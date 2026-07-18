@@ -20,6 +20,10 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     ContractViolation,
     require_version,
 )
+from host_brain.contracts.agent_runtime.node_artifact import (
+    NodeArtifactContractError,
+    normalize_output_contract,
+)
 
 
 TASK_GRAPH_SCHEMA_VERSION = "Natsume.agent.task_graph.v1"
@@ -280,14 +284,25 @@ def validate_task_graph_admission_state(graph: "TaskGraph") -> None:
             "TaskGraph admission requires a non-empty CREATED graph",
         )
     invalid: list[str] = []
+    invalid_contracts: list[str] = []
     for node in graph.nodes:
         expected = TaskNodeStatus.BLOCKED if node.dependencies else TaskNodeStatus.READY
         if node.status is not expected:
             invalid.append(f"{node.node_id}:{node.status.value}->{expected.value}")
+        try:
+            normalize_output_contract(node.output_contract)
+        except NodeArtifactContractError:
+            invalid_contracts.append(node.node_id)
     if invalid:
         raise ContractViolation(
             TASK_GRAPH_INVALID,
             "TaskGraph admission node states are invalid: " + ",".join(invalid),
+        )
+    if invalid_contracts:
+        raise ContractViolation(
+            TASK_GRAPH_INVALID,
+            "TaskGraph admission requires a canonical non-empty output_contract "
+            "for every node: " + ",".join(invalid_contracts),
         )
 
 

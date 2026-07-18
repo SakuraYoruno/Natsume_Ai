@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.host_route_ports import (
+    HostRoutePorts,
+    bind_host_route_endpoint,
+)
 from host_brain.core.errors import (
     TOOL_VISIBILITY_POLICY_VIOLATION,
 )
@@ -33,67 +36,26 @@ from host_brain.tools.catalog import ToolCatalog
 from host_brain.tools.selector import ToolSelection, select_tool_meta_pack
 _logger = logging.getLogger("Natsume.tool_routes")
 
-# ---------------------------------------------------------------------------
-# 路由实例
-# ---------------------------------------------------------------------------
-router = APIRouter(prefix="/tools", tags=["tools"])
-
-# 别名路由：兼容请求 /tool_kits 的前端（如 UAT 场景），返回与 /tools/meta-pack 相同结构
-tool_kits_alias_router = APIRouter(prefix="", tags=["tools"])
-
-# ---------------------------------------------------------------------------
-# 依赖注入（外部注入 broker/catalog/ledger provider，消除循环导入风险）
-# ---------------------------------------------------------------------------
-_broker_provider: Optional[Callable[[], ToolBroker]] = None
-_catalog_provider: Optional[Callable[[], ToolCatalog]] = None
-_ledger_provider: Optional[Callable[[], SQLiteLedger]] = None
+def _get_broker(route_ports: HostRoutePorts) -> ToolBroker:
+    provider = route_ports.tool_broker_provider
+    broker = provider() if provider is not None else None
+    if broker is None:
+        raise RuntimeError("ToolBroker provider not configured")
+    return broker
 
 
-def set_tool_providers(
-    *,
-    broker_provider: Callable[[], ToolBroker],
-    catalog_provider: Callable[[], ToolCatalog],
-    ledger_provider: Callable[[], SQLiteLedger],
-) -> None:
-    """由 router registry 在注册路由后调用，注入依赖获取回调。"""
-    global _broker_provider, _catalog_provider, _ledger_provider
-    _broker_provider = broker_provider
-    _catalog_provider = catalog_provider
-    _ledger_provider = ledger_provider
+def _get_catalog(route_ports: HostRoutePorts) -> ToolCatalog:
+    provider = route_ports.tool_catalog_provider
+    catalog = provider() if provider is not None else None
+    if catalog is None:
+        raise RuntimeError("ToolCatalog provider not configured")
+    return catalog
 
 
-def _get_broker() -> ToolBroker:
-    if _broker_provider is not None:
-        broker = _broker_provider()
-        if broker is not None:
-            return broker
-        _logger.debug("ToolBroker provider returned None; falling back to app dependencies")
-    try:
-        from host_brain.composition.process_services import get_tool_broker  # noqa: PLC0415
-
-        return get_tool_broker()
-    except Exception as exc:
-        raise RuntimeError("ToolBroker provider not configured") from exc
-
-
-def _get_catalog() -> ToolCatalog:
-    if _catalog_provider is not None:
-        catalog = _catalog_provider()
-        if catalog is not None:
-            return catalog
-        _logger.debug("ToolCatalog provider returned None; falling back to app dependencies")
-    try:
-        from host_brain.composition.process_services import get_tool_catalog  # noqa: PLC0415
-
-        return get_tool_catalog()
-    except Exception as exc:
-        raise RuntimeError("ToolCatalog provider not configured") from exc
-
-
-def _require_tool_runtime_seeded() -> int:
+def _require_tool_runtime_seeded(route_ports: HostRoutePorts) -> int:
     """Require the composition-owned catalog; HTTP routes never build services."""
 
-    tools = _get_catalog().list_all()
+    tools = _get_catalog(route_ports).list_all()
     if not tools:
         raise RuntimeError("TOOL_RUNTIME_NOT_COMPOSED")
     return len(tools)
@@ -168,15 +130,17 @@ class ToolHealthResponse(BaseModel):
 # GET /tools/health — ToolBroker 健康状态
 # ---------------------------------------------------------------------------
 
-@router.get("/health", response_model=ToolHealthResponse)
-async def tool_health() -> ToolHealthResponse:
+async def tool_health(
+    *,
+    _route_ports: HostRoutePorts,
+) -> ToolHealthResponse:
     """ToolBroker 健康状态检查。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        catalog = _get_catalog()
-        _require_tool_runtime_seeded()
+        catalog = _get_catalog(_route_ports)
+        _require_tool_runtime_seeded(_route_ports)
         all_tools = catalog.list_all()
         write_count = sum(1 for t in all_tools if t.side_effect_level == "WRITE")
         read_count = len(all_tools) - write_count
@@ -208,12 +172,13 @@ async def tool_health() -> ToolHealthResponse:
 # GET /tools/meta-pack — 获取 Top-K 工具元数据包
 # ---------------------------------------------------------------------------
 
-@router.get("/meta-pack", response_model=ToolMetaPackResponse)
 async def get_tool_meta_pack(
     query: str = "",
     k: int = 6,
     include_write: bool = False,
     tags: Optional[str] = None,
+    *,
+    _route_ports: HostRoutePorts,
 ) -> ToolMetaPackResponse:
     """获取当前 Top-K 工具元数据包（含 tool_visibility_hash）。
 
@@ -228,8 +193,8 @@ async def get_tool_meta_pack(
     required_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
 
     try:
-        catalog = _get_catalog()
-        _require_tool_runtime_seeded()
+        catalog = _get_catalog(_route_ports)
+        _require_tool_runtime_seeded(_route_ports)
         selection: ToolSelection = select_tool_meta_pack(
             catalog,
             query=query,
@@ -279,24 +244,34 @@ async def get_tool_meta_pack(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@tool_kits_alias_router.get("/tool_kits", response_model=ToolMetaPackResponse)
-async def get_tool_kits_alias() -> ToolMetaPackResponse:
+async def get_tool_kits_alias(
+    *,
+    _route_ports: HostRoutePorts,
+) -> ToolMetaPackResponse:
     """兼容别名：GET /tool_kits 与 GET /tools/meta-pack 返回相同结构，便于 UAT/外部前端统一访问。"""
-    return await get_tool_meta_pack(query="", k=20, include_write=True)
+    return await get_tool_meta_pack(
+        query="",
+        k=20,
+        include_write=True,
+        _route_ports=_route_ports,
+    )
 
 
 # ---------------------------------------------------------------------------
 # GET /tools/{tool_id} — 查询单个工具元数据
 # ---------------------------------------------------------------------------
 
-@router.get("/{tool_id}", response_model=ToolMetaResponse)
-async def get_tool_meta(tool_id: str) -> ToolMetaResponse:
+async def get_tool_meta(
+    tool_id: str,
+    *,
+    _route_ports: HostRoutePorts,
+) -> ToolMetaResponse:
     """查询单个工具元数据。"""
     request_id = new_request_id()
 
     try:
-        catalog = _get_catalog()
-        _require_tool_runtime_seeded()
+        catalog = _get_catalog(_route_ports)
+        _require_tool_runtime_seeded(_route_ports)
         meta = catalog.get(tool_id)
         return ToolMetaResponse(
             id=meta.id,
@@ -325,8 +300,11 @@ async def get_tool_meta(tool_id: str) -> ToolMetaResponse:
 # POST /tools/execute — 执行工具（经 ToolBroker 单入口）
 # ---------------------------------------------------------------------------
 
-@router.post("/execute", response_model=ToolExecuteResponse, status_code=200)
-async def execute_tool(body: ToolExecuteRequest) -> ToolExecuteResponse:
+async def execute_tool(
+    body: ToolExecuteRequest,
+    *,
+    _route_ports: HostRoutePorts,
+) -> ToolExecuteResponse:
     """执行工具（经 ToolBroker 单入口 + WRITE token gating）。
 
     - READ 工具：无需 approval_token_ref，直接执行
@@ -337,8 +315,8 @@ async def execute_tool(body: ToolExecuteRequest) -> ToolExecuteResponse:
     ts_ms = int(time.time() * 1000)
 
     try:
-        _require_tool_runtime_seeded()
-        broker = _get_broker()
+        _require_tool_runtime_seeded(_route_ports)
+        broker = _get_broker(_route_ports)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -408,3 +386,52 @@ async def execute_tool(body: ToolExecuteRequest) -> ToolExecuteResponse:
             extra={"request_id": request_id, "tool_id": body.tool_id},
         )
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+def create_tool_router(route_ports: HostRoutePorts) -> APIRouter:
+    """Create Tool routes with dependencies captured by one app instance."""
+
+    router = APIRouter(tags=["tools"])
+
+    def add(path: str, endpoint: Any, *, methods: list[str], **kwargs: Any) -> None:
+        router.add_api_route(
+            path,
+            bind_host_route_endpoint(endpoint, route_ports),
+            methods=methods,
+            **kwargs,
+        )
+
+    add("/tools/health", tool_health, methods=["GET"], response_model=ToolHealthResponse)
+    add(
+        "/tools/meta-pack",
+        get_tool_meta_pack,
+        methods=["GET"],
+        response_model=ToolMetaPackResponse,
+    )
+    add(
+        "/tool_kits",
+        get_tool_kits_alias,
+        methods=["GET"],
+        response_model=ToolMetaPackResponse,
+    )
+    add(
+        "/tools/execute",
+        execute_tool,
+        methods=["POST"],
+        response_model=ToolExecuteResponse,
+        status_code=200,
+    )
+    add(
+        "/tools/{tool_id}",
+        get_tool_meta,
+        methods=["GET"],
+        response_model=ToolMetaResponse,
+    )
+    return router
+
+
+__all__ = [
+    "ToolExecuteRequest",
+    "create_tool_router",
+    "execute_tool",
+]

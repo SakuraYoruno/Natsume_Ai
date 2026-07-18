@@ -32,9 +32,28 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0094_task_runtime_graph_cancellation_continuation.sql"
+        "0107_research_shadow_ledger.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
+    assert (
+        "host_brain/audit/migrations/0104_host_embodiment_runtime_authority.sql"
+        in migration_files
+    )
+    assert "host_brain/audit/migrations/0105_planning_search_calibration.sql" in migration_files
+    assert "host_brain/audit/migrations/0106_code_historical_benchmark_ledger.sql" in migration_files
+    assert "host_brain/audit/migrations/0107_research_shadow_ledger.sql" in migration_files
+    assert "host_brain/audit/migrations/0103_retire_llm_node_call_log.sql" in migration_files
+    assert "host_brain/audit/migrations/0102_task_runtime_node_artifact.sql" in migration_files
+    assert "host_brain/audit/migrations/0101_agent_workspace_authority.sql" in migration_files
+    assert "host_brain/audit/migrations/0100_task_runtime_graph_revision_supersession.sql" in migration_files
+    assert (
+        "host_brain/audit/migrations/0099_task_runtime_terminal_reconciliation.sql"
+        in migration_files
+    )
+    assert "host_brain/audit/migrations/0098_task_runtime_effect_reconciliation.sql" in migration_files
+    assert "host_brain/audit/migrations/0097_node_grant_batch_uniqueness.sql" in migration_files
+    assert "host_brain/audit/migrations/0096_task_runtime_review_continuation.sql" in migration_files
+    assert "host_brain/audit/migrations/0095_task_runtime_revisioned_graph_outbox.sql" in migration_files
     assert "host_brain/audit/migrations/0094_task_runtime_graph_cancellation_continuation.sql" in migration_files
     assert "host_brain/audit/migrations/0093_task_runtime_outbox_claim.sql" in migration_files
     assert "host_brain/audit/migrations/0092_task_runtime_graph_cancellation.sql" in migration_files
@@ -47,6 +66,7 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert "host_brain/audit/migrations/0085_task_runtime_budget_usage.sql" in migration_files
     assert "host_brain/audit/migrations/0084_capability_forge_proposal_log.sql" in migration_files
     assert "host_brain/audit/migrations/0083_host_embodiment_outbox.sql" in migration_files
+    assert "edge_client/gateway/migrations/0002_embodiment_command_authority.sql" in migration_files
     assert "edge_client/gateway/migrations/0001_embodiment_transport.sql" in migration_files
     for name in (
         "packages",

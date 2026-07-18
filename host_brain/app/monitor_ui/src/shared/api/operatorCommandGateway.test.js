@@ -9,6 +9,7 @@ import {
   resetOperatorCommandGateway,
 } from './operatorCommandGateway.js'
 import { isOperatorCommandId } from './generated/operatorCommandClient.ts'
+import { cancelTaskGraph } from '../../features/execution/taskRuntimeApi.js'
 
 test('configured transport still uses the same-origin BFF without browser signing', async () => {
   const observed = []
@@ -108,6 +109,47 @@ test('production command path uses same-origin BFF without an injected signer', 
     })
   } finally {
     globalThis.fetch = previousFetch
+  }
+})
+
+test('TaskGraph cancellation uses the generated high-risk Operator command', async () => {
+  const observed = []
+  configureOperatorCommandGateway({
+    fetchImpl: async (url, init) => {
+      observed.push({ url, init })
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            allowed: true,
+            audit_ref: 'secure-ingress-audit://task-graph-cancel',
+            claim_ref: 'secure-ingress-claim://task-graph-cancel',
+            command_id: 'task_graph.cancel',
+            duplicate: false,
+            executed: true,
+            reason_code: 'OBS_COMMAND_COMPLETED',
+            result_ref: 'obs-command://result/task-graph/cancel/1',
+            status: 'completed',
+            terminal_state: 'SUCCEEDED',
+          }
+        },
+      }
+    },
+  })
+  try {
+    await cancelTaskGraph('graph-ui-cancel', 4, 'operator_requested')
+    assert.equal(observed[0].url, '/v1/host/operator-command-bff/task_graph.cancel')
+    assert.deepEqual(JSON.parse(observed[0].init.body), {
+      payload: {
+        graph_id: 'graph-ui-cancel',
+        graph_revision: 4,
+        reason_code: 'OPERATOR_REQUESTED',
+      },
+    })
+    assert.equal(ENDPOINT_REGISTRY.execution.taskGraphCancel.risk, 'high')
+  } finally {
+    resetOperatorCommandGateway()
   }
 })
 

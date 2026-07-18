@@ -11,6 +11,7 @@ from pathlib import Path
 import sqlite3
 import threading
 from typing import Any
+from urllib.parse import quote
 import uuid
 
 from natsume_contracts.identity import CredentialProofKind, PrincipalKind
@@ -683,6 +684,149 @@ class SQLiteSecureIngressStore:
                 self._conn.rollback()
                 raise
 
+    def complete_review_decision_claim(
+        self,
+        *,
+        claim_ref: str,
+        result_ref: str,
+        prior_result_ref: str | None,
+        review_id: str,
+        review_status: str,
+        review_status_version: int,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        at_ms: int | None = None,
+    ) -> None:
+        """Complete or strictly repair a historical POST Review claim.
+
+        Releases before 0096 could bind Secure Ingress to the worker receipt
+        while the command was still waiting for acceptance.  Replacement is
+        legal only when the exact HostCommand, terminal Review decision,
+        graph/node lineage and currently stored pre-acceptance receipt all
+        match in one writer transaction.
+        """
+
+        from host_brain.persistence.review_continuation_store import (  # noqa: PLC0415
+            parse_task_review_subject,
+        )
+
+        normalized_status = str(review_status or "").strip().upper()
+        normalized_review_id = str(review_id or "").strip()
+        normalized_graph_id = str(graph_id or "").strip()
+        normalized_node_id = str(node_id or "").strip()
+        try:
+            revision = int(graph_revision)
+            status_version = int(review_status_version)
+        except (TypeError, ValueError) as exc:
+            raise SecureIngressStoreError(
+                "SECURE_INGRESS_REVIEW_DECISION_INVALID"
+            ) from exc
+        expected_ref = (
+            f"review-decision://{quote(normalized_review_id, safe='')}/"
+            f"{normalized_status.lower()}/{status_version}"
+        )
+        if (
+            normalized_status not in {"REJECTED", "EXPIRED"}
+            or not normalized_review_id
+            or not normalized_graph_id
+            or not normalized_node_id
+            or revision < 1
+            or status_version < 1
+            or str(result_ref or "").strip() != expected_ref
+        ):
+            raise SecureIngressStoreError(
+                "SECURE_INGRESS_REVIEW_DECISION_INVALID"
+            )
+
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                claim = self._conn.execute(
+                    """
+                    SELECT result_ref, claim_status, updated_at_ms
+                    FROM secure_ingress_idempotency_claim
+                    WHERE claim_ref = ?
+                    """,
+                    (claim_ref,),
+                ).fetchone()
+                command = self._conn.execute(
+                    """
+                    SELECT graph_id, graph_revision, surface
+                    FROM host_command_journal
+                    WHERE ingress_claim_ref = ?
+                    """,
+                    (claim_ref,),
+                ).fetchone()
+                review = self._conn.execute(
+                    """
+                    SELECT status, status_version, resume_phase, subject_ref,
+                           task_graph_id, task_node_id
+                    FROM agent_runtime_review
+                    WHERE review_id = ?
+                    """,
+                    (normalized_review_id,),
+                ).fetchone()
+                binding = (
+                    parse_task_review_subject(review["subject_ref"])
+                    if review is not None
+                    else None
+                )
+                if (
+                    claim is None
+                    or str(claim["claim_status"]) != "COMMITTED"
+                    or command is None
+                    or str(command["surface"]) not in {"internal", "scheduler"}
+                    or str(command["graph_id"]) != normalized_graph_id
+                    or int(command["graph_revision"]) != revision
+                    or review is None
+                    or str(review["status"]) != normalized_status
+                    or int(review["status_version"]) != status_version
+                    or str(review["task_graph_id"] or "") != normalized_graph_id
+                    or str(review["task_node_id"] or "") != normalized_node_id
+                    or binding is None
+                    or binding.graph_id != normalized_graph_id
+                    or binding.graph_revision != revision
+                    or binding.node_id != normalized_node_id
+                ):
+                    raise SecureIngressStoreError(
+                        "SECURE_INGRESS_REVIEW_DECISION_BINDING_CONFLICT"
+                    )
+                current = (
+                    None
+                    if claim["result_ref"] is None
+                    else str(claim["result_ref"])
+                )
+                previous = str(prior_result_ref or "").strip() or None
+                if current == expected_ref:
+                    self._conn.commit()
+                    return
+                if current is not None and (
+                    str(review["resume_phase"]) != "POST_EXECUTION_ACCEPTANCE"
+                    or previous is None
+                    or current != previous
+                ):
+                    raise SecureIngressStoreError(
+                        "SECURE_INGRESS_RESULT_CONFLICT"
+                    )
+                updated_at = int(claim["updated_at_ms"]) if at_ms is None else int(at_ms)
+                cursor = self._conn.execute(
+                    """
+                    UPDATE secure_ingress_idempotency_claim
+                    SET result_ref = ?, updated_at_ms = ?
+                    WHERE claim_ref = ? AND result_ref IS ?
+                    """,
+                    (expected_ref, updated_at, claim_ref, current),
+                )
+                if cursor.rowcount != 1:
+                    raise SecureIngressStoreError(
+                        "SECURE_INGRESS_RESULT_CONFLICT"
+                    )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
     def append(self, event: IngressAuditEvent) -> str:
         audit_ref = f"secure-ingress-audit://{uuid.uuid4().hex}"
         with self._lock:
@@ -756,6 +900,118 @@ class SQLiteSecureIngressStore:
                     (request_id,),
                 ).fetchall()
         return [dict(row) for row in rows]
+
+    def resolve_committed_authority_by_audit(
+        self,
+        *,
+        audit_ref: str,
+    ) -> dict[str, Any] | None:
+        """Resolve one canonical ALLOW audit and its committed claim.
+
+        This is a read-only authority projection.  It deliberately returns no
+        credential proof or secret material; callers must still enforce their
+        own server-owned surface/action/scope/body contract.
+        """
+
+        reference = str(audit_ref or "").strip()
+        if not reference.startswith("secure-ingress-audit://"):
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                    audit.audit_ref AS audit_ref,
+                    audit.claim_ref AS audit_claim_ref,
+                    audit.request_id AS audit_request_id,
+                    audit.surface AS audit_surface,
+                    audit.action AS audit_action,
+                    audit.method AS audit_method,
+                    audit.normalized_path AS audit_normalized_path,
+                    audit.principal_id AS audit_principal_id,
+                    audit.tenant_id AS audit_tenant_id,
+                    audit.requested_scopes_json AS audit_requested_scopes_json,
+                    audit.required_scopes_json AS audit_required_scopes_json,
+                    audit.body_sha256 AS audit_body_sha256,
+                    audit.decision AS audit_decision,
+                    audit.reason_code AS audit_reason_code,
+                    audit.stage AS audit_stage,
+                    audit.side_effects_executed AS audit_side_effects_executed,
+                    audit.ts_ms AS audit_ts_ms,
+                    claim.claim_ref AS claim_ref,
+                    claim.request_id AS claim_request_id,
+                    claim.surface AS claim_surface,
+                    claim.action AS claim_action,
+                    claim.principal_id AS claim_principal_id,
+                    claim.required_scopes_json AS claim_required_scopes_json,
+                    claim.body_sha256 AS claim_body_sha256,
+                    claim.claim_status AS claim_status,
+                    claim.result_ref AS claim_result_ref,
+                    claim.expires_at_ms AS claim_expires_at_ms
+                FROM secure_ingress_audit AS audit
+                JOIN secure_ingress_idempotency_claim AS claim
+                  ON claim.claim_ref = audit.claim_ref
+                WHERE audit.audit_ref = ?
+                LIMIT 1
+                """,
+                (reference,),
+            ).fetchone()
+        if row is None or str(row["claim_status"]) != "COMMITTED":
+            return None
+        try:
+            audit_required = self._string_tuple(
+                row["audit_required_scopes_json"]
+            )
+            claim_required = self._string_tuple(
+                row["claim_required_scopes_json"]
+            )
+            audit_requested = self._string_tuple(
+                row["audit_requested_scopes_json"]
+            )
+            if (
+                str(row["audit_claim_ref"] or "") != str(row["claim_ref"] or "")
+                or str(row["audit_request_id"] or "")
+                != str(row["claim_request_id"] or "")
+                or str(row["audit_surface"] or "")
+                != str(row["claim_surface"] or "")
+                or str(row["audit_action"] or "")
+                != str(row["claim_action"] or "")
+                or str(row["audit_principal_id"] or "")
+                != str(row["claim_principal_id"] or "")
+                or str(row["audit_body_sha256"] or "")
+                != str(row["claim_body_sha256"] or "")
+                or audit_required != claim_required
+            ):
+                return None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return {
+            "audit_ref": str(row["audit_ref"]),
+            "claim_ref": str(row["claim_ref"]),
+            "request_id": str(row["audit_request_id"]),
+            "surface": str(row["audit_surface"]),
+            "action": str(row["audit_action"]),
+            "method": str(row["audit_method"]),
+            "normalized_path": str(row["audit_normalized_path"]),
+            "principal_id": str(row["audit_principal_id"]),
+            "tenant_id": str(row["audit_tenant_id"]),
+            "requested_scopes": audit_requested,
+            "required_scopes": audit_required,
+            "body_sha256": str(row["audit_body_sha256"]),
+            "decision": str(row["audit_decision"]),
+            "reason_code": str(row["audit_reason_code"]),
+            "stage": str(row["audit_stage"]),
+            "side_effects_executed": bool(
+                int(row["audit_side_effects_executed"])
+            ),
+            "audit_ts_ms": int(row["audit_ts_ms"]),
+            "claim_status": str(row["claim_status"]),
+            "claim_result_ref": (
+                str(row["claim_result_ref"])
+                if row["claim_result_ref"] is not None
+                else None
+            ),
+            "claim_expires_at_ms": int(row["claim_expires_at_ms"]),
+        }
 
     @staticmethod
     def _within_validity(at_ms: int, valid_from_ms: int, valid_until_ms: Any) -> bool:

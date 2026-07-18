@@ -20,15 +20,36 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "configs/release/universal_governed_runtime_coverage.json"
 
 
-def test_all_four_routes_are_complete_without_claiming_full_architecture() -> None:
+def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -> None:
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
-    assert set(report.route_statuses.values()) == {"COMPLETE"}
-    assert report.missing_route_controls == {}
+    assert report.route_statuses == {
+        "chat": "COMPLETE",
+        "skill": "COMPLETE",
+        "delegate": "INCOMPLETE",
+        "plan": "INCOMPLETE",
+    }
+    assert report.missing_route_controls == {
+        "delegate": (
+            "budget_enforcement",
+            "review_resume",
+            "verification",
+            "transactional_side_effects",
+        ),
+        "plan": (
+            "node_bound_grant",
+            "budget_enforcement",
+            "review_resume",
+            "verification",
+            "transactional_side_effects",
+        ),
+    }
     assert report.missing_architecture_controls == (
+        "generic_three_layer_planning_search",
         "native_multi_node_task_graph",
+        "revision_plus_one_replan",
         "composition_without_global_service_locator",
     )
 
@@ -62,8 +83,8 @@ def test_manifest_requires_every_control_for_every_route(tmp_path: Path) -> None
 
 def test_manifest_distinguishes_partial_and_not_wired_from_pass(tmp_path: Path) -> None:
     report = load_universal_runtime_coverage(ROOT)
-    assert "generic_three_layer_planning_search" not in report.missing_architecture_controls
-    assert "revision_plus_one_replan" not in report.missing_architecture_controls
+    assert "generic_three_layer_planning_search" in report.missing_architecture_controls
+    assert "revision_plus_one_replan" in report.missing_architecture_controls
     assert "composition_without_global_service_locator" in report.missing_architecture_controls
 
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))

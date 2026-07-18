@@ -10,7 +10,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -20,7 +20,14 @@ from host_brain.app.observability_runtime.live_source_projection import (
     GATEWAY_STATS_SOURCE_KIND,
     read_operator_live_projection,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
+from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -37,11 +44,12 @@ from .obs_routes_core import router, _now_ms, _safe_json
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/failure-events")
+@fail_closed_projection_route
 def get_failure_events(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计时间窗口（分钟，最大 7 天）"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤（如 PROMPT_INJECTION / GOVERNOR_BLOCK）"),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
-    ledger: Any = Depends(get_projection_ledger_view),
+    ledger: Any = Depends(require_obs_projection_ledger_view),
 ):
     """
     Ref #115: 失败事件统计端点。
@@ -464,11 +472,14 @@ def _compose_gateway_stats_response(
 
 @router.get("/gateway/stats", response_model=GatewayStatsResponse)
 def get_gateway_stats(
+    request: Request,
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Read the materialized gateway source and apply a pure window filter."""
 
+    store = require_obs_query_projection_store(request)
     source, projection = read_operator_live_projection(
+        store,
         GATEWAY_STATS_SOURCE_KIND,
         GATEWAY_STATS_SOURCE_KEY,
         max_age_ms=GATEWAY_STATS_MAX_AGE_MS,
@@ -506,16 +517,19 @@ class SkillCatalogStatsResponse(BaseModel):
     projection: Dict[str, Any] = Field(default_factory=dict)
 
 @router.get("/skill-catalog/stats", response_model=SkillCatalogStatsResponse)
-def get_skill_catalog_stats():
+def get_skill_catalog_stats(
+    projection_store: Any = Depends(require_obs_query_projection_store),
+):
     """Read the durable Skill/Domain-Pack catalog; never scan on GET."""
     from host_brain.app.observability_runtime.domain_state_projection import (
         SKILL_PACK_CATALOG_KEY,
         SKILL_PACK_CATALOG_KIND,
         SKILL_PACK_CATALOG_MAX_AGE_MS,
-        read_domain_projection,
+        read_domain_projection_from_store,
     )
 
-    payload, projection = read_domain_projection(
+    payload, projection = read_domain_projection_from_store(
+        projection_store,
         kind=SKILL_PACK_CATALOG_KIND,
         key=SKILL_PACK_CATALOG_KEY,
         max_age_ms=SKILL_PACK_CATALOG_MAX_AGE_MS,
@@ -574,6 +588,14 @@ async def ws_health(websocket: WebSocket):
         )
         return
 
+    try:
+        projection_store = require_obs_route_ports(
+            websocket,
+        ).require_query_projection_store()
+    except HTTPException as exc:
+        await websocket.close(code=1011, reason=str(exc.detail))
+        return
+
     await websocket.accept()
     _ws_clients.append(websocket)
     logger.info("WebSocket health client connected (total: %d)", len(_ws_clients))
@@ -586,7 +608,7 @@ async def ws_health(websocket: WebSocket):
                 # Read the same durable, background-maintained projection as
                 # GET /obs/services/health.  A query connection never primes a
                 # cache, launches a probe, or scans the ledger.
-                health_data = _read_ws_health_projection()
+                health_data = _read_ws_health_projection(projection_store)
 
                 services = health_data.get("services", [])
                 current_statuses: Dict[str, str] = {}
@@ -643,8 +665,8 @@ async def ws_health(websocket: WebSocket):
         logger.info("WebSocket health client disconnected (remaining: %d)", len(_ws_clients))
 
 
-def _read_ws_health_projection() -> dict[str, Any]:
-    """Read only the durable service-health projection."""
+def _read_ws_health_projection(projection_store: Any) -> dict[str, Any]:
+    """Build a health snapshot from one explicitly supplied read port."""
     from host_brain.app.obs_routes_health import _read_query_projection
     from host_brain.app.observability_runtime.health_device_projection import (
         HEALTH_MAX_AGE_MS,
@@ -652,17 +674,12 @@ def _read_ws_health_projection() -> dict[str, Any]:
         SERVICE_HEALTH_KIND,
     )
 
-    try:
-        payload, meta = _read_query_projection(
-            kind=SERVICE_HEALTH_KIND,
-            key=SERVICE_HEALTH_KEY,
-            max_age_ms=HEALTH_MAX_AGE_MS,
-        )
-    except Exception:
-        payload, meta = None, {
-            "degraded_state": "SOURCE_UNAVAILABLE",
-            "reason_code": "OPERATOR_PROJECTION_UNAVAILABLE",
-        }
+    payload, meta = _read_query_projection(
+        projection_store,
+        kind=SERVICE_HEALTH_KIND,
+        key=SERVICE_HEALTH_KEY,
+        max_age_ms=HEALTH_MAX_AGE_MS,
+    )
     body = dict(payload or {})
     services = list(body.get("services") or [])
     counts = {key: 0 for key in ("UP", "DEGRADED", "DOWN", "UNKNOWN")}

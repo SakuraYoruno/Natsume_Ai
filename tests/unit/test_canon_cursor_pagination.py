@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from host_brain.app.host_route_ports import HostRoutePorts
 from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
@@ -24,11 +25,9 @@ def canon_service(tmp_path):
         tmp_path,
         request_id="canon-route-pagination",
     ) as runtime:
-        cr.set_canon_service_provider(lambda: runtime.container.application)
-        try:
-            yield runtime.container.application
-        finally:
-            cr.set_canon_service_provider(None)
+        yield HostRoutePorts(
+            canon_service_provider=lambda: runtime.container.application,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +198,10 @@ class TestListProposalsEndpointCursorParam:
 
         loop = asyncio.new_event_loop()
         try:
-            response = loop.run_until_complete(cr.list_proposals(after_id=42))
+            response = loop.run_until_complete(cr.list_proposals(
+                after_id=42,
+                _route_ports=canon_service,
+            ))
         finally:
             loop.close()
 
@@ -214,7 +216,9 @@ class TestListProposalsEndpointCursorParam:
 
         loop = asyncio.new_event_loop()
         try:
-            response = loop.run_until_complete(cr.list_proposals())
+            response = loop.run_until_complete(cr.list_proposals(
+                _route_ports=canon_service,
+            ))
         finally:
             loop.close()
 

@@ -13,12 +13,14 @@ from host_brain.app.route_execution_ports import (
     dispatch_governed_delegate,
     stream_governed_chat_with_context,
 )
+from host_brain.app.governed_delegate_dispatch import GovernedDelegateOutcome
+from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _ports(*, chat_stream, dispatcher, captured_inputs: list[dict] | None = None):
+def _ports(*, chat_stream, delegate_dispatcher, captured_inputs: list[dict] | None = None):
     def input_factory(**kwargs):  # noqa: ANN003
         if captured_inputs is not None:
             captured_inputs.append(dict(kwargs))
@@ -31,9 +33,33 @@ def _ports(*, chat_stream, dispatcher, captured_inputs: list[dict] | None = None
             "agent_role": "surface_reply",
         },
         surface_reply_sse_generator=chat_stream,
-        sub_agent_request_factory=lambda **kwargs: SimpleNamespace(**kwargs),
-        get_sub_agent_dispatcher=lambda: dispatcher,
-        subagent_dispatch_timeout_ms=4321,
+        governed_delegate_dispatcher=delegate_dispatcher,
+    )
+
+
+def _frozen_delegate() -> FrozenNodeInput:
+    return FrozenNodeInput(
+        command_id="command-route-port",
+        request_id="request-delegate",
+        session_id="session-delegate",
+        principal_id="person-delegate",
+        work_order_id="work-order-route-port",
+        root_work_order_id="work-order-route-port",
+        graph_id="graph-route-port",
+        graph_revision=1,
+        node_id="node-route-port",
+        attempt_id="attempt-route-port",
+        lease_id="lease-route-port",
+        lease_owner_id="owner-route-port",
+        fencing_token=1,
+        route="delegate",
+        target_id="intent_agent",
+        objective="perform admitted work",
+        input_refs=(),
+        _input_pack_json="{}",
+        _input_artifacts_json="[]",
+        node_grant_ref="governor-grant://child/route-port",
+        parent_grant_ref="governor-grant://parent/route-port",
     )
 
 
@@ -87,7 +113,7 @@ async def test_governed_chat_port_streams_once_without_delivery_authority() -> N
 
     ports = _ports(
         chat_stream=chat_stream,
-        dispatcher=object(),
+        delegate_dispatcher=object(),
         captured_inputs=captured_inputs,
     )
     events = [event async for event in stream_governed_chat_with_context(**_chat_kwargs(ports))]
@@ -116,7 +142,7 @@ async def test_governed_chat_port_rejects_smuggled_authority(field: str, value: 
     async def chat_stream(_value):  # noqa: ANN001
         yield "unreachable"
 
-    ports = _ports(chat_stream=chat_stream, dispatcher=object())
+    ports = _ports(chat_stream=chat_stream, delegate_dispatcher=object())
     kwargs = _chat_kwargs(ports)
     kwargs[field] = value
 
@@ -126,26 +152,26 @@ async def test_governed_chat_port_rejects_smuggled_authority(field: str, value: 
 
 @pytest.mark.asyncio
 async def test_delegate_port_dispatches_exact_frozen_target_once() -> None:
-    requests: list[object] = []
+    invocations: list[object] = []
 
     class Dispatcher:
-        async def dispatch(self, request):  # noqa: ANN001
-            requests.append(request)
-            return SimpleNamespace(
+        async def dispatch(self, invocation):  # noqa: ANN001
+            invocations.append(invocation)
+            return GovernedDelegateOutcome(
                 success=True,
-                agent_id=request.agent_id,
-                result="delegate result",
-                error=None,
+                target_id=invocation.target_id,
+                result_text="delegate result",
+                error_text="",
                 audit_refs={"dispatch": "receipt://one"},
-                latency_ms=12,
             )
 
     async def unused_chat(_value):  # noqa: ANN001
         yield "unreachable"
 
-    ports = _ports(chat_stream=unused_chat, dispatcher=Dispatcher())
+    ports = _ports(chat_stream=unused_chat, delegate_dispatcher=Dispatcher())
     outcome = await dispatch_governed_delegate(
         ports=ports,
+        frozen=_frozen_delegate(),
         request_id="request-delegate",
         session_id="session-delegate",
         person_id="person-delegate",
@@ -155,9 +181,11 @@ async def test_delegate_port_dispatches_exact_frozen_target_once() -> None:
         context={"skill_family": "code", "governed_frozen_node": True},
     )
 
-    assert len(requests) == 1
-    assert requests[0].agent_id == "intent_agent"
-    assert requests[0].timeout_ms == 4321
+    assert len(invocations) == 1
+    assert invocations[0].target_id == "intent_agent"
+    assert invocations[0].attempt_id == "attempt-route-port"
+    assert invocations[0].lease_id == "lease-route-port"
+    assert invocations[0].fencing_token == 1
     assert outcome.route_type == "delegate"
     assert outcome.target_id == "intent_agent"
     assert outcome.success is True
@@ -166,23 +194,13 @@ async def test_delegate_port_dispatches_exact_frozen_target_once() -> None:
 
 @pytest.mark.asyncio
 async def test_delegate_port_rejects_planning_context_and_target_drift() -> None:
-    class Dispatcher:
-        async def dispatch(self, request):  # noqa: ANN001
-            return SimpleNamespace(
-                success=True,
-                agent_id="repair_agent",
-                result="wrong target",
-                error=None,
-                audit_refs={},
-                latency_ms=0,
-            )
-
     async def unused_chat(_value):  # noqa: ANN001
         yield "unreachable"
 
-    ports = _ports(chat_stream=unused_chat, dispatcher=Dispatcher())
+    ports = _ports(chat_stream=unused_chat, delegate_dispatcher=object())
     base = {
         "ports": ports,
+        "frozen": _frozen_delegate(),
         "request_id": "request-delegate",
         "session_id": "session-delegate",
         "person_id": "person-delegate",
@@ -193,8 +211,11 @@ async def test_delegate_port_rejects_planning_context_and_target_drift() -> None
 
     with pytest.raises(RouteExecutionBoundaryError, match="planning authority"):
         await dispatch_governed_delegate(**base, context={"replan": True})
-    with pytest.raises(RouteExecutionBoundaryError, match="frozen delegate target"):
-        await dispatch_governed_delegate(**base, context={})
+    with pytest.raises(RouteExecutionBoundaryError, match="drifted from the frozen TaskNode"):
+        await dispatch_governed_delegate(
+            **{**base, "target_id": "repair_agent"},
+            context={},
+        )
 
 
 def test_governed_adapter_imports_independent_route_ports_only() -> None:
@@ -230,9 +251,7 @@ def test_route_execution_ports_expose_no_routing_or_planning_authority() -> None
         "surface_reply_input_factory",
         "resolve_surface_reply_llm_runtime",
         "surface_reply_sse_generator",
-        "sub_agent_request_factory",
-        "get_sub_agent_dispatcher",
-        "subagent_dispatch_timeout_ms",
+        "governed_delegate_dispatcher",
     }
 
     source_path = ROOT / "host_brain/app/route_execution_ports.py"

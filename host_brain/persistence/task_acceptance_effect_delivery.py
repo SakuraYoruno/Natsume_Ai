@@ -18,6 +18,7 @@ from host_brain.persistence.task_record_codec import (
 from host_brain.persistence.task_store_types import (
     AcceptanceEffectStatus,
     TASK_STORE_CANCELLATION_CONFLICT,
+    TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
     TASK_STORE_LEASE_CONFLICT,
     TASK_STORE_NOT_FOUND,
@@ -58,6 +59,9 @@ _ACCEPTANCE_EFFECT_INTENT_REQUIRED_COLUMNS = frozenset(
         "failed_ts_ms",
     }
 )
+
+_EFFECT_RECONCILIATION_PROOF_TABLE = "task_runtime_effect_reconciliation_proof"
+_PENDING_CANCELLATION_RECONCILIATION_PURPOSE = "PENDING_CANCELLATION"
 
 
 class TaskAcceptanceEffectDeliveryMixin:
@@ -204,10 +208,44 @@ class TaskAcceptanceEffectDeliveryMixin:
                     and str(existing_claim["lease_owner"] or "") == owner
                     and int(existing_claim["lease_expires_ts_ms"] or 0) > ts_ms
                 ):
+                    artifact_schema = conn.execute(
+                        """
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table'
+                          AND name = 'task_runtime_node_artifact'
+                        """
+                    ).fetchone()
+                    if artifact_schema is not None:
+                        self._require_valid_node_artifact(
+                            conn,
+                            graph_id=str(existing_claim["graph_id"]),
+                            graph_revision=int(existing_claim["graph_revision"]),
+                            node_id=str(existing_claim["node_id"]),
+                            expected_attempt_id=str(existing_claim["attempt_id"]),
+                        )
                     replay = _acceptance_effect_record(existing_claim)
                     replay["replayed"] = True
                     return replay
             selected_clause = " AND effect.effect_id = ?" if selected_effect is not None else ""
+            artifact_schema = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'task_runtime_node_artifact'
+                """
+            ).fetchone()
+            artifact_join = ""
+            artifact_guard = ""
+            if artifact_schema is not None:
+                artifact_join = """
+                LEFT JOIN task_runtime_node_artifact AS artifact
+                  ON artifact.graph_id = effect.graph_id
+                 AND artifact.graph_revision = effect.graph_revision
+                 AND artifact.node_id = effect.node_id
+                 AND artifact.attempt_id = effect.attempt_id
+                """
+                artifact_guard = """
+                  AND artifact.artifact_ref IS NOT NULL
+                """
             parameters: list[Any] = [ts_ms, ts_ms]
             if selected_effect is not None:
                 parameters.append(selected_effect)
@@ -227,6 +265,9 @@ class TaskAcceptanceEffectDeliveryMixin:
                 JOIN task_runtime_graph AS graph_row
                   ON graph_row.graph_id = effect.graph_id
                  AND graph_row.revision = effect.graph_revision
+                """
+                + artifact_join
+                + """
                 WHERE (
                     (effect.status = 'PENDING' AND effect.available_ts_ms <= ?)
                     OR
@@ -234,6 +275,9 @@ class TaskAcceptanceEffectDeliveryMixin:
                   )
                   AND attempt.status = 'SUCCEEDED'
                   AND node.status = 'ACCEPTED'
+                """
+                + artifact_guard
+                + """
                   AND (
                     effect.commit_scope = 'NODE'
                     OR
@@ -250,6 +294,14 @@ class TaskAcceptanceEffectDeliveryMixin:
             ).fetchone()
             if row is None:
                 return None
+            if artifact_schema is not None:
+                self._require_valid_node_artifact(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    node_id=str(row["node_id"]),
+                    expected_attempt_id=str(row["attempt_id"]),
+                )
             cursor = conn.execute(
                 """
                 UPDATE task_runtime_acceptance_effect_intent
@@ -310,6 +362,10 @@ class TaskAcceptanceEffectDeliveryMixin:
         ts_ms = self._now()
         with self._transaction() as conn:
             row = self._require_acceptance_effect_intent(conn, effect_ref)
+            self._assert_no_pending_cancellation_reconciliation_proof(
+                conn,
+                effect_id=effect_ref,
+            )
             status = AcceptanceEffectStatus(str(row["status"]))
             if status is AcceptanceEffectStatus.COMMITTED:
                 if (
@@ -394,6 +450,10 @@ class TaskAcceptanceEffectDeliveryMixin:
         ts_ms = self._now()
         with self._transaction() as conn:
             row = self._require_acceptance_effect_intent(conn, effect_ref)
+            self._assert_no_pending_cancellation_reconciliation_proof(
+                conn,
+                effect_id=effect_ref,
+            )
             status = AcceptanceEffectStatus(str(row["status"]))
             if status is AcceptanceEffectStatus.FAILED:
                 if (
@@ -446,15 +506,12 @@ class TaskAcceptanceEffectDeliveryMixin:
             failed = _acceptance_effect_record(
                 self._require_acceptance_effect_intent(conn, effect_ref)
             )
-            conn.execute(
-                """
-                UPDATE task_runtime_graph_cancellation_effect_fence
-                SET resolution_status = 'FAILED_EVIDENCE', resolved_ts_ms = ?
-                WHERE effect_id = ?
-                  AND resolution_status = 'RECONCILIATION_REQUIRED'
-                """,
-                (ts_ms, effect_ref),
-            )
+            # Failure only proves that the dispatcher did not obtain a
+            # successful durable receipt.  The handler or downstream
+            # transport may already have produced the external side effect,
+            # so a concurrent cancellation fence must remain unresolved.
+            # A future signed reconciliation path may establish
+            # NO_SIDE_EFFECT; the 0087 row alone cannot.
             failed["replayed"] = False
             return failed
 
@@ -500,6 +557,10 @@ class TaskAcceptanceEffectDeliveryMixin:
         available_ts_ms = ts_ms + retry_delay
         with self._transaction() as conn:
             row = self._require_acceptance_effect_intent(conn, effect_ref)
+            self._assert_no_pending_cancellation_reconciliation_proof(
+                conn,
+                effect_id=effect_ref,
+            )
             cancellation_fence = conn.execute(
                 """
                 SELECT resolution_status
@@ -553,6 +614,52 @@ class TaskAcceptanceEffectDeliveryMixin:
             )
             rescheduled["replayed"] = False
             return rescheduled
+
+    @staticmethod
+    def _assert_no_pending_cancellation_reconciliation_proof(
+        conn: sqlite3.Connection,
+        *,
+        effect_id: str,
+    ) -> None:
+        """Fence handler mutations that lose the 0098 proof writer race.
+
+        Migration 0098 is optional for historical 0087 databases, so an
+        absent proof table preserves the original delivery lifecycle.  Once
+        the table exists, the proof row is a deny-only fence here: its full
+        signature and subject binding are owned by the reconciliation Store,
+        while delivery must never mutate the Effect after that authority has
+        committed.  The caller already owns the same ``BEGIN IMMEDIATE``
+        transaction used for the subsequent Effect CAS.
+        """
+
+        proof_table = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            LIMIT 1
+            """,
+            (_EFFECT_RECONCILIATION_PROOF_TABLE,),
+        ).fetchone()
+        if proof_table is None:
+            return
+        proof = conn.execute(
+            """
+            SELECT proof_id
+            FROM task_runtime_effect_reconciliation_proof
+            WHERE effect_id = ? AND purpose = ?
+            LIMIT 1
+            """,
+            (
+                str(effect_id),
+                _PENDING_CANCELLATION_RECONCILIATION_PURPOSE,
+            ),
+        ).fetchone()
+        if proof is not None:
+            raise TaskStoreError(
+                TASK_STORE_CANCELLATION_CONFLICT,
+                "acceptance effect has a committed pending-cancellation "
+                f"reconciliation proof: {effect_id}",
+            )
 
     @staticmethod
     def _require_acceptance_effect_intent(

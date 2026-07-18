@@ -1,9 +1,9 @@
 """Explicit durable failure-replanning entry for governed PlanningSearch.
 
 This module is deliberately separate from the execution loop.  It can prepare
-one replacement revision only after loading a canonical durable ``FAILED`` or
-``BLOCKED`` graph snapshot and the state-event references that prove that
-failure/block.  It never executes the replacement graph and exposes no worker
+one replacement revision only after loading a canonical durable, quiescent
+``FAILED`` graph snapshot and the state-event references that prove that
+failure.  It never executes the replacement graph and exposes no worker
 callback that could perform an implicit execution-time replan.
 """
 
@@ -21,6 +21,7 @@ from host_brain.orchestration.planning_execution import (
     PlanningExecutionAuthority,
     PreparedPlanningExecution,
 )
+from host_brain.orchestration.planning_graph_compiler import PlanningCompilationContext
 from host_brain.persistence.task_repository import build_outbox_payload_ref
 from host_brain.planning_search.contracts import SearchRequest
 
@@ -29,20 +30,31 @@ PLANNING_RECOVERY_INVALID = "PLANNING_RECOVERY_INVALID"
 PLANNING_RECOVERY_NOT_REPLANNABLE = "PLANNING_RECOVERY_NOT_REPLANNABLE"
 PLANNING_RECOVERY_DURABLE_DRIFT = "PLANNING_RECOVERY_DURABLE_DRIFT"
 
-_REPLANNABLE_GRAPH_STATUSES = frozenset(
-    {TaskGraphStatus.FAILED, TaskGraphStatus.BLOCKED}
-)
+_REPLANNABLE_GRAPH_STATUSES = frozenset({TaskGraphStatus.FAILED})
 _FAILURE_NODE_STATUSES = frozenset(
     {
         "FAILED",
         "VERIFICATION_FAILED",
-        "BLOCKED",
-        "WAITING_APPROVAL",
-        "WAITING_ACCEPTANCE_REVIEW",
-        "RETRY_PENDING",
     }
 )
-_FAILURE_ATTEMPT_STATUSES = frozenset({"FAILED", "RECOVERABLE"})
+_FAILURE_ATTEMPT_STATUSES = frozenset({"FAILED"})
+_CONTINUABLE_NODE_STATUSES = frozenset(
+    {
+        "WAITING_APPROVAL",
+        "LEASED",
+        "RUNNING",
+        "EXECUTED",
+        "VERIFYING",
+        "VERIFIED",
+        "WAITING_ACCEPTANCE_REVIEW",
+        "RETRY_PENDING",
+        "CANCEL_REQUESTED",
+    }
+)
+_NON_TERMINAL_ATTEMPT_STATUSES = frozenset(
+    {"CREATED", "LEASED", "RUNNING", "RECOVERABLE", "CANCEL_REQUESTED"}
+)
+_TERMINAL_ATTEMPT_STATUSES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED"})
 _DURABLE_REF_RE = re.compile(
     r"^[a-z][a-z0-9+.-]{1,31}://"
     r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,999}$"
@@ -72,12 +84,12 @@ class DurablePlanningFailure:
         if self.previous_graph.status not in _REPLANNABLE_GRAPH_STATUSES:
             raise PlanningRecoveryError(
                 PLANNING_RECOVERY_NOT_REPLANNABLE,
-                "durable previous graph must be FAILED or BLOCKED",
+                "durable previous graph must be FAILED",
             )
         if self.graph_status_version < 1:
             raise PlanningRecoveryError(
                 PLANNING_RECOVERY_DURABLE_DRIFT,
-                "FAILED/BLOCKED graph has no durable state-transition version",
+                "FAILED graph has no durable state-transition version",
             )
         if not self.failure_evidence_refs:
             raise PlanningRecoveryError(
@@ -123,7 +135,11 @@ class DurablePlanningFailureSource:
                 "graph_id is required for failure replanning",
             )
         try:
-            raw = self._store.read_scheduler_snapshot(graph_ref, revision)
+            raw = self._store.read_scheduler_snapshot(
+                graph_ref,
+                revision,
+                include_graph_outboxes=True,
+            )
             snapshot = await raw if inspect.isawaitable(raw) else raw
         except PlanningRecoveryError:
             raise
@@ -157,12 +173,20 @@ class DurablePlanningFailureSource:
             raise PlanningRecoveryError(
                 PLANNING_RECOVERY_NOT_REPLANNABLE,
                 "explicit replan rejected: durable graph status is "
-                f"{previous_graph.status.value}, expected FAILED or BLOCKED",
+                f"{previous_graph.status.value}, expected FAILED",
             )
+
+        _validate_quiescent_failed_revision(
+            graph_record=graph_record,
+            attempts=snapshot.get("attempts"),
+            active_leases=snapshot.get("active_leases"),
+            graph=previous_graph,
+        )
 
         evidence_refs = _failure_evidence_refs(
             graph_record=graph_record,
             attempts=snapshot.get("attempts"),
+            graph_outboxes=snapshot.get("graph_outboxes"),
             graph=previous_graph,
             graph_status_version=status_version,
         )
@@ -199,6 +223,7 @@ class GovernedPlanningRecoveryService:
         graph_id: str,
         previous_revision: int,
         created_at: int,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         """Admit revision ``previous + 1`` after an explicit recovery request.
 
@@ -225,6 +250,7 @@ class GovernedPlanningRecoveryService:
             previous_graph=failure.previous_graph,
             failure_evidence_refs=failure.failure_evidence_refs,
             created_at=created,
+            compilation_context=compilation_context,
         )
         prepared.validate()
         replacement = prepared.admission.graph
@@ -296,13 +322,14 @@ def _failure_evidence_refs(
     *,
     graph_record: Mapping[str, Any],
     attempts: Any,
+    graph_outboxes: Any = None,
     graph: TaskGraph,
     graph_status_version: int,
 ) -> tuple[str, ...]:
     if graph_status_version < 1:
         raise PlanningRecoveryError(
             PLANNING_RECOVERY_DURABLE_DRIFT,
-            "FAILED/BLOCKED graph lacks a persisted state transition",
+            "FAILED graph lacks a persisted state transition",
         )
     refs: list[str] = []
 
@@ -311,13 +338,40 @@ def _failure_evidence_refs(
         if normalized and normalized not in refs:
             refs.append(normalized)
 
-    add(
-        build_outbox_payload_ref(
-            aggregate_type="TASK_GRAPH",
-            aggregate_id=graph.graph_id,
-            aggregate_version=graph_status_version,
+    if graph_outboxes is None:
+        add(
+            build_outbox_payload_ref(
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=graph.graph_id,
+                aggregate_version=graph_status_version,
+                graph_revision=graph.revision,
+            )
         )
-    )
+    else:
+        if not isinstance(graph_outboxes, Sequence) or isinstance(
+            graph_outboxes, (str, bytes)
+        ):
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable recovery snapshot graph_outboxes must be a sequence",
+            )
+        terminal_event = f"TASK_GRAPH_{graph.status.value}"
+        matching_graph_outboxes = [
+            item
+            for item in graph_outboxes
+            if isinstance(item, Mapping)
+            and str(item.get("aggregate_type") or "") == "TASK_GRAPH"
+            and str(item.get("aggregate_id") or "") == graph.graph_id
+            and int(item.get("aggregate_version", -1)) == graph_status_version
+            and str(item.get("event_type") or "") == terminal_event
+            and item.get("graph_revision") in (None, graph.revision)
+        ]
+        if len(matching_graph_outboxes) != 1:
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable terminal Graph transition lacks one exact Outbox evidence identity",
+            )
+        add(str(matching_graph_outboxes[0].get("payload_ref") or ""))
 
     raw_nodes = graph_record.get("nodes")
     if not isinstance(raw_nodes, Sequence) or isinstance(raw_nodes, (str, bytes)):
@@ -415,6 +469,99 @@ def _failure_evidence_refs(
             "durable failure evidence exceeds the bounded recovery set",
         )
     return tuple(refs)
+
+
+def _validate_quiescent_failed_revision(
+    *,
+    graph_record: Mapping[str, Any],
+    attempts: Any,
+    active_leases: Any,
+    graph: TaskGraph,
+) -> None:
+    """Reject a predecessor that can still advance through an older runtime path.
+
+    This is a fail-closed stopgap, not durable revision supersession.  CREATED,
+    BLOCKED and READY nodes remain valid because a terminal FAILED graph prevents
+    ordinary scheduler claims; terminal ACCEPTED/FAILED/CANCELLED nodes and
+    terminal Attempts are also valid.  States with an independent continuation
+    path are rejected before PlanningSearch or admission can run.
+    """
+
+    raw_nodes = graph_record.get("nodes")
+    if not isinstance(raw_nodes, Sequence) or isinstance(raw_nodes, (str, bytes)):
+        raise PlanningRecoveryError(
+            PLANNING_RECOVERY_DURABLE_DRIFT,
+            "durable recovery snapshot nodes must be a sequence",
+        )
+    canonical_node_statuses = {
+        node.node_id: node.status.value for node in graph.nodes
+    }
+    observed_node_ids: set[str] = set()
+    for raw_node in raw_nodes:
+        if not isinstance(raw_node, Mapping):
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable recovery snapshot contains a non-mapping node",
+            )
+        node_id = str(raw_node.get("node_id") or "").strip()
+        status = str(raw_node.get("status") or "").strip()
+        if (
+            node_id in observed_node_ids
+            or canonical_node_statuses.get(node_id) != status
+        ):
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable SQL node status differs from the canonical TaskGraph",
+            )
+        observed_node_ids.add(node_id)
+        if status in _CONTINUABLE_NODE_STATUSES:
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_NOT_REPLANNABLE,
+                "explicit replan rejected: predecessor node "
+                f"{node_id} remains continuable in status {status}",
+            )
+    if observed_node_ids != set(canonical_node_statuses):
+        raise PlanningRecoveryError(
+            PLANNING_RECOVERY_DURABLE_DRIFT,
+            "durable SQL node set differs from the canonical TaskGraph",
+        )
+
+    if not isinstance(attempts, Sequence) or isinstance(attempts, (str, bytes)):
+        raise PlanningRecoveryError(
+            PLANNING_RECOVERY_DURABLE_DRIFT,
+            "durable recovery snapshot attempts must be a sequence",
+        )
+    for raw_attempt in attempts:
+        if not isinstance(raw_attempt, Mapping):
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable recovery snapshot contains a non-mapping attempt",
+            )
+        status = str(raw_attempt.get("status") or "").strip()
+        if status in _NON_TERMINAL_ATTEMPT_STATUSES:
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_NOT_REPLANNABLE,
+                "explicit replan rejected: predecessor Attempt "
+                f"{raw_attempt.get('attempt_id')!s} is non-terminal in status {status}",
+            )
+        if status not in _TERMINAL_ATTEMPT_STATUSES:
+            raise PlanningRecoveryError(
+                PLANNING_RECOVERY_DURABLE_DRIFT,
+                "durable recovery snapshot contains an unknown Attempt status",
+            )
+
+    if not isinstance(active_leases, Sequence) or isinstance(
+        active_leases, (str, bytes)
+    ):
+        raise PlanningRecoveryError(
+            PLANNING_RECOVERY_DURABLE_DRIFT,
+            "durable recovery snapshot active_leases must be a sequence",
+        )
+    if active_leases:
+        raise PlanningRecoveryError(
+            PLANNING_RECOVERY_NOT_REPLANNABLE,
+            "explicit replan rejected: predecessor revision retains an active lease",
+        )
 
 
 def _non_negative_int(value: Any, *, field_name: str) -> int:

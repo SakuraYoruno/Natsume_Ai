@@ -11,10 +11,17 @@ from fastapi.responses import StreamingResponse
 
 from host_brain.app.app_factory import create_host_fastapi_app, docs_redirect_response
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.edge_event_routes import handle_edge_events_route
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
 from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
+
+
+class EmptyQueryProjectionStore:
+    @staticmethod
+    def get(*_args: object, **_kwargs: object) -> None:
+        return None
 
 
 @asynccontextmanager
@@ -45,6 +52,7 @@ def build_host_test_app(
     metrics: RuntimeMetrics | None = None,
     logger: logging.Logger | None = None,
     canon_service_provider: Callable[[], Any | None] | None = None,
+    obs_route_ports: ObsRoutePorts | None = None,
 ) -> FastAPI:
     runtime_metrics = metrics or RuntimeMetrics()
     runtime_logger = logger or logging.getLogger("tests.host_app")
@@ -74,5 +82,8 @@ def build_host_test_app(
         edge_events_endpoint=edge_events_endpoint,
         root_endpoint=root_endpoint,
         canon_service_provider=canon_service_provider or (lambda: None),
+        obs_route_ports=obs_route_ports or ObsRoutePorts(
+            query_projection_store_provider=EmptyQueryProjectionStore,
+        ),
         input_runtime_ports=input_runtime_ports,
     )

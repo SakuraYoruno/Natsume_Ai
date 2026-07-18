@@ -15,14 +15,12 @@ from typing import Iterator
 
 from fastapi.testclient import TestClient
 
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.observability_runtime.projection_ledger_view import (
     refresh_ledger_stats_projection,
 )
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.composition.process_service_container import (
-    get_process_service_container,
-)
 from host_brain.observability.projection_store import QueryProjectionStore
 
 
@@ -31,10 +29,21 @@ class DurableObsProjectionRuntime:
     ledger: SQLiteLedger
     store: QueryProjectionStore
 
+    def new_route_ports(self) -> ObsRoutePorts:
+        """Create a route-port bundle owned by one test application."""
+
+        store = self.store
+        return ObsRoutePorts(
+            query_projection_store_provider=lambda: store,
+        )
+
     def refresh_ledger_stats(self) -> dict[str, int]:
         """Run the background-owned ledger statistics materializer."""
 
-        return refresh_ledger_stats_projection()
+        return refresh_ledger_stats_projection(
+            ledger=self.ledger,
+            store=self.store,
+        )
 
 
 @contextmanager
@@ -43,9 +52,10 @@ def compose_durable_obs_projection_runtime(
     *,
     request_id: str,
 ) -> Iterator[DurableObsProjectionRuntime]:
-    """Bind one migrated source/projection database to the process container."""
+    """Create one isolated migrated source/projection database."""
 
     db_path = Path(tmp_path) / "obs-projection.sqlite3"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     migration = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id=request_id,
     )
@@ -57,24 +67,31 @@ def compose_durable_obs_projection_runtime(
         initialize_schema=False,
     )
     store = QueryProjectionStore(db_path)
-    container = get_process_service_container()
-    previous_ledger = container.ledger
-    previous_store = container.query_projection_store
-    container.ledger = ledger
-    container.query_projection_store = store
     try:
         yield DurableObsProjectionRuntime(ledger=ledger, store=store)
     finally:
-        if container.ledger is ledger:
-            container.ledger = previous_ledger
-        if container.query_projection_store is store:
-            container.query_projection_store = previous_store
         ledger.close()
 
 
 class LedgerStatsRefreshingTestClient(TestClient):
     """Materialize source rows before each operator query in integration tests."""
 
+    def __init__(
+        self,
+        app,
+        *args,
+        projection_runtime: DurableObsProjectionRuntime,
+        obs_route_ports: ObsRoutePorts,
+        **kwargs,
+    ):  # type: ignore[no-untyped-def]
+        if not isinstance(obs_route_ports, ObsRoutePorts):
+            raise TypeError("obs_route_ports must be ObsRoutePorts")
+        if obs_route_ports.query_projection_store_provider() is not projection_runtime.store:
+            raise ValueError("obs_route_ports must reference projection_runtime.store")
+        self._projection_runtime = projection_runtime
+        app.state.obs_route_ports = obs_route_ports
+        super().__init__(app, *args, **kwargs)
+
     def request(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        refresh_ledger_stats_projection()
+        self._projection_runtime.refresh_ledger_stats()
         return super().request(*args, **kwargs)

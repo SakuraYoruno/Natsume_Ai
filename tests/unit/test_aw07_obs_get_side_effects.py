@@ -3,9 +3,22 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+from host_brain.app.obs_route_ports import ObsRoutePorts
+
+
+def _obs_request(store):
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                obs_route_ports=ObsRoutePorts(
+                    query_projection_store_provider=lambda: store,
+                ),
+            ),
+        ),
+    )
+
 
 def test_services_health_get_never_primes_or_probes(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_health as routes
     from host_brain.app.observability_runtime import health_device_projection as projection
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
@@ -40,9 +53,13 @@ def test_services_health_get_never_primes_or_probes(monkeypatch) -> None:
 
     monkeypatch.setattr(heartbeat, "prime_core_service_cache_once", _forbidden_prime)
     monkeypatch.setattr(projection, "load_health_projection_sources", _forbidden_source)
-    monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
-
-    response = asyncio.run(routes.get_services_health(window_minutes=60, side=None))
+    response = asyncio.run(
+        routes.get_services_health(
+            _obs_request(store),
+            window_minutes=60,
+            side=None,
+        )
+    )
 
     assert response.total == 0
     assert response.services == []
@@ -50,7 +67,6 @@ def test_services_health_get_never_primes_or_probes(monkeypatch) -> None:
 
 
 def test_avatar_state_get_reads_projection_without_device_command(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_stats_system as routes
     from host_brain.channels import embodiment
     from host_brain.app.observability_runtime import health_device_projection as projection
@@ -81,11 +97,10 @@ def test_avatar_state_get_reads_projection_without_device_command(monkeypatch) -
         degraded_detail=None,
     )
     store = SimpleNamespace(get=lambda kind, key: document if (kind, key) == ("device_status", "avatar") else None)
-    monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
     monkeypatch.setattr(embodiment, "submit_avatar_command", _forbidden_command)
     monkeypatch.setattr(projection, "load_device_status_projection_sources", _forbidden_source)
 
-    response = asyncio.run(routes.get_avatar_state())
+    response = asyncio.run(routes.get_avatar_state(_obs_request(store)))
 
     assert response["status"] == "OK"
     assert response["projection_version"] == 3
@@ -93,7 +108,6 @@ def test_avatar_state_get_reads_projection_without_device_command(monkeypatch) -
 
 
 def test_llm_and_organ_gets_do_not_call_background_loaders(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_health as routes
     from host_brain.app.observability_runtime import health_device_projection as projection
 
@@ -102,14 +116,9 @@ def test_llm_and_organ_gets_do_not_call_background_loaders(monkeypatch) -> None:
 
     monkeypatch.setattr(projection, "load_health_projection_sources", _forbidden)
     monkeypatch.setattr(projection, "load_organ_tribe_projection_source", _forbidden)
-    monkeypatch.setattr(
-        dependencies,
-        "get_query_projection_store",
-        lambda: SimpleNamespace(get=lambda _kind, _key: None),
-    )
-
-    nodes = routes.get_llm_nodes(window_minutes=60)
-    organ = routes.get_organ_tribe_status()
+    request = _obs_request(SimpleNamespace(get=lambda _kind, _key: None))
+    nodes = routes.get_llm_nodes(request, window_minutes=60)
+    organ = routes.get_organ_tribe_status(request)
 
     assert nodes.nodes == []
     assert nodes.projection_version == 0

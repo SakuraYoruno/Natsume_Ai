@@ -45,6 +45,8 @@ from host_brain.persistence.task_store_types import (
     AcceptanceEffectStatus,
     AttemptStatus,
     OutboxMessage,
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
+    TASK_STORE_BUDGET_EXCEEDED,
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
     TaskStoreError,
@@ -484,24 +486,52 @@ def _budget_usage_record(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]
         record.pop("exceeded_dimensions_json"),
         field_name="budget_usage.exceeded_dimensions_json",
     )
+    try:
+        accepted_raw = int(record.get("accepted"))
+        version_before = int(record.get("reservation_version_before"))
+        version_after = int(record.get("reservation_version_after"))
+    except (TypeError, ValueError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_DURABLE_DATA_INVALID,
+            "durable BudgetUsage outcome/version is invalid",
+        ) from exc
+    reason_code = str(record.get("reason_code") or "").strip() or None
     if (
         not _DURABLE_REFERENCE_PATTERN.fullmatch(str(record.get("usage_id") or ""))
         or str(record.get("delta_digest") or "") != expected_digest
         or any(item not in _BUDGET_AMOUNT_FIELDS for item in dimensions)
         or len(set(dimensions)) != len(dimensions)
-        or int(record.get("accepted") or 0) not in {0, 1}
-        or int(record.get("reservation_version_after") or 0)
-        != int(record.get("reservation_version_before") or -1) + 1
+        or accepted_raw not in {0, 1}
+        or version_before < 0
+        or version_after < 1
     ):
         raise TaskStoreError(
             TASK_STORE_DURABLE_DATA_INVALID,
             "durable BudgetUsage binding is invalid",
         )
-    accepted = bool(record["accepted"])
-    if accepted == bool(dimensions):
+    accepted = bool(accepted_raw)
+    normal_accepted = (
+        accepted
+        and reason_code is None
+        and not dimensions
+        and version_after == version_before + 1
+    )
+    terminal_winner = (
+        not accepted
+        and reason_code == TASK_STORE_BUDGET_EXCEEDED
+        and bool(dimensions)
+        and version_after == version_before + 1
+    )
+    terminal_sibling = (
+        not accepted
+        and reason_code == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+        and bool(dimensions)
+        and version_after == version_before
+    )
+    if not (normal_accepted or terminal_winner or terminal_sibling):
         raise TaskStoreError(
             TASK_STORE_DURABLE_DATA_INVALID,
-            "durable BudgetUsage outcome conflicts with exceeded dimensions",
+            "durable BudgetUsage outcome/reason/version matrix is invalid",
         )
     record["accepted"] = accepted
     record["delta"] = delta.to_dict()
@@ -1097,6 +1127,7 @@ def _parallel_settlement_decision_record(
 
 def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
     record = dict(row)
+    has_graph_revision = "graph_revision" in record
     evidence_refs = _loads_list(
         record.pop("evidence_refs_json"),
         field_name="task_runtime_outbox.evidence_refs_json",
@@ -1115,10 +1146,14 @@ def _outbox_record(row: sqlite3.Row) -> dict[str, Any]:
             event_type=str(record["event_type"]),
             payload_ref=str(record["payload_ref"]),
             idempotency_key=str(record["idempotency_key"]),
+            graph_revision=record.get("graph_revision"),
             attempt_id=record["attempt_id"],
             evidence_refs=tuple(evidence_refs),
             available_ts_ms=int(record["available_ts_ms"]),
-        ).validate()
+        ).validate(
+            allow_legacy_graph_revision=not has_graph_revision,
+            allow_legacy_graph_payload_ref=True,
+        )
     except (TaskStoreError, TypeError, ValueError) as exc:
         if isinstance(exc, TaskStoreError) and exc.reason_code == TASK_STORE_DURABLE_DATA_INVALID:
             raise

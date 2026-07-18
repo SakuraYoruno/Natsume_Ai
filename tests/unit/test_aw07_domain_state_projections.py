@@ -7,11 +7,13 @@ from types import SimpleNamespace
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.observability_runtime.domain_state_projection import (
+    GOVERNANCE_SNAPSHOT_MAX_AGE_MS,
     LIFE_EVOLUTION_KIND,
     LIFE_MAX_AGE_MS,
     SECURITY_IMMUNE_KEY,
     SECURITY_IMMUNE_KIND,
     SECURITY_IMMUNE_MAX_AGE_MS,
+    SEMANTIC_RECALL_STATS_MAX_AGE_MS,
     SKILL_PACK_CATALOG_KEY,
     SKILL_PACK_CATALOG_KIND,
     SKILL_PACK_CATALOG_MAX_AGE_MS,
@@ -27,12 +29,6 @@ def _store(tmp_path) -> QueryProjectionStore:  # noqa: ANN001
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="aw07-domain-unit")
     assert result.success, result
     return QueryProjectionStore(db_path)
-
-
-def _install_store(monkeypatch, store: QueryProjectionStore) -> None:  # noqa: ANN001
-    from host_brain.composition import process_services as dependencies
-
-    monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
 
 
 def test_life_get_reads_durable_projection_without_source_getter(tmp_path, monkeypatch) -> None:  # noqa: ANN001
@@ -63,20 +59,17 @@ def test_life_get_reads_durable_projection_without_source_getter(tmp_path, monke
         source_cursor=8,
         freshness_ts_ms=now,
     )
-    _install_store(monkeypatch, store)
-
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("Life GET must not call a source getter")
 
     monkeypatch.setattr(life_application_boundary, "read_life_snapshot", forbidden)
-    monkeypatch.setattr(routes, "_default_snapshot", forbidden)
-    routes.set_life_evolution_snapshot_provider(forbidden)
     monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "true")
     get_core_settings.cache_clear()
     try:
-        response = asyncio.run(routes._get_life_evolution_snapshot("default", ""))
+        response = asyncio.run(
+            routes._get_life_evolution_snapshot(store, "default", "")
+        )
     finally:
-        routes.set_life_evolution_snapshot_provider(None)
         get_core_settings.cache_clear()
 
     assert response["view_id"] == "projected-life"
@@ -109,16 +102,15 @@ def test_security_gets_never_initialize_agent(tmp_path, monkeypatch) -> None:  #
         source_cursor=now,
         freshness_ts_ms=now,
     )
-    _install_store(monkeypatch, store)
     monkeypatch.setattr(
         agent,
         "get_security_immune_agent",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("GET initialized Immune Agent")),
     )
 
-    runtime = routes.get_security_immune_runtime()
-    assets = routes.get_security_immune_assets()
-    incidents = routes.get_security_immune_incidents("high")
+    runtime = routes.get_security_immune_runtime(store)
+    assets = routes.get_security_immune_assets(store)
+    incidents = routes.get_security_immune_incidents(store, "high")
 
     assert runtime["asset_count"] == 1
     assert assets["assets"][0]["asset_id"] == "asset-1"
@@ -150,14 +142,12 @@ def test_skill_catalog_get_never_initializes_registry(tmp_path, monkeypatch) -> 
         source_cursor=now,
         freshness_ts_ms=now,
     )
-    _install_store(monkeypatch, store)
-
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("Skill Catalog GET initialized the registry")
 
     monkeypatch.setattr(dependencies, "get_skill_registry", forbidden)
 
-    response = routes.get_skill_catalog_stats()
+    response = routes.get_skill_catalog_stats(store)
 
     assert response.loaded_skills == 1
     assert response.skills[0].name == "skill.one"
@@ -169,10 +159,8 @@ def test_empty_domain_gets_have_version_cursor_freshness_and_degraded(tmp_path, 
     from host_brain.app import obs_routes_platform, obs_routes_security_immune
 
     store = _store(tmp_path)
-    _install_store(monkeypatch, store)
-
-    immune = obs_routes_security_immune.get_security_immune_runtime()
-    skills = obs_routes_platform.get_skill_catalog_stats()
+    immune = obs_routes_security_immune.get_security_immune_runtime(store)
+    skills = obs_routes_platform.get_skill_catalog_stats(store)
 
     for projection in (immune["projection"], skills.projection):
         assert projection["schema_version"] == "Natsume.operator.query_projection.v1"
@@ -204,9 +192,7 @@ def test_stale_skill_catalog_is_not_served_as_current(tmp_path, monkeypatch) -> 
         source_cursor=1,
         freshness_ts_ms=1,
     )
-    _install_store(monkeypatch, store)
-
-    response = obs_routes_platform.get_skill_catalog_stats()
+    response = obs_routes_platform.get_skill_catalog_stats(store)
 
     assert response.skills == []
     assert response.loaded_skills == 0
@@ -253,7 +239,7 @@ def test_background_loaders_project_canonical_life_and_skill_pack_catalog() -> N
     assert catalog["domain_packs"][0]["pack_id"] == "pack.one"
 
 
-def test_life_background_loader_binds_the_composed_snapshot_reader(monkeypatch) -> None:  # noqa: ANN001
+def test_life_background_loader_requires_the_explicit_snapshot_reader(monkeypatch) -> None:  # noqa: ANN001
     from host_brain.composition import process_services
 
     calls: list[str] = []
@@ -270,9 +256,18 @@ def test_life_background_loader_binds_the_composed_snapshot_reader(monkeypatch) 
             }
 
     reader = Reader()
-    monkeypatch.setattr(process_services, "get_life_snapshot_reader", lambda: reader)
+    monkeypatch.setattr(
+        process_services,
+        "get_life_snapshot_reader",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("explicit loader must not discover a process reader")
+        ),
+    )
 
-    payload, cursor = load_life_evolution_projection_source("natsume")
+    payload, cursor = load_life_evolution_projection_source(
+        "natsume",
+        snapshot_reader=reader.get_snapshot,
+    )
 
     assert calls == ["natsume"]
     assert payload["person_id"] == "natsume"
@@ -324,7 +319,7 @@ def test_life_body_has_no_legacy_trace_feed_warm_read_model() -> None:
     source = inspect.getsource(obs_routes_life_body)
     assert "_get_warmed_trace_feed_snapshot" not in source
     assert "get_trace_feed_warm_status" not in source
-    assert "get_query_projection_store().get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)" in source
+    assert "projection_store.get(TRACE_FEED_KIND, TRACE_FEED_INDEX_KEY)" in source
 
 
 def test_domain_routes_reference_only_durable_readers() -> None:
@@ -342,10 +337,12 @@ def test_domain_routes_reference_only_durable_readers() -> None:
     assert "get_skill_registry" not in skill_source
     assert "list_installed" not in skill_source
     assert "isdir" not in skill_source
-    assert "read_domain_projection" in life_source + immune_source + skill_source
+    assert "read_domain_projection_from_store" in life_source + immune_source + skill_source
 
 
 def test_projection_age_contracts_are_nonzero() -> None:
+    assert GOVERNANCE_SNAPSHOT_MAX_AGE_MS > 30_000
     assert LIFE_MAX_AGE_MS > 0
     assert SECURITY_IMMUNE_MAX_AGE_MS > LIFE_MAX_AGE_MS
+    assert SEMANTIC_RECALL_STATS_MAX_AGE_MS > 60_000
     assert SKILL_PACK_CATALOG_MAX_AGE_MS > LIFE_MAX_AGE_MS

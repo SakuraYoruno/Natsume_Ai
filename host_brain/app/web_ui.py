@@ -5,18 +5,22 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, Query, HTTPException
+from typing import Annotated, Dict, List, Optional, Any
+from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 
-from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from host_brain.core.ids import new_request_id
 from host_brain.app.observability_runtime.projection_runtime import (
     SESSION_INDEX_KEY,
     SESSION_KIND,
     TRACE_KIND,
 )
-from host_brain.app.observability_runtime.remaining_query_projection import read, read_all, response_meta
+from host_brain.app.observability_runtime.remaining_query_projection import (
+    read_all_from_store,
+    read_from_store,
+    response_meta,
+)
 
 logger = logging.getLogger("Natsume.web_ui")
 
@@ -88,11 +92,6 @@ class LinkTopologyResponse(BaseModel):
     freshness_ts_ms: int = 0
     degraded_state: str = "REBUILDING"
 
-def get_ledger() -> SQLiteLedger:
-    """获取SQLite账本实例"""
-    from host_brain.composition.process_services import get_ledger as get_app_ledger
-    return get_app_ledger()
-
 @router.get("/timeline", response_model=TimelineAggregationResponse)
 def get_timeline_aggregation(
     start_time: datetime = Query(..., description="开始时间"),
@@ -102,11 +101,20 @@ def get_timeline_aggregation(
     request_type: Optional[str] = Query(None, description="请求类型过滤"),
     limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
     offset: int = Query(0, ge=0, description="分页偏移量"),
+    *,
+    projection_store: Annotated[
+        Any,
+        Depends(require_obs_query_projection_store),
+    ],
 ):
     """Aggregate the already-materialized public session index."""
     start_ts = int(start_time.timestamp() * 1000)
     end_ts = int(end_time.timestamp() * 1000)
-    payload, meta = read(SESSION_KIND, SESSION_INDEX_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        SESSION_KIND,
+        SESSION_INDEX_KEY,
+    )
     rows = [
         dict(row)
         for row in list((payload or {}).get("items") or [])
@@ -186,12 +194,21 @@ def get_status_distribution(
     request_type: Optional[str] = Query(None, description="请求类型过滤"),
     limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
     offset: int = Query(0, ge=0, description="分页偏移量"),
+    *,
+    projection_store: Annotated[
+        Any,
+        Depends(require_obs_query_projection_store),
+    ],
 ):
     """Aggregate status from the public durable session projection."""
 
     start_ts = int(start_time.timestamp() * 1000)
     end_ts = int(end_time.timestamp() * 1000)
-    payload, meta = read(SESSION_KIND, SESSION_INDEX_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        SESSION_KIND,
+        SESSION_INDEX_KEY,
+    )
     allowed_types = {
         value.strip().lower() for value in str(request_type or "").split(",") if value.strip()
     }
@@ -227,9 +244,16 @@ def get_status_distribution(
     )
 
 @router.get("/request/{request_id}", response_model=RequestDetailResponse)
-def get_request_detail(request_id: str) -> dict:
+def get_request_detail(
+    request_id: str,
+    *,
+    projection_store: Annotated[
+        Any,
+        Depends(require_obs_query_projection_store),
+    ],
+) -> dict:
     """Read request detail from the durable public Trace projection."""
-    payload, meta = read(TRACE_KIND, request_id)
+    payload, meta = read_from_store(projection_store, TRACE_KIND, request_id)
     if payload is None:
         raise HTTPException(
             status_code=404,
@@ -260,12 +284,17 @@ def get_link_topology(
     min_connections: int = Query(1, description="最小连接数阈值"),
     limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
     offset: int = Query(0, ge=0, description="分页偏移量"),
+    *,
+    projection_store: Annotated[
+        Any,
+        Depends(require_obs_query_projection_store),
+    ],
 ):
     """Build topology solely from fresh public Trace projection documents."""
 
     start_ts = int(start_time.timestamp() * 1000)
     end_ts = int(end_time.timestamp() * 1000)
-    traces, meta = read_all(TRACE_KIND)
+    traces, meta = read_all_from_store(projection_store, TRACE_KIND)
     request_sources: dict[str, set[str]] = {}
     for trace in traces[: max(1, int(limit))]:
         ts_ms = int(trace.get("ts_ms") or trace.get("timestamp") or 0)
@@ -333,9 +362,18 @@ def search_requests(
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     limit: int = Query(100, ge=1, le=10000, description="最大返回记录数"),
     offset: int = Query(0, ge=0, description="分页偏移量"),
+    *,
+    projection_store: Annotated[
+        Any,
+        Depends(require_obs_query_projection_store),
+    ],
 ):
     """Search public identifiers and statuses in the session projection."""
-    payload, meta = read(SESSION_KIND, SESSION_INDEX_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        SESSION_KIND,
+        SESSION_INDEX_KEY,
+    )
     start_ts = int(start_time.timestamp() * 1000)
     end_ts = int(end_time.timestamp() * 1000)
     keyword = str(query or "").strip().lower()

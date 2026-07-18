@@ -12,7 +12,8 @@ from fastapi.responses import StreamingResponse
 
 from host_brain.contracts.agent_runtime.review_policy import ReviewItem
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
-from host_brain.persistence.review_repository import ReviewStore, ReviewStoreError
+from host_brain.persistence.review_repository import ReviewStoreError
+from host_brain.task_runtime.review_command_service import TaskReviewCommandService
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.app.internal_task_runtime import (
     GovernedInternalRuntimeError,
@@ -63,10 +64,16 @@ def _bool_flag(value: Any, *, default: bool = False) -> bool:
     return bool(default)
 
 
-def _get_review_store() -> ReviewStore:
-    return ReviewStore(
-        Path(get_internal_agent_settings().review_db_path).expanduser()
-    )
+def _review_command_service(request: Request) -> TaskReviewCommandService:
+    service = getattr(request.state, "task_review_command_service", None)
+    if service is None:
+        service = getattr(request.app.state, "task_review_command_service", None)
+    if not isinstance(service, TaskReviewCommandService):
+        raise HTTPException(
+            status_code=503,
+            detail="TASK_REVIEW_COMMAND_SERVICE_UNAVAILABLE",
+        )
+    return service
 
 
 def _get_runtime_event_store() -> RuntimeEventStore:
@@ -171,6 +178,21 @@ def _internal_command_authority(request: Request) -> Any:
     ):
         raise HTTPException(status_code=403, detail="INTERNAL_AGENT_AUTHORITY_INCOMPLETE")
     return authority
+
+
+def _review_actor(
+    request: Request,
+    payload: Mapping[str, Any] | None = None,
+) -> str:
+    """Bind Review audit identity to the authenticated operator principal."""
+
+    authority = _internal_command_authority(request)
+    principal_id = str(getattr(authority, "principal_id", "") or "").strip()
+    body = dict(payload or {})
+    asserted = _text(body.get("actor_id") or body.get("reviewer_id"))
+    if asserted and asserted != principal_id:
+        raise HTTPException(status_code=403, detail="REVIEW_ACTOR_IDENTITY_MISMATCH")
+    return principal_id
 
 
 def _extract_owner_directive(
@@ -373,11 +395,29 @@ async def ingest_owner_directive(payload: dict[str, Any] = Body(...)) -> dict[st
 
 
 @router.post("/reviews")
-async def create_review(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+async def create_review(
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
     review_payload = _mapping(payload.get("review")) or _mapping(payload)
     try:
         review = ReviewItem.from_mapping(review_payload)
-        record = _get_review_store().create_review(
+        principal_id = _review_actor(request)
+        if review.requester != principal_id:
+            raise HTTPException(
+                status_code=403,
+                detail="REVIEW_REQUESTER_IDENTITY_MISMATCH",
+            )
+        if (
+            review.subject_ref.startswith("task-node://")
+            or _text(payload.get("task_graph_id"))
+            or _text(payload.get("task_node_id"))
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="TASK_BOUND_REVIEW_CREATE_INTERNAL_ONLY",
+            )
+        record = _review_command_service(request).create_review(
             review,
             work_order_id=_text(payload.get("work_order_id")) or None,
             task_graph_id=_text(payload.get("task_graph_id")) or None,
@@ -391,12 +431,17 @@ async def create_review(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
 
 
 @router.post("/reviews/{review_id}/approve")
-async def approve_review(review_id: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+async def approve_review(
+    review_id: str,
+    request: Request,
+    payload: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
     body = _mapping(payload)
+    actor_id = _review_actor(request, body)
     try:
-        approved = _get_review_store().approve_review(
+        approved = _review_command_service(request).approve_review(
             review_id,
-            actor_id=_text(body.get("actor_id") or body.get("reviewer_id")) or "reviewer",
+            actor_id=actor_id,
             expected_subject_ref=_text(body.get("subject_ref")) or None,
             expected_subject_version=(
                 int(body["subject_version"]) if body.get("subject_version") is not None else None
@@ -413,12 +458,17 @@ async def approve_review(review_id: str, payload: dict[str, Any] | None = Body(d
 
 
 @router.post("/reviews/{review_id}/reject")
-async def reject_review(review_id: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+async def reject_review(
+    review_id: str,
+    request: Request,
+    payload: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
     body = _mapping(payload)
+    actor_id = _review_actor(request, body)
     try:
-        record = _get_review_store().reject_review(
+        record = _review_command_service(request).reject_review(
             review_id,
-            actor_id=_text(body.get("actor_id") or body.get("reviewer_id")) or "reviewer",
+            actor_id=actor_id,
         )
     except ReviewStoreError as exc:
         _raise_review_store_error(exc)
@@ -426,14 +476,19 @@ async def reject_review(review_id: str, payload: dict[str, Any] | None = Body(de
 
 
 @router.post("/reviews/{review_id}/resume")
-async def resume_review(review_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+async def resume_review(
+    review_id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
     _require_degradation_http(
         capability_id="remote_review_resume",
         static_risk_level=4,
     )
     body = _mapping(payload)
+    _review_actor(request, body)
     try:
-        resume = _get_review_store().resume_review(
+        resume = _review_command_service(request).resume_review(
             review_id,
             resume_token_ref=_text(body.get("resume_token_ref")),
             subject_ref=_text(body.get("subject_ref")),

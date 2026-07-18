@@ -28,6 +28,7 @@ from host_brain.integrations.runtime_events import (
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
@@ -150,6 +151,10 @@ async def test_clock_to_task_runtime_to_durable_result_is_one_real_chain(
     infrastructure = SimpleNamespace(
         task_store=task_store,
         review_store=ReviewStore(db_path, clock=lambda: NOW),
+        review_continuation_store=ReviewContinuationStore(
+            db_path,
+            clock=lambda: NOW,
+        ),
         command_repository=HostCommandRepository(db_path),
         outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
         scheduler_definition_repository=definitions,

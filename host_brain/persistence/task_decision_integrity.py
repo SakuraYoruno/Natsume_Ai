@@ -21,7 +21,12 @@ from host_brain.persistence.task_record_codec import (
     _outbox_record,
     _validated_budget_record,
 )
+from host_brain.persistence.task_budget_usage_store import (
+    _assert_terminal_budget_authority,
+)
 from host_brain.persistence.task_store_types import (
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
+    TASK_STORE_BUDGET_EXCEEDED,
     TASK_STORE_DURABLE_DATA_INVALID,
     TaskStoreError,
 )
@@ -130,6 +135,7 @@ def _assert_graph_cancellation_decision_bindings(
     if (
         graph_outbox["aggregate_type"] != "TASK_GRAPH"
         or graph_outbox["aggregate_id"] != graph_id
+        or int(graph_outbox.get("graph_revision") or 0) != revision
         or int(graph_outbox["aggregate_version"]) != int(record["graph_version_after"])
         or graph_outbox["event_type"] != "TASK_GRAPH_CANCELLED"
         or not required_evidence.issubset(set(graph_outbox["evidence_refs"]))
@@ -268,6 +274,8 @@ def _assert_parallel_success_decision_bindings(
     if (
         graph_outbox["aggregate_type"] != "TASK_GRAPH"
         or graph_outbox["aggregate_id"] != record["graph_id"]
+        or int(graph_outbox.get("graph_revision") or 0)
+        != int(record["graph_revision"])
         or int(graph_outbox["aggregate_version"])
         != int(record["graph_version_after"])
         or graph_outbox["event_type"] != "TASK_GRAPH_COMPLETED"
@@ -358,6 +366,8 @@ def _assert_parallel_settlement_decision_outbox_binding(
     if (
         graph_outbox["aggregate_type"] != "TASK_GRAPH"
         or graph_outbox["aggregate_id"] != record["graph_id"]
+        or int(graph_outbox.get("graph_revision") or 0)
+        != int(record["graph_revision"])
         or int(graph_outbox["aggregate_version"])
         != int(record["graph_version_after"])
         or graph_outbox["event_type"]
@@ -443,25 +453,66 @@ def _assert_parallel_budget_usage_lineage(
         """
         SELECT * FROM task_runtime_budget_usage
         WHERE budget_id = ? AND graph_id = ? AND graph_revision = ?
-          AND node_id = ? AND attempt_id = ? AND accepted = 0
+          AND accepted = 0
         ORDER BY reservation_version_after, created_ts_ms, usage_id
         """,
         (
             str(payload.get("budget_id") or ""),
             str(payload.get("graph_id") or ""),
             int(payload.get("graph_revision") or 0),
-            selected_node_id,
-            str(selected.get("attempt_id") or ""),
         ),
     ).fetchall()
-    if not any(
-        str(usage["usage_id"]) in evidence_refs
-        and bool(usage["exceeded_dimensions"])
-        for usage in (_budget_usage_record(row) for row in usage_rows)
+    usages = tuple(_budget_usage_record(row) for row in usage_rows)
+    winners = tuple(
+        usage
+        for usage in usages
+        if usage["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+    )
+    siblings = tuple(
+        usage
+        for usage in usages
+        if usage["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    )
+    if len(winners) != 1 or len(winners) + len(siblings) != len(usages):
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision lacks one unique terminal usage authority",
+        )
+    winner = winners[0]
+    if (
+        str(winner["node_id"]) != selected_node_id
+        or str(winner["attempt_id"]) != str(selected.get("attempt_id") or "")
+        or str(winner["usage_id"]) not in evidence_refs
+        or not bool(winner["exceeded_dimensions"])
+        or int(winner["reservation_version_after"])
+        != int(payload.get("budget_status_version_before") or -1)
+        or any(str(sibling["usage_id"]) in evidence_refs for sibling in siblings)
     ):
         raise TaskStoreError(
             reason_code,
-            "parallel Budget decision lacks its rejected durable usage lineage",
+            "parallel Budget decision selected a passive sibling instead of the winner",
+        )
+    budget_row = conn.execute(
+        "SELECT * FROM task_runtime_budget_reservation WHERE budget_id = ?",
+        (str(payload.get("budget_id") or ""),),
+    ).fetchone()
+    if budget_row is None:
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision is missing its terminal reservation",
+        )
+    try:
+        authority, _ = _assert_terminal_budget_authority(
+            conn,
+            budget_row=budget_row,
+            terminal_version=int(winner["reservation_version_after"]),
+        )
+    except TaskStoreError as exc:
+        raise TaskStoreError(reason_code, exc.detail) from exc
+    if str(authority["usage_id"]) != str(winner["usage_id"]):
+        raise TaskStoreError(
+            reason_code,
+            "parallel Budget decision winner differs from terminal authority",
         )
 
 
@@ -473,10 +524,9 @@ def _find_invalid_declared_parallel_settlement_decision_ref(
 ) -> str | None:
     """Find a Graph Outbox declaration with no correctly bound decision row.
 
-    TaskGraph Outboxes predate an explicit ``graph_revision`` column, so a
-    complete marker scan is safe only while one revision exists for the graph
-    id.  Every ``taskbatch://sha256/`` marker in that history must resolve to a
-    decision bound to the same revision and exact Graph Outbox.
+    Migration 0095 binds every TaskGraph Outbox to an explicit revision.  Every
+    ``taskbatch://sha256/`` marker in the requested revision must therefore
+    resolve to a decision bound to that same revision and exact Graph Outbox.
     """
 
     graph_row = conn.execute(
@@ -488,29 +538,16 @@ def _find_invalid_declared_parallel_settlement_decision_ref(
     ).fetchone()
     if graph_row is None:
         return None
-    revision_count = int(
-        conn.execute(
-            "SELECT COUNT(*) FROM task_runtime_graph WHERE graph_id = ?",
-            (graph_id,),
-        ).fetchone()[0]
-    )
-    if revision_count != 1:
-        # Historical TaskGraph Outboxes do not carry graph_revision.  Scanning
-        # them across revisions could mistake another revision's equal
-        # status/version marker for the queried revision.  The selected row is
-        # still validated against its exact Outbox by the caller; complete
-        # cross-revision missing-marker detection requires revisioned Outbox
-        # aggregate identity.
-        return None
     rows = conn.execute(
         """
         SELECT * FROM task_runtime_outbox
         WHERE aggregate_type = 'TASK_GRAPH'
           AND aggregate_id = ?
+          AND graph_revision = ?
           AND event_type IN ('TASK_GRAPH_FAILED', 'TASK_GRAPH_BLOCKED')
         ORDER BY aggregate_version DESC, outbox_id DESC
         """,
-        (graph_id,),
+        (graph_id, int(graph_revision)),
     ).fetchall()
     for row in rows:
         outbox = _outbox_record(row)

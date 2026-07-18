@@ -11,7 +11,13 @@ function HormoneBar({ view }) {
         <span className="font-mono font-semibold" style={{ color: view.color }}>{view.valueLabel}</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
-        <div className="h-full rounded-full" style={{ width: view.width, backgroundColor: view.color }} />
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: view.available ? view.width : '100%',
+            backgroundColor: view.available ? view.color : '#e5e7eb',
+          }}
+        />
       </div>
     </div>
   )
@@ -28,7 +34,7 @@ function Gauge({ view }) {
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{
-            width: view.width,
+            width: view.available ? view.width : '100%',
             backgroundColor: view.backgroundColor,
           }}
         />
@@ -42,7 +48,15 @@ function Gauge({ view }) {
   )
 }
 
-export function CurrentEmotionPanel({ moodStyle, MoodIcon, emotionTagLabel, gauges, hormoneBars, gateView }) {
+export function CurrentEmotionPanel({
+  moodStyle,
+  MoodIcon,
+  emotionTagLabel,
+  gauges,
+  hormoneBars,
+  gateView,
+  runtimeEmotionAvailable = false,
+}) {
   return (
     <div className="card space-y-4 p-5">
       <h2 className="flex items-center gap-1 text-sm font-semibold text-gray-700">
@@ -59,7 +73,9 @@ export function CurrentEmotionPanel({ moodStyle, MoodIcon, emotionTagLabel, gaug
         </div>
         <div className="mt-2">
           <NoticeBanner variant="info" className="text-left">
-            这里已经直接读取运行时快照，不再使用前端模拟情绪数据。
+            {runtimeEmotionAvailable
+              ? '这里直接读取运行时快照，不使用前端模拟情绪数据。'
+              : '运行时情绪快照当前不可用，效价、唤醒、稳定度与内分泌值保持不可测。'}
           </NoticeBanner>
         </div>
       </div>
@@ -82,7 +98,11 @@ export function CurrentEmotionPanel({ moodStyle, MoodIcon, emotionTagLabel, gaug
   )
 }
 
-export function EmotionDistributionPanel({ topEmotionRows, vtsStatCards }) {
+export function EmotionDistributionPanel({
+  topEmotionRows,
+  vtsStatCards,
+  vtsObservation = { source: 'avatar_action_log', availability: '未加载' },
+}) {
   return (
     <div className="card space-y-4 p-5">
       <h2 className="flex items-center gap-1 text-sm font-semibold text-gray-700">
@@ -113,7 +133,7 @@ export function EmotionDistributionPanel({ topEmotionRows, vtsStatCards }) {
       )}
 
       {vtsStatCards.length > 0 ? (
-        <div className="grid grid-cols-3 gap-2 border-t pt-2 text-center text-xs">
+        <div className="grid grid-cols-2 gap-2 border-t pt-2 text-center text-xs sm:grid-cols-4">
           {vtsStatCards.map((card) => (
             <div key={card.label}>
               <div className={`text-lg font-bold ${card.className}`}>{card.value}</div>
@@ -122,6 +142,11 @@ export function EmotionDistributionPanel({ topEmotionRows, vtsStatCards }) {
           ))}
         </div>
       ) : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-[11px] text-gray-400">
+        <span>来源：<span className="font-mono">{vtsObservation.source}</span></span>
+        <span>可用性：{vtsObservation.availability}</span>
+      </div>
     </div>
   )
 }
@@ -173,9 +198,14 @@ export function BondTemperaturePanel({ bondMetrics, bondStageLabel, memorySubsys
         <div className="space-y-1 border-t pt-2">
           <div className="mb-1 text-xs font-medium text-gray-600">记忆子系统成功率</div>
           {memorySubsystemRows.map((subsystem) => (
-            <div key={subsystem.key} className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">{subsystem.label}</span>
-              <span className={subsystem.tone}>{subsystem.successRate}%</span>
+            <div key={subsystem.key}>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-600">{subsystem.label}</span>
+                <span className={subsystem.tone}>{subsystem.successRate}</span>
+              </div>
+              <div className="truncate text-[10px] text-gray-400">
+                来源：{subsystem.source}
+              </div>
             </div>
           ))}
         </div>

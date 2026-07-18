@@ -87,6 +87,19 @@ async def _run_cortex_orchestrator_pipeline(
             ts_ms=ts_ms,
         )
 
+    # A governed Host Input is owned by the authenticated ingress principal,
+    # not by the conversational person projection.  The latter remains in the
+    # request/person context, while the former must be frozen into the
+    # Governor decision so its durable grant can later derive node grants for
+    # the exact HostCommand principal.
+    governed_authority: dict[str, Any] | None = None
+    if governed_command_application_provider is not None:
+        governed_authority = _require_governed_command_authority(
+            command_authority,
+        )
+        intent_draft = dict(intent_draft or {})
+        intent_draft["principal_id"] = governed_authority["principal_id"]
+
     def _result_from_commit(commit: dict[str, Any]) -> dict[str, Any]:
         return {
             "decision": str(commit.get("decision") or "").strip().upper() or "REJECT",
@@ -185,17 +198,6 @@ async def _run_cortex_orchestrator_pipeline(
 
     governed_command_application: Any | None = None
     if governed_command_application_provider is not None:
-        authority = dict(command_authority or {})
-        missing_authority = [
-            key
-            for key in ("principal_id", "claim_ref", "audit_ref", "body_sha256")
-            if not str(authority.get(key) or "").strip()
-        ]
-        if missing_authority:
-            raise RuntimeError(
-                "governed_command_authority_incomplete:"
-                + ",".join(missing_authority)
-            )
         governed_command_application = governed_command_application_provider()
         if inspect.isawaitable(governed_command_application):
             governed_command_application = await governed_command_application
@@ -215,7 +217,7 @@ async def _run_cortex_orchestrator_pipeline(
         intent_id=str(governor_result.get("intent_id") or request_id),
         metrics=_NoopMetrics(),
         governed_command_application=governed_command_application,
-        command_authority=dict(command_authority or {}),
+        command_authority=dict(governed_authority or {}),
     ):
         parsed = _parse_sse_data_event(event)
         if parsed and str(parsed.get("phase") or "").upper() == "COMMIT":
@@ -225,6 +227,23 @@ async def _run_cortex_orchestrator_pipeline(
         raise RuntimeError("cortex_orchestrator_commit_missing")
 
     return _result_from_commit(commit_event)
+
+
+def _require_governed_command_authority(
+    command_authority: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Validate the exact Secure Ingress identity before Governor admission."""
+
+    authority = {
+        key: str(dict(command_authority or {}).get(key) or "").strip()
+        for key in ("principal_id", "claim_ref", "audit_ref", "body_sha256")
+    }
+    missing = [key for key, value in authority.items() if not value]
+    if missing:
+        raise RuntimeError(
+            "governed_command_authority_incomplete:" + ",".join(missing)
+        )
+    return authority
 
 
 async def _run_cortex_pipeline(

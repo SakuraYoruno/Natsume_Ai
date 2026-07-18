@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
+from host_brain.contracts.agent_runtime.node_artifact import (
+    is_task_result_artifact_ref,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphCompletionPolicy,
     TaskNodeStatus,
 )
+from host_brain.persistence.worker_projection_repository import (
+    WorkerProjectionStoreError,
+    validate_worker_projection_payload,
+)
 
 from .admission import AdmittedExecution, AdmittedTaskNode
-from .budget_runtime import DurableBudgetRuntime
+from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
+from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
 from .coordinator_receipts import (
     _digest_from_receipt_ref,
     build_execution_receipt,
@@ -26,6 +34,7 @@ from .coordinator_records import (
     _assert_durable_identity,
     _attempt_id,
     _mapping,
+    _node_input_refs,
     _optional_record_non_negative_int,
     _record_evidence_refs,
     _record_non_negative_int,
@@ -83,6 +92,7 @@ class DurableDagSchedulingRuntime:
         "_bounded_fanout_enabled",
         "_atomic_graph_success_enabled",
         "_acceptance_effects_enabled",
+        "_accepted_graph_finalization",
         "_projection_reader",
         "_fanout_event_buffer_size",
     )
@@ -103,6 +113,7 @@ class DurableDagSchedulingRuntime:
         bounded_fanout_enabled: bool,
         atomic_graph_success_enabled: bool,
         acceptance_effects_enabled: bool,
+        accepted_graph_finalization: AcceptedGraphFinalizationRuntime,
         projection_reader: ExecutionProjectionReaderPort | None,
         fanout_event_buffer_size: int,
     ) -> None:
@@ -119,6 +130,7 @@ class DurableDagSchedulingRuntime:
         self._bounded_fanout_enabled = bool(bounded_fanout_enabled)
         self._atomic_graph_success_enabled = bool(atomic_graph_success_enabled)
         self._acceptance_effects_enabled = bool(acceptance_effects_enabled)
+        self._accepted_graph_finalization = accepted_graph_finalization
         self._projection_reader = projection_reader
         self._fanout_event_buffer_size = int(fanout_event_buffer_size)
 
@@ -313,8 +325,12 @@ class DurableDagSchedulingRuntime:
                     )
                 review_admission = admitted.for_node(pre_review_node_id)
                 review_node = durable_nodes[pre_review_node_id]
-                if graph_status in {"CREATED", "ACTIVE"}:
-                    graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
+                if graph_status == "CREATED":
+                    graph = await self._node_lifecycle.transition_graph(
+                        review_admission,
+                        graph,
+                        "ACTIVE",
+                    )
                     graph_status = _status(graph)
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
@@ -352,8 +368,12 @@ class DurableDagSchedulingRuntime:
                         review_node,
                         evidence_refs=pre_review_refs,
                     )
-                    if graph_status == "BLOCKED":
-                        await self._node_lifecycle.transition_graph(review_admission, graph, "CANCELLED")
+                    if graph_status in {"ACTIVE", "BLOCKED"}:
+                        await self._node_lifecycle.transition_graph(
+                            review_admission,
+                            graph,
+                            "CANCELLED",
+                        )
                     budget = await self._budgets.finalize(
                         budget, target_status=BudgetReservationStatus.RELEASED
                     )
@@ -365,7 +385,7 @@ class DurableDagSchedulingRuntime:
                 await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     review_admission,
-                    attempt_id=_attempt_id(review_admission, attempt_no=1),
+                    attempt_id=None,
                     status=status,
                     verification_status="NOT_RUN",
                     accepted=False,
@@ -376,7 +396,14 @@ class DurableDagSchedulingRuntime:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield terminal_event(receipt)
+                waiting_event = terminal_event(receipt)
+                if status == "WAITING_APPROVAL" and graph_status == "ACTIVE":
+                    budget, waiting_event = await self._settle_waiting_approval(
+                        admitted=admitted,
+                        receipt_event=waiting_event,
+                        budget=budget,
+                    )
+                yield waiting_event
                 return
 
             post_review_node_id = next(
@@ -418,37 +445,60 @@ class DurableDagSchedulingRuntime:
                 post_review_refs = tuple(
                     dict.fromkeys((*_record_evidence_refs(review_node), *review_refs))
                 )
+                reservation = await self._node_execution_projection.try_operation(
+                    review_admission.reservation_id
+                )
+                receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
                 if gate.allowed:
-                    await self._node_lifecycle.transition_node(
+                    acceptance_judgement = {
+                        "schema_version": "Natsume.agent.acceptance_judgement.v1",
+                        "judgement_id": f"review-accept::{gate.review_id}",
+                        "work_order_id": review_admission.work_order_id,
+                        "task_graph_id": review_admission.graph_id,
+                        "task_node_id": review_admission.node_id,
+                        "attempt_id": attempt_id,
+                        "decision": "ACCEPT",
+                        "reason_code": None,
+                        "evidence_refs": list(post_review_refs),
+                        "criteria": [],
+                        "critic_candidate": {
+                            "source": "durable_review",
+                            "review": gate.to_dict(),
+                        },
+                        "started_at_ms": command.created_at_ms,
+                        "finished_at_ms": command.created_at_ms,
+                    }
+                    if not receipt_ref or self._projection_reader is None:
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            "review-approved TaskNode has no durable worker projection",
+                        )
+                    loaded = await _maybe_await(
+                        self._projection_reader.load(receipt_ref)
+                    )
+                    try:
+                        worker_output = validate_worker_projection_payload(
+                            loaded if isinstance(loaded, Mapping) else {},
+                            expected_projection_id=receipt_ref,
+                        )
+                    except WorkerProjectionStoreError as exc:
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            "review-approved TaskNode worker projection is invalid",
+                        ) from exc
+                    await self._node_lifecycle.accept_node_output(
                         review_admission,
                         review_node,
-                        "ACCEPTED",
+                        attempt_id=attempt_id,
+                        receipt_ref=receipt_ref,
+                        worker_output=worker_output,
                         evidence_refs=post_review_refs,
-                        acceptance_judgement={
-                            "schema_version": "Natsume.agent.acceptance_judgement.v1",
-                            "judgement_id": f"review-accept::{gate.review_id}",
-                            "work_order_id": review_admission.work_order_id,
-                            "task_graph_id": review_admission.graph_id,
-                            "task_node_id": review_admission.node_id,
-                            "attempt_id": attempt_id,
-                            "decision": "ACCEPT",
-                            "reason_code": None,
-                            "evidence_refs": list(post_review_refs),
-                            "criteria": [],
-                            "critic_candidate": {
-                                "source": "durable_review",
-                                "review": gate.to_dict(),
-                            },
-                            "started_at_ms": command.created_at_ms,
-                            "finished_at_ms": command.created_at_ms,
-                        },
+                        acceptance_judgement=acceptance_judgement,
                     )
                     if graph_status == "BLOCKED":
                         await self._node_lifecycle.transition_graph(review_admission, graph, "ACTIVE")
                     await self._runtime_outbox.publish_pending()
                     continue
-                reservation = await self._node_execution_projection.try_operation(review_admission.reservation_id)
-                receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
                 if gate.disposition == "REVIEW_DENIED":
                     await self._node_lifecycle.transition_node(
                         review_admission,
@@ -521,9 +571,15 @@ class DurableDagSchedulingRuntime:
                 if graph_status in {"CREATED", "ACTIVE"}:
                     graph = await self._node_lifecycle.transition_graph(final_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
-                budget = await self._budgets.finalize(
-                    budget, target_status=BudgetReservationStatus.RELEASED
-                )
+                    budget = await self._budgets.finalize(
+                        budget, target_status=BudgetReservationStatus.RELEASED
+                    )
+                else:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "terminal TaskGraph has an unsettled exceeded Budget; "
+                        "terminal reconciliation is required",
+                    )
             if budget.status == "RELEASED":
                 if graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}:
                     raise GovernedRuntimeError(
@@ -628,7 +684,15 @@ class DurableDagSchedulingRuntime:
                         "accepted TaskGraph lacks a consumed budget",
                     )
                 if graph_status == "ACTIVE":
-                    graph = await self._node_lifecycle.transition_graph(final_admission, graph, "COMPLETED")
+                    graph = await self._accepted_graph_finalization.complete(
+                        admitted=final_admission,
+                        command=command,
+                        work_order=work_order,
+                        graph=graph,
+                        node_grant_ref=grant_refs.get(final_admission.node_id),
+                        worker_commit=None,
+                        attempt_id=None,
+                    )
                     graph_status = _status(graph)
                 if graph_status != "COMPLETED":
                     raise GovernedRuntimeError(
@@ -672,6 +736,16 @@ class DurableDagSchedulingRuntime:
                     selected = self._node_execution_projection.selected_parallel_decision_outcome(decision)
                     terminal_node_id = _required_record_text(selected, "node_id")
                 terminal_admission = admitted.for_node(terminal_node_id or admitted.node_id)
+                if (
+                    failed_node_id is not None
+                    and graph_status == "BLOCKED"
+                    and budget.status in {"ACTIVE", "EXCEEDED"}
+                ):
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "BLOCKED failure Graph has an unsettled Budget; "
+                        "terminal reconciliation is required",
+                    )
                 if graph_status == "ACTIVE":
                     graph = await self._node_lifecycle.transition_graph(
                         terminal_admission,
@@ -693,9 +767,11 @@ class DurableDagSchedulingRuntime:
                 return
 
             if graph_status in {"FAILED", "CANCELLED", "COMPLETED"}:
-                if graph_status in {"FAILED", "CANCELLED"} and budget.status == "ACTIVE":
-                    budget = await self._budgets.finalize(
-                        budget, target_status=BudgetReservationStatus.RELEASED
+                if budget.status in {"ACTIVE", "EXCEEDED"}:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "terminal TaskGraph has an unsettled Budget; "
+                        "terminal reconciliation is required",
                     )
                 decision = await self._node_execution_projection.matching_parallel_decision(
                     admitted,
@@ -734,6 +810,35 @@ class DurableDagSchedulingRuntime:
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     f"TaskGraph is not schedulable: {graph_status}",
                 )
+
+            recovery_binding = None
+            for binding in admitted.nodes:
+                if statuses[binding.node_id] not in {
+                    "LEASED",
+                    "RUNNING",
+                    "EXECUTED",
+                    "VERIFYING",
+                    "VERIFIED",
+                }:
+                    continue
+                candidate = admitted.for_node(binding.node_id)
+                reservation = await self._node_execution_projection.try_operation(
+                    candidate.reservation_id
+                )
+                if reservation is not None:
+                    recovery_binding = binding
+                    break
+            if recovery_binding is not None:
+                recovery_admission = admitted.for_node(recovery_binding.node_id)
+                async for event in self._node_execution.execute_stream(
+                    admitted=recovery_admission,
+                    command=command,
+                    work_order=work_order,
+                    budget=budget,
+                    node_grant_ref=grant_refs.get(recovery_admission.node_id),
+                ):
+                    yield event
+                return
 
             scheduler_snapshot = await _maybe_await(
                 self._store.read_scheduler_snapshot(
@@ -788,9 +893,29 @@ class DurableDagSchedulingRuntime:
 
             if decision.dependency_ready_node_ids or decision.retry_due_node_ids:
                 for node_id in decision.dependency_ready_node_ids:
+                    dependency_node = durable_nodes[node_id]
+                    if any(
+                        is_task_result_artifact_ref(ref)
+                        for ref in _node_input_refs(dependency_node)
+                    ):
+                        resolved = await _maybe_await(
+                            self._store.resolve_node_input_artifacts(
+                                admitted.graph_id,
+                                admitted.graph_revision,
+                                node_id,
+                            )
+                        )
+                        if not isinstance(resolved, Sequence) or isinstance(
+                            resolved,
+                            (str, bytes, bytearray),
+                        ) or any(not isinstance(item, Mapping) for item in resolved):
+                            raise GovernedRuntimeError(
+                                GOVERNED_DURABLE_STATE_CONFLICT,
+                                "dependency-ready TaskNode artifact resolution is invalid",
+                            )
                     await self._node_lifecycle.transition_node(
                         admitted.for_node(node_id),
-                        durable_nodes[node_id],
+                        dependency_node,
                         "READY",
                     )
                 for node_id in decision.retry_due_node_ids:
@@ -874,12 +999,18 @@ class DurableDagSchedulingRuntime:
             if review_binding is not None:
                 binding = review_binding
                 review_admission = admitted.for_node(binding.node_id)
+                if graph_status == "CREATED":
+                    graph = await self._node_lifecycle.transition_graph(
+                        review_admission,
+                        graph,
+                        "ACTIVE",
+                    )
+                    graph_status = _status(graph)
                 review_node = await self._node_lifecycle.transition_node(
                     review_admission,
                     durable_nodes[binding.node_id],
                     "WAITING_APPROVAL",
                 )
-                graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                 gate = self._reviews.pre_execution_gate(
                     work_order=work_order,
                     context=build_review_context(
@@ -895,7 +1026,7 @@ class DurableDagSchedulingRuntime:
                 await self._runtime_outbox.publish_pending()
                 receipt = build_execution_receipt(
                     review_admission,
-                    attempt_id=_attempt_id(review_admission, attempt_no=1),
+                    attempt_id=None,
                     status="WAITING_APPROVAL",
                     verification_status="NOT_RUN",
                     accepted=False,
@@ -906,7 +1037,12 @@ class DurableDagSchedulingRuntime:
                         "budget": budget.execution_payload(),
                     },
                 )
-                yield terminal_event(receipt)
+                budget, waiting_event = await self._settle_waiting_approval(
+                    admitted=admitted,
+                    receipt_event=terminal_event(receipt),
+                    budget=budget,
+                )
+                yield waiting_event
                 return
 
             # Atomic-success Graphs freeze their outer terminal authority in
@@ -1163,6 +1299,36 @@ class DurableDagSchedulingRuntime:
                 )
             )
         return tuple(outcomes)
+
+    async def _settle_waiting_approval(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        receipt_event: Mapping[str, Any],
+        budget: BudgetRuntimeContext,
+    ) -> tuple[BudgetRuntimeContext, dict[str, Any]]:
+        receipt = receipt_event.get("execution_receipt")
+        node_id = _text(receipt.get("node_id")) if isinstance(receipt, Mapping) else ""
+        if not node_id:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "pre-execution review outcome has no TaskNode identity",
+            )
+        outcome = _ParallelNodeOutcome.from_terminal_event(
+            node_id=node_id,
+            event=receipt_event,
+        )
+        budget, terminal = await self._parallel_settlement.resolve_parallel_outcomes(
+            admitted=admitted,
+            outcomes=(outcome,),
+            budget=budget,
+        )
+        if terminal is None:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "pre-execution review did not produce a blocking settlement",
+            )
+        return budget, terminal
 
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value

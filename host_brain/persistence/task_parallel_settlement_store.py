@@ -79,6 +79,7 @@ class TaskParallelSettlementStoreMixin:
             )
         conn = self._connect()
         try:
+            conn.execute("BEGIN")
             row = conn.execute(
                 """
                 SELECT * FROM task_runtime_parallel_settlement_decision
@@ -103,6 +104,8 @@ class TaskParallelSettlementStoreMixin:
             )
             return record
         finally:
+            if conn.in_transaction:
+                conn.rollback()
             conn.close()
 
     def get_latest_parallel_settlement_decision(
@@ -121,6 +124,7 @@ class TaskParallelSettlementStoreMixin:
             )
         conn = self._connect()
         try:
+            conn.execute("BEGIN")
             declared_ref = _find_invalid_declared_parallel_settlement_decision_ref(
                 conn,
                 graph_id=graph_ref,
@@ -155,6 +159,8 @@ class TaskParallelSettlementStoreMixin:
             )
             return record
         finally:
+            if conn.in_transaction:
+                conn.rollback()
             conn.close()
 
     def settle_parallel_graph_budget(
@@ -274,6 +280,7 @@ class TaskParallelSettlementStoreMixin:
             or decision.payload["budget_target_status"] != expected_budget_target
             or decision.payload["node_states"] != expected_state_payload
             or decision.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or graph_outbox.graph_revision != int(revision)
             or decision.payload["budget_outbox_id"]
             != (budget_outbox.outbox_id if budget_outbox is not None else None)
             or decision_reference not in graph_outbox.evidence_refs
@@ -395,6 +402,7 @@ class TaskParallelSettlementStoreMixin:
                     ),
                     expected_event_type=f"TASK_GRAPH_{graph_target.value}",
                     expected_attempt_id=None,
+                    expected_graph_revision=int(revision),
                 )
                 if budget_target is None:
                     if (
@@ -614,6 +622,14 @@ class TaskParallelSettlementStoreMixin:
         }
         for outcome in decision.payload["outcomes"]:
             node_id = str(outcome["node_id"])
+            outcome_status = str(outcome["status"])
+            if outcome_status == TaskNodeStatus.WAITING_APPROVAL.value:
+                if outcome["attempt_id"] is not None:
+                    raise TaskStoreError(
+                        reason_code,
+                        f"parallel settlement pre-execution review bound an Attempt: {node_id}",
+                    )
+                continue
             attempt_id = str(outcome["attempt_id"])
             attempt = conn.execute(
                 "SELECT * FROM task_runtime_attempt WHERE attempt_id = ?",
@@ -628,7 +644,7 @@ class TaskParallelSettlementStoreMixin:
                 """,
                 (str(graph_id), int(revision), node_id),
             ).fetchone()
-            allowed = expected_attempt_statuses.get(str(outcome["status"]))
+            allowed = expected_attempt_statuses.get(outcome_status)
             if (
                 attempt is None
                 or (

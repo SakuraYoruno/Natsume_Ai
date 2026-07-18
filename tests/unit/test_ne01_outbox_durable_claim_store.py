@@ -37,7 +37,10 @@ def _store(tmp_path: Path, clock: _Clock) -> DurableTaskStore:
         ts_ms=clock.value,
     )
     assert migrated.success is True, migrated.as_dict()
-    assert migrated.summary["current_version"] == 94
+    assert (
+        migrated.summary["current_version"]
+        == migrated.summary["latest_version"]
+    )
     return DurableTaskStore(db_path, clock=clock)
 
 
@@ -49,26 +52,45 @@ def _insert_outbox(
     aggregate_version: int,
     created_ts_ms: int,
     available_ts_ms: int = 0,
+    graph_revision: int = 1,
 ) -> None:
     aggregate_type = "TASK_GRAPH"
     payload_ref = (
-        f"taskstore://event/{aggregate_type}/{aggregate_id}/{aggregate_version}"
+        f"taskstore://event/{aggregate_type}/"
+        f"{aggregate_id}@{graph_revision}/{aggregate_version}"
     )
     with sqlite3.connect(store.db_path) as conn:
         conn.execute(
             """
+            INSERT OR IGNORE INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref,
+                status, status_version, graph_json, source_kind,
+                source_ref, legacy_snapshot_json, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, 'ACTIVE', 0, ?, 'CANONICAL', NULL, NULL, 0, 0)
+            """,
+            (
+                aggregate_id,
+                graph_revision,
+                f"work-order::{aggregate_id}",
+                f"planner::{aggregate_id}",
+                f'{{"graph_id":"{aggregate_id}","revision":{graph_revision}}}',
+            ),
+        )
+        conn.execute(
+            """
             INSERT INTO task_runtime_outbox(
                 outbox_id, aggregate_type, aggregate_id, aggregate_version,
-                event_type, payload_ref, evidence_refs_json, attempt_id,
+                graph_revision, event_type, payload_ref, evidence_refs_json, attempt_id,
                 idempotency_key, status, available_ts_ms, created_ts_ms,
                 published_ts_ms, status_version
-            ) VALUES (?, ?, ?, ?, ?, ?, '[]', NULL, ?, 'PENDING', ?, ?, NULL, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', NULL, ?, 'PENDING', ?, ?, NULL, 0)
             """,
             (
                 outbox_id,
                 aggregate_type,
                 aggregate_id,
                 aggregate_version,
+                graph_revision,
                 "TASK_GRAPH_CHANGED",
                 payload_ref,
                 f"idempotency::{outbox_id}",
@@ -76,6 +98,84 @@ def _insert_outbox(
                 created_ts_ms,
             ),
         )
+
+
+def test_pre_0095_outbox_rows_keep_legacy_codec_compatibility(tmp_path: Path) -> None:
+    db_path = tmp_path / "pre-0095.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            (MIGRATIONS / "0052_task_runtime.sql").read_text(encoding="utf-8")
+        )
+        conn.executescript(
+            (MIGRATIONS / "0054_task_runtime_recovery.sql").read_text(
+                encoding="utf-8"
+            )
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_outbox(
+                outbox_id, aggregate_type, aggregate_id, aggregate_version,
+                event_type, payload_ref, evidence_refs_json, attempt_id,
+                idempotency_key, status, available_ts_ms, created_ts_ms,
+                published_ts_ms, status_version
+            ) VALUES (?, 'TASK_GRAPH', ?, 1, 'TASK_GRAPH_CREATED', ?, '[]',
+                      NULL, ?, 'PENDING', 0, 0, NULL, 0)
+            """,
+            (
+                "outbox-legacy-graph",
+                "graph-legacy",
+                "taskstore://event/TASK_GRAPH/graph-legacy/1",
+                "idempotency::outbox-legacy-graph",
+            ),
+        )
+
+    store = DurableTaskStore(db_path, clock=_Clock(0), verify_schema=False)
+    rows = store.list_pending_outbox()
+
+    assert [row["outbox_id"] for row in rows] == ["outbox-legacy-graph"]
+    assert "graph_revision" not in rows[0]
+
+
+def test_claim_order_is_independent_across_graph_revisions(tmp_path: Path) -> None:
+    clock = _Clock(75)
+    store = _store(tmp_path, clock)
+    _insert_outbox(
+        store,
+        outbox_id="outbox-shared-r1-v1",
+        aggregate_id="graph-shared",
+        graph_revision=1,
+        aggregate_version=1,
+        created_ts_ms=1,
+    )
+    _insert_outbox(
+        store,
+        outbox_id="outbox-shared-r1-v2",
+        aggregate_id="graph-shared",
+        graph_revision=1,
+        aggregate_version=2,
+        created_ts_ms=2,
+    )
+    _insert_outbox(
+        store,
+        outbox_id="outbox-shared-r2-v1",
+        aggregate_id="graph-shared",
+        graph_revision=2,
+        aggregate_version=1,
+        created_ts_ms=3,
+    )
+
+    claimed = store.claim_pending_outbox("publisher-revisions", 50, limit=10)
+
+    assert [row["outbox_id"] for row in claimed] == [
+        "outbox-shared-r1-v1",
+        "outbox-shared-r2-v1",
+    ]
+    assert [row["graph_revision"] for row in claimed] == [1, 2]
+    assert store.inspect_outbox_delivery_backlog() == {
+        "total_pending": 3,
+        "delivery_ready_count": 0,
+        "next_wakeup_ts_ms": 125,
+    }
 
 
 def test_claim_is_fenced_cross_process_and_ordered_per_aggregate(tmp_path: Path) -> None:
@@ -322,10 +422,97 @@ def test_0093_readiness_requires_columns_indexes_and_triggers(tmp_path: Path) ->
             )
 
     with sqlite3.connect(db_path) as conn:
-        conn.execute("DROP INDEX idx_task_runtime_outbox_delivery_ready")
+        conn.execute("DROP INDEX idx_task_runtime_outbox_revision_delivery_order")
     with pytest.raises(TaskStoreError) as missing_index:
         store.assert_outbox_delivery_ready(force_revalidate=True)
     assert missing_index.value.reason_code == TASK_STORE_SCHEMA_NOT_READY
+
+
+def test_revision_readiness_rejects_missing_guard_and_corrupt_rows(tmp_path: Path) -> None:
+    clock = _Clock(700)
+    store = _store(tmp_path, clock)
+    _insert_outbox(
+        store,
+        outbox_id="outbox-revision-corrupt",
+        aggregate_id="graph-revision-corrupt",
+        aggregate_version=1,
+        created_ts_ms=1,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("DROP TRIGGER trg_task_runtime_outbox_graph_revision_update_guard")
+    with pytest.raises(TaskStoreError) as missing_guard:
+        store.assert_outbox_delivery_ready(force_revalidate=True)
+    assert missing_guard.value.reason_code == TASK_STORE_SCHEMA_NOT_READY
+
+    corrupt_root = tmp_path / "corrupt-row"
+    corrupt_root.mkdir()
+    corrupt_store = _store(corrupt_root, clock)
+    _insert_outbox(
+        corrupt_store,
+        outbox_id="outbox-revision-corrupt",
+        aggregate_id="graph-revision-corrupt",
+        aggregate_version=1,
+        created_ts_ms=1,
+    )
+    with sqlite3.connect(corrupt_store.db_path) as conn:
+        trigger_sql = conn.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name = 'trg_task_runtime_outbox_graph_revision_update_guard'
+            """
+        ).fetchone()[0]
+        conn.execute("DROP TRIGGER trg_task_runtime_outbox_graph_revision_update_guard")
+        conn.execute(
+            "UPDATE task_runtime_outbox SET graph_revision = NULL WHERE outbox_id = ?",
+            ("outbox-revision-corrupt",),
+        )
+        conn.execute(trigger_sql)
+    with pytest.raises(TaskStoreError) as codec_corrupt:
+        corrupt_store.list_pending_outbox()
+    assert codec_corrupt.value.reason_code == "TASK_STORE_DURABLE_DATA_INVALID"
+    with pytest.raises(TaskStoreError) as corrupt:
+        corrupt_store.assert_outbox_delivery_ready(force_revalidate=True)
+    assert corrupt.value.reason_code == "TASK_STORE_DURABLE_DATA_INVALID"
+
+
+def test_revision_readiness_rejects_text_affinity_spoofed_schema(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path, _Clock(750))
+    with sqlite3.connect(store.db_path) as conn:
+        table_sql = conn.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type = 'table' AND name = 'task_runtime_outbox'
+            """
+        ).fetchone()[0]
+        spoofed_sql = table_sql.replace(
+            "graph_revision INTEGER",
+            "graph_revision TEXT /* graph_revision INTEGER */",
+            1,
+        )
+        assert spoofed_sql != table_sql
+        # Retain the normalized SQL fragment in a comment so only the actual
+        # PRAGMA column affinity check can distinguish this pseudo-schema.
+        assert "graph_revision INTEGER" in spoofed_sql
+        schema_version = int(conn.execute("PRAGMA schema_version").fetchone()[0])
+        conn.execute("PRAGMA writable_schema = ON")
+        conn.execute(
+            """
+            UPDATE sqlite_master SET sql = ?
+            WHERE type = 'table' AND name = 'task_runtime_outbox'
+            """,
+            (spoofed_sql,),
+        )
+        conn.execute(f"PRAGMA schema_version = {schema_version + 1}")
+        conn.execute("PRAGMA writable_schema = OFF")
+
+    with pytest.raises(TaskStoreError) as error:
+        store.assert_outbox_delivery_ready(force_revalidate=True)
+
+    assert error.value.reason_code == TASK_STORE_SCHEMA_NOT_READY
+    assert "graph_revision" in str(error.value)
 
 
 def test_delivery_hot_paths_use_constructor_readiness_without_rescanning(

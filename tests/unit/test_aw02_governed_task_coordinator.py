@@ -128,9 +128,38 @@ class _FakeTaskStore:
             raise _NotFound(reservation_id)
         return dict(self.reservation)
 
+    def reconcile_operation_reservation_state(self, reservation_id: str) -> dict[str, Any]:
+        return self.get_operation_reservation(reservation_id)
+
+    def get_committed_operation_checkpoint(self, reservation_id: str) -> dict[str, Any]:
+        reservation = self.get_operation_reservation(reservation_id)
+        attempt = dict(self.attempts[reservation["attempt_id"]])
+        receipt_ref = str(reservation["receipt_ref"])
+        digest_ref = "sha256://execution/" + receipt_ref.rsplit("/", 1)[-1]
+        return {
+            "reservation": reservation,
+            "attempt": attempt,
+            "lease": {
+                "lease_id": reservation["lease_id"],
+                "attempt_id": reservation["attempt_id"],
+                "owner_id": reservation["owner_id"],
+                "fencing_token": reservation["fencing_token"],
+            },
+            "outbox": {
+                "aggregate_type": "OPERATION_RESERVATION",
+                "aggregate_id": reservation_id,
+                "aggregate_version": reservation["status_version"],
+                "event_type": "OPERATION_COMMITTED",
+                "attempt_id": reservation["attempt_id"],
+                "evidence_refs": [receipt_ref, digest_ref],
+            },
+            "checkpoint_digest_ref": digest_ref,
+        }
+
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
         return {
             "observed_ts_ms": 1,
+            "graph_record": dict(self.graph),
             "attempts": [dict(item) for item in self.attempts.values()],
             "active_leases": [],
             "budgets": [dict(self.budget)] if self.budget else [],
@@ -215,6 +244,42 @@ class _FakeTaskStore:
         self.node["node"]["status_version"] = self.node["status_version"]
         return self.get_node(graph_id, revision, node_id)
 
+    def commit_node_acceptance(
+        self,
+        graph_id: str,
+        revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+        acceptance_judgement: Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Any,
+        effect_intents: Any = (),
+    ) -> dict[str, Any]:
+        del outbox, acceptance_judgement, worker_output
+        node = self.transition_node(
+            graph_id,
+            revision,
+            node_id,
+            expected_version=expected_version,
+            target_status="ACCEPTED",
+            outbox=None,
+        )
+        return {
+            "node": node,
+            "artifact": {
+                "graph_id": graph_id,
+                "graph_revision": revision,
+                "node_id": node_id,
+                "attempt_id": attempt_id,
+                "receipt_ref": receipt_ref,
+            },
+            "effect_intents": tuple(effect_intents),
+            "replayed": False,
+        }
+
     def create_attempt(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append("attempt:CREATED")
         attempt = {
@@ -290,7 +355,12 @@ class _FakeTaskStore:
         self.calls.append("operation:RESERVED")
         self.reservation = {
             "reservation_id": kwargs["reservation_id"],
+            "business_scope": kwargs["business_scope"],
+            "operation_fingerprint": kwargs["operation_fingerprint"],
             "attempt_id": kwargs["attempt_id"],
+            "lease_id": kwargs["lease_id"],
+            "owner_id": kwargs["owner_id"],
+            "fencing_token": kwargs["fencing_token"],
             "status": "RESERVED" if self.reservation_acquired else "RECOVERY_REQUIRED",
             "status_version": 0,
             "receipt_ref": None,
@@ -450,7 +520,7 @@ def _contracts(*, executor: TaskExecutor) -> tuple[Any, ...]:
                 dependencies=(),
                 route="executive_runtime",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=(),

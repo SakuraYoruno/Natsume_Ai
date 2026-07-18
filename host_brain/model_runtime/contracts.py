@@ -302,6 +302,133 @@ class RetryDirective:
         return cls(retry=False, reason="accepted")
 
 
+MODEL_BUDGET_GUARD_SCHEMA_VERSION = "Natsume.model_runtime.budget_guard.v1"
+_MODEL_BUDGET_USAGE_DIMENSIONS = frozenset(
+    {"token_count", "completion_tokens", "model_cost_micros"}
+)
+_REQUIRED_MODEL_BUDGET_USAGE_DIMENSIONS = (
+    "token_count",
+    "completion_tokens",
+    "model_cost_micros",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelBudgetGuard:
+    """Immutable, node-bound upper bounds for one governed model call.
+
+    The guard travels from a durable Task budget through an already-frozen
+    worker input. It can only reduce the server-selected route's attempt and
+    output limits; it never selects a model, provider, or route.
+    """
+
+    budget_id: str
+    graph_id: str
+    graph_revision: int
+    node_id: str
+    attempt_id: str
+    deadline_ms: int
+    max_provider_attempts: int
+    max_token_count: int
+    max_output_tokens: int
+    max_model_cost_micros: int
+    required_usage_dimensions: tuple[str, ...] = _REQUIRED_MODEL_BUDGET_USAGE_DIMENSIONS
+    schema_version: str = MODEL_BUDGET_GUARD_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.schema_version != MODEL_BUDGET_GUARD_SCHEMA_VERSION:
+            raise ValueError("model budget guard schema version is invalid")
+        for field_name in ("budget_id", "graph_id", "node_id", "attempt_id"):
+            object.__setattr__(
+                self,
+                field_name,
+                _clean_required(getattr(self, field_name), field_name=field_name),
+            )
+        for field_name in (
+            "graph_revision",
+            "deadline_ms",
+            "max_provider_attempts",
+            "max_token_count",
+            "max_output_tokens",
+            "max_model_cost_micros",
+        ):
+            try:
+                value = int(getattr(self, field_name))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{field_name} must be a positive integer") from exc
+            if value <= 0:
+                raise ValueError(f"{field_name} must be a positive integer")
+            object.__setattr__(self, field_name, value)
+        if self.max_output_tokens > self.max_token_count:
+            raise ValueError("max_output_tokens must not exceed max_token_count")
+        dimensions = tuple(
+            dict.fromkeys(str(item or "").strip() for item in self.required_usage_dimensions)
+        )
+        if (
+            not dimensions
+            or not set(dimensions).issubset(_MODEL_BUDGET_USAGE_DIMENSIONS)
+            or dimensions != _REQUIRED_MODEL_BUDGET_USAGE_DIMENSIONS
+        ):
+            raise ValueError("model budget guard usage dimensions are invalid")
+        object.__setattr__(self, "required_usage_dimensions", dimensions)
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ModelBudgetGuard":
+        data = dict(payload or {})
+        expected = {
+            "schema_version",
+            "budget_id",
+            "graph_id",
+            "graph_revision",
+            "node_id",
+            "attempt_id",
+            "deadline_ms",
+            "max_provider_attempts",
+            "max_token_count",
+            "max_output_tokens",
+            "max_model_cost_micros",
+            "required_usage_dimensions",
+        }
+        if set(data) != expected:
+            raise ValueError("model budget guard payload shape is invalid")
+        raw_dimensions = data.get("required_usage_dimensions")
+        if not isinstance(raw_dimensions, Sequence) or isinstance(
+            raw_dimensions,
+            (str, bytes, bytearray),
+        ):
+            raise ValueError("model budget guard usage dimensions must be a sequence")
+        return cls(
+            schema_version=str(data.get("schema_version") or ""),
+            budget_id=str(data.get("budget_id") or ""),
+            graph_id=str(data.get("graph_id") or ""),
+            graph_revision=data.get("graph_revision"),
+            node_id=str(data.get("node_id") or ""),
+            attempt_id=str(data.get("attempt_id") or ""),
+            deadline_ms=data.get("deadline_ms"),
+            max_provider_attempts=data.get("max_provider_attempts"),
+            max_token_count=data.get("max_token_count"),
+            max_output_tokens=data.get("max_output_tokens"),
+            max_model_cost_micros=data.get("max_model_cost_micros"),
+            required_usage_dimensions=tuple(str(item or "") for item in raw_dimensions),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "budget_id": self.budget_id,
+            "graph_id": self.graph_id,
+            "graph_revision": self.graph_revision,
+            "node_id": self.node_id,
+            "attempt_id": self.attempt_id,
+            "deadline_ms": self.deadline_ms,
+            "max_provider_attempts": self.max_provider_attempts,
+            "max_token_count": self.max_token_count,
+            "max_output_tokens": self.max_output_tokens,
+            "max_model_cost_micros": self.max_model_cost_micros,
+            "required_usage_dimensions": list(self.required_usage_dimensions),
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderAttemptRequest:
     request_id: str
@@ -314,6 +441,7 @@ class ProviderAttemptRequest:
     target: ProviderTarget
     timeout_ms: int
     metadata: JsonMapping = field(default_factory=dict)
+    model_budget_guard: ModelBudgetGuard | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request_id", _clean_required(self.request_id, field_name="request_id"))
@@ -325,6 +453,11 @@ class ProviderAttemptRequest:
         object.__setattr__(self, "attempt_index", int(self.attempt_index))
         object.__setattr__(self, "timeout_ms", int(self.timeout_ms))
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
+        if self.model_budget_guard is not None and not isinstance(
+            self.model_budget_guard,
+            ModelBudgetGuard,
+        ):
+            raise TypeError("model_budget_guard must be a ModelBudgetGuard")
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,6 +556,7 @@ class ModelAttemptRequest:
     foreground: bool = True
     retry_evaluator: RetryEvaluator | None = None
     metadata: JsonMapping = field(default_factory=dict)
+    model_budget_guard: ModelBudgetGuard | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request_id", _clean_required(self.request_id, field_name="request_id"))
@@ -440,6 +574,11 @@ class ModelAttemptRequest:
         object.__setattr__(self, "max_attempts", int(self.max_attempts))
         object.__setattr__(self, "foreground", bool(self.foreground))
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
+        if self.model_budget_guard is not None and not isinstance(
+            self.model_budget_guard,
+            ModelBudgetGuard,
+        ):
+            raise TypeError("model_budget_guard must be a ModelBudgetGuard")
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,9 +639,11 @@ __all__ = [
     "CachePolicy",
     "CacheScope",
     "JsonMapping",
+    "MODEL_BUDGET_GUARD_SCHEMA_VERSION",
     "ModelAttemptRecord",
     "ModelAttemptRequest",
     "ModelAttemptResult",
+    "ModelBudgetGuard",
     "OutputContract",
     "OutputKind",
     "PromptMessage",

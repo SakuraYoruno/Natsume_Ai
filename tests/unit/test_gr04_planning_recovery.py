@@ -29,7 +29,13 @@ class _SnapshotStore:
         self.snapshot = snapshot
         self.calls: list[tuple[str, int]] = []
 
-    def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict:
+    def read_scheduler_snapshot(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        include_graph_outboxes: bool = False,
+    ) -> dict:
         self.calls.append((graph_id, revision))
         return self.snapshot
 
@@ -127,7 +133,7 @@ async def test_loads_failed_graph_and_derives_only_durable_failure_evidence() ->
     assert store.calls == [("graph-recovery", 1)]
     assert failure.previous_graph.status is TaskGraphStatus.FAILED
     assert failure.failure_evidence_refs == (
-        "taskstore://event/TASK_GRAPH/graph-recovery/2",
+        "taskstore://event/TASK_GRAPH/graph-recovery@1/2",
         "taskstore://event/TASK_NODE/graph-recovery@1/node-recover/3",
         "taskstore://event/TASK_ATTEMPT/attempt-recovery-1/4",
         "evidence://attempt/recovery-1",
@@ -135,20 +141,130 @@ async def test_loads_failed_graph_and_derives_only_durable_failure_evidence() ->
 
 
 @pytest.mark.asyncio
-async def test_blocked_graph_is_replannable_without_mutating_durable_snapshot() -> None:
+async def test_blocked_graph_is_rejected_without_mutating_durable_snapshot() -> None:
     snapshot = _snapshot(TaskGraphStatus.BLOCKED)
     before = snapshot["graph_record"]["graph"].copy()
+
+    with pytest.raises(PlanningRecoveryError) as raised:
+        await DurablePlanningFailureSource(_SnapshotStore(snapshot)).load(
+            graph_id="graph-recovery",
+            previous_revision=1,
+        )
+
+    assert raised.value.reason_code == PLANNING_RECOVERY_NOT_REPLANNABLE
+    assert snapshot["graph_record"]["graph"] == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "node_status",
+    [
+        TaskNodeStatus.WAITING_APPROVAL,
+        TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW,
+        TaskNodeStatus.RETRY_PENDING,
+    ],
+)
+async def test_failed_graph_with_continuable_node_is_rejected(
+    node_status: TaskNodeStatus,
+) -> None:
+    snapshot = _snapshot(TaskGraphStatus.FAILED)
+    graph = TaskGraph.from_mapping(snapshot["graph_record"]["graph"])
+    node = replace(graph.nodes[0], status=node_status)
+    snapshot["graph_record"]["graph"] = replace(graph, nodes=(node,)).to_dict()
+    snapshot["graph_record"]["nodes"][0]["status"] = node_status.value
+    snapshot["graph_record"]["nodes"][0]["node"] = node.to_dict()
+
+    with pytest.raises(PlanningRecoveryError) as raised:
+        await DurablePlanningFailureSource(_SnapshotStore(snapshot)).load(
+            graph_id="graph-recovery",
+            previous_revision=1,
+        )
+
+    assert raised.value.reason_code == PLANNING_RECOVERY_NOT_REPLANNABLE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attempt_status", ["RUNNING", "RECOVERABLE"])
+async def test_failed_graph_with_live_attempt_is_rejected(
+    attempt_status: str,
+) -> None:
+    snapshot = _snapshot(TaskGraphStatus.FAILED)
+    snapshot["attempts"][0]["status"] = attempt_status
+
+    with pytest.raises(PlanningRecoveryError) as raised:
+        await DurablePlanningFailureSource(_SnapshotStore(snapshot)).load(
+            graph_id="graph-recovery",
+            previous_revision=1,
+        )
+
+    assert raised.value.reason_code == PLANNING_RECOVERY_NOT_REPLANNABLE
+
+
+@pytest.mark.asyncio
+async def test_failed_graph_with_active_lease_is_rejected() -> None:
+    snapshot = _snapshot(TaskGraphStatus.FAILED)
+    snapshot["active_leases"] = [
+        {"attempt_id": "attempt-recovery-1", "status": "ACTIVE"}
+    ]
+
+    with pytest.raises(PlanningRecoveryError) as raised:
+        await DurablePlanningFailureSource(_SnapshotStore(snapshot)).load(
+            graph_id="graph-recovery",
+            previous_revision=1,
+        )
+
+    assert raised.value.reason_code == PLANNING_RECOVERY_NOT_REPLANNABLE
+
+
+@pytest.mark.asyncio
+async def test_failed_graph_preserves_ready_and_successful_predecessor_nodes() -> None:
+    snapshot = _snapshot(TaskGraphStatus.FAILED)
+    graph = TaskGraph.from_mapping(snapshot["graph_record"]["graph"])
+    accepted = replace(
+        graph.nodes[0],
+        node_id="node-accepted",
+        status=TaskNodeStatus.ACCEPTED,
+        status_version=7,
+    )
+    ready = replace(
+        graph.nodes[0],
+        node_id="node-ready",
+        status=TaskNodeStatus.READY,
+        status_version=1,
+    )
+    graph = replace(graph, nodes=(*graph.nodes, accepted, ready))
+    snapshot["graph_record"]["graph"] = graph.to_dict()
+    snapshot["graph_record"]["nodes"].extend(
+        [
+            {
+                "graph_id": graph.graph_id,
+                "graph_revision": graph.revision,
+                "node_id": node.node_id,
+                "status": node.status.value,
+                "status_version": node.status_version,
+                "node": node.to_dict(),
+            }
+            for node in (accepted, ready)
+        ]
+    )
+    snapshot["attempts"].append(
+        {
+            "attempt_id": "attempt-accepted-1",
+            "graph_id": graph.graph_id,
+            "graph_revision": graph.revision,
+            "node_id": accepted.node_id,
+            "status": "SUCCEEDED",
+            "status_version": 4,
+            "error_ref": None,
+        }
+    )
 
     failure = await DurablePlanningFailureSource(_SnapshotStore(snapshot)).load(
         graph_id="graph-recovery",
         previous_revision=1,
     )
 
-    assert failure.previous_graph.status is TaskGraphStatus.BLOCKED
-    assert failure.failure_evidence_refs[0] == (
-        "taskstore://event/TASK_GRAPH/graph-recovery/2"
-    )
-    assert snapshot["graph_record"]["graph"] == before
+    assert failure.previous_graph.nodes[-2:] == (accepted, ready)
 
 
 @pytest.mark.asyncio

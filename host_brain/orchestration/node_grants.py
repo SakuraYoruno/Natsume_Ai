@@ -43,6 +43,8 @@ NODE_GRANT_VERIFICATION_FAILED = "NODE_GRANT_VERIFICATION_FAILED"
 
 _CHILD_STAGE = "S_TASK_GRAPH_NODE_GRANT"
 _CHILD_REASON = "TASK_GRAPH_NODE_DERIVED_APPROVE"
+_REVIEW_RENEWAL_REASON = "TASK_GRAPH_NODE_REVIEW_CONTINUATION_APPROVE"
+_REVIEW_RENEWAL_SCHEMA = "Natsume.task.review_continuation_authority.v1"
 _SUPPORTED_EXECUTABLE_ROUTES = frozenset({"skill", "delegate", "chat"})
 _ISSUABLE_NODE_ROUTES = _SUPPORTED_EXECUTABLE_ROUTES
 
@@ -140,6 +142,7 @@ class VerifiedNodeGrant:
     nonce: str
     action_kind: str
     token_subject: str
+    review_continuation_authority: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -160,6 +163,11 @@ class VerifiedNodeGrant:
             "nonce": self.nonce,
             "action_kind": self.action_kind,
             "token_subject": self.token_subject,
+            "review_continuation_authority": (
+                None
+                if self.review_continuation_authority is None
+                else dict(self.review_continuation_authority)
+            ),
         }
 
 
@@ -196,13 +204,14 @@ class NodeBoundGrantService:
         *,
         ledger: Any,
         token_service: Any,
+        review_store: Any | None = None,
         clock: Callable[[], int] | None = None,
         child_ttl_ms: int = 60_000,
     ) -> None:
         if not callable(getattr(ledger, "trace_request", None)):
             raise TypeError("ledger must expose trace_request")
-        if not callable(getattr(ledger, "log_governor", None)):
-            raise TypeError("ledger must expose log_governor")
+        if not callable(getattr(ledger, "log_governor_batch", None)):
+            raise TypeError("ledger must expose atomic log_governor_batch")
         if not callable(getattr(token_service, "issue_approval_token", None)):
             raise TypeError("token_service must expose issue_approval_token")
         ttl = int(child_ttl_ms)
@@ -210,6 +219,7 @@ class NodeBoundGrantService:
             raise ValueError("child_ttl_ms must be positive")
         self._ledger = ledger
         self._token_service = token_service
+        self._review_store = review_store
         self._clock = clock or (lambda: int(time.time() * 1000))
         self._child_ttl_ms = ttl
         self._lock = threading.RLock()
@@ -234,6 +244,72 @@ class NodeBoundGrantService:
                 request_id=request_id,
                 session_id=session_id,
                 principal_id=principal_id,
+            )
+
+    def validate_parent_binding(
+        self,
+        *,
+        parent_grant_ref: str,
+        request_id: str,
+        session_id: str,
+        principal_id: str,
+    ) -> Mapping[str, Any]:
+        """Fail closed before command admission when parent identity drifts.
+
+        This is intentionally read-only: child grants are still issued only
+        after durable command admission, but an impossible request/session/
+        principal/expiry tuple must never leave an admitted graph behind.
+        ``derive`` repeats the same check to preserve the live authority fence
+        across the admission-to-issuance race.
+        """
+
+        with self._lock:
+            request = _required_text(request_id, "request_id")
+            session = _required_text(session_id, "session_id")
+            principal = _required_text(principal_id, "principal_id")
+            parent_ref = _required_text(parent_grant_ref, "parent_grant_ref")
+            now_ms = int(self._clock())
+            if now_ms <= 0:
+                raise NodeGrantDerivationError(
+                    NODE_GRANT_INPUT_INVALID,
+                    "clock must return a positive millisecond value",
+                )
+            return self._resolve_parent(
+                parent_ref=parent_ref,
+                request_id=request,
+                session_id=session,
+                principal_id=principal,
+                now_ms=now_ms,
+            )
+
+    def derive_review_continuation(
+        self,
+        *,
+        parent_grant_ref: str,
+        task_graph: TaskGraph,
+        work_order: WorkOrderV3,
+        request_id: str,
+        session_id: str,
+        principal_id: str,
+        continuation_claim: Mapping[str, Any],
+    ) -> NodeGrantBatch:
+        """Mint one short-lived batch bound to a live Review worker claim.
+
+        The immutable HostCommand remains the parent business authority.  The
+        consumed Review and the leased 0096 claim only renew its execution
+        credential after a human pause; neither can change graph, route,
+        target, principal, or WorkOrder lineage.
+        """
+
+        with self._lock:
+            return self._derive_review_continuation_locked(
+                parent_grant_ref=parent_grant_ref,
+                task_graph=task_graph,
+                work_order=work_order,
+                request_id=request_id,
+                session_id=session_id,
+                principal_id=principal_id,
+                continuation_claim=continuation_claim,
             )
 
     def _derive_locked(
@@ -404,8 +480,25 @@ class NodeBoundGrantService:
 
         # All validation and decision construction completed before durable
         # writes.  SQLiteLedger owns the canonical row encoding.
-        for decision, _grant in staged:
-            self._ledger.log_governor(decision)
+        inserted = self._persist_grant_batch(staged)
+        if not inserted:
+            concurrent_replay = self._load_replay(
+                specs=specs,
+                batch_id=batch_id,
+                parent_ref=parent_ref,
+                task_graph=task_graph,
+                request_id=request,
+                session_id=session,
+                principal_id=principal,
+                parent_scope=parent_scope,
+                now_ms=now_ms,
+            )
+            if concurrent_replay is None:
+                raise NodeGrantDerivationError(
+                    NODE_GRANT_REPLAY_DRIFT,
+                    "concurrent node-grant batch winner is not durably readable",
+                )
+            return concurrent_replay
 
         if work_order.to_dict() != work_order_before:
             raise AssertionError("NodeBoundGrantService mutated WorkOrderV3")
@@ -418,6 +511,281 @@ class NodeBoundGrantService:
             replayed=False,
         )
 
+    def _derive_review_continuation_locked(
+        self,
+        *,
+        parent_grant_ref: str,
+        task_graph: TaskGraph,
+        work_order: WorkOrderV3,
+        request_id: str,
+        session_id: str,
+        principal_id: str,
+        continuation_claim: Mapping[str, Any],
+    ) -> NodeGrantBatch:
+        request = _required_text(request_id, "request_id")
+        session = _required_text(session_id, "session_id")
+        principal = _required_text(principal_id, "principal_id")
+        parent_ref = _required_text(parent_grant_ref, "parent_grant_ref")
+        if not isinstance(task_graph, TaskGraph) or not isinstance(work_order, WorkOrderV3):
+            raise NodeGrantDerivationError(
+                NODE_GRANT_INPUT_INVALID,
+                "canonical TaskGraph and WorkOrderV3 are required",
+            )
+        task_graph.validate()
+        work_order.validate()
+        work_order_before = work_order.to_dict()
+        now_ms = int(self._clock())
+        if now_ms <= 0:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_INPUT_INVALID,
+                "clock must return a positive millisecond value",
+            )
+        store = self._review_store
+        validate_authority = getattr(
+            store,
+            "validate_review_continuation_authority",
+            None,
+        )
+        if not callable(validate_authority):
+            raise NodeGrantDerivationError(
+                NODE_GRANT_PARENT_INVALID,
+                "Review continuation grant renewal has no canonical authority validator",
+            )
+        try:
+            # The background worker intentionally strips the raw claim token
+            # before crossing into a surface runtime.  Renewal therefore
+            # revalidates the digest/owner/fence projection, never a secret
+            # token that the runtime must not receive.
+            authority_raw = validate_authority(dict(continuation_claim or {}))
+        except Exception as exc:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_PARENT_INVALID,
+                "Review continuation authority is not canonical or currently owned",
+            ) from exc
+        authority = dict(authority_raw) if isinstance(authority_raw, Mapping) else {}
+        if (
+            str(authority.get("schema_version") or "") != _REVIEW_RENEWAL_SCHEMA
+            or str(authority.get("review_status") or "").strip().upper() != "CONSUMED"
+            or str(authority.get("graph_id") or "").strip() != task_graph.graph_id
+            or int(authority.get("graph_revision") or 0) != task_graph.revision
+            or str(authority.get("node_id") or "").strip()
+            not in {node.node_id for node in task_graph.nodes}
+        ):
+            raise NodeGrantDerivationError(
+                NODE_GRANT_PARENT_INVALID,
+                "Review continuation authority differs from the admitted Graph",
+            )
+
+        parent = self._resolve_parent(
+            parent_ref=parent_ref,
+            request_id=request,
+            session_id=session,
+            principal_id=principal,
+            now_ms=now_ms,
+            allow_expired=True,
+        )
+        parent_binding = durable_governor_binding(parent)
+        specs, batch_id = _compile_specs(
+            task_graph=task_graph,
+            work_order=work_order,
+            parent_ref=parent_ref,
+            request_id=request,
+            session_id=session,
+            principal_id=principal,
+            parent_seq=_integer(
+                parent_binding.get("seq"),
+                NODE_GRANT_PARENT_INVALID,
+                "parent seq",
+            ),
+            review_continuation_authority=authority,
+        )
+        unsupported = sorted({spec.route for spec in specs} - _ISSUABLE_NODE_ROUTES)
+        if unsupported:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_ROUTE_UNSUPPORTED,
+                "node grant issuance is unsupported for route(s): " + ",".join(unsupported),
+            )
+        parent_scope = str(parent_binding.get("scope") or "").strip().lower()
+        replay = self._load_replay(
+            specs=specs,
+            batch_id=batch_id,
+            parent_ref=parent_ref,
+            task_graph=task_graph,
+            request_id=request,
+            session_id=session,
+            principal_id=principal,
+            parent_scope=parent_scope,
+            now_ms=now_ms,
+            review_continuation_authority=authority,
+            expected_reason=_REVIEW_RENEWAL_REASON,
+        )
+        if replay is not None:
+            if work_order.to_dict() != work_order_before:
+                raise AssertionError("NodeBoundGrantService mutated WorkOrderV3")
+            return replay
+
+        # The live claim is revalidated by every worker-side verifier.  A
+        # credential may outlive one heartbeat interval, but it is unusable as
+        # soon as claim ownership expires or moves to another fencing token.
+        budget_time_ms = (
+            int(work_order.budget_policy.limits.time_ms)
+            if work_order.budget_policy is not None
+            else 0
+        )
+        if budget_time_ms > 86_400_000:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_INPUT_INVALID,
+                "Review continuation execution budget exceeds the 24-hour grant ceiling",
+            )
+        child_expiry = now_ms + max(
+            self._child_ttl_ms,
+            budget_time_ms + self._child_ttl_ms,
+        )
+        staged: list[tuple[dict[str, Any], NodeBoundGrant]] = []
+        for spec in specs:
+            token_ref = self._token_service.issue_approval_token(
+                intent_id=spec.intent_id,
+                skill_name=spec.token_subject,
+                session_id=session,
+                seq=spec.seq,
+                now_ts_ms=now_ms,
+            )
+            child_intent = _child_intent(
+                spec=spec,
+                task_graph=task_graph,
+                parent_ref=parent_ref,
+                request_id=request,
+                session_id=session,
+                principal_id=principal,
+                parent_scope=parent_scope,
+                now_ms=now_ms,
+                expires_at_ms=child_expiry,
+                review_continuation_authority=authority,
+            )
+            node_authority = _node_authority(
+                spec=spec,
+                task_graph=task_graph,
+                parent_ref=parent_ref,
+                batch_id=batch_id,
+                request_id=request,
+                expires_at_ms=child_expiry,
+                review_continuation_authority=authority,
+            )
+            binding = build_governed_action_binding(
+                intent_envelope=child_intent,
+                approval_token_ref=token_ref,
+                risk_level=spec.risk_level,
+                issued_at_ms=now_ms,
+                expires_at_ms=child_expiry,
+            )
+            binding["node_authority"] = deepcopy(node_authority)
+            committed = compile_route_decision(
+                approved=True,
+                reason_code=_REVIEW_RENEWAL_REASON,
+                committed_at_ms=now_ms,
+                proposer_node_id="node_bound_grant_service",
+                tier="full",
+            )
+            decision = {
+                "request_id": request,
+                "intent_id": spec.intent_id,
+                "decision": "APPROVE",
+                "reason_code": _REVIEW_RENEWAL_REASON,
+                "rule_trace": [{
+                    "gate_id": "DURABLE_REVIEW_CONTINUATION_BINDING",
+                    "hit": False,
+                    "reason_hint": "EXACT_LIVE_REVIEW_CLAIM",
+                }],
+                "tokens": {"approval_token_ref": token_ref},
+                "approved_action_binding": binding,
+                "snapshot_refs": {
+                    "parent_governor_grant_ref": parent_ref,
+                    "node_grant": node_authority,
+                    "node_intent": child_intent,
+                    "review_continuation_authority": deepcopy(authority),
+                },
+                "stage": _CHILD_STAGE,
+                "ts_ms": now_ms,
+                "committed_route_token_ref": committed.token.value,
+                "committed_route_token": {
+                    "token": committed.token.value,
+                    "reason_code": committed.reason_code,
+                    "committed_at_ms": committed.committed_at_ms,
+                    "proposer_node_id": committed.proposer_node_id,
+                },
+            }
+            grant_ref = governor_grant_ref(request, decision)
+            if grant_ref == parent_ref:
+                raise NodeGrantDerivationError(
+                    NODE_GRANT_REPLAY_DRIFT,
+                    "Review-renewed child grant reused parent authority",
+                )
+            staged.append((
+                decision,
+                NodeBoundGrant(
+                    node_id=spec.node_id,
+                    route=spec.route,
+                    target_id=spec.target_id,
+                    decision_id=spec.decision_id,
+                    intent_id=spec.intent_id,
+                    grant_ref=grant_ref,
+                    expires_at_ms=child_expiry,
+                    nonce=spec.nonce,
+                ),
+            ))
+        inserted = self._persist_grant_batch(staged)
+        if not inserted:
+            concurrent_replay = self._load_replay(
+                specs=specs,
+                batch_id=batch_id,
+                parent_ref=parent_ref,
+                task_graph=task_graph,
+                request_id=request,
+                session_id=session,
+                principal_id=principal,
+                parent_scope=parent_scope,
+                now_ms=now_ms,
+                review_continuation_authority=authority,
+                expected_reason=_REVIEW_RENEWAL_REASON,
+            )
+            if concurrent_replay is None:
+                raise NodeGrantDerivationError(
+                    NODE_GRANT_REPLAY_DRIFT,
+                    "concurrent Review grant batch winner is not durably readable",
+                )
+            return concurrent_replay
+        if work_order.to_dict() != work_order_before:
+            raise AssertionError("NodeBoundGrantService mutated WorkOrderV3")
+        return NodeGrantBatch(
+            batch_id=batch_id,
+            parent_grant_ref=parent_ref,
+            task_graph_id=task_graph.graph_id,
+            graph_revision=task_graph.revision,
+            grants=tuple(grant for _decision, grant in staged),
+            replayed=False,
+        )
+
+    def _persist_grant_batch(
+        self,
+        staged: list[tuple[dict[str, Any], NodeBoundGrant]],
+    ) -> bool:
+        append_batch = getattr(self._ledger, "log_governor_batch", None)
+        if not callable(append_batch):
+            raise NodeGrantDerivationError(
+                NODE_GRANT_PARENT_INVALID,
+                "Governor ledger lacks atomic node-grant batch append",
+            )
+        result = append_batch([decision for decision, _grant in staged])
+        if result not in {None, True, False}:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_REPLAY_DRIFT,
+                "Governor batch append returned an invalid result",
+            )
+        # ``None`` is retained only for legacy/in-memory test ledgers.  The
+        # production SQLite ledger returns False when another process won the
+        # deterministic batch race.
+        return result is not False
+
     def _resolve_parent(
         self,
         *,
@@ -426,6 +794,7 @@ class NodeBoundGrantService:
         session_id: str,
         principal_id: str,
         now_ms: int,
+        allow_expired: bool = False,
     ) -> dict[str, Any]:
         try:
             decision = DurableGovernorGrantResolver(self._ledger).require(
@@ -448,7 +817,7 @@ class NodeBoundGrantService:
             or str(binding.get("principal_id") or "").strip() != principal_id
             or str(binding.get("scope") or "").strip() == ""
             or seq < 0
-            or expires_at_ms <= now_ms
+            or (expires_at_ms <= now_ms and not allow_expired)
         ):
             raise NodeGrantDerivationError(
                 NODE_GRANT_PARENT_INVALID,
@@ -468,6 +837,8 @@ class NodeBoundGrantService:
         principal_id: str,
         parent_scope: str,
         now_ms: int,
+        review_continuation_authority: Mapping[str, Any] | None = None,
+        expected_reason: str = _CHILD_REASON,
     ) -> NodeGrantBatch | None:
         trace = self._ledger.trace_request(request_id)
         rows = list(trace.get("governor_log") or []) if isinstance(trace, Mapping) else []
@@ -514,6 +885,7 @@ class NodeBoundGrantService:
                 batch_id=batch_id,
                 request_id=request_id,
                 expires_at_ms=expires_at_ms,
+                review_continuation_authority=review_continuation_authority,
             )
             token_digest = (
                 "sha256:" + hashlib.sha256(token_ref.encode("utf-8")).hexdigest()
@@ -523,7 +895,7 @@ class NodeBoundGrantService:
             if (
                 str(row.get("decision") or "").strip().upper() != "APPROVE"
                 or str(row.get("stage") or "") != _CHILD_STAGE
-                or str(row.get("reason_code") or "") != _CHILD_REASON
+                or str(row.get("reason_code") or "") != expected_reason
                 or not token_ref
                 or authority != expected_authority
                 or _mapping(binding.get("node_authority")) != expected_authority
@@ -535,6 +907,10 @@ class NodeBoundGrantService:
                 or str(binding.get("scope") or "").strip().lower() != parent_scope
                 or str(binding.get("principal_id") or "") != principal_id
                 or str(binding.get("approval_token_digest") or "") != token_digest
+                or (
+                    dict(_mapping(snapshots.get("review_continuation_authority")))
+                    != dict(review_continuation_authority or {})
+                )
             ):
                 raise NodeGrantDerivationError(NODE_GRANT_REPLAY_DRIFT, f"durable child drifted: {spec.node_id}")
             if expires_at_ms <= now_ms:
@@ -571,10 +947,17 @@ class DurableNodeGrantVerifier:
     here and remain outside this grant-only boundary.
     """
 
-    def __init__(self, *, ledger: Any, clock: Callable[[], int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        ledger: Any,
+        review_store: Any | None = None,
+        clock: Callable[[], int] | None = None,
+    ) -> None:
         if not callable(getattr(ledger, "trace_request", None)):
             raise TypeError("ledger must expose trace_request")
         self._ledger = ledger
+        self._review_store = review_store
         self._clock = clock or (lambda: int(time.time() * 1000))
 
     def verify(
@@ -591,6 +974,11 @@ class DurableNodeGrantVerifier:
         route: str,
         target_id: str,
         parent_grant_ref: str,
+        attempt_id: str | None = None,
+        lease_id: str | None = None,
+        lease_owner_id: str | None = None,
+        fencing_token: int | None = None,
+        _claim_phase: bool = False,
     ) -> VerifiedNodeGrant:
         expected = {
             "grant_ref": _verify_text(grant_ref, "grant_ref"),
@@ -627,6 +1015,56 @@ class DurableNodeGrantVerifier:
         except Exception as exc:
             raise NodeGrantVerificationError("grant reference is not a durable approved decision") from exc
 
+        snapshots = _mapping(decision.get("snapshot_refs"))
+        review_authority = _mapping(
+            snapshots.get("review_continuation_authority")
+        )
+        review_renewal = bool(review_authority)
+        if review_renewal:
+            validate_authority = getattr(
+                self._review_store,
+                (
+                    "validate_review_continuation_authority"
+                    if _claim_phase
+                    else "validate_review_continuation_execution_authority"
+                ),
+                None,
+            )
+            if not callable(validate_authority):
+                raise NodeGrantVerificationError(
+                    "Review-renewed node grant has no execution-authority validator"
+                )
+            try:
+                if _claim_phase:
+                    canonical_authority = validate_authority(review_authority)
+                else:
+                    canonical_authority = validate_authority(
+                        review_authority,
+                        attempt_id=_verify_text(attempt_id, "attempt_id"),
+                        lease_id=_verify_text(lease_id, "lease_id"),
+                        lease_owner_id=_verify_text(
+                            lease_owner_id,
+                            "lease_owner_id",
+                        ),
+                        fencing_token=fencing_token,
+                        node_id=expected["node_id"],
+                    )
+            except Exception as exc:
+                raise NodeGrantVerificationError(
+                    "Review continuation claim is no longer live or exact"
+                ) from exc
+            if (
+                not isinstance(canonical_authority, Mapping)
+                or dict(canonical_authority) != review_authority
+                or str(review_authority.get("schema_version") or "")
+                != _REVIEW_RENEWAL_SCHEMA
+                or str(review_authority.get("review_status") or "").strip().upper()
+                != "CONSUMED"
+            ):
+                raise NodeGrantVerificationError(
+                    "Review continuation authority drifted from canonical state"
+                )
+
         parent_binding = durable_governor_binding(parent)
         try:
             parent_seq = int(parent_binding.get("seq"))
@@ -639,14 +1077,17 @@ class DurableNodeGrantVerifier:
             or str(parent_binding.get("session_id") or "") != expected["session_id"]
             or str(parent_binding.get("principal_id") or "") != expected["principal_id"]
             or parent_seq < 0
-            or parent_expiry <= now_ms
+            or (parent_expiry <= now_ms and not review_renewal)
         ):
             raise NodeGrantVerificationError(
                 "durable parent binding mismatch or expiry",
-                reason_code=(NODE_GRANT_EXPIRED if parent_expiry <= now_ms else NODE_GRANT_VERIFICATION_FAILED),
+                reason_code=(
+                    NODE_GRANT_EXPIRED
+                    if parent_expiry <= now_ms and not review_renewal
+                    else NODE_GRANT_VERIFICATION_FAILED
+                ),
             )
 
-        snapshots = _mapping(decision.get("snapshot_refs"))
         authority = _mapping(snapshots.get("node_grant"))
         bound_authority = _mapping(durable_governor_binding(decision).get("node_authority"))
         child_intent = _mapping(snapshots.get("node_intent"))
@@ -663,10 +1104,10 @@ class DurableNodeGrantVerifier:
                 "durable node grant is expired",
                 reason_code=NODE_GRANT_EXPIRED,
             )
-        if expiry > parent_expiry or ordinal < 1:
+        if (expiry > parent_expiry and not review_renewal) or ordinal < 1:
             raise NodeGrantVerificationError("node expiry or ordinal exceeds parent authority")
 
-        batch_id = _stable_ref("node-grant-batch", {
+        batch_identity: dict[str, Any] = {
             "request_id": expected["request_id"],
             "session_id": expected["session_id"],
             "principal_id": expected["principal_id"],
@@ -674,7 +1115,10 @@ class DurableNodeGrantVerifier:
             "graph_id": expected["graph_id"],
             "graph_revision": revision,
             "root_work_order_id": expected["root_work_order_id"],
-        })
+        }
+        if review_renewal:
+            batch_identity["review_continuation_authority"] = review_authority
+        batch_id = _stable_ref("node-grant-batch", batch_identity)
         identity = {
             "batch_id": batch_id,
             "node_id": expected["node_id"],
@@ -712,6 +1156,10 @@ class DurableNodeGrantVerifier:
             "expires_at_ms": expiry,
             "nonce": nonce,
         }
+        if review_renewal:
+            expected_authority["review_continuation_authority"] = deepcopy(
+                review_authority
+            )
         parent_scope = str(parent_binding.get("scope") or "").strip().lower()
         expected_args = {
             "request_id": expected["request_id"],
@@ -727,6 +1175,10 @@ class DurableNodeGrantVerifier:
             "expires_at_ms": expiry,
             "nonce": nonce,
         }
+        if review_renewal:
+            expected_args["review_continuation_authority"] = deepcopy(
+                review_authority
+            )
         expected_intent = {
             "schema_version": "Natsume.intent.v1",
             "id": intent_id,
@@ -742,18 +1194,27 @@ class DurableNodeGrantVerifier:
             "target": parent_scope,
             "args": expected_args,
             "nonce": nonce,
-            "source": "node_bound_grant_service",
+            "source": (
+                "node_bound_grant_service.review_continuation"
+                if review_renewal
+                else "node_bound_grant_service"
+            ),
         }
         if (
             str(decision.get("request_id") or "") != expected["request_id"]
             or str(decision.get("decision") or "").strip().upper() != "APPROVE"
             or str(decision.get("stage") or "") != _CHILD_STAGE
-            or str(decision.get("reason_code") or "") != _CHILD_REASON
+            or str(decision.get("reason_code") or "")
+            != (_REVIEW_RENEWAL_REASON if review_renewal else _CHILD_REASON)
             or str(snapshots.get("parent_governor_grant_ref") or "") != expected["parent_grant_ref"]
             or authority != expected_authority
             or bound_authority != expected_authority
             or child_intent != expected_intent
             or not token_ref
+            or (
+                _mapping(snapshots.get("review_continuation_authority"))
+                != review_authority
+            )
         ):
             raise NodeGrantVerificationError("durable decision/node authority/intent exact match failed")
 
@@ -789,7 +1250,15 @@ class DurableNodeGrantVerifier:
             nonce=nonce,
             action_kind=action_kind,
             token_subject=token_subject,
+            review_continuation_authority=(
+                dict(review_authority) if review_renewal else None
+            ),
         )
+
+    def verify_for_claim(self, **kwargs: Any) -> VerifiedNodeGrant:
+        """Verify immutable grant authority before the READY claim transaction."""
+
+        return self.verify(**kwargs, _claim_phase=True)
 
 
 def _compile_specs(
@@ -801,6 +1270,7 @@ def _compile_specs(
     session_id: str,
     principal_id: str,
     parent_seq: int,
+    review_continuation_authority: Mapping[str, Any] | None = None,
 ) -> tuple[tuple[_NodeSpec, ...], str]:
     if not task_graph.nodes:
         raise NodeGrantDerivationError(NODE_GRANT_INPUT_INVALID, "TaskGraph has no executable nodes")
@@ -843,7 +1313,7 @@ def _compile_specs(
             "node bindings must cover the executable graph exactly",
         )
 
-    batch_id = _stable_ref("node-grant-batch", {
+    batch_identity: dict[str, Any] = {
         "request_id": request_id,
         "session_id": session_id,
         "principal_id": principal_id,
@@ -851,7 +1321,12 @@ def _compile_specs(
         "graph_id": task_graph.graph_id,
         "graph_revision": task_graph.revision,
         "root_work_order_id": task_graph.root_work_order_id,
-    })
+    }
+    if review_continuation_authority:
+        batch_identity["review_continuation_authority"] = dict(
+            review_continuation_authority
+        )
+    batch_id = _stable_ref("node-grant-batch", batch_identity)
     specs: list[_NodeSpec] = []
     for ordinal, node in enumerate(task_graph.nodes, start=1):
         route, separator, encoded_target = str(node.route or "").partition(":")
@@ -904,8 +1379,9 @@ def _node_authority(
     batch_id: str,
     request_id: str,
     expires_at_ms: int,
+    review_continuation_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    authority = {
         "schema_version": "Natsume.task_graph.node_grant.binding.v1",
         "batch_id": batch_id,
         "decision_id": spec.decision_id,
@@ -924,6 +1400,11 @@ def _node_authority(
         "expires_at_ms": int(expires_at_ms),
         "nonce": spec.nonce,
     }
+    if review_continuation_authority:
+        authority["review_continuation_authority"] = dict(
+            review_continuation_authority
+        )
+    return authority
 
 
 def _child_intent(
@@ -937,7 +1418,26 @@ def _child_intent(
     parent_scope: str,
     now_ms: int,
     expires_at_ms: int,
+    review_continuation_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    args: dict[str, Any] = {
+        "request_id": request_id,
+        "graph_id": task_graph.graph_id,
+        "graph_revision": task_graph.revision,
+        "root_work_order_id": task_graph.root_work_order_id,
+        "node_id": spec.node_id,
+        "route": spec.route,
+        "target_id": spec.target_id,
+        "action_kind": spec.action_kind,
+        "token_subject": spec.token_subject,
+        "parent_governor_grant_ref": parent_ref,
+        "expires_at_ms": int(expires_at_ms),
+        "nonce": spec.nonce,
+    }
+    if review_continuation_authority:
+        args["review_continuation_authority"] = dict(
+            review_continuation_authority
+        )
     return {
         "schema_version": "Natsume.intent.v1",
         "id": spec.intent_id,
@@ -951,22 +1451,13 @@ def _child_intent(
         "route": spec.route,
         "target_id": spec.target_id,
         "target": parent_scope,
-        "args": {
-            "request_id": request_id,
-            "graph_id": task_graph.graph_id,
-            "graph_revision": task_graph.revision,
-            "root_work_order_id": task_graph.root_work_order_id,
-            "node_id": spec.node_id,
-            "route": spec.route,
-            "target_id": spec.target_id,
-            "action_kind": spec.action_kind,
-            "token_subject": spec.token_subject,
-            "parent_governor_grant_ref": parent_ref,
-            "expires_at_ms": int(expires_at_ms),
-            "nonce": spec.nonce,
-        },
+        "args": args,
         "nonce": spec.nonce,
-        "source": "node_bound_grant_service",
+        "source": (
+            "node_bound_grant_service.review_continuation"
+            if review_continuation_authority
+            else "node_bound_grant_service"
+        ),
     }
 
 

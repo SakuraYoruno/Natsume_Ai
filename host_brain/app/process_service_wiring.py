@@ -54,7 +54,6 @@ def configure_process_service_ports(
         resolve_model_provider_credential,
     )
     from host_brain.app.multimodal_observer import MultimodalObserver
-    from host_brain.app.obs_routes_sysmode import _get_mode_transition_service
     from host_brain.app.recall.semantic_recall import SemanticRecaller
     from host_brain.app.settings import get_persistence_settings
     from host_brain.app.startup import (
@@ -85,7 +84,6 @@ def configure_process_service_ports(
                 if persistence_db_path_override is not None
                 else str(get_persistence_settings().canonical_db_path)
             ),
-            mode_transition_service=_get_mode_transition_service,
             model_credential_resolver=resolve_model_provider_credential,
             model_base_url_resolver=resolve_model_provider_base_url,
             model_transport=invoke_model_provider_transport,

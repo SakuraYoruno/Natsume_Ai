@@ -15,7 +15,6 @@ GraphHandlerBinding = tuple[str, Callable[..., Any]]
 @dataclass(frozen=True, slots=True)
 class ProcessApplicationPorts:
     persistence_db_path: Callable[[], str]
-    mode_transition_service: Callable[[], Any]
     model_credential_resolver: Callable[[str], str | None]
     model_base_url_resolver: Callable[[str], str | None]
     model_transport: Callable[..., str | dict[str, Any]]

@@ -14,7 +14,11 @@ from typing import Any
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetPolicy,
+    BudgetReservation,
+)
 from host_brain.contracts.agent_runtime.review_policy import ReviewResumePhase
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
@@ -32,6 +36,8 @@ from host_brain.persistence.host_command_repository import (
 )
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import (
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
+    TASK_STORE_BUDGET_EXCEEDED,
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_OWNERSHIP_CONFLICT,
     TASK_STORE_SCHEDULER_CAPACITY,
@@ -39,12 +45,14 @@ from host_brain.persistence.task_repository import (
     OutboxMessage,
     TaskStoreError,
 )
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.task_runtime import (
     AdmittedExecution,
     GovernedRuntimeError,
     GovernedTaskCoordinator,
     RetryableWorkerPreparationError,
 )
+from host_brain.task_runtime.budget_runtime import _budget_id
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
@@ -159,7 +167,7 @@ def _contracts(
                 dependencies=dependencies,
                 route=f"worker:{node_id}",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1},
                 risk_level=1,
                 acceptance_criteria=(),
@@ -247,6 +255,78 @@ class _Worker:
                 },
                 "evidence_refs": [f"model-budget://{node_id}/stable"],
             },
+        }
+
+
+class _DurableReviewWorker(_Worker):
+    """Persist the exact worker projection required by post-review replay."""
+
+    def __init__(
+        self,
+        calls: list[str],
+        projection_store: WorkerProjectionStore,
+    ) -> None:
+        super().__init__(calls, set())
+        self._projection_store = projection_store
+
+    async def execute_stream(self, *, execution_context: dict[str, Any], **_: Any):
+        node_id = str(execution_context["node_id"])
+        self._calls.append(node_id)
+        budget_usage = {
+            "schema_version": "Natsume.task_runtime.worker_budget_usage.v1",
+            "usage_id": f"worker-usage://{node_id}/durable-review",
+            "measurements": {
+                "token_count": 10,
+                "retry_count": 0,
+                "model_cost_micros": 25,
+            },
+            "evidence_refs": [f"model-budget://{node_id}/durable-review"],
+        }
+        body = {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "reason_code": None,
+            "command_id": str(execution_context["command_id"]),
+            "request_id": str(execution_context["request_id"]),
+            "narrative": "durable review projection",
+            "route_type": "chat",
+            "target_id": str(execution_context["target_id"]),
+            "graph_id": str(execution_context["graph_id"]),
+            "graph_revision": int(execution_context["graph_revision"]),
+            "node_id": node_id,
+            "attempt_id": str(execution_context["attempt_id"]),
+            "node_grant_ref": str(
+                execution_context.get("node_grant_ref")
+                or "governor-grant://gr03a/legacy-node"
+            ),
+            "audit_refs": {},
+            "budget_usage": budget_usage,
+        }
+        encoded = json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        projection_id = (
+            f"worker-projection://gr03a/1/{node_id}/"
+            f"{execution_context['attempt_id']}/{digest}"
+        )
+        self._projection_store.stage(
+            projection_id=projection_id,
+            projection={
+                **body,
+                "projection_id": projection_id,
+                "payload_digest": f"sha256:{digest}",
+                "schema_version": "Natsume.task_runtime.worker_projection.v1",
+            },
+        )
+        yield {
+            **body,
+            "receipt_ref": projection_id,
         }
 
 
@@ -444,6 +524,21 @@ class _FailingHeartbeatStore:
         return self._delegate.heartbeat_lease(*args, **kwargs)
 
 
+class _FailingExceededBudgetReleaseStore:
+    def __init__(self, delegate: DurableTaskStore) -> None:
+        self._delegate = delegate
+        self.release_calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def transition_budget(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if str(kwargs.get("target_status") or "") == "RELEASED":
+            self.release_calls += 1
+            raise TimeoutError("simulated crash before exceeded Budget release")
+        return self._delegate.transition_budget(*args, **kwargs)
+
+
 class _Resolver:
     def __init__(self, calls: list[str], fail_nodes: set[str] | None = None) -> None:
         self._worker = _Worker(calls, fail_nodes or set())
@@ -552,6 +647,8 @@ def _coordinator(
     bounded_fanout_enabled: bool = False,
     fanout_event_buffer_size: int = 32,
     outbox_publisher: Any = None,
+    node_grant_verifier: Any = None,
+    projection_reader: Any = None,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
     return GovernedTaskCoordinator(
@@ -573,7 +670,9 @@ def _coordinator(
         acceptance=(
             acceptance if acceptance is not None else _Acceptance(acceptance_decision)
         ),
+        projection_reader=projection_reader,
         review_runtime=review_runtime,
+        node_grant_verifier=node_grant_verifier,
         owner_id="gr03a-worker",
         lease_ttl_ms=lease_ttl_ms,
         operation_ttl_ms=operation_ttl_ms,
@@ -597,10 +696,13 @@ def _runtime_outbox(
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=(
-            f"taskstore://event/{aggregate_type}/{aggregate_id}/{aggregate_version}"
+            f"taskstore://event/{aggregate_type}/"
+            f"{aggregate_id}{'@1' if aggregate_type == 'TASK_GRAPH' else ''}/"
+            f"{aggregate_version}"
         ),
         idempotency_key=f"gr03a-runtime:{discriminator}",
         outbox_id=f"outbox::gr03a-runtime::{discriminator}",
@@ -697,6 +799,8 @@ async def test_gr03_post_acceptance_review_resumes_without_worker_reexecution(
     contracts = _contracts((("root", ()),))
     calls: list[str] = []
     review_store = ReviewStore(db_path, clock=lambda: NOW)
+    projection_store = WorkerProjectionStore(db_path, clock=lambda: NOW)
+    worker = _DurableReviewWorker(calls, projection_store)
     app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
         coordinator=_coordinator(
@@ -704,6 +808,8 @@ async def test_gr03_post_acceptance_review_resumes_without_worker_reexecution(
             calls,
             review_runtime=TaskNodeReviewRuntime(review_store, clock=lambda: NOW),
             acceptance_decision="REVIEW",
+            worker_resolver=_StaticResolver(worker),
+            projection_reader=projection_store,
         ),
     )
 
@@ -1356,11 +1462,12 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
     crashed_snapshot = crashed_store.read_scheduler_snapshot("graph-gr03a", 1)
     assert crashed_store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
     assert crashed_snapshot["budgets"][0]["status"] == "EXCEEDED"
-    rejected_usages = [
+    winning_usages = [
         row for row in crashed_snapshot["budget_usage"] if row["accepted"] is False
+        and row["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
     ]
-    assert len(rejected_usages) == 1
-    rejected_usage = rejected_usages[0]
+    assert len(winning_usages) == 1
+    rejected_usage = winning_usages[0]
     rejected_usage_id = rejected_usage["usage_id"]
     rejected_node_id = rejected_usage["node_id"]
     rejected_attempt_id = rejected_usage["attempt_id"]
@@ -1368,6 +1475,56 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
     assert crashed_store.get_node("graph-gr03a", 1, rejected_node_id)[
         "status"
     ] == "FAILED"
+
+    # Add a passive sibling after the winning commit but before settlement.
+    # It intentionally shares the winner's version/timestamp and sorts before
+    # the winner by usage_id, proving selection is based on terminal authority
+    # rather than the old lexical tie-breaker.
+    passive_usage_ids = (
+        "budget-usage://000-passive-sibling",
+        "budget-usage://001-passive-sibling",
+    )
+    left_attempt = next(
+        row for row in crashed_snapshot["attempts"] if row["node_id"] == "left"
+    )
+    exceeded_budget = crashed_snapshot["budgets"][0]
+    for index, passive_usage_id in enumerate(passive_usage_ids):
+        passive = crashed_store.consume_budget_once(
+            exceeded_budget["budget_id"],
+            usage_id=passive_usage_id,
+            charge_kind="WORKER_USAGE",
+            graph_id="graph-gr03a",
+            graph_revision=1,
+            node_id="left",
+            attempt_id=left_attempt["attempt_id"],
+            delta=BudgetAmount(token_count=20 + index),
+            expected_version=exceeded_budget["status_version"],
+            outbox=_runtime_outbox(
+                "BUDGET_RESERVATION",
+                exceeded_budget["budget_id"],
+                exceeded_budget["status_version"] + 1,
+                "BUDGET_EXCEEDED",
+                attempt_id=left_attempt["attempt_id"],
+                evidence_refs=(passive_usage_id,),
+            ),
+        )
+        assert passive.reason_code == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    with_passive = crashed_store.read_scheduler_snapshot("graph-gr03a", 1)
+    rejected_usages = [
+        row for row in with_passive["budget_usage"] if row["accepted"] is False
+    ]
+    assert len(rejected_usages) == 3
+    assert sum(
+        row["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+        for row in rejected_usages
+    ) == 2
+    assert {
+        (row["reason_code"], row["reservation_version_after"], row["created_ts_ms"])
+        for row in rejected_usages
+    } == {
+        (TASK_STORE_BUDGET_EXCEEDED, exceeded_budget["status_version"], NOW),
+        (TASK_STORE_BUDGET_ALREADY_EXCEEDED, exceeded_budget["status_version"], NOW),
+    }
 
     reentry_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
@@ -1416,6 +1573,7 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
     assert selected_outcome["status"] == "BUDGET_BLOCKED"
     assert selected_outcome["accepted"] is False
     assert rejected_usage_id in selected_outcome["evidence_refs"]
+    assert not set(passive_usage_ids).intersection(selected_outcome["evidence_refs"])
 
     replay_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
@@ -1444,6 +1602,7 @@ async def test_ne01_b4_budget_crash_reentry_and_replay_keep_rejected_usage_linea
         "decision_ref": decision_ref,
     }
     assert rejected_usage_id in replay_receipt["evidence_refs"]
+    assert not set(passive_usage_ids).intersection(replay_receipt["evidence_refs"])
     assert decision_ref in replay_receipt["evidence_refs"]
     assert sorted(calls) == ["left", "right"]
 
@@ -1560,10 +1719,30 @@ async def test_ne01_b4_parallel_budget_selects_rejected_usage_not_admission_orde
     rejected_usages = [
         row for row in snapshot["budget_usage"] if row["accepted"] is False
     ]
-    assert len(snapshot["budget_usage"]) == 1
-    assert len(rejected_usages) == 1
-    rejected_usage = rejected_usages[0]
+    winning_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+    ]
+    passive_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    ]
+    assert len(snapshot["budget_usage"]) == 2
+    assert len(winning_usages) == 1
+    assert len(passive_usages) == 1
+    rejected_usage = winning_usages[0]
+    passive_usage = passive_usages[0]
     assert rejected_usage["node_id"] == "right"
+    assert passive_usage["node_id"] == "left"
+    assert passive_usage["outbox_id"] == rejected_usage["outbox_id"]
+    assert passive_usage["reservation_version_before"] == rejected_usage[
+        "reservation_version_after"
+    ]
+    assert passive_usage["reservation_version_after"] == rejected_usage[
+        "reservation_version_after"
+    ]
     right_attempt_id = rejected_usage["attempt_id"]
     rejected_usage_id = rejected_usage["usage_id"]
 
@@ -1709,10 +1888,30 @@ async def test_ne01_b4_right_first_budget_decision_is_stable_across_crash_reentr
     rejected_usages = [
         row for row in crashed_snapshot["budget_usage"] if row["accepted"] is False
     ]
-    assert len(crashed_snapshot["budget_usage"]) == 1
-    assert len(rejected_usages) == 1
-    rejected_usage = rejected_usages[0]
+    winning_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+    ]
+    passive_usages = [
+        row
+        for row in rejected_usages
+        if row["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    ]
+    assert len(crashed_snapshot["budget_usage"]) == 2
+    assert len(winning_usages) == 1
+    assert len(passive_usages) == 1
+    rejected_usage = winning_usages[0]
+    passive_usage = passive_usages[0]
     assert rejected_usage["node_id"] == "right"
+    assert passive_usage["node_id"] == "left"
+    assert passive_usage["outbox_id"] == rejected_usage["outbox_id"]
+    assert passive_usage["reservation_version_before"] == rejected_usage[
+        "reservation_version_after"
+    ]
+    assert passive_usage["reservation_version_after"] == rejected_usage[
+        "reservation_version_after"
+    ]
     assert crashed_snapshot["graph_record"]["status"] == "ACTIVE"
     assert crashed_snapshot["budgets"][0]["status"] == "EXCEEDED"
 
@@ -3568,6 +3767,186 @@ async def test_gr03b_precharge_exceeded_blocks_before_worker_and_releases_budget
 
 
 @pytest.mark.asyncio
+async def test_ne01_terminal_reentry_does_not_silently_release_blocked_budget(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    limited = replace(
+        work_order,
+        budget_policy=replace(
+            work_order.budget_policy,
+            limits=replace(work_order.budget_policy.limits, tool_call_count=0),
+        ),
+    )
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        limited,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    durable = DurableTaskStore(db_path, clock=lambda: NOW)
+    crashing = _FailingExceededBudgetReleaseStore(durable)
+
+    with pytest.raises(GovernedRuntimeError):
+        _ = [
+            event
+            async for event in _coordinator(
+                db_path,
+                [],
+                task_store=crashing,
+            ).execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+    assert crashing.release_calls == 1
+    crashed = durable.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert crashed["graph_record"]["status"] == "BLOCKED"
+    assert crashed["graph_record"]["nodes"][0]["status"] == "FAILED"
+    assert crashed["budgets"][0]["status"] == "EXCEEDED"
+    outbox_count = len(durable.list_pending_outbox(limit=100))
+
+    with pytest.raises(GovernedRuntimeError) as rejected:
+        _ = [
+            event
+            async for event in _coordinator(
+                db_path,
+                [],
+                task_store=durable,
+            ).execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+
+    assert rejected.value.reason_code == "GOVERNED_DURABLE_STATE_CONFLICT"
+    assert "terminal reconciliation is required" in rejected.value.detail
+    unchanged = durable.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert unchanged["graph_record"]["status"] == "BLOCKED"
+    assert unchanged["budgets"][0]["status"] == "EXCEEDED"
+    assert len(durable.list_pending_outbox(limit=100)) == outbox_count
+    inventory = durable.inventory_terminal_reconciliation_cases()
+    assert inventory["discovered_count"] == 1
+    assert inventory["inserted_count"] == 1
+    assert inventory["cases"][0]["classification"] == "SIGNED_REPAIR_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    "preexisting_pending_budget",
+    (False, True),
+    ids=("missing-budget", "pending-budget"),
+)
+@pytest.mark.asyncio
+async def test_ne01_terminal_graph_reentry_cannot_create_or_activate_budget(
+    tmp_path: Path,
+    preexisting_pending_budget: bool,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    repository = HostCommandRepository(db_path, clock=lambda: NOW)
+    record = repository.admit(command, work_order, assignment, graph)
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    budget_id = _budget_id(admitted, work_order.budget_policy)
+    if preexisting_pending_budget:
+        store.create_budget_reservation(
+            BudgetReservation(
+                budget_id=budget_id,
+                scope=work_order.budget_policy.scope,
+                limits=work_order.budget_policy.limits,
+                reserved=work_order.budget_policy.limits,
+            ),
+            graph_id=graph.graph_id,
+            graph_revision=graph.revision,
+            node_id=None,
+            attempt_id=None,
+            outbox=_runtime_outbox(
+                "BUDGET_RESERVATION",
+                budget_id,
+                0,
+                "BUDGET_RESERVATION_CREATED",
+            ),
+        )
+    store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=0,
+        target_status=TaskGraphStatus.ACTIVE,
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            1,
+            "TASK_GRAPH_ACTIVE",
+        ),
+    )
+    store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=1,
+        target_status=TaskGraphStatus.FAILED,
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            2,
+            "TASK_GRAPH_FAILED",
+        ),
+    )
+    with sqlite3.connect(db_path) as conn:
+        before_budget = conn.execute(
+            """
+            SELECT budget_id, status, status_version, updated_ts_ms
+            FROM task_runtime_budget_reservation ORDER BY budget_id
+            """
+        ).fetchall()
+        before_outbox_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox"
+        ).fetchone()[0]
+
+    calls: list[str] = []
+    with pytest.raises(GovernedRuntimeError) as rejected:
+        _ = [
+            event
+            async for event in _coordinator(db_path, calls).execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+
+    assert rejected.value.reason_code == "GOVERNED_BUDGET_STATE_CONFLICT"
+    assert calls == []
+    assert store.get_graph(graph.graph_id, graph.revision)["status"] == "FAILED"
+    with sqlite3.connect(db_path) as conn:
+        after_budget = conn.execute(
+            """
+            SELECT budget_id, status, status_version, updated_ts_ms
+            FROM task_runtime_budget_reservation ORDER BY budget_id
+            """
+        ).fetchall()
+        after_outbox_count = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox"
+        ).fetchone()[0]
+    assert after_budget == before_budget
+    assert after_outbox_count == before_outbox_count
+    if preexisting_pending_budget:
+        assert after_budget == [(budget_id, "PENDING", 0, NOW)]
+    else:
+        assert after_budget == []
+
+
+@pytest.mark.asyncio
 async def test_gr03b_typed_worker_usage_exceeded_blocks_acceptance_and_is_durable(
     tmp_path: Path,
 ) -> None:
@@ -4177,8 +4556,10 @@ async def test_ne01_b2_retry_budget_exhaustion_fails_closed_before_reservation(
             SELECT attempt_id, evidence_refs_json
             FROM task_runtime_outbox
             WHERE aggregate_type = 'TASK_GRAPH'
+              AND aggregate_id = ? AND graph_revision = ?
               AND event_type = 'TASK_GRAPH_BLOCKED'
-            """
+            """,
+            (graph.graph_id, graph.revision),
         ).fetchone()
     assert reservation_count == 0
     assert graph_blocked_outbox is not None

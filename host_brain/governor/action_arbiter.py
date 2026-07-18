@@ -115,8 +115,9 @@ def build_governed_action_binding(
     token_digest = _token_digest(token_ref)
     person_id = str(intent.get("person_id") or "").strip()
     # HTTP/client args are untrusted and must never nominate their own
-    # authority principal.  Until a separate authenticated identity is wired,
-    # the canonical Governor person is the sole principal authority.
+    # authority principal.  A production ingress may set principal_id only
+    # after Secure Ingress authentication has frozen that service identity;
+    # otherwise the server-derived conversational person remains the principal.
     principal_id = str(intent.get("principal_id") or person_id).strip()
     binding_digest = _digest(
         {

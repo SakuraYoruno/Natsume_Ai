@@ -754,6 +754,22 @@ def _extract_minimax_text_content(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _internal_hard_max_output_tokens(params: Mapping[str, Any]) -> int | None:
+    """Read the transport-only output ceiling without exposing it downstream.
+
+    ``_natsume_hard_max_output_tokens`` is attached by the governed Model
+    Attempt transport after route configuration has been frozen.  It is not a
+    provider generation parameter: builders consume it only to constrain their
+    public token field, and must never copy it into a provider request.
+    """
+
+    try:
+        parsed = int(params.get("_natsume_hard_max_output_tokens"))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _build_minimax_standard_payload(
     *,
     model_id: str,
@@ -762,6 +778,7 @@ def _build_minimax_standard_payload(
     stream: bool,
 ) -> dict[str, Any]:
     params = dict(gen_params or {})
+    hard_max_tokens = _internal_hard_max_output_tokens(params)
     temperature = float(params.get("temperature", 0.4))
     top_p = float(params.get("top_p", 0.9))
     max_tokens = 1024
@@ -774,6 +791,8 @@ def _build_minimax_standard_payload(
         if parsed > 0:
             max_tokens = parsed
             break
+    if hard_max_tokens is not None:
+        max_tokens = min(max_tokens, hard_max_tokens)
     normalized_messages: list[dict[str, Any]] = []
     for item in list(messages or []):
         if not isinstance(item, Mapping):
@@ -1216,6 +1235,7 @@ def _build_openai_compat_payload(
     stream: bool = False,
 ) -> dict[str, Any]:
     params = dict(gen_params or {})
+    hard_max_tokens = _internal_hard_max_output_tokens(params)
     response_format = params.get("response_format")
     minimum_max_tokens = _openai_compat_minimum_max_tokens(
         model_id=model_id,
@@ -1241,10 +1261,14 @@ def _build_openai_compat_payload(
         except (TypeError, ValueError):
             parsed = 0
         if parsed > 0:
-            if minimum_max_tokens > 0:
+            if hard_max_tokens is not None:
+                parsed = min(parsed, hard_max_tokens)
+            elif minimum_max_tokens > 0:
                 parsed = max(parsed, minimum_max_tokens)
             payload["max_tokens"] = parsed
             break
+    if hard_max_tokens is not None and "max_tokens" not in payload:
+        payload["max_tokens"] = hard_max_tokens
     if isinstance(response_format, Mapping):
         payload["response_format"] = dict(response_format)
     elif _normalize_response_format(response_format) == "json_object":
@@ -1440,6 +1464,7 @@ def _build_chat_google_genai_kwargs(
     streaming: bool,
 ) -> dict[str, Any]:
     params = dict(gen_params or {})
+    hard_max_tokens = _internal_hard_max_output_tokens(params)
     temperature = float(params.get("temperature", 0.4))
     top_p = float(params.get("top_p", 0.9))
     normalized_model_id = str(model_id or "").strip().lower()
@@ -1455,8 +1480,14 @@ def _build_chat_google_genai_kwargs(
             # text appears (signed content blocks / thinking overhead), which
             # looks like a false empty response to the pool validator.
             minimum_cap = 1024 if "pro" in normalized_model_id else 64
-            max_tokens = max(parsed, minimum_cap)
+            max_tokens = (
+                min(parsed, hard_max_tokens)
+                if hard_max_tokens is not None
+                else max(parsed, minimum_cap)
+            )
             break
+    if max_tokens is None and hard_max_tokens is not None:
+        max_tokens = hard_max_tokens
 
     llm_kwargs: dict[str, Any] = {
         "model": str(model_id or "").strip() or "gemini-2.5-flash-lite",
@@ -1729,25 +1760,6 @@ def _log_llm_pool_call(
                     ts_ms=ts_value,
                     provider_usage=token_usage,
                 )
-            )
-        if hasattr(ledger, "log_llm_node_call"):
-            normalized_scene = str(scene_type or "").strip().upper() or "CHAT"
-            node_suffix = normalized_scene.lower()
-            final_status = "DEGRADED" if pool_exhausted else "OK"
-            final_reason = "LLM_POOL_EXHAUSTED" if pool_exhausted else None
-            ledger.log_llm_node_call(
-                {
-                    "request_id": str(request_id or "").strip(),
-                    "node_id": f"llm_pool:{node_suffix}",
-                    "provider": str(final_provider or "").strip().lower(),
-                    "model_id": str(final_model or "").strip(),
-                    "status": final_status,
-                    "reason_code": final_reason,
-                    "latency_ms": int(total_latency_ms),
-                    "input_digest": f"scene={normalized_scene};tier={str(cognitive_tier or '').strip().upper() or 'B'};attempts={len(attempts_payload)}",
-                    "output_digest": attempts_json[:4000],
-                    "ts_ms": ts_value,
-                }
             )
     except Exception as exc:
         _logger.debug("log_llm_pool_call skipped: %s", exc)

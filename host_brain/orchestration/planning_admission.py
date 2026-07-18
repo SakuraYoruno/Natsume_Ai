@@ -142,7 +142,23 @@ class GovernedPlanningAdmissionService:
             graph.root_work_order_id,
             assigned_at_ms=graph.created_at,
         )
-        raw = self._commands.admit(command, work_order, assignment, graph)
+        if compiled.previous_revision is None:
+            raw = self._commands.admit(command, work_order, assignment, graph)
+        else:
+            admit_replan = getattr(self._commands, "admit_replan", None)
+            if not callable(admit_replan):
+                raise PlanningAdmissionError(
+                    PLANNING_ADMISSION_DURABLE_DRIFT,
+                    "command repository has no durable graph supersession authority",
+                )
+            raw = admit_replan(
+                command,
+                work_order,
+                assignment,
+                graph,
+                previous_revision=compiled.previous_revision,
+                failure_evidence_refs=compiled.failure_evidence_refs,
+            )
         record = await raw if inspect.isawaitable(raw) else raw
         if not isinstance(record, Mapping):
             raise PlanningAdmissionError(

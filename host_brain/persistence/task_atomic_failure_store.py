@@ -351,6 +351,7 @@ class TaskAtomicFailureStoreMixin:
                     kind="graph",
                     aggregate_type="TASK_GRAPH",
                     aggregate_id=graph_id,
+                    graph_revision=graph_revision,
                     aggregate_version=graph_version,
                     event_type=f"TASK_GRAPH_{graph_target.value}",
                     attempt_id=attempt_ref,
@@ -423,6 +424,7 @@ class TaskAtomicFailureStoreMixin:
         kind: str,
         aggregate_type: str,
         aggregate_id: str,
+        graph_revision: int | None = None,
         aggregate_version: int,
         event_type: str,
         attempt_id: str,
@@ -435,12 +437,14 @@ class TaskAtomicFailureStoreMixin:
         return OutboxMessage.create(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
+            graph_revision=graph_revision,
             aggregate_version=int(aggregate_version),
             event_type=event_type,
             payload_ref=build_outbox_payload_ref(
                 aggregate_type=aggregate_type,
                 aggregate_id=aggregate_id,
                 aggregate_version=int(aggregate_version),
+                graph_revision=graph_revision,
             ),
             idempotency_key=outbox_key,
             outbox_id=f"outbox::{outbox_key}",
@@ -542,10 +546,16 @@ class TaskAtomicFailureStoreMixin:
                 """
                 SELECT outbox_id FROM task_runtime_outbox
                 WHERE aggregate_type = 'TASK_GRAPH' AND aggregate_id = ?
+                  AND graph_revision = ?
                   AND attempt_id = ? AND aggregate_version > ?
                 LIMIT 1
                 """,
-                (graph_id, attempt_id, int(expected_graph_version)),
+                (
+                    graph_id,
+                    graph_revision,
+                    attempt_id,
+                    int(expected_graph_version),
+                ),
             ).fetchone()
             if unexpected_graph_outbox is not None:
                 reject("node-only failure unexpectedly emitted a TaskGraph outbox")
@@ -561,6 +571,7 @@ class TaskAtomicFailureStoreMixin:
                 kind="graph",
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=graph_id,
+                graph_revision=graph_revision,
                 aggregate_version=graph_version,
                 event_type=f"TASK_GRAPH_{graph_target_status.value}",
                 attempt_id=attempt_id,
@@ -572,6 +583,7 @@ class TaskAtomicFailureStoreMixin:
                 expected_aggregate=("TASK_GRAPH", graph_id, graph_version),
                 expected_event_type=f"TASK_GRAPH_{graph_target_status.value}",
                 expected_attempt_id=attempt_id,
+                expected_graph_revision=graph_revision,
             )
 
         lease_rows = conn.execute(

@@ -21,7 +21,7 @@ PARALLEL_SUCCESS_METHODS = (
 
 
 def test_parallel_success_mixin_preserves_authority_and_owner_transaction() -> None:
-    assert task_repository.DurableTaskStore.__bases__[2] is TaskParallelSuccessStoreMixin
+    assert task_repository.DurableTaskStore.__bases__[4] is TaskParallelSuccessStoreMixin
     for name in PARALLEL_SUCCESS_METHODS:
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskParallelSuccessStoreMixin,

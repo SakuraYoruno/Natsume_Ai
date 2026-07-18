@@ -57,9 +57,19 @@ export default function BarChart({
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
         formatter: (params) => {
-          const lines = params.map(
-            (item) => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};margin-right:4px"></span>${item.seriesName}: <b>${item.value ?? '—'}${yUnit}</b>`
-          )
+          const lines = params.map((item) => {
+            const sourceSeries = series[item.seriesIndex] ?? {}
+            const lowerBound = Boolean(sourceSeries.lowerBoundFlags?.[item.dataIndex])
+            const coverageLabel = sourceSeries.coverageLabels?.[item.dataIndex]
+            const unavailableLabel = sourceSeries.unavailableLabel ?? '—'
+            const valueLabel = item.value == null
+              ? unavailableLabel
+              : `${lowerBound ? '≥ ' : ''}${item.value}${yUnit}`
+            const coverage = coverageLabel
+              ? ` <span style="color:#98A2B3">(${coverageLabel})</span>`
+              : ''
+            return `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};margin-right:4px"></span>${item.seriesName}: <b>${valueLabel}</b>${coverage}`
+          })
           return `<div style="font-size:12px">${params[0]?.axisValue}<br/>${lines.join('<br/>')}</div>`
         },
       },

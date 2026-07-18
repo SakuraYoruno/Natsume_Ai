@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any, Callable, Iterator, Mapping
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from host_brain.contracts.agent_runtime.review_policy import (
     ReviewItem,
@@ -27,6 +27,12 @@ from host_brain.core.ids import now_ms
 from host_brain.contracts.agent_runtime.review_token_contract import (
     ReviewTokenService,
     review_resume_token_digest,
+)
+from host_brain.persistence.review_continuation_store import (
+    ReviewContinuationStoreError,
+    continuation_table_exists,
+    enqueue_task_review_continuation_in_transaction,
+    validate_task_review_admission_in_transaction,
 )
 
 
@@ -117,6 +123,14 @@ class ReviewStoreError(RuntimeError):
 
     def to_dict(self) -> dict[str, str]:
         return {"reason_code": self.reason_code, "detail": self.detail}
+
+
+class _CommittedReviewError(Exception):
+    """Commit the current Review transition, then expose its public error."""
+
+    def __init__(self, error: ReviewStoreError) -> None:
+        self.error = error
+        super().__init__(str(error))
 
 
 def _dumps(value: Any) -> str:
@@ -212,6 +226,9 @@ class ReviewStore:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
             conn.commit()
+        except _CommittedReviewError as exc:
+            conn.commit()
+            raise exc.error
         except BaseException:
             conn.rollback()
             raise
@@ -323,6 +340,16 @@ class ReviewStore:
                 conn,
                 subject_ref=item.subject_ref,
             )
+            try:
+                validate_task_review_admission_in_transaction(
+                    conn,
+                    review=item,
+                    task_graph_id=task_graph_id,
+                    task_node_id=task_node_id,
+                    require_schema=continuation_table_exists(conn),
+                )
+            except ReviewContinuationStoreError as exc:
+                raise ReviewStoreError(exc.reason_code, exc.detail) from exc
             conn.execute(
                 """
                 INSERT INTO agent_runtime_review(
@@ -392,6 +419,7 @@ class ReviewStore:
         self,
         *,
         task_graph_id: str | None = None,
+        graph_revision: int | None = None,
         work_order_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -399,9 +427,33 @@ class ReviewStore:
 
         clauses: list[str] = []
         params: list[Any] = []
-        if _text(task_graph_id):
+        graph_ref = _text(task_graph_id)
+        if graph_ref:
             clauses.append("task_graph_id = ?")
-            params.append(_text(task_graph_id))
+            params.append(graph_ref)
+        if graph_revision is not None:
+            if not graph_ref or isinstance(graph_revision, bool):
+                raise ReviewStoreError(
+                    REVIEW_STORE_INVALID,
+                    "graph_revision requires one task_graph_id and a positive integer",
+                )
+            try:
+                normalized_revision = int(graph_revision)
+            except (TypeError, ValueError) as exc:
+                raise ReviewStoreError(
+                    REVIEW_STORE_INVALID,
+                    "graph_revision must be a positive integer",
+                ) from exc
+            if normalized_revision < 1:
+                raise ReviewStoreError(
+                    REVIEW_STORE_INVALID,
+                    "graph_revision must be a positive integer",
+                )
+            subject_prefix = (
+                f"task-node://{quote(graph_ref, safe='')}/{normalized_revision}/"
+            )
+            clauses.append("substr(subject_ref, 1, length(?)) = ?")
+            params.extend((subject_prefix, subject_prefix))
         if _text(work_order_id):
             clauses.append("work_order_id = ?")
             params.append(_text(work_order_id))
@@ -453,7 +505,9 @@ class ReviewStore:
             )
             if int(item.expires_at) <= ts_ms:
                 self._expire_review_row(conn, row, ts_ms=ts_ms)
-                raise ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem is expired")
+                raise _CommittedReviewError(
+                    ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem is expired")
+                )
             if item.status is not ReviewStatus.PENDING:
                 raise ReviewStoreError(
                     REVIEW_STATUS_CONFLICT,
@@ -465,7 +519,9 @@ class ReviewStore:
             effective_ttl = min(ttl, remaining)
             if effective_ttl <= 0:
                 self._expire_review_row(conn, row, ts_ms=ts_ms)
-                raise ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem is expired")
+                raise _CommittedReviewError(
+                    ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem is expired")
+                )
             try:
                 token = self._token_service.issue_resume_token(
                     review_id=item.review_id,
@@ -530,6 +586,12 @@ class ReviewStore:
             validate_review_transition(item.status, ReviewStatus.REJECTED)
             rejected = replace(item, status=ReviewStatus.REJECTED, decision_actor=actor)
             self._update_review_item(conn, row, rejected, ts_ms=ts_ms)
+            self._enqueue_task_continuation(
+                conn,
+                row=row,
+                item=rejected,
+                ts_ms=ts_ms,
+            )
             conn.execute(
                 """
                 UPDATE agent_runtime_review_token
@@ -587,12 +649,16 @@ class ReviewStore:
                 )
             if str(token_row["state"]) == "EXPIRED" or int(token_row["expires_ts_ms"]) <= ts_ms:
                 self._expire_review_row(conn, row, ts_ms=ts_ms)
-                raise ReviewStoreError(REVIEW_TOKEN_EXPIRED, "resume token is expired")
+                raise _CommittedReviewError(
+                    ReviewStoreError(REVIEW_TOKEN_EXPIRED, "resume token is expired")
+                )
             if str(token_row["state"]) != "AVAILABLE":
                 raise ReviewStoreError(REVIEW_TOKEN_INVALID, f"resume token state is {token_row['state']}")
             if int(item.expires_at) <= ts_ms:
                 self._expire_review_row(conn, row, ts_ms=ts_ms)
-                raise ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem is expired")
+                raise _CommittedReviewError(
+                    ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem is expired")
+                )
             if item.status is not ReviewStatus.APPROVED:
                 raise ReviewStoreError(
                     REVIEW_STATUS_CONFLICT,
@@ -627,6 +693,12 @@ class ReviewStore:
                 resume_result_ref=result_ref,
             )
             self._update_review_item(conn, row, consumed, ts_ms=ts_ms)
+            continuation = self._enqueue_task_continuation(
+                conn,
+                row=row,
+                item=consumed,
+                ts_ms=ts_ms,
+            )
             return {
                 "review": self._record_from_row(self._require_review(conn, item.review_id)),
                 "resume_phase": phase,
@@ -638,23 +710,71 @@ class ReviewStore:
                 ),
                 "replay_side_effects": False,
                 "resume_result_ref": result_ref,
+                "continuation": continuation,
             }
 
     def expire_due(self) -> dict[str, Any]:
         ts_ms = self._now()
-        with self._transaction() as conn:
+        conn = self._connect()
+        try:
             rows = conn.execute(
                 """
-                SELECT * FROM agent_runtime_review
-                WHERE status IN ('PENDING', 'APPROVED') AND expires_at <= ?
-                ORDER BY review_id
+                SELECT r.review_id
+                FROM agent_runtime_review AS r
+                WHERE (
+                    r.status IN ('PENDING', 'APPROVED')
+                    AND r.expires_at <= ?
+                ) OR (
+                    r.status = 'APPROVED'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_runtime_review_token AS t
+                        WHERE t.review_id = r.review_id
+                          AND t.state = 'AVAILABLE'
+                          AND t.expires_ts_ms <= ?
+                    )
+                )
+                ORDER BY r.review_id
                 """,
-                (ts_ms,),
+                (ts_ms, ts_ms),
             ).fetchall()
-            expired_ids: list[str] = []
-            for row in rows:
-                self._expire_review_row(conn, row, ts_ms=ts_ms)
-                expired_ids.append(str(row["review_id"]))
+        finally:
+            conn.close()
+
+        expired_ids: list[str] = []
+        failed: list[dict[str, str]] = []
+        for candidate in rows:
+            review_id = str(candidate["review_id"])
+            try:
+                with self._transaction() as conn:
+                    row = self._require_review(conn, review_id)
+                    item = self._item_from_row(row)
+                    token_due = conn.execute(
+                        """
+                        SELECT 1 FROM agent_runtime_review_token
+                        WHERE review_id = ? AND state = 'AVAILABLE'
+                          AND expires_ts_ms <= ?
+                        LIMIT 1
+                        """,
+                        (review_id, ts_ms),
+                    ).fetchone()
+                    if item.status not in {
+                        ReviewStatus.PENDING,
+                        ReviewStatus.APPROVED,
+                    } or (
+                        int(item.expires_at) > ts_ms and token_due is None
+                    ):
+                        continue
+                    self._expire_review_row(conn, row, ts_ms=ts_ms)
+                expired_ids.append(review_id)
+            except ReviewStoreError as exc:
+                # One malformed historical Review must not roll back or stop
+                # expiration/continuation for every healthy Review.
+                failed.append(
+                    {"review_id": review_id, "reason_code": exc.reason_code}
+                )
+
+        with self._transaction() as conn:
             token_cursor = conn.execute(
                 """
                 UPDATE agent_runtime_review_token
@@ -666,6 +786,7 @@ class ReviewStore:
             return {
                 "expired_review_ids": tuple(expired_ids),
                 "expired_token_count": int(token_cursor.rowcount if token_cursor.rowcount >= 0 else 0),
+                "failed_reviews": tuple(failed),
             }
 
     def _require_review(self, conn: sqlite3.Connection, review_id: str) -> sqlite3.Row:
@@ -690,7 +811,13 @@ class ReviewStore:
                 "diff_ref": row["diff_ref"],
             }
         )
-        return ReviewItem.from_mapping(payload)
+        try:
+            return ReviewItem.from_mapping(payload)
+        except ValueError as exc:
+            raise ReviewStoreError(
+                str(getattr(exc, "reason_code", "") or REVIEW_STORE_INVALID),
+                "review_json violates the ReviewItem contract",
+            ) from exc
 
     def _record_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
         item = self._item_from_row(row)
@@ -755,6 +882,12 @@ class ReviewStore:
         validate_review_transition(item.status, ReviewStatus.EXPIRED)
         expired = replace(item, status=ReviewStatus.EXPIRED)
         self._update_review_item(conn, row, expired, ts_ms=ts_ms)
+        self._enqueue_task_continuation(
+            conn,
+            row=row,
+            item=expired,
+            ts_ms=ts_ms,
+        )
         conn.execute(
             """
             UPDATE agent_runtime_review_token
@@ -763,6 +896,25 @@ class ReviewStore:
             """,
             (ts_ms, item.review_id),
         )
+
+    @staticmethod
+    def _enqueue_task_continuation(
+        conn: sqlite3.Connection,
+        *,
+        row: sqlite3.Row,
+        item: ReviewItem,
+        ts_ms: int,
+    ) -> dict[str, Any] | None:
+        try:
+            return enqueue_task_review_continuation_in_transaction(
+                conn,
+                review=item,
+                task_graph_id=row["task_graph_id"],
+                task_node_id=row["task_node_id"],
+                ts_ms=ts_ms,
+            )
+        except ReviewContinuationStoreError as exc:
+            raise ReviewStoreError(exc.reason_code, exc.detail) from exc
 
     def _raise_if_subject_mismatch(
         self,

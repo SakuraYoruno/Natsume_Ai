@@ -173,7 +173,14 @@ OPERATOR_QUERY_ROUTE_POLICIES = (
     ),
     OperatorQueryRoutePolicy(
         method="GET",
-        path_pattern=re.compile(r"/obs/task-runtime/(?:executions(?:/[^/]+)?|review-locator)"),
+        path_pattern=re.compile(
+            r"/obs/task-runtime/(?:"
+            r"executions(?:/[^/]+)?|"
+            r"review-locator|"
+            r"effect-reconciliation/(?:candidates|cases|challenge)|"
+            r"terminal-reconciliation/(?:candidates|cases|challenge)"
+            r")"
+        ),
         required_scope="obs:task-runtime:read",
     ),
     OperatorQueryRoutePolicy(

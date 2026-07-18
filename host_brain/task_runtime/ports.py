@@ -42,11 +42,37 @@ class TaskStorePort(Protocol):
 
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> Mapping[str, Any]: ...
 
+    def get_node_artifact(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def resolve_node_input_artifacts(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+    ) -> Sequence[Mapping[str, Any]]: ...
+
     def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
 
     def get_active_lease(self, attempt_id: str) -> Mapping[str, Any] | None: ...
 
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
+
+    def reconcile_operation_reservation_state(
+        self,
+        reservation_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_committed_operation_checkpoint(
+        self,
+        reservation_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_budget_usage(self, budget_id: str, usage_id: str) -> Mapping[str, Any]: ...
 
     def get_graph_cancellation_intent(self, intent_ref: str) -> Mapping[str, Any]: ...
 
@@ -69,7 +95,13 @@ class TaskStorePort(Protocol):
         intent_ref: str,
     ) -> Mapping[str, Any] | None: ...
 
-    def read_scheduler_snapshot(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
+    def read_scheduler_snapshot(
+        self,
+        graph_id: str,
+        revision: int,
+        *,
+        include_graph_outboxes: bool = False,
+    ) -> Mapping[str, Any]: ...
 
     def transition_graph(
         self,
@@ -129,6 +161,35 @@ class TaskStorePort(Protocol):
         acceptance_judgement: Mapping[str, Any] | Any | None = None,
     ) -> Mapping[str, Any]: ...
 
+    def transition_node_to_accepted_with_artifact(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+        acceptance_judgement: Mapping[str, Any] | Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+    def commit_node_acceptance(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        expected_version: int,
+        outbox: Any,
+        acceptance_judgement: Mapping[str, Any] | Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
+        effect_intents: Sequence[Mapping[str, Any] | Any] = (),
+    ) -> Mapping[str, Any]: ...
+
     def transition_node_and_stage_acceptance_effects(
         self,
         graph_id: str,
@@ -138,6 +199,9 @@ class TaskStorePort(Protocol):
         expected_version: int,
         outbox: Any,
         acceptance_judgement: Mapping[str, Any] | Any,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
         effect_intents: Sequence[Mapping[str, Any] | Any],
     ) -> Mapping[str, Any]: ...
 
@@ -212,6 +276,7 @@ class TaskStorePort(Protocol):
         operation_fingerprint: str | None,
         attempt_created_outbox: Any,
         attempt_leased_outbox: Any,
+        review_continuation_authority: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]: ...
 
     def schedule_retry(
@@ -454,11 +519,133 @@ class TaskOutboxFactoryPort(Protocol):
         event_type: str,
         payload_ref: str,
         idempotency_key: str | None = None,
+        graph_revision: int | None = None,
         attempt_id: str | None = None,
         evidence_refs: tuple[str, ...] = (),
         outbox_id: str | None = None,
         available_ts_ms: int | None = None,
     ) -> Any: ...
+
+
+class GraphCancellationOperationReconciliationStorePort(Protocol):
+    """Narrow durable boundary for cancellation-bound operation settlement."""
+
+    def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
+
+    def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_intent(self, intent_ref: str) -> Mapping[str, Any]: ...
+
+    def reconcile_graph_cancellation_operation(
+        self,
+        intent_ref: str,
+        reservation_id: str,
+        *,
+        action: str,
+        expected_version: int,
+        outbox: Any,
+        reconciler_actor_id: str,
+        downstream_receipt_ref: str | None = None,
+        attestation_ref: str | None = None,
+        attestation_key_id: str | None = None,
+        attestation_signature: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+
+class GraphCancellationEffectReconciliationStorePort(Protocol):
+    """Append-only proof boundary for one inventoried Effect uncertainty.
+
+    The read returns one exact aggregate with ``case``, ``intent``, ``effect``,
+    ``fence``, ``attempt`` and an optional ``proof``.  The mutation records a
+    proof sidecar and Outbox only; it must not rewrite the 0092 fence, intent,
+    decision, or a finalized cancellation.
+    """
+
+    def read_graph_cancellation_effect_reconciliation(
+        self,
+        intent_ref: str,
+        effect_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def record_graph_cancellation_effect_reconciliation_proof(
+        self,
+        intent_ref: str,
+        effect_id: str,
+        *,
+        purpose: str,
+        case_id: str,
+        expected_case_snapshot_sha256: str,
+        expected_subject_snapshot_sha256: str,
+        expected_intent_status_version: int,
+        expected_effect_status: str,
+        expected_effect_status_version: int,
+        expected_effect_fencing_token: int,
+        expected_effect_attempt_count: int,
+        expected_effect_lease_owner: str | None,
+        expected_effect_lease_expires_ts_ms: int | None,
+        expected_attempt_status: str,
+        expected_attempt_status_version: int,
+        expected_fence_observed_status: str,
+        expected_fence_observed_status_version: int,
+        expected_fence_resolution_status: str,
+        outcome: str,
+        target_resolution_status: str,
+        receipt_ref: str | None,
+        executor_quiescence_ref: str | None,
+        reconciler_actor_id: str,
+        attestation_ref: str,
+        attestation_key_id: str,
+        attestation_signature: str,
+        issued_ts_ms: int,
+        proof_id: str,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+
+class TerminalReconciliationStorePort(Protocol):
+    """Append-only inventory and exact Graph/Budget repair boundary."""
+
+    def inventory_terminal_reconciliation_cases(
+        self,
+        *,
+        limit: int = 500,
+    ) -> Mapping[str, Any]: ...
+
+    def assert_terminal_reconciliation_production_ready(self) -> None: ...
+
+    def list_terminal_reconciliation_candidates(
+        self,
+        graph_id: str | None = None,
+        graph_revision: int | None = None,
+        *,
+        classification: str | None = None,
+        limit: int = 100,
+    ) -> tuple[Mapping[str, Any], ...]: ...
+
+    def read_terminal_reconciliation_case(
+        self,
+        case_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def record_terminal_reconciliation_proof(
+        self,
+        case_id: str,
+        *,
+        expected_case_snapshot_sha256: str,
+        expected_subject_snapshot_sha256: str,
+        action: str,
+        target_graph_status: str | None,
+        target_budget_status: str | None,
+        authority_kind: str,
+        reconciler_actor_id: str,
+        issued_ts_ms: int,
+        proof_id: str,
+        graph_outbox: Any | None,
+        budget_outbox: Any | None,
+        attestation_ref: str | None = None,
+        attestation_key_id: str | None = None,
+        attestation_signature: str | None = None,
+    ) -> Mapping[str, Any]: ...
 
 
 class GovernedWorkerPort(Protocol):
@@ -513,9 +700,12 @@ __all__ = [
     "AcceptancePort",
     "CommandRepositoryPort",
     "ExecutionProjectionReaderPort",
+    "GraphCancellationEffectReconciliationStorePort",
+    "GraphCancellationOperationReconciliationStorePort",
     "GovernedWorkerPort",
     "GovernedWorkerResolverPort",
     "RuntimeOutboxPublisherPort",
+    "TerminalReconciliationStorePort",
     "TaskOutboxFactoryPort",
     "TaskStorePort",
     "VerificationPort",

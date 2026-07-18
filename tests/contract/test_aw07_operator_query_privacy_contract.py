@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.observability.operator_query_gateway import (
     DigestOperatorQueryAuthenticator,
     OPERATOR_QUERY_AUTH_BINDINGS_ENV,
@@ -223,10 +224,17 @@ def test_real_obs_fastapi_trace_route_crosses_operator_query_gateway(monkeypatch
             }
         },
     )()
+    projection_store = type(
+        "Store",
+        (),
+        {"get": lambda _self, _kind, _key: projection},
+    )()
     monkeypatch.setattr(
-        obs_module,
-        "get_query_projection_store",
-        lambda: type("Store", (), {"get": lambda _self, _kind, _key: projection})(),
+        obs_module.app.state,
+        "obs_route_ports",
+        ObsRoutePorts(
+            query_projection_store_provider=lambda: projection_store,
+        ),
     )
 
     response = TestClient(obs_module.app).post(

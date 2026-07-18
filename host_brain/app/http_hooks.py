@@ -131,6 +131,7 @@ def runtime_lifespan(
     logger: Any,
     lifecycle_ports: LifecycleRuntimeApplicationPorts,
     canon_service_provider: Callable[[], Any | None] | None = None,
+    mode_transition_service_sink: Callable[[Any | None], None] | None = None,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
@@ -481,21 +482,12 @@ def runtime_lifespan(
                     set_sys_mode=set_sys_mode,
                     ledger=ledger,
                 )
+                if mode_transition_service_sink is not None:
+                    mode_transition_service_sink(_mode_service)
 
                 _activity_monitor = ActivityMonitor(mode_transition_service=_mode_service)
                 _activity_monitor.start()
                 set_activity_monitor(_activity_monitor)  # 注册到 dependencies 供消息链路调用
-
-                # 将 ModeTransitionService 实例注入到 obs_routes 模块，
-                # 确保 /obs/sys-mode API 端点和 ActivityMonitor 共享同一实例
-                # （避免历史记录/规则开关各自独立的问题）
-                try:
-                    import host_brain.app.obs_routes_sysmode as _obs_mod  # noqa: PLC0415
-                    with _obs_mod._mode_transition_lock:
-                        _obs_mod._mode_transition_service = _mode_service
-                    logger.info("ModeTransitionService 已注入 obs_routes（单例共享）")
-                except Exception as _inject_exc:
-                    logger.warning("ModeTransitionService 注入 obs_routes 失败（降级）: %s", _inject_exc)
 
                 new_module_statuses["activity_monitor"] = (
                     f"OK (gaming_check={_activity_monitor._gaming_interval}s, "
@@ -637,6 +629,8 @@ def runtime_lifespan(
         try:
             yield
         finally:
+            if mode_transition_service_sink is not None:
+                mode_transition_service_sink(None)
             await _shutdown_runtime(
                 activity_monitor=_activity_monitor,
                 resource_manager=_resource_manager,

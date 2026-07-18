@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import inspect
 
+import pytest
+
 import host_brain.task_runtime as task_runtime
 from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import coordinator_receipts
@@ -12,6 +14,8 @@ from host_brain.task_runtime import graph_cancellation_projection
 from host_brain.task_runtime import graph_cancellation_records
 from host_brain.task_runtime import graph_cancellation_runtime
 from host_brain.task_runtime import node_execution_runtime
+from host_brain.task_runtime.admission import AdmittedExecution, AdmittedTaskNode
+from host_brain.task_runtime.errors import GovernedRuntimeError
 
 
 DAG_RECORD_NAMES = (
@@ -466,3 +470,68 @@ def test_extracted_records_remain_frozen_slotted_dataclasses() -> None:
     assert outcome.__dataclass_params__.frozen is True
     assert receipt.__slots__
     assert outcome.__slots__
+
+
+def test_pre_review_receipt_and_outcome_use_null_attempt_only() -> None:
+    admitted = AdmittedExecution(
+        command_id="command-pre-review",
+        work_order_id="work-order-pre-review",
+        assignment_id="assignment-pre-review",
+        executor="HOST",
+        graph_id="graph-pre-review",
+        graph_revision=1,
+        nodes=(
+            AdmittedTaskNode(
+                node_id="node-pre-review",
+                worker_route="skill:pre-review",
+                dependencies=(),
+                acceptance_criteria=(),
+                operation_fingerprint="sha256:" + "1" * 64,
+                reservation_id="reservation-pre-review",
+            ),
+        ),
+        business_scope="graph:graph-pre-review@1",
+    )
+    receipt = coordinator_receipts.build_execution_receipt(
+        admitted,
+        attempt_id=None,
+        status="WAITING_APPROVAL",
+        verification_status="NOT_RUN",
+        accepted=False,
+    )
+    event = coordinator_receipts.terminal_event(receipt)
+    outcome = coordinator_records._ParallelNodeOutcome.from_terminal_event(
+        node_id=admitted.node_id,
+        event=event,
+    )
+    assert receipt.to_dict()["attempt_id"] is None
+    assert outcome.attempt_id is None
+
+    with pytest.raises(ValueError, match="must not bind a TaskAttempt"):
+        coordinator_receipts.build_execution_receipt(
+            admitted,
+            attempt_id="attempt::fabricated",
+            status="WAITING_APPROVAL",
+            verification_status="NOT_RUN",
+            accepted=False,
+        )
+
+    forged_event = dict(event)
+    forged_receipt = dict(event["execution_receipt"])
+    forged_receipt["attempt_id"] = "attempt::fabricated"
+    forged_event["execution_receipt"] = forged_receipt
+    with pytest.raises(GovernedRuntimeError, match="bound a TaskAttempt"):
+        coordinator_records._ParallelNodeOutcome.from_terminal_event(
+            node_id=admitted.node_id,
+            event=forged_event,
+        )
+
+    post_without_attempt = dict(event)
+    post_receipt = dict(event["execution_receipt"])
+    post_receipt["status"] = "WAITING_ACCEPTANCE_REVIEW"
+    post_without_attempt["execution_receipt"] = post_receipt
+    with pytest.raises(GovernedRuntimeError, match="has no TaskAttempt"):
+        coordinator_records._ParallelNodeOutcome.from_terminal_event(
+            node_id=admitted.node_id,
+            event=post_without_attempt,
+        )

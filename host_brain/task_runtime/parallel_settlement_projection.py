@@ -6,6 +6,8 @@ import inspect
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.persistence.task_store_types import TASK_STORE_BUDGET_EXCEEDED
+
 from .admission import AdmittedExecution
 from .budget_runtime import BudgetRuntimeContext
 from .coordinator_records import (
@@ -128,9 +130,7 @@ class ParallelSettlementProjection:
         outcomes_by_lineage = {
             (outcome.node_id, outcome.attempt_id): outcome for outcome in outcomes
         }
-        rejected: list[
-            tuple[tuple[int, int, str], Mapping[str, Any], _ParallelNodeOutcome]
-        ] = []
+        terminal_winners: list[tuple[Mapping[str, Any], _ParallelNodeOutcome]] = []
         for raw_usage in raw_usages:
             if not isinstance(raw_usage, Mapping):
                 continue
@@ -142,27 +142,19 @@ class ParallelSettlementProjection:
                 source is None
                 or _text(raw_usage.get("budget_id")) != budget.budget_id
                 or raw_usage.get("accepted") is not False
+                or _text(raw_usage.get("reason_code")) != TASK_STORE_BUDGET_EXCEEDED
                 or not isinstance(exceeded_dimensions, list)
                 or not exceeded_dimensions
             ):
                 continue
-            rejected.append(
-                (
-                    (
-                        int(raw_usage.get("reservation_version_after") or 0),
-                        int(raw_usage.get("created_ts_ms") or 0),
-                        _text(raw_usage.get("usage_id")),
-                    ),
-                    raw_usage,
-                    source,
-                )
-            )
-        if not rejected:
+            terminal_winners.append((raw_usage, source))
+        if len(terminal_winners) != 1:
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
-                "EXCEEDED Budget has no rejected usage matching the latest Attempt lineage",
+                "EXCEEDED Budget must have exactly one canonical winning usage "
+                "matching the latest Attempt lineage",
             )
-        _, usage, source = min(rejected, key=lambda item: item[0])
+        usage, source = terminal_winners[0]
         usage_ref = _required_record_text(usage, "usage_id")
         event = dict(source.event)
         receipt_raw = event.get("execution_receipt")
@@ -292,6 +284,19 @@ class ParallelSettlementProjection:
                         f"parallel TaskNode {outcome.node_id} receipt status "
                         f"{outcome.status} conflicts with durable status {durable_status}"
                     ),
+                )
+            if outcome.status == "WAITING_APPROVAL":
+                if outcome.attempt_id is not None:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        f"parallel TaskNode {outcome.node_id} pre-execution review "
+                        "bound a TaskAttempt",
+                    )
+                continue
+            if not outcome.attempt_id:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    f"parallel TaskNode {outcome.node_id} receipt has no TaskAttempt",
                 )
             durable_attempt = _mapping(
                 await _maybe_await(self._store.get_attempt(outcome.attempt_id)),

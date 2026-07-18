@@ -60,7 +60,7 @@ export function buildDigitalLifeWiredDomains({
       desc: !hasRuntimeSnapshot && !topEmotion
         ? '等待运行快照恢复后补齐情绪与表情摘要。'
         : topEmotion
-          ? `当前情绪 ${currentEmotion} · VTS 降级率 ${vtsData?.degrade_rate ?? 0}%`
+          ? `当前情绪 ${currentEmotion} · VTS 降级率 ${vtsData?.degrade_rate == null ? '不可测' : `${vtsData.degrade_rate}%`}`
           : '情绪上下文已接入，但当前窗口还没有可用的表情样本。',
       status: !hasRuntimeSnapshot && !topEmotion
         ? 'pending'

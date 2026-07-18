@@ -8,6 +8,7 @@ import re
 from .command_ports import (
     ObsCommandEnvelope,
     ObsCommandExecutionResult,
+    ObsCommandPortExecutionError,
     ObsCommandPortRegistry,
 )
 
@@ -42,7 +43,15 @@ class ObsCommandRouter:
             result = port.execute(envelope)
             if inspect.isawaitable(result):
                 result = await result
+        except ObsCommandPortExecutionError as exc:
+            raise ObsCommandRoutingError(
+                exc.reason_code,
+                side_effects_may_have_run=exc.side_effects_may_have_run,
+            ) from exc
         except Exception as exc:
+            # Arbitrary dependencies are not an authority source.  Even an
+            # exception with similarly named attributes remains uncertain
+            # until a registered port translates it into the closed contract.
             raise ObsCommandRoutingError(
                 "OBS_COMMAND_EXECUTION_UNCERTAIN",
                 side_effects_may_have_run=True,

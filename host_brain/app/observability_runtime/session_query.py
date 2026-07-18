@@ -14,7 +14,6 @@ from host_brain.app.observability_runtime.projection_runtime import (
     SESSION_KIND,
     projection_meta,
 )
-from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
 logger = logging.getLogger("Natsume.obs.session")
@@ -396,6 +395,3 @@ def refresh_session_query_projection() -> dict[str, int]:
         source_ref="session-background-worker",
     )
     return {"session_count": len(rows)}
-
-
-register_projection_job("sessions", refresh_session_query_projection)

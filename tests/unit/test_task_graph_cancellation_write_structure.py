@@ -25,7 +25,7 @@ def _method_ast(owner: type, name: str) -> ast.FunctionDef:
 
 
 def test_graph_cancellation_write_mixins_borrow_owner_authorities() -> None:
-    assert task_repository.DurableTaskStore.__bases__[4:6] == (
+    assert task_repository.DurableTaskStore.__bases__[6:8] == (
         TaskGraphCancellationRequestMixin,
         TaskGraphCancellationFinalizationMixin,
     )
@@ -36,7 +36,7 @@ def test_graph_cancellation_write_mixins_borrow_owner_authorities() -> None:
     }
     critical_conn_calls = {
         "request_graph_cancellation": {
-            "_assert_graph_cancellation_decision_bindings",
+            "_assert_graph_cancellation_decision_trusted",
             "_assert_mutation_outbox_replay",
             "_insert_outbox",
             "_mark_operation_recovery_required",

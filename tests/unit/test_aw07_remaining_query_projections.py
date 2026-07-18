@@ -75,7 +75,9 @@ class _SourceLedger:
 def test_background_job_materializes_metadata_without_private_bodies(
     tmp_path, monkeypatch
 ) -> None:
-    from host_brain.composition import process_services as dependencies
+    from host_brain.app.obs_projection_jobs import (
+        _remaining_queries_callback,
+    )
     from host_brain.memory import canon_world_store
     from host_brain.app.observability_runtime import remaining_query_projection as projection
 
@@ -130,9 +132,6 @@ def test_background_job_materializes_metadata_without_private_bodies(
             return [WorldDocument(), RelativeWorldDocument()]
 
     monkeypatch.setattr(canon_world_store, "WorldCanonStore", WorldStore)
-    monkeypatch.setattr(dependencies, "get_ledger", lambda: source_ledger)
-    monkeypatch.setattr(dependencies, "get_query_projection_store", lambda: store)
-
     class CanonService:
         @staticmethod
         def preview_sync():
@@ -142,9 +141,11 @@ def test_background_job_materializes_metadata_without_private_bodies(
                 {"issues": (), "records": (), "removed_doc_ids": ()},
             )()
 
-    result = projection.refresh_remaining_query_projections(
-        canon_service=CanonService(),
-    )
+    result = _remaining_queries_callback(
+        source_ledger,
+        store,
+        CanonService(),
+    )()
 
     assert result["agent_loop_count"] == 1
     assert result["checkpoint_count"] == 1
@@ -185,14 +186,28 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
     def forbidden(*_args, **_kwargs):
         raise AssertionError("GET touched a source")
 
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: EmptyStore())
+    empty_store = EmptyStore()
+    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: empty_store)
     monkeypatch.setattr(dependencies, "get_ledger", forbidden)
-    monkeypatch.setattr(web_ui, "get_ledger", forbidden)
 
-    stats = agent_routes.get_agent_loop_stats(window_minutes=60, limit=10)
-    resident = agent_routes.get_memory_resident_context()
-    history = skill_routes.get_agent_loop_history(window_minutes=60, limit=10)
-    checkpoints = system_routes.get_checkpoints(limit=20, include_expired=False)
+    stats = agent_routes.get_agent_loop_stats(
+        window_minutes=60,
+        limit=10,
+        projection_store=empty_store,
+    )
+    resident = agent_routes.get_memory_resident_context(
+        projection_store=empty_store,
+    )
+    history = skill_routes.get_agent_loop_history(
+        window_minutes=60,
+        limit=10,
+        projection_store=empty_store,
+    )
+    checkpoints = system_routes.get_checkpoints(
+        limit=20,
+        include_expired=False,
+        projection_store=empty_store,
+    )
     now = datetime.now()
     timeline = web_ui.get_timeline_aggregation(
         start_time=now - timedelta(hours=1),
@@ -202,6 +217,7 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
         request_type=None,
         limit=100,
         offset=0,
+        projection_store=empty_store,
     )
     search = web_ui.search_requests(
         query="req",
@@ -211,6 +227,7 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
         page_size=20,
         limit=100,
         offset=0,
+        projection_store=empty_store,
     )
 
     for response in (stats, resident, history, checkpoints, timeline):
@@ -223,9 +240,8 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
 
 
 def test_stale_projection_returns_empty_payload_with_preserved_version_cursor(
-    tmp_path, monkeypatch
+    tmp_path,
 ) -> None:
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_stats_agent as agent_routes
     from host_brain.app.observability_runtime import remaining_query_projection as projection
 
@@ -252,15 +268,54 @@ def test_stale_projection_returns_empty_payload_with_preserved_version_cursor(
         source_cursor=77,
         freshness_ts_ms=1,
     )
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: store)
-
-    response = agent_routes.get_agent_loop_stats(window_minutes=60, limit=10)
+    response = agent_routes.get_agent_loop_stats(
+        window_minutes=60,
+        limit=10,
+        projection_store=store,
+    )
 
     assert response.recent_loops == []
     assert response.projection_version == document.projection_version
     assert response.cursor == 77
     assert response.freshness_ts_ms == 1
     assert response.degraded_state == "STALE"
+
+
+def test_read_all_from_store_is_explicit(tmp_path) -> None:
+    from host_brain.app.observability_runtime import remaining_query_projection as projection
+    from host_brain.app.observability_runtime.projection_runtime import TRACE_KIND
+
+    store = _store(tmp_path)
+    now_ms = int(time.time() * 1000)
+    first = store.upsert(
+        TRACE_KIND,
+        "req-explicit-one",
+        {"request_id": "req-explicit-one", "ts_ms": now_ms},
+        source_cursor=11,
+        freshness_ts_ms=now_ms,
+    )
+    second = store.upsert(
+        TRACE_KIND,
+        "req-explicit-two",
+        {"request_id": "req-explicit-two", "ts_ms": now_ms},
+        source_cursor=22,
+        freshness_ts_ms=now_ms,
+    )
+
+    explicit_payloads, explicit_meta = projection.read_all_from_store(
+        store,
+        TRACE_KIND,
+    )
+
+    assert {item["request_id"] for item in explicit_payloads} == {
+        "req-explicit-one",
+        "req-explicit-two",
+    }
+    assert explicit_meta["projection_version"] == max(
+        first.projection_version,
+        second.projection_version,
+    )
+    assert explicit_meta["source_cursor"] == 22
 
 
 def test_remaining_get_handlers_are_projection_only_by_ast_contract() -> None:
@@ -271,7 +326,9 @@ def test_remaining_get_handlers_are_projection_only_by_ast_contract() -> None:
 
     handlers = (
         web_ui.get_timeline_aggregation,
+        web_ui.get_status_distribution,
         web_ui.get_request_detail,
+        web_ui.get_link_topology,
         web_ui.search_requests,
         agent_routes.get_agent_loop_stats,
         agent_routes.get_memory_resident_context,

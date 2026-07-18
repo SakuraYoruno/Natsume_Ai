@@ -4,24 +4,21 @@ from pathlib import Path
 
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
-from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
+from host_brain.agent_runtime.workspace_policy import WORKSPACE_WRITE_GRANT_REQUIRED
 
 
-def test_codex_immuneplane_builds_and_executes_self_heal_work_order(monkeypatch, tmp_path) -> None:
+def test_codex_immuneplane_blocks_self_heal_runtime_repo_without_workspace_grant(monkeypatch, tmp_path) -> None:
+    executor_called = False
+
     class CanonicalFixtureExecutor:
-        def __init__(self, **dependencies: object) -> None:
-            assert dependencies["model_attempt_service"] is model_attempt_service
-            assert dependencies["prompt_registry"] is prompt_registry
+        def __init__(self, **_dependencies: object) -> None:
+            pass
 
-        def execute(self, order, *, workspace: Path) -> AgentResult:  # noqa: ANN001
-            return AgentResult(
-                status="EXECUTED",
-                work_order_id=order.work_order_id,
-                summary="Canonical self-heal fixture completed.",
-                result_text=f"checked {workspace.name}",
-                review_required=True,
-            )
+        def execute(self, _order, *, workspace: Path):  # noqa: ANN001, ANN201
+            nonlocal executor_called
+            executor_called = True
+            raise AssertionError(f"executor must not run without WorkspaceGrant: {workspace}")
 
     model_attempt_service = object()
     prompt_registry = object()
@@ -52,8 +49,9 @@ def test_codex_immuneplane_builds_and_executes_self_heal_work_order(monkeypatch,
         prompt_registry=prompt_registry,
     ).execute(work_order)
 
-    assert result["status"] == "EXECUTED"
+    assert result["status"] == "BLOCKED"
+    assert result["reason_code"] == WORKSPACE_WRITE_GRANT_REQUIRED
     assert result["review_required"] is True
-    assert result["risk_flags"] == []
-    assert result["metadata"]["execution_authority"] == "canonical_agent_executor"
+    assert result["risk_flags"] == ["workspace_grant_required"]
+    assert executor_called is False
     assert Path(result["artifacts_dir"], "work_order.json").exists()

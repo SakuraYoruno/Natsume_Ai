@@ -16,6 +16,7 @@ from host_brain.model_runtime.contracts import (
     AttemptAuditRepository,
     AttemptStatus,
     CacheScope,
+    ModelBudgetGuard,
     ModelAttemptRecord,
     ModelAttemptRequest,
     ModelAttemptResult,
@@ -44,6 +45,14 @@ class AttemptAuditError(ModelAttemptServiceError):
 
 class OutputContractViolation(ModelAttemptServiceError):
     def __init__(self, message: str, *, code: str = "OUTPUT_SCHEMA_INVALID") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ModelBudgetGuardViolation(ModelAttemptServiceError):
+    """A guarded model call cannot prove or honor its immutable limits."""
+
+    def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
         self.code = code
 
@@ -154,20 +163,23 @@ def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, 
 
     measured: dict[str, int] = {}
     has_total, total = _present_int("total_tokens", "totalTokenCount")
+    has_prompt, prompt = _present_int(
+        "prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount"
+    )
+    has_completion, completion = _present_int(
+        "completion_tokens",
+        "output_tokens",
+        "candidatesTokenCount",
+        "outputTokenCount",
+    )
+    if has_prompt:
+        measured["prompt_tokens"] = prompt
+    if has_completion:
+        measured["completion_tokens"] = completion
     if has_total:
         measured["token_count"] = total
-    else:
-        has_prompt, prompt = _present_int(
-            "prompt_tokens", "input_tokens", "promptTokenCount", "inputTokenCount"
-        )
-        has_completion, completion = _present_int(
-            "completion_tokens",
-            "output_tokens",
-            "candidatesTokenCount",
-            "outputTokenCount",
-        )
-        if has_prompt and has_completion:
-            measured["token_count"] = prompt + completion
+    elif has_prompt and has_completion:
+        measured["token_count"] = prompt + completion
 
     # Cost is accepted only in the canonical integer micro-unit.  Currency
     # floats and provider-specific price estimates are deliberately ignored.
@@ -221,10 +233,18 @@ class ModelAttemptService:
             )
 
         attempts: list[ModelAttemptRecord] = []
-        # Attempt budget is a route-policy decision.  Request/domain code may
-        # provide semantic evaluation, but it cannot raise or lower the number
-        # of provider attempts selected by the server-owned route.
-        budget = prepared.route.max_attempts
+        # An ordinary request cannot alter the route-owned provider budget.
+        # A typed ModelBudgetGuard is different: it comes from a durable Task
+        # reservation and can only reduce that server-selected ceiling.
+        guard = request.model_budget_guard
+        budget = min(
+            prepared.route.max_attempts,
+            (
+                guard.max_provider_attempts
+                if guard is not None
+                else prepared.route.max_attempts
+            ),
+        )
         target_index = 0
         retry_reason = "initial"
         prompt = prepared.prompt
@@ -256,6 +276,11 @@ class ModelAttemptService:
                 response = await asyncio.wait_for(
                     adapter.complete(attempt_request),
                     timeout=max(0.001, attempt_request.timeout_ms / 1000.0),
+                )
+                self._assert_model_budget_guard_response(
+                    response,
+                    guard,
+                    prior_attempts=attempts,
                 )
                 validate_output_contract(response.content, prompt.output_contract)
                 directive = await self._evaluate_retry(request, response, attempt_request)
@@ -310,6 +335,28 @@ class ModelAttemptService:
                 )
                 await asyncio.shield(self._audit(terminal))
                 raise
+            except ModelBudgetGuardViolation as exc:
+                # Do not retry or fall back after an unmetered/over-cap call.
+                # Its true charge cannot be reconstructed safely, so accepting
+                # any later provider response would leave the Task ledger false.
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=AttemptStatus.REJECTED,
+                    response=response,
+                    error_code=exc.code,
+                    error_message=str(exc),
+                )
+                await self._audit(terminal)
+                attempts.append(terminal)
+                return ModelAttemptResult(
+                    request_id=request.request_id,
+                    success=False,
+                    route_decision=prepared.route,
+                    attempts=tuple(attempts),
+                    error_code=exc.code,
+                    error_message=str(exc),
+                )
             except OutputContractViolation as exc:
                 terminal = self._terminal_record(
                     started,
@@ -334,24 +381,62 @@ class ModelAttemptService:
                 terminal = self._terminal_record(
                     started,
                     started_monotonic=started_monotonic,
-                    status=AttemptStatus.TIMED_OUT,
-                    error_code="PROVIDER_TIMEOUT",
+                    status=(
+                        AttemptStatus.REJECTED
+                        if guard is not None
+                        else AttemptStatus.TIMED_OUT
+                    ),
+                    error_code=(
+                        "MODEL_PROVIDER_USAGE_UNPROVEN"
+                        if guard is not None
+                        else "PROVIDER_TIMEOUT"
+                    ),
                     error_message=_safe_error_message(exc),
                 )
                 await self._audit(terminal)
                 attempts.append(terminal)
+                if guard is not None:
+                    return ModelAttemptResult(
+                        request_id=request.request_id,
+                        success=False,
+                        route_decision=prepared.route,
+                        attempts=tuple(attempts),
+                        error_code="MODEL_PROVIDER_USAGE_UNPROVEN",
+                        error_message="guarded provider call timed out without canonical usage",
+                    )
                 last_error_code = "PROVIDER_TIMEOUT"
                 last_error_message = "provider attempt timed out"
             except Exception as exc:
                 terminal = self._terminal_record(
                     started,
                     started_monotonic=started_monotonic,
-                    status=AttemptStatus.FAILED,
-                    error_code=type(exc).__name__.upper(),
-                    error_message=_safe_error_message(exc),
+                    status=(
+                        AttemptStatus.REJECTED
+                        if guard is not None
+                        else AttemptStatus.FAILED
+                    ),
+                    error_code=(
+                        "MODEL_PROVIDER_USAGE_UNPROVEN"
+                        if guard is not None
+                        else type(exc).__name__.upper()
+                    ),
+                    error_message=(
+                        "guarded provider call failed without canonical usage"
+                        if guard is not None
+                        else _safe_error_message(exc)
+                    ),
                 )
                 await self._audit(terminal)
                 attempts.append(terminal)
+                if guard is not None:
+                    return ModelAttemptResult(
+                        request_id=request.request_id,
+                        success=False,
+                        route_decision=prepared.route,
+                        attempts=tuple(attempts),
+                        error_code="MODEL_PROVIDER_USAGE_UNPROVEN",
+                        error_message="guarded provider call failed without canonical usage",
+                    )
                 last_error_code = terminal.error_code or "PROVIDER_ERROR"
                 last_error_message = terminal.error_message or "provider attempt failed"
 
@@ -385,6 +470,13 @@ class ModelAttemptService:
         commitment forbids fallback on interruption.
         """
 
+        if request.model_budget_guard is not None:
+            # Streaming adapters expose text chunks but not a final canonical
+            # usage record, so they cannot satisfy a durable budget guard.
+            raise ModelBudgetGuardViolation(
+                "guarded model calls require complete usage accounting",
+                code="MODEL_BUDGET_STREAM_UNSUPPORTED",
+            )
         prepared = await self._prepare(request)
         cached = self._get_cached(prepared.cache_key)
         if cached is not None:
@@ -546,7 +638,13 @@ class ModelAttemptService:
         )
         if not isinstance(route, RouteDecision):
             raise TypeError("route policy must return RouteDecision")
-        cache_key = self._cache_key(request, prompt, route)
+        # A cache hit has no provider usage for this execution. A guarded call
+        # must produce a fresh, node-bound measurement before Task acceptance.
+        cache_key = (
+            None
+            if request.model_budget_guard is not None
+            else self._cache_key(request, prompt, route)
+        )
         return _PreparedCall(prompt=prompt, route=route, deadline_at=deadline_at, cache_key=cache_key)
 
     async def _evaluate_retry(
@@ -589,7 +687,18 @@ class ModelAttemptService:
             target=target,
             timeout_ms=max(1, timeout_ms),
             metadata=dict(request.metadata),
+            model_budget_guard=request.model_budget_guard,
         )
+        audit_metadata: dict[str, Any] = {
+            "scene_type": request.scene_type,
+            "cognitive_tier": request.cognitive_tier,
+        }
+        # Model-node identity is a governed public dimension.  Preserve only
+        # this explicit key from caller metadata; arbitrary request metadata
+        # must never enter the durable audit journal.
+        model_node_id = str(request.metadata.get("model_node_id") or "").strip()
+        if model_node_id:
+            audit_metadata["model_node_id"] = model_node_id
         started = ModelAttemptRecord(
             attempt_id=attempt_id,
             request_id=request.request_id,
@@ -604,9 +713,61 @@ class ModelAttemptService:
             prompt_version=prompt.version,
             prompt_digest=prompt.digest,
             started_at_ms=self._wall_clock_ms(),
-            metadata={"scene_type": request.scene_type, "cognitive_tier": request.cognitive_tier},
+            metadata=audit_metadata,
         )
         return attempt_request, started, self._monotonic()
+
+    @staticmethod
+    def _assert_model_budget_guard_response(
+        response: ProviderResponse,
+        guard: ModelBudgetGuard | None,
+        *,
+        prior_attempts: Sequence[ModelAttemptRecord] = (),
+    ) -> None:
+        if guard is None:
+            return
+        measured = _provider_budget_measurements(response.usage)
+        missing = [
+            dimension
+            for dimension in guard.required_usage_dimensions
+            if dimension not in measured
+        ]
+        if missing:
+            raise ModelBudgetGuardViolation(
+                "provider response omitted required budget measurements: "
+                + ", ".join(missing),
+                code="MODEL_PROVIDER_USAGE_REQUIRED",
+            )
+        completion_tokens = int(measured["completion_tokens"])
+        if completion_tokens > guard.max_output_tokens:
+            raise ModelBudgetGuardViolation(
+                "provider response exceeded the governed output token cap",
+                code="MODEL_OUTPUT_BUDGET_EXCEEDED",
+            )
+        prior_measurements = [
+            _provider_budget_measurements(
+                item.metadata.get("provider_budget_measurements")
+            )
+            for item in prior_attempts
+        ]
+        token_count = sum(
+            int(item.get("token_count", 0)) for item in prior_measurements
+        )
+        token_count += int(measured["token_count"])
+        if token_count > guard.max_token_count:
+            raise ModelBudgetGuardViolation(
+                "provider responses exceeded the governed total token budget",
+                code="MODEL_TOKEN_BUDGET_EXCEEDED",
+            )
+        model_cost_micros = sum(
+            int(item.get("model_cost_micros", 0)) for item in prior_measurements
+        )
+        model_cost_micros += int(measured["model_cost_micros"])
+        if model_cost_micros > guard.max_model_cost_micros:
+            raise ModelBudgetGuardViolation(
+                "provider responses exceeded the governed model cost budget",
+                code="MODEL_COST_BUDGET_EXCEEDED",
+            )
 
     def _terminal_record(
         self,

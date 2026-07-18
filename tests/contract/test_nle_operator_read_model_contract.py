@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -268,15 +269,26 @@ class _TaskStore:
 
     def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict:
         self.calls.append(("read_scheduler_snapshot", graph_id, revision))
-        return _snapshot()
+        snapshot = _snapshot()
+        snapshot["graph_record"]["revision"] = revision
+        snapshot["graph_record"]["graph"]["revision"] = revision
+        for node in snapshot["graph_record"]["nodes"]:
+            node["graph_revision"] = revision
+        return snapshot
 
 
 class _ReviewStore:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def list_reviews(self, *, task_graph_id: str, limit: int) -> list[dict]:
-        self.calls.append(("list_reviews", task_graph_id, limit))
+    def list_reviews(
+        self,
+        *,
+        task_graph_id: str,
+        graph_revision: int,
+        limit: int,
+    ) -> list[dict]:
+        self.calls.append(("list_reviews", task_graph_id, graph_revision, limit))
         return [_review("review-pending", status="PENDING", expires_at=2_000)]
 
     def get_review(self, review_id: str) -> dict:
@@ -311,10 +323,66 @@ def test_t_nle_21_service_uses_only_store_read_facades() -> None:
         ("list_graphs", 25),
         ("read_scheduler_snapshot", "graph-1", 3),
     ]
-    assert reviews.calls == [("list_reviews", "graph-1", 500)]
+    assert reviews.calls == [("list_reviews", "graph-1", 3, 500)]
     assert events.calls and events.calls[0][0] == "list_events_for_aggregates"
+    assert ("TASK_GRAPH", "graph-1@3") in events.calls[0][1]
     for store in (tasks, reviews, events):
         assert not any(name.startswith(("write", "create", "update", "approve", "reject", "resume")) for name, *_ in store.calls)
+
+
+def test_t_nle_21_service_scopes_review_events_to_the_exact_graph_revision() -> None:
+    revision_one = _review(
+        "review-revision-1",
+        status="PENDING",
+        expires_at=2_000,
+    )
+    revision_one["review"]["subject_ref"] = "task-node://graph-1/1/execute"
+    revision_two = _review(
+        "review-revision-2",
+        status="PENDING",
+        expires_at=2_000,
+    )
+    revision_two["review"]["subject_ref"] = "task-node://graph-1/2/execute"
+
+    class ExactRevisionReviewStore:
+        def __init__(self) -> None:
+            self.calls: list[tuple] = []
+
+        def list_reviews(
+            self,
+            *,
+            task_graph_id: str,
+            graph_revision: int,
+            limit: int,
+        ) -> list[dict]:
+            self.calls.append(
+                ("list_reviews", task_graph_id, graph_revision, limit)
+            )
+            subject_prefix = f"task-node://{task_graph_id}/{graph_revision}/"
+            return [
+                record
+                for record in (revision_one, revision_two)
+                if record["review"]["subject_ref"].startswith(subject_prefix)
+            ]
+
+    reviews = ExactRevisionReviewStore()
+    events = _EventStore()
+    service = OperatorReadModelService(
+        task_store=_TaskStore(),
+        review_store=reviews,
+        event_store=events,
+        clock=lambda: 1_000,
+    )
+
+    detail = service.get_execution("graph-1", 1, after_cursor=0, event_limit=50)
+
+    assert reviews.calls == [("list_reviews", "graph-1", 1, 500)]
+    assert [review["review_id"] for review in detail["reviews"]] == [
+        "review-revision-1"
+    ]
+    aggregate_refs = events.calls[0][1]
+    assert ("REVIEW", "review-revision-1") in aggregate_refs
+    assert ("REVIEW", "review-revision-2") not in aggregate_refs
 
 
 def test_t_nle_21_review_locator_is_public_read_only_and_allows_unbound_review() -> None:
@@ -403,7 +471,9 @@ def test_t_nle_21_obs_routes_honor_operator_feature_flag(monkeypatch: pytest.Mon
     assert disabled.value.status_code == 404
     assert disabled.value.detail["reason_code"] == "NLE_OPERATOR_VIEWS_DISABLED"
     with pytest.raises(HTTPException) as dependency_disabled:
-        _get_operator_read_model_service()
+        _get_operator_read_model_service(
+            SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+        )
     assert dependency_disabled.value.status_code == 404
 
     monkeypatch.setenv("HOST_NLE_OPERATOR_VIEWS_ENABLED", "true")

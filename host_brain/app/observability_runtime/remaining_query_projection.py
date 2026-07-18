@@ -7,7 +7,6 @@ Private goal/canon/checkpoint bodies are deliberately never materialized.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import time
@@ -19,7 +18,7 @@ from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 from .projection_runtime import projection_meta
 from host_brain.canon.application import CanonApplicationService
-from host_brain.observability.projection_store import digest_json
+from host_brain.observability.projection_store import QueryProjectionStore
 
 
 AGENT_LOOP_KIND = "agent_loop_summary"
@@ -50,18 +49,16 @@ STARTUP_SNAPSHOT_KEY = "current"
 REMAINING_QUERY_MAX_AGE_MS = 15_000
 
 
-def read(
+def read_from_store(
+    store: QueryProjectionStore,
     kind: str,
     key: str,
     *,
     max_age_ms: int = REMAINING_QUERY_MAX_AGE_MS,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """Read an already materialized document; never invoke a source loader."""
+    """Read one materialized document through an explicit app-local store."""
 
-    from host_brain.composition.process_services import peek_query_projection_store
-
-    store = peek_query_projection_store()
-    document = store.get(kind, key) if store is not None else None
+    document = store.get(kind, key)
     meta = projection_meta(kind, key, document, max_age_ms=max_age_ms)
     if document is None or not meta["available"]:
         return None, meta
@@ -82,17 +79,15 @@ def response_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def read_all(
+def read_all_from_store(
+    store: QueryProjectionStore,
     kind: str,
     *,
     max_age_ms: int = REMAINING_QUERY_MAX_AGE_MS,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Read every fresh document of a kind without opening a source store."""
+    """Read every fresh document through an explicit app-local store."""
 
-    from host_brain.composition.process_services import peek_query_projection_store
-
-    store = peek_query_projection_store()
-    documents = list(store.list(kind)) if store is not None else []
+    documents = list(store.list(kind))
     available: list[tuple[Any, dict[str, Any]]] = []
     for document in documents:
         meta = projection_meta(
@@ -313,25 +308,6 @@ def _checkpoint_documents(ledger: Any) -> tuple[list[dict[str, Any]], int]:
     return documents, cursor
 
 
-def _world_snapshot_payload(ledger: Any) -> tuple[dict[str, Any], int]:
-    from host_brain.composition.process_services import get_state_arbiter
-    from host_brain.persona.scene_policy import life_projection_enabled
-    from host_brain.runtime.world_model import build_world_snapshot
-
-    payload = asyncio.run(
-        build_world_snapshot(
-            ledger=ledger,
-            person_id="default",
-            state_arbiter=get_state_arbiter(),
-            fact_keys=[],
-            session_id="",
-            enabled=life_projection_enabled(),
-        )
-    )
-    cursor = int(payload.get("generated_at_ms") or 0)
-    return dict(payload), cursor
-
-
 def _memory_payloads(ledger: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
     from host_brain.app.context.memory_context_orchestrator import (
         build_memory_context_debug,
@@ -452,126 +428,6 @@ def _canon_sync_payload(service: CanonApplicationService) -> tuple[dict[str, Any
     return payload, now
 
 
-def _startup_snapshot_payload() -> tuple[dict[str, Any] | None, int]:
-    from host_brain.app.startup_snapshot import (
-        peek_current_startup_snapshot,
-        snapshot_to_dict,
-    )
-
-    snapshot = peek_current_startup_snapshot()
-    if snapshot is None:
-        return None, 0
-    payload = snapshot_to_dict(snapshot)
-    return payload, int(snapshot.ts_ms)
-
-
-def refresh_remaining_query_projections(
-    *,
-    canon_service: CanonApplicationService,
-) -> dict[str, int]:
-    """Independent source job; never call this function from a GET handler."""
-
-    from host_brain.composition.process_services import get_ledger, get_query_projection_store
-
-    ledger = get_ledger()
-    store = get_query_projection_store()
-    agent_payload, agent_cursor = _agent_loop_payload(ledger)
-    store.upsert(
-        AGENT_LOOP_KIND,
-        AGENT_LOOP_INDEX_KEY,
-        agent_payload,
-        source_cursor=agent_cursor,
-        source_digest=digest_json(agent_payload),
-        source_ref="agent-loop-background-worker",
-    )
-    resident_payload, resident_cursor = _resident_context_payload(ledger)
-    store.upsert(
-        RESIDENT_CONTEXT_KIND,
-        RESIDENT_CONTEXT_INDEX_KEY,
-        resident_payload,
-        source_cursor=resident_cursor,
-        source_digest=digest_json(resident_payload),
-        source_ref="resident-context-background-worker",
-    )
-    checkpoints, checkpoint_cursor = _checkpoint_documents(ledger)
-    store.upsert(
-        CHECKPOINT_INDEX_KIND,
-        CHECKPOINT_INDEX_KEY,
-        {"items": checkpoints, "timestamp": checkpoint_cursor},
-        source_cursor=checkpoint_cursor,
-        source_ref="checkpoint-background-worker",
-    )
-    for checkpoint in checkpoints:
-        store.upsert(
-            CHECKPOINT_KIND,
-            str(checkpoint["checkpoint_id"]),
-            checkpoint,
-            source_cursor=int(checkpoint.get("created_at_ms") or 0),
-            source_ref="checkpoint-background-worker",
-        )
-    world_count = 0
-    try:
-        world_payload, world_cursor = _world_snapshot_payload(ledger)
-        store.upsert(
-            WORLD_SNAPSHOT_KIND,
-            "default",
-            world_payload,
-            source_cursor=world_cursor,
-            source_digest=digest_json(world_payload),
-            source_ref="world-snapshot-background-worker",
-        )
-        world_count = 1
-    except Exception:
-        pass
-    events_payload: dict[str, Any] = {"items": []}
-    try:
-        context_payload, health_payload, events_payload, memory_cursor = _memory_payloads(ledger)
-        for kind, payload in (
-            (MEMORY_CONTEXT_KIND, context_payload),
-            (MEMORY_HEALTH_KIND, health_payload),
-            (MEMORY_EVENTS_KIND, events_payload),
-        ):
-            store.upsert(
-                kind,
-                "default",
-                payload,
-                source_cursor=memory_cursor,
-                source_digest=digest_json(payload),
-                source_ref="memory-background-worker",
-            )
-    except Exception:
-        pass
-    canon_payload, canon_cursor = _canon_sync_payload(canon_service)
-    store.upsert(
-        CANON_SYNC_KIND,
-        CANON_SYNC_KEY,
-        canon_payload,
-        source_cursor=canon_cursor,
-        source_digest=digest_json(canon_payload),
-        source_ref="canon-sync-background-worker",
-    )
-    startup_payload, startup_cursor = _startup_snapshot_payload()
-    if startup_payload is not None:
-        store.upsert(
-            STARTUP_SNAPSHOT_KIND,
-            STARTUP_SNAPSHOT_KEY,
-            startup_payload,
-            source_cursor=startup_cursor,
-            source_digest=digest_json(startup_payload),
-            source_ref="startup-snapshot-background-worker",
-        )
-    return {
-        "agent_loop_count": len(agent_payload["loops"]),
-        "resident_document_count": len(resident_payload["world_canon_documents"])
-        + len(resident_payload["persona_resident_documents"]),
-        "checkpoint_count": len(checkpoints),
-        "world_snapshot_count": world_count,
-        "memory_event_count": len(events_payload["items"]),
-        "canon_drift_count": int(canon_payload["drift_count"]),
-        "startup_snapshot_count": int(startup_payload is not None),
-    }
-
-
 __all__ = [
     "AGENT_LOOP_INDEX_KEY",
     "AGENT_LOOP_KIND",
@@ -589,8 +445,7 @@ __all__ = [
     "STARTUP_SNAPSHOT_KEY",
     "STARTUP_SNAPSHOT_KIND",
     "WORLD_SNAPSHOT_KIND",
-    "read",
-    "read_all",
-    "refresh_remaining_query_projections",
+    "read_from_store",
+    "read_all_from_store",
     "response_meta",
 ]

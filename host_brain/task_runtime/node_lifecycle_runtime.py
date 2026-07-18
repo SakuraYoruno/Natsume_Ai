@@ -67,6 +67,7 @@ class DurableNodeLifecycleRuntime:
                         command_id=admitted.command_id,
                         aggregate_type="TASK_GRAPH",
                         aggregate_id=admitted.graph_id,
+                        graph_revision=admitted.graph_revision,
                         aggregate_version=version + 1,
                         event_type=f"TASK_GRAPH_{target_status}",
                     ),
@@ -109,6 +110,69 @@ class DurableNodeLifecycleRuntime:
             )
         )
 
+    async def accept_node_output(
+        self,
+        admitted: AdmittedExecution,
+        node: Mapping[str, Any],
+        *,
+        attempt_id: str,
+        receipt_ref: str,
+        worker_output: Mapping[str, Any],
+        evidence_refs: Sequence[str] = (),
+        acceptance_judgement: Mapping[str, Any],
+        effect_intents: Sequence[Any] = (),
+    ) -> dict[str, Any]:
+        """Atomically accept one node and persist its canonical output."""
+
+        version = _version(node)
+        result = _mapping(
+            await _maybe_await(
+                self._store.commit_node_acceptance(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    admitted.node_id,
+                    expected_version=version,
+                    outbox=self._runtime_outbox.build(
+                        command_id=admitted.command_id,
+                        aggregate_type="TASK_NODE",
+                        aggregate_id=(
+                            f"{admitted.graph_id}@{admitted.graph_revision}/"
+                            f"{admitted.node_id}"
+                        ),
+                        aggregate_version=version + 1,
+                        event_type="TASK_NODE_ACCEPTED",
+                        attempt_id=attempt_id,
+                        evidence_refs=evidence_refs,
+                    ),
+                    acceptance_judgement=acceptance_judgement,
+                    attempt_id=attempt_id,
+                    receipt_ref=receipt_ref,
+                    worker_output=worker_output,
+                    effect_intents=effect_intents,
+                )
+            ),
+            field_name="atomic node artifact acceptance",
+        )
+        accepted = result.get("node")
+        artifact = result.get("artifact")
+        if not isinstance(accepted, Mapping) or not isinstance(artifact, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "atomic node acceptance returned no durable output artifact",
+            )
+        if (
+            _status(accepted) != "ACCEPTED"
+            or _required_record_text(artifact, "graph_id") != admitted.graph_id
+            or _required_record_text(artifact, "node_id") != admitted.node_id
+            or _required_record_text(artifact, "attempt_id") != attempt_id
+            or _required_record_text(artifact, "receipt_ref") != receipt_ref
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "atomic node acceptance returned a different artifact lineage",
+            )
+        return dict(accepted)
+
     async def transition_graph_with_acceptance_effects(
         self,
         admitted: AdmittedExecution,
@@ -126,6 +190,7 @@ class DurableNodeLifecycleRuntime:
                     command_id=admitted.command_id,
                     aggregate_type="TASK_GRAPH",
                     aggregate_id=admitted.graph_id,
+                    graph_revision=admitted.graph_revision,
                     aggregate_version=version + 1,
                     event_type="TASK_GRAPH_COMPLETED",
                 ),

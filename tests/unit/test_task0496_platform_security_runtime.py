@@ -27,6 +27,7 @@ from host_brain.app.pentest_secure_run_routes import (
 )
 from host_brain.app.router_registry import register_host_routers
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.governor.tokens import TokenService
 from host_brain.pentest.lab_isolation import PentestEffectAction
@@ -67,6 +68,7 @@ def test_production_router_registry_mounts_each_secure_route_once() -> None:
     register_host_routers(
         app,
         input_runtime_ports=build_input_runtime_application_ports(),
+        route_ports=HostRoutePorts(),
     )
     paths = [route.path for route in app.routes]
 

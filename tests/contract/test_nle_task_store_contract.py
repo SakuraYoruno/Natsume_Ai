@@ -28,6 +28,9 @@ from host_brain.contracts.agent_runtime.acceptance_judge import (
     judge_acceptance_result,
 )
 import host_brain.persistence.task_repository as task_store_module
+from host_brain.persistence import (
+    reconciliation_proof_verifier as reconciliation_verifier_module,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
@@ -122,19 +125,25 @@ def _event(
     event_type: str,
     *,
     idempotency_key: str | None = None,
+    graph_revision: int | None = None,
     attempt_id: str | None = None,
     evidence_refs: tuple[str, ...] = (),
 ) -> OutboxMessage:
     unique = uuid.uuid4().hex
+    normalized_graph_revision = (
+        int(graph_revision or 1) if aggregate_type == "TASK_GRAPH" else None
+    )
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
         aggregate_version=aggregate_version,
         event_type=event_type,
+        graph_revision=normalized_graph_revision,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=normalized_graph_revision,
         ),
         idempotency_key=idempotency_key or f"event:{unique}",
         attempt_id=attempt_id,
@@ -142,7 +151,12 @@ def _event(
     )
 
 
-def _graph(*, graph_id: str = "graph-1", node_status: TaskNodeStatus = TaskNodeStatus.READY) -> TaskGraph:
+def _graph(
+    *,
+    graph_id: str = "graph-1",
+    revision: int = 1,
+    node_status: TaskNodeStatus = TaskNodeStatus.READY,
+) -> TaskGraph:
     node = TaskNode(
         node_id="node-1",
         dependencies=(),
@@ -158,8 +172,8 @@ def _graph(*, graph_id: str = "graph-1", node_status: TaskNodeStatus = TaskNodeS
     graph = TaskGraph(
         graph_id=graph_id,
         root_work_order_id=f"work-order::{graph_id}",
-        revision=1,
-        planner_ref="planner://test/1",
+        revision=revision,
+        planner_ref=f"planner://test/{revision}",
         status=TaskGraphStatus.CREATED,
         created_at=1_700_000_000_000,
         nodes=(node,),
@@ -230,6 +244,28 @@ def _create_graph(store: DurableTaskStore, *, graph_id: str = "graph-1") -> None
         _graph(graph_id=graph_id),
         outbox=_event("TASK_GRAPH", graph_id, 0, "TASK_GRAPH_CREATED"),
     )
+
+
+def _transition_graph_path(
+    store: DurableTaskStore,
+    *statuses: TaskGraphStatus,
+    graph_id: str = "graph-1",
+) -> None:
+    for target in statuses:
+        graph = store.get_graph(graph_id, 1)
+        version = int(graph["status_version"])
+        store.transition_graph(
+            graph_id,
+            1,
+            expected_version=version,
+            target_status=target,
+            outbox=_event(
+                "TASK_GRAPH",
+                graph_id,
+                version + 1,
+                f"TASK_GRAPH_{target.value}",
+            ),
+        )
 
 
 def _verification_result(
@@ -742,7 +778,7 @@ def test_t_nle_06_ed25519_runtime_is_public_key_only_rotatable_and_dependency_fa
     assert "Ed25519PrivateKey" not in production_members
     assert not any(name.startswith("sign_") for name in production_members)
 
-    monkeypatch.setattr(task_store_module, "_Ed25519PublicKey", None)
+    monkeypatch.setattr(reconciliation_verifier_module, "_Ed25519PublicKey", None)
     with pytest.raises(TaskStoreError) as missing_dependency:
         Ed25519ReconciliationProofVerifier({"reconciler-v1": public_keys["reconciler-v1"]})
     assert missing_dependency.value.reason_code == TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED
@@ -828,6 +864,55 @@ def test_t_nle_06_wrong_or_duplicate_outbox_rolls_back_state_transition(tmp_path
     assert len(store.list_pending_outbox()) == 1
 
 
+def test_t_nle_06_graph_transition_rejects_outbox_from_another_revision(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "task-runtime-revision-boundary.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="task-runtime-revision-boundary",
+        ts_ms=100,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    store = DurableTaskStore(
+        db_path,
+        clock=MutableClock(),
+        verify_schema=False,
+    )
+    graph_id = "graph-revision-boundary"
+    for revision in (1, 2):
+        store.create_graph(
+            _graph(graph_id=graph_id, revision=revision),
+            outbox=_event(
+                "TASK_GRAPH",
+                graph_id,
+                0,
+                "TASK_GRAPH_CREATED",
+                graph_revision=revision,
+            ),
+        )
+
+    with pytest.raises(TaskStoreError) as wrong_revision:
+        store.transition_graph(
+            graph_id,
+            1,
+            expected_version=0,
+            target_status=TaskGraphStatus.ACTIVE,
+            outbox=_event(
+                "TASK_GRAPH",
+                graph_id,
+                1,
+                "TASK_GRAPH_ACTIVE",
+                graph_revision=2,
+            ),
+        )
+
+    assert wrong_revision.value.reason_code == TASK_STORE_INVALID
+    assert store.get_graph(graph_id, 1)["status"] == "CREATED"
+    assert store.get_graph(graph_id, 1)["status_version"] == 0
+    assert store.get_graph(graph_id, 2)["status"] == "CREATED"
+    assert len(store.list_pending_outbox()) == 2
+
+
 def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
     tmp_path: Path,
 ) -> None:
@@ -841,6 +926,7 @@ def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
         OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id="graph-1",
+            graph_revision=1,
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref="taskstore://event/TASK_GRAPH/wrong-graph/0",
@@ -848,6 +934,7 @@ def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
         OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id="graph-1",
+            graph_revision=1,
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref=canonical,
@@ -856,6 +943,7 @@ def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
         OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id="graph-1",
+            graph_revision=1,
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref=canonical,
@@ -2284,6 +2372,237 @@ def test_t_nle_06_durable_reconciliation_action_status_matrix_rejects_tamper(
                 (valid_status, original_receipt),
             )
         assert store.get_operation_reservation("reservation-matrix")["status"] == valid_status
+
+
+@pytest.mark.parametrize(
+    "terminal_path",
+    (
+        (TaskGraphStatus.BLOCKED,),
+        (TaskGraphStatus.ACTIVE, TaskGraphStatus.COMPLETED),
+        (TaskGraphStatus.ACTIVE, TaskGraphStatus.FAILED),
+        (TaskGraphStatus.CANCELLED,),
+    ),
+    ids=("blocked", "completed", "failed", "cancelled"),
+)
+def test_graph_bound_budget_creation_rejects_non_executable_graph_without_writes(
+    tmp_path: Path,
+    terminal_path: tuple[TaskGraphStatus, ...],
+) -> None:
+    store = _migrated_store(tmp_path)
+    _create_graph(store)
+    _transition_graph_path(store, *terminal_path)
+    terminal_status = terminal_path[-1].value
+    budget_id = f"budget-create-{terminal_status.lower()}"
+    with sqlite3.connect(str(store.db_path)) as conn:
+        before = (
+            conn.execute(
+                "SELECT COUNT(*) FROM task_runtime_budget_reservation"
+            ).fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM task_runtime_outbox").fetchone()[0],
+        )
+
+    with pytest.raises(TaskStoreError) as rejected:
+        store.create_budget_reservation(
+            BudgetReservation(
+                budget_id=budget_id,
+                scope=f"graph:graph-1@1:{terminal_status.lower()}",
+                limits=BudgetAmount(token_count=10),
+                reserved=BudgetAmount(token_count=10),
+            ),
+            graph_id="graph-1",
+            graph_revision=1,
+            outbox=_event(
+                "BUDGET_RESERVATION",
+                budget_id,
+                0,
+                "BUDGET_RESERVATION_CREATED",
+            ),
+        )
+
+    assert rejected.value.reason_code == TASK_STORE_CAS_CONFLICT
+    assert store.get_graph("graph-1", 1)["status"] == terminal_status
+    with sqlite3.connect(str(store.db_path)) as conn:
+        after = (
+            conn.execute(
+                "SELECT COUNT(*) FROM task_runtime_budget_reservation"
+            ).fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM task_runtime_outbox").fetchone()[0],
+        )
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_budget_reservation WHERE budget_id = ?",
+            (budget_id,),
+        ).fetchone() == (0,)
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    "terminal_path",
+    (
+        (TaskGraphStatus.BLOCKED,),
+        (TaskGraphStatus.ACTIVE, TaskGraphStatus.COMPLETED),
+        (TaskGraphStatus.ACTIVE, TaskGraphStatus.FAILED),
+        (TaskGraphStatus.CANCELLED,),
+    ),
+    ids=("blocked", "completed", "failed", "cancelled"),
+)
+def test_graph_bound_budget_activation_rejects_non_executable_graph_without_writes(
+    tmp_path: Path,
+    terminal_path: tuple[TaskGraphStatus, ...],
+) -> None:
+    store = _migrated_store(tmp_path)
+    _create_graph(store)
+    terminal_status = terminal_path[-1].value
+    budget_id = f"budget-activate-{terminal_status.lower()}"
+    store.create_budget_reservation(
+        BudgetReservation(
+            budget_id=budget_id,
+            scope=f"graph:graph-1@1:{terminal_status.lower()}",
+            limits=BudgetAmount(token_count=10),
+            reserved=BudgetAmount(token_count=10),
+        ),
+        graph_id="graph-1",
+        graph_revision=1,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            budget_id,
+            0,
+            "BUDGET_RESERVATION_CREATED",
+        ),
+    )
+    _transition_graph_path(store, *terminal_path)
+    with sqlite3.connect(str(store.db_path)) as conn:
+        before_budget = conn.execute(
+            """
+            SELECT status, status_version, updated_ts_ms
+            FROM task_runtime_budget_reservation WHERE budget_id = ?
+            """,
+            (budget_id,),
+        ).fetchone()
+        before_outboxes = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox"
+        ).fetchone()[0]
+
+    with pytest.raises(TaskStoreError) as rejected:
+        store.transition_budget(
+            budget_id,
+            expected_version=0,
+            target_status=BudgetReservationStatus.ACTIVE,
+            outbox=_event(
+                "BUDGET_RESERVATION",
+                budget_id,
+                1,
+                "BUDGET_RESERVATION_ACTIVE",
+            ),
+        )
+
+    assert rejected.value.reason_code == TASK_STORE_CAS_CONFLICT
+    assert store.get_graph("graph-1", 1)["status"] == terminal_status
+    with sqlite3.connect(str(store.db_path)) as conn:
+        after_budget = conn.execute(
+            """
+            SELECT status, status_version, updated_ts_ms
+            FROM task_runtime_budget_reservation WHERE budget_id = ?
+            """,
+            (budget_id,),
+        ).fetchone()
+        after_outboxes = conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_outbox"
+        ).fetchone()[0]
+    assert after_budget == before_budget == ("PENDING", 0, 100)
+    assert after_outboxes == before_outboxes
+
+
+def test_terminal_graph_budget_guard_does_not_block_settlement_or_unbound_budget(
+    tmp_path: Path,
+) -> None:
+    store = _migrated_store(tmp_path)
+    _create_graph(store)
+    graph_budget_id = "budget-terminal-settlement"
+    store.create_budget_reservation(
+        BudgetReservation(
+            budget_id=graph_budget_id,
+            scope="graph:graph-1@1:settlement",
+            limits=BudgetAmount(token_count=10),
+            reserved=BudgetAmount(token_count=10),
+        ),
+        graph_id="graph-1",
+        graph_revision=1,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            graph_budget_id,
+            0,
+            "BUDGET_RESERVATION_CREATED",
+        ),
+    )
+    store.transition_budget(
+        graph_budget_id,
+        expected_version=0,
+        target_status=BudgetReservationStatus.ACTIVE,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            graph_budget_id,
+            1,
+            "BUDGET_RESERVATION_ACTIVE",
+        ),
+    )
+    _transition_graph_path(
+        store,
+        TaskGraphStatus.ACTIVE,
+        TaskGraphStatus.FAILED,
+    )
+
+    consumed = store.consume_budget(
+        graph_budget_id,
+        delta=BudgetAmount(token_count=1),
+        expected_version=1,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            graph_budget_id,
+            2,
+            "BUDGET_CONSUMED",
+        ),
+    )
+    assert consumed.accepted is True
+    released = store.transition_budget(
+        graph_budget_id,
+        expected_version=2,
+        target_status=BudgetReservationStatus.RELEASED,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            graph_budget_id,
+            3,
+            "BUDGET_RESERVATION_RELEASED",
+        ),
+    )
+    assert released["status"] == "RELEASED"
+
+    unbound_budget_id = "budget-unbound-after-terminal"
+    store.create_budget_reservation(
+        BudgetReservation(
+            budget_id=unbound_budget_id,
+            scope="unbound:test",
+            limits=BudgetAmount(token_count=1),
+            reserved=BudgetAmount(token_count=1),
+        ),
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            unbound_budget_id,
+            0,
+            "BUDGET_RESERVATION_CREATED",
+        ),
+    )
+    unbound = store.transition_budget(
+        unbound_budget_id,
+        expected_version=0,
+        target_status=BudgetReservationStatus.ACTIVE,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            unbound_budget_id,
+            1,
+            "BUDGET_RESERVATION_ACTIVE",
+        ),
+    )
+    assert unbound["status"] == "ACTIVE"
 
 
 def test_t_nle_06_budget_consumption_and_denied_overage_are_reconcilable(tmp_path: Path) -> None:

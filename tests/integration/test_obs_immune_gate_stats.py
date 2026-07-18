@@ -15,7 +15,7 @@ from tests.fakes.obs_projection_runtime import (
 
 
 @pytest.fixture
-def ledger(tmp_path, request):
+def projection_runtime(tmp_path, request):
     composition = compose_durable_obs_projection_runtime(
         tmp_path,
         request_id="obs-immune-stats",
@@ -91,11 +91,11 @@ def ledger(tmp_path, request):
             "ts_ms": now - 1000,
         }
     )
-    yield db
+    yield runtime
 
 
 @pytest.fixture
-def client(ledger, monkeypatch: pytest.MonkeyPatch):
+def client(projection_runtime, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "host_brain.tribe.immune_agent.get_immune_agent",
         lambda: SimpleNamespace(
@@ -119,7 +119,11 @@ def client(ledger, monkeypatch: pytest.MonkeyPatch):
     )
     app = FastAPI()
     app.include_router(router)
-    return LedgerStatsRefreshingTestClient(app)
+    return LedgerStatsRefreshingTestClient(
+        app,
+        projection_runtime=projection_runtime,
+        obs_route_ports=projection_runtime.new_route_ports(),
+    )
 
 
 def test_obs_immune_gate_stats_aggregates_window_events(client):

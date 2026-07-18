@@ -10,6 +10,8 @@ import threading
 import unicodedata
 from typing import Any, Mapping
 
+from host_brain.app.host_route_ports import HostRoutePorts
+
 from natsume_contracts.identity import CredentialProofKind
 from host_brain.secure_ingress import (
     CredentialVerifierRegistry,
@@ -289,6 +291,7 @@ def build_obs_command_composition(
     db_path: str | Path | None = None,
     emergency_audit_path: str | Path | None = None,
     outcome_journal_path: str | Path | None = None,
+    route_ports: HostRoutePorts | None = None,
 ) -> ObsCommandComposition:
     """Build one command plane or a terminal disabled composition.
 
@@ -380,7 +383,9 @@ def build_obs_command_composition(
             emergency_audit_sink=emergency_audit,
         )
         adapter = SecureIngressAdapter(service=service, mode=effective_mode)
-        registry = build_default_obs_domain_command_registry()
+        registry = build_default_obs_domain_command_registry(
+            route_ports=route_ports,
+        )
         router = ObsCommandRouter(registry)
         ingress = SecureObsCommandIngress(
             ingress_adapter=adapter,

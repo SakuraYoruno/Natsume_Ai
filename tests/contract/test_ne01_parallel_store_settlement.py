@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from threading import Event
 from typing import Any
 import uuid
 
 import pytest
 
+import host_brain.persistence.task_parallel_settlement_store as settlement_store_module
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
@@ -18,6 +21,7 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 )
 from host_brain.contracts.agent_runtime.parallel_settlement import (
     CanonicalParallelSettlementDecision,
+    ParallelSettlementContractError,
     normalize_parallel_settlement_decision,
 )
 from host_brain.contracts.agent_runtime.task_graph import (
@@ -67,17 +71,26 @@ def _event(
     attempt_id: str | None = None,
     evidence_refs: tuple[str, ...] = (),
     identity: str | None = None,
+    graph_revision: int | None = None,
 ) -> OutboxMessage:
     stable = identity or uuid.uuid4().hex
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(
+            int(graph_revision or 1) if aggregate_type == "TASK_GRAPH" else None
+        ),
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=(
+                int(graph_revision or 1)
+                if aggregate_type == "TASK_GRAPH"
+                else None
+            ),
         ),
         idempotency_key=f"ne01-parallel-store:{stable}",
         outbox_id=f"outbox::ne01-parallel-store:{stable}",
@@ -86,11 +99,11 @@ def _event(
     )
 
 
-def _graph(graph_id: str) -> TaskGraph:
+def _graph(graph_id: str, *, revision: int = 1) -> TaskGraph:
     return TaskGraph(
         graph_id=graph_id,
         root_work_order_id=f"work-order::{graph_id}",
-        revision=1,
+        revision=revision,
         planner_ref="planner://ne01/parallel-store",
         status=TaskGraphStatus.CREATED,
         created_at=NOW,
@@ -349,7 +362,7 @@ def _stable_attempt(
 def _decision_outcome(
     *,
     node_id: str,
-    attempt_id: str,
+    attempt_id: str | None,
     status: str,
     reason_code: str | None,
     evidence_refs: tuple[str, ...] | None = None,
@@ -372,6 +385,126 @@ def _decision_outcome(
             )
         ),
     }
+
+
+def test_waiting_approval_contract_requires_null_attempt_and_other_outcomes_require_one() -> None:
+    base = {
+        "schema_version": "Natsume.task_runtime.parallel_settlement.v2",
+        "decision_kind": "REVIEW",
+        "selected_node_id": "left",
+        "graph_id": "graph-pre-review-contract",
+        "graph_revision": 1,
+        "graph_status_before": "ACTIVE",
+        "graph_status_version_before": 1,
+        "graph_target_status": "BLOCKED",
+        "budget_id": BUDGET_ID,
+        "budget_status_before": "ACTIVE",
+        "budget_status_version_before": 1,
+        "budget_target_status": None,
+        "node_states": {
+            "left": {"status": "WAITING_APPROVAL", "status_version": 1},
+        },
+        "outcomes": [
+            _decision_outcome(
+                node_id="left",
+                attempt_id=None,
+                status="WAITING_APPROVAL",
+                reason_code="GOVERNED_REVIEW_REQUIRED",
+                evidence_refs=("review://pre-review", "task-checkpoint://pre-review"),
+            )
+        ],
+        "graph_outbox_id": "outbox::pre-review-contract",
+        "budget_outbox_id": None,
+    }
+
+    normalized = normalize_parallel_settlement_decision(base)
+    assert normalized.payload["outcomes"][0]["attempt_id"] is None
+
+    forged_attempt = json.loads(json.dumps(base))
+    forged_attempt["outcomes"][0]["attempt_id"] = "attempt::not-created"
+    with pytest.raises(ParallelSettlementContractError, match="must not bind attempt_id"):
+        normalize_parallel_settlement_decision(forged_attempt)
+
+    post_without_attempt = json.loads(json.dumps(base))
+    post_without_attempt["node_states"]["left"]["status"] = "WAITING_ACCEPTANCE_REVIEW"
+    post_without_attempt["outcomes"][0]["status"] = "WAITING_ACCEPTANCE_REVIEW"
+    with pytest.raises(ParallelSettlementContractError, match="attempt_id is required"):
+        normalize_parallel_settlement_decision(post_without_attempt)
+
+
+def test_waiting_approval_settlement_preserves_review_evidence_without_attempt(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-pre-review-no-attempt"
+    store = _store(tmp_path, graph_id)
+    _transition_node(store, graph_id, "left", TaskNodeStatus.WAITING_APPROVAL)
+    states = _node_states(store, graph_id)
+    graph_outbox = _event(
+        "TASK_GRAPH",
+        graph_id,
+        2,
+        "TASK_GRAPH_BLOCKED",
+        identity=f"{graph_id}:blocked",
+    )
+    decision, graph_outbox, budget_outbox = _settlement_decision(
+        graph_id=graph_id,
+        node_states=states,
+        graph_outbox=graph_outbox,
+        budget_outbox=None,
+        decision_kind="REVIEW",
+        selected_node_id="left",
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=None,
+        outcomes=(
+            _decision_outcome(
+                node_id="left",
+                attempt_id=None,
+                status=TaskNodeStatus.WAITING_APPROVAL.value,
+                reason_code="GOVERNED_REVIEW_REQUIRED",
+                evidence_refs=(
+                    "review://pre-review-no-attempt",
+                    "task-checkpoint://pre-review-no-attempt",
+                ),
+            ),
+        ),
+    )
+    assert budget_outbox is None
+
+    committed = store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=1,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=None,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=None,
+    )
+
+    assert committed["graph"]["status"] == TaskGraphStatus.BLOCKED.value
+    assert committed["budget"]["status"] == BudgetReservationStatus.ACTIVE.value
+    assert committed["decision"]["payload"]["outcomes"][0]["attempt_id"] is None
+    assert store.read_scheduler_snapshot(graph_id, 1)["attempts"] == []
+
+    replayed = store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=1,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=None,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=None,
+    )
+    assert replayed["replayed"] is True
 
 
 def _budget_settlement_fixture(
@@ -929,6 +1062,168 @@ def test_parallel_decision_readers_fail_closed_when_attempt_lineage_drifts(
     assert latest.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
 
 
+def test_parallel_budget_decision_rejects_second_terminal_version_outbox(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-parallel-budget-duplicate-terminal-outbox"
+    (
+        store,
+        _,
+        _,
+        states,
+        decision,
+        graph_outbox,
+        budget_outbox,
+    ) = _budget_settlement_fixture(tmp_path, graph_id=graph_id)
+    store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=2,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=BudgetReservationStatus.RELEASED,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=budget_outbox,
+    )
+    duplicate = _event(
+        "BUDGET_RESERVATION",
+        BUDGET_ID,
+        2,
+        "BUDGET_TERMINAL_DUPLICATE",
+        identity=f"{graph_id}:duplicate-terminal-outbox",
+    )
+    with store._transaction() as conn:  # noqa: SLF001 - corruption fixture
+        store._insert_outbox(  # noqa: SLF001 - corruption fixture
+            conn,
+            duplicate,
+            ts_ms=NOW,
+            expected_aggregate=("BUDGET_RESERVATION", BUDGET_ID, 2),
+            expected_event_type="BUDGET_TERMINAL_DUPLICATE",
+            expected_attempt_id=None,
+        )
+
+    with pytest.raises(TaskStoreError) as invalid:
+        store.get_parallel_settlement_decision(decision.decision_ref)
+    assert invalid.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
+def test_parallel_budget_decision_rejects_terminal_reservation_version_drift(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-parallel-budget-terminal-version-drift"
+    (
+        store,
+        _,
+        _,
+        states,
+        decision,
+        graph_outbox,
+        budget_outbox,
+    ) = _budget_settlement_fixture(tmp_path, graph_id=graph_id)
+    store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=2,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=BudgetReservationStatus.RELEASED,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=budget_outbox,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_budget_reservation SET status_version = 9
+            WHERE budget_id = ?
+            """,
+            (BUDGET_ID,),
+        )
+
+    with pytest.raises(TaskStoreError) as invalid:
+        store.get_parallel_settlement_decision(decision.decision_ref)
+    assert invalid.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
+def test_parallel_decision_reader_uses_one_sqlite_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph_id = "graph-parallel-decision-read-snapshot"
+    (
+        store,
+        attempt_id,
+        _,
+        states,
+        decision,
+        graph_outbox,
+        budget_outbox,
+    ) = _budget_settlement_fixture(tmp_path, graph_id=graph_id)
+    store.settle_parallel_graph_budget(
+        graph_id,
+        1,
+        budget_id=BUDGET_ID,
+        expected_graph_version=1,
+        expected_budget_version=2,
+        expected_node_states=states,
+        graph_target_status=TaskGraphStatus.BLOCKED,
+        budget_target_status=BudgetReservationStatus.RELEASED,
+        decision_ref=decision.decision_ref,
+        decision_payload=decision.payload,
+        graph_outbox=graph_outbox,
+        budget_outbox=budget_outbox,
+    )
+    decision_read = Event()
+    writer_updated = Event()
+    original_record = settlement_store_module._parallel_settlement_decision_record
+    observed = False
+
+    def record_with_interleave(row: Any) -> dict[str, Any]:
+        nonlocal observed
+        record = original_record(row)
+        if not observed:
+            observed = True
+            decision_read.set()
+            assert writer_updated.wait(timeout=2.0)
+        return record
+
+    monkeypatch.setattr(
+        settlement_store_module,
+        "_parallel_settlement_decision_record",
+        record_with_interleave,
+    )
+
+    def tamper_attempt() -> None:
+        assert decision_read.wait(timeout=2.0)
+        with sqlite3.connect(store.db_path, timeout=2.0) as conn:
+            conn.execute("PRAGMA busy_timeout = 2000")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE task_runtime_attempt SET status = 'CANCELLED' "
+                "WHERE attempt_id = ?",
+                (attempt_id,),
+            )
+            writer_updated.set()
+            conn.commit()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(tamper_attempt)
+        first = store.get_parallel_settlement_decision(decision.decision_ref)
+        future.result(timeout=3.0)
+    assert first["decision_ref"] == decision.decision_ref
+
+    with pytest.raises(TaskStoreError) as invalid:
+        store.get_parallel_settlement_decision(decision.decision_ref)
+    assert invalid.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+
+
 @pytest.mark.parametrize(
     "evidence_refs",
     (
@@ -1025,6 +1320,60 @@ def test_latest_parallel_decision_fails_closed_when_graph_outbox_declares_missin
     with pytest.raises(TaskStoreError) as exc:
         store.get_latest_parallel_settlement_decision(graph_id, 1)
 
+    assert exc.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
+    assert missing_ref in exc.value.detail
+
+
+def test_latest_parallel_decision_scans_only_the_exact_graph_revision(
+    tmp_path: Path,
+) -> None:
+    graph_id = "graph-parallel-multi-revision-marker"
+    store = _store(tmp_path, graph_id)
+    store.create_graph(
+        _graph(graph_id, revision=2),
+        outbox=_event(
+            "TASK_GRAPH",
+            graph_id,
+            0,
+            "TASK_GRAPH_CREATED",
+            graph_revision=2,
+            identity="multi-revision-created",
+        ),
+    )
+    store.transition_graph(
+        graph_id,
+        2,
+        expected_version=0,
+        target_status=TaskGraphStatus.ACTIVE,
+        outbox=_event(
+            "TASK_GRAPH",
+            graph_id,
+            1,
+            "TASK_GRAPH_ACTIVE",
+            graph_revision=2,
+            identity="multi-revision-active",
+        ),
+    )
+    missing_ref = f"taskbatch://sha256/{'b' * 64}"
+    store.transition_graph(
+        graph_id,
+        2,
+        expected_version=1,
+        target_status=TaskGraphStatus.FAILED,
+        outbox=_event(
+            "TASK_GRAPH",
+            graph_id,
+            2,
+            "TASK_GRAPH_FAILED",
+            graph_revision=2,
+            evidence_refs=(missing_ref,),
+            identity="multi-revision-missing-decision",
+        ),
+    )
+
+    assert store.get_latest_parallel_settlement_decision(graph_id, 1) is None
+    with pytest.raises(TaskStoreError) as exc:
+        store.get_latest_parallel_settlement_decision(graph_id, 2)
     assert exc.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
     assert missing_ref in exc.value.detail
 

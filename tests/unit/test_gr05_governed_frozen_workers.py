@@ -9,6 +9,7 @@ from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.task_runtime.governed_workers import (
     GOVERNED_NODE_COMMIT_INVALID,
     GOVERNED_NODE_GRANT_INVALID,
+    GOVERNED_NODE_INPUT_INVALID,
     GovernedFrozenNodeWorker,
     GovernedNodeWorkerError,
 )
@@ -48,6 +49,22 @@ class _Executor:
         yield dict(self.terminal)
 
 
+def _active_budget() -> dict[str, Any]:
+    """The only budget projection a production frozen worker may consume."""
+
+    return {
+        "budget_id": "budget://governed-workers/active",
+        "status": "ACTIVE",
+        "status_version": 3,
+        "remaining": {
+            "token_count": 120,
+            "time_ms": 1_000,
+            "retry_count": 1,
+            "model_cost_micros": 4_000,
+        },
+    }
+
+
 def _contracts(route: str = "chat", target: str = "surface_reply"):
     graph_id = "graph-governed-workers"
     work_order_id = "wo-governed-workers"
@@ -57,7 +74,12 @@ def _contracts(route: str = "chat", target: str = "surface_reply"):
         domain="chat" if route == "chat" else "research",
         run_mode="worker",
         objective="frozen objective",
-        input_pack={"user_message": "hello"},
+        input_pack={
+            "user_message": "hello",
+            # A caller-owned input pack must never expand the authoritative
+            # runtime reservation frozen below.
+            "budget": {"remaining": {"token_count": 999_999_999}},
+        },
         metadata={
             "planning_lineage": {
                 "graph_id": graph_id,
@@ -77,7 +99,16 @@ def _contracts(route: str = "chat", target: str = "surface_reply"):
         task_graph_id=graph_id,
         task_node_id=node_id,
         graph_revision=1,
-        budget_policy=BudgetPolicy(scope="worker-test", limits=BudgetAmount(time_ms=1000, concurrency=1)),
+        budget_policy=BudgetPolicy(
+            scope="worker-test",
+            limits=BudgetAmount(
+                token_count=120,
+                time_ms=1_000,
+                concurrency=1,
+                retry_count=1,
+                model_cost_micros=4_000,
+            ),
+        ),
         business_idempotency_scope="worker-test",
         operation_fingerprint="sha256:" + "a" * 64,
         approval_ref="governor-grant://parent",
@@ -107,9 +138,13 @@ def _contracts(route: str = "chat", target: str = "surface_reply"):
         "graph_revision": 1,
         "node_id": node_id,
         "attempt_id": "attempt-workers-1",
+        "lease_id": "lease-workers-1",
+        "lease_owner_id": "worker-governed-workers",
+        "fencing_token": 1,
         "worker_route": f"{route}:{target}",
         "node_input_refs": ["artifact://input/one"],
         "node_grant_ref": "governor-grant://child/node",
+        "budget": _active_budget(),
     }
     return command, order, context
 
@@ -166,6 +201,15 @@ async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_comm
     mutated_pack = dict(executor.inputs[0].input_pack)
     mutated_pack["user_message"] = "tampered"
     assert executor.inputs[0].input_pack["user_message"] == "hello"
+    assert executor.inputs[0].budget == _active_budget()
+    assert executor.inputs[0].input_pack["budget"]["remaining"]["token_count"] == 999_999_999
+
+    # The frozen JSON snapshot must retain the precharged durable remaining,
+    # even if the mutable execution context or a projection copy is changed.
+    context["budget"]["remaining"]["token_count"] = 1
+    copied_budget = dict(executor.inputs[0].budget)
+    copied_budget["remaining"]["token_count"] = 999
+    assert executor.inputs[0].budget["remaining"]["token_count"] == 120
 
 
 @pytest.mark.asyncio
@@ -224,3 +268,31 @@ async def test_parent_grant_cannot_be_reused_as_node_grant() -> None:
         ]
 
     assert raised.value.reason_code == GOVERNED_NODE_GRANT_INVALID
+
+
+@pytest.mark.asyncio
+async def test_worker_rejects_missing_authoritative_budget_before_grant_or_execution() -> None:
+    command, order, context = _contracts()
+    context.pop("budget")
+    grants = _GrantVerifier()
+    executor = _Executor({})
+    worker = GovernedFrozenNodeWorker(
+        route_kind="chat",
+        executor=executor,
+        node_grants=grants,
+        projections=_ProjectionStore(),
+    )
+
+    with pytest.raises(GovernedNodeWorkerError) as raised:
+        _ = [
+            event
+            async for event in worker.execute_stream(
+                command=command,
+                work_order=order,
+                execution_context=context,
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_NODE_INPUT_INVALID
+    assert grants.calls == []
+    assert executor.inputs == []

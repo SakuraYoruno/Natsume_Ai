@@ -59,16 +59,43 @@ def production_adapter_id(provider: str) -> str:
 
 def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
     raw = request.target.metadata.get("generation_parameters")
-    if raw is None:
-        return {}
-    if not isinstance(raw, Mapping):
+    if raw is not None and not isinstance(raw, Mapping):
         raise ProductionProviderConfigurationError("generation_parameters must be a mapping")
-    unknown = set(raw) - _GENERATION_KEYS
+    source = dict(raw or {})
+    unknown = set(source) - _GENERATION_KEYS
     if unknown:
         raise ProductionProviderConfigurationError(
             "unsupported generation parameters: " + ", ".join(sorted(str(item) for item in unknown))
         )
-    return {str(key): value for key, value in raw.items()}
+    params = {str(key): value for key, value in source.items()}
+    guard = request.model_budget_guard
+    if guard is None:
+        return params
+    configured = _positive_int(params.get("max_tokens"))
+    params["max_tokens"] = (
+        min(configured, guard.max_output_tokens)
+        if configured is not None
+        else guard.max_output_tokens
+    )
+    return params
+
+
+def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
+    """Keep the hard cap internal to the first-party transport adapter."""
+
+    params = _generation_parameters(request)
+    guard = request.model_budget_guard
+    if guard is not None:
+        params["_natsume_hard_max_output_tokens"] = guard.max_output_tokens
+    return params
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def production_provider_payload(
@@ -166,6 +193,10 @@ class VaultBackedSingleAttemptAdapter:
             raise ProductionProviderConfigurationError(
                 f"provider credential unavailable: {self._provider}"
             )
+        if request.model_budget_guard is not None and self._provider == "codex" and not credential:
+            raise ProductionProviderConfigurationError(
+                "guarded Codex CLI calls do not expose a hard output cap"
+            )
         provider_name = "openai" if self._provider == "openai_compatible" else self._provider
         raw_response = await asyncio.to_thread(
             self._transport,
@@ -174,7 +205,7 @@ class VaultBackedSingleAttemptAdapter:
             api_key=credential,
             timeout_ms=request.timeout_ms,
             messages=request.prompt.as_message_dicts(),
-            gen_params=_generation_parameters(request),
+            gen_params=_transport_generation_parameters(request),
             response_format=request.prompt.output_contract.response_format(),
             base_url_override=self._base_url_resolver(self._provider),
             feature_key=f"model_attempt:{request.scene_type.lower()}",

@@ -6,12 +6,14 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping
 from copy import deepcopy
 import hashlib
+import inspect
 import json
 import re
 from typing import Any, Protocol
 
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
@@ -193,6 +195,12 @@ class _AgentWorker:
             parent_grant_ref=str(
                 execution_context.get("parent_grant_ref") or ""
             ).strip(),
+            attempt_id=str(execution_context.get("attempt_id") or "").strip(),
+            lease_id=str(execution_context.get("lease_id") or "").strip(),
+            lease_owner_id=str(
+                execution_context.get("lease_owner_id") or ""
+            ).strip(),
+            fencing_token=execution_context.get("fencing_token"),
         )
         verified_payload = (
             verified_grant.to_dict()
@@ -207,7 +215,30 @@ class _AgentWorker:
                 "internal node grant verifier returned no durable projection",
             )
         legacy_order = work_order.to_agent_work_order()
-        result = await asyncio.to_thread(self._executor.execute, legacy_order)
+        if legacy_order.requires_write:
+            workspace_execution_authority = {
+                "command_id": str(command.command_id or "").strip(),
+                "principal_id": str(command.principal_id or "").strip(),
+                "root_work_order_id": str(
+                    execution_context.get("work_order_id") or ""
+                ).strip(),
+                "graph_id": str(execution_context.get("graph_id") or "").strip(),
+                "graph_revision": execution_context.get("graph_revision"),
+                "node_id": str(execution_context.get("node_id") or "").strip(),
+                "attempt_id": str(execution_context.get("attempt_id") or "").strip(),
+                "lease_id": str(execution_context.get("lease_id") or "").strip(),
+                "lease_owner_id": str(
+                    execution_context.get("lease_owner_id") or ""
+                ).strip(),
+                "fencing_token": execution_context.get("fencing_token"),
+            }
+            result = await asyncio.to_thread(
+                self._executor.execute,
+                legacy_order,
+                workspace_execution_authority=workspace_execution_authority,
+            )
+        else:
+            result = await asyncio.to_thread(self._executor.execute, legacy_order)
         if not isinstance(result, Mapping):
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_AUTHORITY_INVALID,
@@ -546,6 +577,92 @@ class GovernedInternalRuntime:
                 if self._in_flight == 0:
                     self._condition.notify_all()
 
+    async def continue_review_admission(
+        self,
+        record: Mapping[str, Any],
+        claim: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact durable Internal admission after Review."""
+
+        async with self._condition:
+            if not self._active or not self._accepting:
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_INACTIVE,
+                    "internal runtime is not accepting Review continuation",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            work_order = durable.get("work_order")
+            assignment = durable.get("assignment")
+            graph = durable.get("graph")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface is not HostCommandSurface.INTERNAL
+                or not isinstance(work_order, WorkOrderV3)
+                or assignment is None
+                or graph is None
+            ):
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                    "Review continuation Internal admission is incomplete or misrouted",
+                )
+            operation = self._application.execute_review_continuation(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+                continuation_claim=dict(claim or {}),
+            )
+            return await _review_continuation_result(operation)
+        finally:
+            async with self._condition:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._condition.notify_all()
+
+    async def request_graph_cancellation(
+        self,
+        record: Mapping[str, Any],
+        *,
+        authority: Mapping[str, Any],
+        source: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Cancel one exact Internal admission through verified authority."""
+
+        async with self._condition:
+            if not self._active or not self._accepting:
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_INACTIVE,
+                    "internal runtime is not accepting cancellation commands",
+                )
+            self._in_flight += 1
+        try:
+            command = dict(record or {}).get("command")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface is not HostCommandSurface.INTERNAL
+            ):
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                    "cancellation admission is not owned by the Internal runtime",
+                )
+            return await self._application.request_graph_cancellation(
+                command_id=command.command_id,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                authority=dict(authority or {}),
+                source=source,
+                reason_code=reason_code,
+            )
+        finally:
+            async with self._condition:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._condition.notify_all()
+
     def existing_command(self, *, request_id: str) -> Mapping[str, Any] | None:
         return self._commands.get_by_request(
             surface=HostCommandSurface.INTERNAL.value,
@@ -652,6 +769,30 @@ class InternalAgentCommandService:
                 "internal runtime returned no terminal result",
             )
         receipt = dict(terminal.get("execution_receipt") or {})
+        projection = (
+            dict(receipt.get("projection") or {})
+            if isinstance(receipt.get("projection"), Mapping)
+            else {}
+        )
+        review = (
+            dict(projection.get("review") or {})
+            if isinstance(projection.get("review"), Mapping)
+            else {}
+        )
+        waiting_review = str(receipt.get("status") or "").strip().upper() in {
+            "WAITING_APPROVAL",
+            "WAITING_ACCEPTANCE_REVIEW",
+        }
+        if waiting_review:
+            if not str(review.get("review_id") or "").strip():
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
+                    "waiting internal command has no durable ReviewItem",
+                )
+            # A POST checkpoint can already carry the worker's pre-acceptance
+            # receipt.  It is still not the terminal command result, so leave
+            # the ingress claim open for the fenced Review continuation.
+            return terminal
         result_ref = str(
             receipt.get("receipt_ref") or terminal.get("receipt_ref") or ""
         ).strip()
@@ -669,25 +810,6 @@ class InternalAgentCommandService:
                 "terminal internal command has no durable claim reference",
             )
         if not result_ref:
-            projection = (
-                dict(receipt.get("projection") or {})
-                if isinstance(receipt.get("projection"), Mapping)
-                else {}
-            )
-            review = (
-                dict(projection.get("review") or {})
-                if isinstance(projection.get("review"), Mapping)
-                else {}
-            )
-            waiting_review = str(receipt.get("status") or "").strip().upper() in {
-                "WAITING_APPROVAL",
-                "WAITING_ACCEPTANCE_REVIEW",
-            }
-            if waiting_review and str(review.get("review_id") or "").strip():
-                # A pre-execution review has no worker receipt yet.  Leave the
-                # ingress claim result unbound so the approved continuation can
-                # atomically attach the eventual durable execution receipt.
-                return terminal
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
                 "terminal internal command has no durable result reference",
@@ -715,15 +837,27 @@ def build_governed_internal_runtime(
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
     canonical_executor: AgentRuntimeExecutor | None = None,
+    cancellation_authority_verifier: Any | None = None,
 ) -> GovernedInternalRuntime:
     review_store = getattr(task_runtime_container, "review_store", None)
-    if review_store is None:
-        raise TypeError("internal Agent Task Runtime review store is required")
+    continuation_store = getattr(
+        task_runtime_container,
+        "review_continuation_store",
+        None,
+    )
+    if review_store is None or continuation_store is None:
+        raise TypeError(
+            "internal Agent Task Runtime Review stores are required"
+        )
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,
         token_service=token_service,
+        review_store=continuation_store,
     )
-    node_grant_verifier = DurableNodeGrantVerifier(ledger=ledger)
+    node_grant_verifier = DurableNodeGrantVerifier(
+        ledger=ledger,
+        review_store=continuation_store,
+    )
     canonical_worker = _AgentWorker(
         executor=canonical_executor or AgentRuntimeExecutor(),
         result_repository=result_repository,
@@ -739,6 +873,7 @@ def build_governed_internal_runtime(
         acceptance=_AgentResultAcceptance(),
         projection_reader=_AgentProjectionReader(result_repository),
         review_runtime=TaskNodeReviewRuntime(review_store),
+        node_grant_verifier=node_grant_verifier,
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",
@@ -750,6 +885,7 @@ def build_governed_internal_runtime(
         command_repository=task_runtime_container.command_repository,
         coordinator=coordinator,
         node_grant_service=node_grant_service,
+        cancellation_authority_verifier=cancellation_authority_verifier,
     )
     return GovernedInternalRuntime(
         application=application,
@@ -848,7 +984,17 @@ def _build_contracts(
         domain=work_order.domain,
         run_mode=work_order.run_mode,
         objective=work_order.objective,
-        workspace=deepcopy(dict(work_order.workspace or {})),
+        workspace=(
+            {
+                "strategy": "durable_workspace",
+                "workspace_id": DurableWorkspaceRuntime.workspace_id_for(
+                    graph_id=graph_id,
+                    graph_revision=1,
+                ),
+            }
+            if work_order.requires_write
+            else deepcopy(dict(work_order.workspace or {}))
+        ),
         input_pack=deepcopy(dict(work_order.input_pack or {})),
         allowed_actions=tuple(work_order.allowed_actions or ()),
         forbidden_actions=tuple(work_order.forbidden_actions or ()),
@@ -1106,6 +1252,33 @@ def _assert_stable_replay(candidate: HostCommand, durable: HostCommand) -> None:
             INTERNAL_RUNTIME_AUTHORITY_INVALID,
             "replayed internal command changed stable semantics: " + ", ".join(drift),
         )
+
+
+async def _review_continuation_result(operation: Any) -> dict[str, Any]:
+    current = await operation if inspect.isawaitable(operation) else operation
+    if isinstance(current, Mapping):
+        return dict(current)
+    if not hasattr(current, "__aiter__"):
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            "Review continuation returned no durable Internal result",
+        )
+    terminal: dict[str, Any] | None = None
+    async for raw_event in current:
+        if not isinstance(raw_event, Mapping):
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                "Review continuation emitted a non-mapping Internal event",
+            )
+        event = dict(raw_event)
+        if bool(event.get("done")):
+            terminal = event
+    if terminal is None:
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            "Review continuation emitted no durable Internal terminal result",
+        )
+    return terminal
 
 
 def _public_projection(durable: Mapping[str, Any]) -> dict[str, Any]:

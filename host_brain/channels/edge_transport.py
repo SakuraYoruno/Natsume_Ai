@@ -22,6 +22,9 @@ from host_brain.core.ids import new_request_id, now_ms
 from natsume_contracts.edge.transport_v1 import EdgeTransportResult
 
 
+_LOOPBACK_EDGE_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 def _normalize_base_url(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -32,6 +35,38 @@ def _normalize_base_url(value: str) -> str:
     scheme = parsed.scheme or "http"
     netloc = parsed.netloc or parsed.path
     return f"{scheme}://{netloc}".rstrip("/") if netloc else ""
+
+
+def _is_loopback_edge_endpoint(base_url: str) -> bool:
+    """Return whether an Edge RPC endpoint is explicitly local to this Host.
+
+    HMAC authenticates the request body, but it does not provide transport
+    confidentiality.  The only intentionally clear-text deployment is the
+    local Edge sidecar.  Do not infer loopback from DNS: the exception is
+    deliberately limited to stable, explicit loopback endpoint spellings.
+    """
+
+    try:
+        host = str(urllib.parse.urlparse(base_url).hostname or "").lower()
+    except (TypeError, ValueError):
+        return False
+    return host.rstrip(".") in _LOOPBACK_EDGE_HOSTS
+
+
+def _edge_endpoint_requires_tls(base_url: str) -> bool:
+    """Whether a configured Host-to-Edge endpoint violates transport policy.
+
+    This guard is intentionally shared by the authenticated Edge RPC and the
+    Gateway-reply ingress.  Both carry user-controlled content and an HMAC
+    credential, so a remote clear-text endpoint would disclose more than the
+    command transport alone.
+    """
+
+    try:
+        scheme = str(urllib.parse.urlparse(base_url).scheme or "").lower()
+    except (TypeError, ValueError):
+        scheme = ""
+    return scheme != "https" and not _is_loopback_edge_endpoint(base_url)
 
 
 def resolve_edge_base_url() -> str:
@@ -180,6 +215,11 @@ class HttpEdgeTransportPort:
         started = time.monotonic()
         if not self._base_url:
             return _rejected("EDGE_RPC_ENDPOINT_MISSING", "Edge endpoint is not configured")
+        if _edge_endpoint_requires_tls(self._base_url):
+            return _rejected(
+                "EDGE_RPC_TLS_REQUIRED",
+                "Non-loopback Host to Edge RPC endpoints must use HTTPS",
+            )
         if not self._shared_key:
             return _rejected("EDGE_RPC_AUTH_UNAVAILABLE", "Edge HMAC key is not configured")
         try:
@@ -375,13 +415,19 @@ async def _submit_gateway_payload(
     base_urls = resolve_gateway_base_urls()
     if not base_urls:
         return _rejected("GATEWAY_REPLY_ENDPOINT_MISSING", "Gateway endpoint is not configured")
+    base_url = base_urls[0]
+    if _edge_endpoint_requires_tls(base_url):
+        return _rejected(
+            "EDGE_GATEWAY_TLS_REQUIRED",
+            "Non-loopback Host to Edge Gateway endpoints must use HTTPS",
+        )
     try:
         async with httpx.AsyncClient(
             timeout=max(0.2, timeout_ms / 1000.0),
             trust_env=False,
         ) as client:
             response = await client.post(
-                f"{base_urls[0]}{path}",
+                f"{base_url}{path}",
                 content=body,
                 headers=headers,
             )

@@ -15,6 +15,7 @@ import json
 import re
 from typing import Any, Protocol
 
+from host_brain.model_runtime.contracts import ModelBudgetGuard
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 from host_brain.task_runtime.worker_budget_usage import (
     build_worker_budget_usage,
@@ -25,6 +26,7 @@ from host_brain.task_runtime.worker_budget_usage import (
 GOVERNED_ROUTE_INPUT_INVALID = "GOVERNED_ROUTE_INPUT_INVALID"
 GOVERNED_ROUTE_OUTPUT_INVALID = "GOVERNED_ROUTE_OUTPUT_INVALID"
 GOVERNED_ROUTE_ROUTE_DRIFT = "GOVERNED_ROUTE_ROUTE_DRIFT"
+GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED = "GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED"
 
 
 class GovernedRouteExecutorError(RuntimeError):
@@ -86,6 +88,7 @@ class FrozenDelegateRouteExecutor:
 
         dispatched = self._dispatch(
             ports=self._ports,
+            frozen=frozen,
             request_id=frozen.request_id,
             session_id=frozen.session_id,
             person_id=frozen.principal_id,
@@ -224,6 +227,11 @@ class FrozenChatRouteExecutor:
                 "delivery_authorized": False,
             }
         )
+        _assert_guarded_chat_terminal(
+            frozen=frozen,
+            decision=decision,
+            audit_refs=audit_refs,
+        )
         yield _terminal_commit(
             frozen=frozen,
             decision=decision,
@@ -274,6 +282,9 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         "pii_ingress_stats": _safe_mapping(input_pack.get("pii_ingress_stats")),
         "motive_state": _safe_mapping(input_pack.get("motive_state")),
     }
+    guarded_budget = _governed_model_budget(frozen)
+    if guarded_budget is not None:
+        trace_stage_meta["governed_model_budget"] = guarded_budget
     return {
         "ports": ports,
         "request_body": request_body,
@@ -309,6 +320,97 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         # manufactures delivery authority from an APPROVE decision.
         "governor_result": {},
     }
+
+
+def _governed_model_budget(frozen: FrozenNodeInput) -> dict[str, Any] | None:
+    """Derive one non-expandable model guard from frozen durable remaining."""
+
+    budget = frozen.budget
+    if not budget:
+        # Direct construction is retained for narrow executor tests. Production
+        # frozen workers reject an absent budget before reaching this adapter.
+        return None
+    remaining = _mapping_child(budget, "remaining")
+    try:
+        deadline_ms = int(remaining.get("time_ms"))
+        retry_count = int(remaining.get("retry_count"))
+        token_count = int(remaining.get("token_count"))
+        model_cost_micros = int(remaining.get("model_cost_micros"))
+    except (TypeError, ValueError) as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_INPUT_INVALID,
+            "frozen durable budget has invalid model limits",
+        ) from exc
+    max_provider_attempts = retry_count + 1
+    max_output_tokens = token_count // max_provider_attempts
+    if (
+        deadline_ms <= 0
+        or retry_count < 0
+        or token_count <= 0
+        or max_output_tokens <= 0
+        or model_cost_micros <= 0
+    ):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_INPUT_INVALID,
+            "frozen durable budget cannot admit another model call",
+        )
+    try:
+        guard = ModelBudgetGuard(
+            budget_id=str(budget.get("budget_id") or ""),
+            graph_id=frozen.graph_id,
+            graph_revision=frozen.graph_revision,
+            node_id=frozen.node_id,
+            attempt_id=frozen.attempt_id,
+            deadline_ms=deadline_ms,
+            max_provider_attempts=max_provider_attempts,
+            max_token_count=token_count,
+            max_output_tokens=max_output_tokens,
+            max_model_cost_micros=model_cost_micros,
+        )
+    except (TypeError, ValueError) as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_INPUT_INVALID,
+            "frozen durable budget cannot form a model guard",
+        ) from exc
+    return guard.as_dict()
+
+
+def _assert_guarded_chat_terminal(
+    *,
+    frozen: FrozenNodeInput,
+    decision: str,
+    audit_refs: Mapping[str, Any],
+) -> None:
+    """Prevent fallback or synthetic approvals from bypassing model accounting."""
+
+    expected_guard = _governed_model_budget(frozen)
+    if expected_guard is None or decision != "APPROVE":
+        return
+    trace = _mapping_child(audit_refs, "trace_stage_meta")
+    if _mapping_child(trace, "governed_model_budget") != expected_guard:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "guarded chat approval did not preserve the frozen model budget guard",
+        )
+    evidence_gate = _mapping_child(trace, "surface_evidence_gate")
+    if evidence_gate.get("status") == "OK":
+        # This documented path never invokes a model and therefore has no
+        # provider measurement to settle.
+        return
+    attempt = _mapping_child(trace, "surface_model_attempt")
+    measurement = _mapping_child(attempt, "budget_measurement")
+    attempt_ids = attempt.get("attempt_ids")
+    if (
+        attempt.get("success") is not True
+        or not isinstance(attempt_ids, Sequence)
+        or isinstance(attempt_ids, (str, bytes, bytearray))
+        or not attempt_ids
+        or not {"token_count", "model_cost_micros"}.issubset(measurement)
+    ):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "guarded chat approval lacks a complete surface model measurement",
+        )
 
 
 def _delegate_context(input_pack: Mapping[str, Any], *, frozen: FrozenNodeInput) -> dict[str, Any]:

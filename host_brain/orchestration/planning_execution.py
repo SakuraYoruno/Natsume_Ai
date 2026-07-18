@@ -9,8 +9,9 @@ lineage.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
@@ -20,9 +21,11 @@ from host_brain.orchestration.planning_admission import (
 )
 from host_brain.orchestration.planning_graph_compiler import (
     CompiledPlanningGraph,
+    PlanningCompilationContext,
     PlanningGraphCompiler,
 )
 from host_brain.planning_search.contracts import SearchRequest, SearchResult, SearchStatus
+from host_brain.task_runtime.worker_registry import GovernedWorkerRoute
 from host_brain.planning_search.service import PlanningSearchService
 from natsume_contracts.task import HostCommandSurface
 
@@ -30,6 +33,9 @@ from natsume_contracts.task import HostCommandSurface
 PLANNING_EXECUTION_INVALID = "PLANNING_EXECUTION_INVALID"
 PLANNING_EXECUTION_SEARCH_FAILED = "PLANNING_EXECUTION_SEARCH_FAILED"
 PLANNING_EXECUTION_REVISION_CONFLICT = "PLANNING_EXECUTION_REVISION_CONFLICT"
+PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE = (
+    "PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE"
+)
 
 
 class PlanningExecutionError(RuntimeError):
@@ -127,13 +133,21 @@ class GovernedPlanningExecutionService:
         compiler: PlanningGraphCompiler,
         admission: GovernedPlanningAdmissionService,
         command_application: Any,
+        delegate_target_validator: Callable[[str], Any] | None = None,
     ) -> None:
         if not callable(getattr(command_application, "execute_stream", None)):
             raise ValueError("command_application.execute_stream is required")
+        if not callable(
+            getattr(command_application, "preflight_parent_governor_binding", None)
+        ):
+            raise ValueError(
+                "command_application.preflight_parent_governor_binding is required"
+            )
         self._search = search
         self._compiler = compiler
         self._admission = admission
         self._application = command_application
+        self._delegate_target_validator = delegate_target_validator
 
     async def prepare_initial(
         self,
@@ -141,10 +155,19 @@ class GovernedPlanningExecutionService:
         *,
         authority: PlanningExecutionAuthority,
         created_at: int,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
+        self._validate_compilation_context_authority(
+            compilation_context,
+            authority=authority,
+        )
         result = self._run_search(request)
-        compiled = self._compiler.compile(result, created_at=int(created_at))
+        compiled = self._compiler.compile(
+            result,
+            created_at=int(created_at),
+            compilation_context=compilation_context,
+        )
         if compiled.task_graph.revision != 1:
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_REVISION_CONFLICT,
@@ -160,8 +183,13 @@ class GovernedPlanningExecutionService:
         previous_graph: TaskGraph,
         failure_evidence_refs: Sequence[str],
         created_at: int,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
+        self._validate_compilation_context_authority(
+            compilation_context,
+            authority=authority,
+        )
         if not isinstance(previous_graph, TaskGraph):
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_REVISION_CONFLICT,
@@ -182,6 +210,7 @@ class GovernedPlanningExecutionService:
             previous_graph=previous_graph,
             failure_evidence_refs=evidence_refs,
             created_at=int(created_at),
+            compilation_context=compilation_context,
         )
         if previous_graph.to_dict() != previous_snapshot:
             raise PlanningExecutionError(
@@ -244,6 +273,33 @@ class GovernedPlanningExecutionService:
             )
         return result
 
+    @staticmethod
+    def _validate_compilation_context_authority(
+        compilation_context: PlanningCompilationContext | None,
+        *,
+        authority: PlanningExecutionAuthority,
+    ) -> None:
+        """Keep root compilation authority bound to the admitted parent grant.
+
+        Search candidates remain authority-free, but a caller could otherwise
+        compile their selected path with a context approved by a different
+        governor request.  Legacy callers may omit the context until their
+        domain is migrated; supplied contexts must never cross that boundary.
+        """
+
+        if compilation_context is None:
+            return
+        if not isinstance(compilation_context, PlanningCompilationContext):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compilation_context must be PlanningCompilationContext",
+            )
+        if compilation_context.approval_ref != authority.governor_grant_ref:
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compilation context approval_ref differs from governor grant",
+            )
+
     async def _admit(
         self,
         result: SearchResult,
@@ -252,6 +308,19 @@ class GovernedPlanningExecutionService:
         authority: PlanningExecutionAuthority,
     ) -> PreparedPlanningExecution:
         graph = compiled.task_graph
+        self._validate_delegate_targets(graph)
+        # Planning admission owns the first HostCommand/TaskGraph write. Its
+        # parent authority must be checked here, not only in execute_stream.
+        # Replans bind the original Governor request rather than their
+        # revision-suffixed command request identity.
+        preflight = self._application.preflight_parent_governor_binding(
+            parent_grant_ref=authority.governor_grant_ref,
+            request_id=authority.base_command_request_id,
+            session_id=authority.session_id,
+            principal_id=authority.principal_id,
+        )
+        if inspect.isawaitable(preflight):
+            await preflight
         receipt = await self._admission.admit(
             compiled,
             surface=authority.surface,
@@ -273,10 +342,38 @@ class GovernedPlanningExecutionService:
         prepared.validate()
         return prepared
 
+    def _validate_delegate_targets(self, graph: TaskGraph) -> None:
+        validator = self._delegate_target_validator
+        if validator is None:
+            return
+        for node in graph.nodes:
+            try:
+                route = GovernedWorkerRoute.parse(node.route)
+            except Exception as exc:
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    f"compiled TaskNode route is invalid: {node.node_id}",
+                ) from exc
+            if route.kind != "delegate" or route.target_id is None:
+                continue
+            try:
+                verdict = validator(route.target_id)
+            except Exception as exc:
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE,
+                    "compiled delegate target is not enabled: " + route.target_id,
+                ) from exc
+            if inspect.isawaitable(verdict):
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "delegate target validator must be synchronous before admission",
+                )
+
 
 __all__ = [
     "GovernedPlanningExecutionService",
     "PLANNING_EXECUTION_INVALID",
+    "PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE",
     "PLANNING_EXECUTION_REVISION_CONFLICT",
     "PLANNING_EXECUTION_SEARCH_FAILED",
     "PlanningExecutionAuthority",

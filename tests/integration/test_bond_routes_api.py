@@ -11,7 +11,9 @@ from host_brain.bond.bond_stage_engine import (
     STAGE_FRIEND,
     BondStageEngine,
 )
-from host_brain.app.bond_routes import router, set_bond_engine_provider
+from host_brain.app.bond_routes import create_bond_router
+from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 
 
@@ -21,8 +23,10 @@ from host_brain.bond.user_identity import get_canonical_bond_user_id
 def client():
     engine = BondStageEngine()
     app = FastAPI()
-    app.include_router(router)
-    set_bond_engine_provider(lambda: engine)
+    app.include_router(create_bond_router(HostRoutePorts(
+        bond_engine_provider=lambda: engine,
+        bond_writer_provider=lambda: BondDynamicsWriter(stage_engine=engine),
+    )))
     return TestClient(app)
 
 

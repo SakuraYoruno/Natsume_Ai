@@ -13,6 +13,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
+import re
 import secrets
 import sqlite3
 from typing import Any, Iterator
@@ -32,6 +33,12 @@ RUNTIME_EVENT_DURABLE_DATA_INVALID = "RUNTIME_EVENT_DURABLE_DATA_INVALID"
 RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY = "0068#runtime_event_delivery"
 RUNTIME_EVENT_DELIVERY_MIGRATION_SHA256 = (
     "91f114e2d0f199a9d9fa772f207e9154aba577f8469a0be0ff59dcbe854d63e2"
+)
+TASK_GRAPH_OUTBOX_REVISION_MIGRATION_ASSET_KEY = (
+    "0095#task_runtime_revisioned_graph_outbox"
+)
+TASK_GRAPH_OUTBOX_REVISION_MIGRATION_SHA256 = (
+    "db39c2af0c497322c18d767b74139b5cba635c33e947cba5191f440aad534fa1"
 )
 
 _ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
@@ -162,6 +169,14 @@ def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
+def _revisioned_task_graph_ref(value: str) -> tuple[str, int] | None:
+    graph_id, separator, raw_revision = str(value or "").rpartition("@")
+    if not separator or not graph_id or not raw_revision.isdigit():
+        return None
+    revision = int(raw_revision)
+    return (graph_id, revision) if revision >= 1 else None
+
+
 class RuntimeEventRepository:
     """One connection owner for journal, delivery, inbox, and projection UoWs."""
 
@@ -252,6 +267,14 @@ class RuntimeEventRepository:
                     """,
                     (RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY,),
                 ).fetchone()
+                revision_asset = conn.execute(
+                    """
+                    SELECT checksum, disposition
+                    FROM schema_migration_assets
+                    WHERE asset_key = ?
+                    """,
+                    (TASK_GRAPH_OUTBOX_REVISION_MIGRATION_ASSET_KEY,),
+                ).fetchone()
                 columns = {
                     table: {
                         str(row[1])
@@ -274,6 +297,35 @@ class RuntimeEventRepository:
                     ).fetchall()
                 }
                 foreign_keys = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])
+                revision_index_row = conn.execute(
+                    """
+                    SELECT tbl_name, sql FROM sqlite_master
+                    WHERE type = 'index'
+                      AND name = 'uq_runtime_event_task_outbox_source'
+                    """
+                ).fetchone()
+                revision_index_list = {
+                    str(row[1]): row
+                    for row in conn.execute(
+                        "PRAGMA index_list(runtime_event_timeline)"
+                    ).fetchall()
+                }
+                duplicate_task_outbox_source = conn.execute(
+                    """
+                    SELECT source_ref
+                    FROM runtime_event_timeline
+                    WHERE source_kind = 'TASK_STORE_OUTBOX'
+                    GROUP BY source_ref
+                    HAVING COUNT(*) <> 1
+                    LIMIT 1
+                    """
+                ).fetchone()
+                revision_outbox_columns = {
+                    str(row[1])
+                    for row in conn.execute(
+                        "PRAGMA table_info(task_runtime_outbox)"
+                    ).fetchall()
+                }
             finally:
                 conn.close()
         except sqlite3.DatabaseError as exc:
@@ -286,6 +338,38 @@ class RuntimeEventRepository:
             for table, required in _REQUIRED_TABLE_COLUMNS.items()
             if not required <= columns.get(table, set())
         }
+        revision_footprint = (
+            revision_asset is not None
+            or revision_index_row is not None
+            or "graph_revision" in revision_outbox_columns
+        )
+        revision_schema_invalid = False
+        if revision_footprint:
+            normalized_revision_index = re.sub(
+                r"\s+", "", str(revision_index_row[1] if revision_index_row else "").lower()
+            )
+            revision_index_meta = revision_index_list.get(
+                "uq_runtime_event_task_outbox_source"
+            )
+            revision_schema_invalid = (
+                revision_asset is None
+                or str(revision_asset["checksum"])
+                != TASK_GRAPH_OUTBOX_REVISION_MIGRATION_SHA256
+                or str(revision_asset["disposition"])
+                not in _ALLOWED_MIGRATION_DISPOSITIONS
+                or revision_index_row is None
+                or str(revision_index_row[0]) != "runtime_event_timeline"
+                or normalized_revision_index
+                != (
+                    "createuniqueindexuq_runtime_event_task_outbox_source"
+                    "onruntime_event_timeline(source_ref)"
+                    "wheresource_kind='task_store_outbox'"
+                )
+                or revision_index_meta is None
+                or int(revision_index_meta[2]) != 1
+                or int(revision_index_meta[4]) != 1
+                or duplicate_task_outbox_source is not None
+            )
         if (
             asset is None
             or str(asset["checksum"]) != RUNTIME_EVENT_DELIVERY_MIGRATION_SHA256
@@ -294,6 +378,7 @@ class RuntimeEventRepository:
             or not _REQUIRED_INDEXES <= indexes
             or not _REQUIRED_TRIGGERS <= triggers
             or foreign_keys != 1
+            or revision_schema_invalid
         ):
             raise RuntimeEventRepositoryError(
                 RUNTIME_EVENT_REPOSITORY_SCHEMA_NOT_READY,
@@ -467,8 +552,85 @@ class RuntimeEventRepository:
                     tuple(params),
                 ).fetchall()
                 records.extend(dict(row) for row in rows)
-            records.sort(key=lambda item: (int(item["cursor"]), str(item["event_id"])))
-            return records[:size]
+
+            # 0095 makes future TaskGraph Runtime Events revision-addressed.
+            # Preserve the immutable pre-0095 journal and resolve its legacy
+            # ``aggregate_id=graph_id`` rows through the exact source Outbox
+            # authority instead of guessing or rewriting historical evidence.
+            outbox_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_outbox)"
+                ).fetchall()
+            }
+            legacy_graph_refs = [
+                resolved
+                for kind, identifier in normalized
+                if kind == "TASK_GRAPH"
+                for resolved in [_revisioned_task_graph_ref(identifier)]
+                if resolved is not None
+            ]
+            if "graph_revision" in outbox_columns:
+                for offset in range(0, len(legacy_graph_refs), 200):
+                    chunk = legacy_graph_refs[offset : offset + 200]
+                    if not chunk:
+                        continue
+                    identity_sql = " OR ".join(
+                        "(event.aggregate_id = ? AND outbox.aggregate_id = ? "
+                        "AND outbox.graph_revision = ?)"
+                        for _ in chunk
+                    )
+                    params = [after]
+                    for graph_id, revision in chunk:
+                        params.extend((graph_id, graph_id, revision))
+                    params.append(size)
+                    rows = conn.execute(
+                        f"""
+                        SELECT event.*
+                        FROM runtime_event_timeline AS event
+                        JOIN task_runtime_outbox AS outbox
+                          ON event.source_kind = 'TASK_STORE_OUTBOX'
+                         AND event.source_ref = 'taskstore://outbox/' || outbox.outbox_id
+                         AND outbox.aggregate_type = 'TASK_GRAPH'
+                        WHERE event.cursor > ?
+                          AND event.aggregate_type = 'TASK_GRAPH'
+                          AND ({identity_sql})
+                        ORDER BY event.cursor ASC
+                        LIMIT ?
+                        """,
+                        tuple(params),
+                    ).fetchall()
+                    records.extend(dict(row) for row in rows)
+            deduped = {int(item["cursor"]): item for item in records}
+            ordered = sorted(
+                deduped.values(),
+                key=lambda item: (int(item["cursor"]), str(item["event_id"])),
+            )
+            return ordered[:size]
+        finally:
+            conn.close()
+
+    def get_task_outbox_journal(self, *, outbox_id: str) -> dict[str, Any] | None:
+        """Resolve the sole journal row projected from one immutable Outbox."""
+
+        reference = f"taskstore://outbox/{_required_text(outbox_id, 'outbox_id')}"
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM runtime_event_timeline
+                WHERE source_kind = 'TASK_STORE_OUTBOX' AND source_ref = ?
+                ORDER BY cursor
+                LIMIT 2
+                """,
+                (reference,),
+            ).fetchall()
+            if len(rows) > 1:
+                raise RuntimeEventRepositoryError(
+                    RUNTIME_EVENT_DURABLE_DATA_INVALID,
+                    "one TaskStore Outbox has multiple Runtime Event journal rows",
+                )
+            return dict(rows[0]) if rows else None
         finally:
             conn.close()
 

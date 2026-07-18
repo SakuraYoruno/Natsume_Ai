@@ -96,7 +96,7 @@ def _probe_neo4j(env_values: dict[str, str], secret_store: dict[str, Any]) -> di
             "detail": "BOND_NEO4J_ENABLED=false",
         }
 
-    uri = env_values.get("BOND_NEO4J_URI", "bolt://127.0.0.1:7687")
+    uri = env_values.get("BOND_NEO4J_URI", "bolt://127.0.0.1:17687")
     database = env_values.get("BOND_NEO4J_DATABASE", "neo4j")
     auth_ref = env_values.get("BOND_NEO4J_AUTH_REF", "")
     secret_raw = str(secret_store.get(auth_ref, ""))

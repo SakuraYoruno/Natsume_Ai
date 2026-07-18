@@ -595,8 +595,8 @@ def test_defender_signals_get_defender_specific_response_actions(tmp_path: Path)
 def test_security_immune_obs_routes_filter_incidents(monkeypatch) -> None:
     monkeypatch.setattr(
         obs_security_routes,
-        "read_domain_projection",
-        lambda **_kwargs: (
+        "read_domain_projection_from_store",
+        lambda _store, **_kwargs: (
             {
                 "asset_count": 1,
                 "incident_count": 2,
@@ -620,6 +620,9 @@ def test_security_immune_obs_routes_filter_incidents(monkeypatch) -> None:
         ),
     )
     app = FastAPI()
+    app.dependency_overrides[
+        obs_security_routes.require_obs_query_projection_store
+    ] = lambda: object()
     app.include_router(obs_router)
     client = TestClient(app)
 

@@ -27,6 +27,8 @@ export function useMemoryBrowserController() {
     refreshing,
     error,
     lastUpdatedAt,
+    resourceIssues,
+    resourceStates,
   } = query
 
   const viewModel = useMemo(() => buildMemoryBrowserViewModel({
@@ -41,6 +43,7 @@ export function useMemoryBrowserController() {
     error,
     lastUpdatedAt,
     windowMinutes,
+    resourceIssues,
   }), [
     canonDocs,
     compressData,
@@ -51,6 +54,7 @@ export function useMemoryBrowserController() {
     loading,
     memoryData,
     refreshing,
+    resourceIssues,
     residentContext,
     windowMinutes,
   ])
@@ -64,6 +68,8 @@ export function useMemoryBrowserController() {
     lastUpdatedAt,
     loading,
     refreshing,
+    resourceIssues,
+    resourceStates,
     windowMinutes,
     windowOptions: MEMORY_BROWSER_WINDOW_OPTIONS,
     onRefresh: query.refetch,

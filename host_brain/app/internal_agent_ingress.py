@@ -25,9 +25,13 @@ class InternalAgentIngress:
         *,
         evaluator: SecureIngressAuthorityEvaluator,
     ) -> None:
-        self._http = SecureIngressHttpAuthorityAdapter(
+        self._internal_http = SecureIngressHttpAuthorityAdapter(
             evaluator=evaluator,
             surface=IngressSurface.INTERNAL_AGENT,
+        )
+        self._review_http = SecureIngressHttpAuthorityAdapter(
+            evaluator=evaluator,
+            surface=IngressSurface.REVIEW_OPERATOR,
         )
 
     def evaluate_http(
@@ -39,7 +43,13 @@ class InternalAgentIngress:
     ) -> SecureIngressAuthority:
         """Return redacted authority or a fail-closed denial."""
 
-        return self._http.evaluate(
+        path = str(getattr(getattr(request, "url", None), "path", "") or "")
+        adapter = (
+            self._review_http
+            if path.startswith("/internal/codex/reviews")
+            else self._internal_http
+        )
+        return adapter.evaluate(
             request=request,
             raw_body=raw_body,
             received_at_ms=received_at_ms,

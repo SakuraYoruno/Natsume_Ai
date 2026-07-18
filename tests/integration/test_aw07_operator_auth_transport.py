@@ -165,10 +165,25 @@ def test_cross_site_request_with_valid_operator_cookie_is_csrf_denied(monkeypatc
 
 
 class _FakeWebSocket:
-    def __init__(self, gateway: OperatorQueryGateway, *, cookie: str | None = None) -> None:
+    def __init__(
+        self,
+        gateway: OperatorQueryGateway,
+        *,
+        cookie: str | None = None,
+        projection_store=None,
+    ) -> None:
+        from host_brain.app.obs_route_ports import ObsRoutePorts
+
         headers = [] if cookie is None else [(b"cookie", cookie.encode("ascii"))]
         self.scope = {"headers": headers}
-        self.app = SimpleNamespace(state=SimpleNamespace(operator_query_gateway=gateway))
+        self.app = SimpleNamespace(
+            state=SimpleNamespace(
+                operator_query_gateway=gateway,
+                obs_route_ports=ObsRoutePorts(
+                    query_projection_store_provider=lambda: projection_store,
+                ),
+            )
+        )
         self.accepted = False
         self.closed = None
         self.messages = []
@@ -189,7 +204,7 @@ def test_ws_rejects_before_accept_and_before_projection_getter(monkeypatch) -> N
     monkeypatch.setattr(
         obs_routes_platform,
         "_read_ws_health_projection",
-        lambda: source_calls.append(True),
+        lambda _store: source_calls.append(True),
     )
     websocket = _FakeWebSocket(gateway)
 
@@ -202,10 +217,12 @@ def test_ws_rejects_before_accept_and_before_projection_getter(monkeypatch) -> N
 
 def test_ws_cookie_auth_reads_only_durable_health_projection(monkeypatch) -> None:
     gateway = _configure_binding(monkeypatch, ["obs:health:stream"])
+    projection_store = SimpleNamespace(get=lambda *_args: None)
+    observed_stores = []
     monkeypatch.setattr(
         obs_routes_platform,
         "_read_ws_health_projection",
-        lambda: {
+        lambda store: observed_stores.append(store) or {
             "services": [{"service_id": "host", "status": "UP"}],
             "total": 1,
             "up": 1,
@@ -223,6 +240,7 @@ def test_ws_cookie_auth_reads_only_durable_health_projection(monkeypatch) -> Non
     websocket = _FakeWebSocket(
         gateway,
         cookie=f"natsume_operator_session={TOKEN}",
+        projection_store=projection_store,
     )
 
     asyncio.run(obs_routes_platform.ws_health(websocket))
@@ -230,3 +248,4 @@ def test_ws_cookie_auth_reads_only_durable_health_projection(monkeypatch) -> Non
     assert websocket.accepted is True
     assert websocket.messages[0]["type"] == "health_snapshot"
     assert websocket.messages[0]["data"]["services"][0]["status"] == "UP"
+    assert observed_stores == [projection_store]

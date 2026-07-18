@@ -13,24 +13,13 @@ forward recovery migration have both been applied to the selected database.
 from __future__ import annotations
 
 from contextlib import contextmanager
-import base64
-import binascii
 import hashlib
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any, Callable, Iterator, Mapping, NoReturn, Protocol, Sequence
+from typing import Any, Callable, Iterator, Mapping, NoReturn, Sequence
 from urllib.parse import quote
 import uuid
-
-try:
-    from cryptography.exceptions import InvalidSignature as _Ed25519InvalidSignature
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-        Ed25519PublicKey as _Ed25519PublicKey,
-    )
-except ImportError:  # pragma: no cover - exercised through dependency fail-closed test
-    _Ed25519InvalidSignature = None
-    _Ed25519PublicKey = None
 
 from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
@@ -92,6 +81,7 @@ from host_brain.persistence.task_store_types import (
     OutboxMessage,
     RecoveryReport,
     TASK_STORE_BUDGET_EXCEEDED,
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_CANCELLATION_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
@@ -99,6 +89,7 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_IDEMPOTENCY_RECOVERY_REQUIRED,
     TASK_STORE_LEASE_CONFLICT,
     TASK_STORE_NOT_FOUND,
+    TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED,
     TASK_STORE_OUTBOX_CONFLICT,
     TASK_STORE_OWNERSHIP_CONFLICT,
     TASK_STORE_SCHEMA_NOT_READY,
@@ -108,6 +99,13 @@ from host_brain.persistence.task_store_types import (
     _PARALLEL_SETTLEMENT_DECISION_REQUIRED_COLUMNS,
     _PARALLEL_SUCCESS_DECISION_REQUIRED_COLUMNS,
     build_outbox_payload_ref,
+)
+from host_brain.persistence.reconciliation_proof_verifier import (
+    Ed25519ReconciliationProofVerifier,
+    ReconciliationProofVerifier,
+    TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
+    TASK_STORE_RECONCILIATION_PROOF_INVALID,
+    TASK_STORE_RECONCILIATION_PROOF_REQUIRED,
 )
 from host_brain.persistence.task_record_codec import (
     _ACCEPTANCE_EFFECT_TYPE_PATTERN,
@@ -136,7 +134,6 @@ from host_brain.persistence.task_record_codec import (
     build_acceptance_effect_payload_digest,
 )
 from host_brain.persistence.task_decision_integrity import (
-    _assert_graph_cancellation_decision_bindings,
     _assert_parallel_budget_usage_lineage,
     _assert_parallel_settlement_decision_outbox_binding,
     _assert_parallel_success_decision_bindings,
@@ -167,6 +164,18 @@ from host_brain.persistence.task_graph_cancellation_finalization import (
 from host_brain.persistence.task_graph_cancellation_continuation_store import (
     TaskGraphCancellationContinuationStoreMixin,
 )
+from host_brain.persistence.task_operation_reconciliation_store import (
+    TaskOperationReconciliationStoreMixin,
+)
+from host_brain.persistence.task_operation_checkpoint_store import (
+    TaskOperationCheckpointStoreMixin,
+)
+from host_brain.persistence.task_effect_reconciliation_store import (
+    TaskEffectReconciliationStoreMixin,
+)
+from host_brain.persistence.task_graph_cancellation_effect_overlay_store import (
+    TaskGraphCancellationEffectOverlayMixin,
+)
 from host_brain.persistence.task_retry_mutation_store import (
     TaskRetryMutationStoreMixin,
 )
@@ -185,11 +194,16 @@ from host_brain.persistence.task_ready_claim_store import (
 from host_brain.persistence.task_outbox_delivery_store import (
     TaskOutboxDeliveryStoreMixin,
 )
+from host_brain.persistence.task_budget_usage_store import (
+    TaskBudgetUsageStoreMixin,
+)
+from host_brain.persistence.task_terminal_reconciliation_store import (
+    TaskTerminalReconciliationStoreMixin,
+)
+from host_brain.persistence.task_node_artifact_store import (
+    TaskNodeArtifactStoreMixin,
+)
 
-
-TASK_STORE_RECONCILIATION_PROOF_REQUIRED = "TASK_STORE_RECONCILIATION_PROOF_REQUIRED"
-TASK_STORE_RECONCILIATION_PROOF_INVALID = "TASK_STORE_RECONCILIATION_PROOF_INVALID"
-TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED = "TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED"
 
 TASK_RUNTIME_TABLES = frozenset(
     {
@@ -292,88 +306,6 @@ _GRAPH_CANCELLATION_EFFECT_FENCE_REQUIRED_COLUMNS = frozenset(
 _LEGACY_RECEIPT_REF_PATTERN = re.compile(r"^legacy-receipt://0052/rowid--?[0-9]+$")
 
 
-class ReconciliationProofVerifier(Protocol):
-    """Verification-only boundary; it intentionally exposes no signing API."""
-
-    def has_key(self, key_id: str) -> bool: ...
-
-    def verify(self, *, key_id: str, message: bytes, signature: str) -> bool: ...
-
-
-class Ed25519ReconciliationProofVerifier:
-    """Verify authority attestations using public keys only.
-
-    Signing keys and signing helpers deliberately do not exist in the runtime
-    module.  Production composition may instead inject a remote implementation
-    of :class:`ReconciliationProofVerifier` with the same verification-only API.
-    """
-
-    def __init__(self, public_keys: Mapping[str, bytes]) -> None:
-        if _Ed25519PublicKey is None:
-            raise TaskStoreError(
-                TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
-                "cryptography with Ed25519 support is required for proof verification",
-            )
-        keys: dict[str, Any] = {}
-        for raw_key_id, raw_key in public_keys.items():
-            key_id = str(raw_key_id or "").strip()
-            try:
-                key_bytes = bytes(raw_key)
-            except (TypeError, ValueError) as exc:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "Ed25519 public keys must be byte strings",
-                ) from exc
-            if not key_id or len(key_bytes) != 32:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "reconciliation public keys require key_id and exactly 32 bytes",
-                )
-            try:
-                keys[key_id] = _Ed25519PublicKey.from_public_bytes(key_bytes)
-            except ValueError as exc:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    f"invalid Ed25519 public key for key_id {key_id}",
-                ) from exc
-        if not keys:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "at least one reconciliation public key is required",
-            )
-        self._public_keys = keys
-
-    def has_key(self, key_id: str) -> bool:
-        return str(key_id or "").strip() in self._public_keys
-
-    def verify(self, *, key_id: str, message: bytes, signature: str) -> bool:
-        key = self._public_keys.get(str(key_id or "").strip())
-        supplied = str(signature or "").strip()
-        if key is None or not supplied.startswith("ed25519:"):
-            return False
-        encoded = supplied.removeprefix("ed25519:")
-        try:
-            signature_bytes = base64.b64decode(
-                encoded,
-                altchars=b"-_",
-                validate=True,
-            )
-        except (binascii.Error, ValueError):
-            return False
-        if len(signature_bytes) != 64:
-            return False
-        try:
-            key.verify(signature_bytes, bytes(message))
-        except (ValueError, TypeError):
-            return False
-        except Exception as exc:
-            if _Ed25519InvalidSignature is not None and isinstance(
-                exc,
-                _Ed25519InvalidSignature,
-            ):
-                return False
-            raise
-        return True
 
 
 def build_operation_fingerprint(
@@ -489,6 +421,13 @@ class DurableTaskStore(
     TaskRetryMutationStoreMixin,
     TaskRetryReplayStoreMixin,
     TaskAtomicFailureStoreMixin,
+    TaskOperationCheckpointStoreMixin,
+    TaskOperationReconciliationStoreMixin,
+    TaskEffectReconciliationStoreMixin,
+    TaskGraphCancellationEffectOverlayMixin,
+    TaskTerminalReconciliationStoreMixin,
+    TaskNodeArtifactStoreMixin,
+    TaskBudgetUsageStoreMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
 ):
@@ -510,6 +449,21 @@ class DurableTaskStore(
         self._clock = clock
         self._timeout_ms = max(1, int(timeout_ms))
         self._reconciliation_proof_verifier = reconciliation_proof_verifier
+        # Some owning repositories borrow the TaskStore UoW with their own
+        # schema verification.  Detect this additive column once even when
+        # ``verify_schema`` is false so those writes choose the exact physical
+        # Outbox shape without weakening the production readiness gate.
+        conn = self._connect()
+        try:
+            outbox_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    "PRAGMA table_info(task_runtime_outbox)"
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+        self._outbox_graph_revision_enabled = "graph_revision" in outbox_columns
         if verify_schema:
             self.assert_schema_ready()
             self._initialize_outbox_delivery_capability()
@@ -735,8 +689,16 @@ class DurableTaskStore(
         outbox: OutboxMessage,
         ts_ms: int,
         attempt_id: str | None = None,
+        terminal_reconciliation_bypass: bool = False,
     ) -> dict[str, Any]:
         row = self._require_graph(conn, graph_id, revision)
+        if not terminal_reconciliation_bypass:
+            self._assert_no_terminal_reconciliation_fence(
+                conn,
+                graph_id=str(graph_id),
+                graph_revision=int(revision),
+                action="TaskGraph transition",
+            )
         self._require_version(
             row,
             expected_version,
@@ -781,6 +743,7 @@ class DurableTaskStore(
             ),
             expected_event_type=f"TASK_GRAPH_{target.value}",
             expected_attempt_id=(str(attempt_id) if attempt_id is not None else None),
+            expected_graph_revision=int(revision),
         )
         updated_graph = self._require_graph(conn, graph_id, revision)
         return _graph_record(updated_graph, node_rows)
@@ -798,6 +761,7 @@ class DurableTaskStore(
         verification_result: VerificationResult | Mapping[str, Any] | None,
         acceptance_judgement: AcceptanceJudgement | Mapping[str, Any] | None,
         ts_ms: int,
+        outbox_attempt_id: str | None = None,
     ) -> dict[str, Any]:
         row = self._require_node(conn, graph_id, graph_revision, node_id)
         self._require_version(row, expected_version, subject=f"TaskNode {node_id}")
@@ -845,6 +809,27 @@ class DurableTaskStore(
                 )
             except ContractViolation as exc:
                 raise TaskStoreError(exc.reason_code, exc.detail) from exc
+            # 0102 is the lowest Acceptance state fence. Every caller,
+            # including internal atomic helpers, must materialize and validate
+            # the immutable output before the status CAS can become visible.
+            # A database deliberately pinned before 0102 retains its historical
+            # transition contract so it can be upgraded/reconciled; once the
+            # 0102 table exists, the public low-level transition cannot bypass
+            # the canonical Acceptance UoW.
+            artifact_schema = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'task_runtime_node_artifact'
+                """
+            ).fetchone()
+            if artifact_schema is not None:
+                self._require_valid_node_artifact(
+                    conn,
+                    graph_id=str(graph_id),
+                    graph_revision=int(graph_revision),
+                    node_id=str(node_id),
+                    allow_pre_acceptance_owner=True,
+                )
         node_payload["status"] = target.value
         node_payload["status_version"] = int(expected_version) + 1
         cancel_ts = (
@@ -882,7 +867,9 @@ class DurableTaskStore(
                 int(expected_version) + 1,
             ),
             expected_event_type=f"TASK_NODE_{target.value}",
-            expected_attempt_id=None,
+            expected_attempt_id=(
+                str(outbox_attempt_id) if outbox_attempt_id is not None else None
+            ),
         )
         return _node_record(
             self._require_node(conn, graph_id, graph_revision, node_id)
@@ -1244,7 +1231,42 @@ class DurableTaskStore(
         return rows[0]
 
     @staticmethod
+    def _assert_graph_revision_not_superseded(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        ready = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_graph_revision_supersession'
+            """
+        ).fetchone()
+        if ready is None:
+            return
+        row = conn.execute(
+            """
+            SELECT supersession_id, replacement_revision
+            FROM task_runtime_graph_revision_supersession
+            WHERE graph_id = ? AND previous_revision = ?
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if row is not None:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "superseded Graph revision fences ordinary "
+                f"{str(action or 'execution authority')}: "
+                f"{row['supersession_id']} -> revision "
+                f"{int(row['replacement_revision'])}",
+            )
+
+    @classmethod
     def _assert_graph_not_cancelling(
+        cls,
         conn: sqlite3.Connection,
         *,
         graph_id: str,
@@ -1256,6 +1278,12 @@ class DurableTaskStore(
         separately require 0092 through ``assert_graph_cancellation_ready``.
         """
 
+        cls._assert_graph_revision_not_superseded(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            action="execution mutation",
+        )
         ready = conn.execute(
             """
             SELECT 1 FROM sqlite_master
@@ -1277,6 +1305,106 @@ class DurableTaskStore(
                 TASK_STORE_CANCELLATION_CONFLICT,
                 "durable Graph cancellation fences new execution authority: "
                 f"{row['intent_ref']}",
+            )
+
+    def _assert_graph_accepts_budget_authority(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        """Fence graph-bound Budget creation/activation inside the write UoW."""
+
+        self._assert_graph_revision_not_superseded(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            action=f"BudgetReservation {action}",
+        )
+        graph = self._require_graph(conn, graph_id, graph_revision)
+        status = str(graph["status"] or "").strip().upper()
+        if status not in {
+            TaskGraphStatus.CREATED.value,
+            TaskGraphStatus.ACTIVE.value,
+        }:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                f"graph-bound BudgetReservation {action} requires a CREATED or "
+                f"ACTIVE TaskGraph, got {status or 'UNKNOWN'}",
+            )
+
+    def assert_no_terminal_reconciliation_fence_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        """Apply the canonical unresolved-0099 fence inside a caller UoW.
+
+        This narrow public hook lets higher-level repositories compose terminal
+        reconciliation validation without opening a second transaction or
+        depending on the private helper's implementation shape.
+        """
+
+        if not isinstance(conn, sqlite3.Connection) or not conn.in_transaction:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "terminal reconciliation fence requires an active SQLite transaction",
+            )
+        self._assert_no_terminal_reconciliation_fence(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            action=action,
+        )
+
+    @staticmethod
+    def _assert_no_terminal_reconciliation_fence(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        ready = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_terminal_reconciliation_supersession'
+            """
+        ).fetchone()
+        if ready is None:
+            return
+        unresolved = conn.execute(
+            """
+            SELECT item.case_id
+            FROM task_runtime_terminal_reconciliation_case AS item
+            WHERE item.graph_id = ? AND item.graph_revision = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM task_runtime_terminal_reconciliation_proof AS proof
+                  WHERE proof.case_id = item.case_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM task_runtime_terminal_reconciliation_supersession AS supersession
+                  WHERE supersession.prior_case_id = item.case_id
+              )
+            ORDER BY item.created_ts_ms, item.case_id
+            LIMIT 1
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if unresolved is not None:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "inventoried terminal reconciliation case fences ordinary "
+                f"{str(action or 'authority mutation')}: "
+                f"{unresolved['case_id']}",
             )
 
 
@@ -2754,6 +2882,7 @@ class DurableTaskStore(
         attestation_key_id: str | None = None,
         attestation_signature: str | None = None,
         ttl_ms: int | None = None,
+        _required_cancellation_intent_ref: str | None = None,
     ) -> dict[str, Any]:
         try:
             recovery_action = IdempotencyRecoveryAction(str(action).strip().upper())
@@ -2797,6 +2926,17 @@ class DurableTaskStore(
             )
         if recovery_action is IdempotencyRecoveryAction.REACQUIRE and int(ttl_ms or 0) <= 0:
             raise TaskStoreError(TASK_STORE_INVALID, "REACQUIRE requires positive ttl_ms")
+        required_cancellation_ref = str(
+            _required_cancellation_intent_ref or ""
+        ).strip() or None
+        if (
+            required_cancellation_ref is not None
+            and recovery_action is IdempotencyRecoveryAction.REACQUIRE
+        ):
+            raise TaskStoreError(
+                TASK_STORE_CANCELLATION_CONFLICT,
+                "cancellation reconciliation cannot REACQUIRE an operation",
+            )
 
         ts_ms = self._now()
         with self._transaction() as conn:
@@ -2808,6 +2948,41 @@ class DurableTaskStore(
                     TASK_STORE_INVALID,
                     f"reservation {reservation_id} is not RECOVERY_REQUIRED",
                 )
+            if required_cancellation_ref is not None:
+                original_attempt_ref = str(row["attempt_id"] or "").strip()
+                if not original_attempt_ref:
+                    raise TaskStoreError(
+                        TASK_STORE_OWNERSHIP_CONFLICT,
+                        "cancellation reconciliation requires an attempt-bound reservation",
+                    )
+                original_attempt = self._require_attempt(conn, original_attempt_ref)
+                intent_row = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_graph_cancellation_intent
+                    WHERE intent_ref = ?
+                    """,
+                    (required_cancellation_ref,),
+                ).fetchone()
+                if intent_row is None:
+                    raise TaskStoreError(
+                        TASK_STORE_NOT_FOUND,
+                        f"graph cancellation intent not found: {required_cancellation_ref}",
+                    )
+                intent = _graph_cancellation_intent_record(intent_row)
+                if str(intent["status"]) != "REQUESTED":
+                    raise TaskStoreError(
+                        TASK_STORE_CANCELLATION_CONFLICT,
+                        "operation reconciliation requires an exact REQUESTED cancellation intent",
+                    )
+                if (
+                    str(intent["graph_id"]) != str(original_attempt["graph_id"])
+                    or int(intent["graph_revision"])
+                    != int(original_attempt["graph_revision"])
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_OWNERSHIP_CONFLICT,
+                        "operation reservation does not belong to the cancelling graph revision",
+                    )
             proof_binding = build_reconciliation_attestation_binding(
                 reservation_id=str(row["reservation_id"]),
                 business_scope=str(row["business_scope"]),
@@ -2969,6 +3144,12 @@ class DurableTaskStore(
                     graph_id=str(graph_id),
                     graph_revision=int(graph_revision),
                 )
+                self._assert_graph_accepts_budget_authority(
+                    conn,
+                    graph_id=str(graph_id),
+                    graph_revision=int(graph_revision),
+                    action="creation",
+                )
             if attempt_id is not None:
                 self._require_attempt(conn, attempt_id)
             consumed = reservation.consumed.to_dict()
@@ -3031,6 +3212,24 @@ class DurableTaskStore(
                 )
             self._require_version(row, expected_version, subject=f"BudgetReservation {budget_id}")
             target = validate_budget_transition(str(row["status"]), target_status)
+            if row["graph_id"] is not None and row["graph_revision"] is not None:
+                self._assert_no_terminal_reconciliation_fence(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    action="Budget transition",
+                )
+            if (
+                target is BudgetReservationStatus.ACTIVE
+                and row["graph_id"] is not None
+                and row["graph_revision"] is not None
+            ):
+                self._assert_graph_accepts_budget_authority(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    action="activation",
+                )
             cursor = conn.execute(
                 """
                 UPDATE task_runtime_budget_reservation
@@ -3058,6 +3257,7 @@ class DurableTaskStore(
         """Return one integrity-checked graph cancellation intent."""
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         reference = str(intent_ref or "").strip()
         if not reference:
             raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
@@ -3082,6 +3282,7 @@ class DurableTaskStore(
         revision: int,
     ) -> dict[str, Any] | None:
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         conn = self._connect()
         try:
             row = conn.execute(
@@ -3122,17 +3323,14 @@ class DurableTaskStore(
                 "finalized cancellation intent is missing its decision",
             )
         decision = _graph_cancellation_decision_record(decision_row)
-        _assert_graph_cancellation_decision_bindings(
-            conn,
-            decision,
-            evidence_refs_builder=self._graph_cancellation_evidence_refs,
-        )
+        self._assert_graph_cancellation_decision_trusted(conn, decision)
         return record
 
     def list_pending_graph_cancellations(self, *, limit: int = 100) -> list[dict[str, Any]]:
         """Enumerate REQUESTED intents for startup/re-entry continuation."""
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         size = max(1, min(int(limit), 500))
         conn = self._connect()
         try:
@@ -3151,6 +3349,7 @@ class DurableTaskStore(
 
     def get_graph_cancellation_decision(self, decision_ref: str) -> dict[str, Any]:
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         reference = str(decision_ref or "").strip()
         if not reference:
             raise TaskStoreError(TASK_STORE_INVALID, "cancellation decision_ref is required")
@@ -3166,11 +3365,7 @@ class DurableTaskStore(
                     f"graph cancellation decision not found: {reference}",
                 )
             record = _graph_cancellation_decision_record(row)
-            _assert_graph_cancellation_decision_bindings(
-                conn,
-                record,
-                evidence_refs_builder=self._graph_cancellation_evidence_refs,
-            )
+            self._assert_graph_cancellation_decision_trusted(conn, record)
             return record
         finally:
             conn.close()
@@ -3180,6 +3375,7 @@ class DurableTaskStore(
         intent_ref: str,
     ) -> dict[str, Any] | None:
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         reference = str(intent_ref or "").strip()
         if not reference:
             raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
@@ -3195,11 +3391,7 @@ class DurableTaskStore(
             if row is None:
                 return None
             record = _graph_cancellation_decision_record(row)
-            _assert_graph_cancellation_decision_bindings(
-                conn,
-                record,
-                evidence_refs_builder=self._graph_cancellation_evidence_refs,
-            )
+            self._assert_graph_cancellation_decision_trusted(conn, record)
             return record
         finally:
             conn.close()
@@ -3212,6 +3404,7 @@ class DurableTaskStore(
         aggregate_id: str,
         aggregate_version: int,
         event_type: str,
+        graph_revision: int | None = None,
         attempt_id: str | None = None,
     ) -> OutboxMessage:
         material = (
@@ -3222,12 +3415,14 @@ class DurableTaskStore(
         return OutboxMessage.create(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
+            graph_revision=graph_revision,
             aggregate_version=aggregate_version,
             event_type=event_type,
             payload_ref=build_outbox_payload_ref(
                 aggregate_type=aggregate_type,
                 aggregate_id=aggregate_id,
                 aggregate_version=aggregate_version,
+                graph_revision=graph_revision,
             ),
             idempotency_key=f"graph-cancellation:{digest}",
             outbox_id=f"outbox::graph-cancellation:{digest}",
@@ -3295,6 +3490,17 @@ class DurableTaskStore(
         ).fetchall()
         for row in effect_rows:
             refs.add(str(row["effect_id"]))
+            proof = self._read_validated_effect_reconciliation_proof_in_transaction(
+                conn,
+                intent_ref=str(intent_ref),
+                effect_id=str(row["effect_id"]),
+                purpose="PENDING_CANCELLATION",
+            )
+            if proof is not None:
+                refs.add(str(proof["proof_id"]))
+                receipt_ref = str(proof.get("receipt_ref") or "").strip()
+                if _DURABLE_REFERENCE_PATTERN.fullmatch(receipt_ref):
+                    refs.add(receipt_ref)
             if row["resolution_status"] is None:
                 # Authorized NODE effects remain deliverable after Graph
                 # cancellation; bind only their immutable effect identity.
@@ -3359,6 +3565,12 @@ class DurableTaskStore(
                     graph_id=str(row["graph_id"]),
                     graph_revision=int(row["graph_revision"]),
                 )
+                self._assert_no_terminal_reconciliation_fence(
+                    conn,
+                    graph_id=str(row["graph_id"]),
+                    graph_revision=int(row["graph_revision"]),
+                    action="Budget consumption",
+                )
             self._require_version(row, expected_version, subject=f"BudgetReservation {budget_id}")
             if str(row["status"]) != BudgetReservationStatus.ACTIVE.value:
                 raise TaskStoreError(
@@ -3420,259 +3632,6 @@ class DurableTaskStore(
                 exceeded_dimensions=exceeded_dimensions,
             )
 
-    def consume_budget_once(
-        self,
-        budget_id: str,
-        *,
-        usage_id: str,
-        charge_kind: str,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        attempt_id: str,
-        delta: BudgetAmount,
-        expected_version: int,
-        outbox: OutboxMessage,
-    ) -> BudgetConsumptionResult:
-        """Atomically journal and apply one stable budget usage charge.
-
-        An exact ``(budget_id, usage_id)`` replay returns the original outcome
-        without changing the reservation or inserting another outbox row.  Any
-        reuse with different binding material fails closed.
-        """
-
-        budget_ref = str(budget_id or "").strip()
-        usage_ref = str(usage_id or "").strip()
-        kind = str(charge_kind or "").strip().upper()
-        graph_ref = str(graph_id or "").strip()
-        node_ref = str(node_id or "").strip()
-        attempt_ref = str(attempt_id or "").strip()
-        if (
-            not budget_ref
-            or not _DURABLE_REFERENCE_PATTERN.fullmatch(usage_ref)
-            or not kind
-            or len(kind) > 64
-            or not graph_ref
-            or not node_ref
-            or not attempt_ref
-            or isinstance(graph_revision, bool)
-            or not isinstance(graph_revision, int)
-            or graph_revision < 1
-        ):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "budget usage requires a durable usage_id and complete graph/attempt binding",
-            )
-        if not isinstance(delta, BudgetAmount):
-            raise TaskStoreError(TASK_STORE_INVALID, "delta must be a BudgetAmount")
-        normalized_delta = BudgetAmount.from_mapping(delta.to_dict())
-        delta_json = _dumps(normalized_delta.to_dict())
-        delta_digest = "sha256:" + hashlib.sha256(delta_json.encode("utf-8")).hexdigest()
-        ts_ms = self._now()
-
-        with self._transaction() as conn:
-            self._assert_graph_not_cancelling(
-                conn,
-                graph_id=graph_ref,
-                graph_revision=graph_revision,
-            )
-            existing = conn.execute(
-                """
-                SELECT * FROM task_runtime_budget_usage
-                WHERE budget_id = ? AND usage_id = ?
-                """,
-                (budget_ref, usage_ref),
-            ).fetchone()
-            if existing is not None:
-                drift = (
-                    str(existing["charge_kind"]) != kind
-                    or str(existing["graph_id"]) != graph_ref
-                    or int(existing["graph_revision"]) != graph_revision
-                    or str(existing["node_id"]) != node_ref
-                    or str(existing["attempt_id"]) != attempt_ref
-                    or str(existing["delta_digest"]) != delta_digest
-                    or str(existing["delta_json"]) != delta_json
-                )
-                if drift:
-                    raise TaskStoreError(
-                        TASK_STORE_OUTBOX_CONFLICT,
-                        f"budget usage replay drift: {usage_ref}",
-                    )
-                reservation = self._budget_record(self._require_budget(conn, budget_ref))
-                dimensions = tuple(
-                    str(item)
-                    for item in _loads_list(
-                        existing["exceeded_dimensions_json"],
-                        field_name="budget_usage.exceeded_dimensions_json",
-                    )
-                )
-                usage = _budget_usage_record(existing)
-                return BudgetConsumptionResult(
-                    accepted=bool(existing["accepted"]),
-                    reason_code=(str(existing["reason_code"]) if existing["reason_code"] else None),
-                    reservation=reservation,
-                    exceeded_dimensions=dimensions,
-                    usage_id=usage_ref,
-                    replayed=True,
-                    usage=usage,
-                )
-
-            row = self._require_budget(conn, budget_ref)
-            self._require_version(row, expected_version, subject=f"BudgetReservation {budget_ref}")
-            if str(row["status"]) != BudgetReservationStatus.ACTIVE.value:
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    f"budget {budget_ref} must be ACTIVE before consumption",
-                )
-            if (
-                str(row["graph_id"] or "") != graph_ref
-                or int(row["graph_revision"] or 0) != graph_revision
-                or row["node_id"] is not None
-                or row["attempt_id"] is not None
-            ):
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "shared budget reservation graph binding drifted",
-                )
-            attempt = self._require_attempt(conn, attempt_ref)
-            if (
-                str(attempt["graph_id"]) != graph_ref
-                or int(attempt["graph_revision"]) != graph_revision
-                or str(attempt["node_id"]) != node_ref
-            ):
-                raise TaskStoreError(
-                    TASK_STORE_INVALID,
-                    "budget usage attempt is outside the reservation graph revision",
-                )
-
-            consumed = _amount_from_json(row["consumed_json"], field_name="consumed_json")
-            reserved = _amount_from_json(row["reserved_json"], field_name="reserved_json")
-            attempted = _add_amounts(consumed, normalized_delta)
-            exceeded_dimensions = tuple(
-                key
-                for key, value in attempted.to_dict().items()
-                if value > reserved.to_dict()[key]
-            )
-            accepted = not exceeded_dimensions
-            target_status = (
-                BudgetReservationStatus.ACTIVE.value
-                if accepted
-                else BudgetReservationStatus.EXCEEDED.value
-            )
-            next_consumed = attempted if accepted else consumed
-            next_version = int(expected_version) + 1
-            cursor = conn.execute(
-                """
-                UPDATE task_runtime_budget_reservation
-                SET consumed_json = ?, attempted_consumed_json = ?,
-                    exceeded_dimensions_json = ?, status = ?,
-                    status_version = status_version + 1, updated_ts_ms = ?
-                WHERE budget_id = ? AND status_version = ? AND status = 'ACTIVE'
-                """,
-                (
-                    _dumps(next_consumed.to_dict()),
-                    _dumps(attempted.to_dict()),
-                    _dumps(list(exceeded_dimensions)),
-                    target_status,
-                    ts_ms,
-                    budget_ref,
-                    int(expected_version),
-                ),
-            )
-            self._require_cas(cursor, subject=f"BudgetReservation {budget_ref}")
-            reason_code = TASK_STORE_BUDGET_EXCEEDED if exceeded_dimensions else None
-            conn.execute(
-                """
-                INSERT INTO task_runtime_budget_usage(
-                    budget_id, usage_id, graph_id, graph_revision, node_id,
-                    attempt_id, charge_kind, delta_json, delta_digest, accepted,
-                    reason_code, exceeded_dimensions_json,
-                    reservation_version_before, reservation_version_after,
-                    outbox_id, created_ts_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    budget_ref,
-                    usage_ref,
-                    graph_ref,
-                    graph_revision,
-                    node_ref,
-                    attempt_ref,
-                    kind,
-                    delta_json,
-                    delta_digest,
-                    1 if accepted else 0,
-                    reason_code,
-                    _dumps(list(exceeded_dimensions)),
-                    int(expected_version),
-                    next_version,
-                    outbox.outbox_id,
-                    ts_ms,
-                ),
-            )
-            self._insert_outbox(
-                conn,
-                outbox,
-                ts_ms=ts_ms,
-                expected_aggregate=("BUDGET_RESERVATION", budget_ref, next_version),
-                expected_event_type=("BUDGET_CONSUMED" if accepted else "BUDGET_EXCEEDED"),
-                expected_attempt_id=attempt_ref,
-            )
-            updated = self._budget_record(self._require_budget(conn, budget_ref))
-            usage_row = conn.execute(
-                """
-                SELECT * FROM task_runtime_budget_usage
-                WHERE budget_id = ? AND usage_id = ?
-                """,
-                (budget_ref, usage_ref),
-            ).fetchone()
-            return BudgetConsumptionResult(
-                accepted=accepted,
-                reason_code=reason_code,
-                reservation=updated,
-                exceeded_dimensions=exceeded_dimensions,
-                usage_id=usage_ref,
-                replayed=False,
-                usage=_budget_usage_record(usage_row),
-            )
-
-    def get_budget_usage(self, budget_id: str, usage_id: str) -> dict[str, Any]:
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT * FROM task_runtime_budget_usage
-                WHERE budget_id = ? AND usage_id = ?
-                """,
-                (str(budget_id), str(usage_id)),
-            ).fetchone()
-            if row is None:
-                raise TaskStoreError(
-                    TASK_STORE_NOT_FOUND,
-                    f"BudgetUsage not found: {usage_id}",
-                )
-            return _budget_usage_record(row)
-        finally:
-            conn.close()
-
-    def reconcile_budget(self, budget_id: str) -> dict[str, Any]:
-        conn = self._connect()
-        try:
-            record = self._budget_record(self._require_budget(conn, budget_id))
-        finally:
-            conn.close()
-        reserved = BudgetAmount.from_mapping(record["reserved"])
-        consumed = BudgetAmount.from_mapping(record["consumed"])
-        remaining = {
-            key: max(0, reserved.to_dict()[key] - consumed.to_dict()[key])
-            for key in reserved.to_dict()
-        }
-        return {
-            **record,
-            "remaining": remaining,
-            "balanced": not consumed.exceeds(reserved),
-            "denied_usage_preserved": bool(record["exceeded_dimensions"]),
-        }
 
     # -- Acceptance-bound effect intents ------------------------------------------
 
@@ -3725,153 +3684,6 @@ class DurableTaskStore(
             return _outbox_record(self._require_outbox(conn, outbox_id))
 
     # -- Internal row helpers -------------------------------------------------------
-
-    def _insert_outbox(
-        self,
-        conn: sqlite3.Connection,
-        message: OutboxMessage,
-        *,
-        ts_ms: int,
-        expected_aggregate: tuple[str, str, int],
-        expected_event_type: str,
-        expected_attempt_id: str | None,
-    ) -> None:
-        if not isinstance(message, OutboxMessage):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "every durable state mutation requires an OutboxMessage",
-            )
-        message.validate()
-        if message.available_ts_ms is not None:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "mutation outbox availability is assigned only by the trusted store clock",
-            )
-        actual_aggregate = (
-            message.aggregate_type,
-            message.aggregate_id,
-            int(message.aggregate_version),
-        )
-        normalized_expected = (
-            str(expected_aggregate[0]),
-            str(expected_aggregate[1]),
-            int(expected_aggregate[2]),
-        )
-        if actual_aggregate != normalized_expected:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "outbox aggregate must identify the state version committed in this transaction: "
-                f"expected {normalized_expected}, got {actual_aggregate}",
-            )
-        normalized_event_type = str(expected_event_type or "").strip()
-        if not normalized_event_type or message.event_type != normalized_event_type:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "outbox event_type does not describe the committed mutation: "
-                f"expected {normalized_event_type}, got {message.event_type}",
-            )
-        normalized_attempt_id = str(expected_attempt_id or "").strip() or None
-        if message.attempt_id != normalized_attempt_id:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "outbox attempt_id does not match the committed mutation: "
-                f"expected {normalized_attempt_id}, got {message.attempt_id}",
-            )
-        try:
-            conn.execute(
-                """
-                INSERT INTO task_runtime_outbox(
-                    outbox_id, aggregate_type, aggregate_id, aggregate_version,
-                    event_type, payload_ref, evidence_refs_json, attempt_id,
-                    idempotency_key, status, available_ts_ms, created_ts_ms,
-                    published_ts_ms, status_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, NULL, 0)
-                """,
-                (
-                    message.outbox_id,
-                    message.aggregate_type,
-                    message.aggregate_id,
-                    message.aggregate_version,
-                    message.event_type,
-                    message.payload_ref,
-                    _dumps(list(message.evidence_refs)),
-                    message.attempt_id,
-                    message.idempotency_key,
-                    ts_ms,
-                    ts_ms,
-                ),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise TaskStoreError(
-                TASK_STORE_OUTBOX_CONFLICT,
-                f"outbox identity/idempotency conflict: {message.idempotency_key}",
-            ) from exc
-
-    def _assert_mutation_outbox_replay(
-        self,
-        conn: sqlite3.Connection,
-        message: OutboxMessage,
-        *,
-        expected_aggregate: tuple[str, str, int],
-        expected_event_type: str,
-        expected_attempt_id: str | None,
-    ) -> None:
-        if not isinstance(message, OutboxMessage):
-            raise TaskStoreError(TASK_STORE_INVALID, "atomic replay requires an OutboxMessage")
-        message.validate()
-        if message.available_ts_ms is not None:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "mutation outbox availability is assigned only by the trusted store clock",
-            )
-        expected = (
-            str(expected_aggregate[0]),
-            str(expected_aggregate[1]),
-            int(expected_aggregate[2]),
-        )
-        if (
-            (message.aggregate_type, message.aggregate_id, message.aggregate_version) != expected
-            or message.event_type != str(expected_event_type)
-            or message.attempt_id != (str(expected_attempt_id or "").strip() or None)
-        ):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "atomic replay outbox does not bind the committed mutation",
-            )
-        by_id = conn.execute(
-            "SELECT * FROM task_runtime_outbox WHERE outbox_id = ?",
-            (message.outbox_id,),
-        ).fetchone()
-        by_key = conn.execute(
-            "SELECT * FROM task_runtime_outbox WHERE idempotency_key = ?",
-            (message.idempotency_key,),
-        ).fetchone()
-        if (
-            by_id is None
-            or by_key is None
-            or str(by_id["outbox_id"]) != str(by_key["outbox_id"])
-        ):
-            raise TaskStoreError(
-                TASK_STORE_OUTBOX_CONFLICT,
-                "atomic acceptance replay is missing its exact state outbox",
-            )
-        durable = _outbox_record(by_id)
-        drift = (
-            str(durable["outbox_id"]) != message.outbox_id
-            or str(durable["aggregate_type"]) != message.aggregate_type
-            or str(durable["aggregate_id"]) != message.aggregate_id
-            or int(durable["aggregate_version"]) != message.aggregate_version
-            or str(durable["event_type"]) != message.event_type
-            or str(durable["payload_ref"]) != message.payload_ref
-            or str(durable["idempotency_key"]) != message.idempotency_key
-            or durable["attempt_id"] != message.attempt_id
-            or tuple(durable["evidence_refs"]) != tuple(message.evidence_refs)
-        )
-        if drift:
-            raise TaskStoreError(
-                TASK_STORE_OUTBOX_CONFLICT,
-                "atomic acceptance state outbox replay drift",
-            )
 
     @staticmethod
     def _validated_reference(value: Any, *, field_name: str) -> str:
@@ -4521,6 +4333,7 @@ __all__ = [
     "RecoveryReport",
     "ReconciliationProofVerifier",
     "TASK_RUNTIME_TABLES",
+    "TASK_STORE_BUDGET_ALREADY_EXCEEDED",
     "TASK_STORE_BUDGET_EXCEEDED",
     "TASK_STORE_CANCELLATION_CONFLICT",
     "TASK_STORE_CAS_CONFLICT",
@@ -4529,6 +4342,7 @@ __all__ = [
     "TASK_STORE_INVALID",
     "TASK_STORE_LEASE_CONFLICT",
     "TASK_STORE_NOT_FOUND",
+    "TASK_STORE_NODE_ARTIFACT_RECONCILIATION_REQUIRED",
     "TASK_STORE_OUTBOX_CONFLICT",
     "TASK_STORE_OWNERSHIP_CONFLICT",
     "TASK_STORE_RECONCILIATION_PROOF_REQUIRED",

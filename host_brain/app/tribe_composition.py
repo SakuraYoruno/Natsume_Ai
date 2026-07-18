@@ -17,7 +17,6 @@ def configure_tribe_application_ports() -> TribeApplicationPorts:
         resolve_chat_emotion_context,
     )
     from host_brain.app.intent_seq import allocate_intent_seq
-    from host_brain.app.obs_routes_sysmode import _get_mode_transition_service
     from host_brain.app.user_preference_store import build_user_preference_pack
     from host_brain.composition import process_services
     from host_brain.composition.tribe_runtime import (
@@ -32,10 +31,14 @@ def configure_tribe_application_ports() -> TribeApplicationPorts:
         tribe_registry=get_host_tribe_registry(),
     )
 
+    def resolve_process_mode_transition_service():
+        monitor = process_services.get_activity_monitor()
+        return getattr(monitor, "_mode_service", None) if monitor is not None else None
+
     return bind_ports(
         TribeApplicationPorts(
             activity_monitor=process_services.get_activity_monitor,
-            mode_transition_service=_get_mode_transition_service,
+            mode_transition_service=resolve_process_mode_transition_service,
             bond_update_queue=process_services.get_bond_update_queue,
             ledger=process_services.get_ledger,
             life_snapshot_reader=process_services.get_life_snapshot_reader,

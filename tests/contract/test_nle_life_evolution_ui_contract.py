@@ -4,14 +4,15 @@ import asyncio
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from host_brain.app import obs_routes_life_evolution as routes
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.composition.process_services import get_token_service
 from host_brain.app.settings.core import get_core_settings
-from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.observability.degradation_state import (
     DegradationStateMachine,
@@ -24,6 +25,11 @@ from host_brain.persona.life_evolution_view import (
 
 
 NOW = 1_800_200_000_000
+
+
+def _request_with_route_ports(ports: ObsRoutePorts) -> Request:
+    app = SimpleNamespace(state=SimpleNamespace(obs_route_ports=ports))
+    return Request({"type": "http", "app": app})
 
 
 @pytest.fixture(autouse=True)
@@ -272,25 +278,30 @@ def test_t_nle_22_expired_scene_keeps_recorded_policy_source_and_effective_polic
     assert preview["why_now"]
 
 
-def test_t_nle_22_feature_gate_runs_before_snapshot_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_t_nle_22_feature_gate_runs_before_projection_store(monkeypatch: pytest.MonkeyPatch) -> None:
     called = False
 
-    def provider(**_: object) -> dict:
-        nonlocal called
-        called = True
-        return {"schema_version": "should-not-run"}
+    class Store:
+        def get(self, *_args: object, **_kwargs: object) -> None:
+            nonlocal called
+            called = True
+            return None
 
-    routes.set_life_evolution_snapshot_provider(provider)
     monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "false")
     get_core_settings.cache_clear()
     try:
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(routes._get_life_evolution_snapshot(person_id="default", session_id=""))
+            asyncio.run(
+                routes._get_life_evolution_snapshot(
+                    projection_store=Store(),
+                    person_id="default",
+                    session_id="",
+                )
+            )
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["reason_code"] == "NLE_LIFE_VIEWS_DISABLED"
         assert called is False
     finally:
-        routes.set_life_evolution_snapshot_provider(None)
         get_core_settings.cache_clear()
 
 
@@ -305,116 +316,12 @@ def test_t_nle_22_life_projection_rollout_is_disabled_when_absent_or_malformed(m
     assert life_projection_enabled() is True
 
 
-def _patch_default_snapshot_dependencies(monkeypatch: pytest.MonkeyPatch, ledger: SQLiteLedger) -> None:
-    from host_brain.composition import process_services as dependencies
-    from host_brain.tribe import social_brain_agent
-
-    class Stage:
-        def peek_state(self, _user_id: str) -> None:
-            return None
-
-    class Social:
-        def resolve_relationship_repair_state(self, *, person_id: str) -> dict:
-            return {"person_id": person_id}
-
-    monkeypatch.setattr(dependencies, "get_ledger", lambda: ledger)
-    monkeypatch.setattr(dependencies, "get_state_arbiter", lambda: None)
-    monkeypatch.setattr(dependencies, "get_bond_stage_engine", lambda: Stage())
-    monkeypatch.setattr(social_brain_agent, "get_social_brain_agent", lambda: Social())
-
-
-def test_t_nle_22_actual_surface_scene_producer_reaches_default_snapshot_without_fake_fallback(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from host_brain.surface_runtime.eligibility import _surface_scene_guardrails
-    from host_brain.persona.life_evolution_observer import reset_life_evolution_observations
-
-    monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "true")
-    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")
-    reset_life_evolution_observations()
-    ledger = SQLiteLedger(db_path=str(tmp_path / "scene-producer.sqlite3"), check_same_thread=False)
-    _patch_default_snapshot_dependencies(monkeypatch, ledger)
-    try:
-        before_tables = {
-            row[0] for row in ledger._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
-        empty_snapshot = asyncio.run(
-            routes._default_snapshot(person_id="default", session_id="session-1", fact_keys=[], now_ms=NOW)
-        )
-        assert empty_snapshot["scene"]["status"] == "UNAVAILABLE"
-        assert empty_snapshot["scene"]["source_refs"] == []
-        assert empty_snapshot["scene"]["observed_from_actual_producer"] is False
-        produced, _ = _surface_scene_guardrails(
-            scene_awareness={
-                "scene_tags": ["meeting"],
-                "source_ref": "environment://actual-scene",
-                "observed_at_ms": NOW - 1_000,
-                "expires_at_ms": NOW + 60_000,
-                "confidence": 0.91,
-            },
-            task_control={"task_mode": "work_code"},
-            user_goal_ref="intent://actual-scene",
-            now_ms=NOW,
-        )
-        snapshot = asyncio.run(
-            routes._default_snapshot(person_id="default", session_id="session-1", fact_keys=[], now_ms=NOW)
-        )
-        after_tables = {
-            row[0] for row in ledger._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
-        assert snapshot["scene"]["decision_id"] == produced["decision_id"]
-        assert snapshot["scene"]["status"] == "OBSERVED"
-        assert snapshot["scene"]["observed_from_actual_producer"] is True
-        assert snapshot["scene"]["source_refs"] == ["environment://actual-scene"]
-        assert snapshot["action_arbiter"]["status"] == "UNAVAILABLE"
-        assert snapshot["action_preview"]["decision"] == "BLOCK"
-        assert snapshot["action_preview"]["execution_performed"] is False
-        assert after_tables == before_tables
-    finally:
-        reset_life_evolution_observations()
-        ledger._conn.close()
-
-
-def test_t_nle_22_actual_supervisor_appraisal_producer_reaches_default_snapshot_minimized(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from host_brain.persona.life_evolution_observer import reset_life_evolution_observations
-    from host_brain.validation import DigitalLifeRuntimeConfig, DigitalLifeSupervisor
-
-    monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "true")
-    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")
-    reset_life_evolution_observations()
-    ledger = SQLiteLedger(db_path=str(tmp_path / "appraisal-producer.sqlite3"), check_same_thread=False)
-    _patch_default_snapshot_dependencies(monkeypatch, ledger)
-    supervisor = DigitalLifeSupervisor(DigitalLifeRuntimeConfig(out_dir=tmp_path / "supervisor-state"))
-    event = {
-        "episode_id": "actual-episode-1",
-        "ts_ms": NOW,
-        "motive": "check_in",
-        "felt_reason": "PRIVATE_FEELING_BODY",
-        "opening_message": "PRIVATE_OPENING_BODY",
-        "chosen_action": "hold",
-        "send_allowed": False,
-        "emotional_drive": 0.7,
-        "disturbance_risk": 0.4,
-        "relationship_permission": 0.2,
-        "emotional_state": {"drifted_valence": 0.1, "drifted_arousal": 0.4},
-    }
-    try:
-        supervisor._write_proactive_episode_record(event, scheduler_intent={"skill_name": "proactive_talk"})
-        snapshot = asyncio.run(
-            routes._default_snapshot(person_id="default", session_id="session-1", fact_keys=[], now_ms=NOW)
-        )
-        encoded = json.dumps(snapshot, ensure_ascii=False)
-        assert snapshot["appraisals"]["record_count"] == 1
-        assert snapshot["appraisals"]["records"][0]["source_event_ref"] == "emotional_proactive_episode://actual-episode-1"
-        assert "PRIVATE_OPENING_BODY" not in encoded
-        assert "PRIVATE_FEELING_BODY" not in encoded
-    finally:
-        reset_life_evolution_observations()
-        ledger._conn.close()
+def test_t_nle_22_route_has_no_live_producer_or_process_fallback() -> None:
+    source = Path(routes.__file__).read_text(encoding="utf-8")
+    assert "def _default_snapshot(" not in source
+    assert "set_life_evolution_snapshot_provider" not in source
+    assert "composition.process_services" not in source
+    assert "read_domain_projection_from_store(" in source
 
 
 def _approved_preview_payload(now_ms: int, *, token: str = "approval::ui-preview") -> dict:
@@ -468,7 +375,12 @@ def test_t_nle_22_client_forged_governor_context_is_ignored_and_blocked(monkeypa
     get_core_settings.cache_clear()
     try:
         forged = _approved_preview_payload(int(time.time() * 1000))
-        result = asyncio.run(routes.post_life_evolution_action_preview(forged))
+        request = _request_with_route_ports(
+            ObsRoutePorts(query_projection_store_provider=lambda: object())
+        )
+        result = asyncio.run(
+            routes.post_life_evolution_action_preview(request, forged)
+        )
     finally:
         get_core_settings.cache_clear()
 
@@ -497,11 +409,21 @@ def test_t_nle_22_server_trusted_preview_is_governed_dry_run_without_execution_o
             "authority_source_ref": "governor-commit://intent-ui-preview",
         }
     )
-    routes.set_life_evolution_action_context_provider(lambda **_: trusted)
+    request = _request_with_route_ports(
+        ObsRoutePorts(
+            query_projection_store_provider=lambda: object(),
+            life_action_context_provider=lambda **_: trusted,
+            approval_token_validator=get_token_service().validate_bound_token,
+        )
+    )
     try:
-        result = asyncio.run(routes.post_life_evolution_action_preview({"preview_subject_ref": "intent-ui-preview"}))
+        result = asyncio.run(
+            routes.post_life_evolution_action_preview(
+                request,
+                {"preview_subject_ref": "intent-ui-preview"},
+            )
+        )
     finally:
-        routes.set_life_evolution_action_context_provider(None)
         get_core_settings.cache_clear()
 
     assert result["status"] == "DRY_RUN"

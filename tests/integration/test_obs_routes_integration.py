@@ -19,13 +19,11 @@ from fastapi.testclient import TestClient
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes import router
 from host_brain.app.obs_routes_health import router as health_router
 from host_brain.app.obs_fastapi_app import request_trace
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
-from host_brain.app.observability_runtime.health_device_projection import (
-    refresh_health_query_projections,
-)
 from host_brain.app.observability_runtime.live_source_projection import (
     refresh_operator_live_state_projections,
 )
@@ -33,16 +31,18 @@ from host_brain.app.observability_runtime.process_state_projection import (
     refresh_runtime_snapshot_projection,
 )
 from host_brain.app.observability_runtime.projection_ledger_view import (
+    ProjectionLedgerView,
     refresh_ledger_stats_projection,
 )
-from host_brain.app.observability_runtime.session_query import (
-    refresh_session_query_projection,
-)
 from host_brain.app.obs_routes_trace import refresh_trace_query_projections
-from host_brain.composition.process_service_container import (
-    get_process_service_container,
+from host_brain.app.obs_projection_jobs import (
+    _health_callback,
+    _sessions_callback,
 )
 from host_brain.observability.projection_store import QueryProjectionStore
+from host_brain.persistence.capability_execution_repository import (
+    CapabilityExecutionRepository,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,9 +55,15 @@ class ProjectionRefresh:
     ledger_stats: Callable[[], object]
     sessions: Callable[[], object]
     health: Callable[[], object]
-    runtime: Callable[[], object]
+    runtime: Callable[..., object]
     gateway: Callable[[], object]
     trace: Callable[[], object]
+
+
+@dataclass(frozen=True)
+class ObsRoutesTestRuntime:
+    ledger: SQLiteLedger
+    store: QueryProjectionStore
 
 
 class EmptyLifeSnapshotReader:
@@ -74,8 +80,21 @@ class EmptyLifeSnapshotReader:
         }
 
 
+class EmptyModeTransitionService:
+    """Explicit app-owned mode source used by the live projection fixture."""
+
+    @staticmethod
+    def get_current_status() -> dict[str, object]:
+        return {}
+
+    @staticmethod
+    def get_history(*, limit: int) -> list[dict[str, object]]:
+        del limit
+        return []
+
+
 @pytest.fixture
-def ledger(tmp_path: Path, monkeypatch):
+def obs_runtime(tmp_path: Path, monkeypatch):
     """Migrated durable ledger shared by source writers and projection store."""
 
     db_path = tmp_path / "obs-query.sqlite3"
@@ -89,11 +108,6 @@ def ledger(tmp_path: Path, monkeypatch):
         initialize_schema=False,
     )
     store = QueryProjectionStore(db_path)
-    container = get_process_service_container()
-    previous_ledger = container.ledger
-    previous_store = container.query_projection_store
-    container.ledger = db
-    container.query_projection_store = store
 
     async def _no_remote_gateway_health():
         return {}
@@ -365,9 +379,8 @@ def ledger(tmp_path: Path, monkeypatch):
         ),
     )
 
-    # Model attempts are the migration-owned model health source.  The retired
-    # ``llm_node_call_log`` and ``graph_run_trace`` bootstrap tables are not
-    # recreated in a fresh canonical database.
+    # Model attempts are the migration-owned model health source.  Migration
+    # 0103 cold-migrates and removes the retired ``llm_node_call_log`` table.
     db.log_model_attempt({
         "attempt_id": "attempt-int-001",
         "request_id": "req-int-001",
@@ -391,49 +404,78 @@ def ledger(tmp_path: Path, monkeypatch):
         "ts_ms": now - 4000,
     })
 
-    yield db
-    if container.ledger is db:
-        container.ledger = previous_ledger
-    if container.query_projection_store is store:
-        container.query_projection_store = previous_store
-    db.close()
+    try:
+        yield ObsRoutesTestRuntime(ledger=db, store=store)
+    finally:
+        db.close()
 
 
 @pytest.fixture
-def projection_refresh(ledger) -> ProjectionRefresh:
+def ledger(obs_runtime: ObsRoutesTestRuntime) -> SQLiteLedger:
+    return obs_runtime.ledger
+
+
+@pytest.fixture
+def projection_refresh(
+    obs_runtime: ObsRoutesTestRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> ProjectionRefresh:
     """Expose background-owned materializers; HTTP never invokes these."""
 
-    del ledger  # fixture ordering: canonical composition must exist first
+    ledger = obs_runtime.ledger
+    store = obs_runtime.store
+
+    def _refresh_ledger_stats() -> object:
+        return refresh_ledger_stats_projection(ledger=ledger, store=store)
+
+    def _refresh_runtime(mode_service: object) -> object:
+        return refresh_runtime_snapshot_projection(
+            lifecycle_ports=object(),
+            mode_transition_service=mode_service,
+            store=store,
+        )
+
     return ProjectionRefresh(
-        ledger_stats=refresh_ledger_stats_projection,
-        sessions=refresh_session_query_projection,
-        health=refresh_health_query_projections,
-        runtime=refresh_runtime_snapshot_projection,
+        ledger_stats=_refresh_ledger_stats,
+        sessions=_sessions_callback(ledger, store),
+        health=_health_callback(ledger, store),
+        runtime=_refresh_runtime,
         gateway=lambda: refresh_operator_live_state_projections(
             life_snapshot_reader=EmptyLifeSnapshotReader(),
+            ledger_view=ProjectionLedgerView(store),
+            mode_service=EmptyModeTransitionService(),
+            store=store,
         ),
-        trace=refresh_trace_query_projections,
+        trace=lambda: refresh_trace_query_projections(
+            ledger=ledger,
+            store=store,
+            tribe_event_reader=lambda: [],
+        ),
     )
 
 
 @pytest.fixture
-def client(ledger, projection_refresh: ProjectionRefresh):
+def client(
+    obs_runtime: ObsRoutesTestRuntime,
+    projection_refresh: ProjectionRefresh,
+):
     """Projection-only HTTP app with retired trace compatibility paths absent."""
 
-    set_ledger_provider(lambda: ledger)
     projection_refresh.ledger_stats()
     projection_refresh.sessions()
     projection_refresh.health()
     projection_refresh.gateway()
     projection_refresh.trace()
     app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: obs_runtime.store,
+    )
     app.include_router(router)
     app.include_router(health_router)
     app.add_api_route("/observability/trace", request_trace, methods=["POST"])
     _clear_obs_route_response_cache()
     client = TestClient(app)
     yield client
-    set_ledger_provider(None)
     _clear_obs_route_response_cache()
 
 
@@ -536,28 +578,25 @@ def test_runtime_snapshot_returns_unified_state(
             "timestamp": 1700000000000,
         },
     )
-    monkeypatch.setattr(
-        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
-        lambda: type(
-            "_FakeModeService",
-            (),
-            {
-                "get_current_status": lambda self: {
-                    "sys_mode": "focus",
-                    "auto_rules": {"gaming_detect": True},
-                    "idle_ms": 120000,
-                    "idle_minutes": 2.0,
-                    "last_interaction_ts_ms": 1700000000000,
-                    "is_night_time": False,
-                    "valid_transitions": ["normal", "gaming"],
-                    "ts_ms": 1700000000000,
-                    "degraded": False,
-                    "degraded_reason": None,
-                }
-            },
-        )(),
-    )
-    projection_refresh.runtime()
+    mode_service = type(
+        "_FakeModeService",
+        (),
+        {
+            "get_current_status": lambda self: {
+                "sys_mode": "focus",
+                "auto_rules": {"gaming_detect": True},
+                "idle_ms": 120000,
+                "idle_minutes": 2.0,
+                "last_interaction_ts_ms": 1700000000000,
+                "is_night_time": False,
+                "valid_transitions": ["normal", "gaming"],
+                "ts_ms": 1700000000000,
+                "degraded": False,
+                "degraded_reason": None,
+            }
+        },
+    )()
+    projection_refresh.runtime(mode_service)
 
     resp = client.get("/obs/runtime-snapshot?current_topic=%E9%82%A3%E4%B8%AA%E9%A1%B9%E7%9B%AE")
 
@@ -612,15 +651,12 @@ def test_runtime_snapshot_accepts_nested_slot_privacy_metadata(
             "timestamp": 1700000000000,
         },
     )
-    monkeypatch.setattr(
-        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
-        lambda: type(
-            "_FakeModeService",
-            (),
-            {"get_current_status": lambda self: {"sys_mode": "normal"}},
-        )(),
-    )
-    projection_refresh.runtime()
+    mode_service = type(
+        "_FakeModeService",
+        (),
+        {"get_current_status": lambda self: {"sys_mode": "normal"}},
+    )()
+    projection_refresh.runtime(mode_service)
 
     response = client.get("/obs/runtime-snapshot")
 
@@ -714,11 +750,7 @@ def test_runtime_snapshot_repeated_reads_do_not_rebuild(
         "host_brain.lifecycle_runtime.runtime_snapshot.build_digital_life_runtime_snapshot",
         _fake_snapshot,
     )
-    monkeypatch.setattr(
-        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
-        lambda: _FakeModeService(),
-    )
-    projection_refresh.runtime()
+    projection_refresh.runtime(_FakeModeService())
 
     first = client.get("/obs/runtime-snapshot?current_topic=cache-demo")
     second = client.get("/obs/runtime-snapshot?current_topic=cache-demo")
@@ -1113,10 +1145,37 @@ def test_subsystems_stats_classifies_intent_airlock_and_retrieval(
         "detail": "reranker slow: 40866ms>30000ms",
         "ts_ms": now - 60,
     })
+    capability_repository = CapabilityExecutionRepository(ledger.canonical_db_path)
+    assert capability_repository.claim({
+        "idempotency_key": "subsystem-capability-001",
+        "request_hash": "hash-capability-001",
+        "request_id": "req-capability-001",
+        "attempt_id": "attempt-capability-001",
+        "capability_id": "tool.search",
+        "kind": "tool",
+        "owner_token": "owner-capability-001",
+        "now_ms": now - 50,
+        "lease_expires_at_ms": now + 10_000,
+    }) == "ACQUIRED"
+    capability_repository.complete({
+        "idempotency_key": "subsystem-capability-001",
+        "request_hash": "hash-capability-001",
+        "request_id": "req-capability-001",
+        "attempt_id": "attempt-capability-001",
+        "capability_id": "tool.search",
+        "kind": "tool",
+        "owner_token": "owner-capability-001",
+        "status": "SUCCEEDED",
+        "attempt_json": "{}",
+        "evidence_json": "{}",
+        "receipt_json": "{}",
+        "finished_at_ms": now - 40,
+        "claim_state": "COMPLETED",
+    })
     projection_refresh.ledger_stats()
 
     resp = client.get("/obs/subsystems/stats?window_minutes=10080")
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     data = resp.json()
     subsystems = {row["subsystem"]: row for row in data["subsystems"]}
 
@@ -1135,6 +1194,17 @@ def test_subsystems_stats_classifies_intent_airlock_and_retrieval(
     assert retrieval["status"] == "DEGRADED"
     assert retrieval["degraded"] >= 1
     assert "降级" in (retrieval["detail"] or "")
+
+    sandbox = subsystems["sandbox"]
+    assert sandbox["status"] == "UNAVAILABLE"
+    assert sandbox["detail"] == "OBS_SANDBOX_TELEMETRY_SOURCE_UNAVAILABLE"
+    assert sandbox["success_rate"] is None
+
+    capability_execution = subsystems["capability_execution"]
+    assert capability_execution["display_name"] == "Capability 执行回执"
+    assert capability_execution["status"] == "UP"
+    assert capability_execution["total"] == 1
+    assert capability_execution["success_rate"] == 100.0
 
 
 # ---------------------------------------------------------------------------
@@ -1203,7 +1273,7 @@ def test_trace_response_structure(client):
 def test_metrics_timeseries_returns_200(client):
     """T-OBS-ROUTE-INT-13: 正常路径返回 200 + 时序字段。"""
     resp = client.get("/obs/metrics/timeseries")
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     data = resp.json()
     assert "points" in data
     assert "total_requests" in data
@@ -1214,7 +1284,7 @@ def test_metrics_timeseries_returns_200(client):
 def test_metrics_timeseries_range_param(client):
     """T-OBS-ROUTE-INT-14: range_minutes 参数正确影响 range_ms。"""
     resp = client.get("/obs/metrics/timeseries?range_minutes=30")
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["range_ms"] == 30 * 60 * 1000
 
@@ -1222,7 +1292,7 @@ def test_metrics_timeseries_range_param(client):
 def test_metrics_timeseries_interval_param(client):
     """T-OBS-ROUTE-INT-15: interval_minutes 参数正确影响 interval_ms。"""
     resp = client.get("/obs/metrics/timeseries?interval_minutes=1")
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["interval_ms"] == 1 * 60 * 1000
 

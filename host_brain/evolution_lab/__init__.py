@@ -1,5 +1,19 @@
-"""EvolutionLab guards for Codex runtime v2."""
+"""Isolated, proposal-only Evolution Lab contracts."""
 
-from host_brain.evolution_lab.policy import EvolutionBranchPolicy, validate_evolution_branch
+from .contracts import (
+    CounterfactualPairV1,
+    EvolutionLabContractError,
+    EvolutionProposalV1,
+    ExperimentReportV1,
+    ExperimentRunReceiptV1,
+    ExperimentSpecV1,
+)
 
-__all__ = ["EvolutionBranchPolicy", "validate_evolution_branch"]
+__all__ = [
+    "CounterfactualPairV1",
+    "EvolutionLabContractError",
+    "EvolutionProposalV1",
+    "ExperimentReportV1",
+    "ExperimentRunReceiptV1",
+    "ExperimentSpecV1",
+]

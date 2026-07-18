@@ -3,11 +3,15 @@ param(
   [string]$EnvFile = "",
   [string]$LogDir = "",
   [string]$RepoRoot = "",
-  [string]$BindHost = "0.0.0.0",
+  [string]$BindHost = "",
   [int]$Port = 17800,
   [int]$WaitSeconds = 120,
   [switch]$ForceRestart,
   [switch]$CleanQQOneBot,
+  [ValidateSet("full", "minimal_rpc")]
+  [string]$ExecutionProfile = "full",
+  [string]$MinimalDataDir = "",
+  [string]$EmbodimentTransportDb = "",
   [string]$PythonPath = ""
 )
 
@@ -97,6 +101,25 @@ function Get-ListeningPid {
     return $null
   }
   return [int]$conn.OwningProcess
+}
+
+function Test-LoopbackBindHost {
+  param([string]$HostName)
+  $normalized = [string]$HostName
+  if ([string]::IsNullOrWhiteSpace($normalized)) {
+    return $false
+  }
+  return @("127.0.0.1", "localhost", "::1") -contains $normalized.Trim().ToLowerInvariant()
+}
+
+function Get-AvailableLoopbackPort {
+  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+  try {
+    $listener.Start()
+    return [int]$listener.LocalEndpoint.Port
+  } finally {
+    $listener.Stop()
+  }
 }
 
 function Is-EdgeMainProcess {
@@ -261,10 +284,12 @@ function Invoke-SchtasksBreakaway {
 
 $RepoRoot = Resolve-RepoRoot -Preferred $RepoRoot
 $qqOneBotManagerScript = Join-Path $PSScriptRoot 'qq_onebot_manager.ps1'
-if (-not (Test-Path -Path $qqOneBotManagerScript)) {
-  throw "qq_onebot_manager.ps1 not found: $qqOneBotManagerScript"
+if ($ExecutionProfile -eq 'full') {
+  if (-not (Test-Path -Path $qqOneBotManagerScript)) {
+    throw "qq_onebot_manager.ps1 not found: $qqOneBotManagerScript"
+  }
+  . $qqOneBotManagerScript
 }
-. $qqOneBotManagerScript
 $runtimeRoot = Join-Path $RepoRoot 'runtime\edge'
 Ensure-Directory -Path $runtimeRoot
 
@@ -278,21 +303,6 @@ if (-not $EnvFile) {
 }
 
 $envValues = Read-EnvFile -Path $EnvFile
-$cleanNapCatLauncher = Join-Path $RepoRoot 'scripts\runtime\launch_napcat_clean.ps1'
-$envValues['QQ_ONEBOT_API_BASE'] = 'http://127.0.0.1:3000'
-$envValues['EDGE_QQ_ONEBOT_AUTOSTART'] = 'true'
-if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'])) {
-  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
-}
-if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'])) {
-  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
-}
-$envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = 'http://127.0.0.1:3000/get_status'
-$qqCleanStartValue = if ($CleanQQOneBot.IsPresent) { 'true' } else { 'false' }
-$envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = $qqCleanStartValue
-$envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = $qqCleanStartValue
-$effectiveEnvFile = Join-Path $runtimeRoot 'edge.runtime.env'
-Write-EnvFile -Path $effectiveEnvFile -Values $envValues
 if ($Port -le 0) {
   $portRaw = [string]$envValues['EDGE_RPC_PORT']
   if ($portRaw) {
@@ -305,12 +315,103 @@ if ($Port -le 0) {
     $Port = 17800
   }
 }
+if ($Port -lt 1 -or $Port -gt 65535) {
+  throw "Port must be in range 1..65535, got: $Port"
+}
 if ([string]::IsNullOrWhiteSpace($BindHost)) {
   $BindHost = [string]$envValues['EDGE_RPC_HOST']
   if ([string]::IsNullOrWhiteSpace($BindHost)) {
     $BindHost = '0.0.0.0'
   }
 }
+
+if ($ExecutionProfile -eq 'minimal_rpc') {
+  if ($CleanQQOneBot.IsPresent) {
+    throw 'CleanQQOneBot cannot be used with ExecutionProfile=minimal_rpc'
+  }
+  if (-not (Test-LoopbackBindHost -HostName $BindHost)) {
+    throw "ExecutionProfile=minimal_rpc requires a loopback BindHost, got: $BindHost"
+  }
+  $BindHost = '127.0.0.1'
+  if ([string]::IsNullOrWhiteSpace([string]$MinimalDataDir)) {
+    $MinimalDataDir = Join-Path $runtimeRoot ("minimal_rpc\\port_{0}" -f $Port)
+  } elseif (-not [System.IO.Path]::IsPathRooted($MinimalDataDir)) {
+    $MinimalDataDir = Join-Path $RepoRoot $MinimalDataDir
+  }
+  Ensure-Directory -Path $MinimalDataDir
+  $MinimalDataDir = (Resolve-Path -Path $MinimalDataDir).Path
+  if ([string]::IsNullOrWhiteSpace([string]$EmbodimentTransportDb)) {
+    $EmbodimentTransportDb = Join-Path $MinimalDataDir 'embodiment_transport.sqlite3'
+  } elseif (-not [System.IO.Path]::IsPathRooted($EmbodimentTransportDb)) {
+    $EmbodimentTransportDb = Join-Path $RepoRoot $EmbodimentTransportDb
+  }
+  $transportDbParent = Split-Path -Path $EmbodimentTransportDb -Parent
+  if (-not [string]::IsNullOrWhiteSpace($transportDbParent)) {
+    Ensure-Directory -Path $transportDbParent
+  }
+  $EmbodimentTransportDb = [System.IO.Path]::GetFullPath($EmbodimentTransportDb)
+  if (
+    [string]::IsNullOrWhiteSpace([string]$envValues['EDGE_HMAC_SHARED_KEY']) -and
+    [string]::IsNullOrWhiteSpace([string]$envValues['EDGE_HMAC_SHARED_KEY_REF'])
+  ) {
+    throw 'ExecutionProfile=minimal_rpc requires EDGE_HMAC_SHARED_KEY or EDGE_HMAC_SHARED_KEY_REF'
+  }
+
+  # This profile keeps only the authenticated Edge RPC boundary alive.  It is
+  # deliberately loopback-only and writes its receipt store outside the normal
+  # Edge data path so local smoke runs cannot start QQ, Gateway, audio, VTS or
+  # reuse a production embodiment SQLite database.
+  $disabledPeripheralPort = Get-AvailableLoopbackPort
+  $envValues['Natsume_ENV'] = 'prod'
+  $envValues['EDGE_ALLOW_INSECURE_AUTH'] = 'false'
+  $envValues['EDGE_RPC_HOST'] = $BindHost
+  $envValues['EDGE_RPC_PORT'] = [string]$Port
+  $envValues['EDGE_RPC_GATEWAY_ENABLED'] = 'true'
+  $envValues['EDGE_ASR_ENABLED'] = 'false'
+  $envValues['EDGE_TTS_ENABLED'] = 'false'
+  $envValues['EDGE_BARGE_IN_ENABLED'] = 'false'
+  $envValues['EDGE_FALLBACK_LLM_ENABLED'] = 'false'
+  $envValues['EDGE_RESOURCE_GATE_ENABLED'] = 'false'
+  $envValues['EDGE_GATEWAY_ENABLED'] = 'false'
+  $envValues['EDGE_GATEWAY_PLATFORMS'] = ''
+  $envValues['EDGE_EVENT_REPORT_HOST_URL'] = ''
+  $envValues['EDGE_QQ_ONEBOT_AUTOSTART'] = 'false'
+  $envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = 'false'
+  $envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = 'false'
+  $envValues['QQ_ONEBOT_API_BASE'] = ''
+  $envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = ''
+  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = ''
+  $envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = ''
+  $envValues['EDGE_VTS_AUTOSTART'] = 'false'
+  $envValues['EDGE_FACE_CAPTURE_ENABLED'] = 'false'
+  $envValues['EDGE_AVATAR_BACKEND'] = 'vrm'
+  $envValues['EDGE_VRM_MIRROR_VTS_ENABLED'] = 'false'
+  $envValues['EDGE_VRM_BRIDGE_HOST'] = '127.0.0.1'
+  $envValues['EDGE_VRM_BRIDGE_PORT'] = [string]$disabledPeripheralPort
+  $envValues['EDGE_VRM_BRIDGE_MOUTH_UDP_ENABLED'] = 'false'
+  $envValues['EDGE_MATEENGINE_BRIDGE_BASE_URL'] = "http://127.0.0.1:$disabledPeripheralPort"
+  $envValues['NATSUME_DATA_DIR'] = $MinimalDataDir
+  $envValues['EDGE_EMBODIMENT_TRANSPORT_DB'] = $EmbodimentTransportDb
+} else {
+  $cleanNapCatLauncher = Join-Path $RepoRoot 'scripts\runtime\launch_napcat_clean.ps1'
+  $envValues['QQ_ONEBOT_API_BASE'] = 'http://127.0.0.1:3000'
+  $envValues['EDGE_QQ_ONEBOT_AUTOSTART'] = 'true'
+  if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'])) {
+    $envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'])) {
+    $envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
+  }
+  $envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = 'http://127.0.0.1:3000/get_status'
+  $qqCleanStartValue = if ($CleanQQOneBot.IsPresent) { 'true' } else { 'false' }
+  $envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = $qqCleanStartValue
+  $envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = $qqCleanStartValue
+  $envValues['EDGE_RPC_HOST'] = $BindHost
+  $envValues['EDGE_RPC_PORT'] = [string]$Port
+}
+
+$effectiveEnvFile = Join-Path $runtimeRoot 'edge.runtime.env'
+Write-EnvFile -Path $effectiveEnvFile -Values $envValues
 
 $PythonPath = Resolve-PythonInterpreter -RepoRootPath $RepoRoot -PreferredPath $PythonPath
 $pidFile = Join-Path $runtimeRoot 'edge.pid'
@@ -322,7 +423,11 @@ $ensureOneBotScript = Join-Path $PSScriptRoot 'ensure_qq_onebot.ps1'
 $healthUrl = "http://127.0.0.1:$Port/v1/edge/health"
 $qqOneBotStateFile = Join-Path $runtimeRoot 'qq_onebot.state.json'
 $qqOneBotApiBase = [string]$envValues['QQ_ONEBOT_API_BASE']
-$qqOneBotHealthUrl = Get-QQOneBotHealthUrl -ApiBase $qqOneBotApiBase -Override ([string]$envValues['EDGE_QQ_ONEBOT_HEALTH_URL'])
+$qqOneBotHealthUrl = if ($ExecutionProfile -eq 'full') {
+  Get-QQOneBotHealthUrl -ApiBase $qqOneBotApiBase -Override ([string]$envValues['EDGE_QQ_ONEBOT_HEALTH_URL'])
+} else {
+  ''
+}
 
 $runnerContent = @'
 [CmdletBinding()]
@@ -413,7 +518,7 @@ Set-Content -Path $runnerScript -Value $runnerContent -Encoding ascii
 if (-not (Test-Path -Path $runnerScript)) {
   throw "run_edge_task.ps1 not found: $runnerScript"
 }
-if (-not (Test-Path -Path $ensureOneBotScript)) {
+if ($ExecutionProfile -eq 'full' -and -not (Test-Path -Path $ensureOneBotScript)) {
   throw "ensure_qq_onebot.ps1 not found: $ensureOneBotScript"
 }
 
@@ -436,9 +541,12 @@ if ($null -ne $existingPid -and -not $ForceRestart.IsPresent) {
       stderr_log = $stderrLog
       startup_mode = 'main_service_breakaway'
       breakaway_launcher_used = $true
-      auxiliary_management = 'qq_onebot_delegated'
-      qq_onebot_status = if ([string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'disabled' } else { 'unknown' }
+      execution_profile = $ExecutionProfile
+      bind_host = $BindHost
+      auxiliary_management = if ($ExecutionProfile -eq 'minimal_rpc') { 'disabled_by_minimal_rpc_profile' } else { 'qq_onebot_delegated' }
+      qq_onebot_status = if ($ExecutionProfile -eq 'minimal_rpc' -or [string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'disabled' } else { 'unknown' }
       qq_onebot_state_file = $qqOneBotStateFile
+      physical_effect_verification = 'NOT_TESTED'
       detail = "edge main service already listening on port $Port (pid=$existingPid)"
     }
   }
@@ -462,10 +570,12 @@ $ensureOneBotEscaped = ([string]$ensureOneBotScript).Replace('"', '""')
 
 $launcherLines = @(
   '@echo off',
-  "cd /d `"$repoEscaped`"",
-  "start `"`" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ensureOneBotEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
-  "powershell -NoProfile -ExecutionPolicy Bypass -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
+  "cd /d `"$repoEscaped`""
 )
+if ($ExecutionProfile -eq 'full') {
+  $launcherLines += "start `"`" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ensureOneBotEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
+}
+$launcherLines += "powershell -NoProfile -ExecutionPolicy Bypass -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
 Set-Content -Path $launcherScript -Value $launcherLines -Encoding ascii
 
 $taskName = "NatsumeEdgeMainOnly_$([Guid]::NewGuid().ToString('N').Substring(0, 10))"
@@ -487,10 +597,14 @@ $edgePid = if ($Port -gt 0) { Get-ListeningPid -ProbePort $Port } else { $null }
 if ($null -ne $edgePid) {
   Set-Content -Path $pidFile -Value ([string]$edgePid) -Encoding ascii
 }
-$qqOneBotHealth = Test-QQOneBotHealth -ApiBase $qqOneBotApiBase -HealthUrl $qqOneBotHealthUrl -TimeoutSeconds 5
-$qqOneBotState = Read-QQOneBotState -StateFile $qqOneBotStateFile
-$qqOneBotStatus = if ([string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'disabled' } elseif ($qqOneBotHealth.success) { 'healthy' } else { 'degraded' }
-$qqOneBotDetail = if ([string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'qq onebot disabled because QQ_ONEBOT_API_BASE is empty' } else { [string]$qqOneBotHealth.detail }
+$qqOneBotHealth = $null
+$qqOneBotState = $null
+if ($ExecutionProfile -eq 'full') {
+  $qqOneBotHealth = Test-QQOneBotHealth -ApiBase $qqOneBotApiBase -HealthUrl $qqOneBotHealthUrl -TimeoutSeconds 5
+  $qqOneBotState = Read-QQOneBotState -StateFile $qqOneBotStateFile
+}
+$qqOneBotStatus = if ($ExecutionProfile -eq 'minimal_rpc' -or [string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'disabled' } elseif ($qqOneBotHealth.success) { 'healthy' } else { 'degraded' }
+$qqOneBotDetail = if ($ExecutionProfile -eq 'minimal_rpc') { 'qq onebot disabled by minimal_rpc profile' } elseif ([string]::IsNullOrWhiteSpace($qqOneBotApiBase)) { 'qq onebot disabled because QQ_ONEBOT_API_BASE is empty' } else { [string]$qqOneBotHealth.detail }
 
 $result = [ordered]@{
   side = 'edge'
@@ -505,7 +619,9 @@ $result = [ordered]@{
     stderr_log = $stderrLog
     startup_mode = 'main_service_breakaway'
     breakaway_launcher_used = $true
-    auxiliary_management = 'qq_onebot_delegated'
+    execution_profile = $ExecutionProfile
+    bind_host = $BindHost
+    auxiliary_management = if ($ExecutionProfile -eq 'minimal_rpc') { 'disabled_by_minimal_rpc_profile' } else { 'qq_onebot_delegated' }
     qq_onebot_status = $qqOneBotStatus
     qq_onebot_detail = $qqOneBotDetail
     qq_onebot_state_file = $qqOneBotStateFile
@@ -513,6 +629,7 @@ $result = [ordered]@{
     force_restart = [bool]$ForceRestart.IsPresent
     restart_previous_pid = $restartInfo.pid
     restart_previous_detail = $restartInfo.detail
+    physical_effect_verification = 'NOT_TESTED'
     detail = $startupDetail
   }
 }

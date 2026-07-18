@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from host_brain.app import app_factory, asgi
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.chat_immune_gate import (
     log_chat_immune_gate_event,
@@ -207,6 +208,13 @@ async def test_app_factory_exception_handler_uses_injected_logger(monkeypatch: p
         edge_events_endpoint=lambda _body: None,  # type: ignore[arg-type]
         root_endpoint=lambda: Response(),
         canon_service_provider=lambda: object(),
+        obs_route_ports=ObsRoutePorts(
+            query_projection_store_provider=lambda: type(
+                "EmptyProjectionStore",
+                (),
+                {"get": lambda *_args, **_kwargs: None},
+            )(),
+        ),
         input_runtime_ports=build_input_runtime_application_ports(),
     )
     handler = app.exception_handlers[Exception]

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from natsume_contracts.life import LifeOutboxMessage
 from host_brain.orchestration.governor_grant import DurableGovernorGrantResolver
+
+if TYPE_CHECKING:
+    from host_brain.channels.embodiment import HostEmbodimentRuntime
 
 
 _DESTINATION_AUTHORITY_KINDS = {
@@ -27,9 +30,15 @@ _DESTINATION_AUTHORITY_KINDS = {
 class LifeDeliveryTransport:
     """Dispatch one already-committed delivery with its stable idempotency key."""
 
-    def __init__(self, *, ledger: Any) -> None:
+    def __init__(
+        self,
+        *,
+        ledger: Any,
+        embodiment_runtime: "HostEmbodimentRuntime | None" = None,
+    ) -> None:
         self._ledger = ledger
         self._grant_resolver = DurableGovernorGrantResolver(ledger)
+        self._embodiment_runtime = embodiment_runtime
 
     async def __call__(self, message: LifeOutboxMessage) -> Mapping[str, Any]:
         destination = str(message.destination or "").strip().lower()
@@ -76,29 +85,43 @@ class LifeDeliveryTransport:
             )
             return _validated_result(destination, result)
         if destination == "vts.emotion":
-            from host_brain.channels.embodiment import submit_avatar_command  # noqa: PLC0415
+            from host_brain.channels.embodiment import (  # noqa: PLC0415
+                build_host_embodiment_command,
+                queue_embodiment_command,
+            )
+            from natsume_contracts.edge.embodiment_v1 import (  # noqa: PLC0415
+                EMBODIMENT_KIND_AVATAR,
+            )
+
+            runtime = self._require_embodiment_runtime(destination)
 
             emotion_context = dict(payload.get("emotion_context") or {})
             target = dict(payload.get("target") or {})
-            result = await submit_avatar_command(
-                action="set_expression",
-                payload={"emotion_tag": str(
-                    emotion_context.get("emotion_tag")
-                    or target.get("emotion_tag")
-                    or "NEUTRAL"
-                )},
-                request_id=message.delivery_key,
-                authority_ref=(
-                    f"authority://life/{message.authorization.authority_kind}/"
-                    f"{message.authorization.authority_principal_id}"
+            result = queue_embodiment_command(
+                build_host_embodiment_command(
+                    kind=EMBODIMENT_KIND_AVATAR,
+                    action="set_expression",
+                    payload={"emotion_tag": str(
+                        emotion_context.get("emotion_tag")
+                        or target.get("emotion_tag")
+                        or "NEUTRAL"
+                    )},
+                    request_id=message.delivery_key,
+                    authority_ref=(
+                        f"authority://life/{message.authorization.authority_kind}/"
+                        f"{message.authorization.authority_principal_id}"
+                    ),
+                    grant_ref=message.authorization.governor_grant_ref,
+                    idempotency_key=message.delivery_key,
                 ),
-                grant_ref=message.authorization.governor_grant_ref,
-                idempotency_key=message.delivery_key,
+                runtime=runtime,
             )
             return _validated_result(destination, result)
         if destination == "mateengine.state":
-            from host_brain.channels.embodiment import build_host_embodiment_command, submit_embodiment_command  # noqa: PLC0415
+            from host_brain.channels.embodiment import build_host_embodiment_command, queue_embodiment_command  # noqa: PLC0415
             from natsume_contracts.edge.embodiment_v1 import EMBODIMENT_KIND_MATEENGINE  # noqa: PLC0415
+
+            runtime = self._require_embodiment_runtime(destination)
 
             target = dict(payload.get("target") or {})
             state = str(
@@ -116,20 +139,34 @@ class LifeDeliveryTransport:
                 if state.strip().lower() == "idle"
                 else {"command": {"type": "expression", "preset": emotion_tag, "emotion_tag": emotion_tag}}
             )
-            result = await submit_embodiment_command(build_host_embodiment_command(
-                kind=EMBODIMENT_KIND_MATEENGINE,
-                action="command",
-                payload=command_payload,
-                request_id=message.delivery_key,
-                authority_ref=(
-                    f"authority://life/{message.authorization.authority_kind}/"
-                    f"{message.authorization.authority_principal_id}"
+            result = queue_embodiment_command(
+                build_host_embodiment_command(
+                    kind=EMBODIMENT_KIND_MATEENGINE,
+                    action="command",
+                    payload=command_payload,
+                    request_id=message.delivery_key,
+                    authority_ref=(
+                        f"authority://life/{message.authorization.authority_kind}/"
+                        f"{message.authorization.authority_principal_id}"
+                    ),
+                    grant_ref=message.authorization.governor_grant_ref,
+                    idempotency_key=message.delivery_key,
                 ),
-                grant_ref=message.authorization.governor_grant_ref,
-                idempotency_key=message.delivery_key,
-            ))
+                runtime=runtime,
+            )
             return _validated_result(destination, result)
         raise AssertionError(f"unroutable Life delivery destination: {destination}")
+
+    def _require_embodiment_runtime(
+        self,
+        destination: str,
+    ) -> "HostEmbodimentRuntime":
+        runtime = self._embodiment_runtime
+        if runtime is None:
+            raise RuntimeError(
+                f"Life delivery embodiment runtime unavailable for {destination}"
+            )
+        return runtime
 
 
 def _result_mapping(value: Any) -> dict[str, Any]:

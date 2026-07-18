@@ -20,7 +20,7 @@
 | Host | `python -m host_brain` | `127.0.0.1:18080` | 对话、任务、记忆、生命系统和权威写入 | 已接线 |
 | OBS | `python -m host_brain.obs_main` | `127.0.0.1:18082` | 只读查询、指标与 Operator Projection | 已接线，可降级 |
 | Monitor UI / Proxy | 预构建 Vite 静态文件 + Nginx | `127.0.0.1:18180` | 管理界面与 Host/OBS 反向代理 | 部分接线，可降级 |
-| Edge | `python -m edge_client` | 本地 `127.0.0.1:17800`；远端脚本默认 `0.0.0.0:17800` | ASR、TTS、VTS、设备与资源门禁 | 已接线 |
+| Edge | `python -m edge_client` | 本地 `127.0.0.1:17800`；远端脚本默认 `0.0.0.0:17800` | ASR、TTS、VTS、设备与资源门禁 | 已接线；另有 loopback-only TCP receipt smoke，非硬件验收 |
 | Unified Gateway | Edge 进程内的受管 Uvicorn 线程 | `127.0.0.1:19000` | QQ、微信、Telegram、飞书、企微、LINE 接入 | 已接线，可独立失败 |
 | 外部数据服务 | Docker Compose | Neo4j、Chroma、Redis | 图、向量、限流/短期协调依赖 | 已接线 |
 
@@ -207,6 +207,28 @@ powershell -ExecutionPolicy Bypass -File scripts/runtime/start_edge_side.ps1
 
 远端主服务使用 [start_edge_main_service.ps1](../../../scripts/runtime/start_edge_main_service.ps1)，通过计划任务/WMI 进行脱离当前 shell 的启动。它默认绑定 `0.0.0.0`，部署前必须先限制网络暴露。
 
+对 Host→Edge 传输、HMAC、owner/session/lease/fence、durable receipt 和重启回放做本机验收时，应使用 `minimal_rpc`，不要使用会强制拉起 QQ OneBot 的 Side Profile。Host transport 只允许 loopback/localhost 使用明文 HTTP；任何非 loopback Edge 地址必须使用 HTTPS，否则会在创建 HTTP client 前失败关闭。该 profile 必须有 `EDGE_HMAC_SHARED_KEY` 或 `EDGE_HMAC_SHARED_KEY_REF`，并且会强制：
+
+- `127.0.0.1` loopback 绑定与 `Natsume_ENV=prod`、`EDGE_ALLOW_INSECURE_AUTH=false`；
+- 独立 `NATSUME_DATA_DIR` 与 `EDGE_EMBODIMENT_TRANSPORT_DB`；
+- 关闭 ASR、TTS、barge-in、fallback、资源门禁、Unified Gateway、QQ OneBot、VTS 自动启动和面捕；
+- 保留 `EDGE_RPC_GATEWAY_ENABLED=true`，因为它是经过 HMAC 的 Edge RPC 边界，不是 Unified Gateway。
+
+例如：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/runtime/start_edge_main_service.ps1 `
+  -ExecutionProfile minimal_rpc `
+  -BindHost 127.0.0.1 `
+  -Port 17810 `
+  -MinimalDataDir runtime/edge/minimal_rpc/manual `
+  -EmbodimentTransportDb runtime/edge/minimal_rpc/manual/embodiment_transport.sqlite3
+```
+
+分布式入口也可显式传入 `-EdgeStartupProfile main_service -EdgeExecutionProfile minimal_rpc -EdgeBindHost 127.0.0.1`。这只是安全的 RPC/receipt 验收模式；其结果固定报告 `physical_effect_verification=NOT_TESTED`，不得用于宣称 ASR、TTS、VTS、平台或实体设备已经验收。
+
+当前 Edge core 仍会构造 avatar driver；该 profile 将其唯一启动/健康探测指向临时的未监听 loopback 端口，因此不会启动或连接 VTS/VRM 外部进程。这个受控失败探测不是硬件验证，也不替代后续对 Edge core 的显式 peripheral lifecycle 收口。
+
 ### 6.3 一键分布式启动
 
 ```powershell
@@ -241,17 +263,17 @@ Host 主进程 → OBS → Monitor Proxy
 
 | 服务 | 镜像 | 宿主端口 | 数据目录 | 当前问题 |
 |---|---|---:|---|---|
-| Neo4j | `neo4j:5.26-community` | HTTP `${NATSUME_NEO4J_HTTP_PORT:-7474}`；Bolt 固定 `17687` | `runtime/docker/neo4j/` | Compose 带默认密码回退；Bolt 端口变量未接线 |
-| Chroma | `chromadb/chroma:latest` | 固定 `18000` | `runtime/docker/chroma/data/` | `latest` 不可复现；端口变量未接线 |
+| Neo4j | `neo4j:5.26-community` | HTTP `${NATSUME_NEO4J_HTTP_PORT:-7474}`；Bolt `${NATSUME_NEO4J_BOLT_PORT:-17687}` | `runtime/docker/neo4j/` | Compose 仍带默认密码回退 |
+| Chroma | `chromadb/chroma:latest` | `${NATSUME_CHROMA_PORT:-18000}` | `runtime/docker/chroma/data/` | `latest` 不可复现 |
 | Redis | `redis:7-alpine` | `${NATSUME_REDIS_PORT:-6379}` | `runtime/docker/redis/data/` | 仅 TCP 探测 |
 
 Compose 没有容器级 `healthcheck`、资源限制、独立网络、备份任务或迁移策略。三个固定 `container_name` 还会削弱 `ProjectName` 的多实例隔离效果。
 
-### 8.1 已知 clean checkout 阻断
+### 8.1 已收口的端口契约
 
-`.env.example` 的 `BOND_NEO4J_URI` 使用 `bolt://127.0.0.1:7687`，启动脚本也按 URI 探测 7687；Compose 却固定发布 `17687:7687`，且忽略脚本设置的 `NATSUME_NEO4J_BOLT_PORT`。没有本地 `.env` 修正时，外部服务启动会错误等待 7687。
+`.env.example`、`start_docker_services.ps1`、`start_host_side.ps1`、`check_external_env.py` 与 Compose 现在共同使用 Neo4j Bolt 默认 `17687`；启动器从 `BOND_NEO4J_URI` 解析端口后传入 `NATSUME_NEO4J_BOLT_PORT`。Chroma 则从 `CHROMA_ENDPOINT` 解析端口并传入 `NATSUME_CHROMA_PORT`，模板的 `CHROMA_ENDPOINT` 与 `CHROMA_PORT` 均为 `18000`。定向回归测试会防止这个默认值再次漂移。
 
-Chroma 默认 18000 时恰好一致，但自定义 `CHROMA_ENDPOINT` 后，脚本设置的 `NATSUME_CHROMA_PORT` 同样不会改变 Compose 固定映射。
+自定义端口时，`BOND_NEO4J_URI` 与 `CHROMA_ENDPOINT` 是运行时探测的权威来源；不要只改 `CHROMA_PORT` 却保留旧 endpoint。该收口只解决端口一致性，不解决 Compose 默认密码、`latest` 镜像、固定容器名或缺少健康检查等运维缺口。
 
 ## 9. 健康与降级语义
 
@@ -289,8 +311,17 @@ Host 的 `--startup-check` 在探测结果为 degraded 时仍继续启动，只�
 | 环境准备度报告 | [generate_env_readiness_report.py](../../../scripts/runtime/generate_env_readiness_report.py) | 写 `runtime/reports/env_readiness_report.json`；报告未 ready 仍可退出 0 | 是报告生成器，不是 Gate |
 | Host 基础端点 | [test_basic_endpoints.py](../../../scripts/runtime/test_basic_endpoints.py) | 探测 health/ready/metrics/canon | 不会因 `ready=false` 必然失败 |
 | Host 实链 | [test_full_service.py](../../../scripts/runtime/test_full_service.py) | 写 `artifacts/release/reports/full_service_probe_*.json`；失败退出 2 | `/ready` 主要检查 HTTP 200，没有强制 `ready=true` |
+| Host↔Edge durable receipt | [test_edge_tcp_receipt_smoke.py](../../../scripts/runtime/test_edge_tcp_receipt_smoke.py) | 启动真实 loopback Edge 子进程；HMAC、owner/session/lease/fence、receipt query v2、SQLite SHA 与重启回放任一失败即非零 | 不启动 `host_brain` 服务；不接真实/假硬件，预期结果是 `DEGRADED/MATEENGINE_UNAVAILABLE` 与 `physical_effect_status=NOT_TESTED` |
 | Gateway 实链 | [test_gateway_live_matrix.py](../../../scripts/runtime/test_gateway_live_matrix.py) | 写 `gateway_live_matrix_*.json`；存在 FAIL 才非零，WARN 允许 | 需要真实平台凭据与用户环境 |
 | Monitor UI | `npm run build`、`npm run typecheck`、`npm run test:read-model`、`npm run test:e2e` | Node 工具退出码 | Host 脚本不会自动 build UI |
+
+可重复执行的最小传输实测命令为：
+
+```powershell
+python scripts/runtime/test_edge_tcp_receipt_smoke.py --timeout-seconds 60
+```
+
+它会为本次运行生成短生命周期 HMAC、动态 loopback 端口和独立 SQLite，启动两次真实 `python -m edge_client` 子进程；Host 侧的 `HttpEdgeTransportPort` 与 `EdgeRpcEmbodimentCommandPort` 完成 lease、命令、owner-bound receipt query v2 和重启后的精确回放。Edge 0002 会冻结 command owner；legacy ownerless command 不会通过查询接口被猜测归属。它故意把 MateEngine `health` 指向未监听的 loopback 端口，所以只有收到 `DEGRADED/MATEENGINE_UNAVAILABLE`、同一 SQLite command row 和匹配的 receipt SHA-256 才通过。它不启动 Host HTTP 服务、QQ、Unified Gateway、ASR、TTS、VTS 或假设备，也不证明真实物理效果。
 
 推荐验收顺序：
 
@@ -301,6 +332,7 @@ Host 的 `--startup-check` 在探测结果为 degraded 时仍继续启动，只�
 → OBS 指标及时性
 → Monitor 静态构建和代理
 → Edge 嵌套组件健康
+→ Host↔Edge TCP/HMAC/durable receipt smoke
 → Gateway 实平台矩阵
 → 真实 SSE Chat COMMIT
 → 重启后任务/Outbox/投影一致性
@@ -314,7 +346,6 @@ Monitor UI 源码位于 [host_brain/app/monitor_ui/package.json](../../../host_b
 
 | 缺口 | 当前影响 | 完成条件 |
 |---|---|---|
-| Neo4j Bolt 默认端口错位 | clean checkout 外部依赖启动失败 | Compose 消费同一端口变量并增加回归测试 |
 | Gateway 未纳入启动就绪 | Edge 成功但平台入口不可用 | 启动与验收显式检查 `/v1/gateway/health` |
 | ASR/TTS 探测指向遗留端口 | 虚假降级或错误禁用 ASR | 统一读取 `/v1/edge/health` 的组件状态 |
 | 健康只看 HTTP/端口 | `ready=false` 仍可能被判 started | Gate 校验 payload 状态和版本标识 |

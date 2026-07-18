@@ -77,12 +77,14 @@ def _event(
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=(1 if aggregate_type == "TASK_GRAPH" else None),
         ),
         idempotency_key=f"ne01-parallel-success:{stable}",
         outbox_id=f"outbox::ne01-parallel-success:{stable}",
@@ -105,7 +107,7 @@ def _graph(graph_id: str) -> TaskGraph:
                 dependencies=(),
                 route=f"skill:{node_id}",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=("approved projection",),
@@ -382,16 +384,10 @@ def _accept_node(
         TaskNodeStatus.EXECUTED,
         TaskNodeStatus.VERIFYING,
         TaskNodeStatus.VERIFIED,
-        TaskNodeStatus.ACCEPTED,
     ):
         current = store.get_node(graph_id, 1, node_id)
         verification = _verification(graph_id, node_id) if target is TaskNodeStatus.VERIFIED else None
-        judgement = _acceptance(graph_id, node_id, attempt_id) if target is TaskNodeStatus.ACCEPTED else None
-        evidence = (
-            verification.evidence_refs
-            if verification is not None
-            else judgement.evidence_refs if judgement is not None else ()
-        )
+        evidence = verification.evidence_refs if verification is not None else ()
         store.transition_node(
             graph_id,
             1,
@@ -406,8 +402,27 @@ def _accept_node(
                 evidence_refs=evidence,
             ),
             verification_result=verification,
-            acceptance_judgement=judgement,
         )
+    current = store.get_node(graph_id, 1, node_id)
+    judgement = _acceptance(graph_id, node_id, attempt_id)
+    store.commit_node_acceptance(
+        graph_id,
+        1,
+        node_id,
+        expected_version=int(current["status_version"]),
+        outbox=_event(
+            "TASK_NODE",
+            f"{graph_id}@1/{node_id}",
+            int(current["status_version"]) + 1,
+            "TASK_NODE_ACCEPTED",
+            attempt_id=attempt_id,
+            evidence_refs=judgement.evidence_refs,
+        ),
+        acceptance_judgement=judgement,
+        attempt_id=attempt_id,
+        receipt_ref=str(projection["projection_id"]),
+        worker_output=projection,
+    )
     return projection
 
 

@@ -9,6 +9,7 @@ from host_brain.contracts.agent_runtime.budget_policy import BUDGET_POLICY_SCHEM
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.orchestration.planning_admission import PlanningAdmissionReceipt
 from host_brain.orchestration.planning_execution import (
+    PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE,
     PLANNING_EXECUTION_SEARCH_FAILED,
     GovernedPlanningExecutionService,
     PlanningExecutionAuthority,
@@ -142,6 +143,10 @@ class _Admission:
 class _Application:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.preflight_calls: list[dict[str, Any]] = []
+
+    def preflight_parent_governor_binding(self, **kwargs: Any) -> None:
+        self.preflight_calls.append(dict(kwargs))
 
     async def execute_stream(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
@@ -185,6 +190,94 @@ async def test_selected_path_is_compiled_admitted_and_executed_without_second_pl
     assert admission.calls[0]["command_request_id"] == "request-plan"
     assert application.calls[0]["graph"].to_dict() == prepared.compiled.task_graph.to_dict()
     assert events == [{"phase": "COMMIT", "done": True, "graph_revision": 1}]
+
+
+@pytest.mark.asyncio
+async def test_planning_preflights_parent_authority_before_first_admission() -> None:
+    search = _Search(_result("search-parent-preflight", "inspect"))
+    admission = _Admission()
+
+    class _RejectingApplication(_Application):
+        def preflight_parent_governor_binding(self, **kwargs: Any) -> None:
+            self.preflight_calls.append(dict(kwargs))
+            raise RuntimeError("parent principal drift")
+
+    application = _RejectingApplication()
+    authority = _authority()
+    service = GovernedPlanningExecutionService(
+        search=search,  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=admission,  # type: ignore[arg-type]
+        command_application=application,
+    )
+
+    with pytest.raises(RuntimeError, match="parent principal drift"):
+        await service.prepare_initial(
+            SearchRequest("search-parent-preflight", initial_state={}),
+            authority=authority,
+            created_at=100,
+        )
+
+    assert admission.calls == []
+    assert application.preflight_calls == [
+        {
+            "parent_grant_ref": authority.governor_grant_ref,
+            "request_id": authority.base_command_request_id,
+            "session_id": authority.session_id,
+            "principal_id": authority.principal_id,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_planning_rejects_unenabled_delegate_before_any_admission() -> None:
+    candidate = _candidate("unsafe-delegate")
+    candidate = replace(
+        candidate,
+        payload={
+            **candidate.payload,
+            "worker_route": "delegate",
+            "target_id": "repair_agent",
+            "capability_requirements": ["repair_agent"],
+        },
+    )
+    result = SearchResult(
+        request_id="search-unsafe-delegate",
+        status=SearchStatus.SELECTED,
+        stop_reason="selected",
+        selected_candidate=candidate,
+        selected_path=(candidate,),
+        ranked=(),
+        trace=(),
+        counters=SearchCounters(),
+    )
+    admission = _Admission()
+    application = _Application()
+    checked: list[str] = []
+
+    def reject(target_id: str) -> None:
+        checked.append(target_id)
+        raise RuntimeError("delegate target not enabled")
+
+    service = GovernedPlanningExecutionService(
+        search=_Search(result),  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=admission,  # type: ignore[arg-type]
+        command_application=application,
+        delegate_target_validator=reject,
+    )
+
+    with pytest.raises(PlanningExecutionError) as raised:
+        await service.prepare_initial(
+            SearchRequest("search-unsafe-delegate", initial_state={}),
+            authority=_authority(),
+            created_at=100,
+        )
+
+    assert raised.value.reason_code == PLANNING_EXECUTION_DELEGATE_TARGET_UNAVAILABLE
+    assert checked == ["repair_agent"]
+    assert admission.calls == []
+    assert application.preflight_calls == []
 
 
 @pytest.mark.asyncio

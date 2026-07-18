@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import time
-import threading
 from typing import Any
 
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
@@ -24,10 +22,6 @@ TRIBE_EVENTS_KIND = "tribe_events"
 TRIBE_EVENTS_INDEX_KEY = "index"
 SESSION_KIND = "session"
 SESSION_INDEX_KEY = "index"
-_embodiment_observer_lock = threading.Lock()
-_embodiment_observer_unsubscribe = None
-
-
 def get_query_projection_worker() -> QueryProjectionWorker:
     from host_brain.composition.process_services import get_query_projection_store
 
@@ -54,20 +48,35 @@ def projection_meta(
         }
     age = max(0, now - int(document.freshness_ts_ms))
     stale = age > max(0, int(max_age_ms))
+    durable_state = str(
+        getattr(document.degraded_state, "value", document.degraded_state)
+        or "HEALTHY"
+    ).upper()
+    effective_state = "STALE" if stale else durable_state
+    available = not stale and durable_state == "HEALTHY"
+    reason_code = None
+    if stale:
+        reason_code = "OPERATOR_PROJECTION_STALE"
+    elif durable_state == "SOURCE_UNAVAILABLE":
+        reason_code = "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE"
+    elif durable_state == "REBUILDING":
+        reason_code = "OPERATOR_PROJECTION_NOT_READY"
+    elif durable_state == "DIGEST_MISMATCH":
+        reason_code = "OPERATOR_PROJECTION_DIGEST_MISMATCH"
     return {
         "schema_version": document.schema_version,
         "kind": kind,
         "key": key,
-        "available": not stale,
+        "available": available,
         "projection_version": document.projection_version,
         "projection_cursor": document.projection_cursor,
         "source_cursor": document.source_cursor,
         "source_digest": document.source_digest,
         "freshness_ts_ms": document.freshness_ts_ms,
         "age_ms": age,
-        "degraded_state": "STALE" if stale else document.degraded_state.value,
+        "degraded_state": effective_state,
         "degraded_detail": document.degraded_detail,
-        "reason_code": "OPERATOR_PROJECTION_STALE" if stale else None,
+        "reason_code": reason_code,
     }
 
 
@@ -281,73 +290,6 @@ def trace_source(request_id: str, value: Any) -> ProjectionSource:
     )
 
 
-def configure_embodiment_receipt_projection() -> bool:
-    """Bind the neutral Edge receipt observer to ``device_status/<kind>``."""
-
-    global _embodiment_observer_unsubscribe
-    with _embodiment_observer_lock:
-        if _embodiment_observer_unsubscribe is not None:
-            return False
-        from host_brain.composition.process_services import get_query_projection_store
-        from host_brain.channels.embodiment import register_embodiment_receipt_observer
-        from host_brain.core.trace_redaction import public_decision_summary
-
-        store = get_query_projection_store()
-
-        def observe(command: Any, receipt: Any) -> None:
-            kind = str(getattr(command, "kind", "unknown") or "unknown").strip().lower()
-            raw_event = getattr(receipt, "event", None)
-            event = dict(raw_event) if isinstance(raw_event, Mapping) else {}
-            public_event = {
-                key: event[key]
-                for key in (
-                    "request_id",
-                    "kind",
-                    "action",
-                    "device",
-                    "status",
-                    "transport",
-                    "latency_ms",
-                )
-                if key in event and isinstance(event[key], (str, int, float, bool, type(None)))
-            }
-            payload = {
-                "status": str(getattr(receipt, "status", "UNKNOWN") or "UNKNOWN"),
-                "success": bool(getattr(receipt, "success", False)),
-                "reason_code": getattr(receipt, "reason_code", None),
-                "detail": public_decision_summary(
-                    getattr(receipt, "detail", None),
-                    fallback="Edge embodiment receipt recorded.",
-                    max_chars=240,
-                ),
-                "latency_ms": public_event.get("latency_ms"),
-                "event": public_event,
-            }
-            cursor = max(0, int(getattr(receipt, "received_at_ms", 0) or 0))
-            store.upsert(
-                "device_status",
-                kind,
-                payload,
-                source_cursor=cursor,
-                source_digest=digest_json(payload),
-                source_ref="edge-embodiment-receipt",
-            )
-
-        _embodiment_observer_unsubscribe = register_embodiment_receipt_observer(observe)
-        return True
-
-
-def stop_embodiment_receipt_projection() -> bool:
-    global _embodiment_observer_unsubscribe
-    with _embodiment_observer_lock:
-        unsubscribe = _embodiment_observer_unsubscribe
-        _embodiment_observer_unsubscribe = None
-    if unsubscribe is None:
-        return False
-    unsubscribe()
-    return True
-
-
 __all__ = [
     "ProjectionOperatorReadModelService",
     "SESSION_INDEX_KEY",
@@ -363,8 +305,6 @@ __all__ = [
     "TRIBE_EVENTS_INDEX_KEY",
     "get_query_projection_worker",
     "trace_source",
-    "configure_embodiment_receipt_projection",
     "projection_meta",
     "refresh_task_projections",
-    "stop_embodiment_receipt_projection",
 ]

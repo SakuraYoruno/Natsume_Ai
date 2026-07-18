@@ -209,7 +209,12 @@ export default function SystemConfig() {
                   <div className="font-mono text-gray-700">{model.modelId}</div>
                   <div className="mt-1 flex items-center justify-between text-gray-500">
                     <span>{model.callCount} 次调用</span>
-                    <span>{model.totalTokens} tok</span>
+                    <span className="text-right" title={model.totalTokensDetailLabel}>
+                      <span>{model.totalTokensAvailable ? `${model.totalTokensLabel} tok` : model.totalTokensLabel}</span>
+                      {model.totalTokensCoverageLabel ? (
+                        <span className="block text-[10px] text-gray-400">{model.totalTokensCoverageLabel}</span>
+                      ) : null}
+                    </span>
                     <span>{model.latencyLabel}</span>
                   </div>
                 </div>

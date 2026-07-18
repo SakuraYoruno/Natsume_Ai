@@ -18,8 +18,10 @@ import threading
 from typing import Any
 import uuid
 
+from host_brain.core.ids import now_ms
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
+    Ed25519ReconciliationProofVerifier,
     OutboxMessage,
     RecoveryReport,
 )
@@ -36,6 +38,7 @@ from host_brain.persistence.agent_execution_repository import (
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
@@ -46,6 +49,15 @@ from host_brain.task_runtime.graph_cancellation_continuation_worker import (
 )
 from host_brain.task_runtime.graph_cancellation_runtime import (
     GraphCancellationRuntime,
+)
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationService,
+)
+from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
+    GraphCancellationEffectReconciliationService,
+)
+from host_brain.task_runtime.terminal_state_reconciliation import (
+    TerminalStateReconciliationService,
 )
 from host_brain.task_runtime.local_graph_execution_registry import (
     LocalGraphExecutionRegistry,
@@ -109,6 +121,7 @@ MigrationRunnerBuilder = Callable[..., SQLiteMigrationRunner]
 TaskStoreBuilder = Callable[..., DurableTaskStore]
 CommandRepositoryBuilder = Callable[..., HostCommandRepository]
 ReviewStoreBuilder = Callable[..., ReviewStore]
+ReviewContinuationStoreBuilder = Callable[..., ReviewContinuationStore]
 WorkerProjectionStoreBuilder = Callable[..., WorkerProjectionStore]
 AgentResultRepositoryBuilder = Callable[..., AgentExecutionResultRepository]
 SchedulerDefinitionRepositoryBuilder = Callable[..., SchedulerDefinitionRepository]
@@ -126,6 +139,7 @@ _INFRASTRUCTURE_ORDER = (
     "migration_runner",
     "task_store",
     "review_store",
+    "review_continuation_store",
     "worker_projection_store",
     "command_repository",
     "agent_result_repository",
@@ -149,6 +163,7 @@ class ProcessTaskRuntimeContainer:
     recovery_id: str
     recovery_report: RecoveryReport
     review_store: ReviewStore
+    review_continuation_store: ReviewContinuationStore
     worker_projection_store: WorkerProjectionStore
     command_repository: HostCommandRepository
     agent_result_repository: AgentExecutionResultRepository
@@ -158,6 +173,11 @@ class ProcessTaskRuntimeContainer:
     outbox_publisher: RuntimeOutboxPublisher
     graph_execution_registry: LocalGraphExecutionRegistry
     cancellation_continuation_worker: GraphCancellationContinuationWorker
+    operation_reconciliation_service: GraphCancellationOperationReconciliationService
+    effect_reconciliation_service: GraphCancellationEffectReconciliationService
+    terminal_reconciliation_service: TerminalStateReconciliationService
+    terminal_reconciliation_inventory: Mapping[str, Any]
+    terminal_reconciliation_auto_result: Mapping[str, Any]
     startup_publish_result: Mapping[str, Any]
     owner_process_id: int
     _bound_runtime: Any | None = field(default=None, init=False, repr=False)
@@ -653,6 +673,25 @@ def _run_canonical_migrations(
     return migration_runner.apply_migrations(request_id="startup::task-runtime")
 
 
+def _build_task_store_with_reconciliation_authority(
+    *,
+    canonical_db_path: str,
+    task_store_builder: TaskStoreBuilder,
+    reconciliation_public_keys: Mapping[str, bytes] | None,
+) -> DurableTaskStore:
+    """Inject the configured verification-only authority into TaskStore."""
+
+    if not reconciliation_public_keys:
+        return task_store_builder(canonical_db_path)
+    reconciliation_proof_verifier = Ed25519ReconciliationProofVerifier(
+        reconciliation_public_keys
+    )
+    return task_store_builder(
+        canonical_db_path,
+        reconciliation_proof_verifier=reconciliation_proof_verifier,
+    )
+
+
 def build_process_task_runtime_container(
     *,
     ledger: Any,
@@ -662,6 +701,9 @@ def build_process_task_runtime_container(
     migration_runner_builder: MigrationRunnerBuilder = SQLiteMigrationRunner,
     task_store_builder: TaskStoreBuilder = DurableTaskStore,
     review_store_builder: ReviewStoreBuilder = ReviewStore,
+    review_continuation_store_builder: ReviewContinuationStoreBuilder = (
+        ReviewContinuationStore
+    ),
     worker_projection_store_builder: WorkerProjectionStoreBuilder = WorkerProjectionStore,
     command_repository_builder: CommandRepositoryBuilder = HostCommandRepository,
     agent_result_repository_builder: AgentResultRepositoryBuilder = (
@@ -675,6 +717,8 @@ def build_process_task_runtime_container(
     ),
     event_store_builder: RuntimeEventStoreBuilder = RuntimeEventStore,
     outbox_publisher_builder: RuntimeOutboxPublisherBuilder = RuntimeOutboxPublisher,
+    reconciliation_public_keys: Mapping[str, bytes] | None = None,
+    terminal_reconciliation_auto_enabled: bool = False,
 ) -> ProcessTaskRuntimeContainer:
     """Migrate and construct one fail-closed durable infrastructure graph."""
 
@@ -710,14 +754,42 @@ def build_process_task_runtime_container(
                 f"canonical migration failed: {reason}",
             )
 
-        task_store = task_store_builder(canonical)
+        task_store = _build_task_store_with_reconciliation_authority(
+            canonical_db_path=canonical,
+            task_store_builder=task_store_builder,
+            reconciliation_public_keys=reconciliation_public_keys,
+        )
         constructed.append(("task_store", task_store))
         task_store.assert_outbox_delivery_ready()
         task_store.assert_graph_cancellation_continuation_ready()
+        task_store.assert_effect_reconciliation_ready()
+        task_store.assert_terminal_reconciliation_ready()
+        task_store.assert_node_artifact_ready()
         recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
         recovery_report = task_store.recover_startup(recovery_id=recovery_id)
+        terminal_reconciliation_inventory = (
+            task_store.inventory_terminal_reconciliation_cases(limit=10_000)
+        )
+        terminal_reconciliation_service = TerminalStateReconciliationService(
+            task_store=task_store,
+            outbox_factory=OutboxMessage,
+            clock_ms=now_ms,
+        )
+        terminal_reconciliation_auto_result = (
+            terminal_reconciliation_service.reconcile_exact_cases()
+            if bool(terminal_reconciliation_auto_enabled)
+            else {
+                "status": "DISABLED",
+                "candidate_count": 0,
+                "reconciled_count": 0,
+                "results": (),
+                "remaining_exact_cases": False,
+            }
+        )
         review_store = review_store_builder(canonical)
         constructed.append(("review_store", review_store))
+        review_continuation_store = review_continuation_store_builder(canonical)
+        constructed.append(("review_continuation_store", review_continuation_store))
         worker_projection_store = worker_projection_store_builder(canonical)
         constructed.append(("worker_projection_store", worker_projection_store))
         command_repository = command_repository_builder(canonical)
@@ -765,6 +837,19 @@ def build_process_task_runtime_container(
         constructed.append(
             ("cancellation_continuation_worker", cancellation_continuation_worker)
         )
+        operation_reconciliation_service = (
+            GraphCancellationOperationReconciliationService(
+                task_store=task_store,
+                outbox_factory=OutboxMessage,
+                wake_cancellation=cancellation_continuation_worker.wake,
+            )
+        )
+        effect_reconciliation_service = GraphCancellationEffectReconciliationService(
+            task_store=task_store,
+            outbox_factory=OutboxMessage,
+            wake_cancellation=cancellation_continuation_worker.wake,
+            clock_ms=now_ms,
+        )
     except TaskRuntimeContainerConstructionError as exc:
         rollback = _close_constructed_sync(constructed)
         raise TaskRuntimeContainerConstructionError(
@@ -789,6 +874,7 @@ def build_process_task_runtime_container(
         recovery_id=recovery_id,
         recovery_report=recovery_report,
         review_store=review_store,
+        review_continuation_store=review_continuation_store,
         worker_projection_store=worker_projection_store,
         command_repository=command_repository,
         agent_result_repository=agent_result_repository,
@@ -798,6 +884,13 @@ def build_process_task_runtime_container(
         outbox_publisher=outbox_publisher,
         graph_execution_registry=graph_execution_registry,
         cancellation_continuation_worker=cancellation_continuation_worker,
+        operation_reconciliation_service=operation_reconciliation_service,
+        effect_reconciliation_service=effect_reconciliation_service,
+        terminal_reconciliation_service=terminal_reconciliation_service,
+        terminal_reconciliation_inventory=dict(terminal_reconciliation_inventory),
+        terminal_reconciliation_auto_result=dict(
+            terminal_reconciliation_auto_result
+        ),
         startup_publish_result=dict(startup_publish_result),
         owner_process_id=os.getpid(),
     )

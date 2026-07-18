@@ -9,14 +9,14 @@ those remain authoritative in migrations 0052/0054/0059.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
@@ -28,6 +28,10 @@ from host_brain.persistence.task_repository import (
     TaskStoreError,
     build_outbox_payload_ref,
 )
+from host_brain.persistence.graph_revision_supersession_schema import (
+    GraphRevisionSupersessionSchemaError,
+    assert_graph_revision_supersession_schema,
+)
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.core.ids import now_ms
 from natsume_contracts.task.v1 import ExecutorAssignment, HostCommand
@@ -38,10 +42,20 @@ HOST_COMMAND_INVALID = "HOST_COMMAND_INVALID"
 HOST_COMMAND_CONFLICT = "HOST_COMMAND_CONFLICT"
 HOST_COMMAND_INGRESS_CONFLICT = "HOST_COMMAND_INGRESS_CONFLICT"
 HOST_COMMAND_DURABLE_DATA_INVALID = "HOST_COMMAND_DURABLE_DATA_INVALID"
+HOST_COMMAND_SUPERSESSION_CONFLICT = "HOST_COMMAND_SUPERSESSION_CONFLICT"
 
 HOST_COMMAND_MIGRATION_ASSET_KEY = "0062#host_command_admission"
 HOST_COMMAND_MIGRATION_SHA256 = "e003783038278ca82c7b8ee18fb87916ee7e6c109592a59a4f3579da378f5d59"
 HOST_COMMAND_REVISION_MIGRATION_ASSET_KEY = "0088#host_command_graph_revision"
+HOST_COMMAND_SUPERSESSION_MIGRATION_ASSET_KEY = (
+    "0100#task_runtime_graph_revision_supersession"
+)
+HOST_COMMAND_SUPERSESSION_MIGRATION_SHA256 = (
+    "9f7852754e7eab1502abf76deb570827aa4809c7e101940c5cf2a19beeaa499f"
+)
+GRAPH_REVISION_SUPERSESSION_SCHEMA_VERSION = (
+    "Natsume.task_runtime.graph_revision_supersession.v1"
+)
 _ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
     {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
 )
@@ -83,6 +97,7 @@ _REQUIRED_INDEXES = frozenset(
         "idx_host_command_journal_graph",
     }
 )
+_SUPERSESSION_TABLE = "task_runtime_graph_revision_supersession"
 
 
 class HostCommandRepositoryError(RuntimeError):
@@ -200,12 +215,25 @@ class HostCommandRepository:
                     """,
                     (HOST_COMMAND_REVISION_MIGRATION_ASSET_KEY,),
                 ).fetchone()
+                supersession_asset = conn.execute(
+                    """
+                    SELECT checksum, disposition
+                    FROM schema_migration_assets
+                    WHERE asset_key = ?
+                    """,
+                    (HOST_COMMAND_SUPERSESSION_MIGRATION_ASSET_KEY,),
+                ).fetchone()
+                assert_graph_revision_supersession_schema(conn)
                 foreign_keys_enabled = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])
             finally:
                 conn.close()
         except HostCommandRepositoryError:
             raise
-        except (sqlite3.DatabaseError, TaskStoreError) as exc:
+        except (
+            GraphRevisionSupersessionSchemaError,
+            sqlite3.DatabaseError,
+            TaskStoreError,
+        ) as exc:
             raise HostCommandRepositoryError(
                 HOST_COMMAND_SCHEMA_NOT_READY,
                 "host command schema cannot be verified",
@@ -229,18 +257,27 @@ class HostCommandRepository:
             and ("root_work_order_id",) not in unique_indexes
             and ("assignment_id",) not in unique_indexes
         )
+        supersession_ready = (
+            supersession_asset is not None
+            and str(supersession_asset["checksum"])
+            == HOST_COMMAND_SUPERSESSION_MIGRATION_SHA256
+            and str(supersession_asset["disposition"])
+            in _ALLOWED_MIGRATION_DISPOSITIONS
+        )
         if (
             missing_columns
             or missing_indexes
             or foreign_keys_enabled != 1
             or not revision_constraints_ready
+            or not supersession_ready
         ):
             raise HostCommandRepositoryError(
                 HOST_COMMAND_SCHEMA_NOT_READY,
                 "host command schema is stale: "
                 f"missing_columns={missing_columns}, missing_indexes={missing_indexes}, "
                 f"foreign_keys={foreign_keys_enabled}, "
-                f"revision_constraints_ready={revision_constraints_ready}",
+                f"revision_constraints_ready={revision_constraints_ready}, "
+                f"supersession_ready={supersession_ready}",
             )
 
     def admit(
@@ -257,6 +294,63 @@ class HostCommandRepository:
         """
 
         normalized = self._normalize_admission(command, work_order, assignment, graph)
+        if int(normalized["graph_revision"]) != 1:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                "replacement graph revisions require admit_replan supersession authority",
+            )
+        return self._admit_normalized(normalized, replan=None)
+
+    def admit_replan(
+        self,
+        command: Any,
+        work_order: AgentWorkOrder | WorkOrderV3,
+        assignment: Any,
+        graph: TaskGraph,
+        *,
+        previous_revision: int,
+        failure_evidence_refs: Sequence[str],
+    ) -> dict[str, Any]:
+        """Atomically supersede one quiescent FAILED graph revision.
+
+        The predecessor validation, replacement graph/command admission, both
+        Outboxes and the append-only supersession authority share one
+        ``BEGIN IMMEDIATE`` transaction.  An exact response-loss replay must
+        find the already committed supersession row; it is never retrofitted.
+        """
+
+        normalized = self._normalize_admission(command, work_order, assignment, graph)
+        predecessor = _required_int(
+            previous_revision,
+            field_name="previous_revision",
+            minimum=1,
+        )
+        if (
+            int(normalized["graph_revision"]) != predecessor + 1
+            or predecessor < 1
+        ):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                "replan admission requires replacement revision == previous + 1",
+            )
+        evidence_json, evidence_digest = _normalize_failure_evidence_refs(
+            failure_evidence_refs
+        )
+        return self._admit_normalized(
+            normalized,
+            replan={
+                "previous_revision": predecessor,
+                "failure_evidence_json": evidence_json,
+                "failure_evidence_sha256": evidence_digest,
+            },
+        )
+
+    def _admit_normalized(
+        self,
+        normalized: Mapping[str, Any],
+        *,
+        replan: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
         admitted_at_ms = self._now()
         graph_outbox, command_outbox = self._build_outboxes(normalized)
         conn = self._connect()
@@ -266,14 +360,27 @@ class HostCommandRepository:
             if existing is not None:
                 record = self._validated_record(conn, existing)
                 self._assert_exact_replay(record, normalized)
+                if replan is not None:
+                    self._assert_exact_supersession_replay(
+                        conn,
+                        normalized=normalized,
+                        replan=replan,
+                    )
                 self._bind_ingress_claim(conn, normalized)
                 conn.commit()
                 return {**record, "created": False, "replayed": True}
 
+            predecessor = None
+            if replan is not None:
+                predecessor = self._validate_replan_predecessor_in_transaction(
+                    conn,
+                    normalized=normalized,
+                    replan=replan,
+                )
             self._validate_ingress_claim(conn, normalized)
             self._task_store.insert_graph_in_transaction(
                 conn,
-                graph,
+                normalized["graph"],
                 outbox=graph_outbox,
                 ts_ms=admitted_at_ms,
             )
@@ -334,6 +441,20 @@ class HostCommandRepository:
             self._fault("after_outboxes")
             self._bind_ingress_claim(conn, normalized)
             self._fault("after_ingress_claim")
+            if replan is not None:
+                if predecessor is None:
+                    raise HostCommandRepositoryError(
+                        HOST_COMMAND_DURABLE_DATA_INVALID,
+                        "validated replan predecessor disappeared before supersession",
+                    )
+                self._insert_supersession_in_transaction(
+                    conn,
+                    normalized=normalized,
+                    replan=replan,
+                    predecessor=predecessor,
+                    created_ts_ms=admitted_at_ms,
+                )
+                self._fault("after_supersession")
             row = self._require_row(conn, normalized["command_id"])
             record = self._validated_record(conn, row)
             conn.commit()
@@ -355,6 +476,399 @@ class HostCommandRepository:
             raise
         finally:
             conn.close()
+
+    def _validate_replan_predecessor_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        normalized: Mapping[str, Any],
+        replan: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        graph_id = str(normalized["graph_id"])
+        replacement_revision = int(normalized["graph_revision"])
+        previous_revision = int(replan["previous_revision"])
+        predecessor = conn.execute(
+            """
+            SELECT * FROM task_runtime_graph
+            WHERE graph_id = ? AND revision = ?
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if predecessor is None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor TaskGraph does not exist",
+            )
+        if (
+            str(predecessor["root_work_order_id"])
+            != str(normalized["root_work_order_id"])
+            or str(predecessor["status"]) != "FAILED"
+            or int(predecessor["status_version"]) < 1
+            or replacement_revision != previous_revision + 1
+        ):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor must be the same-root FAILED revision immediately before replacement",
+            )
+        try:
+            predecessor_graph = TaskGraph.from_mapping(
+                _load_object(
+                    predecessor["graph_json"],
+                    field_name="replan predecessor task_runtime_graph.graph_json",
+                )
+            )
+        except HostCommandRepositoryError:
+            raise
+        except Exception as exc:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_DURABLE_DATA_INVALID,
+                "replan predecessor TaskGraph payload is invalid",
+            ) from exc
+        if (
+            predecessor_graph.graph_id != graph_id
+            or predecessor_graph.revision != previous_revision
+            or predecessor_graph.root_work_order_id
+            != str(normalized["root_work_order_id"])
+            or predecessor_graph.status.value != "FAILED"
+        ):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_DURABLE_DATA_INVALID,
+                "replan predecessor SQL identity differs from its canonical TaskGraph",
+            )
+
+        previous_commands = conn.execute(
+            """
+            SELECT * FROM host_command_journal
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY command_id
+            """,
+            (graph_id, previous_revision),
+        ).fetchall()
+        if len(previous_commands) != 1:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor requires exactly one immutable HostCommand",
+            )
+        previous_record = self._validated_record(conn, previous_commands[0])
+        if previous_record["root_work_order_id"] != normalized["root_work_order_id"]:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor HostCommand root lineage differs",
+            )
+
+        # Reuse the canonical 0099 unresolved-case validator in the same writer
+        # transaction; an inventoried but unproved terminal anomaly may not be
+        # hidden by admitting a replacement revision.
+        self._task_store.assert_no_terminal_reconciliation_fence_in_transaction(
+            conn,
+            graph_id=graph_id,
+            graph_revision=previous_revision,
+            action="graph revision supersession",
+        )
+
+        continuable_node = conn.execute(
+            """
+            SELECT node_id, status FROM task_runtime_node
+            WHERE graph_id = ? AND graph_revision = ?
+              AND status IN (
+                'WAITING_APPROVAL', 'LEASED', 'RUNNING', 'EXECUTED',
+                'VERIFYING', 'VERIFIED', 'WAITING_ACCEPTANCE_REVIEW',
+                'RETRY_PENDING', 'CANCEL_REQUESTED'
+              )
+            ORDER BY node_id LIMIT 1
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if continuable_node is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor retains a continuable TaskNode: "
+                f"{continuable_node['node_id']}:{continuable_node['status']}",
+            )
+        non_terminal_attempt = conn.execute(
+            """
+            SELECT attempt_id, status FROM task_runtime_attempt
+            WHERE graph_id = ? AND graph_revision = ?
+              AND status IN (
+                'CREATED', 'LEASED', 'RUNNING', 'RECOVERABLE',
+                'CANCEL_REQUESTED'
+              )
+            ORDER BY attempt_id LIMIT 1
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if non_terminal_attempt is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor retains a non-terminal Attempt: "
+                f"{non_terminal_attempt['attempt_id']}:{non_terminal_attempt['status']}",
+            )
+        active_lease = conn.execute(
+            """
+            SELECT lease.lease_id
+            FROM task_runtime_lease AS lease
+            JOIN task_runtime_attempt AS attempt
+              ON attempt.attempt_id = lease.attempt_id
+            WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+              AND lease.status = 'ACTIVE'
+            ORDER BY lease.lease_id LIMIT 1
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if active_lease is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor retains an ACTIVE Lease",
+            )
+        unresolved_operation = conn.execute(
+            """
+            SELECT reservation.reservation_id, reservation.status
+            FROM task_runtime_idempotency_reservation AS reservation
+            JOIN task_runtime_attempt AS attempt
+              ON attempt.attempt_id = reservation.attempt_id
+            WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+              AND reservation.status IN ('RESERVED', 'RECOVERY_REQUIRED')
+            ORDER BY reservation.reservation_id LIMIT 1
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if unresolved_operation is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor retains unresolved operation authority: "
+                f"{unresolved_operation['reservation_id']}:{unresolved_operation['status']}",
+            )
+        review_continuation = conn.execute(
+            """
+            SELECT review_id FROM task_runtime_review_continuation
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY review_id LIMIT 1
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if review_continuation is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor retains Review continuation authority",
+            )
+
+        budgets = conn.execute(
+            """
+            SELECT budget_id, status, node_id, attempt_id
+            FROM task_runtime_budget_reservation
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY budget_id
+            """,
+            (graph_id, previous_revision),
+        ).fetchall()
+        if len(budgets) > 1:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor has multiple Budget authorities",
+            )
+        if budgets and (
+            budgets[0]["node_id"] is not None
+            or budgets[0]["attempt_id"] is not None
+            or str(budgets[0]["status"]) not in {"RELEASED", "CANCELLED"}
+        ):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor Budget must be the unique graph-scope "
+                "RELEASED/CANCELLED reservation",
+            )
+        cancellation = conn.execute(
+            """
+            SELECT intent_ref FROM task_runtime_graph_cancellation_intent
+            WHERE graph_id = ? AND graph_revision = ?
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if cancellation is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor has separate graph-cancellation authority",
+            )
+        acceptance_effect = conn.execute(
+            """
+            SELECT effect_id, status FROM task_runtime_acceptance_effect_intent
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY effect_id LIMIT 1
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if acceptance_effect is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor contains Acceptance effect authority outside "
+                "the proven-safe supersession subset: "
+                f"{acceptance_effect['effect_id']}:{acceptance_effect['status']}",
+            )
+        unresolved_effect_case = conn.execute(
+            """
+            SELECT item.case_id
+            FROM task_runtime_effect_reconciliation_case AS item
+            WHERE item.graph_id = ? AND item.graph_revision = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM task_runtime_effect_reconciliation_proof AS proof
+                WHERE proof.case_id = item.case_id
+              )
+            ORDER BY item.case_id LIMIT 1
+            """,
+            (graph_id, previous_revision),
+        ).fetchone()
+        if unresolved_effect_case is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor retains unresolved effect reconciliation",
+            )
+
+        terminal_outboxes = conn.execute(
+            """
+            SELECT payload_ref FROM task_runtime_outbox
+            WHERE aggregate_type = 'TASK_GRAPH' AND aggregate_id = ?
+              AND graph_revision = ? AND aggregate_version = ?
+              AND event_type = 'TASK_GRAPH_FAILED'
+            ORDER BY outbox_id
+            """,
+            (
+                graph_id,
+                previous_revision,
+                int(predecessor["status_version"]),
+            ),
+        ).fetchall()
+        if len(terminal_outboxes) != 1:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan predecessor lacks one exact FAILED Graph Outbox",
+            )
+        evidence = tuple(json.loads(str(replan["failure_evidence_json"])))
+        if str(terminal_outboxes[0]["payload_ref"]) not in evidence:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replan evidence does not include the exact FAILED Graph transition",
+            )
+
+        existing_supersession = conn.execute(
+            f"""
+            SELECT supersession_id FROM {_SUPERSESSION_TABLE}
+            WHERE graph_id = ?
+              AND (previous_revision = ? OR replacement_revision = ?)
+            LIMIT 1
+            """,
+            (graph_id, previous_revision, replacement_revision),
+        ).fetchone()
+        if existing_supersession is not None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "graph revision predecessor or replacement is already superseded",
+            )
+        return {
+            "previous_command_id": str(previous_record["command_id"]),
+            "previous_graph_status_version": int(predecessor["status_version"]),
+        }
+
+    def _insert_supersession_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        normalized: Mapping[str, Any],
+        replan: Mapping[str, Any],
+        predecessor: Mapping[str, Any],
+        created_ts_ms: int,
+    ) -> None:
+        binding = {
+            "schema_version": GRAPH_REVISION_SUPERSESSION_SCHEMA_VERSION,
+            "graph_id": str(normalized["graph_id"]),
+            "previous_revision": int(replan["previous_revision"]),
+            "replacement_revision": int(normalized["graph_revision"]),
+            "previous_command_id": str(predecessor["previous_command_id"]),
+            "replacement_command_id": str(normalized["command_id"]),
+            "previous_graph_status_version": int(
+                predecessor["previous_graph_status_version"]
+            ),
+            "failure_evidence_sha256": str(replan["failure_evidence_sha256"]),
+        }
+        supersession_id = _supersession_id(binding)
+        conn.execute(
+            f"""
+            INSERT INTO {_SUPERSESSION_TABLE}(
+                supersession_id, schema_version, graph_id,
+                previous_revision, replacement_revision,
+                previous_command_id, replacement_command_id,
+                previous_graph_status_version, failure_evidence_json,
+                failure_evidence_sha256, created_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                supersession_id,
+                binding["schema_version"],
+                binding["graph_id"],
+                binding["previous_revision"],
+                binding["replacement_revision"],
+                binding["previous_command_id"],
+                binding["replacement_command_id"],
+                binding["previous_graph_status_version"],
+                replan["failure_evidence_json"],
+                binding["failure_evidence_sha256"],
+                int(created_ts_ms),
+            ),
+        )
+
+    def _assert_exact_supersession_replay(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        normalized: Mapping[str, Any],
+        replan: Mapping[str, Any],
+    ) -> None:
+        row = conn.execute(
+            f"""
+            SELECT * FROM {_SUPERSESSION_TABLE}
+            WHERE graph_id = ? AND previous_revision = ?
+            """,
+            (str(normalized["graph_id"]), int(replan["previous_revision"])),
+        ).fetchone()
+        if row is None:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "replacement replay has no committed supersession authority",
+            )
+        binding = {
+            "schema_version": str(row["schema_version"]),
+            "graph_id": str(row["graph_id"]),
+            "previous_revision": int(row["previous_revision"]),
+            "replacement_revision": int(row["replacement_revision"]),
+            "previous_command_id": str(row["previous_command_id"]),
+            "replacement_command_id": str(row["replacement_command_id"]),
+            "previous_graph_status_version": int(
+                row["previous_graph_status_version"]
+            ),
+            "failure_evidence_sha256": str(row["failure_evidence_sha256"]),
+        }
+        expected = {
+            "schema_version": GRAPH_REVISION_SUPERSESSION_SCHEMA_VERSION,
+            "graph_id": str(normalized["graph_id"]),
+            "previous_revision": int(replan["previous_revision"]),
+            "replacement_revision": int(normalized["graph_revision"]),
+            "previous_command_id": binding["previous_command_id"],
+            "replacement_command_id": str(normalized["command_id"]),
+            "previous_graph_status_version": binding[
+                "previous_graph_status_version"
+            ],
+            "failure_evidence_sha256": str(replan["failure_evidence_sha256"]),
+        }
+        if (
+            binding != expected
+            or str(row["failure_evidence_json"])
+            != str(replan["failure_evidence_json"])
+            or str(row["supersession_id"]) != _supersession_id(binding)
+            or _digest(str(row["failure_evidence_json"]))
+            != str(row["failure_evidence_sha256"])
+        ):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_SUPERSESSION_CONFLICT,
+                "durable graph revision supersession replay drifted",
+            )
 
     def get(self, command_id: str) -> dict[str, Any] | None:
         normalized_id = _required_text(command_id, field_name="command_id", max_length=512)
@@ -627,12 +1141,14 @@ class HostCommandRepository:
         graph_outbox = OutboxMessage.create(
             aggregate_type="TASK_GRAPH",
             aggregate_id=graph_id,
+            graph_revision=int(normalized["graph_revision"]),
             aggregate_version=0,
             event_type="TASK_GRAPH_CREATED",
             payload_ref=build_outbox_payload_ref(
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=graph_id,
                 aggregate_version=0,
+                graph_revision=int(normalized["graph_revision"]),
             ),
             idempotency_key=f"host-command:{identity_digest}:task-graph-created",
             evidence_refs=evidence,
@@ -779,6 +1295,12 @@ class HostCommandRepository:
                 ).fetchone()
                 is not None
             )
+            if not terminal_result_matches:
+                terminal_result_matches = _matches_review_decision_result(
+                    conn,
+                    result_ref=actual_result,
+                    command=normalized,
+                )
         elif surface == "scheduler" and actual_result:
             terminal_result_matches = (
                 conn.execute(
@@ -792,6 +1314,12 @@ class HostCommandRepository:
                 ).fetchone()
                 is not None
             )
+            if not terminal_result_matches:
+                terminal_result_matches = _matches_review_decision_result(
+                    conn,
+                    result_ref=actual_result,
+                    command=normalized,
+                )
         claim_body_sha256 = _normalize_external_sha256(
             row["body_sha256"],
             field_name="secure_ingress_idempotency_claim.body_sha256",
@@ -1158,6 +1686,66 @@ def _required_text(value: Any, *, field_name: str, max_length: int) -> str:
     return text
 
 
+def _matches_review_decision_result(
+    conn: sqlite3.Connection,
+    *,
+    result_ref: str,
+    command: Mapping[str, Any],
+) -> bool:
+    """Resolve an ingress terminal ref to one exact durable Review decision."""
+
+    try:
+        parsed = urlsplit(str(result_ref or "").strip())
+        if (
+            parsed.scheme != "review-decision"
+            or not parsed.netloc
+            or parsed.query
+            or parsed.fragment
+        ):
+            return False
+        review_id = unquote(parsed.netloc)
+        if not review_id or quote(review_id, safe="") != parsed.netloc:
+            return False
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) != 2 or parts[0] not in {"rejected", "expired"}:
+            return False
+        status = parts[0].upper()
+        if not parts[1].isdigit() or str(int(parts[1])) != parts[1]:
+            return False
+        review_status_version = int(parts[1])
+        if review_status_version < 1:
+            return False
+        row = conn.execute(
+            """
+            SELECT review_id, status, status_version, subject_ref,
+                   task_graph_id, task_node_id
+            FROM agent_runtime_review
+            WHERE review_id = ?
+            """,
+            (review_id,),
+        ).fetchone()
+        if (
+            row is None
+            or str(row["status"]) != status
+            or int(row["status_version"]) != review_status_version
+        ):
+            return False
+        from host_brain.persistence.review_continuation_store import (  # noqa: PLC0415
+            parse_task_review_subject,
+        )
+
+        binding = parse_task_review_subject(str(row["subject_ref"] or ""))
+        return bool(
+            binding is not None
+            and binding.graph_id == str(command.get("graph_id") or "")
+            and binding.graph_revision == int(command.get("graph_revision") or 0)
+            and str(row["task_graph_id"] or "") == binding.graph_id
+            and str(row["task_node_id"] or "") == binding.node_id
+        )
+    except (ImportError, sqlite3.DatabaseError, TypeError, ValueError):
+        return False
+
+
 def _optional_text(value: Any, *, field_name: str, max_length: int) -> str | None:
     text = str(value or "").strip()
     if not text:
@@ -1233,6 +1821,56 @@ def _load_object(value: Any, *, field_name: str) -> dict[str, Any]:
     return parsed
 
 
+def _normalize_failure_evidence_refs(value: Any) -> tuple[str, str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise HostCommandRepositoryError(
+            HOST_COMMAND_INVALID,
+            "failure_evidence_refs must be a sequence",
+        )
+    refs: list[str] = []
+    for raw in value:
+        ref = str(raw or "").strip()
+        try:
+            parsed = urlsplit(ref)
+        except ValueError as exc:
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                "failure evidence contains an invalid durable reference",
+            ) from exc
+        if (
+            not ref
+            or len(ref) > 1024
+            or not parsed.scheme
+            or not parsed.netloc
+            or ref in refs
+        ):
+            raise HostCommandRepositoryError(
+                HOST_COMMAND_INVALID,
+                "failure evidence must contain 1..64 unique durable references",
+            )
+        refs.append(ref)
+    if not 1 <= len(refs) <= 64:
+        raise HostCommandRepositoryError(
+            HOST_COMMAND_INVALID,
+            "failure evidence must contain 1..64 unique durable references",
+        )
+    serialized = json.dumps(
+        refs,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return serialized, _digest(serialized)
+
+
+def _supersession_id(binding: Mapping[str, Any]) -> str:
+    serialized = _canonical_json(binding)
+    return (
+        "graph-revision-supersession://sha256/"
+        + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    )
+
+
 def _canonical_json(value: Mapping[str, Any]) -> str:
     try:
         return json.dumps(
@@ -1270,6 +1908,9 @@ __all__ = [
     "HOST_COMMAND_MIGRATION_ASSET_KEY",
     "HOST_COMMAND_MIGRATION_SHA256",
     "HOST_COMMAND_SCHEMA_NOT_READY",
+    "HOST_COMMAND_SUPERSESSION_CONFLICT",
+    "HOST_COMMAND_SUPERSESSION_MIGRATION_ASSET_KEY",
+    "HOST_COMMAND_SUPERSESSION_MIGRATION_SHA256",
     "HostCommandRepository",
     "HostCommandRepositoryError",
 ]

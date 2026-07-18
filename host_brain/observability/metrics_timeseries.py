@@ -10,6 +10,10 @@ import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional
 
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+)
+
 logger = logging.getLogger("Natsume.obs.metrics")
 
 # 支持的 metric 类型
@@ -84,10 +88,12 @@ class MetricsTimeseriesService:
 
         # 拉取原始数据
         gov_rows   = self._safe_fetch("governor_log",      start_time, end_time)
-        trace_rows = self._safe_fetch("graph_run_trace",   start_time, end_time)
+        attempt_rows = latest_terminal_model_attempts(
+            self._safe_fetch("model_attempt_log", start_time, end_time)
+        )
 
         # 填充桶
-        self._fill_buckets(buckets, gov_rows, trace_rows, interval_ms, start_time)
+        self._fill_buckets(buckets, gov_rows, attempt_rows, interval_ms, start_time)
 
         # 降采样
         if len(buckets) > MAX_DATA_POINTS:
@@ -110,7 +116,7 @@ class MetricsTimeseriesService:
         reason_codes = [{"code": k, "count": v} for k, v in rc_counter.most_common(20)]
 
         # 延迟分布（全局）
-        latency_data = self._compute_latency_dist(trace_rows)
+        latency_data = self._compute_latency_dist(attempt_rows)
 
         # 前端兼容格式（timeseries 字段）
         timestamps = [_fmt_ts(b["ts_ms"]) for b in buckets]
@@ -144,7 +150,11 @@ class MetricsTimeseriesService:
     # ------------------------------------------------------------------
     def _safe_fetch(self, table: str, start_ms: int, end_ms: int) -> List[Dict]:
         try:
-            return self._ledger.fetch_by_time_range(table, start_ms, end_ms)
+            return self._ledger.fetch_by_time_range(
+                table,
+                start_ms=start_ms,
+                end_ms=end_ms,
+            )
         except Exception as exc:
             logger.warning("MetricsTS: 读取 %s 失败 — %s", table, exc)
             return []
@@ -179,7 +189,7 @@ class MetricsTimeseriesService:
         self,
         buckets: List[Dict],
         gov_rows: List[Dict],
-        trace_rows: List[Dict],
+        attempt_rows: List[Dict],
         interval_ms: int,
         start_ms: int,
     ) -> None:
@@ -196,9 +206,9 @@ class MetricsTimeseriesService:
             if r.get("channel") == "voice":
                 buckets[idx]["chat"] += 1
 
-        for r in trace_rows:
+        for r in attempt_rows:
             ts  = r.get("ts_ms", 0)
-            lat = r.get("total_latency_ms")
+            lat = r.get("latency_ms")
             if lat is not None:
                 idx = self._bucket_idx(ts, start_ms, interval_ms, n)
                 buckets[idx]["latencies"].append(lat)
@@ -246,11 +256,11 @@ class MetricsTimeseriesService:
         return points
 
     @staticmethod
-    def _compute_latency_dist(trace_rows: List[Dict]) -> List[Dict[str, Any]]:
-        """按 node_type 聚合延迟分位数（用于前端柱状图）。"""
+    def _compute_latency_dist(attempt_rows: List[Dict]) -> List[Dict[str, Any]]:
+        """从 canonical model attempts 聚合端到端模型调用延迟。"""
         by_type: Dict[str, List[int]] = defaultdict(list)
-        for r in trace_rows:
-            lat = r.get("total_latency_ms")
+        for r in attempt_rows:
+            lat = r.get("latency_ms")
             if lat is not None:
                 by_type["Overall"].append(lat)
 

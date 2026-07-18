@@ -8,7 +8,11 @@ import pytest
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.governed_task_adapter import GovernedHostRuntime
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.contracts.agent_runtime.task_graph import TaskGraph, TaskGraphStatus
+from host_brain.contracts.agent_runtime.task_graph import (
+    TaskGraph,
+    TaskGraphStatus,
+    TaskNodeStatus,
+)
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.orchestration.governor_grant import governor_grant_ref
 from host_brain.orchestration.failure_replan_intent import (
@@ -21,11 +25,17 @@ from host_brain.orchestration.planning_execution import (
     PlanningExecutionAuthority,
 )
 from host_brain.orchestration.planning_graph_compiler import PlanningGraphCompiler
-from host_brain.orchestration.planning_recovery import GovernedPlanningRecoveryService
+from host_brain.orchestration.planning_recovery import (
+    PLANNING_RECOVERY_NOT_REPLANNABLE,
+    GovernedPlanningRecoveryService,
+    PlanningRecoveryError,
+)
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
+    TASK_STORE_CAS_CONFLICT,
+    TaskStoreError,
     build_outbox_payload_ref,
 )
 from natsume_contracts.task import HostCommandSurface
@@ -34,6 +44,9 @@ from natsume_contracts.task import HostCommandSurface
 class _UnusedCommandApplication:
     def __init__(self) -> None:
         self.calls = 0
+
+    def preflight_parent_governor_binding(self, **_kwargs):  # noqa: ANN003
+        return None
 
     async def execute_stream(self, **_kwargs):  # noqa: ANN003
         self.calls += 1
@@ -44,6 +57,9 @@ class _UnusedCommandApplication:
 class _CapturingCommandApplication:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+
+    def preflight_parent_governor_binding(self, **_kwargs):  # noqa: ANN003
+        return None
 
     async def execute_stream(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
@@ -149,26 +165,55 @@ def _graph_outbox(graph_id: str, *, version: int, status: str) -> OutboxMessage:
     return OutboxMessage.create(
         aggregate_type="TASK_GRAPH",
         aggregate_id=graph_id,
+        graph_revision=1,
         aggregate_version=version,
         event_type=f"TASK_GRAPH_{status}",
         payload_ref=build_outbox_payload_ref(
             aggregate_type="TASK_GRAPH",
             aggregate_id=graph_id,
             aggregate_version=version,
+            graph_revision=1,
         ),
         idempotency_key=f"gr04-replan:{graph_id}:{version}:{status}",
         outbox_id=f"outbox::gr04-replan::{graph_id}::{version}::{status}",
     )
 
 
+def _node_outbox(
+    graph_id: str,
+    node_id: str,
+    *,
+    version: int,
+    status: str,
+) -> OutboxMessage:
+    aggregate_id = f"{graph_id}@1/{node_id}"
+    return OutboxMessage.create(
+        aggregate_type="TASK_NODE",
+        aggregate_id=aggregate_id,
+        aggregate_version=version,
+        event_type=f"TASK_NODE_{status}",
+        payload_ref=build_outbox_payload_ref(
+            aggregate_type="TASK_NODE",
+            aggregate_id=aggregate_id,
+            aggregate_version=version,
+        ),
+        idempotency_key=f"gr04-replan-node:{aggregate_id}:{version}:{status}",
+        outbox_id=f"outbox::gr04-replan-node::{aggregate_id}::{version}::{status}",
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "terminal_status",
-    [TaskGraphStatus.FAILED, TaskGraphStatus.BLOCKED],
+    ("terminal_status", "should_replan"),
+    [
+        (TaskGraphStatus.FAILED, True),
+        (TaskGraphStatus.BLOCKED, False),
+    ],
 )
-async def test_real_sqlite_failure_replan_admits_exact_revision_plus_one(
+async def test_real_sqlite_only_failed_revision_admits_exact_revision_plus_one(
     tmp_path,
     terminal_status: TaskGraphStatus,
+    should_replan: bool,
 ) -> None:
     db_path = tmp_path / "planning-replan.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -233,12 +278,31 @@ async def test_real_sqlite_failure_replan_admits_exact_revision_plus_one(
         aggregate_type="TASK_GRAPH",
         aggregate_id=graph_id,
         aggregate_version=2,
+        graph_revision=1,
     )
 
     recovery = GovernedPlanningRecoveryService(
         execution_service=service,
         task_store=store,
     )
+    if not should_replan:
+        with pytest.raises(PlanningRecoveryError) as raised:
+            await recovery.prepare_failure_replan(
+                adapter.request,
+                authority=authority,
+                graph_id=graph_id,
+                previous_revision=1,
+                created_at=200,
+            )
+        assert raised.value.reason_code == PLANNING_RECOVERY_NOT_REPLANNABLE
+        with sqlite3.connect(db_path) as conn:
+            revision_count = conn.execute(
+                "SELECT COUNT(*) FROM host_command_journal"
+            ).fetchone()[0]
+        assert revision_count == 1
+        assert command_application.calls == 0
+        return
+
     replanned = await recovery.prepare_failure_replan(
         adapter.request,
         authority=authority,
@@ -261,11 +325,58 @@ async def test_real_sqlite_failure_replan_admits_exact_revision_plus_one(
             ORDER BY graph_revision
             """
         ).fetchall()
+        supersession = conn.execute(
+            """
+            SELECT schema_version, graph_id, previous_revision,
+                   replacement_revision, previous_command_id,
+                   replacement_command_id, previous_graph_status_version,
+                   failure_evidence_json, failure_evidence_sha256
+            FROM task_runtime_graph_revision_supersession
+            """
+        ).fetchone()
     assert len(rows) == 2
     assert rows[0][0] == rows[1][0] == previous_graph.root_work_order_id
     assert rows[0][1] == rows[1][1] == graph_id
     assert [row[2] for row in rows] == [1, 2]
     assert rows[0][3] == rows[1][3]
+    assert supersession is not None
+    assert supersession[0] == "Natsume.task_runtime.graph_revision_supersession.v1"
+    assert supersession[1:4] == (graph_id, 1, 2)
+    assert supersession[4] != supersession[5]
+    assert supersession[6] == 2
+    assert failure_ref in supersession[7]
+    assert supersession[8].startswith("sha256:")
+
+    with sqlite3.connect(db_path) as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute(
+                """
+                UPDATE task_runtime_graph_revision_supersession
+                SET created_ts_ms = created_ts_ms + 1
+                """
+            )
+        conn.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute("DELETE FROM task_runtime_graph_revision_supersession")
+        conn.rollback()
+
+    old_node = store.get_node(graph_id, 1, previous_graph.nodes[0].node_id)
+    with pytest.raises(TaskStoreError) as fenced:
+        store.transition_node(
+            graph_id,
+            1,
+            previous_graph.nodes[0].node_id,
+            expected_version=old_node["status_version"],
+            target_status=TaskNodeStatus.WAITING_APPROVAL,
+            outbox=_node_outbox(
+                graph_id,
+                previous_graph.nodes[0].node_id,
+                version=old_node["status_version"] + 1,
+                status="WAITING_APPROVAL",
+            ),
+        )
+    assert fenced.value.reason_code == TASK_STORE_CAS_CONFLICT
+    assert "superseded Graph revision" in fenced.value.detail
 
     restarted = GovernedPlanningExecutionService(
         search=adapter,  # type: ignore[arg-type]
@@ -289,6 +400,105 @@ async def test_real_sqlite_failure_replan_admits_exact_revision_plus_one(
     )
     assert replay.admission.replayed is True
     assert replay.admission.graph.to_dict() == replanned.admission.graph.to_dict()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_graph_revision_supersession"
+        ).fetchone() == (1,)
+
+
+@pytest.mark.asyncio
+async def test_replan_supersession_fault_rolls_back_replacement_and_authority(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "planning-replan-atomic.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="gr04-replan-atomic-migrate",
+    )
+    assert migrated.success is True, migrated.as_dict()
+
+    intent, governor = _approved_intent()
+    adapter = build_plan_intent_search(intent, governor_result=governor)
+    store = DurableTaskStore(db_path)
+    authority = PlanningExecutionAuthority(
+        surface=HostCommandSurface.CHAT,
+        base_command_request_id=intent["request_id"],
+        session_id=intent["session_id"],
+        principal_id=intent["principal_id"],
+        input_ref="input://sha256/" + "d" * 64,
+        input_sha256="sha256:" + "d" * 64,
+        governor_grant_ref=governor_grant_ref(intent["request_id"], governor),
+        target_id="planning_search",
+    )
+
+    initial_service = GovernedPlanningExecutionService(
+        search=adapter,  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=GovernedPlanningAdmissionService(
+            command_repository=HostCommandRepository(db_path),
+            runtime_router=CanonicalRuntimeRouter(),
+        ),
+        command_application=_UnusedCommandApplication(),
+    )
+    initial = await initial_service.prepare_initial(
+        adapter.request,
+        authority=authority,
+        created_at=100,
+    )
+    graph_id = initial.admission.graph.graph_id
+    store.transition_graph(
+        graph_id,
+        1,
+        expected_version=0,
+        target_status=TaskGraphStatus.ACTIVE,
+        outbox=_graph_outbox(graph_id, version=1, status="ACTIVE"),
+    )
+    store.transition_graph(
+        graph_id,
+        1,
+        expected_version=1,
+        target_status=TaskGraphStatus.FAILED,
+        outbox=_graph_outbox(graph_id, version=2, status="FAILED"),
+    )
+
+    def fault(stage: str) -> None:
+        if stage == "after_supersession":
+            raise RuntimeError("lost response after supersession insert")
+
+    fault_service = GovernedPlanningExecutionService(
+        search=adapter,  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=GovernedPlanningAdmissionService(
+            command_repository=HostCommandRepository(
+                db_path,
+                fault_injector=fault,
+            ),
+            runtime_router=CanonicalRuntimeRouter(),
+        ),
+        command_application=_UnusedCommandApplication(),
+    )
+    recovery = GovernedPlanningRecoveryService(
+        execution_service=fault_service,
+        task_store=store,
+    )
+    with pytest.raises(RuntimeError, match="lost response"):
+        await recovery.prepare_failure_replan(
+            adapter.request,
+            authority=authority,
+            graph_id=graph_id,
+            previous_revision=1,
+            created_at=200,
+        )
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM host_command_journal"
+        ).fetchone() == (1,)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_graph"
+        ).fetchone() == (1,)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_graph_revision_supersession"
+        ).fetchone() == (0,)
 
 
 @pytest.mark.asyncio

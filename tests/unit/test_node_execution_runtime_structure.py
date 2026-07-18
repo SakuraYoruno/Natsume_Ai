@@ -10,8 +10,13 @@ from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import node_execution_projection
 from host_brain.task_runtime import node_execution_records
 from host_brain.task_runtime import node_execution_runtime
+from host_brain.task_runtime import operation_checkpoint_continuation
+from host_brain.task_runtime import operation_recovery_runtime
 from host_brain.task_runtime.node_execution_projection import NodeExecutionProjection
 from host_brain.task_runtime.node_execution_runtime import DurableNodeExecutionRuntime
+from host_brain.task_runtime.operation_recovery_runtime import (
+    DurableOperationRecoveryRuntime,
+)
 
 
 _PROJECTION_METHODS = {
@@ -41,12 +46,12 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "a67e24f4a8d60d5e824e3fe1b798428e61d74740c8cd1ddbc4b95f42bc46eca2"
+    "1fc33b2e4811fa03b6aa1a460f055245f0349c95856a02c96828c28a74fdd977"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "57abfa566ae8b8546838b9fc0001beecd8cd59da10f526bed5c9ef245a5cfa94",
     "selected_parallel_decision_outcome": "f601f3cc6506170720737b6e739492328d6707d8b53890500762da1ce038b453",
-    "terminal_replay": "d0814ded6d01d4004a52d5c40d70e3343459ec092f42fe75bef394f737cca34a",
+    "terminal_replay": "cb8f08e075f09a0293e2448e331262cd07298abe91abb7c8e8059bddc6d30c4b",
     "attempts_for_node": "003bb661287f2e0b56314f00adffcb4af68cd79a8e85329cbc443ee8ac3fab00",
     "try_operation": "6896d47dd8bef7b3ac99547aabe3be258af6f74ab434b3dfd68f250f368714e6",
 }
@@ -203,7 +208,8 @@ def test_projection_and_record_helpers_are_narrow_boundaries() -> None:
         {
             "get_latest_parallel_settlement_decision": 1,
             "read_scheduler_snapshot": 1,
-            "get_operation_reservation": 1,
+                "get_operation_reservation": 1,
+                "get_node_artifact": 1,
         }
     )
     assert Counter(
@@ -312,7 +318,7 @@ def test_coordinator_wires_shared_instances_without_wrappers() -> None:
         "owner_id": "_owner_id",
         "lease_ttl_ms": "_lease_ttl_ms",
         "operation_ttl_ms": "_operation_ttl_ms",
-        "acceptance_effects_enabled": "_acceptance_effects_enabled",
+        "graph_finalizer": "_accepted_graph_finalization",
     }
     for keyword, field in expected_fields.items():
         value = keywords[keyword]
@@ -320,9 +326,20 @@ def test_coordinator_wires_shared_instances_without_wrappers() -> None:
         assert isinstance(value.value, ast.Name)
         assert value.value.id == "self"
         assert value.attr == field
+    for keyword in ("node_grant_verifier", "projection_reader"):
+        value = keywords[keyword]
+        assert isinstance(value, ast.Name)
+        assert value.id == keyword
 
     delegates = _self_dependency_calls(owner, "_node_execution")
-    assert Counter(call.func.attr for call in delegates) == Counter({"execute_stream": 6})
+    assert not delegates
+    dag_call = _constructor(owner, "_dag_scheduling")
+    dag_keywords = {item.arg: item.value for item in dag_call.keywords}
+    node_runtime = dag_keywords["node_execution"]
+    assert isinstance(node_runtime, ast.Attribute)
+    assert isinstance(node_runtime.value, ast.Name)
+    assert node_runtime.value.id == "self"
+    assert node_runtime.attr == "_node_execution"
 
 
 def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> None:
@@ -335,22 +352,28 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         "runtime_outbox",
         "budget_runtime",
         "node_lifecycle",
+        "node_grant_verifier",
         "worker_resolver",
         "verifier",
         "acceptance",
         "review_runtime",
         "projection",
+        "projection_reader",
+        "graph_finalizer",
         "owner_id",
         "lease_ttl_ms",
         "operation_ttl_ms",
-        "acceptance_effects_enabled",
     )
     assert tuple(inspect.signature(DurableNodeExecutionRuntime).parameters) == expected_parameters
     assert set(DurableNodeExecutionRuntime.__slots__) == {
         "_store",
         "_runtime_outbox",
         "_budgets",
+        "_checkpoint_continuation",
+        "_graph_finalizer",
         "_node_lifecycle",
+        "_node_grant_verifier",
+        "_operation_recovery",
         "_workers",
         "_verifier",
         "_acceptance",
@@ -359,7 +382,6 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         "_owner_id",
         "_lease_ttl_ms",
         "_operation_ttl_ms",
-        "_acceptance_effects_enabled",
     }
     owner = classes[0]
     expected_matrices = {
@@ -369,7 +391,9 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "claim_ready_node": 1,
             "get_attempt": 1,
             "reserve_operation": 1,
-            "commit_operation": 1,
+            "get_active_lease": 1,
+                "commit_operation": 1,
+                "resolve_node_input_artifacts": 1,
         },
         "_runtime_outbox": {"build": 6, "publish_pending": 14},
         "_budgets": {
@@ -380,9 +404,9 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "refresh": 1,
         },
         "_node_lifecycle": {
-            "transition_graph": 5,
-            "transition_node": 7,
-            "transition_graph_with_acceptance_effects": 1,
+            "transition_graph": 4,
+                "transition_node": 6,
+                "accept_node_output": 1,
             "transition_attempt": 2,
             "finalize_node_budget": 8,
             "reject_budget_charge": 3,
@@ -398,6 +422,15 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "attempts_for_node": 1,
             "try_operation": 1,
         },
+        "_operation_recovery": {
+            "assert_existing_lineage": 1,
+            "reconcile_reservation_state": 1,
+            "takeover_committed": 1,
+            "commit_or_reconcile": 1,
+            "unresolved_projection": 1,
+        },
+        "_checkpoint_continuation": {"resume": 1},
+        "_graph_finalizer": {"complete": 1},
     }
     for dependency, expected in expected_matrices.items():
         assert Counter(
@@ -416,6 +449,44 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in {"Lock", "RLock", "Semaphore", "create_task"}
         for node in ast.walk(tree)
+    )
+
+
+def test_online_recovery_is_split_into_focused_non_worker_boundaries() -> None:
+    recovery_tree = _tree(operation_recovery_runtime)
+    recovery_classes = [
+        node for node in recovery_tree.body if isinstance(node, ast.ClassDef)
+    ]
+    assert [node.name for node in recovery_classes] == [
+        "CommittedOperationCheckpoint",
+        "DurableOperationRecoveryRuntime",
+    ]
+    assert len(inspect.getsource(operation_recovery_runtime).splitlines()) < 400
+    assert tuple(inspect.signature(DurableOperationRecoveryRuntime).parameters) == (
+        "task_store",
+        "projection_reader",
+        "runtime_outbox",
+        "owner_id",
+        "lease_ttl_ms",
+    )
+    assert not hasattr(DurableOperationRecoveryRuntime, "execute_stream")
+
+    continuation_tree = _tree(operation_checkpoint_continuation)
+    continuation_classes = [
+        node for node in continuation_tree.body if isinstance(node, ast.ClassDef)
+    ]
+    assert [node.name for node in continuation_classes] == [
+        "CommittedCheckpointContinuation"
+    ]
+    assert len(inspect.getsource(operation_checkpoint_continuation).splitlines()) < 550
+    continuation_owner = continuation_classes[0]
+    assert not any(
+        isinstance(node, ast.Attribute) and node.attr == "_workers"
+        for node in ast.walk(continuation_owner)
+    )
+    assert not any(
+        isinstance(node, ast.Attribute) and node.attr in {"resolve", "execute_stream"}
+        for node in ast.walk(continuation_owner)
     )
 
 

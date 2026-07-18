@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from typing import Any
 
-from .projection_daemon import register_projection_job
 from .projection_runtime import projection_meta
-from host_brain.observability.projection_store import digest_json
 
 
 CAPABILITY_FORGE_OPERATOR_KIND = "capability_forge_operator"
@@ -16,25 +13,12 @@ CAPABILITY_FORGE_OPERATOR_KEY = "current"
 CAPABILITY_FORGE_OPERATOR_MAX_AGE_MS = 15_000
 
 
-def _store(*, owning: bool) -> Any:
-    from host_brain.composition import process_services as dependencies
+def read_capability_forge_projection_from_store(
+    store: Any,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read Capability Forge state through an explicitly composed store."""
 
-    return (
-        dependencies.get_query_projection_store()
-        if owning
-        else dependencies.peek_query_projection_store()
-    )
-
-
-def read_capability_forge_projection() -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """Read the materialized document without initializing any source service."""
-
-    store = _store(owning=False)
-    document = (
-        store.get(CAPABILITY_FORGE_OPERATOR_KIND, CAPABILITY_FORGE_OPERATOR_KEY)
-        if store is not None
-        else None
-    )
+    document = store.get(CAPABILITY_FORGE_OPERATOR_KIND, CAPABILITY_FORGE_OPERATOR_KEY)
     meta = projection_meta(
         CAPABILITY_FORGE_OPERATOR_KIND,
         CAPABILITY_FORGE_OPERATOR_KEY,
@@ -90,57 +74,9 @@ def filter_forge_candidates(
     return selected[: max(1, int(limit))], thresholds
 
 
-def refresh_capability_forge_projection() -> dict[str, int]:
-    """The only place where operator queries touch live capability services."""
-
-    from host_brain.composition.process_services import (
-        get_capability_forge_service,
-        get_capability_gap_telemetry,
-    )
-
-    telemetry = get_capability_gap_telemetry()
-    forge = get_capability_forge_service()
-    gap = telemetry.snapshot(
-        limit_recent=200,
-        limit_hotspots=50,
-        limit_candidates=200,
-        min_candidate_detected=1,
-        min_candidate_sessions=1,
-        min_candidate_failure_rate=0.0,
-        min_candidate_failed=0,
-    )
-    payload = {
-        "timestamp": int(gap.get("timestamp") or int(time.time() * 1000)),
-        "gap": dict(gap),
-        "proposals": list(forge.list_proposals(limit=200)),
-        "runtime_stats": dict(forge.runtime_match_stats()),
-        "runtime_tuning": dict(forge.runtime_tuning_stats(limit=200)),
-        "runtime_quality": dict(forge.runtime_quality_stats(limit=200)),
-    }
-    store = _store(owning=True)
-    current = store.get(CAPABILITY_FORGE_OPERATOR_KIND, CAPABILITY_FORGE_OPERATOR_KEY)
-    cursor = max(
-        int(payload["timestamp"]),
-        int(current.source_cursor) + 1 if current is not None else 0,
-    )
-    store.upsert(
-        CAPABILITY_FORGE_OPERATOR_KIND,
-        CAPABILITY_FORGE_OPERATOR_KEY,
-        payload,
-        source_cursor=cursor,
-        source_digest=digest_json(payload),
-        source_ref="capability-forge-background-worker",
-    )
-    return {"document_count": 1}
-
-
-register_projection_job("capability-forge-operator", refresh_capability_forge_projection)
-
-
 __all__ = [
     "CAPABILITY_FORGE_OPERATOR_KEY",
     "CAPABILITY_FORGE_OPERATOR_KIND",
     "filter_forge_candidates",
-    "read_capability_forge_projection",
-    "refresh_capability_forge_projection",
+    "read_capability_forge_projection_from_store",
 ]

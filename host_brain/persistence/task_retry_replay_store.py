@@ -250,12 +250,14 @@ class TaskRetryReplayStoreMixin:
             graph_outbox = OutboxMessage.create(
                 aggregate_type="TASK_GRAPH",
                 aggregate_id=graph_id,
+                graph_revision=graph_revision,
                 aggregate_version=graph_version,
                 event_type="TASK_GRAPH_BLOCKED",
                 payload_ref=build_outbox_payload_ref(
                     aggregate_type="TASK_GRAPH",
                     aggregate_id=graph_id,
                     aggregate_version=graph_version,
+                    graph_revision=graph_revision,
                 ),
                 idempotency_key=(
                     f"task-retry-budget-blocked:{graph_id}:"
@@ -274,16 +276,23 @@ class TaskRetryReplayStoreMixin:
                 expected_aggregate=("TASK_GRAPH", graph_id, graph_version),
                 expected_event_type="TASK_GRAPH_BLOCKED",
                 expected_attempt_id=attempt_id,
+                expected_graph_revision=graph_revision,
             )
         elif not retry_accepted:
             unexpected_graph_outbox = conn.execute(
                 """
                 SELECT outbox_id FROM task_runtime_outbox
                 WHERE aggregate_type = 'TASK_GRAPH' AND aggregate_id = ?
+                  AND graph_revision = ?
                   AND attempt_id = ? AND aggregate_version > ?
                 LIMIT 1
                 """,
-                (graph_id, attempt_id, int(expected_graph_version or 0)),
+                (
+                    graph_id,
+                    graph_revision,
+                    attempt_id,
+                    int(expected_graph_version or 0),
+                ),
             ).fetchone()
             if unexpected_graph_outbox is not None:
                 reject("node-only retry unexpectedly emitted a TaskGraph outbox")

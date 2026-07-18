@@ -1,7 +1,6 @@
 """Observability REST API — M18 监控面板后端数据接口。
 
 提供 M17 React 前端所需的全套监控数据端点：
-  GET /obs/services/health     — 全服务健康聚合（边缘服务 + 9 个 LLM 云节点）
   GET /obs/sessions            — 会话列表（分页 + 过滤）
   GET /obs/trace/{request_id}  — 单次会话完整链路节点详情
   GET /obs/metrics/timeseries  — 多维度时序数据（请求量/拒绝/延迟）
@@ -20,9 +19,17 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from host_brain.app.obs_route_ports import (
+    require_obs_projection_ledger_view,
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -35,8 +42,6 @@ from host_brain.observability.api_models import (
     LlmNodeItem,
     LlmNodesResponse,
     MetricsTimeseriesResponse,
-    ServiceHealthItem,
-    ServicesHealthResponse,
     SessionItem,
     SessionsResponse,
     StreamEventItem,
@@ -52,7 +57,6 @@ from host_brain.observability.api_models import (
     TribeEventItem,
     TribeEventsResponse,
 )
-from host_brain.observability.service_health_aggregator import ServiceHealthAggregator
 from host_brain.app.observability_runtime.session_query import SessionQueryService
 from host_brain.observability.metrics_timeseries import MetricsTimeseriesService
 from host_brain.app.observability_runtime.process_state_projection import (
@@ -61,10 +65,13 @@ from host_brain.app.observability_runtime.process_state_projection import (
     RESOURCE_MANAGER_MAX_AGE_MS,
     read_process_projection,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 from host_brain.observability.service_registry import (
     LLM_NODE_REGISTRY as _LLM_NODE_REGISTRY,
     EDGE_SERVICE_EVENT_PREFIXES as _EDGE_SERVICE_EVENT_PREFIXES,
+)
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+    model_attempt_node_id,
 )
 
 logger = logging.getLogger("Natsume.obs")
@@ -113,29 +120,12 @@ _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0,
 _OBS_CACHE_WAIT_TIMEOUT_SEC = _env_float("OBS_CACHE_WAIT_TIMEOUT_SEC", 10.0, minimum=1.0)
 _OBS_SESSIONS_CACHE_TTL_MS = _env_int("OBS_SESSIONS_CACHE_TTL_MS", 3000, minimum=0)
 
-# ---------------------------------------------------------------------------
-# 依赖注入
-# ---------------------------------------------------------------------------
-_ledger_provider = None
-
-def set_ledger_provider(provider) -> None:
-    global _ledger_provider
-    _ledger_provider = provider
-
-def _get_ledger() -> SQLiteLedger:
-    if _ledger_provider is not None:
-        return _ledger_provider()
-    # Fallback to shared dependency factory to avoid import-order/cycle issues.
-    from host_brain.composition.process_services import get_ledger as _deps_get_ledger
-    return _deps_get_ledger()
-
-
-def _get_graph_evidence_repository():
+def _get_graph_evidence_repository(ledger: SQLiteLedger):
     from host_brain.persistence.graph_evidence_repository import (  # noqa: PLC0415
         GraphEvidenceRepository,
     )
 
-    return GraphEvidenceRepository.from_ledger(_get_ledger())
+    return GraphEvidenceRepository.from_ledger(ledger)
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -418,9 +408,12 @@ def _infer_subgraph_owner_node_id(subgraph_id: str) -> Optional[str]:
     return None
 
 
-def _build_trace_subgraphs(request_id: str) -> List[Dict[str, Any]]:
+def _build_trace_subgraphs(
+    ledger: SQLiteLedger,
+    request_id: str,
+) -> List[Dict[str, Any]]:
     try:
-        rows = _get_graph_evidence_repository().list_subgraph_summaries(
+        rows = _get_graph_evidence_repository(ledger).list_subgraph_summaries(
             request_id=request_id
         )
     except Exception as exc:
@@ -661,9 +654,12 @@ def _merge_trace_subgraphs(
     return merged
 
 
-def _build_trace_stream_events(request_id: str) -> List[Dict[str, Any]]:
+def _build_trace_stream_events(
+    ledger: SQLiteLedger,
+    request_id: str,
+) -> List[Dict[str, Any]]:
     try:
-        rows = _get_graph_evidence_repository().list_stream_events(
+        rows = _get_graph_evidence_repository(ledger).list_stream_events(
             request_id=request_id
         )
     except Exception as exc:
@@ -884,10 +880,13 @@ def _normalize_trace_status(raw_status: Any, *, default: str = "UNKNOWN") -> str
         return default
     return {
         "SUCCESS": "OK",
+        "SUCCEEDED": "OK",
         "HEALTHY": "OK",
         "ERROR": "FAIL",
         "FAILED": "FAIL",
         "REJECTED": "FAIL",
+        "TIMED_OUT": "FAIL",
+        "CANCELLED": "FAIL",
     }.get(normalized, normalized)
 
 
@@ -1141,6 +1140,19 @@ def _build_trace_summary(
         except Exception:
             total_latency_ms = None
 
+    # model_attempt_log records STARTED and terminal lifecycle rows.  Count
+    # logical invocations, not journal transitions; legacy rows without an
+    # attempt id remain individually countable for retired trace-only callers.
+    model_attempt_ids = {
+        str(row.get("attempt_id") or "").strip()
+        for row in llm_rows
+        if str(row.get("attempt_id") or "").strip()
+    }
+    unkeyed_llm_calls = sum(
+        1 for row in llm_rows if not str(row.get("attempt_id") or "").strip()
+    )
+    llm_call_count = len(model_attempt_ids) + unkeyed_llm_calls
+
     return {
         "request_id": request_id,
         "session_id": _first_present(
@@ -1166,7 +1178,7 @@ def _build_trace_summary(
         "governor_passed": audit_snapshot.get("governor_passed"),
         "final_response_chars": audit_snapshot.get("final_response_chars"),
         "airlock_blocked": any(bool(row.get("blocked")) for row in airlock_rows),
-        "llm_calls": len(llm_rows),
+        "llm_calls": llm_call_count,
         "total_latency_ms": total_latency_ms,
         "audit_snapshot": audit_snapshot or None,
     }
@@ -1522,6 +1534,64 @@ def _append_missing_trace_nodes(
     return appended
 
 
+def _canonical_llm_trace_rows(
+    model_attempt_rows: List[Dict[str, Any]],
+    pool_rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for row in latest_terminal_model_attempts(model_attempt_rows):
+        attempt_id = str(row.get("attempt_id") or "").strip()
+        node_id = (
+            model_attempt_node_id(row)
+            or f"model_attempt:{attempt_id[:16]}"
+        )
+        rows.append(
+            {
+                **row,
+                "node_id": node_id,
+                "display_name": (_LLM_NODE_REGISTRY.get(node_id) or {}).get("role")
+                or "Model Attempt",
+                "reason_code": row.get("error_code"),
+                "input_data": {
+                    "prompt_id": row.get("prompt_id"),
+                    "prompt_version": row.get("prompt_version"),
+                    "attempt_index": row.get("attempt_index"),
+                    "retry_reason": row.get("retry_reason"),
+                },
+                "output_data": {
+                    "attempt_id": attempt_id,
+                    "output_digest": row.get("output_digest"),
+                },
+                "ts_ms": row.get("ended_at_ms") or row.get("ts_ms"),
+            }
+        )
+    for row in pool_rows:
+        scene = str(row.get("scene_type") or "CHAT").strip().upper() or "CHAT"
+        exhausted = bool(row.get("pool_exhausted"))
+        rows.append(
+            {
+                "node_id": f"llm_pool:{scene.lower()}",
+                "display_name": f"LLM Pool ({scene})",
+                "provider": row.get("final_provider"),
+                "model_id": row.get("final_model"),
+                "status": "failed" if exhausted else "succeeded",
+                "reason_code": "LLM_POOL_EXHAUSTED" if exhausted else None,
+                "latency_ms": row.get("total_latency_ms"),
+                "input_data": {
+                    "scene_type": scene,
+                    "cognitive_tier": row.get("cognitive_tier"),
+                },
+                "output_data": {
+                    "attempt_count": row.get("attempt_count"),
+                    "cached": bool(row.get("cached")),
+                    "pool_exhausted": exhausted,
+                },
+                "ts_ms": row.get("ts_ms"),
+            }
+        )
+    return rows
+
+
 def _build_llm_trace_nodes(
     llm_rows: List[Dict[str, Any]],
     summary: Dict[str, Any],
@@ -1533,15 +1603,17 @@ def _build_llm_trace_nodes(
             TraceNode(
                 node_id=str(row.get("node_id") or "llm_node"),
                 node_type="llm",
-                display_name=(registry_meta or {}).get("role") or str(row.get("node_id") or "LLM"),
+                display_name=row.get("display_name")
+                or (registry_meta or {}).get("role")
+                or str(row.get("node_id") or "LLM"),
                 side="host",
                 provider=row.get("provider"),
                 model_id=row.get("model_id"),
                 status=_normalize_trace_status(row.get("status"), default="OK"),
                 reason_code=row.get("reason_code"),
                 latency_ms=row.get("latency_ms"),
-                input_data={"input_digest": row.get("input_digest")},
-                output_data={"output_digest": row.get("output_digest")},
+                input_data=row.get("input_data"),
+                output_data=row.get("output_data"),
                 ts_ms=row.get("ts_ms"),
                 error=row.get("reason_code"),
             )
@@ -1786,7 +1858,19 @@ def _compute_node_health(rows: List[Dict], window: int = 20) -> Dict[str, Any]:
         return {"status": "UNKNOWN", "success_rate": None, "p95_ms": None, "last_call_ts": None}
     recent = rows[-window:]
     total = len(recent)
-    ok_count = sum(1 for r in recent if str(r.get("status", "")).upper() == "OK")
+    success_statuses = {
+        "OK",
+        "UP",
+        "SUCCESS",
+        "SUCCEEDED",
+        "COMPLETED",
+        "ACCEPTED",
+    }
+    ok_count = sum(
+        1
+        for row in recent
+        if str(row.get("status") or "").strip().upper() in success_statuses
+    )
     success_rate = round(ok_count / total * 100, 1) if total > 0 else 0.0
     latencies = [r["latency_ms"] for r in recent if r.get("latency_ms") is not None]
     p95_ms = None
@@ -1880,6 +1964,7 @@ def _format_sse_event(event: str, payload: Dict[str, Any], *, retry_ms: Optional
 def _build_sessions_response(
     ledger: SQLiteLedger | None,
     *,
+    projection_store: Any | None = None,
     page: int,
     page_size: int,
     status: Optional[str],
@@ -1887,11 +1972,14 @@ def _build_sessions_response(
     keyword: Optional[str],
 ) -> SessionsResponse:
     if ledger is None:
-        from host_brain.composition.process_services import get_query_projection_store
-
-        svc = SessionQueryService(None, projection_store=get_query_projection_store())
+        if projection_store is None:
+            raise RuntimeError("explicit query projection store is required")
+        svc = SessionQueryService(None, projection_store=projection_store)
     else:
-        svc = SessionQueryService(ledger)
+        # A caller that already supplied a ledger is an explicit background
+        # source adapter.  It must not re-enter the process locator merely
+        # because the ledger exposes a canonical path.
+        svc = SessionQueryService(ledger, source_only=True)
     since_ms = _now_ms() - window_minutes * 60 * 1000
     result = svc.query(
         page=page,
@@ -2142,7 +2230,10 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
     governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
     retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
-    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
+    llm_rows = _canonical_llm_trace_rows(
+        _fetch_request_rows(ledger, "model_attempt_log", request_id),
+        _fetch_request_rows(ledger, "llm_pool_call_log", request_id),
+    )
     airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
     bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
     memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
@@ -2173,13 +2264,19 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     subgraphs = _load_optional_trace_payload(
         request_id,
         "subgraphs",
-        _build_trace_subgraphs,
+        lambda current_request_id: _build_trace_subgraphs(
+            ledger,
+            current_request_id,
+        ),
         default_value=[],
     )
     stream_events = _load_optional_trace_payload(
         request_id,
         "stream-events",
-        _build_trace_stream_events,
+        lambda current_request_id: _build_trace_stream_events(
+            ledger,
+            current_request_id,
+        ),
         default_value=[],
     )
     optional_ms = int((time.perf_counter() - optional_started) * 1000)
@@ -2642,59 +2739,6 @@ def _build_trace_live_feed_delta(
         timestamp=_now_ms(),
     )
 
-# ---------------------------------------------------------------------------
-# GET /obs/services/health
-# ---------------------------------------------------------------------------
-async def get_services_health(
-    window_minutes: int = Query(60, ge=1, le=1440, description="统计窗口（分钟）"),
-    side: Optional[str] = Query(None, description="过滤端：host|edge"),
-):
-    """WARN-BE-001: 调用 ServiceHealthAggregator.aggregate() 而非内联聚合逻辑。"""
-    ledger = _get_ledger()
-    since_ms = _now_ms() - window_minutes * 60 * 1000
-    try:
-        from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
-
-        if not heartbeat.has_fresh_core_service_cache():
-            await heartbeat.prime_core_service_cache_once()
-    except Exception:
-        pass
-
-    # 使用 ledger 数据构建探测函数注册表（被动监控）
-    probe_registry, extra_data = await asyncio.to_thread(_build_probe_registry, ledger, since_ms)
-    aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
-    result = await aggregator.aggregate(side_filter=side)
-
-    # 将 ServiceHealthAggregator 返回的通用结构映射到 ServicesHealthResponse
-    services = []
-    for svc in result.get("services", []):
-        sid = svc["service_id"]
-        extra = extra_data.get(sid, {})
-        services.append(ServiceHealthItem(
-            service_id=sid,
-            service_type=svc.get("side", "edge"),
-            display_name=svc.get("name", sid),
-            role=extra.get("role"),
-            provider=extra.get("provider"),
-            model_id=extra.get("model_id"),
-            status=svc["status"],
-            success_rate=extra.get("success_rate"),
-            p95_ms=svc.get("latency_ms"),
-            last_call_ts=svc.get("last_check_ts"),
-            call_count=extra.get("call_count"),
-        ))
-
-    return ServicesHealthResponse(
-        total=result["total"],
-        up=result["up"],
-        degraded=result["degraded"],
-        down=result["down"],
-        unknown=result["unknown"],
-        services=services,
-        timestamp=_now_ms(),
-    )
-
-
 def _build_probe_registry(ledger, since_ms: int):
     """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。
     若当前窗口内无数据，则用 7 日窗口回退，避免所有服务显示 UNKNOWN（探测不到服务码）。
@@ -2711,7 +2755,13 @@ def _build_probe_registry(ledger, since_ms: int):
     except Exception:
         voice_rows = []
     try:
-        llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now_ms)
+        llm_rows = latest_terminal_model_attempts(
+            ledger.fetch_by_time_range(
+                "model_attempt_log",
+                start_ms=since_ms,
+                end_ms=now_ms,
+            )
+        )
     except Exception:
         llm_rows = []
 
@@ -2725,8 +2775,13 @@ def _build_probe_registry(ledger, since_ms: int):
         except Exception:
             pass
         try:
-            llm_rows = ledger.fetch_by_time_range(
-                "llm_node_call_log", start_ms=fallback_since_ms, end_ms=now_ms, limit=5000
+            llm_rows = latest_terminal_model_attempts(
+                ledger.fetch_by_time_range(
+                    "model_attempt_log",
+                    start_ms=fallback_since_ms,
+                    end_ms=now_ms,
+                    limit=5000,
+                )
             )
         except Exception:
             pass
@@ -2843,7 +2898,7 @@ def _build_probe_registry(ledger, since_ms: int):
                 "call_count": 0,
             }
             continue
-        node_rows = [r for r in llm_rows if r.get("node_id") == node_id]
+        node_rows = [r for r in llm_rows if model_attempt_node_id(r) == node_id]
         health = _compute_node_health(node_rows)
         _status = health["status"]
         _p95 = health["p95_ms"]
@@ -2868,6 +2923,7 @@ def _build_probe_registry(ledger, since_ms: int):
 # ---------------------------------------------------------------------------
 @router.get("/sessions", response_model=SessionsResponse)
 def get_sessions(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
@@ -2875,7 +2931,8 @@ def get_sessions(
     keyword: Optional[str] = Query(None),
 ):
     """WARN-BE-002: 调用 SessionQueryService.query() 而非内联查询逻辑。"""
-    return _get_obs_route_cached_response(
+    route_ports = require_obs_route_ports(request)
+    return route_ports.response_cache.get_or_build(
         cache_name="obs_sessions",
         cache_key={
             "page": int(page),
@@ -2885,8 +2942,10 @@ def get_sessions(
             "keyword": keyword or "",
         },
         ttl_ms=_OBS_SESSIONS_CACHE_TTL_MS,
+        wait_timeout_s=_OBS_CACHE_WAIT_TIMEOUT_SEC,
         builder=lambda: _build_sessions_response(
             None,
+            projection_store=route_ports.require_query_projection_store(),
             page=page,
             page_size=page_size,
             status=status,
@@ -2938,6 +2997,7 @@ def get_tribe_events(
 # ---------------------------------------------------------------------------
 @router.get("/sessions/export")
 def export_sessions_csv(
+    request: Request,
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
     window_minutes: int = Query(1440, ge=1, le=10080, description="导出时间窗口（分钟），默认 24h"),
     keyword: Optional[str] = Query(None),
@@ -2953,6 +3013,7 @@ def export_sessions_csv(
 
     sessions_response = _build_sessions_response(
         None,
+        projection_store=require_obs_query_projection_store(request),
         page=1,
         page_size=max_rows,
         status=status,
@@ -2995,129 +3056,6 @@ def export_sessions_csv(
         iter([output.getvalue()]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-# ---------------------------------------------------------------------------
-# GET /obs/trace/{request_id}
-# ---------------------------------------------------------------------------
-async def get_trace(request_id: str):
-    """Compatibility route delegated to the durable projection-only reader."""
-
-    from host_brain.app.obs_routes_trace import get_trace as get_projected_trace
-
-    return await get_projected_trace(request_id)
-
-
-# ---------------------------------------------------------------------------
-# GET /obs/trace/{request_id}/stream_events — Chat Stream SSE 链路详情
-# ---------------------------------------------------------------------------
-async def stream_trace_live_feed(
-    request: Request,
-    limit: int = Query(6, ge=1, le=12),
-    window_minutes: int = Query(1440, ge=1, le=10080),
-    active_within_ms: int = Query(60000, ge=1000, le=3600000),
-    interval_ms: int = Query(1000, ge=250, le=10000),
-    keyword: Optional[str] = Query(None),
-    once: bool = Query(False),
-):
-    """流式推送 Trace 首页活跃链路快照，供 WebUI 实时渲染活跃 feed。"""
-
-    async def _event_stream():
-        last_signature: Optional[str] = None
-        last_snapshot: Optional[TraceLiveFeedSnapshot] = None
-        first_event = True
-        ledger = _get_ledger()
-        while True:
-            if await request.is_disconnected():
-                break
-
-            try:
-                snapshot = await asyncio.to_thread(
-                    _build_trace_live_feed_snapshot,
-                    ledger,
-                    limit=limit,
-                    window_minutes=window_minutes,
-                    keyword=keyword,
-                    active_within_ms=active_within_ms,
-                )
-                signature = _trace_live_feed_signature(snapshot)
-                if signature != last_signature:
-                    delta = _build_trace_live_feed_delta(last_snapshot, snapshot)
-                    yield _format_sse_event(
-                        "snapshot",
-                        _model_dump_compat(snapshot),
-                        retry_ms=interval_ms if first_event else None,
-                    )
-                    if delta is not None:
-                        yield _format_sse_event(
-                            "delta",
-                            _model_dump_compat(delta),
-                        )
-                    last_signature = signature
-                    last_snapshot = snapshot
-                    first_event = False
-                else:
-                    yield _format_sse_event(
-                        "heartbeat",
-                        {
-                            "type": "heartbeat",
-                            "count": snapshot.count,
-                            "timestamp": _now_ms(),
-                        },
-                    )
-            except Exception as exc:
-                logger.warning("trace live feed push error: %s", exc)
-                yield _format_sse_event(
-                    "trace_error",
-                    {
-                        "type": "error",
-                        "detail": str(exc),
-                        "timestamp": _now_ms(),
-                    },
-                )
-
-            if once:
-                break
-            await asyncio.sleep(interval_ms / 1000)
-
-    return StreamingResponse(
-        _event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-def get_trace_stream_events(request_id: str):
-    """获取单次请求的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED/AGENT_HANDOFF 等），供链路详情展示。"""
-    try:
-        rows = _get_graph_evidence_repository().list_stream_events(
-            request_id=request_id
-        )
-    except Exception as exc:
-        logger.debug("get_trace_stream_events: %s", exc)
-        rows = []
-    events = [
-        StreamEventItem(
-            request_id=str(r.get("request_id", "")),
-            graph_id=str(r.get("graph_id", "")),
-            phase=str(r.get("phase", "")),
-            event_type=str(r.get("event_type", "")),
-            node_id=r.get("node_id"),
-            chunk=r.get("chunk"),
-            ts_ms=int(r.get("ts_ms") or 0),
-        )
-        for r in rows
-    ]
-    return TraceStreamEventsResponse(
-        request_id=request_id,
-        events=events,
-        count=len(events),
-        timestamp=_now_ms(),
     )
 
 
@@ -3174,12 +3112,14 @@ def get_graph_schema():
 # GET /obs/metrics/timeseries
 # ---------------------------------------------------------------------------
 @router.get("/metrics/timeseries", response_model=MetricsTimeseriesResponse)
+@fail_closed_projection_route
 def get_metrics_timeseries(
     range_minutes: int = Query(60, ge=5, le=10080, description="时间范围（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """WARN-BE-003: 调用 MetricsTimeseriesService.query() 而非内联聚合逻辑。"""
-    projection_view = get_projection_ledger_view()
     svc = MetricsTimeseriesService(projection_view)
     now = _now_ms()
     start_time = now - range_minutes * 60 * 1000
@@ -3232,19 +3172,27 @@ def get_metrics_timeseries(
 # ---------------------------------------------------------------------------
 def get_llm_nodes(
     window_minutes: int = Query(60, ge=1, le=1440),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """9 个 LLM 云节点独立健康状态（成功率/P95延迟/最后调用时间）。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
     try:
-        rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=_now_ms())
+        rows = latest_terminal_model_attempts(
+            ledger.fetch_by_time_range(
+                "model_attempt_log",
+                start_ms=since_ms,
+                end_ms=_now_ms(),
+            )
+        )
     except Exception:
         rows = []
 
     nodes = []
     for node_id, meta in _LLM_NODE_REGISTRY.items():
-        node_rows = [r for r in rows if r.get("node_id") == node_id]
+        node_rows = [r for r in rows if model_attempt_node_id(r) == node_id]
         health = _compute_node_health(node_rows)
         nodes.append(LlmNodeItem(
             node_id=node_id,
@@ -3303,9 +3251,10 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/resource-manager/status")
-def get_resource_manager_status():
+def get_resource_manager_status(request: Request):
     """Whole-system resource manager status for scheduler explainability."""
     payload, projection = read_process_projection(
+        require_obs_query_projection_store(request),
         RESOURCE_MANAGER_KIND,
         RESOURCE_MANAGER_KEY,
         max_age_ms=RESOURCE_MANAGER_MAX_AGE_MS,

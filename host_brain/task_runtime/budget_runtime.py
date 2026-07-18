@@ -114,6 +114,16 @@ class DurableBudgetRuntime:
                 GOVERNED_BUDGET_STATE_CONFLICT,
                 "scheduler snapshot does not expose durable budgets",
             )
+        graph_record = (
+            snapshot.get("graph_record") if isinstance(snapshot, Mapping) else None
+        )
+        if not isinstance(graph_record, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "scheduler snapshot does not expose the durable TaskGraph",
+            )
+        graph_status = str(graph_record.get("status") or "").strip().upper()
+        graph_accepts_new_budget_authority = graph_status in {"CREATED", "ACTIVE"}
         graph_budgets = [dict(item) for item in budgets if isinstance(item, Mapping)]
         if graph_budgets and any(str(item.get("budget_id")) != budget_id for item in graph_budgets):
             raise GovernedRuntimeError(
@@ -123,6 +133,12 @@ class DurableBudgetRuntime:
 
         record = await self._try_reconcile(budget_id)
         if record is None:
+            if not graph_accepts_new_budget_authority:
+                raise GovernedRuntimeError(
+                    GOVERNED_BUDGET_STATE_CONFLICT,
+                    "new graph-level BudgetReservation is forbidden for "
+                    f"TaskGraph status {graph_status or 'UNKNOWN'}",
+                )
             reservation = BudgetReservation(
                 budget_id=budget_id,
                 scope=policy.scope,
@@ -157,6 +173,12 @@ class DurableBudgetRuntime:
 
         self._assert_binding(admitted, policy, budget_id, record)
         if _status(record) == BudgetReservationStatus.PENDING.value:
+            if not graph_accepts_new_budget_authority:
+                raise GovernedRuntimeError(
+                    GOVERNED_BUDGET_STATE_CONFLICT,
+                    "BudgetReservation activation is forbidden for "
+                    f"TaskGraph status {graph_status or 'UNKNOWN'}",
+                )
             try:
                 record = dict(
                     await _maybe_await(
@@ -244,6 +266,152 @@ class DurableBudgetRuntime:
             delta=delta,
         )
 
+    async def settle_worker_checkpoint(
+        self,
+        context: BudgetRuntimeContext,
+        *,
+        node_id: str,
+        attempt_id: str,
+        worker_commit: Mapping[str, Any],
+        durable_elapsed_ms: int,
+    ) -> BudgetCharge:
+        """Resume one COMMITTED worker checkpoint without duplicating usage.
+
+        A prior owner may already have charged the budget before it crashed.
+        In that case the immutable usage journal is the checkpoint and is
+        returned directly.  Otherwise the trusted durable Attempt-to-COMMIT
+        elapsed time supplies the missing wall-clock charge.
+        """
+
+        if (
+            type(durable_elapsed_ms) is not int
+            or durable_elapsed_ms <= 0
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_USAGE_INVALID,
+                "worker checkpoint durable elapsed time must be a positive integer",
+            )
+
+        payload = worker_commit.get("budget_usage")
+        if payload is None:
+            usage_id = _internal_usage_id(
+                context,
+                node_id,
+                attempt_id,
+                "worker-elapsed",
+            )
+            base_delta = BudgetAmount()
+            charge_kind = "WORKER_ELAPSED"
+        else:
+            usage_id, base_delta, charge_kind = _worker_usage(payload, elapsed_ms=0)
+        existing = await self._try_budget_usage(context.budget_id, usage_id)
+        if existing is not None:
+            _assert_checkpoint_usage(
+                existing,
+                context=context,
+                usage_id=usage_id,
+                charge_kind=charge_kind,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                base_delta=base_delta,
+            )
+            updated = await self._required_reconcile(context.budget_id)
+            return BudgetCharge(
+                context=context.refreshed(updated),
+                accepted=bool(existing.get("accepted")),
+                usage_id=usage_id,
+                replayed=True,
+                exceeded_dimensions=tuple(
+                    str(item) for item in existing.get("exceeded_dimensions") or ()
+                ),
+                evidence_ref=_usage_evidence_ref(context.budget_id, usage_id),
+            )
+        return await self.settle_worker(
+            context,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            worker_commit=worker_commit,
+            elapsed_ms=durable_elapsed_ms,
+        )
+
+    async def reconcile_worker_checkpoint(
+        self,
+        context: BudgetRuntimeContext,
+        *,
+        node_id: str,
+        attempt_id: str,
+        worker_commit: Mapping[str, Any],
+        durable_usage: Mapping[str, Any],
+    ) -> BudgetCharge:
+        """Read one already accepted worker usage without inventing a charge.
+
+        Online takeover is intentionally narrower than same-process COMMIT
+        reconciliation: it may only continue from a complete post-budget
+        checkpoint.  Missing, denied, or ambiguous usage evidence is rejected
+        before this method; this read also verifies the immutable Store row.
+        """
+
+        usage_id = str(durable_usage.get("usage_id") or "").strip()
+        existing = await self._try_budget_usage(context.budget_id, usage_id)
+        if existing is None or dict(existing) != dict(durable_usage):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_USAGE_INVALID,
+                "worker checkpoint BudgetUsage is not one immutable durable row",
+            )
+        charge_kind = str(existing.get("charge_kind") or "").strip()
+        if not (
+            charge_kind.startswith("WORKER_USAGE")
+            or charge_kind == "WORKER_ELAPSED"
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_USAGE_INVALID,
+                "checkpoint points to a precharge/retry BudgetUsage",
+            )
+        _assert_usage_identity(
+            existing,
+            context=context,
+            usage_id=usage_id,
+            charge_kind=charge_kind,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        )
+        payload = worker_commit.get("budget_usage")
+        if isinstance(payload, Mapping):
+            expected_usage_id, base_delta, expected_kind = _worker_usage(
+                payload,
+                elapsed_ms=0,
+            )
+            if usage_id != expected_usage_id or charge_kind != expected_kind:
+                raise GovernedRuntimeError(
+                    GOVERNED_BUDGET_USAGE_INVALID,
+                    "checkpoint BudgetUsage identity differs from worker projection",
+                )
+            _assert_checkpoint_usage(
+                existing,
+                context=context,
+                usage_id=usage_id,
+                charge_kind=charge_kind,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                base_delta=base_delta,
+            )
+        if not bool(existing.get("accepted")):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_USAGE_INVALID,
+                "checkpoint BudgetUsage was not accepted",
+            )
+        updated = await self._required_reconcile(context.budget_id)
+        return BudgetCharge(
+            context=context.refreshed(updated),
+            accepted=bool(existing.get("accepted")),
+            usage_id=usage_id,
+            replayed=True,
+            exceeded_dimensions=tuple(
+                str(item) for item in existing.get("exceeded_dimensions") or ()
+            ),
+            evidence_ref=_usage_evidence_ref(context.budget_id, usage_id),
+        )
+
     async def finalize(
         self,
         context: BudgetRuntimeContext,
@@ -304,7 +472,14 @@ class DurableBudgetRuntime:
         delta: BudgetAmount,
     ) -> BudgetCharge:
         last_exc: BaseException | None = None
-        for _ in range(self._cas_retries):
+        # READY claims cap simultaneous writers at the policy concurrency.
+        # Size the CAS budget to that admitted fan-out instead of the old
+        # fixed four attempts, while preserving the configured retry floor.
+        cas_attempts = max(
+            self._cas_retries,
+            int(context.policy.limits.concurrency) + 1,
+        )
+        for _ in range(cas_attempts):
             record = await self._required_reconcile(context.budget_id)
             try:
                 result = await _maybe_await(
@@ -344,6 +519,32 @@ class DurableBudgetRuntime:
                 )
             except BaseException as exc:
                 last_exc = exc
+                replay = await self._try_budget_usage(context.budget_id, usage_id)
+                if replay is not None:
+                    _assert_exact_usage(
+                        replay,
+                        context=context,
+                        usage_id=usage_id,
+                        charge_kind=charge_kind,
+                        node_id=node_id,
+                        attempt_id=attempt_id,
+                        delta=delta,
+                    )
+                    updated = await self._required_reconcile(context.budget_id)
+                    return BudgetCharge(
+                        context=context.refreshed(updated),
+                        accepted=bool(replay.get("accepted")),
+                        usage_id=usage_id,
+                        replayed=True,
+                        exceeded_dimensions=tuple(
+                            str(item)
+                            for item in replay.get("exceeded_dimensions") or ()
+                        ),
+                        evidence_ref=_usage_evidence_ref(
+                            context.budget_id,
+                            usage_id,
+                        ),
+                    )
                 if _reason_code(exc) != "TASK_STORE_CAS_CONFLICT":
                     raise GovernedRuntimeError(
                         GOVERNED_BUDGET_STATE_CONFLICT,
@@ -371,6 +572,22 @@ class DurableBudgetRuntime:
                 f"BudgetReservation disappeared: {budget_id}",
             )
         return record
+
+    async def _try_budget_usage(
+        self,
+        budget_id: str,
+        usage_id: str,
+    ) -> dict[str, Any] | None:
+        reader = getattr(self._store, "get_budget_usage", None)
+        if not callable(reader):
+            return None
+        try:
+            value = await _maybe_await(reader(budget_id, usage_id))
+        except BaseException as exc:
+            if _reason_code(exc) in {"TASK_STORE_NOT_FOUND", "NOT_FOUND"}:
+                return None
+            raise
+        return dict(value) if isinstance(value, Mapping) else None
 
     @staticmethod
     def _assert_binding(
@@ -501,6 +718,91 @@ def _typed_charge_kind(dimensions: tuple[str, ...]) -> str:
         "model_cost_micros": "COST",
     }
     return "WORKER_USAGE:" + "+".join(labels[item] for item in dimensions)
+
+
+def _assert_exact_usage(
+    record: Mapping[str, Any],
+    *,
+    context: BudgetRuntimeContext,
+    usage_id: str,
+    charge_kind: str,
+    node_id: str,
+    attempt_id: str,
+    delta: BudgetAmount,
+) -> None:
+    _assert_usage_identity(
+        record,
+        context=context,
+        usage_id=usage_id,
+        charge_kind=charge_kind,
+        node_id=node_id,
+        attempt_id=attempt_id,
+    )
+    if dict(record.get("delta") or {}) != delta.to_dict():
+        raise GovernedRuntimeError(
+            GOVERNED_BUDGET_STATE_CONFLICT,
+            f"durable budget usage replay drifted: {usage_id}",
+        )
+
+
+def _assert_checkpoint_usage(
+    record: Mapping[str, Any],
+    *,
+    context: BudgetRuntimeContext,
+    usage_id: str,
+    charge_kind: str,
+    node_id: str,
+    attempt_id: str,
+    base_delta: BudgetAmount,
+) -> None:
+    _assert_usage_identity(
+        record,
+        context=context,
+        usage_id=usage_id,
+        charge_kind=charge_kind,
+        node_id=node_id,
+        attempt_id=attempt_id,
+    )
+    durable_delta = dict(record.get("delta") or {})
+    expected = base_delta.to_dict()
+    if (
+        set(durable_delta) != set(expected)
+        or any(
+            int(durable_delta.get(field) or 0) != int(expected[field])
+            for field in expected
+            if field != "time_ms"
+        )
+        or int(durable_delta.get("time_ms") or 0) < int(expected["time_ms"])
+    ):
+        raise GovernedRuntimeError(
+            GOVERNED_BUDGET_STATE_CONFLICT,
+            f"committed checkpoint budget usage drifted: {usage_id}",
+        )
+
+
+def _assert_usage_identity(
+    record: Mapping[str, Any],
+    *,
+    context: BudgetRuntimeContext,
+    usage_id: str,
+    charge_kind: str,
+    node_id: str,
+    attempt_id: str,
+) -> None:
+    if (
+        str(record.get("budget_id") or "") != context.budget_id
+        or str(record.get("usage_id") or "") != usage_id
+        or str(record.get("charge_kind") or "").upper() != charge_kind.upper()
+        or str(record.get("graph_id") or "") != context.graph_id
+        or int(record.get("graph_revision") or 0) != context.graph_revision
+        or str(record.get("node_id") or "") != node_id
+        or str(record.get("attempt_id") or "") != attempt_id
+        or type(record.get("accepted")) is not bool
+    ):
+        raise GovernedRuntimeError(
+            GOVERNED_BUDGET_STATE_CONFLICT,
+            f"durable budget usage lineage drifted: {usage_id}",
+        )
 
 
 def _budget_id(admitted: AdmittedExecution, policy: BudgetPolicy) -> str:

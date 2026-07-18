@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.1
+版本：v2.3
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-15
+维护日期：2026-07-18
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -125,6 +125,10 @@ worker 返回的结果先被验证和验收，再由可信编译器生成 effect
 ### 3.10 用户主权高于自动演化
 
 身份核心、关系边界、主动性边界和高影响能力的重大变化必须可见、可审查、可拒绝、可回滚。系统不能以“成长”为理由降低安全门槛或扩大权限。
+
+### 3.11 版本化事实必须携带版本身份
+
+当一个语义对象允许保留多个 revision 时，仅有逻辑 ID 不足以标识事件、Outbox、投影或读取范围。任何代表该对象事实的下游记录都必须携带 `id + revision`，或能通过不可变 source authority 唯一解析该身份，并在写入、投递、重放和查询时保持同一归属；不同 revision 可以独立推进，但同一 revision 内必须保持因果顺序。给旧事实补充 revision 不能改变既有幂等 ID/key，否则响应丢失会被误判成新动作；新增维度应与稳定 identity 并存。禁止用时间、事件 version 或“当前最新 revision”猜测历史记录所属版本，也禁止为补字段而重写已经成立的历史 journal；兼容读取应沿一对一 source lineage 精确解析。派生 failure evidence 应优先引用真实 durable source ref，不能仅因新格式看起来更规范，就合成数据库中并不存在的历史证据。
 
 ---
 
@@ -548,7 +552,9 @@ Deterministic seed / trace context
 
 输出是候选路径、分数、预算计量与 trace，不是执行 Receipt。
 
-当前公共合同位于 [PlanningSearch contracts](../../host_brain/planning_search/contracts.py)，算法位于 [PlanningSearch algorithms](../../host_brain/planning_search/algorithms.py)。
+当前公共合同位于 [PlanningSearch contracts](../../host_brain/planning_search/contracts.py)，算法位于 [PlanningSearch algorithms](../../host_brain/planning_search/algorithms.py)。Code 的 D19 `code_benchmark_verifier.py` 不是搜索理论的一部分，而是实验侧的受控 pytest 命令证据：它只能验证固定 worktree 测试，不会让搜索结果直接获得执行、预算或生产影响 authority。
+
+D20a 的 Research adapter 同样只实现搜索侧：`ResearchTaskSnapshot` 公开任务、corpus 与来源的受治理 ref/digest 及有限排序 hints；它没有专用本机 locator、正文、answer-key 或 verifier-decision 字段，constraints 拒绝这些命名 key，但任务文字不是内容级 DLP。它能从冻结元数据按虚拟状态动态形成 `query`、`quick-answer`、`primary-source`、`independent-source`、`cross-check`、`resolve-conflict` 与 `stop` 后继；L2 只比较公开 authority/relevance/cost hints，只有快照冻结 `virtual_transition_ready=true` 才有 L3 virtual transition/reward。该 catalog 不读取来源、不生成答案，也不持有 Host、TaskGraph、BrowserWorker、网络或模型端口。
 
 ### 10.2 三层搜索的理论关系
 
@@ -573,6 +579,8 @@ Transition 必须：
 - 对相同 state/candidate/seed 可重放；
 - 明确哪些效果是预测，哪些前置条件已由事实支持。
 
+对涉及代码或外部工件的领域，虚拟状态只能持有 opaque ref、digest、受限标识和预注册候选，不能夹带源码、路径、worktree handle、凭据、模型/工具 callback 或 live ACL。L3 的可用性也应是冻结 state 的一部分，而不是调用方把 `always` 标志当作越权开关；未满足领域条件时，不应暴露 transition/reward simulation port。D20a 的 `FrozenResearchCorpusLoader` 把“可见元数据”和“实验私有输入”再分开：只有可信实验根目录和 manifest 共同指定的 repository-relative 普通文件可被读取，读前/读后都会核对文件状态、大小和内容 digest；在稳定受信输入中，绝对路径、遍历、ADS colon component、case alias、link/reparse point 与未列来源会拒绝。公开 receipt 只输出 source id/ref/digest、大小和 authority tier，不输出路径或正文；这不是 hostile concurrent replacement 的原子 TOCTOU 防线，也尚未把 planner snapshot 与 manifest 精确绑定或证明独立来源，更不是浏览器抓取器、生产 source resolver 或 OS/tenant/sandbox。
+
 ### 10.4 规划收益必须以真实 shadow 证明
 
 算法测试只能证明算法行为，不能证明生产收益。可信校准需要：
@@ -587,7 +595,7 @@ Transition 必须：
   → promotion proposal
 ```
 
-未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。
+未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。D20a 的纯 catalog 与 manifest 安全读取只建立后续实验的输入边界；没有真实模型、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research benefit 仍为 `UNPROVEN`。
 
 ### 10.5 编译是规划与执行之间的防火墙
 
@@ -598,6 +606,8 @@ Transition 必须：
 - graph revision 与 planning trace digest 绑定；
 - worker 看不到搜索器的可变内部状态；
 - 失败重规划生成 `revision + 1`，不覆盖旧图。
+
+若 compiler 将 selected path 转成 worker 输入，输入必须由已冻结 catalog 再生成，而不是复用早期 intent 草稿；图级 budget、review、workspace、approval 和 parent grant 仍属于 compiler/admission authority。尚未具备 durable predecessor lineage 的中间虚拟状态，不得伪装成可直接编译的重规划起点。
 
 当前相应边界位于 [PlanningGraphCompiler](../../host_brain/orchestration/planning_graph_compiler.py) 和 [planning execution](../../host_brain/orchestration/planning_execution.py)。
 
@@ -828,7 +838,7 @@ Evolution Lab 只能读取脱敏快照与可重放 trace，不能持有生产写
 | Canon | [Canon application](../../host_brain/canon/application.py)、[apply service](../../host_brain/memory/canon_apply_service.py) | proposal、apply、rollback、projection |
 | World | [WorldProjectionReadModel](../../host_brain/runtime/world_model.py) | 来源、置信度、TTL、冲突和只读边界 |
 | Governance | [Governor](../../host_brain/governor/decision.py)、[Action Arbiter](../../host_brain/governor/action_arbiter.py) | 决策、reason code、scope 与 restrict-only |
-| Planning | [contracts](../../host_brain/planning_search/contracts.py)、[service](../../host_brain/planning_search/service.py)、[compiler](../../host_brain/orchestration/planning_graph_compiler.py) | 纯搜索、trace、预算、不可变图 |
+| Planning | [contracts](../../host_brain/planning_search/contracts.py)、[service](../../host_brain/planning_search/service.py)、[Code shadow adapter](../../host_brain/planning_search/code_domain.py)、[Code frozen models](../../host_brain/planning_search/code_domain_models.py)、[Code trusted-process private-bare experiment](../../host_brain/planning_search/code_benchmark_sandbox.py)、[compiler](../../host_brain/orchestration/planning_graph_compiler.py) | 纯搜索、trace、冻结证据、trusted-process private-bare 实验、预算、不可变图 |
 | Execution | [HostCommand](../../natsume_contracts/task/v1.py)、[Task coordinator](../../host_brain/task_runtime/coordinator.py) | lineage、Attempt、Review、Verification、Acceptance |
 | Side effects | [acceptance compiler](../../host_brain/task_runtime/acceptance_effects.py)、[dispatcher](../../host_brain/task_runtime/acceptance_effect_dispatcher.py) | authority-free worker result 如何变成可信 effect |
 

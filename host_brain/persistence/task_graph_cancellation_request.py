@@ -10,10 +10,8 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     GraphCancellationContractError,
     normalize_graph_cancellation_intent,
 )
-from host_brain.persistence.task_decision_integrity import (
-    _assert_graph_cancellation_decision_bindings,
-)
 from host_brain.persistence.task_record_codec import (
+    _acceptance_effect_record,
     _dumps,
     _graph_cancellation_decision_record,
     _graph_cancellation_intent_record,
@@ -30,6 +28,47 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_INVALID,
     TaskStoreError,
 )
+
+
+def _cancellation_effect_resolution(effect: Mapping[str, Any]) -> str:
+    """Classify one fully validated Effect without guessing dispatch history.
+
+    Current claim authority makes a retry-PENDING row fenceable only through
+    legacy or corrupt cross-table state: NODE delivery requires ACCEPTED and
+    is excluded below, while GRAPH delivery requires a terminal COMPLETED
+    Graph.  The retry branch is nevertheless fail-closed so a new request
+    cannot mistake imported or pre-correction durable state for a virgin
+    intent.  Existing finalized evidence remains an explicit repair boundary.
+    """
+
+    record = _acceptance_effect_record(effect)
+    status = str(record["status"])
+    if status == "PENDING":
+        # 0087 deliberately has two legal PENDING epochs.  Only the initial
+        # epoch proves that no handler has ever received dispatch authority;
+        # a retry PENDING row already crossed a handler/transport boundary and
+        # can be just as uncertain as FAILED.
+        virgin = (
+            int(record["attempt_count"]) == 0
+            and int(record["fencing_token"]) == 0
+            and int(record["status_version"]) == 0
+            and record.get("reason_code") is None
+            and record.get("last_error") is None
+        )
+        return "CANCELLED" if virgin else "RECONCILIATION_REQUIRED"
+    if status == "CLAIMED":
+        return "RECONCILIATION_REQUIRED"
+    if status == "COMMITTED":
+        return "COMMITTED_EVIDENCE"
+    if status == "FAILED":
+        # A terminal handler/transport failure does not prove that the
+        # external side effect never happened.  The 0087 intent row has no
+        # attested no-side-effect provenance.
+        return "RECONCILIATION_REQUIRED"
+    raise TaskStoreError(
+        TASK_STORE_DURABLE_DATA_INVALID,
+        f"unsupported AcceptanceEffectIntent status: {status}",
+    )
 
 
 class TaskGraphCancellationRequestMixin:
@@ -55,6 +94,7 @@ class TaskGraphCancellationRequestMixin:
         """
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         graph_ref = str(graph_id or "").strip()
         budget_ref = str(budget_id or "").strip() or None
         normalized_states = self._normalize_parallel_node_states(expected_node_states)
@@ -81,6 +121,7 @@ class TaskGraphCancellationRequestMixin:
             or intent.payload["budget_status_version_before"] != expected_budget_version
             or intent.payload["node_states_before"] != expected_before
             or intent.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or graph_outbox.graph_revision != int(revision)
             or reference not in set(graph_outbox.evidence_refs)
         ):
             raise TaskStoreError(
@@ -131,10 +172,9 @@ class TaskGraphCancellationRequestMixin:
                             "finalized cancellation replay is missing its decision",
                         )
                     decision_record = _graph_cancellation_decision_record(decision_row)
-                    _assert_graph_cancellation_decision_bindings(
+                    self._assert_graph_cancellation_decision_trusted(
                         conn,
                         decision_record,
-                        evidence_refs_builder=self._graph_cancellation_evidence_refs,
                     )
                     self._assert_parallel_node_states(
                         node_rows,
@@ -162,6 +202,7 @@ class TaskGraphCancellationRequestMixin:
                         ),
                         expected_event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
                         expected_attempt_id=None,
+                        expected_graph_revision=int(revision),
                     )
                     budget = (
                         self._budget_record(self._require_budget(conn, budget_ref))
@@ -215,6 +256,7 @@ class TaskGraphCancellationRequestMixin:
                     ),
                     expected_event_type="TASK_GRAPH_CANCELLATION_REQUESTED",
                     expected_attempt_id=None,
+                    expected_graph_revision=int(revision),
                 )
                 budget = (
                     self._budget_record(self._require_budget(conn, budget_ref))
@@ -335,6 +377,12 @@ class TaskGraphCancellationRequestMixin:
                     "completed Graph success authority wins the cancellation race",
                 )
             graph = self._require_graph(conn, graph_ref, int(revision))
+            self._assert_no_terminal_reconciliation_fence(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=int(revision),
+                action="Graph cancellation request",
+            )
             self._require_version(
                 graph,
                 expected_graph_version,
@@ -406,6 +454,7 @@ class TaskGraphCancellationRequestMixin:
                 expected_aggregate=("TASK_GRAPH", graph_ref, graph_after_version),
                 expected_event_type=expected_graph_event,
                 expected_attempt_id=None,
+                expected_graph_revision=int(revision),
             )
 
             for row in node_rows:
@@ -629,8 +678,7 @@ class TaskGraphCancellationRequestMixin:
             )
             effects = conn.execute(
                 """
-                SELECT effect.effect_id, effect.status, effect.status_version,
-                       effect.commit_scope, node.status AS node_status,
+                SELECT effect.*, node.status AS node_status,
                        attempt.status AS attempt_status
                 FROM task_runtime_acceptance_effect_intent AS effect
                 JOIN task_runtime_node AS node
@@ -644,13 +692,8 @@ class TaskGraphCancellationRequestMixin:
                 """,
                 (graph_ref, int(revision)),
             ).fetchall()
-            resolutions = {
-                "PENDING": "CANCELLED",
-                "CLAIMED": "RECONCILIATION_REQUIRED",
-                "COMMITTED": "COMMITTED_EVIDENCE",
-                "FAILED": "FAILED_EVIDENCE",
-            }
             for effect in effects:
+                resolution = _cancellation_effect_resolution(effect)
                 node_effect_authorized = (
                     str(effect["commit_scope"]) == "NODE"
                     and str(effect["node_status"]) == "ACCEPTED"
@@ -660,7 +703,6 @@ class TaskGraphCancellationRequestMixin:
                     # Node-scope acceptance authority committed before the
                     # cancellation and remains independently deliverable.
                     continue
-                resolution = resolutions[str(effect["status"])]
                 conn.execute(
                     """
                     INSERT INTO task_runtime_graph_cancellation_effect_fence(

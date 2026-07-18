@@ -500,10 +500,10 @@ function Test-ExternalServicesReadiness {
     [bool]$StartupSkipped
   )
   $chromaEndpoint = Get-EnvSetting -Values $EnvValues -Name "CHROMA_ENDPOINT" -DefaultValue "http://127.0.0.1:18000"
-  $neo4jUri = Get-EnvSetting -Values $EnvValues -Name "BOND_NEO4J_URI" -DefaultValue "bolt://127.0.0.1:7687"
+  $neo4jUri = Get-EnvSetting -Values $EnvValues -Name "BOND_NEO4J_URI" -DefaultValue "bolt://127.0.0.1:17687"
   $redisUrl = Get-EnvSetting -Values $EnvValues -Name "HOST_RATE_LIMIT_REDIS_URL" -DefaultValue "redis://127.0.0.1:6379/0"
   $chromaParsed = Resolve-UriHostPort -UriText $chromaEndpoint -DefaultHost "127.0.0.1" -DefaultPort 18000
-  $neo4jParsed = Resolve-UriHostPort -UriText $neo4jUri -DefaultHost "127.0.0.1" -DefaultPort 7687
+  $neo4jParsed = Resolve-UriHostPort -UriText $neo4jUri -DefaultHost "127.0.0.1" -DefaultPort 17687
   $redisParsed = Resolve-UriHostPort -UriText $redisUrl -DefaultHost "127.0.0.1" -DefaultPort 6379
   $chromaHeartbeat = ("http://{0}:{1}/api/v2/heartbeat" -f $chromaParsed.host, $chromaParsed.port)
   $services = @(

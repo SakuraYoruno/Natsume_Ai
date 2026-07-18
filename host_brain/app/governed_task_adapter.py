@@ -9,10 +9,11 @@ worker or during graph execution.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from copy import deepcopy
 import hashlib
+import inspect
 import json
 import logging
 import re
@@ -63,6 +64,9 @@ from host_brain.app.governed_route_executors import (
     FrozenChatRouteExecutor,
     FrozenDelegateRouteExecutor,
 )
+from host_brain.app.governed_delegate_dispatch import (
+    GovernedDelegateDispatchError,
+)
 from host_brain.app.governed_task_authority import (
     GOVERNED_HOST_AUTHORITY_INVALID,
     GovernedHostAdapterError,
@@ -103,7 +107,42 @@ GOVERNED_HOST_DRAIN_TIMEOUT = "GOVERNED_HOST_DRAIN_TIMEOUT"
 GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE = (
     "GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE"
 )
+GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE = (
+    "GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE"
+)
+GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE = (
+    "GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE"
+)
 GOVERNED_HOST_WORKER_ROUTE = "skill"
+
+_MEMORY_SEARCH_SCOPES = frozenset(
+    {"recent_episode", "long_term", "line", "hybrid"}
+)
+_MEMORY_SEARCH_SCOPE_ALIASES = {
+    "recent": "recent_episode",
+    "recent_episodic": "recent_episode",
+    "episode": "recent_episode",
+    "episodic": "recent_episode",
+    "semantic": "long_term",
+    "longterm": "long_term",
+    "long_term_semantic": "long_term",
+    "quote": "line",
+    "quotes": "line",
+    "dialogue": "line",
+    "lines": "line",
+    "line_semantic": "line",
+    "mixed": "hybrid",
+    "auto": "",
+}
+_MEMORY_RECENT_EPISODE_TAGS = frozenset(
+    {"conversation", "event", "task", "reminder", "dream", "diary"}
+)
+_MEMORY_LINE_SEMANTIC_TAGS = frozenset(
+    {"quote", "line", "dialogue", "style"}
+)
+_MEMORY_LONG_TERM_TAGS = frozenset(
+    {"fact", "preference", "bond", "emotion"}
+)
 
 _FORBIDDEN_DURABLE_KEYS = re.compile(
     r"(?:^|_)(?:api_?key|authorization|bearer|credential|password|raw_?body|"
@@ -182,6 +221,7 @@ class _FrozenSkillWorker:
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "direct skill target is absent from WorkOrderV3 capability lineage",
             )
+        execution_args = _mapping(intent_draft.get("args"))
         node_grant_ref = str(execution_context.get("node_grant_ref") or "").strip()
         if not node_grant_ref:
             raise GovernedHostAdapterError(
@@ -200,6 +240,12 @@ class _FrozenSkillWorker:
             node_id=node_id,
             route="skill",
             target_id=target,
+            attempt_id=str(execution_context.get("attempt_id") or "").strip(),
+            lease_id=str(execution_context.get("lease_id") or "").strip(),
+            lease_owner_id=str(
+                execution_context.get("lease_owner_id") or ""
+            ).strip(),
+            fencing_token=execution_context.get("fencing_token"),
         )
         if verified_grant.grant_ref != node_grant_ref:
             raise GovernedHostAdapterError(
@@ -218,6 +264,11 @@ class _FrozenSkillWorker:
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "node grant child intent differs from its durable verifier projection",
             )
+        _require_frozen_skill_dependencies(
+            ports=self._execution_ports,
+            target=target,
+            args=execution_args,
+        )
         # SQLiteLedger owns a thread-affine connection.  Execute the skill in
         # a worker thread, then persist its receipt on the owning event-loop
         # thread instead of silently losing the audit row.
@@ -225,7 +276,7 @@ class _FrozenSkillWorker:
             execute_frozen_governed_skill,
             ports=self._execution_ports,
             durable_authority_ledger=self._ledger,
-            request_body={"args": dict(intent_draft.get("args") or {})},
+            request_body={"args": execution_args},
             request_id=command.request_id,
             session_id=command.session_id,
             person_id=str(pack.get("person_id") or command.principal_id),
@@ -238,7 +289,7 @@ class _FrozenSkillWorker:
             emotion_context=_mapping(pack.get("emotion_context")),
             render_target_lang=str(pack.get("render_target_lang") or "zh"),
             governed_execution_context=execution_context,
-            execution_args_override=dict(intent_draft.get("args") or {}),
+            execution_args_override=execution_args,
             verified_node_grant=verified_grant.to_dict(),
         )
         payload = _mapping(getattr(outcome, "payload", None))
@@ -346,6 +397,77 @@ class _FrozenSkillWorker:
                 )
             commit["receipt_ref"] = projection_id
         yield commit
+
+
+def _require_frozen_skill_dependencies(
+    *,
+    ports: GovernedSkillExecutionPorts,
+    target: str,
+    args: Mapping[str, Any],
+) -> None:
+    """Reject a frozen Skill whose required startup snapshot is unavailable."""
+
+    skill_id = str(target or "").strip().lower()
+    missing_dependency = ""
+    if skill_id == "resource_manager_status":
+        if ports.resource_manager is None:
+            missing_dependency = "resource_manager"
+    elif skill_id == "memory_store":
+        if ports.episodic_store is None:
+            missing_dependency = "episodic_store"
+    elif skill_id == "memory_forget":
+        if not bool(args.get("dry_run", False)) and ports.episodic_store is None:
+            missing_dependency = "episodic_store"
+    elif skill_id == "memory_search":
+        scope = _frozen_memory_search_scope(args)
+        if scope == "recent_episode" and ports.episodic_store is None:
+            missing_dependency = "episodic_store"
+        elif scope in {"long_term", "line"} and ports.semantic_recaller is None:
+            missing_dependency = "semantic_recaller"
+        elif (
+            scope == "hybrid"
+            and ports.episodic_store is None
+            and ports.semantic_recaller is None
+        ):
+            missing_dependency = "episodic_store_or_semantic_recaller"
+    if missing_dependency:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE,
+            f"frozen Skill {skill_id} requires composed {missing_dependency}",
+        )
+
+
+def _frozen_memory_search_scope(args: Mapping[str, Any]) -> str:
+    """Mirror the declarative memory normalizer without executing the Skill."""
+
+    raw_scope = str(args.get("search_scope") or args.get("scope") or "").strip().lower()
+    scope = _MEMORY_SEARCH_SCOPE_ALIASES.get(raw_scope, raw_scope)
+    if scope in _MEMORY_SEARCH_SCOPES:
+        return scope
+    memory_type = str(args.get("memory_type") or "all").strip().lower()
+    if memory_type not in {"episodic", "semantic", "working", "all"}:
+        memory_type = "all"
+    tags_raw = args.get("tags")
+    tags = (
+        {
+            str(tag or "").strip().lower()
+            for tag in tags_raw
+            if str(tag or "").strip()
+        }
+        if isinstance(tags_raw, list)
+        else set()
+    )
+    if memory_type == "semantic":
+        return "long_term"
+    if memory_type in {"episodic", "working"}:
+        return "recent_episode"
+    if tags & _MEMORY_LINE_SEMANTIC_TAGS:
+        return "line"
+    if tags & _MEMORY_RECENT_EPISODE_TAGS:
+        return "recent_episode"
+    if tags & _MEMORY_LONG_TERM_TAGS:
+        return "long_term"
+    return "recent_episode"
 
 
 def _trusted_skill_budget_observations(value: Any) -> Mapping[str, Any]:
@@ -507,6 +629,7 @@ class GovernedHostRuntime:
         supported_routes: frozenset[str] = frozenset({"skill"}),
         planning_enabled: bool = False,
         acceptance_effect_dispatcher: AcceptanceEffectDispatcher | None = None,
+        delegate_target_validator: Callable[[str], Any] | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
@@ -518,6 +641,7 @@ class GovernedHostRuntime:
         )
         self._planning_enabled = bool(planning_enabled)
         self._acceptance_effect_dispatcher = acceptance_effect_dispatcher
+        self._delegate_target_validator = delegate_target_validator
         self._acceptance_effect_stop = asyncio.Event()
         self._acceptance_effect_task: asyncio.Task[None] | None = None
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
@@ -628,6 +752,53 @@ class GovernedHostRuntime:
             ).strip()
         )
 
+    async def request_graph_cancellation(
+        self,
+        record: Mapping[str, Any],
+        *,
+        authority: Mapping[str, Any],
+        source: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Cancel one exact Host-surface admission through verified authority."""
+
+        async with self._lifecycle:
+            if not self._active or not self._accepting:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_RUNTIME_INACTIVE,
+                    "governed Host runtime is not accepting cancellation commands",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface
+                not in {
+                    HostCommandSurface.CHAT,
+                    HostCommandSurface.HOST_INPUT,
+                    HostCommandSurface.GATEWAY,
+                }
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "cancellation admission is not owned by the Host runtime",
+                )
+            return await self._application.request_graph_cancellation(
+                command_id=command.command_id,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                authority=dict(authority or {}),
+                source=source,
+                reason_code=reason_code,
+            )
+        finally:
+            async with self._lifecycle:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._lifecycle.notify_all()
+
     async def execute_stream(
         self,
         *,
@@ -684,6 +855,7 @@ class GovernedHostRuntime:
             )
             if route == "plan":
                 async for event in self._execute_plan_stream(
+                    request_body=request_body,
                     request_id=request_id,
                     session_id=session_id,
                     ts_ms=ts_ms,
@@ -712,12 +884,22 @@ class GovernedHostRuntime:
                     frozen_context=frozen_context,
                 )
             else:
+                if route == "delegate":
+                    self._validate_delegate_target(intent_draft)
                 authority = dict(command_authority or {})
+                surface = _resolve_host_command_surface(
+                    request_body=request_body,
+                    authority=authority,
+                )
+                ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
                 contracts = build_direct_host_route_contracts(
-                    surface=HostCommandSurface.CHAT,
+                    surface=surface,
                     request_id=request_id,
                     session_id=session_id,
-                    principal_id=person_id,
+                    principal_id=_resolve_host_command_principal(
+                        person_id=person_id,
+                        authority=authority,
+                    ),
                     ts_ms=ts_ms,
                     intent_draft=intent_draft,
                     governor_result=governor_result,
@@ -725,8 +907,12 @@ class GovernedHostRuntime:
                     person_id=person_id,
                     emotion_context=emotion_context,
                     render_target_lang=render_target_lang,
-                    ingress_claim_ref=str(authority.get("ingress_claim_ref") or "").strip() or None,
-                    ingress_audit_ref=str(authority.get("ingress_audit_ref") or "").strip() or None,
+                    input_sha256=_resolve_host_input_sha256(
+                        sanitized_message=sanitized_message,
+                        authority=authority,
+                    ),
+                    ingress_claim_ref=ingress_claim_ref,
+                    ingress_audit_ref=ingress_audit_ref,
                     frozen_context=frozen_context,
                 )
                 candidate_command = contracts.command
@@ -785,9 +971,63 @@ class GovernedHostRuntime:
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
 
+    async def continue_review_admission(
+        self,
+        record: Mapping[str, Any],
+        claim: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact durable Host admission after Review resolution."""
+
+        async with self._lifecycle:
+            if not self._active or not self._accepting:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_RUNTIME_INACTIVE,
+                    "governed Host runtime is not accepting Review continuation",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            work_order = durable.get("work_order")
+            assignment = durable.get("assignment")
+            graph = durable.get("graph")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface
+                not in {
+                    HostCommandSurface.CHAT,
+                    HostCommandSurface.HOST_INPUT,
+                    HostCommandSurface.GATEWAY,
+                }
+                or not isinstance(work_order, WorkOrderV3)
+                or assignment is None
+                or graph is None
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "Review continuation Host admission is incomplete or misrouted",
+                )
+            operation = self._application.execute_review_continuation(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+                continuation_claim=dict(claim or {}),
+            )
+            return await _review_continuation_result(
+                operation,
+                transform=self._dispatch_accepted_effects,
+            )
+        finally:
+            async with self._lifecycle:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._lifecycle.notify_all()
+
     async def _execute_plan_stream(
         self,
         *,
+        request_body: Any,
         request_id: str,
         session_id: str,
         ts_ms: int,
@@ -798,7 +1038,11 @@ class GovernedHostRuntime:
         command_authority: Mapping[str, Any] | None,
         frozen_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        input_sha256 = _sha256_text(sanitized_message)
+        ingress = dict(command_authority or {})
+        input_sha256 = _resolve_host_input_sha256(
+            sanitized_message=sanitized_message,
+            authority=ingress,
+        )
         input_ref = f"input://sha256/{input_sha256.removeprefix('sha256:')}"
         adapter = build_plan_intent_search(
             intent_draft,
@@ -807,18 +1051,24 @@ class GovernedHostRuntime:
             input_refs=(input_ref,),
             frozen_context=frozen_context,
         )
-        ingress = dict(command_authority or {})
+        ingress_claim_ref, ingress_audit_ref = _ingress_references(ingress)
         authority = PlanningExecutionAuthority(
-            surface=HostCommandSurface.CHAT,
+            surface=_resolve_host_command_surface(
+                request_body=request_body,
+                authority=ingress,
+            ),
             base_command_request_id=request_id,
             session_id=session_id,
-            principal_id=person_id,
+            principal_id=_resolve_host_command_principal(
+                person_id=person_id,
+                authority=ingress,
+            ),
             input_ref=input_ref,
             input_sha256=input_sha256,
             governor_grant_ref=governor_grant_ref(request_id, governor_result),
             target_id="planning_search",
-            ingress_claim_ref=str(ingress.get("ingress_claim_ref") or "").strip() or None,
-            ingress_audit_ref=str(ingress.get("ingress_audit_ref") or "").strip() or None,
+            ingress_claim_ref=ingress_claim_ref,
+            ingress_audit_ref=ingress_audit_ref,
         )
         service = GovernedPlanningExecutionService(
             search=adapter,  # type: ignore[arg-type]
@@ -828,6 +1078,7 @@ class GovernedHostRuntime:
                 runtime_router=self._runtime_router,
             ),
             command_application=self._application,
+            delegate_target_validator=self._delegate_target_validator,
         )
         replan = failure_replan_reference_from_intent(intent_draft)
         if replan is None:
@@ -854,6 +1105,41 @@ class GovernedHostRuntime:
             )
         async for event in service.execute_stream(prepared):
             yield await self._dispatch_accepted_effects(event)
+
+    def _validate_delegate_target(self, intent_draft: Mapping[str, Any]) -> None:
+        validator = self._delegate_target_validator
+        target_id = str(
+            intent_draft.get("target_id")
+            or intent_draft.get("agent_id")
+            or ""
+        ).strip()
+        if not target_id:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate route has no target_id",
+            )
+        if validator is None:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate target registry is not composed",
+            )
+        try:
+            result = validator(target_id)
+        except GovernedDelegateDispatchError as exc:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                exc.detail,
+            ) from exc
+        except Exception as exc:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate target validation failed",
+            ) from exc
+        if inspect.isawaitable(result):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate target validator must be synchronous before admission",
+            )
 
     async def _dispatch_accepted_effects(
         self,
@@ -895,8 +1181,14 @@ def build_governed_host_runtime(
     capability_broker: Any,
     model_attempt_service: Any,
     production_authority_verifier: Any,
+    resource_manager: Any | None,
+    episodic_store: Any | None,
+    semantic_recaller: Any | None,
+    cancellation_authority_verifier: Any | None = None,
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
+    bounded_fanout_enabled: bool = False,
+    atomic_graph_success_enabled: bool = False,
     allow_uncomposed_acceptance_effects: bool = False,
 ) -> GovernedHostRuntime:
     from host_brain.app.route_execution_ports import (  # noqa: PLC0415
@@ -904,17 +1196,30 @@ def build_governed_host_runtime(
         dispatch_governed_delegate,
         stream_governed_chat_with_context,
     )
+    from host_brain.app.governed_delegate_dispatch import (  # noqa: PLC0415
+        build_governed_delegate_dispatcher,
+    )
 
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,
         token_service=token_service,
+        review_store=task_runtime_container.review_continuation_store,
     )
-    node_grant_verifier = DurableNodeGrantVerifier(ledger=ledger)
+    node_grant_verifier = DurableNodeGrantVerifier(
+        ledger=ledger,
+        review_store=task_runtime_container.review_continuation_store,
+    )
+    delegate_dispatcher = build_governed_delegate_dispatcher(
+        node_grants=node_grant_verifier,
+    )
     skill_execution_ports = build_governed_skill_execution_ports(
         skill_registry=skill_registry,
         capability_broker=capability_broker,
         model_attempt_service=model_attempt_service,
         production_authority_verifier=production_authority_verifier,
+        resource_manager=resource_manager,
+        episodic_store=episodic_store,
+        semantic_recaller=semantic_recaller,
     )
     projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     canonical = _FrozenSkillWorker(
@@ -926,7 +1231,9 @@ def build_governed_host_runtime(
     chat_worker = None
     delegate_worker = None
     if projection_store is not None:
-        route_execution_ports = build_governed_route_execution_ports()
+        route_execution_ports = build_governed_route_execution_ports(
+            governed_delegate_dispatcher=delegate_dispatcher,
+        )
         chat_worker = GovernedFrozenNodeWorker(
             route_kind="chat",
             executor=FrozenChatRouteExecutor(
@@ -966,7 +1273,10 @@ def build_governed_host_runtime(
             if getattr(task_runtime_container, "review_store", None) is not None
             else None
         ),
+        node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
+        bounded_fanout_enabled=bool(bounded_fanout_enabled),
+        atomic_graph_success_enabled=bool(atomic_graph_success_enabled),
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",
@@ -978,6 +1288,7 @@ def build_governed_host_runtime(
         command_repository=task_runtime_container.command_repository,
         coordinator=coordinator,
         node_grant_service=node_grant_service,
+        cancellation_authority_verifier=cancellation_authority_verifier,
     )
     effect_dispatcher = None
     try:
@@ -1012,6 +1323,7 @@ def build_governed_host_runtime(
         ),
         planning_enabled=projection_store is not None,
         acceptance_effect_dispatcher=effect_dispatcher,
+        delegate_target_validator=delegate_dispatcher.require_target,
     )
 
 
@@ -1076,6 +1388,98 @@ def _build_frozen_context(
     return safe
 
 
+def _ingress_references(
+    authority: Mapping[str, Any] | None,
+) -> tuple[str | None, str | None]:
+    """Normalize the only two durable references exported by Secure Ingress.
+
+    The Host runtime accepts both the legacy generic names used by the input
+    adapter and the explicit names used by other surfaces, but never permits a
+    half-bound ingress identity.  Keeping this normalization here makes every
+    direct route and a compiled plan freeze the same authority tuple.
+    """
+
+    source = dict(authority or {})
+    claim_ref = str(
+        source.get("ingress_claim_ref") or source.get("claim_ref") or ""
+    ).strip() or None
+    audit_ref = str(
+        source.get("ingress_audit_ref") or source.get("audit_ref") or ""
+    ).strip() or None
+    if bool(claim_ref) != bool(audit_ref):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Secure Ingress claim and audit references must be supplied together",
+        )
+    return claim_ref, audit_ref
+
+
+def _resolve_host_command_surface(
+    *,
+    request_body: Any,
+    authority: Mapping[str, Any] | None,
+) -> HostCommandSurface:
+    """Derive the durable Host surface from the authenticated ingress path.
+
+    Caller-provided ``input_source`` alone is not an authority.  A Gateway
+    surface is recorded only when it carries the exact Secure Ingress claim and
+    audit refs; otherwise a normal Chat request remains Chat.
+    """
+
+    claim_ref, _audit_ref = _ingress_references(authority)
+    if not claim_ref:
+        return HostCommandSurface.CHAT
+    if isinstance(request_body, Mapping):
+        raw_source = request_body.get("input_source") or request_body.get("source")
+    else:
+        raw_source = getattr(request_body, "input_source", None)
+    source = str(raw_source or "").strip().upper()
+    return (
+        HostCommandSurface.GATEWAY
+        if source == "GATEWAY"
+        else HostCommandSurface.HOST_INPUT
+    )
+
+
+def _resolve_host_command_principal(
+    *,
+    person_id: str,
+    authority: Mapping[str, Any] | None,
+) -> str:
+    """Use the authenticated ingress principal when one owns the command."""
+
+    claim_ref, _audit_ref = _ingress_references(authority)
+    if claim_ref:
+        return _required_identifier(
+            dict(authority or {}).get("principal_id"),
+            field_name="principal_id",
+        )
+    return _identifier_or_digest(person_id or "anonymous", prefix="principal")
+
+
+def _resolve_host_input_sha256(
+    *,
+    sanitized_message: str,
+    authority: Mapping[str, Any] | None,
+) -> str:
+    """Prefer the authenticated body digest and reject malformed substitutions."""
+
+    raw = str(
+        dict(authority or {}).get("input_sha256")
+        or dict(authority or {}).get("body_sha256")
+        or ""
+    ).strip().lower()
+    if not raw:
+        return _sha256_text(sanitized_message)
+    digest = raw.removeprefix("sha256:")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Secure Ingress body digest must be a sha256 hex digest",
+        )
+    return f"sha256:{digest}"
+
+
 def _build_contracts(
     *,
     request_body: Any,
@@ -1092,8 +1496,11 @@ def _build_contracts(
     frozen_context: Mapping[str, Any] | None = None,
 ) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
     authority = dict(command_authority or {})
-    has_ingress = bool(authority.get("ingress_claim_ref") or authority.get("claim_ref"))
-    surface = HostCommandSurface.HOST_INPUT if has_ingress else HostCommandSurface.CHAT
+    ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
+    surface = _resolve_host_command_surface(
+        request_body=request_body,
+        authority=authority,
+    )
     request_ref = _required_identifier(request_id, field_name="request_id")
     session_ref = _identifier_or_digest(session_id, prefix="session")
     target = str(intent_draft.get("target_id") or intent_draft.get("skill_id") or "").strip()
@@ -1104,29 +1511,15 @@ def _build_contracts(
     graph_id = f"graph-host-{suffix}"
     node_id = f"node-host-{suffix}"
 
-    input_sha256 = str(authority.get("input_sha256") or authority.get("body_sha256") or "").strip()
-    if not input_sha256:
-        input_sha256 = _sha256_text(str(sanitized_message or ""))
-    elif not input_sha256.startswith("sha256:"):
-        input_sha256 = f"sha256:{input_sha256.lower()}"
-    input_ref = f"input://sha256/{input_sha256.split(':', 1)[1]}"
-    principal_raw = str(authority.get("principal_id") or "").strip()
-    principal_id = (
-        _required_identifier(principal_raw, field_name="principal_id")
-        if has_ingress
-        else _identifier_or_digest(person_id or principal_raw or "anonymous", prefix="principal")
+    input_sha256 = _resolve_host_input_sha256(
+        sanitized_message=str(sanitized_message or ""),
+        authority=authority,
     )
-    ingress_claim_ref = str(
-        authority.get("ingress_claim_ref") or authority.get("claim_ref") or ""
-    ).strip() or None
-    ingress_audit_ref = str(
-        authority.get("ingress_audit_ref") or authority.get("audit_ref") or ""
-    ).strip() or None
-    if bool(ingress_claim_ref) != bool(ingress_audit_ref):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "Secure Ingress claim and audit references must be supplied together",
-        )
+    input_ref = f"input://sha256/{input_sha256.split(':', 1)[1]}"
+    principal_id = _resolve_host_command_principal(
+        person_id=person_id,
+        authority=authority,
+    )
     grant_ref = governor_grant_ref(request_ref, governor_result)
     safe_intent = _safe_durable_value(dict(intent_draft or {}), path="intent_draft")
     if not isinstance(safe_intent, dict):
@@ -1383,11 +1776,44 @@ def _sha256_json(value: Mapping[str, Any]) -> str:
     return _sha256_text(payload)
 
 
+async def _review_continuation_result(
+    operation: Any,
+    *,
+    transform: Callable[[Mapping[str, Any]], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    current = await operation if inspect.isawaitable(operation) else operation
+    if isinstance(current, Mapping):
+        return await transform(dict(current))
+    if not hasattr(current, "__aiter__"):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Review continuation returned no durable Host result",
+        )
+    terminal: dict[str, Any] | None = None
+    async for raw_event in current:
+        if not isinstance(raw_event, Mapping):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "Review continuation emitted a non-mapping Host event",
+            )
+        event = await transform(dict(raw_event))
+        if bool(event.get("done")):
+            terminal = event
+    if terminal is None:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Review continuation emitted no durable Host terminal result",
+        )
+    return terminal
+
+
 __all__ = [
     "GOVERNED_HOST_AUTHORITY_INVALID",
+    "GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE",
     "GOVERNED_HOST_GOVERNOR_GRANT_MISSING",
     "GOVERNED_HOST_ROUTE_UNSUPPORTED",
     "GOVERNED_HOST_RUNTIME_INACTIVE",
+    "GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE",
     "GovernedHostAdapterError",
     "GovernedHostRuntime",
     "build_governed_host_runtime",

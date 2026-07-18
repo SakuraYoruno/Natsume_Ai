@@ -63,6 +63,19 @@ def _mateengine_bubble_text_limit() -> int:
     return get_chat_settings().mateengine_chat_bubble_max_chars
 
 
+def _request_embodiment_runtime(request: Request) -> Any | None:
+    """Resolve the app-owned runtime without assuming a fully mounted ASGI scope.
+
+    A real FastAPI request always supplies ``scope['app']``.  Keeping the
+    lookup defensive lets thin request adapters and isolated unit tests retain
+    their fail-closed behaviour: no runtime means no physical enqueue, never a
+    fallback to process-global authority.
+    """
+
+    app = request.scope.get("app")
+    return getattr(getattr(app, "state", None), "embodiment_runtime", None)
+
+
 def _clip_mateengine_bubble_text(text: str) -> str:
     cleaned = " ".join(str(text or "").split())
     limit = _mateengine_bubble_text_limit()
@@ -185,6 +198,7 @@ def _send_mateengine_chat_bubble(
     *,
     emotion_tag: str | None = None,
     emotion_intensity: float | None = None,
+    embodiment_runtime: Any | None = None,
 ) -> None:
     if not text or not _mateengine_chat_bubble_enabled():
         return
@@ -203,6 +217,7 @@ def _send_mateengine_chat_bubble(
             },
             request_id=request_id,
             idempotency_key=f"{request_id}:mateengine:chat-bubble",
+            runtime=embodiment_runtime,
         )
     except Exception as exc:
         _logger.debug(
@@ -267,6 +282,7 @@ def _send_mateengine_state_cue(
     request_id: str,
     lifecycle: Dict[str, Any],
     force: bool = False,
+    embodiment_runtime: Any | None = None,
 ) -> bool:
     if not _mateengine_state_cues_enabled():
         return False
@@ -296,6 +312,7 @@ def _send_mateengine_state_cue(
             },
             request_id=request_id,
             idempotency_key=f"{request_id}:mateengine:state:{clean_state}",
+            runtime=embodiment_runtime,
         )
     except Exception as exc:
         _logger.debug(
@@ -304,7 +321,11 @@ def _send_mateengine_state_cue(
             exc,
         )
         if cue_text:
-            _send_mateengine_chat_bubble(cue_text, request_id=request_id)
+            _send_mateengine_chat_bubble(
+                cue_text,
+                request_id=request_id,
+                embodiment_runtime=embodiment_runtime,
+            )
     return True
 
 
@@ -345,6 +366,8 @@ def _infer_mateengine_state_from_event(event_payload: Any) -> str:
 async def _send_delayed_mateengine_thinking_cue(
     request_id: str,
     lifecycle: Dict[str, Any],
+    *,
+    embodiment_runtime: Any | None = None,
 ) -> None:
     if not _mateengine_state_cues_enabled():
         return
@@ -353,7 +376,12 @@ async def _send_delayed_mateengine_thinking_cue(
         await asyncio.sleep(delay_s)
     if lifecycle.get("done") or lifecycle.get("state_cued"):
         return
-    _send_mateengine_state_cue("thinking", request_id=request_id, lifecycle=lifecycle)
+    _send_mateengine_state_cue(
+        "thinking",
+        request_id=request_id,
+        lifecycle=lifecycle,
+        embodiment_runtime=embodiment_runtime,
+    )
 
 
 def _should_use_inline_governor(intent_draft: Dict[str, Any] | None) -> bool:
@@ -538,6 +566,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             intent_draft=None,
             metrics=metrics,
             governed_command_application=governed_command_application,
+            embodiment_runtime=_request_embodiment_runtime(request),
         ),
         media_type="text/event-stream",
         headers={
@@ -557,6 +586,7 @@ async def _unified_chat_sse_generator(
     intent_draft: Dict[str, Any] | None,
     metrics: Any,
     governed_command_application: Any | None = None,
+    embodiment_runtime: Any | None = None,
     _pre_recall_evidence: list[dict] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -600,6 +630,7 @@ async def _unified_chat_sse_generator(
             _send_delayed_mateengine_thinking_cue(
                 request_id,
                 mateengine_lifecycle,
+                embodiment_runtime=embodiment_runtime,
             )
         )
 
@@ -640,6 +671,7 @@ async def _unified_chat_sse_generator(
                 inferred_state,
                 request_id=request_id,
                 lifecycle=mateengine_lifecycle,
+                embodiment_runtime=embodiment_runtime,
             )
 
         emotion_context = resolve_chat_emotion_context(request_body=request_body)
@@ -754,6 +786,7 @@ async def _unified_chat_sse_generator(
             "approved",
             request_id=request_id,
             lifecycle=mateengine_lifecycle,
+            embodiment_runtime=embodiment_runtime,
         )
         await asyncio.sleep(0)
 
@@ -827,6 +860,7 @@ async def _unified_chat_sse_generator(
                         request_id=request_id,
                         lifecycle=mateengine_lifecycle,
                         force=event_state == "error",
+                        embodiment_runtime=embodiment_runtime,
                     )
                 if _ev.get("phase") == "COMMIT" and _ev.get("done") and not _chat_committed:
                     _chat_committed = True
@@ -840,12 +874,14 @@ async def _unified_chat_sse_generator(
                             request_id=request_id,
                             lifecycle=mateengine_lifecycle,
                             force=True,
+                            embodiment_runtime=embodiment_runtime,
                         )
                         _send_mateengine_chat_bubble(
                             mate_text,
                             request_id=request_id,
                             emotion_tag=mate_performance.get("emotion_tag"),
                             emotion_intensity=mate_performance.get("emotion_intensity"),
+                            embodiment_runtime=embodiment_runtime,
                         )
                     try:
                         from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
@@ -881,6 +917,7 @@ async def _unified_chat_sse_generator(
             request_id=request_id,
             lifecycle=mateengine_lifecycle,
             force=True,
+            embodiment_runtime=embodiment_runtime,
         )
     finally:
         mateengine_lifecycle["done"] = True

@@ -402,6 +402,15 @@ class SQLiteLedger(
         # mirror it into the durable JSON tokens column before column filtering.
         # Old rows without this binding intentionally remain unusable for
         # scoped proactive/embodiment grants.
+        self._insert("governor_log", self._governor_payload(row))
+
+    def log_governor_batch(self, rows: list[dict[str, Any]]) -> bool:
+        """Persist one deterministic node-grant batch, or report a replay race."""
+
+        payloads = [self._governor_payload(row) for row in rows]
+        return self._insert_governor_batch_once(payloads)
+
+    def _governor_payload(self, row: dict[str, Any]) -> dict[str, Any]:
         durable_row = dict(row)
         binding = durable_row.get("approved_action_binding")
         if isinstance(binding, dict):
@@ -416,7 +425,7 @@ class SQLiteLedger(
             payload["tribe_params_snapshot"] = json.dumps(
                 payload["tribe_params_snapshot"], ensure_ascii=False, default=str
             )
-        self._insert("governor_log", payload)
+        return payload
 
     def log_skill_exec(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in SKILL_EXEC_COLUMNS}
@@ -934,19 +943,43 @@ class SQLiteLedger(
         return [self._decode_row("capability_forge_proposal_log", row) for row in rows]
 
     def get_latest_capability_forge_proposals(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        rows = self.list_capability_forge_proposals(limit=max(1, int(limit)) * 20, offset=0)
-        latest: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            proposal_id = str(row.get("proposal_id") or "").strip()
-            if not proposal_id:
-                continue
-            latest[proposal_id] = dict(row)
-        ordered = sorted(
-            latest.values(),
-            key=lambda item: int(item.get("ts_ms") or 0),
-            reverse=True,
-        )
-        return ordered[: max(1, int(limit))]
+        """Return one newest durable event per proposal without a history window."""
+
+        bounded_limit = max(1, min(int(limit), 20000))
+        rows = self._conn.execute(
+            """
+            WITH ranked AS (
+                SELECT
+                    proposal.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY proposal_id
+                        ORDER BY ts_ms DESC, id DESC
+                    ) AS proposal_rank
+                FROM capability_forge_proposal_log AS proposal
+            )
+            SELECT
+                id,
+                proposal_id,
+                event_type,
+                status,
+                stage,
+                session_id,
+                candidate_key,
+                reason_code,
+                actor,
+                payload,
+                ts_ms
+            FROM ranked
+            WHERE proposal_rank = 1
+            ORDER BY ts_ms DESC, id DESC
+            LIMIT ?
+            """,
+            (bounded_limit,),
+        ).fetchall()
+        return [
+            self._decode_row("capability_forge_proposal_log", row)
+            for row in rows
+        ]
 
     # -------------------------------------------------------------------
     # Canon 提案查询与更新

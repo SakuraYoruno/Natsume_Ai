@@ -51,6 +51,15 @@ ASSET_DISPOSITION_LEGACY_BACKFILL = "LEGACY_BACKFILL"
 _SQL_FILE_PATTERN = re.compile(r"^(\d{4})_(.+)\.sql$")
 
 
+def _migration_sha256_hex(value: Any) -> str:
+    """Expose one deterministic digest primitive to checksum-bound SQL assets."""
+
+    if value is None:
+        raise ValueError("natsume_sha256_hex requires non-null input")
+    raw = value if isinstance(value, bytes) else str(value).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 @dataclass(frozen=True)
 class MigrationAsset:
     migration_id: int
@@ -133,6 +142,12 @@ class SQLiteMigrationRunner:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        conn.create_function(
+            "natsume_sha256_hex",
+            1,
+            _migration_sha256_hex,
+            deterministic=True,
+        )
         try:
             self._ensure_meta_tables(conn)
 

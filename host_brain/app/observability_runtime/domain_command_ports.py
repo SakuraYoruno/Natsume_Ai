@@ -10,15 +10,27 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import json
 from dataclasses import asdict, dataclass, is_dataclass
+from functools import partial
 from typing import Any, Callable, Mapping
 
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     ObsCommandEnvelope,
     ObsCommandExecutionResult,
+    ObsCommandPortExecutionError,
     ObsCommandPortRegistry,
+)
+from host_brain.composition.runtime_group import GraphCancellationOperatorError
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationError,
+)
+from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
+    GraphCancellationEffectReconciliationError,
+)
+from host_brain.task_runtime.terminal_state_reconciliation import (
+    TerminalStateReconciliationError,
 )
 from host_brain.observability.operator_command_gateway import operator_runtime_value
 
@@ -96,22 +108,14 @@ class _DomainCommandPort:
         payload["_operator_authority"] = {
             "allowed": True,
             "audit_ref": envelope.audit_ref,
-            "body_sha256": str(
-                operator_runtime_value("command_body_sha256")
-                or hashlib.sha256(
-                    json.dumps(
-                        dict(envelope.payload),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        allow_nan=False,
-                    ).encode("utf-8")
-                ).hexdigest()
-            ),
+            "body_sha256": envelope.body_sha256,
             "claim_ref": envelope.claim_ref,
             "duplicate": False,
             "principal_id": envelope.authority.principal_id,
+            "tenant_id": envelope.authority.tenant_id,
             "request_id": envelope.authority.request_id,
+            "action": envelope.action,
+            "required_scopes": tuple(envelope.required_scopes),
         }
         # This value was injected by bind_server_authority.  Do not read
         # envelope.authority here: the payload is the command/domain boundary.
@@ -309,17 +313,26 @@ async def _avatar_behavior(payload: Mapping[str, Any], request_id: str) -> Any:
     }
 
 
-def _sysmode_service() -> Any:
-    from host_brain.app import obs_routes_sysmode
-
-    service = obs_routes_sysmode._get_mode_transition_service()
-    if isinstance(service, obs_routes_sysmode._FallbackModeService):
+def _sysmode_service(route_ports: HostRoutePorts, *methods: str) -> Any:
+    provider = route_ports.mode_transition_service_provider
+    try:
+        service = provider() if provider is not None else None
+    except Exception as exc:
+        raise ObsDomainCommandError("OBS_SYS_MODE_DOMAIN_UNAVAILABLE") from exc
+    if service is None or any(
+        not callable(getattr(service, method, None)) for method in methods
+    ):
         raise ObsDomainCommandError("OBS_SYS_MODE_DOMAIN_UNAVAILABLE")
     return service
 
 
-def _sysmode_switch(payload: Mapping[str, Any], _request_id: str) -> Any:
-    service = _sysmode_service()
+def _sysmode_switch(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    service = _sysmode_service(route_ports, "switch_mode")
     source: Any = None
     try:
         from host_brain.core.mode_transition import TransitionSource
@@ -333,14 +346,26 @@ def _sysmode_switch(payload: Mapping[str, Any], _request_id: str) -> Any:
     return service.switch_mode(_required_text(payload, "target_mode"), **kwargs)
 
 
-def _sysmode_auto_rules(payload: Mapping[str, Any], _request_id: str) -> Any:
-    updated = _sysmode_service().update_auto_rules(dict(payload.get("rules") or {}))
+def _sysmode_auto_rules(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    updated = _sysmode_service(route_ports, "update_auto_rules").update_auto_rules(
+        dict(payload.get("rules") or {})
+    )
     return {"success": True, "auto_rules": updated}
 
 
-def _sysmode_event(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _sysmode_event(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     event_type = _required_text(payload, "event_type")
-    result = _sysmode_service().on_event(event_type)
+    result = _sysmode_service(route_ports, "on_event").on_event(event_type)
     return {
         "success": True,
         "triggered": result is not None,
@@ -362,17 +387,27 @@ def _canon_payload(payload: Mapping[str, Any], fields: tuple[str, ...]) -> dict[
     return {field: payload[field] for field in fields if field in payload}
 
 
-def _canon_submit(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_submit(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     body = canon_routes.CanonProposalSubmitRequest(**_canon_payload(payload, (
         "proposal_id", "target_doc_id", "proposed_title", "proposed_tags",
         "proposed_body", "proposer_node_id", "summary",
     )))
-    return canon_routes.submit_proposal(body)
+    return canon_routes.submit_proposal(body, _route_ports=route_ports)
 
 
-def _canon_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_approve(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     proposal_id = _required_text(payload, "proposal_id")
@@ -381,20 +416,38 @@ def _canon_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
         "base_version", "approval_token_ref", "actor_id", "session_id",
         "trace_id", "evidence_refs",
     )))
-    return canon_routes.approve_proposal(proposal_id, body)
+    return canon_routes.approve_proposal(
+        proposal_id,
+        body,
+        _route_ports=route_ports,
+    )
 
 
-def _canon_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_reject(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     proposal_id = _required_text(payload, "proposal_id")
     body = canon_routes.CanonProposalRejectRequest(**_canon_payload(payload, (
         "reason", "rejector_node_id",
     )))
-    return canon_routes.reject_proposal(proposal_id, body)
+    return canon_routes.reject_proposal(
+        proposal_id,
+        body,
+        _route_ports=route_ports,
+    )
 
 
-def _canon_rollback(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _canon_rollback(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import canon_routes
 
     proposal_id = _required_text(payload, "proposal_id")
@@ -403,7 +456,11 @@ def _canon_rollback(payload: Mapping[str, Any], _request_id: str) -> Any:
         "base_version", "approval_token_ref", "actor_id", "session_id",
         "trace_id", "evidence_refs",
     )))
-    return canon_routes.rollback_proposal(proposal_id, body)
+    return canon_routes.rollback_proposal(
+        proposal_id,
+        body,
+        _route_ports=route_ports,
+    )
 
 
 def _scheduler_service() -> Any:
@@ -460,14 +517,19 @@ async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> An
     return await output if inspect.isawaitable(output) else output
 
 
-def _tool_execute(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _tool_execute(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import tool_routes
 
     body = tool_routes.ToolExecuteRequest(**_canon_payload(payload, (
         "tool_id", "intent_id", "session_id", "seq", "args", "context",
         "approval_token_ref", "confirm_token_ref", "thread_id", "turn_id",
     )))
-    return tool_routes.execute_tool(body)
+    return tool_routes.execute_tool(body, _route_ports=route_ports)
 
 
 def _mate_action(payload: Mapping[str, Any], request_id: str) -> Any:
@@ -494,14 +556,22 @@ def _mate_say(payload: Mapping[str, Any], _request_id: str) -> Any:
     )
 
 
-def _bond_event(payload: Mapping[str, Any], request_id: str) -> Any:
+def _bond_event(
+    payload: Mapping[str, Any],
+    request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     from host_brain.app import bond_routes
 
     body_values = _canon_payload(payload, (
         "user_id", "update_kind", "evidence_refs", "emotion_tag", "emotion_intensity",
     ))
     body_values["request_id"] = request_id
-    return bond_routes.submit_bond_event(bond_routes.BondEventRequest(**body_values))
+    return bond_routes.submit_bond_event(
+        bond_routes.BondEventRequest(**body_values),
+        _route_ports=route_ports,
+    )
 
 
 def _edge_command_push(payload: Mapping[str, Any], _request_id: str) -> Any:
@@ -526,32 +596,243 @@ def _security_hunt(payload: Mapping[str, Any], _request_id: str) -> Any:
     })
 
 
-def _task_review_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import internal_agent_routes
+async def _task_graph_cancel(payload: Mapping[str, Any], _request_id: str) -> Any:
+    del _request_id
+    service = operator_runtime_value("task_graph_cancellation_command_service")
+    request_cancellation = getattr(service, "request_graph_cancellation", None)
+    if not callable(request_cancellation):
+        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_UNAVAILABLE")
+    authority = payload.get("_operator_authority")
+    if not isinstance(authority, Mapping):
+        raise ObsDomainCommandError("OBS_DOMAIN_BOUND_AUTHORITY_INVALID")
+    try:
+        result = request_cancellation(
+            graph_id=_required_text(payload, "graph_id"),
+            graph_revision=int(payload["graph_revision"]),
+            reason_code=_required_text(payload, "reason_code").upper(),
+            authority=dict(authority),
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except GraphCancellationOperatorError as exc:
+        raise ObsCommandPortExecutionError(
+            exc.reason_code,
+            side_effects_may_have_run=exc.side_effects_may_have_run,
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_RESULT_INVALID")
+    return {
+        "success": True,
+        "side_effects_executed": True,
+        "cancellation": dict(result),
+    }
 
+
+async def _task_operation_reconcile(
+    payload: Mapping[str, Any],
+    _request_id: str,
+) -> Any:
+    del _request_id
+    service = operator_runtime_value("task_operation_reconciliation_command_service")
+    reconcile = getattr(service, "reconcile_graph_cancellation_operation", None)
+    if not callable(reconcile):
+        raise ObsDomainCommandError("OBS_TASK_OPERATION_RECONCILIATION_UNAVAILABLE")
+    try:
+        result = reconcile(
+            intent_ref=_required_text(payload, "intent_ref"),
+            reservation_id=_required_text(payload, "reservation_id"),
+            expected_version=int(payload["expected_version"]),
+            action=_required_text(payload, "action").upper(),
+            reconciler_actor_id=_required_text(payload, "reconciler_actor_id"),
+            downstream_receipt_ref=_optional_text(
+                payload,
+                "downstream_receipt_ref",
+            ),
+            attestation_ref=_required_text(payload, "attestation_ref"),
+            attestation_key_id=_required_text(payload, "attestation_key_id"),
+            attestation_signature=_required_text(payload, "attestation_signature"),
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except GraphCancellationOperationReconciliationError as exc:
+        raise ObsCommandPortExecutionError(
+            exc.reason_code,
+            side_effects_may_have_run=exc.side_effects_may_have_run,
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_TASK_OPERATION_RECONCILIATION_RESULT_INVALID")
+    return {
+        "success": True,
+        "side_effects_executed": True,
+        "reconciliation": dict(result),
+    }
+
+
+async def _task_effect_reconcile(
+    payload: Mapping[str, Any],
+    _request_id: str,
+) -> Any:
+    del _request_id
+    service = operator_runtime_value("task_effect_reconciliation_command_service")
+    reconcile = getattr(service, "reconcile_graph_cancellation_effect", None)
+    if not callable(reconcile):
+        raise ObsDomainCommandError("OBS_TASK_EFFECT_RECONCILIATION_UNAVAILABLE")
+    try:
+        result = reconcile(
+            intent_ref=_required_text(payload, "intent_ref"),
+            effect_id=_required_text(payload, "effect_id"),
+            case_id=_required_text(payload, "case_id"),
+            expected_case_snapshot_sha256=_required_text(
+                payload,
+                "expected_case_snapshot_sha256",
+            ),
+            expected_subject_snapshot_sha256=_required_text(
+                payload,
+                "expected_subject_snapshot_sha256",
+            ),
+            purpose=_required_text(payload, "purpose").upper(),
+            outcome=_required_text(payload, "outcome").upper(),
+            reconciler_actor_id=_required_text(payload, "reconciler_actor_id"),
+            issued_ts_ms=int(payload["issued_ts_ms"]),
+            downstream_receipt_ref=_optional_text(
+                payload,
+                "downstream_receipt_ref",
+            ),
+            executor_quiescence_ref=_optional_text(
+                payload,
+                "executor_quiescence_ref",
+            ),
+            attestation_ref=_required_text(payload, "attestation_ref"),
+            attestation_key_id=_required_text(payload, "attestation_key_id"),
+            attestation_signature=_required_text(payload, "attestation_signature"),
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except GraphCancellationEffectReconciliationError as exc:
+        raise ObsCommandPortExecutionError(
+            exc.reason_code,
+            side_effects_may_have_run=exc.side_effects_may_have_run,
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_TASK_EFFECT_RECONCILIATION_RESULT_INVALID")
+    return {
+        "success": True,
+        "side_effects_executed": True,
+        "reconciliation": dict(result),
+    }
+
+
+async def _task_terminal_reconcile(
+    payload: Mapping[str, Any],
+    _request_id: str,
+) -> Any:
+    del _request_id
+    service = operator_runtime_value("task_terminal_reconciliation_command_service")
+    reconcile = getattr(service, "reconcile_terminal_state", None)
+    if not callable(reconcile):
+        raise ObsDomainCommandError("OBS_TASK_TERMINAL_RECONCILIATION_UNAVAILABLE")
+    target_graph_status = _optional_text(payload, "target_graph_status")
+    target_budget_status = _optional_text(payload, "target_budget_status")
+    try:
+        result = reconcile(
+            case_id=_required_text(payload, "case_id"),
+            expected_case_snapshot_sha256=_required_text(
+                payload,
+                "expected_case_snapshot_sha256",
+            ),
+            expected_subject_snapshot_sha256=_required_text(
+                payload,
+                "expected_subject_snapshot_sha256",
+            ),
+            action=_required_text(payload, "action").upper(),
+            target_graph_status=(
+                target_graph_status.upper()
+                if target_graph_status is not None
+                else None
+            ),
+            target_budget_status=(
+                target_budget_status.upper()
+                if target_budget_status is not None
+                else None
+            ),
+            reconciler_actor_id=_required_text(payload, "reconciler_actor_id"),
+            issued_ts_ms=int(payload["issued_ts_ms"]),
+            attestation_ref=_required_text(payload, "attestation_ref"),
+            attestation_key_id=_required_text(payload, "attestation_key_id"),
+            attestation_signature=_required_text(payload, "attestation_signature"),
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except TerminalStateReconciliationError as exc:
+        raise ObsCommandPortExecutionError(
+            exc.reason_code,
+            side_effects_may_have_run=exc.side_effects_may_have_run,
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_TASK_TERMINAL_RECONCILIATION_RESULT_INVALID")
+    return {
+        "success": True,
+        "side_effects_executed": True,
+        "reconciliation": dict(result),
+    }
+
+
+def _task_review_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
+    service = _task_review_service()
     review_id = _required_text(payload, "review_id")
-    return internal_agent_routes.approve_review(review_id, _canon_payload(payload, (
-        "actor_id", "subject_ref", "subject_version", "resume_phase", "checkpoint_id",
-    )))
+    approved = service.approve_review(
+        review_id,
+        actor_id=_required_text(payload, "actor_id"),
+        expected_subject_ref=_required_text(payload, "subject_ref"),
+        expected_subject_version=int(payload["subject_version"]),
+        expected_resume_phase=_required_text(payload, "resume_phase"),
+        expected_checkpoint_id=_required_text(payload, "checkpoint_id"),
+    )
+    return {"accepted": True, **dict(approved)}
 
 
 def _task_review_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import internal_agent_routes
-
+    service = _task_review_service()
     review_id = _required_text(payload, "review_id")
-    return internal_agent_routes.reject_review(review_id, {
-        "actor_id": _required_text(payload, "actor_id"),
-    })
+    record = service.reject_review(
+        review_id,
+        actor_id=_required_text(payload, "actor_id"),
+    )
+    return {"accepted": True, "review": dict(record)}
 
 
 def _task_review_resume(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import internal_agent_routes
+    from host_brain.observability.degradation_state import (  # noqa: PLC0415
+        require_degradation_capability,
+    )
 
+    require_degradation_capability(
+        capability_id="remote_review_resume",
+        static_risk_level=4,
+    )
+    service = _task_review_service()
     review_id = _required_text(payload, "review_id")
-    return internal_agent_routes.resume_review(review_id, _canon_payload(payload, (
-        "resume_token_ref", "subject_ref", "subject_version", "resume_phase",
-        "checkpoint_id", "resume_result_ref",
-    )))
+    resume = service.resume_review(
+        review_id,
+        resume_token_ref=_required_text(payload, "resume_token_ref"),
+        subject_ref=_required_text(payload, "subject_ref"),
+        subject_version=int(payload["subject_version"]),
+        resume_phase=_required_text(payload, "resume_phase"),
+        checkpoint_id=_required_text(payload, "checkpoint_id"),
+        resume_result_ref=_optional_text(payload, "resume_result_ref"),
+    )
+    return {"accepted": True, "resume": dict(resume)}
+
+
+def _task_review_service() -> Any:
+    service = operator_runtime_value("task_review_command_service")
+    required = ("approve_review", "reject_review", "resume_review")
+    if service is None or any(
+        not callable(getattr(service, method_name, None))
+        for method_name in required
+    ):
+        raise ObsDomainCommandError("OBS_TASK_REVIEW_DOMAIN_UNAVAILABLE")
+    return service
 
 
 _HANDLERS: Mapping[str, DomainHandler] = {
@@ -585,22 +866,48 @@ _HANDLERS: Mapping[str, DomainHandler] = {
     "bond.event.submit": _bond_event,
     "edge.command.push": _edge_command_push,
     "security.hunt.run_once": _security_hunt,
+    "task_graph.cancel": _task_graph_cancel,
+    "task_operation.reconcile": _task_operation_reconcile,
+    "task_effect.reconcile": _task_effect_reconcile,
+    "task_terminal.reconcile": _task_terminal_reconcile,
     "task_review.approve": _task_review_approve,
     "task_review.reject": _task_review_reject,
     "task_review.resume": _task_review_resume,
 }
 
 
-def build_default_obs_domain_command_registry() -> ObsCommandPortRegistry:
+_ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
+    "canon.proposal.submit": _canon_submit,
+    "canon.proposal.approve": _canon_approve,
+    "canon.proposal.reject": _canon_reject,
+    "canon.proposal.rollback": _canon_rollback,
+    "tool.execute": _tool_execute,
+    "bond.event.submit": _bond_event,
+    "sys_mode.switch": _sysmode_switch,
+    "sys_mode.auto_rules.update": _sysmode_auto_rules,
+    "sys_mode.event.submit": _sysmode_event,
+}
+
+
+def build_default_obs_domain_command_registry(
+    *,
+    route_ports: HostRoutePorts | None = None,
+) -> ObsCommandPortRegistry:
     """Bind every manifest command to its fail-closed domain adapter."""
 
     manifest_ids = {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
     if set(_HANDLERS) != manifest_ids:
         raise RuntimeError("OBS_DOMAIN_COMMAND_PORT_MANIFEST_MISMATCH")
+    effective_ports = route_ports or HostRoutePorts()
+    handlers = dict(_HANDLERS)
+    handlers.update({
+        command_id: partial(handler, route_ports=effective_ports)
+        for command_id, handler in _ROUTE_PORT_HANDLERS.items()
+    })
     return ObsCommandPortRegistry(
         ports={
             command_id: _DomainCommandPort(command_id, handler)
-            for command_id, handler in _HANDLERS.items()
+            for command_id, handler in handlers.items()
         },
     )
 

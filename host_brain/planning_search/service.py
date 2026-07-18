@@ -18,6 +18,7 @@ from .contracts import (
     SearchRequest,
     SearchResult,
     SearchStatus,
+    VirtualStateSnapshot,
 )
 from .ports import (
     CandidateExpansionPort,
@@ -56,13 +57,16 @@ class PlanningSearchService:
     def search(self, request: SearchRequest) -> SearchResult:
         ledger = BudgetLedger(request.budget, self._clock_ms)
         trace = TraceRecorder()
-        trace.emit(
-            "service",
-            "search_started",
-            request_id=request.request_id,
-            budget=request.budget.to_dict(),
-            mcts_mode=request.mcts_mode.value,
-        )
+        state_schema, state_digest = _virtual_state_identity(request.state_snapshot)
+        started_details: dict[str, Any] = {
+            "request_id": request.request_id,
+            "budget": request.budget.to_dict(),
+            "mcts_mode": request.mcts_mode.value,
+        }
+        if state_schema:
+            started_details["virtual_state_schema"] = state_schema
+            started_details["virtual_state_digest"] = state_digest
+        trace.emit("service", "search_started", **started_details)
 
         if ledger.deadline_reached():
             trace.emit("service", "search_stopped", reason="deadline_reached")
@@ -74,6 +78,9 @@ class PlanningSearchService:
                 trace=trace,
                 ledger=ledger,
                 mcts_used=False,
+                virtual_state_schema=state_schema,
+                virtual_state_digest=state_digest,
+                state_snapshot=request.state_snapshot,
             )
 
         ranked, failure = self._l1_l2(request, ledger, trace)
@@ -96,6 +103,9 @@ class PlanningSearchService:
                 trace=trace,
                 ledger=ledger,
                 mcts_used=False,
+                virtual_state_schema=state_schema,
+                virtual_state_digest=state_digest,
+                state_snapshot=request.state_snapshot,
             )
 
         mcts_used = False
@@ -138,6 +148,9 @@ class PlanningSearchService:
             trace=trace,
             ledger=ledger,
             mcts_used=mcts_used,
+            virtual_state_schema=state_schema,
+            virtual_state_digest=state_digest,
+            state_snapshot=request.state_snapshot,
         )
 
     def _l1_l2(
@@ -272,6 +285,9 @@ class PlanningSearchService:
         trace: TraceRecorder,
         ledger: BudgetLedger,
         mcts_used: bool,
+        virtual_state_schema: str,
+        virtual_state_digest: str,
+        state_snapshot: VirtualStateSnapshot | None,
     ) -> SearchResult:
         selected = ranked[0] if ranked else None
         return SearchResult(
@@ -285,6 +301,9 @@ class PlanningSearchService:
             counters=ledger.counters(),
             mcts_used=mcts_used,
             side_effects_executed=False,
+            virtual_state_schema=virtual_state_schema,
+            virtual_state_digest=virtual_state_digest,
+            state_snapshot=state_snapshot,
         )
 
 
@@ -294,3 +313,11 @@ def _monotonic_ms() -> float:
 
 def _rounded(value: float) -> float:
     return round(float(value), 10)
+
+
+def _virtual_state_identity(state: VirtualStateSnapshot | None) -> tuple[str, str]:
+    """Extract only canonical state provenance; generic legacy state is allowed."""
+
+    if isinstance(state, VirtualStateSnapshot):
+        return state.schema_version, state.state_digest
+    return "", ""

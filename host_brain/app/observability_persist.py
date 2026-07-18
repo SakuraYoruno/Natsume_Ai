@@ -66,21 +66,6 @@ def persist_chat_observability_rows(
         node_output = dict(node.get("output") or {}) if isinstance(node.get("output"), dict) else node.get("output")
         row_ts = int(now_value + idx)
 
-        ledger.log_llm_node_call(
-            {
-                "request_id": request_id,
-                "node_id": node_id,
-                "provider": provider or "",
-                "model_id": model_id or "",
-                "status": status,
-                "reason_code": reason_code,
-                "latency_ms": node.get("latency_ms"),
-                "input_digest": build_payload_digest(node_input),
-                "output_digest": build_payload_digest(node_output),
-                "ts_ms": row_ts,
-            }
-        )
-
         graph_nodes.append(
             {
                 "node_id": node_id,

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from host_brain.app.governed_route_executors import (
+    GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
     GOVERNED_ROUTE_OUTPUT_INVALID,
     GOVERNED_ROUTE_ROUTE_DRIFT,
     FrozenChatRouteExecutor,
@@ -16,11 +17,48 @@ from host_brain.app.governed_route_executors import (
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
+def _active_budget() -> dict[str, Any]:
+    return {
+        "budget_id": "budget://frozen-route/chat",
+        "status": "ACTIVE",
+        "status_version": 5,
+        "remaining": {
+            "token_count": 120,
+            "time_ms": 4_000,
+            "retry_count": 1,
+            "model_cost_micros": 8_000,
+        },
+    }
+
+
+def _complete_model_measurement() -> dict[str, Any]:
+    return {
+        "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+        "measurement_ref": "model-budget://frozen-route/surface/1",
+        "attempt_count": 1,
+        "retry_count": 0,
+        "token_count": 18,
+        "model_cost_micros": 27,
+    }
+
+
+def _approved_trace(trace_stage_meta: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **dict(trace_stage_meta),
+        "surface_model_attempt": {
+            "success": True,
+            "attempt_ids": ["model-attempt://frozen-route/surface/1"],
+            "budget_measurement": _complete_model_measurement(),
+        },
+    }
+
+
 def _frozen(
     *,
     route: str,
     target_id: str,
     input_pack: dict[str, Any] | None = None,
+    budget: dict[str, Any] | None = None,
 ) -> FrozenNodeInput:
     return FrozenNodeInput(
         command_id="command-frozen-route",
@@ -33,13 +71,18 @@ def _frozen(
         graph_revision=1,
         node_id="node-frozen-route",
         attempt_id="attempt-frozen-route",
+        lease_id="lease-frozen-route",
+        lease_owner_id="owner-frozen-route",
+        fencing_token=1,
         route=route,
         target_id=target_id,
         objective="answer only this frozen objective",
         input_refs=("artifact://frozen/input",),
         _input_pack_json=json.dumps(input_pack or {"user_message": "hello"}),
+        _input_artifacts_json=json.dumps([]),
         node_grant_ref="governor-grant://child/frozen-route",
         parent_grant_ref="governor-grant://parent/frozen-route",
+        _budget_json=json.dumps(budget or {}, sort_keys=True),
     )
 
 
@@ -175,14 +218,32 @@ async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative
         yield 'data: {"phase":"RENDER","chunk":"hel'
         yield 'lo"}\n\n'
         yield 'data: {"phase":"SENTENCE","sentence":"hello"}\n\n'
-        yield 'data: {"phase":"COMMIT","done":true,"decision":"APPROVE",'
-        yield '"narrative":"hello","route_type":"chat","target_id":"surface_reply"}\n\n'
+        terminal = {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "hello",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {
+                "trace_stage_meta": _approved_trace(kwargs["trace_stage_meta"]),
+            },
+        }
+        encoded = json.dumps(terminal, ensure_ascii=False, separators=(",", ":"))
+        split_at = len(encoded) // 2
+        yield f"data: {encoded[:split_at]}"
+        yield f"{encoded[split_at:]}\n\n"
 
     executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    frozen = _frozen(
+        route="chat",
+        target_id="surface_reply",
+        budget=_active_budget(),
+    )
     events = [
         event
         async for event in executor.execute_stream(
-            _frozen(route="chat", target_id="surface_reply")
+            frozen
         )
     ]
 
@@ -192,6 +253,16 @@ async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative
     assert events[0]["narrative"] == "hello"
     assert events[0]["audit_refs"]["source_event_count"] == 3
     assert captured[0]["route_reason"] == "governed_frozen_node"
+    guard = captured[0]["trace_stage_meta"]["governed_model_budget"]
+    assert guard["budget_id"] == "budget://frozen-route/chat"
+    assert guard["graph_id"] == frozen.graph_id
+    assert guard["node_id"] == frozen.node_id
+    assert guard["attempt_id"] == frozen.attempt_id
+    assert guard["deadline_ms"] == 4_000
+    assert guard["max_provider_attempts"] == 2
+    assert guard["max_output_tokens"] == 60
+    assert events[0]["budget_usage"]["measurements"]["token_count"] == 18
+    assert events[0]["budget_usage"]["measurements"]["model_cost_micros"] == 27
 
 
 @pytest.mark.asyncio
@@ -248,7 +319,7 @@ async def test_chat_executor_strips_delivery_authority_and_forces_edge_suppressi
 
 @pytest.mark.asyncio
 async def test_chat_executor_preserves_only_supported_deferred_acceptance_effect() -> None:
-    async def stream(**_kwargs):  # noqa: ANN003
+    async def stream(**kwargs):  # noqa: ANN003
         yield {
             "phase": "COMMIT",
             "done": True,
@@ -264,16 +335,22 @@ async def test_chat_executor_preserves_only_supported_deferred_acceptance_effect
                     },
                 }
             ],
+            "audit_refs": {
+                "trace_stage_meta": _approved_trace(kwargs["trace_stage_meta"]),
+            },
         }
 
     executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
     events = [
         event
         async for event in executor.execute_stream(
-            _frozen(route="chat", target_id="surface_reply")
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                budget=_active_budget(),
+            )
         )
     ]
-
     assert events[0]["acceptance_effect_intents"] == [
         {
             "effect_type": "life.foreground_completed",
@@ -284,6 +361,73 @@ async def test_chat_executor_preserves_only_supported_deferred_acceptance_effect
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_blocks_guarded_approval_without_complete_model_measurement() -> None:
+    async def stream(**kwargs):  # noqa: ANN003
+        trace = dict(kwargs["trace_stage_meta"])
+        trace["surface_model_attempt"] = {
+            "success": True,
+            "attempt_ids": ["model-attempt://frozen-route/surface/partial"],
+            # A provider result with no canonical cost must not become an
+            # accepted chat response merely because it rendered text.
+            "budget_measurement": {"token_count": 18},
+        }
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "unmetered answer",
+            "audit_refs": {"trace_stage_meta": trace},
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(
+                    route="chat",
+                    target_id="surface_reply",
+                    budget=_active_budget(),
+                )
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_blocks_approval_when_surface_replaces_frozen_guard() -> None:
+    async def stream(**kwargs):  # noqa: ANN003
+        trace = _approved_trace(kwargs["trace_stage_meta"])
+        trace["governed_model_budget"] = {
+            **trace["governed_model_budget"],
+            "budget_id": "budget://unrelated/forged",
+        }
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "wrong budget lineage",
+            "audit_refs": {"trace_stage_meta": trace},
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(
+                    route="chat",
+                    target_id="surface_reply",
+                    budget=_active_budget(),
+                )
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED
 
 
 @pytest.mark.asyncio

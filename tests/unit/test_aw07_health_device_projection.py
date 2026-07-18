@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import asyncio
+import sys
 from types import SimpleNamespace
 
 
-def test_device_projection_observes_receipt_after_submission(monkeypatch) -> None:
-    from host_brain.composition import process_services as dependencies
+def test_device_projection_rebuilds_only_from_durable_receipt_facts() -> None:
     from host_brain.channels import embodiment
     from host_brain.app.observability_runtime.health_device_projection import (
         load_device_status_projection_sources,
     )
-    from host_brain.app.observability_runtime import health_device_projection
     from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
-
-    with health_device_projection._receipt_lock:
-        health_device_projection._latest_receipts.clear()
 
     command = embodiment.build_host_embodiment_command(
         kind="avatar",
@@ -23,40 +18,30 @@ def test_device_projection_observes_receipt_after_submission(monkeypatch) -> Non
         request_id="aw07-device-receipt",
     )
     durable_facts: list[dict] = []
-    monkeypatch.setattr(
-        dependencies,
-        "get_ledger",
-        lambda: SimpleNamespace(log_voice_event=lambda row: durable_facts.append(dict(row))),
+    receipt = EmbodimentReceipt(
+        command_id=command.command_id,
+        idempotency_key=command.idempotency_key,
+        accepted=True,
+        status="APPLIED",
+        reason_code=None,
+        detail="ready",
+        received_at_ms=100,
+        completed_at_ms=105,
+        event={"device": "avatar", "connected": True, "token": "must-not-project"},
     )
+    embodiment.build_embodiment_receipt_audit_observer(
+        lambda row: durable_facts.append(dict(row))
+    )(command, receipt)
 
-    class Port:
-        async def submit(self, submitted):  # noqa: ANN001
-            assert submitted is command
-            return EmbodimentReceipt(
-                command_id=command.command_id,
-                idempotency_key=command.idempotency_key,
-                accepted=True,
-                status="APPLIED",
-                reason_code=None,
-                detail="ready",
-                received_at_ms=100,
-                completed_at_ms=105,
-                event={"device": "avatar", "connected": True, "token": "must-not-project"},
-            )
+    class Ledger:
+        def fetch_by_time_range(self, table, **_kwargs):  # noqa: ANN001
+            assert table == "voice_event_log"
+            return durable_facts
 
-    unsubscribe = embodiment.register_embodiment_receipt_observer(
-        embodiment.build_embodiment_receipt_audit_observer(
-            lambda row: durable_facts.append(dict(row))
-        )
-    )
-    try:
-        receipt = asyncio.run(
-            embodiment.submit_embodiment_command(command, command_port=Port())
-        )
-    finally:
-        unsubscribe()
-
-    sources = load_device_status_projection_sources()
+    assert load_device_status_projection_sources() == {}
+    # Compatibility input cannot resurrect a process-local cache.
+    assert load_device_status_projection_sources(include_process_cache=True) == {}
+    sources = load_device_status_projection_sources(Ledger())
     assert receipt.status == "APPLIED"
     assert sources["avatar"][0]["success"] is True
     assert sources["vts"][0]["event"] == {
@@ -100,24 +85,88 @@ def test_health_source_is_passive_cache_and_ledger_only(monkeypatch) -> None:
         def fetch_by_time_range(self, table, **_kwargs):  # noqa: ANN001
             if table == "voice_event_log":
                 return [{"event_type": "TTS_SENT", "status": "OK", "latency_ms": 8, "ts_ms": 800}]
-            if table == "llm_node_call_log":
+            if table == "model_attempt_log":
                 return [
                     {
-                        "node_id": "chat_direct_ja",
-                        "status": "OK",
+                        "attempt_id": "attempt-chat",
+                        "status": "started",
+                        "provider": "gemini",
+                        "model_id": "gemini-2.5-flash-lite",
+                        "metadata": {"model_node_id": "chat_direct_ja"},
+                        "ts_ms": 840,
+                    },
+                    {
+                        "attempt_id": "attempt-chat",
+                        "status": "succeeded",
+                        "provider": "gemini",
+                        "model_id": "gemini-2.5-flash-lite",
+                        "metadata": {"model_node_id": "chat_direct_ja"},
                         "latency_ms": 12,
                         "ts_ms": 850,
                     }
                 ]
+            if table == "llm_pool_call_log":
+                return []
             return []
 
     services, nodes, cursor = load_health_projection_sources(Ledger(), now_ms=1_000)
 
     edge_rpc = next(row for row in services["services"] if row["service_id"] == "edge_rpc")
     chat = next(row for row in nodes["nodes"] if row["node_id"] == "chat_direct_ja")
+    same_model_other_node = next(
+        row for row in nodes["nodes"] if row["node_id"] == "core_reasoner_secondary"
+    )
     assert edge_rpc["status"] == "UP"
     assert chat["status"] == "UP"
+    assert chat["call_count"] == 1
+    assert same_model_other_node["status"] == "UNKNOWN"
     assert cursor == 1_000
+
+
+def test_llm_gateway_health_merges_sources_by_event_time_before_windowing() -> None:
+    from host_brain.app.observability_runtime.health_device_projection import (
+        load_health_projection_sources,
+    )
+
+    class Ledger:
+        def fetch_by_time_range(self, table, **_kwargs):  # noqa: ANN001
+            if table == "model_attempt_log":
+                return [
+                    {
+                        "attempt_id": f"new-attempt-{index}",
+                        "status": "succeeded",
+                        "latency_ms": 10,
+                        "ended_at_ms": 800 + index,
+                        "ts_ms": 800 + index,
+                        "metadata": {},
+                    }
+                    for index in range(20)
+                ]
+            if table == "llm_pool_call_log":
+                return [
+                    {
+                        "request_id": f"old-pool-{index}",
+                        "pool_exhausted": 1,
+                        "total_latency_ms": 20,
+                        "ts_ms": 100 + index,
+                    }
+                    for index in range(20)
+                ]
+            return []
+
+    services, _nodes, _cursor = load_health_projection_sources(
+        Ledger(),
+        now_ms=1_000,
+        include_process_cache=False,
+    )
+
+    gateway = next(
+        row for row in services["services"] if row["service_id"] == "llm_gateway"
+    )
+    assert gateway["status"] == "UP"
+    assert gateway["success_rate"] == 100.0
+    assert gateway["call_count"] == 20
+    assert gateway["last_call_ts"] == 819
 
 
 def test_device_worker_can_rebuild_from_cross_process_receipt_fact() -> None:
@@ -155,37 +204,93 @@ def test_device_worker_can_rebuild_from_cross_process_receipt_fact() -> None:
     assert sources["desktop"][0]["event"]["connected"] is True
 
 
-def test_organ_source_reads_existing_process_state_without_getter(monkeypatch) -> None:
+def test_organ_public_snapshot_uses_only_explicit_evidence(monkeypatch) -> None:
     from host_brain.app.observability_runtime.health_device_projection import (
-        load_organ_tribe_projection_source,
+        ORGAN_AGENT_REGISTRY,
+        build_organ_tribe_public_snapshot,
     )
     from host_brain.tribe import tribe_state
 
-    monkeypatch.setattr(tribe_state, "_GLOBAL_REGISTRY", None)
+    class ForbiddenRegistry:
+        def snapshot(self):
+            raise AssertionError("public snapshot builder read the global registry")
 
-    payload, cursor = load_organ_tribe_projection_source(
-        host_state_loader=lambda: {
-            "namespaces": [
-                {
-                    "namespace": "limbic_agent",
-                    "state": {"mood": "steady", "last_updated_ts_ms": 700},
-                    "updated_at_ms": 710,
-                }
-            ],
-            "ts_ms": 800,
+    monkeypatch.setattr(tribe_state, "_GLOBAL_REGISTRY", ForbiddenRegistry())
+    monkeypatch.setitem(
+        sys.modules,
+        "host_brain.tribe.prefrontal_agent",
+        SimpleNamespace(_PREFRONTAL_AGENT=object()),
+    )
+
+    payload, cursor = build_organ_tribe_public_snapshot(
+        registry_snapshots={
+            "limbic_agent": {
+                "state": {
+                    "active": True,
+                    "mood": "steady",
+                    "last_immune_block_reason": "private user home address",
+                    "last_updated_ts_ms": 700,
+                },
+                "updated_at_ms": 710,
+            },
+            # Snapshot presence alone is not live evidence.
+            "prefrontal_agent": {"state": {"focus": "ready"}},
+            # Future evidence is invalid for this observation.
+            "social_brain_agent": {
+                "state": {"rapport": "warm"},
+                "evidence_ts_ms": 1_100,
+                "timestamp": 800,
+            },
         },
-        scheduler_loader=lambda: {
+        scheduler_snapshot={
             "runtime": {"active": True},
             "tasks": [{"task_id": "emotion_decay_tick", "enabled": True}],
             "timestamp": 900,
         },
-        now_ms=1_000,
+        observed_at_ms=1_000,
     )
 
     limbic = next(row for row in payload["agents"] if row["agent_id"] == "limbic_agent")
-    assert payload["total_agents"] == 23
-    assert payload["active_agents"] >= 1
+    prefrontal = next(
+        row for row in payload["agents"] if row["agent_id"] == "prefrontal_agent"
+    )
+    social = next(
+        row for row in payload["agents"] if row["agent_id"] == "social_brain_agent"
+    )
+    assert payload["total_agents"] == len(ORGAN_AGENT_REGISTRY) == 23
+    assert [row["agent_id"] for row in payload["agents"]] == [
+        row[0] for row in ORGAN_AGENT_REGISTRY
+    ]
+    assert payload["active_agents"] == 1
     assert payload["continuous_system_active"] is True
+    assert payload["emotion_decay_tick_enabled"] is True
+    assert payload["source_process"] == "host-runtime"
+    assert payload["observed_at_ms"] == payload["timestamp"] == 1_000
+    assert payload["evidence_ts_ms"] == 900
     assert limbic["status"] == "active"
-    assert limbic["key_metrics"] == {"mood": "steady"}
-    assert cursor == 1_000
+    assert limbic["key_metrics"] == {"active": True}
+    assert "private user home address" not in repr(payload)
+    assert "last_immune_block_reason" not in repr(payload)
+    assert limbic["last_updated_ts_ms"] == 710
+    assert prefrontal["status"] == "loaded"
+    assert prefrontal["last_updated_ts_ms"] is None
+    assert social["status"] == "loaded"
+    assert social["last_updated_ts_ms"] is None
+    assert cursor == 900
+
+
+def test_organ_public_snapshot_does_not_manufacture_evidence_from_observation_time() -> None:
+    from host_brain.app.observability_runtime.health_device_projection import (
+        build_organ_tribe_public_snapshot,
+    )
+
+    payload, cursor = build_organ_tribe_public_snapshot(
+        registry_snapshots={},
+        scheduler_snapshot={"runtime": {"active": False}},
+        observed_at_ms=5_000,
+    )
+
+    assert payload["active_agents"] == 0
+    assert payload["evidence_ts_ms"] == 0
+    assert payload["timestamp"] == 5_000
+    assert cursor == 0

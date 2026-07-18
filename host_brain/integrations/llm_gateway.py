@@ -1,7 +1,7 @@
 """LLM gateway contract with AIRLOCK and QA enforcement.
 
 M24-A 扩展：
-- health_probe()：探测主模型/备用模型/本地兜底可用性，写入 llm_call_log
+- health_probe()：探测主模型/备用模型/本地兜底可用性，失败写入审计错误日志
 - route_call()：多模型路由（主模型→备用→本地兜底），写入 llm_route_log
 - API Key 从环境变量读取（不硬编码）
 """
@@ -178,7 +178,7 @@ class LlmGatewayContract:
         request_id: str | None = None,
         ts_ms: int | None = None,
     ) -> LLMHealthProbeResult:
-        """M24-A：探测主模型可用性，写入 llm_call_log（健康探测事件）。
+        """M24-A：探测主模型可用性，失败写入审计错误日志。
 
         Args:
             request_id: 请求 ID（可选，用于审计串联）。

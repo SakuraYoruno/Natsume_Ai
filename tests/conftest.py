@@ -102,30 +102,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         pass
 
     try:
-        bond_routes = sys.modules.get("host_brain.app.bond_routes")
-        asgi_app = sys.modules.get("host_brain.app.asgi")
-        if bond_routes is not None:
-            if hasattr(bond_routes, "set_bond_writer_provider"):
-                bond_routes.set_bond_writer_provider(None)
-            if asgi_app is not None and hasattr(asgi_app, "resolve_bond_engine"):
-                bond_routes.set_bond_engine_provider(asgi_app.resolve_bond_engine)
-            else:
-                bond_routes.set_bond_engine_provider(None)
-    except Exception:
-        pass
-
-    try:
-        obs_routes_sysmode = sys.modules.get("host_brain.app.obs_routes_sysmode")
-        obs_routes = sys.modules.get("host_brain.app.obs_routes")
-        if obs_routes_sysmode is not None:
-            obs_routes_sysmode._mode_transition_service = None
-        if obs_routes is not None and obs_routes_sysmode is not None:
-            obs_routes._mode_transition_lock = obs_routes_sysmode._mode_transition_lock
-            obs_routes._mode_transition_service = obs_routes_sysmode._mode_transition_service
-    except Exception:
-        pass
-
-    try:
         tribe_state = sys.modules.get("host_brain.tribe.tribe_state")
         if tribe_state is not None:
             tribe_state._GLOBAL_REGISTRY = None

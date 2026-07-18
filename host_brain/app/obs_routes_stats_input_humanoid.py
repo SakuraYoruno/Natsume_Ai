@@ -14,10 +14,17 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import BaseModel
+from host_brain.app.obs_route_ports import require_obs_projection_ledger_view
+from host_brain.app.observability_runtime.projection_ledger_view import (
+    fail_closed_projection_route,
+)
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+)
 
 from host_brain.app.obs_routes_core import (
     router,
@@ -29,7 +36,6 @@ from host_brain.app.obs_routes_core import (
     _now_ms,
     _safe_json,
 )
-from host_brain.app.observability_runtime.projection_ledger_view import get_projection_ledger_view
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -463,11 +469,14 @@ class InputHumanoidLoopSourceCorrelationResponse(BaseModel):
 # GET /obs/input/humanoid-loop-stats
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-stats", response_model=InputHumanoidLoopStatsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48B: Gateway 人体闭环统计（ACK / 进度回报 / 偏航恢复）。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -560,12 +569,15 @@ def get_input_humanoid_loop_stats(
 # GET /obs/input/humanoid-loop-trend
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-trend", response_model=InputHumanoidLoopTrendResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_trend(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=360, description="时序聚合间隔（分钟）"),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48C: Gateway 人体闭环趋势统计（按请求归一化聚合）。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
@@ -696,6 +708,7 @@ def get_input_humanoid_loop_trend(
 # GET /obs/input/humanoid-loop-alerts
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-alerts", response_model=InputHumanoidLoopAlertsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_alerts(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
@@ -708,10 +721,16 @@ def get_input_humanoid_loop_alerts(
     deviation_recovery_rate_warn: float = Query(60.0, ge=0.0, le=100.0),
     closed_loop_drop_warn: float = Query(25.0, ge=0.0, le=100.0),
     baseline_buckets: int = Query(3, ge=1, le=24),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48D: Gateway 人体闭环趋势告警评估。"""
     now = _now_ms()
-    trend = get_input_humanoid_loop_trend(window_minutes=window_minutes, interval_minutes=interval_minutes)
+    trend = get_input_humanoid_loop_trend(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        projection_view=projection_view,
+    )
 
     labels = trend.timeseries_labels
     total_series = trend.timeseries_total_gateway_requests
@@ -799,10 +818,13 @@ def get_input_humanoid_loop_alerts(
 # GET /obs/input/humanoid-loop-remediation
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-remediation", response_model=InputHumanoidLoopRemediationResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_remediation(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48E: Gateway 人体闭环告警驱动自愈建议。"""
     now = _now_ms()
@@ -812,6 +834,7 @@ def get_input_humanoid_loop_remediation(
         completion_rate_warn=85.0, closed_loop_rate_warn=70.0, ack_touch_rate_warn=75.0,
         progress_touch_rate_warn=50.0, failed_rate_warn=20.0, deviation_recovery_rate_warn=60.0,
         closed_loop_drop_warn=25.0, baseline_buckets=3,
+        projection_view=projection_view,
     )
 
     step_map: Dict[str, InputHumanoidLoopRemediationStepItem] = {}
@@ -833,7 +856,7 @@ def get_input_humanoid_loop_remediation(
 
     # 收集代表性请求
     if alerts_resp.evaluated_bucket_index is not None:
-        ledger = get_projection_ledger_view()
+        ledger = projection_view
         since_ms = now - window_minutes * 60 * 1000
         interval_ms = interval_minutes * 60 * 1000
         bucket_start = since_ms + int(alerts_resp.evaluated_bucket_index) * interval_ms
@@ -963,7 +986,7 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
     intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
     governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
     retrieval_rows = _fetch_request_rows(ledger, "retrieval_event_log", request_id)
-    llm_rows = _fetch_request_rows(ledger, "llm_node_call_log", request_id)
+    llm_rows = _fetch_request_rows(ledger, "model_attempt_log", request_id)
     airlock_rows = _fetch_request_rows(ledger, "airlock_log", request_id)
     bond_rows = _fetch_request_rows(ledger, "bond_update_log", request_id)
     memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
@@ -1050,20 +1073,28 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
 
 
 @router.get("/input/humanoid-loop-diagnostics", response_model=InputHumanoidLoopDiagnosticsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_diagnostics(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48F: Gateway 人体闭环异常回放摘要与根因归纳。"""
     now = _now_ms()
-    remediation = get_input_humanoid_loop_remediation(window_minutes=window_minutes, interval_minutes=interval_minutes, min_bucket_requests=min_bucket_requests)
+    remediation = get_input_humanoid_loop_remediation(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        min_bucket_requests=min_bucket_requests,
+        projection_view=projection_view,
+    )
 
     if not remediation.representative_requests:
         summary = ("当前窗口未发现需要回放归因的代表性异常请求。" if str(remediation.status or "").lower() in {"healthy", "no_data"} else "当前窗口存在闭环异常，但暂时没有提取到可归纳的代表性请求，请继续结合修复建议排查。")
         return InputHumanoidLoopDiagnosticsResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=remediation.status, severity=remediation.severity, summary=summary, diagnosed_count=0, diagnostics=[], timestamp=now)
 
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     diagnostics: List[InputHumanoidLoopDiagnosticItem] = []
     for item in remediation.representative_requests[:5]:
         request_id = str(item.request_id or "").strip()
@@ -1091,14 +1122,22 @@ def _classify_humanoid_loop_hotspot_severity(*, root_cause_code: str, request_co
 
 
 @router.get("/input/humanoid-loop-hotspots", response_model=InputHumanoidLoopHotspotsResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_hotspots(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48G: Gateway 人体闭环病灶热区聚类。"""
     now = _now_ms()
-    diagnostics_resp = get_input_humanoid_loop_diagnostics(window_minutes=window_minutes, interval_minutes=interval_minutes, min_bucket_requests=min_bucket_requests)
+    diagnostics_resp = get_input_humanoid_loop_diagnostics(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        min_bucket_requests=min_bucket_requests,
+        projection_view=projection_view,
+    )
 
     if not diagnostics_resp.diagnostics:
         return InputHumanoidLoopHotspotsResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=diagnostics_resp.status, severity=diagnostics_resp.severity, summary="当前窗口尚未形成系统级病灶热区。", diagnosed_count=0, hotspot_count=0, hotspots=[], timestamp=now)
@@ -1156,12 +1195,15 @@ def get_input_humanoid_loop_hotspots(
 # GET /obs/input/humanoid-loop-hotspot-trend
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-hotspot-trend", response_model=InputHumanoidLoopHotspotTrendResponse)
+@fail_closed_projection_route
 def get_input_humanoid_loop_hotspot_trend(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48H: Gateway 人体闭环病灶热区时间演化趋势。"""
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
     interval_ms = interval_minutes * 60 * 1000
@@ -1270,21 +1312,29 @@ def get_input_humanoid_loop_hotspot_trend(
 # GET /obs/input/humanoid-loop-source-correlation
 # ---------------------------------------------------------------------------
 @router.get("/input/humanoid-loop-source-correlation", response_model=InputHumanoidLoopSourceCorrelationResponse)
+@fail_closed_projection_route
 async def get_input_humanoid_loop_source_correlation(
     window_minutes: int = Query(360, ge=1, le=10080),
     interval_minutes: int = Query(30, ge=1, le=360),
     min_bucket_requests: int = Query(3, ge=1, le=100),
+    *,
+    projection_view: Annotated[Any, Depends(require_obs_projection_ledger_view)],
 ):
     """Ref #48I: Gateway 人体闭环病灶源头归因。"""
     from host_brain.app.obs_routes_stats_governor import get_governor_stats, get_errors, get_subsystems_stats
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    hotspots_resp = get_input_humanoid_loop_hotspots(window_minutes=window_minutes, interval_minutes=interval_minutes, min_bucket_requests=min_bucket_requests)
+    hotspots_resp = get_input_humanoid_loop_hotspots(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        min_bucket_requests=min_bucket_requests,
+        projection_view=projection_view,
+    )
 
     if not hotspots_resp.hotspots:
         return InputHumanoidLoopSourceCorrelationResponse(window_minutes=window_minutes, interval_minutes=interval_minutes, status=hotspots_resp.status, severity=hotspots_resp.severity, summary="当前窗口尚未形成可归因的人体闭环病灶源头。", primary_source_system=None, primary_source_label=None, source_count=0, items=[], timestamp=now)
 
-    ledger = get_projection_ledger_view()
+    ledger = projection_view
 
     # 各源头快照（简化版，保持与原逻辑一致）
     def _gateway_snap():
@@ -1312,7 +1362,11 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _governor_snap():
         try:
-            resp = get_governor_stats(window_minutes=window_minutes, interval_minutes=interval_minutes)
+            resp = get_governor_stats(
+                window_minutes=window_minutes,
+                interval_minutes=interval_minutes,
+                projection_view=projection_view,
+            )
             rejected = int(resp.rejected or 0)
             rejection_rate = float(resp.rejection_rate or 0.0)
             status = "DEGRADED" if rejected > 0 else ("UP" if int(resp.total or 0) > 0 else "UNKNOWN")
@@ -1322,7 +1376,12 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _error_snap():
         try:
-            resp = get_errors(window_minutes=window_minutes, interval_minutes=interval_minutes, limit=10)
+            resp = get_errors(
+                window_minutes=window_minutes,
+                interval_minutes=interval_minutes,
+                limit=10,
+                projection_view=projection_view,
+            )
             total_errors = int(resp.total_errors or 0)
             status = "DOWN" if total_errors >= 3 else ("DEGRADED" if total_errors > 0 else "UP")
             top_stage = str(resp.stages[0].stage or "").strip().upper() if list(resp.stages or []) else None
@@ -1332,7 +1391,10 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _subsystem_snap():
         try:
-            resp = get_subsystems_stats(window_minutes=window_minutes)
+            resp = get_subsystems_stats(
+                window_minutes=window_minutes,
+                projection_view=projection_view,
+            )
             problematic = [{"subsystem": str(item.subsystem or ""), "status": str(item.status or "").upper()} for item in list(resp.subsystems or []) if int(item.failed or 0) > 0 or int(item.degraded or 0) > 0 or str(item.status or "").upper() in {"DOWN", "DEGRADED"}]
             status = "DEGRADED" if problematic else ("UP" if list(resp.subsystems or []) else "UNKNOWN")
             return {"status": status, "problem_count": len(problematic), "problem_subsystems": problematic[:4]}
@@ -1341,15 +1403,23 @@ async def get_input_humanoid_loop_source_correlation(
 
     def _services_snap():
         try:
-            llm_rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now, limit=20_000)
+            llm_rows = ledger.fetch_by_time_range("model_attempt_log", start_ms=since_ms, end_ms=now, limit=20_000)
         except Exception:
             llm_rows = []
         grouped: Dict[str, Dict[str, Any]] = {}
-        for row in [dict(item) for item in llm_rows if isinstance(item, dict)]:
-            node_id = str(row.get("node_id") or "").strip() or "unknown"
-            bucket = grouped.setdefault(node_id, {"total": 0, "failed": 0})
+        for row in latest_terminal_model_attempts(
+            dict(item) for item in llm_rows if isinstance(item, dict)
+        ):
+            attempt_status = str(row.get("status") or "").strip().upper()
+            service_id = (
+                str(row.get("adapter_id") or "").strip()
+                or str(row.get("model_id") or "").strip()
+                or str(row.get("prompt_id") or "").strip()
+                or "unknown"
+            )
+            bucket = grouped.setdefault(service_id, {"total": 0, "failed": 0})
             bucket["total"] += 1
-            if str(row.get("status") or "UNKNOWN").strip().upper() not in {"OK", "SUCCESS", "DONE", "COMPLETED", "PASS", "PASSED"}:
+            if attempt_status != "SUCCEEDED":
                 bucket["failed"] += 1
         degraded = sum(1 for item in grouped.values() if 0 < int(item.get("failed") or 0) < int(item.get("total") or 1))
         down = sum(1 for item in grouped.values() if int(item.get("failed") or 0) >= int(item.get("total") or 1) and int(item.get("total") or 0) > 0)

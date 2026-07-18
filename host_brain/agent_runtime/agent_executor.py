@@ -14,6 +14,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from host_brain.agent_runtime.agent_prompt import (
@@ -384,7 +385,13 @@ class AgentExecutor:
             minimum=30_000, maximum=1_800_000,
         )
 
-    def execute(self, work_order: AgentWorkOrder, *, workspace: Path) -> AgentResult:
+    def execute(
+        self,
+        work_order: AgentWorkOrder,
+        *,
+        workspace: Path,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> AgentResult:
         """执行 AgentWorkOrder 并通过 ModelAttemptService 驱动 ReAct 循环。
 
         Args:
@@ -394,13 +401,20 @@ class AgentExecutor:
         Returns:
             AgentResult（状态 + 输出 + changed_files + verification）
         """
+        if cancelled is not None and not callable(cancelled):
+            raise TypeError("cancelled must be callable")
+
         start_ts = time.time()
         run_mode = str(work_order.run_mode or "inspect").strip().lower()
         sandbox_enabled = run_mode in {"worker", "self_heal", "self_evolve", "audit"}
         request_id = str(work_order.metadata.get("request_id") or work_order.work_order_id)
 
         # 1. 构建工具
-        tool_specs = build_agent_tool_specs(run_mode=run_mode)
+        tool_specs = build_agent_tool_specs(
+            run_mode=run_mode,
+            allowed_actions=work_order.allowed_actions,
+            forbidden_actions=work_order.forbidden_actions,
+        )
         tools_desc = _build_tool_description_for_prompt(tool_specs)
 
         # 2. 构建 system prompt
@@ -449,7 +463,14 @@ class AgentExecutor:
             raw_input=work_order.objective,
         )
 
+        def cancellation_requested() -> bool:
+            return bool(cancelled is not None and cancelled())
+
         for step_num in range(1, self._max_steps + 1):
+            if cancellation_requested():
+                stopped_reason = "CANCELLED"
+                risk_flags.append("agent_cancelled")
+                break
             elapsed_ms = int((time.time() - start_ts) * 1000)
             if elapsed_ms > self._timeout_ms:
                 stopped_reason = "TIMEOUT"
@@ -501,6 +522,14 @@ class AgentExecutor:
                 final_answer = f"LLM call failed at step {step_num}: {exc}"
                 break
 
+            # A model call is bounded but cannot be pre-empted by this
+            # in-process executor.  Recheck the durable caller signal before
+            # interpreting the response or starting any tool side effect.
+            if cancellation_requested():
+                stopped_reason = "CANCELLED"
+                risk_flags.append("agent_cancelled")
+                break
+
             if not raw_output:
                 stopped_reason = "EMPTY_RESPONSE"
                 risk_flags.append("agent_empty_response")
@@ -519,7 +548,12 @@ class AgentExecutor:
                 tool_args = {}
 
             # 权限检查
-            if not is_tool_allowed_for_run_mode(tool_id, run_mode):
+            if not is_tool_allowed_for_run_mode(
+                tool_id,
+                run_mode,
+                allowed_actions=work_order.allowed_actions,
+                forbidden_actions=work_order.forbidden_actions,
+            ):
                 step_duration = int((time.time() - step_start) * 1000)
                 obs = {"error": f"tool `{tool_id}` not allowed in run_mode=`{run_mode}`"}
                 steps.append(AgentStep(
@@ -542,6 +576,10 @@ class AgentExecutor:
                 break
 
             # 执行工具
+            if cancellation_requested():
+                stopped_reason = "CANCELLED"
+                risk_flags.append("agent_cancelled")
+                break
             obs = execute_agent_tool(
                 tool_id=tool_id,
                 args=tool_args,
@@ -557,6 +595,10 @@ class AgentExecutor:
 
             if obs.get("error"):
                 logger.debug("Agent executor tool %s error: %s", tool_id, obs["error"])
+            if cancellation_requested():
+                stopped_reason = "CANCELLED"
+                risk_flags.append("agent_cancelled")
+                break
 
         # 4. 构建结果
         result_text = final_answer or "Agent did not produce a final answer."

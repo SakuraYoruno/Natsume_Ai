@@ -215,6 +215,45 @@ def _surface_json_result(text: str, *, final_provider: str = "mock", final_model
     )
 
 
+def _governed_model_budget_payload(*, deadline_ms: int = 321) -> dict[str, object]:
+    """A complete frozen-node model guard, not an ad-hoc chat hint."""
+
+    return {
+        "schema_version": "Natsume.model_runtime.budget_guard.v1",
+        "budget_id": "budget::surface",
+        "graph_id": "graph::surface",
+        "graph_revision": 3,
+        "node_id": "node::chat",
+        "attempt_id": "attempt::chat-1",
+        "deadline_ms": deadline_ms,
+        "max_provider_attempts": 2,
+        "max_token_count": 80,
+        "max_output_tokens": 40,
+        "max_model_cost_micros": 1_000,
+        "required_usage_dimensions": [
+            "token_count",
+            "completion_tokens",
+            "model_cost_micros",
+        ],
+    }
+
+
+def _fake_surface_chain_result(text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        selected_text=text,
+        observation_codes=(),
+        natsume_emotion_tag="NEUTRAL",
+        user_emotion_tag="NEUTRAL",
+        vts_expression_id="",
+        compiled=SimpleNamespace(trace={}),
+        runtime=SimpleNamespace(
+            latency_ms=1,
+            emotion_confidence=0.0,
+            generation_trace={},
+        ),
+    )
+
+
 def test_proactive_context_followup_forces_bound_message_cause(
     monkeypatch,
     surface_runtime_ports_factory,
@@ -381,6 +420,64 @@ async def test_surface_semantic_retry_is_owned_by_one_model_attempt_request(
     assert len({item["route_decision_id"] for item in attempt_trace["attempts"]}) == 1
     generate_calls = result.runtime.generation_trace["runtime_timings_ms"]["generate_calls"]
     assert [item["kind"] for item in generate_calls] == ["initial"]
+
+
+@pytest.mark.asyncio
+async def test_surface_main_chain_binds_frozen_governed_budget_to_model_attempt(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """The Surface model call must receive the node-bound guard verbatim."""
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    monkeypatch.setenv("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS", "99999")
+    captured_requests: list[object] = []
+
+    class _CapturingModelAttemptService:
+        async def complete(self, request):  # noqa: ANN001
+            captured_requests.append(request)
+            return SimpleNamespace(
+                success=True,
+                content=_candidate_payload(["先把输入和期望输出各写一条。"]),
+            )
+
+    monkeypatch.setattr(
+        "host_brain.composition.process_services.get_model_attempt_service",
+        lambda: _CapturingModelAttemptService(),
+    )
+    monkeypatch.setattr(
+        "host_brain.model_runtime.trace.model_attempt_result_trace",
+        lambda _result: {
+            "success": True,
+            "attempt_ids": ["attempt::model-1"],
+            "budget_measurement": {
+                "token_count": 12,
+                "completion_tokens": 4,
+                "model_cost_micros": 7,
+            },
+        },
+    )
+    trace: dict[str, object] = {
+        "governed_model_budget": _governed_model_budget_payload(deadline_ms=321),
+    }
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "先把输入和期望输出各写一条。"
+    assert len(captured_requests) == 1
+    request = captured_requests[0]
+    guard = request.model_budget_guard
+    assert guard is not None
+    assert guard.as_dict() == _governed_model_budget_payload(deadline_ms=321)
+    assert request.deadline_ms == 321
+    assert request.metadata["model_node_id"] == "node::chat"
 
 
 def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_context(
@@ -1041,6 +1138,71 @@ async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallba
     assert commit["reply_envelope"]["cacheable"] is False
     assert commit["reply_envelope"]["degraded"] is True
     assert commit["audit_refs"]["trace_stage_meta"]["surface_main_chain_used"] is True
+
+
+@pytest.mark.asyncio
+async def test_governed_surface_model_failure_rejects_without_approval_fallback(monkeypatch) -> None:
+    async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("MODEL_PROVIDER_USAGE_REQUIRED: missing canonical usage")
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
+        _boom,
+    )
+
+    events = [
+        _parse_sse(chunk)
+        async for chunk in surface_main_chain_sse_generator(
+            _agent_input(
+                trace_stage_meta={
+                    "governed_model_budget": _governed_model_budget_payload(),
+                }
+            )
+        )
+    ]
+
+    assert [event["phase"] for event in events] == ["COMMIT"]
+    commit = events[0]
+    assert commit["decision"] == "REJECT"
+    assert commit["reason_code"] == "MODEL_PROVIDER_USAGE_REQUIRED"
+    assert commit["narrative"] == "受治理的模型预算未满足，当前节点已停止。"
+    assert commit["audit_refs"]["trace_stage_meta"]["reply_source"] == "surface_main_chain_budget_reject"
+
+
+@pytest.mark.asyncio
+async def test_governed_surface_skips_codex_spark_secondary_model_call(monkeypatch) -> None:
+    async def _fake_run(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return _fake_surface_chain_result("先把实际输入和期望输出并排看。")
+
+    async def _spark_must_not_run(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("a guarded surface node must not make an unbudgeted Spark call")
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
+        _fake_run,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.codex_spark_reply_judge.judge_surface_reply_with_codex_spark",
+        _spark_must_not_run,
+    )
+
+    events = [
+        _parse_sse(chunk)
+        async for chunk in surface_main_chain_sse_generator(
+            _agent_input(
+                trace_stage_meta={
+                    "governed_model_budget": _governed_model_budget_payload(),
+                }
+            )
+        )
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert commit["decision"] == "APPROVE"
+    assert commit["audit_refs"]["trace_stage_meta"]["codex_spark_reply_judge"] == {
+        "status": "SKIPPED",
+        "reason_code": "GOVERNED_MODEL_BUDGET_BOUNDARY",
+    }
 
 
 @pytest.mark.asyncio

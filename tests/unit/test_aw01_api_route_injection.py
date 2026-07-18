@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from host_brain.app import app_factory, router_registry
 from host_brain.app.runtime_metrics import RuntimeMetrics
+from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 
 
@@ -34,6 +36,7 @@ def test_router_registry_mounts_secure_routes_with_stable_unavailable_defaults()
     router_registry.register_host_routers(
         app,
         input_runtime_ports=build_input_runtime_application_ports(),
+        route_ports=HostRoutePorts(),
     )
 
     paths = [getattr(route, "path", "") for route in app.routes]
@@ -72,7 +75,6 @@ def test_app_factory_forwards_explicit_secure_route_providers(
 
         return resolve
 
-    monkeypatch.setattr(app_factory, "wire_route_providers", lambda **_kwargs: None)
     monkeypatch.setattr(
         app_factory,
         "configure_http_middleware",
@@ -92,6 +94,11 @@ def test_app_factory_forwards_explicit_secure_route_providers(
         obs_command_ingress_provider=provider("obs"),
         pentest_secure_run_composition_provider=provider("pentest"),
         signed_skill_provider_intake_provider=provider("signed_intake"),
+        obs_route_ports=ObsRoutePorts(
+            query_projection_store_provider=lambda: SimpleNamespace(
+                get=lambda *_args, **_kwargs: None,
+            ),
+        ),
         input_runtime_ports=build_input_runtime_application_ports(),
     )
 
@@ -123,6 +130,7 @@ def test_scheduler_duplicate_reaches_single_governed_service() -> None:
     router_registry.register_host_routers(
         app,
         input_runtime_ports=build_input_runtime_application_ports(),
+        route_ports=HostRoutePorts(),
         scheduler_command_ingress_provider=lambda: _DuplicateIngress(),
         scheduler_command_service_provider=lambda: _Service(),
     )

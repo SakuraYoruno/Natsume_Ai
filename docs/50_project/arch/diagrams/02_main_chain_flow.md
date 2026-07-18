@@ -3,8 +3,8 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.5
-核对日期：2026-07-16
+版本：v2.8
+核对日期：2026-07-18
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
 
@@ -126,6 +126,7 @@ flowchart TD
     SUCCESS_POLICY -->|"是"| PROJECTION["所有 Node/Attempt/Reservation ACCEPTED\ncanonical projection 重算 digest\n绑定 command/request/route/target/grant"]
     PROJECTION --> RESULT["仅显式 result projection\n编译全图 effects 与公开结果"]
     RESULT --> SUCCESS_UOW["单 UoW：Graph COMPLETED + Budget CONSUMED\n两 Outbox + effects + 0091 decision"]
+    SUCCESS_UOW --> OUTBOX_REV
     SUCCESS_UOW --> REPLAY["completed replay 只读 0091\n双响应丢失重读 terminal authority"]
     NODE -->|"Operation Reservation 未决"| RECOVERY["RECOVERY_REQUIRED\nGraph/Budget 不终结"]
     FAILED --> ATOMIC["Graph + 可选 Budget + Outbox\n+ 0090 canonical v2 decision\n单事务 + exact replay"]
@@ -133,34 +134,64 @@ flowchart TD
     REVIEW --> ATOMIC
     ATOMIC --> MATCH["terminal replay：Graph target + status_version 精确匹配\nReview BLOCKED→FAILED 不泄漏旧 ref"]
     BUDGET --> USAGE["selected=BUDGET_BLOCKED 绑定 rejected usage\n被动 blocked sibling 无需本地 usage"]
-    ATOMIC --> PUB["0093 durable Outbox claim\nboot/recovery-scoped 唯一 owner"]
+    ATOMIC --> OUTBOX_REV["0095 Graph revision + payload\nID/key 升级前后稳定\n歧义 producer 整笔失败"]
+    OUTBOX_REV --> PUB["0093 durable Outbox claim\nboot/recovery-scoped 唯一 owner"]
     PUB --> APPEND["逐条：owner + token + expiry + 单调 fence\n幂等 append runtime event"]
     APPEND --> COMPLETE["fenced complete\n失败 release + durable backoff/error"]
-    TAKEOVER["后台 worker 按 aggregate-head wake 自动续投\nexpired claim 可 takeover\n同 aggregate 严禁越过 predecessor"] -.-> PUB
+    APPEND --> EVENT_REV["新 Event = graph_id@revision\nsource_ref 一 Outbox 一 Event\nlegacy 重投 exact replay"]
+    TAKEOVER["后台 worker 按 revisioned aggregate-head wake 自动续投\nexpired claim 可 takeover\n同 revision 严禁越过 predecessor"] -.-> PUB
     TAKEOVER --> DRAIN["canonical total_pending=0 才 DRAINED\nclaim/backoff/blocked backlog 为 DEFERRED"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
     OFF["atomic_graph_success_enabled 与 bounded_fanout_enabled\n独立默认 OFF；三处生产 composition OFF"] -.-> GATE
-    CANCEL_ENTRY["内部 verified cancellation entry\nexact Graph revision；生产未注入 verifier"] -.-> CANCEL_INTENT["0092 phase 1 UoW\nintent + Graph BLOCKED + durable fences"]
+    CANCEL_UI["Task Runtime UI\nexact Graph revision"] -.-> CANCEL_BFF["同源 Operator BFF\ntask_graph.cancel"]
+    CANCEL_BFF -.-> CANCEL_GATE["Operator Command Gateway\nobs:write + task-runtime:cancel"]
+    CANCEL_OFF["feature flag 默认 OFF\n非 ENFORCE / Gateway 不可用\n启动 fail closed"] -.-> CANCEL_GATE
+    CANCEL_GATE -.-> CANCEL_ENTRY["共享 Secure Ingress verifier\ncommitted audit/claim + canonical body"]
+    CANCEL_ENTRY -.-> CANCEL_ROUTE["immutable HostCommand surface\nHost / Internal / Scheduler"]
+    CANCEL_ROUTE -.-> CANCEL_INTENT["0092 phase 1 UoW\nintent + Graph BLOCKED + durable fences"]
+    CANCEL_ROUTE -.-> CANCEL_UNCERTAIN["下游异常后读 exact durable intent\n无 intent=未执行；匹配=可能已执行\n无法证明则保守 uncertain"]
     CANCEL_INTENT -.-> CANCEL_LOCAL["intent 提交后才 cancel/join\n本地 child + heartbeat"]
     CANCEL_INTENT -.-> CANCEL_RECON["active ownership / operation / effect / review\nadvance + reconciliation gate"]
     CANCEL_SCAN["0094 composition-owned scanner\nrecovery-scoped owner"] -.-> CANCEL_CLAIM["coordination claim + heartbeat\nexpired takeover / stale fence"]
     CANCEL_CLAIM -.-> CANCEL_ADMISSION["HostCommandRepository exact revision\n重建 replay admission"]
     CANCEL_ADMISSION -.-> CANCEL_RECON
     CANCEL_RECON -.->|"durable facts 未收敛"| CANCEL_DEFER["durable defer\n不伪造 cancellation 完成"]
+    EFFECT_FAILED["Effect FAILED\nhandler/transport 失败 ≠ NO_SIDE_EFFECT"] -.-> CANCEL_RECON
+    EFFECT_RETRY["legacy/imported/corrupt retry PENDING\ncanonical fence path 不可达；fail closed"] -.-> CANCEL_RECON
+    EFFECT_VIRGIN["virgin PENDING\ncount/fence/version=0，无 reason/error"] -.-> EFFECT_RULE
+    EFFECT_FAILED -.-> CANCEL_DEFER
+    EFFECT_COMMITTED["Effect COMMITTED + durable receipt\n自动 COMMITTED_EVIDENCE"] -.-> CANCEL_RECON
+    OP_RECON["Operation 签名对账 WIRED_DEFAULT_OFF\nservice + composition + OBS + public key"] -.-> CANCEL_RECON
+    LEGACY_EFFECT["legacy FAILED_EVIDENCE 或 retry-PENDING+CANCELLED\n待审计、修复/隔离；FINALIZED replay 不改写"] -.-> HISTORY
     CANCEL_DEFER -.-> CANCEL_SCAN
     CANCEL_RECON -.-> CANCEL_FINAL["phase 2 UoW\nGraph CANCELLED + Budget + Outbox + decision"]
     CANCEL_FINAL -.-> CANCEL_COMPLETE["0092 FINALIZED + decision 后\n清理 0094 协调行"]
-    CANCEL_FINAL -.-> PUB
+    CANCEL_FINAL -.-> OUTBOX_REV
     EFFECT_RULE["accepted NODE effect 继续 delivery\n其他未授权 NODE/GRAPH effect 被 fence"] -.-> CANCEL_RECON
     FIRST["0091 success / 0092 cancel\nfirst-writer-wins + exact replay"] -.-> CANCEL_INTENT
-    CAS["P1：Budget CAS 固定重试上限\nALREADY_EXCEEDED 高竞争语义未收敛"] -.-> NODE
-    HISTORY["P1：历史 BLOCKED+failure / FAILED+ACTIVE Budget\n归 reconciliation，不由 ACTIVE 重入自动修复"] -.-> REENTRY
-    PREVIEW["P1：WAITING_APPROVAL 仍走 pre-review 专线\n未统一 optional-attempt observation"] -.-> SNAP
+    TERMINAL_GUARD["BLOCKED / FAILED / CANCELLED / COMPLETED\n+ 未结 Budget：Runtime 重入不静默修复"] -.-> TERMINAL_INV["0099 recover_startup 后单次最多 10,000 Graph\nappend-only case/proof/supersession；migration schema-only"]
+    TERMINAL_INV -.-> TERMINAL_AUTO["仅 FAILED + exact atomic failure bundle\n+ 唯一 graph-scope ACTIVE/EXCEEDED Budget\n显式 default-OFF system auto"]
+    TERMINAL_INV -.-> TERMINAL_SIGNED["BLOCKED failure / legacy CANCELLED\nEd25519 signed task_terminal.reconcile"]
+    TERMINAL_INV -.-> TERMINAL_QUARANTINE["child/missing/multi Budget 或完整终态漂移\nquarantine only"]
+    TERMINAL_INV -.-> TERMINAL_FENCE["unresolved current case: graph-wide fence\nGraph/cancel + Budget transition/consume/usage/retry\n0099 proof UoW only bypass"]
+    TERMINAL_FENCE -.-> TERMINAL_CHAIN["old case -> current replacement\nsupersession chain -> trusted proof"]
+    REVIEW_QUEUE["0096 Review terminal mutation + enqueue\n同一事务；不复制业务 status"] --> REVIEW_CLAIM["claim + heartbeat + expired takeover\nowner/token/expiry/monotonic fence"]
+    REVIEW_CLAIM --> REVIEW_ROUTE["immutable HostCommand surface\n重入 Host/Internal/Scheduler"]
+    REVIEW_ROUTE --> REENTRY
+    PREVIEW["WAITING_APPROVAL 合法 attempt_id=null\nPOST 仍绑定原 SUCCEEDED Attempt"] --> SNAP
 
     style LIMIT fill:#fff3cd,stroke:#a87500
     style OFF fill:#fff3cd,stroke:#a87500
     style TAKEOVER fill:#d1e7dd,stroke:#177245
+    style OUTBOX_REV fill:#d1e7dd,stroke:#177245
+    style EVENT_REV fill:#d1e7dd,stroke:#177245
     style CANCEL_ENTRY fill:#fff3cd,stroke:#a87500
+    style CANCEL_UI fill:#fff3cd,stroke:#a87500
+    style CANCEL_BFF fill:#fff3cd,stroke:#a87500
+    style CANCEL_GATE fill:#fff3cd,stroke:#a87500
+    style CANCEL_OFF fill:#fff3cd,stroke:#a87500
+    style CANCEL_ROUTE fill:#fff3cd,stroke:#a87500
+    style CANCEL_UNCERTAIN fill:#fff3cd,stroke:#a87500
     style CANCEL_INTENT fill:#fff3cd,stroke:#a87500
     style CANCEL_LOCAL fill:#fff3cd,stroke:#a87500
     style CANCEL_SCAN fill:#fff3cd,stroke:#a87500
@@ -168,18 +199,32 @@ flowchart TD
     style CANCEL_ADMISSION fill:#fff3cd,stroke:#a87500
     style CANCEL_RECON fill:#fff3cd,stroke:#a87500
     style CANCEL_DEFER fill:#fff3cd,stroke:#a87500
+    style EFFECT_FAILED fill:#fff3cd,stroke:#a87500
+    style EFFECT_RETRY fill:#fff3cd,stroke:#a87500
+    style EFFECT_VIRGIN fill:#d1e7dd,stroke:#177245
+    style EFFECT_COMMITTED fill:#d1e7dd,stroke:#177245
+    style OP_RECON fill:#fff3cd,stroke:#a87500
+    style LEGACY_EFFECT fill:#fff3cd,stroke:#a87500
     style CANCEL_FINAL fill:#fff3cd,stroke:#a87500
     style CANCEL_COMPLETE fill:#fff3cd,stroke:#a87500
     style EFFECT_RULE fill:#fff3cd,stroke:#a87500
     style FIRST fill:#fff3cd,stroke:#a87500
-    style CAS fill:#fff3cd,stroke:#a87500
-    style HISTORY fill:#fff3cd,stroke:#a87500
-    style PREVIEW fill:#fff3cd,stroke:#a87500
+    style TERMINAL_GUARD fill:#fff3cd,stroke:#a87500
+    style TERMINAL_INV fill:#fff3cd,stroke:#a87500
+    style TERMINAL_AUTO fill:#fff3cd,stroke:#a87500
+    style TERMINAL_SIGNED fill:#fff3cd,stroke:#a87500
+    style TERMINAL_QUARANTINE fill:#fff3cd,stroke:#a87500
+    style TERMINAL_FENCE fill:#fff3cd,stroke:#a87500
+    style TERMINAL_CHAIN fill:#fff3cd,stroke:#a87500
+    style REVIEW_QUEUE fill:#d1e7dd,stroke:#177245
+    style REVIEW_CLAIM fill:#d1e7dd,stroke:#177245
+    style REVIEW_ROUTE fill:#d1e7dd,stroke:#177245
+    style PREVIEW fill:#d1e7dd,stroke:#177245
     style RECOVERY fill:#fff3cd,stroke:#a87500
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0093 已收口 Task Runtime Outbox 的跨进程投递；0094 另以 composition-owned worker 收口 pending cancellation 的扫描、持久 coordination claim/heartbeat/defer、expired takeover 与 exact HostCommand admission 重建。0094 不复制业务 cancellation status，0092 intent/decision 仍是唯一 authority；operation/effect/review 未 reconciliation 时只 durable defer。B5C verifier 尚未在生产 composition 注入，cancellation branch 也没有 HTTP/UI/canary。该图不是 production cancellation wiring。
+0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；0098 只处理 Effect 不确定性。0099 另行冻结 append-only case/proof/supersession，readiness 比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec。Classifier 要求唯一 0090、完整 0091/0092 validator 与 exact failure Outbox refs。已 inventoried 未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；旧 case 只能经 replacement/supersession 最终落到可信 proof。System proof 以 case 时间跨进程收敛；healthy closure 仅在历史未决 + current healthy 时生成 signed `NONE` 且零业务写。这不是通用恢复器；两个入口默认 OFF，外部 deployment inventory/key lifecycle/canary未知，整体保持 `PRODUCTION_OFF / CANARY_NOT_RUN`。
 
 ## Plan 分支的真实边界
 
@@ -199,13 +244,15 @@ flowchart LR
 
 当前 Host Plan 不会新增步骤、发明工具组合或比较多套方案。搜索内核存在，但这里主要用于选择完整合法的拓扑顺序。
 
+Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯虚拟快照内生成 `inspect → registered patch → unit/rollback`，随后可将重验的 selected inputs 交给 compiler；没有 worktree、模型/工具/测试、admission、receipt 或生产影响。D17/D18 也没有接入该实线：它仅在实验 adapter 内从 clean protected source 创建 private bare clone 和 baseline/search detached worktree；仓库自有 trusted arm 才能使用 lower-case repository-relative ACL API，cleanup 后复核 source fingerprint。D18 将 preregistration、双臂 evidence/outcome、`VERIFIED_CLEAN` 和 terminal receipt 写入 0106 durable ledger。D19 只在预注册时让固定 `python -m pytest -q <repo-relative-test>` 在每条 worktree 的 shell-free child 中运行，拒 paired test/wall budget 超限并写 path-free verifier receipt；该 service 不选择 winner 或赋予生产 authority。API/账本都无法形成独立信任域，也没有 OS/container/filesystem/network sandbox、模型/工具/token/cost budget 或收益，故同样不能画成 Host 已具备目标规划。
+
 ## 当前例外与缺口
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success、0092 verified two-phase cancellation、0093 Outbox durable delivery 与 0094 pending-intent coordination 已有 shadow/contract 证据。生产 cancellation verifier/HTTP/UI、完整 operation/effect reconciliation、revisioned 0090、历史半提交、统一 `WAITING_APPROVAL`、Budget 高竞争和 canary 尚未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 到 0099 terminal reconciliation 均有分范围证据。0099 只允许带唯一 graph-scope Budget 的 exact FAILED bundle 显式 auto；child/missing/multi Budget 与完整终态漂移必须 quarantine，不代表 general/multi-node/pre-budget recovery。部署 inventory/remediation、凭据/key lifecycle 与真实 canary仍未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
-5. 启动按 migration/readiness → `recover_startup` → recovery outbox publish → outbox background worker → runtime activation/cancellation worker 排序，恢复异常 fail closed；配置逻辑 owner 会派生为每次 container construction 唯一的 execution owner。0093 Outbox 与 0094 cancellation coordination 都支持过期 takeover，但 0094 未收敛 operation/effect 事实时只 durable defer，不能据此宣称完整业务 reconciliation 已完成。
+5. 启动按 migration/readiness（含0099）→ `recover_startup` → 0099 单次最多 10,000 个 terminal Graph inventory → 可选 default-off exact auto → recovery outbox publish → outbox worker → surface runtime activation → cancellation/Review workers 排序，异常 fail closed。0099 不扫描并重做 worker；它只处理已终态 Graph 的显式 case/proof/supersession。
 
 ## 代码锚点
 

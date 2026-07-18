@@ -515,58 +515,51 @@ def _load_request_aux_llm_trace_nodes(
     request_id: str,
 ) -> list[dict[str, Any]]:
     try:
-        rows = list(ledger.fetch_by_request_id("llm_node_call_log", request_id) or [])
+        rows = list(ledger.fetch_by_request_id("llm_pool_call_log", request_id) or [])
     except Exception:
         return []
 
     rows.sort(
         key=lambda row: (
             int(row.get("ts_ms") or 0),
-            str(row.get("node_id") or "").strip(),
+            str(row.get("scene_type") or "").strip(),
         )
     )
 
     nodes: list[dict[str, Any]] = []
     for row in rows:
-        node_id = str(row.get("node_id") or "").strip()
-        if not node_id or node_id == "cortex_orchestrator_llm_stream":
-            continue
-        provider = str(row.get("provider") or "").strip().lower() or None
-        model_id = str(row.get("model_id") or "").strip() or None
-        status = str(row.get("status") or "OK").strip().upper() or "OK"
-        reason_code = str(row.get("reason_code") or "").strip() or None
-        latency_ms = row.get("latency_ms")
+        scene_name = str(row.get("scene_type") or "CHAT").strip().upper() or "CHAT"
+        node_id = f"llm_pool:{scene_name.lower()}"
+        provider = str(row.get("final_provider") or "").strip().lower() or None
+        model_id = str(row.get("final_model") or "").strip() or None
+        pool_exhausted = bool(row.get("pool_exhausted"))
+        status = "DEGRADED" if pool_exhausted else "OK"
+        reason_code = "LLM_POOL_EXHAUSTED" if pool_exhausted else None
+        latency_ms = row.get("total_latency_ms")
         try:
             latency_value = int(latency_ms) if latency_ms is not None else None
         except (TypeError, ValueError):
             latency_value = None
-        display_name = "LLM Pool"
-        if node_id.startswith("llm_pool:"):
-            scene_name = node_id.split(":", 1)[1].strip().upper() or "CHAT"
-            display_name = f"LLM Pool ({scene_name})"
-        output_digest = str(row.get("output_digest") or "").strip()
-        output_data: dict[str, Any] | None = None
-        if output_digest:
-            try:
-                attempts_payload = json.loads(output_digest)
-            except Exception:
-                attempts_payload = None
-            output_data = {"attempts": attempts_payload} if isinstance(attempts_payload, list) else {"output_digest": output_digest[:400]}
-        input_digest = str(row.get("input_digest") or "").strip()
-        input_data = {"input_digest": input_digest[:300]} if input_digest else None
         nodes.append(
             _build_trace_stage_node(
                 node_id=node_id,
                 node_type="llm",
-                display_name=display_name,
+                display_name=f"LLM Pool ({scene_name})",
                 ts_ms=int(row.get("ts_ms") or 0),
                 status=status,
                 reason_code=reason_code,
                 latency_ms=latency_value,
                 provider=provider,
                 model_id=model_id,
-                input_data=input_data,
-                output_data=output_data,
+                input_data={
+                    "scene_type": scene_name,
+                    "cognitive_tier": str(row.get("cognitive_tier") or "").strip().upper() or None,
+                },
+                output_data={
+                    "attempt_count": int(row.get("attempt_count") or 0),
+                    "cached": bool(row.get("cached")),
+                    "pool_exhausted": pool_exhausted,
+                },
             )
         )
     return nodes
@@ -658,21 +651,6 @@ async def _persist_post_process_audit(
                 "ts_ms": ts_ms,
             }
         )
-
-    ledger.log_llm_node_call(
-        {
-            "request_id": request_id,
-            "node_id": "cortex_orchestrator_llm_stream",
-            "provider": provider_name,
-            "model_id": model_id,
-            "status": "OK" if narrative.strip() else "DEGRADED",
-            "reason_code": None if narrative.strip() else "LLM_EMPTY_OUTPUT",
-            "latency_ms": llm_latency_ms,
-            "input_digest": (llm_input_digest or "")[:500] or None,
-            "output_digest": (narrative or "")[:400] or None,
-            "ts_ms": _now,
-        }
-    )
 
     _trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
     _normalized_retrieval_summary = _normalize_retrieval_summary_for_audit(retrieval_summary)

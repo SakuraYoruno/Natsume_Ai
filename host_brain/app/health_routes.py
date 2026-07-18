@@ -12,7 +12,7 @@ from json import loads as json_loads
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from natsume_contracts.edge.service_catalog_v1 import build_edge_transport_probe_statuses
 
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
@@ -37,9 +37,10 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
     CANON_SYNC_KIND,
     STARTUP_SNAPSHOT_KEY,
     STARTUP_SNAPSHOT_KIND,
-    read as read_query_projection,
+    read_from_store,
     response_meta,
 )
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 _logger = logging.getLogger("Natsume.health_routes")
 
 router = APIRouter()
@@ -345,10 +346,16 @@ async def mcp_health_check() -> HealthResponse:
 
 
 @router.get("/health/canon_sync", response_model=HealthResponse)
-async def canon_sync_health_check() -> HealthResponse:
+async def canon_sync_health_check(
+    projection_store: Any = Depends(require_obs_query_projection_store),
+) -> HealthResponse:
     """Read the independently refreshed canon-sync projection."""
     ts_ms = int(time.time() * 1000)
-    payload, meta = read_query_projection(CANON_SYNC_KIND, CANON_SYNC_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        CANON_SYNC_KIND,
+        CANON_SYNC_KEY,
+    )
     return HealthResponse(
         status=str((payload or {}).get("status") or "DEGRADED"),
         version="0.1.0",
@@ -364,10 +371,16 @@ async def canon_sync_health_check() -> HealthResponse:
 
 
 @router.get("/startup")
-async def startup_report() -> Dict[str, Any]:
+async def startup_report(
+    projection_store: Any = Depends(require_obs_query_projection_store),
+) -> Dict[str, Any]:
     """Return the immutable startup snapshot; never rerun startup probes."""
 
-    payload, meta = read_query_projection(STARTUP_SNAPSHOT_KIND, STARTUP_SNAPSHOT_KEY)
+    payload, meta = read_from_store(
+        projection_store,
+        STARTUP_SNAPSHOT_KIND,
+        STARTUP_SNAPSHOT_KEY,
+    )
     ts_ms = int((payload or {}).get("ts_ms") or 0)
     request_id = str((payload or {}).get("request_id") or "startup-projection")
     return {

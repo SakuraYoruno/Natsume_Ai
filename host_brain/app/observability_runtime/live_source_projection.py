@@ -15,8 +15,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from .process_state_projection import read_process_projection
-from .projection_ledger_view import get_projection_ledger_view
-from host_brain.observability.projection_store import digest_json
+from .projection_ledger_view import ProjectionLedgerView
+from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
 
 GATEWAY_STATS_SOURCE_KIND = "gateway_stats_source"
@@ -36,12 +36,13 @@ _last_job_run = 0.0
 
 
 def read_operator_live_projection(
+    store: QueryProjectionStore,
     kind: str,
     key: str,
     *,
     max_age_ms: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    return read_process_projection(kind, key, max_age_ms=max_age_ms)
+    return read_process_projection(store, kind, key, max_age_ms=max_age_ms)
 
 
 def _public_gateway_health(value: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -86,10 +87,14 @@ def _public_gateway_voice_row(value: Mapping[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _upsert(kind: str, key: str, payload: Mapping[str, Any], *, source_ref: str) -> None:
-    from host_brain.composition.process_services import get_query_projection_store
-
-    store = get_query_projection_store()
+def _upsert(
+    store: QueryProjectionStore,
+    kind: str,
+    key: str,
+    payload: Mapping[str, Any],
+    *,
+    source_ref: str,
+) -> None:
     now = int(time.time() * 1000)
     current = store.get(kind, key)
     cursor = max(now, int(current.source_cursor) + 1 if current is not None else now)
@@ -107,15 +112,15 @@ def _upsert(kind: str, key: str, payload: Mapping[str, Any], *, source_ref: str)
 def refresh_operator_live_state_projections(
     *,
     life_snapshot_reader: Any,
+    ledger_view: ProjectionLedgerView,
+    mode_service: Any,
+    store: QueryProjectionStore,
 ) -> dict[str, int]:
-    """Materialize the three remaining live query sources in one fenced job."""
+    """Materialize live sources through explicitly composed app-owned ports."""
 
     from host_brain.app import obs_routes_platform as platform_routes
     from host_brain.app import obs_routes_proactive_autonomy as proactive_routes
-    from host_brain.app import obs_routes_sysmode as sysmode_routes
-
     now = int(time.time() * 1000)
-    ledger_view = get_projection_ledger_view()
     start_ms = now - 10_080 * 60 * 1000
     remote = asyncio.run(platform_routes._fetch_remote_gateway_health())
     channel_rows = ledger_view.fetch_by_time_range(
@@ -138,22 +143,28 @@ def refresh_operator_live_state_projections(
         },
     }
     _upsert(
+        store,
         GATEWAY_STATS_SOURCE_KIND,
         GATEWAY_STATS_SOURCE_KEY,
         gateway_payload,
         source_ref="operator-live-state://gateway",
     )
 
-    service = sysmode_routes._get_mode_transition_service()
-    status = dict(service.get_current_status() or {})
-    history = [dict(item) for item in list(service.get_history(limit=100) or [])]
+    status_reader = getattr(mode_service, "get_current_status", None)
+    history_reader = getattr(mode_service, "get_history", None)
+    if not callable(status_reader) or not callable(history_reader):
+        raise RuntimeError("OPERATOR_LIVE_MODE_SERVICE_PORT_UNAVAILABLE")
+    status = dict(status_reader() or {})
+    history = [dict(item) for item in list(history_reader(limit=100) or [])]
     _upsert(
+        store,
         SYS_MODE_STATUS_KIND,
         SYS_MODE_STATUS_KEY,
         status,
         source_ref="operator-live-state://sys-mode/status",
     )
     _upsert(
+        store,
         SYS_MODE_HISTORY_KIND,
         SYS_MODE_HISTORY_KEY,
         {"items": history, "total": len(history), "timestamp": now},
@@ -166,6 +177,7 @@ def refresh_operator_live_state_projections(
         life_snapshot_reader=life_snapshot_reader,
     )
     _upsert(
+        store,
         PROACTIVE_AUTONOMY_KIND,
         PROACTIVE_AUTONOMY_DEFAULT_KEY,
         proactive,
@@ -177,6 +189,9 @@ def refresh_operator_live_state_projections(
 def run_operator_live_state_projection_job(
     *,
     life_snapshot_reader: Any,
+    ledger_view: ProjectionLedgerView,
+    mode_service: Any,
+    store: QueryProjectionStore,
 ) -> dict[str, int | bool]:
     global _last_job_run
     now = time.monotonic()
@@ -186,6 +201,9 @@ def run_operator_live_state_projection_job(
         _last_job_run = now
     return refresh_operator_live_state_projections(
         life_snapshot_reader=life_snapshot_reader,
+        ledger_view=ledger_view,
+        mode_service=mode_service,
+        store=store,
     )
 
 

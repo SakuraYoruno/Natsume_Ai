@@ -505,6 +505,21 @@ def test_openai_compat_payload_raises_deepseek_json_token_floor() -> None:
     assert payload["max_tokens"] == 384
 
 
+def test_openai_compat_payload_keeps_internal_hard_cap_below_deepseek_floor() -> None:
+    payload = helpers._build_openai_compat_payload(
+        model_id="deepseek-v4-flash",
+        messages=[{"role": "user", "content": "输出 JSON"}],
+        gen_params={
+            "max_tokens": 17,
+            "response_format": {"type": "json_object"},
+            "_natsume_hard_max_output_tokens": 17,
+        },
+    )
+
+    assert payload["max_tokens"] == 17
+    assert "_natsume_hard_max_output_tokens" not in payload
+
+
 def test_openai_compat_payload_keeps_other_model_token_cap() -> None:
     payload = helpers._build_openai_compat_payload(
         model_id="gemini-2.5-flash-lite",

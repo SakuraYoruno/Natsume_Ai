@@ -49,14 +49,17 @@ NOW = 1_900_000_000_000
 TENANT_ID = "tenant.security.test"
 SECRETS = {
     "key.internal-agent.test": "internal-agent-test-secret",
+    "key.review-operator.test": "review-operator-test-secret",
     "key.scheduler-admin.test": "scheduler-admin-test-secret",
 }
 PRINCIPALS = {
     IngressSurface.INTERNAL_AGENT: "service.internal-agent.test",
+    IngressSurface.REVIEW_OPERATOR: "operator.review.test",
     IngressSurface.SCHEDULER_ADMIN: "service.scheduler-admin.test",
 }
 KEYS = {
     IngressSurface.INTERNAL_AGENT: "key.internal-agent.test",
+    IngressSurface.REVIEW_OPERATOR: "key.review-operator.test",
     IngressSurface.SCHEDULER_ADMIN: "key.scheduler-admin.test",
 }
 
@@ -108,6 +111,7 @@ def _database(tmp_path: Path) -> Path:
         )
         for surface in (
             IngressSurface.INTERNAL_AGENT,
+            IngressSurface.REVIEW_OPERATOR,
             IngressSurface.SCHEDULER_ADMIN,
         ):
             policy = M48B_P0_SURFACE_POLICIES[surface]
@@ -214,16 +218,18 @@ def _signed_http_request(
     body: bytes,
     *,
     suffix: str,
+    policy_surface: IngressSurface | None = None,
     request_id: str | None = None,
     idempotency_key: str | None = None,
     nonce: str | None = None,
 ) -> _Request:
-    policy = M48B_P0_SURFACE_POLICIES[surface]
+    selected_surface = policy_surface or surface
+    policy = M48B_P0_SURFACE_POLICIES[selected_surface]
     identity = _identity(surface, suffix=suffix, request_id=request_id)
-    idem = idempotency_key or f"idem.{surface.value}.{suffix}"
-    nonce_value = nonce or f"nonce.{surface.value}.{suffix}"
+    idem = idempotency_key or f"idem.{selected_surface.value}.{surface.value}.{suffix}"
+    nonce_value = nonce or f"nonce.{selected_surface.value}.{surface.value}.{suffix}"
     unsigned = build_surface_request(
-        surface=surface,
+        surface=selected_surface,
         identity=identity,
         credential=None,
         method="POST",
@@ -233,7 +239,9 @@ def _signed_http_request(
         raw_body=body,
         received_at_epoch_ms=NOW,
         transport_key=f"principal:{identity.principal.principal_id}",
-        correlation_id=f"correlation.{surface.value}.{suffix}",
+        correlation_id=(
+            f"correlation.{selected_surface.value}.{surface.value}.{suffix}"
+        ),
     )
     identity_header = base64.urlsafe_b64encode(
         identity.to_canonical_json().encode("utf-8")
@@ -256,7 +264,9 @@ def _signed_http_request(
             (b"x-natsume-nonce", nonce_value.encode("ascii")),
             (
                 b"x-natsume-correlation-id",
-                f"correlation.{surface.value}.{suffix}".encode("ascii"),
+                (
+                    f"correlation.{selected_surface.value}.{surface.value}.{suffix}"
+                ).encode("ascii"),
             ),
         ],
     )
@@ -329,6 +339,49 @@ def test_http_authority_is_server_owned_valid_and_secret_free(tmp_path: Path) ->
             assert SECRETS[KEYS[surface]] not in exposed
             assert "raw_proof" not in exposed
             assert "x-natsume-proof" not in exposed
+    finally:
+        store.close()
+
+
+def test_review_http_path_requires_server_owned_review_decide_scope(
+    tmp_path: Path,
+) -> None:
+    evaluator, store = _evaluator(_database(tmp_path))
+    body = b'{"review_id":"review.scope.test"}'
+    ingress = InternalAgentIngress(evaluator=evaluator)
+    review_policy = M48B_P0_SURFACE_POLICIES[IngressSurface.REVIEW_OPERATOR]
+    try:
+        allowed = ingress.evaluate_http(
+            request=_signed_http_request(
+                IngressSurface.REVIEW_OPERATOR,
+                body,
+                suffix="review-operator",
+            ),
+            raw_body=body,
+            received_at_ms=NOW,
+        )
+        internal_only = ingress.evaluate_http(
+            request=_signed_http_request(
+                IngressSurface.INTERNAL_AGENT,
+                body,
+                suffix="internal-only-on-review-path",
+                policy_surface=IngressSurface.REVIEW_OPERATOR,
+            ),
+            raw_body=body,
+            received_at_ms=NOW + 1,
+        )
+
+        assert review_policy.action == "review:decide"
+        assert review_policy.required_scopes == ("review:decide",)
+        assert review_policy.default_path == "/internal/codex/reviews"
+        assert allowed.allowed is True
+        assert allowed.principal_id == PRINCIPALS[IngressSurface.REVIEW_OPERATOR]
+        assert allowed.claim_ref and allowed.audit_ref
+        assert internal_only.allowed is False
+        assert internal_only.admissible is False
+        assert internal_only.reason_code == IngressReasonCode.PRINCIPAL_INVALID.value
+        assert internal_only.claim_ref is None
+        assert internal_only.audit_ref
     finally:
         store.close()
 

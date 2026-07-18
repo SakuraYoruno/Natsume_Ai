@@ -81,8 +81,8 @@ def test_canon_routes_no_circular_import():
     """直接 import canon_routes 不应触发 ImportError 或循环导入错误。"""
     try:
         import host_brain.app.canon_routes as cr
-        assert hasattr(cr, "router"), "canon_routes 应暴露 router 对象"
-        assert hasattr(cr, "set_canon_service_provider")
+        assert hasattr(cr, "create_canon_router")
+        assert not hasattr(cr, "set_canon_service_provider")
         assert not hasattr(cr, "set_ledger_provider")
     except ImportError as exc:
         pytest.fail(f"canon_routes 导入失败（循环导入）: {exc}")
@@ -95,16 +95,16 @@ def test_canon_routes_no_circular_import():
 def test_set_canon_service_provider_injection(tmp_path):
     """Route injection owns one explicit Canon application boundary."""
     import host_brain.app.canon_routes as cr
+    from host_brain.app.host_route_ports import HostRoutePorts
 
     with compose_canon_test_runtime(
         tmp_path,
         request_id="canon-phase1-provider",
     ) as runtime:
-        cr.set_canon_service_provider(lambda: runtime.container.application)
-        try:
-            assert cr._get_canon_service() is runtime.container.application
-        finally:
-            cr.set_canon_service_provider(None)
+        route_ports = HostRoutePorts(
+            canon_service_provider=lambda: runtime.container.application,
+        )
+        assert cr._get_canon_service(route_ports) is runtime.container.application
 
 
 # ---------------------------------------------------------------------------

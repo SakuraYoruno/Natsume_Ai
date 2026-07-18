@@ -27,16 +27,17 @@ def test_workspace_policy_creates_temp_workspace(tmp_path) -> None:
     assert resolved.path.exists()
 
 
-def test_workspace_policy_blocks_write_without_write_action(tmp_path) -> None:
-    workspace = tmp_path / "repo"
-    workspace.mkdir()
+def test_workspace_policy_blocks_write_without_write_action(monkeypatch, tmp_path) -> None:
+    import host_brain.agent_runtime.workspace_policy as workspace_policy_module
+
+    monkeypatch.setattr(workspace_policy_module, "DEFAULT_CODEX_RUNS_ROOT", tmp_path / "runs")
     order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-block",
             "domain": "code",
             "run_mode": "worker",
             "objective": "change files",
-            "workspace": {"path": str(workspace)},
+            "workspace": {"strategy": "temp_workspace"},
             "allowed_actions": ["read_files"],
             "forbidden_actions": ["modify_secret_files"],
             "approval_policy": {"require_confirm": False},
@@ -50,16 +51,17 @@ def test_workspace_policy_blocks_write_without_write_action(tmp_path) -> None:
     assert "write_files" in str(reason)
 
 
-def test_workspace_policy_accepts_confirmed_bounded_write(tmp_path) -> None:
-    workspace = tmp_path / "repo"
-    workspace.mkdir()
+def test_workspace_policy_accepts_confirmed_bounded_write(monkeypatch, tmp_path) -> None:
+    import host_brain.agent_runtime.workspace_policy as workspace_policy_module
+
+    monkeypatch.setattr(workspace_policy_module, "DEFAULT_CODEX_RUNS_ROOT", tmp_path / "runs")
     order = AgentWorkOrder.from_mapping(
         {
             "work_order_id": "wo-write",
             "domain": "code",
             "run_mode": "worker",
             "objective": "change files",
-            "workspace": {"path": str(workspace)},
+            "workspace": {"strategy": "temp_workspace"},
             "allowed_actions": ["read_files", "write_files"],
             "forbidden_actions": ["modify_secret_files"],
             "approval_policy": {"require_confirm": True, "confirmed": True},

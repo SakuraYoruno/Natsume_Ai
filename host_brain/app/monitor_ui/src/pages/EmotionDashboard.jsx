@@ -47,6 +47,8 @@ export default function EmotionDashboard() {
     error,
     lastUpdatedAt,
     refetch,
+    resourceIssues,
+    resourceStates,
   } = useEmotionOverviewQuery({
     windowMinutes,
     pollingEnabled,
@@ -67,6 +69,7 @@ export default function EmotionDashboard() {
 
   const {
     emotionState,
+    runtimeEmotionAvailable,
     moodStyle,
     emotionTagLabel,
     bondStageLabel,
@@ -83,6 +86,7 @@ export default function EmotionDashboard() {
     hormoneBars,
     topEmotionRows,
     vtsStatCards,
+    vtsObservation,
     memorySubsystemRows,
   } = buildEmotionDashboardViewModel({
     runtimeSnapshot,
@@ -95,6 +99,8 @@ export default function EmotionDashboard() {
     runtimeError,
     lastUpdatedAt,
     runtimeUpdatedAt,
+    resourceIssues,
+    resourceStates,
   })
   const MoodIcon = MOOD_ICONS[emotionState.mood] || MOOD_ICONS.steady
 
@@ -137,6 +143,12 @@ export default function EmotionDashboard() {
 
       {noticeView.error ? <NoticeBanner variant="error">{noticeView.errorMessage}</NoticeBanner> : null}
       {noticeView.runtimeWarning ? <NoticeBanner variant="warning">{noticeView.runtimeWarning}</NoticeBanner> : null}
+      {noticeView.resourceIssues.map((issue) => (
+        <NoticeBanner key={issue.key} variant={issue.availability === 'error' ? 'error' : 'warning'}>
+          {issue.key === 'vtsData' ? 'VTS 观测' : '记忆观测'}：{issue.message}
+          {issue.source ? ` · 来源 ${issue.source}` : ''}
+        </NoticeBanner>
+      ))}
       {noticeView.unavailable ? (
         <NoticeBanner variant="warning">
           情绪观测数据当前暂不可用，页面会保留中性空态并等待运行快照或 VTS 聚合恢复。
@@ -164,8 +176,13 @@ export default function EmotionDashboard() {
           gauges={gauges}
           hormoneBars={hormoneBars}
           gateView={gateView}
+          runtimeEmotionAvailable={runtimeEmotionAvailable}
         />
-        <EmotionDistributionPanel topEmotionRows={topEmotionRows} vtsStatCards={vtsStatCards} />
+        <EmotionDistributionPanel
+          topEmotionRows={topEmotionRows}
+          vtsStatCards={vtsStatCards}
+          vtsObservation={vtsObservation}
+        />
         <BondTemperaturePanel
           bondMetrics={bondMetrics}
           bondStageLabel={bondStageLabel}

@@ -21,9 +21,12 @@ from natsume_contracts.identity import (
 from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     OBS_COMMAND_ENVELOPE_SCHEMA,
+    ObsCommandAuthority,
+    ObsCommandContractError,
     ObsCommandEnvelope,
     ObsCommandExecutionResult,
     ObsCommandPortRegistry,
+    bind_server_authority,
 )
 from host_brain.observability.command_outcome_journal import (
     ObsCommandOutcomeJournal,
@@ -206,6 +209,17 @@ class _ExplodingPort(_RecordingPort):
     def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
         self.envelopes.append(envelope)
         raise RuntimeError("domain crashed after dispatch")
+
+
+class _SpoofingExplodingPort(_RecordingPort):
+    def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
+        self.envelopes.append(envelope)
+
+        class DependencyError(RuntimeError):
+            reason_code = "DEPENDENCY_CLAIMS_NOT_EXECUTED"
+            side_effects_may_have_run = False
+
+        raise DependencyError("untrusted dependency exception")
 
 
 @dataclass
@@ -394,12 +408,58 @@ def test_manifest_has_all_active_families_and_no_implicit_runtime_adapters() -> 
 
     manifest = registry.manifest()
 
-    assert len(manifest) == 33
-    assert len({item["command_id"] for item in manifest}) == 33
+    assert len(manifest) == len(DEFAULT_OBS_COMMAND_SPECS)
+    assert len({item["command_id"] for item in manifest}) == len(
+        DEFAULT_OBS_COMMAND_SPECS
+    )
     assert "wechat.channel.reset" not in {item["command_id"] for item in manifest}
     assert all(item["action"].startswith("obs:command:") for item in manifest)
     assert all(len(item["required_scopes"]) >= 2 for item in manifest)
     assert registry.bound_command_ids == ()
+
+
+def test_terminal_reconciliation_manifest_rejects_forged_actor_and_bad_shape() -> None:
+    registry = ObsCommandPortRegistry()
+    spec = registry.resolve_spec("task_terminal.reconcile")
+    assert spec is not None
+    assert spec.required_scopes == ("obs:write", "task-runtime:reconcile")
+    assert spec.authority_field == "reconciler_actor_id"
+    payload = {
+        "case_id": "terminal-reconciliation://case/" + "a" * 64,
+        "expected_case_snapshot_sha256": "sha256:" + "b" * 64,
+        "expected_subject_snapshot_sha256": "sha256:" + "c" * 64,
+        "action": "RELEASE_BUDGET",
+        "target_budget_status": "RELEASED",
+        "issued_ts_ms": NOW,
+        "attestation_ref": "terminal-reconciliation://attestation/proof-1",
+        "attestation_key_id": "reconciler-v1",
+        "attestation_signature": "ed25519:" + "A" * 86 + "==",
+    }
+    with pytest.raises(
+        ObsCommandContractError,
+        match="OBS_COMMAND_PAYLOAD_FIELD_DENIED",
+    ):
+        spec.payload_schema.validate({
+            **payload,
+            "reconciler_actor_id": "attacker",
+        })
+    with pytest.raises(
+        ObsCommandContractError,
+        match="OBS_COMMAND_PAYLOAD_TYPE_INVALID",
+    ):
+        spec.payload_schema.validate({**payload, "issued_ts_ms": str(NOW)})
+
+    authority = ObsCommandAuthority.bind(
+        principal_id=PRINCIPAL_ID,
+        tenant_id=TENANT_ID,
+        request_id="obs.request.terminal-reconciliation",
+    )
+    bound = bind_server_authority(
+        spec.payload_schema.validate(payload),
+        spec=spec,
+        authority=authority,
+    )
+    assert bound["reconciler_actor_id"] == PRINCIPAL_ID
 
 
 def test_retired_wechat_command_is_not_allowed_without_journal_or_domain() -> None:
@@ -852,6 +912,18 @@ def test_domain_exception_replays_uncertain_after_fresh_claim_state() -> None:
     assert replay.duplicate is True
     assert replay.executed is False
     assert fresh_port.envelopes == []
+
+
+def test_dependency_exception_cannot_spoof_definite_non_execution() -> None:
+    port = _SpoofingExplodingPort()
+    system = _system(port=port)
+
+    outcome = _execute(system, _signed_request(system))
+
+    assert outcome.reason_code == "OBS_COMMAND_EXECUTION_UNCERTAIN"
+    assert outcome.terminal_state == ObsCommandOutcomeState.UNCERTAIN.value
+    assert outcome.certainty == SideEffectCertainty.MAY_HAVE_EXECUTED.value
+    assert len(port.envelopes) == 1
 
 
 def test_all_caller_authority_fields_including_owner_organ_are_overwritten() -> None:

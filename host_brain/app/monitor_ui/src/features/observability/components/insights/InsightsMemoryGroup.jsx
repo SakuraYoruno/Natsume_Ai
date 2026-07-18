@@ -40,6 +40,9 @@ function statusBg(rate, status) {
 }
 
 function subsystemSummary(item) {
+  if (String(item?.status || '').toUpperCase() === 'UNAVAILABLE') {
+    return item?.detail || '统计源暂不可用'
+  }
   if ((item?.total ?? 0) <= 0) return '近窗口无调用'
   if (item?.detail) return item.detail
   const parts = [`${item?.success ?? 0}/${item?.total ?? 0} 正常`]

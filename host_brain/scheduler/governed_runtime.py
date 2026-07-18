@@ -446,6 +446,92 @@ class GovernedSchedulerRuntime:
                 if self._in_flight == 0:
                     self._condition.notify_all()
 
+    async def continue_review_admission(
+        self,
+        record: Mapping[str, Any],
+        claim: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact durable Scheduler admission after Review."""
+
+        async with self._condition:
+            if not self._active or not self._accepting:
+                raise GovernedSchedulerRuntimeError(
+                    SCHEDULER_RUNTIME_INACTIVE,
+                    "scheduler runtime is not accepting Review continuation",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            work_order = durable.get("work_order")
+            assignment = durable.get("assignment")
+            graph = durable.get("graph")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface is not HostCommandSurface.SCHEDULER
+                or not isinstance(work_order, WorkOrderV3)
+                or assignment is None
+                or graph is None
+            ):
+                raise GovernedSchedulerRuntimeError(
+                    SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+                    "Review continuation Scheduler admission is incomplete or misrouted",
+                )
+            operation = self._application.execute_review_continuation(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+                continuation_claim=dict(claim or {}),
+            )
+            return await _review_continuation_result(operation)
+        finally:
+            async with self._condition:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._condition.notify_all()
+
+    async def request_graph_cancellation(
+        self,
+        record: Mapping[str, Any],
+        *,
+        authority: Mapping[str, Any],
+        source: str,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        """Cancel one exact Scheduler admission through verified authority."""
+
+        async with self._condition:
+            if not self._active or not self._accepting:
+                raise GovernedSchedulerRuntimeError(
+                    SCHEDULER_RUNTIME_INACTIVE,
+                    "scheduler runtime is not accepting cancellation commands",
+                )
+            self._in_flight += 1
+        try:
+            command = dict(record or {}).get("command")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface is not HostCommandSurface.SCHEDULER
+            ):
+                raise GovernedSchedulerRuntimeError(
+                    SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+                    "cancellation admission is not owned by the Scheduler runtime",
+                )
+            return await self._application.request_graph_cancellation(
+                command_id=command.command_id,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                authority=dict(authority or {}),
+                source=source,
+                reason_code=reason_code,
+            )
+        finally:
+            async with self._condition:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._condition.notify_all()
+
     def existing_command(self, *, request_id: str) -> Mapping[str, Any] | None:
         return self._commands.get_by_request(
             surface=HostCommandSurface.SCHEDULER.value,
@@ -818,6 +904,29 @@ class SchedulerCommandService:
                     "scheduler runtime returned no terminal result",
                 )
             receipt = dict(terminal.get("execution_receipt") or {})
+            projection = (
+                dict(receipt.get("projection") or {})
+                if isinstance(receipt.get("projection"), Mapping)
+                else {}
+            )
+            review = (
+                dict(projection.get("review") or {})
+                if isinstance(projection.get("review"), Mapping)
+                else {}
+            )
+            waiting_review = str(receipt.get("status") or "").strip().upper() in {
+                "WAITING_APPROVAL",
+                "WAITING_ACCEPTANCE_REVIEW",
+            }
+            if waiting_review:
+                if not str(review.get("review_id") or "").strip():
+                    raise GovernedSchedulerRuntimeError(
+                        SCHEDULER_RUNTIME_INGRESS_COMPLETION_FAILED,
+                        "waiting scheduler command has no durable ReviewItem",
+                    )
+                # A POST checkpoint may carry the worker's pre-acceptance
+                # receipt; it cannot complete the occurrence before Review.
+                return terminal
             result_ref = str(receipt.get("receipt_ref") or "").strip()
             if not result_ref:
                 raise GovernedSchedulerRuntimeError(
@@ -954,6 +1063,7 @@ def build_governed_scheduler_runtime(
     worker_registry: SchedulerWorkerRegistry,
     owner_id: str,
     definition_repository: SchedulerDefinitionRepositoryPort | None = None,
+    cancellation_authority_verifier: Any | None = None,
 ) -> GovernedSchedulerRuntime:
     definitions = definition_repository or getattr(
         task_runtime_container,
@@ -963,13 +1073,22 @@ def build_governed_scheduler_runtime(
     if definitions is None:
         raise TypeError("scheduler definition repository is required")
     review_store = getattr(task_runtime_container, "review_store", None)
-    if review_store is None:
-        raise TypeError("scheduler Task Runtime review store is required")
+    continuation_store = getattr(
+        task_runtime_container,
+        "review_continuation_store",
+        None,
+    )
+    if review_store is None or continuation_store is None:
+        raise TypeError("scheduler Task Runtime Review stores are required")
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,
         token_service=token_service,
+        review_store=continuation_store,
     )
-    node_grant_verifier = DurableNodeGrantVerifier(ledger=ledger)
+    node_grant_verifier = DurableNodeGrantVerifier(
+        ledger=ledger,
+        review_store=continuation_store,
+    )
     canonical_worker = GovernedSchedulerWorker(
         handlers=worker_registry,
         definition_repository=definitions,
@@ -991,6 +1110,7 @@ def build_governed_scheduler_runtime(
             command_repository=command_repository,
         ),
         review_runtime=TaskNodeReviewRuntime(review_store),
+        node_grant_verifier=node_grant_verifier,
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",
@@ -1002,6 +1122,7 @@ def build_governed_scheduler_runtime(
         command_repository=command_repository,
         coordinator=coordinator,
         node_grant_service=node_grant_service,
+        cancellation_authority_verifier=cancellation_authority_verifier,
     )
     return GovernedSchedulerRuntime(
         application=application,
@@ -1264,6 +1385,33 @@ def _assert_stable_replay(candidate: HostCommand, durable: HostCommand) -> None:
             SCHEDULER_RUNTIME_DEFINITION_DRIFT,
             "scheduler replay changed stable semantics: " + ", ".join(drift),
         )
+
+
+async def _review_continuation_result(operation: Any) -> dict[str, Any]:
+    current = await operation if inspect.isawaitable(operation) else operation
+    if isinstance(current, Mapping):
+        return dict(current)
+    if not hasattr(current, "__aiter__"):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "Review continuation returned no durable Scheduler result",
+        )
+    terminal: dict[str, Any] | None = None
+    async for raw_event in current:
+        if not isinstance(raw_event, Mapping):
+            raise GovernedSchedulerRuntimeError(
+                SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+                "Review continuation emitted a non-mapping Scheduler event",
+            )
+        event = dict(raw_event)
+        if bool(event.get("done")):
+            terminal = event
+    if terminal is None:
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "Review continuation emitted no durable Scheduler terminal result",
+        )
+    return terminal
 
 
 def _assert_occurrence_authority(

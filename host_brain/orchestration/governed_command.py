@@ -28,13 +28,12 @@ from host_brain.task_runtime.ports import CommandRepositoryPort
 
 
 class GraphCancellationAuthorityVerifierPort(Protocol):
-    """Verify one graph-bound durable cancellation authority reference."""
+    """Resolve one server-owned authority projection to a durable reference."""
 
     def verify_graph_cancellation(
         self,
         *,
-        request_id: str,
-        request_identity: str,
+        authority: Mapping[str, Any],
         source: str,
         reason_code: str,
         graph_id: str,
@@ -66,6 +65,12 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> dict[str, Any]:
+        await self.preflight_parent_governor_binding(
+            parent_grant_ref=command.governor_grant_ref,
+            request_id=command.request_id,
+            session_id=command.session_id,
+            principal_id=command.principal_id,
+        )
         admitted, persisted_command, persisted_work_order, persisted_graph = await self._admit(
             command=command,
             work_order=work_order,
@@ -99,6 +104,12 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> AsyncIterator[dict[str, Any]]:
+        await self.preflight_parent_governor_binding(
+            parent_grant_ref=command.governor_grant_ref,
+            request_id=command.request_id,
+            session_id=command.session_id,
+            principal_id=command.principal_id,
+        )
         admitted, persisted_command, persisted_work_order, persisted_graph = await self._admit(
             command=command,
             work_order=work_order,
@@ -120,22 +131,110 @@ class GovernedCommandApplication:
         async for event in self._coordinator.execute_stream(**execution_kwargs):
             yield event
 
+    async def execute_review_continuation(
+        self,
+        *,
+        command: HostCommand,
+        work_order: Any,
+        assignment: ExecutorAssignment,
+        graph: Any,
+        continuation_claim: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resume one durable Review checkpoint without reopening admission.
+
+        The Review continuation claim is coordination, not business authority.
+        ``ReviewStore`` must still prove the exact consumed/denied Review and
+        waiting TaskNode.  A consumed Review may mint a short-lived,
+        claim-fenced node-grant renewal so a human pause longer than the
+        original Governor TTL does not make the durable graph impossible to
+        resume.  Denied/expired Reviews need no worker grant: the coordinator
+        only reconciles their already-durable terminal decision.
+        """
+
+        claim = dict(continuation_claim or {})
+        admitted, persisted_command, persisted_work_order, persisted_graph = (
+            await self._admit(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        )
+        if (
+            str(claim.get("graph_id") or "").strip() != admitted.graph_id
+            or int(claim.get("graph_revision") or 0) != admitted.graph_revision
+            or str(claim.get("node_id") or "").strip()
+            not in {binding.node_id for binding in admitted.nodes}
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "Review continuation claim differs from the durable Graph admission",
+            )
+
+        execution_kwargs: dict[str, Any] = {
+            "admitted": admitted,
+            "command": persisted_command,
+            "work_order": persisted_work_order,
+        }
+        review_status = str(claim.get("review_status") or "").strip().upper()
+        if self._node_grants is not None and review_status == "CONSUMED":
+            derive = getattr(
+                self._node_grants,
+                "derive_review_continuation",
+                None,
+            )
+            if not callable(derive):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "node grant service cannot renew a durable Review continuation",
+                )
+            renewed = derive(
+                parent_grant_ref=str(persisted_command.governor_grant_ref or "").strip(),
+                task_graph=persisted_graph,
+                work_order=persisted_work_order,
+                request_id=persisted_command.request_id,
+                session_id=persisted_command.session_id,
+                principal_id=persisted_command.principal_id,
+                continuation_claim=claim,
+            )
+            if inspect.isawaitable(renewed):
+                renewed = await renewed
+            raw_refs = getattr(renewed, "grant_refs", None)
+            refs = dict(raw_refs) if isinstance(raw_refs, Mapping) else {}
+            expected_nodes = {binding.node_id for binding in admitted.nodes}
+            if set(refs) != expected_nodes or any(
+                not str(value or "").strip() for value in refs.values()
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_ASSIGNMENT_CONFLICT,
+                    "Review continuation renewal does not cover the admitted TaskGraph",
+                )
+            execution_kwargs["node_grant_refs"] = {
+                str(node_id): str(ref) for node_id, ref in refs.items()
+            }
+        elif review_status not in {"REJECTED", "EXPIRED", "CANCELLED"}:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "Review continuation requires a canonical terminal Review status",
+            )
+        return await self._coordinator.execute(**execution_kwargs)
+
     async def request_graph_cancellation(
         self,
         *,
         command_id: str,
         graph_id: str,
         graph_revision: int,
-        request_id: str,
-        request_identity: str,
+        authority: Mapping[str, Any],
         source: str,
         reason_code: str,
     ) -> dict[str, Any]:
         """Request a graph-wide cancellation through a verified internal boundary.
 
-        This method deliberately has no HTTP/UI exposure.  Its verifier must
-        bind the durable authority reference to the exact cancellation request
-        and Graph revision before the Task Store can install an intent fence.
+        The caller may pass only a server-owned, secret-free authority
+        projection.  ``request_id`` and ``request_identity`` are issued by the
+        verifier after it re-resolves the durable authority; they can never be
+        supplied by an HTTP payload or another application caller.
         """
 
         command_ref = str(command_id or "").strip()
@@ -195,19 +294,32 @@ class GovernedCommandApplication:
                 GOVERNED_CANCELLATION_AUTHORITY_REQUIRED,
                 "graph cancellation has no composed authority verifier",
             )
-        normalized = {
-            "request_id": str(request_id or "").strip(),
-            "request_identity": str(request_identity or "").strip(),
+        authority_projection = (
+            dict(authority or {}) if isinstance(authority, Mapping) else {}
+        )
+        authority_request_id = str(
+            authority_projection.get("request_id") or ""
+        ).strip()
+        authority_audit_ref = str(
+            authority_projection.get("audit_ref") or ""
+        ).strip()
+        authority_principal_id = str(
+            authority_projection.get("principal_id") or ""
+        ).strip()
+        requested_binding = {
             "source": str(source or "").strip().upper(),
             "reason_code": str(reason_code or "").strip().upper(),
             "graph_id": durable_graph_id,
             "graph_revision": graph_revision,
         }
         if (
-            not normalized["request_id"]
-            or not normalized["request_identity"]
-            or not normalized["source"]
-            or not normalized["reason_code"]
+            not isinstance(authority, Mapping)
+            or not authority
+            or not authority_request_id
+            or not authority_audit_ref
+            or not authority_principal_id
+            or not requested_binding["source"]
+            or not requested_binding["reason_code"]
             or not durable_graph_id
             or graph_revision < 1
         ):
@@ -216,7 +328,10 @@ class GovernedCommandApplication:
                 "graph cancellation authority input is incomplete",
             )
         try:
-            verified_raw = verifier.verify_graph_cancellation(**normalized)
+            verified_raw = verifier.verify_graph_cancellation(
+                authority=authority_projection,
+                **requested_binding,
+            )
             if inspect.isawaitable(verified_raw):
                 verified_raw = await verified_raw
         except BaseException as exc:
@@ -232,18 +347,33 @@ class GovernedCommandApplication:
                 "graph cancellation verifier returned no durable binding",
             )
         verified = dict(verified_raw)
-        verified_binding = {
+        verified_binding: dict[str, Any] = {
             "request_id": str(verified.get("request_id") or "").strip(),
-            "request_identity": str(
-                verified.get("request_identity") or verified.get("authority_ref") or ""
-            ).strip(),
+            "request_identity": str(verified.get("request_identity") or "").strip(),
             "source": str(verified.get("source") or "").strip().upper(),
             "reason_code": str(verified.get("reason_code") or "").strip().upper(),
             "graph_id": str(verified.get("graph_id") or "").strip(),
             "graph_revision": verified.get("graph_revision"),
         }
         principal_id = str(verified.get("principal_id") or "").strip()
-        if verified_binding != normalized or not principal_id:
+        if (
+            not verified_binding["request_id"]
+            or not verified_binding["request_identity"]
+            or not principal_id
+            or verified_binding["request_id"] != authority_request_id
+            or verified_binding["request_identity"] != authority_audit_ref
+            or principal_id != authority_principal_id
+            or {
+                key: verified_binding[key]
+                for key in (
+                    "source",
+                    "reason_code",
+                    "graph_id",
+                    "graph_revision",
+                )
+            }
+            != requested_binding
+        ):
             raise GovernedRuntimeError(
                 GOVERNED_CANCELLATION_AUTHORITY_INVALID,
                 "verified cancellation authority drifted from its Graph binding",
@@ -259,10 +389,10 @@ class GovernedCommandApplication:
             admitted=admitted,
             command=persisted_command,
             work_order=persisted_work_order,
-            request_id=normalized["request_id"],
-            request_identity=normalized["request_identity"],
-            source=normalized["source"],
-            reason_code=normalized["reason_code"],
+            request_id=verified_binding["request_id"],
+            request_identity=verified_binding["request_identity"],
+            source=verified_binding["source"],
+            reason_code=verified_binding["reason_code"],
         )
 
     async def _admit(
@@ -386,6 +516,55 @@ class GovernedCommandApplication:
                 "node grant batch does not exactly cover the admitted TaskGraph",
             )
         return {str(node_id): str(ref) for node_id, ref in refs.items()}
+
+    async def preflight_parent_governor_binding(
+        self,
+        *,
+        parent_grant_ref: str,
+        request_id: str,
+        session_id: str,
+        principal_id: str,
+    ) -> None:
+        """Reject an impossible parent grant before immutable admission.
+
+        ``NodeBoundGrantService`` resolves this read-only check from the
+        durable Governor ledger. It is deliberately repeated by grant
+        derivation after admission so an expiry or takeover race cannot expand
+        authority. A configured grant service without this capability is an
+        invalid authority boundary, never a compatibility fallback.
+        """
+
+        if self._node_grants is None:
+            return
+        parent_ref = str(parent_grant_ref or "").strip()
+        if not parent_ref:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "governed TaskGraph has no parent Governor grant",
+            )
+        validate_parent = getattr(
+            self._node_grants,
+            "validate_parent_binding",
+            None,
+        )
+        if not callable(validate_parent):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "node grant service lacks parent Governor binding preflight",
+            )
+        validated = validate_parent(
+            parent_grant_ref=parent_ref,
+            request_id=request_id,
+            session_id=session_id,
+            principal_id=principal_id,
+        )
+        if inspect.isawaitable(validated):
+            validated = await validated
+        if validated is False:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "node grant service rejected the parent Governor grant",
+            )
 
     @staticmethod
     def _require_ready_graph(graph: Any) -> None:

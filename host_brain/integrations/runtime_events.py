@@ -437,6 +437,37 @@ def _runtime_event_record(row: Mapping[str, Any]) -> dict[str, Any]:
     return record
 
 
+def _runtime_event_matches(
+    record: Mapping[str, Any],
+    expected: RuntimeEvent,
+    *,
+    allow_source_zero_timestamp: bool = False,
+) -> bool:
+    return (
+        str(record.get("event_id")) == expected.event_id
+        and str(record.get("schema_version")) == expected.schema_version
+        and str(record.get("event_type")) == expected.event_type
+        and str(record.get("source_kind")) == expected.source_kind
+        and str(record.get("source_ref")) == expected.source_ref
+        and str(record.get("aggregate_type")) == expected.aggregate_type
+        and str(record.get("aggregate_id")) == expected.aggregate_id
+        and int(record.get("aggregate_version", -1)) == expected.aggregate_version
+        and str(record.get("payload_ref")) == expected.payload_ref
+        and record.get("payload") == dict(expected.payload)
+        and tuple(record.get("evidence_refs") or ()) == tuple(expected.evidence_refs)
+        and str(record.get("dedupe_key")) == expected.dedupe_key
+        and str(record.get("redaction_level")) == expected.redaction_level
+        and (
+            int(record.get("ts_ms", -1)) == expected.ts_ms
+            or (
+                allow_source_zero_timestamp
+                and expected.ts_ms == 0
+                and int(record.get("ts_ms", -1)) >= 0
+            )
+        )
+    )
+
+
 class RuntimeEventStore:
     """Validated Runtime Event facade over the sole SQLite repository owner."""
 
@@ -704,6 +735,33 @@ class RuntimeEventStore:
         outbox_id = _require_text(row.get("outbox_id"), field_name="outbox_id")
         aggregate_type = _require_text(row.get("aggregate_type"), field_name="aggregate_type")
         aggregate_id = _require_text(row.get("aggregate_id"), field_name="aggregate_id")
+        graph_revision: int | None = None
+        runtime_aggregate_id = aggregate_id
+        if aggregate_type == "TASK_GRAPH":
+            raw_revision = row.get("graph_revision")
+            if isinstance(raw_revision, bool):
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_INVALID,
+                    "TaskGraph outbox graph_revision must be a positive integer",
+                )
+            try:
+                graph_revision = int(raw_revision)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_INVALID,
+                    "TaskGraph outbox graph_revision must be a positive integer",
+                ) from exc
+            if graph_revision < 1:
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_INVALID,
+                    "TaskGraph outbox graph_revision must be a positive integer",
+                )
+            runtime_aggregate_id = f"{aggregate_id}@{graph_revision}"
+        elif row.get("graph_revision") is not None:
+            raise RuntimeEventError(
+                RUNTIME_EVENT_INVALID,
+                "non-TaskGraph outbox must not declare graph_revision",
+            )
         aggregate_version = int(row.get("aggregate_version"))
         event_type = _require_text(row.get("event_type"), field_name="event_type")
         payload_ref = _require_durable_ref(row.get("payload_ref"), field_name="payload_ref")
@@ -711,6 +769,10 @@ class RuntimeEventStore:
         source_ref = f"taskstore://outbox/{outbox_id}"
         idempotency_key = _require_text(row.get("idempotency_key"), field_name="idempotency_key")
         idempotency_digest = f"sha256:{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()}"
+        created_value = row.get("created_ts_ms")
+        source_ts_ms = (
+            self._now() if created_value is None else int(created_value)
+        )
         payload: dict[str, Any] = {
             "outbox_id": outbox_id,
             "aggregate_type": aggregate_type,
@@ -722,15 +784,16 @@ class RuntimeEventStore:
             "idempotency_digest": idempotency_digest,
             "status": _text(row.get("status")) or "PENDING",
         }
+        if graph_revision is not None:
+            payload["graph_revision"] = graph_revision
         if _text(row.get("attempt_id")):
             payload["attempt_ref"] = f"taskstore://attempt/{_text(row.get('attempt_id'))}"
-        return self.append_event(
-            RuntimeEvent.create(
+        current_event = RuntimeEvent.create(
                 event_type=event_type,
                 source_kind="TASK_STORE_OUTBOX",
                 source_ref=source_ref,
                 aggregate_type=aggregate_type,
-                aggregate_id=aggregate_id,
+                aggregate_id=runtime_aggregate_id,
                 aggregate_version=aggregate_version,
                 payload_ref=payload_ref,
                 payload=payload,
@@ -740,12 +803,75 @@ class RuntimeEventStore:
                     source_ref=source_ref,
                     event_type=event_type,
                     aggregate_type=aggregate_type,
-                    aggregate_id=aggregate_id,
+                    aggregate_id=runtime_aggregate_id,
                     aggregate_version=aggregate_version,
                 ),
-                ts_ms=int(row.get("created_ts_ms") or self._now()),
+                ts_ms=source_ts_ms,
             )
-        )
+        compatible_events = [current_event]
+        if graph_revision is not None:
+            legacy_payload = dict(payload)
+            legacy_payload.pop("graph_revision", None)
+            compatible_events.append(
+                RuntimeEvent.create(
+                    event_type=event_type,
+                    source_kind="TASK_STORE_OUTBOX",
+                    source_ref=source_ref,
+                    aggregate_type=aggregate_type,
+                    aggregate_id=aggregate_id,
+                    aggregate_version=aggregate_version,
+                    payload_ref=payload_ref,
+                    payload=legacy_payload,
+                    evidence_refs=evidence_refs,
+                    dedupe_key=build_runtime_event_dedupe_key(
+                        source_kind="TASK_STORE_OUTBOX",
+                        source_ref=source_ref,
+                        event_type=event_type,
+                        aggregate_type=aggregate_type,
+                        aggregate_id=aggregate_id,
+                        aggregate_version=aggregate_version,
+                    ),
+                    ts_ms=source_ts_ms,
+                )
+            )
+
+        def existing_projection() -> dict[str, Any] | None:
+            try:
+                durable = self._repository.get_task_outbox_journal(
+                    outbox_id=outbox_id
+                )
+            except RuntimeEventRepositoryError as exc:
+                raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+            if durable is None:
+                return None
+            record = _runtime_event_record(durable)
+            if not any(
+                _runtime_event_matches(
+                    record,
+                    candidate,
+                    allow_source_zero_timestamp=(source_ts_ms == 0),
+                )
+                for candidate in compatible_events
+            ):
+                raise RuntimeEventError(
+                    RUNTIME_EVENT_DURABLE_DATA_INVALID,
+                    "TaskStore Outbox Runtime Event replay drifted from its immutable source",
+                )
+            return record
+
+        existing = existing_projection()
+        if existing is not None:
+            return existing
+        try:
+            return self.append_event(current_event)
+        except RuntimeEventError:
+            # A second publisher may win after the pre-read.  The 0095 unique
+            # source fence makes this lookup authoritative; accept only an
+            # exact current or checksum-reconstructable legacy projection.
+            raced = existing_projection()
+            if raced is not None:
+                return raced
+            raise
 
     def append_reference_event(
         self,

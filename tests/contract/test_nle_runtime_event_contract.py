@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
@@ -34,11 +35,6 @@ from host_brain.tribe.event_bus import TribeEvent
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "host_brain" / "audit" / "migrations"
-TASK_RUNTIME_BASE_MIGRATION = MIGRATIONS / "0052_task_runtime.sql"
-TASK_RUNTIME_RECOVERY_MIGRATION = MIGRATIONS / "0054_task_runtime_recovery.sql"
-TASK_RUNTIME_OUTBOX_CLAIM_MIGRATION = (
-    MIGRATIONS / "0093_task_runtime_outbox_claim.sql"
-)
 RUNTIME_EVENT_MIGRATION = MIGRATIONS / "0056_runtime_events.sql"
 RUNTIME_EVENT_DELIVERY_MIGRATION = MIGRATIONS / "0068_runtime_event_delivery.sql"
 
@@ -64,15 +60,10 @@ def _migrated_runtime_event_store(tmp_path: Path, *, clock: MutableClock | None 
 
 def _migrated_combined_store(tmp_path: Path, *, clock: MutableClock | None = None) -> tuple[DurableTaskStore, RuntimeEventStore]:
     db_path = tmp_path / "combined-runtime.sqlite3"
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(TASK_RUNTIME_BASE_MIGRATION.read_text(encoding="utf-8"))
-        conn.executescript(TASK_RUNTIME_RECOVERY_MIGRATION.read_text(encoding="utf-8"))
-        conn.executescript(
-            TASK_RUNTIME_OUTBOX_CLAIM_MIGRATION.read_text(encoding="utf-8")
-        )
-        conn.executescript(RUNTIME_EVENT_MIGRATION.read_text(encoding="utf-8"))
-        conn.executescript(RUNTIME_EVENT_DELIVERY_MIGRATION.read_text(encoding="utf-8"))
-        _record_delivery_migration(conn)
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="nle-runtime-event-combined-store",
+    )
+    assert migrated.success is True, migrated.as_dict()
     shared_clock = clock or MutableClock()
     return DurableTaskStore(db_path, clock=shared_clock), RuntimeEventStore(db_path, clock=shared_clock)
 
@@ -133,15 +124,18 @@ def _outbox(
     event_type: str = "TASK_GRAPH_CREATED",
     idempotency_key: str = "runtime-event-contract-outbox-1",
 ) -> OutboxMessage:
+    graph_revision = 1 if aggregate_type == "TASK_GRAPH" else None
     return OutboxMessage.create(
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
+        graph_revision=graph_revision,
         aggregate_version=aggregate_version,
         event_type=event_type,
         payload_ref=build_outbox_payload_ref(
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
             aggregate_version=aggregate_version,
+            graph_revision=graph_revision,
         ),
         idempotency_key=idempotency_key,
         evidence_refs=("evidence://runtime-event-contract/graph-created",),
@@ -232,7 +226,9 @@ def test_t_nle_12_task_outbox_publisher_is_at_least_once_without_duplicate_event
     assert retry_publish["published_count"] == 0
     assert len(replay) == 1
     assert replay[0]["source_kind"] == "TASK_STORE_OUTBOX"
-    assert replay[0]["payload"]["payload_ref"] == "taskstore://event/TASK_GRAPH/graph-runtime-event-1/0"
+    assert replay[0]["payload"]["payload_ref"] == (
+        "taskstore://event/TASK_GRAPH/graph-runtime-event-1@1/0"
+    )
     assert "idempotency_key" not in replay[0]["payload"]
     assert task_store.list_pending_outbox() == []
 

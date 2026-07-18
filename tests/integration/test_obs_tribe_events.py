@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from host_brain.app.internal_tribe_routes import set_tribe_event_bus
+from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.obs_routes_trace import refresh_trace_query_projections, router
 from host_brain.tribe.event_bus import InMemoryTribeEventBus, new_tribe_event
 from tests.fakes.obs_projection_runtime import compose_durable_obs_projection_runtime
@@ -19,10 +19,21 @@ def projection_runtime(tmp_path):
         yield runtime
 
 
-def _build_client(projection_runtime) -> TestClient:
-    del projection_runtime  # enforce durable composition before materialization
-    refresh_trace_query_projections()
+def _build_client(
+    projection_runtime,
+    bus: InMemoryTribeEventBus,
+) -> TestClient:
+    refresh_trace_query_projections(
+        ledger=projection_runtime.ledger,
+        store=projection_runtime.store,
+        tribe_event_reader=lambda: [
+            event.to_dict() for event in bus.recent(limit=200)
+        ],
+    )
     app = FastAPI()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: projection_runtime.store,
+    )
     app.include_router(router)
     return TestClient(app)
 
@@ -45,8 +56,7 @@ def test_obs_tribe_events_returns_recent_items(projection_runtime) -> None:
             payload={"request_id": "req_1"},
         )
     )
-    set_tribe_event_bus(bus)
-    client = _build_client(projection_runtime)
+    client = _build_client(projection_runtime, bus)
 
     resp = client.get("/obs/tribe/events?limit=2")
 
@@ -73,8 +83,7 @@ def test_obs_tribe_events_filter_by_event_type(projection_runtime) -> None:
             payload={"conversation_id": "conv_2"},
         )
     )
-    set_tribe_event_bus(bus)
-    client = _build_client(projection_runtime)
+    client = _build_client(projection_runtime, bus)
 
     resp = client.get("/obs/tribe/events?event_type=gateway_degraded&limit=10")
 
@@ -110,8 +119,7 @@ def test_obs_tribe_events_filter_by_request_and_source(projection_runtime) -> No
             payload={"request_id": "req_1", "conversation_id": "conv_1"},
         )
     )
-    set_tribe_event_bus(bus)
-    client = _build_client(projection_runtime)
+    client = _build_client(projection_runtime, bus)
 
     resp = client.get("/obs/tribe/events?request_id=req_1&source_agent=edge.somatic&limit=10")
 

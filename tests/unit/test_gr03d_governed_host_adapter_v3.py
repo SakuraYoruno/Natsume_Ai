@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import get_type_hints
+from typing import Any, get_type_hints
 
 import pytest
 
@@ -148,6 +148,104 @@ def test_direct_skill_worker_is_typed_for_v3_and_rejects_missing_budget() -> Non
         _require_fail_closed_direct_skill_work_order(replace(order, budget_policy=None))
     assert raised.value.reason_code == GOVERNED_HOST_AUTHORITY_INVALID
     assert "BudgetPolicy" in raised.value.detail
+
+
+@pytest.mark.asyncio
+async def test_review_renewed_host_skill_worker_verifies_exact_attempt_and_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command, order, graph = _contracts()
+    node = graph.nodes[0]
+    exact_execution = {
+        "attempt_id": "attempt::review-renewed-host-skill",
+        "lease_id": "lease::review-renewed-host-skill",
+        "lease_owner_id": "host-skill-worker-7",
+        "fencing_token": 7,
+    }
+    child_grant_ref = "governor-decision://sha256/" + "b" * 64
+    child_intent_id = "node-grant-intent::review-renewed-host-skill"
+
+    class _ExactReviewGrantVerifier:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def verify(self, **kwargs: Any) -> Any:
+            self.calls.append(dict(kwargs))
+            assert {
+                field: kwargs.get(field) for field in exact_execution
+            } == exact_execution
+            return SimpleNamespace(
+                grant_ref=child_grant_ref,
+                intent_id=child_intent_id,
+                to_dict=lambda: {
+                    "grant_ref": child_grant_ref,
+                    "intent_id": child_intent_id,
+                    "review_continuation_authority": {
+                        "review_id": "review-host-skill",
+                        "resume_phase": "PRE_EXECUTION",
+                    },
+                },
+            )
+
+    class _Ledger:
+        @staticmethod
+        def get_event(receipt_ref: str) -> dict[str, Any]:
+            assert receipt_ref == "skill-receipt://review-renewed-host-skill"
+            return {"result_status": "SUCCESS"}
+
+    monkeypatch.setattr(
+        "host_brain.app.governed_task_adapter._load_governor_grant",
+        lambda **_kwargs: {
+            "snapshot_refs": {"node_intent": {"id": child_intent_id}},
+            "tokens": {},
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.governed_task_adapter.execute_frozen_governed_skill",
+        lambda **_kwargs: SimpleNamespace(
+            payload={
+                "receipt_ref": "skill-receipt://review-renewed-host-skill",
+                "result": {},
+            },
+            result_text="review-renewed skill completed",
+            success=True,
+            error_text=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.governed_task_adapter.record_governed_skill_execution",
+        lambda **_kwargs: None,
+    )
+    verifier = _ExactReviewGrantVerifier()
+    worker = _FrozenSkillWorker(
+        ledger=_Ledger(),
+        execution_ports=SimpleNamespace(),
+        node_grant_verifier=verifier,  # type: ignore[arg-type]
+    )
+    execution_context = {
+        "command_id": command.command_id,
+        "work_order_id": order.work_order_id,
+        "graph_id": graph.graph_id,
+        "graph_revision": graph.revision,
+        "node_id": node.node_id,
+        "worker_route": node.route,
+        "node_input_refs": list(node.input_refs),
+        "node_grant_ref": child_grant_ref,
+        **exact_execution,
+    }
+
+    events = [
+        event
+        async for event in worker.execute_stream(
+            command=command,
+            work_order=order,
+            execution_context=execution_context,
+        )
+    ]
+
+    assert len(events) == 1
+    assert events[0]["decision"] == "APPROVE"
+    assert verifier.calls[0]["grant_ref"] == child_grant_ref
 
 
 def test_universal_runtime_supports_only_registered_frozen_routes() -> None:

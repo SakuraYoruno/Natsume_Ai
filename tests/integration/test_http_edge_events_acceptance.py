@@ -39,7 +39,6 @@ def _build_client(
         canonical_db_path=db_path,
         world_root=canonical_root / "world",
     )
-    previous_canon_provider = canon_routes._canon_service_provider  # noqa: SLF001
     client = TestClient(
         build_host_test_app(
             get_ledger=lambda: stub,
@@ -48,15 +47,11 @@ def _build_client(
         raise_server_exceptions=False,
     )
     client.__dict__["_canonical_ledger"] = canonical_ledger
-    client.__dict__["_previous_canon_provider"] = previous_canon_provider
     return client
 
 
 def _close_client(client: TestClient) -> None:
     client.close()
-    canon_routes.set_canon_service_provider(
-        client.__dict__.pop("_previous_canon_provider", None)
-    )
     canonical_ledger = client.__dict__.pop("_canonical_ledger", None)
     if canonical_ledger is not None:
         canonical_ledger.close()

@@ -6,7 +6,8 @@ DevSpec §26：长期记忆蒸馏强化。
 1. 从 EpisodicStore 召回 top-k 记忆，调用 MemoryDistillationEngine 生成语义记忆
 2. 将语义记忆自动生成 World Canon 提案（status=pending，等待人工/自动审核）
 3. 提供 run_distillation_cycle() 单入口，可被 NatsumeScheduler 调度
-4. 全程写入审计链（distillation_cycle_log）
+4. 可向历史兼容 sink 尝试写 cycle 摘要；canonical SQLiteLedger 当前没有
+   LongTermMemoryDistiller cycle writer，因此不形成 durable cycle authority
 
 设计约束：
 - 蒸馏结果不直接写入 Canon SSOT，只生成 pending 提案（FR-MEM-DISTILL-001）
@@ -120,7 +121,8 @@ class LongTermMemoryDistiller:
     职责：
     1. 按主题列表依次召回 top-k 记忆并蒸馏为语义记忆
     2. 将语义记忆自动生成 World Canon pending 提案
-    3. 写入 distillation_cycle_log 审计链
+    3. 向可选历史兼容 sink 尝试写 cycle 摘要；canonical 路线当前不持久化
+       LongTermMemoryDistiller cycle audit
     4. 提供 run_distillation_cycle() 单入口（可被调度器调用）
     """
 
@@ -169,7 +171,7 @@ class LongTermMemoryDistiller:
 
         1. 按主题列表依次蒸馏
         2. 将新生成的语义记忆提交为 Canon pending 提案
-        3. 写入审计链
+        3. 若调用方提供历史兼容 cycle sink，则尝试写入摘要
 
         Args:
             request_id: 关联请求 ID（可选）。
@@ -285,7 +287,7 @@ class LongTermMemoryDistiller:
             detail=detail,
         )
 
-        # 写入审计链
+        # 仅尝试历史兼容 sink；canonical SQLiteLedger 当前不提供 cycle writer。
         self._log_cycle(result, req_id)
 
         _logger.info(
@@ -589,7 +591,12 @@ class LongTermMemoryDistiller:
         result: DistillationCycleResult,
         request_id: str,
     ) -> None:
-        """写入 distillation_cycle_log 审计链。"""
+        """向历史兼容 sink 尝试写 cycle 摘要。
+
+        Canonical ``SQLiteLedger`` 当前既没有 ``log_distillation_cycle``，
+        也没有 ``log_system_event``；默认生产路径因此不会持久化这里的
+        cycle。调用方不得把本方法的存在当作 durable audit authority。
+        """
         if self._ledger is None:
             return
         record = {

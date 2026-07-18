@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
-import pytest
+from fastapi.testclient import TestClient
 
 from host_brain.app import health_routes, obs_routes_task_runtime, system_handler
 from host_brain.app.observability_runtime.domain_state_projection import (
@@ -12,6 +12,7 @@ from host_brain.app.observability_runtime.domain_state_projection import (
 )
 from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
+from host_brain.app.obs_application import build_default_obs_application_ports
 from host_brain.observability.degradation_state import _default_runtime_event_db_path
 
 
@@ -98,36 +99,32 @@ def test_mcp_health_endpoints_use_typed_canonical_persistence(
         get_persistence_settings.cache_clear()
 
 
-def test_obs_lifespan_owns_the_composed_life_reader(monkeypatch, tmp_path: Path) -> None:
+def test_obs_lifespan_uses_injected_reader_without_touching_host_life(
+    tmp_path: Path,
+) -> None:
     from host_brain.app import obs_fastapi_app
 
-    class Reader:
-        def get_snapshot(self, person_id: str) -> dict[str, object]:
-            return {
-                "person_id": person_id,
-                "version": 1,
-                "updated_at_ms": 10,
-                "state_digest": "sha256:life",
-                "state": {},
-            }
-
-    life = ProcessLifeContainer(
+    host_life = ProcessLifeContainer(
         repository=object(),  # type: ignore[arg-type]
         command_service=object(),  # type: ignore[arg-type]
-        snapshot_reader=Reader(),  # type: ignore[arg-type]
+        snapshot_reader=object(),  # type: ignore[arg-type]
     )
-    ledger = SimpleNamespace(canonical_db_path=str(tmp_path / "canonical.sqlite3"))
-    monkeypatch.setattr(obs_fastapi_app, "_get_ledger_dep", lambda: ledger)
-    monkeypatch.setattr(
-        obs_fastapi_app,
-        "get_persistence_settings",
-        lambda: SimpleNamespace(world_canon_root=tmp_path / "world"),
+    injected_reader = lambda person_id: {
+        "person_id": person_id,
+        "version": 1,
+        "updated_at_ms": 10,
+        "state_digest": "sha256:life",
+        "state": {},
+    }
+    base_ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / "canonical.sqlite3",
     )
-    monkeypatch.setattr(obs_fastapi_app, "build_process_canon_container", lambda **_kwargs: object())
-    monkeypatch.setattr(obs_fastapi_app, "build_process_life_container", lambda **_kwargs: life)
-    monkeypatch.setattr(obs_fastapi_app, "register_projection_job", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(obs_fastapi_app, "start_projection_jobs", lambda **_kwargs: {"started": True})
-    monkeypatch.setattr(obs_fastapi_app, "stop_projection_jobs", lambda: {"stopped": True})
+    ports = replace(
+        base_ports,
+        life_snapshot_reader=injected_reader,
+        projection_jobs=(),
+    )
+    app = obs_fastapi_app.create_obs_app(ports=ports)
 
     try:
         previous = PROCESS_LIFE_PROVIDER.require()
@@ -135,20 +132,21 @@ def test_obs_lifespan_owns_the_composed_life_reader(monkeypatch, tmp_path: Path)
         previous = None
     if previous is not None:
         PROCESS_LIFE_PROVIDER.clear(previous)
-
-    async def exercise() -> None:
-        app = SimpleNamespace(state=SimpleNamespace())
-        async with obs_fastapi_app.lifespan(app):
-            assert PROCESS_LIFE_PROVIDER.require() is life
-            payload, cursor = load_life_evolution_projection_source("default")
-            assert payload["person_id"] == "default"
-            assert cursor == 10
-        with pytest.raises(RuntimeError, match="PROCESS_LIFE_AUTHORITY_NOT_COMPOSED"):
-            PROCESS_LIFE_PROVIDER.require()
+    PROCESS_LIFE_PROVIDER.install(host_life)
 
     try:
-        asyncio.run(exercise())
+        with TestClient(app) as client:
+            assert client.get("/health").status_code == 200
+            assert PROCESS_LIFE_PROVIDER.require() is host_life
+            assert app.state.life_snapshot_reader is injected_reader
+            payload, cursor = load_life_evolution_projection_source(
+                "default",
+                snapshot_reader=app.state.life_snapshot_reader,
+            )
+            assert payload["person_id"] == "default"
+            assert cursor == 10
+        assert PROCESS_LIFE_PROVIDER.require() is host_life
     finally:
-        PROCESS_LIFE_PROVIDER.clear(life)
+        PROCESS_LIFE_PROVIDER.clear(host_life)
         if previous is not None:
             PROCESS_LIFE_PROVIDER.install(previous)

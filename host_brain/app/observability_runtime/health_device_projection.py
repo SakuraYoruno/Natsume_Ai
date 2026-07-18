@@ -7,19 +7,18 @@ probe a service, instantiate an Agent, submit a command, or scan a ledger.
 from __future__ import annotations
 
 import json
-import sys
-import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from natsume_contracts.edge.embodiment_v1 import EmbodimentCommand, EmbodimentReceipt
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
-from host_brain.channels.embodiment import register_embodiment_receipt_observer
-from host_brain.app.observability_runtime.projection_daemon import register_projection_job
 from host_brain.app.observability_runtime.projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.model_attempt_projection import (
+    latest_terminal_model_attempts,
+    model_attempt_node_id,
+)
 from host_brain.observability.service_registry import (
     ALL_SERVICES,
     EDGE_SERVICE_EVENT_PREFIXES,
@@ -65,11 +64,23 @@ ORGAN_AGENT_REGISTRY: tuple[tuple[str, str, str, str], ...] = (
     ("default_mode_agent", "default_mode", "host_brain.tribe.default_mode_agent", "_DEFAULT_MODE_AGENT"),
 )
 
-
-_receipt_lock = threading.Lock()
-_latest_receipts: dict[str, tuple[dict[str, Any], int]] = {}
-_job_lock = threading.Lock()
-_last_job_run: dict[str, float] = {}
+# Public Organ projection is deny-by-default.  Registry state may contain
+# conversation, emotion, immune, or identity material, so a new metric cannot
+# cross this boundary until its exact field name and scalar type are reviewed.
+_SAFE_OPERATIONAL_AGENT_METRICS = frozenset(
+    {
+        "active",
+        "enabled",
+        "error_count",
+        "pending_count",
+        "queue_depth",
+        "running",
+    }
+)
+ORGAN_AGENT_PUBLIC_METRIC_ALLOWLIST: Mapping[str, frozenset[str]] = {
+    agent_id: _SAFE_OPERATIONAL_AGENT_METRICS
+    for agent_id, _family, _module, _singleton in ORGAN_AGENT_REGISTRY
+}
 
 
 def _now_ms() -> int:
@@ -79,7 +90,7 @@ def _now_ms() -> int:
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -138,22 +149,59 @@ def load_health_projection_sources(
     *,
     now_ms: int | None = None,
     window_minutes: int = 60,
+    include_process_cache: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any], int]:
     """Read only heartbeat cache and audit rows; never launch a probe."""
 
-    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+    heartbeat_cache_reader: Callable[[str], Mapping[str, Any] | None] | None = None
+    if include_process_cache:
+        from host_brain.app.observability_runtime import (
+            service_health_heartbeat as heartbeat,
+        )
+
+        heartbeat_cache_reader = heartbeat.get_cached
 
     now = max(0, int(now_ms if now_ms is not None else _now_ms()))
     since = now - max(1, int(window_minutes)) * 60_000
     voice_rows = _ledger_rows(ledger, "voice_event_log", start_ms=since, end_ms=now)
-    llm_rows = _ledger_rows(ledger, "llm_node_call_log", start_ms=since, end_ms=now)
-    if not llm_rows:
-        llm_rows = _ledger_rows(ledger, "model_attempt_log", start_ms=since, end_ms=now)
+    model_attempt_rows = latest_terminal_model_attempts(
+        _ledger_rows(ledger, "model_attempt_log", start_ms=since, end_ms=now)
+    )
+    pool_rows = _ledger_rows(ledger, "llm_pool_call_log", start_ms=since, end_ms=now)
+    llm_gateway_rows: list[Mapping[str, Any]] = list(model_attempt_rows)
+    llm_gateway_rows.extend(
+        {
+            "status": "failed" if bool(row.get("pool_exhausted")) else "succeeded",
+            "latency_ms": row.get("total_latency_ms"),
+            "ts_ms": row.get("ts_ms"),
+            "request_id": row.get("request_id"),
+        }
+        for row in pool_rows
+    )
+    # Sources are loaded independently and therefore arrive in source-grouped
+    # order.  Health's rolling window must be chronological across both the
+    # canonical ModelAttempt path and the explicit legacy pool path; otherwise
+    # the second appended source wins regardless of recency.
+    llm_gateway_rows.sort(
+        key=lambda row: (
+            _safe_int(
+                row.get("ended_at_ms")
+                if row.get("ended_at_ms") is not None
+                else row.get("ts_ms")
+            ),
+            str(row.get("attempt_id") or row.get("request_id") or ""),
+            _safe_int(row.get("id")),
+        )
+    )
 
     services: list[dict[str, Any]] = []
     for service in ALL_SERVICES:
         service_id = service["service_id"]
-        cached = heartbeat.get_cached(service_id)
+        cached = (
+            heartbeat_cache_reader(service_id)
+            if heartbeat_cache_reader is not None
+            else None
+        )
         if cached is not None:
             health = {
                 "status": str(cached.get("status") or "UNKNOWN").upper(),
@@ -175,7 +223,7 @@ def load_health_projection_sources(
                 ]
             )
         elif service_id == "llm_gateway":
-            health = _compute_health(llm_rows)
+            health = _compute_health(llm_gateway_rows)
         elif service_id == "sqlite_ledger":
             health = {
                 "status": "UP",
@@ -197,7 +245,11 @@ def load_health_projection_sources(
 
     nodes: list[dict[str, Any]] = []
     for node_id, meta in LLM_NODE_REGISTRY.items():
-        cached = heartbeat.get_cached(node_id)
+        cached = (
+            heartbeat_cache_reader(node_id)
+            if heartbeat_cache_reader is not None
+            else None
+        )
         if cached is not None:
             health = {
                 "status": str(cached.get("status") or "UNKNOWN").upper(),
@@ -209,12 +261,8 @@ def load_health_projection_sources(
         else:
             matching = [
                 row
-                for row in llm_rows
-                if str(row.get("node_id") or row.get("model_node_id") or "") == node_id
-                or (
-                    str(row.get("provider") or "").lower() == meta["provider"].lower()
-                    and str(row.get("model_id") or "") == meta["model_id"]
-                )
+                for row in model_attempt_rows
+                if model_attempt_node_id(row) == node_id
             ]
             health = _compute_health(matching)
         nodes.append({"node_id": node_id, **meta, **health})
@@ -293,46 +341,20 @@ def _public_receipt_event(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return event
 
 
-def _observe_embodiment_receipt(
-    command: EmbodimentCommand,
-    receipt: EmbodimentReceipt,
-) -> None:
-    payload = {
-        "status": str(receipt.status or "UNKNOWN").upper(),
-        "success": bool(receipt.success),
-        "reason_code": receipt.reason_code,
-        "detail": _public_detail(receipt.detail),
-        "latency_ms": receipt.latency_ms,
-        "event": {
-            "kind": command.kind,
-            "action": command.action,
-            **_public_receipt_event(receipt.event),
-        },
-        "command_id": receipt.command_id,
-        "receipt_ref": receipt.receipt_ref,
-        "observed_at_ms": int(receipt.completed_at_ms or receipt.received_at_ms),
-    }
-    keys = {command.kind}
-    if command.kind == "avatar":
-        keys.add("vts")
-    if command.kind == "mateengine":
-        keys.add("mate")
-    cursor = int(receipt.completed_at_ms or receipt.received_at_ms)
-    with _receipt_lock:
-        for key in keys:
-            current = _latest_receipts.get(key)
-            if current is None or cursor >= current[1]:
-                _latest_receipts[key] = (dict(payload), cursor)
-
-
 def load_device_status_projection_sources(
     ledger: Any | None = None,
+    *,
+    include_process_cache: bool = False,
 ) -> dict[str, tuple[dict[str, Any], int]]:
-    with _receipt_lock:
-        sources = {
-            key: (dict(payload), int(cursor))
-            for key, (payload, cursor) in _latest_receipts.items()
-        }
+    """Rebuild device status exclusively from durable Host receipt facts.
+
+    ``include_process_cache`` remains a temporary source-compatible argument for
+    callers compiled before D8.  It deliberately has no effect: a process
+    cache cannot be a cross-restart or cross-application observation source.
+    """
+
+    del include_process_cache
+    sources: dict[str, tuple[dict[str, Any], int]] = {}
     if ledger is None:
         return sources
     rows = _ledger_rows(
@@ -407,13 +429,18 @@ def refresh_device_status_query_projections() -> dict[str, int]:
     return {"device_count": len(sources)}
 
 
-def _state_metrics(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+def _state_metrics(snapshot: Mapping[str, Any], *, agent_id: str) -> dict[str, Any]:
     state = snapshot.get("state")
     source = state if isinstance(state, Mapping) else snapshot
+    allowed = ORGAN_AGENT_PUBLIC_METRIC_ALLOWLIST.get(agent_id, frozenset())
     metrics: dict[str, Any] = {}
     for key, value in source.items():
         normalized_key = str(key)
-        if normalized_key.endswith("_ts_ms") or not isinstance(value, (str, int, float, bool)):
+        if (
+            normalized_key not in allowed
+            or isinstance(value, str)
+            or not isinstance(value, (int, float, bool))
+        ):
             continue
         metrics[normalized_key] = value
         if len(metrics) >= 6:
@@ -421,52 +448,77 @@ def _state_metrics(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     return metrics
 
 
-def load_organ_tribe_projection_source(
+def _snapshot_evidence_ts_ms(
+    snapshot: Mapping[str, Any],
     *,
-    host_state_loader: Callable[[], Mapping[str, Any] | None] | None = None,
-    scheduler_loader: Callable[[], Mapping[str, Any] | None] | None = None,
-    now_ms: int | None = None,
+    observed_at_ms: int,
+    candidate_keys: tuple[str, ...],
+) -> int:
+    """Return bounded source evidence, never the time of this observation."""
+
+    state = snapshot.get("state")
+    sources = (snapshot, state) if isinstance(state, Mapping) else (snapshot,)
+    evidence = 0
+    for source in sources:
+        for key in candidate_keys:
+            candidate = _safe_int(source.get(key))
+            if 0 < candidate <= observed_at_ms:
+                evidence = max(evidence, candidate)
+    return evidence
+
+
+def build_organ_tribe_public_snapshot(
+    *,
+    registry_snapshots: Mapping[str, Any],
+    scheduler_snapshot: Mapping[str, Any],
+    observed_at_ms: int,
 ) -> tuple[dict[str, Any], int]:
-    """Inspect already-loaded process state; never import/get an Agent singleton."""
+    """Build the bounded Host Organ-Tribe read model from explicit snapshots.
 
-    from host_brain.tribe import tribe_state
+    This function is deliberately composition-free: it does not inspect loaded
+    modules, discover a process registry, or manufacture evidence from the
+    observation clock.  A catalog entry is active only when its supplied state
+    has a positive, non-future update/evidence timestamp.
+    """
 
-    now = max(0, int(now_ms if now_ms is not None else _now_ms()))
-    registry = getattr(tribe_state, "_GLOBAL_REGISTRY", None)
-    snapshots = registry.snapshot() if registry is not None else {}
-    remote_state = dict(host_state_loader() or {}) if host_state_loader is not None else {}
-    for item in list(remote_state.get("namespaces") or []):
-        if not isinstance(item, Mapping):
-            continue
-        namespace = str(item.get("namespace") or "").strip()
-        if namespace:
-            snapshots[namespace] = dict(item)
+    observed = max(0, _safe_int(observed_at_ms))
+    snapshots = dict(registry_snapshots)
+    scheduler = dict(scheduler_snapshot)
     agents: list[dict[str, Any]] = []
     active = 0
-    cursor = 0
-    for agent_id, family, module_path, singleton_name in ORGAN_AGENT_REGISTRY:
-        snapshot = snapshots.get(agent_id) or snapshots.get(family)
-        module = sys.modules.get(module_path)
-        singleton = getattr(module, singleton_name, None) if module is not None else None
-        if isinstance(snapshot, Mapping):
-            status = "active"
-            metrics = _state_metrics(snapshot)
-            last_ts = _safe_int(
-                snapshot.get("updated_at_ms")
-                or snapshot.get("last_updated_ts_ms")
-                or snapshot.get("last_dispatch_ts_ms")
-            ) or None
-            active += 1
-        elif singleton is not None:
-            status = "loaded"
-            metrics = {"process_instance": True}
-            last_ts = None
-            active += 1
-        else:
+    evidence_ts_ms = 0
+
+    for agent_id, family, _module_path, _singleton_name in ORGAN_AGENT_REGISTRY:
+        candidate = snapshots.get(agent_id)
+        if not isinstance(candidate, Mapping):
+            candidate = snapshots.get(family)
+        snapshot = dict(candidate) if isinstance(candidate, Mapping) else None
+        if snapshot is None:
             status = "inactive"
             metrics = {"process_instance": False}
             last_ts = None
-        cursor = max(cursor, int(last_ts or 0))
+        else:
+            candidate_ts = _snapshot_evidence_ts_ms(
+                snapshot,
+                observed_at_ms=observed,
+                candidate_keys=(
+                    "evidence_ts_ms",
+                    "updated_at_ms",
+                    "last_updated_ts_ms",
+                ),
+            )
+            metrics = _state_metrics(snapshot, agent_id=agent_id)
+            if candidate_ts > 0:
+                status = "active"
+                last_ts = candidate_ts
+                active += 1
+                evidence_ts_ms = max(evidence_ts_ms, candidate_ts)
+            else:
+                # A supplied state proves only that a snapshot was available;
+                # without bounded evidence it must not count as live activity.
+                status = "loaded"
+                last_ts = None
+
         agents.append(
             {
                 "agent_id": agent_id,
@@ -477,32 +529,102 @@ def load_organ_tribe_projection_source(
             }
         )
 
-    scheduler = dict(scheduler_loader() or {}) if scheduler_loader is not None else {}
+    runtime = scheduler.get("runtime")
+    runtime = dict(runtime) if isinstance(runtime, Mapping) else {}
+    scheduler_evidence_ts_ms = max(
+        _snapshot_evidence_ts_ms(
+            scheduler,
+            observed_at_ms=observed,
+            candidate_keys=(
+                "evidence_ts_ms",
+                "updated_at_ms",
+                "last_updated_ts_ms",
+                "timestamp",
+                "ts_ms",
+            ),
+        ),
+        _snapshot_evidence_ts_ms(
+            runtime,
+            observed_at_ms=observed,
+            candidate_keys=(
+                "evidence_ts_ms",
+                "updated_at_ms",
+                "last_updated_ts_ms",
+                "last_tick_ms",
+            ),
+        ),
+    )
+    evidence_ts_ms = max(evidence_ts_ms, scheduler_evidence_ts_ms)
+
+    tasks = list(scheduler.get("tasks") or [])
     decay = next(
         (
             dict(item)
-            for item in list(scheduler.get("tasks") or [])
-            if isinstance(item, Mapping) and str(item.get("task_id") or "") == "emotion_decay_tick"
+            for item in tasks
+            if isinstance(item, Mapping)
+            and str(item.get("task_id") or "") == "emotion_decay_tick"
         ),
         None,
     )
-    runtime = scheduler.get("runtime") if isinstance(scheduler.get("runtime"), Mapping) else {}
-    cursor = max(
-        cursor,
-        _safe_int(remote_state.get("timestamp") or remote_state.get("ts_ms")),
-        _safe_int(scheduler.get("timestamp") or scheduler.get("ts_ms")),
-        now,
-    )
+    seeded_task_ids = {
+        str(item)
+        for item in list(scheduler.get("seeded_task_ids") or [])
+        if str(item).strip()
+    }
     payload = {
         "total_agents": len(agents),
         "active_agents": active,
         "agents": agents,
-        "continuous_system_active": bool(runtime.get("active", decay and decay.get("enabled"))),
-        "emotion_decay_tick_enabled": bool(decay and decay.get("enabled", True)),
-        "source_process": "host" if remote_state else "projection-worker-local-fallback",
-        "timestamp": now,
+        "continuous_system_active": bool(
+            runtime.get("active", scheduler.get("clock_active", False))
+        ),
+        "emotion_decay_tick_enabled": bool(
+            (decay and decay.get("enabled", True))
+            or "emotion_decay_tick" in seeded_task_ids
+        ),
+        "source_process": "host-runtime",
+        "timestamp": observed,
+        "observed_at_ms": observed,
+        "evidence_ts_ms": evidence_ts_ms,
     }
-    return payload, cursor
+    return payload, evidence_ts_ms
+
+
+def load_organ_tribe_projection_source(
+    *,
+    registry_snapshots: Mapping[str, Any] | None = None,
+    scheduler_snapshot: Mapping[str, Any] | None = None,
+    host_state_loader: Callable[[], Mapping[str, Any] | None] | None = None,
+    scheduler_loader: Callable[[], Mapping[str, Any] | None] | None = None,
+    observed_at_ms: int | None = None,
+    now_ms: int | None = None,
+) -> tuple[dict[str, Any], int]:
+    """Compatibility adapter around the explicit public snapshot builder."""
+
+    observed = max(
+        0,
+        _safe_int(
+            observed_at_ms
+            if observed_at_ms is not None
+            else now_ms if now_ms is not None else _now_ms()
+        ),
+    )
+    snapshots = dict(registry_snapshots or {})
+    remote_state = dict(host_state_loader() or {}) if host_state_loader is not None else {}
+    for item in list(remote_state.get("namespaces") or []):
+        if not isinstance(item, Mapping):
+            continue
+        namespace = str(item.get("namespace") or "").strip()
+        if namespace:
+            snapshots[namespace] = dict(item)
+    scheduler = dict(scheduler_snapshot or {})
+    if scheduler_loader is not None:
+        scheduler.update(dict(scheduler_loader() or {}))
+    return build_organ_tribe_public_snapshot(
+        registry_snapshots=snapshots,
+        scheduler_snapshot=scheduler,
+        observed_at_ms=observed,
+    )
 
 
 def refresh_organ_tribe_query_projection() -> dict[str, int]:
@@ -546,46 +668,14 @@ def read_projection_payload(
     return (dict(document.payload) if document is not None and meta["available"] else None), meta
 
 
-def _run_job_if_due(
-    name: str,
-    interval_seconds: float,
-    callback: Callable[[], dict[str, int]],
-) -> dict[str, int | bool]:
-    now = time.monotonic()
-    with _job_lock:
-        previous = _last_job_run.get(name, 0.0)
-        if now - previous < max(0.1, float(interval_seconds)):
-            return {"skipped": True}
-        _last_job_run[name] = now
-    return callback()
-
-
-def run_health_projection_job() -> dict[str, int | bool]:
-    return _run_job_if_due("health-passive", 30.0, refresh_health_query_projections)
-
-
-def run_device_status_projection_job() -> dict[str, int | bool]:
-    return _run_job_if_due("device-status", 1.0, refresh_device_status_query_projections)
-
-
-def run_organ_tribe_projection_job() -> dict[str, int | bool]:
-    return _run_job_if_due("organ-tribe", 10.0, refresh_organ_tribe_query_projection)
-
-
-register_embodiment_receipt_observer(_observe_embodiment_receipt)
-register_projection_job("health-passive", run_health_projection_job)
-register_projection_job("device-status", run_device_status_projection_job)
-register_projection_job("organ-tribe", run_organ_tribe_projection_job)
-
-
 __all__ = [
     "DEVICE_MAX_AGE_MS", "DEVICE_STATUS_KIND", "HEALTH_MAX_AGE_MS",
     "LLM_NODE_HEALTH_KEY", "LLM_NODE_HEALTH_KIND", "ORGAN_AGENT_REGISTRY",
+    "ORGAN_AGENT_PUBLIC_METRIC_ALLOWLIST",
     "ORGAN_TRIBE_KEY", "ORGAN_TRIBE_KIND", "ORGAN_TRIBE_MAX_AGE_MS",
     "SERVICE_HEALTH_KEY", "SERVICE_HEALTH_KIND", "load_device_status_projection_sources",
-    "load_health_projection_sources", "load_organ_tribe_projection_source",
+    "build_organ_tribe_public_snapshot", "load_health_projection_sources",
+    "load_organ_tribe_projection_source",
     "read_projection_payload", "refresh_device_status_query_projections",
     "refresh_health_query_projections", "refresh_organ_tribe_query_projection",
-    "run_device_status_projection_job", "run_health_projection_job",
-    "run_organ_tribe_projection_job",
 ]

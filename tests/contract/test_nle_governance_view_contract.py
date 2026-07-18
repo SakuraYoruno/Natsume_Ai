@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from fastapi import HTTPException
 from host_brain.app import obs_routes_governance as routes
 from host_brain.app.settings.core import get_core_settings
 from host_brain.observability.governance_view import build_governance_view
+from natsume_contracts.operator.v1 import ProjectionDocument
 
 
 PRIVATE = "PRIVATE_IDENTITY_BODY_MUST_NOT_LEAK"
@@ -249,42 +251,58 @@ def test_t_nle_23_non_lab_never_exposes_executable_high_risk_pentest_entry() -> 
     assert all(item["executable_in_current_mode"] is False for item in pentest["high_risk_entrypoints"])
 
 
-def test_t_nle_23_flag_defaults_off_before_provider_construction(
+def test_t_nle_23_flag_defaults_off_before_store_read(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     called = 0
 
-    def provider() -> dict[str, object]:
-        nonlocal called
-        called += 1
-        return {"unexpected": True}
+    class ForbiddenStore:
+        def get(self, _kind: str, _key: str) -> None:
+            nonlocal called
+            called += 1
+            raise AssertionError("feature gate must run before projection read")
 
     monkeypatch.delenv("HOST_NLE_GOVERNANCE_VIEWS_ENABLED", raising=False)
     # CoreSettings intentionally supports a deployment .env.  Isolate this
     # default-value contract from the developer's live acceptance settings.
     monkeypatch.chdir(tmp_path)
     get_core_settings.cache_clear()
-    routes.set_governance_snapshot_provider(provider)
     try:
         with pytest.raises(HTTPException) as blocked:
-            asyncio.run(routes._get_governance_snapshot())
+            asyncio.run(routes._get_governance_snapshot(ForbiddenStore()))
         assert blocked.value.status_code == 404
         assert called == 0
     finally:
-        routes.set_governance_snapshot_provider(None)
         get_core_settings.cache_clear()
 
 
-def test_t_nle_23_enabled_get_uses_injected_read_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_t_nle_23_enabled_get_uses_injected_projection_store(monkeypatch: pytest.MonkeyPatch) -> None:
     expected = {"schema_version": "Natsume.governance.snapshot.v1", "read_only": True}
+    now_ms = int(time.time() * 1000)
+
+    class ProjectedStore:
+        def get(self, kind: str, key: str) -> ProjectionDocument:
+            return ProjectionDocument(
+                kind=kind,
+                key=key,
+                payload=expected,
+                projection_version=1,
+                projection_cursor=1,
+                source_cursor=1,
+                source_digest="sha256:source",
+                payload_digest="sha256:payload",
+                freshness_ts_ms=now_ms,
+            )
+
     monkeypatch.setenv("HOST_NLE_GOVERNANCE_VIEWS_ENABLED", "true")
     get_core_settings.cache_clear()
-    routes.set_governance_snapshot_provider(lambda: expected)
     try:
-        assert asyncio.run(routes._get_governance_snapshot()) == expected
+        result = asyncio.run(routes._get_governance_snapshot(ProjectedStore()))
+        assert result["schema_version"] == expected["schema_version"]
+        assert result["read_only"] is True
+        assert result["projection"]["projection_version"] == 1
     finally:
-        routes.set_governance_snapshot_provider(None)
         get_core_settings.cache_clear()
 
 

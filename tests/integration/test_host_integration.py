@@ -7,7 +7,7 @@
 
 策略：
 - 使用 FastAPI TestClient（同步 ASGI 测试客户端）
-- 使用内存 SQLite 账本（:memory:）隔离测试数据
+- 使用每例独立的临时 SQLite 账本隔离测试数据
 - LLM/ASR/TTS 等外部依赖全部 mock，不发起真实网络请求
 - SSE 流式响应解析为事件列表进行断言
 - 每个测试类对应一个路由组或功能模块
@@ -59,10 +59,13 @@ def find_event(events: List[Dict[str, Any]], phase: str, **kwargs) -> Dict[str, 
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def mem_ledger():
-    """每个测试显式拥有独立的内存 SQLite 账本。"""
+def mem_ledger(tmp_path):
+    """每个测试显式拥有独立、可被生命周期组件复开的 SQLite 账本。"""
     from host_brain.audit.sqlite_ledger import SQLiteLedger
-    ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
+    ledger = SQLiteLedger(
+        db_path=tmp_path / "host-integration.sqlite3",
+        check_same_thread=False,
+    )
     yield ledger
     ledger.close()
 
@@ -70,7 +73,7 @@ def mem_ledger():
 @pytest.fixture
 def test_client(mem_ledger):
     """构建与当前测试账本同生命周期的 TestClient。"""
-    # 注入内存账本
+    # 注入本例专用账本
     import host_brain.composition.process_services as _deps
     _deps.get_process_service_container().ledger = mem_ledger
     _deps.get_process_service_container().bond_stage_engine = None
@@ -100,6 +103,11 @@ def test_client(mem_ledger):
                 "HOST_BOND_SQLITE_PATH": "",
                 "HOST_BOND_STAGE_THRESHOLDS": "",
                 "HOST_BOND_SCORE_MAP": "",
+                # The readiness endpoint probes the effective settings rather
+                # than the mocked chat resolver, and workspace composition is
+                # deliberately fail-closed without its signing secret.
+                "OPENAI_API_KEY": "test-openai-key",
+                "HOST_AGENT_WORKSPACE_HMAC_SECRET": "test-workspace-secret-at-least-32-bytes",
             },
             clear=False,
         ),
@@ -111,8 +119,24 @@ def test_client(mem_ledger):
               new=_mock_astream),
     ):
         from host_brain.app.asgi import app
-        client = TestClient(app, raise_server_exceptions=False)
-        yield client
+        from host_brain.app.tribe_composition import (
+            configure_tribe_application_ports,
+        )
+
+        # The global pytest isolation fixture clears process references
+        # between examples, while this module intentionally reuses the
+        # process app object.  Recompose the app-owned Tribe authority
+        # before entering its lifespan; production creates this authority
+        # in ``create_app`` and never performs that test-only reset.
+        configure_tribe_application_ports()
+
+        # ``TestClient`` only enters the ASGI lifespan when used as a context
+        # manager.  Host readiness/startup endpoints deliberately depend on
+        # lifespan-owned, migration-gated projections, so bypassing it would
+        # exercise an impossible production state and incorrectly turn the
+        # fail-closed 503 contract into a fixture failure.
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
 
     # 清理单例，避免跨测试污染
     _deps.get_process_service_container().ledger = None

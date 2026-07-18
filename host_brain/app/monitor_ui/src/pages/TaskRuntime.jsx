@@ -9,12 +9,14 @@ import {
   TaskBudgetPanel,
   TaskCursorTimeline,
   TaskDagPanel,
+  TaskGraphCancellationPanel,
   TaskGraphPicker,
   TaskReviewPanel,
   TaskVerificationPanel,
 } from '../features/execution/components/TaskRuntimeConsole.jsx'
 import {
   approveTaskReview,
+  cancelTaskGraph,
   rejectTaskReview,
   resumeTaskReview,
 } from '../features/execution/taskRuntimeApi.js'
@@ -53,6 +55,8 @@ export default function TaskRuntime() {
   const [actorId, setActorId] = useState('monitor-operator')
   const [resumeTokens, setResumeTokens] = useState({})
   const [busyReviewId, setBusyReviewId] = useState('')
+  const [cancellationBusy, setCancellationBusy] = useState(false)
+  const [cancellationReasonCode, setCancellationReasonCode] = useState('OPERATOR_REQUESTED')
   const [actionNotice, setActionNotice] = useState(null)
 
   const deepLink = useMemo(
@@ -211,6 +215,30 @@ export default function TaskRuntime() {
     setResumeTokens((current) => ({ ...current, [reviewId]: value }))
   }, [])
 
+  const runGraphCancellation = useCallback(async () => {
+    if (!model.compatible || !model.execution || model.execution.terminal) return
+    const target = `${model.execution.graph_id}@${model.execution.revision}`
+    if (globalThis.confirm && !globalThis.confirm(`确认取消 ${target}？`)) return
+    setCancellationBusy(true)
+    setActionNotice(null)
+    try {
+      await cancelTaskGraph(
+        model.execution.graph_id,
+        model.execution.revision,
+        cancellationReasonCode,
+      )
+      setActionNotice({
+        variant: 'success',
+        text: `${target} 取消命令已由 Operator Gateway 受理；正在刷新 durable 状态。`,
+      })
+      await Promise.all([indexQuery.refetch(), executionQuery.refetch()])
+    } catch (error) {
+      setActionNotice({ variant: 'error', text: error?.message || 'TaskGraph 取消命令失败' })
+    } finally {
+      setCancellationBusy(false)
+    }
+  }, [cancellationReasonCode, executionQuery, indexQuery, model])
+
   const refreshCurrent = useCallback(() => {
     const refreshes = []
     if (deepLink.active && deepLink.reviewId) refreshes.push(locatorQuery.refetch())
@@ -313,7 +341,7 @@ export default function TaskRuntime() {
       ) : null}
       {!deepLink.active && indexQuery.data && !indexModel.compatible ? <NoticeBanner variant="error" title="Execution index 已拒绝">{indexModel.error}</NoticeBanner> : null}
       {!deepLink.active && executionQuery.data && !model.compatible ? <NoticeBanner variant="error" title="Execution read model 已拒绝">{model.error}</NoticeBanner> : null}
-      {actionNotice ? <NoticeBanner variant={actionNotice.variant} title="Review 命令结果">{actionNotice.text}</NoticeBanner> : null}
+      {actionNotice ? <NoticeBanner variant={actionNotice.variant} title="Operator 命令结果">{actionNotice.text}</NoticeBanner> : null}
 
       {!deepLink.active && indexModel.executions.length ? (
         <TaskGraphPicker executions={indexModel.executions} selectedKey={effectiveSelectedKey} onSelect={handleSelect} />
@@ -327,6 +355,16 @@ export default function TaskRuntime() {
             <MetricCard label="Attempts" value={displayMetrics.attempts} hint={`${model.budgets.length} budgets`} tone="text-sky-600" />
             <MetricCard label="Reviews" value={displayMetrics.reviews} hint={`${displayMetrics.events} replay events`} tone="text-violet-600" />
           </div>
+
+          {model.compatible && !deepLink.active ? (
+            <TaskGraphCancellationPanel
+              execution={execution}
+              reasonCode={cancellationReasonCode}
+              setReasonCode={setCancellationReasonCode}
+              busy={cancellationBusy}
+              onCancel={runGraphCancellation}
+            />
+          ) : null}
 
           {model.compatible ? <TaskDagPanel nodes={model.nodes} edges={model.edges} /> : null}
 

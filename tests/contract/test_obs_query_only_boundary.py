@@ -62,6 +62,16 @@ EXPECTED_BASELINE_MUTATION_ROUTES = {
 }
 
 EXPECTED_DUPLICATE_QUERY_ROUTES: set[HttpRouteKey] = set()
+EXPECTED_EFFECT_RECONCILIATION_QUERY_ROUTES = {
+    HttpRouteKey("GET", "/obs/task-runtime/effect-reconciliation/candidates"),
+    HttpRouteKey("GET", "/obs/task-runtime/effect-reconciliation/cases"),
+    HttpRouteKey("GET", "/obs/task-runtime/effect-reconciliation/challenge"),
+}
+EXPECTED_TERMINAL_RECONCILIATION_QUERY_ROUTES = {
+    HttpRouteKey("GET", "/obs/task-runtime/terminal-reconciliation/candidates"),
+    HttpRouteKey("GET", "/obs/task-runtime/terminal-reconciliation/cases"),
+    HttpRouteKey("GET", "/obs/task-runtime/terminal-reconciliation/challenge"),
+}
 
 
 def test_task0489_baseline_manifest_covers_all_18_observed_mutation_handlers() -> None:
@@ -77,8 +87,14 @@ def test_actual_obs_fastapi_route_entries_are_query_only_after_writer_detach() -
     audit = audit_fastapi_route_entries(obs_app)
 
     # Each query route has one canonical owner after the split-router cutover.
-    assert audit.entry_count == 104
-    assert audit.unique_route_count == 104
+    assert audit.entry_count == 110
+    assert audit.unique_route_count == 110
+    assert EXPECTED_EFFECT_RECONCILIATION_QUERY_ROUTES <= {
+        entry.key for entry in audit.entries
+    }
+    assert EXPECTED_TERMINAL_RECONCILIATION_QUERY_ROUTES <= {
+        entry.key for entry in audit.entries
+    }
     assert {entry.key for entry in audit.pure_query_non_get_entries} == EXPECTED_PURE_QUERY_POSTS
     assert OBS_PURE_QUERY_NON_GET_ROUTES == frozenset(EXPECTED_PURE_QUERY_POSTS)
     assert {group.key for group in audit.duplicate_routes} == EXPECTED_DUPLICATE_QUERY_ROUTES

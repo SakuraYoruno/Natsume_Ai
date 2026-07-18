@@ -3,8 +3,8 @@
 
 # 图 06：Gateway 与 Edge 输入输出
 
-版本：v2.0
-核对日期：2026-07-15
+版本：v2.2
+核对日期：2026-07-16
 
 Gateway 处理“平台消息”，Edge RPC 处理“本机感知与动作”。两者可以在同一 Edge lifecycle 中运行，但 transport authority 和 effect authority 不应混为一体。
 
@@ -57,6 +57,10 @@ sequenceDiagram
 ```
 
 平台 API 返回不明确时，Gateway 把状态保留为 retryable 或 uncertain，而不是盲目重发并宣称成功。出站 adapter 只能执行已经验收的 delivery plan，不能重写回复内容或重新决定目标用户。
+
+该不确定性也进入 Graph cancellation fence：Acceptance Effect handler/transport 返回 `FAILED` 不能证明平台未收到消息，因此 cancellation 必须继续 `RECONCILIATION_REQUIRED`；只有 `COMMITTED` 且存在 durable receipt 才可自动收口，不能用错误码猜测 `NO_SIDE_EFFECT`。0098 已把签名 Effect 对账接成默认关闭的 append-only sidecar：PENDING proof exact 绑定 case/intent/effect/fence/Attempt/resolution/actor/Outbox/`graph_revision`，只进入之后的新 decision evidence；已有 FINALIZED decision 的 correction 仅作 trusted-read overlay，旧 decision、fence 和 evidence 均不改写。生产 gate 只阻断目标数据库中实际存在且未修复/未隔离的 legacy inventory；部署密钥/凭据、完整 key lifecycle 与真实 canary仍未完成。
+
+0099 terminal reconciliation 不替代 transport/effect 对账。它在 `recover_startup` 后单次最多 inventory 10,000 个 terminal Graph，case/proof/supersession 只追加；migration 不碰业务行。Readiness 比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec；classifier 要求唯一 0090、完整 0091/0092 与 exact failure Outbox refs。只有唯一 graph-scope exact FAILED bundle 可 default-off auto；结构漂移 quarantine。未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；历史链最终必须有 proof。System proof 以 case 时间跨进程收敛；healthy closure 仅 signed `NONE` 零业务写。它不是 general recovery，当前仍为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。
 
 ## Edge 设备动作
 
@@ -120,4 +124,5 @@ Edge event 不是用户对话输入；平台 inbox 也不是设备 receipt。把
 - Gateway 是否启用由 `EDGE_GATEWAY_ENABLED` 和 `EDGE_GATEWAY_PLATFORMS` 决定。
 - Edge RPC 监听地址来自 `EDGE_RPC_HOST/EDGE_RPC_PORT`。
 - 生产鉴权需要独立的 Gateway/Host/Edge secret profile；不同边界不得复用一把通用密钥。
+- `task_terminal.reconcile` 使用独立默认关闭的 Secure Ingress Operator 权限和 verification-only Ed25519 公钥环；不得复用 Gateway/Edge transport secret 充当签名 authority。
 - 没有真实平台账号或设备时，只能标 `NOT_TESTED/DEGRADED`，mock receipt 不能证明真实投递或硬件动作。

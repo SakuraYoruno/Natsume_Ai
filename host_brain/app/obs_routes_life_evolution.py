@@ -3,40 +3,19 @@
 from __future__ import annotations
 
 import inspect
-import os
 import time
-from collections.abc import Awaitable, Callable, Mapping
-from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
-from fastapi import Body, Depends, HTTPException, Query
+from fastapi import Body, Depends, HTTPException, Query, Request
 
+from host_brain.app.obs_route_ports import (
+    require_obs_query_projection_store,
+    require_obs_route_ports,
+)
 from host_brain.app.obs_routes_core import router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.persona.life_evolution_view import build_life_evolution_view
-
-
-SnapshotProvider = Callable[..., Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
-_snapshot_provider: SnapshotProvider | None = None
-ActionContextProvider = Callable[..., Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
-_action_context_provider: ActionContextProvider | None = None
-
-
-def set_life_evolution_snapshot_provider(provider: SnapshotProvider | None) -> None:
-    """Install a test/composition provider without adding a write authority."""
-    global _snapshot_provider
-    _snapshot_provider = provider
-
-
-def set_life_evolution_action_context_provider(provider: ActionContextProvider | None) -> None:
-    """Install a server-side provider for already committed Governor context.
-
-    Browser payloads are never authority.  Without this internal provider a
-    preview remains a useful fail-closed BLOCK and cannot claim executable
-    approval merely because a caller supplied self-consistent token hashes.
-    """
-    global _action_context_provider
-    _action_context_provider = provider
 
 
 def _require_life_views_enabled() -> None:
@@ -54,100 +33,8 @@ async def _resolve(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
-def _projection_enabled() -> bool:
-    from host_brain.persona.scene_policy import life_projection_enabled
-
-    return life_projection_enabled()
-
-
-async def _default_snapshot(
-    *,
-    person_id: str,
-    session_id: str,
-    fact_keys: list[str],
-    now_ms: int,
-) -> dict[str, Any]:
-    from host_brain.composition.process_services import get_bond_stage_engine, get_ledger, get_state_arbiter
-    from host_brain.bond.bond_projection import build_bond_projection
-    from host_brain.governor.action_preview import preview_action
-    from host_brain.persona.life_evolution_observer import (
-        read_life_evolution_observations,
-        read_supervisor_appraisal_events,
-    )
-    from host_brain.runtime.world_model import build_world_snapshot
-    from host_brain.tribe.social_brain_agent import get_social_brain_agent
-
-    ledger = get_ledger()
-    enabled = _projection_enabled()
-    world = await build_world_snapshot(
-        ledger=ledger,
-        person_id=person_id,
-        state_arbiter=get_state_arbiter(),
-        fact_keys=fact_keys,
-        session_id=session_id,
-        now_ms=now_ms,
-        enabled=enabled,
-    )
-    observations = read_life_evolution_observations(person_id=person_id)
-    appraisals = list(observations.get("appraisals") or [])
-    configured_dir = str(os.environ.get("HOST_NLE_LIFE_APPRAISAL_DIR") or "").strip()
-    if not configured_dir:
-        candidate = Path(__file__).resolve().parents[2] / "artifacts" / "digital_life_host_runtime" / "state"
-        configured_dir = str(candidate) if candidate.is_dir() else ""
-    if configured_dir:
-        appraisals.extend(read_supervisor_appraisal_events(configured_dir, limit=20))
-    appraisals = list(
-        {
-            str(item.get("appraisal_id") or f"missing-{index}"): item
-            for index, item in enumerate(appraisals)
-            if isinstance(item, Mapping)
-        }.values()
-    )
-    bond = build_bond_projection(
-        user_id=person_id,
-        stage_engine=get_bond_stage_engine(),
-        social_brain=get_social_brain_agent(),
-        appraisal_records=appraisals,
-        now_ms=now_ms,
-        enabled=enabled,
-    )
-    scene = dict(observations.get("scene_decision") or {})
-    action_arbiter = dict(observations.get("action_arbiter_decision") or {})
-    preview = preview_action(
-        governor_decision={},
-        proposed_action={
-            "action_kind": "proactive_expression",
-            "scope": "conversation",
-            "risk_level": 5,
-            "requires_token": True,
-            "is_proactive": True,
-        },
-        scene_decision=scene,
-        user_intent={"explicit": False},
-        evidence_refs=tuple(scene.get("source_refs") or ()),
-        now_ms=now_ms,
-        runtime_event_store=None,
-        record_runtime_event=False,
-    )
-    preview["authority_context_status"] = "UNAVAILABLE"
-    preview["authority_validation_reason"] = "CURRENT_GOVERNOR_AUTHORITY_NOT_EXPOSED"
-    preview["arbiter_eligible"] = False
-    preview["would_execute"] = False
-    preview["finality"] = "ARBITER_ELIGIBILITY_ONLY"
-    preview["execution_precheck_status"] = "NOT_RUN"
-    return build_life_evolution_view(
-        person_id=person_id,
-        world_snapshot=world,
-        appraisal_records=appraisals,
-        bond_projection=bond,
-        scene_decision=scene,
-        action_arbiter_decision=action_arbiter,
-        action_preview=preview,
-        now_ms=now_ms,
-    )
-
-
 async def _get_life_evolution_snapshot(
+    projection_store: Any = Depends(require_obs_query_projection_store),
     person_id: str = Query("default"),
     session_id: str = Query(""),
 ) -> dict[str, Any]:
@@ -156,11 +43,12 @@ async def _get_life_evolution_snapshot(
     from host_brain.app.observability_runtime.domain_state_projection import (
         LIFE_EVOLUTION_KIND,
         LIFE_MAX_AGE_MS,
-        read_domain_projection,
+        read_domain_projection_from_store,
     )
 
     key = str(person_id or "default").strip() or "default"
-    payload, projection = read_domain_projection(
+    payload, projection = read_domain_projection_from_store(
+        projection_store,
         kind=LIFE_EVOLUTION_KIND,
         key=key,
         max_age_ms=LIFE_MAX_AGE_MS,
@@ -190,6 +78,7 @@ async def get_life_evolution_snapshot(
 
 @router.post("/life-evolution/action-preview")
 async def post_life_evolution_action_preview(
+    request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Compute a governed DRY_RUN; recording and executors are intentionally unavailable."""
@@ -197,7 +86,8 @@ async def post_life_evolution_action_preview(
     from host_brain.governor.action_preview import preview_action
 
     trusted: dict[str, Any] = {}
-    provider = _action_context_provider
+    route_ports = require_obs_route_ports(request)
+    provider = route_ports.life_action_context_provider
     if provider is not None:
         try:
             preview_subject_ref = payload.get("preview_subject_ref")
@@ -244,7 +134,6 @@ async def post_life_evolution_action_preview(
     authority_context_status = "UNAVAILABLE"
     authority_validation_reason = "TRUSTED_CONTEXT_PROVIDER_UNAVAILABLE"
     if trusted:
-        from host_brain.composition.process_services import get_token_service
         from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL
 
         governor = dict(trusted.get("governor_decision") or {})
@@ -255,22 +144,47 @@ async def post_life_evolution_action_preview(
             seq = int(intent.get("seq"))
         except (TypeError, ValueError):
             seq = -1
-        token_check = get_token_service().validate_bound_token(
-            token_ref if isinstance(token_ref, str) else None,
-            expected_type=TOKEN_TYPE_APPROVAL,
-            intent_id=str(intent.get("id") or intent.get("intent_id") or ""),
-            skill_name=str(proposed_action.get("action_kind") or proposed_action.get("action") or ""),
-            session_id=str(intent.get("session_id") or ""),
-            seq=seq,
-            now_ts_ms=now_ms,
-            consume=False,
-        )
-        if token_check.valid:
+        validator = route_ports.approval_token_validator
+        token_check = None
+        if validator is not None:
+            try:
+                token_check = await _resolve(
+                    validator(
+                        token_ref if isinstance(token_ref, str) else None,
+                        expected_type=TOKEN_TYPE_APPROVAL,
+                        intent_id=str(
+                            intent.get("id") or intent.get("intent_id") or ""
+                        ),
+                        skill_name=str(
+                            proposed_action.get("action_kind")
+                            or proposed_action.get("action")
+                            or ""
+                        ),
+                        session_id=str(intent.get("session_id") or ""),
+                        seq=seq,
+                        now_ts_ms=now_ms,
+                        consume=False,
+                    )
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="OBS_APPROVAL_TOKEN_VALIDATOR_UNAVAILABLE",
+                ) from exc
+        if token_check is not None and bool(getattr(token_check, "valid", False)):
             authority_context_status = "SERVER_TRUSTED_TOKEN_VALID"
             authority_validation_reason = "APPROVAL_TOKEN_VALID_NOT_CONSUMED"
         else:
             authority_context_status = "SERVER_CONTEXT_TOKEN_INVALID"
-            authority_validation_reason = str(token_check.reason_code or token_check.detail or "TOKEN_INVALID")
+            authority_validation_reason = (
+                str(
+                    getattr(token_check, "reason_code", None)
+                    or getattr(token_check, "detail", None)
+                    or "TOKEN_INVALID"
+                )
+                if token_check is not None
+                else "APPROVAL_TOKEN_VALIDATOR_UNAVAILABLE"
+            )
             trusted = {}
     try:
         result = preview_action(
@@ -313,6 +227,4 @@ async def post_life_evolution_action_preview(
 __all__ = [
     "get_life_evolution_snapshot",
     "post_life_evolution_action_preview",
-    "set_life_evolution_action_context_provider",
-    "set_life_evolution_snapshot_provider",
 ]

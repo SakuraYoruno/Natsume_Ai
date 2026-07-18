@@ -26,20 +26,25 @@ class GovernedSkillExecutionPorts:
     capability_broker: Any
     model_attempt_service: Any
     production_authority_verifier: Callable[..., Any]
-    resource_manager_provider: Callable[..., Any]
-    episodic_store_provider: Callable[[], Any]
-    semantic_recaller_provider: Callable[[], Any]
+    resource_manager: Any | None
+    episodic_store: Any | None
+    semantic_recaller: Any | None
+
+    def __post_init__(self) -> None:
+        if not callable(self.production_authority_verifier):
+            raise TypeError("production_authority_verifier must be callable")
 
     # These method names are the structural subset consumed by the shared
     # low-level executor for resource and memory Skills.
     def get_resource_manager(self, *args: Any, **kwargs: Any) -> Any:
-        return self.resource_manager_provider(*args, **kwargs)
+        del args, kwargs
+        return self.resource_manager
 
     def get_episodic_store(self) -> Any:
-        return self.episodic_store_provider()
+        return self.episodic_store
 
     def get_semantic_recaller(self) -> Any:
-        return self.semantic_recaller_provider()
+        return self.semantic_recaller
 
 
 def build_governed_skill_execution_ports(
@@ -48,19 +53,20 @@ def build_governed_skill_execution_ports(
     capability_broker: Any,
     model_attempt_service: Any,
     production_authority_verifier: Callable[..., Any],
+    resource_manager: Any | None,
+    episodic_store: Any | None,
+    semantic_recaller: Any | None,
 ) -> GovernedSkillExecutionPorts:
     """Compose only services usable after Skill route admission is complete."""
-
-    from host_brain.composition import process_services  # noqa: PLC0415
 
     return GovernedSkillExecutionPorts(
         skill_registry=skill_registry,
         capability_broker=capability_broker,
         model_attempt_service=model_attempt_service,
         production_authority_verifier=production_authority_verifier,
-        resource_manager_provider=process_services.get_resource_manager,
-        episodic_store_provider=process_services.get_episodic_store,
-        semantic_recaller_provider=process_services.get_semantic_recaller,
+        resource_manager=resource_manager,
+        episodic_store=episodic_store,
+        semantic_recaller=semantic_recaller,
     )
 
 

@@ -7,6 +7,9 @@ from host_brain.persistence import task_repository
 from host_brain.persistence.task_dag_state_store import (
     TaskDagStateStoreMixin,
 )
+from host_brain.persistence.task_outbox_delivery_store import (
+    TaskOutboxDeliveryStoreMixin,
+)
 from host_brain.persistence.task_ready_claim_store import (
     TaskReadyClaimStoreMixin,
 )
@@ -27,6 +30,22 @@ DAG_STATE_METHODS = (
     "transition_node",
 )
 READY_CLAIM_METHODS = ("claim_ready_node", "_replay_ready_node_claim")
+
+
+def test_task_outbox_mutation_helpers_have_one_mixin_owner() -> None:
+    assert (
+        task_repository.DurableTaskStore._insert_outbox
+        is TaskOutboxDeliveryStoreMixin._insert_outbox
+    )
+    assert (
+        task_repository.DurableTaskStore._assert_mutation_outbox_replay
+        is TaskOutboxDeliveryStoreMixin._assert_mutation_outbox_replay
+    )
+    assert "_insert_outbox" not in task_repository.DurableTaskStore.__dict__
+    assert (
+        "_assert_mutation_outbox_replay"
+        not in task_repository.DurableTaskStore.__dict__
+    )
 
 
 def _module_tree(owner: type) -> ast.Module:

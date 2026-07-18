@@ -1152,6 +1152,18 @@ def _same_request(candidate: SearchRequest, expected: SearchRequest) -> bool:
         and candidate.context == expected.context
         and candidate.budget == expected.budget
         and candidate.mcts_mode is expected.mcts_mode
+        and _same_state_snapshot(candidate, expected)
+    )
+
+
+def _same_state_snapshot(candidate: SearchRequest, expected: SearchRequest) -> bool:
+    left = candidate.state_snapshot
+    right = expected.state_snapshot
+    if left is None or right is None:
+        return left is right
+    return (
+        left.schema_version == right.schema_version
+        and left.state_digest == right.state_digest
     )
 
 

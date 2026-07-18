@@ -24,6 +24,15 @@ from host_brain.composition.task_runtime import (
     build_process_task_runtime_container,
 )
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationService,
+)
+from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
+    GraphCancellationEffectReconciliationService,
+)
+from host_brain.task_runtime.terminal_state_reconciliation import (
+    TerminalStateReconciliationService,
+)
 from host_brain.integrations.runtime_events import (
     RuntimeEventStore,
     RuntimeOutboxPublisher,
@@ -121,6 +130,29 @@ class _TaskStore(_Closeable):
     def assert_graph_cancellation_continuation_ready(self) -> None:
         self.events.append("task-store:cancellation-continuation-ready")
 
+    def assert_effect_reconciliation_ready(self) -> None:
+        self.events.append("task-store:effect-reconciliation-ready")
+
+    def assert_terminal_reconciliation_ready(self) -> None:
+        self.events.append("task-store:terminal-reconciliation-ready")
+
+    def assert_node_artifact_ready(self) -> None:
+        self.events.append("task-store:node-artifact-ready")
+
+    def inventory_terminal_reconciliation_cases(
+        self,
+        *,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        assert limit == 10_000
+        self.events.append("task-store:terminal-reconciliation-inventory")
+        return {
+            "status": "INVENTORIED",
+            "discovered_count": 0,
+            "inserted_count": 0,
+            "cases": (),
+        }
+
     def claim_pending_graph_cancellations(self, **_kwargs: Any) -> list[dict[str, Any]]:
         return []
 
@@ -165,6 +197,11 @@ def _build_fake_container(
         events.append("review-store:build")
         return _Closeable("review-store", events)
 
+    def build_review_continuation_store(db_path: str) -> _Closeable:
+        assert db_path == str(path.resolve())
+        events.append("review-continuation-store:build")
+        return _Closeable("review-continuation-store", events)
+
     def build_worker_projection_store(db_path: str) -> _Closeable:
         assert db_path == str(path.resolve())
         events.append("worker-projection-store:build")
@@ -201,6 +238,7 @@ def _build_fake_container(
         migration_runner_builder=build_migration,
         task_store_builder=build_store,
         review_store_builder=build_review_store,
+        review_continuation_store_builder=build_review_continuation_store,
         worker_projection_store_builder=build_worker_projection_store,
         command_repository_builder=build_repository,
         agent_result_repository_builder=build_agent_result_repository,
@@ -224,8 +262,13 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "task-store:build",
         "task-store:outbox-ready",
         "task-store:cancellation-continuation-ready",
+        "task-store:effect-reconciliation-ready",
+        "task-store:terminal-reconciliation-ready",
+        "task-store:node-artifact-ready",
         f"task-store:recover:{container.recovery_id}",
+        "task-store:terminal-reconciliation-inventory",
         "review-store:build",
+        "review-continuation-store:build",
         "worker-projection-store:build",
         "repository:build",
         "agent-result:build",
@@ -247,6 +290,20 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     assert container.cancellation_continuation_worker.worker_id == (
         f"{container.recovery_id}::graph-cancellation"
     )
+    assert isinstance(
+        container.operation_reconciliation_service,
+        GraphCancellationOperationReconciliationService,
+    )
+    assert isinstance(
+        container.effect_reconciliation_service,
+        GraphCancellationEffectReconciliationService,
+    )
+    assert isinstance(
+        container.terminal_reconciliation_service,
+        TerminalStateReconciliationService,
+    )
+    assert container.terminal_reconciliation_inventory["inserted_count"] == 0
+    assert container.terminal_reconciliation_auto_result["status"] == "DISABLED"
     assert container.graph_execution_registry is not None
     assert container.recovery_report.recovery_id == container.recovery_id
     execution_owner = container.execution_owner_id("configured-owner")
@@ -318,15 +375,18 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert "private platform detail" not in caught.value.detail
     assert caught.value.rollback_failures == ()
-    assert len(events) == 7
+    assert len(events) == 10
     assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
     ]
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
-    assert events[4].startswith("task-store:recover:task-runtime-startup::")
-    assert events[5:] == ["task-store:close", "migration:close"]
+    assert events[4] == "task-store:effect-reconciliation-ready"
+    assert events[5] == "task-store:terminal-reconciliation-ready"
+    assert events[6] == "task-store:node-artifact-ready"
+    assert events[7].startswith("task-store:recover:task-runtime-startup::")
+    assert events[8:] == ["task-store:close", "migration:close"]
 
 
 def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
@@ -365,6 +425,10 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         events.append("worker-projection-store:build")
         return _Closeable("worker-projection-store", events)
 
+    def build_review_continuation_store(_path: str) -> _Closeable:
+        events.append("review-continuation-store:build")
+        return _Closeable("review-continuation-store", events)
+
     with pytest.raises(TaskRuntimeContainerConstructionError) as caught:
         build_process_task_runtime_container(
             ledger=_Ledger(path),
@@ -372,6 +436,7 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
             migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
             task_store_builder=build_store,
             review_store_builder=build_review_store,
+            review_continuation_store_builder=build_review_continuation_store,
             worker_projection_store_builder=build_worker_projection_store,
             command_repository_builder=fail_repository,
         )
@@ -385,12 +450,18 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     ]
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
-    assert events[4].startswith("task-store:recover:task-runtime-startup::")
-    assert events[5:] == [
+    assert events[4] == "task-store:effect-reconciliation-ready"
+    assert events[5] == "task-store:terminal-reconciliation-ready"
+    assert events[6] == "task-store:node-artifact-ready"
+    assert events[7].startswith("task-store:recover:task-runtime-startup::")
+    assert events[8] == "task-store:terminal-reconciliation-inventory"
+    assert events[9:] == [
         "review-store:build",
+        "review-continuation-store:build",
         "worker-projection-store:build",
         "repository:build",
         "worker-projection-store:close",
+        "review-continuation-store:close",
         "review-store:close",
         "task-store:close",
         "migration:close",
@@ -440,6 +511,7 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
         "agent-result:close",
         "repository:close",
         "worker-projection-store:close",
+        "review-continuation-store:close",
         "review-store:close",
         "task-store:close",
         "migration:close",
@@ -447,7 +519,7 @@ def test_bound_runtime_activates_then_drains_and_closes_before_infrastructure(
     assert container.closed
     assert not container.activated
     asyncio.run(container.aclose())
-    assert len(events) == 14
+    assert len(events) == 15
 
 
 def test_worker_start_failure_rolls_back_and_detaches_activated_coordinator(

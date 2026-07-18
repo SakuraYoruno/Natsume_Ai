@@ -75,7 +75,8 @@ LEGACY_INLINE_SCHEMA_ASSETS: dict[
     ),
 }
 
-# 0089 and 0093 contain ALTER TABLE statements followed by indexes/triggers in
+# 0089, 0093 and 0095 contain ALTER TABLE statements followed by
+# indexes/triggers in
 # one explicit transaction.  SQL may commit before the runner persists its
 # migration receipt; the next startup then sees a duplicate column although
 # the complete physical migration exists.  Repair is allowed only for exact
@@ -195,6 +196,300 @@ CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
                 ),
             ),
         },
+    ),
+    "0095_task_runtime_revisioned_graph_outbox.sql": (
+        "db39c2af0c497322c18d767b74139b5cba635c33e947cba5191f440aad534fa1",
+        "task_runtime_outbox",
+        {
+            "graph_revision": ("INTEGER", False),
+        },
+        {
+            "idx_task_runtime_outbox_revision_delivery_order": (
+                "task_runtime_outbox",
+                (
+                    "aggregate_type",
+                    "aggregate_id",
+                    "graph_revision",
+                    "status",
+                    "aggregate_version",
+                    "created_ts_ms",
+                    "outbox_id",
+                ),
+            ),
+            "uq_runtime_event_task_outbox_source": (
+                "runtime_event_timeline",
+                ("source_ref",),
+            ),
+        },
+        (
+            "graph_revisioninteger",
+            "check(graph_revisionisnullor(typeof(graph_revision)='integer'andgraph_revision>=1))",
+        ),
+        {
+            "trg_task_runtime_outbox_graph_revision_insert_guard": (
+                "task_runtime_outbox",
+                (
+                    "beforeinsertontask_runtime_outbox",
+                    "new.aggregate_type='task_graph'",
+                    "new.graph_revisionisnotnull",
+                    "typeof(new.graph_revision)='integer'",
+                    "new.graph_revision>=1",
+                    "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+                    "graph.graph_id=new.aggregate_id",
+                    "graph.revision=new.graph_revision",
+                    "new.aggregate_type<>'task_graph'",
+                    "new.graph_revisionisnull",
+                    "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+                ),
+            ),
+            "trg_task_runtime_outbox_graph_revision_update_guard": (
+                "task_runtime_outbox",
+                (
+                    "beforeupdateofaggregate_type,aggregate_id,graph_revision,aggregate_version,payload_refontask_runtime_outbox",
+                    "new.aggregate_type='task_graph'",
+                    "new.graph_revisionisnotnull",
+                    "typeof(new.graph_revision)='integer'",
+                    "new.graph_revision>=1",
+                    "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+                    "graph.graph_id=new.aggregate_id",
+                    "graph.revision=new.graph_revision",
+                    "new.aggregate_type<>'task_graph'",
+                    "new.graph_revisionisnull",
+                    "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+                ),
+            ),
+        },
+    ),
+}
+
+# 0104 is intentionally handled outside the generic ALTER/index/trigger
+# descriptor above.  In addition to the non-idempotent outbox ALTER it
+# creates two durable authority tables.  A duplicate ``runtime_scope_id`` is
+# therefore evidence of a lost receipt only when the complete authority
+# fence, including every constraint-bearing table, is already physical.
+HOST_EMBODIMENT_RUNTIME_AUTHORITY_REPLAY_ASSET = (
+    "0104_host_embodiment_runtime_authority.sql"
+)
+HOST_EMBODIMENT_RUNTIME_AUTHORITY_REPLAY_CHECKSUM = (
+    "bc8158311e5db0f59e07930250f6334d345831dab34e52103412aab1af989cc5"
+)
+
+_HOST_EMBODIMENT_RUNTIME_AUTHORITY_OUTBOX_COLUMN = (
+    "runtime_scope_id",
+    "TEXT",
+    False,
+    None,
+    0,
+)
+
+_HOST_EMBODIMENT_RUNTIME_AUTHORITY_TABLE_COLUMNS: dict[
+    str,
+    tuple[tuple[str, str, bool, str | None, int], ...],
+] = {
+    "host_embodiment_runtime_lease": (
+        ("runtime_scope_id", "TEXT", True, None, 1),
+        ("owner_id", "TEXT", True, None, 0),
+        ("lease_id", "TEXT", True, None, 0),
+        ("fencing_token", "INTEGER", True, None, 0),
+        ("issued_at_ms", "INTEGER", True, None, 0),
+        ("expires_at_ms", "INTEGER", True, None, 0),
+        ("released_at_ms", "INTEGER", False, None, 0),
+    ),
+    "host_embodiment_edge_session_lease": (
+        ("runtime_scope_id", "TEXT", True, None, 1),
+        ("session_id", "TEXT", True, None, 0),
+        ("owner_id", "TEXT", True, None, 0),
+        ("lease_id", "TEXT", True, None, 0),
+        ("fencing_token", "INTEGER", True, None, 0),
+        ("issued_at_ms", "INTEGER", True, None, 0),
+        ("expires_at_ms", "INTEGER", True, None, 0),
+        ("runtime_lease_id", "TEXT", True, None, 0),
+        ("runtime_fencing_token", "INTEGER", True, None, 0),
+        ("updated_at_ms", "INTEGER", True, None, 0),
+        ("released_at_ms", "INTEGER", False, None, 0),
+    ),
+}
+
+_HOST_EMBODIMENT_RUNTIME_AUTHORITY_TABLE_SQL = {
+    "host_embodiment_runtime_lease": """
+        CREATE TABLE host_embodiment_runtime_lease (
+            runtime_scope_id TEXT NOT NULL PRIMARY KEY
+                CHECK(length(trim(runtime_scope_id)) BETWEEN 1 AND 512),
+            owner_id TEXT NOT NULL
+                CHECK(length(trim(owner_id)) BETWEEN 1 AND 512),
+            lease_id TEXT NOT NULL UNIQUE
+                CHECK(length(trim(lease_id)) BETWEEN 1 AND 512),
+            fencing_token INTEGER NOT NULL
+                CHECK(typeof(fencing_token) = 'integer' AND fencing_token >= 1),
+            issued_at_ms INTEGER NOT NULL
+                CHECK(typeof(issued_at_ms) = 'integer' AND issued_at_ms >= 0),
+            expires_at_ms INTEGER NOT NULL
+                CHECK(typeof(expires_at_ms) = 'integer' AND expires_at_ms > issued_at_ms),
+            released_at_ms INTEGER
+                CHECK(released_at_ms IS NULL OR (
+                    typeof(released_at_ms) = 'integer' AND released_at_ms >= issued_at_ms
+                ))
+        )
+    """,
+    "host_embodiment_edge_session_lease": """
+        CREATE TABLE host_embodiment_edge_session_lease (
+            runtime_scope_id TEXT NOT NULL PRIMARY KEY
+                REFERENCES host_embodiment_runtime_lease(runtime_scope_id) ON DELETE RESTRICT,
+            session_id TEXT NOT NULL
+                CHECK(length(trim(session_id)) BETWEEN 1 AND 512),
+            owner_id TEXT NOT NULL
+                CHECK(length(trim(owner_id)) BETWEEN 1 AND 512),
+            lease_id TEXT NOT NULL
+                CHECK(length(trim(lease_id)) BETWEEN 1 AND 512),
+            fencing_token INTEGER NOT NULL
+                CHECK(typeof(fencing_token) = 'integer' AND fencing_token >= 1),
+            issued_at_ms INTEGER NOT NULL
+                CHECK(typeof(issued_at_ms) = 'integer' AND issued_at_ms >= 0),
+            expires_at_ms INTEGER NOT NULL
+                CHECK(typeof(expires_at_ms) = 'integer' AND expires_at_ms > issued_at_ms),
+            runtime_lease_id TEXT NOT NULL
+                CHECK(length(trim(runtime_lease_id)) BETWEEN 1 AND 512),
+            runtime_fencing_token INTEGER NOT NULL
+                CHECK(typeof(runtime_fencing_token) = 'integer' AND runtime_fencing_token >= 1),
+            updated_at_ms INTEGER NOT NULL
+                CHECK(typeof(updated_at_ms) = 'integer' AND updated_at_ms >= 0),
+            released_at_ms INTEGER
+                CHECK(released_at_ms IS NULL OR (
+                    typeof(released_at_ms) = 'integer' AND released_at_ms >= issued_at_ms
+                )),
+            UNIQUE(runtime_scope_id, session_id, owner_id, lease_id, fencing_token)
+        )
+    """,
+}
+
+_HOST_EMBODIMENT_RUNTIME_AUTHORITY_INDEXES: dict[
+    str,
+    tuple[str, tuple[str, ...], str],
+] = {
+    "idx_host_embodiment_outbox_scope_ready": (
+        "host_embodiment_outbox",
+        ("runtime_scope_id", "status", "created_at_ms", "outbox_id"),
+        """
+        CREATE INDEX idx_host_embodiment_outbox_scope_ready
+            ON host_embodiment_outbox(runtime_scope_id, status, created_at_ms, outbox_id)
+        """,
+    ),
+    "idx_host_embodiment_runtime_lease_active": (
+        "host_embodiment_runtime_lease",
+        ("expires_at_ms", "released_at_ms"),
+        """
+        CREATE INDEX idx_host_embodiment_runtime_lease_active
+            ON host_embodiment_runtime_lease(expires_at_ms, released_at_ms)
+        """,
+    ),
+    "idx_host_embodiment_edge_session_lookup": (
+        "host_embodiment_edge_session_lease",
+        ("runtime_scope_id", "session_id", "owner_id", "released_at_ms"),
+        """
+        CREATE INDEX idx_host_embodiment_edge_session_lookup
+            ON host_embodiment_edge_session_lease(
+                runtime_scope_id, session_id, owner_id, released_at_ms
+            )
+        """,
+    ),
+}
+
+_HOST_EMBODIMENT_RUNTIME_AUTHORITY_TRIGGERS: dict[str, tuple[str, str]] = {
+    "host_embodiment_outbox_scope_no_update": (
+        "host_embodiment_outbox",
+        """
+        CREATE TRIGGER host_embodiment_outbox_scope_no_update
+        BEFORE UPDATE OF runtime_scope_id
+        ON host_embodiment_outbox
+        BEGIN
+            SELECT RAISE(ABORT, 'host embodiment outbox runtime scope is immutable');
+        END
+        """,
+    ),
+    "host_embodiment_runtime_lease_no_delete": (
+        "host_embodiment_runtime_lease",
+        """
+        CREATE TRIGGER host_embodiment_runtime_lease_no_delete
+        BEFORE DELETE ON host_embodiment_runtime_lease
+        BEGIN
+            SELECT RAISE(ABORT, 'host embodiment runtime lease is append-only');
+        END
+        """,
+    ),
+    "host_embodiment_edge_session_lease_no_delete": (
+        "host_embodiment_edge_session_lease",
+        """
+        CREATE TRIGGER host_embodiment_edge_session_lease_no_delete
+        BEFORE DELETE ON host_embodiment_edge_session_lease
+        BEGIN
+            SELECT RAISE(ABORT, 'host embodiment edge session lease is append-only');
+        END
+        """,
+    ),
+}
+
+_HOST_EMBODIMENT_RUNTIME_AUTHORITY_FOREIGN_KEYS = {
+    "host_embodiment_runtime_lease": (),
+    "host_embodiment_edge_session_lease": (
+        (
+            "host_embodiment_runtime_lease",
+            "runtime_scope_id",
+            "runtime_scope_id",
+            "NO ACTION",
+            "RESTRICT",
+            "NONE",
+        ),
+    ),
+}
+
+_HOST_EMBODIMENT_RUNTIME_AUTHORITY_UNIQUE_INDEXES = {
+    "host_embodiment_runtime_lease": (("lease_id",),),
+    "host_embodiment_edge_session_lease": (
+        ("runtime_scope_id", "session_id", "owner_id", "lease_id", "fencing_token"),
+    ),
+}
+
+# Migration 0098 deliberately rebuilds the two 0095 revision guards so the
+# Effect reconciliation Outbox binds the same graph revision as its immutable
+# case.  Receipt-loss replay of 0095 must therefore recognize exactly one of
+# two physical epochs: the original 0095 TaskGraph-only guards before 0098, or
+# these stricter guards when the 0098 case table is present.
+_0098_EFFECT_AWARE_REVISION_TRIGGERS = {
+    "trg_task_runtime_outbox_graph_revision_insert_guard": (
+        "task_runtime_outbox",
+        (
+            "beforeinsertontask_runtime_outbox",
+            "new.aggregate_type='task_graph'",
+            "new.aggregate_type='graph_cancellation_effect_reconciliation'",
+            "new.graph_revisionisnotnull",
+            "typeof(new.graph_revision)='integer'",
+            "new.graph_revision>=1",
+            "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "new.payload_ref=('taskstore://event/graph_cancellation_effect_reconciliation/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "item.case_id=new.aggregate_id",
+            "item.graph_revision=new.graph_revision",
+            "new.aggregate_typenotin('task_graph','graph_cancellation_effect_reconciliation')",
+            "new.graph_revisionisnull",
+            "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+        ),
+    ),
+    "trg_task_runtime_outbox_graph_revision_update_guard": (
+        "task_runtime_outbox",
+        (
+            "beforeupdateofaggregate_type,aggregate_id,graph_revision,aggregate_version,payload_refontask_runtime_outbox",
+            "new.aggregate_type='task_graph'",
+            "new.aggregate_type='graph_cancellation_effect_reconciliation'",
+            "new.graph_revisionisnotnull",
+            "typeof(new.graph_revision)='integer'",
+            "new.graph_revision>=1",
+            "new.payload_ref=('taskstore://event/task_graph/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "new.payload_ref=('taskstore://event/graph_cancellation_effect_reconciliation/'||new.aggregate_id||'@'||new.graph_revision||'/'||new.aggregate_version)",
+            "item.case_id=new.aggregate_id",
+            "item.graph_revision=new.graph_revision",
+            "new.aggregate_typenotin('task_graph','graph_cancellation_effect_reconciliation')",
+            "new.graph_revisionisnull",
+            "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+        ),
     ),
 }
 
@@ -639,12 +934,191 @@ def is_exact_legacy_inline_schema_failure(asset: Any, exc: BaseException) -> boo
     )
 
 
+def _normalized_schema_sql(sql: Any) -> str:
+    return re.sub(r"\s+", "", str(sql).lower()).rstrip(";")
+
+
+def _is_exact_host_embodiment_runtime_authority_asset(asset: Any) -> bool:
+    """Keep the D8 receipt-repair exception bound to its one frozen asset."""
+
+    try:
+        return bool(
+            asset_filename(asset) == HOST_EMBODIMENT_RUNTIME_AUTHORITY_REPLAY_ASSET
+            and int(getattr(asset, "migration_id")) == 104
+            and str(getattr(asset, "name"))
+            == "host_embodiment_runtime_authority"
+            and str(getattr(asset, "checksum"))
+            == HOST_EMBODIMENT_RUNTIME_AUTHORITY_REPLAY_CHECKSUM
+        )
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def _sqlite_table_columns(
+    conn: Any,
+    table: str,
+) -> tuple[tuple[str, str, bool, str | None, int], ...]:
+    rows = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+    return tuple(
+        (
+            str(row[1]),
+            str(row[2] or "").strip().upper(),
+            bool(row[3]),
+            None if row[4] is None else str(row[4]),
+            int(row[5]),
+        )
+        for row in rows
+    )
+
+
+def _sqlite_index_columns(conn: Any, index_name: str) -> tuple[str, ...]:
+    return tuple(
+        str(row[2])
+        for row in conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
+    )
+
+
+def _host_embodiment_runtime_authority_postcondition_holds(
+    conn: Any,
+    asset: Any,
+) -> bool:
+    """Prove all 0104 physical authority objects survived receipt loss.
+
+    Do not infer a successful migration from the duplicate ALTER alone.  The
+    runner is allowed to replace its receipt only after the immutable scope
+    field, named indexes/triggers, both authority tables, their constraints,
+    unique keys and foreign-key edge are all exactly the 0104 shape.
+    """
+
+    if not _is_exact_host_embodiment_runtime_authority_asset(asset):
+        return False
+    try:
+        outbox_columns = _sqlite_table_columns(conn, "host_embodiment_outbox")
+        scope_columns = [
+            column
+            for column in outbox_columns
+            if column[0] == _HOST_EMBODIMENT_RUNTIME_AUTHORITY_OUTBOX_COLUMN[0]
+        ]
+        if (
+            len(scope_columns) != 1
+            or scope_columns[0] != _HOST_EMBODIMENT_RUNTIME_AUTHORITY_OUTBOX_COLUMN
+            or outbox_columns.index(scope_columns[0]) != len(outbox_columns) - 1
+        ):
+            return False
+
+        for table, expected_columns in (
+            _HOST_EMBODIMENT_RUNTIME_AUTHORITY_TABLE_COLUMNS.items()
+        ):
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+            if (
+                row is None
+                or row[0] is None
+                or _normalized_schema_sql(row[0])
+                != _normalized_schema_sql(
+                    _HOST_EMBODIMENT_RUNTIME_AUTHORITY_TABLE_SQL[table]
+                )
+                or _sqlite_table_columns(conn, table) != expected_columns
+            ):
+                return False
+
+            expected_foreign_keys = _HOST_EMBODIMENT_RUNTIME_AUTHORITY_FOREIGN_KEYS[
+                table
+            ]
+            actual_foreign_keys = tuple(
+                (
+                    str(row[2]),
+                    str(row[3]),
+                    str(row[4]),
+                    str(row[5]).upper(),
+                    str(row[6]).upper(),
+                    str(row[7]).upper(),
+                )
+                for row in conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall()
+            )
+            if actual_foreign_keys != expected_foreign_keys:
+                return False
+
+            unique_indexes: list[tuple[str, ...]] = []
+            for index_row in conn.execute(f'PRAGMA index_list("{table}")').fetchall():
+                if int(index_row[2]) == 1 and str(index_row[3]) == "u":
+                    unique_indexes.append(
+                        _sqlite_index_columns(conn, str(index_row[1]))
+                    )
+            if tuple(sorted(unique_indexes)) != tuple(
+                sorted(_HOST_EMBODIMENT_RUNTIME_AUTHORITY_UNIQUE_INDEXES[table])
+            ):
+                return False
+
+        for index_name, (
+            expected_table,
+            expected_columns,
+            expected_sql,
+        ) in _HOST_EMBODIMENT_RUNTIME_AUTHORITY_INDEXES.items():
+            row = conn.execute(
+                "SELECT tbl_name, sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                (index_name,),
+            ).fetchone()
+            if (
+                row is None
+                or str(row[0]) != expected_table
+                or row[1] is None
+                or _normalized_schema_sql(row[1])
+                != _normalized_schema_sql(expected_sql)
+                or _sqlite_index_columns(conn, index_name) != expected_columns
+            ):
+                return False
+            index_meta = {
+                str(item[1]): item
+                for item in conn.execute(
+                    f'PRAGMA index_list("{expected_table}")'
+                ).fetchall()
+            }.get(index_name)
+            if (
+                index_meta is None
+                or int(index_meta[2]) != 0
+                or str(index_meta[3]) != "c"
+                or int(index_meta[4]) != 0
+            ):
+                return False
+
+        for trigger_name, (expected_table, expected_sql) in (
+            _HOST_EMBODIMENT_RUNTIME_AUTHORITY_TRIGGERS.items()
+        ):
+            row = conn.execute(
+                "SELECT tbl_name, sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+                (trigger_name,),
+            ).fetchone()
+            if (
+                row is None
+                or str(row[0]) != expected_table
+                or row[1] is None
+                or _normalized_schema_sql(row[1])
+                != _normalized_schema_sql(expected_sql)
+            ):
+                return False
+    except (IndexError, sqlite3.DatabaseError, TypeError, ValueError):
+        return False
+    return True
+
+
 def is_exact_checksum_bound_schema_replay_failure(
     asset: Any,
     exc: BaseException,
 ) -> bool:
     """Recognize only a receipt-loss replay of a frozen non-idempotent asset."""
 
+    if asset_filename(asset) == HOST_EMBODIMENT_RUNTIME_AUTHORITY_REPLAY_ASSET:
+        return bool(
+            _is_exact_host_embodiment_runtime_authority_asset(asset)
+            and re.fullmatch(
+                r"duplicate column name:\s*runtime_scope_id",
+                str(exc).strip(),
+                flags=re.IGNORECASE,
+            )
+        )
     frozen = CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS.get(asset_filename(asset))
     return bool(
         frozen is not None
@@ -656,6 +1130,8 @@ def is_exact_checksum_bound_schema_replay_failure(
 def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> bool:
     """Prove that a non-idempotent migration committed before receipt loss."""
 
+    if asset_filename(asset) == HOST_EMBODIMENT_RUNTIME_AUTHORITY_REPLAY_ASSET:
+        return _host_embodiment_runtime_authority_postcondition_holds(conn, asset)
     frozen = CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS.get(asset_filename(asset))
     if frozen is None:
         return False
@@ -668,6 +1144,18 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
         required_triggers,
     ) = frozen
     try:
+        filename = asset_filename(asset)
+        effect_reconciliation_schema = False
+        if filename == "0095_task_runtime_revisioned_graph_outbox.sql":
+            effect_reconciliation_schema = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_effect_reconciliation_case'
+                """
+            ).fetchone() is not None
+            if effect_reconciliation_schema:
+                required_triggers = _0098_EFFECT_AWARE_REVISION_TRIGGERS
         table_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
             (table,),
@@ -730,6 +1218,149 @@ def checksum_bound_schema_replay_postcondition_holds(conn: Any, asset: Any) -> b
                 fragment not in normalized_trigger_sql
                 for fragment in expected_fragments
             ):
+                return False
+        if filename == "0095_task_runtime_revisioned_graph_outbox.sql":
+            revision_columns = {
+                str(row[1]): row
+                for row in conn.execute(
+                    'PRAGMA table_info("task_runtime_outbox")'
+                ).fetchall()
+            }
+            revision_column = revision_columns.get("graph_revision")
+            if (
+                revision_column is None
+                or str(revision_column[2] or "").strip().upper() != "INTEGER"
+                or int(revision_column[3]) != 0
+                or revision_column[4] is not None
+                or int(revision_column[5]) != 0
+            ):
+                return False
+            source_index = conn.execute(
+                """
+                SELECT tbl_name, sql FROM sqlite_master
+                WHERE type = 'index'
+                  AND name = 'uq_runtime_event_task_outbox_source'
+                """
+            ).fetchone()
+            source_index_meta = {
+                str(row[1]): row
+                for row in conn.execute(
+                    "PRAGMA index_list(runtime_event_timeline)"
+                ).fetchall()
+            }.get("uq_runtime_event_task_outbox_source")
+            normalized_source_index = re.sub(
+                r"\s+",
+                "",
+                str(source_index[1] if source_index is not None else "").lower(),
+            )
+            duplicate_source = conn.execute(
+                """
+                SELECT source_ref FROM runtime_event_timeline
+                WHERE source_kind = 'TASK_STORE_OUTBOX'
+                GROUP BY source_ref
+                HAVING COUNT(*) <> 1
+                LIMIT 1
+                """
+            ).fetchone()
+            if (
+                source_index is None
+                or str(source_index[0]) != "runtime_event_timeline"
+                or normalized_source_index
+                != (
+                    "createuniqueindexuq_runtime_event_task_outbox_source"
+                    "onruntime_event_timeline(source_ref)"
+                    "wheresource_kind='task_store_outbox'"
+                )
+                or source_index_meta is None
+                or int(source_index_meta[2]) != 1
+                or int(source_index_meta[4]) != 1
+                or duplicate_source is not None
+            ):
+                return False
+            if effect_reconciliation_schema:
+                invalid_revision = conn.execute(
+                    """
+                    SELECT outbox.outbox_id
+                    FROM task_runtime_outbox AS outbox
+                    WHERE
+                        (
+                            outbox.aggregate_type = 'TASK_GRAPH'
+                            AND (
+                                outbox.graph_revision IS NULL
+                                OR typeof(outbox.graph_revision) <> 'integer'
+                                OR outbox.graph_revision < 1
+                                OR outbox.payload_ref <> (
+                                    'taskstore://event/TASK_GRAPH/'
+                                    || outbox.aggregate_id || '@'
+                                    || outbox.graph_revision || '/'
+                                    || outbox.aggregate_version
+                                )
+                                OR NOT EXISTS (
+                                    SELECT 1 FROM task_runtime_graph AS graph
+                                    WHERE graph.graph_id = outbox.aggregate_id
+                                      AND graph.revision = outbox.graph_revision
+                                )
+                            )
+                        )
+                        OR (
+                            outbox.aggregate_type =
+                                'GRAPH_CANCELLATION_EFFECT_RECONCILIATION'
+                            AND (
+                                outbox.graph_revision IS NULL
+                                OR typeof(outbox.graph_revision) <> 'integer'
+                                OR outbox.graph_revision < 1
+                                OR outbox.payload_ref <> (
+                                    'taskstore://event/'
+                                    || 'GRAPH_CANCELLATION_EFFECT_RECONCILIATION/'
+                                    || outbox.aggregate_id || '@'
+                                    || outbox.graph_revision || '/'
+                                    || outbox.aggregate_version
+                                )
+                                OR NOT EXISTS (
+                                    SELECT 1
+                                    FROM task_runtime_effect_reconciliation_case AS item
+                                    WHERE item.case_id = outbox.aggregate_id
+                                      AND item.graph_revision = outbox.graph_revision
+                                )
+                            )
+                        )
+                        OR (
+                            outbox.aggregate_type NOT IN (
+                                'TASK_GRAPH',
+                                'GRAPH_CANCELLATION_EFFECT_RECONCILIATION'
+                            )
+                            AND outbox.graph_revision IS NOT NULL
+                        )
+                    LIMIT 1
+                    """
+                ).fetchone()
+            else:
+                invalid_revision = conn.execute(
+                    """
+                    SELECT outbox.outbox_id
+                    FROM task_runtime_outbox AS outbox
+                    WHERE
+                        (
+                            outbox.aggregate_type = 'TASK_GRAPH'
+                            AND (
+                                outbox.graph_revision IS NULL
+                                OR typeof(outbox.graph_revision) <> 'integer'
+                                OR outbox.graph_revision < 1
+                                OR NOT EXISTS (
+                                    SELECT 1 FROM task_runtime_graph AS graph
+                                    WHERE graph.graph_id = outbox.aggregate_id
+                                      AND graph.revision = outbox.graph_revision
+                                )
+                            )
+                        )
+                        OR (
+                            outbox.aggregate_type <> 'TASK_GRAPH'
+                            AND outbox.graph_revision IS NOT NULL
+                        )
+                    LIMIT 1
+                    """
+                ).fetchone()
+            if invalid_revision is not None:
                 return False
     except (IndexError, sqlite3.DatabaseError):
         return False

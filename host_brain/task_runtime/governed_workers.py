@@ -16,6 +16,10 @@ from typing import Any, Protocol
 from urllib.parse import unquote
 
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.node_artifact import (
+    artifact_digest,
+    is_task_result_artifact_ref,
+)
 from host_brain.task_runtime.worker_registry import GovernedWorkerRoute
 from host_brain.task_runtime.worker_budget_usage import (
     WorkerBudgetUsage,
@@ -49,19 +53,38 @@ class FrozenNodeInput:
     graph_revision: int
     node_id: str
     attempt_id: str
+    lease_id: str
+    lease_owner_id: str
+    fencing_token: int
     route: str
     target_id: str
     objective: str
     input_refs: tuple[str, ...]
     _input_pack_json: str = field(repr=False)
+    _input_artifacts_json: str = field(repr=False)
     node_grant_ref: str
     parent_grant_ref: str
+    _budget_json: str = field(default="{}", repr=False)
 
     @property
     def input_pack(self) -> Mapping[str, Any]:
         """Return a fresh projection so an executor cannot mutate frozen input."""
 
         loaded = json.loads(self._input_pack_json)
+        return dict(loaded) if isinstance(loaded, Mapping) else {}
+
+    @property
+    def input_artifacts(self) -> tuple[Mapping[str, Any], ...]:
+        """Return fresh immutable-by-copy predecessor output projections."""
+
+        loaded = json.loads(self._input_artifacts_json)
+        return tuple(dict(item) for item in loaded if isinstance(item, Mapping))
+
+    @property
+    def budget(self) -> Mapping[str, Any]:
+        """Return the exact durable budget projection frozen for this node."""
+
+        loaded = json.loads(self._budget_json)
         return dict(loaded) if isinstance(loaded, Mapping) else {}
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,13 +99,18 @@ class FrozenNodeInput:
             "graph_revision": self.graph_revision,
             "node_id": self.node_id,
             "attempt_id": self.attempt_id,
+            "lease_id": self.lease_id,
+            "lease_owner_id": self.lease_owner_id,
+            "fencing_token": self.fencing_token,
             "route": self.route,
             "target_id": self.target_id,
             "objective": self.objective,
             "input_refs": list(self.input_refs),
             "input_pack": dict(self.input_pack),
+            "input_artifacts": [dict(item) for item in self.input_artifacts],
             "node_grant_ref": self.node_grant_ref,
             "parent_grant_ref": self.parent_grant_ref,
+            "budget": dict(self.budget),
         }
 
 
@@ -105,6 +133,10 @@ class NodeGrantVerifierPort(Protocol):
         node_id: str,
         route: str,
         target_id: str,
+        attempt_id: str | None = None,
+        lease_id: str | None = None,
+        lease_owner_id: str | None = None,
+        fencing_token: int | None = None,
     ) -> Any: ...
 
 
@@ -162,6 +194,10 @@ class GovernedFrozenNodeWorker:
             node_id=frozen.node_id,
             route=frozen.route,
             target_id=frozen.target_id,
+            attempt_id=frozen.attempt_id,
+            lease_id=frozen.lease_id,
+            lease_owner_id=frozen.lease_owner_id,
+            fencing_token=frozen.fencing_token,
         )
         _assert_verified_grant(verified, frozen=frozen)
 
@@ -272,6 +308,23 @@ def _freeze_node_input(
     graph_id = _required(context.get("graph_id"), "graph_id")
     node_id = _required(context.get("node_id"), "node_id")
     attempt_id = _required(context.get("attempt_id"), "attempt_id")
+    lease_id = _required(context.get("lease_id"), "lease_id")
+    lease_owner_id = _required(
+        context.get("lease_owner_id"),
+        "lease_owner_id",
+    )
+    try:
+        fencing_token = int(context.get("fencing_token"))
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "fencing_token must be a positive integer",
+        ) from exc
+    if fencing_token < 1:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "fencing_token must be a positive integer",
+        )
     route_value = _required(context.get("worker_route"), "worker_route")
     route = GovernedWorkerRoute.parse(route_value)
     if route.kind != expected_route_kind or not route.target_id:
@@ -324,6 +377,50 @@ def _freeze_node_input(
             if str(value or "").strip()
         )
     )
+    raw_artifacts = context.get("node_input_artifacts", ())
+    if not isinstance(raw_artifacts, Sequence) or isinstance(
+        raw_artifacts,
+        (str, bytes, bytearray),
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "node_input_artifacts must be an array",
+        )
+    input_artifacts = [
+        _json_copy(item)
+        for item in raw_artifacts
+        if isinstance(item, Mapping)
+    ]
+    if len(input_artifacts) != len(raw_artifacts):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "node_input_artifacts must contain only objects",
+        )
+    expected_artifact_refs = {
+        ref for ref in input_refs if is_task_result_artifact_ref(ref)
+    }
+    actual_artifact_refs = {
+        str(item.get("artifact_ref") or "").strip()
+        for item in input_artifacts
+    }
+    if (
+        len(actual_artifact_refs) != len(input_artifacts)
+        or actual_artifact_refs != expected_artifact_refs
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "resolved node artifacts differ from frozen input_refs",
+        )
+    for artifact in input_artifacts:
+        payload = artifact.get("payload")
+        if not isinstance(payload, Mapping) or str(
+            artifact.get("payload_sha256") or ""
+        ) != artifact_digest(payload):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_INPUT_INVALID,
+                "resolved node artifact payload digest is invalid",
+            )
+    budget = _freeze_budget_payload(context.get("budget"))
     return FrozenNodeInput(
         command_id=command.command_id,
         request_id=command.request_id,
@@ -335,6 +432,9 @@ def _freeze_node_input(
         graph_revision=revision,
         node_id=node_id,
         attempt_id=attempt_id,
+        lease_id=lease_id,
+        lease_owner_id=lease_owner_id,
+        fencing_token=fencing_token,
         route=route.kind,
         target_id=route.target_id,
         objective=_required(binding.get("objective"), "node binding objective"),
@@ -346,8 +446,22 @@ def _freeze_node_input(
             separators=(",", ":"),
             allow_nan=False,
         ),
+        _input_artifacts_json=json.dumps(
+            input_artifacts,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ),
         node_grant_ref=grant_ref,
         parent_grant_ref=parent_ref,
+        _budget_json=json.dumps(
+            budget,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ),
     )
 
 
@@ -363,6 +477,62 @@ def _node_binding(work_order: WorkOrderV3, *, node_id: str) -> dict[str, Any]:
             f"WorkOrder requires exactly one frozen binding for node {node_id}",
         )
     return matches[0]
+
+
+def _freeze_budget_payload(value: Any) -> dict[str, Any]:
+    """Freeze only budget dimensions that can constrain a model call.
+
+    ``execution_context`` is built by ``NodeExecutionRuntime`` after durable
+    precharge.  Requiring this exact projection prevents a worker input pack
+    from inventing a larger deadline, retry allowance, or output allowance.
+    """
+
+    raw = dict(value) if isinstance(value, Mapping) else {}
+    budget_id = _required(raw.get("budget_id"), "budget.budget_id")
+    status = str(raw.get("status") or "").strip().upper()
+    if status != "ACTIVE":
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.status must be ACTIVE before worker execution",
+        )
+    try:
+        status_version = int(raw.get("status_version"))
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.status_version must be a non-negative integer",
+        ) from exc
+    if status_version < 0:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.status_version must be a non-negative integer",
+        )
+    remaining_raw = raw.get("remaining")
+    if not isinstance(remaining_raw, Mapping):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_INPUT_INVALID,
+            "budget.remaining must be an object",
+        )
+    remaining: dict[str, int] = {}
+    for dimension in (
+        "token_count",
+        "time_ms",
+        "retry_count",
+        "model_cost_micros",
+    ):
+        value = remaining_raw.get(dimension)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_INPUT_INVALID,
+                f"budget.remaining.{dimension} must be a non-negative integer",
+            )
+        remaining[dimension] = int(value)
+    return {
+        "budget_id": budget_id,
+        "status": status,
+        "status_version": status_version,
+        "remaining": remaining,
+    }
 
 
 def _assert_verified_grant(value: Any, *, frozen: FrozenNodeInput) -> None:

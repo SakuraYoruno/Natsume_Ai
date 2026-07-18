@@ -155,6 +155,12 @@ class GovernedSchedulerWorker:
             parent_grant_ref=str(
                 execution_context.get("parent_grant_ref") or ""
             ).strip(),
+            attempt_id=str(execution_context.get("attempt_id") or "").strip(),
+            lease_id=str(execution_context.get("lease_id") or "").strip(),
+            lease_owner_id=str(
+                execution_context.get("lease_owner_id") or ""
+            ).strip(),
+            fencing_token=execution_context.get("fencing_token"),
         )
         verified_payload = (
             verified_grant.to_dict()

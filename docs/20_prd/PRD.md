@@ -3,7 +3,7 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.2
+版本：v4.3
 日期：2026-07-16
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
@@ -157,7 +157,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 取消采用两阶段和 first-writer-wins：第一阶段持久化 intent、Graph/Node/Attempt/Lease/Review/operation/effect fence，第二阶段只在所有 active 或不确定事实完成 reconciliation 后原子提交 Graph/Budget/Outbox/cancellation decision。取消 intent 后禁止产生新的 claim、charge、未授权 COMMIT 或 0091 success；已先提交的终局成功不得被取消覆盖。
 - 已由 `ACCEPTED` Node 与 `SUCCEEDED` Attempt 确认的 NODE effect 是既成 acceptance authority，取消后仍可继续可靠派发；未验收 NODE effect 和未完成 Graph 的 GRAPH effect 必须被 fence。`RESERVED/RECOVERY_REQUIRED` operation 或不确定 effect 必须阻断 final cancellation，直至产生可审计 reconciliation evidence。
 - 未完成的 durable cancellation 必须由 composition-owned scanner 跨进程续跑；当前 0094 coordination 是该要求的实现边界。协调记录只能保存 owner/token/expiry/fencing/attempt/retry 等租约元数据，不得复制业务取消状态；每次续跑必须从 canonical HostCommand admission 按 exact Graph revision 重建执行上下文并重入既有 cancellation runtime。只有 0092 canonical decision 已提交才能完成协调记录；operation/effect/review 等 reconciliation 尚未完成时必须 durable defer，禁止伪报完成。
-- Task Runtime Outbox 必须提供跨进程 owner/token/expiry/单调 fencing claim，允许后台 worker 在 expiry 后自动 takeover，并以幂等 append 与 fenced complete/release 阻止 stale owner。同 aggregate 不得越过 predecessor；只有 canonical `total_pending=0` 才可声明 `DRAINED`，非空但暂无 ready head 必须报 `DEFERRED`。完整 PENDING inventory、delivery-ready backlog 与单 Store 实例 readiness 是三个不可混同的边界。
+- Task Runtime Outbox 必须提供跨进程 owner/token/expiry/单调 fencing claim，允许后台 worker 在 expiry 后自动 takeover，并以幂等 append 与 fenced complete/release 阻止 stale owner。版本化 Graph 的 Outbox、payload、事件投影、Review 和 Operator 读取必须携带或可精确解析 `graph_id + graph_revision`；同一 revision 不得越过 predecessor，不同 revision 不得互相阻塞。Schema 升级不得改变既有 Outbox ID/idempotency key 或破坏 response-loss replay；历史回填只能依赖可证明的 decision/intent/attempt、不可变 HostCommand/deterministic governed identity 或唯一 revision，歧义必须事务失败。新 payload 必须含 revision，旧 payload 只允许 replay compatibility。历史 journal 不得改写，只能通过 source authority exact 查询；一个 Outbox source 只能产生一个 Runtime Event，append 成功但确认丢失的重投不得产生第二投影。只有 canonical `total_pending=0` 才可声明 `DRAINED`，非空但暂无 ready head 必须报 `DEFERRED`。完整 PENDING inventory、delivery-ready backlog 与单 Store 实例 readiness 是三个不可混同的边界。
+- 失败重规划证据必须优先引用实际 durable terminal Graph Outbox payload，不得为历史行合成不存在的 ref；只有输入确实缺失该兼容字段时才可构造版本化 fallback。Outbox inventory 只应由需要它的 recovery 查询显式加载，普通调度和 Operator 热路径不得承担无关扫描。
 
 ### FR-NLE-003：验证、Review 与回放
 

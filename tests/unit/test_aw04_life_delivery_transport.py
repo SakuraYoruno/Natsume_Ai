@@ -143,23 +143,25 @@ def test_gateway_delivery_uses_outbox_key_for_transport_idempotency(monkeypatch)
 def test_embodiment_destinations_are_independent_outbox_operations(monkeypatch) -> None:
     captured: list[tuple[str, str]] = []
 
-    async def _submit_avatar_command(**kwargs):
-        captured.append(("vts", kwargs["request_id"]))
-        return {"status": "ACCEPTED", "success": True}
-
-    async def _submit_embodiment_command(command):
-        captured.append(("mate", command.request_id))
-        return {"status": "ACCEPTED", "success": True}
+    def _queue_embodiment_command(command, **_kwargs):
+        captured.append(("vts" if command.kind == "avatar" else "mate", command.request_id))
+        return {
+            "status": "PENDING",
+            "success": True,
+            "delivery_state": "DURABLY_QUEUED",
+        }
 
     monkeypatch.setattr(
-        "host_brain.channels.embodiment.submit_avatar_command",
-        _submit_avatar_command,
+        "host_brain.channels.embodiment.queue_embodiment_command",
+        _queue_embodiment_command,
     )
-    monkeypatch.setattr(
-        "host_brain.channels.embodiment.submit_embodiment_command",
-        _submit_embodiment_command,
+    # The production transport is intentionally app-runtime scoped.  This
+    # narrow transport test supplies a sentinel while replacing the actual
+    # actuator helpers above.
+    transport = LifeDeliveryTransport(
+        ledger=_Ledger(SURFACE_DECISION),
+        embodiment_runtime=object(),
     )
-    transport = LifeDeliveryTransport(ledger=_Ledger(SURFACE_DECISION))
 
     asyncio.run(
         transport(

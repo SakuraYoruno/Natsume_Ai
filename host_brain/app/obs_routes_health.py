@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from host_brain.observability.api_models import (
@@ -29,6 +29,7 @@ from host_brain.app.observability_runtime.health_device_projection import (
     SERVICE_HEALTH_KIND,
     read_projection_payload,
 )
+from host_brain.app.obs_route_ports import require_obs_query_projection_store
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -41,16 +42,15 @@ def _now_ms() -> int:
 
 
 def _read_query_projection(
+    projection_store: Any,
     *,
     kind: str,
     key: str,
     max_age_ms: int,
 ) -> tuple[dict | None, dict]:
     try:
-        from host_brain.composition.process_services import get_query_projection_store
-
         return read_projection_payload(
-            get_query_projection_store(),
+            projection_store,
             kind=kind,
             key=key,
             max_age_ms=max_age_ms,
@@ -66,16 +66,21 @@ def _read_query_projection(
             "reason_code": "OPERATOR_PROJECTION_UNAVAILABLE",
         }
 
-# ---------------------------------------------------------------------------
-# GET /obs/services/health
-# ---------------------------------------------------------------------------
-@router.get("/services/health", response_model=ServicesHealthResponse)
-async def get_services_health(
-    window_minutes: int = Query(60, ge=1, le=1440, description="统计窗口（分钟）"),
-    side: Optional[str] = Query(None, description="过滤端：host|edge"),
-):
-    """Read one durable snapshot; ``window_minutes`` remains validation-only."""
+
+def build_services_health_response(
+    projection_store: Any,
+    *,
+    window_minutes: int,
+    side: Optional[str],
+) -> ServicesHealthResponse:
+    """Build one service-health response from an explicitly supplied read port."""
+
+    # The materialized snapshot already owns its aggregation window.  The
+    # parameter remains part of the public query contract and is validated by
+    # FastAPI at the HTTP boundary.
+    del window_minutes
     payload, meta = _read_query_projection(
+        projection_store,
         kind=SERVICE_HEALTH_KIND,
         key=SERVICE_HEALTH_KEY,
         max_age_ms=HEALTH_MAX_AGE_MS,
@@ -83,7 +88,11 @@ async def get_services_health(
     rows = list((payload or {}).get("services") or [])
     side_filter = side if isinstance(side, str) and side in {"host", "edge"} else None
     if side_filter is not None:
-        rows = [row for row in rows if str(row.get("service_type") or "") == side_filter]
+        rows = [
+            row
+            for row in rows
+            if str(row.get("service_type") or "") == side_filter
+        ]
     counts = {key: 0 for key in ("UP", "DEGRADED", "DOWN", "UNKNOWN")}
     services: list[ServiceHealthItem] = []
     for row in rows:
@@ -104,16 +113,34 @@ async def get_services_health(
         degraded_state=str(meta.get("degraded_state") or "REBUILDING"),
     )
 
+# ---------------------------------------------------------------------------
+# GET /obs/services/health
+# ---------------------------------------------------------------------------
+@router.get("/services/health", response_model=ServicesHealthResponse)
+async def get_services_health(
+    request: Request,
+    window_minutes: int = Query(60, ge=1, le=1440, description="统计窗口（分钟）"),
+    side: Optional[str] = Query(None, description="过滤端：host|edge"),
+):
+    """Read one durable snapshot; ``window_minutes`` remains validation-only."""
+    return build_services_health_response(
+        require_obs_query_projection_store(request),
+        window_minutes=window_minutes,
+        side=side,
+    )
+
 
 # ---------------------------------------------------------------------------
 # GET /obs/llm/nodes
 # ---------------------------------------------------------------------------
 @router.get("/llm/nodes", response_model=LlmNodesResponse)
 def get_llm_nodes(
+    request: Request,
     window_minutes: int = Query(60, ge=1, le=1440),
 ):
     """Read the durable LLM-node projection without touching the ledger."""
     payload, meta = _read_query_projection(
+        require_obs_query_projection_store(request),
         kind=LLM_NODE_HEALTH_KIND,
         key=LLM_NODE_HEALTH_KEY,
         max_age_ms=HEALTH_MAX_AGE_MS,
@@ -153,9 +180,10 @@ class OrganTribeStatusResponse(BaseModel):
 
 
 @router.get("/organ-tribe/status", response_model=OrganTribeStatusResponse)
-def get_organ_tribe_status():
+def get_organ_tribe_status(request: Request):
     """Read the background process-state projection; never construct Agents."""
     payload, meta = _read_query_projection(
+        require_obs_query_projection_store(request),
         kind=ORGAN_TRIBE_KIND,
         key=ORGAN_TRIBE_KEY,
         max_age_ms=ORGAN_TRIBE_MAX_AGE_MS,

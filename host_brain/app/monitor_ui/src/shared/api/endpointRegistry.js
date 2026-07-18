@@ -170,6 +170,7 @@ export const ENDPOINT_REGISTRY = Object.freeze({
   execution: {
     taskRuntimeExecutions: { service: 'obs', path: '/obs/task-runtime/executions', risk: 'low' },
     taskRuntimeExecution: { service: 'obs', path: '/obs/task-runtime/executions/:graphId', risk: 'low' },
+    taskGraphCancel: { commandId: 'task_graph.cancel', risk: 'high' },
     taskReviewApprove: { commandId: 'task_review.approve', risk: 'medium' },
     taskReviewReject: { commandId: 'task_review.reject', risk: 'medium' },
     taskReviewResume: { commandId: 'task_review.resume', risk: 'high' },

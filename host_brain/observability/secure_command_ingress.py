@@ -441,6 +441,7 @@ class SecureObsCommandIngress:
                 authority=authority,
                 claim_ref=decision.claim_ref,
                 audit_ref=decision.audit_ref,
+                body_sha256=secure_request.body_sha256,
                 correlation_id=request.correlation_id,
             )
         except Exception:

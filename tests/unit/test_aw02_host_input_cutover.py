@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -10,6 +11,7 @@ from fastapi import HTTPException
 import host_brain.input_runtime.ingress as input_ingress
 import host_brain.input_runtime.worker_dispatch as input_worker
 import host_brain.input_runtime.contracts_and_normalization as input_contracts
+import host_brain.input_runtime.cortex_dispatch as cortex_dispatch
 from host_brain.input_runtime.contracts_and_normalization import InputPayload, InputResponse
 from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
@@ -144,6 +146,118 @@ def test_dispatch_is_awaited_and_carries_authority(
     assert worker.await_args.kwargs["dispatch_mode"] == "governed.awaited"
     assert worker.await_args.kwargs["governed_command_application_provider"] is provider
     assert worker.await_args.kwargs["command_authority"] == authority
+
+
+def test_governed_cortex_binds_secure_ingress_principal_before_governor() -> None:
+    authority = {
+        "principal_id": "service.edge.gateway",
+        "claim_ref": "secure-ingress-claim://aw02/principal-bind",
+        "audit_ref": "secure-ingress-audit://aw02/principal-bind",
+        "body_sha256": "c" * 64,
+    }
+    captured: dict[str, object] = {}
+
+    async def evaluate_governor_with_timing(**kwargs):  # noqa: ANN003
+        captured["governor_intent"] = dict(kwargs["intent_draft"])
+        return (
+            {
+                "decision": "APPROVE",
+                "request_id": kwargs["request_id"],
+                "committed_route_token_ref": "GOV_OK_RULE",
+                "committed_route_token": {"token": "GOV_OK_RULE"},
+            },
+            {},
+        )
+
+    async def cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        captured["generator_authority"] = dict(kwargs["command_authority"])
+        yield "data: " + json.dumps(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "governed",
+            }
+        ) + "\n\n"
+
+    ports = SimpleNamespace(
+        evaluate_governor_with_timing=evaluate_governor_with_timing,
+        get_intent_engine=lambda: object(),
+        build_chat_emotion_snapshot=lambda **_kwargs: {},
+        build_chat_governance_snapshot=lambda **_kwargs: {},
+        resolve_chat_emotion_context=lambda **_kwargs: {},
+        chat_request_factory=lambda **kwargs: SimpleNamespace(**kwargs),
+        cortex_orchestrator_sse_generator=cortex_orchestrator_sse_generator,
+    )
+
+    result = _run(
+        cortex_dispatch._run_cortex_orchestrator_pipeline(
+            request_id="request.gateway.aw02.principal-bind",
+            session_id="conversation-aw02",
+            source="GATEWAY",
+            text="执行",
+            payload={"platform": "qq", "conversation_id": "conversation-aw02"},
+            ts_ms=1,
+            intent_draft_override={
+                "route": "plan",
+                "target_id": "planning_search",
+                "task": "execute",
+                "person_id": "person-aw02",
+                "principal_id": "person-aw02",
+            },
+            governed_command_application_provider=lambda: object(),
+            command_authority=authority,
+            ports=ports,
+        )
+    )
+
+    assert result["decision"] == "APPROVE"
+    assert captured["governor_intent"] == {
+        "route": "plan",
+        "target_id": "planning_search",
+        "task": "execute",
+        "person_id": "person-aw02",
+        "principal_id": "service.edge.gateway",
+    }
+    assert captured["generator_authority"] == authority
+
+
+def test_governed_cortex_rejects_incomplete_authority_before_governor() -> None:
+    evaluate_governor = AsyncMock()
+    ports = SimpleNamespace(
+        evaluate_governor_with_timing=evaluate_governor,
+        get_intent_engine=lambda: object(),
+        build_chat_emotion_snapshot=lambda **_kwargs: {},
+        build_chat_governance_snapshot=lambda **_kwargs: {},
+        resolve_chat_emotion_context=lambda **_kwargs: {},
+        chat_request_factory=lambda **kwargs: SimpleNamespace(**kwargs),
+        cortex_orchestrator_sse_generator=lambda **_kwargs: None,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="governed_command_authority_incomplete:claim_ref,audit_ref,body_sha256",
+    ):
+        _run(
+            cortex_dispatch._run_cortex_orchestrator_pipeline(
+                request_id="request.gateway.aw02.incomplete-authority",
+                session_id="conversation-aw02",
+                source="GATEWAY",
+                text="执行",
+                payload={"platform": "qq", "conversation_id": "conversation-aw02"},
+                ts_ms=1,
+                intent_draft_override={
+                    "route": "chat",
+                    "target_id": "surface_reply",
+                    "task": "reject before governor",
+                },
+                governed_command_application_provider=lambda: object(),
+                command_authority={"principal_id": "service.edge.gateway"},
+                ports=ports,
+            )
+        )
+
+    evaluate_governor.assert_not_awaited()
 
 
 def test_receive_input_returns_durable_command_receipt_without_legacy_overwrite(

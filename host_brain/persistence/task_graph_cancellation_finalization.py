@@ -39,6 +39,7 @@ class TaskGraphCancellationFinalizationMixin:
         """Converge one requested Graph after local child cancellation/join."""
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         reference = str(intent_ref or "").strip()
         if not reference:
             raise TaskStoreError(TASK_STORE_INVALID, "cancellation intent_ref is required")
@@ -61,6 +62,10 @@ class TaskGraphCancellationFinalizationMixin:
             graph_ref = str(intent["graph_id"])
             revision = int(intent["graph_revision"])
             if str(intent["status"]) == "FINALIZED":
+                intent = self._validated_graph_cancellation_intent_record(
+                    conn,
+                    intent_row,
+                )
                 return {
                     "intent": intent,
                     "cancelled_attempt_ids": (),
@@ -140,28 +145,42 @@ class TaskGraphCancellationFinalizationMixin:
                 JOIN task_runtime_acceptance_effect_intent AS effect
                   ON effect.effect_id = fence.effect_id
                 WHERE fence.intent_ref = ?
-                  AND fence.resolution_status = 'RECONCILIATION_REQUIRED'
+                  AND fence.resolution_status IN (
+                      'RECONCILIATION_REQUIRED', 'FAILED_EVIDENCE'
+                  )
                 ORDER BY fence.effect_id
                 """,
                 (reference,),
             ).fetchall()
             for fence in fences:
                 current = str(fence["current_status"])
-                if current in {"COMMITTED", "FAILED"}:
-                    resolution = (
-                        "COMMITTED_EVIDENCE" if current == "COMMITTED" else "FAILED_EVIDENCE"
-                    )
+                resolution_status = str(fence["resolution_status"])
+                if (
+                    resolution_status == "RECONCILIATION_REQUIRED"
+                    and current == "COMMITTED"
+                ):
+                    # A committed effect carries a durable receipt and is
+                    # positive evidence that the side effect happened.  A
+                    # FAILED effect is deliberately *not* symmetric: handler
+                    # or transport failure may follow an already-performed
+                    # side effect, and the current schema has no trusted
+                    # no-side-effect attestation.  Such rows stay pending for
+                    # explicit reconciliation.
                     conn.execute(
                         """
                         UPDATE task_runtime_graph_cancellation_effect_fence
-                        SET resolution_status = ?, resolved_ts_ms = ?
+                        SET resolution_status = 'COMMITTED_EVIDENCE', resolved_ts_ms = ?
                         WHERE effect_id = ? AND intent_ref = ?
                           AND resolution_status = 'RECONCILIATION_REQUIRED'
                         """,
-                        (resolution, ts_ms, str(fence["effect_id"]), reference),
+                        (ts_ms, str(fence["effect_id"]), reference),
                     )
-                else:
-                    pending_effects.append(str(fence["effect_id"]))
+            pending_effects.extend(
+                self._graph_cancellation_pending_effect_ids(
+                    conn,
+                    intent_ref=reference,
+                )
+            )
             evidence_refs = self._graph_cancellation_evidence_refs(
                 conn,
                 intent_ref=reference,
@@ -199,6 +218,7 @@ class TaskGraphCancellationFinalizationMixin:
         """Atomically finalize a stable cancellation and its shared Budget."""
 
         self.assert_graph_cancellation_ready()
+        self.assert_effect_reconciliation_ready()
         graph_ref = str(graph_id or "").strip()
         budget_ref = str(budget_id or "").strip() or None
         intent_reference = str(intent_ref or "").strip()
@@ -227,6 +247,7 @@ class TaskGraphCancellationFinalizationMixin:
             or decision.payload["budget_status_version_before"] != expected_budget_version
             or decision.payload["node_states_before"] != expected_before
             or decision.payload["graph_outbox_id"] != graph_outbox.outbox_id
+            or graph_outbox.graph_revision != int(revision)
             or decision.payload["budget_outbox_id"]
             != (budget_outbox.outbox_id if budget_outbox is not None else None)
             or decision_reference not in set(graph_outbox.evidence_refs)
@@ -326,6 +347,7 @@ class TaskGraphCancellationFinalizationMixin:
                     ),
                     expected_event_type="TASK_GRAPH_CANCELLED",
                     expected_attempt_id=None,
+                    expected_graph_revision=int(revision),
                 )
                 if budget_ref is not None:
                     if budget_row is None:
@@ -381,6 +403,7 @@ class TaskGraphCancellationFinalizationMixin:
                         TASK_STORE_DURABLE_DATA_INVALID,
                         "cancellation replay reconciliation evidence drifted",
                     )
+                self._assert_graph_cancellation_decision_trusted(conn, record)
                 return {
                     "graph": _graph_record(graph, node_rows),
                     "budget": self._budget_record(budget_row) if budget_row is not None else None,
@@ -448,14 +471,13 @@ class TaskGraphCancellationFinalizationMixin:
                 """,
                 (graph_ref, int(revision)),
             ).fetchone()
-            uncertain_effect = conn.execute(
-                """
-                SELECT effect_id FROM task_runtime_graph_cancellation_effect_fence
-                WHERE intent_ref = ? AND resolution_status = 'RECONCILIATION_REQUIRED'
-                LIMIT 1
-                """,
-                (intent_reference,),
-            ).fetchone()
+            unresolved_effect_ids = self._graph_cancellation_pending_effect_ids(
+                conn,
+                intent_ref=intent_reference,
+            )
+            uncertain_effect = (
+                unresolved_effect_ids[0] if unresolved_effect_ids else None
+            )
             live_review = conn.execute(
                 """
                 SELECT review_id FROM agent_runtime_review
@@ -698,6 +720,13 @@ class TaskGraphCancellationFinalizationMixin:
                 "SELECT * FROM task_runtime_graph_cancellation_decision WHERE decision_ref = ?",
                 (decision_reference,),
             ).fetchone()
+            final_decision_record = _graph_cancellation_decision_record(
+                final_decision
+            )
+            self._assert_graph_cancellation_decision_trusted(
+                conn,
+                final_decision_record,
+            )
             return {
                 "graph": completed_graph,
                 "budget": (
@@ -707,6 +736,6 @@ class TaskGraphCancellationFinalizationMixin:
                 ),
                 "nodes": tuple(_node_record(row) for row in final_nodes),
                 "intent": _graph_cancellation_intent_record(final_intent),
-                "decision": _graph_cancellation_decision_record(final_decision),
+                "decision": final_decision_record,
                 "replayed": False,
             }

@@ -3,9 +3,155 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
+from types import MappingProxyType
+
+
+VIRTUAL_STATE_SNAPSHOT_SCHEMA = "natsume.planning-search.virtual-state.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningGoal:
+    """One immutable, domain-scoped planning objective.
+
+    A goal carries only the statement of work and references to context that
+    was frozen before search begins.  It deliberately has no executor,
+    authority object, credential, or mutable runtime handle.
+    """
+
+    goal_id: str
+    domain: str
+    objective: str
+    success_criteria: tuple[str, ...]
+    frozen_context_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        goal_id = _required_text(self.goal_id, field_name="goal_id", max_length=240)
+        domain = _required_text(self.domain, field_name="domain", max_length=128).lower()
+        objective = _required_text(self.objective, field_name="objective", max_length=4_000)
+        criteria = _normalized_text_sequence(
+            self.success_criteria,
+            field_name="success_criteria",
+            allow_empty=False,
+            item_limit=4_000,
+        )
+        refs = _normalized_text_sequence(
+            self.frozen_context_refs,
+            field_name="frozen_context_refs",
+            allow_empty=True,
+            item_limit=1_024,
+        )
+        if any("://" not in ref for ref in refs):
+            raise ValueError("frozen_context_refs must contain governed refs")
+        object.__setattr__(self, "goal_id", goal_id)
+        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "objective", objective)
+        object.__setattr__(self, "success_criteria", criteria)
+        object.__setattr__(self, "frozen_context_refs", refs)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "goal_id": self.goal_id,
+            "domain": self.domain,
+            "objective": self.objective,
+            "success_criteria": list(self.success_criteria),
+            "frozen_context_refs": list(self.frozen_context_refs),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class VirtualStateSnapshot:
+    """Canonical, immutable state supplied to a pure planning search.
+
+    The digest is derived locally from the canonical snapshot.  Callers cannot
+    supply a digest that points to different facts, capabilities, or
+    constraints.  A state transition must create a fresh snapshot rather than
+    mutate this object in place.
+    """
+
+    domain: str
+    capabilities: Sequence[str] = ()
+    facts: Mapping[str, Any] = field(default_factory=dict)
+    constraints: Mapping[str, Any] = field(default_factory=dict)
+    source_refs: Sequence[str] = ()
+    schema_version: str = VIRTUAL_STATE_SNAPSHOT_SCHEMA
+
+    def __post_init__(self) -> None:
+        schema = _required_text(
+            self.schema_version,
+            field_name="schema_version",
+            max_length=256,
+        )
+        domain = _required_text(self.domain, field_name="domain", max_length=128).lower()
+        capabilities = _normalized_text_sequence(
+            self.capabilities,
+            field_name="capabilities",
+            allow_empty=True,
+            item_limit=240,
+        )
+        if not isinstance(self.facts, Mapping) or not isinstance(self.constraints, Mapping):
+            raise ValueError("facts and constraints must be objects")
+        facts = _freeze_json(_json_copy(dict(self.facts)))
+        constraints = _freeze_json(_json_copy(dict(self.constraints)))
+        refs = _normalized_text_sequence(
+            self.source_refs,
+            field_name="source_refs",
+            allow_empty=True,
+            item_limit=1_024,
+        )
+        if any("://" not in ref for ref in refs):
+            raise ValueError("source_refs must contain governed refs")
+        object.__setattr__(self, "schema_version", schema)
+        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "capabilities", capabilities)
+        object.__setattr__(self, "facts", facts)
+        object.__setattr__(self, "constraints", constraints)
+        object.__setattr__(self, "source_refs", refs)
+
+    @property
+    def state_digest(self) -> str:
+        encoded = json.dumps(
+            self.identity_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def identity_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "domain": self.domain,
+            "capabilities": list(self.capabilities),
+            "facts": _thaw_json(self.facts),
+            "constraints": _thaw_json(self.constraints),
+            "source_refs": list(self.source_refs),
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"state_digest": self.state_digest, **self.identity_dict()}
+
+    def replace(
+        self,
+        *,
+        capabilities: Sequence[str] | None = None,
+        facts: Mapping[str, Any] | None = None,
+        constraints: Mapping[str, Any] | None = None,
+        source_refs: Sequence[str] | None = None,
+    ) -> "VirtualStateSnapshot":
+        """Return a new frozen virtual state after a pure transition."""
+
+        return VirtualStateSnapshot(
+            schema_version=self.schema_version,
+            domain=self.domain,
+            capabilities=self.capabilities if capabilities is None else capabilities,
+            facts=_thaw_json(self.facts) if facts is None else facts,
+            constraints=_thaw_json(self.constraints) if constraints is None else constraints,
+            source_refs=self.source_refs if source_refs is None else source_refs,
+        )
 
 
 class MCTSMode(str, Enum):
@@ -146,12 +292,16 @@ class SearchRequest:
     budget: SearchBudget = field(default_factory=SearchBudget)
     context: Mapping[str, Any] = field(default_factory=dict)
     mcts_mode: MCTSMode = MCTSMode.AUTO
+    state_snapshot: VirtualStateSnapshot | None = None
 
     def __post_init__(self) -> None:
         request_id = str(self.request_id).strip()
         if not request_id:
             raise ValueError("request_id must not be empty")
         mode = self.mcts_mode if isinstance(self.mcts_mode, MCTSMode) else MCTSMode(str(self.mcts_mode))
+        snapshot = self.state_snapshot
+        if snapshot is not None and not isinstance(snapshot, VirtualStateSnapshot):
+            raise ValueError("state_snapshot must be a VirtualStateSnapshot")
         object.__setattr__(self, "request_id", request_id)
         object.__setattr__(self, "context", _json_copy(dict(self.context)))
         object.__setattr__(self, "mcts_mode", mode)
@@ -235,10 +385,33 @@ class SearchResult:
     counters: SearchCounters
     mcts_used: bool = False
     side_effects_executed: bool = False
+    virtual_state_schema: str = ""
+    virtual_state_digest: str = ""
+    state_snapshot: VirtualStateSnapshot | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.side_effects_executed:
             raise ValueError("PlanningSearch results can never report executed side effects")
+        snapshot = self.state_snapshot
+        if snapshot is not None and not isinstance(snapshot, VirtualStateSnapshot):
+            raise ValueError("state_snapshot must be a VirtualStateSnapshot")
+        schema = str(self.virtual_state_schema or "").strip()
+        digest = str(self.virtual_state_digest or "").strip().lower()
+        if snapshot is not None:
+            if schema and schema != snapshot.schema_version:
+                raise ValueError("virtual_state_schema differs from state_snapshot")
+            if digest and digest != snapshot.state_digest:
+                raise ValueError("virtual_state_digest differs from state_snapshot")
+            schema = snapshot.schema_version
+            digest = snapshot.state_digest
+        if bool(schema) != bool(digest):
+            raise ValueError(
+                "virtual_state_schema and virtual_state_digest must be supplied together"
+            )
+        if digest and not _SHA256_RE.fullmatch(digest):
+            raise ValueError("virtual_state_digest must be a lowercase sha256 digest")
+        object.__setattr__(self, "virtual_state_schema", schema)
+        object.__setattr__(self, "virtual_state_digest", digest)
 
     @property
     def trace_digest(self) -> str:
@@ -251,7 +424,7 @@ class SearchResult:
         return hashlib.sha256(body).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "request_id": self.request_id,
             "status": self.status.value,
             "stop_reason": self.stop_reason,
@@ -264,6 +437,12 @@ class SearchResult:
             "mcts_used": self.mcts_used,
             "side_effects_executed": False,
         }
+        if self.virtual_state_digest:
+            value["virtual_state"] = {
+                "schema": self.virtual_state_schema,
+                "digest": self.virtual_state_digest,
+            }
+        return value
 
 
 def _json_copy(value: Any) -> Any:
@@ -272,6 +451,53 @@ def _json_copy(value: Any) -> Any:
     except (TypeError, ValueError) as exc:
         raise ValueError("value must be JSON-safe") from exc
     return json.loads(encoded)
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _required_text(value: Any, *, field_name: str, max_length: int) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be text")
+    text = value.strip()
+    if not text or len(text) > max_length:
+        raise ValueError(f"{field_name} must be non-empty and at most {max_length} characters")
+    return text
+
+
+def _normalized_text_sequence(
+    value: Sequence[str],
+    *,
+    field_name: str,
+    allow_empty: bool,
+    item_limit: int,
+) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
+        raise ValueError(f"{field_name} must be an explicit sequence")
+    values: list[str] = []
+    for index, item in enumerate(value):
+        text = _required_text(item, field_name=f"{field_name}[{index}]", max_length=item_limit)
+        if text not in values:
+            values.append(text)
+    if not values and not allow_empty:
+        raise ValueError(f"{field_name} must not be empty")
+    return tuple(values)
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({str(key): _freeze_json(child) for key, child in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(child) for child in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(child) for key, child in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(child) for child in value]
+    return value
 
 
 def _rounded(value: float | None) -> float:

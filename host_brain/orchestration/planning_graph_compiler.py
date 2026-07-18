@@ -14,6 +14,7 @@ import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import quote
 
@@ -26,6 +27,10 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     TASK_GRAPH_INVALID,
     ContractViolation,
 )
+from host_brain.contracts.agent_runtime.node_artifact import (
+    build_task_result_artifact_ref,
+    is_task_result_artifact_ref,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphCompletionPolicy,
@@ -37,9 +42,11 @@ from host_brain.contracts.agent_runtime.task_graph import (
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.planning_search.contracts import (
+    PlanningGoal,
     SearchCandidate,
     SearchResult,
     SearchStatus,
+    VirtualStateSnapshot,
 )
 
 
@@ -101,6 +108,9 @@ _BUDGET_LIMIT_FIELDS = frozenset(
     }
 )
 _DEPENDENCY_CANDIDATE_FIELD = "depends_on_candidate_ids"
+_CONTEXT_OWNED_FIELDS = _ROOT_REQUIRED_FIELDS | frozenset(
+    {"workspace", "input_pack", "metadata", "plan_objective"}
+)
 _SAFE_SENSITIVE_WORD_KEYS = frozenset({"token_count"})
 _SENSITIVE_EXACT_KEYS = frozenset(
     {
@@ -156,6 +166,8 @@ class CompiledPlanningGraph:
     trace_digest: str
     selected_candidate_ids: tuple[str, ...]
     compilation_digest: str
+    virtual_state_schema: str = ""
+    virtual_state_digest: str = ""
     previous_revision: int | None = None
     failure_evidence_refs: tuple[str, ...] = ()
 
@@ -167,6 +179,8 @@ class CompiledPlanningGraph:
         task_graph: TaskGraph,
         trace_digest: str,
         selected_candidate_ids: tuple[str, ...],
+        virtual_state_schema: str,
+        virtual_state_digest: str,
         previous_revision: int | None,
         failure_evidence_refs: tuple[str, ...],
     ) -> "CompiledPlanningGraph":
@@ -175,6 +189,8 @@ class CompiledPlanningGraph:
             task_graph=task_graph,
             trace_digest=trace_digest,
             selected_candidate_ids=selected_candidate_ids,
+            virtual_state_schema=virtual_state_schema,
+            virtual_state_digest=virtual_state_digest,
             previous_revision=previous_revision,
             failure_evidence_refs=failure_evidence_refs,
         )
@@ -184,6 +200,8 @@ class CompiledPlanningGraph:
             trace_digest=trace_digest,
             selected_candidate_ids=selected_candidate_ids,
             compilation_digest=compilation_digest,
+            virtual_state_schema=virtual_state_schema,
+            virtual_state_digest=virtual_state_digest,
             previous_revision=previous_revision,
             failure_evidence_refs=failure_evidence_refs,
         )
@@ -218,6 +236,10 @@ class CompiledPlanningGraph:
                 CONTRACT_FIELD_INVALID,
                 "planning trace_digest must be a lowercase sha256 digest",
             )
+        _validate_virtual_state_provenance(
+            schema=self.virtual_state_schema,
+            digest=self.virtual_state_digest,
+        )
         if not self.selected_candidate_ids:
             raise ContractViolation(
                 TASK_GRAPH_INVALID,
@@ -228,6 +250,8 @@ class CompiledPlanningGraph:
             task_graph=task_graph,
             trace_digest=self.trace_digest,
             selected_candidate_ids=self.selected_candidate_ids,
+            virtual_state_schema=self.virtual_state_schema,
+            virtual_state_digest=self.virtual_state_digest,
             previous_revision=self.previous_revision,
             failure_evidence_refs=self.failure_evidence_refs,
         )
@@ -273,6 +297,33 @@ class CompiledPlanningGraph:
                 TASK_GRAPH_INVALID,
                 "TaskGraph.planner_ref is not bound to the planning trace_digest",
             )
+        expected_state = _virtual_state_provenance_dict(
+            schema=self.virtual_state_schema,
+            digest=self.virtual_state_digest,
+        )
+        planning_input = dict(order.input_pack).get("planning_search")
+        planning_lineage = dict(order.metadata).get("planning_lineage")
+        if (
+            not isinstance(planning_input, Mapping)
+            or not isinstance(planning_lineage, Mapping)
+            or planning_input.get("virtual_state") != expected_state
+            or planning_lineage.get("virtual_state") != expected_state
+        ):
+            raise ContractViolation(
+                TASK_GRAPH_INVALID,
+                "compiled planning graph virtual state provenance drifted",
+            )
+        state_marker = f"/state/sha256:{self.virtual_state_digest}"
+        if self.virtual_state_digest and state_marker not in graph.planner_ref:
+            raise ContractViolation(
+                TASK_GRAPH_INVALID,
+                "TaskGraph.planner_ref is not bound to the virtual state digest",
+            )
+        if not self.virtual_state_digest and "/state/sha256:" in graph.planner_ref:
+            raise ContractViolation(
+                TASK_GRAPH_INVALID,
+                "TaskGraph.planner_ref carries unexpected virtual state provenance",
+            )
         if self.previous_revision is None:
             if graph.revision != 1 or self.failure_evidence_refs:
                 raise ContractViolation(
@@ -296,8 +347,160 @@ class CompiledPlanningGraph:
             "trace_digest": self.trace_digest,
             "selected_candidate_ids": list(self.selected_candidate_ids),
             "compilation_digest": self.compilation_digest,
+            "virtual_state_schema": self.virtual_state_schema or None,
+            "virtual_state_digest": self.virtual_state_digest or None,
             "previous_revision": self.previous_revision,
             "failure_evidence_refs": list(self.failure_evidence_refs),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningCompilationContext:
+    """Governor-bound graph policy kept outside dynamic search candidates.
+
+    Goal-driven successor catalogs may propose node descriptors but must never
+    carry graph-wide budget, approval, review, workspace, or idempotency
+    authority.  The compiler copies this immutable context into the canonical
+    WorkOrder only after one selected path has been chosen.
+    """
+
+    domain: str
+    run_mode: str
+    plan_objective: str
+    allowed_actions: Sequence[str]
+    forbidden_actions: Sequence[str]
+    verification_plan: Mapping[str, Any]
+    approval_policy: Mapping[str, Any]
+    review_policy: Mapping[str, Any]
+    budget_policy: Mapping[str, Any]
+    business_idempotency_scope: str
+    approval_ref: str
+    review_ref: str
+    workspace: Mapping[str, Any] = field(default_factory=dict)
+    input_pack: Mapping[str, Any] = field(default_factory=dict)
+    input_refs: Sequence[str] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    goal: PlanningGoal | None = None
+    virtual_state: VirtualStateSnapshot | None = None
+
+    def __post_init__(self) -> None:
+        domain = _required_text(self.domain, field_name="context.domain").lower()
+        run_mode = _required_text(self.run_mode, field_name="context.run_mode").lower()
+        objective = _required_text(
+            self.plan_objective,
+            field_name="context.plan_objective",
+            max_length=4_000,
+        )
+        allowed = _context_text_list(
+            self.allowed_actions, field_name="context.allowed_actions", allow_empty=True
+        )
+        forbidden = _context_text_list(
+            self.forbidden_actions, field_name="context.forbidden_actions", allow_empty=True
+        )
+        input_refs = _context_text_list(
+            self.input_refs, field_name="context.input_refs", allow_empty=True
+        )
+        for name, value in (
+            ("verification_plan", self.verification_plan),
+            ("approval_policy", self.approval_policy),
+            ("review_policy", self.review_policy),
+        ):
+            if not isinstance(value, Mapping) or not value:
+                raise ContractViolation(
+                    CONTRACT_FIELD_INVALID,
+                    f"context.{name} must be a non-empty object",
+                )
+        for name, value in (
+            ("workspace", self.workspace),
+            ("input_pack", self.input_pack),
+            ("metadata", self.metadata),
+        ):
+            if not isinstance(value, Mapping):
+                raise ContractViolation(
+                    CONTRACT_FIELD_INVALID,
+                    f"context.{name} must be an object",
+                )
+        _parse_explicit_budget_policy(self.budget_policy)
+        scope = _required_text(
+            self.business_idempotency_scope,
+            field_name="context.business_idempotency_scope",
+            max_length=240,
+        )
+        approval_ref = _required_text(
+            self.approval_ref, field_name="context.approval_ref", max_length=1_000
+        )
+        review_ref = _required_text(
+            self.review_ref, field_name="context.review_ref", max_length=1_000
+        )
+        if self.goal is not None and not isinstance(self.goal, PlanningGoal):
+            raise ContractViolation(CONTRACT_FIELD_INVALID, "context.goal is invalid")
+        if self.virtual_state is not None and not isinstance(
+            self.virtual_state, VirtualStateSnapshot
+        ):
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID, "context.virtual_state is invalid"
+            )
+        if self.goal is not None and self.goal.domain != domain:
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID,
+                "context.goal domain differs from context.domain",
+            )
+        if self.virtual_state is not None and self.virtual_state.domain != domain:
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID,
+                "context.virtual_state domain differs from context.domain",
+            )
+        for name, value in (
+            ("context.workspace", self.workspace),
+            ("context.input_pack", self.input_pack),
+            ("context.metadata", self.metadata),
+        ):
+            _assert_secret_free(value, path=name)
+        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "run_mode", run_mode)
+        object.__setattr__(self, "plan_objective", objective)
+        object.__setattr__(self, "allowed_actions", allowed)
+        object.__setattr__(self, "forbidden_actions", forbidden)
+        object.__setattr__(self, "verification_plan", _freeze_json(_json_copy(dict(self.verification_plan))))
+        object.__setattr__(self, "approval_policy", _freeze_json(_json_copy(dict(self.approval_policy))))
+        object.__setattr__(self, "review_policy", _freeze_json(_json_copy(dict(self.review_policy))))
+        object.__setattr__(self, "budget_policy", _freeze_json(_json_copy(dict(self.budget_policy))))
+        object.__setattr__(self, "business_idempotency_scope", scope)
+        object.__setattr__(self, "approval_ref", approval_ref)
+        object.__setattr__(self, "review_ref", review_ref)
+        object.__setattr__(self, "workspace", _freeze_json(_json_copy(dict(self.workspace))))
+        object.__setattr__(self, "input_pack", _freeze_json(_json_copy(dict(self.input_pack))))
+        object.__setattr__(self, "input_refs", input_refs)
+        object.__setattr__(self, "metadata", _freeze_json(_json_copy(dict(self.metadata))))
+
+    def root_policy_payload(self) -> dict[str, Any]:
+        """Return a detached canonical payload for compiler-internal merging."""
+
+        input_pack = _thaw_json(self.input_pack)
+        metadata = _thaw_json(self.metadata)
+        metadata["planning_context"] = {
+            "domain": self.domain,
+            "goal": self.goal.to_dict() if self.goal is not None else None,
+            "virtual_state": (
+                self.virtual_state.to_dict() if self.virtual_state is not None else None
+            ),
+        }
+        return {
+            "domain": self.domain,
+            "run_mode": self.run_mode,
+            "plan_objective": self.plan_objective,
+            "allowed_actions": list(self.allowed_actions),
+            "forbidden_actions": list(self.forbidden_actions),
+            "verification_plan": _thaw_json(self.verification_plan),
+            "approval_policy": _thaw_json(self.approval_policy),
+            "review_policy": _thaw_json(self.review_policy),
+            "budget_policy": _thaw_json(self.budget_policy),
+            "business_idempotency_scope": self.business_idempotency_scope,
+            "approval_ref": self.approval_ref,
+            "review_ref": self.review_ref,
+            "workspace": _thaw_json(self.workspace),
+            "input_pack": input_pack,
+            "metadata": metadata,
         }
 
 
@@ -318,6 +521,7 @@ class PlanningGraphCompiler:
         previous_graph: TaskGraph | None = None,
         failure_evidence_refs: Sequence[str] = (),
         completion_policy: TaskGraphCompletionPolicy | str | None = None,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> CompiledPlanningGraph:
         if not isinstance(result, SearchResult):
             raise ContractViolation(
@@ -342,6 +546,12 @@ class PlanningGraphCompiler:
                 CONTRACT_FIELD_INVALID,
                 "PlanningSearch trace_digest is invalid",
             )
+        virtual_state_schema = str(result.virtual_state_schema or "").strip()
+        virtual_state_digest = str(result.virtual_state_digest or "").strip().lower()
+        _validate_virtual_state_provenance(
+            schema=virtual_state_schema,
+            digest=virtual_state_digest,
+        )
         resolved_created_at = _exact_non_negative_int(created_at, field_name="created_at")
         evidence_refs = _normalize_evidence_refs(failure_evidence_refs)
         try:
@@ -358,6 +568,25 @@ class PlanningGraphCompiler:
                 "planning compiler completion_policy is unsupported",
             ) from exc
 
+        if compilation_context is not None and not isinstance(
+            compilation_context, PlanningCompilationContext
+        ):
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID,
+                "compilation_context must be PlanningCompilationContext",
+            )
+        if (
+            compilation_context is not None
+            and compilation_context.virtual_state is not None
+            and (
+                virtual_state_schema != compilation_context.virtual_state.schema_version
+                or virtual_state_digest != compilation_context.virtual_state.state_digest
+            )
+        ):
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID,
+                "search result virtual state differs from compilation context",
+            )
         payloads: list[dict[str, Any]] = []
         for index, candidate in enumerate(selected_path):
             if not isinstance(candidate, SearchCandidate):
@@ -372,6 +601,12 @@ class PlanningGraphCompiler:
                 )
             payload = _json_copy(dict(candidate.payload))
             _assert_secret_free(payload, path=f"selected_path[{index}].payload")
+            if compilation_context is not None:
+                payload = _apply_compilation_context(
+                    payload,
+                    context=compilation_context,
+                    index=index,
+                )
             _validate_node_payload(payload, index=index)
             payloads.append(payload)
         _validate_root_payload(payloads[0])
@@ -397,6 +632,10 @@ class PlanningGraphCompiler:
                     )
                 ],
                 "trace_digest": trace_digest,
+                "virtual_state": _virtual_state_provenance_dict(
+                    schema=virtual_state_schema,
+                    digest=virtual_state_digest,
+                ),
             }
         )
 
@@ -451,6 +690,7 @@ class PlanningGraphCompiler:
             graph_id=graph_id,
             revision=revision,
             trace_digest=trace_digest,
+            virtual_state_digest=virtual_state_digest,
         )
         node_ids = tuple(
             _node_id(
@@ -509,6 +749,10 @@ class PlanningGraphCompiler:
                 "root_work_order_id": root_work_order_id,
                 "revision": revision,
                 "trace_digest": trace_digest,
+                "virtual_state": _virtual_state_provenance_dict(
+                    schema=virtual_state_schema,
+                    digest=virtual_state_digest,
+                ),
                 "selected_path": [
                     {
                         "candidate_id": candidate.candidate_id,
@@ -527,6 +771,8 @@ class PlanningGraphCompiler:
             node_ids=node_ids,
             planner_ref=planner_ref,
             trace_digest=trace_digest,
+            virtual_state_schema=virtual_state_schema,
+            virtual_state_digest=virtual_state_digest,
             operation_fingerprint=operation_fingerprint,
             failure_evidence_refs=evidence_refs,
             previous_revision=previous_revision,
@@ -538,6 +784,8 @@ class PlanningGraphCompiler:
             task_graph=graph,
             trace_digest=trace_digest,
             selected_candidate_ids=selected_candidate_ids,
+            virtual_state_schema=virtual_state_schema,
+            virtual_state_digest=virtual_state_digest,
             previous_revision=previous_revision,
             failure_evidence_refs=evidence_refs,
         )
@@ -550,6 +798,7 @@ class PlanningGraphCompiler:
         previous_graph: TaskGraph,
         failure_evidence_refs: Sequence[str],
         created_at: int = 0,
+        compilation_context: PlanningCompilationContext | None = None,
     ) -> CompiledPlanningGraph:
         """Explicit failure-only spelling of ``compile(..., previous_graph=...)``."""
 
@@ -558,6 +807,7 @@ class PlanningGraphCompiler:
             created_at=created_at,
             previous_graph=previous_graph,
             failure_evidence_refs=failure_evidence_refs,
+            compilation_context=compilation_context,
         )
 
 
@@ -571,6 +821,7 @@ def compile_planning_search_result(
     created_at: int = 0,
     previous_graph: TaskGraph | None = None,
     failure_evidence_refs: Sequence[str] = (),
+    compilation_context: PlanningCompilationContext | None = None,
 ) -> CompiledPlanningGraph:
     """Stateless convenience entry point for the canonical compiler."""
 
@@ -579,7 +830,57 @@ def compile_planning_search_result(
         created_at=created_at,
         previous_graph=previous_graph,
         failure_evidence_refs=failure_evidence_refs,
+        compilation_context=compilation_context,
     )
+
+
+def _apply_compilation_context(
+    payload: Mapping[str, Any],
+    *,
+    context: PlanningCompilationContext,
+    index: int,
+) -> dict[str, Any]:
+    forbidden = sorted(_CONTEXT_OWNED_FIELDS & set(payload))
+    if forbidden:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"selected_path[{index}] attempts to set context-owned fields: "
+            + ",".join(forbidden),
+        )
+    merged = context.root_policy_payload()
+    merged.update(_json_copy(dict(payload)))
+    candidate_refs = _required_text_list(
+        merged.get("input_refs"),
+        field_name=f"selected_path[{index}].input_refs",
+        allow_empty=True,
+    )
+    merged["input_refs"] = list(_dedupe_text(context.input_refs, candidate_refs))
+    return merged
+
+
+def _context_text_list(
+    value: Sequence[str], *, field_name: str, allow_empty: bool
+) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
+        raise ContractViolation(CONTRACT_FIELD_INVALID, f"{field_name} must be an explicit list")
+    return _required_text_list(list(value), field_name=field_name, allow_empty=allow_empty)
+
+
+def _validate_virtual_state_provenance(*, schema: str, digest: str) -> None:
+    if bool(schema) != bool(digest):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "virtual state schema and digest must be supplied together",
+        )
+    if digest and not _SHA256_RE.fullmatch(digest):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "virtual state digest must be a lowercase sha256 digest",
+        )
+
+
+def _virtual_state_provenance_dict(*, schema: str, digest: str) -> dict[str, str] | None:
+    return {"schema": schema, "digest": digest} if schema and digest else None
 
 
 def _validate_node_payload(payload: Mapping[str, Any], *, index: int) -> None:
@@ -608,7 +909,16 @@ def _validate_node_payload(payload: Mapping[str, Any], *, index: int) -> None:
         field_name="acceptance_criteria",
         allow_empty=False,
     )
-    _required_text_list(payload.get("input_refs"), field_name="input_refs", allow_empty=True)
+    input_refs = _required_text_list(
+        payload.get("input_refs"),
+        field_name="input_refs",
+        allow_empty=True,
+    )
+    if any(is_task_result_artifact_ref(ref) for ref in input_refs):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            f"selected_path[{index}] cannot set compiler-owned task-result refs",
+        )
     _required_text_list(
         payload.get("capability_requirements"),
         field_name="capability_requirements",
@@ -848,6 +1158,8 @@ def _compile_work_order(
     node_ids: tuple[str, ...],
     planner_ref: str,
     trace_digest: str,
+    virtual_state_schema: str,
+    virtual_state_digest: str,
     operation_fingerprint: str,
     failure_evidence_refs: tuple[str, ...],
     previous_revision: int | None,
@@ -909,6 +1221,10 @@ def _compile_work_order(
     input_pack["planning_search"] = {
         "trace_digest": trace_digest,
         "selected_candidate_ids": list(selected_candidate_ids),
+        "virtual_state": _virtual_state_provenance_dict(
+            schema=virtual_state_schema,
+            digest=virtual_state_digest,
+        ),
     }
     metadata = deepcopy(dict(root.get("metadata") or {}))
     metadata["planning_lineage"] = {
@@ -926,6 +1242,10 @@ def _compile_work_order(
             else None
         ),
         "trace_digest": trace_digest,
+        "virtual_state": _virtual_state_provenance_dict(
+            schema=virtual_state_schema,
+            digest=virtual_state_digest,
+        ),
         "failure_evidence_refs": list(failure_evidence_refs),
         "approval_ref": str(root["approval_ref"]).strip(),
         "review_ref": str(root["review_ref"]).strip(),
@@ -1097,19 +1417,22 @@ def _planner_ref(
     graph_id: str,
     revision: int,
     trace_digest: str,
+    virtual_state_digest: str = "",
 ) -> str:
     request_digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:24]
+    state_segment = (
+        f"/state/sha256:{virtual_state_digest}"
+        if virtual_state_digest
+        else ""
+    )
     return (
         f"planner://planning-search/{request_digest}/graphs/{quote(graph_id, safe='')}"
-        f"/revisions/{revision}/trace/sha256:{trace_digest}"
+        f"/revisions/{revision}{state_segment}/trace/sha256:{trace_digest}"
     )
 
 
 def _dependency_result_ref(graph_id: str, revision: int, node_id: str) -> str:
-    return (
-        "artifact://task-result/"
-        f"{quote(graph_id, safe='')}/revisions/{revision}/nodes/{quote(node_id, safe='')}"
-    )
+    return build_task_result_artifact_ref(graph_id, revision, node_id)
 
 
 def _sha256_ref(payload: Mapping[str, Any]) -> str:
@@ -1123,6 +1446,8 @@ def _compilation_digest(
     task_graph: TaskGraph,
     trace_digest: str,
     selected_candidate_ids: Sequence[str],
+    virtual_state_schema: str,
+    virtual_state_digest: str,
     previous_revision: int | None,
     failure_evidence_refs: Sequence[str],
 ) -> str:
@@ -1133,6 +1458,10 @@ def _compilation_digest(
             "task_graph": task_graph.to_dict(),
             "trace_digest": trace_digest,
             "selected_candidate_ids": list(selected_candidate_ids),
+            "virtual_state": _virtual_state_provenance_dict(
+                schema=virtual_state_schema,
+                digest=virtual_state_digest,
+            ),
             "previous_revision": previous_revision,
             "failure_evidence_refs": list(failure_evidence_refs),
         }
@@ -1154,6 +1483,22 @@ def _canonical_json(value: Any) -> str:
 
 def _json_copy(value: Any) -> Any:
     return json.loads(_canonical_json(value))
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({str(key): _freeze_json(child) for key, child in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(child) for child in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(child) for key, child in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(child) for child in value]
+    return value
 
 
 def _required_text(value: Any, *, field_name: str, max_length: int = 1_000) -> str:
@@ -1210,6 +1555,7 @@ def _exact_non_negative_int(value: Any, *, field_name: str) -> int:
 
 __all__ = [
     "CompiledPlanningGraph",
+    "PlanningCompilationContext",
     "PlanningGraphCompiler",
     "PlanningSearchGraphCompiler",
     "compile_planning_search_result",

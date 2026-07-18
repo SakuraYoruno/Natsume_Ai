@@ -66,7 +66,9 @@ export function buildVitalSigns({
   nonLiveSlots,
   vtsData,
 }) {
-  const emotionalStability = vtsData ? clampPercent(100 - Number(vtsData?.degrade_rate || 0)) : null
+  const emotionalStability = vtsData?.degrade_rate == null
+    ? null
+    : clampPercent(100 - Number(vtsData.degrade_rate))
   const closedLoopRate = clampPercent(humanoidLoopData?.closed_loop_rate)
   const recoveryRate = clampPercent(humanoidLoopData?.deviation_recovery_rate)
   const hasEmotionValue = hasReadableValue(currentEmotion)
@@ -80,7 +82,9 @@ export function buildVitalSigns({
         : '断续'
   const continuityTone = !hasRuntimeSnapshot
     ? 'pending'
-    : backgroundRuntime.is_advancing
+    : !backgroundRuntime
+      ? (continuityValue === '波动' ? 'warning' : 'stable')
+      : backgroundRuntime.is_advancing
       ? (continuityValue === '断续' ? 'critical' : continuityValue === '轻波动' || continuityValue === '波动' ? 'warning' : 'stable')
       : (continuityValue === '断续' ? 'critical' : continuityValue === '轻波动' || continuityValue === '波动' ? 'warning' : 'stable')
   const vitalityHint = !hasRuntimeSnapshot
@@ -88,11 +92,9 @@ export function buildVitalSigns({
     : nonLiveSlots.length === 0
       ? '关键槽位在线'
       : `${nonLiveSlots.length} 个槽位异常`
-  const emotionValue = !hasRuntimeSnapshot && emotionalStability == null
-    ? '待判定'
-    : emotionalStability == null
-      ? (hasEmotionValue ? currentEmotion : '--')
-      : `${Math.round(emotionalStability)}%`
+  const emotionValue = emotionalStability == null
+    ? hasRuntimeSnapshot ? '不可测' : '待判定'
+    : `${Math.round(emotionalStability)}%`
   const bondValue = !hasRuntimeSnapshot && !hasBondStageValue
     ? '待判定'
     : hasBondStageValue
@@ -147,7 +149,7 @@ export function buildVitalSigns({
       value: emotionValue,
       hint: hasEmotionValue ? `当前情绪 ${currentEmotion}` : '等待情绪样本',
       to: '/life/emotion',
-      tone: !hasRuntimeSnapshot && emotionalStability == null ? 'pending' : emotionalStability != null && emotionalStability < 70 ? 'warning' : 'stable',
+      tone: emotionalStability == null ? 'pending' : emotionalStability < 70 ? 'warning' : 'stable',
     },
     {
       id: 'bond',

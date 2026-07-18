@@ -409,7 +409,12 @@ export function buildDigitalLifeCommandRailModel({
   }
 }
 
-export function buildDigitalLifeCapabilitySectionModel(capabilityGapData = {}) {
+export function buildDigitalLifeCapabilitySectionModel(
+  capabilityGapData = null,
+  capabilityGapProjection = {}
+) {
+  const capabilityGapAvailable = capabilityGapProjection?.available
+    ?? Boolean(capabilityGapData)
   const forgeQualitySummary = capabilityGapData?.forge_runtime_quality?.summary || {}
   const forgeQualityItems = capabilityGapData?.forge_runtime_quality?.items || []
   const forgeRiskItems = [...forgeQualityItems]
@@ -418,6 +423,8 @@ export function buildDigitalLifeCapabilitySectionModel(capabilityGapData = {}) {
 
   return {
     capabilityGapData,
+    capabilityGapAvailable,
+    capabilityGapReasonCode: capabilityGapProjection?.reason_code || null,
     forgeQualitySummary,
     avgForgeHealth: Number(forgeQualitySummary?.avg_health_score ?? 0),
     forgeCriticalCount: Number(forgeQualitySummary?.critical_proposals ?? 0),

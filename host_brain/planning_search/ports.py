@@ -5,8 +5,13 @@ from typing import Any, Mapping, Protocol, Sequence
 from .contracts import CandidateScore, SearchCandidate
 
 
-class CandidateExpansionPort(Protocol):
-    """Produce data-only candidates for a planning state and virtual path."""
+class SuccessorCatalogPort(Protocol):
+    """Dynamically produce legal data-only successors from virtual state.
+
+    This is the public L1 name.  A catalog must derive successors from the
+    frozen virtual state and selected virtual path; it must not execute a
+    candidate, access a real tool, or simply expose a caller-supplied plan.
+    """
 
     def expand(
         self,
@@ -17,6 +22,14 @@ class CandidateExpansionPort(Protocol):
         limit: int,
         context: Mapping[str, Any],
     ) -> Sequence[SearchCandidate]: ...
+
+
+class CandidateExpansionPort(SuccessorCatalogPort, Protocol):
+    """Compatibility name for :class:`SuccessorCatalogPort`.
+
+    Existing Pentest and benchmark adapters remain structurally compatible
+    while new goal-driven domains depend on the less ambiguous public name.
+    """
 
 
 class CognitiveRankingPort(Protocol):

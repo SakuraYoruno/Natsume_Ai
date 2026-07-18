@@ -4,10 +4,17 @@ import ast
 import asyncio
 import hashlib
 import inspect
+import sqlite3
 from typing import Any
 
 import pytest
 
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.persistence.task_store_types import (
+    TASK_STORE_INVALID,
+    OutboxMessage,
+    TaskStoreError,
+)
 from host_brain.task_runtime import coordinator as coordinator_module
 from host_brain.task_runtime import (
     dag_scheduling_runtime as dag_scheduling_runtime_module,
@@ -148,11 +155,161 @@ def test_build_preserves_frozen_digest_identity_and_evidence_normalization() -> 
         "event_type": "TASK_NODE_VERIFIED",
         "payload_ref": "taskstore://event/TASK_NODE/node-one/3",
         "idempotency_key": f"governed:{digest}",
+        "graph_revision": None,
         "attempt_id": "attempt-one",
         "evidence_refs": ("evidence://one", "evidence://two"),
         "outbox_id": f"outbox::governed::{digest}",
     }
     assert factory.calls == [seed, final]
+
+
+def test_graph_outbox_uses_command_identity_and_revisioned_payload_ref() -> None:
+    runtime, _ = _runtime()
+
+    revision_one = runtime.build(
+        command_id="command-graph-revision-1",
+        aggregate_type="TASK_GRAPH",
+        aggregate_id="graph-one",
+        aggregate_version=2,
+        event_type="TASK_GRAPH_ACTIVE",
+        graph_revision=1,
+    )
+    revision_two = runtime.build(
+        command_id="command-graph-revision-2",
+        aggregate_type="TASK_GRAPH",
+        aggregate_id="graph-one",
+        aggregate_version=2,
+        event_type="TASK_GRAPH_ACTIVE",
+        graph_revision=2,
+    )
+
+    assert revision_one["graph_revision"] == 1
+    assert revision_two["graph_revision"] == 2
+    assert revision_one["outbox_id"] != revision_two["outbox_id"]
+    assert revision_one["idempotency_key"] != revision_two["idempotency_key"]
+    assert revision_one["payload_ref"] == (
+        "taskstore://event/TASK_GRAPH/graph-one@1/2"
+    )
+    assert revision_two["payload_ref"] == (
+        "taskstore://event/TASK_GRAPH/graph-one@2/2"
+    )
+
+
+def test_same_command_keeps_legacy_identity_but_revision_conflict_fails_closed(
+    tmp_path,
+) -> None:
+    runtime, _ = _runtime()
+    revision_one = runtime.build(
+        command_id="command-graph-stable",
+        aggregate_type="TASK_GRAPH",
+        aggregate_id="graph-stable-command",
+        aggregate_version=0,
+        event_type="TASK_GRAPH_CREATED",
+        graph_revision=1,
+    )
+    revision_two = runtime.build(
+        command_id="command-graph-stable",
+        aggregate_type="TASK_GRAPH",
+        aggregate_id="graph-stable-command",
+        aggregate_version=0,
+        event_type="TASK_GRAPH_CREATED",
+        graph_revision=2,
+    )
+
+    assert revision_one["outbox_id"] == revision_two["outbox_id"]
+    assert revision_one["idempotency_key"] == revision_two["idempotency_key"]
+    assert revision_one["graph_revision"] == 1
+    assert revision_two["graph_revision"] == 2
+    assert revision_one["payload_ref"].endswith("graph-stable-command@1/0")
+    assert revision_two["payload_ref"].endswith("graph-stable-command@2/0")
+
+    db_path = tmp_path / "runtime-outbox-stable-command.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="runtime-outbox-stable-command",
+        ts_ms=1,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    with sqlite3.connect(db_path) as conn:
+        for revision in (1, 2):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref,
+                    status, status_version, graph_json, source_kind,
+                    source_ref, legacy_snapshot_json, created_ts_ms,
+                    updated_ts_ms
+                ) VALUES ('graph-stable-command', ?, ?, ?, 'CREATED', 0,
+                          '{}', 'CANONICAL', NULL, NULL, 1, 1)
+                """,
+                (
+                    revision,
+                    f"work-order-stable-{revision}",
+                    f"planner://stable/{revision}",
+                ),
+            )
+
+        def insert(message: dict[str, Any]) -> None:
+            conn.execute(
+                """
+                INSERT INTO task_runtime_outbox(
+                    outbox_id, aggregate_type, aggregate_id,
+                    graph_revision, aggregate_version, event_type,
+                    payload_ref, evidence_refs_json, attempt_id,
+                    idempotency_key, status, available_ts_ms,
+                    created_ts_ms, published_ts_ms, status_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', NULL, ?, 'PENDING',
+                          1, 1, NULL, 0)
+                """,
+                (
+                    message["outbox_id"],
+                    message["aggregate_type"],
+                    message["aggregate_id"],
+                    message["graph_revision"],
+                    message["aggregate_version"],
+                    message["event_type"],
+                    message["payload_ref"],
+                    message["idempotency_key"],
+                ),
+            )
+
+        insert(revision_one)
+        with pytest.raises(sqlite3.IntegrityError):
+            insert(revision_two)
+        assert conn.execute(
+            """
+            SELECT graph_revision, payload_ref
+            FROM task_runtime_outbox
+            WHERE outbox_id = ?
+            """,
+            (revision_one["outbox_id"],),
+        ).fetchone() == (1, revision_one["payload_ref"])
+
+
+def test_outbox_message_enforces_exact_graph_revision_contract() -> None:
+    def message(*, aggregate_type: str, graph_revision: object) -> OutboxMessage:
+        payload_aggregate_id = "aggregate-one"
+        if aggregate_type == "TASK_GRAPH" and type(graph_revision) is int:
+            payload_aggregate_id = f"aggregate-one@{graph_revision}"
+        return OutboxMessage.create(
+            aggregate_type=aggregate_type,
+            aggregate_id="aggregate-one",
+            aggregate_version=1,
+            event_type=f"{aggregate_type}_CHANGED",
+            payload_ref=(
+                f"taskstore://event/{aggregate_type}/{payload_aggregate_id}/1"
+            ),
+            graph_revision=graph_revision,  # type: ignore[arg-type]
+        )
+
+    message(aggregate_type="TASK_GRAPH", graph_revision=1).validate()
+    message(aggregate_type="TASK_NODE", graph_revision=None).validate()
+    for invalid in (None, 0, -1, True, "1"):
+        with pytest.raises(TaskStoreError) as graph_error:
+            message(aggregate_type="TASK_GRAPH", graph_revision=invalid).validate()
+        assert graph_error.value.reason_code == TASK_STORE_INVALID
+    with pytest.raises(TaskStoreError) as non_graph_error:
+        message(aggregate_type="TASK_NODE", graph_revision=1).validate()
+    assert non_graph_error.value.reason_code == TASK_STORE_INVALID
 
 
 @pytest.mark.asyncio
@@ -275,10 +432,12 @@ def test_coordinator_wires_one_runtime_outbox_and_keeps_budget_factory_binding()
         "acceptance",
         "projection_reader",
         "review_runtime",
+        "node_grant_verifier",
         "acceptance_effects_enabled",
         "bounded_fanout_enabled",
         "atomic_graph_success_enabled",
         "fanout_event_buffer_size",
+        "execution_registry",
         "owner_id",
         "lease_ttl_ms",
         "operation_ttl_ms",
@@ -424,5 +583,5 @@ def test_runtime_outbox_call_matrix_is_frozen() -> None:
     assert len(rows) == 58
     assert best_effort_count == 5
     assert hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest() == (
-        "f82e9172f261dccf0d915d6919b05999550c0ca13cc22c305e921f77428962a4"
+        "21a248d36343f51365f8c9c1f649e1d25ff29da4a63231866edb87c242492f0c"
     )

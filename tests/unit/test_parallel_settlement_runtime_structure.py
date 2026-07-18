@@ -427,6 +427,7 @@ def test_parallel_outcome_reason_mapping_is_canonical() -> None:
     assert reason("BUDGET_BLOCKED") == "GOVERNED_BUDGET_EXCEEDED"
     assert reason("FAILED") == "GOVERNED_PARALLEL_NODE_FAILED"
     assert reason("VERIFICATION_FAILED") == "GOVERNED_PARALLEL_VERIFICATION_FAILED"
+    assert reason("WAITING_APPROVAL") == "GOVERNED_REVIEW_REQUIRED"
     assert reason("WAITING_ACCEPTANCE_REVIEW") == "GOVERNED_REVIEW_REQUIRED"
     assert reason("RETRY_PENDING") == "GOVERNED_EXECUTION_IN_PROGRESS"
     assert reason("CANCELLED") == "GOVERNED_PARALLEL_NODE_CANCELLED"

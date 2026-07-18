@@ -1,14 +1,14 @@
 """Durable Life, Security Immune and Skill/Domain-Pack query projections.
 
 The loaders in this module are background-worker entry points.  HTTP handlers
-must only call :func:`read_domain_projection`; they must never call a loader,
-initialize a domain singleton, or inspect a supply-chain directory.
+must only call :func:`read_domain_projection_from_store` with their app-local
+store; they must never call a loader, initialize a domain singleton, or inspect
+a supply-chain directory.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict
-import threading
 import time
 from collections.abc import Mapping
 from typing import Any, Callable
@@ -17,7 +17,6 @@ from natsume_contracts.operator.v1 import ProjectionDegradedState
 
 from host_brain.persona.life_evolution_view import build_life_evolution_view
 
-from .projection_daemon import register_projection_job
 from .projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
@@ -25,16 +24,18 @@ from host_brain.observability.projection_store import QueryProjectionStore, dige
 LIFE_EVOLUTION_KIND = "life_evolution"
 LIFE_DEFAULT_KEY = "default"
 LIFE_MAX_AGE_MS = 30_000
+GOVERNANCE_SNAPSHOT_KIND = "governance_snapshot"
+GOVERNANCE_SNAPSHOT_KEY = "current"
+GOVERNANCE_SNAPSHOT_MAX_AGE_MS = 60_000
+SEMANTIC_RECALL_STATS_KIND = "semantic_recall_stats"
+SEMANTIC_RECALL_STATS_KEY = "runtime"
+SEMANTIC_RECALL_STATS_MAX_AGE_MS = 120_000
 SECURITY_IMMUNE_KIND = "security_immune"
 SECURITY_IMMUNE_KEY = "runtime"
 SECURITY_IMMUNE_MAX_AGE_MS = 10 * 60_000
 SKILL_PACK_CATALOG_KIND = "skill_pack_catalog"
 SKILL_PACK_CATALOG_KEY = "index"
 SKILL_PACK_CATALOG_MAX_AGE_MS = 5 * 60_000
-
-_job_lock = threading.Lock()
-_last_job_run: dict[str, float] = {}
-
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
@@ -152,19 +153,10 @@ def _canonical_life_view(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 def load_life_evolution_projection_source(
     person_id: str = LIFE_DEFAULT_KEY,
     *,
-    snapshot_reader: Callable[[str], Mapping[str, Any]] | None = None,
+    snapshot_reader: Callable[[str], Mapping[str, Any]],
 ) -> tuple[dict[str, Any], int]:
     """Background source: canonical durable Life snapshot only."""
 
-    if snapshot_reader is None:
-        from host_brain.digital_life.application_boundary import read_life_snapshot
-        from host_brain.composition.process_services import get_life_snapshot_reader
-
-        reader = get_life_snapshot_reader()
-        snapshot_reader = lambda resolved_person_id: read_life_snapshot(
-            resolved_person_id,
-            reader=reader,
-        )
     snapshot = dict(snapshot_reader(str(person_id or LIFE_DEFAULT_KEY)) or {})
     cursor = max(int(snapshot.get("updated_at_ms") or 0), int(snapshot.get("version") or 0))
     return _canonical_life_view(snapshot), max(0, cursor)
@@ -172,14 +164,10 @@ def load_life_evolution_projection_source(
 
 def load_security_immune_projection_source(
     *,
-    snapshot_reader: Callable[[], Mapping[str, Any]] | None = None,
+    snapshot_reader: Callable[[], Mapping[str, Any]],
 ) -> tuple[dict[str, Any], int]:
     """Background source: persisted/current Immune snapshot, never an HTTP path."""
 
-    if snapshot_reader is None:
-        from host_brain.security_immune.agent import get_security_immune_agent
-
-        snapshot_reader = get_security_immune_agent().export_runtime_state
     payload = dict(snapshot_reader() or {})
     cursor = max(
         int(payload.get("generated_ts_ms") or 0),
@@ -220,17 +208,10 @@ def _domain_pack_catalog() -> list[dict[str, Any]]:
 
 def load_skill_pack_catalog_projection_source(
     *,
-    registry_provider: Callable[[], Any] | None = None,
-    domain_pack_reader: Callable[[], list[dict[str, Any]]] | None = None,
+    registry_provider: Callable[[], Any],
+    domain_pack_reader: Callable[[], list[dict[str, Any]]],
 ) -> tuple[dict[str, Any], int]:
     """Project the canonical built-in Skill registry and Domain Pack catalog."""
-
-    if registry_provider is None:
-        from host_brain.composition.process_services import get_skill_registry
-
-        registry_provider = get_skill_registry
-    if domain_pack_reader is None:
-        domain_pack_reader = _domain_pack_catalog
 
     now = int(time.time() * 1000)
     active_skills = list(registry_provider().all())
@@ -262,63 +243,60 @@ def load_skill_pack_catalog_projection_source(
     return payload, now
 
 
-def _store() -> QueryProjectionStore:
-    from host_brain.composition.process_services import get_query_projection_store
-
-    return get_query_projection_store()
-
-
-def _upsert(kind: str, key: str, payload: Mapping[str, Any], cursor: int, source_ref: str) -> None:
-    _store().upsert(
-        kind,
-        key,
+def refresh_life_evolution_projection(
+    *,
+    snapshot_reader: Callable[[str], Mapping[str, Any]],
+    store: QueryProjectionStore,
+) -> dict[str, int]:
+    payload, cursor = load_life_evolution_projection_source(
+        snapshot_reader=snapshot_reader,
+    )
+    store.upsert(
+        LIFE_EVOLUTION_KIND,
+        LIFE_DEFAULT_KEY,
         payload,
         source_cursor=cursor,
         source_digest=digest_json(payload),
-        source_ref=source_ref,
+        source_ref="canonical-life-background-worker",
     )
-
-
-def refresh_life_evolution_projection() -> dict[str, int]:
-    payload, cursor = load_life_evolution_projection_source()
-    _upsert(LIFE_EVOLUTION_KIND, LIFE_DEFAULT_KEY, payload, cursor, "canonical-life-background-worker")
     return {"document_count": 1}
 
 
-def refresh_security_immune_projection() -> dict[str, int]:
-    payload, cursor = load_security_immune_projection_source()
-    _upsert(SECURITY_IMMUNE_KIND, SECURITY_IMMUNE_KEY, payload, cursor, "security-immune-background-worker")
-    return {"document_count": 1}
+def _unavailable_projection_meta(
+    *,
+    kind: str,
+    key: str,
+    exc: BaseException,
+) -> dict[str, Any]:
+    return {
+        "schema_version": "Natsume.operator.query_projection.v1",
+        "kind": kind,
+        "key": key,
+        "available": False,
+        "projection_version": 0,
+        "projection_cursor": 0,
+        "source_cursor": 0,
+        "freshness_ts_ms": 0,
+        "age_ms": 0,
+        "degraded_state": "SOURCE_UNAVAILABLE",
+        "degraded_detail": type(exc).__name__,
+        "reason_code": "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE",
+    }
 
 
-def refresh_skill_pack_catalog_projection() -> dict[str, int]:
-    payload, cursor = load_skill_pack_catalog_projection_source()
-    _upsert(SKILL_PACK_CATALOG_KIND, SKILL_PACK_CATALOG_KEY, payload, cursor, "skill-pack-catalog-background-worker")
-    return {"document_count": 1}
-
-
-def read_domain_projection(
+def read_domain_projection_from_store(
+    store: QueryProjectionStore,
     *,
     kind: str,
     key: str,
     max_age_ms: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Read one document through an explicitly supplied application store."""
+
     try:
-        document = _store().get(kind, key)
+        document = store.get(kind, key)
     except Exception as exc:
-        return None, {
-            "schema_version": "Natsume.operator.query_projection.v1",
-            "kind": kind,
-            "key": key,
-            "available": False,
-            "projection_version": 0,
-            "projection_cursor": 0,
-            "source_cursor": 0,
-            "freshness_ts_ms": 0,
-            "degraded_state": "SOURCE_UNAVAILABLE",
-            "degraded_detail": type(exc).__name__,
-            "reason_code": "OPERATOR_PROJECTION_SOURCE_UNAVAILABLE",
-        }
+        return None, _unavailable_projection_meta(kind=kind, key=key, exc=exc)
     meta = projection_meta(kind, key, document, max_age_ms=max_age_ms)
     meta.setdefault("projection_version", 0)
     meta.setdefault("projection_cursor", 0)
@@ -330,39 +308,14 @@ def read_domain_projection(
     return dict(document.payload), meta
 
 
-def _run_if_due(name: str, interval_seconds: float, callback: Callable[[], dict[str, int]]) -> dict[str, int | bool]:
-    now = time.monotonic()
-    with _job_lock:
-        previous = _last_job_run.get(name, 0.0)
-        if now - previous < max(0.1, interval_seconds):
-            return {"skipped": True}
-        _last_job_run[name] = now
-    return callback()
-
-
-def run_life_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("life-evolution", 5.0, refresh_life_evolution_projection)
-
-
-def run_security_immune_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("security-immune", 30.0, refresh_security_immune_projection)
-
-
-def run_skill_pack_catalog_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("skill-pack-catalog", 60.0, refresh_skill_pack_catalog_projection)
-
-
-register_projection_job("life-evolution", run_life_projection_job)
-register_projection_job("security-immune", run_security_immune_projection_job)
-register_projection_job("skill-pack-catalog", run_skill_pack_catalog_projection_job)
-
-
 __all__ = [
+    "GOVERNANCE_SNAPSHOT_KEY", "GOVERNANCE_SNAPSHOT_KIND", "GOVERNANCE_SNAPSHOT_MAX_AGE_MS",
     "LIFE_DEFAULT_KEY", "LIFE_EVOLUTION_KIND", "LIFE_MAX_AGE_MS",
+    "SEMANTIC_RECALL_STATS_KEY", "SEMANTIC_RECALL_STATS_KIND", "SEMANTIC_RECALL_STATS_MAX_AGE_MS",
     "SECURITY_IMMUNE_KEY", "SECURITY_IMMUNE_KIND", "SECURITY_IMMUNE_MAX_AGE_MS",
     "SKILL_PACK_CATALOG_KEY", "SKILL_PACK_CATALOG_KIND", "SKILL_PACK_CATALOG_MAX_AGE_MS",
     "load_life_evolution_projection_source", "load_security_immune_projection_source",
-    "load_skill_pack_catalog_projection_source", "read_domain_projection",
-    "refresh_life_evolution_projection", "refresh_security_immune_projection",
-    "refresh_skill_pack_catalog_projection",
+    "load_skill_pack_catalog_projection_source",
+    "read_domain_projection_from_store",
+    "refresh_life_evolution_projection",
 ]

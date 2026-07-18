@@ -8,6 +8,35 @@ import SectionHeading from '../../../shared/ui/SectionHeading.jsx'
 import TimeWindowSelect from '../../../shared/ui/TimeWindowSelect.jsx'
 import SampleMeta from '../../../shared/ui/observability/SampleMeta.jsx'
 import OrganSystemOverview from './lifeBody/OrganSystemOverview.jsx'
+import {
+  formatObservableCount,
+  formatObservablePercent,
+} from '../observabilityResourceState.js'
+
+const MEMORY_RESOURCE_LABELS = {
+  memoryData: '记忆子系统',
+  episodicData: '情景写入',
+  distillData: '长期蒸馏',
+  canonDocs: 'Canon 文档',
+  compressData: '上下文压缩',
+  residentContext: '常驻记忆',
+}
+
+function ObservationMeta({ resourceState, source, measurementAvailable = true, unavailableLabel = '指标不可测' }) {
+  if (!resourceState && !source) return null
+  const resolvedSource = source || resourceState?.source || '未标注'
+  const availability = resourceState
+    ? resourceState.available
+      ? measurementAvailable ? '可观测' : unavailableLabel
+      : resourceState.availability === 'error' ? '请求失败' : '数据源暂不可用'
+    : measurementAvailable ? '可观测' : unavailableLabel
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-[11px] text-gray-400">
+      <span>来源：<span className="font-mono">{resolvedSource}</span></span>
+      <span>可用性：{availability}</span>
+    </div>
+  )
+}
 
 function ResidentDocsPanel({ worldDocs, personaDocs }) {
   return (
@@ -62,84 +91,109 @@ function ResidentDocsPanel({ worldDocs, personaDocs }) {
   )
 }
 
-function CompressionPanel({ compressData }) {
+function CompressionPanel({ compressData, resourceState }) {
   return (
     <div className="card p-4">
       <SectionHeading icon={Archive} title="上下文压缩" />
       {compressData ? (
         <div className="grid grid-cols-3 gap-3 text-center text-xs">
           <div>
-            <div className="text-lg font-bold text-blue-600">{compressData.total_compressions ?? 0}</div>
-            <div className="text-gray-500">压缩次数</div>
+            <div className="text-lg font-bold text-blue-600">{formatObservableCount(compressData.observed_pre_save_hooks)}</div>
+            <div className="text-gray-500">预存钩子观测数</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-green-600">{compressData.avg_compress_rate ?? '—'}%</div>
-            <div className="text-gray-500">平均压缩率</div>
+            <div className="text-lg font-bold text-green-600">{formatObservablePercent(compressData.avg_compression_ratio)}</div>
+            <div className="text-gray-500">平均压缩比</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-purple-600">{compressData.total_tokens_saved ?? 0}</div>
+            <div className="text-lg font-bold text-purple-600">{formatObservableCount(compressData.total_tokens_saved)}</div>
             <div className="text-gray-500">节省词元</div>
           </div>
         </div>
       ) : (
         <EmptyStateCard title="暂无上下文压缩统计" hint="等待压缩链路产生样本后展示。" className="p-4" />
       )}
+      <ObservationMeta
+        resourceState={resourceState}
+        source={compressData?.source_table}
+        measurementAvailable={compressData?.outcome_measurement_available !== false}
+        unavailableLabel="仅观测到预存钩子，压缩结果不可测"
+      />
     </div>
   )
 }
 
-function DistillPanel({ distillData }) {
+function DistillPanel({ distillData, resourceState }) {
   return (
     <div className="card p-4">
       <SectionHeading icon={Brain} title="长期蒸馏" />
       {distillData ? (
-        <div className="grid grid-cols-3 gap-3 text-center text-xs">
+        <div className="grid grid-cols-2 gap-3 text-center text-xs sm:grid-cols-4">
           <div>
-            <div className="text-lg font-bold text-indigo-600">{distillData.total_cycles ?? 0}</div>
+            <div className="text-lg font-bold text-indigo-600">{formatObservableCount(distillData.total_cycles)}</div>
             <div className="text-gray-500">蒸馏循环</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-green-600">{distillData.success_rate ?? '—'}%</div>
+            <div className="text-lg font-bold text-green-600">{formatObservablePercent(distillData.success_rate)}</div>
             <div className="text-gray-500">成功率</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-gray-600">{distillData.total_proposals ?? 0}</div>
+            <div className="text-lg font-bold text-gray-600">{formatObservableCount(distillData.observed_terminal_events)}</div>
+            <div className="text-gray-500">终态审计事件</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-gray-600">{formatObservableCount(distillData.total_proposals_submitted)}</div>
             <div className="text-gray-500">提案数</div>
           </div>
         </div>
       ) : (
         <EmptyStateCard title="暂无蒸馏统计" hint="蒸馏任务运行后会出现统计。" className="p-4" />
       )}
+      <ObservationMeta
+        resourceState={resourceState}
+        source={distillData?.source_table}
+        measurementAvailable={
+          distillData?.cycle_measurement_available !== false
+          && distillData?.failure_measurement_available !== false
+        }
+        unavailableLabel="仅终态审计事件可观测，周期与失败率不可测"
+      />
     </div>
   )
 }
 
-function EpisodicWritePanel({ episodicData }) {
+function EpisodicWritePanel({ episodicData, resourceState }) {
   return (
     <div className="card p-4 lg:col-span-2">
       <SectionHeading icon={Brain} title="情景记忆写入摘要" />
       {episodicData ? (
         <div className="grid grid-cols-2 gap-3 text-center text-xs sm:grid-cols-4">
           <div>
-            <div className="text-lg font-bold text-blue-600">{episodicData.total_writes ?? 0}</div>
-            <div className="text-gray-500">写入次数</div>
+            <div className="text-lg font-bold text-blue-600">{formatObservableCount(episodicData.total_attempts)}</div>
+            <div className="text-gray-500">写入尝试</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-orange-500">{episodicData.guard_block_rate ?? '—'}%</div>
-            <div className="text-gray-500">守卫拦截率</div>
+            <div className="text-lg font-bold text-green-600">{formatObservableCount(episodicData.written_count)}</div>
+            <div className="text-gray-500">实际写入</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-purple-600">{episodicData.distill_eligible_rate ?? '—'}%</div>
-            <div className="text-gray-500">蒸馏资格率</div>
+            <div className="text-lg font-bold text-purple-600">{formatObservablePercent(episodicData.write_rate)}</div>
+            <div className="text-gray-500">写入率</div>
           </div>
           <div>
-            <div className="text-lg font-bold text-gray-700">{episodicData.dream_block_count ?? 0}</div>
-            <div className="text-gray-500">梦境拦截</div>
+            <div className="text-lg font-bold text-orange-500">{formatObservableCount(episodicData.memory_guard_blocked_count)}</div>
+            <div className="text-gray-500">守卫拦截</div>
           </div>
         </div>
       ) : (
         <EmptyStateCard title="暂无情景记忆写入统计" hint="待有写入后展示趋势。" className="p-4" />
       )}
+      <ObservationMeta
+        resourceState={resourceState}
+        source={episodicData?.source_tables?.join(' + ')}
+        measurementAvailable={episodicData?.extended_guard_measurement_available !== false}
+        unavailableLabel="扩展 Guard 指标不可测"
+      />
     </div>
   )
 }
@@ -149,7 +203,6 @@ export default function MemoryBrowserSurface({
   distillData,
   episodicData,
   error,
-  hasSubsystemSamples,
   heroDescription,
   heroMetaItems,
   heroTitle,
@@ -159,6 +212,8 @@ export default function MemoryBrowserSurface({
   memoryOrganModel,
   personaDocs,
   refreshing,
+  resourceIssues = [],
+  resourceStates = {},
   showNoSampleNotice,
   showUnavailableNotice,
   subsystemMetricCards,
@@ -198,7 +253,7 @@ export default function MemoryBrowserSurface({
             loadState={memoryLoadState}
             windowMinutes={windowMinutes}
             sampleSize={subsystemOperationCount}
-            sampleLabel="记忆操作"
+            sampleLabel="记忆观测事件"
             updatedAt={lastUpdatedAt}
             source="memory / recall / distill"
             definition="记忆页把子系统读写、蒸馏和常驻设定放在同一观察面；无样本与暂不可用会明确区分。"
@@ -207,6 +262,13 @@ export default function MemoryBrowserSurface({
       />
 
       {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
+
+      {resourceIssues.map((issue) => (
+        <NoticeBanner key={issue.key} variant={issue.availability === 'error' ? 'error' : 'warning'}>
+          {MEMORY_RESOURCE_LABELS[issue.key] || issue.key}：{issue.message}
+          {issue.source ? ` · 来源 ${issue.source}` : ''}
+        </NoticeBanner>
+      ))}
 
       {showUnavailableNotice ? (
         <NoticeBanner variant="warning">
@@ -222,7 +284,7 @@ export default function MemoryBrowserSurface({
 
       <OrganSystemOverview model={memoryOrganModel} />
 
-      {hasSubsystemSamples ? (
+      {subsystemMetricCards.length > 0 ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {subsystemMetricCards.map((card) => (
             <MetricCard
@@ -245,9 +307,9 @@ export default function MemoryBrowserSurface({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ResidentDocsPanel worldDocs={worldDocs} personaDocs={personaDocs} />
-        <CompressionPanel compressData={compressData} />
-        <DistillPanel distillData={distillData} />
-        <EpisodicWritePanel episodicData={episodicData} />
+        <CompressionPanel compressData={compressData} resourceState={resourceStates.compressData} />
+        <DistillPanel distillData={distillData} resourceState={resourceStates.distillData} />
+        <EpisodicWritePanel episodicData={episodicData} resourceState={resourceStates.episodicData} />
       </div>
     </div>
   )

@@ -1,10 +1,10 @@
 """Background-only projections for process, file and aggregate OBS state.
 
-The route handlers consuming these documents are intentionally boring: they
-peek the already-composed :class:`QueryProjectionStore` and shape an empty
-response when a document is missing or stale.  Every live manager lookup,
-process snapshot, ledger aggregation and filesystem scan stays in the jobs in
-this module.
+The route handlers consuming these documents are intentionally boring: each
+receives its application's :class:`QueryProjectionStore` explicitly and
+shapes an empty response when a document is missing or stale.  Every live
+manager lookup, process snapshot, ledger aggregation and filesystem scan stays
+in the jobs in this module.
 
 BioOps owner artifacts receive a stricter projection than the generic public
 serializer.  Only identifiers, state metadata, logical references and a
@@ -24,7 +24,6 @@ from typing import Any, Callable
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
-from .projection_daemon import register_projection_job
 from .projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
@@ -79,23 +78,20 @@ def complete_projection_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def read_process_projection(
+    store: QueryProjectionStore,
     kind: str,
     key: str,
     *,
     max_age_ms: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """Peek one durable document without constructing a store or source."""
+    """Read one durable document through an explicitly composed store."""
 
-    from host_brain.composition.process_services import peek_query_projection_store
-
-    store = peek_query_projection_store()
     document = None
     error_name: str | None = None
-    if store is not None:
-        try:
-            document = store.get(kind, key)
-        except Exception as exc:  # read boundary must remain available
-            error_name = type(exc).__name__
+    try:
+        document = store.get(kind, key)
+    except Exception as exc:  # read boundary must remain available
+        error_name = type(exc).__name__
     meta = complete_projection_meta(
         projection_meta(kind, key, document, max_age_ms=max_age_ms)
     )
@@ -150,8 +146,10 @@ def _upsert(
     source_ref: str,
     degraded_state: ProjectionDegradedState = ProjectionDegradedState.HEALTHY,
     degraded_detail: str | None = None,
+    store: QueryProjectionStore | None = None,
 ) -> None:
-    _store().upsert(
+    target_store = store if store is not None else _store()
+    target_store.upsert(
         kind,
         key,
         payload,
@@ -172,7 +170,16 @@ def refresh_insights_summary_projection() -> dict[str, int]:
     )
 
     window = int(INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES)
-    payload = _build_insights_summary_snapshot_sync(window)
+    from host_brain.app.observability_runtime.projection_ledger_view import (
+        ProjectionLedgerView,
+    )
+
+    store = _store()
+    payload = _build_insights_summary_snapshot_sync(
+        window,
+        projection_view=ProjectionLedgerView(store),
+        projection_store=store,
+    )
     cursor = _next_cursor(INSIGHTS_SUMMARY_KIND, int(payload.get("timestamp") or 0))
     _upsert(
         INSIGHTS_SUMMARY_KIND,
@@ -195,7 +202,18 @@ def refresh_digital_life_overview_projection() -> dict[str, int]:
     )
 
     window = int(DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES)
-    payload = asyncio.run(_build_digital_life_overview_snapshot_async(window))
+    from host_brain.app.observability_runtime.projection_ledger_view import (
+        ProjectionLedgerView,
+    )
+
+    store = _store()
+    payload = asyncio.run(
+        _build_digital_life_overview_snapshot_async(
+            window,
+            projection_view=ProjectionLedgerView(store),
+            projection_store=store,
+        )
+    )
     cursor = _next_cursor(DIGITAL_LIFE_OVERVIEW_KIND, int(payload.get("timestamp") or 0))
     _upsert(
         DIGITAL_LIFE_OVERVIEW_KIND,
@@ -207,17 +225,20 @@ def refresh_digital_life_overview_projection() -> dict[str, int]:
     return {"document_count": 1}
 
 
-def refresh_runtime_snapshot_projection() -> dict[str, int]:
+def refresh_runtime_snapshot_projection(
+    *,
+    lifecycle_ports: Any,
+    mode_transition_service: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int]:
     """Read process/runtime managers outside ``GET /runtime-snapshot``."""
 
     from host_brain.app.obs_routes_sysmode import _build_runtime_snapshot_response
-    from host_brain.app.lifecycle_runtime_composition import (
-        build_lifecycle_runtime_application_ports,
-    )
 
     value = _build_runtime_snapshot_response(
         "",
-        lifecycle_ports=build_lifecycle_runtime_application_ports(),
+        lifecycle_ports=lifecycle_ports,
+        mode_transition_service=mode_transition_service,
     )
     payload = value.model_dump() if hasattr(value, "model_dump") else value.dict()
     cursor = _next_cursor(RUNTIME_SNAPSHOT_KIND, int(payload.get("timestamp") or 0))
@@ -227,11 +248,16 @@ def refresh_runtime_snapshot_projection() -> dict[str, int]:
         payload,
         cursor=cursor,
         source_ref="runtime-snapshot-background-worker",
+        store=store,
     )
     return {"document_count": 1}
 
 
-def refresh_life_body_projection() -> dict[str, int]:
+def refresh_life_body_projection(
+    *,
+    ledger: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int]:
     """Build the heavy life aggregate outside all three life GET handlers."""
 
     from host_brain.app.obs_routes_life_body import (
@@ -240,7 +266,11 @@ def refresh_life_body_projection() -> dict[str, int]:
     )
 
     window = int(LIFE_BODY_PROJECTION_WINDOW_MINUTES)
-    payload = _build_life_body_payload(window)
+    payload = _build_life_body_payload(
+        window,
+        ledger=ledger,
+        projection_store=store,
+    )
     cursor = _next_cursor(LIFE_BODY_KIND, int(payload.get("timestamp") or 0))
     _upsert(
         LIFE_BODY_KIND,
@@ -248,6 +278,7 @@ def refresh_life_body_projection() -> dict[str, int]:
         payload,
         cursor=cursor,
         source_ref="life-body-background-worker",
+        store=store,
     )
     return {"document_count": 1}
 
@@ -596,12 +627,33 @@ def run_digital_life_overview_projection_job() -> dict[str, int | bool]:
     )
 
 
-def run_runtime_snapshot_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("runtime-snapshot", 15.0, refresh_runtime_snapshot_projection)
+def run_runtime_snapshot_projection_job(
+    *,
+    lifecycle_ports: Any,
+    mode_transition_service: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int | bool]:
+    return _run_if_due(
+        "runtime-snapshot",
+        15.0,
+        lambda: refresh_runtime_snapshot_projection(
+            lifecycle_ports=lifecycle_ports,
+            mode_transition_service=mode_transition_service,
+            store=store,
+        ),
+    )
 
 
-def run_life_body_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("life-body", 30.0, refresh_life_body_projection)
+def run_life_body_projection_job(
+    *,
+    ledger: Any,
+    store: QueryProjectionStore,
+) -> dict[str, int | bool]:
+    return _run_if_due(
+        "life-body",
+        30.0,
+        lambda: refresh_life_body_projection(ledger=ledger, store=store),
+    )
 
 
 def run_resource_manager_projection_job() -> dict[str, int | bool]:
@@ -610,17 +662,6 @@ def run_resource_manager_projection_job() -> dict[str, int | bool]:
 
 def run_bio_ops_projection_job() -> dict[str, int | bool]:
     return _run_if_due("bio-ops-metadata", 30.0, refresh_bio_ops_projection)
-
-
-# Registration is import-driven, while source access remains callback-driven.
-register_projection_job("insights-summary", run_insights_summary_projection_job)
-register_projection_job(
-    "digital-life-overview", run_digital_life_overview_projection_job
-)
-register_projection_job("runtime-snapshot", run_runtime_snapshot_projection_job)
-register_projection_job("life-body", run_life_body_projection_job)
-register_projection_job("resource-manager", run_resource_manager_projection_job)
-register_projection_job("bio-ops-metadata", run_bio_ops_projection_job)
 
 
 __all__ = [

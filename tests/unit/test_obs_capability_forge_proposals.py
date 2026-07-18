@@ -6,6 +6,13 @@ from fastapi.testclient import TestClient
 from host_brain.app.capability_forge import CapabilityForgeService
 from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
 from host_brain.app.obs_routes import router
+from host_brain.app.obs_route_ports import ObsRoutePorts
+
+
+class _UnusedProjectionStore:
+    @staticmethod
+    def get(_kind: str, _key: str):
+        return None
 
 
 def _build_service() -> CapabilityForgeService:
@@ -46,8 +53,8 @@ def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
     baseline = service.list_proposals(limit=20)
     monkeypatch.setattr("host_brain.composition.process_services.get_capability_forge_service", lambda: service)
     monkeypatch.setattr(
-        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection",
-        lambda: (
+        "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection_from_store",
+        lambda _store: (
             {
                 "timestamp": 1700000000000,
                 "proposals": service.list_proposals(limit=200),
@@ -60,6 +67,10 @@ def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
     )
 
     app = FastAPI()
+    store = _UnusedProjectionStore()
+    app.state.obs_route_ports = ObsRoutePorts(
+        query_projection_store_provider=lambda: store,
+    )
     app.include_router(router)
     client = TestClient(app)
 

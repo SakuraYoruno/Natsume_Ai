@@ -7,6 +7,8 @@ import inspect
 from collections import Counter
 
 from host_brain.task_runtime import coordinator
+from host_brain.task_runtime import accepted_graph_finalization
+from host_brain.task_runtime import dag_scheduling_runtime
 from host_brain.task_runtime import node_execution_runtime
 from host_brain.task_runtime import node_lifecycle_runtime
 from host_brain.task_runtime.node_lifecycle_runtime import (
@@ -17,6 +19,7 @@ from host_brain.task_runtime.node_lifecycle_runtime import (
 _MIGRATED_METHODS = (
     "transition_graph",
     "transition_node",
+    "accept_node_output",
     "transition_graph_with_acceptance_effects",
     "cancel_waiting_review_node",
     "transition_attempt",
@@ -27,8 +30,9 @@ _MIGRATED_METHODS = (
 )
 
 _COORDINATOR_CALL_MATRIX = {
-    "transition_graph": 17,
-    "transition_node": 12,
+    "transition_graph": 16,
+    "transition_node": 10,
+    "accept_node_output": 2,
     "transition_graph_with_acceptance_effects": 1,
     "cancel_waiting_review_node": 1,
     "transition_attempt": 2,
@@ -39,9 +43,9 @@ _COORDINATOR_CALL_MATRIX = {
 }
 
 _NODE_EXECUTION_CALL_MATRIX = {
-    "transition_graph": 5,
-    "transition_node": 7,
-    "transition_graph_with_acceptance_effects": 1,
+    "transition_graph": 4,
+    "transition_node": 6,
+    "accept_node_output": 1,
     "transition_attempt": 2,
     "finalize_node_budget": 8,
     "reject_budget_charge": 3,
@@ -49,16 +53,23 @@ _NODE_EXECUTION_CALL_MATRIX = {
     "mark_pre_reservation_failure": 4,
 }
 
-_REMAINING_COORDINATOR_CALL_MATRIX = {
-    "transition_graph": 12,
-    "transition_node": 5,
+_DAG_SCHEDULING_CALL_MATRIX = {
+    "transition_graph": 11,
+    "transition_node": 4,
+    "accept_node_output": 1,
     "cancel_waiting_review_node": 1,
 }
 
+_ACCEPTED_GRAPH_FINALIZATION_CALL_MATRIX = {
+    "transition_graph": 1,
+    "transition_graph_with_acceptance_effects": 1,
+}
+
 _MIGRATED_AST_DIGESTS = {
-    "transition_graph": "a1ea6e5587dcfd2fb593108c9e0241a0ffa6d729b873e6564d6f195b202c0786",
+    "transition_graph": "1e386f1e77cd31cfb63f631a4923d8ad1fcc6dd9c8804b2f4cce3cf3c04ea60e",
     "transition_node": "ccb86a617fdddff46bcf9edc4d1749cc6ec83bd898714d3390d29792ee5aad3b",
-    "transition_graph_with_acceptance_effects": "4e74570337e0f17db6f0fa8a83313ae209e4ebb8aa300d74713c0e64d1a088b2",
+    "accept_node_output": "72eb047db97543272758ae104ebb124fa18ccb0956856b50107f2a89d6c9c4f2",
+    "transition_graph_with_acceptance_effects": "3af921eec7ad0ad9b6e018d51c4f643bf70ad4150b12b539db16c5c776b4eb30",
     "cancel_waiting_review_node": "92af122b371ccd0c827d23782c7d19a6c5319d78b5ad2200d1d439ff1f38db73",
     "transition_attempt": "c3f562d32a665baaad442255a70d3531cb6d3c73efb39f6afaa18e03ea69c683",
     "finalize_node_budget": "b5145090ef7d0c82c5ceac5093ba16803167155d0230c836a3f5108166713e58",
@@ -241,7 +252,7 @@ def test_node_lifecycle_runtime_is_one_narrow_real_boundary() -> None:
     )
 
 
-def test_all_nine_method_bodies_match_the_frozen_coordinator_baseline() -> None:
+def test_all_ten_method_bodies_match_the_frozen_coordinator_baseline() -> None:
     owner = _class(node_lifecycle_runtime, "DurableNodeLifecycleRuntime")
     actual: dict[str, str] = {}
     for name in _MIGRATED_METHODS:
@@ -296,8 +307,19 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
     )
 
     coordinator_calls = _self_dependency_calls(owner, "_node_lifecycle")
-    coordinator_matrix = Counter(call.func.attr for call in coordinator_calls)
-    assert coordinator_matrix == Counter(_REMAINING_COORDINATOR_CALL_MATRIX)
+    assert coordinator_calls == []
+
+    dag_owner = _class(dag_scheduling_runtime, "DurableDagSchedulingRuntime")
+    dag_calls = _self_dependency_calls(dag_owner, "_node_lifecycle")
+    dag_matrix = Counter(call.func.attr for call in dag_calls)
+    assert dag_matrix == Counter(_DAG_SCHEDULING_CALL_MATRIX)
+    dag_finalizer_calls = _self_dependency_calls(
+        dag_owner,
+        "_accepted_graph_finalization",
+    )
+    assert Counter(call.func.attr for call in dag_finalizer_calls) == Counter(
+        {"complete": 1}
+    )
 
     node_execution_owner = _class(
         node_execution_runtime,
@@ -311,10 +333,25 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
         call.func.attr for call in node_execution_calls
     )
     assert node_execution_matrix == Counter(_NODE_EXECUTION_CALL_MATRIX)
-    assert coordinator_matrix + node_execution_matrix == Counter(
+    node_finalizer_calls = _self_dependency_calls(
+        node_execution_owner,
+        "_graph_finalizer",
+    )
+    assert Counter(call.func.attr for call in node_finalizer_calls) == Counter(
+        {"complete": 1}
+    )
+
+    finalizer_owner = _class(
+        accepted_graph_finalization,
+        "AcceptedGraphFinalizationRuntime",
+    )
+    finalizer_calls = _self_dependency_calls(finalizer_owner, "_node_lifecycle")
+    finalizer_matrix = Counter(call.func.attr for call in finalizer_calls)
+    assert finalizer_matrix == Counter(_ACCEPTED_GRAPH_FINALIZATION_CALL_MATRIX)
+    assert dag_matrix + node_execution_matrix + finalizer_matrix == Counter(
         _COORDINATOR_CALL_MATRIX
     )
-    assert len(coordinator_calls) + len(node_execution_calls) == 51
+    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 50
 
 
 def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:
@@ -324,6 +361,7 @@ def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:
         {
             "transition_graph": 1,
             "transition_node": 1,
+            "commit_node_acceptance": 1,
             "transition_graph_and_stage_acceptance_effects": 1,
             "request_cancel_node": 1,
             "transition_attempt": 1,
@@ -332,7 +370,7 @@ def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:
             "get_graph": 1,
         }
     )
-    assert len(store_calls) == 8
+    assert len(store_calls) == 9
 
     failure = _method(owner, "mark_pre_reservation_failure")
     selectors = [
@@ -392,7 +430,7 @@ def test_outbox_matrix_and_best_effort_boundary_are_frozen() -> None:
     owner = _class(node_lifecycle_runtime, "DurableNodeLifecycleRuntime")
     outbox_calls = _self_dependency_calls(owner, "_runtime_outbox")
     assert Counter(call.func.attr for call in outbox_calls) == Counter(
-        {"build": 6, "publish_pending": 3}
+        {"build": 7, "publish_pending": 3}
     )
 
     publishes = [

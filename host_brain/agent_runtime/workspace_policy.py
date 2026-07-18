@@ -2,17 +2,46 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import subprocess
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from host_brain.agent_runtime.artifact_store import DEFAULT_CODEX_RUNS_ROOT, REPO_ROOT, sanitize_segment
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
+if TYPE_CHECKING:
+    from host_brain.agent_runtime.workspace_allocator import (
+        DurableWorkspaceLease,
+        WorkspaceAllocator,
+    )
+
 
 DEFAULT_CLONE_ROOT = REPO_ROOT / "artifacts" / "codex_clones"
+
+WORKSPACE_WRITE_GRANT_REQUIRED = "WORKSPACE_WRITE_GRANT_REQUIRED"
+
+_WRITE_FORBIDDEN_WORKSPACE_SELECTORS = frozenset(
+    {
+        "path",
+        "git_url",
+        "clone_root",
+        "runs_root",
+        "root",
+        "workspace_root",
+        "repo_root",
+    }
+)
+_WORKSPACE_WRITE_ACTIONS = frozenset({"write_files", "agent_write_file"})
+
+
+class WorkspacePolicyViolation(ValueError):
+    def __init__(self, reason_code: str, detail: str) -> None:
+        self.reason_code = reason_code
+        self.detail = detail
+        super().__init__(f"{reason_code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +51,9 @@ class WorkspaceResolution:
     created_workspace: bool = False
     cloned_workspace: bool = False
     git_url: str | None = None
+    workspace_id: str | None = None
+    lease_owner: str | None = None
+    lease_fencing_token: int | None = None
 
 
 def _find_repo_root(start: Path) -> Path | None:
@@ -59,9 +91,28 @@ def _clone_repo(git_url: str, clone_root: Path, clone_name: str | None) -> Path:
 
 
 class WorkspacePolicy:
+    def __init__(
+        self,
+        *,
+        workspace_allocator: "WorkspaceAllocator | None" = None,
+        workspace_lease_provider: Callable[
+            [AgentWorkOrder, str], "DurableWorkspaceLease"
+        ]
+        | None = None,
+    ) -> None:
+        # W2 injects this authority only on the authenticated Internal Agent
+        # path.  Every other composition—and Internal startup without its
+        # explicit secret—must still fail closed rather than trust a payload
+        # that merely names the durable strategy.
+        self._workspace_allocator = workspace_allocator
+        self._workspace_lease_provider = workspace_lease_provider
+
     def resolve(self, work_order: AgentWorkOrder) -> WorkspaceResolution:
         workspace = dict(work_order.workspace or {})
         strategy = str(workspace.get("strategy") or "").strip().lower()
+        if strategy == "durable_workspace":
+            return self._resolve_durable(work_order, workspace=workspace)
+        self._enforce_w0_workspace_source(work_order, workspace=workspace, strategy=strategy)
         if strategy in {"runtime_repo", "current_runtime_repo"}:
             return WorkspaceResolution(path=REPO_ROOT.resolve(), source="runtime_repo")
 
@@ -89,10 +140,146 @@ class WorkspacePolicy:
 
         raise ValueError("workspace could not be resolved from WorkOrder")
 
+    def _resolve_durable(
+        self,
+        work_order: AgentWorkOrder,
+        *,
+        workspace: dict[str, Any],
+    ) -> WorkspaceResolution:
+        if (
+            self._workspace_allocator is None
+            or self._workspace_lease_provider is None
+        ):
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable_workspace requires an injected WorkspaceAllocator and "
+                "server-side lease provider",
+            )
+        extras = sorted(set(workspace).difference({"strategy", "workspace_id"}))
+        if extras:
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable workspace payload may contain only strategy and "
+                "workspace_id; server-side lease data cannot be serialized: "
+                + ",".join(extras),
+            )
+        workspace_id = str(workspace.get("workspace_id") or "").strip()
+        if not workspace_id:
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable workspace_id is required",
+            )
+        expected_root_work_order_id = str(
+            work_order.metadata.get("root_work_order_id")
+            or work_order.work_order_id
+        ).strip()
+        expected_graph_id = str(
+            work_order.metadata.get("task_graph_id") or ""
+        ).strip()
+        raw_graph_revision = work_order.metadata.get("graph_revision")
+        if isinstance(raw_graph_revision, bool):
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable workspace requires canonical graph metadata",
+            )
+        try:
+            expected_graph_revision = int(raw_graph_revision)
+        except (TypeError, ValueError) as exc:
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable workspace requires canonical graph metadata",
+            ) from exc
+        if not expected_graph_id or expected_graph_revision < 1:
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable workspace requires canonical graph metadata",
+            )
+        try:
+            lease = self._workspace_lease_provider(work_order, workspace_id)
+            if lease.workspace_id != workspace_id:
+                raise WorkspacePolicyViolation(
+                    WORKSPACE_WRITE_GRANT_REQUIRED,
+                    "server-side lease is bound to another workspace",
+                )
+            authority = self._workspace_allocator.authorize_workspace(lease)
+            if (
+                authority.root_work_order_id != expected_root_work_order_id
+                or authority.graph_id != expected_graph_id
+                or authority.graph_revision != expected_graph_revision
+            ):
+                raise WorkspacePolicyViolation(
+                    WORKSPACE_WRITE_GRANT_REQUIRED,
+                    "workspace authority is bound to another graph epoch",
+                )
+            prepared = self._workspace_allocator.prepare_workspace(lease)
+        except Exception as exc:
+            from host_brain.persistence.workspace_repository import WorkspaceRepositoryError
+
+            if not isinstance(exc, WorkspaceRepositoryError):
+                raise
+            raise WorkspacePolicyViolation(exc.reason_code, exc.detail) from exc
+        return WorkspaceResolution(
+            path=prepared.path,
+            source="durable_workspace",
+            created_workspace=True,
+            workspace_id=prepared.authority.workspace_id,
+            lease_owner=prepared.authority.lease_owner,
+            lease_fencing_token=prepared.authority.lease_fencing_token,
+        )
+
+    @staticmethod
+    def _enforce_w0_workspace_source(
+        work_order: AgentWorkOrder,
+        *,
+        workspace: dict[str, Any],
+        strategy: str,
+    ) -> None:
+        """Fail closed until a durable, task-bound WorkspaceGrant exists.
+
+        W0 intentionally permits write-capable orders only in the runtime-owned
+        per-WorkOrder temporary root.  It is a stopgap boundary, not durable
+        workspace ownership or OS-level isolation.
+        """
+
+        if not WorkspacePolicy._requires_workspace_write(work_order):
+            return
+        forbidden_selectors = sorted(
+            key
+            for key in _WRITE_FORBIDDEN_WORKSPACE_SELECTORS
+            if key in workspace and str(workspace.get(key) or "").strip()
+        )
+        if strategy != "temp_workspace" or forbidden_selectors:
+            detail = (
+                f"; forbidden selectors={','.join(forbidden_selectors)}"
+                if forbidden_selectors
+                else ""
+            )
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "write-capable WorkOrders may only use the runtime-owned temp_workspace "
+                f"before durable WorkspaceGrant{detail}",
+            )
+
+    @staticmethod
+    def _requires_workspace_write(work_order: AgentWorkOrder) -> bool:
+        actions = {
+            str(action).strip().lower()
+            for action in work_order.allowed_actions
+            if str(action).strip()
+        }
+        return work_order.run_mode in {"worker", "self_heal", "self_evolve"} or bool(
+            actions & _WORKSPACE_WRITE_ACTIONS
+        )
+
     def enforce_write_policy(self, work_order: AgentWorkOrder, resolution: WorkspaceResolution) -> tuple[bool, str | None]:
-        if not work_order.requires_write:
+        if not self._requires_workspace_write(work_order):
             return True, None
-        if not work_order.allowed_actions or "write_files" not in set(work_order.allowed_actions):
+        allowed_actions = {
+            str(action).strip().lower()
+            for action in work_order.allowed_actions
+            if str(action).strip()
+        }
+        if not (allowed_actions & _WORKSPACE_WRITE_ACTIONS):
             return False, "write WorkOrders must include allowed_actions=['write_files', ...]"
         if "modify_secret_files" not in set(work_order.forbidden_actions):
             return False, "write WorkOrders must forbid secret-file mutation"
@@ -132,4 +319,9 @@ class WorkspacePolicy:
         return str(completed.stdout or "").strip() or None
 
 
-__all__ = ["WorkspacePolicy", "WorkspaceResolution"]
+__all__ = [
+    "WORKSPACE_WRITE_GRANT_REQUIRED",
+    "WorkspacePolicy",
+    "WorkspacePolicyViolation",
+    "WorkspaceResolution",
+]
