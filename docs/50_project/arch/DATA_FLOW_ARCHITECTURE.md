@@ -206,6 +206,28 @@ Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加�
 
 这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。Executive legacy SkillDag 生产执行和进程内 registry 已删除；后续约束重点是把 Internal 与领域兼容入口全部迁入同一 lineage。
 
+### 4.3 外部 Skill 生命周期（NE-05）
+
+外部 bundle 不会因为存在于目录中就进入运行时。签名接收先完成 quarantine/stage；0109 ledger 再把 Lab report、Review、SBOM、signature、sandbox、rollback 和 maturity 固定为不可变 evidence。只有 fenced Supply Chain Repository 成功推进 `STAGED → ACTIVE` 后，content-addressed registry 才能返回该版本；降级和回滚同样必须留下 durable receipt。
+
+```mermaid
+flowchart LR
+    Intake[签名 Intake] --> Verify[签名 / SBOM / Sandbox 验证]
+    Verify --> Quarantine[Quarantine]
+    Quarantine --> Stage[STAGED]
+    Lab[Lab Report] --> Evidence[0109 SkillActivationEvidence]
+    Review[Review] --> Evidence
+    Stage --> Evidence
+    Evidence --> Gate{fenced activation gate}
+    Gate -->|拒绝| Rejected[REJECTED receipt]
+    Gate -->|通过| Active[ACTIVE content-addressed version]
+    Active --> Runtime[Runtime 只解析 active 版本]
+    Active --> Degrade[DEGRADED receipt]
+    Active --> Rollback[ROLLED_BACK receipt]
+```
+
+该链已经在 repository/service/contract 层可回放；外部 provider 的真实 sandbox canary、Review production route 和 bundle import 仍标记为未验收，不能把 stage 或测试 fixture 写成生产激活。
+
 ### 4.3 Delegate
 
 Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_dispatch.py](../../../host_brain/app/governed_delegate_dispatch.py) 只注册 `pentest_agent`，将 command/request/session/principal、root WorkOrder、graph/revision/node、attempt、lease/owner/fence、parent/node grant、objective 与 input reference 冻结为一次 invocation；调用前重新校验 node grant，并只投影无副作用的 Domain Pack/SecureRun handoff。它不经过旧 `SubAgentDispatcher`、全局 Agent gateway 或独立 `skill_exec_log`。

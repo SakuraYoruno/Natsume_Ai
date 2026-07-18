@@ -217,7 +217,7 @@ Effect fence 的证据规则为 fail closed：一般 handler/transport `FAILED` 
 
 - `host_brain/model_runtime/`：prompt contract、provider route、ModelAttempt、重试与用量证据。
 - `host_brain/capability_plane/`：Capability Broker、descriptor policy、execution journal。
-- `host_brain/skills/`：内置 Skill 定义、executor 和签名供应链资产。
+- `host_brain/skills/`：内置 Skill 定义、executor、确定性 SkillDraft 编译器和签名供应链资产。外部 bundle 经过 0109 evidence gate 才能进入 active content-addressed registry；运行时不扫描目录、不直接 import。
 - `host_brain/tools/`、`host_brain/mcp/`、`host_brain/lsp/`：具体工具和协议 adapter。
 - `host_brain/airlock/`：外部 bundle 的验证、隔离和 quarantine。
 

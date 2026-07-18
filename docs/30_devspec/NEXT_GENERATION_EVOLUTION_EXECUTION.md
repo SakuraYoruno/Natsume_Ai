@@ -278,11 +278,12 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 自动生成 input/output contract、风险、工具依赖、verifier、test vectors、rollback；
 - bundle 生成 SBOM 和签名，进入 quarantine sandbox；
 - staged activation/rollback 成为真实生命周期，不靠目录扫描/import；
-- maturity policy 默认开启且 fail closed；新能力最高 L1/L2；
+- `SkillActivationEvidenceV1` 将 Lab report、Review、SBOM、signature、sandbox、rollback 和 maturity 绑定到 append-only 0109 ledger；
+- production IntentDecisionEngine 默认启用 restrict-only maturity policy，缺失或伪造 scorecard 直接最高风险；新能力最高 L1/L2；
 - promotion/degradation 由 durable evidence 与 Review 决定；
 - 退役旧 Capability Forge 平行 routing authority，只保留 proposal source。
 
-完成条件：至少一份 Markdown 和一条 accepted trace 各生成一个 draft；隔离验证、拒绝、staged activation、降级和 rollback 都有 receipt；未经审批自动升级为 0。
+当前进度：确定性 `SkillDraftV1`、0109 evidence/receipt ledger、fenced activate/degrade/rollback service 和 active-only content-addressed registry 已落地；外部 provider sandbox canary、真实 Review/实验报告生产接线和 bundle import 仍未完成。最终完成条件仍是：至少一份 Markdown 和一条 accepted trace 各生成一个 draft；隔离验证、拒绝、staged activation、降级和 rollback 都有 receipt；未经审批自动升级为 0。
 
 ### NE-06：Experience Feedback、Knowledge OS 与 Identity Migration
 
@@ -374,7 +375,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前基线已推进到 `0108_evolution_lab_ledger.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前基线已推进到 `0109_skill_lifecycle.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 

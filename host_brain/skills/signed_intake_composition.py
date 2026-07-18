@@ -22,7 +22,9 @@ from host_brain.secure_ingress import (
     SecureIngressService,
 )
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.persistence.skill_lifecycle_repository import SQLiteSkillLifecycleRepository
 from host_brain.persistence.supply_chain_repository import SQLiteSkillSupplyChainStore
+from host_brain.core.ids import now_ms
 
 from .signed_intake_ingress import (
     MAX_SKILL_PROVIDER_INTAKE_BODY_BYTES,
@@ -35,6 +37,7 @@ from .supply_chain import (
 )
 from .supply_chain_quarantine import SkillBundleQuarantine
 from .supply_chain_service import SkillSupplyChainService
+from .skill_lifecycle import SkillLifecycleService
 
 
 HOST_SECURE_INGRESS_MODE_ENV = "HOST_SECURE_INGRESS_MODE"
@@ -113,6 +116,8 @@ class SignedSkillProviderIntakeComposition:
     ingress: SecureSignedSkillProviderIntake
     secure_store: SQLiteSecureIngressStore | None = None
     supply_chain_store: SQLiteSkillSupplyChainStore | None = None
+    lifecycle_repository: SQLiteSkillLifecycleRepository | None = None
+    lifecycle_service: SkillLifecycleService | None = None
     service: SecureIngressService | None = None
     adapter: SecureIngressAdapter | None = None
     source_resolver: FilesystemSkillProviderIntakeSourceResolver | None = None
@@ -236,6 +241,12 @@ def build_signed_skill_provider_intake_composition(
             quarantine_root=resolved_quarantine,
         )
         supply_store = SQLiteSkillSupplyChainStore(resolved_db)
+        lifecycle_repository = SQLiteSkillLifecycleRepository(resolved_db)
+        lifecycle_service = SkillLifecycleService(
+            supply_chain=supply_store,
+            receipts=lifecycle_repository,
+            clock=now_ms,
+        )
         supply_service = SkillSupplyChainService(
             verifier=verifier,
             quarantine=quarantine,
@@ -310,6 +321,8 @@ def build_signed_skill_provider_intake_composition(
         ingress=ingress,
         secure_store=secure_store,
         supply_chain_store=supply_store,
+        lifecycle_repository=lifecycle_repository,
+        lifecycle_service=lifecycle_service,
         service=service,
         adapter=adapter,
         source_resolver=source_resolver,
