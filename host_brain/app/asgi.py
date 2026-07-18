@@ -1228,6 +1228,8 @@ def create_app() -> FastAPI:
                     cancellation_authority_verifier=cancellation_authority_verifier,
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
+                    bounded_fanout_enabled=runtime_settings.task_runtime_bounded_fanout_enabled,
+                    atomic_graph_success_enabled=runtime_settings.task_runtime_atomic_graph_success_enabled,
                 )
                 canonical_agent_executor_kwargs: dict[str, Any] = {
                     "model_attempt_service": get_model_attempt_service(),

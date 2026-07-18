@@ -169,6 +169,14 @@ class CoreSettings(BaseSettings):
     task_runtime_canonical_owner: str = Field(
         default="", alias="HOST_TASK_RUNTIME_CANONICAL_OWNER"
     )
+    task_runtime_bounded_fanout_enabled: bool = Field(
+        default=False,
+        alias="HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED",
+    )
+    task_runtime_atomic_graph_success_enabled: bool = Field(
+        default=False,
+        alias="HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED",
+    )
     agent_workspace_managed_root: Path = Field(
         default_factory=lambda: Path.home() / ".natsume" / "agent_worktrees",
         alias="HOST_AGENT_WORKSPACE_MANAGED_ROOT",
@@ -319,6 +327,22 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_TASK_RUNTIME_CANONICAL_OWNER",
                 default_value="",
                 current_value=s.task_runtime_canonical_owner,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_bounded_fanout_enabled",
+                env_key="HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED",
+                default_value=False,
+                current_value=s.task_runtime_bounded_fanout_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_atomic_graph_success_enabled",
+                env_key="HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED",
+                default_value=False,
+                current_value=s.task_runtime_atomic_graph_success_enabled,
                 is_required=False,
             ),
             inspect_setting(

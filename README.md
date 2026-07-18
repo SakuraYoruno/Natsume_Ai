@@ -5,7 +5,7 @@
 
 Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。它把对话、人格表达、长期记忆、关系状态、主动行为、工具执行、设备能力和多平台消息接入放在同一套可审计运行时中，并要求所有真实动作都能回答四个问题：谁批准、执行了什么、依据什么验收、产生了什么副作用。
 
-本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、Internal Agent、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但可生产的 Durable DAG 并发/恢复、通用智能规划、受治理人格演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。
+本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、Internal Agent、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但可生产的 Durable DAG 并发/恢复、通用智能规划、受治理人格演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。Durable 调度恢复现在会对持久 TaskGraph 重新检查依赖环，发现环以 `PLAN_CYCLE` 失败关闭；多节点 fan-out 与 atomic graph success 仍由显式 `HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED` / `HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED` 控制，默认关闭，必须经过独立 canary 后才能启用。
 
 ## 当前状态
 

@@ -1187,6 +1187,8 @@ def build_governed_host_runtime(
     cancellation_authority_verifier: Any | None = None,
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
+    bounded_fanout_enabled: bool = False,
+    atomic_graph_success_enabled: bool = False,
     allow_uncomposed_acceptance_effects: bool = False,
 ) -> GovernedHostRuntime:
     from host_brain.app.route_execution_ports import (  # noqa: PLC0415
@@ -1273,6 +1275,8 @@ def build_governed_host_runtime(
         ),
         node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
+        bounded_fanout_enabled=bool(bounded_fanout_enabled),
+        atomic_graph_success_enabled=bool(atomic_graph_success_enabled),
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",
