@@ -14,6 +14,7 @@ from host_brain.evolution_lab import (
     ExperimentReportV1,
     ExperimentRunReceiptV1,
     ExperimentSpecV1,
+    RedactionReceiptV1,
 )
 
 
@@ -47,6 +48,7 @@ class SQLiteEvolutionLabLedger:
             }
             required = {
                 "evolution_lab_experiment_spec",
+                "evolution_lab_redaction_receipt",
                 "evolution_lab_run_receipt",
                 "evolution_lab_report",
                 "evolution_lab_proposal",
@@ -78,6 +80,38 @@ class SQLiteEvolutionLabLedger:
                 (spec.experiment_id, spec.spec_digest, encoded, self._clock()),
             )
         return spec.spec_digest
+
+    def append_redaction(self, receipt: RedactionReceiptV1) -> str:
+        if not isinstance(receipt, RedactionReceiptV1):
+            raise EvolutionLabLedgerError("redaction receipt is invalid")
+        encoded = _canonical(receipt.to_dict())
+        with self._transaction() as conn:
+            existing = conn.execute(
+                "SELECT receipt_json FROM evolution_lab_redaction_receipt WHERE receipt_id = ?",
+                (receipt.receipt_id,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing[0]) != encoded:
+                    raise EvolutionLabLedgerError("Evolution Lab redaction replay drift")
+                return receipt.receipt_digest
+            conn.execute(
+                """
+                INSERT INTO evolution_lab_redaction_receipt
+                (receipt_id, receipt_digest, source_digest, rules_version,
+                 output_dataset_digest, receipt_json, production_side_effects, created_at_ms)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    receipt.receipt_id,
+                    receipt.receipt_digest,
+                    receipt.source_digest,
+                    receipt.rules_version,
+                    receipt.output_dataset_digest,
+                    encoded,
+                    self._clock(),
+                ),
+            )
+        return receipt.receipt_digest
 
     def append_run(self, receipt: ExperimentRunReceiptV1) -> str:
         if not isinstance(receipt, ExperimentRunReceiptV1):

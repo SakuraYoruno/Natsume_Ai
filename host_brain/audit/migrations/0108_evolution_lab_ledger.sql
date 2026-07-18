@@ -10,6 +10,17 @@ CREATE TABLE IF NOT EXISTS evolution_lab_experiment_spec (
     created_at_ms INTEGER NOT NULL CHECK(typeof(created_at_ms) = 'integer' AND created_at_ms >= 0)
 );
 
+CREATE TABLE IF NOT EXISTS evolution_lab_redaction_receipt (
+    receipt_id TEXT NOT NULL PRIMARY KEY,
+    receipt_digest TEXT NOT NULL UNIQUE CHECK(length(receipt_digest) = 64),
+    source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+    rules_version TEXT NOT NULL,
+    output_dataset_digest TEXT NOT NULL CHECK(length(output_dataset_digest) = 64),
+    receipt_json TEXT NOT NULL CHECK(length(receipt_json) BETWEEN 2 AND 262144),
+    production_side_effects INTEGER NOT NULL CHECK(production_side_effects = 0),
+    created_at_ms INTEGER NOT NULL CHECK(typeof(created_at_ms) = 'integer' AND created_at_ms >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS evolution_lab_run_receipt (
     run_id TEXT NOT NULL PRIMARY KEY,
     spec_digest TEXT NOT NULL REFERENCES evolution_lab_experiment_spec(spec_digest) ON DELETE RESTRICT,
@@ -66,6 +77,12 @@ BEGIN SELECT RAISE(ABORT, 'Evolution Lab experiment spec is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS evolution_lab_spec_no_delete
 BEFORE DELETE ON evolution_lab_experiment_spec
 BEGIN SELECT RAISE(ABORT, 'Evolution Lab experiment spec is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS evolution_lab_redaction_no_update
+BEFORE UPDATE ON evolution_lab_redaction_receipt
+BEGIN SELECT RAISE(ABORT, 'Evolution Lab redaction receipt is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS evolution_lab_redaction_no_delete
+BEFORE DELETE ON evolution_lab_redaction_receipt
+BEGIN SELECT RAISE(ABORT, 'Evolution Lab redaction receipt is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS evolution_lab_run_no_update
 BEFORE UPDATE ON evolution_lab_run_receipt
 BEGIN SELECT RAISE(ABORT, 'Evolution Lab run receipt is immutable'); END;
