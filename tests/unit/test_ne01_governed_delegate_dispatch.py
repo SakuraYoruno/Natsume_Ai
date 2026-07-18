@@ -36,6 +36,7 @@ def _frozen(*, target_id: str = "pentest_agent") -> FrozenNodeInput:
         lease_id="lease-governed-delegate",
         lease_owner_id="owner-governed-delegate",
         fencing_token=7,
+        node_risk_level=3,
         route="delegate",
         target_id=target_id,
         objective="prepare a read-only threat model for example.test",

@@ -40,6 +40,20 @@ _UPSTREAM_AUTHORITY_FIELDS = (
     "event_ref",
     "payload_digest",
 )
+_RUNTIME_CONTEXT_FIELDS = frozenset(
+    {
+        "runtime_context_schema",
+        "runtime_context_observed_at_ms",
+        "runtime_context_principal_id",
+        "workspace_id",
+        "subject_id",
+        "world_snapshot_v2",
+        "world_identity_v2",
+        "scene_resolution_input_v1",
+        "scene_decision_v2",
+        "scene_identity_v2",
+    }
+)
 
 
 def _digest_identifier(prefix: str, value: object) -> str:
@@ -335,8 +349,7 @@ class RuntimeContextApplicationService:
                 "decision_digest": scene.decision_digest,
             },
         }
-        self.require_frozen(payload)
-        return FrozenRuntimeContextV1(payload=payload)
+        return self.require_frozen(payload)
 
     def require_frozen(self, value: Mapping[str, Any] | None) -> FrozenRuntimeContextV1:
         payload = _mapping(value)
@@ -443,7 +456,17 @@ class RuntimeContextApplicationService:
             "snapshot_digest": world.get("snapshot_digest"),
         } or scene_input_scope_drifted(payload, world=world, decision=decision):
             raise RuntimeContextApplicationError("frozen World/Scene scope drifted")
-        return FrozenRuntimeContextV1(payload=payload)
+        # ``WorkOrderV3.input_pack`` also contains the separately frozen Host
+        # request fields.  Reopening a replay must return only the canonical
+        # Runtime Context projection; otherwise those Host fields overlap with
+        # the freshly reconstructed request envelope and reject an exact
+        # replay as authority drift.
+        runtime_projection = {
+            key: value
+            for key, value in payload.items()
+            if key in _RUNTIME_CONTEXT_FIELDS or key.startswith("runtime_context_")
+        }
+        return FrozenRuntimeContextV1(payload=runtime_projection)
 
 
 def scene_input_scope_drifted(

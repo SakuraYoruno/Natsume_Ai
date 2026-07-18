@@ -87,7 +87,7 @@
 
 Task Runtime lifecycle 的实际边界是：activation rollback 或 `aclose` quiescence 未完成统一使用 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`，后续 bind/activate 锁死，只允许 `aclose` 重试。Coordinator admission close、drain、`aclose` 任一失败均保持 Store 开放；Coordinator 和 0094 worker 都静默后才 drain Outbox/关 infrastructure。
 
-NE-01 首批职责拆分保持这些 authority 不变，但把四个混合模块按真实 owner 分开：Host adapter 只编排 route/runtime，Frozen Skill worker 与合同构造各自独立；HostCommandRepository 只持 SQLite UoW，typed codec 与稳定错误/迁移类型独立；Review continuation Store 与 Subject/Intent binding、row codec 分离；Scheduler occurrence runtime 与 command service 分离。兼容 import 继续指向同一类/常量，未增加第二连接或事务 owner。`AdmittedTaskNode` 现在还冻结并验证原 TaskNode 的 1..5 `risk_level`，worker execution context 不再读取不存在的字段。该切片不改变 atomic/fan-out/cancellation 的默认关闭状态，fresh mixed-file Gate 仍有 7 项。
+NE-01 两批职责拆分保持这些 authority 不变：首批分离 Host adapter/worker/contracts、HostCommand UoW/codec、Review Store/binding/codec 与 Scheduler occurrence/command；第二批分离 ASGI lifecycle wiring、Obs response models、Degradation policy、Node Grant/Planning codec、Intent Review continuation 和 Guardian contracts/operations。兼容 import 继续指向同一类/常量，focused 模块不持有第二连接、journal store 或事务 owner。`AdmittedTaskNode` 冻结并验证 TaskNode 的 1..5 `risk_level`；Chat terminal 的 model budget guard 在 route executor 精确验证后不进入公开 WorkerProjection，只保留 typed budget usage，不能通过放宽敏感字段 Gate 绕过。fresh mixed-file Gate 已为 0，但 atomic/fan-out/cancellation 默认仍关闭，Service Locator 和旧执行旁路仍未清零。
 
 Effect reconciliation persistence 以 `task_effect_reconciliation_store.py` 保留稳定兼容 composite，实际责任拆到 common helpers、read/validation 和 mutation focused modules；cancellation trusted overlay 独立位于 `task_graph_cancellation_effect_overlay_store.py`。所有 mixin 复用 `DurableTaskStore` 的同一 connection/transaction/UoW，没有第二 Store authority，也未通过 architecture policy 白名单掩盖大型文件。
 

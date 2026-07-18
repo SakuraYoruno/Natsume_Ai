@@ -113,7 +113,8 @@ NE-03 先修复已打开的 #84，随后回到 NE-01 清除通用执行主链缺
 
 当前已完成切片：
 
-- 首批混合职责 authority 拆分：`governed_task_adapter.py` 只保留 Host runtime/编排外壳，Frozen Skill worker 与冻结合同构造迁入 focused 模块；`host_command_repository.py` 只保留 SQLite UoW，严格 codec 与稳定类型迁出；Review continuation 的 Subject/Intent authority 与 row codec 分离；Scheduler command service 与 occurrence Task Runtime 分离。四个原始文件分别降到 964、1495、1415、861 行，兼容导入保持不变；合并后定向回归 51 passed，另有 Host adapter、Review、Scheduler 与 HostCommand 独立回归。fresh 全仓 mixed-file Gate 不再报告这四项，但暴露 7 个当前 finding（ASGI、Obs input/humanoid stats、Degradation ceiling、Node Grant、Planning compiler、Intent admission、Guardian），因此 Gate 仍为 RED，生产开关没有变化；
+- 混合职责 authority 第二切片：ASGI 保留 `create_app`/lifespan/nonlocal owner/完整 shutdown，Life/Scheduler、启动安全 Gate 与 Runtime Context 接线迁入 app-local wiring；Obs humanoid 只迁出纯响应模型；Degradation 只迁出 immutable policy catalog；Node Grant 与 Planning compiler 只迁出纯 codec/error；Intent admission 保留唯一 verifier/三入口/RuntimeEvent append，Review continuation 迁入无 store owner 的私有 mixin；Guardian 保留 store/restore/reducer/`_append` 唯一 writer，命令和纯合同迁出。七个原文件分别为 1488、1303、1894、1495、1281、1336、1247 行，fresh 全仓 mixed-file Gate 为 `issues=[]`，没有新增或放宽 allowlist。该静态 Gate 通过不改变 atomic/fan-out/cancellation/reconciliation 的生产开关，也不代表 Service Locator 或旧执行旁路已清零；
+- 生产等价的 Chat/Delegate/Plan 集成在同一 SQLite 上构造 durable Host lease、World/Scene/Guardian composition、Production ActionPreview resolver 与真实 Acceptance/Outbox，只替换最底层模型/网络 transport。它修复了四个此前被假夹具遮蔽的断点：WorkOrder 重开只导出 canonical Runtime Context 字段；Scene 64hex digest 在 Preview 边界确定性投影为 `sha256:` 且 resolver 仍逐字段重开比对；同 scope/owner/lease/fence/revision 的 Guardian expiry 只允许单调延长，缩短或任一身份漂移拒绝；terminal boundary 深拷贝 `action_args`，避免 proof 注回 handler payload 形成循环别名。Chat route 精确验证并消费 model budget guard 后，公开 WorkerProjection 移除 guard、保留 typed measurement，敏感字段 Gate 没有放宽；
 - 修复 `AdmittedTaskNode` 未冻结 `TaskNode.risk_level` 的真实断点；Scheduler/worker execution context 现在从 immutable admitted node 读取 1..5 风险等级，避免首次真实 worker 执行触发 `AttributeError`；
 - Persona 中央写入围栏、迁移专用审计入口、无副作用候选化及 `T-PERSONA-FENCE-01`；
 - Scheduler 真实 `WorkOrderV3` admission、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay；
@@ -197,7 +198,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 #### Lane D：Composition 与 workspace
 
 - D0/W0/W1 已完成既定围栏；W2 在 Internal Agent 单路线接入 graph-bound Git worktree、heartbeat/handoff/takeover 和“启动 1 条 + 后台 backlog”的 cleanup continuation，并保持缺 secret 默认 fail closed。仍需受控 container/OS tenant、进程级取消、promotion/abandon、accepted checkpoint HEAD、Domain/Skill 全路线与真实 canary，不能把 `DIRECTORY_FENCE + worktree` 写成完整隔离；
-- mixed-file ceiling 与 allowlist 均未抬高。首批四个真实 authority 文件已拆到 1,500 行以下；fresh Gate 仍因 `asgi.py`、`obs_routes_stats_input_humanoid.py`、超过既有 ceiling 的 `degradation_state.py`、`node_grants.py`、`planning_graph_compiler.py`、`intent_admission.py`、`runtime_guardian.py` 七项为 RED。后续按“生命周期 helper、纯 codec/contract、command mixin”边界继续拆分，不能用新增 cohesive 例外封板。`DurableDagSchedulingRuntime` 仍是临时 outer orchestrator，不能据此宣称 mixed-responsibility、历史 reconciliation 或一般恢复闭环完成；
+- mixed-file ceiling 与 allowlist 均未抬高。首批四个 authority 文件和第二批七个文件均按“生命周期 helper、纯 codec/contract、无独立 store 的 command mixin”边界完成拆分；fresh 全仓 Gate 已返回 `issues=[]`。这只关闭 mixed-responsibility 静态清单，`DurableDagSchedulingRuntime` 仍是临时 outer orchestrator，约 53 个可变 Service Locator 引用、旧执行 authority、一般恢复和生产 canary 仍未完成，不能据此宣称 NE-01 或完整架构闭环；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - D1 已完成 Canon/Tool/Bond 及其 OBS adapter 的 app-local ports；不得把该局部结果写成整个 OBS 或 ProcessServiceContainer 已去 locator；

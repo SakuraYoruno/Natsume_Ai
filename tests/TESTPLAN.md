@@ -164,8 +164,10 @@
 ## T-NextGen-Critical
 
 - T-GR-RUNTIME-01：Host Chat/Input/Gateway、Scheduler、Internal Agent 与 Operator Command 的真实 route matrix 必须全部生成 `WorkOrderV3 + BudgetPolicy + TaskGraph + node-bound grant + Verification + Acceptance + Receipt`；至少执行每路首个真实 admission，startup-only 测试不能通过本 Gate。
-- T-NE01-FOCUS-01：`governed_task_adapter.py`、`host_command_repository.py`、`review_continuation_store.py`、`scheduler/governed_runtime.py` 必须低于 1,500 行，focused 子模块不得取得第二 SQLite connection/UoW、反向导入旧 owner 或改变兼容 import identity；fresh 全仓 mixed-file Gate 必须报告真实剩余项，禁止增加 allowlist 掩盖。
+- T-NE01-FOCUS-01：两批 11 个原始 mixed/ceiling finding 必须低于 1,500 行或既有 cohesive ceiling；focused 子模块不得取得第二 SQLite connection/UoW、RuntimeEvent append、journal store、反向 owner import 或改变兼容 import identity。fresh 全仓 mixed-file Gate 必须为 `issues=[]`，禁止新增或放宽 allowlist 掩盖。
 - T-NE01-RISK-01：TaskGraph admission 必须把每节点 1..5 `risk_level` 冻结到 `AdmittedTaskNode`，worker execution context 只消费该 immutable 值；缺失、布尔值或越界风险等级在 worker/副作用前失败关闭。
+- T-NE01-BUDGET-PROJECTION-01：Chat route executor 必须在 terminal commit 前精确验证 frozen model budget guard 与 measurement；公开 WorkerProjection 不得包含已消费的 `governed_model_budget` 或其 `max_*_tokens`，但必须持久化 typed `budget_usage.measurements`。不得通过放宽敏感 token 字段规则使测试通过。
+- T-NE01-PREVIEW-REOPEN-01：生产等价 Chat/Delegate/三节点 Plan + exact replay 必须构造 durable Host lease、Runtime Context composition 与 Production ActionPreview resolver；覆盖 Scene digest 确定性投影、同 lease expiry 单调延长、缩短与 scope/owner/lease/fence/revision 漂移拒绝，以及 terminal proof 注入后 boundary `action_args` 无循环别名。Gateway reply 只能在第三次 terminal reopen 成功后发送一次。
 - T-PERSONA-FENCE-01：NE-01 safety fence 后，Bond stage/milestone、interaction cycle、emergent weekly 和后续新增入口在 `PersonaEngine.apply_growth_delta()` 中央 authority 边界全部 fail closed，trait mutation 为 0；静态扫描证明不存在绕开中央门禁的新 writer，运行时负测覆盖全部已知入口。
 - T-PERSONA-PROPOSAL-01：NE-06 replacement 后，旧 Persona growth caller 只生成 `FeedbackProposal`，并完成 proposal → Lab/shadow → Review → versioned activation → rollback；普通后台任务无直接 trait mutation authority。
 - T-NE06-GOVERNANCE-01：0110 V1 ledger 只验证 Feedback/Knowledge/Identity 事件行的 append-only/replay/tamper；真实 Lab/Review authority resolution、version owner activation 和 exact previous-state rollback 必须由 V2 测试另行证明。

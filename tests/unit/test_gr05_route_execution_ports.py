@@ -52,6 +52,7 @@ def _frozen_delegate() -> FrozenNodeInput:
         lease_id="lease-route-port",
         lease_owner_id="owner-route-port",
         fencing_token=1,
+        node_risk_level=3,
         route="delegate",
         target_id="intent_agent",
         objective="perform admitted work",

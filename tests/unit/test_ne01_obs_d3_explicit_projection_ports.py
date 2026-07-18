@@ -247,11 +247,6 @@ def test_two_obs_apps_producers_never_read_process_local_health_or_receipt_cache
         ProjectionJobDaemon,
     )
 
-    class ForbiddenReceiptCache:
-        @staticmethod
-        def items():
-            raise AssertionError("standalone producer touched process receipt cache")
-
     def forbidden_heartbeat_cache(_service_id: str):
         raise AssertionError("standalone producer touched process heartbeat cache")
 
@@ -260,11 +255,9 @@ def test_two_obs_apps_producers_never_read_process_local_health_or_receipt_cache
         "get_cached",
         forbidden_heartbeat_cache,
     )
-    monkeypatch.setattr(
-        health_device_projection,
-        "_latest_receipts",
-        ForbiddenReceiptCache(),
-    )
+    # Device projection 已切到 durable receipt ledger，进程内 receipt cache
+    # 不再是可猴补的兼容入口；缺少该属性本身就是生产边界证据。
+    assert not hasattr(health_device_projection, "_latest_receipts")
 
     for index in (1, 2):
         ports = build_default_obs_application_ports(

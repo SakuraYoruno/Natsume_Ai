@@ -12,7 +12,6 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
-import json
 import threading
 import time
 from typing import Any, Callable
@@ -30,16 +29,26 @@ from host_brain.orchestration.governor_grant import (
     durable_governor_binding,
     governor_grant_ref,
 )
+from host_brain.orchestration.node_grant_codec import (
+    digest as _digest,
+    exact_integer as _exact_integer,
+    mapping as _mapping,
+    required_text as _codec_required_text,
+    stable_ref as _stable_ref,
+)
+from host_brain.orchestration.node_grant_errors import (
+    NODE_GRANT_BINDING_MISSING,
+    NODE_GRANT_EXPIRED,
+    NODE_GRANT_INPUT_INVALID,
+    NODE_GRANT_PARENT_INVALID,
+    NODE_GRANT_REPLAY_DRIFT,
+    NODE_GRANT_ROUTE_DRIFT,
+    NODE_GRANT_ROUTE_UNSUPPORTED,
+    NODE_GRANT_VERIFICATION_FAILED,
+    NodeGrantDerivationError,
+    NodeGrantVerificationError,
+)
 
-
-NODE_GRANT_INPUT_INVALID = "NODE_GRANT_INPUT_INVALID"
-NODE_GRANT_PARENT_INVALID = "NODE_GRANT_PARENT_INVALID"
-NODE_GRANT_BINDING_MISSING = "NODE_GRANT_BINDING_MISSING"
-NODE_GRANT_ROUTE_DRIFT = "NODE_GRANT_ROUTE_DRIFT"
-NODE_GRANT_ROUTE_UNSUPPORTED = "NODE_GRANT_ROUTE_UNSUPPORTED"
-NODE_GRANT_REPLAY_DRIFT = "NODE_GRANT_REPLAY_DRIFT"
-NODE_GRANT_EXPIRED = "NODE_GRANT_EXPIRED"
-NODE_GRANT_VERIFICATION_FAILED = "NODE_GRANT_VERIFICATION_FAILED"
 
 _CHILD_STAGE = "S_TASK_GRAPH_NODE_GRANT"
 _CHILD_REASON = "TASK_GRAPH_NODE_DERIVED_APPROVE"
@@ -47,24 +56,6 @@ _REVIEW_RENEWAL_REASON = "TASK_GRAPH_NODE_REVIEW_CONTINUATION_APPROVE"
 _REVIEW_RENEWAL_SCHEMA = "Natsume.task.review_continuation_authority.v1"
 _SUPPORTED_EXECUTABLE_ROUTES = frozenset({"skill", "delegate", "chat"})
 _ISSUABLE_NODE_ROUTES = _SUPPORTED_EXECUTABLE_ROUTES
-
-
-class NodeGrantDerivationError(PermissionError):
-    """Fail-closed node grant derivation error with a stable reason code."""
-
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or NODE_GRANT_INPUT_INVALID)
-        self.detail = str(detail or "node grant derivation failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
-
-
-class NodeGrantVerificationError(PermissionError):
-    """A durable child decision failed exact authority verification."""
-
-    def __init__(self, detail: str, *, reason_code: str = NODE_GRANT_VERIFICATION_FAILED) -> None:
-        self.reason_code = str(reason_code or NODE_GRANT_VERIFICATION_FAILED)
-        self.detail = str(detail or "node grant verification failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1461,52 +1452,28 @@ def _child_intent(
     }
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    if isinstance(value, str):
-        try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-        return dict(decoded) if isinstance(decoded, Mapping) else {}
-    return {}
-
-
 def _required_text(value: Any, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise NodeGrantDerivationError(NODE_GRANT_INPUT_INVALID, f"{field_name} is required")
-    return text
+    try:
+        return _codec_required_text(value)
+    except ValueError as exc:
+        raise NodeGrantDerivationError(
+            NODE_GRANT_INPUT_INVALID,
+            f"{field_name} is required",
+        ) from exc
 
 
 def _verify_text(value: Any, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise NodeGrantVerificationError(f"{field_name} is required")
-    return text
+    try:
+        return _codec_required_text(value)
+    except ValueError as exc:
+        raise NodeGrantVerificationError(f"{field_name} is required") from exc
 
 
 def _integer(value: Any, reason_code: str, field_name: str) -> int:
     try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
+        return _exact_integer(value)
+    except ValueError as exc:
         raise NodeGrantDerivationError(reason_code, f"{field_name} must be an integer") from exc
-
-
-def _digest(value: Mapping[str, Any]) -> str:
-    payload = json.dumps(
-        dict(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _stable_ref(kind: str, value: Mapping[str, Any]) -> str:
-    return f"{kind}://sha256/{_digest(value)}"
 
 
 __all__ = [

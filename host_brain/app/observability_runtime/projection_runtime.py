@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService

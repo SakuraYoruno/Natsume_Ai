@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from functools import partial
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
@@ -51,6 +50,28 @@ from host_brain.app.lifecycle_runtime_composition import (
 )
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.host_life_scheduler_wiring import (
+    LifeCommandServicePort as _LifeCommandServicePort,
+    LifeSnapshotReaderPort as _LifeSnapshotReaderPort,
+    compose_life_command_authority,
+    compose_life_dispatchers as _compose_life_dispatchers,
+    reset_life_command_authority,
+    scheduler_handler_result as _scheduler_handler_result,
+    scheduler_seed_configs,
+    submit_life_tick_command,
+)
+from host_brain.app.host_runtime_context_wiring import (
+    compose_host_runtime_context as _compose_host_runtime_context,
+    runtime_environment_observation_provider as _runtime_environment_observation_provider,
+)
+from host_brain.app.host_runtime_startup_guards import (
+    assert_graph_cancellation_operator_startup as _assert_graph_cancellation_operator_startup,
+    assert_graph_cancellation_reconciliation_production_ready as _assert_graph_cancellation_reconciliation_production_ready,
+    assert_task_effect_reconciliation_operator_startup as _assert_task_effect_reconciliation_operator_startup,
+    assert_task_operation_reconciliation_operator_startup as _assert_task_operation_reconciliation_operator_startup,
+    assert_task_terminal_reconciliation_operator_startup as _assert_task_terminal_reconciliation_operator_startup,
+    command_ingress_hmac_secrets,
+)
 from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_source_composition import (
     HostObsSourceEpoch,
@@ -120,29 +141,13 @@ from host_brain.task_runtime.review_command_service import TaskReviewCommandServ
 from host_brain.secure_ingress.graph_cancellation_authority import (
     SecureIngressGraphCancellationAuthorityVerifier,
 )
-from host_brain.scheduler.task_registry import (
-    SchedulerTaskConfig,
-    TaskPriority,
-    TriggerMode,
-)
 from host_brain.composition.tribe_runtime import require_process_tribe_runtime
-from host_brain.persistence.world_observation_journal import (
-    SQLiteWorldObservationJournal,
-)
 from host_brain.runtime.context_application import (
     RuntimeContextApplicationService,
 )
-from host_brain.runtime.intent_authority import IntentPolicyIdentityV1
 from host_brain.runtime.intent_admission import DurableIntentAdmissionVerifier
 from host_brain.runtime.production_composition import (
     RuntimeContextComposition,
-    build_runtime_context_composition,
-)
-from host_brain.runtime.production_intent_authority import (
-    ProductionIntentAuthorityPort,
-)
-from host_brain.runtime.world_source_verifier import (
-    RuntimeEventWorldSourceVerifier,
 )
 
 
@@ -150,70 +155,19 @@ logger = logging.getLogger("Natsume.asgi")
 runtime_metrics = RuntimeMetrics()
 
 
-class _LifeCommandServicePort(Protocol):
-    def submit(self, command: Any) -> Any: ...
-
-    def submit_next(self, person_id: str, command_factory: Any) -> Any: ...
-
-    def adopt_all_legacy_projections(self, *, adopted_at_ms: int) -> Any: ...
-
-
-class _LifeSnapshotReaderPort(Protocol):
-    def get_snapshot(self, person_id: str) -> Any: ...
-
-    def get_receipt(self, command_id: str) -> Any | None: ...
-
-
 def _compose_life_command_authority(
     ledger: Any,
 ) -> tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort]:
-    """Resolve the frozen Digital Life command boundary at process startup."""
-
-    container = build_process_life_container(ledger=ledger, adopted_at_ms=now_ms())
-    PROCESS_LIFE_PROVIDER.install(container)
-    service = container.command_service
-    reader = container.snapshot_reader
-    return service, reader
-
-
-def _compose_life_dispatchers(
-    ledger: Any,
-    *,
-    embodiment_runtime: Any,
-    action_preview_service: Any | None = None,
-) -> tuple[Any, Any]:
-    """Bind projection and delivery workers to the canonical Life repository."""
-
-    from host_brain.app.life_projection_handlers import (  # noqa: PLC0415
-        handle_life_projection,
-    )
-    from host_brain.channels.life_delivery_transport import (  # noqa: PLC0415
-        LifeDeliveryTransport,
-    )
-    from host_brain.digital_life.outbox import LifeOutboxDispatcher  # noqa: PLC0415
-    from host_brain.digital_life.projection import (  # noqa: PLC0415
-        LifeProjectionDispatcher,
-    )
-    from host_brain.persistence.life_command_repository import (  # noqa: PLC0415
-        LifeCommandRepository,
-    )
-
-    repository = LifeCommandRepository.from_ledger(ledger)
-    return (
-        LifeProjectionDispatcher(repository, handle_life_projection),
-        LifeOutboxDispatcher(
-            repository,
-            LifeDeliveryTransport(
-                ledger=ledger,
-                embodiment_runtime=embodiment_runtime,
-                action_preview_service=action_preview_service,
-            ),
-        ),
+    return compose_life_command_authority(
+        ledger,
+        container_builder=build_process_life_container,
+        provider=PROCESS_LIFE_PROVIDER,
+        clock_ms=now_ms,
     )
 
 
 def _reset_life_command_authority() -> None:
-    PROCESS_LIFE_PROVIDER.clear()
+    reset_life_command_authority(provider=PROCESS_LIFE_PROVIDER)
 
 
 def _submit_life_tick_command(
@@ -226,92 +180,16 @@ def _submit_life_tick_command(
     life_command_service: _LifeCommandServicePort,
     life_snapshot_reader: _LifeSnapshotReaderPort,
 ) -> dict[str, Any]:
-    """Translate one governed scheduler occurrence into one Life command."""
-
-    from natsume_contracts.life import LifeCommand  # noqa: PLC0415
-
-    intent = dict(definition.intent_template)
-    args = dict(intent.get("args") or {})
-    args.update(dict(occurrence.payload or {}))
-    person_id = str(args.get("person_id") or "default").strip() or "default"
-    runtime_execution = dict(execution_context or {})
-    frozen_input_pack = runtime_execution.get("frozen_input_pack")
-    if not isinstance(frozen_input_pack, Mapping):
-        raise RuntimeError("LIFE_TICK_RUNTIME_CONTEXT_REQUIRED")
-    frozen_runtime_context = runtime_context_application.require_frozen(
-        dict(frozen_input_pack)
-    ).to_dict()
-    life_command_id = f"life_tick::{occurrence.occurrence_id}"
-    existing_receipt = life_snapshot_reader.get_receipt(life_command_id)
-    if existing_receipt is not None:
-        as_replayed = getattr(existing_receipt, "as_replayed", None)
-        replayed_receipt = as_replayed() if callable(as_replayed) else existing_receipt
-        result = _scheduler_handler_result(replayed_receipt)
-        result["status"] = "SUCCEEDED"
-        result["replayed"] = True
-        return result
-    from host_brain.digital_life.policy import build_life_tick_payload  # noqa: PLC0415
-
-    occurrence_context = {
-        **args,
-        **dict(occurrence.payload or {}),
-        "scene_decision_v2": frozen_runtime_context["scene_decision_v2"],
-        "scene_identity_v2": frozen_runtime_context["scene_identity_v2"],
-    }
-    action_preview_context = runtime_execution.get("_action_preview_context")
-    if isinstance(action_preview_context, Mapping):
-        occurrence_context["_action_preview_context"] = dict(
-            action_preview_context
-        )
-    grant_request_id = str(getattr(command, "request_id", "") or "").strip()
-    governor_grant = str(
-        getattr(command, "governor_grant_ref", "") or ""
-    ).strip()
-    authority_principal_id = str(
-        getattr(command, "principal_id", "")
-        or getattr(occurrence, "principal_id", "")
-        or ""
-    ).strip()
-    if grant_request_id and governor_grant and authority_principal_id:
-        occurrence_context["delivery_authorization"] = {
-            "request_id": grant_request_id,
-            "governor_grant_ref": governor_grant,
-            "authority_kind": "scheduler_host_command",
-            "authority_principal_id": authority_principal_id,
-        }
-
-    def _command_factory(snapshot: Any) -> LifeCommand:
-        applied_at_ms = max(
-            int(now_ms()),
-            int(getattr(snapshot, "updated_at_ms", 0) or 0),
-        )
-        return LifeCommand(
-            command_id=life_command_id,
-            person_id=person_id,
-            command_type="tick",
-            payload=build_life_tick_payload(
-                snapshot,
-                scheduled_at_ms=int(occurrence.scheduled_at_ms),
-                occurrence_payload=occurrence_context,
-                task_id=str(occurrence.task_id),
-                definition_revision=int(occurrence.definition_revision),
-            ),
-            expected_version=int(snapshot.version),
-            created_at_ms=applied_at_ms,
-            correlation_id=str(command.request_id),
-            causation_id=str(occurrence.occurrence_id),
-            metadata={
-                "producer": "scheduler_clock",
-                "scheduler_command_id": str(command.command_id),
-                "scheduler_principal_id": str(occurrence.principal_id),
-                "scheduled_at_ms": int(occurrence.scheduled_at_ms),
-                "governor_grant_request_id": grant_request_id or None,
-                "governor_grant_ref": governor_grant or None,
-            },
-        )
-
-    receipt = life_command_service.submit_next(person_id, _command_factory)
-    return _scheduler_handler_result(receipt)
+    return submit_life_tick_command(
+        occurrence=occurrence,
+        definition=definition,
+        command=command,
+        execution_context=execution_context,
+        runtime_context_application=runtime_context_application,
+        life_command_service=life_command_service,
+        life_snapshot_reader=life_snapshot_reader,
+        clock_ms=now_ms,
+    )
 
 
 def resolve_bond_engine():
@@ -355,499 +233,18 @@ async def root_endpoint() -> Response:
 
 
 def _command_ingress_hmac_secrets() -> dict[str, str]:
-    settings = get_input_settings()
-    configured: dict[str, str] = {}
-    raw = str(settings.secure_ingress_hmac_secrets_json or "").strip()
-    if raw:
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict):
-            configured.update(
-                {
-                    str(key).strip(): str(value)
-                    for key, value in parsed.items()
-                    if str(key).strip() and isinstance(value, str) and value
-                }
-            )
-    edge_key = str(settings.edge_gateway_hmac_key_id or "").strip()
-    edge_secret = str(settings.edge_gateway_hmac_secret or "")
-    if edge_key and edge_secret:
-        configured.setdefault(edge_key, edge_secret)
-    scheduler = get_scheduler_settings()
-    scheduler_key = str(scheduler.clock_key_id or "").strip()
-    scheduler_secret = scheduler.clock_hmac_secret.get_secret_value()
-    if scheduler_key and scheduler_secret:
-        configured.setdefault(scheduler_key, scheduler_secret)
-    return configured
-
-
-def _assert_graph_cancellation_operator_startup(
-    *,
-    enabled: bool,
-    operation_reconciliation_enabled: bool,
-    effect_reconciliation_enabled: bool,
-    command_ingress: Any,
-    security: Any,
-) -> None:
-    """Fail closed before route activation when cancellation authority is absent."""
-
-    if not enabled:
-        return
-    if not operation_reconciliation_enabled:
-        raise RuntimeError(
-            "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_OPERATION_RECONCILIATION"
-        )
-    if not effect_reconciliation_enabled:
-        raise RuntimeError(
-            "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_EFFECT_RECONCILIATION"
-        )
-    mode = getattr(command_ingress, "mode", None)
-    mode_value = getattr(mode, "value", mode)
-    if str(mode_value or "").strip().upper() != "ENFORCE":
-        raise RuntimeError(
-            "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
-        )
-    composition = getattr(security, "obs_command_composition", None)
-    if (
-        composition is None
-        or not bool(getattr(composition, "enabled", False))
-        or not bool(getattr(composition, "execution_enabled", False))
-        or not callable(
-            getattr(getattr(composition, "ingress", None), "execute", None)
-        )
-    ):
-        raise RuntimeError(
-            "TASK_GRAPH_CANCELLATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
-        )
-
-
-def _assert_task_operation_reconciliation_operator_startup(
-    *,
-    enabled: bool,
-    command_ingress: Any,
-    security: Any,
-) -> None:
-    """Fail closed before exposing the signed operation reconciliation port."""
-
-    if not enabled:
-        return
-    mode = getattr(command_ingress, "mode", None)
-    mode_value = getattr(mode, "value", mode)
-    if str(mode_value or "").strip().upper() != "ENFORCE":
-        raise RuntimeError(
-            "TASK_OPERATION_RECONCILIATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
-        )
-    composition = getattr(security, "obs_command_composition", None)
-    if (
-        composition is None
-        or not bool(getattr(composition, "enabled", False))
-        or not bool(getattr(composition, "execution_enabled", False))
-        or not callable(
-            getattr(getattr(composition, "ingress", None), "execute", None)
-        )
-    ):
-        raise RuntimeError(
-            "TASK_OPERATION_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
-        )
-
-
-def _assert_task_effect_reconciliation_operator_startup(
-    *,
-    enabled: bool,
-    command_ingress: Any,
-    security: Any,
-) -> None:
-    """Fail closed before exposing the signed Effect reconciliation port."""
-
-    if not enabled:
-        return
-    mode = getattr(command_ingress, "mode", None)
-    mode_value = getattr(mode, "value", mode)
-    if str(mode_value or "").strip().upper() != "ENFORCE":
-        raise RuntimeError(
-            "TASK_EFFECT_RECONCILIATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
-        )
-    composition = getattr(security, "obs_command_composition", None)
-    if (
-        composition is None
-        or not bool(getattr(composition, "enabled", False))
-        or not bool(getattr(composition, "execution_enabled", False))
-        or not callable(
-            getattr(getattr(composition, "ingress", None), "execute", None)
-        )
-    ):
-        raise RuntimeError(
-            "TASK_EFFECT_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
-        )
-
-
-def _assert_task_terminal_reconciliation_operator_startup(
-    *,
-    enabled: bool,
-    command_ingress: Any,
-    security: Any,
-) -> None:
-    """Fail closed before exposing historical terminal-state repair."""
-
-    if not enabled:
-        return
-    mode = getattr(command_ingress, "mode", None)
-    mode_value = getattr(mode, "value", mode)
-    if str(mode_value or "").strip().upper() != "ENFORCE":
-        raise RuntimeError(
-            "TASK_TERMINAL_RECONCILIATION_OPERATOR_REQUIRES_SECURE_INGRESS_ENFORCE"
-        )
-    composition = getattr(security, "obs_command_composition", None)
-    if (
-        composition is None
-        or not bool(getattr(composition, "enabled", False))
-        or not bool(getattr(composition, "execution_enabled", False))
-        or not callable(
-            getattr(getattr(composition, "ingress", None), "execute", None)
-        )
-    ):
-        raise RuntimeError(
-            "TASK_TERMINAL_RECONCILIATION_OPERATOR_COMMAND_GATEWAY_UNAVAILABLE"
-        )
-
-
-def _assert_graph_cancellation_reconciliation_production_ready(
-    *,
-    enabled: bool,
-    task_store: Any,
-) -> None:
-    """Block cancellation on unresolved Effect or terminal inventory."""
-
-    if not enabled:
-        return
-    checker = getattr(
-        task_store,
-        "assert_effect_reconciliation_production_ready",
-        None,
-    )
-    if not callable(checker):
-        raise RuntimeError(
-            "TASK_GRAPH_CANCELLATION_EFFECT_PRODUCTION_GATE_UNAVAILABLE"
-        )
-    checker()
-    terminal_checker = getattr(
-        task_store,
-        "assert_terminal_reconciliation_production_ready",
-        None,
-    )
-    if not callable(terminal_checker):
-        raise RuntimeError(
-            "TASK_GRAPH_CANCELLATION_TERMINAL_RECONCILIATION_"
-            "PRODUCTION_GATE_UNAVAILABLE"
-        )
-    terminal_checker()
-
-
-def _scheduler_seed_configs() -> list[SchedulerTaskConfig]:
-    settings = get_scheduler_settings()
-    from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
-        build_life_tick_task_config,
+    return command_ingress_hmac_secrets(
+        input_settings=get_input_settings(),
+        scheduler_settings=get_scheduler_settings(),
     )
 
-    # The definition is always seeded so the catalog has one explicit Life
-    # periodic authority. Its enabled flag is still governed by Host settings.
-    configs: list[SchedulerTaskConfig] = [
-        build_life_tick_task_config(),
-        SchedulerTaskConfig(
-            task_id="life_io_dispatch_periodic",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 5},
-            intent_template={
-                "skill_name": "life_io_dispatch",
-                "args": {"limit": 100},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.HIGH,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            max_consecutive_failures=3,
-            description=(
-                "Dispatch committed Life projection/outbox work; SchedulerClock "
-                "remains the sole timer"
-            ),
-            resource_profile={
-                "resource_class": "life_io",
-                "uses_llm": False,
-                "uses_gpu": False,
-            },
-        ),
-        SchedulerTaskConfig(
-            task_id="embodiment_outbox_periodic",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 1},
-            intent_template={
-                "skill_name": "embodiment_outbox_dispatch",
-                "args": {"limit": 100},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.HIGH,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            max_consecutive_failures=3,
-            description="Dispatch the canonical Host physical-command outbox",
-            resource_profile={
-                "resource_class": "embodiment_io",
-                "uses_llm": False,
-                "uses_gpu": False,
-            },
-        ),
-    ]
-    if settings.seed_builtin_definitions:
-        from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
-            build_personality_scheduler_seed_task_configs,
-        )
 
-        configs.extend(build_personality_scheduler_seed_task_configs())
-    enabled = bool(settings.background_tasks_enabled)
-    configs.extend(
-        [
-            SchedulerTaskConfig(
-                task_id="audit_retention_daily",
-                trigger_mode=TriggerMode.CRON,
-                trigger_config={
-                    "hour": 2,
-                    "minute": 0,
-                    "catch_up_window_minutes": 1_440,
-                },
-                intent_template={
-                    "skill_name": "audit_retention",
-                    "args": {},
-                    "proposer_node_id": "scheduler",
-                },
-                priority=TaskPriority.LOW,
-                mode_allowlist=["normal", "sleep"],
-                enabled=enabled,
-                description="Daily audit retention policy",
-                resource_profile={
-                    "resource_class": "maintenance",
-                    "uses_llm": False,
-                    "uses_gpu": False,
-                },
-            ),
-            SchedulerTaskConfig(
-                task_id="distillation_engine_periodic",
-                trigger_mode=TriggerMode.INTERVAL,
-                trigger_config={"seconds": settings.distillation_interval_seconds},
-                intent_template={
-                    "skill_name": "distillation_engine_periodic",
-                    "args": {},
-                    "proposer_node_id": "scheduler",
-                },
-                priority=TaskPriority.HIGH,
-                mode_allowlist=["normal", "sleep"],
-                enabled=enabled and settings.distillation_enabled,
-                max_consecutive_failures=3,
-                description="Durable episodic-memory distillation",
-                resource_profile={
-                    "resource_class": "memory_heavy",
-                    "uses_llm": True,
-                    "uses_gpu": False,
-                },
-            ),
-            SchedulerTaskConfig(
-                task_id="agent_immune_auto_dispatch_tick",
-                trigger_mode=TriggerMode.INTERVAL,
-                trigger_config={"seconds": settings.agent_immune_interval_seconds},
-                intent_template={
-                    "skill_name": "agent_immune_auto_dispatch_tick",
-                    "args": {},
-                    "proposer_node_id": "scheduler",
-                },
-                priority=TaskPriority.HIGH,
-                mode_allowlist=["normal", "sleep"],
-                enabled=enabled and settings.agent_immune_enabled,
-                max_consecutive_failures=2,
-                description="Governed internal-agent immune proposal tick",
-                resource_profile={
-                    "resource_class": "background_llm",
-                    "uses_llm": True,
-                    "uses_gpu": False,
-                },
-            ),
-        ]
+def _scheduler_seed_configs():
+    return scheduler_seed_configs(
+        settings=get_scheduler_settings(),
+        security_immune_agent_provider=get_security_immune_agent,
+        logger=logger,
     )
-    try:
-        policy = get_security_immune_agent().policy
-        configs.append(
-            SchedulerTaskConfig(
-                task_id="security_immune_periodic",
-                trigger_mode=TriggerMode.INTERVAL,
-                trigger_config={"seconds": int(policy.scan_interval_seconds)},
-                intent_template={
-                    "skill_name": "security_immune_periodic",
-                    "args": {},
-                    "proposer_node_id": "scheduler",
-                },
-                priority=TaskPriority.HIGH,
-                mode_allowlist=["normal", "sleep"],
-                enabled=enabled and bool(policy.enabled),
-                max_consecutive_failures=2,
-                description="Governed internal security immune scan",
-                resource_profile={
-                    "resource_class": "security",
-                    "uses_llm": False,
-                    "uses_gpu": False,
-                },
-            )
-        )
-    except Exception:
-        logger.warning("SCHEDULER_SECURITY_IMMUNE_SEED_DEGRADED", exc_info=True)
-    deduplicated: dict[str, SchedulerTaskConfig] = {}
-    for config in configs:
-        config.enabled = bool(config.enabled and enabled)
-        deduplicated.setdefault(config.task_id, config)
-    return list(deduplicated.values())
-
-
-def _scheduler_handler_result(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        result = dict(value)
-    else:
-        result = {}
-        for method_name in ("as_dict", "to_dict", "model_dump"):
-            method = getattr(value, method_name, None)
-            if callable(method):
-                candidate = method()
-                if isinstance(candidate, dict):
-                    result = dict(candidate)
-                    break
-    if not result:
-        result = {"detail": str(value or "")[:500]}
-    raw = str(result.get("status") or "SUCCEEDED").strip().upper()
-    result["status"] = {
-        "OK": "SUCCEEDED",
-        "SUCCESS": "SUCCEEDED",
-        "DONE": "SUCCEEDED",
-        "ACCEPTED": "SUCCEEDED",
-        "APPLIED": "SUCCEEDED",
-        "COMMITTED": "SUCCEEDED",
-        "REPLAYED": "SUCCEEDED",
-        "ERROR": "FAILED",
-        "REJECTED": "BLOCKED",
-        "CONFLICT": "BLOCKED",
-        "DEFERRED": "DEGRADED",
-    }.get(raw, raw)
-    if result["status"] not in {
-        "EXECUTED",
-        "SUCCEEDED",
-        "FAILED",
-        "BLOCKED",
-        "DEGRADED",
-        "SKIPPED",
-    }:
-        result["status"] = "DEGRADED"
-        result.setdefault("reason_code", f"SCHEDULER_HANDLER_STATUS_{raw or 'UNKNOWN'}")
-    return result
-
-
-def _compose_host_runtime_context(
-    *,
-    task_runtime: ProcessTaskRuntimeContainer,
-    ledger: Any,
-    embodiment_runtime: Any,
-    environment_observation_provider: Callable[..., Mapping[str, Any]],
-) -> RuntimeContextApplicationService:
-    """Build the sole app-local World/Scene/Intent/Guardian object graph.
-
-    The durable Host embodiment lease is reused as the write fence for every
-    context journal.  Construction is deliberately fail-closed: routes are not
-    exposed when the lease, schema, source verifier or Intent authorities are
-    unavailable.
-    """
-
-    runtime_scope_id = str(
-        getattr(embodiment_runtime, "runtime_scope_id", "") or ""
-    ).strip()
-    if not runtime_scope_id:
-        raise RuntimeError("HOST_RUNTIME_CONTEXT_SCOPE_UNAVAILABLE")
-
-    def runtime_authority_provider() -> dict[str, Any]:
-        renew = getattr(embodiment_runtime, "renew_authority", None)
-        if not callable(renew):
-            raise RuntimeError("HOST_RUNTIME_CONTEXT_AUTHORITY_UNAVAILABLE")
-        claim = renew()
-        if not isinstance(claim, Mapping):
-            raise RuntimeError("HOST_RUNTIME_CONTEXT_AUTHORITY_INVALID")
-        return {**dict(claim), "runtime_scope_id": runtime_scope_id}
-
-    event_store = getattr(task_runtime, "event_store", None)
-    command_repository = getattr(task_runtime, "command_repository", None)
-    policy_version = "natsume.intent-arbiter.production.v1"
-    policy_identity = IntentPolicyIdentityV1(
-        policy_ref="policy://intent-arbiter/production-v1",
-        policy_digest=hashlib.sha256(policy_version.encode("utf-8")).hexdigest(),
-    )
-    observation_journal = SQLiteWorldObservationJournal(
-        task_runtime.canonical_db_path,
-        runtime_scope_id=runtime_scope_id,
-        runtime_authority_provider=runtime_authority_provider,
-        source_event_verifier=RuntimeEventWorldSourceVerifier(event_store),
-    )
-    composition = build_runtime_context_composition(
-        event_store=event_store,
-        observation_port=observation_journal,
-        runtime_scope_id=runtime_scope_id,
-        runtime_authority_provider=runtime_authority_provider,
-        intent_policy_identity=policy_identity,
-        intent_authority_port_factory=(
-            lambda scene_resolver: ProductionIntentAuthorityPort(
-                command_repository=command_repository,
-                scene_resolver=scene_resolver,
-                governor_ledger=ledger,
-                policy_identity=policy_identity,
-            )
-        ),
-        environment_observation_provider=environment_observation_provider,
-    )
-    return RuntimeContextApplicationService(composition)
-
-
-def _runtime_environment_observation_provider(
-    mode_transition_service: Any,
-) -> Callable[..., Mapping[str, Any]]:
-    """Freeze one app-local environment reader for the Runtime Context graph.
-
-    Time comes from the deterministic environment snapshot.  Activity comes
-    from the exact ``ModeTransitionService`` instance created by this ASGI
-    lifespan; the returned closure never looks up a process-global service.
-    """
-
-    status_reader = getattr(mode_transition_service, "get_current_status", None)
-    if not callable(status_reader):
-        raise RuntimeError("HOST_RUNTIME_CONTEXT_MODE_AUTHORITY_UNAVAILABLE")
-
-    def observe(*, now_ms: int) -> Mapping[str, Any]:
-        from host_brain.runtime.environment_state import (  # noqa: PLC0415
-            build_environment_snapshot,
-        )
-
-        snapshot = dict(build_environment_snapshot(now_ms=int(now_ms)))
-        raw_status = status_reader()
-        if not isinstance(raw_status, Mapping):
-            raise RuntimeError("HOST_RUNTIME_CONTEXT_MODE_AUTHORITY_INVALID")
-        mode = str(raw_status.get("sys_mode") or "").strip().lower()
-        activity = {
-            "normal": "NORMAL",
-            "focus": "FOCUS",
-            "gaming": "GAMING",
-            "sleep": "SLEEP",
-            "maintenance": "MAINTENANCE",
-            "locked": "MAINTENANCE",
-        }.get(mode)
-        if activity is None:
-            raise RuntimeError("HOST_RUNTIME_CONTEXT_MODE_UNSUPPORTED")
-        snapshot["activity_state"] = activity
-        snapshot["mode_identity"] = mode
-        return snapshot
-
-    return observe
 
 
 def create_app() -> FastAPI:

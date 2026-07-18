@@ -141,6 +141,10 @@ def _contracts(route: str = "chat", target: str = "surface_reply"):
         "lease_id": "lease-workers-1",
         "lease_owner_id": "worker-governed-workers",
         "fencing_token": 1,
+        # Production NodeExecutionRuntime freezes this from the canonical
+        # TaskNode.  Keep the direct worker fixture on the same fail-closed
+        # execution-context contract.
+        "node_risk_level": 3,
         "worker_route": f"{route}:{target}",
         "node_input_refs": ["artifact://input/one"],
         "node_grant_ref": "governor-grant://child/node",
@@ -197,6 +201,7 @@ async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_comm
     assert terminal["audit_refs"]["buffered_pre_acceptance_events"] == 1
     assert executor.inputs[0].objective == "answer from frozen input"
     assert executor.inputs[0].input_refs == ("artifact://input/one",)
+    assert executor.inputs[0].node_risk_level == 3
     assert grants.calls[0]["grant_ref"] == "governor-grant://child/node"
     mutated_pack = dict(executor.inputs[0].input_pack)
     mutated_pack["user_message"] = "tampered"

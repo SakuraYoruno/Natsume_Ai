@@ -4,7 +4,7 @@ import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
-from host_brain.app import asgi, http_hooks
+from host_brain.app import asgi, host_life_scheduler_wiring, http_hooks
 from host_brain.app import process_runtime_shutdown_adapter
 from host_brain.scheduler import scheduling_center
 from host_brain.tribe.tribe_state import TribeStateRegistry
@@ -170,7 +170,9 @@ def test_life_tick_handler_only_reads_version_and_submits_one_typed_command(
         "authority_principal_id": "scheduler-clock",
     }
 
-    handler_source = inspect.getsource(asgi._submit_life_tick_command)
+    handler_source = inspect.getsource(
+        host_life_scheduler_wiring.submit_life_tick_command
+    )
     assert "LifeCommand(" in handler_source
     assert handler_source.count("life_command_service.submit_next(") == 1
     assert handler_source.index("get_receipt(") < handler_source.index("submit_next(")

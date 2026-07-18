@@ -610,6 +610,13 @@ async def test_acceptance_effect_dispatcher_reopens_preview_before_handler(
     def handler(payload):
         seen.append(dict(payload))
         assert "_action_preview_context" not in payload
+        proof = payload["_action_preview_terminal_proof"]
+        boundary = dict(proof["boundary"])
+        assert "_action_preview_terminal_proof" not in boundary["action_args"]
+        # Exercise the same third reopen performed by the terminal
+        # Gateway/Edge transport.  The boundary must remain independent from
+        # the proof injected into the handler payload.
+        service.require_execution(event_id=proof["event_id"], **boundary)
         return {"receipt_ref": "gateway-receipt://delivery-alpha"}
 
     dispatcher = AcceptanceEffectDispatcher(

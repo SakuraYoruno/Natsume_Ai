@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from types import SimpleNamespace
 import sqlite3
 import time
@@ -8,9 +9,11 @@ import time
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.app.host_runtime_context_wiring import compose_host_runtime_context
 from host_brain.app.governed_task_adapter import (
     build_governed_host_runtime as _build_governed_host_runtime,
 )
+from host_brain.channels.embodiment import HostEmbodimentRuntime
 from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
 
 
@@ -30,11 +33,21 @@ from host_brain.app.production_authority import verify_durable_production_author
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.task_runtime import build_process_task_runtime_container
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
+from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
+from host_brain.orchestration.node_grants import DurableNodeGrantVerifier
+from host_brain.persistence.embodiment_outbox_repository import (
+    EmbodimentOutboxRepository,
+)
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.runtime.action_preview_resolver import (
+    ProductionActionPreviewAuthorityResolver,
+)
+from host_brain.runtime.environment_state import build_environment_snapshot
 from host_brain.secure_ingress import ClaimStatus, IngressAuditEvent
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
+from natsume_contracts.edge.transport_v1 import EdgeTransportResult
 from natsume_contracts.task import HostCommandSurface
 
 
@@ -184,6 +197,30 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
 
     async def frozen_chat(**kwargs):  # noqa: ANN003
         chat_calls.append(dict(kwargs))
+        trace_stage_meta = dict(kwargs["trace_stage_meta"])
+        model_guard = dict(trace_stage_meta.get("governed_model_budget") or {})
+        assert model_guard
+        measurement_identity = hashlib.sha256(
+            (
+                str(model_guard["budget_id"])
+                + "|"
+                + str(model_guard["attempt_id"])
+            ).encode("utf-8")
+        ).hexdigest()
+        trace_stage_meta["surface_model_attempt"] = {
+            "success": True,
+            "attempt_ids": [
+                f"model-attempt://sha256/{measurement_identity}"
+            ],
+            "budget_measurement": {
+                "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+                "measurement_ref": f"model-budget://sha256/{measurement_identity}",
+                "attempt_count": 1,
+                "retry_count": 0,
+                "token_count": 18,
+                "model_cost_micros": 27,
+            },
+        }
         yield {"phase": "DELTA", "done": False, "delta": "buffered"}
         yield {
             "phase": "COMMIT",
@@ -192,6 +229,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             "narrative": f"chat:{kwargs['sanitized_message']}",
             "route_type": "chat",
             "target_id": "surface_reply",
+            "audit_refs": {"trace_stage_meta": trace_stage_meta},
         }
 
     monkeypatch.setattr(
@@ -213,24 +251,34 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         frozen_skill_worker,
     )
 
-    async def frozen_gateway_delivery(**kwargs):  # noqa: ANN003
-        delivered_replies.append(dict(kwargs))
-        return {
-            "success": True,
-            "status": "SENT",
-            "latency_ms": 1,
-            "reply_text_len": len(str(kwargs.get("narrative") or "")),
-        }
+    async def frozen_gateway_transport(*, path, payload, timeout_ms):  # noqa: ANN001
+        delivered_replies.append(
+            {
+                "request_id": str(payload.get("request_id") or ""),
+                "payload": dict(payload),
+                "path": path,
+                "timeout_ms": timeout_ms,
+            }
+        )
+        return EdgeTransportResult(
+            success=True,
+            status="SENT",
+            reason_code=None,
+            detail="frozen terminal network transport accepted",
+            event={"delivery_id": str(payload.get("delivery_id") or "")},
+            latency_ms=1,
+        )
 
     monkeypatch.setattr(
-        "host_brain.input_runtime.gateway_delivery._deliver_gateway_reply",
-        frozen_gateway_delivery,
+        "host_brain.channels.edge_transport._submit_gateway_payload",
+        frozen_gateway_transport,
     )
 
     db_path = tmp_path / "universal-host-runtime.sqlite3"
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
     container = None
     runtime = None
+    embodiment_runtime = None
     life = None
     ingress_store = None
     mismatch_ingress_store = None
@@ -262,6 +310,50 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             token_service=token_service,
             registry=registry,
         )
+
+        class UnusedEmbodimentCommandPort:
+            async def submit(self, _command):  # noqa: ANN001
+                raise AssertionError(
+                    "the governed Host integration must not bypass Acceptance effects"
+                )
+
+        # Reuse the same production composition boundary as the Host ASGI
+        # lifespan.  The real durable embodiment lease fences World, Scene and
+        # Guardian writes; ActionPreview then reopens the canonical
+        # HostCommand/TaskGraph, active node grant and frozen Runtime Context.
+        # This keeps the positive Gateway path production-equivalent instead
+        # of weakening the fail-closed legacy-effect quarantine.
+        embodiment_runtime = HostEmbodimentRuntime(
+            repository=EmbodimentOutboxRepository(db_path),
+            worker_id="gr05-universal-runtime-context-owner",
+            command_port=UnusedEmbodimentCommandPort(),
+            authority_lease_ms=600_000,
+        )
+        runtime_context_application = compose_host_runtime_context(
+            task_runtime=container,
+            ledger=ledger,
+            embodiment_runtime=embodiment_runtime,
+            environment_observation_provider=(
+                lambda *, now_ms: {
+                    **build_environment_snapshot(now_ms=now_ms),
+                    "activity_state": "NORMAL",
+                    "mode_identity": "normal",
+                }
+            ),
+        )
+        action_preview_service = ActionPreviewService(
+            runtime_event_store=runtime_context_application.composition.event_store,
+            guardian=runtime_context_application.composition.guardian,
+            authority_resolver=ProductionActionPreviewAuthorityResolver(
+                command_repository=container.command_repository,
+                task_store=container.task_store,
+                node_grant_verifier=DurableNodeGrantVerifier(
+                    ledger=ledger,
+                    review_store=container.review_continuation_store,
+                ),
+                runtime_context_application=runtime_context_application,
+            ),
+        )
         runtime = build_governed_host_runtime(
             task_runtime_container=container,
             ledger=ledger,
@@ -275,6 +367,11 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             semantic_recaller=None,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="gr05-universal-owner",
+            runtime_context_application=runtime_context_application,
+            degradation_capability_port=(
+                runtime_context_application.composition.guardian
+            ),
+            action_preview_service=action_preview_service,
         )
         await runtime.activate()
 
@@ -465,6 +562,17 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             projections = conn.execute(
                 "SELECT COUNT(*) FROM task_runtime_worker_projection"
             ).fetchone()[0]
+            chat_projection_payloads = [
+                json.loads(row[0])
+                for row in conn.execute(
+                    """
+                    SELECT projection_json
+                    FROM task_runtime_worker_projection
+                    WHERE route_type = 'chat'
+                    ORDER BY created_ts_ms, projection_id
+                    """
+                ).fetchall()
+            ]
             legacy_delegate_logs = conn.execute(
                 """
                 SELECT COUNT(*) FROM skill_exec_log
@@ -501,6 +609,21 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         # node now does so as well, giving every accepted route the same B5
         # result-authority journal.
         assert projections == 5
+        assert len(chat_projection_payloads) == 2
+        assert all(
+            "governed_model_budget"
+            not in projection["audit_refs"]["trace_stage_meta"]
+            for projection in chat_projection_payloads
+        )
+        assert all(
+            projection["budget_usage"]["measurements"]
+            == {
+                "model_cost_micros": 27,
+                "retry_count": 0,
+                "token_count": 18,
+            }
+            for projection in chat_projection_payloads
+        )
         assert legacy_delegate_logs == 0
         assert acceptance_effects == [
             ("conversation.user_turn", "GRAPH", "COMMITTED", 3),
@@ -532,6 +655,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             ingress_store.close()
         if runtime is not None:
             await runtime.aclose()
+        if embodiment_runtime is not None:
+            embodiment_runtime.close()
         if container is not None:
             await container.aclose()
         if life is not None:

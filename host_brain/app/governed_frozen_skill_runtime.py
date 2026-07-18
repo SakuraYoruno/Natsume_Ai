@@ -36,7 +36,10 @@ from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
     context_pack_digest_from_work_order,
 )
-from host_brain.runtime.action_preview_resolver import build_node_authority_context
+from host_brain.runtime.action_preview_resolver import (
+    action_preview_scene_identity,
+    build_node_authority_context,
+)
 from host_brain.task_runtime.worker_budget_usage import (
     build_worker_budget_usage,
     stable_worker_usage_id,
@@ -366,7 +369,9 @@ class _FrozenSkillWorker:
                 "risk_level": risk_level,
                 "action_args": dict(execution_args),
                 "context_pack_digest": context_pack_digest_from_work_order(work_order),
-                "scene_identity": _mapping(pack.get("scene_identity_v2")),
+                "scene_identity": action_preview_scene_identity(
+                    _mapping(pack.get("scene_identity_v2"))
+                ),
                 "task_graph_id": str(execution_context.get("graph_id") or ""),
                 "graph_revision": int(execution_context.get("graph_revision") or 0),
                 "task_node_id": str(execution_context.get("node_id") or ""),

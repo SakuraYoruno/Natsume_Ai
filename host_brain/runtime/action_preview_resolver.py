@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 from typing import Any
 
 from host_brain.runtime.action_preview_authority import (
@@ -37,6 +38,8 @@ ACTION_PREVIEW_AUTHORITY_BINDING_SCHEMA = (
     "Natsume.action_preview.authority_binding.v1"
 )
 EFFECT_DESCRIPTOR_SCHEMA = "Natsume.action_preview.effect_descriptor.v1"
+_SCENE_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_ACTION_PREVIEW_SCENE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _canonical(value: Any) -> str:
@@ -85,6 +88,28 @@ def _mapping(value: Any, field: str) -> dict[str, Any]:
         return json.loads(_canonical(dict(value)))
     except json.JSONDecodeError as exc:  # pragma: no cover - canonical already parsed
         raise ActionPreviewAuthorityError(ACTION_PREVIEW_INVALID, f"{field} is invalid") from exc
+
+
+def action_preview_scene_identity(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Project the canonical Scene identity into the Preview digest schema.
+
+    ``SceneDecisionV2`` intentionally stores its digest as 64 lowercase hex,
+    while ActionPreview receipts use the repository-wide ``sha256:`` digest
+    form.  This is a representation conversion only: the production resolver
+    still reopens the WorkOrder and compares the complete projected identity
+    byte-for-byte before issuing a receipt.
+    """
+
+    scene = _mapping(value, "scene_identity")
+    digest = str(scene.get("decision_digest") or "").strip().lower()
+    if _SCENE_DIGEST.fullmatch(digest):
+        digest = "sha256:" + digest
+    elif _ACTION_PREVIEW_SCENE_DIGEST.fullmatch(digest) is None:
+        raise ActionPreviewAuthorityError(
+            ACTION_PREVIEW_INVALID,
+            "scene_identity.decision_digest is invalid",
+        )
+    return {**scene, "decision_digest": digest}
 
 
 def _route_binding(work_order: Any, *, node_id: str) -> tuple[str, str]:
@@ -665,7 +690,9 @@ class ProductionActionPreviewAuthorityResolver:
             raise ActionPreviewAuthorityError(ACTION_PREVIEW_DRIFT, "caller node grant differs from canonical authority")
         pack = dict(getattr(work_order, "input_pack", {}) or {})
         canonical_context = context_pack_digest_from_work_order(work_order)
-        canonical_scene = _mapping(pack.get("scene_identity_v2"), "scene_identity_v2")
+        canonical_scene = action_preview_scene_identity(
+            _mapping(pack.get("scene_identity_v2"), "scene_identity_v2")
+        )
         expected = (
             canonical_action,
             canonical_scope,
@@ -784,7 +811,9 @@ class ProductionActionPreviewAuthorityResolver:
         preview = _mapping(payload.get("_action_preview_context"), "Acceptance Effect preview context")
         pack = dict(getattr(work_order, "input_pack", {}) or {})
         canonical_context = context_pack_digest_from_work_order(work_order)
-        canonical_scene = _mapping(pack.get("scene_identity_v2"), "scene_identity_v2")
+        canonical_scene = action_preview_scene_identity(
+            _mapping(pack.get("scene_identity_v2"), "scene_identity_v2")
+        )
         lineage_grant_ref = _text(preview.get("node_grant_ref"), "Acceptance Effect node_grant_ref")
         lineage_grant_digest = _text(preview.get("node_grant_digest"), "Acceptance Effect node_grant_digest")
         supplied_grant = _mapping(values["node_grant"], "node_grant")
@@ -1120,5 +1149,6 @@ __all__ = [
     "NODE_AUTHORITY_SCHEMA",
     "ProductionActionPreviewAuthorityResolver",
     "ResolvedActionPreviewAuthority",
+    "action_preview_scene_identity",
     "build_node_authority_context",
 ]
