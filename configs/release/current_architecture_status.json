@@ -1173,7 +1173,7 @@
         "host_brain/audit/migrations/0108_evolution_lab_ledger.sql",
         "tests/integration/test_ne04_evolution_lab_ledger.py"
       ],
-      "boundary": "ExperimentSpec, run, report and proposal are append-only and digest-bound; proposals require Review and cannot influence production. EvolutionLabRunner only accepts DatasetReader, restricted ModelPort, Verifier and ExperimentRepository and rejects production authority ports. Independent verifier, redaction receipts, exact replay worker, production composition and activation/rollback remain missing."
+      "boundary": "ExperimentSpec, run, report, RedactionReceipt and proposal are append-only and digest-bound; proposals require Review and cannot influence production. EvolutionLabRunner only accepts DatasetReader, restricted ModelPort, Verifier and ExperimentRepository and rejects production authority ports. Independent verifier, exact replay worker, production composition and activation/rollback remain missing."
     },
     "counterfactual_analysis": {
       "status": "PARTIAL_NE04_CONTRACT_AND_DURABLE_REPORT",
@@ -1184,8 +1184,38 @@
       ],
       "boundary": "CounterfactualPair is persisted only inside an immutable ExperimentReport; it has no production writer or promotion authority."
     },
-    "capability_maturity": {"status": "PARTIAL", "production_policy_default": "DISABLED"},
-    "skill_compiler": {"status": "MISSING"},
+    "skill_supply_chain": {
+      "status": "PARTIAL_NE05_EVIDENCE_GATED_LIFECYCLE",
+      "evidence_refs": [
+        "host_brain/skills/supply_chain.py",
+        "host_brain/skills/supply_chain_service.py",
+        "host_brain/skills/skill_lifecycle.py",
+        "host_brain/persistence/supply_chain_repository.py",
+        "host_brain/persistence/skill_lifecycle_repository.py",
+        "host_brain/audit/migrations/0109_skill_lifecycle.sql",
+        "tests/unit/test_ne05_skill_lifecycle.py"
+      ],
+      "boundary": "Signed intake still stops at quarantine/stage and never imports external code. A staged record now requires immutable Lab, Review, SBOM, signature, sandbox and rollback evidence before the fenced repository activation; activation, degradation and rollback emit append-only lifecycle receipts. Runtime lookup is content-addressed and active-only. External bundle execution, provider sandbox canary and physical import remain outside this slice."
+    },
+    "capability_maturity": {
+      "status": "PARTIAL_NE05_PRODUCTION_FAIL_CLOSED",
+      "production_policy_default": "ENABLED_FAIL_CLOSED",
+      "evidence_refs": [
+        "host_brain/governor/capability_policy.py",
+        "host_brain/governor/decision.py",
+        "host_brain/composition/process_runtime_services.py",
+        "tests/contract/test_nle_capability_maturity_contract.py"
+      ],
+      "boundary": "Production IntentDecisionEngine composition enables the restrict-only maturity adapter explicitly; missing or forged scorecards resolve to maximum risk. Direct unit construction remains opt-in compatible, and durable promotion/degradation activation still requires NE-05 lifecycle evidence and Review."
+    },
+    "skill_compiler": {
+      "status": "PARTIAL_NE05_DETERMINISTIC_DRAFT",
+      "evidence_refs": [
+        "host_brain/skills/skill_compiler.py",
+        "tests/unit/test_ne05_skill_compiler.py"
+      ],
+      "boundary": "Markdown/API/script/accepted-trace metadata compiles to a deterministic SkillDraftV1 with contracts, verifier, test vectors, budget and rollback metadata. The compiler never imports or activates source; SBOM/signature request and lifecycle activation are separate guarded stages."
+    },
     "experience_feedback_pipeline": {
       "status": "PARTIAL_BROKEN_PATH",
       "reason": "Prefrontal calls PersonaGrowthTracker.on_interaction_cycle with arguments that do not match its signature; the TypeError is swallowed."

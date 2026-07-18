@@ -44,6 +44,7 @@ class IntentDecisionEngine:
         registry: Any | None = None,
         policy_cache: GovernorPolicyCache | None = None,
         capability_scorecard_provider: Any | None = None,
+        capability_maturity_enabled: bool | None = None,
     ) -> None:
         self.ledger = ledger if ledger is not None else SQLiteLedger(":memory:")
         self.token_service = token_service
@@ -54,6 +55,7 @@ class IntentDecisionEngine:
         self._tier_policy = (
             GovernorTierPolicy(
                 CapabilityGovernorPolicyAdapter(
+                    enabled=capability_maturity_enabled,
                     scorecard_provider=capability_scorecard_provider,
                 )
             )
