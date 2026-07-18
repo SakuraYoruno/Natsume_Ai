@@ -1168,11 +1168,12 @@
       "evidence_refs": [
         "host_brain/evolution_lab/contracts.py",
         "host_brain/evolution_lab/policy.py",
+        "host_brain/evolution_lab/runner.py",
         "host_brain/persistence/evolution_lab_ledger_repository.py",
         "host_brain/audit/migrations/0108_evolution_lab_ledger.sql",
         "tests/integration/test_ne04_evolution_lab_ledger.py"
       ],
-      "boundary": "ExperimentSpec, run, report and proposal are append-only and digest-bound; proposals require Review and cannot influence production. Isolated runner, independent verifier, redaction receipts, exact replay worker and activation/rollback remain missing."
+      "boundary": "ExperimentSpec, run, report and proposal are append-only and digest-bound; proposals require Review and cannot influence production. EvolutionLabRunner only accepts DatasetReader, restricted ModelPort, Verifier and ExperimentRepository and rejects production authority ports. Independent verifier, redaction receipts, exact replay worker, production composition and activation/rollback remain missing."
     },
     "counterfactual_analysis": {
       "status": "PARTIAL_NE04_CONTRACT_AND_DURABLE_REPORT",
