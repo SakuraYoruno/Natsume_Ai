@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-18",
   "source_baseline": {
-    "dev_commit": "7e5bfcde1",
+    "dev_commit": "bd1584e488c5696fb090c80be5934c38b27f04fd",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
     "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-03",
+  "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "PRODUCTION_CUTOVER_IMPLEMENTED_LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES",
-  "next_wave": "NE-01",
+  "active_wave_detail": "MIXED_RESPONSIBILITY_AUTHORITY_SPLIT_FIRST_SLICE_PASSED_SEVEN_FINDINGS_REMAIN",
+  "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -24,6 +24,28 @@
     "pull_request_body_transport": "MARKDOWN_BODY_FILE_REQUIRED"
   },
   "active_wave_local_validation": {
+    "status": "TARGETED_SLICE_PASSED_PROGRAM_INCOMPLETE",
+    "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
+    "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+    "slice": "NE01_MIXED_RESPONSIBILITY_AUTHORITY_SPLIT_1",
+    "test_batches": {
+      "combined_focused_regression_passed": 51,
+      "host_command_repository_regression_passed": 21,
+      "review_continuation_regression_passed": 91,
+      "scheduler_regression_passed": 32,
+      "governed_host_adapter_unit_passed": 42,
+      "governed_host_adapter_integration_passed": 38
+    },
+    "completed_large_file_splits": [
+      "host_brain/app/governed_task_adapter.py",
+      "host_brain/persistence/host_command_repository.py",
+      "host_brain/persistence/review_continuation_store.py",
+      "host_brain/scheduler/governed_runtime.py"
+    ],
+    "remaining_mixed_file_gate_finding_count": 7,
+    "production_enablement_changed": false
+  },
+  "completed_ne03_local_validation": {
     "status": "LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -1070,14 +1092,17 @@
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PROVEN_FOR_CANON_TOOL_BOND_OBS_LIFECYCLE_PROJECTION_STATS_5_WEB_UI_GETS_7_REMAINING_MOUNTED_GETS_LIFE_BODY_COLD_SOURCE_VIEW_AND_SELECTED_RESPONSE_CACHES",
       "remaining_locator_boundary": "D6-D8 app-local projection, Direct Skill dependency snapshots and HostEmbodimentRuntime authority remain valid. NE-03 now requires an exact terminal ActionPreview: Life VTS/MateEngine and Gateway/Edge paths with canonical proof may reach the durable queue, while reply-performance, Gateway voice, chat cues and other legacy direct calls without Acceptance-to-Embodiment derivation fail closed pending NE-01. The loopback TCP/HMAC/SQLite receipt-query and restart replay do not prove a deployed Edge or physical effect. Underlying Host sources, Chat/Delegate and most Worker authorities remain process-shared. ProcessServiceContainer still has 60 fields and approximately 53 mutable service references after excluding locks and application_ports; full Host/Worker typed composition, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. Life Body source failures remain typed SOURCE_UNAVAILABLE; health remains DEGRADED. This slice does not complete NE-01 or the full architecture.",
-      "mixed_file_gate": "RED_4_EXISTING_UNCLASSIFIED_OVER_1500",
+      "mixed_file_gate": "RED_7_CURRENT_FINDINGS_AFTER_FIRST_FOUR_SPLITS",
       "mixed_file_gate_findings": [
-        "host_brain/app/governed_task_adapter.py:1539",
-        "host_brain/persistence/host_command_repository.py:1916",
-        "host_brain/persistence/review_continuation_store.py:1710",
-        "host_brain/scheduler/governed_runtime.py:1535"
+        "host_brain/app/asgi.py:2091",
+        "host_brain/app/obs_routes_stats_input_humanoid.py:1512",
+        "host_brain/observability/degradation_state.py:2029>1900",
+        "host_brain/orchestration/node_grants.py:1528",
+        "host_brain/orchestration/planning_graph_compiler.py:1562",
+        "host_brain/runtime/intent_admission.py:1812",
+        "host_brain/runtime/runtime_guardian.py:1945"
       ],
-      "effect_slice_structure_boundary": "The focused Effect, Operation-checkpoint and Workspace fencing modules are below 1,500 lines; task_repository.py is 4,358 lines and no policy allowlist was added. This proves only that the focused slices introduced no new large-file violation. The repository-wide mixed-file gate remains red on the four pre-existing unclassified files above.",
+      "effect_slice_structure_boundary": "The first NE-01 split moved frozen Host worker/contracts, HostCommand codec/types, Review binding/codec, and Scheduler command service into focused modules. The former four findings are now below 1,500 lines without an allowlist. A fresh whole-repository scan exposes seven remaining findings listed above, so the mixed-file gate remains red and NE-01 remains incomplete.",
       "cleanup_progress": {
         "container_fields": 60,
         "mutable_service_references_excluding_locks_and_application_ports": 53,

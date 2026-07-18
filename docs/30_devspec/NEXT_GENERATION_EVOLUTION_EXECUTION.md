@@ -5,8 +5,8 @@
 
 版本：v3.1
 日期：2026-07-18
-状态：`NE-03_IN_PROGRESS / PROGRAM_INCOMPLETE`
-修订执行基线：`origin/dev@7e5bfcde1`；#80～#83 仅作为基础资产，#84 必须重做后才能合并
+状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+修订执行基线：`origin/dev@bd1584e488c5696fb090c80be5934c38b27f04fd`；#84 已按真实边界重做并合入，NE-03 证据保留为已完成波次证据
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
@@ -113,6 +113,8 @@ NE-03 先修复已打开的 #84，随后回到 NE-01 清除通用执行主链缺
 
 当前已完成切片：
 
+- 首批混合职责 authority 拆分：`governed_task_adapter.py` 只保留 Host runtime/编排外壳，Frozen Skill worker 与冻结合同构造迁入 focused 模块；`host_command_repository.py` 只保留 SQLite UoW，严格 codec 与稳定类型迁出；Review continuation 的 Subject/Intent authority 与 row codec 分离；Scheduler command service 与 occurrence Task Runtime 分离。四个原始文件分别降到 964、1495、1415、861 行，兼容导入保持不变；合并后定向回归 51 passed，另有 Host adapter、Review、Scheduler 与 HostCommand 独立回归。fresh 全仓 mixed-file Gate 不再报告这四项，但暴露 7 个当前 finding（ASGI、Obs input/humanoid stats、Degradation ceiling、Node Grant、Planning compiler、Intent admission、Guardian），因此 Gate 仍为 RED，生产开关没有变化；
+- 修复 `AdmittedTaskNode` 未冻结 `TaskNode.risk_level` 的真实断点；Scheduler/worker execution context 现在从 immutable admitted node 读取 1..5 风险等级，避免首次真实 worker 执行触发 `AttributeError`；
 - Persona 中央写入围栏、迁移专用审计入口、无副作用候选化及 `T-PERSONA-FENCE-01`；
 - Scheduler 真实 `WorkOrderV3` admission、Budget、child grant、Review、Verification、Acceptance、Receipt 与 replay；
 - Internal Agent 真实 `WorkOrderV3` admission、Secure Ingress principal、Budget、`delegate:agent_runtime` child grant、PRE/POST Review、Verification、Acceptance、Receipt 与 replay；
@@ -195,7 +197,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 #### Lane D：Composition 与 workspace
 
 - D0/W0/W1 已完成既定围栏；W2 在 Internal Agent 单路线接入 graph-bound Git worktree、heartbeat/handoff/takeover 和“启动 1 条 + 后台 backlog”的 cleanup continuation，并保持缺 secret 默认 fail closed。仍需受控 container/OS tenant、进程级取消、promotion/abandon、accepted checkpoint HEAD、Domain/Skill 全路线与真实 canary，不能把 `DIRECTORY_FENCE + worktree` 写成完整隔离；
-- mixed-file gate 未抬高 ceiling，但全仓仍因 `governed_task_adapter.py`、`host_command_repository.py`、`review_continuation_store.py`、`scheduler/governed_runtime.py` 四个既存 >1,500 行未分类文件为 RED；本次 `asgi.py` 已保持在 1,500 行以内。`DurableDagSchedulingRuntime` 当前 1,338 行，`coordinator.py` 268 行；新增 238 行 `AcceptedGraphFinalizationRuntime` 是 normal/restart/continuation 共用的 Graph+Effect completion boundary。Dag 调用矩阵现为 Store 9、Budget 9、Lifecycle 17、AcceptedFinalization 1、NodeProjection 13、NodeExecution 7、Settlement 4、Success 1、Review 4、Cancellation 1、Outbox 1 build/6 publish；不反向持有 Coordinator callback、不建新锁、不取得第二 persistence authority。它仍是临时 outer orchestrator，不能据此宣称 mixed-responsibility、历史 reconciliation 或一般恢复闭环完成；
+- mixed-file ceiling 与 allowlist 均未抬高。首批四个真实 authority 文件已拆到 1,500 行以下；fresh Gate 仍因 `asgi.py`、`obs_routes_stats_input_humanoid.py`、超过既有 ceiling 的 `degradation_state.py`、`node_grants.py`、`planning_graph_compiler.py`、`intent_admission.py`、`runtime_guardian.py` 七项为 RED。后续按“生命周期 helper、纯 codec/contract、command mixin”边界继续拆分，不能用新增 cohesive 例外封板。`DurableDagSchedulingRuntime` 仍是临时 outer orchestrator，不能据此宣称 mixed-responsibility、历史 reconciliation 或一般恢复闭环完成；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - D1 已完成 Canon/Tool/Bond 及其 OBS adapter 的 app-local ports；不得把该局部结果写成整个 OBS 或 ProcessServiceContainer 已去 locator；
@@ -267,7 +269,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 
 高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance Effect 使用 lifespan-owned Action Preview authority：receipt 只在重新打开 canonical Command/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene 与 Guardian 后签发，并在执行点再次重开；derived terminal 还递归重开 origin Attempt/Lease，受 typed descriptor 的 exact scope/args 投影限制。Scheduler Proactive 以 typed proof 和固定 request ID 贯穿真实 Edge push，遗留 EdgeCommandPusher 无生产 issuer 时保持隔离且不能通过注入关闭门禁。Acceptance surface 只放行其 effect 精确绑定的最小文本，`raw_extra`、媒体、二次回复及 voice/performance/avatar 变换不能借同一 receipt 执行；公开具身 submit/enqueue 无 exact proof 时在端口前失败，durable outbox claim 后仅私有 submitter 可执行。终端正向覆盖 Acceptance surface Gateway 与 Scheduler-derived Life Edge/Gateway/VTS/MateEngine；旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和尚未进入 Governed Operator TaskGraph 的 37 个直写命令隔离失败。这是安全封口，缺正向 TaskGraph 路径仍留给 NE-01。Guardian 是 Host 生命周期内 health/heartbeat 和已切流高风险前门的 app-local durable owner，关闭时解绑进程共享 broker；旧 degradation 仅保留显式兼容 adapter，不再是这些生产前门的默认 authority。0113 为 Host Service Catalog 建立 append-only operation/receipt/head 与 coordinator fence，生产启动默认以 ENFORCE 为目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，并关闭中间 listener。Pending health 必须 exact 绑定 operation/snapshot/stage/candidate，`REGISTERED` 崩溃按同 operation ID 恢复，stop failure 保持待对账而不伪造 rollback；非法 event/status、terminal-first、stage/rank 或 runtime-scope/activation identity 漂移、rollback-ref replay drift、stage skip/regression 和失去 Host identity均由 Store 与 SQLite 双重拒绝。
 
-本波仍是 `NE-03_IN_PROGRESS`，不得越级为整体闭环：#84 的定向本地 Gate 已通过并由最终 HEAD artifact 路径绑定；长周期目标尚无独立 durable owner，Bond 原始证据仍由现有上游投影提供，Windows 后台优雅停止、生产多实例部署 canary 与 NE-07 真实 Docker 全栈均未验收。Operator 的 37 个旧直写入口在 NE-01 提供 Governed Operator TaskGraph 前保持失败关闭，不得把“已阻断”写成“功能已迁移”。
+NE-03 已按边界合入，当前波次为 `NE-01_IN_PROGRESS`，不得越级为整体闭环：首批职责拆分与 risk-level 断点修复不改变 atomic/fan-out/cancellation 的默认关闭状态，也没有迁移 Skill、Internal、Scheduler 管理面或 Operator 的旧执行旁路。Operator 的 37 个旧直写入口在 Governed Operator TaskGraph 到位前继续失败关闭；Windows 后台优雅停止、生产多实例 canary 与 NE-07 真实 Docker 全栈均未验收。
 
 完成条件：至少覆盖架构重构、调试、研究、闲聊、深夜、用户烦躁、游戏低打扰和发布维护八类场景；所有约束保持“只收紧、不覆盖用户目标”；故障进入/恢复可回放。
 

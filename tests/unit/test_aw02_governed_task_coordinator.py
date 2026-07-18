@@ -616,7 +616,7 @@ def _application(
     return GovernedCommandApplication(command_repository=_Repository(), coordinator=coordinator)
 
 
-def test_admitted_execution_preserves_explicit_result_authority() -> None:
+def test_admitted_execution_preserves_result_and_node_risk_authority() -> None:
     command, _, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
 
     admitted = AdmittedExecution.from_contracts(
@@ -627,6 +627,7 @@ def test_admitted_execution_preserves_explicit_result_authority() -> None:
 
     assert admitted.result_node_id == "node-one"
     assert admitted.for_node("node-one").result_node_id == "node-one"
+    assert admitted.active_node.risk_level == 1
 
 
 @pytest.mark.asyncio
