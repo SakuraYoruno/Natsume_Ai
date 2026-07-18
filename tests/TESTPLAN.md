@@ -220,6 +220,14 @@
 - T-NLE-23：Capability/Health/Identity/Security Lab UI 不提供自动升级或未审批身份变更，不泄漏私密正文；非 Lab 模式不暴露可执行 Pentest 高风险入口。
 - T-NLE-24：稳定测试、迁移、重启、SSE、故障注入、canary/drain 和 rollback drill 全部产生可审计 Seal 证据。
 
+### NE-03 World / Scene / Intent / Guardian
+
+- T-NE03-CONTEXT-01：0111 Observation writer 绑定 Host lease 与 canonical source verifier；SQLite 原子分配 workspace/subject revision，并覆盖 exact replay/drift、双 writer、captured head 截断、物理行漂移、future/non-monotonic time、伪造/重复 expiry、expired digest reactivation、重启与超期未 transition fail-closed。
+- T-NE03-SCENE-01：Scene 只消费 app-local typed Guardian snapshot；同一 World/context/Guardian 返回相同 revision/digest，重复读取不追加，变更严格推进；覆盖八场景、1001+ replay、并发 CAS、旧 lease takeover fencing、fingerprint/digest/authority lineage 与 0112 schema drift。
+- T-NE03-INTENT-01：IntentAuthorityPort 对 principal、goal、TaskGraph/node、ContextPack、Scene、action、Grant、policy 与全量约束返回短时效 typed attestation；过期/撤销/跨 principal Grant、任一 binding drift、约束遗漏/冲突和 detached arbitration 均 fail-closed，结果固定 `execution_authorized=false`。
+- T-NE03-GUARDIAN-01：RuntimeGuardian 无 module-global singleton；0112 在 append 同一 SQLite 事务校验 Host scope/owner/lease/fence，并覆盖 1001+ replay、commit-then-raise、CAS loser fencing、lease takeover、deterministic health/recovery reducer replay、伪造 next-state、多 PREPARED Review recovery、maintenance/sleep、SLO 与 acknowledgement。
+- T-NE03-GUARDIAN-02：Recovery Review 使用 durable PREPARED→consume→COMMITTED；consume 后 append 失败或进程重启必须按 deterministic result ref 对账，限制在 COMMITTED 前不得解除。
+
 ## T-ARCH（完整架构发布 Gate）
 
 说明：编号定义不代表代码已实现；每项必须同时具有自动化测试、可审计执行证据和回滚证据，才可标记为通过。执行顺序只由 `docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md` 决定。

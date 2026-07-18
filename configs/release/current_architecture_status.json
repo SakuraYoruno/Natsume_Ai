@@ -1087,19 +1087,55 @@
       ]
     },
     "world_model": {
-      "status": "PARTIAL_LEGACY_PROJECTION_PLUS_CONTRACT_ONLY_V2",
+      "status": "PARTIAL_NE03_DURABLE_OBSERVATION_JOURNAL_NO_PRODUCTION_CALLER",
       "runtime_projection_default": "DISABLED",
-      "write_api_available": false,
-      "reason": "The current production asset is a person-scoped read-only fact projection. The workspace-scoped V2 resolver from PR #80 has no production caller and is not the canonical context authority."
+      "write_api_available": true,
+      "reason": "Migration 0111 and SQLiteWorldObservationJournal assign atomic workspace/subject revisions and require an active Host lease plus canonical source verifier. The writer rejects future/non-monotonic time, forged or duplicate expiry and expired-digest reactivation before append; WorldResolver captures and verifies the exact head, physical row bindings and TTL transitions. Production observation adapters and consumers are not cut over, and this is not a predictive planning world model.",
+      "evidence_refs": [
+        "host_brain/audit/migrations/0111_world_observation_journal.sql",
+        "host_brain/persistence/world_observation_journal.py",
+        "host_brain/runtime/context_contracts.py",
+        "host_brain/runtime/world_resolver.py",
+        "tests/unit/test_ne03_world_resolver.py",
+        "tests/integration/test_ne03_world_observation_journal.py"
+      ]
     },
     "scene_engine": {
-      "status": "PARTIAL_DEFAULT_OFF",
+      "status": "PARTIAL_NE03_DERIVED_DURABLE_KERNEL_NO_PRODUCTION_CALLER",
       "production_default": "DISABLED",
-      "feature_flag": "HOST_LIFE_PROJECTION_ENABLED"
+      "feature_flag": "HOST_LIFE_PROJECTION_ENABLED",
+      "implemented": [
+        "workspace/subject-scoped SceneResolver",
+        "digest-bound SceneDecisionV2 and SceneTransitionV1",
+        "caller cannot select final scene or untyped constraints",
+        "Guardian status is read from the app-local typed Guardian provider",
+        "eight deterministic scenario classes",
+        "no-change transition suppression",
+        "cursor tail refresh and 1001+ Runtime Event replay",
+        "0112 unique aggregate revision CAS and Host lease trigger",
+        "checksum-bound runtime-context schema readiness"
+      ],
+      "missing": [
+        "Surface/Proactive/Task admission production cutover",
+        "Host lifespan composition and trusted signal adapters",
+        "shared Surface/Proactive/Task scene identity"
+      ],
+      "evidence_refs": [
+        "host_brain/runtime/scene_resolver.py",
+        "host_brain/runtime/context_authority_schema.py",
+        "host_brain/audit/migrations/0112_runtime_context_authority.sql",
+        "tests/unit/test_ne03_scene_resolver.py",
+        "tests/integration/test_ne03_runtime_context_durability.py"
+      ]
     },
     "intent_arbiter": {
-      "status": "CONTRACT_ONLY_NO_PRODUCTION_CALLER",
-      "boundary": "PR #80 added an isolated arbiter, but Surface, Proactive and Task admission do not consume it; string-shaped constraints are not a production authority."
+      "status": "AUTHORITY_ATTESTED_RESTRICT_ONLY_NO_PRODUCTION_ADAPTER",
+      "boundary": "IntentAuthorityPort must return a fresh typed attestation that exactly proves principal, goal, graph/node, ContextPack, Scene, action, active Grant, composition-owned policy and every constraint source. Drift, omission, conflict, expiry, revocation and detached arbitration fail closed. Production authority adapter, admission and Preview consumers are not wired yet.",
+      "evidence_refs": [
+        "host_brain/runtime/intent_authority.py",
+        "host_brain/runtime/intent_arbiter.py",
+        "tests/unit/test_ne03_intent_arbiter.py"
+      ]
     },
     "action_preview": {
       "status": "PARTIAL",
@@ -1108,10 +1144,32 @@
       "unified_shadow_runner": "MISSING"
     },
     "runtime_guardian": {
-      "status": "PARTIAL_LEGACY_SERVICES_PR84_REWORK_REQUIRED",
-      "implemented": ["degradation state", "heartbeat", "recovery evidence"],
-      "missing": ["production catalog startup composition", "complete front-door coverage", "durable SLO owner", "cursor-complete replay", "atomic durable state replacement", "Host lifespan owner"],
-      "catalog_default_mode": "AUDIT"
+      "status": "PARTIAL_NE03_LEASE_BOUND_DURABLE_KERNEL_NO_HOST_LIFESPAN",
+      "implemented": [
+        "injected RuntimeGuardian without module-global singleton",
+        "0112 same-transaction Host runtime lease validation",
+        "exact retry and commit response-loss reconciliation",
+        "deterministic typed health and recovery reducer replay",
+        "CAS loser durable-winner reload and write fencing",
+        "ordered multi-PREPARED consume-COMMITTED Review recovery saga",
+        "maintenance and sleep journal",
+        "durable SLO breach and acknowledgement journal",
+        "1001+ cursor-paged replay and semantic delta validation"
+      ],
+      "missing": [
+        "Host lifespan owner and removal of global degradation truth",
+        "production catalog startup composition",
+        "complete front-door coverage",
+        "production multi-instance canary"
+      ],
+      "catalog_default_mode": "AUDIT",
+      "evidence_refs": [
+        "host_brain/runtime/runtime_guardian.py",
+        "host_brain/runtime/production_composition.py",
+        "host_brain/audit/migrations/0112_runtime_context_authority.sql",
+        "tests/unit/test_ne03_runtime_guardian.py",
+        "tests/integration/test_ne03_runtime_context_durability.py"
+      ]
     },
     "workspace_isolation": {
       "status": "PARTIAL",

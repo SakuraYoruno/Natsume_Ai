@@ -732,16 +732,47 @@ Graph Acceptance
 
 ### 9.4 Scene
 
-[scene_policy.py](../../../host_brain/persona/scene_policy.py) 会构造过期、只读、限制性的 `SceneDecision`。它已被 [surface_runtime/eligibility.py](../../../host_brain/surface_runtime/eligibility.py) 和 [proactive_voice.py](../../../host_brain/persona/proactive_voice.py) 消费，用于约束 Surface 表达和主动性 eligibility。
+[world_observation_journal.py](../../../host_brain/persistence/world_observation_journal.py) 通过 0111 为每个 workspace/subject 维护原子 head，持久端而非 caller 分配连续 revision。每次 append 同时校验 canonical source event、Host runtime lease/fence、server time、active TTL target 和 authority lineage；future/non-monotonic batch、重复/伪造 expiry 与 expired digest reactivation 均在事务提交前拒绝。`WorldResolver` 捕获 exact head 后只读分页到该 revision，并核对 digest chain、物理列/JSON 与 terminal digest；超期事实缺少 expiry 时明确阻断。
 
-但生产 feature flag `HOST_LIFE_PROJECTION_ENABLED` 默认为关闭，当前也没有 canonical Scene aggregate、transition journal 或统一 Task context authority。因此定级是 `PARTIAL_DEFAULT_OFF`，不是全局 Scene Engine。
+[scene_resolver.py](../../../host_brain/runtime/scene_resolver.py) 是 NE-03 的 canonical、workspace/subject-scoped 场景解析边界。它只接受不可变 `WorldSnapshotV2` 与 typed `SceneResolutionInputV1`，Guardian status/digest 必须从 composition 注入的 `RuntimeGuardian.snapshot` 读取，caller 不能指定最终 scene、constraints 或伪造 `READY`。八类场景、fingerprint、digest chain、tail refresh 与 1001+ replay 已覆盖；0112 对 `SCENE_STATE/<scope digest>/<revision>` 建立唯一 CAS，并以 Host lease trigger 阻断旧进程追加。
+
+旧 [scene_policy.py](../../../host_brain/persona/scene_policy.py) 仍被部分 Surface/Proactive 路径消费，生产 feature flag `HOST_LIFE_PROJECTION_ENABLED` 默认为关闭；Task admission 尚未切到同一 resolver。因此当前定级是 `PARTIAL_NE03_CANONICAL_RESOLVER`，不是全局 Scene Engine。
+
+### 9.5 Intent 与 Runtime Guardian
+
+`IntentArbiter` 不能裸信 `IntentFrameV1` 的 digest；它必须经 `IntentAuthorityPort` 查询 canonical TaskGraph/node、ContextPack、Scene、action、Grant 和 composition-owned policy，取得 typed、短时效 attestation 后逐字段比较。过期、撤销、跨 principal Grant，遗漏/冲突约束或 detached arbitration 均 fail closed；输出固定 `permission_effect=RESTRICT_ONLY`、`execution_authorized=false`。`RuntimeGuardian` 由 [runtime/production_composition.py](../../../host_brain/runtime/production_composition.py) 注入，底层 degradation 只作为纯 reducer；0112 在 Guardian Runtime Event append 的同一 SQLite 事务校验现有 Host scope/owner/lease/fence。Health/Recovery replay 会在纯 reducer clone 中确定性重放并比较完整 next-state；响应丢失 exact reconcile，竞争 loser write-fenced，多 PREPARED Review 按 durable 顺序收口。
+
+```mermaid
+flowchart LR
+    Obs[0111 workspace Observation Journal] --> World[WorldResolver]
+    World --> Snapshot[WorldSnapshotV2]
+    Snapshot --> Scene[SceneResolver]
+    Scene --> Decision[SceneDecisionV2 + revision/digest]
+    Decision --> Surface[Surface eligibility]
+    Decision --> Proactive[Proactive eligibility]
+    Decision --> Task[Task admission context]
+    Decision --> Authority[IntentAuthorityPort attestation]
+    Authority --> Intent[IntentArbiter]
+    Intent --> Preview[restrict-only Preview / Grant gate]
+    Health[health probes] --> Guardian[RuntimeGuardian]
+    Lease[Host runtime lease] --> Guardian
+    Lease --> Obs
+    Lease --> Scene
+    Source[Canonical observation source verifier] --> Obs
+    Guardian --> Events[(0112 CAS Runtime Event ledger)]
+    Scene --> Events
+```
+
+Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Surface、Proactive 和 Task 全量消费一致的 scene revision/digest 仍是后续切流门槛。
 
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|
 | Memory | typed recall → compressed packet → Surface | Acceptance → Life projection → assistant/Memory | `WIRED_POST_ACCEPTANCE_EVENTUAL` |
 | Persona | Surface/relationship 等多处读 | legacy 写入中央拒绝；仅显式审计迁移可写 | `CENTRAL_FENCE_WIRED` |
-| Scene | Surface/Proactive eligibility | 无 canonical scene write API | `PARTIAL_DEFAULT_OFF` |
-| World Model | read-only fact projection | 无生产 write API | `PARTIAL` |
+| Scene | SceneResolver → Surface/Proactive/Task context | resolver + app-local Guardian 推导 scene；仅追加 lease-bound 0112 transition | `PARTIAL_NE03_DERIVED_RESOLVER_NO_CALLER` |
+| Intent | IntentAuthorityPort → IntentArbiter → Preview/Grant gate | authority attested；仅输出限制；`execution_authorized=false` | `PARTIAL_NE03_ATTESTED_NO_PRODUCTION_ADAPTER` |
+| Runtime Guardian | health/degradation/maintenance/SLO → lease-bound Runtime Event | 只写 guardian/recovery evidence，不激活能力 | `PARTIAL_NE03_LEASE_BOUND_NO_LIFESPAN` |
+| World Model | 0111 ObservationPort → WorldResolver | lease/source authority 分配 revision/expiry；captured-head Resolver 纯读 | `PARTIAL_NE03_DURABLE_JOURNAL_NO_CALLER` |
 
 ## 10. 回执与证据分层
 

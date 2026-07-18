@@ -82,11 +82,11 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
-| World Model | `PARTIAL_LEGACY + CONTRACT_ONLY_V2` | `runtime/world_model.py`、#80 V2 resolver | 旧投影 person-scoped；V2 没有生产 caller，尚无可信 workspace Context Scope | NE-03 |
-| Scene Engine | `PARTIAL_DEFAULT_OFF` | `persona/scene_policy.py`、Surface/Proactive 消费接线 | `HOST_LIFE_PROJECTION_ENABLED` 生产默认关闭；缺统一 scene aggregate、transition journal、TTL/re-evaluation owner | NE-03 |
-| Intent Arbiter | `CONTRACT_ONLY_NO_PRODUCTION_CALLER` | #80 isolated arbiter、Governor + ActionArbiter | typed input/constraint 与 Surface/Proactive/Task production cutover 均缺失 | NE-03 |
+| World Model | `PARTIAL_DURABLE_OBSERVATION_JOURNAL_NO_PRODUCTION_CALLER` | 0111、`SQLiteWorldObservationJournal`、`WorldResolver` | Host lease + source verifier、scope head、物理行封口、typed due expiry 与 competing refs 已有；生产 observation adapters/ContextPack admission 尚未切流，且仍不是预测世界模型 | NE-03 |
+| Scene Engine | `PARTIAL_DURABLE_DERIVED_KERNEL_NO_PRODUCTION_CALLER` | 0112、`runtime/scene_resolver.py`、typed Scene contracts | caller 已不能指定最终 scene 或自报 Guardian 状态，八类场景、tail refresh、lease-bound CAS/replay 已有；Host lifespan 与 Surface/Proactive/Task 同 identity 消费未完成 | NE-03 |
+| Intent Arbiter | `AUTHORITY_ATTESTED_RESTRICT_ONLY_NO_PRODUCTION_ADAPTER` | `IntentFrameV1`、`IntentAuthorityPort`、`IntentArbitrationV1` | graph/context/action/grant/policy 与全量约束必须由 typed attestation 证明且不产生执行授权；真实 authority adapter、production admission/Preview 尚未消费 | NE-03 |
 | Action Preview / Shadow | `PARTIAL_EXPLICIT_PORT_FAIL_CLOSED` | `governor/action_preview.py`、`ObsRoutePorts.life_action_context_provider/approval_token_validator`、Obs route | trusted context与token validator已改为app-owned可选端口；缺失或不可信时失败关闭/标记unavailable，端点固定DRY_RUN且没有执行authority；生产trusted provider和统一shadow runner仍缺 | NE-03 |
-| Runtime Guardian | `PARTIAL_LEGACY / PR84_REWORK_REQUIRED` | health、degradation、heartbeat、service catalog | #84 Draft 恢复截断且非原子，也未接 Host lifespan；旧全局 degradation 与新 Guardian 会形成双真相 | NE-03 |
+| Runtime Guardian | `PARTIAL_LEASE_BOUND_KERNEL_NO_HOST_LIFESPAN` | 0112、`runtime/runtime_guardian.py`、Host runtime lease、Review saga | lease/fence 原子门禁、typed reducer replay、commit reconciliation、CAS fencing、1001+ replay 与多 PREPARED recovery 已有；ASGI lifespan、全局 degradation 退役、Catalog/全部门面切流未完成 | NE-03 |
 | Evolution Lab | `SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER` | 0108 V1 ledger、runner | dataset digest 未独立重算、verifier 可补 hash、隔离可绕过且无 production composition | NE-04 |
 | Counterfactual | `LEDGER_CONTRACT_ONLY` | V1 ExperimentReport | 没有可信独立双臂、sandbox/effect audit 或 promotion authority | NE-04 |
 | Capability Maturity | `PARTIAL_NE05_PRODUCTION_FAIL_CLOSED` | scorecard/provider/Governor adapter + production IntentDecisionEngine wiring | 生产门禁默认开启且缺失/伪造 scorecard 最高风险；仍缺 durable promotion/degradation authority | NE-05 |

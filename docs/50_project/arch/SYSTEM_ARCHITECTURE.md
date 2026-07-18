@@ -371,7 +371,7 @@ flowchart LR
     SCENE --> PER --> SURF
 ```
 
-该图表达职责边界，不代表 Scene 已经成为统一 aggregate。当前 `persona/scene_policy.py` 有消费接线，但生产默认受 `HOST_LIFE_PROJECTION_ENABLED=false` 关闭；World Model 当前也是只读投影，不是可模拟未来的规划世界模型。
+该图表达职责边界。NE-03 durable kernel 已形成 `0111 Observation Journal → WorldResolver → SceneResolver → IntentAuthorityPort → IntentArbiter` 只读链：World writer 绑定 Host lease 与 canonical source verifier，Resolver 读取 captured head；Scene 从 app-local Guardian 获取状态，0112 对 Scene/Guardian revision 做唯一 CAS 和 lease fence；Intent 的 goal/graph/context/scene/action/grant/policy 与完整约束必须经短时效 typed attestation 证明，且永不授予执行权限。`RuntimeGuardian` 对 health/recovery next-state 做确定性 reducer replay，并支持 response-loss reconciliation、CAS fencing 和多 PREPARED Review recovery saga。当前 `persona/scene_policy.py` 仍有旧消费接线，ASGI lifespan 尚未构造该 composition，真实 Intent authority adapter、Task admission/Surface/Proactive 与全局 degradation 路径尚未切到 canonical owner；World Model 仍不是可模拟未来的规划世界模型。
 
 安全演化的目标链必须是：运行证据/反馈 → proposal → 隔离实验与 shadow → Review → version activation → rollback point。任何 milestone、后台周期或模型输出直接调用 trait writer 都违反目标 authority。
 
@@ -434,6 +434,7 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 | TaskGraph revision + `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091～0099 authority、Budget unique-winner contention、single-node post-budget takeover、ACCEPTED→Effect restart 与窄 terminal reconciliation已有证据；general/multi-node/pre-budget recovery、现实 resolver、外部 inventory/凭据/key lifecycle/canary未完成，atomic/bounded/cancellation仍 OFF |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
+| 0111/0112 lease/source-verified World、Guardian-bound Scene、attested Intent 与 deterministic Guardian kernel | ASGI lifespan、真实 Intent/Observation adapters、旧 person-scoped Scene、全局 degradation、Catalog 与三消费者 identity 尚未切流 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |
 
 过渡期文档必须同时画出两侧，并明确哪一侧拥有 authority。隐藏兼容层会制造虚假的完成结论。

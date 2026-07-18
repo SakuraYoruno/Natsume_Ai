@@ -263,6 +263,8 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 高风险 action 必须经过统一 preview/shadow；
 - Runtime Guardian 统一 dependency health、degradation、recovery、maintenance/sleep 与 SLO evidence。
 
+当前 durable-kernel 切片：0111 `world_observation_journal` 以 workspace/subject head 原子分配 revision，写入必须同时通过 canonical source verifier 与真实 Host lease；事务内拒绝 future/non-monotonic batch、伪造或重复 TTL expiry、非 active target 和 expired digest reactivation，Resolver 以 captured head、digest chain 与物理列/JSON 一致性封口。`SceneResolver` 不接受 caller 给出最终 scene/constraints 或自报 Guardian status，而是从 typed World/Task、app-local Guardian、关系与时间确定性推导八类场景；0112 为 Scene/Guardian aggregate revision 建立唯一 CAS 与同事务 lease fence，composition 还校验 migration checksum/index/trigger SQL。`IntentFrameV1` 的 principal、目标、TaskGraph/node、ContextPack、Scene、action、Grant、policy 与六类约束必须经 `IntentAuthorityPort` 返回的 typed、时效受限 attestation 逐字段证明；过期/撤销/跨 principal Grant 和约束遗漏均 fail closed，仲裁结果固定 `execution_authorized=false`。`RuntimeGuardian` 的 health/recovery event 会在纯 reducer clone 中确定性重放后逐字段比较，提交响应丢失精确对账，竞争 loser 加载 durable winner 后 write-fenced，多 PREPARED Review 恢复按 durable 顺序收口。真实 SQLite 已覆盖 World 并发 revision、Scene CAS/lease takeover、Guardian lease takeover、schema drift 及 1001+ Scene/Guardian replay。该切片仍是 `PARTIAL`：Host lifespan 尚未构造唯一 composition，生产 Intent authority adapter、Surface、Proactive、Task admission 尚未接入，旧全局 degradation writers/readers 和 Catalog 前门仍未归零。
+
 完成条件：至少覆盖架构重构、调试、研究、闲聊、深夜、用户烦躁、游戏低打扰和发布维护八类场景；所有约束保持“只收紧、不覆盖用户目标”；故障进入/恢复可回放。
 
 ### NE-04：Evolution Lab、Scenario 与 Counterfactual
@@ -401,7 +403,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前基线已推进到 `0110_evolution_governance_ledger.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0112_runtime_context_authority.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104/0110 固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 
