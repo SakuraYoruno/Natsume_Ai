@@ -6,6 +6,7 @@ import pytest
 
 from host_brain.capability_plane.broker import CapabilityBroker
 from host_brain.capability_plane.policies import DescriptorCapabilityPolicy
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.governor.action_arbiter import (
     ARBITER_BLOCK,
     arbitrate_action,
@@ -104,7 +105,7 @@ def test_t_nle_19_action_arbiter_consumes_shared_model_degradation_gate(
     )
 
 
-def test_t_nle_19_mcp_broker_blocks_before_high_risk_handler(
+def test_t_nle_19_retired_mcp_facade_blocks_before_degradation_or_handler(
     _isolated_degradation_machine: DegradationStateMachine,
 ) -> None:
     machine = _isolated_degradation_machine
@@ -134,7 +135,8 @@ def test_t_nle_19_mcp_broker_blocks_before_high_risk_handler(
         capability_broker=CapabilityBroker(policy=DescriptorCapabilityPolicy()),
         degradation_capability_port=_LEGACY_DEGRADATION_PORT,
     )
-    broker.register_handler("pentest", "execute_exploit", handler)
+    with pytest.raises(PermissionError, match=MCP_TASK_AUTHORITY_REQUIRED):
+        broker.register_handler("pentest", "execute_exploit", handler)
     result = broker.call(
         provider_id="pentest",
         tool_id="execute_exploit",
@@ -143,5 +145,6 @@ def test_t_nle_19_mcp_broker_blocks_before_high_risk_handler(
         ts_ms=NOW,
     )
     assert result.success is False
-    assert result.reason_code == "DEPENDENCY_DEGRADED_HIGH_RISK_BLOCKED"
+    assert result.reason_code == MCP_TASK_AUTHORITY_REQUIRED
+    assert result.output is None
     assert called == 0

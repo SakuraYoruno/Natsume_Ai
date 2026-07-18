@@ -47,6 +47,7 @@ from host_brain.app.governed_route_executors import (
     FrozenDelegateRouteExecutor,
 )
 from host_brain.app.governed_tool_runtime import (
+    DurableToolTaskAuthorityVerifier,
     FrozenToolRouteExecutor,
     ToolHostRequest,
 )
@@ -881,7 +882,8 @@ def build_governed_host_runtime(
     resource_manager: Any | None,
     episodic_store: Any | None,
     semantic_recaller: Any | None,
-    tool_broker: Any | None = None,
+    tool_binding_resolver: Any | None = None,
+    tool_execution_port_factory: Any | None = None,
     tool_catalog: Any | None = None,
     cancellation_authority_verifier: Any | None = None,
     runtime_router: CanonicalRuntimeRouter,
@@ -942,10 +944,18 @@ def build_governed_host_runtime(
     chat_worker = None
     delegate_worker = None
     tool_worker = None
-    if (tool_broker is None) != (tool_catalog is None):
+    tool_ports = (
+        tool_binding_resolver,
+        tool_execution_port_factory,
+        tool_catalog,
+    )
+    if any(value is not None for value in tool_ports) and not all(
+        value is not None for value in tool_ports
+    ):
         raise GovernedHostAdapterError(
             GOVERNED_HOST_AUTHORITY_INVALID,
-            "ToolBroker and ToolCatalog must be composed together",
+            "Tool binding, app-local execution port factory and ToolCatalog "
+            "must be composed together",
         )
     if projection_store is not None:
         route_execution_ports = build_governed_route_execution_ports(
@@ -970,11 +980,19 @@ def build_governed_host_runtime(
             projections=projection_store,
             action_preview_service=action_preview_service,
         )
-        if tool_broker is not None and tool_catalog is not None:
+        if all(value is not None for value in tool_ports):
+            live_tool_authority = DurableToolTaskAuthorityVerifier(
+                task_store=task_runtime_container.task_store,
+                node_grants=node_grant_verifier,
+            )
+            execution_port = tool_execution_port_factory(
+                authority_verifier=live_tool_authority.verify,
+            )
             tool_worker = GovernedFrozenNodeWorker(
                 route_kind="tool",
                 executor=FrozenToolRouteExecutor(
-                    broker=tool_broker,
+                    binding_resolver=tool_binding_resolver,
+                    execution_port=execution_port,
                     catalog=tool_catalog,
                     ledger=ledger,
                 ),

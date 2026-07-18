@@ -30,8 +30,6 @@ from host_brain.composition.process_services import (
     get_security_immune_agent,
     set_memory_service_container,
     get_token_service,
-    get_tool_broker,
-    get_mcp_tool_broker,
     get_tool_catalog,
     get_bond_dynamics_writer,
     get_model_attempt_service,
@@ -272,7 +270,7 @@ def create_app() -> FastAPI:
             token_service=get_token_service,
             capability_broker=get_capability_broker,
             resource_manager=get_resource_manager,
-            tool_broker=get_tool_broker,
+            ledger=get_ledger,
             tool_catalog=get_tool_catalog,
             intent_engine=get_intent_engine,
         )
@@ -303,7 +301,6 @@ def create_app() -> FastAPI:
     embodiment_authority_task: asyncio.Task[None] | None = None
     runtime_context_composition: RuntimeContextComposition | None = None
     runtime_context_application: RuntimeContextApplicationService | None = None
-    mcp_degradation_broker: Any | None = None
     guardian_heartbeat_task: asyncio.Task[None] | None = None
     catalog_rollout_guardian_task: asyncio.Task[None] | None = None
     startup_probe_statuses: dict[str, Any] = {}
@@ -352,7 +349,7 @@ def create_app() -> FastAPI:
 
     route_ports = HostRoutePorts(
         canon_service_provider=canon_service_provider,
-        tool_broker_provider=get_tool_broker,
+        tool_broker_provider=tool_composition.provide_tool_broker,
         tool_catalog_provider=get_tool_catalog,
         governed_tool_application_provider=tool_composition.provide_tool_application,
         bond_engine_provider=resolve_bond_engine,
@@ -482,7 +479,6 @@ def create_app() -> FastAPI:
         nonlocal life_command_authority, life_dispatchers
         nonlocal embodiment_runtime, embodiment_authority_task
         nonlocal runtime_context_composition, runtime_context_application
-        nonlocal mcp_degradation_broker
         nonlocal guardian_heartbeat_task, catalog_rollout_guardian_task
         nonlocal startup_probe_statuses
         async with runtime_lifespan(
@@ -495,6 +491,9 @@ def create_app() -> FastAPI:
             degradation_state_provider=(
                 lambda: host_obs_degradation_state_provider()
             ),
+            tool_broker_provider=tool_composition.provide_tool_broker,
+            tool_catalog_provider=get_tool_catalog,
+            skill_registry_provider=get_skill_registry,
             start_service_heartbeat=False,
         ):
             security: ProcessSecurityServiceContainer | None = None
@@ -706,14 +705,6 @@ def create_app() -> FastAPI:
                     runtime_event_store=runtime_context_composition.event_store,
                     guardian=runtime_context_composition.guardian,
                     authority_resolver=action_preview_authority_resolver,
-                )
-                # The process-owned MCP facade may be constructed while the
-                # Skill registry is prewarmed.  Bind it explicitly to this
-                # application's lifespan-owned Guardian before any route can
-                # execute a provider capability.
-                mcp_degradation_broker = get_mcp_tool_broker()
-                mcp_degradation_broker.bind_degradation_capability_port(
-                    runtime_context_composition.guardian
                 )
                 startup_observed_at_ms = now_ms()
                 runtime_context_composition.guardian.observe_startup_batch(
@@ -1308,21 +1299,6 @@ def create_app() -> FastAPI:
                 application.state.task_runtime_container = None
                 application.state.service_catalog_rollout_store = None
                 application.state.service_catalog_rollout_observer = None
-                if (
-                    mcp_degradation_broker is not None
-                    and runtime_context_composition is not None
-                ):
-                    try:
-                        mcp_degradation_broker.unbind_degradation_capability_port(
-                            runtime_context_composition.guardian
-                        )
-                    except Exception:
-                        logger.error(
-                            "MCP_DEGRADATION_AUTHORITY_UNBIND_FAILED",
-                            exc_info=True,
-                        )
-                    finally:
-                        mcp_degradation_broker = None
                 application.state.runtime_context_composition = None
                 runtime_context_application = None
                 runtime_context_composition = None
@@ -1412,7 +1388,7 @@ def create_app() -> FastAPI:
         metrics=runtime_metrics,
         logger=logger,
         get_ledger=get_ledger,
-        get_tool_broker=get_tool_broker,
+        get_tool_broker=tool_composition.provide_tool_broker,
         get_tool_catalog=get_tool_catalog,
         get_bond_engine=resolve_bond_engine,
         get_bond_writer=get_bond_dynamics_writer,

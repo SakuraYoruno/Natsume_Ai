@@ -2,10 +2,9 @@
 
 The public ``/tools/execute`` adapter is deliberately absent from this module.
 It may only hand an authenticated request to :class:`GovernedToolHttpApplication`.
-The sole call into ``ToolBroker.execute_bound`` for this HTTP surface lives in the frozen TaskNode executor
-below, after HostCommand admission, node-grant derivation, Budget/Lease and (for
-high-risk nodes) Action Preview have all been established by the canonical Task
-Runtime.
+The frozen TaskNode executor owns an app-local Tool execution port. The raw
+Broker cannot execute from a resolved binding; the port reopens the exact
+graph/node/attempt/lease/grant authority immediately before handler dispatch.
 """
 
 from __future__ import annotations
@@ -104,6 +103,87 @@ class ToolGovernanceRegistry:
         )
 
 
+class DurableToolTaskAuthorityVerifier:
+    """Reopen canonical Task and node-grant authority at handler dispatch."""
+
+    def __init__(self, *, task_store: Any, node_grants: Any) -> None:
+        if not callable(
+            getattr(task_store, "assert_live_node_execution_authority", None)
+        ):
+            raise TypeError(
+                "task_store.assert_live_node_execution_authority is required"
+            )
+        if not callable(getattr(node_grants, "verify", None)):
+            raise TypeError("node_grants.verify is required")
+        self._task_store = task_store
+        self._node_grants = node_grants
+
+    def verify(
+        self,
+        *,
+        task_authority: Any,
+        request_id: str | None,
+        intent_id: str,
+        session_id: str,
+        tool_id: str,
+    ) -> bool:
+        frozen = task_authority
+        if (
+            not isinstance(frozen, FrozenNodeInput)
+            or frozen.route != "tool"
+            or frozen.request_id != str(request_id or "")
+            or frozen.session_id != str(session_id or "")
+            or frozen.target_id != str(tool_id or "")
+            or not frozen.reservation_id
+            or not frozen.business_scope
+            or not frozen.operation_fingerprint
+        ):
+            return False
+        self._task_store.assert_live_node_execution_authority(
+            reservation_id=frozen.reservation_id,
+            business_scope=frozen.business_scope,
+            operation_fingerprint=frozen.operation_fingerprint,
+            graph_id=frozen.graph_id,
+            graph_revision=frozen.graph_revision,
+            node_id=frozen.node_id,
+            attempt_id=frozen.attempt_id,
+            lease_id=frozen.lease_id,
+            lease_owner_id=frozen.lease_owner_id,
+            fencing_token=frozen.fencing_token,
+        )
+        verified = self._node_grants.verify(
+            grant_ref=frozen.node_grant_ref,
+            parent_grant_ref=frozen.parent_grant_ref,
+            request_id=frozen.request_id,
+            session_id=frozen.session_id,
+            principal_id=frozen.principal_id,
+            graph_id=frozen.graph_id,
+            graph_revision=frozen.graph_revision,
+            root_work_order_id=frozen.root_work_order_id,
+            node_id=frozen.node_id,
+            route=frozen.route,
+            target_id=frozen.target_id,
+            attempt_id=frozen.attempt_id,
+            lease_id=frozen.lease_id,
+            lease_owner_id=frozen.lease_owner_id,
+            fencing_token=frozen.fencing_token,
+        )
+        return (
+            str(getattr(verified, "intent_id", "") or "")
+            == str(intent_id or "")
+            and str(getattr(verified, "session_id", "") or "")
+            == frozen.session_id
+            and str(getattr(verified, "graph_id", "") or "")
+            == frozen.graph_id
+            and int(getattr(verified, "graph_revision", 0) or 0)
+            == frozen.graph_revision
+            and str(getattr(verified, "node_id", "") or "") == frozen.node_id
+            and str(getattr(verified, "route", "") or "") == "tool"
+            and str(getattr(verified, "target_id", "") or "")
+            == frozen.target_id
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ToolHostRequest:
     """Authority-free request shape consumed by the Host contract freezer."""
@@ -118,16 +198,24 @@ class ToolHostRequest:
 
 
 class FrozenToolRouteExecutor:
-    """The only legal ToolBroker caller for the external Tool HTTP surface."""
+    """Consume the app-local Tool port for the external Tool HTTP surface."""
 
-    def __init__(self, *, broker: Any, catalog: Any, ledger: Any) -> None:
-        if not callable(getattr(broker, "execute_bound", None)):
-            raise TypeError("broker must expose execute_bound")
+    def __init__(
+        self,
+        *,
+        binding_resolver: Callable[[str], Mapping[str, Any]],
+        execution_port: Any,
+        catalog: Any,
+        ledger: Any,
+    ) -> None:
         if not callable(getattr(catalog, "get", None)):
             raise TypeError("catalog must expose get")
-        if not callable(getattr(broker, "resolve_execution_binding", None)):
-            raise TypeError("broker must expose resolve_execution_binding")
-        self._broker = broker
+        if not callable(binding_resolver):
+            raise TypeError("binding_resolver is required")
+        if not callable(getattr(execution_port, "execute_bound", None)):
+            raise TypeError("app-local execution_port.execute_bound is required")
+        self._binding_resolver = binding_resolver
+        self._execution_port = execution_port
         self._catalog = catalog
         self._ledger = ledger
         self._grants = DurableGovernorGrantResolver(ledger)
@@ -174,7 +262,7 @@ class FrozenToolRouteExecutor:
                 "frozen tool execution binding is missing",
             )
         try:
-            live_binding = self._broker.resolve_execution_binding(frozen.target_id)
+            live_binding = self._binding_resolver(frozen.target_id)
         except (KeyError, ValueError) as exc:
             raise GovernedToolExecutionError(
                 409,
@@ -213,41 +301,44 @@ class FrozenToolRouteExecutor:
                     GOVERNED_TOOL_RECONCILIATION_REQUIRED,
                     "A prior Tool handler dispatch requires reconciliation",
                 )
-        self._ledger.log_skill_exec(
-            {
-                "request_id": frozen.request_id,
-                "thread_id": None,
-                "turn_id": None,
-                "intent_id": str(intent["id"]),
-                "skill_name": frozen.target_id,
-                "approval_token_ref": token_ref,
-                "confirm_token_ref": None,
-                "result_status": "PENDING",
-                "result_code": "GOVERNED_TOOL_HANDLER_DISPATCH_PENDING",
-                "result_digest": "sha256:"
-                + hashlib.sha256(
-                    _canonical_json(
-                        {
-                            "request_id": frozen.request_id,
-                            "graph_id": frozen.graph_id,
-                            "graph_revision": frozen.graph_revision,
-                            "node_id": frozen.node_id,
-                            "tool_id": frozen.target_id,
-                            "args": dict(draft.get("args") or {}),
-                            "context": dict(draft.get("context") or {}),
-                            "tool_binding": dict(frozen_binding),
-                        }
-                    ).encode("utf-8")
-                ).hexdigest(),
-                "evidence_ref": None,
-                "manifest_ref": None,
-                "undo_token_ref": None,
-                "ts_ms": int(time.time() * 1000),
-            }
-        )
+
+        def _mark_dispatch_pending() -> None:
+            self._ledger.log_skill_exec(
+                {
+                    "request_id": frozen.request_id,
+                    "thread_id": None,
+                    "turn_id": None,
+                    "intent_id": str(intent["id"]),
+                    "skill_name": frozen.target_id,
+                    "approval_token_ref": token_ref,
+                    "confirm_token_ref": None,
+                    "result_status": "PENDING",
+                    "result_code": "GOVERNED_TOOL_HANDLER_DISPATCH_PENDING",
+                    "result_digest": "sha256:"
+                    + hashlib.sha256(
+                        _canonical_json(
+                            {
+                                "request_id": frozen.request_id,
+                                "graph_id": frozen.graph_id,
+                                "graph_revision": frozen.graph_revision,
+                                "node_id": frozen.node_id,
+                                "tool_id": frozen.target_id,
+                                "args": dict(draft.get("args") or {}),
+                                "context": dict(draft.get("context") or {}),
+                                "tool_binding": dict(frozen_binding),
+                            }
+                        ).encode("utf-8")
+                    ).hexdigest(),
+                    "evidence_ref": None,
+                    "manifest_ref": None,
+                    "undo_token_ref": None,
+                    "ts_ms": int(time.time() * 1000),
+                }
+            )
 
         try:
-            result: ToolExecutionResult = self._broker.execute_bound(
+            result: ToolExecutionResult = self._execution_port.execute_bound(
+                task_authority=frozen,
                 expected_binding=dict(frozen_binding),
                 request_id=frozen.request_id,
                 intent_id=str(intent["id"]),
@@ -266,8 +357,9 @@ class FrozenToolRouteExecutor:
                 thread_id=None,
                 turn_id=None,
                 ts_ms=int(time.time() * 1000),
+                before_handler=_mark_dispatch_pending,
             )
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError, PermissionError) as exc:
             raise GovernedToolExecutionError(
                 409,
                 GOVERNED_TOOL_AUTHORITY_INVALID,

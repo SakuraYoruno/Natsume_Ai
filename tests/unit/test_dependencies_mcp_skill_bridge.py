@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 import host_brain.composition.process_services as dep
 from host_brain.app.settings.persistence import get_persistence_settings
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.mcp.tool_registry import ToolMeta
 
 
@@ -33,8 +34,8 @@ def _reset_dependency_singletons() -> None:
     dep.get_process_service_container().intent_engine = None
     dep.get_process_service_container().skill_registry = None
     dep.get_process_service_container().policy_cache = None
+    dep.get_process_service_container().capability_scorecard_provider = None
     dep.get_process_service_container().mcp_tool_registry = None
-    dep.get_process_service_container().mcp_tool_broker = None
     dep.get_process_service_container().tool_catalog = None
     dep.get_process_service_container().tool_broker = None
     dep.get_process_service_container().bond_stage_engine = None
@@ -44,7 +45,10 @@ def _reset_dependency_singletons() -> None:
     dep.get_process_service_container().graph_runtime = None
 
 
-def test_get_skill_registry_syncs_mcp_tools_incrementally(monkeypatch, tmp_path: Path) -> None:
+def test_enabled_legacy_bridge_registers_only_fail_closed_skill_projection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "audit.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="mcp-skill-bridge-enabled",
@@ -71,12 +75,6 @@ def test_get_skill_registry_syncs_mcp_tools_incrementally(monkeypatch, tmp_path:
                 reversible=True,
             )
         )
-        dep.get_mcp_tool_broker().register_handler(
-            "cursor",
-            "open_path",
-            lambda args: {"opened": str(args.get("path") or "")},
-        )
-
         skill_registry = dep.get_skill_registry()
         assert skill_registry.get(skill_name) is not None
         result = skill_registry.require(skill_name).handler(
@@ -88,8 +86,10 @@ def test_get_skill_registry_syncs_mcp_tools_incrementally(monkeypatch, tmp_path:
                 "seq": 3,
             },
         )
-        assert result["status"] == "OK"
-        assert result["output"]["opened"] == "D:/repo"
+        assert result["status"] == "REJECTED"
+        assert result["reason_code"] == MCP_TASK_AUTHORITY_REQUIRED
+        assert result["output"] is None
+        assert mcp_registry.get(provider_id="cursor", tool_id="open_path") is not None
     finally:
         _reset_dependency_singletons()
         get_persistence_settings.cache_clear()
@@ -106,7 +106,8 @@ def test_get_skill_registry_skips_mcp_bridge_when_disabled(monkeypatch, tmp_path
     monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "0")
     _reset_dependency_singletons()
     try:
-        dep.get_mcp_tool_registry().register(
+        mcp_registry = dep.get_mcp_tool_registry()
+        mcp_registry.register(
             ToolMeta(
                 provider_id="cursor",
                 tool_id="open_path",
@@ -119,6 +120,52 @@ def test_get_skill_registry_skips_mcp_bridge_when_disabled(monkeypatch, tmp_path
         )
         skill_registry = dep.get_skill_registry()
         assert skill_registry.get("mcp::cursor::open_path") is None
+        assert mcp_registry.get(provider_id="cursor", tool_id="open_path") is not None
+        scorecard = dep.get_capability_scorecard_provider(
+            skill_registry=skill_registry
+        ).get("mcp::cursor::open_path")
+        assert scorecard is not None
+        assert scorecard.capability_id == "mcp::cursor::open_path"
+    finally:
+        _reset_dependency_singletons()
+        get_persistence_settings.cache_clear()
+
+
+def test_disabling_bridge_purges_cached_mcp_skill_projection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="mcp-skill-bridge-hot-disable",
+    )
+    assert migrated.success is True, migrated.as_dict()
+    monkeypatch.setenv("Natsume_AUDIT_DB", str(db_path))
+    monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "1")
+    get_persistence_settings.cache_clear()
+    _reset_dependency_singletons()
+    try:
+        dep.get_mcp_tool_registry().register(
+            ToolMeta(
+                provider_id="cursor",
+                tool_id="open_path",
+                name="Open Path",
+                description="Open path",
+                access_level="PUBLIC",
+                risk_level="LOW",
+                reversible=True,
+            )
+        )
+        registry = dep.get_skill_registry()
+        assert registry.get("mcp::cursor::open_path") is not None
+
+        monkeypatch.setenv("HOST_SKILL_MCP_BRIDGE_ENABLED", "0")
+        assert dep.get_skill_registry() is registry
+        assert registry.get("mcp::cursor::open_path") is None
+        assert dep.get_mcp_tool_registry().get(
+            provider_id="cursor",
+            tool_id="open_path",
+        ) is not None
     finally:
         _reset_dependency_singletons()
         get_persistence_settings.cache_clear()

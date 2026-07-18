@@ -74,6 +74,9 @@ class FrozenNodeInput:
     node_grant_ref: str
     parent_grant_ref: str
     _budget_json: str = field(default="{}", repr=False)
+    reservation_id: str = ""
+    business_scope: str = ""
+    operation_fingerprint: str = ""
 
     @property
     def input_pack(self) -> Mapping[str, Any]:
@@ -121,6 +124,9 @@ class FrozenNodeInput:
             "node_grant_ref": self.node_grant_ref,
             "parent_grant_ref": self.parent_grant_ref,
             "budget": dict(self.budget),
+            "reservation_id": self.reservation_id,
+            "business_scope": self.business_scope,
+            "operation_fingerprint": self.operation_fingerprint,
         }
 
 
@@ -568,6 +574,12 @@ def _freeze_node_input(
                 "resolved node artifact payload digest is invalid",
             )
     budget = _freeze_budget_payload(context.get("budget"))
+    reservation_id = _required(context.get("reservation_id"), "reservation_id")
+    business_scope = _required(context.get("business_scope"), "business_scope")
+    operation_fingerprint = _required(
+        context.get("operation_fingerprint"),
+        "operation_fingerprint",
+    )
     return FrozenNodeInput(
         command_id=command.command_id,
         request_id=command.request_id,
@@ -610,6 +622,9 @@ def _freeze_node_input(
             separators=(",", ":"),
             allow_nan=False,
         ),
+        reservation_id=reservation_id,
+        business_scope=business_scope,
+        operation_fingerprint=operation_fingerprint,
     )
 
 

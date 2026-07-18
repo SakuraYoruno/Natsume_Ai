@@ -158,6 +158,9 @@ def runtime_lifespan(
     mode_transition_service_sink: Callable[[Any | None], None] | None = None,
     startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
     degradation_state_provider: Callable[[], Mapping[str, Any] | None] | None = None,
+    tool_broker_provider: Callable[[], Any] | None = None,
+    tool_catalog_provider: Callable[[], Any] | None = None,
+    skill_registry_provider: Callable[[], Any] | None = None,
     start_service_heartbeat: bool = True,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
@@ -357,20 +360,21 @@ def runtime_lifespan(
             })
 
             try:
-                from host_brain.composition.process_services import (  # noqa: PLC0415
-                    get_skill_registry,
-                    get_tool_broker,
-                    get_tool_catalog,
-                )
                 from host_brain.composition.tool_runtime import (  # noqa: PLC0415
                     seed_production_tool_runtime,
                 )
 
-                tool_broker = get_tool_broker()
+                if (
+                    tool_broker_provider is None
+                    or tool_catalog_provider is None
+                    or skill_registry_provider is None
+                ):
+                    raise RuntimeError("APP_LOCAL_TOOL_RUNTIME_NOT_COMPOSED")
+                tool_broker = tool_broker_provider()
                 tool_seed = seed_production_tool_runtime(
-                    catalog=get_tool_catalog(),
+                    catalog=tool_catalog_provider(),
                     broker=tool_broker,
-                    skill_registry=get_skill_registry(),
+                    skill_registry=skill_registry_provider(),
                     lifecycle_ports=lifecycle_ports,
                 )
                 new_module_statuses["tool_runtime_catalog"] = _tool_runtime_startup_status(

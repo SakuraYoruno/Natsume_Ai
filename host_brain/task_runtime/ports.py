@@ -62,6 +62,21 @@ class TaskStorePort(Protocol):
 
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
 
+    def assert_live_node_execution_authority(
+        self,
+        *,
+        reservation_id: str,
+        business_scope: str,
+        operation_fingerprint: str,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        lease_id: str,
+        lease_owner_id: str,
+        fencing_token: int,
+    ) -> Mapping[str, Any]: ...
+
     def reconcile_operation_reservation_state(
         self,
         reservation_id: str,

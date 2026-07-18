@@ -2494,6 +2494,154 @@ class DurableTaskStore(
         finally:
             conn.close()
 
+    def assert_live_node_execution_authority(
+        self,
+        *,
+        reservation_id: str,
+        business_scope: str,
+        operation_fingerprint: str,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        lease_id: str,
+        lease_owner_id: str,
+        fencing_token: int,
+    ) -> dict[str, Any]:
+        """Atomically reopen the exact live worker authority before an effect.
+
+        A FrozenNodeInput is historical evidence, not current authority.  This
+        read transaction joins the canonical Graph, Node, Attempt, Lease and
+        idempotency Reservation and rejects cancellation, supersession, expiry
+        or any owner/fence/identity drift before a Tool handler is reachable.
+        """
+
+        identity = {
+            "reservation_id": str(reservation_id or "").strip(),
+            "business_scope": str(business_scope or "").strip(),
+            "operation_fingerprint": str(operation_fingerprint or "").strip(),
+            "graph_id": str(graph_id or "").strip(),
+            "node_id": str(node_id or "").strip(),
+            "attempt_id": str(attempt_id or "").strip(),
+            "lease_id": str(lease_id or "").strip(),
+            "lease_owner_id": str(lease_owner_id or "").strip(),
+        }
+        try:
+            revision = int(graph_revision)
+            fence = int(fencing_token)
+        except (TypeError, ValueError) as exc:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "live node execution revision and fence must be integers",
+            ) from exc
+        if (
+            any(not value for value in identity.values())
+            or revision < 1
+            or fence < 1
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "live node execution authority identity is incomplete",
+            )
+
+        now_value = self._now()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            self._assert_graph_not_cancelling(
+                conn,
+                graph_id=identity["graph_id"],
+                graph_revision=revision,
+            )
+            row = conn.execute(
+                """
+                SELECT
+                    graph.status AS graph_status,
+                    node.status AS node_status,
+                    attempt.status AS attempt_status,
+                    attempt.owner_id AS attempt_owner_id,
+                    lease.status AS lease_status,
+                    lease.expires_ts_ms AS lease_expires_ts_ms,
+                    reservation.status AS reservation_status,
+                    reservation.expires_ts_ms AS reservation_expires_ts_ms
+                FROM task_runtime_graph AS graph
+                JOIN task_runtime_node AS node
+                  ON node.graph_id = graph.graph_id
+                 AND node.graph_revision = graph.revision
+                 AND node.node_id = ?
+                JOIN task_runtime_attempt AS attempt
+                  ON attempt.graph_id = graph.graph_id
+                 AND attempt.graph_revision = graph.revision
+                 AND attempt.node_id = node.node_id
+                 AND attempt.attempt_id = ?
+                JOIN task_runtime_lease AS lease
+                  ON lease.attempt_id = attempt.attempt_id
+                 AND lease.lease_id = ?
+                JOIN task_runtime_idempotency_reservation AS reservation
+                  ON reservation.attempt_id = attempt.attempt_id
+                 AND reservation.reservation_id = ?
+                 AND reservation.lease_id = lease.lease_id
+                WHERE graph.graph_id = ? AND graph.revision = ?
+                  AND attempt.owner_id = ?
+                  AND lease.owner_id = ?
+                  AND lease.fencing_token = ?
+                  AND reservation.business_scope = ?
+                  AND reservation.operation_fingerprint = ?
+                  AND reservation.owner_id = ?
+                  AND reservation.fencing_token = ?
+                """,
+                (
+                    identity["node_id"],
+                    identity["attempt_id"],
+                    identity["lease_id"],
+                    identity["reservation_id"],
+                    identity["graph_id"],
+                    revision,
+                    identity["lease_owner_id"],
+                    identity["lease_owner_id"],
+                    fence,
+                    identity["business_scope"],
+                    identity["operation_fingerprint"],
+                    identity["lease_owner_id"],
+                    fence,
+                ),
+            ).fetchone()
+            if row is None:
+                raise TaskStoreError(
+                    TASK_STORE_OWNERSHIP_CONFLICT,
+                    "live node execution authority identity no longer matches",
+                )
+            snapshot = dict(row)
+            if (
+                str(snapshot["graph_status"]) != "ACTIVE"
+                or str(snapshot["node_status"]) != "RUNNING"
+                or str(snapshot["attempt_status"]) != "RUNNING"
+                or str(snapshot["attempt_owner_id"] or "")
+                != identity["lease_owner_id"]
+                or str(snapshot["lease_status"]) != "ACTIVE"
+                or int(snapshot["lease_expires_ts_ms"] or 0) <= now_value
+                or str(snapshot["reservation_status"]) != "RESERVED"
+                or int(snapshot["reservation_expires_ts_ms"] or 0) <= now_value
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_OWNERSHIP_CONFLICT,
+                    "live node execution authority is terminal, cancelled, or expired",
+                )
+            return {
+                **identity,
+                "graph_revision": revision,
+                "fencing_token": fence,
+                "verified_ts_ms": now_value,
+                "lease_expires_ts_ms": int(snapshot["lease_expires_ts_ms"]),
+                "reservation_expires_ts_ms": int(
+                    snapshot["reservation_expires_ts_ms"]
+                ),
+            }
+        finally:
+            if conn.in_transaction:
+                conn.rollback()
+            conn.close()
+
     def list_recovery_required_operations(self) -> list[dict[str, Any]]:
         conn = self._connect()
         try:

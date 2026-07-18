@@ -21,13 +21,9 @@ if TYPE_CHECKING:
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.neo4j_client import InMemoryNeo4jBondClient, SqliteBondClient, build_neo4j_bond_client, load_neo4j_runtime_config  # 修复审计问题 #10
-from host_brain.governor.policy_cache import GovernorPolicyCache
-from host_brain.governor.tokens import TokenService
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.memory.life_memory.store import LifeMemoryStore
-from host_brain.mcp.tool_broker import MCPToolBroker
-from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.observability.metrics import MetricsCollector
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.channels.multimodal_processor import MultimodalProcessor
@@ -37,13 +33,6 @@ from host_brain.core.predictive_state import PredictiveStateEngine
 from host_brain.core.meta_learning_loop import MetaLearningLoop
 from host_brain.agents.planning_agent import PlanningAgent
 from host_brain.executive_runtime.capability_synthesis import RuntimeCapabilityRegistry
-from host_brain.skills.builtin_registry import build_builtin_skill_registry
-from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
-from host_brain.skills.provider_catalog import register_configured_skill_providers
-from host_brain.skills.registry import SkillRegistry
-from host_brain.skills.capability_scorecard_provider import FederatedCapabilityScorecardProvider
-from host_brain.tools.broker import ToolBroker
-from host_brain.tools.catalog import ToolCatalog
 
 # 新模块导入（优化计划新增模块）
 from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
@@ -449,7 +438,6 @@ from host_brain.composition.process_runtime_services import (
     get_distillation_engine,
     get_graph_runtime,
     get_intent_engine,
-    get_mcp_tool_broker,
     get_mcp_tool_registry,
     get_memory_guard,
     get_memory_worth_evaluator,

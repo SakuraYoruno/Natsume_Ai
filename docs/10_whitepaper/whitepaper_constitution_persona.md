@@ -382,7 +382,7 @@ I4 用户可见输出必须经 ReplyEnvelope 收口；非 final_reply 或不可�
 I5 记忆与人格状态写入必须走 memory skill、授权写域或内部等价事件；表达层不得直接写入
 I6 任何 CONFIRM / require_confirm / 当前代码定义的高风险确认路径必须有 confirm_token
 I7 session 内 seq 单调；重放/乱序必须拒绝
-I8 禁止旁路：可执行能力必须经注册表、SkillLoader/ToolBroker/MCPToolBroker 等单入口，并受当前 token 与审计契约约束
+I8 禁止旁路：可执行能力必须经 `HostCommand → immutable TaskGraph → app-local governed execution port`，并受 canonical live authority 与审计契约约束；原始 `ToolBroker`/`MCPToolBroker` direct、bound 或 callback API 必须固定拒绝，注册表只提供发现信息而不授予执行权
 I9 Bond SSOT 只能由 Host 单写入口更新；关系快照不得由表达层或外显面反写
 I10 云端出站必须有 airlock 脱敏报告
 I11 代码契约标记为 reversible 的执行或资产变更，成功时必须产生 manifest_ref，并由 Host 签发 undo_token

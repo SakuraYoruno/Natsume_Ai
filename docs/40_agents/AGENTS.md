@@ -68,7 +68,7 @@ B) 仓库中标注 `受众：CODEX` 的文档（尤其 `docs/30_devspec/DevTasks
 你不得破坏白皮书定义的不变量（I1/I6/I8/I9/I10/I11 等）。当任务卡列出不变量时，以任务卡为准；若任务卡未列出，也不得默认破坏。
 
 最低必须保证（简化口径）：
-- 禁止旁路执行：不得绕过 Governor；不得绕过 Skills/ToolBroker 执行入口；不得无 token 执行。
+- 禁止旁路执行：不得绕过 Governor 或 `HostCommand → immutable TaskGraph → app-local governed execution port`；原始 `ToolBroker`/`MCPToolBroker` direct、bound、callback API 必须固定拒绝，且不得绕过 canonical live authority gate 执行。
 - 禁止伪执行宣告：对外“已执行/已保存/已确认”只能引用 Host 审计摘要字段（audit 链路可证明）。
 - 审计强制：新增执行路径必须写审计日志；decision=REJECT 必须有 reason_code。
 - 未完成不得偷跑：必须显式 TODO + 关闭能力（REJECT / NOT_IMPLEMENTED），不能通过绕开门禁来“跑通”。
@@ -176,7 +176,7 @@ D) 风险点与回滚策略
 ## 9. 绝对禁止事项（零容忍）
 1) 把讨论性文本/背景解释/愿景口号写进 DevTasks。  
 2) 在 PRD/白皮书/Project 文档写“请实现/请改代码/请提交”等可执行命令（应迁移到 DevTasks 或写任务卡）。  
-3) 引入旁路执行路径（绕过 Governor/Token/Skills/ToolBroker 执行入口）。  
+3) 引入旁路执行路径（绕过 Governor、`HostCommand → immutable TaskGraph`、app-local governed execution port 或 canonical live authority gate，或恢复原始 `ToolBroker`/`MCPToolBroker` direct、bound、callback 执行）。
 4) 输出或暗示“已执行/已保存/已确认”，但审计链无法证明。  
 5) 只改一半导致契约不一致（Schema/Enum/日志表/测试不同步）。  
 
