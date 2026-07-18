@@ -5,4 +5,7 @@ authority.  It is intentionally no longer exported from the runtime surface;
 validation tools import it through :mod:`host_brain.validation`.
 """
 
-__all__: list[str] = []
+from .world_resolver import WorldResolver, WorldResolverError
+from .intent_arbiter import IntentArbiter
+
+__all__ = ["IntentArbiter", "WorldResolver", "WorldResolverError"]
