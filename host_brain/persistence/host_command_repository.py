@@ -41,14 +41,11 @@ from host_brain.persistence.host_command_repository_codec import (
     digest as _digest,
     load_object as _load_object,
     mapping_from_typed as _mapping_from_typed,
-    matches_review_decision_result as _matches_review_decision_result,
-    normalize_external_sha256 as _normalize_external_sha256,
     normalize_failure_evidence_refs as _normalize_failure_evidence_refs,
     optional_text as _optional_text,
     required_int as _required_int,
     required_sha256 as _required_sha256,
     required_text as _required_text,
-    secure_ingress_surface as _secure_ingress_surface,
     supersession_id as _supersession_id,
     typed_roundtrip as _typed_roundtrip,
     work_order_roundtrip as _work_order_roundtrip,
@@ -72,9 +69,12 @@ from host_brain.persistence.host_command_repository_types import (
     SUPERSESSION_TABLE as _SUPERSESSION_TABLE,
     HostCommandRepositoryError,
 )
+from host_brain.persistence.host_command_claim_result_validation import (
+    HostCommandClaimResultValidationMixin,
+)
 
 
-class HostCommandRepository:
+class HostCommandRepository(HostCommandClaimResultValidationMixin):
     """SQLite repository and UoW for one immutable command admission."""
 
     def __init__(
@@ -85,6 +85,7 @@ class HostCommandRepository:
         timeout_ms: int = 5_000,
         verify_schema: bool = True,
         fault_injector: Callable[[str], None] | None = None,
+        authenticated_outcome_lookup: Callable[[str], Any | None] | None = None,
     ) -> None:
         raw_path = str(db_path or "").strip()
         if not raw_path or raw_path == ":memory:" or raw_path.lower().startswith("file:"):
@@ -98,6 +99,7 @@ class HostCommandRepository:
         self._clock = clock
         self._timeout_ms = max(1, int(timeout_ms))
         self._fault_injector = fault_injector
+        self._authenticated_outcome_lookup = authenticated_outcome_lookup
         self._task_store = DurableTaskStore(
             self.db_path,
             clock=clock,
@@ -891,6 +893,11 @@ class HostCommandRepository:
         finally:
             conn.close()
 
+    def validate_ingress_claim_result(self, command_id: str) -> dict[str, Any]:
+        """Reopen one command and verify its current terminal claim authority."""
+
+        return self._validate_claim_result_record(command_id)
+
     def _normalize_admission(
         self,
         command: Any,
@@ -1203,122 +1210,6 @@ class HostCommandRepository:
                 f"durable command replay payload drift: {drift}",
             )
 
-    def _validate_ingress_claim(
-        self,
-        conn: sqlite3.Connection,
-        normalized: Mapping[str, Any],
-    ) -> None:
-        claim_ref = str(normalized.get("ingress_claim_ref") or "").strip()
-        if not claim_ref:
-            return
-        try:
-            row = conn.execute(
-                """
-                SELECT principal_id, surface, request_id, body_sha256,
-                       claim_status, result_ref
-                FROM secure_ingress_idempotency_claim
-                WHERE claim_ref = ?
-                """,
-                (claim_ref,),
-            ).fetchone()
-            audit = conn.execute(
-                """
-                SELECT request_id, surface, principal_id, body_sha256,
-                       decision, claim_ref, side_effects_executed
-                FROM secure_ingress_audit
-                WHERE audit_ref = ?
-                """,
-                (str(normalized.get("ingress_audit_ref") or ""),),
-            ).fetchone()
-        except sqlite3.DatabaseError as exc:
-            raise HostCommandRepositoryError(
-                HOST_COMMAND_SCHEMA_NOT_READY,
-                "Secure Ingress migration 0058 is unavailable",
-            ) from exc
-        if row is None or audit is None or str(row["claim_status"]) != "COMMITTED":
-            raise HostCommandRepositoryError(
-                HOST_COMMAND_INGRESS_CONFLICT,
-                "ingress claim/audit is absent or the claim is not COMMITTED",
-            )
-        expected_result = str(normalized["command_id"])
-        actual_result = str(row["result_ref"] or "").strip()
-        surface = str(normalized["surface"])
-        terminal_result_matches = True
-        if surface == "internal" and actual_result:
-            terminal_result_matches = (
-                conn.execute(
-                    """
-                    SELECT 1
-                    FROM agent_execution_result
-                    WHERE receipt_ref = ? AND command_id = ?
-                    LIMIT 1
-                    """,
-                    (actual_result, expected_result),
-                ).fetchone()
-                is not None
-            )
-            if not terminal_result_matches:
-                terminal_result_matches = _matches_review_decision_result(
-                    conn,
-                    result_ref=actual_result,
-                    command=normalized,
-                )
-        elif surface == "scheduler" and actual_result:
-            terminal_result_matches = (
-                conn.execute(
-                    """
-                    SELECT 1
-                    FROM scheduler_execution_result
-                    WHERE receipt_ref = ? AND command_id = ?
-                    LIMIT 1
-                    """,
-                    (actual_result, expected_result),
-                ).fetchone()
-                is not None
-            )
-            if not terminal_result_matches:
-                terminal_result_matches = _matches_review_decision_result(
-                    conn,
-                    result_ref=actual_result,
-                    command=normalized,
-                )
-        claim_body_sha256 = _normalize_external_sha256(
-            row["body_sha256"],
-            field_name="secure_ingress_idempotency_claim.body_sha256",
-        )
-        audit_body_sha256 = _normalize_external_sha256(
-            audit["body_sha256"],
-            field_name="secure_ingress_audit.body_sha256",
-        )
-        mismatched = (
-            str(row["principal_id"]) != str(normalized["principal_id"])
-            or str(row["surface"]) != _secure_ingress_surface(str(normalized["surface"]))
-            or str(row["request_id"]) != str(normalized["request_id"])
-            or claim_body_sha256 != str(normalized["input_sha256"])
-            or (
-                surface in {"internal", "scheduler"}
-                and not terminal_result_matches
-            )
-            or (
-                surface not in {"internal", "scheduler"}
-                and actual_result not in {"", expected_result}
-            )
-        )
-        audit_mismatched = (
-            str(audit["request_id"] or "") != str(normalized["request_id"])
-            or str(audit["surface"]) != _secure_ingress_surface(str(normalized["surface"]))
-            or str(audit["principal_id"] or "") != str(normalized["principal_id"])
-            or audit_body_sha256 != str(normalized["input_sha256"])
-            or str(audit["decision"]) != "ALLOW"
-            or str(audit["claim_ref"] or "") != claim_ref
-            or int(audit["side_effects_executed"]) != 0
-        )
-        if mismatched or audit_mismatched:
-            raise HostCommandRepositoryError(
-                HOST_COMMAND_INGRESS_CONFLICT,
-                "ingress claim binding does not match the command",
-            )
-
     def _bind_ingress_claim(
         self,
         conn: sqlite3.Connection,
@@ -1328,10 +1219,11 @@ class HostCommandRepository:
         if not claim_ref:
             return
         self._validate_ingress_claim(conn, normalized)
-        if str(normalized["surface"]) in {"internal", "scheduler"}:
+        if str(normalized["surface"]) in {"internal", "scheduler", "operator", "tool"}:
             # Command admission is not a terminal result for governed worker
-            # surfaces.  Their application services complete the Secure
-            # Ingress claim only after an immutable worker receipt exists.
+            # surfaces.  Native application services complete their claims
+            # after an immutable worker receipt exists; Operator commands keep
+            # the outer OBS outcome journal as the sole claim result authority.
             return
         result_ref = str(normalized["command_id"])
         current = conn.execute(

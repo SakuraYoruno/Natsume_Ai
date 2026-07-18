@@ -6,13 +6,46 @@ import pytest
 from fastapi.testclient import TestClient
 
 from host_brain.tools.catalog import ToolCatalog
-from host_brain.tools.broker import ToolBroker, RESULT_SUCCESS, RESULT_REJECTED
+from host_brain.tools.broker import ToolBroker, RESULT_SUCCESS
+from host_brain.app.governed_tool_runtime import GovernedToolExecutionError
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.tool_routes import create_tool_router
 from fastapi import FastAPI
 
 
 # ── 测试夹具 ──────────────────────────────────────────────────────────────────
+
+class _ProtocolGovernedToolApplication:
+    """Protocol-only adapter; production authority is covered separately."""
+
+    def __init__(self, catalog: ToolCatalog) -> None:
+        self.catalog = catalog
+
+    async def execute(self, *, body, request, raw_body):  # noqa: ANN001, ANN201
+        del request, raw_body
+        try:
+            meta = self.catalog.get(body.tool_id)
+        except KeyError as exc:
+            raise GovernedToolExecutionError(404, "TOOL_NOT_FOUND", "tool not found") from exc
+        if meta.side_effect_level == "WRITE":
+            raise GovernedToolExecutionError(
+                409,
+                "GOVERNED_TOOL_REVIEW_REQUIRED",
+                "durable Review is required",
+            )
+        return {
+            "status": RESULT_SUCCESS,
+            "result_code": "TOOL_EXECUTED",
+            "tool_id": body.tool_id,
+            "intent_id": body.intent_id,
+            "evidence_ref": "evidence::governed-protocol-test",
+            "output": {"result": "read_ok"},
+            "reason_code": None,
+            "detail": None,
+            "request_id": "request-governed-protocol-test",
+            "timestamp": 1,
+        }
+
 
 def _make_test_app() -> tuple[FastAPI, ToolCatalog, ToolBroker]:
     """构建独立测试 FastAPI 应用，注入 mock 依赖。"""
@@ -53,12 +86,24 @@ def _make_test_app() -> tuple[FastAPI, ToolCatalog, ToolBroker]:
     ledger.log_skill_exec = MagicMock()
 
     broker = ToolBroker(catalog=catalog, token_service=token_service, ledger=ledger)
-    broker.register_handler("read_tool_01", lambda args, ctx: {"result": "read_ok"})
+    broker.register_handler(
+        "read_tool_01",
+        lambda args, ctx: {"result": "read_ok"},
+        replay_safe_local=True,
+        adapter_version_id="test.read-tool.v1",
+    )
+    broker.register_handler(
+        "write_tool_01",
+        lambda args, ctx: {"result": "write_ok"},
+        adapter_version_id="test.write-tool.v1",
+    )
 
     app = FastAPI()
+    governed_application = _ProtocolGovernedToolApplication(catalog)
     app.include_router(create_tool_router(HostRoutePorts(
         tool_broker_provider=lambda: broker,
         tool_catalog_provider=lambda: catalog,
+        governed_tool_application_provider=lambda: governed_application,
     )))
     return app, catalog, broker
 
@@ -82,6 +127,9 @@ class TestToolHealth:
         assert data["catalog_size"] == 2
         assert data["read_tools"] == 1
         assert data["write_tools"] == 1
+        assert data["registered_tools"] == 2
+        assert data["governed_executable_tools"] == 1
+        assert data["readiness"] == "READY"
         assert "request_id" in data
         assert "timestamp" in data
 
@@ -208,7 +256,8 @@ class TestExecuteWriteToolGating:
         })
         # WRITE 工具无 handler → TOOL_HANDLER_MISSING → 422
         # 但 token 校验先于 handler 检查，所以应该是 403
-        assert resp.status_code in (403, 422)
+        assert resp.status_code == 409
+        assert resp.headers["x-reason-code"] == "GOVERNED_TOOL_REVIEW_REQUIRED"
 
     def test_write_tool_handler_missing_422(self, client):
         # write_tool_01 没有注册 handler，token 校验失败 → 403
@@ -219,4 +268,4 @@ class TestExecuteWriteToolGating:
             "seq": 1,
             "approval_token_ref": None,
         })
-        assert resp.status_code in (403, 422)
+        assert resp.status_code == 409

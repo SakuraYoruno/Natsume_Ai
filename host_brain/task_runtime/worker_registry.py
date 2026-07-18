@@ -12,7 +12,7 @@ GOVERNED_WORKER_ROUTE_INVALID = "GOVERNED_WORKER_ROUTE_INVALID"
 GOVERNED_WORKER_ROUTE_UNBOUND = "GOVERNED_WORKER_ROUTE_UNBOUND"
 GOVERNED_WORKER_EXECUTOR_UNSUPPORTED = "GOVERNED_WORKER_EXECUTOR_UNSUPPORTED"
 
-_ROUTE_KINDS = frozenset({"chat", "skill", "delegate"})
+_ROUTE_KINDS = frozenset({"chat", "skill", "delegate", "tool"})
 _TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$")
 
 
@@ -70,9 +70,15 @@ class GovernedWorkerRegistry:
         chat: Any | None = None,
         skill: Any | None = None,
         delegate: Any | None = None,
+        tool: Any | None = None,
         allowed_executors: tuple[str, ...] = ("canonical",),
     ) -> None:
-        self._workers = {"chat": chat, "skill": skill, "delegate": delegate}
+        self._workers = {
+            "chat": chat,
+            "skill": skill,
+            "delegate": delegate,
+            "tool": tool,
+        }
         self._allowed_executors = frozenset(
             str(value or "").strip().lower()
             for value in allowed_executors

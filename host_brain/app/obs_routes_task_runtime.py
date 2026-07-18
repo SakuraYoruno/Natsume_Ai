@@ -23,8 +23,6 @@ from host_brain.app.settings.core import get_core_settings
 from host_brain.integrations.runtime_events import RuntimeEventError, RuntimeEventStore
 from host_brain.app.observability_runtime.projection_runtime import (
     ProjectionOperatorReadModelService,
-    get_query_projection_worker,
-    refresh_task_projections,
 )
 from host_brain.observability.projection_store import QueryProjectionError
 from host_brain.observability.operator_query_gateway import (
@@ -409,18 +407,6 @@ def _terminal_reconciliation_challenge(value: Any) -> dict[str, Any]:
         "recommended_resolution": _terminal_resolution(case),
         "settlement": _terminal_settlement_summary(source.get("proof")),
     }
-
-
-def refresh_task_runtime_query_projections() -> dict[str, int]:
-    """Background-only Task/Review projection entry."""
-
-    canonical_db_path = _canonical_db_path()
-    source = OperatorReadModelService(
-        task_store=DurableTaskStore(canonical_db_path),
-        review_store=ReviewStore(canonical_db_path),
-        event_store=RuntimeEventStore(canonical_db_path),
-    )
-    return refresh_task_projections(source, get_query_projection_worker())
 
 
 def _require_operator_views_enabled() -> None:

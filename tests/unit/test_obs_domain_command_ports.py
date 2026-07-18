@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from natsume_contracts.task import HostCommandSurface
+
 from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     OBS_COMMAND_ENVELOPE_SCHEMA,
@@ -32,6 +34,8 @@ from host_brain.task_runtime.terminal_state_reconciliation import (
     TerminalStateReconciliationError,
 )
 from host_brain.app.observability_runtime.domain_command_ports import (
+    BLOCKED_OPERATOR_COMMAND_IDS,
+    GOVERNED_OPERATOR_COMMAND_IDS,
     OBS_DOMAIN_RESULT_SCHEMA,
     ObsDomainCommandError,
     build_default_obs_domain_command_registry,
@@ -88,6 +92,59 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     assert len(expected) == 37
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
+    assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset({"scheduler.task.trigger"})
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 36
+    assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
+        expected
+    )
+
+
+def test_scheduler_trigger_enters_operator_surface_and_reports_review_pause() -> None:
+    captured: dict[str, object] = {}
+
+    class _SchedulerCommandService:
+        @staticmethod
+        async def trigger_manual(**kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+            return {
+                "done": True,
+                "execution_receipt": {
+                    "status": "WAITING_APPROVAL",
+                    "projection": {
+                        "review": {"review_id": "task_review_operator_1"},
+                    },
+                },
+            }
+
+    registry = build_default_obs_domain_command_registry()
+    port = registry.resolve_port("scheduler.task.trigger")
+    assert port is not None
+    state = SimpleNamespace(
+        scheduler_container=SimpleNamespace(
+            command_service=_SchedulerCommandService(),
+        ),
+    )
+    envelope = _envelope(
+        "scheduler.task.trigger",
+        {"task_id": "operator_governed_task", "payload": {"reason": "test"}},
+    )
+
+    with bind_operator_command_runtime(state, raw_body=b"authenticated-body"):
+        result = asyncio.run(port.execute(envelope))
+
+    assert captured["command_surface"] is HostCommandSurface.OPERATOR
+    assert captured["task_id"] == "operator_governed_task"
+    assert captured["payload"] == {"reason": "test"}
+    authority = captured["authority"]
+    assert isinstance(authority, dict)
+    assert authority["principal_id"] == "principal.authenticated"
+    assert authority["claim_ref"] == envelope.claim_ref
+    assert authority["audit_ref"] == envelope.audit_ref
+    assert result.success is True
+    assert result.side_effects_executed is False
+    assert result.result["output"]["execution_receipt"]["status"] == (
+        "WAITING_APPROVAL"
+    )
 
 
 def test_bio_adapter_uses_bound_principal_not_caller_owner(monkeypatch) -> None:

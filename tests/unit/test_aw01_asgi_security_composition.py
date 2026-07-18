@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 
-from host_brain.app import asgi
+from host_brain.app import asgi, tool_runtime_composition
 from host_brain.app.host_route_ports import HostRoutePorts
 
 
@@ -325,9 +325,15 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     capability_broker = object()
     model_attempt_service = object()
     prompt_registry = object()
+    intent_engine = object()
+    resource_manager = object()
+    tool_catalog = object()
+    tool_broker = SimpleNamespace(resolve_execution_binding=object())
+    governed_tool_application = object()
     canonical_executor = object()
     workspace_runtime = object()
     obs_ingress = SimpleNamespace(execute=lambda *_args, **_kwargs: None)
+    outcome_lookup = lambda _receipt_ref: None
     pentest_composition = object()
     signed_ingress = object()
     skill_registry = object()
@@ -353,6 +359,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             enabled=True,
             execution_enabled=True,
             ingress=obs_ingress,
+            outcome_journal=SimpleNamespace(lookup=outcome_lookup),
         )
         pentest_secure_run_composition = pentest_composition
         signed_skill_provider_intake_composition = SimpleNamespace(
@@ -561,7 +568,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         return FastAPI()
 
     def fake_build_container(**kwargs):
-        assert isinstance(kwargs.pop("route_ports"), HostRoutePorts)
+        route_ports = kwargs.pop("route_ports")
+        assert isinstance(route_ports, HostRoutePorts)
+        captured["route_ports"] = route_ports
         provider = kwargs.pop("degradation_capability_port_provider")
         assert callable(provider)
         assert provider() is None
@@ -574,6 +583,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         return container
 
     def fake_build_task_runtime(**kwargs):
+        assert kwargs.pop("authenticated_outcome_lookup") is outcome_lookup
         assert kwargs == {
             "ledger": ledger,
             "canonical_db_path": ledger.canonical_db_path,
@@ -597,7 +607,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["token_service"] is token_service
         assert kwargs["capability_broker"] is capability_broker
         assert kwargs["model_attempt_service"] is model_attempt_service
-        assert kwargs["production_authority_verifier"] is asgi.verify_durable_production_authority
+        assert kwargs["production_authority_verifier"] is (
+            tool_runtime_composition.verify_durable_production_authority
+        )
         captured["cancellation_authority_verifier"] = kwargs[
             "cancellation_authority_verifier"
         ]
@@ -775,7 +787,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         fake_compose_runtime_context,
     )
     monkeypatch.setattr(
-        asgi,
+        tool_runtime_composition,
         "DurableIntentAdmissionVerifier",
         lambda **kwargs: intent_admission_verifier
         if kwargs
@@ -790,7 +802,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
     monkeypatch.setattr(asgi, "get_capability_broker", lambda: capability_broker)
     monkeypatch.setattr(
-        asgi,
+        tool_runtime_composition,
         "ApplicationModelAttemptServicePort",
         lambda: model_attempt_service,
     )
@@ -830,7 +842,20 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             ),
         ),
     )
-    monkeypatch.setattr(asgi, "get_intent_engine", object)
+    monkeypatch.setattr(asgi, "get_intent_engine", lambda: intent_engine)
+    monkeypatch.setattr(asgi, "get_resource_manager", lambda **_kwargs: resource_manager)
+    monkeypatch.setattr(asgi, "get_tool_broker", lambda: tool_broker)
+    monkeypatch.setattr(asgi, "get_tool_catalog", lambda: tool_catalog)
+    monkeypatch.setattr(
+        tool_runtime_composition,
+        "SecureIngressHttpAuthorityAdapter",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        tool_runtime_composition,
+        "GovernedToolHttpApplication",
+        lambda **_kwargs: governed_tool_application,
+    )
     monkeypatch.setattr(asgi, "get_episodic_store", object)
     monkeypatch.setattr(asgi, "get_memory_guard", object)
     monkeypatch.setattr(asgi, "get_memory_worth_evaluator", object)
@@ -876,7 +901,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     )
     monkeypatch.setattr(asgi, "build_process_canon_container", fake_build_canon)
     monkeypatch.setattr(
-        asgi,
+        tool_runtime_composition,
         "build_governed_host_runtime",
         fake_build_governed_runtime,
     )
@@ -957,6 +982,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
                 captured["governed_command_application_provider"]()
                 is governed_runtime
             )
+            assert (
+                captured["route_ports"].governed_tool_application_provider()
+                is governed_tool_application
+            )
             assert captured["obs_command_ingress_provider"]() is obs_ingress
             assert (
                 captured["pentest_secure_run_composition_provider"]()
@@ -985,6 +1014,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert application.state.task_operation_reconciliation_command_service is None
         assert application.state.task_effect_reconciliation_command_service is None
         assert captured["governed_command_application_provider"]() is None
+        assert captured["route_ports"].governed_tool_application_provider() is None
 
     asyncio.run(scenario())
 

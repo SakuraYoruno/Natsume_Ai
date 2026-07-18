@@ -1989,14 +1989,14 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
     def _validate_ingress_authority(
         conn: sqlite3.Connection,
         *,
-        authority: Mapping[str, str],
+        authority: Mapping[str, Any],
         request_id: str,
     ) -> None:
         try:
             claim = conn.execute(
                 """
                 SELECT principal_id, surface, request_id, body_sha256,
-                       claim_status
+                       claim_status, action, required_scopes_json
                 FROM secure_ingress_idempotency_claim
                 WHERE claim_ref = ?
                 """,
@@ -2005,7 +2005,8 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             audit = conn.execute(
                 """
                 SELECT request_id, surface, principal_id, body_sha256,
-                       decision, reason_code, claim_ref, side_effects_executed
+                       decision, reason_code, claim_ref, side_effects_executed,
+                       action, required_scopes_json
                 FROM secure_ingress_audit
                 WHERE audit_ref = ?
                 """,
@@ -2021,9 +2022,15 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
                 SCHEDULER_OCCURRENCE_INVALID,
                 "scheduler authority claim or audit is missing",
             )
+        command_surface = str(
+            authority.get("command_surface") or "scheduler"
+        ).strip().lower()
+        expected_surface = (
+            "obs.command" if command_surface == "operator" else "scheduler.admin"
+        )
         expected = (
             authority["principal_id"],
-            "scheduler.admin",
+            expected_surface,
             request_id,
             authority["body_sha256"],
         )
@@ -2039,9 +2046,29 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             str(audit["request_id"]),
             str(audit["body_sha256"]).removeprefix("sha256:"),
         )
+        operator_policy_valid = True
+        if command_surface == "operator":
+            try:
+                claim_scopes_raw = json.loads(str(claim["required_scopes_json"]))
+                audit_scopes_raw = json.loads(str(audit["required_scopes_json"]))
+                claim_scopes = tuple(sorted(str(item) for item in claim_scopes_raw))
+                audit_scopes = tuple(sorted(str(item) for item in audit_scopes_raw))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                operator_policy_valid = False
+            else:
+                operator_policy_valid = (
+                    str(claim["action"]) == "obs:command:scheduler.task.trigger"
+                    and str(audit["action"])
+                    == "obs:command:scheduler.task.trigger"
+                    and claim_scopes == ("obs:write", "scheduler:write")
+                    and audit_scopes == ("obs:write", "scheduler:write")
+                )
+        elif command_surface != "scheduler":
+            operator_policy_valid = False
         if (
             claim_binding != expected
             or audit_binding != expected
+            or not operator_policy_valid
             or str(claim["claim_status"]) != "COMMITTED"
             or str(audit["decision"]) != "ALLOW"
             or str(audit["reason_code"]) != "SECURE_INGRESS_ALLOWED"
@@ -2427,7 +2454,7 @@ def _normalize_authority(
     authority: Mapping[str, Any],
     *,
     request_id: str,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     if not isinstance(authority, Mapping):
         raise SchedulerRepositoryError(
             SCHEDULER_OCCURRENCE_INVALID,
@@ -2450,7 +2477,7 @@ def _normalize_authority(
             SCHEDULER_OCCURRENCE_INVALID,
             "scheduler authority request_id differs from the occurrence",
         )
-    return {
+    normalized: dict[str, Any] = {
         "request_id": authority_request,
         "principal_id": _required_text(
             data.get("principal_id"),
@@ -2474,6 +2501,10 @@ def _normalize_authority(
             reason_code=SCHEDULER_OCCURRENCE_INVALID,
         ),
     }
+    command_surface = str(data.get("command_surface") or "").strip().lower()
+    if command_surface:
+        normalized["command_surface"] = command_surface
+    return normalized
 
 
 def _normalize_admin_authority(authority: Mapping[str, Any]) -> dict[str, str]:

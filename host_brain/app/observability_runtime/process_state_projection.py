@@ -131,12 +131,6 @@ def _run_if_due(
     return callback()
 
 
-def _store() -> QueryProjectionStore:
-    from host_brain.composition.process_services import get_query_projection_store
-
-    return get_query_projection_store()
-
-
 def _upsert(
     kind: str,
     key: str,
@@ -146,10 +140,9 @@ def _upsert(
     source_ref: str,
     degraded_state: ProjectionDegradedState = ProjectionDegradedState.HEALTHY,
     degraded_detail: str | None = None,
-    store: QueryProjectionStore | None = None,
+    store: QueryProjectionStore,
 ) -> None:
-    target_store = store if store is not None else _store()
-    target_store.upsert(
+    store.upsert(
         kind,
         key,
         payload,
@@ -159,70 +152,6 @@ def _upsert(
         degraded_state=degraded_state,
         degraded_detail=degraded_detail,
     )
-
-
-def refresh_insights_summary_projection() -> dict[str, int]:
-    """Aggregate the configured summary window outside the request path."""
-
-    from host_brain.app.obs_routes_summary import (
-        INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES,
-        _build_insights_summary_snapshot_sync,
-    )
-
-    window = int(INSIGHTS_SUMMARY_PROJECTION_WINDOW_MINUTES)
-    from host_brain.app.observability_runtime.projection_ledger_view import (
-        ProjectionLedgerView,
-    )
-
-    store = _store()
-    payload = _build_insights_summary_snapshot_sync(
-        window,
-        projection_view=ProjectionLedgerView(store),
-        projection_store=store,
-    )
-    cursor = _next_cursor(INSIGHTS_SUMMARY_KIND, int(payload.get("timestamp") or 0))
-    _upsert(
-        INSIGHTS_SUMMARY_KIND,
-        window_key(window),
-        payload,
-        cursor=cursor,
-        source_ref="insights-summary-background-worker",
-    )
-    return {"document_count": 1}
-
-
-def refresh_digital_life_overview_projection() -> dict[str, int]:
-    """Build the digital-life aggregate only in the background worker."""
-
-    import asyncio
-
-    from host_brain.app.obs_routes_summary import (
-        DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES,
-        _build_digital_life_overview_snapshot_async,
-    )
-
-    window = int(DIGITAL_LIFE_OVERVIEW_PROJECTION_WINDOW_MINUTES)
-    from host_brain.app.observability_runtime.projection_ledger_view import (
-        ProjectionLedgerView,
-    )
-
-    store = _store()
-    payload = asyncio.run(
-        _build_digital_life_overview_snapshot_async(
-            window,
-            projection_view=ProjectionLedgerView(store),
-            projection_store=store,
-        )
-    )
-    cursor = _next_cursor(DIGITAL_LIFE_OVERVIEW_KIND, int(payload.get("timestamp") or 0))
-    _upsert(
-        DIGITAL_LIFE_OVERVIEW_KIND,
-        window_key(window),
-        payload,
-        cursor=cursor,
-        source_ref="digital-life-overview-background-worker",
-    )
-    return {"document_count": 1}
 
 
 def refresh_runtime_snapshot_projection(
@@ -322,14 +251,10 @@ def load_resource_manager_projection_source(
             now,
             "disabled",
         )
-    if manager_provider is None:
-        from host_brain.composition.process_services import get_resource_manager
-
-        manager_provider = lambda: get_resource_manager(create_if_missing=False)
     raw: dict[str, Any] = {}
     source = "unavailable"
     try:
-        manager = manager_provider()
+        manager = manager_provider() if manager_provider is not None else None
         if manager is not None:
             value = manager.get_status()
             raw = dict(value) if isinstance(value, Mapping) else {}
@@ -356,26 +281,6 @@ def load_resource_manager_projection_source(
     payload.pop("status_path", None)
     payload["status_ref"] = "resource-manager://status/current"
     return payload, cursor, source
-
-
-def refresh_resource_manager_projection() -> dict[str, int]:
-    payload, observed, source = load_resource_manager_projection_source()
-    cursor = _next_cursor(RESOURCE_MANAGER_KIND, observed)
-    unavailable = str(payload.get("status") or "").upper() == "UNAVAILABLE"
-    _upsert(
-        RESOURCE_MANAGER_KIND,
-        RESOURCE_MANAGER_KEY,
-        payload,
-        cursor=cursor,
-        source_ref=f"resource-manager-{source}-background-worker",
-        degraded_state=(
-            ProjectionDegradedState.SOURCE_UNAVAILABLE
-            if unavailable
-            else ProjectionDegradedState.HEALTHY
-        ),
-        degraded_detail="resource manager source unavailable" if unavailable else None,
-    )
-    return {"document_count": 1}
 
 
 _BIO_METADATA_FIELDS = frozenset(
@@ -580,13 +485,16 @@ def load_bio_ops_projection_sources(root: Path) -> list[tuple[str, dict[str, Any
     return documents
 
 
-def refresh_bio_ops_projection() -> dict[str, int]:
-    from host_brain.app.obs_routes_agent_bio_ops import OBSERVABLE_EFFECTS_ROOT
+def refresh_bio_ops_projection(
+    *,
+    store: QueryProjectionStore,
+    root: Path,
+) -> dict[str, int]:
+    """Materialize BioOps metadata through explicit app-local ports only."""
 
-    documents = load_bio_ops_projection_sources(Path(OBSERVABLE_EFFECTS_ROOT))
+    documents = load_bio_ops_projection_sources(Path(root))
     if not documents:
         return {"document_count": 0}
-    store = _store()
     for run_id, payload, observed in documents:
         current = store.get(BIO_OPS_KIND, run_id)
         cursor = _monotonic_source_cursor(current, payload, observed)
@@ -615,16 +523,6 @@ def refresh_bio_ops_projection() -> dict[str, int]:
         source_ref="bio-ops-metadata-background-worker:latest",
     )
     return {"document_count": len(documents) + 1}
-
-
-def run_insights_summary_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("insights-summary", 30.0, refresh_insights_summary_projection)
-
-
-def run_digital_life_overview_projection_job() -> dict[str, int | bool]:
-    return _run_if_due(
-        "digital-life-overview", 60.0, refresh_digital_life_overview_projection
-    )
 
 
 def run_runtime_snapshot_projection_job(
@@ -656,14 +554,6 @@ def run_life_body_projection_job(
     )
 
 
-def run_resource_manager_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("resource-manager", 30.0, refresh_resource_manager_projection)
-
-
-def run_bio_ops_projection_job() -> dict[str, int | bool]:
-    return _run_if_due("bio-ops-metadata", 30.0, refresh_bio_ops_projection)
-
-
 __all__ = [
     "BIO_OPS_KIND",
     "BIO_OPS_LATEST_KEY",
@@ -685,16 +575,9 @@ __all__ = [
     "load_resource_manager_projection_source",
     "read_process_projection",
     "refresh_bio_ops_projection",
-    "refresh_digital_life_overview_projection",
-    "refresh_insights_summary_projection",
     "refresh_life_body_projection",
-    "refresh_resource_manager_projection",
     "refresh_runtime_snapshot_projection",
-    "run_bio_ops_projection_job",
-    "run_digital_life_overview_projection_job",
-    "run_insights_summary_projection_job",
     "run_life_body_projection_job",
-    "run_resource_manager_projection_job",
     "run_runtime_snapshot_projection_job",
     "window_key",
 ]

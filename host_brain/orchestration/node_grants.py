@@ -54,7 +54,7 @@ _CHILD_STAGE = "S_TASK_GRAPH_NODE_GRANT"
 _CHILD_REASON = "TASK_GRAPH_NODE_DERIVED_APPROVE"
 _REVIEW_RENEWAL_REASON = "TASK_GRAPH_NODE_REVIEW_CONTINUATION_APPROVE"
 _REVIEW_RENEWAL_SCHEMA = "Natsume.task.review_continuation_authority.v1"
-_SUPPORTED_EXECUTABLE_ROUTES = frozenset({"skill", "delegate", "chat"})
+_SUPPORTED_EXECUTABLE_ROUTES = frozenset({"skill", "delegate", "chat", "tool"})
 _ISSUABLE_NODE_ROUTES = _SUPPORTED_EXECUTABLE_ROUTES
 
 
@@ -1127,7 +1127,11 @@ class DurableNodeGrantVerifier:
             if expected["route"] == "skill"
             else f"{expected['route']}:{expected['target_id']}"
         )
-        token_subject = action_kind
+        token_subject = (
+            expected["target_id"]
+            if expected["route"] in {"skill", "tool"}
+            else action_kind
+        )
         expected_authority = {
             "schema_version": "Natsume.task_graph.node_grant.binding.v1",
             "batch_id": batch_id,
@@ -1341,11 +1345,12 @@ def _compile_specs(
             "ordinal": ordinal,
         }
         digest = _digest(identity)
-        # Skill executor validation is already deployed with target-only
-        # subjects. Chat/delegate have no such compatibility constraint, so
-        # both action and token subject bind route+target explicitly.
+        # Skill and Tool low-level executors validate target-only token
+        # subjects.  Their durable action binding still distinguishes Tool
+        # from Skill; only the bearer-token subject preserves the existing
+        # broker contract. Chat/delegate bind route+target for both fields.
         action_kind = target_id if route == "skill" else f"{route}:{target_id}"
-        token_subject = action_kind
+        token_subject = target_id if route in {"skill", "tool"} else action_kind
         specs.append(_NodeSpec(
             node_id=node.node_id,
             route=route,

@@ -16,9 +16,8 @@ def _write_json(path, payload) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _materialize_bio_ops_projection(tmp_path, monkeypatch) -> QueryProjectionStore:
+def _materialize_bio_ops_projection(tmp_path) -> QueryProjectionStore:
     from host_brain.app.observability_runtime import process_state_projection
-    from host_brain.composition import process_services
 
     db_path = tmp_path / "operator-projection.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -26,9 +25,10 @@ def _materialize_bio_ops_projection(tmp_path, monkeypatch) -> QueryProjectionSto
     )
     assert result.success, result.as_dict()
     store = QueryProjectionStore(db_path)
-    monkeypatch.setattr(process_services, "get_query_projection_store", lambda: store)
-    monkeypatch.setattr(process_services, "peek_query_projection_store", lambda: store)
-    refreshed = process_state_projection.refresh_bio_ops_projection()
+    refreshed = process_state_projection.refresh_bio_ops_projection(
+        store=store,
+        root=tmp_path,
+    )
     assert refreshed["document_count"] >= 2
     return store
 
@@ -179,7 +179,7 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
     _write_json(run_dir / "pytest_result.json", {"exit_code": 0})
 
     monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    store = _materialize_bio_ops_projection(tmp_path, monkeypatch)
+    store = _materialize_bio_ops_projection(tmp_path)
     app = _app_with_projection_store(store)
 
     response = TestClient(app).get("/obs/codex-bio-ops")
@@ -236,7 +236,7 @@ def test_codex_bio_ops_legacy_mutations_are_unregistered_and_side_effect_free(
         },
     )
     monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
-    store = _materialize_bio_ops_projection(tmp_path, monkeypatch)
+    store = _materialize_bio_ops_projection(tmp_path)
     app = _app_with_projection_store(store)
     client = TestClient(app)
 

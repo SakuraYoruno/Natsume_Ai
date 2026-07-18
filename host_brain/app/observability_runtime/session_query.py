@@ -14,7 +14,7 @@ from host_brain.app.observability_runtime.projection_runtime import (
     SESSION_KIND,
     projection_meta,
 )
-from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.projection_store import QueryProjectionStore
 
 logger = logging.getLogger("Natsume.obs.session")
 
@@ -30,15 +30,10 @@ class SessionQueryService:
         source_only: bool = False,
     ):
         self._ledger = ledger
-        canonical_path = getattr(ledger, "canonical_db_path", None)
         if source_only:
             self._projection_store = None
         elif projection_store is not None:
             self._projection_store = projection_store
-        elif isinstance(canonical_path, str) and canonical_path.strip() and canonical_path != ":memory:":
-            from host_brain.composition.process_services import get_query_projection_store
-
-            self._projection_store = get_query_projection_store()
         else:
             self._projection_store = None
 
@@ -364,34 +359,3 @@ def _fmt_ts(ts_ms: Optional[int]) -> Optional[str]:
 
     dt = datetime.datetime.fromtimestamp(ts_ms / 1000)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def refresh_session_query_projection() -> dict[str, int]:
-    """Background-only source scan for the durable session index."""
-
-    from host_brain.composition.process_services import get_ledger, get_query_projection_store
-
-    ledger = get_ledger()
-    service = SessionQueryService(ledger, source_only=True)
-    now_ms = int(time.time() * 1000)
-    snapshot = service._query_source(
-        page=1,
-        page_size=10_000,
-        status=None,
-        channel=None,
-        keyword=None,
-        start_time=0,
-        end_time=now_ms,
-    )
-    rows = list(snapshot.get("items") or [])
-    cursor = max((int(row.get("ts_ms") or 0) for row in rows), default=0)
-    payload = {"items": rows, "timestamp": cursor}
-    get_query_projection_store().upsert(
-        SESSION_KIND,
-        SESSION_INDEX_KEY,
-        payload,
-        source_cursor=cursor,
-        source_digest=digest_json(payload),
-        source_ref="session-background-worker",
-    )
-    return {"session_count": len(rows)}

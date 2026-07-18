@@ -58,6 +58,7 @@ from host_brain.scheduler.command_service import (
     SchedulerCommandService,
     SchedulerDefinitionRepositoryPort,
     _build_governor_intent,
+    _require_scheduler_command_surface,
     _scheduler_session_id,
 )
 from host_brain.scheduler.contracts import (
@@ -239,6 +240,7 @@ class GovernedSchedulerRuntime:
         authority: Mapping[str, Any],
         governor_grant: str,
         received_at_ms: int,
+        command_surface: HostCommandSurface = HostCommandSurface.SCHEDULER,
     ) -> AsyncIterator[dict[str, Any]]:
         async with self._condition:
             if not self._active or not self._accepting:
@@ -248,6 +250,7 @@ class GovernedSchedulerRuntime:
                 )
             self._in_flight += 1
         try:
+            surface = _require_scheduler_command_surface(command_surface)
             request_id = str(authority.get("request_id") or "").strip()
             try:
                 self._governor_grants.require(
@@ -260,7 +263,7 @@ class GovernedSchedulerRuntime:
                     exc.detail,
                 ) from exc
             existing = self._commands.get_by_request(
-                surface=HostCommandSurface.SCHEDULER.value,
+                surface=surface.value,
                 request_id=request_id,
             )
             if existing is None:
@@ -289,6 +292,7 @@ class GovernedSchedulerRuntime:
                 governor_grant=governor_grant,
                 received_at_ms=received_at_ms,
                 frozen_runtime_context=frozen_runtime_context,
+                command_surface=surface,
             )
             if existing is None:
                 command = candidate_command
@@ -416,7 +420,11 @@ class GovernedSchedulerRuntime:
             graph = durable.get("graph")
             if (
                 not isinstance(command, HostCommand)
-                or command.surface is not HostCommandSurface.SCHEDULER
+                or command.surface
+                not in {
+                    HostCommandSurface.SCHEDULER,
+                    HostCommandSurface.OPERATOR,
+                }
                 or not isinstance(work_order, WorkOrderV3)
                 or assignment is None
                 or graph is None
@@ -460,7 +468,11 @@ class GovernedSchedulerRuntime:
             command = dict(record or {}).get("command")
             if (
                 not isinstance(command, HostCommand)
-                or command.surface is not HostCommandSurface.SCHEDULER
+                or command.surface
+                not in {
+                    HostCommandSurface.SCHEDULER,
+                    HostCommandSurface.OPERATOR,
+                }
             ):
                 raise GovernedSchedulerRuntimeError(
                     SCHEDULER_RUNTIME_AUTHORITY_INVALID,
@@ -480,9 +492,15 @@ class GovernedSchedulerRuntime:
                 if self._in_flight == 0:
                     self._condition.notify_all()
 
-    def existing_command(self, *, request_id: str) -> Mapping[str, Any] | None:
+    def existing_command(
+        self,
+        *,
+        request_id: str,
+        command_surface: HostCommandSurface = HostCommandSurface.SCHEDULER,
+    ) -> Mapping[str, Any] | None:
+        surface = _require_scheduler_command_surface(command_surface)
         return self._commands.get_by_request(
-            surface=HostCommandSurface.SCHEDULER.value,
+            surface=surface.value,
             request_id=str(request_id or "").strip(),
         )
 
@@ -583,7 +601,9 @@ def _build_contracts(
     governor_grant: str,
     received_at_ms: int,
     frozen_runtime_context: Mapping[str, Any] | None = None,
+    command_surface: HostCommandSurface = HostCommandSurface.SCHEDULER,
 ) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
+    surface = _require_scheduler_command_surface(command_surface)
     if occurrence.task_id != definition.task_id or (
         occurrence.definition_revision != definition.definition_revision
     ):
@@ -603,20 +623,31 @@ def _build_contracts(
     retry_policy = definition.retry_policy
     risk_level = max(1, min(5, int(definition.definition.get("risk_level") or 1)))
     worker_route = f"delegate:{definition.worker_key}"
-    business_scope = f"scheduler:{_scope_token(occurrence.task_id)}"
-    operation_fingerprint = _sha256_json(
-        {
+    business_scope = (
+        f"operator:scheduler.task.trigger:{_scope_token(occurrence.task_id)}"
+        if surface is HostCommandSurface.OPERATOR
+        else f"scheduler:{_scope_token(occurrence.task_id)}"
+    )
+    fingerprint_material = {
             "definition_revision": definition.definition_revision,
             "occurrence_id": occurrence.occurrence_id,
             "payload_sha256": occurrence.payload_sha256,
             "worker_key": definition.worker_key,
-        }
-    )
+    }
+    if surface is HostCommandSurface.OPERATOR:
+        fingerprint_material["command_surface"] = surface.value
+        fingerprint_material["operator_command_id"] = "scheduler.task.trigger"
+    operation_fingerprint = _sha256_json(fingerprint_material)
     output_contract = {
         "type": "durable_scheduler_result",
         "required": ["occurrence_id", "result", "receipt_ref"],
     }
-    review_ref = f"review-waiver://governor-grant/{suffix}"
+    operator_surface = surface is HostCommandSurface.OPERATOR
+    review_ref = (
+        f"task-review-policy://operator/scheduler-task-trigger/{suffix}"
+        if operator_surface
+        else f"review-waiver://governor-grant/{suffix}"
+    )
     budget_policy = BudgetPolicy(
         scope=f"work-order:{work_order_id}",
         limits=_SCHEDULER_BUDGET_LIMITS,
@@ -656,12 +687,30 @@ def _build_contracts(
             "on_missing": "BLOCK",
         },
         review_policy={
-            "review_required": False,
-            "durable_review_required": False,
-            "mode": "governor_grant_review_waiver",
-            "reason": "approved_scheduler_occurrence",
-            "waiver_authority": "governor_grant",
-            "waiver_ref": review_ref,
+            **(
+                {
+                    "review_required": True,
+                    "durable_review_required": True,
+                    "mode": "operator_command_pre_execution",
+                    "reason": "authenticated_operator_write",
+                    "command_id": "scheduler.task.trigger",
+                    "side_effects": [f"delegate:{definition.worker_key}"],
+                    "evidence_refs": [
+                        claim_ref,
+                        audit_ref,
+                        governor_grant,
+                    ],
+                }
+                if operator_surface
+                else {
+                    "review_required": False,
+                    "durable_review_required": False,
+                    "mode": "governor_grant_review_waiver",
+                    "reason": "approved_scheduler_occurrence",
+                    "waiver_authority": "governor_grant",
+                    "waiver_ref": review_ref,
+                }
+            ),
         },
         metadata={
             "definition_revision": definition.definition_revision,
@@ -670,6 +719,10 @@ def _build_contracts(
             "resource_profile": definition.resource_profile,
             "retry_policy": retry_policy,
             "risk_level": risk_level,
+            "command_surface": surface.value,
+            "operator_command_id": (
+                "scheduler.task.trigger" if operator_surface else None
+            ),
             "planning_lineage": {
                 "graph_id": graph_id,
                 "root_work_order_id": work_order_id,
@@ -730,7 +783,7 @@ def _build_contracts(
         nodes=(node,),
     )
     command = build_host_command(
-        surface=HostCommandSurface.SCHEDULER,
+        surface=surface,
         request_id=request_id,
         session_id=_scheduler_session_id(occurrence.occurrence_id),
         principal_id=principal_id,

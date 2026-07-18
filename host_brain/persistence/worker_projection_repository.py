@@ -200,13 +200,62 @@ class WorkerProjectionStore:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                "SELECT name, sql FROM sqlite_master WHERE type='table' AND name=?",
                 (_TABLE,),
             ).fetchone()
             if row is None:
                 raise WorkerProjectionStoreError(
                     WORKER_PROJECTION_SCHEMA_NOT_READY,
                     "worker projection migration 0086 is not applied",
+                )
+            columns = tuple(
+                str(item["name"])
+                for item in conn.execute(f"PRAGMA table_info({_TABLE})").fetchall()
+            )
+            expected_columns = (
+                "projection_id",
+                "schema_version",
+                "payload_digest",
+                "command_id",
+                "request_id",
+                "graph_id",
+                "graph_revision",
+                "node_id",
+                "attempt_id",
+                "route_type",
+                "target_id",
+                "decision",
+                "projection_json",
+                "created_ts_ms",
+            )
+            create_sql = re.sub(r"[\s\"`\[\]]+", "", str(row["sql"] or "").lower())
+            route_guard = "check(route_typein('chat','skill','delegate','tool'))"
+            required_indexes = {
+                "idx_task_runtime_worker_projection_graph": (
+                    "graph_id",
+                    "graph_revision",
+                    "node_id",
+                ),
+                "idx_task_runtime_worker_projection_request": (
+                    "request_id",
+                    "created_ts_ms",
+                ),
+            }
+            indexes = {
+                name: tuple(
+                    str(item["name"])
+                    for item in conn.execute(f"PRAGMA index_info({name})").fetchall()
+                )
+                for name in required_indexes
+            }
+            if (
+                columns != expected_columns
+                or route_guard not in create_sql
+                or indexes != required_indexes
+            ):
+                raise WorkerProjectionStoreError(
+                    WORKER_PROJECTION_SCHEMA_NOT_READY,
+                    "worker projection migration 0114 is missing or structurally drifted",
                 )
         finally:
             conn.close()
@@ -365,7 +414,7 @@ def _validate_body(value: Mapping[str, Any]) -> None:
         raise WorkerProjectionStoreError(WORKER_PROJECTION_INVALID, "projection is not terminal COMMIT")
     if str(value.get("decision")) not in {"APPROVE", "REJECT"}:
         raise WorkerProjectionStoreError(WORKER_PROJECTION_INVALID, "projection decision is invalid")
-    if str(value.get("route_type")) not in {"chat", "skill", "delegate"}:
+    if str(value.get("route_type")) not in {"chat", "skill", "delegate", "tool"}:
         raise WorkerProjectionStoreError(WORKER_PROJECTION_INVALID, "projection route is invalid")
     try:
         revision = int(value.get("graph_revision"))

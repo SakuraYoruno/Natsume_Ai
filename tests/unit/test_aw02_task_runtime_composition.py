@@ -170,6 +170,8 @@ class _TaskStore(_Closeable):
 def _build_fake_container(
     tmp_path: Path,
     events: list[str],
+    *,
+    authenticated_outcome_lookup: Any | None = None,
 ) -> ProcessTaskRuntimeContainer:
     path = tmp_path / "canonical.sqlite3"
     ledger = _Ledger(path)
@@ -187,8 +189,14 @@ def _build_fake_container(
         events.append("task-store:build")
         return _TaskStore(events)
 
-    def build_repository(db_path: str) -> _Closeable:
+    def build_repository(
+        db_path: str,
+        *,
+        authenticated_outcome_lookup: Any | None = None,
+    ) -> _Closeable:
         assert db_path == str(path.resolve())
+        if authenticated_outcome_lookup is not None:
+            events.append("repository:outcome-lookup-bound")
         events.append("repository:build")
         return _Closeable("repository", events)
 
@@ -246,6 +254,7 @@ def _build_fake_container(
         scheduler_result_repository_builder=build_scheduler_result_repository,
         event_store_builder=build_event_store,
         outbox_publisher_builder=build_publisher,
+        authenticated_outcome_lookup=authenticated_outcome_lookup,
     )
 
 
@@ -318,6 +327,24 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     assert len(recovery_id_parts[4]) == 16
     assert container.startup_publish_result["status"] == "OK"
 
+    asyncio.run(container.aclose())
+
+
+def test_authenticated_outcome_lookup_is_bound_to_the_command_repository(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    lookup = lambda _receipt_ref: None
+
+    container = _build_fake_container(
+        tmp_path,
+        events,
+        authenticated_outcome_lookup=lookup,
+    )
+
+    assert events.index("repository:outcome-lookup-bound") < events.index(
+        "repository:build"
+    )
     asyncio.run(container.aclose())
 
 

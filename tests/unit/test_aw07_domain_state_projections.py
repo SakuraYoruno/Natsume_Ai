@@ -291,15 +291,20 @@ def test_bio_ops_refresh_floors_source_cursors_at_durable_documents(
         {"run_id": "run-1", "latest_run_id": "run-1", "status": "old"},
         source_cursor=30,
     )
-    monkeypatch.setattr(process_state_projection, "_store", lambda: store)
     monkeypatch.setattr(
         process_state_projection,
         "load_bio_ops_projection_sources",
         lambda _root: [("run-1", {"run_id": "run-1", "status": "new"}, 10)],
     )
 
-    result = process_state_projection.refresh_bio_ops_projection()
-    replayed = process_state_projection.refresh_bio_ops_projection()
+    result = process_state_projection.refresh_bio_ops_projection(
+        store=store,
+        root=tmp_path,
+    )
+    replayed = process_state_projection.refresh_bio_ops_projection(
+        store=store,
+        root=tmp_path,
+    )
 
     assert result == {"document_count": 2}
     assert replayed == {"document_count": 2}

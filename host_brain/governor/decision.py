@@ -76,7 +76,15 @@ class IntentDecisionEngine:
         prompt_profile_id: str = "default_profile",
         tool_visibility_hash: str = "",
         governance_snapshot: dict[str, Any] | None = None,
+        registry_override: Any | None = None,
     ) -> dict[str, Any]:
+        # HTTP/application adapters may expose an app-local capability catalog
+        # that is not an executable SkillRegistry.  The same Governor engine,
+        # ledger, token service and maturity policy still own the decision;
+        # only metadata lookup for this exact call is substituted.  This keeps
+        # Tool/Provider catalogs out of the Skill execution registry while
+        # avoiding a second Governor state machine.
+        registry = registry_override if registry_override is not None else self._registry
         req_id = request_id or new_request_id()
         now = current_ms if current_ms is not None else now_ms()
         turn = turn_id or new_turn_id()
@@ -130,8 +138,8 @@ class IntentDecisionEngine:
 
         # M42：若注入了 registry，则将所有已注册 Skill 名称作为动态 action 白名单
         extra_action_allowlist: set[str] | None = None
-        if self._registry is not None:
-            extra_action_allowlist = set(self._registry.list_skill_names())
+        if registry is not None:
+            extra_action_allowlist = set(registry.list_skill_names())
 
         envelope, reason_code, lint = strict_validate_intent(normalized, extra_action_allowlist)
         proposal_row["lint_result"] = lint
@@ -206,7 +214,7 @@ class IntentDecisionEngine:
         if (
             self._policy_cache is not None
             and str(envelope.action or "").strip() == "narrative_only"
-            and self._registry is None  # registry 注入时由分层治理处理，避免重复
+            and registry is None  # registry 注入时由分层治理处理，避免重复
         ):
             _p2a_trust = int(gates_input.get("trust_level", 50))
             _cached = self._policy_cache.get("narrative_only", _p2a_trust)
@@ -285,7 +293,7 @@ class IntentDecisionEngine:
         approved_action_binding = build_governed_action_binding(
             intent_envelope=envelope,
             approval_token_ref=approval_token_ref,
-            risk_level=_resolve_intent_risk_level(self._registry, envelope.action),
+            risk_level=_resolve_intent_risk_level(registry, envelope.action),
             issued_at_ms=now,
             expires_at_ms=now + _approval_binding_ttl_ms(self),
         )
@@ -306,9 +314,9 @@ class IntentDecisionEngine:
         }
         # M42：分层治理路由（若注入了 registry，则按 risk_level 选择审批通道）
         approval_tier = "full"  # 默认全量审批（向后兼容）
-        if self._registry is not None and self._tier_policy is not None:
+        if registry is not None and self._tier_policy is not None:
             skill_name = envelope.action
-            meta = self._registry.get(skill_name)
+            meta = registry.get(skill_name)
             if meta is not None:
                 tier_enum = self._tier_policy.get_approval_tier(meta)
                 approval_tier = tier_enum.value
@@ -358,7 +366,7 @@ class IntentDecisionEngine:
                     row["approved_action_binding"] = build_governed_action_binding(
                         intent_envelope=envelope,
                         approval_token_ref=airlock_token_ref,
-                        risk_level=_resolve_intent_risk_level(self._registry, envelope.action),
+                        risk_level=_resolve_intent_risk_level(registry, envelope.action),
                         issued_at_ms=now,
                         expires_at_ms=now + _approval_binding_ttl_ms(self),
                     )

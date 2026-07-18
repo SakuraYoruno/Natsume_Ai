@@ -66,7 +66,7 @@
 ## T-Tool
 - T-Tool-01: ToolMeta pack is metadata-only (no execution payload), with required fields and context-pack validation compatibility.
 - T-Tool-02: Top-K selection only exposes a subset and hides WRITE tools by default; tool_visibility_hash is deterministic for same input.
-- T-Tool-03: ToolBroker is the single execution entry; WRITE without valid token must reject (TOKEN_INVALID/CONFIRM_REQUIRED), and executed actions must carry evidence_ref.
+- T-Tool-03: legacy ToolBroker direct execution must remain explicitly classified and is not production admission authority; WRITE without valid token must reject (TOKEN_INVALID/CONFIRM_REQUIRED), and executed test actions must carry evidence_ref.
 
 ## T-MCP
 - T-MCP-01: MCP provider tools are synced as governed ToolMeta entries, and MCP WRITE without valid token must reject while successful calls remain auditable by request_id/intent_id/evidence_ref.
@@ -163,7 +163,9 @@
 
 ## T-NextGen-Critical
 
-- T-GR-RUNTIME-01：Host Chat/Input/Gateway、Scheduler、Internal Agent 与 Operator Command 的真实 route matrix 必须全部生成 `WorkOrderV3 + BudgetPolicy + TaskGraph + node-bound grant + Verification + Acceptance + Receipt`；至少执行每路首个真实 admission，startup-only 测试不能通过本 Gate。
+- T-GR-RUNTIME-01：Host Chat/Input/Gateway、Scheduler、Internal Agent 与 Operator Command 的真实 route matrix 必须全部生成 `WorkOrderV3 + BudgetPolicy + TaskGraph + node-bound grant + Verification + Acceptance + Receipt`；至少执行每路首个真实 admission，startup-only 测试不能通过本 Gate。Operator Review continuation 还必须从 app-local OBS Outcome Journal 只读复验 outer receipt 的 checksum-chain 与 claim/audit/command/action/scopes/body/terminal/domain-result 绑定；lookup 缺失、抛错、无记录和篡改必须 fail closed。
+
+  当前 NE-01 第三切片的受影响面集中回归覆盖 ReAct、Obs、Operator、Tool、Task composition、ASGI、迁移与文档合同，共 240 项通过；这是切片证据，不替代 NE-01 波次集成或 NE-07 真实服务栈验收。
 - T-NE01-FOCUS-01：两批 11 个原始 mixed/ceiling finding 必须低于 1,500 行或既有 cohesive ceiling；focused 子模块不得取得第二 SQLite connection/UoW、RuntimeEvent append、journal store、反向 owner import 或改变兼容 import identity。fresh 全仓 mixed-file Gate 必须为 `issues=[]`，禁止新增或放宽 allowlist 掩盖。
 - T-NE01-RISK-01：TaskGraph admission 必须把每节点 1..5 `risk_level` 冻结到 `AdmittedTaskNode`，worker execution context 只消费该 immutable 值；缺失、布尔值或越界风险等级在 worker/副作用前失败关闭。
 - T-NE01-BUDGET-PROJECTION-01：Chat route executor 必须在 terminal commit 前精确验证 frozen model budget guard 与 measurement；公开 WorkerProjection 不得包含已消费的 `governed_model_budget` 或其 `max_*_tokens`，但必须持久化 typed `budget_usage.measurements`。不得通过放宽敏感 token 字段规则使测试通过。
@@ -235,6 +237,8 @@
 - T-NE03-CATALOG-01：0113 Service Catalog 必须从 durable head 严格经历 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE；每阶段启动真实 socket/Uvicorn 并核验 Host/Guardian identity，中间候选关闭、最终候选保留。Pending listener 必须精确绑定 operation ID、snapshot、stage 与 candidate，其他健康 listener 不能推进 head；`REGISTERED` 崩溃必须以同 operation ID 恢复。候选停止失败或 listener 仍占用时保持待对账，不得写伪 `ROLLED_BACK`。覆盖 target 停点/恢复、双 coordinator、非法 operation receipt 状态机、terminal-first、append response-loss、错误/正确双 listener reconciliation、stage/rank 与 runtime-scope/activation identity SQL tamper、rollback_ref replay drift、stage skip/regression、exact replay 与 ENFORCE 重启。
 
 当前执行记录（由 `artifacts/local-gates/<final-head-sha>/` 绑定 #84 最终 HEAD）：NE-03 wave `239 passed`；既有受影响回归 `101 passed`；raw transport 私有化后回归 `36 passed`；Service Catalog 关闭加固回归 `6 passed`；独立审计复跑 Guardian/Catalog `42 passed`、ActionPreview/Edge `47 passed`。production CLI Host 在隔离 runtime 环境和 fresh SQLite 上逐级完成 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，生成 5 个 operation / 15 个 receipt，`/health` 为 HTTP 200、`status=OK`、`service_identity=host.main/http`，Guardian durability=`READY`、fencing token=5。Windows Ctrl+Break 清除进程/端口且没有伪造 lease release；旧 lease 到期后，同一 SQLite/端口/快照由 coordinator fence=2 接管，恢复 ENFORCE/health OK，Guardian fence=6，ledger 累计 6 operation / 18 receipt。该项是 crash-fenced recovery，不是 graceful-stop PASS；另以故障注入证明显式 `HostCatalogRuntime.close()` 即使 candidate stop 报错也继续释放 authority/reservation，Windows 优雅停止脚本留到 NE-07。commit-bound Gate 已成功退出；部署多实例 canary 未执行，NE-03 以 `LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES` 合入，当前活动波次为 `NE-01_IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+NE-01 第三个切片的强制测试矩阵：Obs locator retirement 必须证明五个零参数 refresher/locator import 已删除、显式 store/root 注入仍可读，库存固定为不高于 47 模块/152 个导入名；ReAct 必须证明工具发现不再返回 `run_skill`/`dispatch_sub_agent`，即使注入旧 ToolSpec 也在 Skill executor/Delegate dispatcher 前以精确 governed-admission reason 失败且 `side_effects_executed=false`；Operator 必须用真实 SQLite 与 HMAC Secure Ingress 证明 `scheduler.task.trigger` 在 Review 前执行 0 次、一次性 resume 后执行 1 次、重复/重启不再执行，同时确认其他 36/37 命令继续在 handler 前拒绝。Tool HTTP 必须用真实 migration/SQLite/HMAC 证明 exact TOOL claim、immutable graph、durable Review、一次性 resume、node grant、Budget/Attempt/Lease、exact binding、Verification/Acceptance/Receipt、重启 duplicate 与拒绝 replay；production seed 必须报告 `governed_executable_tools=0` 和 `FAIL_CLOSED_NO_GOVERNED_EXECUTOR`，不能把测试 adapter 写成生产能力。另需证明 `RECOVERY_REQUIRED/RETRY_PENDING` 不封 claim、unknown operation 不二次调 handler。旧 `ToolBroker.execute()`、`tools.MCPAdapter`、process-owned `MCPToolBroker` 与默认 MCP Skill bridge 保持为显式未完成项。该矩阵不改变 atomic/fan-out/cancellation/reconciliation 的默认关闭状态，也不把 47/152 消费库存误写成 53 个服务槽位已清零。
 
 ## T-ARCH（完整架构发布 Gate）
 

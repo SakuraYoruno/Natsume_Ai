@@ -6,6 +6,7 @@ import logging
 from host_brain.app.http_hooks import _init_edge_command_pusher_status
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
 from host_brain.app.http_hooks import _startup_status_is_degraded
+from host_brain.app.http_hooks import _tool_runtime_startup_status
 from host_brain.memory.canon_world_store import compute_world_canon_hash
 from tests.fakes.canon_runtime import compose_canon_test_runtime
 
@@ -16,6 +17,39 @@ def test_startup_status_marks_only_real_degraded_values() -> None:
     assert _startup_status_is_degraded("OK") is False
     assert _startup_status_is_degraded("OK (task_id=distillation_engine_periodic, interval=600s)") is False
     assert _startup_status_is_degraded("SKIPPED: gateway-only mode") is False
+
+
+def test_tool_runtime_startup_status_rejects_catalog_only_or_zero_executor() -> None:
+    status = _tool_runtime_startup_status(
+        seeded_count=2,
+        readiness={
+            "status": "FAIL_CLOSED_NO_GOVERNED_EXECUTOR",
+            "catalog_ids": ("a", "b"),
+            "registered_ids": ("a", "b"),
+            "governed_executable_ids": (),
+        },
+    )
+
+    assert status == (
+        "DEGRADED: FAIL_CLOSED_NO_GOVERNED_EXECUTOR "
+        "(seeded=2, catalog=2, registered=2, governed_executors=0)"
+    )
+    assert _startup_status_is_degraded(status) is True
+
+
+def test_tool_runtime_startup_status_requires_exact_ready_seed() -> None:
+    status = _tool_runtime_startup_status(
+        seeded_count=2,
+        readiness={
+            "status": "READY",
+            "catalog_ids": ("a", "b"),
+            "registered_ids": ("a", "b"),
+            "governed_executable_ids": ("a",),
+        },
+    )
+
+    assert status == "OK (2 tools registered, 1 governed executors)"
+    assert _startup_status_is_degraded(status) is False
 
 
 def test_init_edge_command_pusher_status_returns_ok(monkeypatch) -> None:

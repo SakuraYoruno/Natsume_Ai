@@ -14,6 +14,7 @@ from .models import SecureIngressRequest
 
 class IngressSurface(str, Enum):
     HOST = "host"
+    TOOL = "tool"
     OBS = "obs"
     GATEWAY = "gateway"
     BRIDGE = "bridge"
@@ -43,6 +44,14 @@ SECURE_INGRESS_SURFACE_POLICIES: Mapping[
         action="host:input",
         required_scopes=("host:write",),
         default_path="/v1/host/input",
+    ),
+    IngressSurface.TOOL: IngressSurfacePolicy(
+        surface=IngressSurface.TOOL,
+        surface_id="host.tool",
+        audience="host",
+        action="host:tool",
+        required_scopes=("host:write",),
+        default_path="/tools/execute",
     ),
     IngressSurface.OBS: IngressSurfacePolicy(
         surface=IngressSurface.OBS,

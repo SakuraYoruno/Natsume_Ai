@@ -715,14 +715,16 @@ def scorecard_from_tool_meta(
     *,
     maturity_level: int | str,
     generated_at_ms: int,
+    capability_id: str | None = None,
 ) -> CapabilityScorecard:
     provider = _text(_field(meta, "provider_id", "local")) or "local"
     tool_id = _text(_field(meta, "tool_id", _field(meta, "id", "")))
     if not tool_id:
         raise ValueError("ToolMeta adapter requires tool_id/id")
     version = _ref_part(_field(meta, "version", "current"))
+    resolved_capability_id = _text(capability_id) or f"mcp::{provider}::{tool_id}"
     return build_capability_scorecard(
-        capability_id=f"mcp::{provider}::{tool_id}",
+        capability_id=resolved_capability_id,
         source_kind=SOURCE_TOOL_META,
         source_ref=f"tool-registry://{_ref_part(provider)}/{_ref_part(tool_id)}/{version}",
         risk=canonical_risk_from_tool_meta(meta),

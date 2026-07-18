@@ -6,7 +6,7 @@
 版本：v3.1
 日期：2026-07-18
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
-修订执行基线：`origin/dev@bd1584e488c5696fb090c80be5934c38b27f04fd`；#84 已按真实边界重做并合入，NE-03 证据保留为已完成波次证据
+修订执行基线：`origin/dev@f67d92ec3d476650883931647580806c98764b31`；#84 与后续 #85 已按真实边界合入，NE-03 证据保留为已完成波次证据
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
@@ -113,7 +113,7 @@ NE-03 先修复已打开的 #84，随后回到 NE-01 清除通用执行主链缺
 
 当前已完成切片：
 
-- 混合职责 authority 第二切片：ASGI 保留 `create_app`/lifespan/nonlocal owner/完整 shutdown，Life/Scheduler、启动安全 Gate 与 Runtime Context 接线迁入 app-local wiring；Obs humanoid 只迁出纯响应模型；Degradation 只迁出 immutable policy catalog；Node Grant 与 Planning compiler 只迁出纯 codec/error；Intent admission 保留唯一 verifier/三入口/RuntimeEvent append，Review continuation 迁入无 store owner 的私有 mixin；Guardian 保留 store/restore/reducer/`_append` 唯一 writer，命令和纯合同迁出。七个原文件分别为 1488、1303、1894、1495、1281、1336、1247 行，fresh 全仓 mixed-file Gate 为 `issues=[]`，没有新增或放宽 allowlist。该静态 Gate 通过不改变 atomic/fan-out/cancellation/reconciliation 的生产开关，也不代表 Service Locator 或旧执行旁路已清零；
+- 混合职责 authority 第二切片：ASGI 保留 `create_app`/lifespan/nonlocal owner/完整 shutdown，Life/Scheduler、启动安全 Gate 与 Runtime Context 接线迁入 app-local wiring；Obs humanoid 只迁出纯响应模型；Degradation 只迁出 immutable policy catalog；Node Grant 与 Planning compiler 只迁出纯 codec/error；Intent admission 保留唯一 verifier/三入口/RuntimeEvent append，Review continuation 迁入无 store owner 的私有 mixin；Guardian 保留 store/restore/reducer/`_append` 唯一 writer，命令和纯合同迁出。第三切片继续将 Host/Tool app-local 装配迁入无生命周期 owner 的 typed composition；七个原文件当前分别为 1479、1303、1894、1495、1281、1336、1247 行，fresh 全仓 mixed-file Gate 为 `issues=[]`，没有新增或放宽 allowlist。该静态 Gate 通过不改变 atomic/fan-out/cancellation/reconciliation 的生产开关，也不代表 Service Locator 或旧执行旁路已清零；
 - 生产等价的 Chat/Delegate/Plan 集成在同一 SQLite 上构造 durable Host lease、World/Scene/Guardian composition、Production ActionPreview resolver 与真实 Acceptance/Outbox，只替换最底层模型/网络 transport。它修复了四个此前被假夹具遮蔽的断点：WorkOrder 重开只导出 canonical Runtime Context 字段；Scene 64hex digest 在 Preview 边界确定性投影为 `sha256:` 且 resolver 仍逐字段重开比对；同 scope/owner/lease/fence/revision 的 Guardian expiry 只允许单调延长，缩短或任一身份漂移拒绝；terminal boundary 深拷贝 `action_args`，避免 proof 注回 handler payload 形成循环别名。Chat route 精确验证并消费 model budget guard 后，公开 WorkerProjection 移除 guard、保留 typed measurement，敏感字段 Gate 没有放宽；
 - 修复 `AdmittedTaskNode` 未冻结 `TaskNode.risk_level` 的真实断点；Scheduler/worker execution context 现在从 immutable admitted node 读取 1..5 风险等级，避免首次真实 worker 执行触发 `AttributeError`；
 - Persona 中央写入围栏、迁移专用审计入口、无副作用候选化及 `T-PERSONA-FENCE-01`；
@@ -270,7 +270,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 
 高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance Effect 使用 lifespan-owned Action Preview authority：receipt 只在重新打开 canonical Command/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene 与 Guardian 后签发，并在执行点再次重开；derived terminal 还递归重开 origin Attempt/Lease，受 typed descriptor 的 exact scope/args 投影限制。Scheduler Proactive 以 typed proof 和固定 request ID 贯穿真实 Edge push，遗留 EdgeCommandPusher 无生产 issuer 时保持隔离且不能通过注入关闭门禁。Acceptance surface 只放行其 effect 精确绑定的最小文本，`raw_extra`、媒体、二次回复及 voice/performance/avatar 变换不能借同一 receipt 执行；公开具身 submit/enqueue 无 exact proof 时在端口前失败，durable outbox claim 后仅私有 submitter 可执行。终端正向覆盖 Acceptance surface Gateway 与 Scheduler-derived Life Edge/Gateway/VTS/MateEngine；旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和尚未进入 Governed Operator TaskGraph 的 37 个直写命令隔离失败。这是安全封口，缺正向 TaskGraph 路径仍留给 NE-01。Guardian 是 Host 生命周期内 health/heartbeat 和已切流高风险前门的 app-local durable owner，关闭时解绑进程共享 broker；旧 degradation 仅保留显式兼容 adapter，不再是这些生产前门的默认 authority。0113 为 Host Service Catalog 建立 append-only operation/receipt/head 与 coordinator fence，生产启动默认以 ENFORCE 为目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，并关闭中间 listener。Pending health 必须 exact 绑定 operation/snapshot/stage/candidate，`REGISTERED` 崩溃按同 operation ID 恢复，stop failure 保持待对账而不伪造 rollback；非法 event/status、terminal-first、stage/rank 或 runtime-scope/activation identity 漂移、rollback-ref replay drift、stage skip/regression 和失去 Host identity均由 Store 与 SQLite 双重拒绝。
 
-NE-03 已按边界合入，当前波次为 `NE-01_IN_PROGRESS`，不得越级为整体闭环：首批职责拆分与 risk-level 断点修复不改变 atomic/fan-out/cancellation 的默认关闭状态，也没有迁移 Skill、Internal、Scheduler 管理面或 Operator 的旧执行旁路。Operator 的 37 个旧直写入口在 Governed Operator TaskGraph 到位前继续失败关闭；Windows 后台优雅停止、生产多实例 canary 与 NE-07 真实 Docker 全栈均未验收。
+NE-03 已按边界合入，当前波次为 `NE-01_IN_PROGRESS`，不得越级为整体闭环：首两批职责拆分与 risk-level 断点修复不改变 atomic/fan-out/cancellation 的默认关闭状态。第三个切片把 Obs locator 消费清单从 51 模块/163 个导入名降到 47/152，但约 53 个可变服务槽位仍在；ReAct 的 `run_skill`、`dispatch_sub_agent` 嵌套直执行入口已从发现面删除并以 governed-admission reason 失败关闭。Operator 只将 `scheduler.task.trigger` 接入真实 HMAC→HostCommand→TaskGraph→Review/resume→Budget/Attempt→Verification/Acceptance/Receipt 链；Review continuation 还必须通过 app-local 注入的只读 OBS Outcome Journal lookup，精确复验 checksum chain 上的 outer receipt 与 claim/audit/command/scope/body/terminal/domain-result 绑定，缺失或篡改均 fail closed。36/37 个旧命令仍在 handler 前阻断。HTTP `/tools/execute` 也已进入 TOOL Secure Ingress、不可变 TaskGraph、durable Review、node-bound grant、Budget/Attempt/Lease、exact binding 与 Verification/Acceptance/Receipt；0114 扩展 Worker Projection 的合法 route。这个正向证据使用真实 SQLite 和显式 safe-local 测试 adapter，不代表生产 Tool 已启用：生产 seed 的 governed executor 数仍为 0、health 为 `FAIL_CLOSED_NO_GOVERNED_EXECUTOR`，workspace-bound executor、一般 pending-operation reconciliation 以及旧 `ToolBroker.execute()`/MCP direct authority 都未清零。该切片没有迁完 Skill、Scheduler 管理面、Operator、Tool/MCP 或全局 Service Locator；Windows 后台优雅停止、生产多实例 canary 与 NE-07 真实 Docker 全栈均未验收。
 
 完成条件：至少覆盖架构重构、调试、研究、闲聊、深夜、用户烦躁、游戏低打扰和发布维护八类场景；所有约束保持“只收紧、不覆盖用户目标”；故障进入/恢复可回放。
 
@@ -410,7 +410,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0113_service_catalog_rollout_authority.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104/0110 固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0114_task_runtime_tool_worker_projection.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104/0110 固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 
