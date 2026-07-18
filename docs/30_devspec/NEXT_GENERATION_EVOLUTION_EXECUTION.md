@@ -3,10 +3,10 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v2.9
+版本：v3.1
 日期：2026-07-18
-状态：`NE-02_IN_PROGRESS / PROGRAM_INCOMPLETE`
-原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；执行事实以本文所在提交的工作树为准
+状态：`NE-03_IN_PROGRESS / PROGRAM_INCOMPLETE`
+修订执行基线：`origin/dev@7e5bfcde1`；#80～#83 仅作为基础资产，#84 必须重做后才能合并
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
@@ -40,7 +40,7 @@
 | PlanningSearch | 公共内核存在；Host 不生成竞争方案 |
 | Pentest L3 | 强制 shadow-only；0105 通用 durable calibration 可显式注入并跨重启重放，但默认兼容 ledger 仍在内存，outcome 是 `UNVERIFIED_RUNTIME_RECORD`，不能影响真实动作或生成 capability-unlocking 后继 |
 | Code/Research | Code 已有动态纯 shadow catalog、`PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 双 worktree、0106 cleanup-gated ledger，以及 D19 预注册固定 pytest argv 的受信子进程验证；Research 的 D20a 现有公开 metadata 动态 catalog 与可信实验根/manifest 的 readonly-file loader。两者都仍没有 Research paired cohort、真实模型、独立 verifier、成本/延迟收益对照或生产 influence；D19 也没有 durable historical cohort、受控模型/工具、独立信任域 verifier、hermetic Python 或 OS/container sandbox |
-| Composition | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY`：D1～D7c 的 app-local routes、21个producer、Host五合同lineage、Memory/VTS冷读、Life Body冷聚合、Direct Skill依赖失败关闭及Obs app assembly继续成立。D8 为每个 Host ASGI lifespan 构造显式 `HostEmbodimentRuntime`，并保证 Task Runtime migration gate 先于 Life authority 与 Query Projection 构造；新 outbox 行绑定 canonical DB 派生的不可变 `runtime_scope_id`；同 scope 只允许一个持 durable runtime lease/fence 的进程，第二实例失败关闭，历史无 scope 行不被接管。enqueue、claim、过期、收口与对账均在自身 SQLite 写事务内复验 exact Host authority。Host 在该 authority 下持久保存精确 Edge `session/owner/lease/fence`；替代 runtime 在开放路由前必须 exact reconnect、原子轮换 Edge fence 并验证新 lease/旧 fence 加一，否则失败关闭；不同 store 不争用默认 lease。Life、reply-performance、Gateway voice 与其他已迁移路径的新命令只返回 `PENDING / DURABLY_QUEUED`；精确重复回放既有 durable 状态，只有既有 `APPLIED` receipt 是物理收口证据。Edge receipt query v2 还校验 owner/current session/lease/fence 与精确 command/key，legacy ownerless command 返回 `NOT_FOUND`；Host 对 `IN_DOUBT` 只读查询，只有 identity+receipt-digest CAS 命中的 FOUND receipt 才能收口，重复同 digest 不重复落审计，`NOT_FOUND`/查询故障保持不确定且绝不重放。非 loopback HTTP 失败关闭，远端必须 HTTPS。真实 child Edge 的 loopback TCP/HMAC/SQLite、receipt query 与重启 exact replay 已验证；该 smoke 不含真实设备，物理效果仍 `NOT_TESTED`。剩余 legacy direct adapter、全路径 runtime 注入、Host source底层authority、Chat/Delegate/Acceptance Effect共享边界、约53个非锁可变 service 引用、完整Host/Worker对象图和全局 locator 删除均未完成；health仍因8个partial和4个认证job保持DEGRADED，NE-01不得封板 |
+| Composition | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY`：D1～D7c 的 app-local routes、21个producer、Host五合同lineage、Memory/VTS冷读、Life Body冷聚合、Direct Skill依赖失败关闭及Obs app assembly继续成立。D8 为每个 Host ASGI lifespan 构造显式 `HostEmbodimentRuntime`，并保证 Task Runtime migration gate 先于 Life authority 与 Query Projection 构造；新 outbox 行绑定 canonical DB 派生的不可变 `runtime_scope_id`；同 scope 只允许一个持 durable runtime lease/fence 的进程，第二实例失败关闭，历史无 scope 行不被接管。enqueue、claim、过期、收口与对账均在自身 SQLite 写事务内复验 exact Host authority。Host 在该 authority 下持久保存精确 Edge `session/owner/lease/fence`；替代 runtime 在开放路由前必须 exact reconnect、原子轮换 Edge fence 并验证新 lease/旧 fence 加一，否则失败关闭；不同 store 不争用默认 lease。当前只有持有精确 ActionPreview 的 Life VTS/MateEngine 与 Gateway/Edge 出站路径可以继续持久入队；旧 reply-performance、Gateway voice 和其他缺少 Acceptance→Embodiment 派生证明的直接入队失败关闭，待 NE-01 正向迁移。精确重复仍只回放既有 durable 状态，且只有既有 `APPLIED` receipt 是物理收口证据。Edge receipt query v2 还校验 owner/current session/lease/fence 与精确 command/key，legacy ownerless command 返回 `NOT_FOUND`；Host 对 `IN_DOUBT` 只读查询，只有 identity+receipt-digest CAS 命中的 FOUND receipt 才能收口，重复同 digest 不重复落审计，`NOT_FOUND`/查询故障保持不确定且绝不重放。非 loopback HTTP 失败关闭，远端必须 HTTPS。真实 child Edge 的 loopback TCP/HMAC/SQLite、receipt query 与重启 exact replay 已验证；该 smoke 不含真实设备，物理效果仍 `NOT_TESTED`。剩余 legacy direct adapter、全路径 runtime 注入、Host source底层authority、Chat/Delegate共享边界、约53个非锁可变 service 引用、完整Host/Worker对象图和全局 locator 删除均未完成；health仍因8个partial和4个认证job保持DEGRADED，NE-01不得封板 |
 | Evolution abilities | 多为 partial/placeholder/missing |
 
 Memory/Distillation 的 D6 口径进一步冻结为：`COMPRESS_BEFORE_SAVE` 只证明 pre-save hook 被观测，不能记作 compression outcome；`DistillationEngine` 在 batch、single 及 item-level 写出的 terminal audit event 也不能记作完整 `LongTermMemoryDistiller` cycle。对应不可测 total/success/failed/cycle 字段必须为 `null`，只允许另列 observed event counts。
@@ -53,19 +53,31 @@ ModelAttempt 非流式生产路径只投影 provider 明确回报的 token 维�
 
 任何 PR 或报告若把上述 `PARTIAL/BROKEN/SHADOW` 写成 `DONE/PASS`，该交付自动失败。
 
+2026-07-18 代码复审将最近波次重新定级如下；这些状态覆盖对应 PR 正文中的宽泛完成描述：
+
+| PR | 当前定级 | 不计完成的原因 |
+|---|---|---|
+| #80 | `CONTRACT_ONLY_AT_MERGE / SUPERSEDED_BY_84_REWORK` | 合并时 World/Intent 没有进入 Surface、Proactive 或 Task admission；当前生产切流由 #84 重做，不回溯把 #80 改写为闭环 |
+| #81 | `SELF_ATTESTED_SHADOW / TRUSTED_EVIDENCE_MISSING` | dataset、verifier 和 effect isolation 可由同一 runner 自报 |
+| #82 | `PARTIAL / NON_ATOMIC / EVIDENCE_UNVERIFIED` | activation 与 receipt 跨事务，URI 未查询真实 authority，runtime resolver 未切流 |
+| #83 | `LEDGER_ONLY / NO_REAL_ACTIVATION` | APPLIED/ACTIVE/ROLLED_BACK 仅写事件名，没有切换真实 version owner |
+| #84 | `DRAFT_REWORK_IMPLEMENTED / LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES` | Host lifespan、三消费者 Scene identity、durable Intent admission、Action Preview authority、Guardian 与 Host Catalog 五阶段已重做且 commit-bound 定向 Gate 已通过；长周期目标、Windows 优雅停止和部署 canary 等边界继续如实保留 |
+
+GitHub Actions 当前因账户额度无法分配真实步骤，统一记为 `NOT_RUN_ACCOUNT_QUOTA`。零步骤失败不阻断当前波次，也不能写成 PASS；本地定向 Gate 必须绑定 commit SHA 保存到忽略目录 `artifacts/local-gates/<sha>/`。
+
 任何生产代码或工程工具变更必须在同一变更集中更新 README、对应权威文档或机器状态；CI 的 change-contract 门禁直接检查 Git 变更集，不能再用“文档最近更新过”代替本次同步。架构语义变化还必须按 freshness policy 的 source→doc 映射更新对应事实、数据流、图和 Trace。
 
 ## 3. 执行 DAG
 
 ```text
-NE-00 文档与机器事实重置
+交付协议与机器状态纠偏
+  ↓
+NE-03 World/Scene/Intent/Guardian 重做与生产切流
   ↓
 NE-01 执行主链与显式 Composition 闭环
-  ├──────────────┐
-  ↓              ↓
-NE-02 真实规划   NE-03 World/Scene/Intent/Guardian
-  └──────┬───────┘
-         ↓
+  ↓
+NE-02 真实 PlanningSearch 与收益证明
+  ↓
 NE-04 Evolution Lab / Scenario / Counterfactual
   ├──────────────┐
   ↓              ↓
@@ -75,7 +87,7 @@ NE-05 Skill      NE-06 Feedback / Knowledge / Identity
 NE-07 Full Program Acceptance
 ```
 
-NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-04 的实验/提案合同冻结后并行。不得为了“并行”同时修改同一 authority、migration 或 composition 文件。
+NE-03 先修复已打开的 #84，随后回到 NE-01 清除通用执行主链缺口；NE-05 与 NE-06 可在 NE-04 的实验/提案合同冻结后并行。不得为了“并行”同时修改同一 authority、migration 或 composition 文件。
 
 ## 4. Architecture Waves
 
@@ -140,7 +152,7 @@ NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-0
 - D12 先修复 PlanningSearch 的错误影响边界：`PentestPlanningSearchAdapter` 已移除“校准阈值通过即可选择 L3”分支，始终执行 L1/L2 baseline，并仅把 L3 作为 shadow evidence 记录。内存 `PentestMCTSCalibrationLedger` 不能跨 run、不能提供反事实 outcome，也不再拥有任何 production influence；dynamic successor、durable calibration、promotion proposal/gate 仍是 NE-02 未完成工作。
 - D13 建立领域无关的 0105 `CalibrationPrediction/Outcome/Repository`：prediction 和 outcome 分表 append-only，canonical JSON/digest、prediction identity、candidate bind、outcome identity、重启 replay、physical-schema semantic verification 与 SQL immutable trigger 均 fail closed。Pentest adapter/loop 可从显式 kernel context 注入 repository，把 virtual state、baseline/shadow path、trace、预算和纯虚拟 counters 写入；候选 target 会在 fingerprint 前先收口到授权 scope。注入库的 busy/schema/drift 失败只产生 `mcts_durable_calibration_unavailable` 可观察事件并跳过可选 shadow evidence，不阻断既有 L1/L2 baseline。现有 Pentest execution record 只投影为 `UNVERIFIED_RUNTIME_RECORD`，不是 Task/Run receipt，默认无注入路径仍是内存 compatibility ledger；Research/Code、dynamic successor、receipt-bound counterfactual 和 promotion gate 仍未完成。
 - Workspace 已推进到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED`：D0/W0/W1 继续有效；认证 Internal Agent 写 admission 会覆写 caller workspace 为 graph epoch 派生 ID，并在显式配置稳定 HMAC secret 时注入 W2 runtime。首次 source HEAD 被冻结为 durable commit，独立 namespace worktree、实例/PID 租约、独占 scope、heartbeat、顺序 handoff、过期 takeover、可信 cleanup receipt 与 pending cleanup worker 已接线；启动同步最多续清 1 条，剩余 durable backlog 交 worker。首次 HEAD 并发 winner 可严格重放，其他 immutable drift 失败关闭。Provisioning/allocator/cleanup adapter 的 Filesystem/Git callback 已移出 SQLite writer transaction，workspace/source 跨进程锁、共享 deadline 与前后 exact authority 短事务允许 heartbeat 并拒绝后验 fence/expiry 漂移；Agent tool 只在动作间协作取消，Verification 只在整体启动前验活，二者没有逐操作 fence或强杀。默认缺 secret 时 Host 降级在线而写入关闭。它仍缺进程级强杀、promotion/abandon、accepted checkpoint HEAD、Domain Pack/Codex runtime 接线以及 OS/container/tenant/handle 隔离，真实 canary 未运行；
-- Composition D1～D7a 的 app-local route、Obs lifecycle、Host五合同lineage、Memory/VTS冷读、route locator 清零与0103边界继续有效。D7b 让 Life Body 只聚合同一 app 的 runtime/overview/insights/trace durable roots 与 canonical ledger 有界只读 lineage；Host 停止后可冷读，缺根、无效、过期和 ledger 失败均写 typed `SOURCE_UNAVAILABLE`，公开 payload 不保留 content/private body，安全/Gateway风险语义保留，源未变化不追加journal。21个 producer 的声明 source-mode 更新为`6/3/8/4-auth/0-unavailable`，但声明为 partial 的成功路径不等于运行可用。Direct Skill worker 的 resource manager、episodic store 与 semantic recaller 改为 composition-time 实例快照，执行期不再回读进程 locator；authority-first依赖预检阻止缺后端被接受。D7c同时清零composition→app反向依赖且未增加NLE白名单。D8 的 Host 0104 migration 为 canonical DB 派生的 `runtime_scope_id` 增加单一 runtime lease/fence、scope-filtered outbox 与 Edge credential 持久记录；每个 lifespan 仍显式持有 runtime，但同 scope 只有持租约者可工作，第二实例和旧 fence 失败关闭。Edge session/owner 稳定派生，并以 Host 持久保存的 exact lease/fence 支持同身份重启重连。Edge 0002 冻结 command owner；receipt query v2 要求 HMAC+nonce、owner/current session/lease/fence 与精确 command/key，legacy ownerless 返回 `NOT_FOUND`。`IN_DOUBT` 只由 found receipt 的 identity+digest CAS 收口，重复 digest 不重复落审计，`NOT_FOUND`/查询失败不重试或重放。非 loopback HTTP 被拒绝，远端仅允许 HTTPS。child Edge 的 loopback TCP/HMAC/SQLite、receipt query 与重启 exact replay 有证据；Life、reply-performance、Gateway voice 等选定路径的新命令只 durable queue 并返回 `PENDING / DURABLY_QUEUED`，精确重复只回放既有 durable 状态，只有 `APPLIED` receipt 才能表明 Edge 已收口，仍没有真实设备效果。底层 Host source、Chat/Delegate、Acceptance Effect authority 仍共享，剩余 direct embodiment adapter、约53个非锁可变服务引用、完整Host/Worker对象图和全局 locator 删除均未完成；完整Query Plane、NE-01和全局Composition不得封板。
+- Composition D1～D7a 的 app-local route、Obs lifecycle、Host五合同lineage、Memory/VTS冷读、route locator 清零与0103边界继续有效。D7b 让 Life Body 只聚合同一 app 的 runtime/overview/insights/trace durable roots 与 canonical ledger 有界只读 lineage；Host 停止后可冷读，缺根、无效、过期和 ledger 失败均写 typed `SOURCE_UNAVAILABLE`，公开 payload 不保留 content/private body，安全/Gateway风险语义保留，源未变化不追加journal。21个 producer 的声明 source-mode 更新为`6/3/8/4-auth/0-unavailable`，但声明为 partial 的成功路径不等于运行可用。Direct Skill worker 的 resource manager、episodic store 与 semantic recaller 改为 composition-time 实例快照，执行期不再回读进程 locator；authority-first依赖预检阻止缺后端被接受。D7c同时清零composition→app反向依赖且未增加NLE白名单。D8 的 Host 0104 migration 为 canonical DB 派生的 `runtime_scope_id` 增加单一 runtime lease/fence、scope-filtered outbox 与 Edge credential 持久记录；每个 lifespan 仍显式持有 runtime，但同 scope 只有持租约者可工作，第二实例和旧 fence 失败关闭。Edge session/owner 稳定派生，并以 Host 持久保存的 exact lease/fence 支持同身份重启重连。Edge 0002 冻结 command owner；receipt query v2 要求 HMAC+nonce、owner/current session/lease/fence 与精确 command/key，legacy ownerless 返回 `NOT_FOUND`。`IN_DOUBT` 只由 found receipt 的 identity+digest CAS 收口，重复 digest 不重复落审计，`NOT_FOUND`/查询失败不重试或重放。非 loopback HTTP 被拒绝，远端仅允许 HTTPS。child Edge 的 loopback TCP/HMAC/SQLite、receipt query 与重启 exact replay 有证据；当前只有持有精确 ActionPreview 的 Life VTS/MateEngine 与 Gateway/Edge 出站可以 durable queue，旧 reply-performance、Gateway voice 和其他缺少 Acceptance→Embodiment 派生证明的调用失败关闭，待 NE-01 正向迁移。`PENDING / DURABLY_QUEUED` 仍只表示持久接收，只有 `APPLIED` receipt 才能表明 Edge 已收口，仍没有真实设备效果。底层 Host source、Chat/Delegate authority 仍共享，剩余 direct embodiment adapter、约53个非锁可变服务引用、完整Host/Worker对象图和全局 locator 删除均未完成；完整Query Plane、NE-01和全局Composition不得封板。
 
 Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。B4/0090 与 B5A/B5B/0091 语义继续有效；B5C 已有 0092～0099 分范围 durable authority。Budget 高竞争唯一 winner、单节点 post-budget 检查点接管与 0099 窄历史终态 reconciliation 已有证据，但不构成通用恢复。0094 本身不复制 0092 业务状态；Operation、Effect 与 terminal reconciliation 均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`。外部生产库存尚未盘点，general/batch/pre-budget recovery、部署密钥/凭据、完整 key lifecycle 与真实 canary尚未完成，atomic、bounded、cancellation均为 `PRODUCTION_OFF`。现实 resolver 分类仍未闭环。Lane D 的 Workspace 只到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT_FAIL_CLOSED`，Internal 单路线接线不等于强隔离或全 Agent 接线；Composition 也未完成。因此 Lane B、NE-01 和完整架构都不得封板。
 
@@ -187,7 +199,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；
 - route/handler 只依赖显式 ports；
 - D1 已完成 Canon/Tool/Bond 及其 OBS adapter 的 app-local ports；不得把该局部结果写成整个 OBS 或 ProcessServiceContainer 已去 locator；
-- D4～D7c 的projection迁移、五合同source、Memory/VTS冷读、Obs-route locator 清零、Host六个GET切流、Life Body冷源、安全与journal语义、Direct Skill authority-first依赖门禁及Obs app assembly反向依赖清零继续守护。D8 已补 Host 0104 scope/runtime lease、持久 Edge reconnect credential、Edge 0002 owner authority、receipt query v2、最小真实 TCP/HMAC/SQLite/restart smoke 与 `IN_DOUBT` 只读 CAS 对账；选定 Life/reply-performance/Gateway voice 只 durable queue。它不证明物理设备效果，也不覆盖剩余 legacy direct adapter 或全路径注入。下一刀继续收口仍在`ProcessServiceContainer`中的约53个非锁可变引用、Chat/Delegate/Acceptance Effect共享authority和其余完整Host/Worker scope。迁移测试不等于部署库已执行0103/0104或Edge 0002，局部D8切片不得写成NE-01完成；
+- D4～D7c 的projection迁移、五合同source、Memory/VTS冷读、Obs-route locator 清零、Host六个GET切流、Life Body冷源、安全与journal语义、Direct Skill authority-first依赖门禁及Obs app assembly反向依赖清零继续守护。D8 已补 Host 0104 scope/runtime lease、持久 Edge reconnect credential、Edge 0002 owner authority、receipt query v2、最小真实 TCP/HMAC/SQLite/restart smoke 与 `IN_DOUBT` 只读 CAS 对账；NE-03 进一步要求 terminal ActionPreview，当前仅证明带 exact receipt 的 Life VTS/MateEngine 与 Gateway/Edge 出站，旧 reply-performance/Gateway voice 直接入队已安全阻断而未正向迁移。它不证明物理设备效果，也不覆盖剩余 legacy direct adapter 或全路径注入。下一刀继续收口仍在`ProcessServiceContainer`中的约53个非锁可变引用、Chat/Delegate共享authority和其余完整Host/Worker scope。迁移测试不等于部署库已执行0103/0104/0111～0113或Edge 0002，局部切片不得写成NE-01完成；
 - 消除业务层 `get_*()` service locator 和 test reset 单例；
 - 每个 Task/Experiment 绑定 workspace owner、root、isolation mode 与 cleanup receipt；
 - Code shadow 使用隔离 worktree，禁止污染主工作区。
@@ -250,6 +262,12 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - Intent Arbiter 合并显式用户目标、任务、关系、场景、风险、权限与长期目标；
 - 高风险 action 必须经过统一 preview/shadow；
 - Runtime Guardian 统一 dependency health、degradation、recovery、maintenance/sleep 与 SLO evidence。
+
+当前生产切流实现：0111 `world_observation_journal` 以 workspace/subject head 原子分配 revision，写入必须同时通过 canonical source event 与真实 Host lease；显式 expiry transition 处理 TTL，Resolver 重开 captured head 并校验 digest chain 和物理列/JSON。Host ASGI lifespan 在取得 runtime scope/owner/fence 后构造唯一 app-local Runtime Context composition；生产 observation application 只采集服务端 principal、Bond/Emotion 投影和 composition-owned environment，不允许请求 body 选择 World 或 Scene。`SceneResolver` 从重开的 World、Task、Guardian、关系与时间推导结果，Surface、Proactive 和 Task admission 消费同一 `scene revision/digest`。生产 `IntentAuthorityPort` 重开 HostCommand、WorkOrder、TaskGraph、Scene、action 和 Grant，`DurableIntentAdmissionVerifier` 先持久化完整节点准备集再封口 graph-level receipt set；输出始终 restrict-only，`BLOCK/REVIEW` 失败关闭，Review continuation 绑定 Task Runtime 的 durable ReviewStore。
+
+高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance Effect 使用 lifespan-owned Action Preview authority：receipt 只在重新打开 canonical Command/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene 与 Guardian 后签发，并在执行点再次重开；derived terminal 还递归重开 origin Attempt/Lease，受 typed descriptor 的 exact scope/args 投影限制。Scheduler Proactive 以 typed proof 和固定 request ID 贯穿真实 Edge push，遗留 EdgeCommandPusher 无生产 issuer 时保持隔离且不能通过注入关闭门禁。Acceptance surface 只放行其 effect 精确绑定的最小文本，`raw_extra`、媒体、二次回复及 voice/performance/avatar 变换不能借同一 receipt 执行；公开具身 submit/enqueue 无 exact proof 时在端口前失败，durable outbox claim 后仅私有 submitter 可执行。终端正向覆盖 Acceptance surface Gateway 与 Scheduler-derived Life Edge/Gateway/VTS/MateEngine；旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和尚未进入 Governed Operator TaskGraph 的 37 个直写命令隔离失败。这是安全封口，缺正向 TaskGraph 路径仍留给 NE-01。Guardian 是 Host 生命周期内 health/heartbeat 和已切流高风险前门的 app-local durable owner，关闭时解绑进程共享 broker；旧 degradation 仅保留显式兼容 adapter，不再是这些生产前门的默认 authority。0113 为 Host Service Catalog 建立 append-only operation/receipt/head 与 coordinator fence，生产启动默认以 ENFORCE 为目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，并关闭中间 listener。Pending health 必须 exact 绑定 operation/snapshot/stage/candidate，`REGISTERED` 崩溃按同 operation ID 恢复，stop failure 保持待对账而不伪造 rollback；非法 event/status、terminal-first、stage/rank 或 runtime-scope/activation identity 漂移、rollback-ref replay drift、stage skip/regression 和失去 Host identity均由 Store 与 SQLite 双重拒绝。
+
+本波仍是 `NE-03_IN_PROGRESS`，不得越级为整体闭环：#84 的定向本地 Gate 已通过并由最终 HEAD artifact 路径绑定；长周期目标尚无独立 durable owner，Bond 原始证据仍由现有上游投影提供，Windows 后台优雅停止、生产多实例部署 canary 与 NE-07 真实 Docker 全栈均未验收。Operator 的 37 个旧直写入口在 NE-01 提供 Governed Operator TaskGraph 前保持失败关闭，不得把“已阻断”写成“功能已迁移”。
 
 完成条件：至少覆盖架构重构、调试、研究、闲聊、深夜、用户烦躁、游戏低打扰和发布维护八类场景；所有约束保持“只收紧、不覆盖用户目标”；故障进入/恢复可回放。
 
@@ -326,16 +344,22 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 
 进入条件：NE-01～NE-06 均 `CODE_COMPLETE`，没有已知 P0/P1，旧 authority usage 为 0；所有 Target Architecture Gate 仍是强制条件，早期 wave 允许 shadow 不等于最终豁免。
 
+验收必须使用独立 acceptance 数据根和真实生产进程/镜像；mock、fake store、端口占位和 scripted replay 只能做前置测试，不能形成最终 receipt。`FullStackAcceptanceReceiptV1` 绑定 commit、run、配置摘要、镜像 digest、container/PID、健康和真实读写回执、重启/故障/性能结果，并排除 secret、用户正文和私密数据。
+
 验收范围：
 
 1. 全量 unit/contract/integration/e2e；
 2. migration fresh/upgrade/backup/restore；
-3. Docker 依赖、Host、Obs、Monitor UI、Gateway、Edge；
-4. chat/skill/delegate/plan/scheduler/internal/operator 全路线 ledger 对账；
-5. Research/Code/Pentest planning benchmark 与 calibration；
-6. Evolution Lab、Skill compile、feedback、knowledge、identity golden paths；
-7. security、privacy、performance、chaos、crash recovery、rollback；
-8. ASR/TTS/VRM/VTS/硬件矩阵：可用则实测，不可用则精确记为 `DEGRADED/NOT_TESTED`。
+3. 构建 Monitor UI，并由真实 Nginx Monitor Proxy 服务构建产物；
+4. 使用参数化 acceptance volume 启动固定版本/digest 的 Docker Neo4j、Chroma、Redis，逐项完成真实写入、读取、重启持久性和 namespace 清理；
+5. 使用生产脚本启动 Host、Obs、Nginx Monitor、完整 Edge Profile 和 Unified Gateway；本地 Gateway webhook 必须贯通 durable inbox → HostCommand/TaskGraph → Acceptance/Outbox → durable delivery → reply receipt；
+6. chat/skill/delegate/plan/scheduler/internal/operator 全路线 ledger 对账；
+7. Research/Code/Pentest planning benchmark 与 calibration；
+8. Evolution Lab、Skill compile、feedback、knowledge、identity golden paths；
+9. security、privacy、performance、chaos、crash recovery、rollback；
+10. 至少一个已配置真实非 mock 模型 provider；ASR/TTS/VRM/VTS/硬件可用则实测，不可用逐项 `NOT_TESTED`。
+
+Docker、Neo4j、Chroma、Redis、Host、Obs、Monitor、Edge 或 Gateway 任一强制本地服务无法真实启动/读写时，结果必须是 `FAIL`，不能用内存 fallback。只有本地强制栈全部通过、仅缺外部 provider 凭据、平台账号或硬件时，才允许 `ACCEPTANCE_PENDING_EXTERNAL`。
 
 其中 Pentest L3 必须满足 Target Gate #6：使用 durable calibration、能按虚拟状态生成后继，并由 promotion Gate 证明安全与收益；否则 NE-07 只能 `FAIL` 或 `ACCEPTANCE_PENDING_EXTERNAL`，不得 `PASS`。
 
@@ -367,10 +391,12 @@ FAIL
 1. 每个 NE 波至少交付一条 production cutover、两个可量化架构改善和旧路径删除。
 2. 只增加 adapter、shadow fixture、空目录、报告或测试时，状态保持 `IN_PROGRESS`。
 3. 不按微型 TASK 编号逐个提交；按可审 vertical slice 中文提交。
-4. 提交信息、PR 标题和正文统一使用中文。
-5. 每个 PR 写清：真实生产路径、删除的旧 authority、定向测试、一次 wave integration、风险与回滚。
-6. 不保护无价值 WIP；保护范围只包括用户明确资产、secret、模型、有效运行数据和当前任务外的真实业务改动。
-7. 运行证据写入被忽略的 `artifacts/`；只有最终、脱敏、可复核的 machine receipt 才进入文档证据目录。
+4. 提交标题只允许 `重构/修复/功能/测试/文档/性能/安全/构建：中文结果`；`origin/dev..HEAD` 不允许 merge commit，同步 dev 必须 rebase。
+5. PR 正文必须通过 Markdown 文件和 `gh pr create/edit --body-file` 提交，禁止在命令行拼接字面量 `\\n`。
+6. PR 固定包含“目标、生产接线、删除或停用的旧路径、本地验证、远程 CI 状态、已知边界、风险与回滚”七节，并通过 `tools/delivery/change_metadata_gate.py`。
+7. 每个代码提交同步受影响文档和机器状态，提交后立即推送；Draft 可 `--force-with-lease`，Ready 后禁止重写历史。
+8. 不保护无价值 WIP；保护范围只包括用户明确资产、secret、模型、有效运行数据和当前任务外的真实业务改动。
+9. 运行证据写入被忽略的 `artifacts/`；只有最终、脱敏、可复核的 machine receipt 才进入文档证据目录。
 
 ## 7. 停止与回滚
 
@@ -381,12 +407,12 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前基线已推进到 `0110_evolution_governance_ledger.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0113_service_catalog_rollout_authority.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104/0110 固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 
 文档验收后创建的 Goal 应使用以下目标，不附带微任务数量：
 
 ```text
-按 NEXT_GENERATION_EVOLUTION_EXECUTION.md 完成 NE-01～NE-07：先修复 Scheduler/Internal 与 Durable DAG/Review/Budget/legacy authority，删除全局 service locator；再完成真实跨领域 PlanningSearch、World/Scene/Intent、Evolution Lab、Skill Compiler、Experience/Knowledge/Identity 受治理闭环；最后统一启动 Docker、Host、Obs、前端、Gateway 与 Edge 进行一次完整验收。全过程按小工作片定向单测、每波一次集成、最终一次全量实测执行。
+按 NEXT_GENERATION_EVOLUTION_EXECUTION.md v3.1 完成 NE-03、NE-01、NE-02、NE-04～NE-07：先重做 #84 并完成 World/Scene/Intent/Guardian 生产切流，再封板通用执行、真实 PlanningSearch 和受治理演化闭环；最终构建 Monitor UI，启动真实 Docker Neo4j/Chroma/Redis、Host、Obs、Nginx Monitor、完整 Edge 与 Unified Gateway 做全量网络、数据、重启、故障和回滚验收。全过程使用中文提交/PR、每提交同步文档并推送，远程 CI 额度缺失只记 NOT_RUN_ACCOUNT_QUOTA。
 ```

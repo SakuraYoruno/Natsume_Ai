@@ -11,6 +11,10 @@ from natsume_contracts.life import (
     LifeDeliveryAuthorization,
     LifeSnapshot,
 )
+from host_brain.runtime.scene_consumer_projection import (
+    SceneConsumerProjectionError,
+    project_scene_decision_v2,
+)
 
 
 PROACTIVE_IDLE_THRESHOLD_MS = 4 * 60 * 60 * 1_000
@@ -140,15 +144,33 @@ def build_life_tick_payload(
     timezone_name = str(
         dict(occurrence_payload or {}).get("timezone") or "Asia/Shanghai"
     ).strip()
-    proactive = _proactive_delivery(
-        state,
-        now_ms=now_value,
-        idle_ms=idle_ms,
-        timezone_name=timezone_name,
-    )
+    proactive = None
+    scene_projection = _proactive_scene_projection(occurrence_payload)
+    if scene_projection is not None:
+        scene_kind = str(scene_projection.decision.scene_id or "").removeprefix(
+            "scene."
+        ).replace("-", "_")
+        scene_allowed, _scene_reason = scene_projection.evaluate_proactive(
+            scene_kind or "proactive_talk"
+        )
+        if scene_allowed:
+            proactive = _proactive_delivery(
+                state,
+                now_ms=now_value,
+                idle_ms=idle_ms,
+                timezone_name=timezone_name,
+                scene_identity=scene_projection.identity.to_dict(),
+            )
     authorization = _delivery_authorization(occurrence_payload)
     if proactive is not None and authorization is not None:
         proactive["authorization"] = authorization.as_dict()
+        preview_context = dict(occurrence_payload or {}).get(
+            "_action_preview_context"
+        )
+        if isinstance(preview_context, Mapping):
+            proactive["payload"]["_action_preview_context"] = dict(
+                preview_context
+            )
         payload["deliveries"] = [proactive]
         state_patch["proactive"] = {
             "last_attempt_ms": now_value,
@@ -172,12 +194,33 @@ def _delivery_authorization(
         return None
 
 
+def _proactive_scene_projection(
+    occurrence_payload: Mapping[str, Any] | None,
+) -> Any | None:
+    """Verify the exact Scheduler-admitted Scene or fail closed.
+
+    ``scene_awareness`` and any caller-supplied scene label are deliberately
+    ignored.  The only accepted source is the immutable SceneDecisionV2 plus
+    its exact identity copied from the Scheduler WorkOrder.
+    """
+
+    context = dict(occurrence_payload or {})
+    try:
+        return project_scene_decision_v2(
+            context.get("scene_decision_v2"),
+            expected_identity=context.get("scene_identity_v2"),
+        )
+    except SceneConsumerProjectionError:
+        return None
+
+
 def _proactive_delivery(
     state: Mapping[str, Any],
     *,
     now_ms: int,
     idle_ms: int,
     timezone_name: str,
+    scene_identity: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     proactive = _mapping(state.get("proactive"))
     target = _mapping(proactive.get("last_target"))
@@ -216,6 +259,11 @@ def _proactive_delivery(
                 "source_kind": "life_tick",
                 "motive": "soft_reconnect",
                 "state_version": int(state.get("version") or 0),
+                "scene_id": str(scene_identity.get("scene_id") or ""),
+                "scene_revision": int(scene_identity.get("revision") or 0),
+                "scene_decision_digest": str(
+                    scene_identity.get("decision_digest") or ""
+                ),
             },
         },
     }

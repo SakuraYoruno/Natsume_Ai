@@ -20,6 +20,10 @@ from host_brain.persistence.task_repository import (
     AcceptanceEffectIntentSpec,
 )
 from natsume_contracts.task import HostCommand
+from host_brain.runtime.action_preview_authority import (
+    ActionPreviewAuthorityError,
+    context_pack_digest_from_work_order,
+)
 
 
 ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
@@ -148,6 +152,21 @@ def compile_graph_acceptance_effects(
             )
         )
 
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_ref,
+        worker_commit=commit,
+    )
+    if preview_context is not None:
+        payloads = [
+            (
+                effect_type,
+                {**dict(payload), "_action_preview_context": preview_context},
+            )
+            for effect_type, payload in payloads
+        ]
+
     return tuple(
         _spec(
             effect_type=effect_type,
@@ -158,6 +177,44 @@ def compile_graph_acceptance_effects(
         )
         for effect_type, payload in payloads
     )
+
+
+def _action_preview_context(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    worker_commit: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    pack = getattr(work_order, "input_pack", None)
+    if not isinstance(pack, Mapping) or pack.get("runtime_context_schema") != "natsume.runtime-context.request.v1":
+        return None
+    audit = worker_commit.get("audit_refs")
+    audit_map = dict(audit) if isinstance(audit, Mapping) else {}
+    node_grant_ref = str(audit_map.get("node_grant_ref") or "").strip()
+    node_grant_digest = str(audit_map.get("node_grant_digest") or "").strip().lower()
+    if not node_grant_ref or not node_grant_digest.startswith("sha256:"):
+        raise AcceptanceEffectCompileError(
+            "runtime-context effect has no exact node grant preview binding"
+        )
+    try:
+        context_digest = context_pack_digest_from_work_order(work_order)
+    except ActionPreviewAuthorityError as exc:
+        raise AcceptanceEffectCompileError(exc.detail) from exc
+    scene = pack.get("scene_identity_v2")
+    if not isinstance(scene, Mapping):
+        raise AcceptanceEffectCompileError("runtime-context effect has no exact Scene identity")
+    return {
+        "schema_version": "Natsume.acceptance_effect.action_preview_context.v1",
+        "context_pack_digest": context_digest,
+        "scene_identity": _json_mapping(scene, field_name="scene_identity_v2"),
+        "task_graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "task_node_id": node_id,
+        "parent_governor_grant_ref": command.governor_grant_ref,
+        "node_grant_ref": node_grant_ref,
+        "node_grant_digest": node_grant_digest,
+    }
 
 
 def _worker_descriptors(commit: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:

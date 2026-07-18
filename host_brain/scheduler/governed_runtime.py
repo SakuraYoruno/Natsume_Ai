@@ -330,12 +330,14 @@ class GovernedSchedulerRuntime:
         runtime_router: CanonicalRuntimeRouter,
         command_repository: Any,
         governor_grants: DurableGovernorGrantResolver,
+        runtime_context_application: Any | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
         self._runtime_router = runtime_router
         self._commands = command_repository
         self._governor_grants = governor_grants
+        self._runtime_context_application = runtime_context_application
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
         self._condition = asyncio.Condition()
         self._active = False
@@ -398,16 +400,36 @@ class GovernedSchedulerRuntime:
                     SCHEDULER_RUNTIME_GOVERNOR_GRANT_MISSING,
                     exc.detail,
                 ) from exc
+            existing = self._commands.get_by_request(
+                surface=HostCommandSurface.SCHEDULER.value,
+                request_id=request_id,
+            )
+            if existing is None:
+                frozen_runtime_context = self._freeze_runtime_context(
+                    occurrence=occurrence,
+                    definition=definition,
+                    authority=authority,
+                    received_at_ms=received_at_ms,
+                )
+            else:
+                existing_order = existing.get("work_order")
+                existing_input = getattr(existing_order, "input_pack", None)
+                if not isinstance(existing_input, Mapping):
+                    raise GovernedSchedulerRuntimeError(
+                        SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+                        "durable scheduler replay lacks a frozen input pack",
+                    )
+                frozen_runtime_context = _require_existing_runtime_context(
+                    existing_input,
+                    runtime_context_application=self._runtime_context_application,
+                )
             candidate_command, candidate_order, candidate_graph = _build_contracts(
                 occurrence=occurrence,
                 definition=definition,
                 authority=authority,
                 governor_grant=governor_grant,
                 received_at_ms=received_at_ms,
-            )
-            existing = self._commands.get_by_request(
-                surface=HostCommandSurface.SCHEDULER.value,
-                request_id=request_id,
+                frozen_runtime_context=frozen_runtime_context,
             )
             if existing is None:
                 command = candidate_command
@@ -445,6 +467,73 @@ class GovernedSchedulerRuntime:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._condition.notify_all()
+
+    def _freeze_runtime_context(
+        self,
+        *,
+        occurrence: SchedulerOccurrence,
+        definition: SchedulerDefinitionSnapshot,
+        authority: Mapping[str, Any],
+        received_at_ms: int,
+    ) -> dict[str, Any]:
+        service = self._runtime_context_application
+        freeze = getattr(service, "freeze_request", None)
+        if not callable(freeze):
+            # Non-proactive scheduler handlers remain available during the
+            # migration window.  Proactive execution itself fails closed in
+            # its handler unless this exact frozen context is present.
+            return {}
+        template = definition.intent_template
+        template_args = (
+            dict(template.get("args") or {})
+            if isinstance(template.get("args"), Mapping)
+            else {}
+        )
+        person_id = str(
+            template_args.get("person_id")
+            or template_args.get("user_id")
+            or occurrence.principal_id
+            or authority.get("principal_id")
+            or "scheduler"
+        ).strip() or "scheduler"
+        skill_name = str(template.get("skill_name") or definition.task_id).strip()
+        try:
+            frozen = freeze(
+                request_body=None,
+                person_id=person_id,
+                ts_ms=int(received_at_ms),
+                intent_draft={
+                    "route": "scheduler",
+                    "task_kind": "PROACTIVE"
+                    if skill_name == "proactive_talk"
+                    else "SCHEDULER",
+                    "target_id": skill_name,
+                    "task": f"Execute scheduled task {occurrence.task_id}",
+                },
+                governor_result={
+                    "risk_level": max(
+                        1,
+                        min(
+                            5,
+                            int(definition.definition.get("risk_level") or 1),
+                        ),
+                    ),
+                },
+                command_authority=dict(authority),
+                emotion_context=None,
+                emotion_snapshot=None,
+                bond_summary=None,
+            )
+            payload = frozen.to_dict()
+            return _require_existing_runtime_context(
+                payload,
+                runtime_context_application=service,
+            )
+        except Exception as exc:
+            raise GovernedSchedulerRuntimeError(
+                SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+                "scheduler runtime context could not be frozen",
+            ) from exc
 
     async def continue_review_admission(
         self,
@@ -1064,6 +1153,8 @@ def build_governed_scheduler_runtime(
     owner_id: str,
     definition_repository: SchedulerDefinitionRepositoryPort | None = None,
     cancellation_authority_verifier: Any | None = None,
+    runtime_context_application: Any | None = None,
+    action_preview_service: Any | None = None,
 ) -> GovernedSchedulerRuntime:
     definitions = definition_repository or getattr(
         task_runtime_container,
@@ -1095,6 +1186,7 @@ def build_governed_scheduler_runtime(
         occurrence_repository=definitions,
         result_repository=result_repository,
         node_grant_verifier=node_grant_verifier,
+        action_preview_service=action_preview_service,
     )
     command_repository = task_runtime_container.command_repository
     coordinator = GovernedTaskCoordinator(
@@ -1129,6 +1221,7 @@ def build_governed_scheduler_runtime(
         runtime_router=runtime_router,
         command_repository=command_repository,
         governor_grants=DurableGovernorGrantResolver(ledger),
+        runtime_context_application=runtime_context_application,
     )
 
 
@@ -1139,6 +1232,7 @@ def _build_contracts(
     authority: Mapping[str, Any],
     governor_grant: str,
     received_at_ms: int,
+    frozen_runtime_context: Mapping[str, Any] | None = None,
 ) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
     if occurrence.task_id != definition.task_id or (
         occurrence.definition_revision != definition.definition_revision
@@ -1194,6 +1288,7 @@ def _build_contracts(
         input_pack={
             "occurrence_id": occurrence.occurrence_id,
             "definition_ref": definition_ref,
+            **dict(frozen_runtime_context or {}),
         },
         allowed_actions=(f"delegate:{definition.worker_key}",),
         forbidden_actions=(
@@ -1304,6 +1399,37 @@ def _build_contracts(
         created_at_ms=int(received_at_ms),
     )
     return command, work_order, graph
+
+
+def _require_existing_runtime_context(
+    input_pack: Mapping[str, Any],
+    *,
+    runtime_context_application: Any | None,
+) -> dict[str, Any]:
+    """Reopen the exact admitted context without resolving a newer Scene."""
+
+    payload = dict(input_pack or {})
+    if payload.get("runtime_context_schema") is None:
+        return {}
+    require = getattr(runtime_context_application, "require_frozen", None)
+    if not callable(require):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "durable scheduler context cannot be verified without its app-local authority",
+        )
+    try:
+        frozen = require(payload)
+        exact = frozen.to_dict()
+    except Exception as exc:
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "durable scheduler runtime context is missing or drifted",
+        ) from exc
+    return {
+        key: value
+        for key, value in exact.items()
+        if key not in {"occurrence_id", "definition_ref"}
+    }
 
 
 def _build_governor_intent(

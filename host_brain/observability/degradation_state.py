@@ -28,6 +28,7 @@ DEGRADATION_FAULT_MATRIX_SCHEMA_VERSION = "Natsume.degradation.fault_matrix.v1"
 DEGRADATION_CAPABILITY_DECISION_SCHEMA_VERSION = (
     "Natsume.degradation.capability_decision.v1"
 )
+DEGRADATION_REDUCER_STATE_SCHEMA_VERSION = "Natsume.degradation.reducer-state.v1"
 
 DEGRADATION_HEALTHY = "HEALTHY"
 DEGRADATION_DEGRADED = "DEGRADED"
@@ -287,6 +288,31 @@ def _risk(value: Any) -> int:
         return 5
 
 
+def _non_negative_int(value: Any, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise DegradationStateError(
+            DEGRADATION_REPLAY_INVALID,
+            f"{field} must be a non-negative integer",
+        )
+    return value
+
+
+def _positive_int(value: Any, *, field: str) -> int:
+    result = _non_negative_int(value, field=field)
+    if result < 1:
+        raise DegradationStateError(
+            DEGRADATION_REPLAY_INVALID,
+            f"{field} must be positive",
+        )
+    return result
+
+
+def _optional_non_negative_int(value: Any, *, field: str) -> int | None:
+    if value is None:
+        return None
+    return _non_negative_int(value, field=field)
+
+
 @dataclass(frozen=True, slots=True)
 class DegradationTransition:
     schema_version: str
@@ -390,6 +416,17 @@ class DegradationStateMachine:
         self._max_transition_history = max(1, int(max_transition_history))
         if event_store is not None and restore_from_store:
             self.restore_from_event_store()
+
+    def is_pure_reducer(self) -> bool:
+        """Return whether an enclosing owner can safely own all side effects."""
+
+        with self._lock:
+            return (
+                self._event_sink is None
+                and self._event_store is None
+                and self._event_bus is None
+                and not self._durability_required
+            )
 
     def _state_status(self) -> str:
         if self._active:
@@ -523,6 +560,205 @@ class DegradationStateMachine:
         self._recovered_at_ms = None
         self._history.clear()
         self._events.clear()
+
+    def export_reducer_state(self) -> dict[str, Any]:
+        """Export the pure reducer state for an enclosing durable owner.
+
+        RuntimeGuardian uses this snapshot to make its own journal the only
+        durable writer.  Transport/event ports are deliberately excluded.
+        """
+
+        with self._lock:
+            state = self.snapshot()
+            return {
+                "schema": DEGRADATION_REDUCER_STATE_SCHEMA_VERSION,
+                "revision": state.revision,
+                "status": state.status,
+                "entered_at_ms": state.entered_at_ms,
+                "updated_at_ms": state.updated_at_ms,
+                "recovered_at_ms": state.recovered_at_ms,
+                "active_dependencies": [
+                    copy.deepcopy(row) for row in state.active_dependencies
+                ],
+                "recovery_pending_dependencies": [
+                    copy.deepcopy(row)
+                    for row in state.recovery_pending_dependencies
+                ],
+                "last_transition": copy.deepcopy(state.last_transition),
+            }
+
+    def restore_reducer_state(self, state: Mapping[str, Any]) -> None:
+        """Replace the in-memory reducer from a validated Guardian snapshot."""
+
+        if not isinstance(state, Mapping):
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                "embedded degradation reducer state must be a mapping",
+            )
+        if str(state.get("schema") or "") != DEGRADATION_REDUCER_STATE_SCHEMA_VERSION:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                "embedded degradation reducer schema is unsupported",
+            )
+        raw_revision = state.get("revision")
+        if isinstance(raw_revision, bool) or not isinstance(raw_revision, int) or raw_revision < 0:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                "embedded degradation revision must be non-negative",
+            )
+
+        active: dict[str, dict[str, Any]] = {}
+        for raw in state.get("active_dependencies") or ():
+            if not isinstance(raw, Mapping):
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    "embedded active dependency must be a mapping",
+                )
+            dependency = _dependency_id(raw.get("dependency_id"))
+            status = _status(raw.get("status"))
+            if status not in _FAILURE_STATUSES:
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    f"embedded active dependency has invalid status: {dependency}",
+                )
+            active[dependency] = {
+                "dependency_id": dependency,
+                "status": status,
+                "entered_at_ms": _non_negative_int(
+                    raw.get("entered_at_ms"),
+                    field=f"active[{dependency}].entered_at_ms",
+                ),
+                "source_ref": _durable_ref(
+                    raw.get("source_ref"), namespace="degradation-source"
+                ),
+                "evidence_refs": _evidence_refs(raw.get("evidence_refs") or ()),
+                "injected": bool(raw.get("injected")),
+            }
+
+        pending: dict[str, dict[str, Any]] = {}
+        for raw in state.get("recovery_pending_dependencies") or ():
+            if not isinstance(raw, Mapping):
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    "embedded pending dependency must be a mapping",
+                )
+            dependency = _dependency_id(raw.get("dependency_id"))
+            status = _status(raw.get("status"))
+            if status not in _HEALTHY_STATUSES:
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    f"embedded pending dependency has invalid status: {dependency}",
+                )
+            subject_version = _positive_int(
+                raw.get("review_subject_version"),
+                field=f"pending[{dependency}].review_subject_version",
+            )
+            pending[dependency] = {
+                "dependency_id": dependency,
+                "status": status,
+                "observed_at_ms": _non_negative_int(
+                    raw.get("observed_at_ms"),
+                    field=f"pending[{dependency}].observed_at_ms",
+                ),
+                "source_ref": _durable_ref(
+                    raw.get("source_ref"), namespace="degradation-source"
+                ),
+                "evidence_refs": _evidence_refs(raw.get("evidence_refs") or ()),
+                "review_required": True,
+                "review_subject_ref": _durable_ref(
+                    raw.get("review_subject_ref"),
+                    namespace="degradation-recovery",
+                ),
+                "review_subject_version": subject_version,
+                "review_checkpoint_id": _durable_ref(
+                    raw.get("review_checkpoint_id"),
+                    namespace="checkpoint",
+                ),
+            }
+        overlap = set(active).intersection(pending)
+        if overlap:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                f"dependency cannot be active and recovery-pending: {sorted(overlap)}",
+            )
+
+        history: list[DegradationTransition] = []
+        raw_last = state.get("last_transition")
+        if raw_last is not None:
+            if not isinstance(raw_last, Mapping):
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    "embedded last transition must be a mapping",
+                )
+            values = dict(raw_last)
+            for field in (
+                "evidence_refs",
+                "affected_capabilities",
+                "high_risk_capabilities",
+            ):
+                values[field] = tuple(values.get(field) or ())
+            try:
+                transition = DegradationTransition(**values)
+            except (TypeError, ValueError) as exc:
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    "embedded last transition is invalid",
+                ) from exc
+            if transition.revision != raw_revision:
+                raise DegradationStateError(
+                    DEGRADATION_REPLAY_INVALID,
+                    "embedded last transition does not match reducer revision",
+                )
+            history.append(transition)
+        elif raw_revision != 0:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                "non-empty reducer revision requires a last transition",
+            )
+
+        origins: dict[str, set[str]] = {}
+        for dependency in (*active, *pending):
+            for capability in FAULT_POLICIES[dependency].affected_capabilities:
+                origins.setdefault(capability, set()).add(dependency)
+
+        entered_at = _optional_non_negative_int(
+            state.get("entered_at_ms"), field="entered_at_ms"
+        )
+        updated_at = _non_negative_int(
+            state.get("updated_at_ms"), field="updated_at_ms"
+        )
+        recovered_at = _optional_non_negative_int(
+            state.get("recovered_at_ms"), field="recovered_at_ms"
+        )
+        expected_status = (
+            DEGRADATION_DEGRADED
+            if active
+            else DEGRADATION_RECOVERY_PENDING
+            if pending or origins
+            else DEGRADATION_HEALTHY
+        )
+        if str(state.get("status") or "") != expected_status:
+            raise DegradationStateError(
+                DEGRADATION_REPLAY_INVALID,
+                "embedded degradation status does not match reducer state",
+            )
+
+        with self._lock:
+            self._active = active
+            self._pending = pending
+            self._restriction_origins = origins
+            self._revision = raw_revision
+            self._entered_at_ms = entered_at
+            self._updated_at_ms = updated_at
+            self._recovered_at_ms = recovered_at
+            self._history = history[-self._max_transition_history :]
+            self._events.clear()
+            self._durability_status = (
+                "UNAVAILABLE" if self._durability_required else "NOT_REQUIRED"
+            )
+            self._restored_event_count = 0
+            self._last_durable_cursor = 0
+            self._last_durable_error = None
 
     def _restore_record(self, record: Mapping[str, Any]) -> None:
         revision = int(record.get("aggregate_version") or 0)
@@ -805,17 +1041,13 @@ class DegradationStateMachine:
         self._emit(transition)
         return transition
 
-    def acknowledge_recovery(
+    def prepare_recovery_acknowledgement(
         self,
         *,
         dependency_id: str,
-        review_store: Any,
         review_id: str,
-        resume_token_ref: str,
-        now_ms: int | None = None,
-    ) -> DegradationTransition:
+    ) -> dict[str, Any]:
         dependency = _dependency_id(dependency_id)
-        observed = int(now_ms if now_ms is not None else time.time() * 1000)
         with self._lock:
             if dependency in self._active or dependency not in self._pending:
                 raise DegradationStateError(
@@ -830,52 +1062,70 @@ class DegradationStateMachine:
             f"degradation-recovery://runtime/{dependency.lower()}/"
             f"ack/{subject_version}/{_digest(str(review_id))[:16]}"
         )
-        try:
-            resumed = review_store.resume_review(
-                str(review_id),
-                resume_token_ref=str(resume_token_ref),
-                subject_ref=subject_ref,
-                subject_version=subject_version,
-                resume_phase="PRE_EXECUTION",
-                checkpoint_id=checkpoint_id,
-                resume_result_ref=result_ref,
-            )
-        except Exception as exc:
-            reason = str(getattr(exc, "reason_code", DEGRADATION_REVIEW_REQUIRED))
-            raise DegradationStateError(
-                reason,
-                "recovery review token was not accepted for this dependency checkpoint",
-            ) from exc
-        review_record = dict(resumed.get("review") or {})
-        review_item = dict(review_record.get("review") or {})
+        return {
+            "dependency_id": dependency,
+            "review_id": str(review_id),
+            "subject_ref": subject_ref,
+            "subject_version": subject_version,
+            "resume_phase": "PRE_EXECUTION",
+            "checkpoint_id": checkpoint_id,
+            "resume_result_ref": result_ref,
+            "expected_reducer_revision": int(self._revision),
+            "evidence_refs": tuple(pending.get("evidence_refs") or ()),
+        }
+
+    def apply_consumed_recovery_acknowledgement(
+        self,
+        *,
+        binding: Mapping[str, Any],
+        review_record: Mapping[str, Any],
+        now_ms: int | None = None,
+    ) -> DegradationTransition:
+        dependency = _dependency_id(binding.get("dependency_id"))
+        observed = int(now_ms if now_ms is not None else time.time() * 1000)
+        review_id = str(binding.get("review_id") or "")
+        subject_ref = str(binding.get("subject_ref") or "")
+        subject_version = int(binding.get("subject_version") or -1)
+        checkpoint_id = str(binding.get("checkpoint_id") or "")
+        result_ref = str(binding.get("resume_result_ref") or "")
+        record = dict(review_record)
+        review_item = dict(record.get("review") or {})
         if (
             str(review_item.get("status") or "") != "CONSUMED"
+            or str(review_item.get("review_id") or "") != review_id
             or str(review_item.get("subject_ref") or "") != subject_ref
             or int(review_item.get("subject_version") or -1) != subject_version
-            or str(resumed.get("checkpoint_id") or "") != checkpoint_id
-            or str(resumed.get("resume_phase") or "") != "PRE_EXECUTION"
-            or bool(resumed.get("replay_side_effects"))
+            or str(review_item.get("resume_phase") or "") != "PRE_EXECUTION"
+            or str(review_item.get("checkpoint_id") or "") != checkpoint_id
+            or str(review_item.get("resume_result_ref") or "") != result_ref
         ):
             raise DegradationStateError(
                 DEGRADATION_REVIEW_REQUIRED,
-                "ReviewStore returned a non-bound recovery resume decision",
+                "ReviewStore record is not bound to the prepared recovery",
             )
         refs = _evidence_refs(
-            tuple(pending.get("evidence_refs") or ())
-            + (
-                f"review-item://{str(review_id)}",
-                str(resumed.get("resume_result_ref") or result_ref),
-            )
+            tuple(binding.get("evidence_refs") or ())
+            + (f"review-item://{review_id}", result_ref)
         )
         reviewer = _durable_ref(
             review_item.get("decision_actor"), namespace="reviewer"
         )
         with self._lock:
-            current_pending = self._pending.get(dependency)
-            if current_pending != pending or dependency in self._active:
+            pending = copy.deepcopy(self._pending.get(dependency))
+            if (
+                not pending
+                or dependency in self._active
+                or str(pending.get("review_subject_ref") or "") != subject_ref
+                or int(pending.get("review_subject_version") or -1)
+                != subject_version
+                or str(pending.get("review_checkpoint_id") or "")
+                != checkpoint_id
+                or int(self._revision)
+                != int(binding.get("expected_reducer_revision") or -1)
+            ):
                 raise DegradationStateError(
                     DEGRADATION_REVIEW_REQUIRED,
-                    "recovery state changed while its review was being consumed",
+                    "recovery state changed after acknowledgement preparation",
                 )
             previous = self._state_status()
             self._pending.pop(dependency, None)
@@ -897,13 +1147,53 @@ class DegradationStateMachine:
                 review_subject_ref=subject_ref,
                 review_subject_version=subject_version,
                 review_checkpoint_id=checkpoint_id,
-                review_id=str(review_id),
-                resume_result_ref=str(resumed.get("resume_result_ref") or result_ref),
+                review_id=review_id,
+                resume_result_ref=result_ref,
             )
             if self._state_status() == DEGRADATION_HEALTHY:
                 self._entered_at_ms = None
         self._emit(transition)
         return transition
+
+    def acknowledge_recovery(
+        self,
+        *,
+        dependency_id: str,
+        review_store: Any,
+        review_id: str,
+        resume_token_ref: str,
+        now_ms: int | None = None,
+    ) -> DegradationTransition:
+        binding = self.prepare_recovery_acknowledgement(
+            dependency_id=dependency_id,
+            review_id=review_id,
+        )
+        try:
+            resumed = review_store.resume_review(
+                str(review_id),
+                resume_token_ref=str(resume_token_ref),
+                subject_ref=binding["subject_ref"],
+                subject_version=binding["subject_version"],
+                resume_phase=binding["resume_phase"],
+                checkpoint_id=binding["checkpoint_id"],
+                resume_result_ref=binding["resume_result_ref"],
+            )
+        except Exception as exc:
+            reason = str(getattr(exc, "reason_code", DEGRADATION_REVIEW_REQUIRED))
+            raise DegradationStateError(
+                reason,
+                "recovery review token was not accepted for this dependency checkpoint",
+            ) from exc
+        if bool(resumed.get("replay_side_effects")):
+            raise DegradationStateError(
+                DEGRADATION_REVIEW_REQUIRED,
+                "ReviewStore attempted to replay side effects",
+            )
+        return self.apply_consumed_recovery_acknowledgement(
+            binding=binding,
+            review_record=dict(resumed.get("review") or {}),
+            now_ms=now_ms,
+        )
 
     def recovery_review_binding(self, dependency_id: str) -> dict[str, Any]:
         """Return the exact immutable ReviewItem subject/checkpoint binding."""
@@ -1471,15 +1761,22 @@ def run_isolated_fault_injection_matrix(
 def _observation_evidence_ref(
     *, source_ref: str, dependency_id: str, rows: Sequence[Mapping[str, Any]]
 ) -> str:
-    safe_rows = [
-        {
-            "service_id": str(row.get("service_id") or row.get("name") or "").strip(),
-            "status": _status(row.get("status")),
-            "last_check_ts": row.get("last_check_ts") or row.get("ts_ms"),
-            "side": str(row.get("side") or row.get("owner") or "").strip(),
-        }
-        for row in rows
-    ]
+    safe_rows = sorted(
+        [
+            {
+                "service_id": str(
+                    row.get("service_id") or row.get("name") or ""
+                ).strip(),
+                "status": _status(row.get("status")),
+                "last_check_ts": row.get("last_check_ts") or row.get("ts_ms"),
+                "side": str(
+                    row.get("side") or row.get("owner") or ""
+                ).strip(),
+            }
+            for row in rows
+        ],
+        key=_canonical_json,
+    )
     digest = _digest(
         {
             "dependency_id": dependency_id,
@@ -1488,6 +1785,135 @@ def _observation_evidence_ref(
         }
     )
     return f"health-observation://sha256/{digest}"
+
+
+def _observation_time(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise DegradationStateError(
+            DEGRADATION_HEALTH_EVIDENCE_INVALID,
+            "degradation observation time must be a non-negative integer",
+        )
+    return value
+
+
+def normalize_service_observations(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_ref: str,
+    now_ms: int,
+) -> tuple[dict[str, Any], ...]:
+    """Normalize probe rows without reading or mutating runtime state.
+
+    The result is deterministic for the same logical row set.  It can be fed
+    to either the legacy reducer adapter or the app-local ``RuntimeGuardian``;
+    this function itself owns no clock, repository, singleton or policy flag.
+    Unknown/deferred signals are deliberately omitted and therefore can never
+    release an existing degradation latch.
+    """
+
+    if isinstance(rows, (str, bytes, bytearray)) or not isinstance(rows, Sequence):
+        raise DegradationStateError(
+            DEGRADATION_HEALTH_EVIDENCE_INVALID,
+            "service observations must be a sequence of mappings",
+        )
+    observed = _observation_time(now_ms)
+    canonical_source_ref = _durable_ref(
+        source_ref,
+        namespace="degradation-source",
+    )
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for raw_row in rows:
+        if not isinstance(raw_row, Mapping):
+            raise DegradationStateError(
+                DEGRADATION_HEALTH_EVIDENCE_INVALID,
+                "each service observation must be a mapping",
+            )
+        row = dict(raw_row)
+        service_id = str(
+            row.get("service_id") or row.get("name") or ""
+        ).strip().lower()
+        dependency = _SERVICE_TO_DEPENDENCY.get(service_id)
+        if not dependency:
+            continue
+        normalized_status = _status(row.get("status"))
+        detail = str(row.get("detail") or "").strip().lower()
+        if normalized_status in _IGNORED_STATUSES:
+            continue
+        if normalized_status in _HEALTHY_STATUSES and any(
+            marker in detail for marker in _NON_HEALTHY_SUCCESS_MARKERS
+        ):
+            continue
+        grouped.setdefault(dependency, []).append(row)
+
+    observations: list[dict[str, Any]] = []
+    for dependency in sorted(grouped):
+        dependency_rows = grouped[dependency]
+        statuses = [_status(row.get("status")) for row in dependency_rows]
+        if any(status in _FAILURE_STATUSES for status in statuses):
+            resolved_status = "DOWN" if "DOWN" in statuses else "DEGRADED"
+        elif statuses and all(status in _HEALTHY_STATUSES for status in statuses):
+            resolved_status = "UP"
+        else:
+            continue
+        observations.append(
+            {
+                "dependency_id": dependency,
+                "status": resolved_status,
+                "evidence_refs": (
+                    _observation_evidence_ref(
+                        source_ref=canonical_source_ref,
+                        dependency_id=dependency,
+                        rows=dependency_rows,
+                    ),
+                ),
+                "source_ref": canonical_source_ref,
+                "observed_at_ms": observed,
+                "detail": f"service observation count={len(dependency_rows)}",
+            }
+        )
+    return tuple(observations)
+
+
+def normalize_startup_observations(
+    statuses: Mapping[str, Any],
+    *,
+    source_ref: str,
+    now_ms: int,
+) -> tuple[dict[str, Any], ...]:
+    """Normalize startup results into dependency observations, without I/O."""
+
+    if not isinstance(statuses, Mapping):
+        raise DegradationStateError(
+            DEGRADATION_HEALTH_EVIDENCE_INVALID,
+            "startup statuses must be a mapping",
+        )
+    rows: list[dict[str, Any]] = []
+    for module_name, raw_status in dict(statuses).items():
+        dependency = _STARTUP_MODULE_TO_DEPENDENCY.get(
+            str(module_name).strip().lower()
+        )
+        if not dependency:
+            continue
+        text = str(raw_status or "").strip()
+        token = text.split(":", 1)[0].split(" ", 1)[0].strip().upper()
+        if token.startswith("DEGRADED") or token.startswith("FAILED"):
+            resolved = "DEGRADED"
+        elif token == "OK":
+            resolved = "UP"
+        else:
+            continue
+        rows.append(
+            {
+                "service_id": FAULT_POLICIES[dependency].service_ids[0],
+                "status": resolved,
+                "name": str(module_name),
+            }
+        )
+    return normalize_service_observations(
+        rows,
+        source_ref=source_ref,
+        now_ms=now_ms,
+    )
 
 
 def reconcile_service_observations(
@@ -1504,46 +1930,20 @@ def reconcile_service_observations(
     policy_enabled = degradation_policy_enabled() if enabled is None else bool(enabled)
     if not policy_enabled:
         return ()
-    grouped: dict[str, list[Mapping[str, Any]]] = {}
-    for raw_row in rows:
-        row = dict(raw_row or {})
-        service_id = str(row.get("service_id") or row.get("name") or "").strip().lower()
-        dependency = _SERVICE_TO_DEPENDENCY.get(service_id)
-        if not dependency:
-            continue
-        normalized_status = _status(row.get("status"))
-        detail = str(row.get("detail") or "").strip().lower()
-        if normalized_status in _IGNORED_STATUSES:
-            continue
-        if normalized_status in _HEALTHY_STATUSES and any(
-            marker in detail for marker in _NON_HEALTHY_SUCCESS_MARKERS
-        ):
-            continue
-        grouped.setdefault(dependency, []).append(row)
-
     observed = int(now_ms if now_ms is not None else time.time() * 1000)
     transitions: list[dict[str, Any]] = []
-    for dependency in sorted(grouped):
-        dependency_rows = grouped[dependency]
-        statuses = [_status(row.get("status")) for row in dependency_rows]
-        if any(status in _FAILURE_STATUSES for status in statuses):
-            resolved_status = "DOWN" if "DOWN" in statuses else "DEGRADED"
-        elif statuses and all(status in _HEALTHY_STATUSES for status in statuses):
-            resolved_status = "UP"
-        else:
-            continue
-        evidence_ref = _observation_evidence_ref(
-            source_ref=source_ref,
-            dependency_id=dependency,
-            rows=dependency_rows,
-        )
+    for observation in normalize_service_observations(
+        rows,
+        source_ref=source_ref,
+        now_ms=observed,
+    ):
         transition = target.observe(
-            dependency_id=dependency,
-            status=resolved_status,
-            evidence_refs=(evidence_ref,),
-            source_ref=source_ref,
-            now_ms=observed,
-            detail=f"service observation count={len(dependency_rows)}",
+            dependency_id=str(observation["dependency_id"]),
+            status=str(observation["status"]),
+            evidence_refs=tuple(observation["evidence_refs"]),
+            source_ref=str(observation["source_ref"]),
+            now_ms=int(observation["observed_at_ms"]),
+            detail=str(observation["detail"]),
             injected=injected,
         )
         if transition:
@@ -1559,33 +1959,28 @@ def reconcile_startup_statuses(
     now_ms: int | None = None,
     enabled: bool | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    rows: list[dict[str, Any]] = []
-    for module_name, raw_status in dict(statuses or {}).items():
-        dependency = _STARTUP_MODULE_TO_DEPENDENCY.get(str(module_name).strip().lower())
-        if not dependency:
-            continue
-        text = str(raw_status or "").strip()
-        token = text.split(":", 1)[0].split(" ", 1)[0].strip().upper()
-        if token.startswith("DEGRADED") or token.startswith("FAILED"):
-            resolved = "DEGRADED"
-        elif token == "OK":
-            resolved = "UP"
-        else:
-            continue
-        rows.append(
-            {
-                "service_id": FAULT_POLICIES[dependency].service_ids[0],
-                "status": resolved,
-                "name": module_name,
-            }
-        )
-    return reconcile_service_observations(
-        rows,
-        machine=machine,
+    target = machine or get_degradation_state_machine()
+    policy_enabled = degradation_policy_enabled() if enabled is None else bool(enabled)
+    if not policy_enabled:
+        return ()
+    observed = int(now_ms if now_ms is not None else time.time() * 1000)
+    transitions: list[dict[str, Any]] = []
+    for observation in normalize_startup_observations(
+        statuses,
         source_ref=source_ref,
-        now_ms=now_ms,
-        enabled=enabled,
-    )
+        now_ms=observed,
+    ):
+        transition = target.observe(
+            dependency_id=str(observation["dependency_id"]),
+            status=str(observation["status"]),
+            evidence_refs=tuple(observation["evidence_refs"]),
+            source_ref=str(observation["source_ref"]),
+            now_ms=int(observation["observed_at_ms"]),
+            detail=str(observation["detail"]),
+        )
+        if transition:
+            transitions.append(transition.as_dict())
+    return tuple(transitions)
 
 
 __all__ = [
@@ -1624,6 +2019,8 @@ __all__ = [
     "get_degradation_state",
     "get_degradation_state_machine",
     "infer_degradation_capability",
+    "normalize_service_observations",
+    "normalize_startup_observations",
     "reconcile_service_observations",
     "reconcile_startup_statuses",
     "run_isolated_fault_injection_matrix",

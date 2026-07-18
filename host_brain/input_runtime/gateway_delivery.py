@@ -1,5 +1,7 @@
 """Host input runtime responsibility extracted from the HTTP adapter."""
 
+from collections.abc import Mapping
+
 from .contracts_and_normalization import *  # noqa: F403
 
 async def _deliver_gateway_reply(
@@ -21,6 +23,9 @@ async def _deliver_gateway_reply(
     # - 语音回复：默认中文，遇到显式日文内容再路由日语
     # tts_text_ja 是旧字段名；新的语音链路优先使用中文 narrative。
     tts_text_ja: str | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
     ports: InputRuntimeApplicationPorts,
 ) -> dict[str, Any]:
     platform = str(payload.get("platform") or "").strip().lower()
@@ -253,6 +258,9 @@ async def _deliver_gateway_reply(
             },
             wait_result=wait_result,
             timeout_ms=timeout_ms,
+            action_preview_service=action_preview_service,
+            action_preview_event_id=action_preview_event_id,
+            action_preview_boundary=action_preview_boundary,
         )
         preview = _build_reply_preview(
             reply_text or f"[{envelope_response_form}:{str(reply_envelope.reaction_id or '').strip() or 'media'}]",
@@ -460,6 +468,9 @@ async def _deliver_gateway_reply(
                 },
                 wait_result=True,
                 timeout_ms=secondary_timeout_ms,
+                action_preview_service=action_preview_service,
+                action_preview_event_id=action_preview_event_id,
+                action_preview_boundary=action_preview_boundary,
             )
         except Exception as exc:  # pragma: no cover - defensive async send
             _logger.debug("gateway secondary reply failed request_id=%s msg_type=%s err=%s", request_id, effective_msg_type.value, exc)
@@ -523,6 +534,9 @@ async def _deliver_gateway_reply(
         },
         wait_result=wait_result,
         timeout_ms=timeout_ms,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
     )
     if not bool(getattr(result, "success", False)):
         status = str(getattr(result, "status", "FAILED"))
@@ -748,10 +762,13 @@ async def _send_gateway_voice_reply(
         return voice_result
     except Exception as exc:
         _vlogger.debug("gateway_voice send failed (non-critical): %s", exc)
+        failure_reason = str(exc).strip().split(":", 1)[0]
+        if not failure_reason.startswith("ACTION_PREVIEW_"):
+            failure_reason = "GATEWAY_VOICE_EXCEPTION"
         return {
             "voice_success": False,
             "voice_status": "FAILED",
-            "voice_reason_code": "GATEWAY_VOICE_EXCEPTION",
+            "voice_reason_code": failure_reason,
             "voice_detail": f"{type(exc).__name__}: {str(exc)[:180]}",
             "voice_latency_ms": 0,
             "voice_started": False,

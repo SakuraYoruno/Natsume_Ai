@@ -26,10 +26,7 @@ from host_brain.integrations.runtime_events import (
     RuntimeEventError,
     RuntimeEventStore,
 )
-from host_brain.observability.degradation_state import (
-    DegradationStateError,
-    require_degradation_capability,
-)
+from host_brain.runtime.degradation_authority import evaluate_degradation_capability
 
 router = APIRouter(prefix="/internal/codex", tags=["internal-codex"])
 
@@ -107,23 +104,31 @@ def _raise_runtime_event_error(exc: RuntimeEventError) -> None:
 
 def _require_degradation_http(
     *,
+    request: Request,
     capability_id: str,
     static_risk_level: int,
 ) -> dict[str, Any]:
-    try:
-        return require_degradation_capability(
-            capability_id=capability_id,
-            static_risk_level=static_risk_level,
-        )
-    except DegradationStateError as exc:
+    decision = evaluate_degradation_capability(
+        getattr(request.state, "degradation_capability_port", None),
+        capability_id=capability_id,
+        static_risk_level=static_risk_level,
+    )
+    if not bool(decision.get("allowed")):
         raise HTTPException(
             status_code=503,
             detail={
-                "reason_code": exc.reason_code,
-                "detail": exc.detail,
+                "reason_code": str(
+                    decision.get("reason_code")
+                    or "DEGRADATION_STATE_UNAVAILABLE"
+                ),
+                "detail": str(
+                    decision.get("detail")
+                    or "app-local degradation authority blocked the request"
+                ),
                 "capability_id": capability_id,
             },
-        ) from exc
+        )
+    return decision
 
 
 def _runtime_event_next_cursor(events: list[dict[str, Any]], *, after: int) -> int:
@@ -482,6 +487,7 @@ async def resume_review(
     payload: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
     _require_degradation_http(
+        request=request,
         capability_id="remote_review_resume",
         static_risk_level=4,
     )
@@ -556,6 +562,7 @@ async def list_runtime_events(
 
 @router.get("/runtime/events/sse")
 async def stream_runtime_events_sse(
+    request: Request,
     after: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     event_type: str | None = Query(None),
@@ -563,6 +570,7 @@ async def stream_runtime_events_sse(
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
     _require_degradation_http(
+        request=request,
         capability_id="runtime_event_stream",
         static_risk_level=3,
     )

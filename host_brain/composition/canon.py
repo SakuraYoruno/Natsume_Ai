@@ -10,6 +10,7 @@ from host_brain.canon.application import CanonApplicationService
 from host_brain.memory.canon_apply_service import CanonApplyService
 from host_brain.persistence.canon_apply_repository import CanonApplyRepository
 from host_brain.persistence.canon_repository import CanonRepository
+from host_brain.runtime.degradation_authority import DegradationCapabilityPort
 
 
 class CanonCompositionError(RuntimeError):
@@ -30,6 +31,7 @@ def build_process_canon_container(
     ledger: Any,
     canonical_db_path: str | Path,
     world_root: str | Path,
+    degradation_capability_port: DegradationCapabilityPort | None = None,
 ) -> ProcessCanonContainer:
     raw = str(canonical_db_path or "").strip()
     ledger_raw = str(getattr(ledger, "canonical_db_path", "") or "").strip()
@@ -47,6 +49,7 @@ def build_process_canon_container(
         ledger=ledger,
         db_path=canonical,
         repository=apply_repository,
+        degradation_capability_port=degradation_capability_port,
     )
     application = CanonApplicationService(
         repository=repository,

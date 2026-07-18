@@ -58,6 +58,7 @@ def build_checkpoint_execution_context(
         "node_input_refs": list(_node_input_refs(node)),
         "node_input_artifacts": [dict(item) for item in input_artifacts],
         "node_acceptance_criteria": list(admitted.active_node.acceptance_criteria),
+        "node_risk_level": int(admitted.active_node.risk_level),
         "recovery": {
             "mode": "COMMITTED_CHECKPOINT_ONLINE_TAKEOVER",
             "worker_replayed": False,

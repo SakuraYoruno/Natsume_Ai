@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from host_brain.channels.embodiment import (
     EdgeEmbodimentSessionConfig,
-    EdgeRpcEmbodimentCommandPort,
+    _EdgeRpcEmbodimentCommandPort,
     build_durable_host_embodiment_session_config,
     build_host_embodiment_command,
 )
@@ -64,7 +64,7 @@ def test_host_port_handshakes_binds_fence_and_reuses_live_lease(monkeypatch) -> 
         )
         return _Result(event={"receipt": receipt.as_dict()})
 
-    port = EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge)
+    port = _EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge)
     first = asyncio.run(
         port.submit(
             build_host_embodiment_command(
@@ -101,7 +101,7 @@ def test_host_port_fails_closed_when_session_handshake_is_unavailable(monkeypatc
         )
 
     receipt = asyncio.run(
-        EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge).submit(
+        _EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge).submit(
             build_host_embodiment_command(
                 kind="mateengine", action="command", payload={"command": {"type": "reset"}}
             )
@@ -127,7 +127,7 @@ def test_replacement_host_rejects_a_non_rotating_edge_handshake(monkeypatch) -> 
         # persistence or a physical command.
         return _Result(event={"lease": inherited.as_dict()})
 
-    port = EdgeRpcEmbodimentCommandPort(
+    port = _EdgeRpcEmbodimentCommandPort(
         post_to_edge=fake_post_to_edge,
         session_config=EdgeEmbodimentSessionConfig(
             session_id=inherited.session_id,
@@ -196,7 +196,7 @@ def test_host_port_renews_near_expiry_with_exact_reconnect_credentials(monkeypat
         )
         return _Result(event={"receipt": receipt.as_dict()})
 
-    port = EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge)
+    port = _EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge)
     asyncio.run(port.submit(build_host_embodiment_command(kind="voice", action="speak", payload={"text": "one"})))
     clock["value"] = first_lease.expires_at_ms - 4_000
     asyncio.run(port.submit(build_host_embodiment_command(kind="voice", action="speak", payload={"text": "two"})))
@@ -228,7 +228,7 @@ def test_host_session_handshake_serializes_across_event_loops(monkeypatch) -> No
         )
         return _Result(event={"receipt": receipt.as_dict()})
 
-    port = EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge)
+    port = _EdgeRpcEmbodimentCommandPort(post_to_edge=fake_post_to_edge)
 
     def submit(index: int):
         return asyncio.run(
@@ -272,13 +272,13 @@ def test_two_ports_keep_lease_and_reset_scoped_to_their_own_runtime(monkeypatch)
         )
         return _Result(event={"receipt": receipt.as_dict()})
 
-    first = EdgeRpcEmbodimentCommandPort(
+    first = _EdgeRpcEmbodimentCommandPort(
         post_to_edge=fake_post_to_edge,
         session_config=EdgeEmbodimentSessionConfig(
             session_id="host-a", owner_id="host-a-owner"
         ),
     )
-    second = EdgeRpcEmbodimentCommandPort(
+    second = _EdgeRpcEmbodimentCommandPort(
         post_to_edge=fake_post_to_edge,
         session_config=EdgeEmbodimentSessionConfig(
             session_id="host-b", owner_id="host-b-owner"

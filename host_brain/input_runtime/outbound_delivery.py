@@ -81,11 +81,14 @@ async def trigger_reply_performance(
         }
     except Exception as exc:
         _logger.debug("reply performance trigger failed request_id=%s err=%s", request_id, exc)
+        failure_reason = str(exc).strip().split(":", 1)[0]
+        if not failure_reason.startswith("ACTION_PREVIEW_"):
+            failure_reason = "PERFORMANCE_TRIGGER_EXCEPTION"
         return {
             "invoked": True,
             "affected_output": False,
             "status": "FAILED",
-            "reason_code": "PERFORMANCE_TRIGGER_EXCEPTION",
+            "reason_code": failure_reason,
             "detail": f"{type(exc).__name__}: {str(exc)[:180]}",
             "performance": performance.as_dict(),
         }

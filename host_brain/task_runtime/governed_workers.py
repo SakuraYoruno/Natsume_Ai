@@ -25,6 +25,11 @@ from host_brain.task_runtime.worker_budget_usage import (
     WorkerBudgetUsage,
     WorkerBudgetUsageError,
 )
+from host_brain.runtime.action_preview_authority import (
+    ActionPreviewAuthorityError,
+    context_pack_digest_from_work_order,
+)
+from host_brain.runtime.action_preview_resolver import build_node_authority_context
 from natsume_contracts.task import HostCommand
 
 
@@ -56,6 +61,7 @@ class FrozenNodeInput:
     lease_id: str
     lease_owner_id: str
     fencing_token: int
+    node_risk_level: int
     route: str
     target_id: str
     objective: str
@@ -102,6 +108,7 @@ class FrozenNodeInput:
             "lease_id": self.lease_id,
             "lease_owner_id": self.lease_owner_id,
             "fencing_token": self.fencing_token,
+            "node_risk_level": self.node_risk_level,
             "route": self.route,
             "target_id": self.target_id,
             "objective": self.objective,
@@ -154,6 +161,7 @@ class GovernedFrozenNodeWorker:
         executor: FrozenRouteExecutorPort,
         node_grants: NodeGrantVerifierPort,
         projections: WorkerProjectionWriterPort,
+        action_preview_service: Any | None = None,
     ) -> None:
         kind = str(route_kind or "").strip().lower()
         if kind not in {"chat", "delegate"}:
@@ -168,6 +176,7 @@ class GovernedFrozenNodeWorker:
         self._executor = executor
         self._node_grants = node_grants
         self._projections = projections
+        self._action_preview_service = action_preview_service
 
     async def execute_stream(
         self,
@@ -200,6 +209,12 @@ class GovernedFrozenNodeWorker:
             fencing_token=frozen.fencing_token,
         )
         _assert_verified_grant(verified, frozen=frozen)
+        preview = self._preview_delegate(
+            command=command,
+            work_order=work_order,
+            frozen=frozen,
+            verified_grant=_projection(verified),
+        )
 
         terminal: dict[str, Any] | None = None
         terminal_count = 0
@@ -256,6 +271,19 @@ class GovernedFrozenNodeWorker:
                 ) from exc
             normalized["budget_usage"] = budget_usage.to_payload()
         normalized["audit_refs"]["buffered_pre_acceptance_events"] = buffered_event_count
+        normalized["audit_refs"].update(
+            {
+                "node_grant_ref": frozen.node_grant_ref,
+                "node_grant_digest": "sha256:" + _sha256_json(_projection(verified)),
+            }
+        )
+        if preview is not None:
+            normalized["audit_refs"].update(
+                {
+                    "action_preview_receipt_ref": preview["receipt_ref"],
+                    "action_preview_event_id": preview["event_id"],
+                }
+            )
         payload_digest = _sha256_json(normalized)
         projection_id = (
             f"worker-projection://{_ref(frozen.graph_id)}/{frozen.graph_revision}/"
@@ -290,6 +318,75 @@ class GovernedFrozenNodeWorker:
             },
         }
 
+    def _preview_delegate(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        frozen: FrozenNodeInput,
+        verified_grant: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        if self._route_kind != "delegate":
+            return None
+        pack = dict(work_order.input_pack or {})
+        if pack.get("runtime_context_schema") != "natsume.runtime-context.request.v1":
+            if self._action_preview_service is not None:
+                raise GovernedNodeWorkerError(
+                    GOVERNED_NODE_GRANT_INVALID,
+                    "legacy Delegate WorkOrder is quarantined without Runtime Context",
+                )
+            return None
+        service = self._action_preview_service
+        if service is None:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_GRANT_INVALID,
+                "governed Delegate has no app-local ActionPreview authority",
+            )
+        try:
+            kwargs = {
+                "action_kind": "delegate.dispatch",
+                "action_scope": frozen.target_id,
+                # The initial pentest adapter is read-only, but the domain is
+                # security-sensitive and therefore keeps the high-risk gate.
+                "risk_level": frozen.node_risk_level,
+                "action_args": {
+                    "objective_digest": "sha256:"
+                    + hashlib.sha256(frozen.objective.encode("utf-8")).hexdigest(),
+                    "input_refs": list(frozen.input_refs),
+                },
+                "context_pack_digest": context_pack_digest_from_work_order(work_order),
+                "scene_identity": dict(pack.get("scene_identity_v2") or {}),
+                "task_graph_id": frozen.graph_id,
+                "graph_revision": frozen.graph_revision,
+                "task_node_id": frozen.node_id,
+                "parent_governor_grant_ref": frozen.parent_grant_ref,
+                "node_grant_ref": frozen.node_grant_ref,
+                "node_grant": dict(verified_grant),
+                "guardian_capability_id": f"delegate_{frozen.target_id}".lower(),
+                "authority_context": build_node_authority_context(
+                    command=command,
+                    execution_context={
+                        "attempt_id": frozen.attempt_id,
+                        "lease_id": frozen.lease_id,
+                        "lease_owner_id": frozen.lease_owner_id,
+                        "fencing_token": frozen.fencing_token,
+                    },
+                    purpose="delegate.dispatch",
+                ),
+            }
+            issued = service.issue_receipt(**kwargs)
+            service.require_execution(
+                event_id=issued["event_id"],
+                **{
+                    key: value
+                    for key, value in kwargs.items()
+                    if key != "guardian_capability_id"
+                },
+            )
+        except ActionPreviewAuthorityError as exc:
+            raise GovernedNodeWorkerError(exc.reason_code, exc.detail) from exc
+        return dict(issued)
+
 
 def _freeze_node_input(
     *,
@@ -315,15 +412,16 @@ def _freeze_node_input(
     )
     try:
         fencing_token = int(context.get("fencing_token"))
+        node_risk_level = int(context.get("node_risk_level"))
     except (TypeError, ValueError) as exc:
         raise GovernedNodeWorkerError(
             GOVERNED_NODE_INPUT_INVALID,
             "fencing_token must be a positive integer",
         ) from exc
-    if fencing_token < 1:
+    if fencing_token < 1 or not 1 <= node_risk_level <= 5:
         raise GovernedNodeWorkerError(
             GOVERNED_NODE_INPUT_INVALID,
-            "fencing_token must be a positive integer",
+            "fencing_token and node_risk_level must be valid",
         )
     route_value = _required(context.get("worker_route"), "worker_route")
     route = GovernedWorkerRoute.parse(route_value)
@@ -435,6 +533,7 @@ def _freeze_node_input(
         lease_id=lease_id,
         lease_owner_id=lease_owner_id,
         fencing_token=fencing_token,
+        node_risk_level=node_risk_level,
         route=route.kind,
         target_id=route.target_id,
         objective=_required(binding.get("objective"), "node binding objective"),
@@ -536,12 +635,7 @@ def _freeze_budget_payload(value: Any) -> dict[str, Any]:
 
 
 def _assert_verified_grant(value: Any, *, frozen: FrozenNodeInput) -> None:
-    if isinstance(value, Mapping):
-        verified = dict(value)
-    else:
-        projector = getattr(value, "to_dict", None)
-        projected = projector() if callable(projector) else None
-        verified = dict(projected) if isinstance(projected, Mapping) else {}
+    verified = _projection(value)
     expected = {
         "grant_ref": frozen.node_grant_ref,
         "parent_grant_ref": frozen.parent_grant_ref,
@@ -558,6 +652,14 @@ def _assert_verified_grant(value: Any, *, frozen: FrozenNodeInput) -> None:
             GOVERNED_NODE_GRANT_INVALID,
             "node grant verifier did not return the exact frozen authority binding",
         )
+
+
+def _projection(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    projector = getattr(value, "to_dict", None)
+    projected = projector() if callable(projector) else None
+    return dict(projected) if isinstance(projected, Mapping) else {}
 
 
 def _assert_terminal(event: Mapping[str, Any], *, frozen: FrozenNodeInput) -> None:

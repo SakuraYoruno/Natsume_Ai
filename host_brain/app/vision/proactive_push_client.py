@@ -13,6 +13,7 @@ import threading
 from typing import Any
 
 from host_brain.core.ids import new_request_id
+from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
 
 _logger = logging.getLogger("Natsume.proactive_push_client")
 
@@ -59,7 +60,12 @@ class ProactivePushClient:
         self._hmac_key = hmac_key
         self._timeout_sec = timeout_sec
 
-    def push(self, message: dict[str, Any]) -> dict[str, Any]:
+    def push(
+        self,
+        message: dict[str, Any],
+        *,
+        preview_proof: ActionPreviewExecutionProof | None = None,
+    ) -> dict[str, Any]:
         """同步推送主动对话消息到 Edge。
 
         Args:
@@ -73,7 +79,22 @@ class ProactivePushClient:
         try:
             from host_brain.channels.edge_transport import submit_proactive_push  # noqa: PLC0415
 
-            request_id = new_request_id()
+            request_id = (
+                preview_proof.action_scope
+                if preview_proof is not None
+                else new_request_id()
+            )
+            if preview_proof is not None and (
+                preview_proof.action_kind != "proactive.ui_push"
+                or preview_proof.action_args != dict(message or {})
+                or not request_id
+            ):
+                return {
+                    "success": False,
+                    "status": "REJECTED",
+                    "reason_code": "ACTION_PREVIEW_DRIFT",
+                    "detail": "proactive payload or request scope differs from Preview proof",
+                }
 
             async def _call() -> Any:
                 return await submit_proactive_push(
@@ -82,6 +103,17 @@ class ProactivePushClient:
                     timeout_ms=max(1000, int(float(self._timeout_sec) * 1000)),
                     base_url=self._edge_base_url,
                     shared_key=self._hmac_key,
+                    action_preview_service=(
+                        preview_proof.service if preview_proof is not None else None
+                    ),
+                    action_preview_event_id=(
+                        preview_proof.event_id if preview_proof is not None else None
+                    ),
+                    action_preview_boundary=(
+                        preview_proof.boundary_dict()
+                        if preview_proof is not None
+                        else None
+                    ),
                 )
 
             result = _run_edge_push_sync(_call)

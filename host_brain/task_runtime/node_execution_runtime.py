@@ -847,6 +847,7 @@ class DurableNodeExecutionRuntime:
             "node_input_refs": list(node_input_refs),
             "node_input_artifacts": input_artifacts,
             "node_acceptance_criteria": list(admitted.active_node.acceptance_criteria),
+            "node_risk_level": int(admitted.active_node.risk_level),
         }
         if node_grant_ref is not None:
             execution_context["node_grant_ref"] = node_grant_ref

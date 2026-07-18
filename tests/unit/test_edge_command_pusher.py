@@ -1,8 +1,68 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
-from host_brain.tribe.edge_command_pusher import EdgeCommandPusher
+from host_brain.governor.action_preview import ActionPreviewService
+from host_brain.runtime.action_preview_authority import (
+    ACTION_PREVIEW_BLOCKED,
+    ActionPreviewAuthorityError,
+)
+from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
+from host_brain.tribe.edge_command_pusher import (
+    EdgeCommandPusher,
+    build_edge_command_preview_args,
+    edge_command_preview_scope,
+    init_edge_command_pusher,
+    set_edge_command_pusher,
+)
+
+
+def _preview_service(require_execution=None) -> ActionPreviewService:  # noqa: ANN001
+    service = ActionPreviewService(
+        runtime_event_store=object(),
+        guardian=SimpleNamespace(evaluate_capability=lambda **_kwargs: {}),
+        authority_resolver=SimpleNamespace(resolve=lambda **_kwargs: None),
+    )
+    service.require_execution = (  # type: ignore[method-assign]
+        require_execution or (lambda **_kwargs: SimpleNamespace())
+    )
+    return service
+
+
+def _proof(
+    *,
+    command_type: str = "emotion_state_command",
+    target_agent: str = "edge.somatic",
+    source_agent: str = "host_brain",
+    payload: dict[str, Any] | None = None,
+    require_execution=None,  # noqa: ANN001
+) -> ActionPreviewExecutionProof:
+    args = build_edge_command_preview_args(
+        command_type=command_type,
+        target_agent=target_agent,
+        source_agent=source_agent,
+        payload=payload,
+    )
+    return ActionPreviewExecutionProof(
+        service=_preview_service(require_execution),
+        event_id="runtime-event://edge-command-preview",
+        boundary={
+            "action_kind": "edge.tribe_command",
+            "action_scope": edge_command_preview_scope(args),
+            "risk_level": 4,
+            "action_args": args,
+            "context_pack_digest": "sha256:" + "1" * 64,
+            "scene_identity": {"decision_digest": "sha256:" + "2" * 64},
+            "task_graph_id": "graph-edge-command",
+            "graph_revision": 1,
+            "task_node_id": "node-edge-command",
+            "parent_governor_grant_ref": "grant://edge-command/parent",
+            "node_grant_ref": "grant://edge-command/node",
+            "node_grant": {"grant_ref": "grant://edge-command/node"},
+            "authority_context": {"schema_version": "test.edge-command.v1"},
+        },
+    )
 
 
 def test_edge_command_pusher_from_env_reuses_host_edge_rpc_base_url(monkeypatch) -> None:
@@ -65,6 +125,7 @@ def test_edge_command_pusher_enters_cooldown_after_failure(monkeypatch) -> None:
     first = pusher.push_command(
         command_type="emotion_state_command",
         target_agent="edge.somatic",
+        action_preview_proof=_proof(),
     )
 
     assert first["reason"] == "HTTP_ERROR"
@@ -74,6 +135,7 @@ def test_edge_command_pusher_enters_cooldown_after_failure(monkeypatch) -> None:
     second = pusher.push_command(
         command_type="emotion_state_command",
         target_agent="edge.somatic",
+        action_preview_proof=_proof(),
     )
 
     assert second["reason"] == "COOLDOWN_ACTIVE"
@@ -95,6 +157,7 @@ def test_edge_command_pusher_backoff_grows_on_repeated_failures(monkeypatch) -> 
     first = pusher.push_command(
         command_type="emotion_state_command",
         target_agent="edge.somatic",
+        action_preview_proof=_proof(),
     )
     assert first["reason"] == "HTTP_ERROR"
 
@@ -102,6 +165,7 @@ def test_edge_command_pusher_backoff_grows_on_repeated_failures(monkeypatch) -> 
     second = pusher.push_command(
         command_type="emotion_state_command",
         target_agent="edge.somatic",
+        action_preview_proof=_proof(),
     )
     assert second["reason"] == "HTTP_ERROR"
 
@@ -109,6 +173,71 @@ def test_edge_command_pusher_backoff_grows_on_repeated_failures(monkeypatch) -> 
     during_backoff = pusher.push_command(
         command_type="emotion_state_command",
         target_agent="edge.somatic",
+        action_preview_proof=_proof(),
     )
     assert during_backoff["reason"] == "COOLDOWN_ACTIVE"
     assert during_backoff["cooldown_remaining_ms"] >= 28000
+
+
+def test_edge_command_pusher_constructor_flag_cannot_bypass_preview() -> None:
+    session = _FailingSession()
+    pusher = EdgeCommandPusher(
+        edge_base_url="http://edge.local",
+        session=session,
+        enforce_action_preview=False,
+    )
+
+    result = pusher.push_command(
+        command_type="gate_control_command",
+        target_agent="edge.channel",
+        payload={"gate_open": True},
+    )
+
+    assert result["reason"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert session.calls == 0
+
+
+def test_edge_command_pusher_rejects_tamper_and_lost_lease_before_network() -> None:
+    session = _FailingSession()
+    pusher = EdgeCommandPusher(edge_base_url="http://edge.local", session=session)
+    exact = _proof(payload={"gate_open": True})
+
+    tampered = pusher.push_command(
+        command_type="emotion_state_command",
+        target_agent="edge.somatic",
+        payload={"gate_open": False},
+        action_preview_proof=exact,
+    )
+    assert tampered["reason"] == "ACTION_PREVIEW_DRIFT"
+
+    def _lost_lease(**_kwargs):
+        raise ActionPreviewAuthorityError(
+            ACTION_PREVIEW_BLOCKED,
+            "Task node Lease is no longer active",
+        )
+
+    lost = pusher.push_command(
+        command_type="emotion_state_command",
+        target_agent="edge.somatic",
+        action_preview_proof=_proof(require_execution=_lost_lease),
+    )
+    assert lost["reason"] == ACTION_PREVIEW_BLOCKED
+    assert session.calls == 0
+
+
+def test_edge_command_pusher_singleton_injection_cannot_replace_gated_type() -> None:
+    class UngatedPusher(EdgeCommandPusher):
+        pass
+
+    injected = UngatedPusher(edge_base_url="http://edge.local")
+    set_edge_command_pusher(None)
+    try:
+        for install in (set_edge_command_pusher, init_edge_command_pusher):
+            try:
+                install(injected)
+            except TypeError as exc:
+                assert "canonical gated type" in str(exc)
+            else:  # pragma: no cover - fail-closed assertion
+                raise AssertionError("subclass injection must not downgrade the gate")
+    finally:
+        set_edge_command_pusher(None)

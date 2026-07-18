@@ -230,6 +230,9 @@ def main() -> int:
     _configure_windows_event_loop_policy()
     args = parse_args()
     _bind_cli_persistence_path(args.db_path)
+    os.environ["HOST_APP_HOST"] = str(args.host)
+    os.environ["HOST_APP_PORT"] = str(int(args.port))
+    get_core_settings.cache_clear()
 
     # 配置日志
     setup_logging(args.log_level)
@@ -238,6 +241,30 @@ def main() -> int:
     # 设置环境变量（.env 已在模块顶部加载，此处仅作兜底）
     os.environ.setdefault("Natsume_ENV", "dev")
 
+    if args.reload:
+        logger.error(
+            "Service Catalog authority does not permit Uvicorn reload workers; "
+            "run a single governed Host process"
+        )
+        return 1
+
+    if str(args.db_path).strip() == ":memory:":
+        logger.error("Governed Host startup requires file-backed SQLite durability")
+        return 1
+
+    migration = SQLiteMigrationRunner(db_path=args.db_path).apply_migrations(
+        request_id=f"{new_request_id()}:service-catalog-migration",
+    )
+    if not migration.success:
+        logger.error(
+            "Service Catalog migration failed",
+            extra={
+                "reason_code": migration.reason_code,
+                "detail": migration.detail,
+            },
+        )
+        return 1
+
     # 运行启动检查（如果启用）
     if args.startup_check:
         logger.info("Running startup health check...")
@@ -245,14 +272,9 @@ def main() -> int:
             logger.error("Startup health check failed, exiting")
             return 1
 
-    # 导入uvicorn（延迟导入以避免不必要的依赖）
-    try:
-        import uvicorn
-    except ImportError as exc:
-        logger.error("uvicorn not installed, please install with: pip install uvicorn")
-        return 1
-
-    # 启动FastAPI服务器
+    # Host startup is now one durable Service Catalog activation.  CANARY and
+    # ENFORCE transfer the exact prebound socket into Uvicorn; no check/close/
+    # bind race or process-local activation truth remains.
     logger.info(
         "Starting Natsume AI Host Brain server",
         extra={
@@ -263,16 +285,35 @@ def main() -> int:
         },
     )
 
+    runtime = None
     try:
-        uvicorn.run(
-            "host_brain.app.asgi:app",
+        from host_brain.service_catalog.host_startup import (  # noqa: PLC0415
+            start_host_through_service_catalog,
+        )
+
+        runtime = start_host_through_service_catalog(
+            db_path=args.db_path,
             host=args.host,
             port=args.port,
-            reload=args.reload,
-            log_level=args.log_level.lower(),
-            loop="asyncio",
+            log_level=args.log_level,
             access_log=_resolve_uvicorn_access_log_enabled(),
+            operation_id=(
+                str(os.environ.get("HOST_SERVICE_CATALOG_OPERATION_ID") or "").strip()
+                or None
+            ),
         )
+        if not runtime.outcome.started:
+            logger.error(
+                "Service Catalog blocked Host activation",
+                extra={
+                    "operation_id": runtime.outcome.operation_id,
+                    "status": runtime.outcome.status,
+                    "reason_code": runtime.outcome.reason_code,
+                },
+            )
+            return 1
+        if runtime.outcome.candidate_handle is not None:
+            runtime.candidate.join()
         return 0
     except KeyboardInterrupt:
         logger.info("Server shutdown requested by user")
@@ -280,6 +321,9 @@ def main() -> int:
     except Exception as exc:
         logger.error("Server startup failed", extra={"error": str(exc)})
         return 1
+    finally:
+        if runtime is not None:
+            runtime.close()
 
 
 if __name__ == "__main__":

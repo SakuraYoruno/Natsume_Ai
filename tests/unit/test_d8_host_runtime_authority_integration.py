@@ -18,6 +18,11 @@ from host_brain.persistence.embodiment_outbox_repository import (
 )
 from natsume_contracts.edge.embodiment_v1 import EmbodimentReceipt
 from natsume_contracts.edge.transport_v1 import EdgeSessionLease, stable_lease_id
+from tests.action_preview_test_support import (
+    build_scheduler_action_preview,
+    issue_embodiment_action_preview,
+    terminal_preview_kwargs,
+)
 
 
 class _Result:
@@ -59,14 +64,54 @@ def _repository(tmp_path: Path, name: str) -> tuple[EmbodimentOutboxRepository, 
     return EmbodimentOutboxRepository(db_path), db_path
 
 
-def _command(name: str):
+def _command(name: str, *, grant_ref: str):
     return build_host_embodiment_command(
-        kind="voice",
-        action="speak",
-        payload={"text": name},
+        kind="mateengine",
+        action="command",
+        payload={"command": {"type": "status", "request": name}},
         request_id=f"req_d8_runtime_{name}",
+        authority_ref=f"authority://task-node/{name}",
+        grant_ref=grant_ref,
         idempotency_key=f"d8-runtime-key-{name}",
     )
+
+
+def _command_with_preview(
+    *,
+    service,
+    scheduler_context: dict,
+    name: str,
+):
+    command = _command(
+        name,
+        grant_ref=str(
+            scheduler_context["origin_boundary"]["node_grant_ref"]
+        ),
+    )
+    preview = issue_embodiment_action_preview(
+        service=service,
+        scheduler_context=scheduler_context,
+        command=command,
+    )
+    return command, terminal_preview_kwargs(service, preview)
+
+
+def _admit_and_dispatch(
+    runtime: HostEmbodimentRuntime,
+    *,
+    service,
+    scheduler_context: dict,
+    name: str,
+) -> None:
+    command, proof = _command_with_preview(
+        service=service,
+        scheduler_context=scheduler_context,
+        name=name,
+    )
+    ack = runtime.enqueue(command, **proof)
+    assert ack.status == "PENDING"
+    batch = asyncio.run(runtime.dispatch_pending_async(limit=1))
+    assert batch.applied == 1
 
 
 def _edge_lease(
@@ -197,7 +242,16 @@ def test_restart_loads_live_edge_lease_without_busy_and_rebinds_it_to_new_runtim
         session_config=config,
         authority_lease_ms=20_000,
     )
-    assert asyncio.run(first.submit(_command("before-restart"))).success
+    preview_service, scheduler_context = build_scheduler_action_preview(
+        tmp_path,
+        name="d8-runtime-restart",
+    )
+    _admit_and_dispatch(
+        first,
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        name="before-restart",
+    )
     assert [path for path, _payload in calls] == [
         "/v1/edge/embodiment/session",
         "/v1/edge/embodiment",
@@ -231,7 +285,12 @@ def test_restart_loads_live_edge_lease_without_busy_and_rebinds_it_to_new_runtim
     assert rebound["runtime_lease_id"] == current_runtime_claim["lease_id"]
     assert rebound["runtime_fencing_token"] == 2
 
-    assert asyncio.run(restarted.submit(_command("after-restart"))).success
+    _admit_and_dispatch(
+        restarted,
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        name="after-restart",
+    )
     assert [path for path, _payload in calls] == [
         "/v1/edge/embodiment/session",
         "/v1/edge/embodiment",
@@ -284,7 +343,16 @@ def test_restart_near_edge_expiry_renews_with_exact_reconnect_credentials(
         session_config=config,
         authority_lease_ms=30_000,
     )
-    assert asyncio.run(first.submit(_command("seed-renew"))).success
+    preview_service, scheduler_context = build_scheduler_action_preview(
+        tmp_path,
+        name="d8-runtime-renew",
+    )
+    _admit_and_dispatch(
+        first,
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        name="seed-renew",
+    )
     first.close()
 
     clock["value"] = 27_000
@@ -295,7 +363,12 @@ def test_restart_near_edge_expiry_renews_with_exact_reconnect_credentials(
         session_config=config,
         authority_lease_ms=30_000,
     )
-    assert asyncio.run(restarted.submit(_command("renew-after-restart"))).success
+    _admit_and_dispatch(
+        restarted,
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        name="renew-after-restart",
+    )
     assert len(session_payloads) == 2
     assert session_payloads[1]["session_id"] == config.session_id
     assert session_payloads[1]["owner_id"] == config.owner_id
@@ -321,12 +394,27 @@ def test_expired_and_replaced_runtime_fence_blocks_old_enqueue_and_edge_submit(
         edge_calls.append(str(path))
         raise AssertionError("失去 Host authority 后不得跨越 Edge 边界")
 
+    preview_service, scheduler_context = build_scheduler_action_preview(
+        tmp_path,
+        name="d8-runtime-stale-fence",
+    )
     stale = HostEmbodimentRuntime(
         repository=repository,
         worker_id="stale-host",
         post_to_edge=fake_post_to_edge,
         session_config=build_durable_host_embodiment_session_config(db_path),
         authority_lease_ms=1_000,
+    )
+    pending_command, pending_proof = _command_with_preview(
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        name="stale-dispatch",
+    )
+    assert stale.enqueue(pending_command, **pending_proof).status == "PENDING"
+    rejected_command, rejected_proof = _command_with_preview(
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        name="stale-enqueue",
     )
     original = _runtime_lease_row(db_path)
 
@@ -342,9 +430,9 @@ def test_expired_and_replaced_runtime_fence_blocks_old_enqueue_and_edge_submit(
     assert replacement["fencing_token"] == original["fencing_token"] + 1
 
     with pytest.raises(RuntimeError, match="EMBODIMENT_RUNTIME_AUTHORITY_LOST"):
-        stale.enqueue(_command("stale-enqueue"))
+        stale.enqueue(rejected_command, **rejected_proof)
     with pytest.raises(RuntimeError, match="EMBODIMENT_RUNTIME_AUTHORITY_LOST"):
-        asyncio.run(stale.submit(_command("stale-submit")))
+        asyncio.run(stale.dispatch_pending_async(limit=1))
     assert edge_calls == []
     stale.close()
 

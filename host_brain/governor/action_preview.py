@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.governor.action_arbiter import ActionArbiter
+from host_brain.runtime.action_preview_authority import DurableActionPreviewAuthority
 
 
 ACTION_PREVIEW_SCHEMA_VERSION = "Natsume.action.preview.v1"
@@ -139,8 +141,63 @@ def preview_action(
 
 
 class ActionPreviewService:
+    """App-local preview facade with an injected durable Guardian authority."""
+
+    def __init__(
+        self,
+        *,
+        runtime_event_store: Any,
+        guardian: Any,
+        authority_resolver: Any,
+        clock: Any = None,
+    ) -> None:
+        if not callable(getattr(guardian, "evaluate_capability", None)):
+            raise TypeError("ActionPreviewService requires app-local RuntimeGuardian")
+        if not callable(getattr(authority_resolver, "resolve", None)):
+            raise TypeError(
+                "ActionPreviewService requires a canonical authority resolver"
+            )
+        self._clock = clock or (lambda: int(time.time() * 1000))
+        if not callable(self._clock):
+            raise TypeError("ActionPreviewService clock must be callable")
+        self._event_store = runtime_event_store
+        self._guardian = guardian
+        self._authority_resolver = authority_resolver
+        self._arbiter = ActionArbiter(degradation_capability_port=guardian)
+        self._authority: DurableActionPreviewAuthority | None = None
+
     def preview(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("arbiter", self._arbiter)
+        kwargs.setdefault("runtime_event_store", self._event_store)
+        kwargs.setdefault("record_runtime_event", True)
         return preview_action(**kwargs)
+
+    def issue_receipt(self, **kwargs: Any) -> dict[str, Any]:
+        return self._durable_authority().issue(**kwargs)
+
+    def require_execution(self, **kwargs: Any) -> Any:
+        return self._durable_authority().require_execution(**kwargs)
+
+    def now_ms(self) -> int:
+        """Return the same clock used by issue/reopen expiry checks."""
+
+        return int(self._clock())
+
+    def _durable_authority(self) -> DurableActionPreviewAuthority:
+        authority = self._authority
+        if authority is None:
+            # Delay repository validation until the first effect boundary so
+            # application composition can publish one shared facade before all
+            # stores finish wiring. A missing/invalid store still fails closed
+            # before a receipt can be issued or an executor can run.
+            authority = DurableActionPreviewAuthority(
+                runtime_event_store=self._event_store,
+                guardian=self._guardian,
+                authority_resolver=self._authority_resolver,
+                clock=self._clock,
+            )
+            self._authority = authority
+        return authority
 
 
 __all__ = [

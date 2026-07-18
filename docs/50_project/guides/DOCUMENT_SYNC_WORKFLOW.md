@@ -3,7 +3,7 @@
 
 # Natsume AI 文档与代码同步工作流
 
-版本：v2.0
+版本：v2.1
 维护日期：2026-07-15
 
 文档不是代码改完后的装饰。当前架构、模块边界、数据流和机器状态必须随 production composition 同步；历史报告只保存其固定范围，不允许反向覆盖当前事实。
@@ -55,13 +55,17 @@
 python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
+python tools/delivery/change_metadata_gate.py --root . --base-ref origin/dev
 python -m pre_commit run
 ```
 
 - `doc_audience_lint`：检查受众/标题头和混写规则。
 - `doc_authority_gate`：检查核心文档存在、旧执行计划隔离、机器状态与执行合同一致。
 - `doc_freshness_gate`：按源码变更提醒事实文档过期。
+- `change_metadata_gate`：检查 Feature 分支无 merge commit、中文规范提交和真实 Markdown PR 七章节；Ready 前追加 `--pr-body-file`、`--pr-title` 与 `--require-pr-metadata`。
 - pre-commit：在提交前组合运行文档 Gate。
+
+PR 正文必须先写入本地 Markdown 文件，再使用 `gh pr create/edit --body-file <path>`；不得把 `\\n` 拼进内联 shell 参数。GitHub Actions 因账户额度未分配步骤时记录 `NOT_RUN_ACCOUNT_QUOTA`，本地报告写入 `artifacts/local-gates/<commit-sha>/`，两者都不能冒充远程 PASS。
 
 门禁通过只证明规则覆盖的内容自洽，不替代人工核对生产接线。新增重要文档时应把它加入 authority/freshness Gate，而不是只加一个链接。
 

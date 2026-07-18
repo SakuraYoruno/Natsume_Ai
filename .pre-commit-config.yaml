@@ -14,3 +14,17 @@ repos:
         language: system
         pass_filenames: false
         files: ^(\.pre-commit-config\.yaml|README\.md|docs/|configs/release/current_architecture_status\.json|tools/|tests/)
+      - id: chinese-commit-message
+        name: 中文提交标题门禁
+        entry: python tools/delivery/change_metadata_gate.py --commit-message-file
+        language: system
+        pass_filenames: true
+        always_run: true
+        stages: [commit-msg]
+      - id: feature-branch-history
+        name: Feature 分支提交历史门禁
+        entry: python tools/delivery/change_metadata_gate.py --root . --base-ref origin/dev
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

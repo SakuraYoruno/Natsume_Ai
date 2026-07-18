@@ -17,6 +17,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.runtime.degradation_authority import DegradationCapabilityPort
+
 
 @dataclass(frozen=True, slots=True)
 class GovernedSkillExecutionPorts:
@@ -29,10 +31,16 @@ class GovernedSkillExecutionPorts:
     resource_manager: Any | None
     episodic_store: Any | None
     semantic_recaller: Any | None
+    degradation_capability_port: DegradationCapabilityPort
 
     def __post_init__(self) -> None:
         if not callable(self.production_authority_verifier):
             raise TypeError("production_authority_verifier must be callable")
+        if not isinstance(
+            self.degradation_capability_port,
+            DegradationCapabilityPort,
+        ):
+            raise TypeError("degradation_capability_port must be injected")
 
     # These method names are the structural subset consumed by the shared
     # low-level executor for resource and memory Skills.
@@ -56,6 +64,7 @@ def build_governed_skill_execution_ports(
     resource_manager: Any | None,
     episodic_store: Any | None,
     semantic_recaller: Any | None,
+    degradation_capability_port: DegradationCapabilityPort,
 ) -> GovernedSkillExecutionPorts:
     """Compose only services usable after Skill route admission is complete."""
 
@@ -67,6 +76,7 @@ def build_governed_skill_execution_ports(
         resource_manager=resource_manager,
         episodic_store=episodic_store,
         semantic_recaller=semantic_recaller,
+        degradation_capability_port=degradation_capability_port,
     )
 
 
@@ -119,6 +129,7 @@ def execute_frozen_governed_skill(
         governed_execution_context=governed_execution_context,
         execution_args_override=execution_args_override,
         verified_node_grant=verified_node_grant,
+        degradation_capability_port=ports.degradation_capability_port,
     )
 
 

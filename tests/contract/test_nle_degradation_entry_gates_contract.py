@@ -17,9 +17,13 @@ from host_brain.observability.degradation_state import (
     DegradationStateMachine,
     set_global_degradation_state_machine,
 )
+from host_brain.runtime.degradation_authority import (
+    LegacyModuleGlobalDegradationAdapter,
+)
 
 
 NOW = 1_800_200_000_000
+_LEGACY_DEGRADATION_PORT = LegacyModuleGlobalDegradationAdapter()
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +94,7 @@ def test_t_nle_19_action_arbiter_consumes_shared_model_degradation_gate(
             "action_kind": intent["action"],
         },
         now_ms=NOW,
+        degradation_capability_port=_LEGACY_DEGRADATION_PORT,
     )
     assert result["decision"] == ARBITER_BLOCK
     assert result["execution_state"] == "BLOCKED"
@@ -127,6 +132,7 @@ def test_t_nle_19_mcp_broker_blocks_before_high_risk_handler(
     broker = MCPToolBroker(
         registry=registry,
         capability_broker=CapabilityBroker(policy=DescriptorCapabilityPolicy()),
+        degradation_capability_port=_LEGACY_DEGRADATION_PORT,
     )
     broker.register_handler("pentest", "execute_exploit", handler)
     result = broker.call(

@@ -13,8 +13,8 @@ from host_brain.governor.action_arbiter import (
     ARBITER_ALLOW,
     ARBITER_ALLOW_WITH_RESTRICTIONS,
     ARBITER_BLOCK,
-    ActionArbiter,
-    arbitrate_action,
+    ActionArbiter as _ActionArbiter,
+    arbitrate_action as _arbitrate_action,
     build_governed_action_binding,
 )
 from host_brain.governor.action_preview import (
@@ -25,7 +25,9 @@ from host_brain.governor.action_preview import (
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.surface_runtime.eligibility import _surface_scene_guardrails
-from host_brain.executive_runtime.skill_execution import _execute_skill
+from host_brain.executive_runtime.skill_execution import (
+    _execute_skill as _execute_skill_impl,
+)
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.persona.proactive_voice import (
     SCENE_MORNING_GREET,
@@ -39,9 +41,59 @@ from host_brain.persona.scene_policy import (
     build_scene_decision,
     evaluate_proactive_scene,
 )
+from host_brain.runtime.context_contracts import ContextConstraintV1, SceneDecisionV2
+from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
+from host_brain.runtime.degradation_authority import (
+    LegacyModuleGlobalDegradationAdapter,
+)
+
+
+_LEGACY_DEGRADATION_PORT = LegacyModuleGlobalDegradationAdapter()
+
+
+def arbitrate_action(**kwargs):  # type: ignore[no-untyped-def]
+    kwargs.setdefault(
+        "degradation_capability_port",
+        _LEGACY_DEGRADATION_PORT,
+    )
+    return _arbitrate_action(**kwargs)
+
+
+class ActionArbiter(_ActionArbiter):
+    def __init__(self, *, enabled: bool = True) -> None:
+        super().__init__(
+            enabled=enabled,
+            degradation_capability_port=_LEGACY_DEGRADATION_PORT,
+        )
+
+
+def _execute_skill(**kwargs):  # type: ignore[no-untyped-def]
+    kwargs.setdefault(
+        "degradation_capability_port",
+        _LEGACY_DEGRADATION_PORT,
+    )
+    return _execute_skill_impl(**kwargs)
 
 
 NOW = 1_800_100_000_000
+
+
+def _scene_v2(
+    *,
+    scene_id: str = "scene.casual-chat",
+    constraints: tuple[ContextConstraintV1, ...] = (),
+) -> tuple[dict, dict]:
+    decision = SceneDecisionV2(
+        workspace_id="workspace_scene_contract",
+        subject_id="person_scene_contract",
+        scene_id=scene_id,
+        revision=1,
+        world_snapshot_digest="a" * 64,
+        context_digest="b" * 64,
+        guardian_snapshot_digest="c" * 64,
+        constraints=constraints,
+    )
+    return decision.to_dict(), SceneIdentityV2.from_decision(decision).to_dict()
 
 
 def _intent(**overrides) -> dict:
@@ -145,63 +197,88 @@ def test_t_nle_17_scene_decision_preserves_source_ttl_and_restrict_only_contract
     assert evaluate_proactive_scene(payload, proactive_scene_type=SCENE_MORNING_GREET, now_ms=NOW)[0] is True
 
 
-def test_t_nle_17_scene_policy_actually_changes_existing_proactive_voice_without_renewing_stale_input(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")
+def test_t_nle_17_proactive_voice_requires_exact_frozen_scene_v2() -> None:
     voice = PersonaProactiveVoice()
+    blocked_scene, blocked_identity = _scene_v2(
+        scene_id="scene.sleep",
+        constraints=(
+            ContextConstraintV1(
+                code="PROACTIVE_ACTION_BLOCKED",
+                disposition="BLOCK",
+                origin="GUARDIAN",
+                source_ref="guardian://snapshot/sha256/" + "d" * 64,
+                reason="sleep blocks proactive",
+            ),
+        ),
+    )
+    gaming_scene, gaming_identity = _scene_v2(
+        scene_id="scene.game-low-interruption",
+        constraints=(
+            ContextConstraintV1(
+                code="LOW_INTERRUPTION",
+                disposition="RESTRICT",
+                origin="SCENE",
+                source_ref="policy://scene/v1/game-low-interruption",
+                reason="gaming is low interruption",
+            ),
+        ),
+    )
     blocked, blocked_reason = voice._scene_allows_scene(
         SCENE_MORNING_GREET,
         {
-            "scene_awareness": {
-                "scene_tags": ["meeting"],
-                "observed_at_ms": NOW,
-                "expires_at_ms": NOW + 30_000,
-            },
-            "current_ts_ms": NOW,
+            "scene_decision_v2": blocked_scene,
+            "scene_identity_v2": blocked_identity,
         },
     )
-    stale, stale_reason = voice._scene_allows_scene(
+    missing, missing_reason = voice._scene_allows_scene(
         SCENE_MORNING_GREET,
-        {
-            "scene_awareness": {
-                "scene_tags": ["meeting"],
-                "observed_at_ms": NOW - 60_000,
-                "expires_at_ms": NOW - 1,
-            },
-            "current_ts_ms": NOW,
-        },
+        {},
     )
     gaming_generic, gaming_reason = voice._scene_allows_scene(
         SCENE_MORNING_GREET,
-        {"scene_awareness": {"scene_tags": ["gaming"]}, "current_ts_ms": NOW},
+        {
+            "scene_decision_v2": gaming_scene,
+            "scene_identity_v2": gaming_identity,
+        },
     )
     gaming_followup, _ = voice._scene_allows_scene(
         SCENE_TOPIC_FOLLOWUP,
-        {"scene_awareness": {"scene_tags": ["gaming"]}, "current_ts_ms": NOW},
+        {
+            "scene_decision_v2": gaming_scene,
+            "scene_identity_v2": gaming_identity,
+        },
     )
 
-    assert blocked is False and "suppresses proactive" in blocked_reason
-    assert stale is True and "expired" in stale_reason
-    assert gaming_generic is False and "generic greeting" in gaming_reason
+    assert blocked is False and "PROACTIVE_ACTION_BLOCKED" in blocked_reason
+    assert missing is False and "SCENE_DECISION_V2_REQUIRED" in missing_reason
+    assert gaming_generic is False and "low-interruption" in gaming_reason
     assert gaming_followup is True
 
 
-def test_t_nle_17_scene_decision_projects_into_surface_expression_without_changing_task(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_LIFE_PROJECTION_ENABLED", "true")
+def test_t_nle_17_scene_decision_projects_into_surface_expression_without_changing_task() -> None:
     task_control = {"task_mode": "technical_help", "response_move": "answer"}
+    scene_v2, scene_identity = _scene_v2(
+        scene_id="scene.release-maintenance",
+        constraints=(
+            ContextConstraintV1(
+                code="MAINTENANCE_EFFECT_REVIEW",
+                disposition="REVIEW",
+                origin="SCENE",
+                source_ref="policy://scene/v1/release-maintenance",
+                reason="maintenance requires review",
+            ),
+        ),
+    )
     scene, guardrails = _surface_scene_guardrails(
-        scene_awareness={
-            "scene_tags": ["meeting"],
-            "observed_at_ms": NOW,
-            "expires_at_ms": NOW + 30_000,
-        },
-        task_control=task_control,
+        scene_decision_v2=scene_v2,
+        scene_identity_v2=scene_identity,
         user_goal_ref="intent://intent_scene_1",
-        now_ms=NOW,
     )
 
     assert scene["proactive_policy"] == "BLOCK"
     assert scene["user_goal_preserved"] is True
-    assert any("不得主动扩展" in item for item in guardrails)
+    assert scene["validation_status"] == "VERIFIED"
+    assert any("不得自行扩大行动" in item for item in guardrails)
     assert task_control == {"task_mode": "technical_help", "response_move": "answer"}
 
 
@@ -444,9 +521,15 @@ def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(
         "durable_authority_ledger": ledger,
         "capability_broker_override": capability_broker,
     }
+    missing_scene = _execute_skill(**kwargs)
+    frozen_scene, frozen_scene_identity = _scene_v2()
+    envelope["scene_decision_v2"] = frozen_scene
+    envelope["scene_identity_v2"] = frozen_scene_identity
     first = _execute_skill(**kwargs)
     replay = _execute_skill(**kwargs)
 
+    assert missing_scene.success is False
+    assert missing_scene.error_text == "SCENE_DECISION_V2_REQUIRED"
     assert first.success is True, (first.error_text, first.payload)
     assert first.payload["approval_token_ref"] == token_ref
     assert replay.success is False

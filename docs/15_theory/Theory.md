@@ -440,7 +440,7 @@ WorldFact {
 }
 ```
 
-当前 [WorldProjectionReadModel](../../host_brain/runtime/world_model.py) 已按来源、置信度、TTL、冲突和推断类型输出只读 facts，并明确 `write_api_available=false`。它是现实投影的基础资产，不是完整目标 World Model，也不是可供 MCTS 随意推进的 simulator。
+当前生产 Context 路径先把服务端观测追加到 workspace-scoped Observation Journal，再由 [WorldResolver](../../host_brain/runtime/world_resolver.py) 以捕获的单调 head 重开。TTL 只能由显式 expiry transition 推进，读取不能续期；冲突事实保留 competing refs，不能只按 confidence 静默覆盖。[WorldProjectionReadModel](../../host_brain/runtime/world_model.py) 仍是兼容的只读投影，二者都不是可供 MCTS 随意推进的 simulator，更不代表预测型 World Model 已完成。
 
 ### 8.3 Scene 的职责边界
 
@@ -452,6 +452,8 @@ Scene 应从 World、Life、Relationship、Affect 和当前任务派生：
 - 下一次重新计算的 TTL 或触发条件。
 
 Scene 不能自行创建事实，不能授予能力，也不能在后台替用户改写目标。
+
+生产上必须由一个 app-local resolver 产生 Scene identity，Surface、Proactive 和 Task admission 只能消费同一 revision/digest。如果三者各自重算，即使场景名称相同，也不具备可重放的局面同一性。
 
 ### 8.4 Intent Arbiter 的理论职责
 
@@ -465,6 +467,8 @@ Scene 不能自行创建事实，不能授予能力，也不能在后台替用�
 - 安全与资源约束。
 
 Intent Arbiter 应把它们变成结构化优先级和冲突说明。硬规则是：用户显式、合法且仍有效的目标，不能被内部情绪或自主性静默覆盖；内部倾向只能提出候选、请求澄清、选择表达方式或在授权范围内调度。
+
+工程上，Intent 必须在 TaskGraph admission 后、worker 执行前重开目标、graph/node、ContextPack、Scene、Grant 和 policy authority，并持久化按节点仲裁回执。它只能收紧约束；需要人工判断时进入 durable Review continuation，不能把 `REVIEW` 当成无法恢复的死路。未存在独立长期目标 owner 时，必须显式保留空集或阻断，不能从对话文本臆造长期目标。
 
 ---
 
@@ -507,7 +511,11 @@ expiry(child) ≤ expiry(parent)
 
 治理输出必须有稳定 decision、reason code、scope、expiry 和 lineage refs。自然语言理由只是可读投影，不能替代结构化裁决。
 
-### 9.3 Review 不是聊天里的“好吧”
+### 9.3 Action Preview 不是执行授权
+
+Preview 的职责是把“已有权限在此刻是否仍能用于这个精确动作”变成可重放证据，而不是新建一张权限票。签发和执行都必须重开 immutable Command/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack/Scene 与当前 Guardian；derived receipt 在最终网络/设备边界还必须递归重开原始 Attempt/Lease，不能把中间证据当成继续权限。receipt 固定 `authority_granted=false`。下游动作只能匹配预先冻结的 EffectDescriptor，不能靠更换 scope、参数、target 或复用 origin receipt 扩展能力。Acceptance 只绑定它明确验收的效果：若只验收一条文本，就不能顺带加入 `raw_extra`、媒体、二次回复、语音或 Avatar 变换；这些都需要独立 effect 与 Preview。没有可重开的 authority、旧任务缺少 Context、终端网络/设备调用没有 exact proof 时，正确结果是隔离或失败关闭。
+
+### 9.4 Review 不是聊天里的“好吧”
 
 Review 必须绑定：
 
@@ -521,7 +529,7 @@ Review 必须绑定：
 
 旧对话中的同意不能用于新 revision；不同动作之间不能共享确认。
 
-### 9.4 降级必须更保守
+### 9.5 降级必须更保守
 
 当身份、策略、预算、依赖、存储或 verifier 不可用时，系统应：
 

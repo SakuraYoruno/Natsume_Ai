@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Callable
 
+from host_brain.core.ids import new_event_id, now_ms
+
 
 def _coerce_scene_awareness(raw_scene: Any) -> dict[str, Any]:
     if isinstance(raw_scene, Mapping):
@@ -64,7 +66,16 @@ def execute_gaming_companion(
     suggested_message = str(analysis_result.get("message") or "").strip()
     if suggested_message and callable(ui_pusher):
         try:
-            pushed = ui_pusher({"content": suggested_message, "source": "gaming_companion_tick"})
+            pushed = ui_pusher(
+                {
+                    "type": "gaming_companion",
+                    "content": suggested_message,
+                    "event_id": new_event_id(),
+                    "ts_ms": now_ms(),
+                    "request_id": str(ctx.get("request_id") or "").strip(),
+                    "source": "gaming_companion_tick",
+                }
+            )
         except Exception as exc:
             pushed = {"status": "DEGRADED", "detail": str(exc)}
 

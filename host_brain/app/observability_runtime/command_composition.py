@@ -8,7 +8,9 @@ import os
 from pathlib import Path
 import threading
 import unicodedata
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
+
+from host_brain.runtime.degradation_authority import DegradationCapabilityPort
 
 from host_brain.app.host_route_ports import HostRoutePorts
 
@@ -292,6 +294,9 @@ def build_obs_command_composition(
     emergency_audit_path: str | Path | None = None,
     outcome_journal_path: str | Path | None = None,
     route_ports: HostRoutePorts | None = None,
+    degradation_capability_port_provider: (
+        Callable[[], DegradationCapabilityPort | None] | None
+    ) = None,
 ) -> ObsCommandComposition:
     """Build one command plane or a terminal disabled composition.
 
@@ -385,6 +390,9 @@ def build_obs_command_composition(
         adapter = SecureIngressAdapter(service=service, mode=effective_mode)
         registry = build_default_obs_domain_command_registry(
             route_ports=route_ports,
+            degradation_capability_port_provider=(
+                degradation_capability_port_provider
+            ),
         )
         router = ObsCommandRouter(registry)
         ingress = SecureObsCommandIngress(

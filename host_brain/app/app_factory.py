@@ -14,6 +14,7 @@ from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_read_routes import HostObsReadPorts
+from host_brain.app.health_routes import DegradationStateProvider
 from host_brain.app.pentest_secure_run_routes import PentestSecureRunCompositionProvider
 from host_brain.app.router_registry import register_host_routers
 from host_brain.app.runtime_metrics import RuntimeMetrics, build_metrics_response
@@ -51,6 +52,8 @@ def create_host_fastapi_app(
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
     host_obs_read_ports: HostObsReadPorts | None = None,
+    degradation_state_provider: DegradationStateProvider | None = None,
+    degradation_capability_port_provider: Callable[[], Any | None] | None = None,
     canon_service_provider: Callable[[], Any | None] | None = None,
     route_ports: HostRoutePorts | None = None,
     obs_route_ports: ObsRoutePorts,
@@ -96,6 +99,10 @@ def create_host_fastapi_app(
         scheduler_command_ingress_provider=scheduler_command_ingress_provider,
         scheduler_command_service_provider=scheduler_command_service_provider,
         host_obs_read_ports=host_obs_read_ports,
+        degradation_state_provider=degradation_state_provider,
+        degradation_capability_port_provider=(
+            degradation_capability_port_provider
+        ),
     )
     configure_http_middleware(app)
 

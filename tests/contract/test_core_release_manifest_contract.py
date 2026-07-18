@@ -31,7 +31,9 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
 
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
-    assert manifest["migration_head"].endswith("0110_evolution_governance_ledger.sql")
+    assert manifest["migration_head"].endswith(
+        "0113_service_catalog_rollout_authority.sql"
+    )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
     assert (
         "host_brain/audit/migrations/0104_host_embodiment_runtime_authority.sql"
@@ -43,6 +45,12 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert "host_brain/audit/migrations/0108_evolution_lab_ledger.sql" in migration_files
     assert "host_brain/audit/migrations/0109_skill_lifecycle.sql" in migration_files
     assert "host_brain/audit/migrations/0110_evolution_governance_ledger.sql" in migration_files
+    assert "host_brain/audit/migrations/0111_world_observation_journal.sql" in migration_files
+    assert "host_brain/audit/migrations/0112_runtime_context_authority.sql" in migration_files
+    assert (
+        "host_brain/audit/migrations/0113_service_catalog_rollout_authority.sql"
+        in migration_files
+    )
     assert "host_brain/audit/migrations/0103_retire_llm_node_call_log.sql" in migration_files
     assert "host_brain/audit/migrations/0102_task_runtime_node_artifact.sql" in migration_files
     assert "host_brain/audit/migrations/0101_agent_workspace_authority.sql" in migration_files

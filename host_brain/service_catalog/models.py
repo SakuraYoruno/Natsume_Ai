@@ -22,7 +22,9 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 class CatalogMode(str, Enum):
     AUDIT = "AUDIT"
+    SHADOW = "SHADOW"
     PREFLIGHT = "PREFLIGHT"
+    CANARY = "CANARY"
     ENFORCE = "ENFORCE"
 
 

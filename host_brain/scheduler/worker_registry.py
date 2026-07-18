@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
+import hashlib
 import inspect
 from typing import Any, Callable, Protocol
 
@@ -117,6 +118,7 @@ class GovernedSchedulerWorker:
         occurrence_repository: SchedulerOccurrenceRepositoryPort,
         result_repository: SchedulerExecutionResultRepositoryPort,
         node_grant_verifier: Any,
+        action_preview_service: Any | None = None,
     ) -> None:
         if not callable(getattr(node_grant_verifier, "verify", None)):
             raise TypeError("node_grant_verifier must expose verify")
@@ -125,6 +127,7 @@ class GovernedSchedulerWorker:
         self._occurrences = occurrence_repository
         self._results = result_repository
         self._node_grants = node_grant_verifier
+        self._action_preview_service = action_preview_service
 
     async def execute_stream(
         self,
@@ -172,6 +175,10 @@ class GovernedSchedulerWorker:
         worker_context = {
             **dict(execution_context),
             "verified_node_grant": verified_payload,
+            # The handler receives the immutable input admitted with this
+            # WorkOrder.  It must not derive a replacement Scene from the
+            # mutable Scheduler definition or occurrence payload.
+            "frozen_input_pack": dict(getattr(work_order, "input_pack", {}) or {}),
         }
         occurrence_id = _work_order_occurrence_id(work_order)
         occurrence_raw = self._occurrences.get_occurrence(occurrence_id)
@@ -215,6 +222,17 @@ class GovernedSchedulerWorker:
                 SCHEDULER_DURABLE_RESULT_INVALID,
                 "durable definition worker key differs from HostCommand target",
             )
+
+        preview_context = self._preview_scheduler_node(
+            command=command,
+            work_order=work_order,
+            execution_context=execution_context,
+            occurrence=occurrence,
+            definition=definition,
+            verified_grant=verified_payload,
+        )
+        if preview_context is not None:
+            worker_context["_action_preview_context"] = preview_context
 
         try:
             handler = self._handlers.resolve(
@@ -288,6 +306,96 @@ class GovernedSchedulerWorker:
             "task_id": occurrence.task_id,
             "result": dict(stored_result),
             "receipt_ref": receipt_ref,
+        }
+
+    def _preview_scheduler_node(
+        self,
+        *,
+        command: HostCommand,
+        work_order: Any,
+        execution_context: Mapping[str, Any],
+        occurrence: SchedulerOccurrence,
+        definition: SchedulerDefinitionSnapshot,
+        verified_grant: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Bind the frozen Scheduler node before any registered handler runs."""
+
+        pack = getattr(work_order, "input_pack", None)
+        if not isinstance(pack, Mapping) or pack.get("runtime_context_schema") != (
+            "natsume.runtime-context.request.v1"
+        ):
+            if self._action_preview_service is not None:
+                raise SchedulerWorkerError(
+                    "ACTION_PREVIEW_INVALID",
+                    "legacy Scheduler WorkOrder is quarantined without Runtime Context",
+                )
+            return None
+        service = self._action_preview_service
+        if service is None:
+            raise SchedulerWorkerError(
+                "ACTION_PREVIEW_INVALID",
+                "runtime-context Scheduler has no app-local ActionPreview authority",
+            )
+        from host_brain.runtime.action_preview_authority import (  # noqa: PLC0415
+            ActionPreviewAuthorityError,
+            context_pack_digest_from_work_order,
+        )
+        from host_brain.runtime.action_preview_resolver import (  # noqa: PLC0415
+            build_node_authority_context,
+        )
+
+        expires_at_ms = int(verified_grant.get("expires_at_ms") or 0)
+        action_args = {
+            "occurrence_id": occurrence.occurrence_id,
+            "occurrence_payload_digest": "sha256:"
+            + hashlib.sha256(
+                str(occurrence.payload_sha256).encode("utf-8")
+            ).hexdigest(),
+            "definition_revision": int(definition.definition_revision),
+            "definition_ref": str(dict(pack).get("definition_ref") or ""),
+        }
+        kwargs = {
+            "action_kind": f"scheduler.{definition.worker_key}",
+            "action_scope": definition.worker_key,
+            "risk_level": int(execution_context.get("node_risk_level") or 0),
+            "action_args": action_args,
+            "context_pack_digest": context_pack_digest_from_work_order(work_order),
+            "scene_identity": dict(pack.get("scene_identity_v2") or {}),
+            "task_graph_id": str(execution_context.get("graph_id") or ""),
+            "graph_revision": int(execution_context.get("graph_revision") or 0),
+            "task_node_id": str(execution_context.get("node_id") or ""),
+            "parent_governor_grant_ref": str(
+                execution_context.get("parent_grant_ref") or ""
+            ),
+            "node_grant_ref": str(verified_grant.get("grant_ref") or ""),
+            "node_grant": dict(verified_grant),
+            "guardian_capability_id": f"scheduler_{definition.worker_key}".lower(),
+            "authority_context": build_node_authority_context(
+                command=command,
+                execution_context=execution_context,
+                purpose="scheduler.execute",
+            ),
+        }
+        reopen = {
+            key: value
+            for key, value in kwargs.items()
+            if key
+            not in {
+                "guardian_capability_id",
+                "guardian_capability_id",
+            }
+        }
+        try:
+            issued = service.issue_receipt(**kwargs)
+            service.require_execution(event_id=issued["event_id"], **reopen)
+        except ActionPreviewAuthorityError as exc:
+            raise SchedulerWorkerError(exc.reason_code, exc.detail) from exc
+        return {
+            "schema_version": "Natsume.scheduler.action_preview_context.v1",
+            "origin_event_id": str(issued["event_id"]),
+            "origin_receipt_ref": str(issued["receipt_ref"]),
+            "origin_boundary": reopen,
+            "node_grant_expires_at_ms": expires_at_ms,
         }
 
 

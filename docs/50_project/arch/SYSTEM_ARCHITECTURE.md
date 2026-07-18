@@ -371,7 +371,7 @@ flowchart LR
     SCENE --> PER --> SURF
 ```
 
-该图表达职责边界，不代表 Scene 已经成为统一 aggregate。当前 `persona/scene_policy.py` 有消费接线，但生产默认受 `HOST_LIFE_PROJECTION_ENABLED=false` 关闭；World Model 当前也是只读投影，不是可模拟未来的规划世界模型。
+该图表达职责边界。NE-03 当前生产链为 `server observation → 0111 Observation Journal → WorldResolver → SceneResolver → frozen ContextPack → Intent admission → Action Preview authority reopen`：Host ASGI lifespan 在取得 runtime lease/fence 后构造唯一 app-local composition，World 读取 captured head，Scene/Guardian 的 revision 在 0112 中 CAS 封口。Surface、Proactive 和 Task admission 消费同一 Scene revision/digest；production Intent authority 重开 HostCommand/WorkOrder/TaskGraph/Scene/Grant 并持久化 restrict-only receipt set。高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance/Life 在执行点再次重开 Task/Attempt/Lease/Grant/Context/Scene/Guardian；终端仅放行持有 exact proof 的 Acceptance surface Gateway 和 Scheduler-derived Life Edge/Gateway/VTS/MateEngine。旧 reply-performance、Gateway voice、chat cue、37 个 Operator 直写与其他缺证明路径失败关闭，待 NE-01 正向迁移；Preview receipt 本身不产生新权限。`RuntimeGuardian` 是 Host health/heartbeat 的 app-local durable owner；0113 Service Catalog 从 durable head 逐级真实启动到默认目标 ENFORCE，commit-bound 本地 Gate 与 crash takeover 已通过。这不等于整个演化架构完成：长周期目标 owner、Bond 上游原始证据、Windows graceful stop、Governed Operator 功能迁移与部署多实例 canary 仍未验收，World 也不是可模拟未来的规划世界模型。
 
 安全演化的目标链必须是：运行证据/反馈 → proposal → 隔离实验与 shadow → Review → version activation → rollback point。任何 milestone、后台周期或模型输出直接调用 trait writer 都违反目标 authority。
 
@@ -434,6 +434,7 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 | TaskGraph revision + `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091～0099 authority、Budget unique-winner contention、single-node post-budget takeover、ACCEPTED→Effect restart 与窄 terminal reconciliation已有证据；general/multi-node/pre-budget recovery、现实 resolver、外部 inventory/凭据/key lifecycle/canary未完成，atomic/bounded/cancellation仍 OFF |
 | Typed task composition | 全局 ProcessServiceContainer accessor |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
+| ASGI app-local Runtime Context、0111 World observation/resolver、0112 Scene/Guardian、三消费者 Scene identity、durable Intent admission、Action Preview authority、0113 Host Catalog 五阶段及 commit-bound 本地 Gate | 长周期目标 owner、Bond 上游原始证据、Windows graceful stop、Governed Operator 功能迁移、legacy compatibility adapter 清理与部署多实例 canary 尚未收口 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |
 
 过渡期文档必须同时画出两侧，并明确哪一侧拥有 authority。隐藏兼容层会制造虚假的完成结论。

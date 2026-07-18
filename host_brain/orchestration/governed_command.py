@@ -41,6 +41,19 @@ class GraphCancellationAuthorityVerifierPort(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class IntentAdmissionVerifierPort(Protocol):
+    """Verify one durable Graph against the canonical Intent authorities."""
+
+    def verify_intent_admission(
+        self,
+        *,
+        command: HostCommand,
+        work_order: Any,
+        graph: Any,
+        replayed: bool,
+    ) -> Any: ...
+
+
 class GovernedCommandApplication:
     """Bind command admission to the only allowed Task Runtime entrypoint."""
 
@@ -51,11 +64,13 @@ class GovernedCommandApplication:
         coordinator: GovernedTaskCoordinator,
         node_grant_service: Any | None = None,
         cancellation_authority_verifier: GraphCancellationAuthorityVerifierPort | None = None,
+        intent_admission_verifier: IntentAdmissionVerifierPort | None = None,
     ) -> None:
         self._commands = command_repository
         self._coordinator = coordinator
         self._node_grants = node_grant_service
         self._cancellation_authority = cancellation_authority_verifier
+        self._intent_admission = intent_admission_verifier
 
     async def execute(
         self,
@@ -65,17 +80,29 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> dict[str, Any]:
-        await self.preflight_parent_governor_binding(
-            parent_grant_ref=command.governor_grant_ref,
-            request_id=command.request_id,
-            session_id=command.session_id,
-            principal_id=command.principal_id,
-        )
+        if not await self._is_intent_receipt_replay(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        ):
+            await self.preflight_parent_governor_binding(
+                parent_grant_ref=command.governor_grant_ref,
+                request_id=command.request_id,
+                session_id=command.session_id,
+                principal_id=command.principal_id,
+            )
         admitted, persisted_command, persisted_work_order, persisted_graph = await self._admit(
             command=command,
             work_order=work_order,
             assignment=assignment,
             graph=graph,
+        )
+        await self._verify_intent_admission(
+            admitted=admitted,
+            command=persisted_command,
+            work_order=persisted_work_order,
+            graph=persisted_graph,
         )
         if self._node_grants is None:
             return await self._coordinator.execute(
@@ -104,17 +131,29 @@ class GovernedCommandApplication:
         assignment: ExecutorAssignment,
         graph: Any,
     ) -> AsyncIterator[dict[str, Any]]:
-        await self.preflight_parent_governor_binding(
-            parent_grant_ref=command.governor_grant_ref,
-            request_id=command.request_id,
-            session_id=command.session_id,
-            principal_id=command.principal_id,
-        )
+        if not await self._is_intent_receipt_replay(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        ):
+            await self.preflight_parent_governor_binding(
+                parent_grant_ref=command.governor_grant_ref,
+                request_id=command.request_id,
+                session_id=command.session_id,
+                principal_id=command.principal_id,
+            )
         admitted, persisted_command, persisted_work_order, persisted_graph = await self._admit(
             command=command,
             work_order=work_order,
             assignment=assignment,
             graph=graph,
+        )
+        await self._verify_intent_admission(
+            admitted=admitted,
+            command=persisted_command,
+            work_order=persisted_work_order,
+            graph=persisted_graph,
         )
         execution_kwargs: dict[str, Any] = {
             "admitted": admitted,
@@ -170,13 +209,102 @@ class GovernedCommandApplication:
                 GOVERNED_ADMISSION_INVALID,
                 "Review continuation claim differs from the durable Graph admission",
             )
+        review_status = str(claim.get("review_status") or "").strip().upper()
+        try:
+            await self._verify_intent_admission(
+                admitted=admitted,
+                command=persisted_command,
+                work_order=persisted_work_order,
+                graph=persisted_graph,
+            )
+        except GovernedRuntimeError as exc:
+            # A denied Intent Review is intentionally non-executable.  The
+            # ordinary verifier must keep returning BLOCKED, but the durable
+            # 0096 continuation worker still needs a finite checkpoint action
+            # instead of deferring forever.  Only the exact terminal Review
+            # proof may enter the existing graph-cancellation state machine.
+            if (
+                review_status not in {"REJECTED", "EXPIRED", "CANCELLED"}
+                or exc.reason_code != "INTENT_ADMISSION_BLOCKED"
+            ):
+                raise
+            verifier = self._intent_admission
+            prove_terminal = getattr(
+                verifier,
+                "verify_terminal_intent_review_claim",
+                None,
+            )
+            if not callable(prove_terminal):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "terminal Intent Review verifier is unavailable",
+                ) from exc
+            try:
+                proof = prove_terminal(
+                    command=persisted_command,
+                    work_order=persisted_work_order,
+                    graph=persisted_graph,
+                    continuation_claim=claim,
+                )
+                if inspect.isawaitable(proof):
+                    proof = await proof
+            except BaseException as proof_exc:
+                if isinstance(proof_exc, asyncio.CancelledError):
+                    raise
+                reason_code = str(
+                    getattr(proof_exc, "reason_code", None)
+                    or GOVERNED_ADMISSION_INVALID
+                ).strip()
+                detail = str(
+                    getattr(proof_exc, "detail", None)
+                    or "terminal Intent Review proof failed"
+                ).strip()
+                raise GovernedRuntimeError(reason_code, detail) from proof_exc
+            if (
+                not isinstance(proof, Mapping)
+                or proof.get("task_graph_id") != admitted.graph_id
+                or proof.get("graph_revision") != admitted.graph_revision
+                or proof.get("task_node_id") != claim.get("node_id")
+                or proof.get("review_id") != claim.get("review_id")
+                or proof.get("review_status") != review_status
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "terminal Intent Review proof differs from continuation claim",
+                )
+            cancellation = getattr(
+                self._coordinator,
+                "request_graph_cancellation",
+                None,
+            )
+            if not callable(cancellation):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "governed coordinator cannot terminalize denied Intent Review",
+                )
+            result = cancellation(
+                admitted=admitted,
+                command=persisted_command,
+                work_order=persisted_work_order,
+                request_id=str(proof.get("request_id") or "").strip(),
+                request_identity=str(proof.get("request_identity") or "").strip(),
+                source="SYSTEM",
+                reason_code=str(proof.get("reason_code") or "").strip(),
+            )
+            if inspect.isawaitable(result):
+                result = await result
+            if not isinstance(result, Mapping):
+                raise GovernedRuntimeError(
+                    GOVERNED_ADMISSION_INVALID,
+                    "denied Intent Review cancellation returned no durable result",
+                )
+            return dict(result)
 
         execution_kwargs: dict[str, Any] = {
             "admitted": admitted,
             "command": persisted_command,
             "work_order": persisted_work_order,
         }
-        review_status = str(claim.get("review_status") or "").strip().upper()
         if self._node_grants is not None and review_status == "CONSUMED":
             derive = getattr(
                 self._node_grants,
@@ -218,6 +346,141 @@ class GovernedCommandApplication:
                 "Review continuation requires a canonical terminal Review status",
             )
         return await self._coordinator.execute(**execution_kwargs)
+
+    async def _is_intent_receipt_replay(
+        self,
+        *,
+        command: HostCommand,
+        work_order: Any,
+        assignment: ExecutorAssignment,
+        graph: Any,
+    ) -> bool:
+        """Recognize only an exact durable replay before parent-grant preflight.
+
+        A composed Intent verifier owns an immutable per-node receipt.  Once
+        that receipt exists, replay must be able to validate it after the
+        parent grant expires.  New or drifting input still performs the normal
+        live parent preflight before any immutable admission is created.
+        """
+
+        if self._intent_admission is None or not isinstance(command, HostCommand):
+            return False
+        getter = getattr(self._commands, "get", None)
+        if not callable(getter):
+            return False
+        try:
+            raw = getter(command.command_id)
+            if inspect.isawaitable(raw):
+                raw = await raw
+        except Exception:
+            return False
+        if not isinstance(raw, Mapping):
+            return False
+        record = dict(raw)
+        durable_command = record.get("command")
+        durable_work_order = record.get("work_order")
+        durable_assignment = record.get("assignment")
+        durable_graph = record.get("graph")
+        serializers = (
+            (durable_command, command),
+            (durable_work_order, work_order),
+            (durable_assignment, assignment),
+            (durable_graph, graph),
+        )
+        try:
+            exact_contracts = all(
+                callable(getattr(durable, "to_dict", None))
+                and callable(getattr(candidate, "to_dict", None))
+                and durable.to_dict() == candidate.to_dict()
+                for durable, candidate in serializers
+            )
+        except Exception:
+            return False
+        if not exact_contracts:
+            return False
+        # A matching durable command is only admission identity, never proof
+        # that Intent arbitration finished.  Parent-grant preflight may be
+        # skipped only after the verifier reopens the graph-level prepared
+        # marker *and* every exact per-node preparation receipt.  Partial
+        # writes therefore fail closed instead of inheriting replay authority.
+        prove = getattr(
+            self._intent_admission,
+            "has_prepared_intent_receipt_set",
+            None,
+        )
+        if not callable(prove):
+            return False
+        try:
+            proof = prove(
+                command=durable_command,
+                work_order=durable_work_order,
+                graph=durable_graph,
+            )
+            if inspect.isawaitable(proof):
+                proof = await proof
+            return proof is True
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            return False
+
+    async def _verify_intent_admission(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        command: HostCommand,
+        work_order: Any,
+        graph: Any,
+    ) -> None:
+        verifier = self._intent_admission
+        if verifier is None:
+            return
+        verify = getattr(verifier, "verify_intent_admission", None)
+        if not callable(verify):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "composed Intent admission verifier is unavailable",
+            )
+        try:
+            result = verify(
+                command=command,
+                work_order=work_order,
+                graph=graph,
+                replayed=bool(admitted.replayed),
+            )
+            if inspect.isawaitable(result):
+                result = await result
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            reason_code = str(
+                getattr(exc, "reason_code", None) or GOVERNED_ADMISSION_INVALID
+            ).strip()
+            detail = str(
+                getattr(exc, "detail", None)
+                or "canonical Intent admission verification failed"
+            ).strip()
+            raise GovernedRuntimeError(reason_code, detail) from exc
+        expected_nodes = {binding.node_id for binding in admitted.nodes}
+        returned_nodes = (
+            {
+                str(item.get("task_node_id") or "").strip()
+                for item in result
+                if isinstance(item, Mapping)
+            }
+            if isinstance(result, (tuple, list))
+            else set()
+        )
+        if (
+            not isinstance(result, (tuple, list))
+            or len(result) != len(admitted.nodes)
+            or len(returned_nodes) != len(result)
+            or returned_nodes != expected_nodes
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "Intent admission verifier did not cover the exact TaskGraph",
+            )
 
     async def request_graph_cancellation(
         self,
@@ -607,4 +870,5 @@ class GovernedCommandApplication:
 __all__ = [
     "GovernedCommandApplication",
     "GraphCancellationAuthorityVerifierPort",
+    "IntentAdmissionVerifierPort",
 ]

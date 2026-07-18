@@ -220,7 +220,7 @@ def build_durable_host_embodiment_session_config(
     )
 
 
-class EdgeRpcEmbodimentCommandPort:
+class _EdgeRpcEmbodimentCommandPort:
     """One Host runtime's authenticated Edge command port.
 
     The Edge lease is intentionally instance state.  A process can therefore
@@ -238,9 +238,9 @@ class EdgeRpcEmbodimentCommandPort:
         rotate_initial_lease_fence: bool = False,
     ) -> None:
         if post_to_edge is None:
-            from host_brain.channels.edge_transport import submit_edge_request  # noqa: PLC0415
+            from host_brain.channels.edge_transport import _submit_edge_request  # noqa: PLC0415
 
-            post_to_edge = submit_edge_request
+            post_to_edge = _submit_edge_request
         if not callable(post_to_edge):
             raise TypeError("post_to_edge must be callable")
         self._post_to_edge = post_to_edge
@@ -770,7 +770,7 @@ class HostEmbodimentRuntime:
                     initial_lease
                 ):
                     raise RuntimeError("EMBODIMENT_EDGE_LEASE_REBIND_FAILED")
-                effective_port = EdgeRpcEmbodimentCommandPort(
+                effective_port = _EdgeRpcEmbodimentCommandPort(
                     post_to_edge=post_to_edge,
                     session_config=effective_session,
                     initial_lease=initial_lease,
@@ -796,7 +796,10 @@ class HostEmbodimentRuntime:
             self._dispatcher: EmbodimentOutboxDispatcher = EmbodimentOutboxDispatcher(
                 repository,
                 worker_id=self._worker_id,
-                submitter=self.submit,
+                # Only a claimed durable outbox row may use the private
+                # physical submitter.  Public submit/enqueue entry points must
+                # first reopen an exact ActionPreview receipt.
+                submitter=self._submit_claimed_outbox,
                 receipt_lookup=self.query_receipt,
                 receipt_observer=self._publish_receipt,
                 authority_provider=self._authority_for_mutation,
@@ -807,14 +810,6 @@ class HostEmbodimentRuntime:
                 self._closed = True
                 self._receipt_observers.clear()
             raise
-
-    @property
-    def command_port(self) -> EmbodimentCommandPort:
-        return self._command_port
-
-    @property
-    def outbox(self) -> EmbodimentOutboxPort:
-        return self._outbox
 
     @property
     def dispatcher(self) -> "EmbodimentOutboxDispatcher":
@@ -838,11 +833,45 @@ class HostEmbodimentRuntime:
                 else None
             )
 
-    def enqueue(self, command: EmbodimentCommand) -> EmbodimentOutboxAck:
+    def enqueue(
+        self,
+        command: EmbodimentCommand,
+        *,
+        action_preview_service: Any | None = None,
+        action_preview_event_id: str | None = None,
+        action_preview_boundary: Mapping[str, Any] | None = None,
+    ) -> EmbodimentOutboxAck:
+        _require_terminal_embodiment_preview(
+            command=command,
+            action_preview_service=action_preview_service,
+            action_preview_event_id=action_preview_event_id,
+            action_preview_boundary=action_preview_boundary,
+        )
         self._require_authority()
         return self._outbox.enqueue(command)
 
-    async def submit(self, command: EmbodimentCommand) -> EmbodimentReceipt:
+    async def submit(
+        self,
+        command: EmbodimentCommand,
+        *,
+        action_preview_service: Any | None = None,
+        action_preview_event_id: str | None = None,
+        action_preview_boundary: Mapping[str, Any] | None = None,
+    ) -> EmbodimentReceipt:
+        _require_terminal_embodiment_preview(
+            command=command,
+            action_preview_service=action_preview_service,
+            action_preview_event_id=action_preview_event_id,
+            action_preview_boundary=action_preview_boundary,
+        )
+        return await self._submit_claimed_outbox(command)
+
+    async def _submit_claimed_outbox(
+        self,
+        command: EmbodimentCommand,
+    ) -> EmbodimentReceipt:
+        """Execute only a command already claimed from this runtime's outbox."""
+
         self._require_authority()
         receipt = await self._command_port.submit(command)
         # A physical effect may complete after a stalled Host lost its durable
@@ -1118,6 +1147,9 @@ async def submit_embodiment_command(
     *,
     runtime: HostEmbodimentRuntime | None = None,
     command_port: EmbodimentCommandPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
 ) -> EmbodimentReceipt:
     """Submit through an explicitly supplied app runtime or command port.
 
@@ -1129,10 +1161,63 @@ async def submit_embodiment_command(
     if runtime is not None:
         if command_port is not None:
             raise TypeError("runtime and command_port are mutually exclusive")
-        return await runtime.submit(command)
+        return await runtime.submit(
+            command,
+            action_preview_service=action_preview_service,
+            action_preview_event_id=action_preview_event_id,
+            action_preview_boundary=action_preview_boundary,
+        )
     if command_port is None:
         raise RuntimeError("EMBODIMENT_RUNTIME_REQUIRED")
+    _require_terminal_embodiment_preview(
+        command=command,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
+    )
     return await command_port.submit(command)
+
+
+def _require_terminal_embodiment_preview(
+    *,
+    command: EmbodimentCommand,
+    action_preview_service: Any,
+    action_preview_event_id: str | None,
+    action_preview_boundary: Mapping[str, Any] | None,
+) -> None:
+    """Reopen exact Preview authority before public enqueue/direct submit."""
+
+    from host_brain.governor.action_preview import ActionPreviewService  # noqa: PLC0415
+
+    if not isinstance(action_preview_service, ActionPreviewService):
+        raise RuntimeError("ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED")
+    if not str(action_preview_event_id or "").strip() or not isinstance(
+        action_preview_boundary,
+        Mapping,
+    ):
+        raise RuntimeError("ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED")
+    boundary = dict(action_preview_boundary)
+    args = boundary.get("action_args")
+    expected_kind = {
+        (EMBODIMENT_KIND_AVATAR, "set_expression"): "embodiment.vts.set_expression",
+        (EMBODIMENT_KIND_MATEENGINE, "command"): "embodiment.mateengine.command",
+    }.get((str(command.kind), str(command.action)))
+    if (
+        expected_kind is None
+        or str(boundary.get("action_kind") or "") != expected_kind
+        or str(boundary.get("action_scope") or "") != str(command.idempotency_key)
+        or not isinstance(args, Mapping)
+        or dict(args)
+        != {
+            "delivery_key": str(command.idempotency_key),
+            "command": command.as_dict(),
+        }
+    ):
+        raise RuntimeError("ACTION_PREVIEW_DRIFT")
+    action_preview_service.require_execution(
+        event_id=str(action_preview_event_id),
+        **boundary,
+    )
 
 
 def queue_embodiment_command(
@@ -1140,13 +1225,28 @@ def queue_embodiment_command(
     *,
     runtime: HostEmbodimentRuntime | None = None,
     outbox: EmbodimentOutboxPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
 ) -> EmbodimentOutboxAck:
     """Durably enqueue through an explicitly owned app runtime or outbox."""
+
+    _require_terminal_embodiment_preview(
+        command=command,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
+    )
 
     if runtime is not None:
         if outbox is not None:
             raise TypeError("runtime and outbox are mutually exclusive")
-        return runtime.enqueue(command)
+        return runtime.enqueue(
+            command,
+            action_preview_service=action_preview_service,
+            action_preview_event_id=action_preview_event_id,
+            action_preview_boundary=action_preview_boundary,
+        )
     if outbox is None:
         raise RuntimeError("EMBODIMENT_RUNTIME_REQUIRED")
     return outbox.enqueue(command)
@@ -1168,12 +1268,18 @@ async def submit_voice_command(
     payload: Mapping[str, Any],
     runtime: HostEmbodimentRuntime | None = None,
     command_port: EmbodimentCommandPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
     **meta: Any,
 ) -> EmbodimentReceipt:
     return await submit_embodiment_command(
         build_host_embodiment_command(kind=EMBODIMENT_KIND_VOICE, action=action, payload=payload, **meta),
         runtime=runtime,
         command_port=command_port,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
     )
 
 
@@ -1183,12 +1289,18 @@ async def submit_avatar_command(
     payload: Mapping[str, Any],
     runtime: HostEmbodimentRuntime | None = None,
     command_port: EmbodimentCommandPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
     **meta: Any,
 ) -> EmbodimentReceipt:
     return await submit_embodiment_command(
         build_host_embodiment_command(kind=EMBODIMENT_KIND_AVATAR, action=action, payload=payload, **meta),
         runtime=runtime,
         command_port=command_port,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
     )
 
 
@@ -1203,6 +1315,9 @@ async def submit_avatar_behavior(
     source: str | None = None,
     runtime: HostEmbodimentRuntime | None = None,
     command_port: EmbodimentCommandPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
     **meta: Any,
 ) -> EmbodimentReceipt:
     """Submit one high-level avatar behavior to the Edge-owned actuator."""
@@ -1225,6 +1340,9 @@ async def submit_avatar_behavior(
         payload=payload,
         runtime=runtime,
         command_port=command_port,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
         **meta,
     )
 
@@ -1235,6 +1353,9 @@ def queue_mateengine_command(
     payload: Mapping[str, Any],
     runtime: HostEmbodimentRuntime | None = None,
     outbox: EmbodimentOutboxPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
     **meta: Any,
 ) -> EmbodimentOutboxAck:
     return queue_embodiment_command(
@@ -1246,6 +1367,9 @@ def queue_mateengine_command(
         ),
         runtime=runtime,
         outbox=outbox,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
     )
 
 
@@ -1255,6 +1379,9 @@ def queue_desktop_command(
     payload: Mapping[str, Any],
     runtime: HostEmbodimentRuntime | None = None,
     outbox: EmbodimentOutboxPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
     **meta: Any,
 ) -> EmbodimentOutboxAck:
     return queue_embodiment_command(
@@ -1266,6 +1393,9 @@ def queue_desktop_command(
         ),
         runtime=runtime,
         outbox=outbox,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
     )
 
 
@@ -1275,12 +1405,18 @@ async def submit_desktop_command(
     payload: Mapping[str, Any],
     runtime: HostEmbodimentRuntime | None = None,
     command_port: EmbodimentCommandPort | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
     **meta: Any,
 ) -> EmbodimentReceipt:
     return await submit_embodiment_command(
         build_host_embodiment_command(kind=EMBODIMENT_KIND_DESKTOP, action=action, payload=payload, **meta),
         runtime=runtime,
         command_port=command_port,
+        action_preview_service=action_preview_service,
+        action_preview_event_id=action_preview_event_id,
+        action_preview_boundary=action_preview_boundary,
     )
 
 
@@ -1295,7 +1431,7 @@ def _default_idempotency_key(
 
 
 __all__ = [
-    "EdgeEmbodimentSessionConfig", "EdgeRpcEmbodimentCommandPort",
+    "EdgeEmbodimentSessionConfig",
     "EmbodimentOutboxAck", "EmbodimentOutboxPort",
     "EmbodimentReceiptLookupUnavailable", "HostEmbodimentRuntime",
     "ReceiptObserver", "build_embodiment_receipt_audit_observer",

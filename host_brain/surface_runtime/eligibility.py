@@ -6,6 +6,11 @@ from typing import Any
 from collections.abc import AsyncGenerator, Mapping, Sequence
 
 from host_brain.persona.response_form_contract import normalize_response_form
+from host_brain.runtime.scene_consumer_projection import (
+    SceneConsumerProjectionError,
+    project_scene_decision_v2,
+    surface_fail_closed_projection,
+)
 import os
 
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
@@ -118,51 +123,20 @@ def _sub_agent_result_should_bypass_surface(sub_agent_ctx: Any | None) -> bool:
 
 def _surface_scene_guardrails(
     *,
-    scene_awareness: Mapping[str, Any] | None,
-    task_control: Mapping[str, Any] | None,
+    scene_decision_v2: Any,
+    scene_identity_v2: Any,
     user_goal_ref: str,
-    now_ms: int,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
-    """Project SceneDecision into expression-only Surface constraints."""
-    from host_brain.persona.scene_policy import build_scene_decision, life_projection_enabled  # noqa: PLC0415
+    """Project one already-frozen Scene into expression-only constraints."""
 
-    control = dict(task_control or {}) if isinstance(task_control, Mapping) else {}
-    enabled = life_projection_enabled()
-    decision = build_scene_decision(
-        scene_awareness=scene_awareness,
-        task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
-        user_goal_ref=user_goal_ref,
-        now_ms=int(now_ms),
-        enabled=enabled,
-    )
-    payload = decision.as_dict(now_ms=int(now_ms))
-    has_scene_observation = isinstance(scene_awareness, Mapping) and any(
-        scene_awareness.get(key)
-        for key in ("scene_tags", "current_activity", "source_ref", "source_refs", "observed_at_ms")
-    )
-    if has_scene_observation:
-        try:
-            from host_brain.persona.life_evolution_observer import observe_scene_decision  # noqa: PLC0415
-
-            observe_scene_decision(
-                payload,
-                source_kind="surface_main_chain",
-                source_ref=user_goal_ref,
-            )
-        except Exception:
-            pass
-    if bool(payload.get("expired")) or not enabled:
-        return payload, ()
-    policy = str(payload.get("proactive_policy") or "ALLOW").upper()
-    expression_mode = str(payload.get("expression_mode") or "natural")
-    if policy == "BLOCK":
-        return payload, (
-            f"SceneDecision({expression_mode})：保持简短、安静、任务优先；不得主动扩展话题或追加追问。",
-            "SceneDecision 只能收紧表达，绝不能改写、取消或替换用户已经明确的任务目标。",
+    try:
+        projection = project_scene_decision_v2(
+            scene_decision_v2,
+            expected_identity=scene_identity_v2,
         )
-    if policy == "CONTEXTUAL":
-        return payload, (
-            f"SceneDecision({expression_mode})：表达必须贴合当前任务/场景，最多一次必要追问，不发通用主动寒暄。",
-            "场景、情绪和关系信号不得扩大权限、改变任务范围或覆盖显式用户目标。",
-        )
-    return payload, ()
+    except SceneConsumerProjectionError as exc:
+        return surface_fail_closed_projection(exc, user_goal_ref=user_goal_ref)
+    return (
+        projection.expression_projection(user_goal_ref=user_goal_ref),
+        projection.surface_guardrails(),
+    )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI
@@ -14,7 +15,13 @@ from edge_client.tribe.peripheral_agent import PeripheralAgent as EdgePeripheral
 from edge_client.tribe.registry import EdgeTribeRegistry
 from edge_client.tribe.somatic_agent import SomaticAgent as EdgeSomaticAgent
 from host_brain.app.internal_tribe_routes import router, set_tribe_event_bus
+from host_brain.governor.action_preview import ActionPreviewService
+from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
 from host_brain.tribe.edge_command_pusher import EdgeCommandPusher
+from host_brain.tribe.edge_command_pusher import (
+    build_edge_command_preview_args,
+    edge_command_preview_scope,
+)
 from host_brain.tribe.event_bus import InMemoryTribeEventBus
 from host_brain.tribe.peripheral_agent import PeripheralAgent as HostPeripheralAgent
 from host_brain.tribe.somatic_agent import SomaticAgent as HostSomaticAgent
@@ -50,6 +57,46 @@ class _FakeVtsDriver:
     def set_expression(self, emotion_tag: str, intensity: float | None = None) -> SimpleNamespace:
         self.calls.append({"emotion_tag": emotion_tag, "intensity": intensity})
         return SimpleNamespace(success=True)
+
+
+def _edge_command_proof(
+    *,
+    command_type: str,
+    target_agent: str,
+    source_agent: str,
+    payload: dict[str, Any],
+) -> ActionPreviewExecutionProof:
+    args = build_edge_command_preview_args(
+        command_type=command_type,
+        target_agent=target_agent,
+        source_agent=source_agent,
+        payload=payload,
+    )
+    service = ActionPreviewService(
+        runtime_event_store=object(),
+        guardian=SimpleNamespace(evaluate_capability=lambda **_kwargs: {}),
+        authority_resolver=SimpleNamespace(resolve=lambda **_kwargs: None),
+    )
+    service.require_execution = lambda **_kwargs: SimpleNamespace()  # type: ignore[method-assign]
+    return ActionPreviewExecutionProof(
+        service=service,
+        event_id="runtime-event://edge-roundtrip-preview",
+        boundary={
+            "action_kind": "edge.tribe_command",
+            "action_scope": edge_command_preview_scope(args),
+            "risk_level": 4,
+            "action_args": args,
+            "context_pack_digest": "sha256:" + "1" * 64,
+            "scene_identity": {"decision_digest": "sha256:" + "2" * 64},
+            "task_graph_id": "graph-edge-roundtrip",
+            "graph_revision": 1,
+            "task_node_id": "node-edge-roundtrip",
+            "parent_governor_grant_ref": "grant://edge-roundtrip/parent",
+            "node_grant_ref": "grant://edge-roundtrip/node",
+            "node_grant": {"grant_ref": "grant://edge-roundtrip/node"},
+            "authority_context": {"schema_version": "test.edge-roundtrip.v1"},
+        },
+    )
 
 
 def _build_edge_app() -> FastAPI:
@@ -129,17 +176,40 @@ def test_host_to_edge_command_roundtrip_dispatch(monkeypatch) -> None:
             session=_LoopbackSession(edge_client),  # type: ignore[arg-type]
         )
 
+        emotion_payload = {
+            "emotion_tag": "JOY",
+            "intensity": 0.81,
+            "mood_state": None,
+            "session_id": "sess_edge_1",
+        }
         emotion_result = pusher.push_emotion_state(
             emotion_tag="joy",
             intensity=0.81,
             session_id="sess_edge_1",
             source_agent="limbic_agent",
+            action_preview_proof=_edge_command_proof(
+                command_type="emotion_state_command",
+                target_agent="edge.somatic",
+                source_agent="limbic_agent",
+                payload=emotion_payload,
+            ),
         )
+        gate_payload = {
+            "gate_open": False,
+            "reason": "platform_disconnected",
+            "platform": "wechat",
+        }
         gate_result = pusher.push_gate_control(
             gate_open=False,
             reason="platform_disconnected",
             platform="wechat",
             source_agent="cortex_agent",
+            action_preview_proof=_edge_command_proof(
+                command_type="gate_control_command",
+                target_agent="edge.channel",
+                source_agent="cortex_agent",
+                payload=gate_payload,
+            ),
         )
 
     assert emotion_result["ok"] is True

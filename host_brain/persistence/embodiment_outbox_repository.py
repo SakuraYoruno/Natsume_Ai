@@ -500,6 +500,36 @@ class EmbodimentOutboxRepository:
         assert row is not None
         return dict(row)
 
+    def validate_runtime_lease(
+        self,
+        *,
+        worker_id: str,
+        lease_id: str,
+        fencing_token: int,
+        now_ms: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the exact live Host claim without extending its expiry."""
+
+        owner = _normalise_identifier(worker_id, field="worker_id")
+        resolved_lease_id = _normalise_identifier(lease_id, field="lease_id")
+        fence = _fencing_token(fencing_token)
+        now = _now_ms(now_ms)
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM host_embodiment_runtime_lease "
+                "WHERE runtime_scope_id = ? AND owner_id = ? AND lease_id = ? "
+                "AND fencing_token = ? AND released_at_ms IS NULL "
+                "AND expires_at_ms > ?",
+                (
+                    self._runtime_scope_id,
+                    owner,
+                    resolved_lease_id,
+                    fence,
+                    now,
+                ),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def release_runtime_lease(
         self,
         *,

@@ -10,9 +10,10 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from host_brain.governor.route_token import validate_governor_route_token
-from host_brain.observability.degradation_state import (
-    evaluate_degradation_front_door,
-    infer_degradation_capability,
+from host_brain.observability.degradation_state import infer_degradation_capability
+from host_brain.runtime.degradation_authority import (
+    DegradationCapabilityPort,
+    evaluate_degradation_capability,
 )
 
 
@@ -212,6 +213,7 @@ def arbitrate_action(
     user_intent: Mapping[str, Any] | None = None,
     now_ms: int | None = None,
     enabled: bool = True,
+    degradation_capability_port: DegradationCapabilityPort | None = None,
 ) -> dict[str, Any]:
     """Apply soft constraints after a committed, intent-bound Governor decision."""
     now = int(now_ms if now_ms is not None else time.time() * 1000)
@@ -337,7 +339,8 @@ def arbitrate_action(
     capability_policy_decision = action.get("capability_policy_decision")
     if not isinstance(capability_policy_decision, Mapping):
         capability_policy_decision = governor.get("capability_policy_decision")
-    degradation_decision = evaluate_degradation_front_door(
+    degradation_decision = evaluate_degradation_capability(
+        degradation_capability_port,
         capability_id=capability_id,
         static_risk_level=effective_risk,
         capability_policy_decision=(
@@ -453,11 +456,21 @@ def _assert_restrict_only(
 
 
 class ActionArbiter:
-    def __init__(self, *, enabled: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        degradation_capability_port: DegradationCapabilityPort | None = None,
+    ) -> None:
         self._enabled = bool(enabled)
+        self._degradation_capability_port = degradation_capability_port
 
     def decide(self, **kwargs: Any) -> dict[str, Any]:
         kwargs.setdefault("enabled", self._enabled)
+        kwargs.setdefault(
+            "degradation_capability_port",
+            self._degradation_capability_port,
+        )
         return arbitrate_action(**kwargs)
 
 

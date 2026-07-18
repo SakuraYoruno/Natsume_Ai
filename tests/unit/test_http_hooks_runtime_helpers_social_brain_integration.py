@@ -108,7 +108,7 @@ def test_run_proactive_dispatch_rejects_unvalidated_scheduler_authority(monkeypa
     )
 
     assert result["status"] == "REJECTED"
-    assert result["reason_code"] == "SKILL_AUTHORITY_MISSING"
+    assert result["reason_code"] == "PROACTIVE_NODE_AUTHORITY_REQUIRED"
     assert captured == {}
 
 

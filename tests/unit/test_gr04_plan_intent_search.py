@@ -121,6 +121,14 @@ def test_approved_plan_search_selects_complete_compiler_ready_mixed_route_path()
     assert compiled.work_order.approval_ref.startswith("governor-decision://sha256/")
     assert compiled.work_order.review_ref == "review://gr04/approved-plan"
     assert compiled.work_order.budget_policy is not None
+    assert compiled.work_order.input_pack["intent_draft"] == {
+        "route": "plan",
+        "target_id": "planning_search",
+        "task": "execute the approved multi-node plan",
+        "action": "exec_intent",
+        "target": "host",
+        "args": {"task": "execute the approved multi-node plan"},
+    }
     for candidate in adapter.candidates:
         payload = candidate.payload
         assert payload["worker_route"] in {"skill", "delegate", "chat"}

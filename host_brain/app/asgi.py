@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -31,6 +32,7 @@ from host_brain.composition.process_services import (
     set_memory_service_container,
     get_token_service,
     get_tool_broker,
+    get_mcp_tool_broker,
     get_tool_catalog,
     get_bond_dynamics_writer,
     get_model_attempt_service,
@@ -124,9 +126,23 @@ from host_brain.scheduler.task_registry import (
     TriggerMode,
 )
 from host_brain.composition.tribe_runtime import require_process_tribe_runtime
-from host_brain.observability.degradation_state import (
-    get_degradation_state,
-    get_degradation_state_machine,
+from host_brain.persistence.world_observation_journal import (
+    SQLiteWorldObservationJournal,
+)
+from host_brain.runtime.context_application import (
+    RuntimeContextApplicationService,
+)
+from host_brain.runtime.intent_authority import IntentPolicyIdentityV1
+from host_brain.runtime.intent_admission import DurableIntentAdmissionVerifier
+from host_brain.runtime.production_composition import (
+    RuntimeContextComposition,
+    build_runtime_context_composition,
+)
+from host_brain.runtime.production_intent_authority import (
+    ProductionIntentAuthorityPort,
+)
+from host_brain.runtime.world_source_verifier import (
+    RuntimeEventWorldSourceVerifier,
 )
 
 
@@ -164,6 +180,7 @@ def _compose_life_dispatchers(
     ledger: Any,
     *,
     embodiment_runtime: Any,
+    action_preview_service: Any | None = None,
 ) -> tuple[Any, Any]:
     """Bind projection and delivery workers to the canonical Life repository."""
 
@@ -189,6 +206,7 @@ def _compose_life_dispatchers(
             LifeDeliveryTransport(
                 ledger=ledger,
                 embodiment_runtime=embodiment_runtime,
+                action_preview_service=action_preview_service,
             ),
         ),
     )
@@ -203,6 +221,8 @@ def _submit_life_tick_command(
     occurrence: Any,
     definition: Any,
     command: Any,
+    execution_context: Mapping[str, Any],
+    runtime_context_application: RuntimeContextApplicationService,
     life_command_service: _LifeCommandServicePort,
     life_snapshot_reader: _LifeSnapshotReaderPort,
 ) -> dict[str, Any]:
@@ -214,6 +234,13 @@ def _submit_life_tick_command(
     args = dict(intent.get("args") or {})
     args.update(dict(occurrence.payload or {}))
     person_id = str(args.get("person_id") or "default").strip() or "default"
+    runtime_execution = dict(execution_context or {})
+    frozen_input_pack = runtime_execution.get("frozen_input_pack")
+    if not isinstance(frozen_input_pack, Mapping):
+        raise RuntimeError("LIFE_TICK_RUNTIME_CONTEXT_REQUIRED")
+    frozen_runtime_context = runtime_context_application.require_frozen(
+        dict(frozen_input_pack)
+    ).to_dict()
     life_command_id = f"life_tick::{occurrence.occurrence_id}"
     existing_receipt = life_snapshot_reader.get_receipt(life_command_id)
     if existing_receipt is not None:
@@ -225,7 +252,17 @@ def _submit_life_tick_command(
         return result
     from host_brain.digital_life.policy import build_life_tick_payload  # noqa: PLC0415
 
-    occurrence_context = {**args, **dict(occurrence.payload or {})}
+    occurrence_context = {
+        **args,
+        **dict(occurrence.payload or {}),
+        "scene_decision_v2": frozen_runtime_context["scene_decision_v2"],
+        "scene_identity_v2": frozen_runtime_context["scene_identity_v2"],
+    }
+    action_preview_context = runtime_execution.get("_action_preview_context")
+    if isinstance(action_preview_context, Mapping):
+        occurrence_context["_action_preview_context"] = dict(
+            action_preview_context
+        )
     grant_request_id = str(getattr(command, "request_id", "") or "").strip()
     governor_grant = str(
         getattr(command, "governor_grant_ref", "") or ""
@@ -710,6 +747,109 @@ def _scheduler_handler_result(value: Any) -> dict[str, Any]:
     return result
 
 
+def _compose_host_runtime_context(
+    *,
+    task_runtime: ProcessTaskRuntimeContainer,
+    ledger: Any,
+    embodiment_runtime: Any,
+    environment_observation_provider: Callable[..., Mapping[str, Any]],
+) -> RuntimeContextApplicationService:
+    """Build the sole app-local World/Scene/Intent/Guardian object graph.
+
+    The durable Host embodiment lease is reused as the write fence for every
+    context journal.  Construction is deliberately fail-closed: routes are not
+    exposed when the lease, schema, source verifier or Intent authorities are
+    unavailable.
+    """
+
+    runtime_scope_id = str(
+        getattr(embodiment_runtime, "runtime_scope_id", "") or ""
+    ).strip()
+    if not runtime_scope_id:
+        raise RuntimeError("HOST_RUNTIME_CONTEXT_SCOPE_UNAVAILABLE")
+
+    def runtime_authority_provider() -> dict[str, Any]:
+        renew = getattr(embodiment_runtime, "renew_authority", None)
+        if not callable(renew):
+            raise RuntimeError("HOST_RUNTIME_CONTEXT_AUTHORITY_UNAVAILABLE")
+        claim = renew()
+        if not isinstance(claim, Mapping):
+            raise RuntimeError("HOST_RUNTIME_CONTEXT_AUTHORITY_INVALID")
+        return {**dict(claim), "runtime_scope_id": runtime_scope_id}
+
+    event_store = getattr(task_runtime, "event_store", None)
+    command_repository = getattr(task_runtime, "command_repository", None)
+    policy_version = "natsume.intent-arbiter.production.v1"
+    policy_identity = IntentPolicyIdentityV1(
+        policy_ref="policy://intent-arbiter/production-v1",
+        policy_digest=hashlib.sha256(policy_version.encode("utf-8")).hexdigest(),
+    )
+    observation_journal = SQLiteWorldObservationJournal(
+        task_runtime.canonical_db_path,
+        runtime_scope_id=runtime_scope_id,
+        runtime_authority_provider=runtime_authority_provider,
+        source_event_verifier=RuntimeEventWorldSourceVerifier(event_store),
+    )
+    composition = build_runtime_context_composition(
+        event_store=event_store,
+        observation_port=observation_journal,
+        runtime_scope_id=runtime_scope_id,
+        runtime_authority_provider=runtime_authority_provider,
+        intent_policy_identity=policy_identity,
+        intent_authority_port_factory=(
+            lambda scene_resolver: ProductionIntentAuthorityPort(
+                command_repository=command_repository,
+                scene_resolver=scene_resolver,
+                governor_ledger=ledger,
+                policy_identity=policy_identity,
+            )
+        ),
+        environment_observation_provider=environment_observation_provider,
+    )
+    return RuntimeContextApplicationService(composition)
+
+
+def _runtime_environment_observation_provider(
+    mode_transition_service: Any,
+) -> Callable[..., Mapping[str, Any]]:
+    """Freeze one app-local environment reader for the Runtime Context graph.
+
+    Time comes from the deterministic environment snapshot.  Activity comes
+    from the exact ``ModeTransitionService`` instance created by this ASGI
+    lifespan; the returned closure never looks up a process-global service.
+    """
+
+    status_reader = getattr(mode_transition_service, "get_current_status", None)
+    if not callable(status_reader):
+        raise RuntimeError("HOST_RUNTIME_CONTEXT_MODE_AUTHORITY_UNAVAILABLE")
+
+    def observe(*, now_ms: int) -> Mapping[str, Any]:
+        from host_brain.runtime.environment_state import (  # noqa: PLC0415
+            build_environment_snapshot,
+        )
+
+        snapshot = dict(build_environment_snapshot(now_ms=int(now_ms)))
+        raw_status = status_reader()
+        if not isinstance(raw_status, Mapping):
+            raise RuntimeError("HOST_RUNTIME_CONTEXT_MODE_AUTHORITY_INVALID")
+        mode = str(raw_status.get("sys_mode") or "").strip().lower()
+        activity = {
+            "normal": "NORMAL",
+            "focus": "FOCUS",
+            "gaming": "GAMING",
+            "sleep": "SLEEP",
+            "maintenance": "MAINTENANCE",
+            "locked": "MAINTENANCE",
+        }.get(mode)
+        if activity is None:
+            raise RuntimeError("HOST_RUNTIME_CONTEXT_MODE_UNSUPPORTED")
+        snapshot["activity_state"] = activity
+        snapshot["mode_identity"] = mode
+        return snapshot
+
+    return observe
+
+
 def create_app() -> FastAPI:
     from host_brain.app.tribe_composition import configure_tribe_application_ports
 
@@ -757,12 +897,26 @@ def create_app() -> FastAPI:
     life_dispatchers: tuple[Any, Any] | None = None
     embodiment_runtime: Any | None = None
     embodiment_authority_task: asyncio.Task[None] | None = None
+    runtime_context_composition: RuntimeContextComposition | None = None
+    runtime_context_application: RuntimeContextApplicationService | None = None
+    mcp_degradation_broker: Any | None = None
+    guardian_heartbeat_task: asyncio.Task[None] | None = None
+    catalog_rollout_guardian_task: asyncio.Task[None] | None = None
+    startup_probe_statuses: dict[str, Any] = {}
+
+    def capture_startup_probe_statuses(statuses: Mapping[str, Any]) -> None:
+        nonlocal startup_probe_statuses
+        startup_probe_statuses = dict(statuses)
 
     def task_runtime_container_provider() -> ProcessTaskRuntimeContainer | None:
         return task_runtime_container
 
     def governed_command_application_provider() -> GovernedHostRuntime | None:
         return governed_host_runtime
+
+    def degradation_capability_port_provider() -> Any | None:
+        current = runtime_context_composition
+        return current.guardian if current is not None else None
 
     def internal_agent_ingress_provider() -> InternalAgentIngress | None:
         return internal_agent_ingress
@@ -925,12 +1079,21 @@ def create_app() -> FastAPI:
         nonlocal canon_container
         nonlocal life_command_authority, life_dispatchers
         nonlocal embodiment_runtime, embodiment_authority_task
+        nonlocal runtime_context_composition, runtime_context_application
+        nonlocal mcp_degradation_broker
+        nonlocal guardian_heartbeat_task, catalog_rollout_guardian_task
+        nonlocal startup_probe_statuses
         async with runtime_lifespan(
             get_ledger=get_ledger,
             logger=logger,
             lifecycle_ports=lifecycle_runtime_ports,
             canon_service_provider=canon_service_provider,
             mode_transition_service_sink=capture_mode_transition_service,
+            startup_probe_sink=capture_startup_probe_statuses,
+            degradation_state_provider=(
+                lambda: host_obs_degradation_state_provider()
+            ),
+            start_service_heartbeat=False,
         ):
             security: ProcessSecurityServiceContainer | None = None
             command_ingress: ProcessCommandIngressContainer | None = None
@@ -947,6 +1110,9 @@ def create_app() -> FastAPI:
                     ),
                     token_service=get_token_service(),
                     route_ports=route_ports,
+                    degradation_capability_port_provider=(
+                        degradation_capability_port_provider
+                    ),
                 )
             except Exception:
                 logger.error(
@@ -991,18 +1157,6 @@ def create_app() -> FastAPI:
                 except Exception:
                     logger.warning(
                         "HOST_OBS_GOVERNANCE_SCORECARD_SOURCE_PREWARM_FAILED",
-                        exc_info=True,
-                    )
-                try:
-                    degradation_machine = get_degradation_state_machine()
-                    host_obs_degradation_state_provider = (
-                        lambda machine=degradation_machine: get_degradation_state(
-                            machine=machine
-                        )
-                    )
-                except Exception:
-                    logger.warning(
-                        "HOST_OBS_GOVERNANCE_DEGRADATION_SOURCE_PREWARM_FAILED",
                         exc_info=True,
                     )
                 truthy = {"1", "true", "yes", "on"}
@@ -1101,15 +1255,155 @@ def create_app() -> FastAPI:
                 # Ensure the lifespan-owned heartbeat has entered its renewal
                 # loop before composition can eventually expose routes.
                 await asyncio.sleep(0)
+                runtime_context_application = _compose_host_runtime_context(
+                    task_runtime=task_runtime,
+                    ledger=ledger,
+                    embodiment_runtime=embodiment_runtime,
+                    environment_observation_provider=(
+                        _runtime_environment_observation_provider(
+                            mode_transition_service
+                        )
+                    ),
+                )
+                runtime_context_composition = runtime_context_application.composition
+                from host_brain.governor.action_preview import (  # noqa: PLC0415
+                    ActionPreviewService,
+                )
+                from host_brain.orchestration.node_grants import (  # noqa: PLC0415
+                    DurableNodeGrantVerifier,
+                )
+                from host_brain.runtime.action_preview_resolver import (  # noqa: PLC0415
+                    ProductionActionPreviewAuthorityResolver,
+                )
+
+                action_preview_authority_resolver = (
+                    ProductionActionPreviewAuthorityResolver(
+                        command_repository=task_runtime.command_repository,
+                        task_store=task_runtime.task_store,
+                        node_grant_verifier=DurableNodeGrantVerifier(
+                            ledger=ledger,
+                            review_store=task_runtime.review_continuation_store,
+                        ),
+                        runtime_context_application=runtime_context_application,
+                    )
+                )
+
+                action_preview_service = ActionPreviewService(
+                    runtime_event_store=runtime_context_composition.event_store,
+                    guardian=runtime_context_composition.guardian,
+                    authority_resolver=action_preview_authority_resolver,
+                )
+                # The process-owned MCP facade may be constructed while the
+                # Skill registry is prewarmed.  Bind it explicitly to this
+                # application's lifespan-owned Guardian before any route can
+                # execute a provider capability.
+                mcp_degradation_broker = get_mcp_tool_broker()
+                mcp_degradation_broker.bind_degradation_capability_port(
+                    runtime_context_composition.guardian
+                )
+                startup_observed_at_ms = now_ms()
+                runtime_context_composition.guardian.observe_startup_batch(
+                    startup_probe_statuses,
+                    source_ref=(
+                        "startup-probe://host/"
+                        + hashlib.sha256(
+                            (
+                                f"{runtime_context_composition.guardian.snapshot().snapshot_digest}:"
+                                f"{startup_observed_at_ms}"
+                            ).encode("utf-8")
+                        ).hexdigest()
+                    ),
+                    observed_at_ms=startup_observed_at_ms,
+                )
+                host_obs_degradation_state_provider = (
+                    runtime_context_composition.guardian.read_degradation_state
+                )
+                from host_brain.app.observability_runtime.service_health_heartbeat import (  # noqa: PLC0415
+                    heartbeat_loop,
+                )
+
+                guardian_heartbeat_task = asyncio.create_task(
+                    heartbeat_loop(
+                        30.0,
+                        degradation_observer=(
+                            runtime_context_composition.guardian.observe_service_batch
+                        ),
+                    ),
+                    name="host-runtime-guardian-health-heartbeat",
+                )
+                catalog_operation_id = str(
+                    os.environ.get("HOST_SERVICE_CATALOG_OPERATION_ID") or ""
+                ).strip()
+                if catalog_operation_id:
+                    from host_brain.service_catalog.rollout_authority import (  # noqa: PLC0415
+                        ServiceCatalogRolloutGuardianObserver,
+                        ServiceCatalogRolloutStore,
+                    )
+
+                    catalog_guardian = runtime_context_composition.guardian
+                    catalog_rollout_store = ServiceCatalogRolloutStore(
+                        task_runtime.canonical_db_path
+                    )
+                    catalog_rollout_observer = (
+                        ServiceCatalogRolloutGuardianObserver(
+                            store=catalog_rollout_store,
+                            guardian=catalog_guardian,
+                        )
+                    )
+                    application.state.service_catalog_rollout_store = (
+                        catalog_rollout_store
+                    )
+                    application.state.service_catalog_rollout_observer = (
+                        catalog_rollout_observer
+                    )
+
+                    async def observe_catalog_rollout_receipt() -> None:
+                        try:
+                            for _attempt in range(240):
+                                receipt = await asyncio.to_thread(
+                                    catalog_rollout_store.terminal_receipt,
+                                    catalog_operation_id,
+                                )
+                                if receipt is not None:
+                                    catalog_rollout_observer.observe_operation(
+                                        catalog_operation_id
+                                    )
+                                    return
+                                await asyncio.sleep(0.25)
+                            logger.error(
+                                "HOST_SERVICE_CATALOG_TERMINAL_RECEIPT_TIMEOUT",
+                                extra={"operation_id": catalog_operation_id},
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.error(
+                                "HOST_SERVICE_CATALOG_GUARDIAN_OBSERVE_FAILED",
+                                extra={"operation_id": catalog_operation_id},
+                                exc_info=True,
+                            )
+
+                    catalog_rollout_guardian_task = asyncio.create_task(
+                        observe_catalog_rollout_receipt(),
+                        name="host-service-catalog-rollout-guardian-observer",
+                    )
+                await asyncio.sleep(0)
+                application.state.runtime_context_composition = (
+                    runtime_context_composition
+                )
                 life_dispatchers = _compose_life_dispatchers(
                     ledger,
                     embodiment_runtime=embodiment_runtime,
+                    action_preview_service=action_preview_service,
                 )
                 application.state.embodiment_runtime = embodiment_runtime
                 canon = build_process_canon_container(
                     ledger=ledger,
                     canonical_db_path=task_runtime.canonical_db_path,
                     world_root=get_persistence_settings().world_canon_root.resolve(),
+                    degradation_capability_port=(
+                        runtime_context_composition.guardian
+                    ),
                 )
                 # Startup reconciliation is a production composition action;
                 # the legacy HTTP lifespan no longer constructs this writer.
@@ -1230,6 +1524,19 @@ def create_app() -> FastAPI:
                     owner_id=canonical_owner,
                     bounded_fanout_enabled=runtime_settings.task_runtime_bounded_fanout_enabled,
                     atomic_graph_success_enabled=runtime_settings.task_runtime_atomic_graph_success_enabled,
+                    runtime_context_application=runtime_context_application,
+                    intent_admission_verifier=DurableIntentAdmissionVerifier(
+                        authority_port=(
+                            runtime_context_composition.intent_authority_port
+                        ),
+                        intent_arbiter=runtime_context_composition.intent_arbiter,
+                        event_store=runtime_context_composition.event_store,
+                        review_store=task_runtime.review_store,
+                    ),
+                    degradation_capability_port=(
+                        runtime_context_composition.guardian
+                    ),
+                    action_preview_service=action_preview_service,
                 )
                 canonical_agent_executor_kwargs: dict[str, Any] = {
                     "model_attempt_service": get_model_attempt_service(),
@@ -1260,14 +1567,24 @@ def create_app() -> FastAPI:
                     proactive_push_detail = str(exc)[:300]
                     logger.warning("SCHEDULER_PROACTIVE_PUSH_DEGRADED:%s", exc)
 
-                def scheduler_ui_pusher(message: dict[str, Any]) -> dict[str, Any]:
+                def scheduler_ui_pusher(
+                    message: dict[str, Any],
+                    *,
+                    preview_proof: Any,
+                ) -> dict[str, Any]:
                     if proactive_client is None:
                         return {
                             "status": "SKIPPED",
                             "success": False,
                             "detail": proactive_push_detail,
                         }
-                    return dict(proactive_client.push(message) or {})
+                    return dict(
+                        proactive_client.push(
+                            message,
+                            preview_proof=preview_proof,
+                        )
+                        or {}
+                    )
 
                 async def scheduler_production_handler(
                     *,
@@ -1276,7 +1593,6 @@ def create_app() -> FastAPI:
                     command: Any,
                     execution_context: Any,
                 ) -> dict[str, Any]:
-                    del execution_context
                     intent = dict(definition.intent_template)
                     args = dict(intent.get("args") or {})
                     args.update(dict(occurrence.payload or {}))
@@ -1291,6 +1607,9 @@ def create_app() -> FastAPI:
                         life_snapshot_reader=get_life_snapshot_reader,
                         retention_policy=None,
                         ui_pusher=scheduler_ui_pusher,
+                        execution_context=execution_context,
+                        runtime_context_application=runtime_context_application,
+                        action_preview_service=action_preview_service,
                     )
                     return _scheduler_handler_result(result)
 
@@ -1313,7 +1632,13 @@ def create_app() -> FastAPI:
                     )
 
                     proposal = build_immune_proposal_from_report(
-                        await build_live_health_report(),
+                        await build_live_health_report(
+                            degradation_state_provider=(
+                                runtime_context_composition.guardian.read_degradation_state
+                                if runtime_context_composition is not None
+                                else None
+                            )
+                        ),
                         source="health",
                     )
                     if not proposal.get("triggered"):
@@ -1336,7 +1661,6 @@ def create_app() -> FastAPI:
                     command: Any,
                     execution_context: Any,
                 ) -> dict[str, Any]:
-                    del execution_context
                     life_command_service, life_snapshot_reader = (
                         life_command_authority_provider(ledger)
                     )
@@ -1345,6 +1669,8 @@ def create_app() -> FastAPI:
                         occurrence=occurrence,
                         definition=definition,
                         command=command,
+                        execution_context=execution_context,
+                        runtime_context_application=runtime_context_application,
                         life_command_service=life_command_service,
                         life_snapshot_reader=life_snapshot_reader,
                     )
@@ -1486,6 +1812,8 @@ def create_app() -> FastAPI:
                     cancellation_authority_verifier=(
                         cancellation_authority_verifier
                     ),
+                    runtime_context_application=runtime_context_application,
+                    action_preview_service=action_preview_service,
                 )
                 runtime_group = GovernedRuntimeGroup(
                     {
@@ -1588,7 +1916,41 @@ def create_app() -> FastAPI:
                 application.state.task_terminal_reconciliation_read_authority = None
                 application.state.governed_host_runtime = None
                 application.state.task_runtime_container = None
+                application.state.service_catalog_rollout_store = None
+                application.state.service_catalog_rollout_observer = None
+                if (
+                    mcp_degradation_broker is not None
+                    and runtime_context_composition is not None
+                ):
+                    try:
+                        mcp_degradation_broker.unbind_degradation_capability_port(
+                            runtime_context_composition.guardian
+                        )
+                    except Exception:
+                        logger.error(
+                            "MCP_DEGRADATION_AUTHORITY_UNBIND_FAILED",
+                            exc_info=True,
+                        )
+                    finally:
+                        mcp_degradation_broker = None
+                application.state.runtime_context_composition = None
+                runtime_context_application = None
+                runtime_context_composition = None
                 try:
+                    if catalog_rollout_guardian_task is not None:
+                        catalog_rollout_guardian_task.cancel()
+                        try:
+                            await catalog_rollout_guardian_task
+                        except asyncio.CancelledError:
+                            pass
+                        catalog_rollout_guardian_task = None
+                    if guardian_heartbeat_task is not None:
+                        guardian_heartbeat_task.cancel()
+                        try:
+                            await guardian_heartbeat_task
+                        except asyncio.CancelledError:
+                            pass
+                        guardian_heartbeat_task = None
                     if scheduler is not None:
                         try:
                             # Producers stop before runtime admission closes.
@@ -1683,6 +2045,12 @@ def create_app() -> FastAPI:
         ),
         scheduler_command_ingress_provider=scheduler_command_ingress_provider,
         scheduler_command_service_provider=scheduler_command_service_provider,
+        degradation_state_provider=(
+            lambda: host_obs_degradation_state_provider()
+        ),
+        degradation_capability_port_provider=(
+            degradation_capability_port_provider
+        ),
         host_obs_read_ports=host_obs_read_ports,
         canon_service_provider=canon_service_provider,
         route_ports=route_ports,
@@ -1693,6 +2061,8 @@ def create_app() -> FastAPI:
     application.state.command_ingress_container = None
     application.state.memory_service_container = None
     application.state.task_runtime_container = None
+    application.state.service_catalog_rollout_store = None
+    application.state.service_catalog_rollout_observer = None
     application.state.agent_workspace_container = None
     application.state.task_effect_reconciliation_command_service = None
     application.state.task_terminal_reconciliation_command_service = None
@@ -1706,6 +2076,7 @@ def create_app() -> FastAPI:
     application.state.task_operation_reconciliation_command_service = None
     application.state.canon_container = None
     application.state.embodiment_runtime = None
+    application.state.runtime_context_composition = None
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports
     application.state.input_runtime_ports = input_runtime_ports
     application.state.task_runtime_container_provider = (

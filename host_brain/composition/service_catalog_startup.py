@@ -5,7 +5,7 @@ candidate's lifecycle callbacks.  It intentionally does not read
 ``os.environ``, open sockets, start processes, stop incumbents or discover
 services.  All ambient capabilities are explicit constructor dependencies.
 
-An ENFORCE preparation contains only an opaque local reference and a
+CANARY and ENFORCE preparations contain only an opaque local reference and a
 process-local HMAC.  The underlying probe reservation remains private to the
 coordinator, is bound to the complete catalog snapshot, expires quickly and
 is consumed before the first startup callback.  A prepared object is frozen,
@@ -39,9 +39,13 @@ HOST_SERVICE_CATALOG_RESERVATION_TTL_MS_ENV = (
 )
 
 MODE_AUDIT = "AUDIT"
+MODE_SHADOW = "SHADOW"
 MODE_PREFLIGHT = "PREFLIGHT"
+MODE_CANARY = "CANARY"
 MODE_ENFORCE = "ENFORCE"
-_ALLOWED_MODES = frozenset({MODE_AUDIT, MODE_PREFLIGHT, MODE_ENFORCE})
+_ALLOWED_MODES = frozenset(
+    {MODE_AUDIT, MODE_SHADOW, MODE_PREFLIGHT, MODE_CANARY, MODE_ENFORCE}
+)
 
 DEFAULT_RESERVATION_TTL_MS = 5_000
 MIN_RESERVATION_TTL_MS = 100
@@ -454,7 +458,7 @@ class ServiceCatalogStartupCoordinator:
 
         attestation: ReservationAttestation | None = None
         expires_at_ms = now_ms + self._ttl_ms
-        if self._mode == MODE_ENFORCE:
+        if self._mode in {MODE_CANARY, MODE_ENFORCE}:
             attestation = _copy_attestation(
                 _read_attr(report, "reservation", default=None)
             )
@@ -578,7 +582,7 @@ class ServiceCatalogStartupCoordinator:
             # is terminal for this preparation, so concurrent/retry callers
             # can never reach start_candidate.
             state.consumed = True
-            if prepared.mode == MODE_ENFORCE:
+            if prepared.mode in {MODE_CANARY, MODE_ENFORCE}:
                 attestation = state.attestation
                 if not self._valid_attestation(
                     attestation,

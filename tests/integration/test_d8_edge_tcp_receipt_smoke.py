@@ -20,7 +20,9 @@ def test_real_tcp_hmac_edge_sqlite_receipt_smoke(tmp_path: Path) -> None:
     result = SMOKE.run_smoke(root=ROOT, work_dir=tmp_path, timeout_s=60)
 
     assert result["status"] == "PASS"
-    assert result["host_transport"] == "HttpEdgeTransportPort + EdgeRpcEmbodimentCommandPort"
+    assert result["host_transport"] == (
+        "private Host Edge transport + claimed embodiment dispatcher"
+    )
     assert result["minimal_profile"]["bind_host"] == "127.0.0.1"
     assert result["minimal_profile"]["asr_tts_gateway_qq_vts_disabled"] is True
     assert result["receipt"]["status"] == "DEGRADED"

@@ -11,6 +11,40 @@ from host_brain.app import asgi
 from host_brain.app.host_route_ports import HostRoutePorts
 
 
+@pytest.mark.parametrize(
+    ("mode", "activity"),
+    (
+        ("normal", "NORMAL"),
+        ("focus", "FOCUS"),
+        ("gaming", "GAMING"),
+        ("sleep", "SLEEP"),
+        ("maintenance", "MAINTENANCE"),
+        ("locked", "MAINTENANCE"),
+    ),
+)
+def test_runtime_environment_observation_uses_app_local_mode_authority(
+    mode: str,
+    activity: str,
+) -> None:
+    provider = asgi._runtime_environment_observation_provider(
+        SimpleNamespace(get_current_status=lambda: {"sys_mode": mode})
+    )
+
+    observed = provider(now_ms=1_900_000_000_000)
+
+    assert observed["now_ms"] == 1_900_000_000_000
+    assert observed["activity_state"] == activity
+    assert observed["mode_identity"] == mode
+
+
+def test_runtime_environment_observation_fails_without_app_local_authority() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_RUNTIME_CONTEXT_MODE_AUTHORITY_UNAVAILABLE",
+    ):
+        asgi._runtime_environment_observation_provider(None)
+
+
 def test_scheduler_clock_secret_is_added_only_under_explicit_key(monkeypatch) -> None:
     monkeypatch.setattr(
         asgi,
@@ -285,6 +319,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     ledger = SimpleNamespace(
         canonical_db_path="D:/runtime/canonical.sqlite3",
         log_voice_event=lambda *_args, **_kwargs: None,
+        trace_request=lambda _request_id: [],
     )
     token_service = object()
     capability_broker = object()
@@ -336,6 +371,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     governed_runtime = object()
     internal_runtime = object()
     scheduler_runtime = object()
+    intent_admission_verifier = object()
     runtime_group = SimpleNamespace(wake_review_continuation=lambda: None)
     internal_ingress = object()
     scheduler_ingress = object()
@@ -398,6 +434,31 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     canon_application = CanonApplication()
     canon_container = SimpleNamespace(application=canon_application)
 
+    class CanonicalCommandRepository:
+        @staticmethod
+        def get_by_graph(*_args, **_kwargs):  # noqa: ANN001, ANN202
+            raise AssertionError(
+                "composition-only fixture must not query a canonical command"
+            )
+
+    canonical_command_repository = CanonicalCommandRepository()
+
+    class CanonicalTaskStore:
+        @staticmethod
+        def _unreachable(*_args, **_kwargs):  # noqa: ANN001, ANN202
+            raise AssertionError(
+                "composition-only fixture must not query canonical task state"
+            )
+
+        get_graph = _unreachable
+        get_node = _unreachable
+        get_attempt = _unreachable
+        get_active_lease = _unreachable
+        get_acceptance_effect_intent = _unreachable
+        get_node_artifact = _unreachable
+
+    canonical_task_store = CanonicalTaskStore()
+
     class TaskRuntimeContainer:
         bound_runtime = None
         canonical_db_path = ledger.canonical_db_path
@@ -409,8 +470,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             resume_review=lambda *_args, **_kwargs: {},
         )
         review_continuation_store = object()
-        command_repository = object()
-        task_store = object()
+        command_repository = canonical_command_repository
+        task_store = canonical_task_store
         recovery_id = "test-recovery"
         operation_reconciliation_service = object()
         effect_reconciliation_service = object()
@@ -435,6 +496,58 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     task_runtime_container = TaskRuntimeContainer()
 
+    class RuntimeGuardian:
+        @staticmethod
+        def snapshot():
+            return SimpleNamespace(revision=1, snapshot_digest="sha256:" + "a" * 64)
+
+        @staticmethod
+        def observe_startup_batch(*_args, **_kwargs):
+            events.append("guardian-startup-observed")
+
+        @staticmethod
+        def read_degradation_state():
+            return {
+                "schema": "natsume.runtime-guardian-degradation.v1",
+                "authority": "RUNTIME_GUARDIAN",
+                "status": "READY",
+                "active_dependencies": [],
+                "recovery_pending_dependencies": [],
+            }
+
+        @staticmethod
+        def observe_service_batch(*_args, **_kwargs):
+            return None
+
+        @staticmethod
+        def evaluate_capability(**_kwargs):
+            return {
+                "allowed": True,
+                "allowed_by_degradation": True,
+                "decision": "UNCHANGED",
+                "durability_status": "READY",
+                "guardian_authority": {
+                    "authority": "RUNTIME_GUARDIAN",
+                    "authority_status": "ACTIVE",
+                    "durable": True,
+                    "aggregate_ref": "runtime-guardian://sha256/" + "a" * 64,
+                    "guardian_revision": 1,
+                    "fencing_token": 1,
+                },
+            }
+
+    runtime_guardian = RuntimeGuardian()
+    runtime_context_composition = SimpleNamespace(
+        guardian=runtime_guardian,
+        intent_authority_port=object(),
+        intent_arbiter=object(),
+        event_store=object(),
+    )
+    runtime_context_application = SimpleNamespace(
+        composition=runtime_context_composition,
+        require_frozen=lambda value: value,
+    )
+
     @asynccontextmanager
     async def base_lifespan():
         events.append("base-started")
@@ -449,6 +562,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     def fake_build_container(**kwargs):
         assert isinstance(kwargs.pop("route_ports"), HostRoutePorts)
+        provider = kwargs.pop("degradation_capability_port_provider")
+        assert callable(provider)
+        assert provider() is None
         assert kwargs == {
             "ledger": ledger,
             "canonical_db_path": ledger.canonical_db_path,
@@ -470,6 +586,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     def fake_build_canon(**kwargs):
         assert kwargs["ledger"] is ledger
         assert kwargs["canonical_db_path"] == ledger.canonical_db_path
+        assert kwargs["degradation_capability_port"] is runtime_guardian
         events.append("canon-built")
         return canon_container
 
@@ -486,6 +603,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         ]
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
         assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
+        assert kwargs["runtime_context_application"] is runtime_context_application
+        assert kwargs["intent_admission_verifier"] is intent_admission_verifier
+        assert kwargs["degradation_capability_port"] is runtime_guardian
         events.append("governed-runtime-built")
         return governed_runtime
 
@@ -565,14 +685,38 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["cancellation_authority_verifier"] is captured[
             "cancellation_authority_verifier"
         ]
+        assert kwargs["runtime_context_application"] is runtime_context_application
         events.append("scheduler-runtime-built")
         return scheduler_container
+
+    def fake_compose_runtime_context(**kwargs):
+        assert kwargs["task_runtime"] is task_runtime_container
+        assert kwargs["ledger"] is ledger
+        assert kwargs["embodiment_runtime"] is embodiment_runtime
+        environment = kwargs["environment_observation_provider"](now_ms=1_900_000_000_000)
+        assert environment["activity_state"] == "GAMING"
+        events.append("runtime-context-built")
+        return runtime_context_application
+
+    async def fake_guardian_heartbeat(*_args, **_kwargs):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("guardian-heartbeat-stopped")
+            raise
 
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
         asgi,
         "runtime_lifespan",
-        lambda **_kwargs: base_lifespan(),
+        lambda **kwargs: (
+            kwargs["mode_transition_service_sink"](
+                SimpleNamespace(
+                    get_current_status=lambda: {"sys_mode": "gaming"}
+                )
+            ),
+            base_lifespan(),
+        )[1],
     )
     monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
     monkeypatch.setattr(
@@ -592,8 +736,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(
         asgi,
         "_compose_life_dispatchers",
-        lambda current, *, embodiment_runtime: (object(), object())
-        if current is ledger and embodiment_runtime is not None
+        lambda current, *, embodiment_runtime, action_preview_service: (object(), object())
+        if (
+            current is ledger
+            and embodiment_runtime is not None
+            and action_preview_service is not None
+        )
         else pytest.fail("wrong Life dispatcher ledger"),
     )
     from host_brain.channels import embodiment as embodiment_module
@@ -613,6 +761,31 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         embodiment_module,
         "build_embodiment_receipt_audit_observer",
         lambda _writer: object(),
+    )
+    from host_brain.app.observability_runtime import service_health_heartbeat
+
+    monkeypatch.setattr(
+        service_health_heartbeat,
+        "heartbeat_loop",
+        fake_guardian_heartbeat,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "_compose_host_runtime_context",
+        fake_compose_runtime_context,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "DurableIntentAdmissionVerifier",
+        lambda **kwargs: intent_admission_verifier
+        if kwargs
+        == {
+            "authority_port": runtime_context_composition.intent_authority_port,
+            "intent_arbiter": runtime_context_composition.intent_arbiter,
+            "event_store": runtime_context_composition.event_store,
+            "review_store": task_runtime_container.review_store,
+        }
+        else pytest.fail("wrong Intent admission composition"),
     )
     monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
     monkeypatch.setattr(asgi, "get_capability_broker", lambda: capability_broker)
@@ -643,6 +816,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             task_graph_cancellation_operator_enabled=False,
             task_operation_reconciliation_operator_enabled=True,
             task_effect_reconciliation_operator_enabled=True,
+            task_terminal_reconciliation_operator_enabled=False,
+            task_terminal_reconciliation_auto_enabled=False,
+            task_runtime_bounded_fanout_enabled=True,
+            task_runtime_atomic_graph_success_enabled=True,
             task_reconciliation_public_keys=lambda: {"reconciler-v1": b"k" * 32},
             agent_workspace_managed_root="D:/runtime/agent-workspaces",
             agent_workspace_lease_ms=120_000,
@@ -764,6 +941,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert application.state.canon_container is canon_container
             assert application.state.embodiment_runtime is embodiment_runtime
             assert (
+                application.state.runtime_context_composition
+                is runtime_context_composition
+            )
+            assert (
                 application.state.task_operation_reconciliation_command_service
                 is task_runtime_container.operation_reconciliation_service
             )
@@ -799,6 +980,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert application.state.governed_host_runtime is None
         assert application.state.governed_internal_runtime is None
         assert application.state.governed_scheduler_runtime is None
+        assert application.state.runtime_context_composition is None
         assert application.state.agent_workspace_container is None
         assert application.state.task_operation_reconciliation_command_service is None
         assert application.state.task_effect_reconciliation_command_service is None
@@ -811,6 +993,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "container-built",
         "task-runtime-built",
         "embodiment-transport-fenced",
+        "runtime-context-built",
+        "guardian-startup-observed",
         "canon-built",
         "canon-synced",
         "command-ingress-built",
@@ -825,6 +1009,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "governed-runtime-activated",
         "scheduler-clock-activated",
         "serving",
+        "guardian-heartbeat-stopped",
         "scheduler-clock-stopped",
         "workspace-closed",
         "task-runtime-closed",
@@ -935,7 +1120,6 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
     calls: list[str] = []
     governance_snapshot: dict[str, object] = {}
     ledger = SimpleNamespace(canonical_db_path=":memory:")
-    degradation_machine = object()
 
     class StopAfterGovernanceRead(RuntimeError):
         pass
@@ -960,18 +1144,6 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
     def get_scorecards():
         calls.append("scorecards-prewarmed")
         return Scorecards()
-
-    def get_degradation_machine():
-        calls.append("degradation-prewarmed")
-        return degradation_machine
-
-    def read_degradation(*, machine):
-        assert machine is degradation_machine
-        calls.append("degradation-read")
-        return {
-            "status": "READY",
-            "updated_at_ms": 1_750_000_000_000,
-        }
 
     def read_governance_then_stop(current_ledger):
         assert current_ledger is ledger
@@ -1022,12 +1194,6 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
     monkeypatch.setattr(asgi, "get_capability_scorecard_provider", get_scorecards)
     monkeypatch.setattr(
         asgi,
-        "get_degradation_state_machine",
-        get_degradation_machine,
-    )
-    monkeypatch.setattr(asgi, "get_degradation_state", read_degradation)
-    monkeypatch.setattr(
-        asgi,
         "_compose_life_command_authority",
         read_governance_then_stop,
     )
@@ -1052,9 +1218,7 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
     assert calls == [
         "semantic",
         "scorecards-prewarmed",
-        "degradation-prewarmed",
         "scorecards-read",
-        "degradation-read",
     ]
     assert governance_snapshot["capabilities"] == {
         "status": "AVAILABLE",
@@ -1063,7 +1227,10 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
         "automatic_upgrade_available": False,
         "read_only": True,
     }
-    assert governance_snapshot["degradation"]["status"] == "READY"
+    # Before the fenced RuntimeGuardian is composed, observability must stay
+    # fail-closed instead of consulting the retired module-global authority.
+    assert governance_snapshot["degradation"]["status"] == "UNAVAILABLE"
+    assert governance_snapshot["degradation"]["high_risk_latched"] is True
     pentest = governance_snapshot["domain_isolation"]["pentest"]
     assert pentest["lab_mode"] is True
     assert pentest["allow_exploit_requested"] is True

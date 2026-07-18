@@ -8,6 +8,34 @@ from host_brain.app import asgi, http_hooks
 from host_brain.app import process_runtime_shutdown_adapter
 from host_brain.scheduler import scheduling_center
 from host_brain.tribe.tribe_state import TribeStateRegistry
+from host_brain.runtime.context_contracts import SceneDecisionV2
+from host_brain.runtime.scene_consumer_projection import SceneIdentityV2
+
+
+def _life_tick_runtime_context() -> tuple[dict, object]:
+    scene = SceneDecisionV2(
+        workspace_id="tenant:life-tick-test",
+        subject_id="person-1",
+        scene_id="scene.casual-chat",
+        revision=1,
+        world_snapshot_digest="1" * 64,
+        context_digest="2" * 64,
+        guardian_snapshot_digest="3" * 64,
+        constraints=(),
+    )
+    frozen = {
+        "runtime_context_schema": "natsume.runtime-context.request.v1",
+        "scene_decision_v2": scene.to_dict(),
+        "scene_identity_v2": SceneIdentityV2.from_decision(scene).to_dict(),
+    }
+    authority = SimpleNamespace(
+        require_frozen=lambda value: SimpleNamespace(
+            to_dict=lambda: dict(frozen)
+        )
+        if dict(value).get("scene_identity_v2") == frozen["scene_identity_v2"]
+        else (_ for _ in ()).throw(ValueError("scene drift"))
+    )
+    return {"frozen_input_pack": dict(frozen)}, authority
 
 
 def test_production_startup_has_one_clock_and_no_private_life_or_tribe_loop() -> None:
@@ -23,7 +51,7 @@ def test_production_startup_has_one_clock_and_no_private_life_or_tribe_loop() ->
     assert "host_brain.tribe.tribe_state" not in shutdown_source
     assert asgi_source.index(
         "life_command_authority = _compose_life_command_authority(ledger)"
-    ) < asgi_source.index("life_dispatchers = _compose_life_dispatchers(ledger)")
+    ) < asgi_source.index("life_dispatchers = _compose_life_dispatchers(")
     assert asgi_source.index("await scheduler.stop_clock()") < asgi_source.rindex(
         "_reset_life_command_authority()"
     ) < asgi_source.rindex("life_dispatchers = None")
@@ -113,11 +141,14 @@ def test_life_tick_handler_only_reads_version_and_submits_one_typed_command(
     )
     reader = Reader()
     service = Service(reader)
+    execution_context, runtime_context_application = _life_tick_runtime_context()
 
     result = asgi._submit_life_tick_command(
         occurrence=occurrence,
         definition=definition,
         command=command,
+        execution_context=execution_context,
+        runtime_context_application=runtime_context_application,
         life_command_service=service,
         life_snapshot_reader=reader,
     )
@@ -192,11 +223,14 @@ def test_life_tick_crash_gap_replays_receipt_without_a_second_command() -> None:
     command = SimpleNamespace(command_id="host-command-1", request_id="request-1")
     reader = Reader()
     service = Service(reader)
+    execution_context, runtime_context_application = _life_tick_runtime_context()
 
     first = asgi._submit_life_tick_command(
         occurrence=occurrence,
         definition=definition,
         command=command,
+        execution_context=execution_context,
+        runtime_context_application=runtime_context_application,
         life_command_service=service,
         life_snapshot_reader=reader,
     )
@@ -204,6 +238,8 @@ def test_life_tick_crash_gap_replays_receipt_without_a_second_command() -> None:
         occurrence=occurrence,
         definition=definition,
         command=command,
+        execution_context=execution_context,
+        runtime_context_application=runtime_context_application,
         life_command_service=service,
         life_snapshot_reader=reader,
     )

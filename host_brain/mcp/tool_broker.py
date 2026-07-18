@@ -26,9 +26,10 @@ from host_brain.core.errors import (
 from host_brain.core.ids import now_ms
 from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL, TokenService
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
-from host_brain.observability.degradation_state import (
-    evaluate_degradation_front_door,
-    infer_degradation_capability,
+from host_brain.observability.degradation_state import infer_degradation_capability
+from host_brain.runtime.degradation_authority import (
+    DegradationCapabilityPort,
+    evaluate_degradation_capability,
 )
 
 
@@ -58,12 +59,14 @@ class MCPToolBroker:
         capability_broker: CapabilityBroker,
         ledger: SQLiteLedger | None = None,
         token_service: TokenService | None = None,
+        degradation_capability_port: DegradationCapabilityPort | None = None,
     ) -> None:
         if capability_broker is None:
             raise ValueError("MCPToolBroker requires the composed CapabilityBroker")
         self.registry = registry
         self.ledger = ledger
         self._token_service = token_service
+        self._degradation_capability_port = degradation_capability_port
         self._handlers: dict[str, MCPHandler] = {}
         self._broker = capability_broker
         self._policy = PredicateCapabilityPolicy(self._evaluate_policy)
@@ -72,6 +75,32 @@ class MCPToolBroker:
         if not callable(handler):
             raise ValueError("MCP handler must be callable")
         self._handlers[_handler_key(provider_id, tool_id)] = handler
+
+    def bind_degradation_capability_port(
+        self,
+        port: DegradationCapabilityPort,
+    ) -> None:
+        """Bind the lifespan-owned Guardian before production execution."""
+
+        if not isinstance(port, DegradationCapabilityPort):
+            raise TypeError("MCPToolBroker requires DegradationCapabilityPort")
+        current = self._degradation_capability_port
+        if current is not None and current is not port:
+            raise RuntimeError("MCP_DEGRADATION_AUTHORITY_ALREADY_BOUND")
+        self._degradation_capability_port = port
+
+    def unbind_degradation_capability_port(
+        self,
+        port: DegradationCapabilityPort,
+    ) -> None:
+        """Release only the exact app-local Guardian that owns the binding."""
+
+        current = self._degradation_capability_port
+        if current is None:
+            return
+        if current is not port:
+            raise RuntimeError("MCP_DEGRADATION_AUTHORITY_OWNER_MISMATCH")
+        self._degradation_capability_port = None
 
     def call(
         self,
@@ -195,7 +224,8 @@ class MCPToolBroker:
             provider_id, tool_id, meta.name, meta.description, meta.domain_tags,
             default="high_risk_execution" if static_risk >= 3 else "general_execution",
         )
-        degradation = evaluate_degradation_front_door(
+        degradation = evaluate_degradation_capability(
+            self._degradation_capability_port,
             capability_id=capability,
             static_risk_level=static_risk,
         )

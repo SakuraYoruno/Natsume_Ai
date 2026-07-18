@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Callable
 from json import loads as json_loads
 from pathlib import Path
 from typing import Any, Dict, Mapping
@@ -43,7 +44,65 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 _logger = logging.getLogger("Natsume.health_routes")
 
-router = APIRouter()
+DegradationStateProvider = Callable[[], Mapping[str, Any]]
+
+
+class DegradationStateUnavailable(RuntimeError):
+    """The app-local degradation read authority is unavailable or invalid."""
+
+
+_support_router = APIRouter()
+
+
+def _read_degradation_state(
+    *,
+    degradation_state_provider: DegradationStateProvider | None,
+    allow_legacy_degradation_provider: bool,
+) -> dict[str, Any]:
+    """Resolve one read-only degradation snapshot through an explicit port.
+
+    Production routers always provide the app-local RuntimeGuardian reader and
+    keep ``allow_legacy_degradation_provider`` disabled.  The legacy branch is
+    deliberately limited to the exported compatibility router used by direct
+    tests and older embedded consumers; it is never selected by Host router
+    composition.
+    """
+
+    provider = degradation_state_provider
+    if provider is None and allow_legacy_degradation_provider:
+        from host_brain.observability.degradation_state import (  # noqa: PLC0415
+            get_degradation_state,
+        )
+
+        provider = get_degradation_state
+    if provider is None:
+        raise DegradationStateUnavailable(
+            "RUNTIME_GUARDIAN_DEGRADATION_PROVIDER_UNAVAILABLE"
+        )
+    try:
+        state = provider()
+    except Exception as exc:
+        raise DegradationStateUnavailable(
+            "RUNTIME_GUARDIAN_DEGRADATION_READ_FAILED"
+        ) from exc
+    if not isinstance(state, Mapping):
+        raise DegradationStateUnavailable(
+            "RUNTIME_GUARDIAN_DEGRADATION_STATE_INVALID"
+        )
+    resolved = dict(state)
+    if not allow_legacy_degradation_provider:
+        guardian_authority = resolved.get("guardian_authority")
+        if (
+            not isinstance(guardian_authority, Mapping)
+            or str(guardian_authority.get("authority") or "")
+            != "RUNTIME_GUARDIAN"
+            or str(resolved.get("durability_authority") or "")
+            != "RUNTIME_GUARDIAN_JOURNAL"
+        ):
+            raise DegradationStateUnavailable(
+                "RUNTIME_GUARDIAN_DEGRADATION_AUTHORITY_INVALID"
+            )
+    return resolved
 
 
 def _apply_host_health_status(health_report: dict[str, Any]) -> None:
@@ -132,6 +191,8 @@ async def build_live_health_report(
     skip_dependency_probes: bool = False,
     request_id: str | None = None,
     ts_ms: int | None = None,
+    degradation_state_provider: DegradationStateProvider | None = None,
+    allow_legacy_degradation_provider: bool = False,
 ) -> dict[str, Any]:
     req_id = str(request_id or new_request_id()).strip()
     ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
@@ -167,31 +228,15 @@ async def build_live_health_report(
         ledger=get_ledger(),
         ts_ms=ts_value,
     )
-    try:
-        from host_brain.observability.degradation_state import (  # noqa: PLC0415
-            get_degradation_state,
-            reconcile_service_observations,
-        )
-
-        if _dep_probes:
-            reconcile_service_observations(
-                [
-                    {
-                        "service_id": service_id,
-                        "status": "UP" if bool(dict(row or {}).get("available")) else "DOWN",
-                        "owner": "edge",
-                        "ts_ms": ts_value,
-                        "detail": dict(row or {}).get("detail"),
-                    }
-                    for service_id, row in _dep_probes.items()
-                    if isinstance(row, Mapping)
-                ],
-                source_ref=f"health-report://{req_id}",
-                now_ms=ts_value,
-            )
-        health_report["degradation_state"] = get_degradation_state()
-    except Exception as degradation_exc:
-        _logger.warning("Health degradation projection skipped: %s", degradation_exc)
+    # GET /health is a read adapter. Service probe observations are owned by
+    # the lifespan-managed heartbeat and its RuntimeGuardian observer; a
+    # health request must never advance either durable aggregate.  Missing or
+    # failed read authority is therefore a hard availability failure rather
+    # than permission to fall back to a second process-global truth.
+    health_report["degradation_state"] = _read_degradation_state(
+        degradation_state_provider=degradation_state_provider,
+        allow_legacy_degradation_provider=allow_legacy_degradation_provider,
+    )
     _apply_host_health_status(health_report)
     return health_report
 
@@ -219,7 +264,6 @@ async def build_live_readiness_report(
     return readiness_report
 
 
-@router.get("/health", response_model=HealthResponse)
 async def health_check(
     skip_dependency_probes: bool = Query(
         False,
@@ -229,6 +273,9 @@ async def health_check(
         False,
         description="Attach a Codex immune proposal when the health report is not healthy.",
     ),
+    *,
+    degradation_state_provider: DegradationStateProvider | None = None,
+    allow_legacy_degradation_provider: bool = False,
 ) -> HealthResponse:
     """Health endpoint."""
     request_id = new_request_id()
@@ -239,11 +286,24 @@ async def health_check(
             skip_dependency_probes=skip_dependency_probes,
             request_id=request_id,
             ts_ms=ts_ms,
+            degradation_state_provider=degradation_state_provider,
+            allow_legacy_degradation_provider=(
+                allow_legacy_degradation_provider
+            ),
         )
         if include_immune_proposal:
             proposal = build_immune_proposal_from_report(health_report, source="health")
             if proposal.get("triggered"):
                 health_report["immune_proposal"] = proposal
+
+        # Exact service identity is part of the public health contract used by
+        # the Service Catalog post-start authority.  A 2xx response alone can
+        # never prove that the expected Host owns this listener.
+        from host_brain.service_catalog.host_startup import (  # noqa: PLC0415
+            host_main_health_identity,
+        )
+
+        health_report["service_identity"] = host_main_health_identity()
 
         return HealthResponse(
             status=health_report.get("status", "OK"),
@@ -251,6 +311,15 @@ async def health_check(
             timestamp=ts_ms,
             details=health_report,
         )
+    except DegradationStateUnavailable as exc:
+        _logger.warning(
+            "Health degradation authority unavailable",
+            extra={"request_id": request_id, "reason_code": str(exc)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         _logger.exception(
             "Health check failed",
@@ -262,15 +331,27 @@ async def health_check(
         )
 
 
-@router.get("/health/degradation")
-async def degradation_health_state() -> Dict[str, Any]:
+async def degradation_health_state(
+    *,
+    degradation_state_provider: DegradationStateProvider | None = None,
+    allow_legacy_degradation_provider: bool = False,
+) -> Dict[str, Any]:
     """Read-only unified dependency degradation snapshot."""
-    from host_brain.observability.degradation_state import get_degradation_state  # noqa: PLC0415
+    try:
+        return _read_degradation_state(
+            degradation_state_provider=degradation_state_provider,
+            allow_legacy_degradation_provider=(
+                allow_legacy_degradation_provider
+            ),
+        )
+    except DegradationStateUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
-    return get_degradation_state()
 
-
-@router.get("/ready", response_model=ReadinessResponse)
+@_support_router.get("/ready", response_model=ReadinessResponse)
 async def environment_readiness(
     include_immune_proposal: bool = Query(
         False,
@@ -308,7 +389,7 @@ async def environment_readiness(
         )
 
 
-@router.get("/health/mcp", response_model=HealthResponse)
+@_support_router.get("/health/mcp", response_model=HealthResponse)
 async def mcp_health_check() -> HealthResponse:
     """MCP registry health endpoint."""
     ts_ms = int(time.time() * 1000)
@@ -345,7 +426,7 @@ async def mcp_health_check() -> HealthResponse:
     )
 
 
-@router.get("/health/canon_sync", response_model=HealthResponse)
+@_support_router.get("/health/canon_sync", response_model=HealthResponse)
 async def canon_sync_health_check(
     projection_store: Any = Depends(require_obs_query_projection_store),
 ) -> HealthResponse:
@@ -370,7 +451,7 @@ async def canon_sync_health_check(
     )
 
 
-@router.get("/startup")
+@_support_router.get("/startup")
 async def startup_report(
     projection_store: Any = Depends(require_obs_query_projection_store),
 ) -> Dict[str, Any]:
@@ -391,7 +472,7 @@ async def startup_report(
     }
 
 
-@router.get("/health/env-readiness")
+@_support_router.get("/health/env-readiness")
 async def env_readiness_report() -> Dict[str, Any]:
     """Settings 分层 readiness 报告（OPT-4）。
 
@@ -425,3 +506,78 @@ async def env_readiness_report() -> Dict[str, Any]:
         "timestamp": ts_ms,
         **report.to_dict(),
     }
+
+
+def create_health_router(
+    *,
+    degradation_state_provider: DegradationStateProvider | None = None,
+    allow_legacy_degradation_provider: bool = False,
+) -> APIRouter:
+    """Create a health router bound to one app-local degradation reader.
+
+    ``allow_legacy_degradation_provider`` exists solely for the module-level
+    compatibility router below.  Host composition must leave it disabled and
+    pass the current RuntimeGuardian read port explicitly.
+    """
+
+    health_router = APIRouter()
+
+    @health_router.get("/health", response_model=HealthResponse)
+    async def app_health_check(
+        skip_dependency_probes: bool = Query(
+            False,
+            description=(
+                "Skip external dependency probes and return a lightweight "
+                "host-only health snapshot."
+            ),
+        ),
+        include_immune_proposal: bool = Query(
+            False,
+            description=(
+                "Attach a Codex immune proposal when the health report is "
+                "not healthy."
+            ),
+        ),
+    ) -> HealthResponse:
+        return await health_check(
+            skip_dependency_probes=skip_dependency_probes,
+            include_immune_proposal=include_immune_proposal,
+            degradation_state_provider=degradation_state_provider,
+            allow_legacy_degradation_provider=(
+                allow_legacy_degradation_provider
+            ),
+        )
+
+    @health_router.get("/health/degradation")
+    async def app_degradation_health_state() -> Dict[str, Any]:
+        return await degradation_health_state(
+            degradation_state_provider=degradation_state_provider,
+            allow_legacy_degradation_provider=(
+                allow_legacy_degradation_provider
+            ),
+        )
+
+    health_router.include_router(_support_router)
+    return health_router
+
+
+# Compatibility-only router for direct imports and embedded test apps.  The
+# production Host registry always calls ``create_health_router`` with an
+# explicit app-local provider and never mounts this object.
+router = create_health_router(allow_legacy_degradation_provider=True)
+
+
+__all__ = [
+    "DegradationStateProvider",
+    "DegradationStateUnavailable",
+    "build_live_health_report",
+    "build_live_readiness_report",
+    "canon_sync_health_check",
+    "create_health_router",
+    "degradation_health_state",
+    "env_readiness_report",
+    "health_check",
+    "mcp_health_check",
+    "router",
+    "startup_report",
+]

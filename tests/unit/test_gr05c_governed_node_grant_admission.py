@@ -92,7 +92,12 @@ def _contracts():
         session_id="session-gr05c",
         principal_id="principal-gr05c",
         ts_ms=1,
-        intent_draft={"route": "chat", "task": "answer"},
+        intent_draft={
+            "route": "chat",
+            "action": "exec_intent",
+            "target": "host",
+            "task": "answer",
+        },
         governor_result={"decision": "APPROVE", "intent_id": "intent-gr05c"},
         sanitized_message="hello",
         person_id="person-gr05c",

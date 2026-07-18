@@ -212,6 +212,14 @@ def build_direct_host_route_contracts(
         "route": route,
         "target_id": target,
         "task": objective,
+        "action": _identifier(
+            intent_draft.get("action") or intent_draft.get("action_kind"),
+            "intent.action",
+        ),
+        "target": _identifier(
+            intent_draft.get("target") or intent_draft.get("scope"),
+            "intent.target",
+        ).lower(),
         "args": _safe_json(dict(intent_draft.get("args") or {}), path="intent.args"),
     }
     frozen = _safe_json(dict(frozen_context or {}), path="frozen_context")

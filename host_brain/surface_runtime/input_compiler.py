@@ -308,23 +308,30 @@ def build_surface_main_chain_input_from_surface_reply_input(
     surface_intent_id = str(
         _safe_mapping(getattr(agent_input, "intent_draft", None)).get("id") or ""
     ).strip()
+    frozen_intent = _safe_mapping(getattr(agent_input, "intent_draft", None))
+    frozen_scene_decision = getattr(agent_input, "scene_decision_v2", None)
+    if frozen_scene_decision is None:
+        frozen_scene_decision = frozen_intent.get("scene_decision_v2")
+    frozen_scene_identity = getattr(agent_input, "scene_identity_v2", None)
+    if frozen_scene_identity is None:
+        frozen_scene_identity = frozen_intent.get("scene_identity_v2")
     scene_payload, scene_guardrails = _surface_scene_guardrails(
-        scene_awareness=_safe_mapping(getattr(agent_input, "scene_awareness", None)),
-        task_control=task_control,
+        scene_decision_v2=frozen_scene_decision,
+        scene_identity_v2=frozen_scene_identity,
         user_goal_ref=f"intent://{surface_intent_id}" if surface_intent_id else "",
-        now_ms=int(getattr(agent_input, "ts_ms", 0) or time.time() * 1000),
     )
     if isinstance(trace_stage_meta, dict):
         trace_stage_meta["scene_decision"] = {
             "schema_version": scene_payload.get("schema_version"),
             "decision_id": scene_payload.get("decision_id"),
             "scene_type": scene_payload.get("scene_type"),
+            "revision": scene_payload.get("revision"),
+            "decision_digest": scene_payload.get("decision_digest"),
             "proactive_policy": scene_payload.get("proactive_policy"),
             "expression_mode": scene_payload.get("expression_mode"),
-            "expires_at_ms": scene_payload.get("expires_at_ms"),
-            "expired": scene_payload.get("expired"),
             "source_refs": list(scene_payload.get("source_refs") or []),
             "user_goal_preserved": scene_payload.get("user_goal_preserved"),
+            "validation_status": scene_payload.get("validation_status"),
         }
     affect_packet = _affect_packet(
         agent_input,

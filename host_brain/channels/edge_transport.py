@@ -190,7 +190,7 @@ def build_edge_envelope(
     }
 
 
-class HttpEdgeTransportPort:
+class _HttpEdgeTransportPort:
     """One-attempt, authenticated implementation of ``EdgeTransportPort``."""
 
     def __init__(
@@ -282,7 +282,7 @@ class HttpEdgeTransportPort:
         )
 
 
-async def submit_edge_request(
+async def _submit_edge_request(
     *,
     path: str,
     payload: Mapping[str, Any],
@@ -291,7 +291,7 @@ async def submit_edge_request(
     base_url: str | None = None,
     shared_key: str | None = None,
 ) -> EdgeTransportResult:
-    return await HttpEdgeTransportPort(
+    return await _HttpEdgeTransportPort(
         base_url=base_url,
         shared_key=shared_key,
     ).submit(
@@ -309,8 +309,24 @@ async def submit_proactive_push(
     timeout_ms: int = 5_000,
     base_url: str | None = None,
     shared_key: str | None = None,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
 ) -> EdgeTransportResult:
-    return await submit_edge_request(
+    denied = _require_terminal_action_preview(
+        service=action_preview_service,
+        event_id=action_preview_event_id,
+        boundary=action_preview_boundary,
+        allowed_action_kinds=frozenset(
+            {"life-delivery.edge.proactive", "proactive.ui_push"}
+        ),
+        expected_scope=str(request_id or ""),
+        expected_destination="edge.proactive",
+        expected_payload=dict(message or {}),
+    )
+    if denied is not None:
+        return denied
+    return await _submit_edge_request(
         path="/v1/edge/proactive_push",
         payload=message,
         request_id=request_id,
@@ -332,11 +348,41 @@ async def submit_gateway_reply(
     delivery_id: str | None = None,
     wait_result: bool = True,
     timeout_ms: int = 12_000,
+    action_preview_service: Any | None = None,
+    action_preview_event_id: str | None = None,
+    action_preview_boundary: Mapping[str, Any] | None = None,
 ) -> EdgeTransportResult:
     """Submit one idempotency-bound reply to the durable Gateway outbox."""
 
     req_id = str(request_id or new_request_id())
     extra = dict(raw_extra or {})
+    preview_payload: dict[str, Any] = {
+        "platform": str(platform or "").strip().lower(),
+        "conversation_id": str(conversation_id or "").strip(),
+        "content": str(content),
+        "msg_type": str(msg_type or "text").strip().lower(),
+    }
+    if str(media_path or "").strip():
+        preview_payload["media_path"] = str(media_path).strip()
+    if extra:
+        preview_payload["raw_extra"] = extra
+    stable_scope = str(delivery_id or req_id).strip()
+    denied = _require_terminal_action_preview(
+        service=action_preview_service,
+        event_id=action_preview_event_id,
+        boundary=action_preview_boundary,
+        allowed_action_kinds=frozenset(
+            {
+                "life-delivery.proactive.gateway",
+                "life-delivery.edge.gateway_reply",
+            }
+        ),
+        expected_scope=stable_scope,
+        expected_destination=None,
+        expected_payload=preview_payload,
+    )
+    if denied is not None:
+        return denied
     material = json.dumps(
         {
             "platform": str(platform or "").strip().lower(),
@@ -372,6 +418,153 @@ async def submit_gateway_reply(
         path="/v1/gateway/reply",
         payload=payload,
         timeout_ms=max(12_000, int(timeout_ms) + 3_000 if wait_result else int(timeout_ms)),
+    )
+
+
+def _require_terminal_action_preview(
+    *,
+    service: Any,
+    event_id: str | None,
+    boundary: Mapping[str, Any] | None,
+    allowed_action_kinds: frozenset[str],
+    expected_scope: str,
+    expected_destination: str | None,
+    expected_payload: Mapping[str, Any],
+) -> EdgeTransportResult | None:
+    """Reopen exact Preview authority at the final network boundary."""
+
+    from host_brain.governor.action_preview import ActionPreviewService  # noqa: PLC0415
+
+    if not isinstance(service, ActionPreviewService):
+        return _rejected(
+            "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+            "terminal Edge/Gateway transport has no app-local ActionPreview authority",
+        )
+    if not str(event_id or "").strip() or not isinstance(boundary, Mapping):
+        return _rejected(
+            "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+            "terminal Edge/Gateway transport lacks an exact Preview boundary",
+        )
+    exact = dict(boundary)
+    required = {
+        "action_kind",
+        "action_scope",
+        "risk_level",
+        "action_args",
+        "context_pack_digest",
+        "scene_identity",
+        "task_graph_id",
+        "graph_revision",
+        "task_node_id",
+        "parent_governor_grant_ref",
+        "node_grant_ref",
+        "node_grant",
+        "authority_context",
+    }
+    args = exact.get("action_args")
+    if frozenset(exact) != required or not isinstance(args, Mapping):
+        return _rejected(
+            "ACTION_PREVIEW_INVALID",
+            "terminal Preview execution boundary drifted",
+        )
+    action_args = dict(args)
+    action_kind = str(exact.get("action_kind") or "")
+    destination = str(action_args.get("destination") or "").strip().lower()
+    payload = action_args.get("payload")
+    acceptance_surface = action_kind == "acceptance-effect.surface.reply_delivery"
+    flat_derived_matches = (
+        action_kind == "proactive.ui_push"
+        and action_kind in allowed_action_kinds
+        and str(exact.get("action_scope") or "") == str(expected_scope or "")
+        and _canonical_preview_payload(action_args)
+        == _canonical_preview_payload(expected_payload)
+    )
+    enveloped_derived_matches = (
+        action_kind in allowed_action_kinds
+        and str(exact.get("action_scope") or "") == str(expected_scope or "")
+        and str(action_args.get("delivery_key") or "") == str(expected_scope or "")
+        and isinstance(payload, Mapping)
+        and _canonical_preview_payload(payload)
+        == _canonical_preview_payload(expected_payload)
+        and (
+            (expected_destination is not None and destination == expected_destination)
+            or (
+                expected_destination is None
+                and destination in {"proactive.gateway", "edge.gateway_reply"}
+            )
+        )
+    )
+    derived_matches = flat_derived_matches or enveloped_derived_matches
+    acceptance_matches = acceptance_surface and _acceptance_surface_matches(
+        action_args=action_args,
+        request_id=str(expected_scope or ""),
+        terminal_payload=expected_payload,
+    )
+    if not derived_matches and not acceptance_matches:
+        return _rejected(
+            "ACTION_PREVIEW_DRIFT",
+            "terminal Edge/Gateway payload differs from its Preview receipt",
+        )
+    try:
+        service.require_execution(event_id=str(event_id), **exact)
+    except Exception as exc:
+        return _rejected(
+            str(getattr(exc, "reason_code", None) or "ACTION_PREVIEW_INVALID"),
+            str(getattr(exc, "detail", None) or "terminal Preview authority reopen failed"),
+        )
+    return None
+
+
+def _acceptance_surface_matches(
+    *,
+    action_args: Mapping[str, Any],
+    request_id: str,
+    terminal_payload: Mapping[str, Any],
+) -> bool:
+    """Validate the sole approved Acceptance Effect -> Gateway transform."""
+
+    if (
+        str(action_args.get("request_id") or "") != request_id
+        or str(action_args.get("decision") or "").strip().upper() != "APPROVE"
+    ):
+        return False
+    actual = dict(terminal_payload)
+    # No caller-controlled transform is implied by Acceptance.  The only
+    # permitted terminal shape is the exact minimal text delivery below.
+    # Media and metadata need separate, action-bound Preview receipts.
+    if frozenset(actual) != {
+        "platform",
+        "conversation_id",
+        "content",
+        "msg_type",
+    }:
+        return False
+    expected = {
+        "platform": str(action_args.get("reply_channel") or "").strip().lower(),
+        "conversation_id": str(action_args.get("reply_target") or "").strip(),
+        "content": str(action_args.get("narrative") or ""),
+        "msg_type": "text",
+    }
+    return _canonical_preview_payload(actual) == _canonical_preview_payload(expected)
+
+
+def _canonical_preview_payload(value: Mapping[str, Any]) -> str:
+    normalized = dict(value)
+    if "platform" in normalized:
+        normalized["platform"] = str(normalized.get("platform") or "").strip().lower()
+        normalized["conversation_id"] = str(normalized.get("conversation_id") or "").strip()
+        normalized["content"] = str(normalized.get("content") or "")
+        normalized["msg_type"] = str(normalized.get("msg_type") or "text").strip().lower()
+        if not str(normalized.get("media_path") or "").strip():
+            normalized.pop("media_path", None)
+        if not dict(normalized.get("raw_extra") or {}):
+            normalized.pop("raw_extra", None)
+    return json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -466,12 +659,10 @@ def _rejected(reason_code: str, detail: str, *, status: str = "REJECTED") -> Edg
 
 
 __all__ = [
-    "HttpEdgeTransportPort",
     "build_edge_envelope",
     "resolve_edge_base_url",
     "resolve_gateway_base_urls",
     "resolve_host_edge_rpc_shared_key",
-    "submit_edge_request",
     "submit_gateway_reply",
     "submit_proactive_push",
 ]

@@ -9,7 +9,7 @@ import pytest
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.channels.embodiment import (
     EdgeEmbodimentSessionConfig,
-    EdgeRpcEmbodimentCommandPort,
+    _EdgeRpcEmbodimentCommandPort,
     EmbodimentReceiptLookupUnavailable,
     HostEmbodimentRuntime,
     build_host_embodiment_command,
@@ -264,7 +264,7 @@ def test_edge_rpc_receipt_query_uses_live_lease_and_distinguishes_not_found(monk
             event={"receipt_query": {"status": "NOT_FOUND"}, "receipt": None},
         )
 
-    port = EdgeRpcEmbodimentCommandPort(
+    port = _EdgeRpcEmbodimentCommandPort(
         post_to_edge=post_to_edge,
         session_config=EdgeEmbodimentSessionConfig(
             session_id="d8-host",
@@ -299,6 +299,6 @@ def test_edge_rpc_receipt_query_raises_for_unavailable_lookup(monkeypatch) -> No
             return _Result(success=False, reason_code="EDGE_SESSION_BUSY")
         raise AssertionError("receipt query must not run without a live lease")
 
-    port = EdgeRpcEmbodimentCommandPort(post_to_edge=post_to_edge)
+    port = _EdgeRpcEmbodimentCommandPort(post_to_edge=post_to_edge)
     with pytest.raises(EmbodimentReceiptLookupUnavailable, match="EDGE_SESSION_BUSY"):
         asyncio.run(port.query_receipt(command))

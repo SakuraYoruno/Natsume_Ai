@@ -6,7 +6,7 @@ import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Callable, Mapping
 
 from fastapi import HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -132,6 +132,9 @@ def runtime_lifespan(
     lifecycle_ports: LifecycleRuntimeApplicationPorts,
     canon_service_provider: Callable[[], Any | None] | None = None,
     mode_transition_service_sink: Callable[[Any | None], None] | None = None,
+    startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
+    degradation_state_provider: Callable[[], Mapping[str, Any] | None] | None = None,
+    start_service_heartbeat: bool = True,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
@@ -407,22 +410,29 @@ def runtime_lifespan(
             new_module_statuses["life_continuity_loop"] = (
                 "RETIRED: governed SchedulerClock life_tick owns periodic Life commands"
             )
-            try:
-                from host_brain.app.startup import reconcile_startup_degradation  # noqa: PLC0415
+            if startup_probe_sink is not None:
+                # ASGI owns the app-local RuntimeGuardian, but it can only be
+                # composed after Task Runtime migrations and the Host fencing
+                # lease exist.  Export this probe batch without writing the
+                # retired module-global degradation aggregate.
+                startup_probe_sink(dict(new_module_statuses))
+            else:
+                try:
+                    from host_brain.app.startup import reconcile_startup_degradation  # noqa: PLC0415
 
-                _degradation_ts_ms = int(time.time() * 1000)
-                reconcile_startup_degradation(
-                    new_module_statuses,
-                    source_ref=f"startup-probe://runtime/{_degradation_ts_ms}",
-                    now_ms=_degradation_ts_ms,
-                )
-            except Exception as _degradation_exc:
-                # Degradation projection must never make the existing startup
-                # guardian unavailable; its feature flag is the rollback path.
-                logger.warning(
-                    "Startup degradation projection skipped: %s",
-                    _degradation_exc,
-                )
+                    _degradation_ts_ms = int(time.time() * 1000)
+                    reconcile_startup_degradation(
+                        new_module_statuses,
+                        source_ref=f"startup-probe://runtime/{_degradation_ts_ms}",
+                        now_ms=_degradation_ts_ms,
+                    )
+                except Exception as _degradation_exc:
+                    # Compatibility-only owner used outside the production
+                    # ASGI composition during the rollback window.
+                    logger.warning(
+                        "Startup degradation projection skipped: %s",
+                        _degradation_exc,
+                    )
             report = build_startup_report(
                 runtime_statuses=new_module_statuses,
                 dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
@@ -515,7 +525,8 @@ def runtime_lifespan(
                     from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
 
                     _resource_manager = SystemResourceManager(
-                        model_attempt_service=get_model_attempt_service()
+                        model_attempt_service=get_model_attempt_service(),
+                        degradation_state_provider=degradation_state_provider,
                     )
                     _resource_manager.start(
                         run_immediately=core_settings.resource_manager_run_on_startup
@@ -534,11 +545,12 @@ def runtime_lifespan(
                 logger.warning("SystemResourceManager 启动失败（降级）: %s", _rm_exc)
 
             # 服务健康心跳：定时探测 Edge/Host，避免总览一直显示「未知」
-            try:
-                from host_brain.app.observability_runtime.service_health_heartbeat import start_heartbeat
-                start_heartbeat(interval_sec=30.0)
-            except Exception as hb_exc:
-                logger.warning("Service health heartbeat start skipped: %s", hb_exc)
+            if start_service_heartbeat:
+                try:
+                    from host_brain.app.observability_runtime.service_health_heartbeat import start_heartbeat
+                    start_heartbeat(interval_sec=30.0)
+                except Exception as hb_exc:
+                    logger.warning("Service health heartbeat start skipped: %s", hb_exc)
 
             # [Tribe 基础设施] 初始化 TribeEventBus 单例 + HostTribeRegistry 单例
             # Phase 0：确保所有族 Agent 在启动时可以通过 get_tribe_event_bus() /
