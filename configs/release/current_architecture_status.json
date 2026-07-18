@@ -559,9 +559,9 @@
       "reason": "Host plan search only validates and orders approved planned_steps."
     },
     "pentest_conditional_mcts": {
-      "status": "SHADOW_UNCALIBRATED",
-      "production_influence": "NOT_ACCEPTED",
-      "reason": "Candidate expansion is root-fixed and calibration is in-memory and baseline-root scoped."
+      "status": "SHADOW_ONLY_MEMORY_CALIBRATION",
+      "production_influence": "DISABLED_UNTIL_DURABLE_PROMOTION",
+      "reason": "Adapter always selects the L1/L2 baseline. Candidate expansion is root-fixed, calibration is in-memory and baseline-root scoped, and no durable promotion authority exists."
     },
     "research_production_planning_benefit": {
       "status": "UNPROVEN",

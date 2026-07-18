@@ -23,7 +23,7 @@
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
 | 通用 PlanningSearch 内核 | `AVAILABLE` | 领域无关 contracts、ports、L1/L2/L3 算法存在 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
-| Pentest L3 | `WIRED_SHADOW_UNCALIBRATED` | Conditional MCTS 可运行，但校准非 durable，不能证明 production uplift |
+| Pentest L3 | `WIRED_SHADOW_ONLY_MEMORY_CALIBRATION` | Conditional MCTS 可运行，但 adapter 强制选择 L1/L2 baseline；内存校准即使过阈值也没有 production influence，且不能证明 uplift |
 | Code/Research 收益 | `SIMULATION_ONLY` | 只有冻结模拟 fixture；没有真实仓库、真实来源或真实模型 shadow |
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |
 | Governed Chat Surface 模型预算 | `PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD` | 仅已 admission 的 Host chat 节点把冻结剩余预算传给 Surface 主模型调用：强制 provider attempt、总 token、输出 token 与 model cost 上限，缺 canonical usage 或超限即拒绝；不覆盖 Thalamus、Delegate、通用工具或全局成本预支 |
@@ -283,7 +283,7 @@ Pentest L1/L2 已接入公共 service，L3 使用纯虚拟 transition/reward，�
 3. 无法表达“A 获得 capability 后才解锁 B”的后继生成；
 4. calibration ledger 是内存对象，不能跨 run 形成可靠证据。
 
-shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行替代路径的真实结果。因此 production influence 必须保持 `NOT_ACCEPTED`。
+shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行替代路径的真实结果。因此 adapter 已强制 production influence 为 `DISABLED_UNTIL_DURABLE_PROMOTION`；内存 ledger 的阈值不再能改变真实动作。未来必须同时具备 durable calibration、反事实证据和已批准 promotion gate，才可另行引入受控切流。
 
 ### 5.4 Code / Research
 
