@@ -6,5 +6,6 @@ validation tools import it through :mod:`host_brain.validation`.
 """
 
 from .world_resolver import WorldResolver, WorldResolverError
+from .intent_arbiter import IntentArbiter
 
-__all__ = ["WorldResolver", "WorldResolverError"]
+__all__ = ["IntentArbiter", "WorldResolver", "WorldResolverError"]

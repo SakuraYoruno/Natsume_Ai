@@ -22,7 +22,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 | 长期演化 | `INCOMPLETE` | World/Scene/Identity 等有局部资产，Evolution Lab、Skill Compiler、Knowledge OS 等未形成完整生产闭环 |
 
 NE-02 的 Research shadow 已新增独立语料绑定、执行 profile/budget、citation verifier、双臂回执合同和 0107 append-only SQLite ledger；脚本重放与未 attested 的 canonical attempt 永远不能形成收益结论。D20c 已冻结外部 provider attestation 合同：必须是新请求、真实 provider、模型/路由/响应摘要、token、成本与延迟齐全；localhost、mock、disabled、test、placeholder 和 cache 路径会被拒绝。该合同仍不等于已获得外部凭据后的真实收益证明。NE-01 的 fan-out/atomic 生产开关即使显式设置，也必须同时提供 `HOST_TASK_RUNTIME_CANARY_RECEIPT`，缺失时启动失败关闭。NE-03 已冻结 workspace-scoped `WorldFactV2`、`WorldSnapshotV2`、`ContextPackV2` 和 `SceneDecisionV2` 合同；它们尚未替代旧 person-scoped resolver。
-NE-03 的只读 `WorldResolver` 已按 workspace/subject 过滤 journal 事实，保留 competing refs，过期事实只按读取时钟剔除且不会续期；它尚未替代旧 person-scoped production resolver。
+NE-03 的只读 `WorldResolver` 已按 workspace/subject 过滤 journal 事实，保留 competing refs，过期事实只按读取时钟剔除且不会续期；`IntentArbiter` 只合并并收紧 Scene、关系、风险和 Grant 约束，不替换用户目标或扩大权限。它们尚未替代旧 person-scoped production resolver。
 NE-04 已冻结 proposal-only 的 `ExperimentSpecV1`、`ExperimentRunReceiptV1`、`CounterfactualPairV1`、`ExperimentReportV1` 和 `EvolutionProposalV1`；实验合同禁止生产 writer、未 Review promotion 和副作用，隔离 runner 与 durable Lab ledger 仍待接线。
 NE-05 已新增确定性的 `SkillDraftV1` 编译器，统一 Markdown/API/script/accepted trace 的 I/O、风险、依赖、verifier、测试向量、预算和回滚元数据；编译器不 import、不激活外部代码，供应链 sandbox/activation/rollback 仍待接线。
 NE-06 已冻结 `FeedbackProposalV1`、namespace 分离的 `KnowledgeEntryV1` 和带 regression/review/rollback 绑定的 `IdentityMigrationPlanV1`；这些合同禁止未 Review 直写和跨 workspace 知识串线，生产 proposal/activation 仍待接线。
