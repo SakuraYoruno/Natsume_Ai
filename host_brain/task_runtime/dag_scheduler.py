@@ -95,6 +95,12 @@ def compute_dag_schedule(
                 + ",".join(missing)
             )
 
+    # A malformed durable snapshot must never be made executable by falling
+    # back to insertion order or serial execution.  Admission normally
+    # rejects cycles, but recovery/replay can observe old or manually-created
+    # rows, so the scheduler repeats the graph invariant at its boundary.
+    _reject_cycles(by_id)
+
     ready: list[str] = []
     dependency_ready: list[str] = []
     retry_due: list[str] = []
@@ -184,6 +190,36 @@ def _validate_candidate(candidate: DagNodeScheduleCandidate) -> None:
             raise DagScheduleInputError(
                 f"candidate {candidate.node_id} sets retry_not_before_ms outside RETRY_PENDING"
             )
+
+
+def _reject_cycles(
+    candidates: dict[str, DagNodeScheduleCandidate],
+) -> None:
+    """Reject every dependency cycle with a stable, actionable error."""
+
+    indegree = {node_id: len(candidate.dependencies) for node_id, candidate in candidates.items()}
+    dependents: dict[str, list[str]] = {node_id: [] for node_id in candidates}
+    for candidate in candidates.values():
+        for dependency in candidate.dependencies:
+            dependents[dependency].append(candidate.node_id)
+
+    ready = sorted(node_id for node_id, degree in indegree.items() if degree == 0)
+    visited = 0
+    while ready:
+        node_id = ready.pop(0)
+        visited += 1
+        for dependent in sorted(dependents[node_id]):
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                ready.append(dependent)
+                ready.sort()
+
+    if visited != len(candidates):
+        cyclic = sorted(node_id for node_id, degree in indegree.items() if degree > 0)
+        raise DagScheduleInputError(
+            "PLAN_CYCLE: durable DAG contains a dependency cycle: "
+            + ",".join(cyclic)
+        )
 
 
 def _require_non_negative_int(

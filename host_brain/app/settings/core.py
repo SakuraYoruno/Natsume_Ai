@@ -169,6 +169,18 @@ class CoreSettings(BaseSettings):
     task_runtime_canonical_owner: str = Field(
         default="", alias="HOST_TASK_RUNTIME_CANONICAL_OWNER"
     )
+    task_runtime_bounded_fanout_enabled: bool = Field(
+        default=False,
+        alias="HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED",
+    )
+    task_runtime_atomic_graph_success_enabled: bool = Field(
+        default=False,
+        alias="HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED",
+    )
+    task_runtime_canary_receipt: str = Field(
+        default="",
+        alias="HOST_TASK_RUNTIME_CANARY_RECEIPT",
+    )
     agent_workspace_managed_root: Path = Field(
         default_factory=lambda: Path.home() / ".natsume" / "agent_worktrees",
         alias="HOST_AGENT_WORKSPACE_MANAGED_ROOT",
@@ -268,6 +280,11 @@ class CoreSettings(BaseSettings):
             raise ValueError(
                 "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_EFFECT_RECONCILIATION"
             )
+        if (
+            self.task_runtime_bounded_fanout_enabled
+            or self.task_runtime_atomic_graph_success_enabled
+        ) and not self.task_runtime_canary_receipt.strip():
+            raise ValueError("TASK_RUNTIME_GRAPH_ENABLEMENT_REQUIRES_CANARY_RECEIPT")
         return self
 
     def task_reconciliation_public_keys(self) -> dict[str, bytes]:
@@ -320,6 +337,33 @@ class CoreSettings(BaseSettings):
                 default_value="",
                 current_value=s.task_runtime_canonical_owner,
                 is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_bounded_fanout_enabled",
+                env_key="HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED",
+                default_value=False,
+                current_value=s.task_runtime_bounded_fanout_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_atomic_graph_success_enabled",
+                env_key="HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED",
+                default_value=False,
+                current_value=s.task_runtime_atomic_graph_success_enabled,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_canary_receipt",
+                env_key="HOST_TASK_RUNTIME_CANARY_RECEIPT",
+                default_value="",
+                current_value=("configured" if s.task_runtime_canary_receipt else ""),
+                is_required=(
+                    s.task_runtime_bounded_fanout_enabled
+                    or s.task_runtime_atomic_graph_success_enabled
+                ),
             ),
             inspect_setting(
                 domain=domain,

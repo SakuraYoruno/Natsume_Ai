@@ -182,6 +182,18 @@ def test_b0_unknown_dependency_snapshot_fails_closed() -> None:
         )
 
 
+def test_b0_dependency_cycle_fails_closed_instead_of_serializing_execution() -> None:
+    with pytest.raises(DagScheduleInputError, match=r"PLAN_CYCLE:.*left.*right"):
+        compute_dag_schedule(
+            (
+                _candidate("left", TaskNodeStatus.READY, dependencies=("right",)),
+                _candidate("right", TaskNodeStatus.READY, dependencies=("left",)),
+            ),
+            now_ms=1_000,
+            concurrency_limit=2,
+        )
+
+
 @pytest.mark.parametrize(
     ("concurrency_limit", "occupied_slots"),
     [(0, 0), (True, 0), (1, -1), (1, True)],

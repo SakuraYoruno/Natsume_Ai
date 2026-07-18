@@ -7,6 +7,7 @@
   "production_enablement": {
     "atomic_graph_success": "OFF",
     "bounded_fanout": "OFF",
+    "graph_enablement_gate": "CANARY_RECEIPT_REQUIRED",
     "durable_cancellation": "OFF",
     "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "effect_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
