@@ -35,6 +35,8 @@
 | Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
 | 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Identity 等有资产，但 Evolution Lab、Skill Compiler、Knowledge OS 等未形成生产闭环 |
 
+恢复调度边界现在会对 durable TaskGraph snapshot 重新执行全图环检测；发现依赖环时返回 `PLAN_CYCLE` 并失败关闭，绝不忽略依赖或退化为串行执行。该修复收口执行安全边界，但不改变多节点生产 canary 尚未完成的事实。
+
 因此：历史 Core/GR 回执可以证明对应资产存在，不能证明 `Full Architecture DONE`。
 
 ## 2. 运行拓扑
