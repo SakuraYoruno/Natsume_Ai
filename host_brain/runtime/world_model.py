@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
@@ -414,16 +415,76 @@ async def _state_arbiter_facts(
     return facts
 
 
+def _fact_value_fingerprint(value: Any) -> str:
+    """Create a deterministic comparison key without using source confidence."""
+
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def _has_competing_values(facts: Sequence[Mapping[str, Any]]) -> bool:
+    return len({_fact_value_fingerprint(item.get("value")) for item in facts}) > 1
+
+
 def _dedupe_facts(facts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    deduped: dict[str, dict[str, Any]] = {}
+    """Deduplicate exact source observations without hiding source conflicts.
+
+    The former implementation keyed only by ``key`` and selected the highest
+    confidence value.  That silently discarded competing observations.  A
+    source may still refresh its own projection, but distinct source refs are
+    retained.  They are marked as a conflict only when their values differ;
+    equal values from multiple sources are corroborating evidence instead.
+    """
+
+    deduped: dict[tuple[str, str], dict[str, Any]] = {}
     for item in facts:
         key = str(item.get("key") or "")
         if not key:
             continue
-        existing = deduped.get(key)
+        source_ref = str(item.get("source_ref") or item.get("source") or "unknown")
+        identity = (key, source_ref)
+        existing = deduped.get(identity)
         if existing is None or float(item.get("confidence") or 0.0) >= float(existing.get("confidence") or 0.0):
-            deduped[key] = dict(item)
-    return list(deduped.values())
+            deduped[identity] = dict(item)
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in deduped.values():
+        grouped.setdefault(str(item.get("key") or ""), []).append(item)
+    for key, competing in grouped.items():
+        source_refs = sorted(
+            {
+                str(item.get("source_ref") or item.get("source") or "unknown")
+                for item in competing
+            }
+        )
+        if len(source_refs) < 2:
+            continue
+        has_competing_values = _has_competing_values(competing)
+        for item in competing:
+            metadata = dict(item.get("metadata") or {})
+            if has_competing_values:
+                previous = str(item.get("conflict_state") or "NONE").strip().upper()
+                item["conflict_state"] = previous if "CONFLICT" in previous else "CONFLICT"
+                item["conflict_detail"] = "competing source values retained"
+                metadata["competing_source_refs"] = source_refs
+            else:
+                metadata["corroborating_source_refs"] = source_refs
+            item["metadata"] = metadata
+    return sorted(
+        deduped.values(),
+        key=lambda item: (
+            str(item.get("key") or ""),
+            str(item.get("source_ref") or item.get("source") or ""),
+        ),
+    )
 
 
 async def build_world_snapshot(
@@ -482,7 +543,7 @@ async def build_world_snapshot(
     facts.extend(await _state_arbiter_facts(state_arbiter=state_arbiter, fact_keys=list(fact_keys or []), session_id=session_id, now_ms=now))
     deduped = _dedupe_facts(facts)
     source_summary: dict[str, int] = {}
-    conflict_count = 0
+    conflict_keys: set[str] = set()
     expired_count = 0
     inferred_count = 0
     for fact in deduped:
@@ -490,7 +551,7 @@ async def build_world_snapshot(
         source_summary[source] = source_summary.get(source, 0) + 1
         conflict_state = str(fact.get("conflict_state") or "")
         if "CONFLICT" in conflict_state or "SOURCE_UNAVAILABLE" in conflict_state:
-            conflict_count += 1
+            conflict_keys.add(str(fact.get("key") or ""))
         if "EXPIRED" in conflict_state:
             expired_count += 1
         if str(fact.get("epistemic_type") or "") == "inferred":
@@ -505,10 +566,24 @@ async def build_world_snapshot(
         "status": "OK",
         "facts": deduped,
         "source_summary": source_summary,
-        "conflict_count": conflict_count,
+        "conflict_count": len({key for key in conflict_keys if key}),
         "expired_count": expired_count,
         "inferred_count": inferred_count,
+        "competing_facts": {
+            key: [dict(item) for item in values]
+            for key, values in _group_facts_by_key(deduped).items()
+            if _has_competing_values(values)
+        },
     }
+
+
+def _group_facts_by_key(facts: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for fact in facts:
+        key = str(fact.get("key") or "")
+        if key:
+            grouped.setdefault(key, []).append(dict(fact))
+    return grouped
 
 
 class WorldProjectionReadModel:

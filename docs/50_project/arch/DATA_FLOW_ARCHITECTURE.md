@@ -1025,6 +1025,8 @@ flowchart LR
 
 Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Surface、Proactive 和 Task 已消费一致的 scene revision/digest。长周期目标尚无独立 durable owner，Bond 原始证据仍来自既有上游投影，因此空 `long_term_goal_refs` 不得被臆造值填充。
 
+兼容 World projection 不参与 Scene authority：它只按 `(key, source_ref)` 保留来源，值不同的来源形成只读 `competing_facts`，同值多来源是 corroboration；任何一方都不能用较高 confidence 静默覆盖另一来源。
+
 ### 9.6 Host HardState durable mode flow
 
 ```mermaid

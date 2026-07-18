@@ -271,6 +271,7 @@
 ### NE-03 World / Scene / Intent / Guardian
 
 - T-NE03-CONTEXT-01：0111 Observation writer 绑定 Host lease 与 canonical source verifier；SQLite 原子分配 workspace/subject revision，并覆盖 exact replay/drift、双 writer、captured head 截断、物理行漂移、future/non-monotonic time、伪造/重复 expiry、expired digest reactivation、重启与超期未 transition fail-closed。
+- T-NE03-WORLD-COMPETING-01：兼容 `WorldProjectionReadModel` 必须按 `(key, source_ref)` 去重，不能按最高 confidence 覆盖另一来源；同值多来源保留为 `corroborating_source_refs` 且不伪造 conflict，值不同的来源保留为 `competing_source_refs` 与只读 `competing_facts`。该回归不替代 workspace-scoped `WorldResolver`、Scene 或 Guardian production authority。
 - T-NE03-SCENE-01：Scene 只消费 app-local typed Guardian snapshot；同一 World/context/Guardian 返回相同 revision/digest，重复读取不追加，变更严格推进；覆盖八场景、1001+ replay、并发 CAS、旧 lease takeover fencing、fingerprint/digest/authority lineage 与 0112 schema drift。
 - T-NE03-INTENT-01：IntentAuthorityPort 对 principal、goal、TaskGraph/node、ContextPack、Scene、action、Grant、policy 与全量约束返回短时效 typed attestation；过期/撤销/跨 principal Grant、任一 binding drift、约束遗漏/冲突和 detached arbitration 均 fail-closed，结果固定 `execution_authorized=false`。
 - T-NE03-GUARDIAN-01：RuntimeGuardian 无 module-global singleton；0112 在 append 同一 SQLite 事务校验 Host scope/owner/lease/fence，并覆盖 1001+ replay、commit-then-raise、CAS loser fencing、lease takeover、deterministic health/recovery reducer replay、伪造 next-state、多 PREPARED Review recovery、maintenance/sleep、SLO 与 acknowledgement。

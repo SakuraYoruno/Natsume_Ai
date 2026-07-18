@@ -31,7 +31,7 @@ Tribe runtime 的当前模块边界为 `app/tribe_runtime_scope.py`：它是 ASG
 | `LEGACY` | 仍被兼容路径使用，不是目标 authority |
 | `MISSING` | 尚无满足目标语义的生产实现 |
 
-“源码存在”和“模块已成为生产权威”不是同一件事。例如 PlanningSearch 内核存在，不代表 Host 已能生成竞争计划；World Model 查询资产存在，不代表它已是规划世界模型。
+“源码存在”和“模块已成为生产权威”不是同一件事。例如 PlanningSearch 内核存在，不代表 Host 已能生成竞争计划；World Model 查询资产存在，不代表它已是规划世界模型。兼容 World projection 只保留 `(key, source_ref)` 来源事实：不同值会形成只读冲突组，同值多来源仅是佐证，不能作为新的 Scene 或执行 authority。
 
 ## 2. 生产运行面
 

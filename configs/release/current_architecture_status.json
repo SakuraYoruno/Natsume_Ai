@@ -2879,7 +2879,14 @@
       "status": "PARTIAL_NE03_PRODUCTION_OBSERVATION_WIRED_NOT_PREDICTIVE",
       "runtime_projection_default": "HOST_LIFESPAN_COMPOSED",
       "write_api_available": true,
-      "reason": "The Host lifespan composes RuntimeWorldObservationApplication with migration 0111, an active Host lease and canonical RuntimeEvent source verification. Server-owned principal, existing Bond/Emotion projections and composition-owned environment signals are appended and reopened through WorldResolver; the raw request body cannot select World or Scene. TTL advances through explicit expiry transitions and reads do not renew it. The upstream Bond raw-evidence owner is not replaced, long-term goals have no independent durable owner, and this remains a current-fact projection rather than a predictive planning world model.",
+      "reason": "The Host lifespan composes RuntimeWorldObservationApplication with migration 0111, an active Host lease and canonical RuntimeEvent source verification. Server-owned principal, existing Bond/Emotion projections and composition-owned environment signals are appended and reopened through WorldResolver; the raw request body cannot select World or Scene. TTL advances through explicit expiry transitions and reads do not renew it. The compatibility WorldProjectionReadModel retains observations by (key, source_ref): different values remain an explicit read-only conflict group while equal values are corroboration, never a confidence-only overwrite. The upstream Bond raw-evidence owner is not replaced, long-term goals have no independent durable owner, and this remains a current-fact projection rather than a predictive planning world model.",
+      "compatibility_projection_conflict_boundary": {
+        "status": "SCOPED_LOCAL_GATE_PASSED_NOT_SCENE_OR_EXECUTION_AUTHORITY",
+        "semantics": "Same-source observations deduplicate by higher confidence. Different source refs with different values are retained as competing_source_refs and read-only competing_facts; matching values are retained as corroborating_source_refs without manufacturing a conflict.",
+        "local_validation": "43_PASSED_WORLD_UNIT_CONTRACT_AND_SQLITE_INTEGRATION",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "boundary": "This compatibility projection does not replace workspace-scoped WorldResolver, SceneResolver, RuntimeGuardian, or a predictive planning world model."
+      },
       "evidence_refs": [
         "host_brain/audit/migrations/0111_world_observation_journal.sql",
         "host_brain/persistence/world_observation_journal.py",
@@ -2889,7 +2896,8 @@
         "host_brain/runtime/world_resolver.py",
         "tests/integration/test_ne03_context_application.py",
         "tests/unit/test_ne03_world_resolver.py",
-        "tests/integration/test_ne03_world_observation_journal.py"
+        "tests/integration/test_ne03_world_observation_journal.py",
+        "tests/unit/test_ne03_world_model_conflicts.py"
       ]
     },
     "scene_engine": {
