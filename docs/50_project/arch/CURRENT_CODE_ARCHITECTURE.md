@@ -407,12 +407,16 @@ Edge session/owner 不是默认的进程字符串：Host 从 normalized canonica
 | Capability Maturity | scorecard/provider/Governor adapter | policy 默认关闭；缺 durable promotion/degradation lifecycle |
 | Capability Forge | `app/capability_forge.py` | 是 gap proposal/canary 服务，不是从文档/轨迹生成 SkillBundle 的 Skill Compiler |
 | Evolution Lab | `evolution_lab/policy.py` | 只有分支前缀守卫，尚无 scenario runner、experiment store 或 promotion gate |
-| Feedback | response/persona/recommendation feedback 资产 | 没有统一 proposal pipeline；Prefrontal 调用 `on_interaction_cycle()` 的参数与真实签名不符，`TypeError` 被吞掉 |
+| Feedback | response/persona/recommendation feedback + 0110 proposal ledger | `FeedbackProposalV1` 已可持久化 STAGED/APPLIED/ROLLED_BACK；Prefrontal 参数漂移已修复，旧增长 caller 尚未全部转为 proposal adapter |
 | Persona Growth | `persona_growth.py`、Bond stage、Evolution Orchestrator、emergent growth skill | legacy 入口已被 `PersonaEngine` 中央围栏和静态扫描封禁；当前只产生经 drift guard 检查的无副作用 candidate，尚未接入 proposal/Review/版本激活 |
-| Knowledge OS | Memory、Retrieval、Canon、Markdown KB | 缺统一 provenance、版本、过期、冲突与 Decision Record 生命周期 |
-| Identity | `release/identity_snapshot.py` | snapshot/diff/review/rollback 合同存在；gate 默认关闭，未形成真实 migration executor |
+| Knowledge OS | `KnowledgeEntryV1`、0110 namespace ledger、active projection | life/project namespace、competing refs、activation/deprecation 已有；旧 Memory/Markdown KB/Canon 尚未 shadow/cutover |
+| Identity | `release/identity_snapshot.py`、`IdentityMigrationPlanV1`、0110 plan/event ledger | migration ACTIVE/ROLLED_BACK 事件要求 regression + Review；现有 snapshot owner 和 production executor 未接线 |
 | Runtime Guardian | health、degradation、heartbeat、service catalog | degradation/recovery evidence 已接部分生产链；Catalog startup coordinator 未进生产 composition、默认 `AUDIT`，前门与 SLO owner 不完整 |
 | Workspace Isolation | `agent_runtime/workspace_paths.py`、`agent_runtime/workspace_policy.py`、`agent_runtime/workspace_allocator.py`、`agent_runtime/workspace_runtime.py`、`composition/agent_workspace.py`、`persistence/workspace_repository.py`、`persistence/workspace_operation_fencing.py` | D0/W0/W1 继续生效。W2 为认证 Internal Agent 写 admission 派生 graph workspace，显式配置 secret 后冻结 exact source commit并创建独立 Git worktree；实例/PID lease、同 workspace 独占 scope、heartbeat、顺序 handoff、过期 takeover、cleanup receipt、启动同步 1 条+后台 pending continuation 与 ASGI quiescence 已接线。focused fencing 模块只让 provisioning/allocator/cleanup adapter 的外部 Git/filesystem callback 由 workspace/source 锁串行，在共享 deadline 内运行并在前后 exact authority 短事务间完成，不持有 SQLite writer；后验漂移只返回失败。Agent tool 只在动作间协作取消，Verification 只在整体启动前验活；二者没有逐操作 fence或强杀。默认缺 secret 时写入 fail closed，canary 未跑。状态仅为 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED`，且没有 promotion/abandon、accepted checkpoint HEAD、Domain/Skill 接线、OS/container/tenant 与 handle-level TOCTOU 防护 |
+
+### NE-06 生产证据链状态
+
+0110 `evolution_governance_ledger` 把 Feedback、Knowledge、Identity 的 proposal 与 apply/rollback 事件分开持久化：没有 Lab/Review 的 proposal 只能停留在 STAGED/PROPOSED；Knowledge 的读取只返回已激活且未废弃的 workspace-scoped projection，并保留 competing refs；Identity activation 必须绑定 regression report、Review 和 rollback snapshot。`PrefrontalAgent` 已改用有界 interaction_stats 调用 `PersonaGrowthTracker`，不再把原始对话字段误传进成长接口。该切片仍不等于全量生产闭环：旧 stage/milestone/emergent caller、现有 IdentitySnapshot owner、Memory/Markdown KB/Canon shadow cutover 和真实 Lab/Review route 尚未接线。
 
 ## 9. 仓库边界
 

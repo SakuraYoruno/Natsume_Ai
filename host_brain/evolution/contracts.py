@@ -72,6 +72,28 @@ class FeedbackProposalV1:
         object.__setattr__(self, "review_required", True)
         object.__setattr__(self, "applied", False)
 
+    @property
+    def proposal_digest(self) -> str:
+        return _hash(self.to_dict(include_digest=False))
+
+    def to_dict(self, *, include_digest: bool = True) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "schema": "natsume.feedback-proposal.v1",
+            "proposal_id": self.proposal_id,
+            "source_kind": self.source_kind,
+            "trace_digest": self.trace_digest,
+            "outcome_digest": self.outcome_digest,
+            "confidence": self.confidence,
+            "target_version": self.target_version,
+            "change": _copy(self.change),
+            "rollback_ref": self.rollback_ref,
+            "review_required": True,
+            "applied": False,
+        }
+        if include_digest:
+            result["proposal_digest"] = self.proposal_digest
+        return result
+
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeEntryV1:
@@ -136,6 +158,7 @@ class IdentityMigrationPlanV1:
     review_ref: str
     rollback_snapshot_digest: str
     activation_version: int
+    no_change_release: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "migration_id", _text(self.migration_id, "migration_id", 160))
@@ -145,8 +168,31 @@ class IdentityMigrationPlanV1:
         object.__setattr__(self, "review_ref", _text(self.review_ref, "review_ref", 1_024))
         if isinstance(self.activation_version, bool) or not isinstance(self.activation_version, int) or self.activation_version < 1:
             raise KnowledgeEvolutionContractError("activation_version must be positive")
-        if self.previous_snapshot_digest == self.proposed_snapshot_digest:
+        if not isinstance(self.no_change_release, bool):
+            raise KnowledgeEvolutionContractError("no_change_release must be bool")
+        if self.previous_snapshot_digest == self.proposed_snapshot_digest and not self.no_change_release:
             raise KnowledgeEvolutionContractError("identity migration must describe a change or be explicitly no-op outside this plan")
+
+    @property
+    def plan_digest(self) -> str:
+        return _hash(self.to_dict(include_digest=False))
+
+    def to_dict(self, *, include_digest: bool = True) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "schema": "natsume.identity-migration-plan.v1",
+            "migration_id": self.migration_id,
+            "previous_snapshot_digest": self.previous_snapshot_digest,
+            "proposed_snapshot_digest": self.proposed_snapshot_digest,
+            "diff_digest": self.diff_digest,
+            "regression_report_ref": self.regression_report_ref,
+            "review_ref": self.review_ref,
+            "rollback_snapshot_digest": self.rollback_snapshot_digest,
+            "activation_version": self.activation_version,
+            "no_change_release": self.no_change_release,
+        }
+        if include_digest:
+            result["plan_digest"] = self.plan_digest
+        return result
 
 
 __all__ = [

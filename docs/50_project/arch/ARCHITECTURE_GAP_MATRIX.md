@@ -92,10 +92,10 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 | Capability Maturity | `PARTIAL` | scorecard/provider/Governor adapter | 只读投影；门禁默认关闭，缺 durable promotion/degradation authority | NE-05 |
 | Capability Forge | `PARTIAL` | `app/capability_forge.py` | 能生成/批准 blueprint 和 canary 路由，不会生成新能力实现 | NE-05 |
 | Skill Compiler | `MISSING` | 无 document/trace/script compiler | 缺 typed draft、测试、SBOM、签名、sandbox、activation 全链 | NE-05 |
-| Experience Feedback | `PARTIAL_BROKEN_PATH` | response/persona/recommendation feedback | 多条局部链；Prefrontal 调用参数与 `on_interaction_cycle()` 签名不符且异常被吞；没有统一 proposal/review/rollback pipeline | NE-06 |
-| Knowledge OS | `MISSING` | Memory、Retrieval、Canon 是基础资产 | 缺 provenance/version/staleness/conflict/decision lifecycle | NE-06 |
+| Experience Feedback | `PARTIAL_NE06_DURABLE_PROPOSAL_LEDGER` | `evolution/contracts.py`、`persistence/evolution_governance_ledger.py`、Prefrontal adapter | 0110 已持久化 proposal→Lab/Review→apply/rollback，Prefrontal 参数漂移已修复；stage/milestone/emergent caller 尚未全部转为 proposal adapter | NE-06 |
+| Knowledge OS | `PARTIAL_NE06_NAMESPACE_PROPOSAL_LEDGER` | `KnowledgeEntryV1`、0110 namespace ledger、active projection | life/project namespace、competing refs、activation/deprecation 已有；旧 Memory/Markdown KB/Canon/Pentest shadow compare 与切换未完成 | NE-06 |
 | Identity Snapshot | `PARTIAL` | `release/identity_snapshot.py` | 合同丰富，但 gate 默认关闭，未由 release 主链生成/持久化 | NE-06 |
-| Identity Migration | `MISSING` | 无 migration executor | 缺计划、隔离迁移、人格回归、用户确认、激活/回滚闭环 | NE-06 |
+| Identity Migration | `PARTIAL_NE06_DURABLE_ACTIVATION_ROLLBACK` | `IdentityMigrationPlanV1`、0110 identity plan/event ledger、production composition | ACTIVE/ROLLED_BACK 事件要求 regression + Review；现有 IdentitySnapshot owner、persona regression 和生产 atomic activation 未接线 | NE-06 |
 
 ## 5. 历史证据的正确解释
 

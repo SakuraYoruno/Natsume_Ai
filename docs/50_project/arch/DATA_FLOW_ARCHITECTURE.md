@@ -206,6 +206,27 @@ Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加�
 
 这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。Executive legacy SkillDag 生产执行和进程内 registry 已删除；后续约束重点是把 Internal 与领域兼容入口全部迁入同一 lineage。
 
+### 4.3 Feedback、Knowledge 与 Identity 演化（NE-06）
+
+NE-06 把长期变化限定为 proposal 流：旧增长入口只生成 FeedbackProposal，Knowledge 先以 namespace-scoped proposal 保存，Identity 先注册 migration plan。0110 ledger 以 append-only event 记录 `PROPOSED/STAGED → Lab + Review → ACTIVE/APPLIED → ROLLED_BACK/DEPRECATED`，任何读取只看已激活 projection。
+
+```mermaid
+flowchart LR
+    Outcome[任务结果 / 用户反馈] --> Feedback[FeedbackProposal]
+    Fact[Life 或 Project 事实] --> Knowledge[KnowledgeEntry proposal]
+    Snapshot[Identity snapshot + diff] --> Identity[MigrationPlan]
+    Feedback --> Ledger[0110 Evolution Governance Ledger]
+    Knowledge --> Ledger
+    Identity --> Ledger
+    Lab[Lab evidence] --> Gate{Review + evidence gate}
+    Ledger --> Gate
+    Gate -->|拒绝 / 保持 proposal| Pending[只读 proposal]
+    Gate -->|通过| Active[版本化 active projection]
+    Active --> Rollback[durable rollback / deprecation event]
+```
+
+反馈、知识和人格都没有直接生产 writer；当前 repository/composition 已能回放 apply/rollback，旧 Memory、IdentitySnapshot owner 和所有增长 caller 的完整切流仍待完成。
+
 ### 4.3 Delegate
 
 Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_dispatch.py](../../../host_brain/app/governed_delegate_dispatch.py) 只注册 `pentest_agent`，将 command/request/session/principal、root WorkOrder、graph/revision/node、attempt、lease/owner/fence、parent/node grant、objective 与 input reference 冻结为一次 invocation；调用前重新校验 node grant，并只投影无副作用的 Domain Pack/SecureRun handoff。它不经过旧 `SubAgentDispatcher`、全局 Agent gateway 或独立 `skill_exec_log`。

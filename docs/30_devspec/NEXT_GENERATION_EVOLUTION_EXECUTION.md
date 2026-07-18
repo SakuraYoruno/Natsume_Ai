@@ -297,6 +297,8 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 删除其余吞异常的局部反馈链；
 - proposal 进入 Lab、Review，再更新版本化 policy/maturity/knowledge。
 
+当前进度：`FeedbackProposalV1` 已补齐 canonical digest/to_dict；0110 append-only ledger 已持久化 STAGED、Lab/Review APPLIED 和 ROLLED_BACK 事件，Prefrontal 的旧 `on_interaction_cycle()` 参数漂移已改为有界 `interaction_stats`。stage、milestone、emergent weekly 仍只产生候选，尚未全部改成 proposal adapter。
+
 #### Knowledge OS
 
 - 明确 Life Memory 与 Project Knowledge namespace；
@@ -304,12 +306,16 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 支持去重、过期、冲突、promotion、deprecation 与项目摘要；
 - 重大架构选择生成 ADR/Decision Record，不把 Canon 当普通事实库。
 
+当前进度：0110 已提供 life-memory/project-knowledge 双 namespace 的 proposal→Lab/Review→active/deprecate 事件和只读 active projection，并保留同 conflict group 的 competing refs；旧 Memory/Markdown KB/Canon/Pentest 资产尚未完成 shadow compare 与读切换。
+
 #### Identity
 
 - release 主链真实生成和持久化 IdentitySnapshot；
 - 建立 migration plan/executor、persona/relationship regression、用户 Review；
 - 重大变化默认阻断，激活后保留前一 release rollback ref；
 - 记忆正文和私密 thought 不进入 snapshot。
+
+当前进度：`IdentityMigrationPlanV1` 已支持显式 no-change release，0110 已持久化 PROPOSED→ACTIVE→ROLLED_BACK 事件并要求 regression report 与 Review；现有 IdentitySnapshot/Review owner 尚未接入生产 activation。
 
 完成条件：T-PERSONA-PROPOSAL-01 通过；至少一条真实任务经验走完整 proposal→Lab→Review→versioned apply；一个项目知识冲突被识别并处置；一次 identity no-change 与一次重大差异阻断/回滚演练通过。
 
@@ -374,7 +380,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前基线已推进到 `0108_evolution_lab_ledger.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前 NE-06 分支推进到 `0110_evolution_governance_ledger.sql`，后续 NE 波次继续使用 next-free 编号，不得把旧的 0104 固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 
