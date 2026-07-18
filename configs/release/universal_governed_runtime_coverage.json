@@ -386,6 +386,38 @@
         "tests/unit/test_parallel_settlement_budget_winner_selection.py"
       ]
     },
+    "visual_agent_direct_execution_authority": {
+      "status": "PARTIAL",
+      "stage": "RETIRED_COMPATIBILITY_ONLY_PRODUCTION_OFF",
+      "surface": "/v1/agent/run",
+      "compatibility_envelope": "AGENT_INIT_TO_LOOP_DONE",
+      "terminal_status": "REJECTED",
+      "reason_code": "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED",
+      "side_effects_executed": false,
+      "execution_rounds": 0,
+      "retired_paths": [
+        "host_brain/app/vision/agent_loop.py",
+        "host_brain/app/vision/edge_rpc_client.py",
+        "SQLiteLedger.log_agent_loop"
+      ],
+      "legacy_execution_symbol_production_references": 0,
+      "model_ledger_edge_or_clawdbot_resolution": 0,
+      "chat_actions_boundary": "ONLY_TEXT_CONTINUES; ACTIONS_AND_UNKNOWN_VALUES_REJECT_BEFORE_RUNTIME_MODEL_PROMPT_MEMORY_LEDGER",
+      "legacy_action_planner_model_entry": "SEALED_FIXED_REJECTION",
+      "retained_parser_authority": "NONE_PROPOSAL_ONLY",
+      "positive_execution": "MISSING_PROPOSAL_TO_NEW_IMMUTABLE_TASK_GRAPH_REVISION",
+      "boundary": "Authority retirement is not a Visual Agent capability PASS. This compatibility endpoint is distinct from the Delegate vision_agent target.",
+      "evidence_refs": [
+        "host_brain/app/agent_routes.py",
+        "host_brain/app/chat_routes.py",
+        "host_brain/app/chat_handler_vision.py",
+        "host_brain/app/vision/action_planner.py",
+        "tests/unit/test_agent_routes.py",
+        "tests/unit/test_ne01_visual_agent_authority_cutover.py",
+        "tests/unit/test_fastapi_app_immune_gate.py",
+        "tests/unit/test_vision_ui_handler.py"
+      ]
+    },
     "revision_plus_one_replan": {
       "status": "PARTIAL",
       "durable_supersession_boundary": "Migration 0100 adds append-only graph-revision supersession authority. HostCommandRepository.admit_replan owns one BEGIN IMMEDIATE transaction that revalidates the same-root FAILED predecessor, exact terminal Graph Outbox, quiescent Node/Attempt/Lease/Operation/Review/Budget/Effect/cancellation/0099 facts, admits revision+1 Graph and HostCommand, then appends one deterministic supersession row. Exact response-loss replay requires the same committed row; injected failure after insertion rolls back replacement and supersession together. Ordinary TaskStore mutations, READY claim, retry, Budget writes, and Review continuation read the same durable fence. The SQL trigger freezes Graph FAILED-to-CREATED/root/version binding and foreign-key existence; exact HostCommand-to-Graph lineage is deliberately enforced by the repository transaction rather than a cross-table trigger so 0088 receipt-loss table rebuild remains compatible.",
@@ -455,6 +487,20 @@
     },
     "composition_without_global_service_locator": {
       "status": "PARTIAL",
+      "current_inventory": {
+        "dev_c2be993bc_named_process_services_consumer_modules": 45,
+        "dev_c2be993bc_named_process_services_imported_names": 123,
+        "dev_c2be993bc_all_import_form_consumer_modules": 51,
+        "react_cutoff_named_process_services_consumer_modules": 43,
+        "react_cutoff_named_process_services_imported_names": 120,
+        "react_cutoff_all_import_form_consumer_modules": 49,
+        "named_process_services_consumer_modules": 41,
+        "named_process_services_imported_names": 117,
+        "all_import_form_consumer_modules": 47,
+        "process_service_container_total_fields": 54,
+        "process_service_container_lock_fields": 4,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49
+      },
       "full_architecture_static_gate": {
         "status": "PASS",
         "failed_gates": [],
@@ -466,7 +512,7 @@
         "edge_findings": 0,
         "edge_violations": 0,
         "reverse_imports": [],
-        "boundary": "ORIGIN_DEV_C2BE993BC_AND_CURRENT_REACT_CUTOFF_KEEP_STATIC_GATES_GREEN_FAILED_EMPTY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_GLOBAL_SERVICE_LOCATOR_REMOVAL_AND_NE01_REMAIN_INCOMPLETE"
+        "boundary": "ORIGIN_DEV_C2BE993BC_REACT_CUTOFF_AND_CURRENT_VISUAL_CUTOFF_KEEP_STATIC_GATES_GREEN_FAILED_EMPTY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_GLOBAL_SERVICE_LOCATOR_REMOVAL_AND_NE01_REMAIN_INCOMPLETE"
       },
       "business_layer_sqlite_authority": {
         "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
@@ -647,9 +693,12 @@
         "process_get_tool_broker_accessor_count": 0,
         "process_tool_broker_container_slot_count": 0,
         "host_lifecycle_tool_broker_provider_count": 0,
-        "named_process_services_import_modules": 43,
-        "named_process_services_imported_names": 120,
-        "all_process_services_import_form_consumer_modules": 49,
+        "named_process_services_import_modules": 41,
+        "named_process_services_imported_names": 117,
+        "all_process_services_import_form_consumer_modules": 47,
+        "react_cutoff_named_process_services_import_modules": 43,
+        "react_cutoff_named_process_services_imported_names": 120,
+        "react_cutoff_all_process_services_import_form_consumer_modules": 49,
         "previous_dev_baseline_named_process_services_import_modules": 45,
         "previous_dev_baseline_named_process_services_imported_names": 123,
         "previous_dev_baseline_all_process_services_import_form_consumer_modules": 51,
@@ -701,14 +750,17 @@
         "before_imported_names": 152,
         "previous_dev_baseline_modules": 45,
         "previous_dev_baseline_imported_names": 123,
-        "current_modules": 43,
-        "current_imported_names": 120,
+        "react_cutoff_modules": 43,
+        "react_cutoff_imported_names": 120,
+        "current_modules": 41,
+        "current_imported_names": 117,
         "scope": "ONLY_EXACT_FROM_HOST_BRAIN_COMPOSITION_PROCESS_SERVICES_IMPORT_FORM_NOT_FULL_REPOSITORY"
       },
       "all_process_services_import_consumer_modules": {
         "before": 52,
         "previous_dev_baseline": 51,
-        "current": 49,
+        "react_cutoff": 49,
+        "current": 47,
         "scope": "ALL_IMPORT_FORMS"
       },
       "process_service_container": {
@@ -738,7 +790,7 @@
         "full_architecture_static_gate": "PASS",
         "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
       },
-      "boundary": "CURRENT_43_MODULES_120_NAMES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_49_CONSUMER_MODULES_DEV_C2BE993BC_45_123_51_IS_PREVIOUS_HISTORY_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
+      "boundary": "CURRENT_41_MODULES_117_NAMES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_47_CONSUMER_MODULES_REACT_43_120_49_AND_DEV_C2BE993BC_45_123_51_ARE_PREVIOUS_HISTORY_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
       "evidence_refs": [
         "host_brain/app/host_lifecycle_composition.py",
         "host_brain/app/http_hooks.py",

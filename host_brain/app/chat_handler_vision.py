@@ -1,9 +1,11 @@
-"""视觉界面场景 SSE 生成器模块（SCENE_VISION_UI 专用）。
+"""历史视觉界面 SSE helper（当前无生产 caller）。
 
-从 chat_handler.py 拆分，负责 SCENE_VISION_UI 场景下的视觉分析 SSE 响应。
-由 chat_handler._unified_chat_sse_generator 在场景分类后调用。
+该模块曾从 ``chat_handler.py`` 拆分，但当前真实 ``/v1/chat`` 直接进入
+Cortex；生产 ``response_format`` 门禁位于 ``chat_routes.handle_v1_chat_route``。
+这里保留 text 分析兼容代码和第二道非 text 拒绝，不构成 Visual Agent
+production wiring 或执行 authority。
 
-完整链路：
+若未来由受治理 caller 重新接入，helper 内部链路为：
   [Governor 鉴权（由调用方预完成）]
   → 视觉上下文解析（vision_context / 消息文本）
   → Gemini Vision 模型分析（multimodal）
@@ -43,6 +45,9 @@ from host_brain.app.graph_config_builder import (
 )
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.schemas import ChatRequest
+from host_brain.app.vision.clawdbot_protocol import (
+    VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.memory.life_memory.contracts import ChatMemoryCandidate
 from host_brain.model_runtime import (
     ModelAttemptRequest,
@@ -540,6 +545,25 @@ async def _vision_ui_sse_generator(
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+    response_format = str(
+        getattr(request_body, "response_format", "text")
+    ).strip().lower()
+    if response_format != "text":
+        rejected_format = "actions" if response_format == "actions" else "unsupported"
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+                "response_format": rejected_format,
+                "action_plan_available": False,
+                "side_effects_executed": False,
+                "request_id": request_id,
+            }
+        )
+        return
+
     fallback_templates = _load_template_mapping("chat_handler_vision.fallback_texts")
 
     # ── 生产化加固：HMAC 签名校验 ─────────────────────────────────────────
@@ -761,43 +785,13 @@ async def _vision_ui_sse_generator(
                 "empty_narrative",
             )
 
-        # response_format 分支：actions 模式 → 生成 ActionPlan
-        response_format = str(getattr(request_body, "response_format", "text") or "text").lower()
-        action_plan_dict: Optional[Dict[str, Any]] = None
-
-        if response_format == "actions":
-            from host_brain.app.vision.action_planner import generate_action_plan  # noqa: PLC0415
-            try:
-                action_plan = await generate_action_plan(
-                    request_id=request_id,
-                    session_id=session_id,
-                    goal=request_body.message,
-                    vision_context=vision_context,
-                    llm_runtime=llm_runtime,
-                    image_upload_allowed=_img_allowed,
-                    stop_on_error=True,
-                    need_screenshot_feedback=False,
-                )
-                action_plan_dict = action_plan.model_dump()
-                _logger.info(
-                    "action_plan generated",
-                    extra={
-                        "request_id": request_id,
-                        "action_count": len(action_plan.actions),
-                        "is_fallback": action_plan.extra.get("fallback", False),
-                    },
-                )
-            except Exception as exc:
-                _logger.warning("action_plan generation failed: %s", exc, extra={"request_id": request_id})
-                action_plan_dict = None
-
         yield _sse({
             "phase": "NODE_DONE",
             "node_id": "vision_renderer",
             "status": "OK",
             "response_format": response_format,
             "narrative_length": len(narrative),
-            "has_action_plan": action_plan_dict is not None,
+            "has_action_plan": False,
             "request_id": request_id,
         })
 
@@ -929,9 +923,6 @@ async def _vision_ui_sse_generator(
                 "sla_monitor": _sla_summary,
             },
         }
-        # actions 模式：将 ActionPlan 附加到 COMMIT 事件
-        if action_plan_dict is not None:
-            commit_payload["action_plan"] = action_plan_dict
         yield _sse(commit_payload)
 
     except Exception as exc:

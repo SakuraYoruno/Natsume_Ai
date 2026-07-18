@@ -10,6 +10,9 @@ from fastapi.responses import StreamingResponse
 
 from host_brain.app.schemas import ChatRequest
 from host_brain.app.sse_response import sse_single_commit
+from host_brain.app.vision.clawdbot_protocol import (
+    VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.core.ids import new_request_id
 
 
@@ -76,12 +79,32 @@ async def handle_v1_chat_route(
     handle_chat_fn: Callable[..., Any],
     notify_user_interaction_fn: Callable[[], None] | None = None,
 ) -> StreamingResponse:
+    request_id = getattr(request.state, "request_id", None) or new_request_id()
+    response_format = str(
+        getattr(request_body, "response_format", "text")
+    ).strip().lower()
+    if response_format != "text":
+        request.state.request_id = request_id
+        return sse_single_commit(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+                "response_format": (
+                    "actions" if response_format == "actions" else "unsupported"
+                ),
+                "action_plan_available": False,
+                "side_effects_executed": False,
+                "request_id": request_id,
+            }
+        )
+
     try:
         if notify_user_interaction_fn is not None:
             notify_user_interaction_fn()
     except Exception:
         pass
-    request_id = getattr(request.state, "request_id", None) or new_request_id()
     request.state.request_id = request_id
     bio_ops_trace = build_chat_bio_ops_preflight_trace(request_body)
     request.state.bio_ops_runtime_trace = bio_ops_trace

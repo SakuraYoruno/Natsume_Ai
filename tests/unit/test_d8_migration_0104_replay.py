@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import shutil
 import sqlite3
 from types import SimpleNamespace
 from typing import Callable
@@ -33,10 +34,22 @@ def _asset() -> SimpleNamespace:
 
 def _seed(tmp_path: Path, name: str) -> tuple[Path, SQLiteMigrationRunner]:
     db_path = tmp_path / f"{name}.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
+    frozen_catalog = tmp_path / f"{name}-migrations-through-0104"
+    frozen_catalog.mkdir()
+    for source in _MIGRATIONS.glob("*.sql"):
+        if int(source.name.split("_", 1)[0]) <= 104:
+            shutil.copy2(source, frozen_catalog / source.name)
+    runner = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=frozen_catalog,
+    )
     seeded = runner.apply_migrations(request_id=f"d8-0104-{name}-seed", ts_ms=104)
     assert seeded.success, seeded.as_dict()
     assert seeded.summary["current_version"] == 104
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT checksum FROM schema_migrations WHERE migration_id = 104"
+        ).fetchone() == (_asset().checksum,)
     return db_path, runner
 
 

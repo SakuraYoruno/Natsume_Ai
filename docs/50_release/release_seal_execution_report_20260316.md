@@ -3,6 +3,8 @@
 
 # Natsume AI 封测执行报告（2026-03-16）
 
+> 状态：`HISTORICAL_EVIDENCE_SUPERSEDED`。本文只记录 2026-03-16 当时的执行事实，不代表 v3.1 当前生产能力，也不能替代 NE-07 的真实 Docker/Host/Obs/Monitor/Edge/Gateway 全栈验收。文中旧 Visual Agent/ActionPlanner/ClawdBot 结论已随直连 authority 退役而失效。
+
 **计划文档**：`docs/50_release/release_seal_test_plan_20260313.md`、`release_seal_test_plan_supplement_20260315.md`  
 **原报告目录**：逐批次原始报告已从工作树清理，需要时从 Git 历史追溯。
 

@@ -25,8 +25,9 @@ RETIRED_ZERO_ARGUMENT_REFRESHERS = (
 )
 
 
-def _process_locator_inventory() -> tuple[int, int]:
+def _process_locator_inventory() -> tuple[int, int, int]:
     modules: set[str] = set()
+    all_form_modules: set[str] = set()
     imports = 0
     for path in (ROOT / "host_brain").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
@@ -36,14 +37,22 @@ def _process_locator_inventory() -> tuple[int, int]:
                 and node.module == "host_brain.composition.process_services"
             ):
                 modules.add(path.relative_to(ROOT).as_posix())
+                all_form_modules.add(path.relative_to(ROOT).as_posix())
                 imports += len(node.names)
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "host_brain.composition"
+                and any(alias.name == "process_services" for alias in node.names)
+            ):
+                all_form_modules.add(path.relative_to(ROOT).as_posix())
             elif isinstance(node, ast.Import) and any(
                 alias.name == "host_brain.composition.process_services"
                 for alias in node.names
             ):
                 modules.add(path.relative_to(ROOT).as_posix())
+                all_form_modules.add(path.relative_to(ROOT).as_posix())
                 imports += 1
-    return len(modules), imports
+    return len(modules), imports, len(all_form_modules)
 
 
 def test_obs_projection_modules_have_no_process_service_locator() -> None:
@@ -65,6 +74,7 @@ def test_dead_zero_argument_projection_refreshers_are_removed() -> None:
 
 
 def test_process_locator_inventory_only_moves_down() -> None:
-    modules, imports = _process_locator_inventory()
-    assert modules <= 45
-    assert imports <= 147
+    modules, imports, all_form_modules = _process_locator_inventory()
+    assert modules <= 43
+    assert imports <= 141
+    assert all_form_modules <= 48

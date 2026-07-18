@@ -1,8 +1,4 @@
-"""ProactivePushClient：Host → Edge 主动对话消息推送客户端。
-
-复用 EdgeRpcClient._build_envelope 的 HMAC 签名机制，
-向 Edge 的 POST /v1/edge/proactive_push 接口推送主动对话消息。
-"""
+"""ProactivePushClient：经受治理 Edge transport 推送主动对话消息。"""
 
 from __future__ import annotations
 

@@ -4,7 +4,7 @@
 # Natsume AI 封测计划补充（F-34 ~ F-52）
 
 更新时间：2026-03-17  
-状态：补充版，与 `release_seal_test_plan_20260313.md` 配套使用  
+状态：`HISTORICAL_SUPERSEDED`。本文件仅保留 2026-03-17 的旧补充范围，不再作为当前生产能力或 NE-07 放行依据。
 说明：原计划 F-01~F-33 未覆盖以下已启用功能模块。本文补充所有缺失测试项，并要求对未启动的定时任务/服务先手动触发再测试。**多智能体专项封测**（execution_profile 选图、Supervisor+专家 Agent+Judge、观测与审计等）见主计划 §4 矩阵 MA-01～MA-06、§10。
 
 ---
@@ -401,23 +401,25 @@
 
 ---
 
-## F-50：F-23 补全——Vision 截图与自动化（需 Edge 配合）
+## F-50：F-23 历史口径——Vision 截图与自动化（已被 v3.1 取代）
 
-**范围**：`GET /v1/edge/screenshot` → 截图 → `POST /v1/agent/run`（VISION_UI 场景）→ ActionPlanner → ClawdBot 执行 → UI Assertion 验证
+旧 `ActionPlanner → ClawdBot` 直连链已退役，raw Agent Loop/ClawdBot/Edge client 已删除；`/v1/agent/run` 仅保留固定拒绝兼容面。本节不得再用于证明正向视觉自动化。
+
+**当前范围**：受治理视觉 proposal → 新 immutable TaskGraph revision → 独立 Visual 节点 Attempt/Lease/Grant/Budget/Verification/Acceptance/Receipt → Edge HMAC/lease/fence → UI Assertion。
 
 **真实检查方法**：
 1. 在 Edge 节点侧确认 VTS/桌面可见
 2. 调用 `GET /v1/edge/screenshot` 获取截图
-3. 发送 VISION_UI 场景 chat 请求（含截图 base64）
-4. 检查 ActionPlanner 生成的 ActionPlan
-5. 检查 ClawdBot 执行结果
+3. 证明 `/v1/agent/run` 和视觉聊天 `actions` 兼容输入在模型、Memory、Ledger 与执行端口前固定拒绝
+4. 从受治理 proposal 创建新图 revision，核对独立节点 authority 和 Preview Receipt
+5. 经真实 Edge HMAC session/lease/fence 执行动作并查询 receipt
 6. 检查 UI Assertion 验证结果（`GET /obs/ui-assertion/stats`）
 7. Edge 节点电脑侧白盒确认：桌面动作真实可见
 
 **通过标准**：
 - 截图成功获取
-- ActionPlan 生成合理
-- ClawdBot 执行结果可查
+- 旧 HTTP/ActionPlanner 直连执行为 0
+- 新图 revision、节点 authority 与 Edge receipt 可查
 - UI Assertion 验证有记录
 - Edge 节点电脑侧动作真实可见
 

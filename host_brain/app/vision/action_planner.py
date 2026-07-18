@@ -1,12 +1,10 @@
-"""视觉指令生成器（Action Planner）。
+"""Pure legacy Visual ActionPlan parsing helpers and a sealed compatibility API.
 
-职责：
-  接收用户目标 + 屏幕截图 → 调用 LLM → 生成结构化 ActionPlan
-  供 ClawdBot 直接执行（response_format="actions" 模式）
-
-与 chat_handler_vision.py 的区别：
-  chat_handler_vision  → response_format="text"  → 返回自然语言建议（给用户看）
-  action_planner       → response_format="actions" → 返回 ActionPlan JSON（给 ClawdBot 执行）
+The former ``generate_action_plan`` function resolved a process-global model and
+returned executable desktop actions outside HostCommand/TaskGraph admission.
+That authority is retired.  Parsing helpers remain pure for future governed
+proposal compilation and historical contract tests; they do not execute a model
+or an actuator and their output grants no execution authority.
 """
 
 from __future__ import annotations
@@ -15,74 +13,14 @@ import json
 import logging
 from typing import Any, Dict, List, Mapping, Optional
 
-from host_brain.composition.process_services import get_model_attempt_service, get_prompt_registry
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-from host_brain.model_runtime import (
-    ModelAttemptRequest,
-    OutputContract,
-    PromptRef,
-    VISION_ACTION_PLANNER_PROMPT_ID,
-    model_attempt_result_trace,
-)
-
 from .clawdbot_protocol import (
     Action,
     ActionPlan,
     ActionType,
+    VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
 )
 
 _logger = logging.getLogger("Natsume.action_planner")
-
-_DEFAULT_SYSTEM_PROMPT = """你是一个谨慎的桌面视觉自动化规划器。
-只输出一个 JSON 对象，不要输出 Markdown 或额外解释。
-如果目标只是观察、描述或要求不要操作，返回单个 done 动作。
-允许的 actions[].type: click, right_click, double_click, type, key, scroll, drag, wait, screenshot, done。
-不要编造屏幕上不存在的元素；不确定时用 done 并在 target_desc 说明原因。
-"""
-
-_DEFAULT_USER_PROMPT_TEMPLATE = """用户目标：
-{goal}
-
-视觉上下文：
-{vision_context_section}
-
-请返回 JSON：
-{{
-  "goal_understood": "一句话复述目标",
-  "visual_summary": "一句话说明你从截图或视觉上下文里实际看到了什么；如果没有图像，只说明文字上下文",
-  "confidence": 0.0,
-  "notes": "必要时说明不确定性",
-  "actions": [
-    {{"type": "done", "target_desc": "只观察，不执行操作"}}
-  ]
-}}
-"""
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_contract_json(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
-# ---------------------------------------------------------------------------
-# LLM Prompt：指令生成
-# ---------------------------------------------------------------------------
-
 # ---------------------------------------------------------------------------
 # 核心函数：生成 ActionPlan
 # ---------------------------------------------------------------------------
@@ -98,120 +36,19 @@ async def generate_action_plan(
     stop_on_error: bool = True,
     need_screenshot_feedback: bool = False,
 ) -> ActionPlan:
-    """调用 LLM 分析截图，生成结构化 ActionPlan。
+    """Fail closed; a governed compiler must own all future model execution."""
 
-    Args:
-        goal:                    用户的自动化目标（自然语言）
-        vision_context:          视觉上下文（含截图 base64/url 或文字描述）
-        llm_runtime:             LLM 运行时配置
-        image_upload_allowed:    是否允许上传图片给 LLM
-        stop_on_error:           遇到错误时是否停止
-        need_screenshot_feedback: 是否需要执行后截图反馈（Agent Loop 模式）
-
-    Returns:
-        ActionPlan 实例（即使 LLM 失败也会返回降级计划）
-    """
-    timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 20000)
-    templates = _load_template_mapping("vision.action_planner.prompt_templates")
-
-    # 构建 Prompt
-    from host_brain.app.chat_handler_vision import _build_vision_context_section, _has_image_input
-    vision_section = _build_vision_context_section(vision_context)
-    user_prompt = _mapping_text(
-        templates,
-        "user_prompt_template",
-        default=_DEFAULT_USER_PROMPT_TEMPLATE,
-        goal=goal,
-        vision_context_section=vision_section,
+    _ = (
+        request_id,
+        session_id,
+        goal,
+        vision_context,
+        llm_runtime,
+        image_upload_allowed,
+        stop_on_error,
+        need_screenshot_feedback,
     )
-
-    # 构建消息（支持多模态）
-    has_image = _has_image_input(vision_context) and image_upload_allowed
-    image_base64 = str((vision_context or {}).get("image_base64") or "").strip() if has_image else ""
-    image_url = str((vision_context or {}).get("image_url") or "").strip() if has_image else ""
-    image_mime = str((vision_context or {}).get("image_mime") or "image/png").strip()
-    messages: list[dict] = [
-        {
-            "role": "system",
-            "content": _mapping_text(
-                templates,
-                "system_prompt",
-                default=_DEFAULT_SYSTEM_PROMPT,
-            ),
-        },
-    ]
-    if has_image and image_base64:
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{image_base64}"}},
-                {"type": "text", "text": user_prompt},
-            ],
-        })
-    elif has_image and image_url:
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": user_prompt},
-            ],
-        })
-    else:
-        messages.append({"role": "user", "content": user_prompt})
-
-    try:
-        prompt_ref = PromptRef(
-            prompt_id=VISION_ACTION_PLANNER_PROMPT_ID,
-            version="v1.0.0",
-            variables={"messages": tuple(messages)},
-            output_contract=OutputContract(kind="json_object"),
-        )
-        get_prompt_registry().render(prompt_ref)
-        result = await get_model_attempt_service().complete(
-            ModelAttemptRequest(
-                request_id=f"{request_id}:action-plan",
-                scene_type="VISION_ACTION_PLANNER",
-                cognitive_tier="B",
-                prompt=prompt_ref,
-                deadline_ms=max(5_000, timeout_ms),
-                foreground=True,
-                metadata={
-                    "caller": "vision_action_planner",
-                    "parent_request_id": request_id,
-                    "session_id": session_id,
-                    "has_image": bool(has_image),
-                },
-            )
-        )
-        attempt_trace = model_attempt_result_trace(result)
-        if not result.success:
-            return _make_fallback_plan(
-                request_id,
-                session_id,
-                goal,
-                reason=f"MODEL_ATTEMPT_ERROR:{result.error_code or 'FAILED'}",
-                model_attempt=attempt_trace,
-            )
-
-        # 提取 LLM 返回的 JSON 文本
-        raw_text = str(result.content or "").strip()
-
-        return _parse_llm_response(
-            raw_text=raw_text,
-            request_id=request_id,
-            session_id=session_id,
-            goal=goal,
-            stop_on_error=stop_on_error,
-            need_screenshot_feedback=need_screenshot_feedback,
-            model_attempt=attempt_trace,
-        )
-
-    except Exception as exc:
-        _logger.warning(
-            "action_planner: LLM 调用失败",
-            extra={"request_id": request_id, "error": str(exc)},
-        )
-        return _make_fallback_plan(request_id, session_id, goal, reason=f"LLM_ERROR:{type(exc).__name__}")
+    raise RuntimeError(VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED)
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +153,7 @@ def _parse_llm_response(
         stop_on_error=stop_on_error,
         need_screenshot_feedback=need_screenshot_feedback,
         extra={
+            "execution_authority": "NONE_PROPOSAL_ONLY",
             "goal_understood": str(data.get("goal_understood") or ""),
             "visual_summary": str(data.get("visual_summary") or data.get("screen_summary") or data.get("scene_summary") or ""),
             "confidence": _safe_float(data.get("confidence"), default=0.0),
@@ -375,6 +213,7 @@ def _make_fallback_plan(
         stop_on_error=True,
         need_screenshot_feedback=False,
         extra={
+            "execution_authority": "NONE_PROPOSAL_ONLY",
             "fallback": True,
             "reason": reason,
             "model_attempt": dict(model_attempt or {}),
