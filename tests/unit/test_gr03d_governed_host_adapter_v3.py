@@ -194,14 +194,14 @@ async def test_review_renewed_host_skill_worker_verifies_exact_attempt_and_lease
             return {"result_status": "SUCCESS"}
 
     monkeypatch.setattr(
-        "host_brain.app.governed_task_adapter._load_governor_grant",
+        "host_brain.app.governed_frozen_skill_runtime._load_governor_grant",
         lambda **_kwargs: {
             "snapshot_refs": {"node_intent": {"id": child_intent_id}},
             "tokens": {},
         },
     )
     monkeypatch.setattr(
-        "host_brain.app.governed_task_adapter.execute_frozen_governed_skill",
+        "host_brain.app.governed_frozen_skill_runtime.execute_frozen_governed_skill",
         lambda **_kwargs: SimpleNamespace(
             payload={
                 "receipt_ref": "skill-receipt://review-renewed-host-skill",
@@ -213,7 +213,7 @@ async def test_review_renewed_host_skill_worker_verifies_exact_attempt_and_lease
         ),
     )
     monkeypatch.setattr(
-        "host_brain.app.governed_task_adapter.record_governed_skill_execution",
+        "host_brain.app.governed_frozen_skill_runtime.record_governed_skill_execution",
         lambda **_kwargs: None,
     )
     verifier = _ExactReviewGrantVerifier()

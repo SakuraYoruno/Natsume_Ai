@@ -10,13 +10,12 @@ those remain authoritative in migrations 0052/0054/0059.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote
 
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
@@ -36,80 +35,43 @@ from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOr
 from host_brain.core.ids import now_ms
 from natsume_contracts.task.v1 import ExecutorAssignment, HostCommand
 
-
-HOST_COMMAND_SCHEMA_NOT_READY = "HOST_COMMAND_SCHEMA_NOT_READY"
-HOST_COMMAND_INVALID = "HOST_COMMAND_INVALID"
-HOST_COMMAND_CONFLICT = "HOST_COMMAND_CONFLICT"
-HOST_COMMAND_INGRESS_CONFLICT = "HOST_COMMAND_INGRESS_CONFLICT"
-HOST_COMMAND_DURABLE_DATA_INVALID = "HOST_COMMAND_DURABLE_DATA_INVALID"
-HOST_COMMAND_SUPERSESSION_CONFLICT = "HOST_COMMAND_SUPERSESSION_CONFLICT"
-
-HOST_COMMAND_MIGRATION_ASSET_KEY = "0062#host_command_admission"
-HOST_COMMAND_MIGRATION_SHA256 = "e003783038278ca82c7b8ee18fb87916ee7e6c109592a59a4f3579da378f5d59"
-HOST_COMMAND_REVISION_MIGRATION_ASSET_KEY = "0088#host_command_graph_revision"
-HOST_COMMAND_SUPERSESSION_MIGRATION_ASSET_KEY = (
-    "0100#task_runtime_graph_revision_supersession"
+from host_brain.persistence.host_command_repository_codec import (
+    assert_current_graph_identity as _assert_current_graph_identity,
+    canonical_json as _canonical_json,
+    digest as _digest,
+    load_object as _load_object,
+    mapping_from_typed as _mapping_from_typed,
+    matches_review_decision_result as _matches_review_decision_result,
+    normalize_external_sha256 as _normalize_external_sha256,
+    normalize_failure_evidence_refs as _normalize_failure_evidence_refs,
+    optional_text as _optional_text,
+    required_int as _required_int,
+    required_sha256 as _required_sha256,
+    required_text as _required_text,
+    secure_ingress_surface as _secure_ingress_surface,
+    supersession_id as _supersession_id,
+    typed_roundtrip as _typed_roundtrip,
+    work_order_roundtrip as _work_order_roundtrip,
 )
-HOST_COMMAND_SUPERSESSION_MIGRATION_SHA256 = (
-    "9f7852754e7eab1502abf76deb570827aa4809c7e101940c5cf2a19beeaa499f"
+from host_brain.persistence.host_command_repository_types import (
+    ALLOWED_MIGRATION_DISPOSITIONS as _ALLOWED_MIGRATION_DISPOSITIONS,
+    GRAPH_REVISION_SUPERSESSION_SCHEMA_VERSION,
+    HOST_COMMAND_COLUMNS as _HOST_COMMAND_COLUMNS,
+    HOST_COMMAND_CONFLICT,
+    HOST_COMMAND_DURABLE_DATA_INVALID,
+    HOST_COMMAND_INGRESS_CONFLICT,
+    HOST_COMMAND_INVALID,
+    HOST_COMMAND_MIGRATION_ASSET_KEY,
+    HOST_COMMAND_MIGRATION_SHA256,
+    HOST_COMMAND_REVISION_MIGRATION_ASSET_KEY,
+    HOST_COMMAND_SCHEMA_NOT_READY,
+    HOST_COMMAND_SUPERSESSION_CONFLICT,
+    HOST_COMMAND_SUPERSESSION_MIGRATION_ASSET_KEY,
+    HOST_COMMAND_SUPERSESSION_MIGRATION_SHA256,
+    REQUIRED_INDEXES as _REQUIRED_INDEXES,
+    SUPERSESSION_TABLE as _SUPERSESSION_TABLE,
+    HostCommandRepositoryError,
 )
-GRAPH_REVISION_SUPERSESSION_SCHEMA_VERSION = (
-    "Natsume.task_runtime.graph_revision_supersession.v1"
-)
-_ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
-    {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
-)
-_HOST_COMMAND_COLUMNS = frozenset(
-    {
-        "command_id",
-        "schema_version",
-        "request_id",
-        "surface",
-        "principal_id",
-        "session_id",
-        "ingress_claim_ref",
-        "ingress_audit_ref",
-        "governor_grant_ref",
-        "input_ref",
-        "input_sha256",
-        "route_type",
-        "target_id",
-        "business_scope",
-        "operation_fingerprint",
-        "root_work_order_id",
-        "graph_id",
-        "graph_revision",
-        "assignment_id",
-        "command_json",
-        "command_digest",
-        "work_order_json",
-        "work_order_digest",
-        "assignment_json",
-        "assignment_digest",
-        "graph_json",
-        "graph_digest",
-        "created_at_ms",
-    }
-)
-_REQUIRED_INDEXES = frozenset(
-    {
-        "idx_host_command_journal_principal_created",
-        "idx_host_command_journal_graph",
-    }
-)
-_SUPERSESSION_TABLE = "task_runtime_graph_revision_supersession"
-
-
-class HostCommandRepositoryError(RuntimeError):
-    """Fail-closed command admission error with a stable reason code."""
-
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or HOST_COMMAND_INVALID)
-        self.detail = str(detail or "host command persistence failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
-
-    def to_dict(self) -> dict[str, str]:
-        return {"reason_code": self.reason_code, "detail": self.detail}
 
 
 class HostCommandRepository:
@@ -1515,389 +1477,6 @@ class HostCommandRepository:
             "assignment": typed_values["assignment"],
             "graph": typed_values["graph"],
         }
-
-
-def _assert_current_graph_identity(
-    *,
-    record: Mapping[str, Any],
-    frozen_graph: Mapping[str, Any],
-    current_graph: Mapping[str, Any],
-    current_nodes: list[sqlite3.Row],
-) -> None:
-    """Verify mutable runtime state still belongs to the frozen admission.
-
-    TaskStore legitimately rewrites graph/node JSON as statuses advance.  The
-    admission journal therefore owns the immutable CREATED/READY snapshot and
-    compares only identity, topology, route, and execution policy against the
-    live rows.  Status and status_version remain TaskStore authority.
-    """
-
-    graph_fields = (
-        "schema_version",
-        "graph_id",
-        "root_work_order_id",
-        "revision",
-        "planner_ref",
-    )
-    for field_name in graph_fields:
-        if current_graph.get(field_name) != frozen_graph.get(field_name):
-            raise HostCommandRepositoryError(
-                HOST_COMMAND_DURABLE_DATA_INVALID,
-                f"current TaskGraph immutable binding drift: {field_name}",
-            )
-    if (
-        str(current_graph.get("graph_id") or "") != str(record["graph_id"])
-        or int(current_graph.get("revision") or 0) != int(record["graph_revision"])
-        or str(current_graph.get("root_work_order_id") or "")
-        != str(record["root_work_order_id"])
-    ):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_DURABLE_DATA_INVALID,
-            "current TaskGraph no longer belongs to the admitted command",
-        )
-
-    frozen_nodes = frozen_graph.get("nodes")
-    if not isinstance(frozen_nodes, list):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_DURABLE_DATA_INVALID,
-            "frozen TaskGraph nodes are invalid",
-        )
-    frozen_by_id = {
-        str(item.get("node_id") or ""): dict(item)
-        for item in frozen_nodes
-        if isinstance(item, Mapping) and str(item.get("node_id") or "")
-    }
-    current_by_id: dict[str, dict[str, Any]] = {}
-    for row in current_nodes:
-        node_id = str(row["node_id"] or "")
-        current_by_id[node_id] = _load_object(
-            row["node_json"],
-            field_name=f"task_runtime_node[{node_id}].node_json",
-        )
-    if set(current_by_id) != set(frozen_by_id):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_DURABLE_DATA_INVALID,
-            "current TaskGraph node identities differ from frozen admission",
-        )
-    mutable_fields = {"status", "status_version"}
-    for node_id, frozen_node in frozen_by_id.items():
-        current_node = current_by_id[node_id]
-        frozen_immutable = {
-            key: value for key, value in frozen_node.items() if key not in mutable_fields
-        }
-        current_immutable = {
-            key: value for key, value in current_node.items() if key not in mutable_fields
-        }
-        if _canonical_json(frozen_immutable) != _canonical_json(current_immutable):
-            raise HostCommandRepositoryError(
-                HOST_COMMAND_DURABLE_DATA_INVALID,
-                f"current TaskNode immutable binding drift: {node_id}",
-            )
-
-
-def _work_order_roundtrip(
-    value: Any,
-    *,
-    require_instance: bool = True,
-) -> tuple[dict[str, Any], WorkOrderV3]:
-    """Version-dispatch a v2/v3 WorkOrder and return canonical durable v3."""
-
-    if require_instance and not isinstance(value, (AgentWorkOrder, WorkOrderV3)):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            "work_order must be AgentWorkOrder or WorkOrderV3",
-        )
-    try:
-        payload = (
-            _mapping_from_typed(value, field_name="work_order")
-            if require_instance
-            else dict(value)
-        )
-        typed = WorkOrderV3.from_mapping(deepcopy(payload))
-        typed.validate()
-        return _mapping_from_typed(typed, field_name="work_order"), typed
-    except HostCommandRepositoryError:
-        raise
-    except Exception as exc:
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID if require_instance else HOST_COMMAND_DURABLE_DATA_INVALID,
-            f"work_order violates its versioned contract: {exc}",
-        ) from exc
-
-
-def _typed_roundtrip(
-    value: Any,
-    expected_type: type[Any],
-    *,
-    field_name: str,
-    require_instance: bool = True,
-) -> tuple[dict[str, Any], Any]:
-    if require_instance and not isinstance(value, expected_type):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"{field_name} must be {expected_type.__name__}",
-        )
-    try:
-        payload = (
-            _mapping_from_typed(value, field_name=field_name)
-            if require_instance
-            else dict(value)
-        )
-        typed = expected_type.from_mapping(deepcopy(payload))
-        validator = getattr(typed, "validate", None)
-        if callable(validator):
-            validator()
-        normalized = _mapping_from_typed(typed, field_name=field_name)
-        if _canonical_json(payload) != _canonical_json(normalized):
-            payload = normalized
-        return payload, typed
-    except HostCommandRepositoryError:
-        raise
-    except Exception as exc:
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID if require_instance else HOST_COMMAND_DURABLE_DATA_INVALID,
-            f"{field_name} violates its typed contract: {exc}",
-        ) from exc
-
-
-def _mapping_from_typed(value: Any, *, field_name: str) -> dict[str, Any]:
-    serializer = getattr(value, "to_dict", None)
-    if not callable(serializer):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"{field_name} lacks to_dict()",
-        )
-    payload = serializer()
-    if not isinstance(payload, Mapping):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"{field_name}.to_dict() must return a mapping",
-        )
-    return dict(payload)
-
-
-def _required_text(value: Any, *, field_name: str, max_length: int) -> str:
-    text = str(value or "").strip()
-    if not text or len(text) > int(max_length):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"{field_name} must contain 1..{int(max_length)} characters",
-        )
-    return text
-
-
-def _matches_review_decision_result(
-    conn: sqlite3.Connection,
-    *,
-    result_ref: str,
-    command: Mapping[str, Any],
-) -> bool:
-    """Resolve an ingress terminal ref to one exact durable Review decision."""
-
-    try:
-        parsed = urlsplit(str(result_ref or "").strip())
-        if (
-            parsed.scheme != "review-decision"
-            or not parsed.netloc
-            or parsed.query
-            or parsed.fragment
-        ):
-            return False
-        review_id = unquote(parsed.netloc)
-        if not review_id or quote(review_id, safe="") != parsed.netloc:
-            return False
-        parts = [part for part in parsed.path.split("/") if part]
-        if len(parts) != 2 or parts[0] not in {"rejected", "expired"}:
-            return False
-        status = parts[0].upper()
-        if not parts[1].isdigit() or str(int(parts[1])) != parts[1]:
-            return False
-        review_status_version = int(parts[1])
-        if review_status_version < 1:
-            return False
-        row = conn.execute(
-            """
-            SELECT review_id, status, status_version, subject_ref,
-                   task_graph_id, task_node_id
-            FROM agent_runtime_review
-            WHERE review_id = ?
-            """,
-            (review_id,),
-        ).fetchone()
-        if (
-            row is None
-            or str(row["status"]) != status
-            or int(row["status_version"]) != review_status_version
-        ):
-            return False
-        from host_brain.persistence.review_continuation_store import (  # noqa: PLC0415
-            parse_task_review_subject,
-        )
-
-        binding = parse_task_review_subject(str(row["subject_ref"] or ""))
-        return bool(
-            binding is not None
-            and binding.graph_id == str(command.get("graph_id") or "")
-            and binding.graph_revision == int(command.get("graph_revision") or 0)
-            and str(row["task_graph_id"] or "") == binding.graph_id
-            and str(row["task_node_id"] or "") == binding.node_id
-        )
-    except (ImportError, sqlite3.DatabaseError, TypeError, ValueError):
-        return False
-
-
-def _optional_text(value: Any, *, field_name: str, max_length: int) -> str | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if len(text) > int(max_length):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"{field_name} exceeds {int(max_length)} characters",
-        )
-    return text
-
-
-def _required_int(value: Any, *, field_name: str, minimum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < int(minimum):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"{field_name} must be an integer >= {int(minimum)}",
-        )
-    return int(value)
-
-
-def _required_sha256(value: Any, *, field_name: str) -> str:
-    text = str(value or "")
-    if (
-        len(text) != 71
-        or not text.startswith("sha256:")
-        or any(character not in "0123456789abcdef" for character in text[7:])
-    ):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"{field_name} must use canonical sha256:<64 lower-case hex> form",
-        )
-    return text
-
-
-def _normalize_external_sha256(value: Any, *, field_name: str) -> str:
-    text = str(value or "").strip().lower()
-    if len(text) == 64 and all(character in "0123456789abcdef" for character in text):
-        return f"sha256:{text}"
-    return _required_sha256(text, field_name=field_name)
-
-
-def _reject_constant(value: str) -> None:
-    raise ValueError(f"non-finite JSON constant is forbidden: {value}")
-
-
-def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate JSON key: {key}")
-        result[key] = value
-    return result
-
-
-def _load_object(value: Any, *, field_name: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(
-            str(value),
-            parse_constant=_reject_constant,
-            object_pairs_hook=_reject_duplicate_pairs,
-        )
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_DURABLE_DATA_INVALID,
-            f"{field_name} is not strict JSON",
-        ) from exc
-    if not isinstance(parsed, dict):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_DURABLE_DATA_INVALID,
-            f"{field_name} must contain a JSON object",
-        )
-    return parsed
-
-
-def _normalize_failure_evidence_refs(value: Any) -> tuple[str, str]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            "failure_evidence_refs must be a sequence",
-        )
-    refs: list[str] = []
-    for raw in value:
-        ref = str(raw or "").strip()
-        try:
-            parsed = urlsplit(ref)
-        except ValueError as exc:
-            raise HostCommandRepositoryError(
-                HOST_COMMAND_INVALID,
-                "failure evidence contains an invalid durable reference",
-            ) from exc
-        if (
-            not ref
-            or len(ref) > 1024
-            or not parsed.scheme
-            or not parsed.netloc
-            or ref in refs
-        ):
-            raise HostCommandRepositoryError(
-                HOST_COMMAND_INVALID,
-                "failure evidence must contain 1..64 unique durable references",
-            )
-        refs.append(ref)
-    if not 1 <= len(refs) <= 64:
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            "failure evidence must contain 1..64 unique durable references",
-        )
-    serialized = json.dumps(
-        refs,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-    return serialized, _digest(serialized)
-
-
-def _supersession_id(binding: Mapping[str, Any]) -> str:
-    serialized = _canonical_json(binding)
-    return (
-        "graph-revision-supersession://sha256/"
-        + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-    )
-
-
-def _canonical_json(value: Mapping[str, Any]) -> str:
-    try:
-        return json.dumps(
-            dict(value),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise HostCommandRepositoryError(
-            HOST_COMMAND_INVALID,
-            f"typed payload is not canonical JSON: {exc}",
-        ) from exc
-
-
-def _digest(serialized: str) -> str:
-    return f"sha256:{hashlib.sha256(serialized.encode('utf-8')).hexdigest()}"
-
-
-def _secure_ingress_surface(command_surface: str) -> str:
-    return {
-        "host_input": "host.input",
-        "gateway": "gateway.webhook",
-        "internal": "internal.agent",
-        "scheduler": "scheduler.admin",
-    }.get(str(command_surface), str(command_surface))
 
 
 __all__ = [

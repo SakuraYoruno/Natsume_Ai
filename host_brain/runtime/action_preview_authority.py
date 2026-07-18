@@ -302,6 +302,29 @@ def _sanitize_guardian(value: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
     return authority_map, _digest(policy)
 
 
+def _same_guardian_authority_after_renewal(
+    issued: Mapping[str, Any],
+    current: Mapping[str, Any],
+) -> bool:
+    """Accept only a monotonic extension of the exact Host runtime lease.
+
+    The production authority provider renews its durable lease on every read.
+    Renewal changes only ``lease_expires_at_ms``; treating that extension as an
+    authority rotation would make issue-then-reopen fail in the same process.
+    Owner, lease, fence, Guardian revision/status and journal head remain exact,
+    while a regressed expiry still fails closed.
+    """
+
+    previous = dict(issued or {})
+    reopened = dict(current or {})
+    try:
+        previous_expiry = int(previous.pop("lease_expires_at_ms"))
+        reopened_expiry = int(reopened.pop("lease_expires_at_ms"))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return previous == reopened and reopened_expiry >= previous_expiry
+
+
 def _scene(value: Mapping[str, Any]) -> dict[str, Any]:
     scene = dict(value or {})
     if frozenset(scene) != _SCENE_FIELDS or scene.get("schema") != "natsume.scene-identity.v2":
@@ -724,7 +747,10 @@ class DurableActionPreviewAuthority:
             raise ActionPreviewAuthorityError(ACTION_PREVIEW_BLOCKED, "RuntimeGuardian is unavailable")
         authority, policy_digest = _sanitize_guardian(current)
         if (
-            receipt.payload["guardian_authority_digest"] != _digest(authority)
+            not _same_guardian_authority_after_renewal(
+                receipt.payload["guardian_authority"],
+                authority,
+            )
             or receipt.payload["guardian_policy_digest"] != policy_digest
         ):
             raise ActionPreviewAuthorityError(

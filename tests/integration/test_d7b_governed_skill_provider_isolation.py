@@ -324,7 +324,7 @@ async def test_governed_memory_search_without_backend_fails_before_skill_receipt
         pytest.fail("missing Skill dependency reached the low-level executor")
 
     monkeypatch.setattr(
-        "host_brain.app.governed_task_adapter.execute_frozen_governed_skill",
+        "host_brain.app.governed_frozen_skill_runtime.execute_frozen_governed_skill",
         forbidden_low_level_execution,
     )
     PROCESS_LIFE_PROVIDER.clear()

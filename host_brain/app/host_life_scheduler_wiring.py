@@ -1,0 +1,397 @@
+"""Focused Life and Scheduler wiring used by the Host ASGI composition root."""
+
+from __future__ import annotations
+
+from typing import Any, Callable, Mapping, Protocol
+
+from host_brain.runtime.context_application import RuntimeContextApplicationService
+from host_brain.scheduler.task_registry import (
+    SchedulerTaskConfig,
+    TaskPriority,
+    TriggerMode,
+)
+
+
+class LifeCommandServicePort(Protocol):
+    def submit(self, command: Any) -> Any: ...
+
+    def submit_next(self, person_id: str, command_factory: Any) -> Any: ...
+
+    def adopt_all_legacy_projections(self, *, adopted_at_ms: int) -> Any: ...
+
+
+class LifeSnapshotReaderPort(Protocol):
+    def get_snapshot(self, person_id: str) -> Any: ...
+
+    def get_receipt(self, command_id: str) -> Any | None: ...
+
+
+def compose_life_command_authority(
+    ledger: Any,
+    *,
+    container_builder: Callable[..., Any],
+    provider: Any,
+    clock_ms: Callable[[], int],
+) -> tuple[LifeCommandServicePort, LifeSnapshotReaderPort]:
+    """Resolve the frozen Digital Life command boundary at process startup."""
+
+    container = container_builder(ledger=ledger, adopted_at_ms=int(clock_ms()))
+    provider.install(container)
+    return container.command_service, container.snapshot_reader
+
+
+def compose_life_dispatchers(
+    ledger: Any,
+    *,
+    embodiment_runtime: Any,
+    action_preview_service: Any | None = None,
+) -> tuple[Any, Any]:
+    """Bind projection and delivery workers to the canonical Life repository."""
+
+    from host_brain.app.life_projection_handlers import (  # noqa: PLC0415
+        handle_life_projection,
+    )
+    from host_brain.channels.life_delivery_transport import (  # noqa: PLC0415
+        LifeDeliveryTransport,
+    )
+    from host_brain.digital_life.outbox import LifeOutboxDispatcher  # noqa: PLC0415
+    from host_brain.digital_life.projection import (  # noqa: PLC0415
+        LifeProjectionDispatcher,
+    )
+    from host_brain.persistence.life_command_repository import (  # noqa: PLC0415
+        LifeCommandRepository,
+    )
+
+    repository = LifeCommandRepository.from_ledger(ledger)
+    return (
+        LifeProjectionDispatcher(repository, handle_life_projection),
+        LifeOutboxDispatcher(
+            repository,
+            LifeDeliveryTransport(
+                ledger=ledger,
+                embodiment_runtime=embodiment_runtime,
+                action_preview_service=action_preview_service,
+            ),
+        ),
+    )
+
+
+def reset_life_command_authority(*, provider: Any) -> None:
+    provider.clear()
+
+
+def submit_life_tick_command(
+    *,
+    occurrence: Any,
+    definition: Any,
+    command: Any,
+    execution_context: Mapping[str, Any],
+    runtime_context_application: RuntimeContextApplicationService,
+    life_command_service: LifeCommandServicePort,
+    life_snapshot_reader: LifeSnapshotReaderPort,
+    clock_ms: Callable[[], int],
+) -> dict[str, Any]:
+    """Translate one governed scheduler occurrence into one Life command."""
+
+    from natsume_contracts.life import LifeCommand  # noqa: PLC0415
+
+    intent = dict(definition.intent_template)
+    args = dict(intent.get("args") or {})
+    args.update(dict(occurrence.payload or {}))
+    person_id = str(args.get("person_id") or "default").strip() or "default"
+    runtime_execution = dict(execution_context or {})
+    frozen_input_pack = runtime_execution.get("frozen_input_pack")
+    if not isinstance(frozen_input_pack, Mapping):
+        raise RuntimeError("LIFE_TICK_RUNTIME_CONTEXT_REQUIRED")
+    frozen_runtime_context = runtime_context_application.require_frozen(
+        dict(frozen_input_pack)
+    ).to_dict()
+    life_command_id = f"life_tick::{occurrence.occurrence_id}"
+    existing_receipt = life_snapshot_reader.get_receipt(life_command_id)
+    if existing_receipt is not None:
+        as_replayed = getattr(existing_receipt, "as_replayed", None)
+        replayed_receipt = as_replayed() if callable(as_replayed) else existing_receipt
+        result = scheduler_handler_result(replayed_receipt)
+        result["status"] = "SUCCEEDED"
+        result["replayed"] = True
+        return result
+    from host_brain.digital_life.policy import build_life_tick_payload  # noqa: PLC0415
+
+    occurrence_context = {
+        **args,
+        **dict(occurrence.payload or {}),
+        "scene_decision_v2": frozen_runtime_context["scene_decision_v2"],
+        "scene_identity_v2": frozen_runtime_context["scene_identity_v2"],
+    }
+    action_preview_context = runtime_execution.get("_action_preview_context")
+    if isinstance(action_preview_context, Mapping):
+        occurrence_context["_action_preview_context"] = dict(
+            action_preview_context
+        )
+    grant_request_id = str(getattr(command, "request_id", "") or "").strip()
+    governor_grant = str(
+        getattr(command, "governor_grant_ref", "") or ""
+    ).strip()
+    authority_principal_id = str(
+        getattr(command, "principal_id", "")
+        or getattr(occurrence, "principal_id", "")
+        or ""
+    ).strip()
+    if grant_request_id and governor_grant and authority_principal_id:
+        occurrence_context["delivery_authorization"] = {
+            "request_id": grant_request_id,
+            "governor_grant_ref": governor_grant,
+            "authority_kind": "scheduler_host_command",
+            "authority_principal_id": authority_principal_id,
+        }
+
+    def _command_factory(snapshot: Any) -> LifeCommand:
+        applied_at_ms = max(
+            int(clock_ms()),
+            int(getattr(snapshot, "updated_at_ms", 0) or 0),
+        )
+        return LifeCommand(
+            command_id=life_command_id,
+            person_id=person_id,
+            command_type="tick",
+            payload=build_life_tick_payload(
+                snapshot,
+                scheduled_at_ms=int(occurrence.scheduled_at_ms),
+                occurrence_payload=occurrence_context,
+                task_id=str(occurrence.task_id),
+                definition_revision=int(occurrence.definition_revision),
+            ),
+            expected_version=int(snapshot.version),
+            created_at_ms=applied_at_ms,
+            correlation_id=str(command.request_id),
+            causation_id=str(occurrence.occurrence_id),
+            metadata={
+                "producer": "scheduler_clock",
+                "scheduler_command_id": str(command.command_id),
+                "scheduler_principal_id": str(occurrence.principal_id),
+                "scheduled_at_ms": int(occurrence.scheduled_at_ms),
+                "governor_grant_request_id": grant_request_id or None,
+                "governor_grant_ref": governor_grant or None,
+            },
+        )
+
+    receipt = life_command_service.submit_next(person_id, _command_factory)
+    return scheduler_handler_result(receipt)
+
+
+def scheduler_seed_configs(
+    *,
+    settings: Any,
+    security_immune_agent_provider: Callable[[], Any],
+    logger: Any,
+) -> list[SchedulerTaskConfig]:
+    from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
+        build_life_tick_task_config,
+    )
+
+    # The definition is always seeded so the catalog has one explicit Life
+    # periodic authority. Its enabled flag is still governed by Host settings.
+    configs: list[SchedulerTaskConfig] = [
+        build_life_tick_task_config(),
+        SchedulerTaskConfig(
+            task_id="life_io_dispatch_periodic",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 5},
+            intent_template={
+                "skill_name": "life_io_dispatch",
+                "args": {"limit": 100},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.HIGH,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            max_consecutive_failures=3,
+            description=(
+                "Dispatch committed Life projection/outbox work; SchedulerClock "
+                "remains the sole timer"
+            ),
+            resource_profile={
+                "resource_class": "life_io",
+                "uses_llm": False,
+                "uses_gpu": False,
+            },
+        ),
+        SchedulerTaskConfig(
+            task_id="embodiment_outbox_periodic",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 1},
+            intent_template={
+                "skill_name": "embodiment_outbox_dispatch",
+                "args": {"limit": 100},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.HIGH,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            max_consecutive_failures=3,
+            description="Dispatch the canonical Host physical-command outbox",
+            resource_profile={
+                "resource_class": "embodiment_io",
+                "uses_llm": False,
+                "uses_gpu": False,
+            },
+        ),
+    ]
+    if settings.seed_builtin_definitions:
+        from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
+            build_personality_scheduler_seed_task_configs,
+        )
+
+        configs.extend(build_personality_scheduler_seed_task_configs())
+    enabled = bool(settings.background_tasks_enabled)
+    configs.extend(
+        [
+            SchedulerTaskConfig(
+                task_id="audit_retention_daily",
+                trigger_mode=TriggerMode.CRON,
+                trigger_config={
+                    "hour": 2,
+                    "minute": 0,
+                    "catch_up_window_minutes": 1_440,
+                },
+                intent_template={
+                    "skill_name": "audit_retention",
+                    "args": {},
+                    "proposer_node_id": "scheduler",
+                },
+                priority=TaskPriority.LOW,
+                mode_allowlist=["normal", "sleep"],
+                enabled=enabled,
+                description="Daily audit retention policy",
+                resource_profile={
+                    "resource_class": "maintenance",
+                    "uses_llm": False,
+                    "uses_gpu": False,
+                },
+            ),
+            SchedulerTaskConfig(
+                task_id="distillation_engine_periodic",
+                trigger_mode=TriggerMode.INTERVAL,
+                trigger_config={"seconds": settings.distillation_interval_seconds},
+                intent_template={
+                    "skill_name": "distillation_engine_periodic",
+                    "args": {},
+                    "proposer_node_id": "scheduler",
+                },
+                priority=TaskPriority.HIGH,
+                mode_allowlist=["normal", "sleep"],
+                enabled=enabled and settings.distillation_enabled,
+                max_consecutive_failures=3,
+                description="Durable episodic-memory distillation",
+                resource_profile={
+                    "resource_class": "memory_heavy",
+                    "uses_llm": True,
+                    "uses_gpu": False,
+                },
+            ),
+            SchedulerTaskConfig(
+                task_id="agent_immune_auto_dispatch_tick",
+                trigger_mode=TriggerMode.INTERVAL,
+                trigger_config={"seconds": settings.agent_immune_interval_seconds},
+                intent_template={
+                    "skill_name": "agent_immune_auto_dispatch_tick",
+                    "args": {},
+                    "proposer_node_id": "scheduler",
+                },
+                priority=TaskPriority.HIGH,
+                mode_allowlist=["normal", "sleep"],
+                enabled=enabled and settings.agent_immune_enabled,
+                max_consecutive_failures=2,
+                description="Governed internal-agent immune proposal tick",
+                resource_profile={
+                    "resource_class": "background_llm",
+                    "uses_llm": True,
+                    "uses_gpu": False,
+                },
+            ),
+        ]
+    )
+    try:
+        policy = security_immune_agent_provider().policy
+        configs.append(
+            SchedulerTaskConfig(
+                task_id="security_immune_periodic",
+                trigger_mode=TriggerMode.INTERVAL,
+                trigger_config={"seconds": int(policy.scan_interval_seconds)},
+                intent_template={
+                    "skill_name": "security_immune_periodic",
+                    "args": {},
+                    "proposer_node_id": "scheduler",
+                },
+                priority=TaskPriority.HIGH,
+                mode_allowlist=["normal", "sleep"],
+                enabled=enabled and bool(policy.enabled),
+                max_consecutive_failures=2,
+                description="Governed internal security immune scan",
+                resource_profile={
+                    "resource_class": "security",
+                    "uses_llm": False,
+                    "uses_gpu": False,
+                },
+            )
+        )
+    except Exception:
+        logger.warning("SCHEDULER_SECURITY_IMMUNE_SEED_DEGRADED", exc_info=True)
+    deduplicated: dict[str, SchedulerTaskConfig] = {}
+    for config in configs:
+        config.enabled = bool(config.enabled and enabled)
+        deduplicated.setdefault(config.task_id, config)
+    return list(deduplicated.values())
+
+
+def scheduler_handler_result(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        result = dict(value)
+    else:
+        result = {}
+        for method_name in ("as_dict", "to_dict", "model_dump"):
+            method = getattr(value, method_name, None)
+            if callable(method):
+                candidate = method()
+                if isinstance(candidate, dict):
+                    result = dict(candidate)
+                    break
+    if not result:
+        result = {"detail": str(value or "")[:500]}
+    raw = str(result.get("status") or "SUCCEEDED").strip().upper()
+    result["status"] = {
+        "OK": "SUCCEEDED",
+        "SUCCESS": "SUCCEEDED",
+        "DONE": "SUCCEEDED",
+        "ACCEPTED": "SUCCEEDED",
+        "APPLIED": "SUCCEEDED",
+        "COMMITTED": "SUCCEEDED",
+        "REPLAYED": "SUCCEEDED",
+        "ERROR": "FAILED",
+        "REJECTED": "BLOCKED",
+        "CONFLICT": "BLOCKED",
+        "DEFERRED": "DEGRADED",
+    }.get(raw, raw)
+    if result["status"] not in {
+        "EXECUTED",
+        "SUCCEEDED",
+        "FAILED",
+        "BLOCKED",
+        "DEGRADED",
+        "SKIPPED",
+    }:
+        result["status"] = "DEGRADED"
+        result.setdefault("reason_code", f"SCHEDULER_HANDLER_STATUS_{raw or 'UNKNOWN'}")
+    return result
+
+
+__all__ = [
+    "LifeCommandServicePort",
+    "LifeSnapshotReaderPort",
+    "compose_life_command_authority",
+    "compose_life_dispatchers",
+    "reset_life_command_authority",
+    "scheduler_handler_result",
+    "scheduler_seed_configs",
+    "submit_life_tick_command",
+]

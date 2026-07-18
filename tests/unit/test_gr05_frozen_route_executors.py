@@ -74,6 +74,7 @@ def _frozen(
         lease_id="lease-frozen-route",
         lease_owner_id="owner-frozen-route",
         fencing_token=1,
+        node_risk_level=3,
         route=route,
         target_id=target_id,
         objective="answer only this frozen objective",

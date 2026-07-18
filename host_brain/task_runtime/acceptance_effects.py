@@ -24,6 +24,7 @@ from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
     context_pack_digest_from_work_order,
 )
+from host_brain.runtime.action_preview_resolver import action_preview_scene_identity
 
 
 ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
@@ -207,7 +208,9 @@ def _action_preview_context(
     return {
         "schema_version": "Natsume.acceptance_effect.action_preview_context.v1",
         "context_pack_digest": context_digest,
-        "scene_identity": _json_mapping(scene, field_name="scene_identity_v2"),
+        "scene_identity": action_preview_scene_identity(
+            _json_mapping(scene, field_name="scene_identity_v2")
+        ),
         "task_graph_id": command.graph_id,
         "graph_revision": command.graph_revision,
         "task_node_id": node_id,

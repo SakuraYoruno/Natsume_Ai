@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 import inspect
 import re
 from typing import Any
@@ -203,7 +204,12 @@ class AcceptanceEffectDispatcher:
             }
             issued = service.issue_receipt(**kwargs)
             execution_boundary = {
-                key: value
+                # The handler payload receives an in-process terminal proof
+                # after this method returns.  Keep the durable execution
+                # boundary structurally independent: aliasing ``action_args``
+                # would create payload -> proof -> boundary -> payload cycles
+                # and make the final Gateway/Edge reopen non-canonical.
+                key: deepcopy(value)
                 for key, value in kwargs.items()
                 if key != "guardian_capability_id"
             }

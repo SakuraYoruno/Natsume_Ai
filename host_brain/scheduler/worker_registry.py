@@ -341,6 +341,7 @@ class GovernedSchedulerWorker:
             context_pack_digest_from_work_order,
         )
         from host_brain.runtime.action_preview_resolver import (  # noqa: PLC0415
+            action_preview_scene_identity,
             build_node_authority_context,
         )
 
@@ -360,7 +361,9 @@ class GovernedSchedulerWorker:
             "risk_level": int(execution_context.get("node_risk_level") or 0),
             "action_args": action_args,
             "context_pack_digest": context_pack_digest_from_work_order(work_order),
-            "scene_identity": dict(pack.get("scene_identity_v2") or {}),
+            "scene_identity": action_preview_scene_identity(
+                dict(pack.get("scene_identity_v2") or {})
+            ),
             "task_graph_id": str(execution_context.get("graph_id") or ""),
             "graph_revision": int(execution_context.get("graph_revision") or 0),
             "task_node_id": str(execution_context.get("node_id") or ""),

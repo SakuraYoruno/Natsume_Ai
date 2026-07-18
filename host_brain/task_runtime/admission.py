@@ -31,6 +31,7 @@ class AdmittedTaskNode:
     acceptance_criteria: tuple[str, ...]
     operation_fingerprint: str
     reservation_id: str
+    risk_level: int = 1
 
     def validate(self) -> None:
         if not all(
@@ -52,6 +53,15 @@ class AdmittedTaskNode:
             raise GovernedRuntimeError(
                 GOVERNED_ADMISSION_INVALID,
                 f"admitted TaskNode dependencies are invalid: {self.node_id}",
+            )
+        if (
+            isinstance(self.risk_level, bool)
+            or not isinstance(self.risk_level, int)
+            or not 1 <= self.risk_level <= 5
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                f"admitted TaskNode risk level is invalid: {self.node_id}",
             )
 
 
@@ -229,6 +239,10 @@ class AdmittedExecution:
                     acceptance_criteria=acceptance_criteria,
                     operation_fingerprint=operation_fingerprint,
                     reservation_id=reservation_id,
+                    risk_level=_exact_positive_int(
+                        getattr(node, "risk_level", None),
+                        f"TaskNode[{node_id}].risk_level",
+                    ),
                 )
             )
         admitted = cls(

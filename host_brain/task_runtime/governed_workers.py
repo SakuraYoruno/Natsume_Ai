@@ -29,7 +29,10 @@ from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
     context_pack_digest_from_work_order,
 )
-from host_brain.runtime.action_preview_resolver import build_node_authority_context
+from host_brain.runtime.action_preview_resolver import (
+    action_preview_scene_identity,
+    build_node_authority_context,
+)
 from natsume_contracts.task import HostCommand
 
 
@@ -355,7 +358,9 @@ class GovernedFrozenNodeWorker:
                     "input_refs": list(frozen.input_refs),
                 },
                 "context_pack_digest": context_pack_digest_from_work_order(work_order),
-                "scene_identity": dict(pack.get("scene_identity_v2") or {}),
+                "scene_identity": action_preview_scene_identity(
+                    dict(pack.get("scene_identity_v2") or {})
+                ),
                 "task_graph_id": frozen.graph_id,
                 "graph_revision": frozen.graph_revision,
                 "task_node_id": frozen.node_id,
@@ -681,11 +686,22 @@ def _assert_terminal(event: Mapping[str, Any], *, frozen: FrozenNodeInput) -> No
 
 def _safe_audit_refs(value: Any) -> dict[str, Any]:
     raw = dict(value) if isinstance(value, Mapping) else {}
-    return {
+    public = {
         str(key): _json_copy(child)
         for key, child in raw.items()
         if str(key).strip() and "token" not in str(key).lower() and "secret" not in str(key).lower()
     }
+    trace = public.get("trace_stage_meta")
+    if isinstance(trace, Mapping) and "governed_model_budget" in trace:
+        # FrozenChatRouteExecutor has already compared this exact guard with
+        # the durable node budget before it emits a terminal.  The public
+        # worker projection carries the resulting typed budget_usage instead;
+        # it must not republish the consumed execution constraint (whose
+        # max_*_tokens fields intentionally fail the projection secret gate).
+        public_trace = dict(trace)
+        public_trace.pop("governed_model_budget", None)
+        public["trace_stage_meta"] = public_trace
+    return public
 
 
 def _safe_acceptance_effect_intents(value: Any) -> list[dict[str, Any]]:
