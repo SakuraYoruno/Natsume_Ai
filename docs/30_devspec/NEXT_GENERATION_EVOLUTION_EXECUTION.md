@@ -3,10 +3,10 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-版本：v2.9
+版本：v3.1
 日期：2026-07-18
-状态：`NE-02_IN_PROGRESS / PROGRAM_INCOMPLETE`
-原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；执行事实以本文所在提交的工作树为准
+状态：`NE-03_IN_PROGRESS / PROGRAM_INCOMPLETE`
+修订执行基线：`origin/dev@7e5bfcde1`；#80～#83 仅作为基础资产，#84 必须重做后才能合并
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
@@ -53,19 +53,31 @@ ModelAttempt 非流式生产路径只投影 provider 明确回报的 token 维�
 
 任何 PR 或报告若把上述 `PARTIAL/BROKEN/SHADOW` 写成 `DONE/PASS`，该交付自动失败。
 
+2026-07-18 代码复审将最近波次重新定级如下；这些状态覆盖对应 PR 正文中的宽泛完成描述：
+
+| PR | 当前定级 | 不计完成的原因 |
+|---|---|---|
+| #80 | `CONTRACT_ONLY / NO_PRODUCTION_CALLER` | World/Intent 没有进入 Surface、Proactive 或 Task admission |
+| #81 | `SELF_ATTESTED_SHADOW / TRUSTED_EVIDENCE_MISSING` | dataset、verifier 和 effect isolation 可由同一 runner 自报 |
+| #82 | `PARTIAL / NON_ATOMIC / EVIDENCE_UNVERIFIED` | activation 与 receipt 跨事务，URI 未查询真实 authority，runtime resolver 未切流 |
+| #83 | `LEDGER_ONLY / NO_REAL_ACTIVATION` | APPLIED/ACTIVE/ROLLED_BACK 仅写事件名，没有切换真实 version owner |
+| #84 | `DRAFT_INVALID_PENDING_REWORK` | 当前分支恢复截断、先改内存后落盘且没有 Host lifespan/三消费者生产接线 |
+
+GitHub Actions 当前因账户额度无法分配真实步骤，统一记为 `NOT_RUN_ACCOUNT_QUOTA`。零步骤失败不阻断当前波次，也不能写成 PASS；本地定向 Gate 必须绑定 commit SHA 保存到忽略目录 `artifacts/local-gates/<sha>/`。
+
 任何生产代码或工程工具变更必须在同一变更集中更新 README、对应权威文档或机器状态；CI 的 change-contract 门禁直接检查 Git 变更集，不能再用“文档最近更新过”代替本次同步。架构语义变化还必须按 freshness policy 的 source→doc 映射更新对应事实、数据流、图和 Trace。
 
 ## 3. 执行 DAG
 
 ```text
-NE-00 文档与机器事实重置
+交付协议与机器状态纠偏
+  ↓
+NE-03 World/Scene/Intent/Guardian 重做与生产切流
   ↓
 NE-01 执行主链与显式 Composition 闭环
-  ├──────────────┐
-  ↓              ↓
-NE-02 真实规划   NE-03 World/Scene/Intent/Guardian
-  └──────┬───────┘
-         ↓
+  ↓
+NE-02 真实 PlanningSearch 与收益证明
+  ↓
 NE-04 Evolution Lab / Scenario / Counterfactual
   ├──────────────┐
   ↓              ↓
@@ -75,7 +87,7 @@ NE-05 Skill      NE-06 Feedback / Knowledge / Identity
 NE-07 Full Program Acceptance
 ```
 
-NE-02 与 NE-03 可在 NE-01 合同冻结后并行；NE-05 与 NE-06 可在 NE-04 的实验/提案合同冻结后并行。不得为了“并行”同时修改同一 authority、migration 或 composition 文件。
+NE-03 先修复已打开的 #84，随后回到 NE-01 清除通用执行主链缺口；NE-05 与 NE-06 可在 NE-04 的实验/提案合同冻结后并行。不得为了“并行”同时修改同一 authority、migration 或 composition 文件。
 
 ## 4. Architecture Waves
 
@@ -326,16 +338,22 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 
 进入条件：NE-01～NE-06 均 `CODE_COMPLETE`，没有已知 P0/P1，旧 authority usage 为 0；所有 Target Architecture Gate 仍是强制条件，早期 wave 允许 shadow 不等于最终豁免。
 
+验收必须使用独立 acceptance 数据根和真实生产进程/镜像；mock、fake store、端口占位和 scripted replay 只能做前置测试，不能形成最终 receipt。`FullStackAcceptanceReceiptV1` 绑定 commit、run、配置摘要、镜像 digest、container/PID、健康和真实读写回执、重启/故障/性能结果，并排除 secret、用户正文和私密数据。
+
 验收范围：
 
 1. 全量 unit/contract/integration/e2e；
 2. migration fresh/upgrade/backup/restore；
-3. Docker 依赖、Host、Obs、Monitor UI、Gateway、Edge；
-4. chat/skill/delegate/plan/scheduler/internal/operator 全路线 ledger 对账；
-5. Research/Code/Pentest planning benchmark 与 calibration；
-6. Evolution Lab、Skill compile、feedback、knowledge、identity golden paths；
-7. security、privacy、performance、chaos、crash recovery、rollback；
-8. ASR/TTS/VRM/VTS/硬件矩阵：可用则实测，不可用则精确记为 `DEGRADED/NOT_TESTED`。
+3. 构建 Monitor UI，并由真实 Nginx Monitor Proxy 服务构建产物；
+4. 使用参数化 acceptance volume 启动固定版本/digest 的 Docker Neo4j、Chroma、Redis，逐项完成真实写入、读取、重启持久性和 namespace 清理；
+5. 使用生产脚本启动 Host、Obs、Nginx Monitor、完整 Edge Profile 和 Unified Gateway；本地 Gateway webhook 必须贯通 durable inbox → HostCommand/TaskGraph → Acceptance/Outbox → durable delivery → reply receipt；
+6. chat/skill/delegate/plan/scheduler/internal/operator 全路线 ledger 对账；
+7. Research/Code/Pentest planning benchmark 与 calibration；
+8. Evolution Lab、Skill compile、feedback、knowledge、identity golden paths；
+9. security、privacy、performance、chaos、crash recovery、rollback；
+10. 至少一个已配置真实非 mock 模型 provider；ASR/TTS/VRM/VTS/硬件可用则实测，不可用逐项 `NOT_TESTED`。
+
+Docker、Neo4j、Chroma、Redis、Host、Obs、Monitor、Edge 或 Gateway 任一强制本地服务无法真实启动/读写时，结果必须是 `FAIL`，不能用内存 fallback。只有本地强制栈全部通过、仅缺外部 provider 凭据、平台账号或硬件时，才允许 `ACCEPTANCE_PENDING_EXTERNAL`。
 
 其中 Pentest L3 必须满足 Target Gate #6：使用 durable calibration、能按虚拟状态生成后继，并由 promotion Gate 证明安全与收益；否则 NE-07 只能 `FAIL` 或 `ACCEPTANCE_PENDING_EXTERNAL`，不得 `PASS`。
 
@@ -367,10 +385,12 @@ FAIL
 1. 每个 NE 波至少交付一条 production cutover、两个可量化架构改善和旧路径删除。
 2. 只增加 adapter、shadow fixture、空目录、报告或测试时，状态保持 `IN_PROGRESS`。
 3. 不按微型 TASK 编号逐个提交；按可审 vertical slice 中文提交。
-4. 提交信息、PR 标题和正文统一使用中文。
-5. 每个 PR 写清：真实生产路径、删除的旧 authority、定向测试、一次 wave integration、风险与回滚。
-6. 不保护无价值 WIP；保护范围只包括用户明确资产、secret、模型、有效运行数据和当前任务外的真实业务改动。
-7. 运行证据写入被忽略的 `artifacts/`；只有最终、脱敏、可复核的 machine receipt 才进入文档证据目录。
+4. 提交标题只允许 `重构/修复/功能/测试/文档/性能/安全/构建：中文结果`；`origin/dev..HEAD` 不允许 merge commit，同步 dev 必须 rebase。
+5. PR 正文必须通过 Markdown 文件和 `gh pr create/edit --body-file` 提交，禁止在命令行拼接字面量 `\\n`。
+6. PR 固定包含“目标、生产接线、删除或停用的旧路径、本地验证、远程 CI 状态、已知边界、风险与回滚”七节，并通过 `tools/delivery/change_metadata_gate.py`。
+7. 每个代码提交同步受影响文档和机器状态，提交后立即推送；Draft 可 `--force-with-lease`，Ready 后禁止重写历史。
+8. 不保护无价值 WIP；保护范围只包括用户明确资产、secret、模型、有效运行数据和当前任务外的真实业务改动。
+9. 运行证据写入被忽略的 `artifacts/`；只有最终、脱敏、可复核的 machine receipt 才进入文档证据目录。
 
 ## 7. 停止与回滚
 
@@ -388,5 +408,5 @@ FAIL
 文档验收后创建的 Goal 应使用以下目标，不附带微任务数量：
 
 ```text
-按 NEXT_GENERATION_EVOLUTION_EXECUTION.md 完成 NE-01～NE-07：先修复 Scheduler/Internal 与 Durable DAG/Review/Budget/legacy authority，删除全局 service locator；再完成真实跨领域 PlanningSearch、World/Scene/Intent、Evolution Lab、Skill Compiler、Experience/Knowledge/Identity 受治理闭环；最后统一启动 Docker、Host、Obs、前端、Gateway 与 Edge 进行一次完整验收。全过程按小工作片定向单测、每波一次集成、最终一次全量实测执行。
+按 NEXT_GENERATION_EVOLUTION_EXECUTION.md v3.1 完成 NE-03、NE-01、NE-02、NE-04～NE-07：先重做 #84 并完成 World/Scene/Intent/Guardian 生产切流，再封板通用执行、真实 PlanningSearch 和受治理演化闭环；最终构建 Monitor UI，启动真实 Docker Neo4j/Chroma/Redis、Host、Obs、Nginx Monitor、完整 Edge 与 Unified Gateway 做全量网络、数据、重启、故障和回滚验收。全过程使用中文提交/PR、每提交同步文档并推送，远程 CI 额度缺失只记 NOT_RUN_ACCOUNT_QUOTA。
 ```

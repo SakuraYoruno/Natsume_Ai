@@ -72,13 +72,13 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 |---|---|---|---|---|---|
 | TRACE-EVO-01 | FR-NLE-004 | World facts/provenance/TTL/conflict 进入 Context | `runtime/world_model.py` | `PARTIAL_READ_PROJECTION` | NE-03 |
 | TRACE-EVO-02 | FR-NLE-004 | Scene aggregate/transition/策略 | `persona/scene_policy.py` | `PARTIAL_DEFAULT_OFF` | NE-03 |
-| TRACE-EVO-03 | FR-NLE-004 | user/task/life/relationship/authority 仲裁 | Governor + ActionArbiter | `MISSING_UNIFIED_ARBITER` | NE-03 |
+| TRACE-EVO-03 | FR-NLE-004 | user/task/life/relationship/authority 仲裁 | #80 contract + Governor/ActionArbiter | `CONTRACT_ONLY_NO_PRODUCTION_CALLER` | NE-03 |
 | TRACE-EVO-04 | FR-NLE-004 | 高风险 action 统一 preview/shadow | action preview + Obs | `PARTIAL_ELIGIBILITY_ONLY` | NE-03 |
 | TRACE-EVO-05 | FR-NLE-005 | 统一 health/degradation/recovery/SLO | degradation/heartbeat/catalog | `PARTIAL` | NE-03 |
-| TRACE-EVO-06 | FR-ARCH-010 | Scenario/Experiment Lab | branch policy only | `PLACEHOLDER` | NE-04 |
-| TRACE-EVO-07 | FR-ARCH-010 | Counterfactual replay | 无 | `MISSING` | NE-04 |
+| TRACE-EVO-06 | FR-ARCH-010 | Scenario/Experiment Lab | 0108 V1 ledger + self-attested runner | `SHADOW_UNTRUSTED_EVIDENCE` | NE-04 |
+| TRACE-EVO-07 | FR-ARCH-010 | Counterfactual replay | V1 report contract | `CONTRACT_ONLY_NO_TRUSTED_RUNNER` | NE-04 |
 | TRACE-EVO-08 | FR-NLE-005、FR-ARCH-007 | Maturity 成为默认 restrict-only 门禁 | scorecard + disabled adapter | `PARTIAL` | NE-05 |
-| TRACE-EVO-09 | FR-ARCH-007、FR-ARCH-010 | Skill Compiler 与 signed lifecycle | forge/intake/quarantine | `MISSING_COMPILER` | NE-05 |
+| TRACE-EVO-09 | FR-ARCH-007、FR-ARCH-010 | Skill Compiler 与 signed lifecycle | deterministic draft + intake/quarantine + 0109 ledger | `PARTIAL_NON_ATOMIC_NO_RUNTIME_RESOLVER` | NE-05 |
 | TRACE-EVO-10 | FR-ARCH-010 | 经验只以 proposal 回流 | 多条局部 feedback；T-PERSONA-PROPOSAL-01 待实现 | `PARTIAL_BROKEN_PATH` | NE-06 |
 | TRACE-EVO-11 | FR-ARCH-005、FR-ARCH-010 | Knowledge provenance/version/conflict | Memory/Retrieval/Canon 基础 | `MISSING_KNOWLEDGE_OS` | NE-06 |
 | TRACE-EVO-12 | FR-NLE-005 | Identity snapshot 接 release | pure contract | `PARTIAL_DEFAULT_OFF` | NE-06 |

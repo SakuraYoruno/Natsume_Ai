@@ -23,11 +23,9 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 NE-02 的 Research shadow 已新增独立语料绑定、执行 profile/budget、citation verifier、双臂回执合同和 0107 append-only SQLite ledger；脚本重放与未 attested 的 canonical attempt 永远不能形成收益结论。D20c 已冻结外部 provider attestation 合同：必须是新请求、真实 provider、模型/路由/响应摘要、token、成本与延迟齐全；localhost、mock、disabled、test、placeholder 和 cache 路径会被拒绝。该合同仍不等于已获得外部凭据后的真实收益证明。NE-01 的 fan-out/atomic 生产开关即使显式设置，也必须同时提供 `HOST_TASK_RUNTIME_CANARY_RECEIPT`，缺失时启动失败关闭。NE-03 已冻结 workspace-scoped `WorldFactV2`、`WorldSnapshotV2`、`ContextPackV2` 和 `SceneDecisionV2` 合同；它们尚未替代旧 person-scoped resolver。
 NE-03 的只读 `WorldResolver` 已按 workspace/subject 过滤 journal 事实，保留 competing refs，过期事实只按读取时钟剔除且不会续期；`IntentArbiter` 只合并并收紧 Scene、关系、风险和 Grant 约束，不替换用户目标或扩大权限。它们尚未替代旧 person-scoped production resolver。
-NE-04 已冻结 proposal-only 的 `ExperimentSpecV1`、`ExperimentRunReceiptV1`、`CounterfactualPairV1`、`ExperimentReportV1` 和 `EvolutionProposalV1`；实验合同禁止生产 writer、未 Review promotion 和副作用，隔离 runner 与 durable Lab ledger 仍待接线。
-NE-04 已新增 0108 append-only Evolution Lab ledger：ExperimentSpec、RunReceipt、Report、RedactionReceipt 和 EvolutionProposal 必须按 digest/版本链精确绑定，proposal 永远要求 Review 且禁止生产影响；`EvolutionLabRunner` 现在只接受 DatasetReader、受限 ModelPort、Verifier 和 ExperimentRepository，并拒绝暴露 writer/CapabilityBroker/Edge/activation authority 的端口。真实 verifier、production composition、Review activation 和 rollback 仍待接线。
-NE-05 已新增确定性的 `SkillDraftV1` 编译器，统一 Markdown/API/script/accepted trace 的 I/O、风险、依赖、verifier、测试向量、预算和回滚元数据；0109 又把 Lab report、Review、SBOM、signature、sandbox、rollback 和 maturity 证据落入 append-only ledger，由 fenced service 产生 activate/degrade/rollback receipt，runtime 仅解析 active content-addressed 版本。外部 provider sandbox canary、真实 Review/activation 生产入口和 bundle import 仍待完成。生产 Governor 的 restrict-only maturity policy 已默认开启，缺失或伪造 scorecard 最高风险。
-NE-06 已冻结 `FeedbackProposalV1`、namespace 分离的 `KnowledgeEntryV1` 和带 regression/review/rollback 绑定的 `IdentityMigrationPlanV1`；这些合同禁止未 Review 直写和跨 workspace 知识串线，生产 proposal/activation 仍待接线。
-NE-06 当前已新增 0110 append-only Evolution Governance Ledger：Feedback、Knowledge、Identity 分别持久化 proposal/plan 与 Lab+Review 后的 apply、activate、deprecate、rollback 事件；Knowledge active projection 只读且保留 competing refs，Identity 支持显式 no-change release。Prefrontal 的 `on_interaction_cycle()` 参数漂移已修复，但旧增长 caller、现有 IdentitySnapshot owner 和旧知识库尚未完成 shadow/cutover。
+NE-04 的 0108 V1 ledger 和 runner 仅是 self-attested shadow：dataset digest 没有由 runner 独立重算，缺失 verifier evidence 时会自行补 hash，端口隔离依赖可绕过的属性名检查，而且没有生产 composition。V1 永久 `benefit_eligible=false`，不能作为 promotion 证据。
+NE-05 已有确定性 `SkillDraftV1`、安全接收与 0109 lifecycle 记录，但 Lab/Review/Sandbox URI 尚未查询真实 authority，supply-chain 状态与 terminal receipt 不是同一 UoW，exact replay 与跨版本 rollback evidence 仍有缺陷，Host 也仍从旧 Skill registry 解析；因此不构成真实 activation/rollback 闭环。生产 Governor 的 restrict-only maturity policy 已默认开启，缺失或伪造 scorecard 最高风险。
+NE-06 的 0110 V1 ledger 只持久化 Feedback、Knowledge、Identity 的事件名与引用；APPLIED/ACTIVE/ROLLED_BACK 没有切换真实 policy/persona/knowledge/identity owner，引用也未查询 Lab/Review/Snapshot authority。Prefrontal 的一个参数漂移已修复，但 V1 不具备 activation authority。
 
 D6 的 ledger-stats 投影只保留每张表按时间戳与持久行身份稳定排序后的最新 5,000 条公开记录；`truncated=true` 表示更旧尾部未物化，不再让整张高流量表永久返回 503。截断后只有 `start_ms` **严格晚于**最老保留记录时间的窗口可被权威回答；相等时间仍可能存在被持久行身份裁掉的同毫秒记录，因此边界窗口、直接全表读取和未命中的 `request_id` 都以 `PROJECTION_SOURCE_TRUNCATED` 失败关闭。投影轮询没有新事实时复用原 `source_cursor/source_digest`，只刷新 freshness，immutable journal 不增长；来源不可用和超出保留期的查询也继续失败关闭。这个边界是“可查询的最新有界窗口”，不是完整历史统计。
 
@@ -374,7 +372,9 @@ PR/推送的 freshness workflow 会把 Git 变更集传入门禁：只要生产�
 
 ## 提交约定
 
-- 提交信息、PR 标题和 PR 正文统一使用中文。
+- 提交标题统一为 `重构/修复/功能/测试/文档/性能/安全/构建：中文结果`，Feature 分支禁止 merge commit，同步 `dev` 使用 rebase。
+- PR 标题和正文统一使用中文；正文从真实 Markdown 文件通过 `--body-file` 提交，固定包含目标、生产接线、旧路径、本地验证、远程 CI、边界、风险与回滚七节。
+- GitHub Actions 因账户额度未运行时只记录 `NOT_RUN_ACCOUNT_QUOTA`；本地证据绑定 commit SHA 写入被忽略的 `artifacts/local-gates/<sha>/`。
 - 不提交 `.env`、密钥、`runtime/`、`artifacts/`、模型文件或本地服务数据。
 - 修改生产架构时同步更新 Current、Gap、机器状态、执行合同和相应数据流图。
 - 删除或移动文档时同步更新目录索引与文档门禁策略。
