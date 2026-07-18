@@ -20,6 +20,9 @@ RESEARCH_BENCHMARK_SCHEMA = "natsume.research-benchmark.shadow.v1"
 RESEARCH_EVIDENCE_CLASSES = frozenset(
     {"SCRIPTED_REPLAY", "CANONICAL_ATTEMPT_UNATTESTED", "ATTESTED_EXTERNAL"}
 )
+_FORBIDDEN_PROVIDER_MARKERS = frozenset(
+    {"localhost", "127.0.0.1", "mock", "disabled", "test", "placeholder", "cache"}
+)
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -334,6 +337,10 @@ class ResearchModelExecutionReceiptV1:
         attestation = None if self.attestation_ref is None else _text(self.attestation_ref, "attestation_ref", 1_024)
         if evidence_class == "ATTESTED_EXTERNAL" and not attestation:
             raise ResearchBenchmarkContractError("attested external evidence requires attestation_ref")
+        if evidence_class == "ATTESTED_EXTERNAL" and (self.total_tokens is None or self.cost_micros is None):
+            raise ResearchBenchmarkContractError(
+                "attested external evidence requires token and cost usage"
+            )
         if evidence_class != "ATTESTED_EXTERNAL" and attestation:
             raise ResearchBenchmarkContractError("non-attested evidence cannot carry attestation_ref")
         object.__setattr__(self, "attestation_ref", attestation)
@@ -352,6 +359,58 @@ class ResearchModelExecutionReceiptV1:
             "cost_micros": self.cost_micros,
             "attestation_ref": self.attestation_ref,
             "benefit_eligible": self.benefit_eligible,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalProviderRunAttestationV1:
+    """Trusted transport evidence for one fresh external-model request.
+
+    This is an attestation contract only; it does not call a provider and it
+    cannot grant production influence.  Local, mock, disabled, test and cache
+    routes are rejected so scripted replay cannot masquerade as real evidence.
+    """
+
+    execution_id: str
+    provider: str
+    model: str
+    route_digest: str
+    response_digest: str
+    total_tokens: int
+    cost_micros: int
+    provider_latency_ms: int
+    total_latency_ms: int
+    fresh_request: bool = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "execution_id", _text(self.execution_id, "execution_id", 160))
+        provider = _text(self.provider, "provider", 160).lower()
+        if any(marker in provider for marker in _FORBIDDEN_PROVIDER_MARKERS):
+            raise ResearchBenchmarkContractError("external attestation provider is not genuinely external")
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "model", _text(self.model, "model", 240))
+        for name in ("route_digest", "response_digest"):
+            object.__setattr__(self, name, _digest(getattr(self, name), name))
+        for name in ("total_tokens", "cost_micros", "provider_latency_ms", "total_latency_ms"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ResearchBenchmarkContractError(f"{name} must be a non-negative integer")
+        if not self.fresh_request:
+            raise ResearchBenchmarkContractError("external model attestation requires a fresh request")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "natsume.research.external-provider-attestation.v1",
+            "execution_id": self.execution_id,
+            "provider": self.provider,
+            "model": self.model,
+            "route_digest": self.route_digest,
+            "response_digest": self.response_digest,
+            "total_tokens": self.total_tokens,
+            "cost_micros": self.cost_micros,
+            "provider_latency_ms": self.provider_latency_ms,
+            "total_latency_ms": self.total_latency_ms,
+            "fresh_request": True,
         }
 
 
@@ -426,4 +485,5 @@ __all__ = [
     "ResearchExecutionProfileV1",
     "ResearchModelExecutionReceiptV1",
     "ResearchVerifierReceiptV1",
+    "ExternalProviderRunAttestationV1",
 ]

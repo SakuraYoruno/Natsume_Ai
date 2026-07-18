@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from host_brain.planning_search.research_benchmark_contracts import (
+    ExternalProviderRunAttestationV1,
     PairedResearchRunReceiptV1,
     ResearchBenchmarkContractError,
     ResearchCorpusBindingV1,
@@ -94,4 +95,31 @@ def test_d20b_rejects_cache_and_forged_external_attestation() -> None:
             arm_id="arm",
             evidence_class="ATTESTED_EXTERNAL",
             attempt_ids=("attempt",),
+        )
+
+
+def test_d20c_external_attestation_requires_fresh_real_usage() -> None:
+    attestation = ExternalProviderRunAttestationV1(
+        execution_id="external-run",
+        provider="openai",
+        model="research-model",
+        route_digest="a" * 64,
+        response_digest="b" * 64,
+        total_tokens=321,
+        cost_micros=42,
+        provider_latency_ms=120,
+        total_latency_ms=180,
+    )
+    assert attestation.to_dict()["fresh_request"] is True
+    with pytest.raises(ResearchBenchmarkContractError):
+        ExternalProviderRunAttestationV1(
+            execution_id="cached-run",
+            provider="localhost-mock",
+            model="test",
+            route_digest="a" * 64,
+            response_digest="b" * 64,
+            total_tokens=1,
+            cost_micros=1,
+            provider_latency_ms=1,
+            total_latency_ms=1,
         )

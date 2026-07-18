@@ -71,6 +71,7 @@ from .research_domain_models import (
     ResearchTaskSnapshot,
 )
 from .research_benchmark_contracts import (
+    ExternalProviderRunAttestationV1,
     RESEARCH_BENCHMARK_SCHEMA,
     RESEARCH_EVIDENCE_CLASSES,
     PairedResearchRunReceiptV1,
@@ -144,6 +145,7 @@ __all__ = [
     "ResearchExecutionBudgetV1",
     "ResearchExecutionProfileV1",
     "ResearchModelExecutionReceiptV1",
+    "ExternalProviderRunAttestationV1",
     "ResearchVerifierReceiptV1",
     "PairedResearchRunReceiptV1",
     "ResearchCognitiveRanker",
