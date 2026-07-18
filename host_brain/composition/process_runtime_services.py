@@ -406,6 +406,9 @@ def get_intent_engine() -> IntentDecisionEngine:
             token_service=get_token_service(),
             registry=skill_registry,
             policy_cache=get_policy_cache(),
+            # Production composition is fail-closed by default.  Direct unit
+            # consumers may still opt into the adapter explicitly.
+            capability_maturity_enabled=True,
             capability_scorecard_provider=get_capability_scorecard_provider(
                 skill_registry=skill_registry,
             ),

@@ -9,6 +9,7 @@ from host_brain.evolution_lab import (
     ExperimentReportV1,
     ExperimentRunReceiptV1,
     ExperimentSpecV1,
+    RedactionReceiptV1,
 )
 from host_brain.persistence.evolution_lab_ledger_repository import (
     EvolutionLabLedgerError,
@@ -45,6 +46,16 @@ def test_ne04_evolution_lab_ledger_replays_and_blocks_unbound_proposal(tmp_path)
     )
     assert ledger.register_spec(spec) == spec.spec_digest
     assert ledger.register_spec(spec) == spec.spec_digest
+    redaction = RedactionReceiptV1(
+        receipt_id="redaction-ne04",
+        source_digest="2" * 64,
+        rules_version="redaction.v1",
+        output_dataset_digest="3" * 64,
+        redacted_fields=("private_body", "raw_thought"),
+        source_kind="real_trace",
+    )
+    assert ledger.append_redaction(redaction) == redaction.receipt_digest
+    assert ledger.append_redaction(redaction) == redaction.receipt_digest
 
     baseline = _run("run-baseline", spec, "baseline")
     alternative = _run("run-alternative", spec, "alternative")

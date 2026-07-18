@@ -87,6 +87,47 @@ class ExperimentSpecV1:
 
 
 @dataclass(frozen=True, slots=True)
+class RedactionReceiptV1:
+    """Evidence binding a replay dataset to its redaction operation."""
+
+    receipt_id: str
+    source_digest: str
+    rules_version: str
+    output_dataset_digest: str
+    redacted_fields: tuple[str, ...]
+    source_kind: str
+    production_side_effects: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "receipt_id", _text(self.receipt_id, "receipt_id", 160))
+        object.__setattr__(self, "source_digest", _digest(self.source_digest, "source_digest"))
+        object.__setattr__(self, "rules_version", _text(self.rules_version, "rules_version", 120))
+        object.__setattr__(self, "output_dataset_digest", _digest(self.output_dataset_digest, "output_dataset_digest"))
+        fields = tuple(sorted({_text(item, "redacted_fields[]", 160) for item in self.redacted_fields}))
+        object.__setattr__(self, "redacted_fields", fields)
+        object.__setattr__(self, "source_kind", _text(self.source_kind, "source_kind", 64).lower())
+        if self.production_side_effects:
+            raise EvolutionLabContractError("redaction cannot produce production side effects")
+        object.__setattr__(self, "production_side_effects", False)
+
+    @property
+    def receipt_digest(self) -> str:
+        return _json_digest(self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "natsume.evolution-lab.redaction-receipt.v1",
+            "receipt_id": self.receipt_id,
+            "source_digest": self.source_digest,
+            "rules_version": self.rules_version,
+            "output_dataset_digest": self.output_dataset_digest,
+            "redacted_fields": list(self.redacted_fields),
+            "source_kind": self.source_kind,
+            "production_side_effects": False,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ExperimentRunReceiptV1:
     run_id: str
     spec_digest: str
@@ -240,4 +281,5 @@ __all__ = [
     "ExperimentReportV1",
     "ExperimentRunReceiptV1",
     "ExperimentSpecV1",
+    "RedactionReceiptV1",
 ]
