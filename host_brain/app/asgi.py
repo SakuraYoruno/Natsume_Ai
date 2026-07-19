@@ -52,6 +52,7 @@ from host_brain.app.host_life_scheduler_wiring import (
     submit_life_tick_command,
 )
 from host_brain.app.host_runtime_context_wiring import (
+    bind_host_hard_state_runtime as _bind_host_hard_state_runtime,
     compose_host_runtime_context as _compose_host_runtime_context,
     runtime_environment_observation_provider as _runtime_environment_observation_provider,
 )
@@ -503,6 +504,7 @@ def create_app() -> FastAPI:
             tool_catalog_provider=host_services.tool_catalog,
             skill_registry_provider=host_services.skill_registry,
             start_service_heartbeat=False,
+            defer_activity_monitor=True,
         ):
             security: ProcessSecurityServiceContainer | None = None
             command_ingress: ProcessCommandIngressContainer | None = None
@@ -676,6 +678,19 @@ def create_app() -> FastAPI:
                 # Ensure the lifespan-owned heartbeat has entered its renewal
                 # loop before composition can eventually expose routes.
                 await asyncio.sleep(0)
+                _bind_host_hard_state_runtime(
+                    task_runtime=task_runtime,
+                    embodiment_runtime=embodiment_runtime,
+                    host_lifecycle=host_lifecycle,
+                )
+                activity_monitor = host_lifecycle.start_activity_monitor(
+                    ledger=ledger,
+                )
+                startup_probe_statuses["activity_monitor"] = (
+                    f"OK (gaming_check={activity_monitor._gaming_interval}s, "
+                    f"idle_check={activity_monitor._idle_interval}s, "
+                    "hard_state_journal=bound)"
+                )
                 runtime_context_application = _compose_host_runtime_context(
                     task_runtime=task_runtime,
                     ledger=ledger,
@@ -1282,6 +1297,7 @@ def create_app() -> FastAPI:
                 application.state.memory_service_container = memory
                 yield
             finally:
+                host_lifecycle.stop_activity_monitor(logger=logger)
                 scheduler_container = None
                 host_obs_source_epoch = None
                 host_obs_tribe_state_reader = None

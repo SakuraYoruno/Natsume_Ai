@@ -14,6 +14,7 @@ from threading import RLock
 from typing import Any
 
 from host_brain.app.host_hard_state import HostHardStateOwner
+from host_brain.contracts.host_hard_state import HostHardStateJournalPort
 
 
 ServiceProvider = Callable[[], Any]
@@ -54,6 +55,7 @@ class HostLifecycleContainer:
 
     ports: HostLifecycleApplicationPorts
     initial_sys_mode: str = "normal"
+    require_durable_hard_state: bool = False
     endocrine_resolver: KeywordFactory | None = field(default=None, repr=False)
     _epoch: int = field(default=0, init=False, repr=False)
     _open: bool = field(default=False, init=False, repr=False)
@@ -69,6 +71,7 @@ class HostLifecycleContainer:
     def __post_init__(self) -> None:
         bootstrap_kwargs: dict[str, Any] = {
             "initial_sys_mode": self.initial_sys_mode,
+            "require_durable": self.require_durable_hard_state,
         }
         if self.endocrine_resolver is not None:
             bootstrap_kwargs["endocrine_resolver"] = self.endocrine_resolver
@@ -123,6 +126,7 @@ class HostLifecycleContainer:
                 mode_service = self.ports.mode_transition_service_factory(
                     get_hard_state=self.get_hard_state,
                     set_sys_mode=self.set_sys_mode,
+                    history_provider=self.get_sys_mode_history,
                     ledger=ledger,
                 )
                 monitor = self.ports.activity_monitor_factory(
@@ -194,10 +198,35 @@ class HostLifecycleContainer:
 
         return self._hard_state_owner.get_hard_state()
 
-    def set_sys_mode(self, target_mode: str) -> dict[str, Any]:
+    def set_sys_mode(
+        self,
+        target_mode: str,
+        **metadata: Any,
+    ) -> dict[str, Any]:
         """Atomically switch this application's live system mode."""
 
-        return self._hard_state_owner.set_sys_mode(target_mode)
+        return self._hard_state_owner.set_sys_mode(target_mode, **metadata)
+
+    def bind_hard_state_journal(
+        self, journal: HostHardStateJournalPort
+    ) -> dict[str, object]:
+        """Bind and recover the canonical HardState journal for this lifespan."""
+
+        snapshot = self._hard_state_owner.bind_durable_journal(journal)
+        return {
+            "runtime_scope_id": snapshot.runtime_scope_id,
+            "revision": snapshot.revision,
+            "sys_mode": snapshot.sys_mode,
+            "event_id": snapshot.event_id,
+            "event_digest": snapshot.event_digest,
+            "updated_at_ms": snapshot.updated_at_ms,
+        }
+
+    def get_sys_mode_history(self, *, limit: int = 100) -> list[dict[str, object]]:
+        return self._hard_state_owner.durable_history(limit=limit)
+
+    def get_hard_state_durability_status(self) -> dict[str, object]:
+        return self._hard_state_owner.durability_status()
 
     def get_endocrine_state(
         self,
@@ -218,6 +247,22 @@ class HostLifecycleContainer:
             if monitor is not None:
                 monitor.notify_user_interaction()
 
+    def stop_activity_monitor(self, *, logger: Any) -> None:
+        """Stop mode producers before the Host runtime fence is released."""
+
+        with self._lock:
+            monitor = self._owned_activity_monitor
+            self._owned_activity_monitor = None
+            self._activity_monitor = None
+            self._mode_transition_service = None
+        if monitor is not None:
+            try:
+                monitor.stop()
+                logger.info("ActivityMonitor 已停止")
+            except Exception as exc:
+                logger.warning("ActivityMonitor 停止失败: %s", exc)
+        self._hard_state_owner.unbind_durable_journal()
+
     async def aclose(self, *, logger: Any) -> None:
         """Unpublish and stop all services exactly once for the open epoch."""
 
@@ -233,6 +278,7 @@ class HostLifecycleContainer:
             self._activity_monitor = None
             self._owned_resource_manager = None
             self._resource_manager = None
+            self._hard_state_owner.unbind_durable_journal()
         try:
             try:
                 if resource_manager is not None:
@@ -262,6 +308,7 @@ def build_host_lifecycle_container() -> HostLifecycleContainer:
 
     return HostLifecycleContainer(
         initial_sys_mode=get_core_settings().sys_mode,
+        require_durable_hard_state=True,
         ports=HostLifecycleApplicationPorts(
             memory_guard=process_services.get_memory_guard,
             state_arbiter=process_services.get_state_arbiter,

@@ -55,10 +55,15 @@ def _make_service(
     def get_hard_state():
         return state_holder["state"]
 
-    def set_sys_mode(target_mode):
+    def set_sys_mode(target_mode, **metadata):
         old = state_holder["state"]
         state_holder["state"] = _make_hard_state(target_mode)
-        return {"from_mode": old.sys_mode, "to_mode": target_mode, "ts_ms": int(time.time() * 1000)}
+        return {
+            "from_mode": old.sys_mode,
+            "to_mode": target_mode,
+            "event_id": metadata["event_id"],
+            "ts_ms": int(time.time() * 1000),
+        }
 
     mock_get = MagicMock(side_effect=get_hard_state)
     mock_set = MagicMock(side_effect=set_sys_mode)
@@ -89,7 +94,13 @@ class TestManualSwitch:
         assert result["from_mode"] == "normal"
         assert result["to_mode"] == "focus"
         assert result["source"] == "manual"
-        mock_set.assert_called_once_with("focus")
+        mock_set.assert_called_once()
+        call_args, call_kwargs = mock_set.call_args
+        assert call_args == ("focus",)
+        assert call_kwargs["source"] == "manual"
+        assert call_kwargs["reason"] == "手动切换"
+        assert call_kwargs["event_id"] == result["event_id"]
+        assert call_kwargs["ts_ms"] == result["ts_ms"]
 
     def test_normal_to_gaming_succeeds(self):
         service, mock_set, _ = _make_service("normal")
@@ -113,13 +124,47 @@ class TestManualSwitch:
         assert result["success"] is True
 
     def test_same_mode_no_op(self):
-        """切换到相同模式应成功但不调用 set_sys_mode。"""
+        """相同模式返回 NO_CHANGE，不能伪造 transition receipt。"""
         service, mock_set, _ = _make_service("normal")
         result = service.switch_mode("normal")
         assert result["success"] is True
         assert result["from_mode"] == "normal"
         assert result["to_mode"] == "normal"
+        assert result["event_id"] is None
+        assert result["no_change"] is True
+        assert result["transition_committed"] is False
         mock_set.assert_not_called()
+
+    def test_same_mode_with_request_identity_can_return_durable_exact_replay(self):
+        state = _make_hard_state("focus")
+        setter = MagicMock(
+            return_value={
+                "from_mode": "normal",
+                "to_mode": "focus",
+                "event_id": "operator-request-1",
+                "ts_ms": 123,
+                "revision": 2,
+                "event_digest": "sha256:" + "a" * 64,
+                "exact_replay": True,
+                "current_mode": "focus",
+                "current_revision": 2,
+            }
+        )
+        service = ModeTransitionService(
+            get_hard_state=lambda: state,
+            set_sys_mode=setter,
+        )
+        result = service.switch_mode(
+            "focus",
+            source=TransitionSource.MANUAL,
+            reason="work",
+            event_id="operator-request-1",
+        )
+        assert result["success"] is True
+        assert result["exact_replay"] is True
+        assert result["event_id"] == "operator-request-1"
+        assert result["ts_ms"] == 123
+        setter.assert_called_once()
 
     def test_invalid_target_mode_fails(self):
         service, mock_set, _ = _make_service("normal")
@@ -355,12 +400,10 @@ class TestQueryAndConfig:
 class TestAuditLog:
     """审计日志写入。"""
 
-    def test_successful_switch_writes_audit(self):
+    def test_successful_switch_uses_canonical_journal_instead_of_error_log(self):
         service, _, mock_ledger = _make_service("normal")
         service.switch_mode("focus")
-        mock_ledger.log_error.assert_called_once()
-        call_kwargs = mock_ledger.log_error.call_args
-        assert "MODE_TRANSITION" in str(call_kwargs)
+        mock_ledger.log_error.assert_not_called()
 
     def test_failed_switch_writes_audit(self):
         service, _, mock_ledger = _make_service("focus")
@@ -372,7 +415,7 @@ class TestAuditLog:
         state = _make_hard_state("normal")
         service = ModeTransitionService(
             get_hard_state=lambda: state,
-            set_sys_mode=lambda m: {"from_mode": "normal", "to_mode": m, "ts_ms": 0},
+            set_sys_mode=lambda m, **metadata: {"from_mode": "normal", "to_mode": m, "event_id": metadata["event_id"], "ts_ms": 0},
             ledger=None,
         )
         # 不抛异常即通过
@@ -395,7 +438,7 @@ class TestEdgeCases:
 
         service = ModeTransitionService(
             get_hard_state=exploding_get,
-            set_sys_mode=lambda m: {},
+            set_sys_mode=lambda m, **_metadata: {},
         )
         result = service.switch_mode("focus")
         assert result["success"] is False
@@ -405,7 +448,7 @@ class TestEdgeCases:
         """set_sys_mode 抛异常时应返回失败结果。"""
         state = _make_hard_state("normal")
 
-        def exploding_set(m):
+        def exploding_set(m, **_metadata):
             raise RuntimeError("write failed")
 
         service = ModeTransitionService(

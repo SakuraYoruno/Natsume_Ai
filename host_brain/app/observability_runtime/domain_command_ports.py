@@ -359,7 +359,7 @@ def _sysmode_service(route_ports: HostRoutePorts, *methods: str) -> Any:
 
 def _sysmode_switch(
     payload: Mapping[str, Any],
-    _request_id: str,
+    request_id: str,
     *,
     route_ports: HostRoutePorts,
 ) -> Any:
@@ -371,7 +371,13 @@ def _sysmode_switch(
         source = TransitionSource(str(payload.get("source") or "manual"))
     except (ImportError, ValueError):
         source = None
-    kwargs: dict[str, Any] = {"reason": str(payload.get("reason") or "")}
+    kwargs: dict[str, Any] = {
+        "reason": str(payload.get("reason") or ""),
+        "event_id": (
+            "obs-sys-mode:"
+            + hashlib.sha256(str(request_id).encode("utf-8")).hexdigest()
+        ),
+    }
     if source is not None:
         kwargs["source"] = source
     return service.switch_mode(_required_text(payload, "target_mode"), **kwargs)

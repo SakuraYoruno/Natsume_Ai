@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.6
+版本：v2.7
 
 核对日期：2026-07-19
 
@@ -132,7 +132,7 @@ flowchart TD
 - Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Budget 高竞争唯一 winner、single-node post-budget checkpoint continuation、ACCEPTED→Effect restart 和 0099 窄 terminal reconciliation 已有证据；general/multi-node/pre-budget recovery、外部 deployment inventory/remediation、现实 resolver、部署凭据、完整 key lifecycle 和真实 canary仍缺，atomic/bounded/cancellation 均保持 OFF。
 - Chat 的 frozen model budget guard 属于执行约束，不是公开投影数据：route executor 先精确验证 terminal 携带的 guard 和 measurement，worker 再从公开 `audit_refs.trace_stage_meta` 移除已消费 guard，只把 typed `budget_usage.measurements` 写入 WorkerProjection。这样既保留 fail-closed Budget 证据，也不会让 `max_output_tokens/max_token_count` 绕过 projection 的敏感 token 字段门禁。
 - Preview 数据流固定为 `canonical WorkOrder → Runtime Context projection → Scene sha256 identity → Guardian exact authority → issue → terminal reopen`。同 Guardian lease 续租只能单调延长 expiry；terminal proof 的 boundary 使用独立 `action_args` 副本，再把 proof 注入 handler payload，因而不会形成 `payload → proof → boundary → payload` 循环。
-- 两批职责拆分后的数据方向仍是 `app-local wiring/纯 codec/私有 command mixin → 原 authority owner`；focused 模块不能反向取得 SQLite connection、RuntimeEvent append 或独立 journal store。此前 Tool/MCP、ToolBroker、ReAct 和视觉切片的安全边界继续成立。本 HardState 切片把 mode 数据流改为 `CoreSettings bootstrap → HostHardStateOwner → explicit consumer ports`：运行期不再通过 env 或 process facade 读写，Chat/Tribe/Lifecycle/Scheduler 共用同一 owner，Endocrine 在 owner 锁外解析，Obs 从 durable Life Body projection 冷读。Operator 与外部 Tool 的 governed 数据流不变，生产 seed 仍因缺真实 workspace-bound executor而 fail closed。视觉库存 named41/117、all-form47、Container54/4/49 只作历史；当前机械库存为 named40/116、all-form46、Container52/3/48。fresh full architecture static=`PASS`、`failed_gates=[]` 只覆盖静态 Gate；HardState durable owner/restart recovery、Tool seed readiness P2、真实 executor、process-wide locator 与完整 Worker scope仍未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 两批职责拆分后的数据方向仍是 `app-local wiring/纯 codec/私有 command mixin → 原 authority owner`；focused 模块不能反向取得 SQLite connection、RuntimeEvent append 或独立 journal store。此前 Tool/MCP、ToolBroker、ReAct 和视觉切片的安全边界继续成立。HardState 的当前流为 `CoreSettings bootstrap candidate → app-local owner → 0115 runtime-fenced journal/head → explicit consumer ports`：生产写入在 durable bind 前失败关闭，绑定后以 expected revision/mode CAS 原子提交 event/head，commit 成功后才替换内存；restart/fence rotation 从完整验证的 head 恢复。Chat/Tribe/Lifecycle/Scheduler 共用同一 owner，Endocrine 在 owner 锁外解析，Obs 从 durable Life Body projection 冷读。Operator 与外部 Tool 的 governed 数据流不变，生产 seed 仍因缺真实 workspace-bound executor而 fail closed。当前机械库存仍为 named40/116、all-form46、Container52/3/48。fresh full architecture static=`PASS`、`failed_gates=[]` 只覆盖静态 Gate；auto-rules/last-interaction、Tool seed readiness P2、真实 executor、process-wide locator 与完整 Worker scope仍未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 - Operator continuation 不把 `secure_ingress_idempotency_claim.result_ref` 当成任意非空 bearer。ASGI 从同一个 app-local OBS composition 向 Task Runtime 注入 Outcome Journal 的只读 lookup；HostCommand validation 精确绑定 checksum-chained outer receipt、claim/audit、command/action/scopes/body、`SUCCEEDED` 终态和可重建 domain result。lookup 缺失、异常、记录缺失或字段漂移均 fail closed，且 validation 不创建第二个 Journal/Store/UoW。
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
@@ -149,8 +149,12 @@ flowchart LR
     Container --> Start["factory/start success\nthen publish"]
     Start --> Services["ActivityMonitor + ResourceManager + ModeTransition"]
     Container --> Bootstrap["CoreSettings.sys_mode\nbootstrap only"]
-    Bootstrap --> HardState["HostHardStateOwner\nimmutable app-local state"]
-    HardState --> ModeChange["atomic mode replacement\nno env write"]
+    Bootstrap --> HardState["HostHardStateOwner\nproduction writes require durable bind"]
+    Lease["Host runtime scope · owner\nlease · fencing token"] --> Journal["0115 append-only event\n+ canonical head"]
+    HardState --> Journal
+    Journal --> CAS["verify full chain + expected head\nevent/head one UoW"]
+    CAS --> ModeChange["commit then immutable replacement\nno env write"]
+    Journal --> Restart["restart / rotated fence\nrecover verified head"]
     HardState --> Endocrine["frozen snapshot\nresolver called after lock release"]
     HardState --> ModeReaders["Chat · Tribe · Lifecycle · Scheduler\nexplicit mode / shared owner"]
     ModeReaders --> DurableProjection["runtime projection → Obs Life Body\ndurable read-only"]
@@ -163,7 +167,7 @@ flowchart LR
     Container --> Close["closing fence → unpublish\nblock begin → exact-once close"]
 ```
 
-Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState 切换只在 owner 锁内替换 immutable snapshot，不递归读取 owner；Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。Tribe 的 bind/unbind 围栏仍不提供并发 multi-app 隔离，Endocrine agent 仍 process-global。视觉 commit-bound 库存为 named41/117、all-form47、Container54/4/49；当前机械库存为 named40/116、all-form46、Container52/3/48。HardState durable owner/restart recovery、helper 正向生产 mode 传播、process-wide locator、heartbeat、Tribe bus、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
+Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。Tribe 的 bind/unbind 围栏仍不提供并发 multi-app 隔离，Endocrine agent 仍 process-global。当前机械库存为 named40/116、all-form46、Container52/3/48。auto-rules/last-interaction、helper 正向生产 mode 传播、process-wide locator、heartbeat、Tribe bus、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
 
 ## 3. 入口与路由分流
 
@@ -586,9 +590,9 @@ Host lifespan
 
 21个producer callback执行路径不调用`process_services`。Host source endpoint不在GET时构造服务；ASGI lifespan预热并捕获provider、关闭时清空，但其底层Mode/Forge/ledger/Semantic/Governance/Scheduler/Tribe仍来自process authority。合同只递归约束`timestamp`、`*_ts_ms`、`*_at_ms`字段不晚于Host observed，不是“所有future字段”过滤器；Obs允许相对本地接收时钟最多5秒skew，正evidence最大年龄120秒，并把freshness写成`min(source evidence, local receive)`。五路径分别缓存，lineage以SQLite单事务CAS更新当前head并从immutable journal读取完整epoch历史。三层公共序列化与合同复验保护通用payload；Organ `key_metrics`另以逐agent显式数值/布尔allowlist阻断任意state标量。
 
-Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
+Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode transition history 已由 0115 journal 持久化；auto-rules/last-interaction 与 Organ 指标仍是易失派生状态，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照；本 HardState 切片确保 Obs 的 sys mode 继续来自 durable root，而不是重新读取 app-local 内存或环境。Host lifecycle 现在收口 app-local monitor/resource/mode/HardState 与单活 Tribe fence；process 三 HardState facade、slot/lock、6 个目标 binding和两处伪写归零。视觉库存41/117/47、Container54/4/49只作历史；当前40/116/46、Container52/3/48。210 项集中定向、7 项 D7b 与29项Operator/focus/runtime projection分别通过，禁止相加；宽Obs超时不计。真实 workspace-bound governed Tool/MCP/Visual executor、heartbeat、process-global Endocrine/Tribe、HardState durable owner/restart recovery、共享status、完整Host/Worker composition、剩余direct embodiment adapter和全局locator删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress；wave integration=`NOT_RUN_PER_WAVE_POLICY`，remote CI=`NOT_RUN_ACCOUNT_QUOTA`。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照；Obs 的 sys mode 继续来自 durable root，而不是重新读取 app-local 内存或环境。Host lifecycle 现在收口 app-local monitor/resource/mode/HardState 与单活 Tribe fence；process三HardState facade、slot/lock、6个目标binding和两处伪写归零。当前库存40/116/46、Container52/3/48。`HOST_SYS_MODES`/`HOST_MODE_TRANSITIONS`已进入neutral contract，数据依赖固定为`persistence → contracts/host_hard_state`而不再回流core application。前一210、D7b7、Operator/focus/runtime projection29分别保留；本次权威核心consolidated为`84 passed in 66.37s`，neutral-contract修复后的lifecycle/ASGI/manifest/operator final peripheral affected batch独立为`67 passed in 35.78s`。外围67与核心84可能语义重叠，二者及旧83/82历史均禁止相加。0115成功切换只以journal作为canonical audit，exact replay不重复追加进程内history或legacy `error_log`。真实workspace-bound executor、Operator/HTTP E2E、heartbeat、process-global Endocrine/Tribe、auto-rules/last-interaction、共享status、完整Host/Worker composition、剩余direct embodiment adapter和全局locator删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress；production canary/wave integration=`NOT_RUN_PER_WAVE_POLICY`，remote CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 
@@ -836,6 +840,29 @@ flowchart LR
 
 Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Surface、Proactive 和 Task 已消费一致的 scene revision/digest。长周期目标尚无独立 durable owner，Bond 原始证据仍来自既有上游投影，因此空 `long_term_goal_refs` 不得被臆造值填充。
 
+### 9.6 Host HardState durable mode flow
+
+```mermaid
+sequenceDiagram
+    participant H as Host ASGI lifespan
+    participant O as HostHardStateOwner
+    participant J as SQLiteHardStateJournal
+    participant L as Host runtime lease
+    participant D as 0115 event/head
+    H->>L: obtain scope/owner/lease/fence
+    H->>J: bind canonical DB + authority provider
+    J->>D: verify migration, full chain and head
+    J-->>O: load or initialize verified snapshot
+    O->>J: transition(expected revision/mode, event identity)
+    J->>L: reopen exact active authority
+    J->>D: BEGIN IMMEDIATE; append event + advance head
+    D-->>J: commit
+    J-->>O: committed snapshot
+    O->>O: replace immutable memory state
+```
+
+production owner 在 bind 前拒绝写入。0115 trigger 和 repository 都验证 exact lease/fence；event 与 head 同事务，故 `after_event_append` 或 `after_head_write` 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest/from-to chain，再采用 durable head；不同 bootstrap mode 不能覆盖已提交事实。成功 transition 只由 journal 形成 canonical audit；exact event replay 返回原结果且不再追加进程内 history 或 legacy `error_log`，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。这是journal/owner内部response-loss语义；`sys_mode.switch`仍被governed Operator Preview/TaskGraph gate阻断，legacy helper无POST route，不能外推Operator/HTTP端到端replay。该流只覆盖当前 mode 与 transition history；自动模式规则、last-interaction、production canary 和 NE-01 wave integration仍未完成。
+
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|
 | Memory | typed recall → compressed packet → Surface | Acceptance → Life projection → assistant/Memory | `WIRED_POST_ACCEPTANCE_EVENTUAL` |
@@ -845,6 +872,7 @@ Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Sur
 | Action Preview | canonical authority reopen → RuntimeEvent receipt → execution-point reopen | receipt 不授予权限；旧任务/effect 与未 Governed Operator 直写失败关闭 | `PARTIAL_NE03_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED` |
 | Runtime Guardian / Catalog | Host lifespan health/degradation/maintenance/SLO + 0113 五阶段 rollout | lease-bound Guardian event；Catalog operation/receipt/head append-only | `PARTIAL_NE03_ENFORCE_TARGET_WIRED_LOCAL_ACCEPTANCE_PASSED` |
 | World Model | server observation → 0111 ObservationPort → WorldResolver | lease/source authority 分配 revision/expiry；captured-head Resolver 纯读 | `PARTIAL_NE03_PRODUCTION_OBSERVATION_WIRED` |
+| Host HardState | bootstrap candidate → app-local owner → 0115 journal/head → explicit consumers | exact Host lease/fence；event/head 同 UoW；commit 后替换内存；restart 完整 replay | `WIRED_DURABLE_MODE_AUTHORITY / NE01_IN_PROGRESS` |
 
 ## 10. 回执与证据分层
 

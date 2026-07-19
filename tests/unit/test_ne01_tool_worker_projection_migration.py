@@ -70,13 +70,13 @@ def test_0114_preserves_historical_projection_and_expands_tool_route(tmp_path: P
     WorkerProjectionStore(db_path).assert_schema_ready()
 
 
-def test_0114_catalog_and_readiness_are_current(tmp_path: Path) -> None:
+def test_0115_catalog_preserves_0114_worker_projection_readiness(tmp_path: Path) -> None:
     db_path = tmp_path / "tool-projection-current.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
-        request_id="ne01-tool-projection-0114"
+        request_id="ne01-tool-projection-through-0115"
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 114
+    assert result.summary["current_version"] == 115
     WorkerProjectionStore(db_path).assert_schema_ready()
 
 

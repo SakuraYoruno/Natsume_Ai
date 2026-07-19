@@ -8,10 +8,11 @@ import json
 import os
 from typing import Any, Mapping
 
+from host_brain.contracts.host_hard_state import HOST_SYS_MODES
 from host_brain.core.ids import now_ms
 
 
-ALLOWED_SYS_MODES = {"normal", "focus", "gaming", "sleep", "maintenance", "locked"}
+ALLOWED_SYS_MODES = HOST_SYS_MODES
 ALLOWED_MOOD_STATES = {"calm", "steady", "engaged", "tired", "critical"}
 
 
@@ -528,5 +529,4 @@ from host_brain.core.emotion_timeline import (  # noqa: E402, F401
     EmotionTimeline,
     compute_emotion_echo,
 )
-
 

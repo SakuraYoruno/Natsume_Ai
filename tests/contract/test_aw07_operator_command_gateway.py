@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -16,6 +17,7 @@ from host_brain.observability.command_ports import (
     OBS_COMMAND_ENVELOPE_SCHEMA,
     ObsCommandAuthority,
     ObsCommandEnvelope,
+    ObsCommandPortExecutionError,
     bind_server_authority,
 )
 from host_brain.app.observability_runtime.domain_command_ports import (
@@ -101,7 +103,7 @@ def _envelope(command_id: str, payload: dict[str, object]) -> ObsCommandEnvelope
     )
 
 
-def test_scheduler_port_consumes_request_local_service_and_bound_authority() -> None:
+def test_scheduler_mutation_fails_closed_before_legacy_service_execution() -> None:
     captured: dict[str, object] = {}
 
     class _SchedulerService:
@@ -122,14 +124,12 @@ def test_scheduler_port_consumes_request_local_service_and_bound_authority() -> 
         scheduler_container=SimpleNamespace(command_service=_SchedulerService())
     )
     with bind_operator_command_runtime(state):
-        result = asyncio.run(port.execute(_envelope(
-            "scheduler.task.enable",
-            {"task_id": "clock.daily"},
-        )))
+        with pytest.raises(ObsCommandPortExecutionError) as blocked:
+            asyncio.run(port.execute(_envelope(
+                "scheduler.task.enable",
+                {"task_id": "clock.daily"},
+            )))
 
-    authority = captured["authority"]
-    assert authority["principal_id"] == "operator.contract"
-    assert authority["claim_ref"] == "claim://operator/contract"
-    assert authority["audit_ref"] == "audit://operator/contract"
-    assert captured["expected_head_version"] == 7
-    assert result.success is True
+    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert blocked.value.side_effects_may_have_run is False
+    assert captured == {}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -40,6 +41,7 @@ from host_brain.app.observability_runtime.domain_command_ports import (
     ObsDomainCommandError,
     build_default_obs_domain_command_registry,
 )
+from host_brain.app.observability_runtime import domain_command_ports
 from host_brain.app.host_route_ports import HostRoutePorts
 
 
@@ -245,6 +247,29 @@ def test_sysmode_adapter_fails_closed_until_governed_operator_cutover() -> None:
         )
     assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
     assert captured == {}
+
+
+def test_sysmode_adapter_prepares_stable_request_identity_behind_gate() -> None:
+    captured: dict[str, object] = {}
+
+    class _ModeService:
+        @staticmethod
+        def switch_mode(target_mode, **kwargs):  # noqa: ANN001, ANN003
+            captured.update(target_mode=target_mode, **kwargs)
+            return {"success": True}
+
+    result = domain_command_ports._sysmode_switch(  # noqa: SLF001
+        {"target_mode": "focus", "reason": "work", "source": "manual"},
+        "authenticated-command-request",
+        route_ports=HostRoutePorts(
+            mode_transition_service_provider=lambda: _ModeService(),
+        ),
+    )
+    assert result == {"success": True}
+    assert captured["event_id"] == (
+        "obs-sys-mode:"
+        + hashlib.sha256(b"authenticated-command-request").hexdigest()
+    )
 
 
 def test_direct_avatar_exception_is_unreachable_without_task_preview(monkeypatch) -> None:

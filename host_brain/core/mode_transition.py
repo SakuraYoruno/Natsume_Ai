@@ -11,7 +11,8 @@
   - ☀️ morning_wakeup → sleep → normal（首次日间互动）
   - 📱 user_message_received → sleep → normal（收到任何用户消息）
 
-每次切换写入审计日志，支持查询切换历史。
+成功切换由 durable HardState journal 形成唯一审计，失败尝试写入 legacy
+诊断日志；查询历史优先读取 durable journal。
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from host_brain.contracts.host_hard_state import HOST_MODE_TRANSITIONS
 from host_brain.core.ids import now_ms, new_event_id
 from host_brain.core.metabolism import (
     ALLOWED_SYS_MODES,
@@ -50,14 +52,7 @@ class TransitionSource(str, Enum):
 
 # 合法的模式切换路径（from_mode → to_mode 集合）
 # None 表示允许从任意模式切换
-VALID_TRANSITIONS: dict[str | None, set[str]] = {
-    "normal":      {"focus", "gaming", "sleep", "maintenance", "locked"},
-    "focus":       {"normal"},
-    "gaming":      {"normal"},
-    "sleep":       {"normal"},
-    "maintenance": {"normal", "locked"},
-    "locked":      {"normal", "maintenance"},
-}
+VALID_TRANSITIONS = HOST_MODE_TRANSITIONS
 
 # 自动切换规则默认开关
 DEFAULT_AUTO_RULES: dict[str, bool] = {
@@ -132,7 +127,8 @@ class ModeTransitionService:
         self,
         *,
         get_hard_state: Callable[[], HardState],
-        set_sys_mode: Callable[[str], dict[str, Any]],
+        set_sys_mode: Callable[..., dict[str, Any]],
+        history_provider: Callable[..., list[dict[str, Any]]] | None = None,
         ledger: Any | None = None,
         auto_rules: dict[str, bool] | None = None,
         idle_threshold_ms: int = DEFAULT_IDLE_THRESHOLD_MS,
@@ -140,6 +136,7 @@ class ModeTransitionService:
         self._get_hard_state = get_hard_state
         self._set_sys_mode = set_sys_mode
         self._ledger = ledger
+        self._history_provider = history_provider
         self._auto_rules = dict(DEFAULT_AUTO_RULES)
         if auto_rules:
             self._auto_rules.update(auto_rules)
@@ -167,6 +164,7 @@ class ModeTransitionService:
         *,
         source: TransitionSource = TransitionSource.MANUAL,
         reason: str = "",
+        event_id: str | None = None,
     ) -> dict[str, Any]:
         """切换 sys_mode。
 
@@ -179,7 +177,8 @@ class ModeTransitionService:
             {"success": bool, "from_mode": str, "to_mode": str, "event_id": str, ...}
         """
         ts = now_ms()
-        event_id = new_event_id()
+        explicit_event_id = str(event_id or "").strip()
+        resolved_event_id = explicit_event_id or new_event_id()
         target = str(target_mode).strip().lower()
 
         # 获取当前模式
@@ -189,7 +188,7 @@ class ModeTransitionService:
         except Exception as exc:
             logger.error("Failed to get current hard_state: %s", exc)
             return self._record_event(ModeTransitionEvent(
-                event_id=event_id,
+                event_id=resolved_event_id,
                 from_mode="unknown",
                 to_mode=target,
                 source=source.value,
@@ -202,7 +201,7 @@ class ModeTransitionService:
         # 目标模式合法性检查
         if target not in ALLOWED_SYS_MODES:
             return self._record_event(ModeTransitionEvent(
-                event_id=event_id,
+                event_id=resolved_event_id,
                 from_mode=from_mode,
                 to_mode=target,
                 source=source.value,
@@ -213,23 +212,25 @@ class ModeTransitionService:
             ))
 
         # 相同模式不切换
-        if from_mode == target:
-            return self._record_event(ModeTransitionEvent(
-                event_id=event_id,
-                from_mode=from_mode,
-                to_mode=target,
-                source=source.value,
-                reason=reason,
-                ts_ms=ts,
-                success=True,
-                error=None,
-            ))
+        if from_mode == target and not explicit_event_id:
+            return {
+                "event_id": None,
+                "from_mode": from_mode,
+                "to_mode": target,
+                "source": source.value,
+                "reason": reason,
+                "ts_ms": ts,
+                "success": True,
+                "error": None,
+                "no_change": True,
+                "transition_committed": False,
+            }
 
         # 切换路径合法性检查
         allowed_targets = VALID_TRANSITIONS.get(from_mode, set())
-        if target not in allowed_targets:
+        if from_mode != target and target not in allowed_targets:
             return self._record_event(ModeTransitionEvent(
-                event_id=event_id,
+                event_id=resolved_event_id,
                 from_mode=from_mode,
                 to_mode=target,
                 source=source.value,
@@ -241,7 +242,24 @@ class ModeTransitionService:
 
         # 执行切换
         try:
-            result = self._set_sys_mode(target)
+            result = self._set_sys_mode(
+                target,
+                expected_from_mode=from_mode,
+                event_id=resolved_event_id,
+                source=source.value,
+                reason=reason,
+                ts_ms=ts,
+            )
+            if (
+                not isinstance(result, dict)
+                or result.get("to_mode") != target
+                or result.get("event_id") != resolved_event_id
+                or (
+                    not bool(result.get("exact_replay"))
+                    and result.get("from_mode") != from_mode
+                )
+            ):
+                raise RuntimeError("MODE_TRANSITION_COMMIT_IDENTITY_INVALID")
             success = True
             error = None
             logger.info(
@@ -249,20 +267,58 @@ class ModeTransitionService:
                 from_mode, target, source.value, reason,
             )
         except Exception as exc:
+            if from_mode == target and "NOOP_TRANSITION_REJECTED" in str(exc):
+                return {
+                    "event_id": None,
+                    "request_event_id": resolved_event_id,
+                    "from_mode": from_mode,
+                    "to_mode": target,
+                    "source": source.value,
+                    "reason": reason,
+                    "ts_ms": ts,
+                    "success": True,
+                    "error": None,
+                    "no_change": True,
+                    "transition_committed": False,
+                }
             success = False
             error = str(exc)
             logger.error("Mode transition failed: %s → %s: %s", from_mode, target, exc)
 
-        return self._record_event(ModeTransitionEvent(
-            event_id=event_id,
-            from_mode=from_mode,
-            to_mode=target,
+        canonical_event = ModeTransitionEvent(
+            event_id=resolved_event_id,
+            from_mode=(
+                str(result.get("from_mode")) if success else from_mode
+            ),
+            to_mode=(str(result.get("to_mode")) if success else target),
             source=source.value,
             reason=reason,
-            ts_ms=ts,
+            ts_ms=(int(result.get("ts_ms") or ts) if success else ts),
             success=success,
             error=error,
-        ))
+        )
+        if success and bool(result.get("exact_replay")):
+            # 精确重放只返回已经持久化的 canonical receipt。不能再次写入
+            # 进程内历史或 legacy error_log，否则同一事件会被观测成两次切换。
+            recorded = canonical_event.as_dict()
+            recorded["success"] = True
+            recorded["transition_committed"] = True
+        else:
+            recorded = self._record_event(
+                canonical_event,
+                write_legacy_audit=not success,
+            )
+        if success:
+            for key in (
+                "revision",
+                "event_digest",
+                "exact_replay",
+                "current_mode",
+                "current_revision",
+                "current_event_digest",
+            ):
+                recorded[key] = result.get(key)
+        return recorded
 
     # ── 事件驱动自动切换 ──────────────────────────────────────────────────
 
@@ -358,7 +414,18 @@ class ModeTransitionService:
         """获取最近的模式切换历史。"""
         with self._history_lock:
             recent = self._history[-limit:]
-        return [e.as_dict() for e in reversed(recent)]
+        local = [e.as_dict() for e in reversed(recent)]
+        if self._history_provider is None:
+            return local
+        durable = list(self._history_provider(limit=limit))
+        merged = {str(item.get("event_id") or ""): dict(item) for item in local}
+        for item in durable:
+            merged[str(item.get("event_id") or "")] = dict(item)
+        return sorted(
+            merged.values(),
+            key=lambda item: int(item.get("ts_ms") or 0),
+            reverse=True,
+        )[: max(0, int(limit))]
 
     def update_auto_rules(self, rules: dict[str, bool]) -> dict[str, bool]:
         """更新自动切换规则开关。"""
@@ -378,15 +445,21 @@ class ModeTransitionService:
         """获取当前 sys_mode。"""
         try:
             return self._get_hard_state().sys_mode
-        except Exception:
-            return "normal"
+        except Exception as exc:
+            logger.error("HardState mode authority unavailable: %s", exc)
+            raise RuntimeError("HARD_STATE_MODE_AUTHORITY_UNAVAILABLE") from exc
 
     def _is_night_time(self) -> bool:
         """判断当前是否为深夜时段 (23:00 - 06:00)。"""
         hour = datetime.datetime.now().hour
         return hour >= NIGHT_HOUR_START or hour < NIGHT_HOUR_END
 
-    def _record_event(self, event: ModeTransitionEvent) -> dict[str, Any]:
+    def _record_event(
+        self,
+        event: ModeTransitionEvent,
+        *,
+        write_legacy_audit: bool = True,
+    ) -> dict[str, Any]:
         """记录切换事件到内存历史 + 审计日志。"""
         # 内存历史
         with self._history_lock:
@@ -395,7 +468,7 @@ class ModeTransitionService:
                 self._history = self._history[-self._max_history:]
 
         # 审计日志
-        if self._ledger is not None:
+        if write_legacy_audit and self._ledger is not None:
             try:
                 self._ledger.log_error(
                     request_id=event.event_id,
@@ -413,4 +486,5 @@ class ModeTransitionService:
 
         result = event.as_dict()
         result["success"] = event.success
+        result["transition_committed"] = bool(event.success)
         return result

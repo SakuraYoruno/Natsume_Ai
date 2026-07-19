@@ -170,6 +170,7 @@ def runtime_lifespan(
     tool_catalog_provider: Callable[[], Any] | None = None,
     skill_registry_provider: Callable[[], Any] | None = None,
     start_service_heartbeat: bool = True,
+    defer_activity_monitor: bool = False,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
@@ -522,27 +523,32 @@ def runtime_lifespan(
                 logger.warning("ANSAgent 主事件循环注册失败（降级）: %s", _ans_loop_exc)
 
             # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
-            try:
-                _activity_monitor = host_lifecycle.start_activity_monitor(
-                    ledger=ledger,
-                )
-                if mode_transition_service_sink is not None:
-                    mode_transition_service_sink(
-                        host_lifecycle.get_mode_transition_service()
-                    )
-
+            if defer_activity_monitor:
                 new_module_statuses["activity_monitor"] = (
-                    f"OK (gaming_check={_activity_monitor._gaming_interval}s, "
-                    f"idle_check={_activity_monitor._idle_interval}s)"
+                    "DEFERRED: durable HardState authority must bind first"
                 )
-                logger.info(
-                    "ActivityMonitor 已启动 (gaming_interval=%ds, idle_interval=%ds)",
-                    _activity_monitor._gaming_interval,
-                    _activity_monitor._idle_interval,
-                )
-            except Exception as _am_exc:
-                new_module_statuses["activity_monitor"] = f"DEGRADED: {_am_exc}"
-                logger.warning("ActivityMonitor 启动失败（降级）: %s", _am_exc)
+            else:
+                try:
+                    _activity_monitor = host_lifecycle.start_activity_monitor(
+                        ledger=ledger,
+                    )
+                    if mode_transition_service_sink is not None:
+                        mode_transition_service_sink(
+                            host_lifecycle.get_mode_transition_service()
+                        )
+
+                    new_module_statuses["activity_monitor"] = (
+                        f"OK (gaming_check={_activity_monitor._gaming_interval}s, "
+                        f"idle_check={_activity_monitor._idle_interval}s)"
+                    )
+                    logger.info(
+                        "ActivityMonitor 已启动 (gaming_interval=%ds, idle_interval=%ds)",
+                        _activity_monitor._gaming_interval,
+                        _activity_monitor._idle_interval,
+                    )
+                except Exception as _am_exc:
+                    new_module_statuses["activity_monitor"] = f"DEGRADED: {_am_exc}"
+                    logger.warning("ActivityMonitor 启动失败（降级）: %s", _am_exc)
 
             # 整机资源管家：自动采样 CPU/GPU/内存/显存，压力触发 LLM 分析。
             try:
