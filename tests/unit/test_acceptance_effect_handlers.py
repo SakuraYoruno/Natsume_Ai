@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 import hashlib
 import json
 from types import SimpleNamespace
@@ -301,7 +302,7 @@ def test_sys_mode_acceptance_handler_reconciles_negative_projection_by_exact_eve
     assert len(service.calls) == 1
 
 
-def test_sys_mode_acceptance_handler_keeps_negative_projection_unknown_until_read_recovers() -> None:
+def test_sys_mode_acceptance_handler_reclaimed_reconcile_never_switches_again() -> None:
     class RecoverableModeTransitionService(_ModeTransitionService):
         def __init__(self) -> None:
             super().__init__(
@@ -331,21 +332,57 @@ def test_sys_mode_acceptance_handler_keeps_negative_projection_unknown_until_rea
     assert len(service.calls) == 1
     assert len(service.reopen_calls) == 1
 
-    # A restarted dispatcher invokes the same frozen event identity.  Even
-    # when the service again reports a negative projection, exact HardState
-    # history settles the canonical commit without producing a second event.
+    # A restarted dispatcher must use the production handler's read-only
+    # reconciliation method.  Exact HardState history settles the canonical
+    # commit without invoking switch_mode for a second time.
     service.reopen_fails = False
-    recovered = handler(_payload())
+    recovered = handler.reconcile(_payload())
 
     assert recovered["status"] == "REPLAYED"
     assert recovered["receipt_ref"].startswith(
         "host-sys-mode-replayed://sha256/"
     )
-    assert [call["event_id"] for call in service.calls] == [_EVENT_ID, _EVENT_ID]
+    assert [call["event_id"] for call in service.calls] == [_EVENT_ID]
     assert [call["event_id"] for call in service.reopen_calls] == [
         _EVENT_ID,
         _EVENT_ID,
     ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("event_id", "obs-sys-mode:" + "f" * 64),
+        ("to_mode", "gaming"),
+        ("source", "automatic"),
+        ("reason", "drifted reason"),
+        ("runtime_scope_id", "runtime-scope-other"),
+    ],
+)
+def test_sys_mode_read_only_reconcile_rejects_exact_identity_drift(
+    field: str,
+    value: str,
+) -> None:
+    class DriftedCommitService(_ModeTransitionService):
+        def reopen_transition_commit(self, **kwargs: Any):  # noqa: ANN201
+            commit = super().reopen_transition_commit(**kwargs)
+            assert commit is not None
+            return replace(commit, event=replace(commit.event, **{field: value}))
+
+    service = DriftedCommitService(
+        {
+            "success": True,
+            "to_mode": "focus",
+            "event_id": _EVENT_ID,
+            "exact_replay": False,
+            "no_change": False,
+        }
+    )
+
+    with pytest.raises(AcceptanceEffectOutcomeUnknown, match="read-only exact"):
+        _handler(service).reconcile(_payload())
+
+    assert service.calls == []
 
 
 def test_sys_mode_acceptance_handler_requires_terminal_preview_before_service() -> None:

@@ -6,10 +6,14 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
 import inspect
+import logging
 import re
 from typing import Any
 
 from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
+
+
+logger = logging.getLogger("Natsume.acceptance_effect_recovery")
 
 
 ACCEPTANCE_EFFECT_HANDLER_MISSING = "ACCEPTANCE_EFFECT_HANDLER_MISSING"
@@ -19,6 +23,10 @@ ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED = (
     "ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED"
 )
 _DURABLE_REF = re.compile(r"^[a-z][a-z0-9+.-]{1,31}://\S+$")
+_SCHEDULER_OPERATION_EFFECT_TYPE = "scheduler.operation.execute"
+_SCHEDULER_DERIVED_CONTEXT_SCHEMA = (
+    "Natsume.scheduler.action_preview_context.v2"
+)
 
 AcceptanceEffectHandler = Callable[[Mapping[str, Any]], Mapping[str, Any] | str | Awaitable[Any]]
 
@@ -114,8 +122,17 @@ class AcceptanceEffectDispatcher:
             return None
         effect = dict(claimed)
         effect_type = str(effect.get("effect_type") or "").strip()
+        reconciliation_only = bool(effect.get("claim_reconciliation_required"))
         handler = self._handlers.get(effect_type)
         if handler is None:
+            if reconciliation_only:
+                return self._reschedule_reconciliation(
+                    effect,
+                    detail=(
+                        "reclaimed Acceptance Effect has no registered "
+                        f"read-only reconciler: {effect_type or '<empty>'}"
+                    ),
+                )
             return self._fail(
                 effect,
                 reason_code=ACCEPTANCE_EFFECT_HANDLER_MISSING,
@@ -125,6 +142,32 @@ class AcceptanceEffectDispatcher:
             handler_payload, preview = self._require_action_preview(effect)
             if preview is not None:
                 terminal_boundary = dict(preview["_terminal_execution_boundary"])
+                if effect_type == _SCHEDULER_OPERATION_EFFECT_TYPE:
+                    if _contains_reserved_preview_context(handler_payload):
+                        raise AcceptanceEffectDispatchError(
+                            "ACTION_PREVIEW_INVALID",
+                            "Scheduler Acceptance Effect payload collides with private Preview context",
+                        )
+                    receipt = preview.get("receipt")
+                    if (
+                        not isinstance(receipt, Mapping)
+                        or str(receipt.get("authority_kind") or "").strip().upper()
+                        != "ACCEPTANCE_EFFECT"
+                    ):
+                        raise AcceptanceEffectDispatchError(
+                            "ACTION_PREVIEW_INVALID",
+                            "Scheduler Acceptance Effect has no exact origin receipt",
+                        )
+                    # This live claim context exists only inside the current
+                    # handler invocation.  Persisting it would turn a short
+                    # fence into replayable authority after COMMIT/expiry.
+                    handler_payload["_action_preview_context"] = {
+                        "schema_version": _SCHEDULER_DERIVED_CONTEXT_SCHEMA,
+                        "origin_authority_kind": "ACCEPTANCE_EFFECT",
+                        "origin_event_id": str(preview["event_id"]),
+                        "origin_receipt_ref": str(preview["receipt_ref"]),
+                        "origin_boundary": deepcopy(terminal_boundary),
+                    }
                 if effect_type == "host.sys_mode_transition":
                     handler_payload["_action_preview_terminal_proof"] = (
                         ActionPreviewExecutionProof(
@@ -139,10 +182,24 @@ class AcceptanceEffectDispatcher:
                         "event_id": str(preview["event_id"]),
                         "boundary": terminal_boundary,
                     }
-            outcome = handler(handler_payload)
+            # A reclaimed claim means that a previous owner may already have
+            # crossed the downstream effect boundary.  This rule is
+            # deliberately effect-type agnostic: replaying any ordinary
+            # handler here could duplicate a visible conversation write,
+            # Life mutation, delivery, Scheduler operation, or future effect.
+            if reconciliation_only:
+                reconciler = getattr(handler, "reconcile", None)
+                if not callable(reconciler):
+                    raise AcceptanceEffectOutcomeUnknown(
+                        "reclaimed Acceptance Effect has no read-only reconciler: "
+                        f"{effect_type or '<empty>'}"
+                    )
+                outcome = reconciler(handler_payload)
+            else:
+                outcome = handler(handler_payload)
             if inspect.isawaitable(outcome):
                 outcome = await outcome
-            receipt_ref = _receipt_ref(outcome, effect_id=str(effect["effect_id"]))
+            receipt_ref = _receipt_ref(outcome)
         except AcceptanceEffectOutcomeUnknown as exc:
             # An invoked handler may already have committed its external or
             # cross-authority effect.  It must never become terminal FAILED
@@ -220,6 +277,31 @@ class AcceptanceEffectDispatcher:
             "life.foreground_completed": 2,
             "surface.reply_delivery": 3,
         }.get(effect_type, 5)
+        if effect_type == _SCHEDULER_OPERATION_EFFECT_TYPE:
+            get_node = getattr(self._store, "get_node", None)
+            if not callable(get_node):
+                raise AcceptanceEffectDispatchError(
+                    "ACTION_PREVIEW_INVALID",
+                    "Scheduler Acceptance Effect cannot reopen canonical TaskNode risk",
+                )
+            node = get_node(
+                str(effect.get("graph_id") or ""),
+                int(effect.get("graph_revision") or 0),
+                str(effect.get("node_id") or ""),
+            )
+            node_payload = dict(node.get("node") or {}) if isinstance(node, Mapping) else {}
+            raw_risk = node_payload.get("risk_level")
+            if isinstance(raw_risk, bool):
+                raw_risk = None
+            try:
+                risk_level = int(raw_risk)
+            except (TypeError, ValueError):
+                risk_level = 0
+            if not 1 <= int(risk_level) <= 5:
+                raise AcceptanceEffectDispatchError(
+                    "ACTION_PREVIEW_INVALID",
+                    "Scheduler Acceptance Effect TaskNode risk is invalid",
+                )
         try:
             kwargs = {
                 "action_kind": f"acceptance-effect.{effect_type}",
@@ -546,31 +628,44 @@ class AcceptanceEffectRuntime:
                 raise
             except Exception:
                 # Durable rows and leases remain the source of truth.  A
-                # transient store/transport failure must not kill recovery.
+                # transient store/transport failure must not kill recovery,
+                # but it must be observable rather than silently swallowed.
+                logger.exception("ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED")
                 continue
 
 
-def _receipt_ref(value: Any, *, effect_id: str) -> str:
+def _receipt_ref(value: Any) -> str:
     if isinstance(value, str):
         receipt = value.strip()
     elif isinstance(value, Mapping):
-        receipt = str(
-            value.get("receipt_ref")
-            or value.get("event_id")
-            or value.get("command_id")
-            or ""
-        ).strip()
+        receipt = str(value.get("receipt_ref") or "").strip()
     else:
         receipt = ""
     if not receipt:
-        suffix = str(effect_id).rsplit("/", 1)[-1]
-        receipt = f"acceptance-effect-receipt://sha256/{suffix}"
+        raise AcceptanceEffectDispatchError(
+            ACCEPTANCE_EFFECT_HANDLER_FAILED,
+            "effect handler returned no authoritative durable receipt_ref",
+        )
     if not _DURABLE_REF.fullmatch(receipt):
         raise AcceptanceEffectDispatchError(
             ACCEPTANCE_EFFECT_HANDLER_FAILED,
             "effect handler returned a non-durable receipt reference",
         )
     return receipt
+
+
+def _contains_reserved_preview_context(value: Any) -> bool:
+    """Reject durable handler data that could shadow the live v2 context."""
+
+    if isinstance(value, Mapping):
+        for raw_key, child in value.items():
+            if str(raw_key) == "_action_preview_context":
+                return True
+            if _contains_reserved_preview_context(child):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_contains_reserved_preview_context(child) for child in value)
+    return False
 
 
 def _effect_dispatch_key(effect: Mapping[str, Any]) -> tuple[int, int, str]:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from functools import partial
 import hashlib
 import json
 from typing import Any
@@ -17,6 +16,7 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 def build_production_acceptance_effect_handlers(
     *,
     mode_transition_service_provider: Callable[[], Any] | None = None,
+    scheduler_operation_handler: Callable[[Mapping[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
         "conversation.user_turn": _record_accepted_user_turn,
@@ -24,18 +24,42 @@ def build_production_acceptance_effect_handlers(
         "surface.reply_delivery": _deliver_accepted_surface_reply,
     }
     if mode_transition_service_provider is not None:
-        handlers["host.sys_mode_transition"] = partial(
-            _apply_accepted_sys_mode_transition,
+        handlers["host.sys_mode_transition"] = _AcceptedSysModeTransitionHandler(
             service_provider=mode_transition_service_provider,
         )
+    if scheduler_operation_handler is not None:
+        if not callable(scheduler_operation_handler):
+            raise TypeError("scheduler_operation_handler must be callable")
+        handlers["scheduler.operation.execute"] = scheduler_operation_handler
     return handlers
 
 
-def _apply_accepted_sys_mode_transition(
+class _AcceptedSysModeTransitionHandler:
+    """Callable production handler with an explicit read-only recovery path."""
+
+    def __init__(self, *, service_provider: Callable[[], Any]) -> None:
+        if not callable(service_provider):
+            raise TypeError("mode_transition_service_provider must be callable")
+        self._service_provider = service_provider
+
+    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _apply_accepted_sys_mode_transition(
+            payload,
+            service_provider=self._service_provider,
+        )
+
+    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _reconcile_accepted_sys_mode_transition(
+            payload,
+            service_provider=self._service_provider,
+        )
+
+
+def _accepted_sys_mode_transition_request(
     payload: Mapping[str, Any],
-    *,
-    service_provider: Callable[[], Any],
-) -> Mapping[str, Any]:
+) -> tuple[dict[str, Any], str, str, str, str, Any]:
+    """Reopen the exact immutable payload and current Preview claim proof."""
+
     from host_brain.core.mode_transition import TransitionSource  # noqa: PLC0415
     from host_brain.runtime.action_preview_proof import (  # noqa: PLC0415
         ActionPreviewExecutionProof,
@@ -130,6 +154,22 @@ def _apply_accepted_sys_mode_transition(
         != expected_args_digest
     ):
         raise ValueError("accepted sys_mode transition Preview receipt drifted")
+    return value, target_mode, reason, event_id, runtime_scope_id, source
+
+
+def _apply_accepted_sys_mode_transition(
+    payload: Mapping[str, Any],
+    *,
+    service_provider: Callable[[], Any],
+) -> Mapping[str, Any]:
+    (
+        value,
+        target_mode,
+        reason,
+        event_id,
+        runtime_scope_id,
+        source,
+    ) = _accepted_sys_mode_transition_request(payload)
 
     service = service_provider()
     switch_mode = getattr(service, "switch_mode", None)
@@ -244,6 +284,93 @@ def _apply_accepted_sys_mode_transition(
     except Exception as exc:
         raise AcceptanceEffectOutcomeUnknown(
             "sys_mode transition requires exact HardState reconciliation "
+            f"for event {event_id}: {type(exc).__name__}: {str(exc)[:1200]}"
+        ) from exc
+
+
+def _reconcile_accepted_sys_mode_transition(
+    payload: Mapping[str, Any],
+    *,
+    service_provider: Callable[[], Any],
+) -> Mapping[str, Any]:
+    """Read back one exact HardState event without invoking ``switch_mode``."""
+
+    (
+        value,
+        target_mode,
+        reason,
+        event_id,
+        runtime_scope_id,
+        source,
+    ) = _accepted_sys_mode_transition_request(payload)
+    try:
+        service = service_provider()
+        reopen = getattr(service, "reopen_transition_commit", None)
+        if not callable(reopen):
+            raise RuntimeError("HARD_STATE_EXACT_HISTORY_UNAVAILABLE")
+        commit = reopen(
+            event_id=event_id,
+            target_mode=target_mode,
+            source=source.value,
+            reason=reason,
+        )
+        if commit is None:
+            raise LookupError("exact HardState transition is absent")
+        event = getattr(commit, "event", None)
+        snapshot = getattr(commit, "snapshot", None)
+        event_digest = str(getattr(event, "event_digest", "") or "").strip()
+        snapshot_digest = str(
+            getattr(snapshot, "event_digest", "") or ""
+        ).strip()
+        event_revision = int(getattr(event, "revision", 0) or 0)
+        snapshot_revision = int(getattr(snapshot, "revision", 0) or 0)
+        if (
+            getattr(commit, "exact_replay", None) is not True
+            or str(getattr(event, "event_id", "") or "").strip() != event_id
+            or str(getattr(event, "runtime_scope_id", "") or "").strip()
+            != runtime_scope_id
+            or str(getattr(event, "to_mode", "") or "").strip().lower()
+            != target_mode
+            or str(getattr(event, "source", "") or "").strip().lower()
+            != source.value
+            or str(getattr(event, "reason", "") or "") != reason
+            or event_revision <= 0
+            or not event_digest.startswith("sha256:")
+            or len(event_digest) != 71
+            or str(getattr(snapshot, "runtime_scope_id", "") or "").strip()
+            != runtime_scope_id
+            or snapshot_revision < event_revision
+            or not snapshot_digest.startswith("sha256:")
+            or len(snapshot_digest) != 71
+        ):
+            raise RuntimeError("SYS_MODE_TRANSITION_DURABLE_RECEIPT_INVALID")
+        return {
+            "success": True,
+            "error": None,
+            "from_mode": getattr(event, "from_mode", None),
+            "to_mode": getattr(event, "to_mode", None),
+            "event_id": getattr(event, "event_id", None),
+            "ts_ms": getattr(event, "transition_ts_ms", None),
+            "revision": event_revision,
+            "event_digest": event_digest,
+            "exact_replay": True,
+            "no_change": False,
+            "transition_committed": True,
+            "current_mode": getattr(snapshot, "sys_mode", None),
+            "current_revision": snapshot_revision,
+            "current_event_digest": snapshot_digest,
+            "status": "REPLAYED",
+            "runtime_scope_id": runtime_scope_id,
+            "receipt_ref": sys_mode_transition_handler_receipt_ref(
+                value,
+                outcome_status="REPLAYED",
+            ),
+        }
+    except AcceptanceEffectOutcomeUnknown:
+        raise
+    except Exception as exc:
+        raise AcceptanceEffectOutcomeUnknown(
+            "sys_mode transition requires read-only exact HardState reconciliation "
             f"for event {event_id}: {type(exc).__name__}: {str(exc)[:1200]}"
         ) from exc
 

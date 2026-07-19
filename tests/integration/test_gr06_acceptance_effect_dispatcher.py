@@ -540,28 +540,36 @@ async def test_unknown_handler_outcome_survives_retry_limit_and_restart_reconcil
         business_payload=frozen_business_payload,
     )
     durable_hard_state_events: dict[str, dict[str, Any]] = {}
-    calls: list[str] = []
+    calls: list[tuple[str, str]] = []
 
-    def reconcile_by_exact_event(payload: dict[str, Any]) -> str:
-        exact_payload = {
-            key: payload[key] for key in frozen_business_payload
-        }
-        exact_event_id = str(exact_payload["event_id"])
-        calls.append(exact_event_id)
-        committed = durable_hard_state_events.get(exact_event_id)
-        if committed is None:
+    class ExactEventHandler:
+        @staticmethod
+        def _exact(payload: dict[str, Any]) -> dict[str, Any]:
+            return {key: payload[key] for key in frozen_business_payload}
+
+        def __call__(self, payload: dict[str, Any]) -> str:
+            exact_payload = self._exact(payload)
+            exact_event_id = str(exact_payload["event_id"])
+            calls.append(("invoke", exact_event_id))
             # Simulate HardState committing before its caller loses the
             # response/reopen attribution boundary.
             durable_hard_state_events[exact_event_id] = exact_payload
             raise AcceptanceEffectOutcomeUnknown(
                 f"HardState commit {exact_event_id} requires exact reopen"
             )
-        assert committed == exact_payload
-        return "host-sys-mode-replayed://sha256/" + "8" * 64
+
+        def reconcile(self, payload: dict[str, Any]) -> str:
+            exact_payload = self._exact(payload)
+            exact_event_id = str(exact_payload["event_id"])
+            calls.append(("reconcile", exact_event_id))
+            assert durable_hard_state_events.get(exact_event_id) == exact_payload
+            return "host-sys-mode-replayed://sha256/" + "8" * 64
+
+    handler = ExactEventHandler()
 
     first_dispatcher = AcceptanceEffectDispatcher(
         task_store=store,
-        handlers={"host.sys_mode_transition": reconcile_by_exact_event},
+        handlers={"host.sys_mode_transition": handler},
         owner_id="dispatcher-sys-mode-before-restart",
         max_attempts=1,
         retry_base_ms=10,
@@ -600,7 +608,7 @@ async def test_unknown_handler_outcome_survives_retry_limit_and_restart_reconcil
     restarted_store = DurableTaskStore(store.db_path, clock=clock)
     restarted_dispatcher = AcceptanceEffectDispatcher(
         task_store=restarted_store,
-        handlers={"host.sys_mode_transition": reconcile_by_exact_event},
+        handlers={"host.sys_mode_transition": handler},
         owner_id="dispatcher-sys-mode-after-restart",
         max_attempts=1,
         retry_base_ms=10,
@@ -623,7 +631,7 @@ async def test_unknown_handler_outcome_survives_retry_limit_and_restart_reconcil
             "host-sys-mode-replayed://sha256/" + "8" * 64
         )
         assert committed["attempt_count"] == 2
-        assert calls == [event_id, event_id]
+        assert calls == [("invoke", event_id), ("reconcile", event_id)]
         assert len(durable_hard_state_events) == 1
     finally:
         await restarted_runtime.aclose()
@@ -666,13 +674,18 @@ async def test_expired_lease_cannot_commit_and_recovery_uses_new_fence(
     assert claimed["fencing_token"] == 1
     assert claimed["reason_code"] is None
 
-    def recover(_payload: dict[str, Any]) -> str:
-        calls.append("recovery-owner")
-        return "conversation-receipt://dispatcher/recovered"
+    class Recover:
+        def __call__(self, _payload: dict[str, Any]) -> str:
+            calls.append("forbidden-ordinary-replay")
+            raise AssertionError("reclaimed effect must not invoke ordinary handler")
+
+        def reconcile(self, _payload: dict[str, Any]) -> str:
+            calls.append("recovery-reconcile")
+            return "conversation-receipt://dispatcher/recovered"
 
     restarted = AcceptanceEffectDispatcher(
         task_store=DurableTaskStore(store.db_path, clock=clock),
-        handlers={"conversation.user_turn": recover},
+        handlers={"conversation.user_turn": Recover()},
         owner_id="dispatcher-restarted",
         lease_ms=100,
         action_preview_service=_TestActionPreviewAuthority(),
@@ -682,10 +695,108 @@ async def test_expired_lease_cannot_commit_and_recovery_uses_new_fence(
     assert committed["status"] == AcceptanceEffectStatus.COMMITTED.value
     assert committed["fencing_token"] == 2
     assert committed["attempt_count"] == 2
-    assert calls == ["stale-owner", "recovery-owner"]
+    assert calls == ["stale-owner", "recovery-reconcile"]
 
     assert await restarted.dispatch_effect(str(effect["effect_id"])) is None
-    assert calls == ["stale-owner", "recovery-owner"]
+    assert calls == ["stale-owner", "recovery-reconcile"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registered_handler", [True, False])
+async def test_reclaimed_generic_effect_without_reconciler_stays_unknown(
+    tmp_path: Path,
+    registered_handler: bool,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    node_id, attempt_id = _seed_completed_graph(store, "graph-generic-no-reconciler")
+    effect = _stage_effect(
+        store,
+        graph_id="graph-generic-no-reconciler",
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="conversation.user_turn",
+        opaque_order="only",
+    )
+    calls: list[str] = []
+
+    def expire_after_effect(_payload: dict[str, Any]) -> str:
+        calls.append("initial-invocation")
+        clock.advance(11)
+        return "conversation-receipt://dispatcher/unknown-boundary"
+
+    stale = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"conversation.user_turn": expire_after_effect},
+        owner_id="dispatcher-generic-stale",
+        lease_ms=10,
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+    with pytest.raises(TaskStoreError):
+        await stale.dispatch_effect(str(effect["effect_id"]))
+
+    def forbidden_replay(_payload: dict[str, Any]) -> str:
+        calls.append("forbidden-replay")
+        return "conversation-receipt://dispatcher/duplicate"
+
+    restarted = AcceptanceEffectDispatcher(
+        task_store=DurableTaskStore(store.db_path, clock=clock),
+        handlers=(
+            {"conversation.user_turn": forbidden_replay}
+            if registered_handler
+            else {"unrelated.effect": forbidden_replay}
+        ),
+        owner_id="dispatcher-generic-restarted",
+        lease_ms=100,
+        retry_base_ms=10,
+        retry_max_ms=10,
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+
+    pending = await restarted.dispatch_effect(str(effect["effect_id"]))
+
+    assert pending is not None
+    assert pending["status"] == AcceptanceEffectStatus.PENDING.value
+    assert pending["reason_code"] == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+    assert pending["side_effect_state"] == "UNKNOWN"
+    assert pending["reconciliation_state"] == "RECONCILIATION_REQUIRED"
+    assert calls == ["initial-invocation"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler_outcome",
+    [None, {}, {"event_id": "event://not-a-receipt"}, {"command_id": "command://not-a-receipt"}],
+)
+async def test_handler_without_explicit_durable_receipt_fails_closed(
+    tmp_path: Path,
+    handler_outcome: Any,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    node_id, attempt_id = _seed_completed_graph(store, "graph-missing-receipt")
+    effect = _stage_effect(
+        store,
+        graph_id="graph-missing-receipt",
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="conversation.user_turn",
+        opaque_order="only",
+    )
+    dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"conversation.user_turn": lambda _payload: handler_outcome},
+        owner_id="dispatcher-missing-receipt",
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+
+    failed = await dispatcher.dispatch_effect(str(effect["effect_id"]))
+
+    assert failed is not None
+    assert failed["status"] == AcceptanceEffectStatus.FAILED.value
+    assert failed["reason_code"] == ACCEPTANCE_EFFECT_HANDLER_FAILED
+    assert failed["receipt_ref"] is None
+    assert "authoritative durable receipt_ref" in failed["last_error"]
 
 
 @pytest.mark.asyncio

@@ -39,6 +39,7 @@ from host_brain.app.lifecycle_runtime_composition import (
 from host_brain.app.host_lifecycle_composition import (
     build_host_lifecycle_container,
 )
+from host_brain.app import host_life_scheduler_wiring as _scheduler_result_wiring
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.host_life_scheduler_wiring import (
@@ -47,7 +48,6 @@ from host_brain.app.host_life_scheduler_wiring import (
     compose_life_command_authority,
     compose_life_dispatchers as _compose_life_dispatchers,
     reset_life_command_authority,
-    scheduler_handler_result as _scheduler_handler_result,
     scheduler_seed_configs,
     submit_life_tick_command,
 )
@@ -129,6 +129,10 @@ from host_brain.composition.scheduler import (
     SchedulerClockIdentityConfig,
     build_process_scheduler_container,
 )
+from host_brain.scheduler.accepted_operation import (
+    SchedulerAcceptedOperationHandler,
+)
+from host_brain.scheduler.worker_registry import SchedulerWorkerRegistry
 from host_brain.composition.task_runtime import (
     ProcessTaskRuntimeContainer,
     build_process_task_runtime_container,
@@ -988,6 +992,18 @@ def create_app() -> FastAPI:
                 agent_workspace_container = workspace.compose_agent_workspace_application_scope(
                     application, task_runtime, runtime_settings, canonical_owner
                 )
+                scheduler_workers = SchedulerWorkerRegistry()
+                scheduler_operation_handler = SchedulerAcceptedOperationHandler(
+                    worker_registry=scheduler_workers,
+                    definition_repository=(
+                        task_runtime.scheduler_definition_repository
+                    ),
+                    occurrence_repository=(
+                        task_runtime.scheduler_definition_repository
+                    ),
+                    command_repository=task_runtime.command_repository,
+                    result_repository=task_runtime.scheduler_result_repository,
+                )
                 operator_composition = build_governed_operator_composition(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
@@ -1001,6 +1017,7 @@ def create_app() -> FastAPI:
                     cancellation_authority_verifier=cancellation_authority_verifier,
                     secure_ingress_authority_resolver=command_ingress.store,
                     runtime_owner_id=canonical_owner,
+                    scheduler_operation_handler=scheduler_operation_handler,
                 )
                 acceptance_effect_dispatcher = (
                     operator_composition.acceptance_effect_dispatcher
@@ -1095,17 +1112,17 @@ def create_app() -> FastAPI:
                         runtime_context_application=runtime_context_application,
                         action_preview_service=action_preview_service,
                     )
-                    return _scheduler_handler_result(result)
+                    return _scheduler_result_wiring.proactive_scheduler_handler_result(result)
 
                 async def distillation_scheduler_handler(**_: Any) -> dict[str, Any]:
                     report = await host_services.distillation_engine().run_batch()
-                    return _scheduler_handler_result(report)
+                    return _scheduler_result_wiring.distillation_scheduler_handler_result(report)
 
                 async def security_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
                     result = await get_security_immune_agent().run_once(
                         reason="scheduled"
                     )
-                    return _scheduler_handler_result(result)
+                    return _scheduler_result_wiring.security_immune_scheduler_handler_result(result)
 
                 async def agent_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
                     from host_brain.agent_runtime.immune import (  # noqa: PLC0415
@@ -1300,6 +1317,10 @@ def create_app() -> FastAPI:
                     ),
                     runtime_context_application=runtime_context_application,
                     action_preview_service=action_preview_service,
+                    worker_registry=scheduler_workers,
+                    acceptance_effect_dispatcher=(
+                        acceptance_effect_dispatcher
+                    ),
                 )
                 runtime_group = GovernedRuntimeGroup(
                     {

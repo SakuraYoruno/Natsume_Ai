@@ -1,6 +1,6 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-19",
+  "as_of_date": "2026-07-20",
   "source_baseline": {
     "dev_commit": "57a54d76b4f38ecc23e5ba4c1834625b6c17907a",
     "repository_cleanup_commit": "f0cd1dfd7",
@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "DELIVERY_METADATA_GATE_LOCAL_ONLY_WORKSPACE_0116_LIFECYCLE_FOUNDATION_UNIVERSAL_RUNTIME_SEVEN_ROUTE_GATE_V2_ALL_ROUTES_INCOMPLETE_LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_AND_HARD_STATE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_REACT_RUN_SKILL_AND_DISPATCH_SUB_AGENT_DISCOVERY_AND_LOW_LEVEL_BYPASSES_RETIRED_VISUAL_AGENT_DIRECT_HTTP_LOOP_RAW_CLIENT_LEDGER_WRITER_AND_LEGACY_ACTION_PLANNER_MODEL_ENTRY_RETIRED_HARD_STATE_PROCESS_FACADES_SLOT_LOCK_AND_TARGETED_BINDINGS_ZERO_HOST_HARD_STATE_0115_DURABLE_JOURNAL_OWNER_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_LOOKUP_NO_CHANGE_NO_FAKE_EVENT_REPLAY_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_PRODUCTION_WIRED_OPERATOR_2_OF_37_GOVERNED_SYS_MODE_TYPED_TASKGRAPH_REVIEW_CONTINUATION_SINGLE_ACCEPTANCE_EFFECT_OWNER_EXACT_HARD_STATE_REPLAY_OUTER_WAL_TERMINALIZATION_35_BLOCKED_CANARY_NOT_RUN_CURRENT_NAMED_PROCESS_SERVICES_40_MODULES_116_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_46_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_NE01_STILL_INCOMPLETE",
+  "active_wave_detail": "DELIVERY_METADATA_GATE_LOCAL_ONLY_WORKSPACE_0116_LIFECYCLE_FOUNDATION_UNIVERSAL_RUNTIME_SEVEN_ROUTE_GATE_V2_ALL_ROUTES_INCOMPLETE_SCHEDULER_GOVERNED_OCCURRENCE_POST_ACCEPTANCE_HANDLER_CUTOVER_IMMUTABLE_OPERATION_PLAN_CANONICAL_EFFECT_STAGING_SHARED_APP_LOCAL_DISPATCHER_ACTUAL_RESULT_LEDGER_DUPLICATE_NO_RECALL_RESPONSE_LOSS_READ_ONLY_RECONCILIATION_DEFINITION_ADMIN_MUTABLE_BATCH_CLOCK_RETRY_AND_CANARY_STILL_INCOMPLETE_LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_AND_HARD_STATE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_REACT_RUN_SKILL_AND_DISPATCH_SUB_AGENT_DISCOVERY_AND_LOW_LEVEL_BYPASSES_RETIRED_VISUAL_AGENT_DIRECT_HTTP_LOOP_RAW_CLIENT_LEDGER_WRITER_AND_LEGACY_ACTION_PLANNER_MODEL_ENTRY_RETIRED_HARD_STATE_PROCESS_FACADES_SLOT_LOCK_AND_TARGETED_BINDINGS_ZERO_HOST_HARD_STATE_0115_DURABLE_JOURNAL_OWNER_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_LOOKUP_NO_CHANGE_NO_FAKE_EVENT_REPLAY_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_PRODUCTION_WIRED_OPERATOR_2_OF_37_GOVERNED_SYS_MODE_TYPED_TASKGRAPH_REVIEW_CONTINUATION_SINGLE_ACCEPTANCE_EFFECT_OWNER_EXACT_HARD_STATE_REPLAY_OUTER_WAL_TERMINALIZATION_35_BLOCKED_CANARY_NOT_RUN_CURRENT_NAMED_PROCESS_SERVICES_40_MODULES_116_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_46_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_NE01_STILL_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,14 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "TARGETED_SLICE_PASSED_PROGRAM_INCOMPLETE",
-    "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
+    "status": "CONSOLIDATED_TARGETED_BATCH_PASSED_POST_COMMIT_ARTIFACT_REQUIRED_PROGRAM_INCOMPLETE",
+    "commit_binding": "ARTIFACTS_LOCAL_GATES_COMMIT_SHA_PATH_GENERATED_AFTER_COMMIT",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_OPERATOR_SYS_MODE_GOVERNED_VERTICAL_SLICE_ON_DURABLE_HARD_STATE_AND_EXISTING_AUTHORITY_RETIREMENT_BASELINE",
+    "slice": "NE01_SCHEDULER_POST_ACCEPTANCE_HANDLER_CUTOVER_ON_OPERATOR_SYS_MODE_AND_EXISTING_AUTHORITY_RETIREMENT_BASELINE",
+    "reclaimed_acceptance_effect_policy": "READ_ONLY_RECONCILE_REQUIRED_MISSING_RECONCILER_STAYS_RECONCILIATION_REQUIRED_NO_ORDINARY_HANDLER_REPLAY",
+    "scheduler_handler_result_policy": "EXPLICIT_CANONICAL_STATUS_AND_AUTHORITATIVE_DURABLE_RECEIPT_REQUIRED_NO_SYNTHETIC_SUCCESS_OR_RECEIPT",
+    "sys_mode_reconciliation": "EXACT_HARD_STATE_REOPEN_ONLY_SWITCH_MODE_NOT_REINVOKED",
+    "recovery_loop_observability": "ERROR_LOGGED_NOT_SILENT_DURABLE_GUARDIAN_EVIDENCE_REMAINS_FOLLOW_UP",
     "test_batches": {
       "structure_and_runtime_context_passed": 59,
       "action_preview_and_embodiment_passed": 43,
@@ -150,7 +154,16 @@
         "operator"
       ],
       "hard_state_final_peripheral_affected_regression_overlap_boundary": "MAY_OVERLAP_THE_FINAL_CORE_84_TEST_BATCH_AND_MUST_NOT_BE_ADDED_TO_IT",
-      "hard_state_final_peripheral_affected_regression_historical_67_boundary": "THIS_FINAL_PERIPHERAL_67_IS_DISTINCT_FROM_ANY_EARLIER_67_TEST_HISTORY_ALL_67_BATCHES_REMAIN_NON_ADDITIVE"
+      "hard_state_final_peripheral_affected_regression_historical_67_boundary": "THIS_FINAL_PERIPHERAL_67_IS_DISTINCT_FROM_ANY_EARLIER_67_TEST_HISTORY_ALL_67_BATCHES_REMAIN_NON_ADDITIVE",
+      "scheduler_operation_plan_passed": 4,
+      "scheduler_accepted_handler_passed": 21,
+      "scheduler_preview_and_recovery_passed": 30,
+      "scheduler_runtime_and_operator_passed": 10,
+      "scheduler_consolidated_worktree_regression_passed": 185,
+      "scheduler_consolidated_worktree_regression_duration_seconds": 190.27,
+      "scheduler_consolidated_worktree_regression_powershell_wall_seconds": 192.2,
+      "scheduler_consolidated_worktree_regression_file_count": 21,
+      "scheduler_batch_overlap_boundary": "THE_CONSOLIDATED_185_TEST_WORKTREE_BATCH_IS_THE_CURRENT_SLICE_AUTHORITY_AND_INCLUDES_OR_OVERLAPS_THE_HISTORICAL_4_21_30_10_48_AND_123_BATCHES; DO_NOT_SUM; COMMIT_SHA_BOUND_BY_IGNORED_POST_COMMIT_LOCAL_GATE_ARTIFACT"
     },
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "completed_large_file_splits": [
@@ -191,7 +204,7 @@
       "boundary": "ORIGIN_DEV_57A54D76B_REACT_VISUAL_AND_CURRENT_0115_DURABLE_HARD_STATE_CUTOFF_WITH_NEUTRAL_HOST_MODE_CONTRACT_KEEP_GATES_1_6_10_11_GREEN_FAILED_EMPTY_PERSISTENCE_TO_APPLICATION_ZERO_TARGET_SCC_EMPTY_STATIC_ONLY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_FULL_TYPED_COMPOSITION_PRODUCTION_CANARY_AND_NE01_REMAIN_INCOMPLETE"
     },
     "focused_structure_current_lines": {
-      "host_brain/app/asgi.py": 1490,
+      "host_brain/app/asgi.py": 1499,
       "host_brain/app/http_hooks.py": 698,
       "host_brain/app/host_lifecycle_composition.py": 334,
       "host_brain/app/tool_runtime_composition.py": 172,
@@ -796,7 +809,7 @@
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler domain effects and Internal artifacts are not yet atomically committed by Acceptance. Operator has migrated scheduler.task.trigger and sys_mode.switch; the other 35 audited write commands remain blocked, while commit-bound acceptance, wave integration and production canary are still missing. Host candidate-plan generation remains MISSING; approved-plan topology execution is not generic planning search.",
+      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler governed occurrences now stage an immutable scheduler.operation.execute effect in the canonical Acceptance UoW and invoke the real handler through the shared app-local dispatcher after Acceptance; actual results remain in the existing immutable Scheduler result ledger. Definition/admin direct authority, mutable batch/clock retry, general unknown-effect attribution and current-commit integrated acceptance remain missing. Internal artifacts are not yet atomically committed by Acceptance. Operator has migrated scheduler.task.trigger and sys_mode.switch; the other 35 audited write commands remain blocked, while commit-bound acceptance, wave integration and production canary are still missing. Host candidate-plan generation remains MISSING; approved-plan topology execution is not generic planning search.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -883,12 +896,31 @@
       ]
     },
     "scheduler_governed_runtime": {
-      "status": "WIRED",
+      "status": "PARTIAL_POST_ACCEPTANCE_HANDLER_CUTOVER",
       "scope": ["clock occurrence", "manual occurrence"],
-      "semantics": "HostCommand + WorkOrderV3 + BudgetPolicy + TaskGraph + child grant + Review + Verification + Acceptance + Receipt",
+      "semantics": "HostCommand + WorkOrderV3 + BudgetPolicy + TaskGraph + child grant + Review + immutable operation plan + Verification/Acceptance and scheduler.operation.execute staging in the canonical TaskStore UoW + shared app-local AcceptanceEffectDispatcher + actual immutable Scheduler result receipt",
+      "side_effect_boundary": "The Task worker never calls the real Scheduler handler. Review-before-resume produces zero calls; a committed Acceptance Effect calls once; duplicate replay returns the immutable operation/result authority without a second call. Expired claims and response loss after handler invocation are read-only reconciliation boundaries and may remain RECOVERY_REQUIRED rather than blind-replaying the effect.",
+      "remaining": [
+        "definition and admin direct write authority",
+        "mutable batch freezing and durable clock retry/backoff semantics",
+        "general unknown external effect human attribution",
+        "program-wide Budget measurement",
+        "consolidated commit-bound acceptance evidence",
+        "NE-01 wave integration and production canary"
+      ],
       "evidence_refs": [
         "host_brain/scheduler/governed_runtime.py",
+        "host_brain/scheduler/operation_plan.py",
+        "host_brain/scheduler/accepted_operation.py",
+        "host_brain/scheduler/accepted_effect_runtime.py",
         "host_brain/scheduler/worker_registry.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/unit/test_ne01_scheduler_operation_plan.py",
+        "tests/unit/test_ne01_scheduler_accepted_operation.py",
+        "tests/unit/test_ne01_scheduler_accepted_effect_runtime.py",
+        "tests/unit/test_ne01_acceptance_effect_derived_preview.py",
+        "tests/unit/test_aw02_governed_scheduler_runtime.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py",
         "tests/integration/test_aw02_scheduler_production_cutover.py"
       ]
     },

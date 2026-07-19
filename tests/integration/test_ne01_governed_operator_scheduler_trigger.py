@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -23,6 +25,9 @@ from natsume_contracts.identity import (
 from natsume_contracts.task import HostCommandSurface
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.app.acceptance_effect_handlers import (
+    build_production_acceptance_effect_handlers,
+)
 from host_brain.app.observability_runtime.command_composition import (
     build_obs_command_composition,
 )
@@ -58,6 +63,10 @@ from host_brain.persistence.scheduler_repository import (
 )
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
+from host_brain.runtime.context_application import FrozenRuntimeContextV1
+from host_brain.scheduler.accepted_operation import SchedulerAcceptedOperationHandler
+from host_brain.runtime.context_contracts import WorldSnapshotV2
 from host_brain.scheduler.governed_runtime import (
     SchedulerCommandService,
     SchedulerDefinitionPolicyEvaluator,
@@ -65,6 +74,9 @@ from host_brain.scheduler.governed_runtime import (
 )
 from host_brain.scheduler.worker_registry import SchedulerWorkerRegistry
 from host_brain.secure_ingress import build_hmac_sha256_signature
+from host_brain.task_runtime.acceptance_effect_dispatcher import (
+    AcceptanceEffectDispatcher,
+)
 
 
 COMMAND_ID = "scheduler.task.trigger"
@@ -72,6 +84,87 @@ PRINCIPAL_ID = "operator.scheduler.integration"
 TENANT_ID = "tenant.operator.integration"
 KEY_ID = "operator.scheduler.hmac.v1"
 SECRET = "operator-scheduler-integration-secret"
+
+
+class _RuntimeContextAuthority:
+    """Freeze one canonical, replayable ContextPack for the integration."""
+
+    def __init__(self) -> None:
+        workspace_id = "tenant:operator-scheduler-integration"
+        subject_id = "operator-scheduler-integration"
+        world = WorldSnapshotV2(
+            workspace_id=workspace_id,
+            subject_id=subject_id,
+            revision=1,
+            facts=(),
+        )
+        decision_digest = hashlib.sha256(
+            b"operator-scheduler-integration-scene"
+        ).hexdigest()
+        self._payload = {
+            "runtime_context_schema": "natsume.runtime-context.request.v1",
+            "runtime_context_observed_at_ms": 1,
+            "runtime_context_principal_id": PRINCIPAL_ID,
+            "workspace_id": workspace_id,
+            "subject_id": subject_id,
+            "world_snapshot_v2": world.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": workspace_id,
+                "subject_id": subject_id,
+                "scene_id": "scene.release-maintenance",
+                "revision": 1,
+                "decision_digest": decision_digest,
+            },
+        }
+
+    def freeze_request(self, **_kwargs: Any) -> FrozenRuntimeContextV1:
+        return FrozenRuntimeContextV1(payload=deepcopy(self._payload))
+
+    def require_frozen(self, value: Any) -> FrozenRuntimeContextV1:
+        candidate = dict(value or {})
+        if any(candidate.get(key) != expected for key, expected in self._payload.items()):
+            raise ValueError("frozen Scheduler Runtime Context drifted")
+        return FrozenRuntimeContextV1(payload=deepcopy(self._payload))
+
+
+class _ExactPreviewAuthority:
+    """Minimal exact Preview authority used by both node and Effect gates."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, tuple[dict[str, Any], SimpleNamespace]] = {}
+
+    def issue_receipt(self, **kwargs: Any) -> dict[str, Any]:
+        index = len(self._records) + 1
+        event_id = f"runtimeevent://operator-scheduler-preview/{index}"
+        receipt_ref = f"action-preview://operator-scheduler-preview/{index}"
+        authority = dict(kwargs.get("authority_context") or {})
+        authority_kind = (
+            "ACCEPTANCE_EFFECT"
+            if authority.get("schema_version")
+            == "Natsume.action_preview.acceptance_effect_authority_request.v1"
+            else "TASK_NODE"
+        )
+        boundary = {
+            key: deepcopy(value)
+            for key, value in kwargs.items()
+            if key != "guardian_capability_id"
+        }
+        receipt = SimpleNamespace(
+            receipt_ref=receipt_ref,
+            payload={"authority_kind": authority_kind},
+        )
+        self._records[event_id] = (boundary, receipt)
+        return {
+            "event_id": event_id,
+            "receipt_ref": receipt_ref,
+            "receipt": {"authority_kind": authority_kind},
+        }
+
+    def require_execution(self, *, event_id: str, **kwargs: Any) -> Any:
+        boundary, receipt = self._records[event_id]
+        assert kwargs == boundary
+        return receipt
 
 
 def _definition() -> dict[str, Any]:
@@ -283,6 +376,7 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
         command_repository=commands,
         outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
         scheduler_definition_repository=definitions,
+        worker_projection_store=WorkerProjectionStore(db_path),
         graph_execution_registry=None,
     )
     handler_calls: list[dict[str, Any]] = []
@@ -295,6 +389,23 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
     workers.register("operator_governed_worker", handler)
     ledger = SQLiteLedger(str(db_path))
     tokens = TokenService(approval_ttl_ms=180_000)
+    runtime_context = _RuntimeContextAuthority()
+    preview_authority = _ExactPreviewAuthority()
+    accepted_operation = SchedulerAcceptedOperationHandler(
+        worker_registry=workers,
+        definition_repository=definitions,
+        occurrence_repository=definitions,
+        command_repository=commands,
+        result_repository=results,
+    )
+    acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
+        task_store=task_store,
+        handlers=build_production_acceptance_effect_handlers(
+            scheduler_operation_handler=accepted_operation,
+        ),
+        owner_id="operator-scheduler-acceptance-effect-owner",
+        action_preview_service=preview_authority,
+    )
     scheduler_runtime = build_governed_scheduler_runtime(
         task_runtime_container=infrastructure,
         ledger=ledger,
@@ -303,6 +414,9 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
         runtime_router=CanonicalRuntimeRouter(),
         worker_registry=workers,
         owner_id="operator-scheduler-runtime-owner",
+        runtime_context_application=runtime_context,
+        action_preview_service=preview_authority,
+        acceptance_effect_dispatcher=acceptance_effect_dispatcher,
     )
     claim_store = SQLiteSecureIngressStore(db_path)
     runtime_group = GovernedRuntimeGroup(
@@ -442,12 +556,35 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
         assert len(final["attempts"]) == 1
         assert final["budgets"][0]["status"] == "CONSUMED"
         assert len(handler_calls) == 1
-        verified_grant = handler_calls[0]["verified_node_grant"]
-        assert verified_grant["grant_ref"] != command.governor_grant_ref
-        assert verified_grant["parent_grant_ref"] == command.governor_grant_ref
+        private_preview = handler_calls[0]["_action_preview_context"]
+        assert private_preview["origin_authority_kind"] == "ACCEPTANCE_EFFECT"
+        assert private_preview["origin_boundary"]["task_graph_id"] == command.graph_id
+        assert (
+            private_preview["origin_boundary"]["parent_governor_grant_ref"]
+            == command.governor_grant_ref
+        )
         assert review_store.get_review(review["review_id"])["review"]["status"] == (
             "CONSUMED"
         )
+        effects = task_store.list_acceptance_effect_intents(
+            graph_id=command.graph_id,
+            graph_revision=command.graph_revision,
+            limit=10,
+        )
+        assert len(effects) == 1
+        assert effects[0]["effect_type"] == "scheduler.operation.execute"
+        assert effects[0]["status"] == "COMMITTED"
+
+        durable_result = results.get_by_command(command.command_id)
+        assert durable_result is not None
+        assert durable_result["occurrence_id"] == command.input_ref
+        assert durable_result["work_order_id"] == order.work_order_id
+        assert durable_result["result"] == {
+            "status": "SUCCEEDED",
+            "summary": "governed Operator worker ran",
+        }
+        immutable_receipt_ref = durable_result["receipt_ref"]
+        immutable_result_digest = durable_result["result_digest"]
 
         occurrence = definitions.get_occurrence(command.input_ref)
         assert occurrence is not None
@@ -475,6 +612,15 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
         assert receipt["accepted"] is True
         assert replay["replayed"] is True
         assert len(handler_calls) == 1
+        replayed_result = results.get_by_command(command.command_id)
+        assert replayed_result is not None
+        assert replayed_result["receipt_ref"] == immutable_receipt_ref
+        assert replayed_result["result_digest"] == immutable_result_digest
+        with sqlite3.connect(str(db_path)) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM scheduler_execution_result WHERE command_id = ?",
+                (command.command_id,),
+            ).fetchone()[0] == 1
 
         with sqlite3.connect(str(db_path)) as conn:
             outer_result_ref = conn.execute(
@@ -544,3 +690,39 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
     }
     assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 35
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == manifest
+
+
+@pytest.mark.asyncio
+async def test_scheduler_recovery_required_never_reports_side_effects_executed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from host_brain.app.observability_runtime import domain_command_ports
+
+    async def recovery_required(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "execution_receipt": {
+                "status": "ACCEPTED",
+                "accepted": True,
+                "verification_status": "PASS",
+            },
+            "scheduler_effect_status": "RECOVERY_REQUIRED",
+            "reason_code": "SCHEDULER_ACCEPTANCE_EFFECT_RECOVERY_REQUIRED",
+        }
+
+    monkeypatch.setattr(
+        domain_command_ports,
+        "_scheduler_service",
+        lambda: SimpleNamespace(trigger_manual=recovery_required),
+    )
+    result = await domain_command_ports._scheduler_trigger(
+        {
+            "task_id": "operator_governed_task",
+            "payload": {},
+            "_operator_authority": {"request_id": "request-recovery-required"},
+        },
+        "request-recovery-required",
+    )
+
+    assert result["scheduler_effect_status"] == "RECOVERY_REQUIRED"
+    assert result["success"] is False
+    assert result["side_effects_executed"] is False

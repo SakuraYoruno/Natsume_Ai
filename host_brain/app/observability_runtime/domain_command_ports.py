@@ -560,14 +560,17 @@ async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> An
         "CANCELLED",
     }:
         raise ObsDomainCommandError("OBS_SCHEDULER_RESULT_INVALID")
-    # The outer OBS outcome records admission as success.  It records an
-    # actual side effect only when the Task Runtime has durably accepted the
-    # node; a Review pause is an admitted, explicitly non-executed outcome.
+    effect_status = str(result.get("scheduler_effect_status") or "").strip().upper()
+    effect_committed = status == "ACCEPTED" and effect_status == "COMMITTED"
+    # The outer OBS outcome records admission as success.  A TaskNode being
+    # accepted is not proof that its post-Acceptance Scheduler operation ran;
+    # only the committed Effect receipt may assert an executed side effect.
     return {
         **result,
         "success": status
-        in {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW", "ACCEPTED"},
-        "side_effects_executed": status == "ACCEPTED",
+        in {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW"}
+        or effect_committed,
+        "side_effects_executed": effect_committed,
     }
 
 

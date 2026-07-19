@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import pytest
@@ -152,6 +153,55 @@ async def test_effect_runtime_shutdown_waits_for_in_flight_handler_pass() -> Non
     await asyncio.wait_for(closing, timeout=1.0)
     assert cancelled is False
     assert runtime.active is False
+
+
+@pytest.mark.asyncio
+async def test_effect_runtime_reports_recovery_pass_failure_without_stopping(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    dispatcher = _dispatcher()
+    attempted = asyncio.Event()
+    pass_no = 0
+
+    async def drain_ready(*, limit: int):
+        nonlocal pass_no
+        pass_no += 1
+        if pass_no == 1:
+            return ()  # startup recovery
+        if pass_no == 2:
+            attempted.set()
+            raise RuntimeError("temporary recovery store failure")
+        return ()
+
+    dispatcher.drain_ready = drain_ready  # type: ignore[method-assign]
+    runtime = AcceptanceEffectRuntime(
+        dispatcher=dispatcher,
+        poll_seconds=0.01,
+    )
+    caplog.set_level(
+        logging.ERROR,
+        logger="Natsume.acceptance_effect_recovery",
+    )
+
+    await runtime.activate()
+    try:
+        await asyncio.wait_for(attempted.wait(), timeout=1.0)
+        for _ in range(50):
+            if any(
+                record.message == "ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED"
+                for record in caplog.records
+            ):
+                break
+            await asyncio.sleep(0.01)
+        assert runtime.active is True
+        assert pass_no >= 2
+        assert any(
+            record.message == "ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED"
+            and record.exc_info is not None
+            for record in caplog.records
+        )
+    finally:
+        await runtime.aclose()
 
 
 @pytest.mark.asyncio

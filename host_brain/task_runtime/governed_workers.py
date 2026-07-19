@@ -172,6 +172,7 @@ class GovernedFrozenNodeWorker:
         projections: WorkerProjectionWriterPort,
         action_preview_service: Any | None = None,
         allowed_acceptance_effect_types: frozenset[str] | None = None,
+        preview_purpose: str | None = None,
     ) -> None:
         kind = str(route_kind or "").strip().lower()
         if kind not in {"chat", "delegate", "tool"}:
@@ -187,6 +188,12 @@ class GovernedFrozenNodeWorker:
         self._node_grants = node_grants
         self._projections = projections
         self._action_preview_service = action_preview_service
+        purpose = str(preview_purpose or "").strip().lower()
+        if purpose and purpose not in {"delegate.dispatch", "scheduler.execute"}:
+            raise ValueError("preview_purpose must be delegate.dispatch or scheduler.execute")
+        if purpose == "scheduler.execute" and kind != "delegate":
+            raise ValueError("scheduler.execute Preview requires a delegate route")
+        self._preview_purpose = purpose or None
         allowed_effects = (
             frozenset({"life.foreground_completed"})
             if allowed_acceptance_effect_types is None
@@ -368,11 +375,25 @@ class GovernedFrozenNodeWorker:
                 "governed Delegate has no app-local ActionPreview authority",
             )
         try:
+            scheduler_preview = self._preview_purpose == "scheduler.execute"
             action_args = {
                 "objective_digest": "sha256:"
                 + hashlib.sha256(frozen.objective.encode("utf-8")).hexdigest(),
                 "input_refs": list(frozen.input_refs),
             }
+            if scheduler_preview:
+                occurrence_id = str(pack.get("occurrence_id") or "").strip()
+                definition_ref = str(pack.get("definition_ref") or "").strip()
+                if not occurrence_id or not definition_ref:
+                    raise GovernedNodeWorkerError(
+                        GOVERNED_NODE_GRANT_INVALID,
+                        "governed Scheduler Preview requires frozen occurrence and definition refs",
+                    )
+                action_args = {
+                    "occurrence_id": occurrence_id,
+                    "definition_ref": definition_ref,
+                    "objective_digest": action_args["objective_digest"],
+                }
             if self._route_kind == "tool":
                 intent = pack.get("intent_draft")
                 if not isinstance(intent, Mapping):
@@ -404,7 +425,9 @@ class GovernedFrozenNodeWorker:
                 }
             kwargs = {
                 "action_kind": (
-                    "delegate.dispatch"
+                    f"scheduler.{frozen.target_id}"
+                    if scheduler_preview
+                    else "delegate.dispatch"
                     if self._route_kind == "delegate"
                     else "tool.execute"
                 ),
@@ -424,7 +447,9 @@ class GovernedFrozenNodeWorker:
                 "node_grant_ref": frozen.node_grant_ref,
                 "node_grant": dict(verified_grant),
                 "guardian_capability_id": (
-                    f"delegate_{frozen.target_id}"
+                    f"scheduler_{frozen.target_id}"
+                    if scheduler_preview
+                    else f"delegate_{frozen.target_id}"
                     if self._route_kind == "delegate"
                     else frozen.target_id
                 ).lower(),
@@ -437,7 +462,9 @@ class GovernedFrozenNodeWorker:
                         "fencing_token": frozen.fencing_token,
                     },
                     purpose=(
-                        "delegate.dispatch"
+                        "scheduler.execute"
+                        if scheduler_preview
+                        else "delegate.dispatch"
                         if self._route_kind == "delegate"
                         else "tool.execute"
                     ),

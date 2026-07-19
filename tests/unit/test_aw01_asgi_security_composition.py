@@ -438,6 +438,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     governed_runtime = object()
     acceptance_effect_dispatcher = object()
     acceptance_effect_runtime = object()
+    scheduler_worker_registry = object()
+    scheduler_operation_handler = object()
+    scheduler_definition_store = object()
+    scheduler_result_store = object()
 
     class OperatorRuntime:
         async def activate(self) -> None:
@@ -556,6 +560,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         )
         review_continuation_store = object()
         command_repository = canonical_command_repository
+        scheduler_definition_repository = scheduler_definition_store
+        scheduler_result_repository = scheduler_result_store
         task_store = canonical_task_store
         recovery_id = "test-recovery"
         operation_reconciliation_service = object()
@@ -682,6 +688,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "test-canonical-owner::runtime::test-boot::acceptance-effects"
         )
         assert "host.sys_mode_transition" in kwargs["handlers"]
+        assert (
+            kwargs["handlers"]["scheduler.operation.execute"]
+            is scheduler_operation_handler
+        )
         captured["effect_action_preview_service"] = kwargs[
             "action_preview_service"
         ]
@@ -782,10 +792,14 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             ],
             "secure_ingress_authority_resolver": command_store,
             "runtime_owner_id": "test-canonical-owner::runtime::test-boot",
+            "scheduler_operation_handler": scheduler_operation_handler,
         }
         fake_build_acceptance_effect_dispatcher(
             task_store=canonical_task_store,
-            handlers={"host.sys_mode_transition": object()},
+            handlers={
+                "host.sys_mode_transition": object(),
+                "scheduler.operation.execute": scheduler_operation_handler,
+            },
             owner_id=(
                 "test-canonical-owner::runtime::test-boot::acceptance-effects"
             ),
@@ -880,6 +894,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "cancellation_authority_verifier"
         ]
         assert kwargs["runtime_context_application"] is runtime_context_application
+        assert kwargs["worker_registry"] is scheduler_worker_registry
+        assert kwargs["acceptance_effect_dispatcher"] is (
+            acceptance_effect_dispatcher
+        )
         assert kwargs["current_mode"]() == "gaming"
         gate_result = kwargs["resource_gate"](
             SimpleNamespace(
@@ -1081,6 +1099,25 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         ),
     )
     monkeypatch.setattr(asgi, "_scheduler_seed_configs", lambda: [])
+    monkeypatch.setattr(
+        asgi,
+        "SchedulerWorkerRegistry",
+        lambda: scheduler_worker_registry,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "SchedulerAcceptedOperationHandler",
+        lambda **kwargs: scheduler_operation_handler
+        if kwargs
+        == {
+            "worker_registry": scheduler_worker_registry,
+            "definition_repository": scheduler_definition_store,
+            "occurrence_repository": scheduler_definition_store,
+            "command_repository": canonical_command_repository,
+            "result_repository": scheduler_result_store,
+        }
+        else pytest.fail("wrong Scheduler accepted-operation authority ports"),
+    )
     monkeypatch.setattr(
         asgi,
         "build_process_security_service_container",

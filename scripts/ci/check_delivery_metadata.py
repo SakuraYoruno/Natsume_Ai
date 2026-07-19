@@ -36,11 +36,15 @@ _CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _COMMIT_RE = re.compile(
     rf"^(?:{'|'.join(ALLOWED_COMMIT_PREFIXES)})：(?P<result>\S(?:.*\S)?)$"
 )
-_FALSE_COMPLETION_RE = re.compile(
+_COMPLETION_SCOPE_PATTERN = (
     r"(?:Full\s+Architecture|完整架构|整体架构|生产闭环|NE-\d{2})"
-    r".{0,20}(?:DONE|PASS|完成|已完成|闭环)",
+)
+_COMPLETION_SCOPE_RE = re.compile(_COMPLETION_SCOPE_PATTERN, re.IGNORECASE)
+_FALSE_COMPLETION_RE = re.compile(
+    rf"{_COMPLETION_SCOPE_PATTERN}.{{0,20}}?(?:DONE|PASS|已完成|完成|闭环)",
     re.IGNORECASE,
 )
+_CLAUSE_BOUNDARY_RE = re.compile(r"[;；。.!?！？\r\n]")
 _NEGATION_MARKERS = (
     "不宣称",
     "不得",
@@ -53,6 +57,7 @@ _NEGATION_MARKERS = (
     "PARTIAL",
     "NOT_RUN",
     "基础资产",
+    "STATIC GATE",
 )
 
 
@@ -126,6 +131,14 @@ def validate_pull_request_metadata(
         findings.append(
             GateFinding("CHINESE_PR_TITLE_REQUIRED", "pull_request.title", normalized_title)
         )
+    if _unqualified_completion_claim(normalized_title):
+        findings.append(
+            GateFinding(
+                "UNQUALIFIED_COMPLETION_CLAIM",
+                "pull_request.title",
+                normalized_title,
+            )
+        )
     if "\\n" in normalized_title or "\\n" in raw_body:
         findings.append(
             GateFinding(
@@ -174,10 +187,38 @@ def validate_pull_request_metadata(
 
 def _unqualified_completion_claim(value: str) -> bool:
     text = str(value or "")
-    if _FALSE_COMPLETION_RE.search(text) is None:
-        return False
-    upper = text.upper()
-    return not any(marker.upper() in upper for marker in _NEGATION_MARKERS)
+    for match in _FALSE_COMPLETION_RE.finditer(text):
+        context = _completion_claim_context(text, match=match).upper()
+        if not any(marker.upper() in context for marker in _NEGATION_MARKERS):
+            return True
+    return False
+
+
+def _completion_claim_context(text: str, *, match: re.Match[str]) -> str:
+    """Return only the clause segment attributable to one completion claim.
+
+    A negation before another architecture/NE scope must not qualify this
+    match.  The suffix remains available until the next scope or hard clause
+    boundary so text such as ``NE-01 PASS，但仍未完成`` stays explicitly
+    bounded.
+    """
+
+    claim_start = match.start()
+    clause_start = 0
+    for boundary in _CLAUSE_BOUNDARY_RE.finditer(text, 0, claim_start):
+        clause_start = boundary.end()
+    prefix = text[clause_start:claim_start]
+    if _COMPLETION_SCOPE_RE.search(prefix) is not None:
+        clause_start = claim_start
+
+    claim_end = len(text)
+    next_boundary = _CLAUSE_BOUNDARY_RE.search(text, match.end())
+    if next_boundary is not None:
+        claim_end = next_boundary.start()
+    next_scope = _COMPLETION_SCOPE_RE.search(text, match.end())
+    if next_scope is not None:
+        claim_end = min(claim_end, next_scope.start())
+    return text[clause_start:claim_end]
 
 
 def read_commit_records(

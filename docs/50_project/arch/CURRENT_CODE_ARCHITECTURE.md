@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.22
+版本：v5.23
 核对日期：2026-07-19
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -17,8 +17,8 @@
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
 | Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0116_agent_workspace_lifecycle.sql` |
-| Universal Runtime 七路线 | `INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。Chat/Skill 缺当前提交和 migration head 绑定的真实 receipt；Plan/Delegate 存在节点治理缺口；Scheduler/Internal 尚未原子提交领域副作用；Operator 已迁移 `scheduler.task.trigger` 与 `sys_mode.switch` 两条 vertical slice，剩余 35 条写命令在 admission 前阻断。旧 GR-06 四路线 receipt 只算历史证据；2/37 不构成 Operator 完成 |
-| Scheduler | `PARTIAL / TRANSACTIONAL_EFFECT_MISSING` | Clock/Manual occurrence 已进入 HostCommand/TaskGraph；生产 handler 仍可能在外层 Verification/Acceptance 前执行领域副作用，commit-bound canary 未运行 |
+| Universal Runtime 七路线 | `INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。Chat/Skill 缺当前提交和 migration head 绑定的真实 receipt；Plan/Delegate 存在节点治理缺口；Scheduler governed occurrence 已把真实 handler 移至 Acceptance 后，Internal 仍未原子提交领域 artifact；Operator 已迁移 `scheduler.task.trigger` 与 `sys_mode.switch` 两条 vertical slice，剩余 35 条写命令在 admission 前阻断。旧 GR-06 四路线 receipt 只算历史证据；2/37 不构成 Operator 完成 |
+| Scheduler | `PARTIAL / POST_ACCEPTANCE_HANDLER_CUTOVER` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。Review 前 handler=0，Effect commit 后=1，duplicate 不重调；response-loss 只读对账。definition/admin authority、mutable batch/clock retry、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / LEGACY_EXECUTOR_BRIDGE` | v2 ingress 编译为 V3 后仍桥接 legacy `AgentWorkOrder`；write-capable 路径关闭，artifact 与 Acceptance 尚未原子提交，commit-bound canary 未运行 |
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW。TaskStore 的 public graph/effect staging 写入 API 已删除；生产 Graph 只能从 HostCommand admission 同一 UoW 进入，Effect 只能从 canonical Acceptance UoW 进入。应用 Python 写 authority 定级为 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED`，但 SQLite 无新 migration/trigger，raw/orphan SQL 仍可绕过，因此同时保留 `SQL_DIRECT_BYPASS_PRESENT`。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
 | 通用 PlanningSearch | `PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService、shadow benchmark 合同与 context-owned compiler 已存在；D16 落下 Code 动态纯 shadow catalog，D17/D18 增加实验专用 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 双 worktree、`VERIFIED_CLEAN` 和 0106 preregistered durable ledger；D19 只增加预注册冻结 pytest argv 的受控子进程证据，尚无生产 domain cutover 或收益结论 |
@@ -132,6 +132,14 @@ Chat / Host Input / Gateway
 Effect 为 `RECOVERY_PENDING`、其他 owner 持有 lease 或结果不确定时，Runtime Group 只 durable defer continuation，不得抢先把 outer outcome 写成拒绝或成功。Review `CANCELLED` 必须重开 exact Task cancellation authority；缺证据继续等待恢复，不能静默悬挂或伪造终态。COMMITTED effect 的副作用归因来自 exact HardState event；`NO_CHANGE` 无 event 且固定 `side_effects_executed=false`。一旦调用 HardState 后丢失响应、返回 `success=False` 或后置归因失败，必须先查询 exact event：已存在规范化为 `REPLAYED`，读取不确定保持 `PENDING + RECONCILIATION_REQUIRED`/`UNKNOWN`，普通 `max_attempts` 不得把它写成 `FAILED`；只有权威确认不存在才走普通失败。历史与未知结果只用 permanent event-id lookup 对账，不受后续 history window 限制，也不会再次执行 ModeTransition。
 
 该切片令 Operator 进度成为 2/37；另 35 个写命令在 handler 前失败关闭。它没有当前提交绑定的 acceptance receipt，也没有 NE-01 wave integration 或 production canary，因此 Operator 与 Universal Runtime 仍为 `INCOMPLETE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+#### 3.1.2 Scheduler post-Acceptance operation slice
+
+Scheduler 的生产 worker 不再调用 `SchedulerWorkerRegistry` 中的领域 handler，也不把 handler 返回值当作 Acceptance 前的 worker projection。`SchedulerOperationPlanExecutor` 只根据冻结的 occurrence、definition、worker key、operation fingerprint 和 graph/node/Attempt lineage 生成一个 immutable `scheduler.operation.execute` 描述；对应 verifier/acceptance 会从 canonical `WorkerProjectionStore` 和 Scheduler repository 重新打开这些 authority。
+
+Graph Verification/Acceptance 与 Effect staging 复用 TaskStore 既有 canonical UoW。提交后，共享 app-local `AcceptanceEffectDispatcher` 才为 exact Scheduler action 派生并重开 Preview，调用 `SchedulerAcceptedOperationHandler`；实际领域结果继续写既有 append-only `SchedulerExecutionResultRepository`，没有新增第二个 result store。native occurrence claim 绑定该实际 result receipt；Operator 外层 outcome 使用自己的 checksum-chained receipt，并以实际结果已可归因为封口前置条件，不能把 Graph 已 ACCEPTED 当成 handler 已执行。Review 前 handler 调用为 0、Effect commit 后为 1；duplicate 命中 immutable operation/result identity 后不再调用。过期 claim 与 handler 越界后的响应丢失只允许 read-only reconciliation，无法证明时保持 `RECOVERY_REQUIRED`，禁止盲重放。
+
+当前工作树集中回归覆盖 21 个指定文件，结果为 `185 passed in 190.27s`（PowerShell wall `192.20s`）；旧 4/21/30/10/48/123 分组被包含或重叠，不得相加。所有 reclaimed Effect 现只允许显式只读 `reconcile()`，无 reconciler 时保持 unknown；生产 sys-mode 仅重开 exact HardState，Scheduler handler 的空/歧义结果与合成 receipt 均失败关闭，恢复轮询异常会显式记录。commit SHA 由提交后的忽略目录本地 gate artifact 绑定。这仍只是 governed occurrence 的副作用边界切流：Scheduler definition/admin 的直接写 authority、mutable batch freezing、clock retry/backoff、一般未知外部效果的人工归因、wave integration 和 production canary 仍缺；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。因此 Scheduler 与 NE-01 仍为 `PARTIAL/IN_PROGRESS`。
 
 ### 3.2 Read route 与退役边界
 
@@ -374,7 +382,7 @@ shadow 对账的还是实际执行的 baseline 根动作，不是 L3 未执行�
 | 状态域 | 当前权威写入/存储 | 备注 |
 |---|---|---|
 | Host command / Task / Attempt | `HostCommandRepository`、`DurableTaskStore` | canonical 四路线权威 |
-| Scheduler | Scheduler repositories + Durable Task Runtime | occurrence 与 Task lineage 均持久化，真实 governed execution 已接通 |
+| Scheduler | Scheduler repositories + Durable Task Runtime + shared Acceptance Effect dispatcher | occurrence 与 Task lineage 持久化；worker 只提交 operation plan，真实 handler 在 Acceptance 后执行，实际结果进入既有 immutable result ledger。definition/admin、mutable batch/clock retry 与 canary 尚未收口 |
 | Review | `ReviewStore` + 0096 `ReviewContinuationStore` | token/decision 为唯一业务真相；task-bound continuation 自动、可 takeover，PRE 无伪 Attempt，POST 不重跑 worker |
 | Runtime Event / Outbox | canonical SQLite journal/outbox | 关键事件与投影可恢复 |
 | Host mode HardState | app-local `HostHardStateOwner` + 0115 `SQLiteHardStateJournal` | runtime-scoped event/head 同事务，expected revision/mode CAS 与 exact Host lease/fence；完整 digest/revision replay后恢复。auto-rules/last-interaction 尚未持久，production canary 未跑 |

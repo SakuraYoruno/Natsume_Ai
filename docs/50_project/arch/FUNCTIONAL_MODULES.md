@@ -52,7 +52,7 @@
 | 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 为 `WIRED`；进度/最近轮次走只读投影，Executive 已退出生产路由 |
 | 任务、Skill 与 Delegate | Chat 意图、Operator 命令 | `orchestration`、`task_runtime`、`agent_runtime`、`skills` | Model Runtime、Capability Broker、Domain Pack | Host canonical route `WIRED`；0102+GR06 canonical Node Acceptance 已统一 exact Effect/artifact/`ACCEPTED`/Attempt Outbox。public TaskStore graph/effect staging 入口已删除，应用 Python 写 authority 已封口；raw/orphan SQL 仍可绕过，通用恢复与生产并发仍 `PARTIAL` |
 | 视觉桌面自动化兼容入口 | `/v1/agent/run`、`/v1/agent/info`、vision chat `response_format` fence | `app/agent_routes.py`、`app/chat_handler_vision.py` | 无执行下游 | `RETIRED_COMPATIBILITY_ONLY / PRODUCTION_OFF`；raw loop/client 与 Ledger writer 已删除，`run` 只返回固定拒绝，`info` 明示不可用，vision chat 非 `text` 在 handle/model/Memory/Ledger 前拒绝；`ActionPlan` schema/parser 仅 proposal-only。它不是 Delegate `vision_agent`，也不是正向 Visual Agent Runtime |
-| 自动化与定时任务 | Scheduler API、Monitor Automation | `scheduler`、`lifecycle_runtime` | Governed Command、Life、Memory、Security Immune | 定义、时钟、持久化与 governed execution 已接通；DAG 自动恢复仍受 Lane B 限制 |
+| 自动化与定时任务 | Scheduler API、Monitor Automation | `scheduler`、`lifecycle_runtime` | Governed Command、Life、Memory、Security Immune | governed occurrence 的 worker 已改为 immutable operation plan，真实 handler 由共享 Acceptance Effect dispatcher 在验收后执行；definition/admin、mutable batch/clock retry、一般未知效果归因和 canary 仍为 `PARTIAL` |
 | 记忆、检索与设定 | Memory/Canon API、Monitor Memory/Canon | `memory`、`retrieval`、`canon` | SQLite、Chroma、Neo4j、Surface Context | 多类记忆与 Canon proposal/apply 可用；统一 Knowledge OS 为 `MISSING` |
 | 数字生命状态 | `/v1/digital-life/*`、Monitor Life Systems | `digital_life` | Projection、Persona、Lifecycle、Delivery Outbox | command/event/reducer 地基 `WIRED`；World/Scene/Intent 统一上下文仍 `PARTIAL/MISSING` |
 | 人格、情绪和关系表达 | Surface Reply、Bond API、Monitor Persona/Bond | `persona`、`bond`、`surface_runtime` | Model Runtime、Memory、Life Projection、Embodiment | 表达链可用；Persona 旧直写已中央封口，受治理的演化提案链仍缺失 |
@@ -82,7 +82,7 @@
 | Orchestration | HostCommand admission、Governor grant 解析、计划图编译、revision、0100 durable supersession 和 node grant | [`orchestration/governed_command.py`](../../../host_brain/orchestration/governed_command.py)、[`orchestration/planning_graph_compiler.py`](../../../host_brain/orchestration/planning_graph_compiler.py)、[`orchestration/planning_admission.py`](../../../host_brain/orchestration/planning_admission.py)、[`persistence/host_command_repository.py`](../../../host_brain/persistence/host_command_repository.py)、[`orchestration/node_grants.py`](../../../host_brain/orchestration/node_grants.py) | contracts、repository ports、PlanningSearch result | 领域 worker 实现、外部副作用 | Host 主链 `WIRED`；显式 FAILED-only replan 已有单事务 supersession 与旧 revision fence，但自动触发、更宽 predecessor classifier 和生产 canary仍 `PARTIAL` |
 | Governed Host Adapter | 把 `chat/skill/delegate/plan` 编译为 HostCommand + `WorkOrderV3` + immutable graph；以 route-aware authority 校验 exact replay | [`app/governed_task_adapter.py`](../../../host_brain/app/governed_task_adapter.py)、[`app/governed_task_authority.py`](../../../host_brain/app/governed_task_authority.py) | Orchestration、Task Runtime、route worker | 执行期二次规划 | `WIRED`；adapter 负责生命周期/编译，authority 模块负责纯 replay、lineage 与 fail-closed 校验；chat/delegate 不再误套 skill 专属 metadata |
 | Task Runtime | 依赖推进、Attempt、Lease、Idempotency、Budget、Review、Verification、Acceptance、effect intents、两阶段 Graph cancellation、窄 continuation 与 0099 历史终态 reconciliation | [`task_runtime/coordinator.py`](../../../host_brain/task_runtime/coordinator.py)、[`task_runtime/accepted_graph_finalization.py`](../../../host_brain/task_runtime/accepted_graph_finalization.py)、[`task_runtime/operation_recovery_runtime.py`](../../../host_brain/task_runtime/operation_recovery_runtime.py)、[`task_runtime/terminal_state_reconciliation.py`](../../../host_brain/task_runtime/terminal_state_reconciliation.py)、[`persistence/task_terminal_reconciliation_store.py`](../../../host_brain/persistence/task_terminal_reconciliation_store.py) | Task repository ports、worker/verifier/acceptance/cancellation-authority ports、canonical HostCommand repository | 路由意图识别、计划搜索、未经验证的业务取消、第二套状态、通用副作用猜测 | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`；其中 TaskStore 应用层写口已达 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED / SQL_DIRECT_BYPASS_PRESENT`。Budget unique winner、single-node post-budget takeover、ACCEPTED→Effect restart 与 0099 窄分类/修复已有；general/multi-node/pre-budget recovery、外部 inventory/remediation、现实 resolver、部署 key/credential 与 canary 未闭环 |
-| Scheduler | 定义、occurrence、时钟、lease、模式/资源策略和定时 worker registry | [`scheduler/clock.py`](../../../host_brain/scheduler/clock.py)、[`scheduler/scheduling_center.py`](../../../host_brain/scheduler/scheduling_center.py)、[`scheduler/governed_runtime.py`](../../../host_brain/scheduler/governed_runtime.py) | Secure Ingress、Governor、Task Runtime、Scheduler Repository | 自建第二套 Task 状态机 | `WIRED`；Clock/Manual occurrence 已贯通 V3/Budget/child grant/Review/Verification/Acceptance/Receipt |
+| Scheduler | 定义、occurrence、时钟、lease、模式/资源策略、operation plan 与验收后 handler dispatch | [`scheduler/clock.py`](../../../host_brain/scheduler/clock.py)、[`scheduler/scheduling_center.py`](../../../host_brain/scheduler/scheduling_center.py)、[`scheduler/governed_runtime.py`](../../../host_brain/scheduler/governed_runtime.py)、[`scheduler/operation_plan.py`](../../../host_brain/scheduler/operation_plan.py)、[`scheduler/accepted_operation.py`](../../../host_brain/scheduler/accepted_operation.py)、[`scheduler/accepted_effect_runtime.py`](../../../host_brain/scheduler/accepted_effect_runtime.py) | Secure Ingress、Governor、Task Runtime、shared Acceptance Effect dispatcher、Scheduler Repository | worker 内领域副作用、自建第二套 Task/result 状态机、未知效果盲重放 | `PARTIAL / POST_ACCEPTANCE_HANDLER_CUTOVER`；Clock/Manual occurrence 已贯通 V3/Budget/child grant/Review/Verification/Acceptance/Receipt，21 文件工作树集中回归 `185 passed in 190.27s`。Graph Acceptance 与 operation Effect staging 同 UoW，实际结果写既有 immutable ledger；reclaimed Effect 只走显式 reconcile，结果/receipt 严格失败关闭；commit 由提交后本地 artifact 绑定，definition/admin、mutable batch/clock retry、人工 reconciliation 与 canary仍缺 |
 | Internal Agent Runtime | 认证后的内部 Agent WorkOrder、结果持久化和 Review API | [`app/internal_task_runtime.py`](../../../host_brain/app/internal_task_runtime.py)、[`app/internal_agent_ingress.py`](../../../host_brain/app/internal_agent_ingress.py) | Secure Ingress、Agent Executor、Task Runtime | 绕过 HostCommand 权限 lineage | `WIRED`；边界 v2 编译 V3，完整 child grant、Budget、PRE/POST Review、Verification、Acceptance、Receipt 与 replay 已验证 |
 | Read Projection / Executive Guard | `task_progress`、`recent_turn` 的只读投影与 retired fail-close guard | [`agent_runtime/read_routes.py`](../../../host_brain/agent_runtime/read_routes.py)、[`executive_runtime/runtime.py`](../../../host_brain/executive_runtime/runtime.py) | Durable Task/Conversation projection | Task/Attempt、worker、状态写入 | `WIRED / RETIRED`；Executive 无生产入口，legacy SkillDag 执行和内存 registry 已删除 |
 
@@ -246,15 +246,22 @@ B5C 的 0092 intent/decision 仍是唯一取消业务真相；0099 case/proof/su
 ### 6.2 定时任务和内部 Agent
 
 ```text
-SchedulerClock / authenticated Internal Agent
-  → Secure Ingress authority
-  → Governor grant
-  → GovernedSchedulerRuntime / GovernedInternalRuntime
-  → HostCommand admission
-  → Task Runtime
+SchedulerClock / manual occurrence
+  → Secure Ingress authority → Governor grant
+  → GovernedSchedulerRuntime → HostCommand admission → Task Runtime
+  → immutable scheduler operation plan
+  → Verification / Acceptance + scheduler.operation.execute staging（同一 TaskStore UoW）
+  → shared app-local AcceptanceEffectDispatcher
+  → real Scheduler handler
+  → immutable SchedulerExecutionResultRepository
+
+authenticated Internal Agent
+  → Secure Ingress authority → Governor grant
+  → GovernedInternalRuntime → HostCommand admission → Task Runtime
+  → legacy AgentWorkOrder executor bridge（仍待移除）
 ```
 
-Scheduler 与 Internal Agent 均已按该调用链接通。Internal 只在 ingress 接受 `AgentWorkOrder`，剥离调用方 authority 后立即编译为 `WorkOrderV3 + BudgetPolicy`；既有 executor 仅在 child grant 验证后接收兼容投影。Lane A 已完成；0096 已把两者的长时间 Review grant renewal 与 surface continuation 接入同一合同。
+Scheduler 的 worker 只生成 plan，不调用真实 handler；Review pending 时 handler=0，Effect commit 后只调用一次，duplicate 重放既有结果。handler 调用后的响应丢失或过期 claim 先只读查询 operation/result authority，无法归因时保持恢复状态而不盲调。Internal 只在 ingress 接受 `AgentWorkOrder`，剥离调用方 authority 后立即编译为 `WorkOrderV3 + BudgetPolicy`；既有 executor 仅在 child grant 验证后接收兼容投影。0096 已把两者的长时间 Review grant renewal 与 surface continuation 接入同一合同，但 Internal legacy bridge 和 Scheduler 其余 authority 仍使 NE-01 保持 `IN_PROGRESS`。
 
 ### 6.3 数字生命与主动输出
 

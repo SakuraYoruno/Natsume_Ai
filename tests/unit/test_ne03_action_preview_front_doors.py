@@ -8,6 +8,7 @@ import pytest
 
 from host_brain.app import acceptance_effect_handlers
 from host_brain.app.observability_runtime.domain_command_ports import (
+    BLOCKED_OPERATOR_COMMAND_IDS,
     _DomainCommandPort,
 )
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
@@ -44,12 +45,6 @@ from host_brain.runtime.action_preview_resolver import (
     ResolvedActionPreviewAuthority,
 )
 from host_brain.runtime.runtime_guardian import RuntimeGuardian
-from host_brain.scheduler.contracts import occurrence_work_order_id
-from host_brain.scheduler.worker_registry import (
-    GovernedSchedulerWorker,
-    SchedulerWorkerError,
-    SchedulerWorkerRegistry,
-)
 from host_brain.tribe.edge_command_pusher import EdgeCommandPusher
 from natsume_contracts.life import (
     LifeDeliveryAuthorization,
@@ -826,162 +821,6 @@ def test_production_resolver_rejects_forged_grant_context_scene_and_old_attempt(
     assert lost.value.reason_code == "ACTION_PREVIEW_BLOCKED"
 
 
-@pytest.mark.asyncio
-async def test_scheduler_worker_previews_before_registered_handler(monkeypatch) -> None:
-    order: list[str] = []
-    occurrence_id = "scheduleroccurrence://sha256/" + "5" * 64
-    occurrence = {
-        "occurrence_id": occurrence_id,
-        "task_id": "life_tick",
-        "definition_revision": 1,
-        "source": "CLOCK",
-        "scheduled_at_ms": NOW,
-        "payload": {"person_id": "person-preview"},
-        "request_id": "request-preview-scheduler",
-        "principal_id": "person-preview",
-        "ingress_claim_ref": "secure-ingress-claim://preview/scheduler",
-        "ingress_audit_ref": "audit://preview/scheduler",
-        "body_sha256": "sha256:" + "6" * 64,
-    }
-    definition = {
-        "task_id": "life_tick",
-        "definition_revision": 1,
-        "definition": {
-            "task_id": "life_tick",
-            "trigger_mode": "interval",
-            "trigger_config": {"seconds": 60},
-            "intent_template": {
-                "skill_name": "life_tick",
-                "args": {"person_id": "person-preview"},
-            },
-            "priority": "NORMAL",
-            "enabled": True,
-            "retry_policy": {"max_attempts": 1, "retry_backoff_ms": 0},
-            "resource_profile": {},
-            "worker_key": "life_command",
-            "risk_level": 3,
-        },
-    }
-
-    class Repository:
-        def get_occurrence(self, _occurrence_id):
-            return occurrence
-
-        def get_revision(self, _task_id, _revision):
-            return definition
-
-        def append(self, *, occurrence_id, command_id, work_order_id, result):
-            return {
-                "receipt_ref": "schedulerresult://sha256/" + "7" * 64,
-                "occurrence_id": occurrence_id,
-                "command_id": command_id,
-                "work_order_id": work_order_id,
-                "status": result["status"],
-                "result": dict(result),
-            }
-
-    class PreviewService:
-        def issue_receipt(self, **_kwargs):
-            order.append("preview-issued")
-            return {
-                "event_id": "runtime-event://preview/scheduler",
-                "receipt_ref": "action-preview://sha256/" + "8" * 64,
-            }
-
-        def require_execution(self, **_kwargs):
-            order.append("preview-reopened")
-
-    class GrantVerifier:
-        def verify(self, **kwargs):
-            return {
-                **kwargs,
-                "grant_ref": kwargs["grant_ref"],
-                "expires_at_ms": NOW + 60_000,
-            }
-
-    async def handler(**kwargs):
-        order.append("handler")
-        assert kwargs["execution_context"]["_action_preview_context"][
-            "origin_event_id"
-        ] == "runtime-event://preview/scheduler"
-        return {"status": "SUCCEEDED", "summary": "previewed"}
-
-    monkeypatch.setattr(
-        "host_brain.runtime.action_preview_authority.context_pack_digest_from_work_order",
-        lambda _work_order: "sha256:" + "9" * 64,
-    )
-    handlers = SchedulerWorkerRegistry()
-    handlers.register("life_command", handler)
-    repository = Repository()
-    worker = GovernedSchedulerWorker(
-        handlers=handlers,
-        definition_repository=repository,
-        occurrence_repository=repository,
-        result_repository=repository,
-        node_grant_verifier=GrantVerifier(),
-        action_preview_service=PreviewService(),
-    )
-    command = SimpleNamespace(
-        input_ref=occurrence_id,
-        request_id=occurrence["request_id"],
-        session_id="session-preview-scheduler",
-        principal_id=occurrence["principal_id"],
-        target_id="life_command",
-        command_id="host-command://scheduler/" + "a" * 64,
-        created_at_ms=NOW - 1,
-    )
-    work_order = SimpleNamespace(
-        work_order_id=occurrence_work_order_id(occurrence_id),
-        input_pack={
-            "occurrence_id": occurrence_id,
-            "runtime_context_schema": "natsume.runtime-context.request.v1",
-            "scene_identity_v2": _scheduler_context_scene(),
-            "definition_ref": "scheduler-definition://preview/life-tick/1",
-        },
-    )
-    execution_context = {
-        "worker_route": "delegate:life_command",
-        "node_grant_ref": "governor-grant://preview-child",
-        "graph_id": "graph-preview-scheduler",
-        "graph_revision": 1,
-        "node_id": "node-preview-scheduler",
-        "work_order_id": work_order.work_order_id,
-        "parent_grant_ref": "governor-grant://preview-parent",
-        "attempt_id": "attempt-preview-scheduler",
-        "lease_id": "lease-preview-scheduler",
-        "lease_owner_id": "worker-preview-scheduler",
-        "fencing_token": 1,
-    }
-    events = [
-        event
-        async for event in worker.execute_stream(
-            command=command,
-            work_order=work_order,
-            execution_context=execution_context,
-        )
-    ]
-    assert events[-1]["decision"] == "APPROVE"
-    assert order == ["preview-issued", "preview-reopened", "handler"]
-
-    blocked = GovernedSchedulerWorker(
-        handlers=handlers,
-        definition_repository=repository,
-        occurrence_repository=repository,
-        result_repository=repository,
-        node_grant_verifier=GrantVerifier(),
-    )
-    with pytest.raises(SchedulerWorkerError, match="ActionPreview authority"):
-        _ = [
-            event
-            async for event in blocked.execute_stream(
-                command=command,
-                work_order=work_order,
-                execution_context=execution_context,
-            )
-        ]
-    assert order == ["preview-issued", "preview-reopened", "handler"]
-
-
 def _scheduler_context_scene() -> dict[str, Any]:
     return {
         "schema": "natsume.scene-identity.v2",
@@ -1112,7 +951,7 @@ async def test_legacy_operator_and_edge_actuators_fail_before_side_effect(
 
 
 @pytest.mark.asyncio
-async def test_all_37_obs_direct_commands_fail_before_handler() -> None:
+async def test_all_35_legacy_obs_direct_commands_fail_before_handler() -> None:
     calls: list[str] = []
     authority = ObsCommandAuthority.bind(
         principal_id="operator-preview",
@@ -1120,7 +959,14 @@ async def test_all_37_obs_direct_commands_fail_before_handler() -> None:
         request_id="request-preview-all-obs",
     )
     assert len(DEFAULT_OBS_COMMAND_SPECS) == 37
-    for spec in DEFAULT_OBS_COMMAND_SPECS:
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 35
+    blocked_specs = tuple(
+        spec
+        for spec in DEFAULT_OBS_COMMAND_SPECS
+        if spec.command_id in BLOCKED_OPERATOR_COMMAND_IDS
+    )
+    assert len(blocked_specs) == 35
+    for spec in blocked_specs:
         port = _DomainCommandPort(
             command_id=spec.command_id,
             handler=lambda _payload, _request_id, command_id=spec.command_id: calls.append(command_id),

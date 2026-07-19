@@ -4,8 +4,7 @@ import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
-from host_brain.app import asgi, host_life_scheduler_wiring, http_hooks
-from host_brain.app import process_runtime_shutdown_adapter
+from host_brain.app import asgi, host_life_scheduler_wiring, host_runtime_shutdown, http_hooks
 from host_brain.scheduler import scheduling_center
 from host_brain.tribe.tribe_state import TribeStateRegistry
 from host_brain.runtime.context_contracts import SceneDecisionV2
@@ -41,7 +40,9 @@ def _life_tick_runtime_context() -> tuple[dict, object]:
 def test_production_startup_has_one_clock_and_no_private_life_or_tribe_loop() -> None:
     lifespan_source = inspect.getsource(http_hooks.runtime_lifespan)
     asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
-    shutdown_source = inspect.getsource(process_runtime_shutdown_adapter)
+    shutdown_source = inspect.getsource(
+        host_runtime_shutdown.shutdown_host_runtime_authority
+    )
 
     assert asgi_source.count("await scheduler.activate_clock()") == 1
     assert "start_life_continuity_loop" not in lifespan_source
@@ -52,9 +53,12 @@ def test_production_startup_has_one_clock_and_no_private_life_or_tribe_loop() ->
     assert asgi_source.index(
         "life_command_authority = _compose_life_command_authority(ledger)"
     ) < asgi_source.index("life_dispatchers = _compose_life_dispatchers(")
-    assert asgi_source.index("await scheduler.stop_clock()") < asgi_source.rindex(
-        "_reset_life_command_authority()"
-    ) < asgi_source.rindex("life_dispatchers = None")
+    assert shutdown_source.index("scheduler.stop_clock") < shutdown_source.index(
+        '("life_command_authority", reset_life_command_authority)'
+    ) < shutdown_source.rindex("on_dependencies_released,")
+    assert asgi_source.index(
+        "life_command_authority = life_dispatchers = None"
+    ) < asgi_source.index("on_dependencies_released=withdraw_closed_process_references")
 
 
 def test_default_tribe_registry_cannot_start_a_periodic_thread(monkeypatch) -> None:

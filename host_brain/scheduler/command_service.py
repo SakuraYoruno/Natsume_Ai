@@ -602,11 +602,27 @@ class SchedulerCommandService:
                         "waiting scheduler command has no durable ReviewItem",
                     )
                 return terminal
-            result_ref = str(receipt.get("receipt_ref") or "").strip()
+            effect_status = str(
+                terminal.get("scheduler_effect_status") or ""
+            ).strip().upper()
+            if effect_status != "COMMITTED":
+                # A Task terminal receipt proves only how the immutable Graph
+                # stopped; it is not a Scheduler operation result.  In
+                # particular FAILED/BLOCKED/CANCELLED may happen before an
+                # Acceptance Effect exists, while RECOVERY_REQUIRED/PENDING
+                # must be reconciled without invoking the handler again.  The
+                # native claim therefore remains replayable and unbound until
+                # the one Scheduler result writer exposes its attributable
+                # receipt.  Host-command replay validation deliberately only
+                # accepts that receipt (or a terminal Review decision).
+                return terminal
+            result_ref = str(
+                terminal.get("scheduler_result_receipt_ref") or ""
+            ).strip()
             if not result_ref:
                 raise GovernedSchedulerRuntimeError(
                     SCHEDULER_RUNTIME_INGRESS_COMPLETION_FAILED,
-                    "terminal scheduler result has no durable receipt",
+                    "terminal scheduler result has no attributed durable receipt",
                 )
             # Native Scheduler ingress owns and completes its claim here.
             # OBS Operator ingress has a separate append-only outcome journal

@@ -132,12 +132,26 @@
     },
     "scheduler": {
       "status": "INCOMPLETE",
-      "production_boundary": "Scheduler occurrences enter HostCommand and a single-node immutable TaskGraph, but the production handler may perform its domain side effect before the outer Verification/Acceptance boundary. Program-wide Budget measurement, transactional Effect staging and current-commit live acceptance remain unproven.",
+      "production_boundary": "Scheduler governed occurrences enter HostCommand and a single-node immutable TaskGraph. The production worker now emits only an immutable scheduler.operation.execute plan; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW. The shared app-local AcceptanceEffectDispatcher invokes the real handler only after Acceptance and persists the actual result in the existing immutable SchedulerExecutionResultRepository. Review-before-resume calls the handler zero times, committed delivery calls it once, and duplicate replay does not call it again. Every reclaimed Effect must use an explicit read-only reconciler; missing reconciliation stays unknown, production sys-mode only reopens exact HardState, and empty or ambiguous Scheduler results and synthetic receipts fail closed. The route remains INCOMPLETE because definition/admin direct authority, mutable batch and clock retry semantics, general unknown-effect human attribution, program-wide Budget measurement, commit-bound acceptance, wave integration and production canary remain missing.",
       "evidence_refs": [
         "host_brain/scheduler/governed_runtime.py",
+        "host_brain/scheduler/operation_plan.py",
+        "host_brain/scheduler/accepted_operation.py",
+        "host_brain/scheduler/accepted_effect_runtime.py",
         "host_brain/scheduler/worker_registry.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/unit/test_ne01_scheduler_operation_plan.py",
+        "tests/unit/test_ne01_scheduler_accepted_operation.py",
+        "tests/unit/test_ne01_scheduler_accepted_effect_runtime.py",
+        "tests/unit/test_ne01_scheduler_handler_result_semantics.py",
+        "tests/unit/test_ne01_scheduler_ingress_terminal_boundary.py",
+        "tests/unit/test_ne01_acceptance_effect_derived_preview.py",
+        "tests/unit/test_ne01_acceptance_effect_runtime.py",
         "tests/unit/test_aw02_governed_scheduler_runtime.py",
-        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py"
+        "tests/unit/test_acceptance_effect_handlers.py",
+        "tests/integration/test_gr06_acceptance_effect_dispatcher.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py",
+        "tests/integration/test_aw02_scheduler_production_cutover.py"
       ],
       "controls": {
         "host_command": "PASS",
@@ -150,7 +164,7 @@
         "verification": "PARTIAL",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "MISSING",
+        "transactional_side_effects": "PARTIAL",
         "commit_bound_acceptance": "MISSING"
       }
     },

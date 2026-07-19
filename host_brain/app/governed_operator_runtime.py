@@ -645,6 +645,7 @@ def build_governed_operator_composition(
     cancellation_authority_verifier: Any | None,
     secure_ingress_authority_resolver: Any,
     runtime_owner_id: str,
+    scheduler_operation_handler: Any | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
@@ -652,6 +653,7 @@ def build_governed_operator_composition(
         task_store=task_runtime_container.task_store,
         handlers=build_production_acceptance_effect_handlers(
             mode_transition_service_provider=mode_transition_service_provider,
+            scheduler_operation_handler=scheduler_operation_handler,
         ),
         owner_id=f"{runtime_owner_id}::acceptance-effects",
         action_preview_service=action_preview_service,

@@ -388,7 +388,7 @@ def test_sys_mode_negative_response_recovers_one_real_sqlite_commit_after_restar
             mode_transition_service_provider=lambda: recovered_service,
         )["host.sys_mode_transition"]
 
-        receipt = recovered_handler(payload)
+        receipt = recovered_handler.reconcile(payload)
 
         assert receipt["success"] is True
         assert receipt["status"] == "REPLAYED"

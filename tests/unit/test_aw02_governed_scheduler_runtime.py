@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.app.acceptance_effect_handlers import (
+    build_production_acceptance_effect_handlers,
+)
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.governor.action_arbiter import build_governed_action_binding
@@ -24,6 +29,10 @@ from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
 )
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
+from host_brain.runtime.context_application import FrozenRuntimeContextV1
+from host_brain.runtime.context_contracts import WorldSnapshotV2
+from host_brain.scheduler.accepted_operation import SchedulerAcceptedOperationHandler
 from host_brain.scheduler.contracts import (
     SchedulerContractError,
     occurrence_work_order_id,
@@ -39,14 +48,95 @@ from host_brain.scheduler.governed_runtime import (
 )
 from host_brain.scheduler.worker_registry import (
     SCHEDULER_HANDLER_NOT_REGISTERED,
-    GovernedSchedulerWorker,
     SchedulerWorkerError,
     SchedulerWorkerRegistry,
     SchedulerWorkerResolver,
 )
+from host_brain.task_runtime.acceptance_effect_dispatcher import (
+    AcceptanceEffectDispatcher,
+)
 
 
 NOW = 1_800_000_000_000
+
+
+class _RuntimeContextAuthority:
+    def __init__(self) -> None:
+        workspace_id = "tenant:scheduler-runtime-unit"
+        subject_id = "scheduler-runtime-unit"
+        world = WorldSnapshotV2(
+            workspace_id=workspace_id,
+            subject_id=subject_id,
+            revision=1,
+            facts=(),
+        )
+        self._payload = {
+            "runtime_context_schema": "natsume.runtime-context.request.v1",
+            "runtime_context_observed_at_ms": NOW,
+            "runtime_context_principal_id": "scheduler-service-principal",
+            "workspace_id": workspace_id,
+            "subject_id": subject_id,
+            "world_snapshot_v2": world.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": workspace_id,
+                "subject_id": subject_id,
+                "scene_id": "scene.scheduler",
+                "revision": 1,
+                "decision_digest": hashlib.sha256(
+                    b"scheduler-runtime-unit-scene"
+                ).hexdigest(),
+            },
+        }
+
+    def freeze_request(self, **_kwargs: Any) -> FrozenRuntimeContextV1:
+        return FrozenRuntimeContextV1(payload=deepcopy(self._payload))
+
+    def require_frozen(self, value: Any) -> FrozenRuntimeContextV1:
+        source = dict(value or {})
+        if any(source.get(key) != expected for key, expected in self._payload.items()):
+            raise ValueError("Scheduler Runtime Context drifted")
+        return FrozenRuntimeContextV1(payload=deepcopy(self._payload))
+
+
+class _ExactPreviewAuthority:
+    def __init__(self) -> None:
+        self._records: dict[str, tuple[dict[str, Any], SimpleNamespace]] = {}
+        self.reject_task_node = False
+
+    def issue_receipt(self, **kwargs: Any) -> dict[str, Any]:
+        index = len(self._records) + 1
+        event_id = f"runtimeevent://scheduler-runtime-unit/{index}"
+        receipt_ref = f"action-preview://scheduler-runtime-unit/{index}"
+        authority = dict(kwargs.get("authority_context") or {})
+        authority_kind = (
+            "ACCEPTANCE_EFFECT"
+            if authority.get("schema_version")
+            == "Natsume.action_preview.acceptance_effect_authority_request.v1"
+            else "TASK_NODE"
+        )
+        if self.reject_task_node and authority_kind == "TASK_NODE":
+            raise RuntimeError("injected pre-effect TaskNode Preview failure")
+        boundary = {
+            key: deepcopy(value)
+            for key, value in kwargs.items()
+            if key != "guardian_capability_id"
+        }
+        receipt = SimpleNamespace(
+            receipt_ref=receipt_ref,
+            payload={"authority_kind": authority_kind},
+        )
+        self._records[event_id] = (boundary, receipt)
+        return {
+            "event_id": event_id,
+            "receipt_ref": receipt_ref,
+            "receipt": {"authority_kind": authority_kind},
+        }
+
+    def require_execution(self, *, event_id: str, **kwargs: Any) -> Any:
+        boundary, receipt = self._records[event_id]
+        assert kwargs == boundary
+        return receipt
 
 
 def _sha256(value: str) -> str:
@@ -217,7 +307,7 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
         authority=occurrence_authority,
     )
     # A newer head must not invalidate an occurrence already admitted on rev1.
-    definitions.publish_definition(
+    revision_two = definitions.publish_definition(
         task_id="proactive_tick",
         definition=_definition(marker="revision-two"),
         expected_head_version=revision_one["head_version"],
@@ -242,6 +332,10 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
                 RuntimeEventStore(db_path),
             ),
             scheduler_definition_repository=definitions,
+            worker_projection_store=WorkerProjectionStore(
+                db_path,
+                clock=lambda: NOW,
+            ),
         )
         handler_calls: list[tuple[str, int, str]] = []
         handler_contexts: list[dict] = []
@@ -260,6 +354,23 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
         handlers = SchedulerWorkerRegistry()
         handlers.register("intent_dispatch", handler)
         token_service = TokenService(approval_ttl_ms=180_000)
+        runtime_context = _RuntimeContextAuthority()
+        preview_authority = _ExactPreviewAuthority()
+        accepted_operation = SchedulerAcceptedOperationHandler(
+            worker_registry=handlers,
+            definition_repository=definitions,
+            occurrence_repository=definitions,
+            command_repository=infrastructure.command_repository,
+            result_repository=results,
+        )
+        dispatcher = AcceptanceEffectDispatcher(
+            task_store=task_store,
+            handlers=build_production_acceptance_effect_handlers(
+                scheduler_operation_handler=accepted_operation,
+            ),
+            owner_id="scheduler-unit-acceptance-effect-owner",
+            action_preview_service=preview_authority,
+        )
         runtime = build_governed_scheduler_runtime(
             task_runtime_container=infrastructure,
             ledger=ledger,
@@ -268,6 +379,9 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
             runtime_router=CanonicalRuntimeRouter(),
             worker_registry=handlers,
             owner_id="scheduler-owner",
+            runtime_context_application=runtime_context,
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=dispatcher,
         )
         await runtime.activate()
         engine = _IntentEngine(ledger, token_service)
@@ -302,7 +416,7 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
                 **authority,
                 "allowed": False,
                 "duplicate": True,
-                "existing_result_ref": first["execution_receipt"]["receipt_ref"],
+                "existing_result_ref": first["scheduler_result_receipt_ref"],
             },
             received_at_ms=NOW + 5_000,
         )
@@ -336,11 +450,12 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
             for value in admitted["work_order"].budget_policy.limits.to_dict().values()
         )
         assert admitted["graph"].nodes[0].route == "delegate:intent_dispatch"
-        verified_grant = handler_contexts[0]["verified_node_grant"]
-        assert verified_grant["route"] == "delegate"
-        assert verified_grant["target_id"] == "intent_dispatch"
-        assert verified_grant["grant_ref"] != admitted["command"].governor_grant_ref
-        assert verified_grant["parent_grant_ref"] == admitted["command"].governor_grant_ref
+        private_preview = handler_contexts[0]["_action_preview_context"]
+        assert private_preview["origin_authority_kind"] == "ACCEPTANCE_EFFECT"
+        assert (
+            private_preview["origin_boundary"]["parent_governor_grant_ref"]
+            == admitted["command"].governor_grant_ref
+        )
         snapshot = task_store.read_scheduler_snapshot(
             admitted["command"].graph_id,
             admitted["command"].graph_revision,
@@ -366,7 +481,80 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
                 "SELECT result_ref FROM secure_ingress_idempotency_claim WHERE claim_ref = ?",
                 (claim_ref,),
             ).fetchone()
-        assert claim_result == (first["execution_receipt"]["receipt_ref"],)
+        assert claim_result == (first["scheduler_result_receipt_ref"],)
+
+        # A TaskGraph may stop before Acceptance has created a Scheduler
+        # Effect.  Its Task receipt is not a Scheduler business result: keep
+        # the native claim result NULL and reopen the immutable HostCommand on
+        # duplicate delivery without touching the real handler.
+        failed_request = "request-scheduler-pre-effect-failed"
+        failed_body = _sha256("scheduler-pre-effect-failed-body")
+        failed_claim = "secure-ingress-claim://scheduler/pre-effect-failed"
+        failed_audit = "audit://secure-ingress/scheduler/pre-effect-failed"
+        _insert_scheduler_authority(
+            db_path,
+            request_id=failed_request,
+            principal_id=principal_id,
+            body_sha256=failed_body,
+            claim_ref=failed_claim,
+            audit_ref=failed_audit,
+        )
+        failed_authority = {
+            "allowed": True,
+            "duplicate": False,
+            "request_id": failed_request,
+            "principal_id": principal_id,
+            "claim_ref": failed_claim,
+            "audit_ref": failed_audit,
+            "body_sha256": failed_body,
+        }
+        failed_occurrence = definitions.admit_manual_occurrence(
+            task_id="proactive_tick",
+            definition_revision=revision_two["definition_revision"],
+            request_id=failed_request,
+            scheduled_at_ms=NOW + 1,
+            payload={"reason": "pre-effect-failure"},
+            authority=failed_authority,
+        )
+        preview_authority.reject_task_node = True
+        failed = await service.execute_occurrence(
+            occurrence=failed_occurrence,
+            authority=failed_authority,
+            received_at_ms=NOW + 1,
+        )
+        failed_replay = await service.execute_occurrence(
+            occurrence=failed_occurrence,
+            authority={
+                **failed_authority,
+                "allowed": False,
+                "duplicate": True,
+                "existing_result_ref": None,
+            },
+            received_at_ms=NOW + 2,
+        )
+        assert failed["execution_receipt"]["accepted"] is False
+        assert failed["execution_receipt"]["status"] == "FAILED"
+        assert "scheduler_effect_status" not in failed
+        assert failed_replay["execution_receipt"]["replayed"] is True
+        assert len(handler_calls) == 1
+        with sqlite3.connect(str(db_path)) as conn:
+            failed_claim_result = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim WHERE claim_ref = ?",
+                (failed_claim,),
+            ).fetchone()
+        assert failed_claim_result == (None,)
+        failed_command = infrastructure.command_repository.get_by_request(
+            surface="scheduler",
+            request_id=failed_request,
+        )
+        assert failed_command is not None
+        assert (
+            infrastructure.command_repository.validate_ingress_claim_result(
+                failed_command["command_id"]
+            )["command_id"]
+            == failed_command["command_id"]
+        )
+        preview_authority.reject_task_node = False
 
         with pytest.raises(GovernedSchedulerRuntimeError) as authority_exc:
             await service.execute_occurrence(
@@ -436,7 +624,7 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
                 received_at_ms=NOW,
             )
         assert exc_info.value.reason_code == SCHEDULER_RUNTIME_MODE_BLOCKED
-        assert engine.calls == 1
+        assert engine.calls == 2
         assert len(handler_calls) == 1
     finally:
         if runtime is not None:
@@ -572,19 +760,17 @@ def test_scheduler_contract_rejects_legacy_retry_backoff_alias() -> None:
 
 
 def test_executor_assignment_selects_only_canonical_scheduler_worker() -> None:
-    repository = SimpleNamespace()
-    verifier = SimpleNamespace(verify=lambda **kwargs: kwargs)
-    canonical = GovernedSchedulerWorker(
-        handlers=SchedulerWorkerRegistry(default_handler=lambda **_: {"status": "OK"}),
-        definition_repository=repository,
-        occurrence_repository=repository,
-        result_repository=repository,
-        node_grant_verifier=verifier,
-    )
+    class CanonicalPlanWorker:
+        async def execute_stream(self, **_kwargs):
+            yield {"phase": "COMMIT", "operation_planned": True}
+
+    canonical = CanonicalPlanWorker()
     resolver = SchedulerWorkerResolver(canonical_worker=canonical)
     assert resolver.resolve(executor="canonical", worker_route="delegate:scheduler_production") is canonical
     with pytest.raises(SchedulerWorkerError):
         resolver.resolve(executor="legacy", worker_route="delegate:scheduler_production")
+    with pytest.raises(TypeError, match="execute_stream"):
+        SchedulerWorkerResolver(canonical_worker=SimpleNamespace())
 
     strict = SchedulerWorkerRegistry(default_handler=lambda **_: {"status": "OK"})
     assert callable(strict.resolve(worker_key="scheduler_production", task_id="dynamic"))
@@ -594,54 +780,8 @@ def test_executor_assignment_selects_only_canonical_scheduler_worker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_executor_assignment_invokes_canonical_real_handler() -> None:
+async def test_executor_assignment_cannot_reach_post_acceptance_handler() -> None:
     calls: list[str] = []
-    authority = {
-        "request_id": "request-worker-selection",
-        "principal_id": "scheduler-worker-principal",
-        "ingress_claim_ref": "secure-ingress-claim://scheduler/worker-selection",
-        "ingress_audit_ref": "audit://secure-ingress/scheduler/worker-selection",
-        "body_sha256": "sha256:" + "a" * 64,
-    }
-    occurrence = {
-        "occurrence_id": "scheduleroccurrence://sha256/" + "b" * 64,
-        "task_id": "worker_selection",
-        "definition_revision": 1,
-        "source": "MANUAL",
-        "scheduled_at_ms": NOW,
-        "payload": {},
-        **authority,
-    }
-    class Repository:
-        worker_key = "intent_dispatch"
-
-        def get_occurrence(self, occurrence_id):
-            return occurrence
-
-        def get_revision(self, task_id, revision):
-            return {
-                "task_id": "worker_selection",
-                "definition_revision": 1,
-                "definition": {
-                    **_definition(worker_key=self.worker_key),
-                    "task_id": "worker_selection",
-                },
-            }
-
-        def append(self, *, occurrence_id, command_id, work_order_id, result):
-            return {
-                "receipt_ref": "schedulerresult://sha256/" + hashlib.sha256(
-                    command_id.encode()
-                ).hexdigest(),
-                "occurrence_id": occurrence_id,
-                "command_id": command_id,
-                "work_order_id": work_order_id,
-                "result_status": result["status"],
-                "result": dict(result),
-                "result_digest": "sha256:" + "c" * 64,
-            }
-
-    repository = Repository()
 
     def handler(name):
         async def run(**_):
@@ -652,36 +792,19 @@ async def test_executor_assignment_invokes_canonical_real_handler() -> None:
 
     canonical_registry = SchedulerWorkerRegistry()
     canonical_registry.register("intent_dispatch", handler("canonical"))
-    canonical = GovernedSchedulerWorker(
-        handlers=canonical_registry,
-        definition_repository=repository,
-        occurrence_repository=repository,
-        result_repository=repository,
-        node_grant_verifier=SimpleNamespace(verify=lambda **kwargs: kwargs),
-    )
+    class CanonicalPlanWorker:
+        async def execute_stream(self, **_kwargs):
+            yield {
+                "phase": "COMMIT",
+                "decision": "APPROVE",
+                "result": {"summary": "immutable Scheduler operation planned"},
+            }
+
+    canonical = CanonicalPlanWorker()
     resolver = SchedulerWorkerResolver(canonical_worker=canonical)
-    command = SimpleNamespace(
-        input_ref=occurrence["occurrence_id"],
-        request_id=authority["request_id"],
-        session_id="scheduler-session-worker-selection",
-        principal_id=authority["principal_id"],
-        target_id="intent_dispatch",
-        command_id="host-command://scheduler/" + "d" * 64,
-    )
-    work_order = SimpleNamespace(
-        work_order_id=occurrence_work_order_id(occurrence["occurrence_id"]),
-        input_pack={"occurrence_id": occurrence["occurrence_id"]},
-    )
-    context = {
-        "probe": True,
-        "worker_route": "delegate:intent_dispatch",
-        "node_grant_ref": "governor-grant://scheduler/node-selection",
-        "graph_id": "graph-scheduler-worker-selection",
-        "graph_revision": 1,
-        "node_id": "node-scheduler-worker-selection",
-        "work_order_id": work_order.work_order_id,
-        "parent_grant_ref": "governor-grant://scheduler/parent-selection",
-    }
+    command = SimpleNamespace(target_id="intent_dispatch")
+    work_order = SimpleNamespace()
+    context = {"worker_route": "delegate:intent_dispatch"}
 
     worker = resolver.resolve(executor="canonical", worker_route="delegate:intent_dispatch")
     events = [
@@ -692,21 +815,28 @@ async def test_executor_assignment_invokes_canonical_real_handler() -> None:
             execution_context=context,
         )
     ]
-    assert events[-1]["result"]["summary"] == "canonical"
-    assert calls == ["canonical"]
+    assert events[-1]["result"]["summary"] == "immutable Scheduler operation planned"
+    assert calls == []
 
-    repository.worker_key = "unknown_worker"
     command.target_id = "unknown_worker"
     context["worker_route"] = "delegate:unknown_worker"
-    failed = [
+    second_plan = [
         event
-        async for event in canonical.execute_stream(
+        async for event in resolver.resolve(
+            executor="canonical",
+            worker_route="delegate:unknown_worker",
+        ).execute_stream(
             command=command,
             work_order=work_order,
             execution_context=context,
         )
     ]
-    assert failed[-1]["decision"] == "REJECT"
-    assert failed[-1]["result"]["status"] == "FAILED"
-    assert failed[-1]["result"]["reason_code"] == SCHEDULER_HANDLER_NOT_REGISTERED
+    assert second_plan[-1]["decision"] == "APPROVE"
+    assert calls == []
+
+    accepted_handler = canonical_registry.resolve(
+        worker_key="intent_dispatch",
+        task_id="worker_selection",
+    )
+    await accepted_handler()
     assert calls == ["canonical"]

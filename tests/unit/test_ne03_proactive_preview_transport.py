@@ -331,6 +331,9 @@ def test_production_resolver_enforces_typed_proactive_message_projection() -> No
     origin_ref = "action-preview://proactive/origin"
     origin = {
         "authority_kind": "TASK_NODE",
+        "action_args_digest": resolver_module._digest(
+            origin_boundary["action_args"]
+        ),
         "guardian_capability_id": reopened.guardian_capability_id,
         "action_kind": reopened.action_kind,
         "action_scope": reopened.action_scope,

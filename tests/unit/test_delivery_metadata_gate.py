@@ -80,6 +80,60 @@ def test_unqualified_program_completion_claim_fails_but_boundary_text_passes() -
     ) == ()
 
 
+def test_pr_title_is_checked_for_unqualified_completion_claim() -> None:
+    findings = validate_pull_request_metadata(
+        title="NE-01：完整架构完成",
+        body=_body(),
+    )
+    assert {
+        (item.code, item.subject)
+        for item in findings
+    } == {("UNQUALIFIED_COMPLETION_CLAIM", "pull_request.title")}
+    assert validate_pull_request_metadata(
+        title="NE-01：未完成范围纠偏",
+        body=_body(),
+    ) == ()
+
+
+def test_negation_cannot_qualify_a_different_completion_claim_on_same_line() -> None:
+    findings = validate_pull_request_metadata(
+        title="中文标题",
+        body=_body(boundary="NE-01 完成；NE-02 未完成"),
+    )
+    assert {
+        (item.code, item.subject)
+        for item in findings
+    } == {
+        (
+            "UNQUALIFIED_COMPLETION_CLAIM",
+            "pull_request.body:23",
+        )
+    }
+    assert validate_pull_request_metadata(
+        title="中文标题",
+        body=_body(boundary="NE-01 未完成；NE-02 未完成"),
+    ) == ()
+
+
+def test_scoped_static_gate_pass_is_not_program_completion() -> None:
+    assert validate_pull_request_metadata(
+        title="中文标题",
+        body=_body(
+            boundary=(
+                "Full architecture static Gate：PASS；"
+                "这只证明静态边界，整体仍为 INCOMPLETE"
+            )
+        ),
+    ) == ()
+    assert {
+        item.code
+        for item in validate_pull_request_metadata(
+            title="中文标题",
+            body=_body(boundary="Full Architecture PASS；NE-02 未完成"),
+        )
+    } == {"UNQUALIFIED_COMPLETION_CLAIM"}
+
+
 def test_git_reader_excludes_base_and_preserves_parent_count(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     subprocess.run(
