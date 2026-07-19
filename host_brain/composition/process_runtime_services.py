@@ -39,7 +39,6 @@ from host_brain.skills.capability_scorecard_provider import FederatedCapabilityS
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
 from host_brain.skills.provider_catalog import register_configured_skill_providers
 from host_brain.skills.registry import SkillRegistry
-from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
 
 _logger = logging.getLogger("Natsume.process_runtime_services")
@@ -81,24 +80,13 @@ def get_tool_catalog() -> ToolCatalog:
 def get_token_service() -> TokenService:
     """Return the process-wide execution token authority.
 
-    Governor issues approval tokens and ToolBroker consumes them.  Keeping the
-    two components on different in-memory registries makes every real token
-    fail validation at the execution boundary, so both dependencies must share
-    this singleton.
+    Governor issues approval tokens and the app-local governed Tool boundary
+    consumes them.  Both receive this same authority from the composition
+    root, otherwise every real token fails validation at execution time.
     """
     if _container().token_service is None:
         _container().token_service = TokenService()
     return _container().token_service
-
-
-def get_tool_broker() -> ToolBroker:
-    if _container().tool_broker is None:
-        _container().tool_broker = ToolBroker(
-            catalog=get_tool_catalog(),
-            token_service=get_token_service(),
-            ledger=_foundation().get_ledger(),
-        )
-    return _container().tool_broker
 
 
 def _resolve_mcp_registry_db_path() -> str:

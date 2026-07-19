@@ -1235,7 +1235,6 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
             semantic_recaller=fail_semantic_recaller,
             episodic_store=provider,
             skill_registry=provider,
-            tool_broker=provider,
             tool_catalog=provider,
             capability_broker=provider,
             hard_state=lambda: SimpleNamespace(sys_mode="normal"),

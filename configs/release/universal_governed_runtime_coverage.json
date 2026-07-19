@@ -442,10 +442,22 @@
     },
     "composition_without_global_service_locator": {
       "status": "PARTIAL",
+      "full_architecture_static_gate": {
+        "status": "PASS",
+        "failed_gates": [],
+        "origin_dev_failed_gates": [1, 6, 10],
+        "resolved_gates": [1, 6, 10, 11],
+        "issues": [],
+        "strongly_connected_components": [],
+        "edge_findings": 0,
+        "edge_violations": 0,
+        "reverse_imports": [],
+        "boundary": "STATIC_GATES_GREEN_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_GLOBAL_SERVICE_LOCATOR_REMOVAL_AND_NE01_REMAIN_INCOMPLETE"
+      },
       "business_layer_sqlite_authority": {
         "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
         "baseline": "ORIGIN_DEV_FAIL_GATES_1_6_10",
-        "current_full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
+        "current_full_architecture_static_gate": "PASS",
         "runtime_context_0112": {
           "readiness_owner": "RuntimeEventRepository",
           "application_surface": "RuntimeEventStore readiness port",
@@ -480,9 +492,7 @@
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
-        "remaining_static_gaps": [
-          "GATE_11_TOOLBROKER_PRODUCTION_SERVICE_INVENTORY"
-        ]
+        "remaining_static_gaps": []
       },
       "service_catalog_layering_authority": {
         "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_GATE_1_SUBSEQUENTLY_PASSED_NE01_IN_PROGRESS",
@@ -570,7 +580,7 @@
         "boundary": "PERSISTENCE_CONTRACT_LAYERING_ONLY_GATE_1_TYPED_COMPOSITION_AND_NE01_NOT_COMPLETE"
       },
       "final_persistence_contract_layering_authority": {
-        "status": "GATE1_PASS_FULL_STATIC_FAIL_GATE11_NE01_IN_PROGRESS",
+        "status": "GATE1_PASS_FULL_STATIC_PASS_NE01_IN_PROGRESS",
         "pure_contract_modules": [
           "host_brain/contracts/evolution.py",
           "host_brain/contracts/evolution_lab.py",
@@ -599,8 +609,8 @@
           "edge_findings": 0,
           "edge_violations": 0,
           "reverse_imports": [],
-          "failed_gates": [11],
-          "full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
+          "failed_gates": [],
+          "full_architecture_static_gate": "PASS",
           "gate_6": "PASS",
           "gate_10": "PASS"
         },
@@ -614,6 +624,33 @@
         },
         "migration_added_this_slice": false,
         "boundary": "LAYERING_AND_TYPE_IDENTITY_ONLY_NE04_TO_NE06_PRODUCTION_FUNCTIONS_UNIVERSAL_RUNTIME_TYPED_COMPOSITION_AND_PLANNING_SEARCH_BENEFIT_REMAIN_INCOMPLETE"
+      },
+      "gate_11_tool_broker_app_local_authority": {
+        "status": "PASS",
+        "tool_broker_constructor_count": 1,
+        "tool_broker_constructor_path": "host_brain/tools/broker.py",
+        "tool_broker_owner": "APP_LOCAL_TOOL_RUNTIME_BOUNDARY_LAZY_OWNED_BY_GOVERNED_HOST_TOOL_RUNTIME_COMPOSITION",
+        "process_get_tool_broker_accessor_count": 0,
+        "process_tool_broker_container_slot_count": 0,
+        "host_lifecycle_tool_broker_provider_count": 0,
+        "named_process_services_import_modules": 45,
+        "named_process_services_imported_names": 123,
+        "all_process_services_import_form_consumer_modules": 51,
+        "process_service_container_fields": 54,
+        "process_service_container_lock_fields": 4,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49,
+        "validation": {
+          "structure_lifecycle_bridge_route_token_seed_passed": 43,
+          "asgi_tool_mcp_http_broker_mcp_audit_real_sqlite_passed": 98,
+          "supplemental_overlap_passed": 1,
+          "overlap_boundary": "SUPPLEMENTAL_ONE_OVERLAPS_THE_43_TEST_BATCH_DO_NOT_SUM",
+          "py_compile": "PASS",
+          "policy_json": "PASS",
+          "whitespace": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "boundary": "STATIC_INVENTORY_ONLY_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_TOOL_MCP_EXECUTOR_AND_NE01_REMAIN_INCOMPLETE"
       },
       "obs_projection_lifecycle_authority": {
         "status": "GATE_6_PASS_CONTINUOUS_SLO_INCOMPLETE_NE01_STILL_IN_PROGRESS",
@@ -635,8 +672,8 @@
           "final_targeted_passed": 19,
           "batch_overlap": "BATCHES_OVERLAP_DO_NOT_SUM",
           "gate_6_issues": [],
-          "full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
-          "full_architecture_static_gate_boundary": "GATE_11_TOOLBROKER_PRODUCTION_SERVICE_INVENTORY_REMAINS_AFTER_GATE_1_6_10_PASS",
+          "full_architecture_static_gate": "PASS",
+          "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_CONTINUOUS_SLO_AND_NE01_REMAIN_INCOMPLETE",
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
@@ -655,9 +692,9 @@
         "scope": "ALL_IMPORT_FORMS"
       },
       "process_service_container": {
-        "fields": 55,
+        "fields": 54,
         "lock_fields": 4,
-        "mutable_service_references_excluding_locks_and_application_ports": 50
+        "mutable_service_references_excluding_locks_and_application_ports": 49
       },
       "host_lifecycle_boundary": {
         "publication": "FACTORY_AND_START_MUST_SUCCEED_BEFORE_APP_LOCAL_PROVIDER_PUBLICATION",
@@ -678,8 +715,8 @@
         "structure_and_single_clock_passed": 22,
         "batch_overlap": "OVERLAP_4_TEST_AW08_TRIBE_DEPENDENCY_DIRECTION_DEDUPLICATED_161",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
-        "full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
-        "full_architecture_static_gate_boundary": "GATE_11_TOOLBROKER_PRODUCTION_SERVICE_INVENTORY_REMAINS_AFTER_GATE_1_6_10_PASS"
+        "full_architecture_static_gate": "PASS",
+        "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
       },
       "boundary": "45_MODULES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_51_CONSUMER_MODULES_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
       "evidence_refs": [
@@ -691,7 +728,12 @@
         "tests/unit/test_ne01_host_lifecycle_composition.py",
         "tests/unit/test_aw04_single_clock.py",
         "host_brain/composition/process_service_container.py",
-        "host_brain/composition/process_services.py"
+        "host_brain/composition/process_services.py",
+        "host_brain/composition/process_runtime_services.py",
+        "host_brain/tools/broker.py",
+        "host_brain/app/tool_runtime_composition.py",
+        "tests/unit/test_ne01_legacy_tool_mcp_authority_retirement.py",
+        "tests/contract/test_ne01_process_service_container_cleanup.py"
       ]
     }
   }

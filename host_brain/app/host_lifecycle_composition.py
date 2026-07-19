@@ -32,7 +32,6 @@ class HostLifecycleApplicationPorts:
     semantic_recaller: ServiceProvider
     episodic_store: ServiceProvider
     skill_registry: ServiceProvider
-    tool_broker: ServiceProvider
     tool_catalog: ServiceProvider
     capability_broker: ServiceProvider
     hard_state: ServiceProvider
@@ -234,7 +233,6 @@ def build_host_lifecycle_container() -> HostLifecycleContainer:
             semantic_recaller=process_services.get_semantic_recaller,
             episodic_store=process_services.get_episodic_store,
             skill_registry=process_services.get_skill_registry,
-            tool_broker=process_services.get_tool_broker,
             tool_catalog=process_services.get_tool_catalog,
             capability_broker=process_services.get_capability_broker,
             hard_state=process_services.get_hard_state,

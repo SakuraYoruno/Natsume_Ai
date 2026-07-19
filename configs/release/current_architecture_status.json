@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_CLOSED_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_GATE_11_TOOLBROKER_INVENTORY_REMAINS_COMBINED_NAMED_PROCESS_SERVICES_45_MODULES_123_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_51_CONTAINER_55_FIELDS_4_LOCKS_50_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_NE01_STILL_INCOMPLETE",
+  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_COMBINED_NAMED_PROCESS_SERVICES_45_MODULES_123_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_51_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_NE01_STILL_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -95,7 +95,14 @@
       "final_persistence_contract_boundary_passed": 4,
       "final_persistence_contract_targeted_passed": 32,
       "final_persistence_contract_py_compile": "PASS",
-      "final_persistence_contract_diff_check": "PASS"
+      "final_persistence_contract_diff_check": "PASS",
+      "gate_11_structure_lifecycle_bridge_route_token_seed_passed": 43,
+      "gate_11_asgi_tool_mcp_http_broker_mcp_audit_real_sqlite_passed": 98,
+      "gate_11_supplemental_overlap_passed": 1,
+      "gate_11_overlap_boundary": "SUPPLEMENTAL_ONE_OVERLAPS_THE_43_TEST_BATCH_DO_NOT_SUM",
+      "gate_11_py_compile": "PASS",
+      "gate_11_policy_json": "PASS",
+      "gate_11_whitespace": "PASS"
     },
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "completed_large_file_splits": [
@@ -114,19 +121,25 @@
     "remaining_mixed_file_gate_finding_count": 0,
     "mixed_file_gate": "GREEN_ISSUES_EMPTY_WITHOUT_POLICY_EXPANSION",
     "full_architecture_static_gate": {
-      "status": "FAIL_PROGRAM_GAPS_CHANGED_FROM_ORIGIN_DEV",
-      "failed_gates": [11],
+      "status": "PASS",
+      "failed_gates": [],
       "origin_dev_failed_gates": [1, 6, 10],
-      "current_slice_added_failures": [11],
-      "resolved_gates": [1, 6, 10],
-      "issues": [
-        "Gate 11: production service ToolBroker expected only host_brain/composition/process_runtime_services.py but also found host_brain/tools/broker.py"
-      ],
+      "current_slice_added_failures": [],
+      "resolved_gates": [1, 6, 10, 11],
+      "issues": [],
       "strongly_connected_components": [],
       "edge_findings": 0,
       "edge_violations": 0,
       "reverse_imports": [],
-      "boundary": "GATES_1_6_10_GREEN_AND_PERSISTENCE_TO_APPLICATION_ZERO_BUT_FULL_ARCHITECTURE_STATIC_GATE_REMAINS_FAILED_ON_GATE_11_TOOLBROKER_PRODUCTION_SERVICE_INVENTORY_NE01_IN_PROGRESS"
+      "gate_11": {
+        "status": "PASS",
+        "tool_broker_constructor_count": 1,
+        "tool_broker_constructor_path": "host_brain/tools/broker.py",
+        "process_get_tool_broker_accessor_count": 0,
+        "process_tool_broker_container_slot_count": 0,
+        "host_lifecycle_tool_broker_provider_count": 0
+      },
+      "boundary": "GATES_1_6_10_11_GREEN_AND_PERSISTENCE_TO_APPLICATION_ZERO_STATIC_ONLY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_AND_NE01_REMAIN_INCOMPLETE"
     },
     "focused_structure_current_lines": {
       "host_brain/app/asgi.py": 1469,
@@ -144,9 +157,9 @@
         "named_modules": 45,
         "named_imported_names": 123,
         "all_import_form_consumer_modules": 51,
-        "process_service_container_fields": 55,
+        "process_service_container_fields": 54,
         "process_service_container_lock_fields": 4,
-        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 50
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49
       },
       "host_lifecycle_commit_bound_history": {
         "before_modules": 47,
@@ -169,10 +182,10 @@
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 52,
         "scope": "TOOL_MCP_SLICE_SNAPSHOT_BEFORE_HOST_LIFECYCLE_REBASE"
       },
-      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker"],
+      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
-      "retired_global_accessors": ["get_mcp_tool_broker"],
-      "boundary": "COMBINED_CURRENT_IS_45_MODULES_123_NAMES_AND_51_ALL_FORM_CONSUMERS_HISTORICAL_SLICE_INVENTORIES_HAVE_DIFFERENT_BASELINES_PROCESS_WIDE_LOCATOR_REMAINS"
+      "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker"],
+      "boundary": "COMBINED_CURRENT_IS_45_MODULES_123_NAMES_51_ALL_FORM_CONSUMERS_AND_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_HISTORICAL_SLICE_INVENTORIES_HAVE_DIFFERENT_BASELINES_PROCESS_WIDE_LOCATOR_REMAINS"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
@@ -259,14 +272,14 @@
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "task_store_slice_static_gate": "FAIL_GATES_1_6_10",
         "full_architecture_static_gate_at_slice_completion": "FAIL_GATES_1_6_10_NOT_PASS",
-        "full_architecture_static_gate_current": "FAIL_GATE_11_NOT_PASS"
+        "full_architecture_static_gate_current": "PASS"
       },
       "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_SQLITE_ORPHAN_RAW_SQL_REMAINS_NE01_IN_PROGRESS"
     },
     "business_sqlite_boundary": {
       "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
       "origin_dev_status": "FAIL_GATES_1_6_10",
-      "current_status": "FAIL_GATE_11",
+      "current_status": "PASS",
       "runtime_context_readiness": {
         "schema": "0112_RUNTIME_CONTEXT_AUTHORITY",
         "owner": "RuntimeEventRepository",
@@ -302,7 +315,7 @@
         "repository_and_global_independent_rerun_passed": 16,
         "root_batch_overlap": "OVERLAPS_ROLLOUT_15_DO_NOT_SUM",
         "global_sqlite_boundary": "PASS",
-        "full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
+        "full_architecture_static_gate": "PASS",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
@@ -319,8 +332,8 @@
       "rollout_authority_responsibility": "GUARDIAN_OBSERVER_ONLY",
       "repository_dependency": "STABLE_CONTRACTS_ONLY",
       "full_architecture_static_gate": {
-        "status": "FAIL_GATE_11_NOT_PASS",
-        "failed_gates": [11],
+        "status": "PASS",
+        "failed_gates": [],
         "scc_before": ["application", "composition", "persistence"],
         "scc_after_service_catalog": ["application", "persistence"],
         "scc_current": [],
@@ -370,8 +383,8 @@
       ],
       "removed_persistence_to_application_imports": 7,
       "full_architecture_static_gate": {
-        "status": "FAIL_GATE_11_NOT_PASS",
-        "failed_gates": [11],
+        "status": "PASS",
+        "failed_gates": [],
         "scc_current": [],
         "remaining_persistence_to_application_imports": 0,
         "remaining_breakdown": {
@@ -418,8 +431,8 @@
       ],
       "removed_persistence_to_application_imports": 4,
       "full_architecture_static_gate": {
-        "status": "FAIL_GATE_11_NOT_PASS",
-        "failed_gates": [11],
+        "status": "PASS",
+        "failed_gates": [],
         "gate_1_issues": [],
         "strongly_connected_components": [],
         "application_to_composition_imports": 0,
@@ -460,7 +473,7 @@
         "final_targeted_passed": 19,
         "batch_overlap": "BATCHES_OVERLAP_DO_NOT_SUM",
         "gate_6_issues": [],
-        "full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
+        "full_architecture_static_gate": "PASS",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
@@ -506,6 +519,12 @@
       "post_transaction_authority_checks": "SEPARATE_FAIL_CLOSED_NODE_GRANT_EXACT_BINDING_SAFE_LOCAL_REPLAY_AND_WRITE_CHILD_TOKEN_VALIDATION_NOT_ONE_ATOMIC_INTERVAL",
       "dispatch_marker_order": "BEFORE_HANDLER_WRITES_PENDING_ONLY_AFTER_ALL_LIVE_GRANT_BINDING_REPLAY_AND_WRITE_TOKEN_CHECKS_PASS_AND_IMMEDIATELY_BEFORE_HANDLER",
       "global_tool_broker_execution_port_factory": "ABSENT",
+      "tool_broker_constructor_path": "host_brain/tools/broker.py",
+      "tool_broker_constructor_count": 1,
+      "process_get_tool_broker_accessor_count": 0,
+      "process_tool_broker_container_slot_count": 0,
+      "host_lifecycle_tool_broker_provider_count": 0,
+      "tool_broker_owner": "APP_LOCAL_TOOL_RUNTIME_BOUNDARY_LAZY_OWNED_BY_GOVERNED_HOST_TOOL_RUNTIME_COMPOSITION",
       "production_execution_port_factory_callers": [
         "host_brain/app/tool_runtime_composition.py"
       ],
@@ -520,6 +539,15 @@
       "mcp_skill_bridge": "DEFAULT_OFF_PURGES_STALE_PREFIX_EXPLICIT_COMPATIBILITY_HANDLER_REJECTS",
       "stale_durable_skill": "REJECTED_AT_FROZEN_WORKER_BEFORE_PREVIEW_GRANT_AND_REGISTRY_LOOKUP_WITH_MCP_TASK_AUTHORITY_REQUIRED",
       "readonly_metadata": "MCP_REGISTRY_AND_CAPABILITY_SCORECARD_RETAINED",
+      "gate_11_validation": {
+        "structure_lifecycle_bridge_route_token_seed_passed": 43,
+        "asgi_tool_mcp_http_broker_mcp_audit_real_sqlite_passed": 98,
+        "supplemental_overlap_passed": 1,
+        "overlap_boundary": "SUPPLEMENTAL_ONE_OVERLAPS_THE_43_TEST_BATCH_DO_NOT_SUM",
+        "py_compile": "PASS",
+        "policy_json": "PASS",
+        "whitespace": "PASS"
+      },
       "boundary": "REACT_GOVERNED_TOOL_NODE_AND_REAL_WORKSPACE_BOUND_TOOL_MCP_EXECUTORS_REQUIRE_SEPARATE_NE01_MIGRATION"
     },
     "production_enablement_changed": true
@@ -1576,14 +1604,14 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor and SystemResourceManager, and publication occurs only after each factory/start succeeds; Activity factory failure publishes no Mode authority, aclose raises a closing fence that blocks begin, and the ResourceManager startup sample runs in its sole owned loop. Per-app Tribe ports bind only during lifespan through a process-global exact-owner fence: one live Host is allowed, a second fails closed, and concurrent multi-app Tribe isolation is neither supported nor claimed. ToolBroker/MCP direct and callback authority is retired; get_mcp_tool_broker and its process-owned slot are deleted, but a real workspace-bound governed Tool/MCP executor is still absent. http_hooks has zero process_services imports and the activity/resource global publication slots and setters are retired. The original Host lifecycle slice recorded 47/152 to 45/124 named imports, 52 to 51 all-form consumer modules, and 56 fields/4 locks/51 mutable refs; after combining the Tool/MCP slice, the current inventory is 45 modules/123 imported names, 51 all-form consumer modules, and 55 fields/4 locks/50 mutable refs. Heartbeat cache/client, HardState/set_sys_mode, Tribe agents/bus, the shared ResourceManager status path, underlying Host sources, Chat/Delegate boundaries and most Worker authorities remain process-global or process-shared. Full Host/Worker typed composition, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. This slice does not complete NE-01 or the full architecture, and the full architecture static Gate remains failed.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor and SystemResourceManager, and publication occurs only after each factory/start succeeds; Activity factory failure publishes no Mode authority, aclose raises a closing fence that blocks begin, and the ResourceManager startup sample runs in its sole owned loop. Per-app Tribe ports bind only during lifespan through a process-global exact-owner fence: one live Host is allowed, a second fails closed, and concurrent multi-app Tribe isolation is neither supported nor claimed. ToolBroker/MCP direct and callback authority is retired; get_mcp_tool_broker, get_tool_broker and their process-owned slots are deleted, HostLifecycleApplicationPorts has no ToolBroker provider, and the sole ToolBroker constructor is host_brain/tools/broker.py inside an app-local ToolRuntimeBoundary. A real workspace-bound governed Tool/MCP executor is still absent. http_hooks has zero process_services imports and the activity/resource global publication slots and setters are retired. The original Host lifecycle slice recorded 47/152 to 45/124 named imports, 52 to 51 all-form consumer modules, and 56 fields/4 locks/51 mutable refs; the Gate 11 repair leaves the current inventory at 45 modules/123 imported names, 51 all-form consumer modules, and 54 fields/4 locks/49 mutable refs. Heartbeat cache/client, HardState/set_sys_mode, Tribe agents/bus, the shared ResourceManager status path, underlying Host sources, Chat/Delegate boundaries and most Worker authorities remain process-global or process-shared. Full Host/Worker typed composition, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. This slice does not complete NE-01 or the full architecture; only the full architecture static Gate is now green.",
       "mixed_file_gate": "GREEN_ISSUES_EMPTY_WITHOUT_POLICY_EXPANSION",
       "mixed_file_gate_findings": [],
       "effect_slice_structure_boundary": "The second NE-01 split moved ASGI lifecycle wiring, Obs response models, immutable Degradation policy, Node Grant and Planning codecs, Intent Review continuation, and Guardian contracts/commands into focused modules. The original authority owners remain the only lifecycle, connection, RuntimeEvent append, or journal-store owners. All eleven former findings are within the 1,500-line or pre-existing cohesive ceiling and the fresh repository gate returns no issues without adding or widening an allowlist. Service Locator, old execution bypasses, general recovery, and production enablement remain incomplete.",
       "cleanup_progress": {
-        "container_fields": 55,
+        "container_fields": 54,
         "container_lock_fields": 4,
-        "mutable_service_references_excluding_locks_and_application_ports": 50,
+        "mutable_service_references_excluding_locks_and_application_ports": 49,
         "retired_zero_consumer_slots": [
           "retrieval_orchestrator",
           "retrieval_pipeline",
@@ -1592,13 +1620,14 @@
           "consolidation_trigger",
           "skill_composer",
           "activity_monitor",
-          "resource_manager"
+          "resource_manager",
+          "tool_broker"
         ],
         "retired_global_publication_setters": [
           "set_activity_monitor",
           "set_resource_manager"
         ],
-        "retired_get_accessors": 4,
+        "retired_get_accessors": 5,
         "retired_broad_facade_reexports": [
           "BondDynamicsWriter",
           "BondStageEngine",

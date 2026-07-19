@@ -277,7 +277,7 @@
     },
     "ToolBroker": {
       "count": 1,
-      "allowed_paths": ["host_brain/composition/process_runtime_services.py"]
+      "allowed_paths": ["host_brain/tools/broker.py"]
     },
     "IntentDecisionEngine": {
       "count": 1,

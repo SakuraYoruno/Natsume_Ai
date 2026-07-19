@@ -16,6 +16,7 @@ RETIRED_PROCESS_LOCATORS = {
     "retrieval_orchestrator",
     "resource_manager",
     "skill_composer",
+    "tool_broker",
 }
 
 RETIRED_PROCESS_ACCESSORS = {
@@ -23,6 +24,7 @@ RETIRED_PROCESS_ACCESSORS = {
     "get_context_compressor",
     "get_episodic_memory_graph",
     "get_skill_composer",
+    "get_tool_broker",
 }
 
 RETIRED_PROCESS_SETTERS = {
@@ -52,8 +54,8 @@ def test_ne01_dead_process_locators_are_removed_from_the_container() -> None:
     container_fields = {field.name for field in fields(ProcessServiceContainer)}
 
     assert container_fields.isdisjoint(RETIRED_PROCESS_LOCATORS)
-    assert len(container_fields) == 55
-    assert len(container_fields - PROCESS_LOCKS - {"application_ports"}) == 50
+    assert len(container_fields) == 54
+    assert len(container_fields - PROCESS_LOCKS - {"application_ports"}) == 49
 
 
 def test_ne01_dead_process_accessors_are_not_reexported() -> None:

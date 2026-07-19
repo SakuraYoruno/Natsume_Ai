@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from host_brain.composition import process_runtime_services
+from host_brain.composition import process_runtime_services, process_services
 from host_brain.executive_runtime import skill_execution
 from host_brain.app import governed_frozen_skill_runtime
 from host_brain.mcp.tool_broker import MCPToolBroker
@@ -28,6 +28,32 @@ def test_asgi_does_not_construct_or_bind_the_legacy_mcp_broker() -> None:
     assert "mcp_degradation_broker" not in source
     assert not hasattr(process_runtime_services, "get_mcp_tool_broker")
     assert "mcp_tool_broker" not in container_source
+
+
+def test_process_owned_tool_broker_locator_is_retired() -> None:
+    container_source = (
+        ROOT / "host_brain" / "composition" / "process_service_container.py"
+    ).read_text(encoding="utf-8")
+    runtime_source = (
+        ROOT / "host_brain" / "composition" / "process_runtime_services.py"
+    ).read_text(encoding="utf-8")
+
+    assert not hasattr(process_runtime_services, "get_tool_broker")
+    assert not hasattr(process_services, "get_tool_broker")
+    assert "tool_broker:" not in container_source
+    assert "ToolBroker(" not in runtime_source
+
+
+def test_gate11_inventory_tracks_only_the_app_local_boundary_broker() -> None:
+    from tools.run_core_release import _call_inventory
+
+    _call_inventory.cache_clear()
+    inventory = _call_inventory(ROOT)
+
+    assert inventory.get("ToolBroker") == ["host_brain/tools/broker.py"]
+    assert inventory.get("build_tool_runtime_boundary") == [
+        "host_brain/app/tool_runtime_composition.py"
+    ]
 
 
 def test_process_mcp_skill_bridge_is_default_off_and_purges_stale_entries() -> None:

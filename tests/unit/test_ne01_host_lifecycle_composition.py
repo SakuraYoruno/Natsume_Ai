@@ -88,7 +88,6 @@ def _ports(
         semantic_recaller=provider,
         episodic_store=provider,
         skill_registry=provider,
-        tool_broker=provider,
         tool_catalog=provider,
         capability_broker=provider,
         hard_state=lambda: SimpleNamespace(sys_mode="normal"),
@@ -460,8 +459,8 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
             named_import_modules[path] = imported_names
 
     assert len(named_import_modules) == 45
-    assert sum(named_import_modules.values()) == 124
+    assert sum(named_import_modules.values()) == 123
     assert len(all_import_modules) == 51
     assert ROOT / "host_brain" / "app" / "http_hooks.py" not in all_import_modules
     asgi_imports = named_import_modules[ROOT / "host_brain" / "app" / "asgi.py"]
-    assert asgi_imports == 14
+    assert asgi_imports == 13
