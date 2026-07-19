@@ -1,4 +1,4 @@
-"""Tool execution single-entry broker with WRITE token gating."""
+"""Tool metadata facade and app-local governed execution boundary."""
 
 from __future__ import annotations
 
@@ -11,13 +11,18 @@ from threading import RLock
 from typing import Any, Callable
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import CONFIRM_REQUIRED, TOKEN_INVALID
+from host_brain.core.errors import (
+    CONFIRM_REQUIRED,
+    GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED,
+    TOKEN_INVALID,
+)
 from host_brain.core.ids import new_event_id, now_ms
 from host_brain.governor.tokens import TokenService
 from host_brain.tools.catalog import ToolCatalog, ToolMeta
 
 
 ToolHandler = Callable[[dict[str, Any], dict[str, Any] | None], Any]
+ToolTaskAuthorityVerifier = Callable[..., bool]
 
 RESULT_SUCCESS = "SUCCESS"
 RESULT_REJECTED = "REJECTED"
@@ -51,8 +56,106 @@ class _RegisteredTool:
     binding_json: str
 
 
-class ToolBroker:
-    """Single legal entrypoint for managed tool execution."""
+class _ToolHandlerVault:
+    """Private executable registry shared only by one app-local boundary."""
+
+    __slots__ = ("catalog", "lock", "registrations")
+
+    def __init__(self, catalog: ToolCatalog) -> None:
+        self.catalog = catalog
+        self.lock = RLock()
+        self.registrations: dict[str, _RegisteredTool] = {}
+
+
+class _GovernedToolExecutionPort:
+    """App-local port sealed to one authority verifier and private vault."""
+
+    __slots__ = (
+        "__vault",
+        "__token_service",
+        "__ledger",
+        "__authority_verifier",
+    )
+
+    def __init__(
+        self,
+        *,
+        vault: _ToolHandlerVault,
+        token_service: TokenService,
+        ledger: SQLiteLedger,
+        authority_verifier: ToolTaskAuthorityVerifier,
+    ) -> None:
+        self.__vault = vault
+        self.__token_service = token_service
+        self.__ledger = ledger
+        self.__authority_verifier = authority_verifier
+
+    def execute_bound(
+        self,
+        *,
+        task_authority: Any,
+        expected_binding: Mapping[str, Any],
+        request_id: str | None,
+        intent_id: str,
+        session_id: str,
+        seq: int,
+        tool_id: str,
+        args: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+        approval_token_ref: str | None = None,
+        confirm_token_ref: str | None = None,
+        thread_id: str | None = None,
+        turn_id: str | None = None,
+        ts_ms: int | None = None,
+        before_handler: Callable[[], None] | None = None,
+    ) -> ToolExecutionResult:
+        try:
+            authorized = self.__authority_verifier(
+                task_authority=task_authority,
+                request_id=request_id,
+                intent_id=intent_id,
+                session_id=session_id,
+                tool_id=tool_id,
+            )
+        except Exception as exc:
+            raise PermissionError(GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED) from exc
+        if authorized is not True:
+            raise PermissionError(GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED)
+        target = str(tool_id or "").strip()
+        if not isinstance(expected_binding, Mapping):
+            raise ValueError("expected_binding must be a mapping")
+        with self.__vault.lock:
+            registration = self.__vault.registrations.get(target)
+            if registration is None:
+                raise KeyError(f"tool handler missing: {target}")
+            if _canonical_json(expected_binding) != registration.binding_json:
+                raise ValueError(f"tool execution binding changed: {target}")
+            if registration.execution_safety != "SAFE_LOCAL_REPLAY":
+                raise ValueError(f"tool requires reconciliation: {target}")
+            return _execute_registered(
+                token_service=self.__token_service,
+                ledger=self.__ledger,
+                registration=registration,
+                request_id=request_id,
+                intent_id=intent_id,
+                session_id=session_id,
+                seq=seq,
+                tool_id=target,
+                args=args,
+                context=context,
+                approval_token_ref=approval_token_ref,
+                confirm_token_ref=confirm_token_ref,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                ts_ms=ts_ms,
+                before_handler=before_handler,
+            )
+
+
+class ToolRuntimeBoundary:
+    """One app-local Broker facade plus its non-exported execution vault."""
+
+    __slots__ = ("broker", "__vault", "__token_service", "__ledger")
 
     def __init__(
         self,
@@ -61,11 +164,66 @@ class ToolBroker:
         token_service: TokenService,
         ledger: SQLiteLedger,
     ) -> None:
+        vault = _ToolHandlerVault(catalog)
+        self.__vault = vault
+        self.__token_service = token_service
+        self.__ledger = ledger
+        self.broker = ToolBroker(
+            catalog=catalog,
+            token_service=token_service,
+            ledger=ledger,
+            _vault=vault,
+        )
+
+    def bind_execution_port(
+        self,
+        *,
+        authority_verifier: ToolTaskAuthorityVerifier,
+    ) -> _GovernedToolExecutionPort:
+        """Bind the sole handler port inside one ASGI application object graph."""
+
+        if not callable(authority_verifier):
+            raise TypeError("authority_verifier must be callable")
+        return _GovernedToolExecutionPort(
+            vault=self.__vault,
+            token_service=self.__token_service,
+            ledger=self.__ledger,
+            authority_verifier=authority_verifier,
+        )
+
+
+def build_tool_runtime_boundary(
+    *,
+    catalog: ToolCatalog,
+    token_service: TokenService,
+    ledger: SQLiteLedger,
+) -> ToolRuntimeBoundary:
+    """Construct an app-local Tool boundary; never store it in a process locator."""
+
+    return ToolRuntimeBoundary(
+        catalog=catalog,
+        token_service=token_service,
+        ledger=ledger,
+    )
+
+
+class ToolBroker:
+    """Registration/readiness facade whose raw execution APIs are retired."""
+
+    def __init__(
+        self,
+        *,
+        catalog: ToolCatalog,
+        token_service: TokenService,
+        ledger: SQLiteLedger,
+        _vault: _ToolHandlerVault | None = None,
+    ) -> None:
         self.catalog = catalog
         self.token_service = token_service
         self.ledger = ledger
-        self._lock = RLock()
-        self._registrations: dict[str, _RegisteredTool] = {}
+        self.__vault = _vault or _ToolHandlerVault(catalog)
+        if self.__vault.catalog is not catalog:
+            raise ValueError("Tool handler vault must bind the exact ToolCatalog")
 
     def register_handler(
         self,
@@ -81,7 +239,7 @@ class ToolBroker:
         if not target:
             raise ValueError("tool_id must be non-empty")
         explicit_version = str(adapter_version_id or "").strip() or None
-        with self._lock:
+        with self.__vault.lock:
             meta = self.catalog.get(target)
             execution_safety = (
                 "SAFE_LOCAL_REPLAY" if replay_safe_local else "RECONCILIATION_REQUIRED"
@@ -103,7 +261,7 @@ class ToolBroker:
                 adapter_identity=adapter_identity,
                 binding_json=_canonical_json(binding),
             )
-            self._registrations[target] = registration
+            self.__vault.registrations[target] = registration
 
     def resolve_execution_binding(self, tool_id: str) -> dict[str, Any]:
         """Return the immutable catalog/adapter identity frozen at admission.
@@ -115,8 +273,8 @@ class ToolBroker:
         """
 
         target = str(tool_id or "").strip()
-        with self._lock:
-            registration = self._registrations.get(target)
+        with self.__vault.lock:
+            registration = self.__vault.registrations.get(target)
             if registration is None:
                 raise KeyError(f"tool handler missing: {target}")
             # Metadata replacement outside the Broker must be followed by an
@@ -136,9 +294,9 @@ class ToolBroker:
         adapter is wired.  This projection is read-only and secret-free.
         """
 
-        with self._lock:
+        with self.__vault.lock:
             catalog = {meta.id: meta for meta in self.catalog.list_all()}
-            registrations = dict(self._registrations)
+            registrations = dict(self.__vault.registrations)
             catalog_ids = tuple(sorted(catalog))
             registered_ids = tuple(sorted(registrations))
             missing_handler_ids = tuple(sorted(set(catalog) - set(registrations)))
@@ -194,40 +352,35 @@ class ToolBroker:
         turn_id: str | None = None,
         ts_ms: int | None = None,
     ) -> ToolExecutionResult:
-        """Validate the frozen binding and execute its handler atomically.
+        """Reject raw bound execution without an app-local Task authority port.
 
-        The same lock protects handler replacement, the exact binding compare,
-        handler selection and invocation.  The bound path never reopens the
-        mutable catalog after comparison and therefore has no compare/dispatch
-        TOCTOU window.
+        Resolving a live binding is metadata admission, not execution
+        authority. Only ``_GovernedToolExecutionPort`` can cross the private
+        capability boundary after it reopens the exact frozen node authority.
         """
 
         target = str(tool_id or "").strip()
-        if not isinstance(expected_binding, Mapping):
-            raise ValueError("expected_binding must be a mapping")
-        with self._lock:
-            registration = self._registrations.get(target)
-            if registration is None:
-                raise KeyError(f"tool handler missing: {target}")
-            if _canonical_json(expected_binding) != registration.binding_json:
-                raise ValueError(f"tool execution binding changed: {target}")
-            if registration.execution_safety != "SAFE_LOCAL_REPLAY":
-                raise ValueError(f"tool requires reconciliation: {target}")
-            return self._execute_registered(
-                registration,
-                request_id=request_id,
-                intent_id=intent_id,
-                session_id=session_id,
-                seq=seq,
-                tool_id=target,
-                args=args,
-                context=context,
-                approval_token_ref=approval_token_ref,
-                confirm_token_ref=confirm_token_ref,
-                thread_id=thread_id,
-                turn_id=turn_id,
-                ts_ms=ts_ms,
-            )
+        del expected_binding, session_id, seq, args, context
+        del approval_token_ref, confirm_token_ref
+        return _log_and_return(
+            ledger=self.ledger,
+            request_id=request_id,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            intent_id=intent_id,
+            tool_id=target,
+            approval_token_ref=None,
+            confirm_token_ref=None,
+            status=RESULT_REJECTED,
+            result_code=GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED,
+            result_digest=(
+                "raw bound ToolBroker execution is retired; an app-local "
+                "verified Tool Task execution port is required"
+            ),
+            evidence_ref=None,
+            ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
+            output=None,
+        )
 
     def execute(
         self,
@@ -245,116 +398,82 @@ class ToolBroker:
         turn_id: str | None = None,
         ts_ms: int | None = None,
     ) -> ToolExecutionResult:
+        """Reject the retired unbound execution API before handler lookup.
+
+        Production execution must enter through HostCommand/TaskGraph and the
+        exact immutable binding consumed by the app-local execution port.
+        Keeping this compatibility signature fail-closed prevents old callers
+        from using a catalog id plus Governor token as a second execution authority.
+        """
+
         target = str(tool_id or "").strip()
-        with self._lock:
-            registration = self._registrations.get(target)
-            if registration is None:
-                try:
-                    self.catalog.get(target)
-                except KeyError:
-                    return self._missing_result(
-                        request_id=request_id,
-                        intent_id=intent_id,
-                        tool_id=target,
-                        approval_token_ref=approval_token_ref,
-                        confirm_token_ref=confirm_token_ref,
-                        thread_id=thread_id,
-                        turn_id=turn_id,
-                        ts_ms=ts_ms,
-                        not_found=True,
-                    )
-                return self._missing_result(
-                    request_id=request_id,
-                    intent_id=intent_id,
-                    tool_id=target,
-                    approval_token_ref=approval_token_ref,
-                    confirm_token_ref=confirm_token_ref,
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                    ts_ms=ts_ms,
-                    not_found=False,
-                )
-            return self._execute_registered(
-                registration,
-                request_id=request_id,
-                intent_id=intent_id,
-                session_id=session_id,
-                seq=seq,
-                tool_id=target,
-                args=args,
-                context=context,
-                approval_token_ref=approval_token_ref,
-                confirm_token_ref=confirm_token_ref,
-                thread_id=thread_id,
-                turn_id=turn_id,
-                ts_ms=ts_ms,
-            )
+        # Retired callers may still provide stale bearer material. It is not
+        # authority and must not be copied into the durable audit ledger.
+        del session_id, seq, args, context, approval_token_ref, confirm_token_ref
+        return _log_and_return(
+            ledger=self.ledger,
+            request_id=request_id,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            intent_id=intent_id,
+            tool_id=target,
+            approval_token_ref=None,
+            confirm_token_ref=None,
+            status=RESULT_REJECTED,
+            result_code=GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED,
+            result_digest=(
+                "direct ToolBroker execution is retired; immutable TaskGraph "
+                "authority and exact execution binding are required"
+            ),
+            evidence_ref=None,
+            ts_ms=int(ts_ms if ts_ms is not None else now_ms()),
+            output=None,
+        )
 
-    def _execute_registered(
-        self,
-        registration: _RegisteredTool,
-        *,
-        request_id: str | None,
-        intent_id: str,
-        session_id: str,
-        seq: int,
-        tool_id: str,
-        args: dict[str, Any] | None,
-        context: dict[str, Any] | None,
-        approval_token_ref: str | None,
-        confirm_token_ref: str | None,
-        thread_id: str | None,
-        turn_id: str | None,
-        ts_ms: int | None,
-    ) -> ToolExecutionResult:
-        now_value = int(ts_ms if ts_ms is not None else now_ms())
-        safe_args = args if isinstance(args, dict) else {}
-        meta = registration.meta
-        handler = registration.handler
 
-        if meta.side_effect_level == "WRITE":
-            require_confirm = meta.auth_level == "CONFIRM"
-            validation = self.token_service.validate_execution_tokens(
-                intent_id=intent_id,
-                skill_name=tool_id,
-                session_id=session_id,
-                seq=int(seq),
-                approval_token_ref=approval_token_ref,
-                confirm_token_ref=confirm_token_ref,
-                require_confirm=require_confirm,
-                now_ts_ms=now_value,
-            )
-            if not validation.valid:
-                code = validation.reason_code or TOKEN_INVALID
-                detail = validation.detail or "write token validation failed"
-                if code == CONFIRM_REQUIRED and not confirm_token_ref:
-                    detail = "confirm token required for write tool"
-                return self._log_and_return(
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                    intent_id=intent_id,
-                    tool_id=tool_id,
-                    approval_token_ref=approval_token_ref,
-                    confirm_token_ref=confirm_token_ref,
-                    status=RESULT_REJECTED,
-                    result_code=code,
-                    result_digest=detail,
-                    evidence_ref=None,
-                    ts_ms=now_value,
-                    output=None,
-                )
+def _execute_registered(
+    *,
+    token_service: TokenService,
+    ledger: SQLiteLedger,
+    registration: _RegisteredTool,
+    request_id: str | None,
+    intent_id: str,
+    session_id: str,
+    seq: int,
+    tool_id: str,
+    args: dict[str, Any] | None,
+    context: dict[str, Any] | None,
+    approval_token_ref: str | None,
+    confirm_token_ref: str | None,
+    thread_id: str | None,
+    turn_id: str | None,
+    ts_ms: int | None,
+    before_handler: Callable[[], None] | None,
+) -> ToolExecutionResult:
+    now_value = int(ts_ms if ts_ms is not None else now_ms())
+    safe_args = args if isinstance(args, dict) else {}
+    meta = registration.meta
+    handler = registration.handler
 
-        try:
-            # M27-J：context 注入情感字段（OPT-38）
-            exec_context = dict(context or {})
-            if "emotion_tag" not in exec_context:
-                exec_context["emotion_tag"] = "NEUTRAL"
-            if "mood_state" not in exec_context:
-                exec_context["mood_state"] = "steady"
-            output = handler(safe_args, exec_context)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            return self._log_and_return(
+    if meta.side_effect_level == "WRITE":
+        require_confirm = meta.auth_level == "CONFIRM"
+        validation = token_service.validate_execution_tokens(
+            intent_id=intent_id,
+            skill_name=tool_id,
+            session_id=session_id,
+            seq=int(seq),
+            approval_token_ref=approval_token_ref,
+            confirm_token_ref=confirm_token_ref,
+            require_confirm=require_confirm,
+            now_ts_ms=now_value,
+        )
+        if not validation.valid:
+            code = validation.reason_code or TOKEN_INVALID
+            detail = validation.detail or "write token validation failed"
+            if code == CONFIRM_REQUIRED and not confirm_token_ref:
+                detail = "confirm token required for write tool"
+            return _log_and_return(
+                ledger=ledger,
                 request_id=request_id,
                 thread_id=thread_id,
                 turn_id=turn_id,
@@ -362,53 +481,29 @@ class ToolBroker:
                 tool_id=tool_id,
                 approval_token_ref=approval_token_ref,
                 confirm_token_ref=confirm_token_ref,
-                status=RESULT_FAILED,
-                result_code=TOOL_EXECUTION_ERROR,
-                result_digest=str(exc),
+                status=RESULT_REJECTED,
+                result_code=code,
+                result_digest=detail,
                 evidence_ref=None,
                 ts_ms=now_value,
                 output=None,
             )
 
-        evidence_ref = f"evidence::{new_event_id()}"
-        digest = _result_digest(output)
-        return self._log_and_return(
-            request_id=request_id,
-            thread_id=thread_id,
-            turn_id=turn_id,
-            intent_id=intent_id,
-            tool_id=tool_id,
-            approval_token_ref=approval_token_ref,
-            confirm_token_ref=confirm_token_ref,
-            status=RESULT_SUCCESS,
-            result_code=TOOL_EXECUTED,
-            result_digest=digest,
-            evidence_ref=evidence_ref,
-            ts_ms=now_value,
-            output=output,
-        )
+    if before_handler is not None:
+        if not callable(before_handler):
+            raise TypeError("before_handler must be callable")
+        # PENDING means the live Task authority, exact binding, replay-safety
+        # and any WRITE token check all passed; the handler is next.
+        before_handler()
 
-    def _missing_result(
-        self,
-        *,
-        request_id: str | None,
-        intent_id: str,
-        tool_id: str,
-        approval_token_ref: str | None,
-        confirm_token_ref: str | None,
-        thread_id: str | None,
-        turn_id: str | None,
-        ts_ms: int | None,
-        not_found: bool,
-    ) -> ToolExecutionResult:
-        now_value = int(ts_ms if ts_ms is not None else now_ms())
-        result_code = TOOL_NOT_FOUND if not_found else TOOL_HANDLER_MISSING
-        detail = (
-            f"tool not found: {tool_id}"
-            if not_found
-            else f"tool handler missing: {tool_id}"
-        )
-        return self._log_and_return(
+    try:
+        exec_context = dict(context or {})
+        exec_context.setdefault("emotion_tag", "NEUTRAL")
+        exec_context.setdefault("mood_state", "steady")
+        output = handler(safe_args, exec_context)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return _log_and_return(
+            ledger=ledger,
             request_id=request_id,
             thread_id=thread_id,
             turn_id=turn_id,
@@ -416,57 +511,76 @@ class ToolBroker:
             tool_id=tool_id,
             approval_token_ref=approval_token_ref,
             confirm_token_ref=confirm_token_ref,
-            status=RESULT_REJECTED,
-            result_code=result_code,
-            result_digest=detail,
+            status=RESULT_FAILED,
+            result_code=TOOL_EXECUTION_ERROR,
+            result_digest=str(exc),
             evidence_ref=None,
             ts_ms=now_value,
             output=None,
         )
 
-    def _log_and_return(
-        self,
-        *,
-        request_id: str | None,
-        thread_id: str | None,
-        turn_id: str | None,
-        intent_id: str,
-        tool_id: str,
-        approval_token_ref: str | None,
-        confirm_token_ref: str | None,
-        status: str,
-        result_code: str,
-        result_digest: str,
-        evidence_ref: str | None,
-        ts_ms: int,
-        output: Any,
-    ) -> ToolExecutionResult:
-        row = {
-            "request_id": request_id,
-            "thread_id": thread_id,
-            "turn_id": turn_id,
-            "intent_id": intent_id,
-            "skill_name": tool_id,
-            "approval_token_ref": approval_token_ref,
-            "confirm_token_ref": confirm_token_ref,
-            "result_status": status,
-            "result_code": result_code,
-            "result_digest": result_digest,
-            "evidence_ref": evidence_ref,
-            "manifest_ref": None,
-            "undo_token_ref": None,
-            "ts_ms": ts_ms,
-        }
-        self.ledger.log_skill_exec(row)
-        return ToolExecutionResult(
-            status=status,
-            result_code=result_code,
-            tool_id=tool_id,
-            intent_id=intent_id,
-            evidence_ref=evidence_ref,
-            detail=row,
-            output=output,
-        )
+    evidence_ref = f"evidence::{new_event_id()}"
+    return _log_and_return(
+        ledger=ledger,
+        request_id=request_id,
+        thread_id=thread_id,
+        turn_id=turn_id,
+        intent_id=intent_id,
+        tool_id=tool_id,
+        approval_token_ref=approval_token_ref,
+        confirm_token_ref=confirm_token_ref,
+        status=RESULT_SUCCESS,
+        result_code=TOOL_EXECUTED,
+        result_digest=_result_digest(output),
+        evidence_ref=evidence_ref,
+        ts_ms=now_value,
+        output=output,
+    )
+
+
+def _log_and_return(
+    *,
+    ledger: SQLiteLedger,
+    request_id: str | None,
+    thread_id: str | None,
+    turn_id: str | None,
+    intent_id: str,
+    tool_id: str,
+    approval_token_ref: str | None,
+    confirm_token_ref: str | None,
+    status: str,
+    result_code: str,
+    result_digest: str,
+    evidence_ref: str | None,
+    ts_ms: int,
+    output: Any,
+) -> ToolExecutionResult:
+    row = {
+        "request_id": request_id,
+        "thread_id": thread_id,
+        "turn_id": turn_id,
+        "intent_id": intent_id,
+        "skill_name": tool_id,
+        "approval_token_ref": approval_token_ref,
+        "confirm_token_ref": confirm_token_ref,
+        "result_status": status,
+        "result_code": result_code,
+        "result_digest": result_digest,
+        "evidence_ref": evidence_ref,
+        "manifest_ref": None,
+        "undo_token_ref": None,
+        "ts_ms": ts_ms,
+    }
+    ledger.log_skill_exec(row)
+    return ToolExecutionResult(
+        status=status,
+        result_code=result_code,
+        tool_id=tool_id,
+        intent_id=intent_id,
+        evidence_ref=evidence_ref,
+        detail=row,
+        output=output,
+    )
 
 
 def _result_digest(output: Any) -> str:

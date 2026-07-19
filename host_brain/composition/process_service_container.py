@@ -24,7 +24,6 @@ class ProcessServiceContainer:
     policy_cache: Any = None
     capability_scorecard_provider: Any = None
     mcp_tool_registry: Any = None
-    mcp_tool_broker: Any = None
     tool_catalog: Any = None
     tool_broker: Any = None
     bond_stage_engine: Any = None

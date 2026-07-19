@@ -4,11 +4,14 @@ import ast
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from host_brain.composition import process_services as dependencies
 from host_brain.capability_plane.journal import InMemoryCapabilityExecutionJournal
 from host_brain.capability_plane.production_composition import (
     build_production_capability_runtime,
 )
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.integrations.graph_governed_tool_node import GovernedToolNode
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
@@ -31,7 +34,7 @@ def test_dependencies_owns_one_capability_runtime_composition(monkeypatch) -> No
         dependencies.reset_capability_runtime_composition()
 
 
-def test_graph_skill_and_mcp_receive_the_same_broker_with_separate_policies() -> None:
+def test_graph_and_skill_use_broker_while_mcp_compatibility_facade_is_inert() -> None:
     composition = build_production_capability_runtime(
         execution_journal=InMemoryCapabilityExecutionJournal(),
     )
@@ -60,12 +63,25 @@ def test_graph_skill_and_mcp_receive_the_same_broker_with_separate_policies() ->
         registry=MCPToolRegistry(db_path=":memory:"),
         capability_broker=broker,
     )
+    with pytest.raises(PermissionError, match=MCP_TASK_AUTHORITY_REQUIRED):
+        mcp.register_handler(
+            "provider",
+            "tool",
+            lambda _args: calls.append("mcp") or "must-not-run",
+        )
+    mcp_result = mcp.call(
+        provider_id="provider",
+        tool_id="tool",
+        args={"value": 1},
+    )
 
     assert graph._broker is broker  # noqa: SLF001
-    assert mcp._broker is broker  # noqa: SLF001
+    assert not hasattr(mcp, "_broker")
     assert graph_result["tool_results"][0]["result"] == "ok"
     assert calls == ["graph"]
     assert skill_result["reason_code"] == "SKILL_AUTHORITY_MISSING"
+    assert mcp_result.reason_code == MCP_TASK_AUTHORITY_REQUIRED
+    assert mcp_result.output is None
 
 
 def test_production_has_one_broker_constructor_and_no_private_fallbacks() -> None:

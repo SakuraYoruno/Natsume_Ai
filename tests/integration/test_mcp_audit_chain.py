@@ -1,18 +1,16 @@
-"""T-MCP-AUDIT-01~03: MCP 审计链集成测试（M14-C）。
-
-覆盖需求：FR-MCP-001
-验证：MCP 调用可追溯到 intent/governor/skill_exec 记录；
-      WRITE 调用含 approval_token_ref + evidence_ref；
-      AIRLOCK 净化报告可回放。
-"""
+"""Legacy MCP direct calls produce rejection audit, never provider effects."""
 
 from __future__ import annotations
 
-from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.core.errors import (
+    GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED,
+    MCP_TASK_AUTHORITY_REQUIRED,
+)
 from host_brain.governor.tokens import TokenService
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
@@ -25,290 +23,190 @@ NOW_MS = 1_800_000_000_000
 @pytest.fixture
 def full_stack() -> tuple[MCPAdapter, TokenService, SQLiteLedger]:
     ledger = SQLiteLedger(db_path=":memory:")
-    tokens = TokenService(approval_ttl_ms=60_000, confirm_ttl_ms=60_000, undo_ttl_ms=60_000)
+    tokens = TokenService(
+        approval_ttl_ms=60_000,
+        confirm_ttl_ms=60_000,
+        undo_ttl_ms=60_000,
+    )
     catalog = ToolCatalog()
     broker = ToolBroker(catalog=catalog, token_service=tokens, ledger=ledger)
-    adapter = MCPAdapter(catalog=catalog, broker=broker)
-    return adapter, tokens, ledger
+    return MCPAdapter(catalog=catalog, broker=broker), tokens, ledger
 
 
 def _make_tools() -> list[dict]:
     return [
-        {"tool_id": "search_docs", "name": "Search Docs", "desc": "Search", "side_effect_level": "READ"},
-        {"tool_id": "create_doc", "name": "Create Doc", "desc": "Create", "side_effect_level": "WRITE"},
+        {
+            "tool_id": "search_docs",
+            "name": "Search Docs",
+            "desc": "Search",
+            "side_effect_level": "READ",
+        },
+        {
+            "tool_id": "create_doc",
+            "name": "Create Doc",
+            "desc": "Create",
+            "side_effect_level": "WRITE",
+        },
     ]
 
 
-def _search_handler(args: dict, _ctx: Any) -> dict:
-    return {"results": [{"id": 1}]}
+def _execute(
+    adapter: MCPAdapter,
+    tool_id: str,
+    *,
+    request_id: str,
+    intent_id: str,
+    seq: int,
+    args: dict,
+    approval_token_ref: str | None = None,
+) -> dict:
+    return adapter.execute_mcp_tool(
+        tool_id,
+        args,
+        provider_id="test_provider",
+        request_id=request_id,
+        intent_id=intent_id,
+        session_id="session-audit",
+        seq=seq,
+        approval_token_ref=approval_token_ref,
+        ts_ms=NOW_MS,
+    )
 
 
-def _create_handler(args: dict, _ctx: Any) -> dict:
-    return {"id": 999, "title": args.get("title", "")}
-
-
-# ── T-MCP-AUDIT-01: MCP 调用可追溯到 intent/governor/skill_exec 记录 ──────────
-
-class TestMCPAuditChain:
-    """T-MCP-AUDIT-01: MCP 调用可追溯到 intent/governor/skill_exec 记录。"""
-
-    def test_read_call_logged_in_skill_exec(self, full_stack):
-        adapter, tokens, ledger = full_stack
+class TestMCPRetirementAuditChain:
+    def test_read_rejection_is_bound_to_request_intent_and_tool(self, full_stack):
+        adapter, _tokens, ledger = full_stack
+        callback = MagicMock(return_value={"results": [{"id": 1}]})
         adapter.sync_provider_tools(
             "test_provider",
             tools=_make_tools(),
-            handlers={"search_docs": _search_handler},
+            handlers={"search_docs": callback},
         )
-        result = adapter.execute_mcp_tool(
+
+        result = _execute(
+            adapter,
             "search_docs",
-            {"query": "audit test"},
-            provider_id="test_provider",
-            request_id="req_audit_01",
-            intent_id="intent_audit_01",
-            session_id="session_audit",
+            request_id="req-audit-read",
+            intent_id="intent-audit-read",
             seq=1,
-            ts_ms=NOW_MS,
+            args={"query": "audit"},
         )
-        assert result["status"] == "SUCCESS"
-        # 验证 skill_exec_log 中有对应记录
-        event = ledger.get_event(result["evidence_ref"])
-        assert event is not None
 
-    def test_read_call_request_id_in_log(self, full_stack):
-        adapter, tokens, ledger = full_stack
+        assert result["status"] == "REJECTED"
+        assert result["result_code"] == MCP_TASK_AUTHORITY_REQUIRED
+        assert result["evidence_ref"] is None
+        callback.assert_not_called()
+        assert len(ledger.skill_exec_log) == 1
+        row = ledger.skill_exec_log[0]
+        assert row["request_id"] == "req-audit-read"
+        assert row["intent_id"] == "intent-audit-read"
+        assert row["skill_name"] == "mcp::test_provider::search_docs"
+        assert row["result_status"] == "REJECTED"
+        assert row["result_code"] == GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED
+
+    def test_call_tool_maps_internal_rejection_without_provider_callback(self, full_stack):
+        adapter, _tokens, ledger = full_stack
+        callback = MagicMock(return_value={"results": []})
         adapter.sync_provider_tools(
             "test_provider",
             tools=_make_tools(),
-            handlers={"search_docs": _search_handler},
+            handlers={"search_docs": callback},
         )
-        result = adapter.execute_mcp_tool(
-            "search_docs",
-            {"query": "audit test"},
+
+        result = adapter.call_tool(
             provider_id="test_provider",
-            request_id="req_audit_02",
-            intent_id="intent_audit_02",
-            session_id="session_audit",
+            tool_id="search_docs",
+            request_id="req-call-tool",
+            intent_id="intent-call-tool",
+            session_id="session-audit",
             seq=2,
+            args={"query": "audit"},
             ts_ms=NOW_MS,
         )
-        event = ledger.get_event(result["evidence_ref"])
-        assert event is not None
-        assert event["request_id"] == "req_audit_02"
 
-    def test_read_call_intent_id_in_log(self, full_stack):
+        assert result.status == "REJECTED"
+        assert result.result_code == MCP_TASK_AUTHORITY_REQUIRED
+        assert result.output is None
+        callback.assert_not_called()
+        assert ledger.skill_exec_log[-1]["result_code"] == GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED
+
+    def test_valid_legacy_write_token_is_not_execution_authority(self, full_stack):
         adapter, tokens, ledger = full_stack
+        callback = MagicMock(return_value={"id": 999})
         adapter.sync_provider_tools(
             "test_provider",
             tools=_make_tools(),
-            handlers={"search_docs": _search_handler},
+            handlers={"create_doc": callback},
         )
-        result = adapter.execute_mcp_tool(
-            "search_docs",
-            {"query": "audit test"},
-            provider_id="test_provider",
-            request_id="req_audit_03",
-            intent_id="intent_audit_03",
-            session_id="session_audit",
+        approval = tokens.issue_approval_token(
+            intent_id="intent-audit-write",
+            skill_name=to_mcp_tool_id("test_provider", "create_doc"),
+            session_id="session-audit",
             seq=3,
-            ts_ms=NOW_MS,
+            now_ts_ms=NOW_MS,
         )
-        event = ledger.get_event(result["evidence_ref"])
-        assert event is not None
-        assert event["intent_id"] == "intent_audit_03"
 
-    def test_tool_id_in_log(self, full_stack):
-        adapter, tokens, ledger = full_stack
-        adapter.sync_provider_tools(
-            "test_provider",
-            tools=_make_tools(),
-            handlers={"search_docs": _search_handler},
+        result = _execute(
+            adapter,
+            "create_doc",
+            request_id="req-audit-write",
+            intent_id="intent-audit-write",
+            seq=3,
+            args={"title": "must not create"},
+            approval_token_ref=approval,
         )
-        result = adapter.execute_mcp_tool(
+
+        assert result["status"] == "REJECTED"
+        assert result["result_code"] == MCP_TASK_AUTHORITY_REQUIRED
+        assert result["output"] is None
+        callback.assert_not_called()
+        row = ledger.skill_exec_log[-1]
+        assert row["result_status"] == "REJECTED"
+        assert row["result_code"] == GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED
+
+
+class TestAirlockRejectionReceipt:
+    def test_sensitive_fields_are_removed_before_audited_rejection(self, full_stack):
+        adapter, _tokens, _ledger = full_stack
+        adapter.sync_provider_tools("test_provider", tools=_make_tools())
+
+        result = _execute(
+            adapter,
             "search_docs",
-            {"query": "audit test"},
-            provider_id="test_provider",
-            request_id="req_audit_04",
-            intent_id="intent_audit_04",
-            session_id="session_audit",
+            request_id="req-airlock",
+            intent_id="intent-airlock",
             seq=4,
-            ts_ms=NOW_MS,
+            args={"query": "safe", "api_key": "secret", "hard_state": "raw"},
         )
-        event = ledger.get_event(result["evidence_ref"])
-        assert event is not None
-        assert "search_docs" in event["skill_name"]
 
-
-# ── T-MCP-AUDIT-02: MCP WRITE 调用含 approval_token_ref + evidence_ref ─────────
-
-class TestMCPWriteAudit:
-    """T-MCP-AUDIT-02: MCP WRITE 调用含 approval_token_ref + evidence_ref。"""
-
-    def test_write_call_has_evidence_ref(self, full_stack):
-        adapter, tokens, ledger = full_stack
-        adapter.sync_provider_tools(
-            "test_provider",
-            tools=_make_tools(),
-            handlers={"create_doc": _create_handler},
-        )
-        mapped_id = to_mcp_tool_id("test_provider", "create_doc")
-        approval = tokens.issue_approval_token(
-            intent_id="intent_write_01",
-            skill_name=mapped_id,
-            session_id="session_audit",
-            seq=10,
-            now_ts_ms=NOW_MS,
-        )
-        result = adapter.execute_mcp_tool(
-            "create_doc",
-            {"title": "Audit Write Test"},
-            provider_id="test_provider",
-            request_id="req_write_01",
-            intent_id="intent_write_01",
-            session_id="session_audit",
-            seq=10,
-            approval_token_ref=approval,
-            ts_ms=NOW_MS,
-        )
-        assert result["status"] == "SUCCESS"
-        assert result["evidence_ref"] is not None
-        assert result["evidence_ref"].startswith("evidence::")
-
-    def test_write_call_approval_token_in_log(self, full_stack):
-        adapter, tokens, ledger = full_stack
-        adapter.sync_provider_tools(
-            "test_provider",
-            tools=_make_tools(),
-            handlers={"create_doc": _create_handler},
-        )
-        mapped_id = to_mcp_tool_id("test_provider", "create_doc")
-        approval = tokens.issue_approval_token(
-            intent_id="intent_write_02",
-            skill_name=mapped_id,
-            session_id="session_audit",
-            seq=11,
-            now_ts_ms=NOW_MS,
-        )
-        result = adapter.execute_mcp_tool(
-            "create_doc",
-            {"title": "Audit Write Test 2"},
-            provider_id="test_provider",
-            request_id="req_write_02",
-            intent_id="intent_write_02",
-            session_id="session_audit",
-            seq=11,
-            approval_token_ref=approval,
-            ts_ms=NOW_MS,
-        )
-        event = ledger.get_event(result["evidence_ref"])
-        assert event is not None
-        assert event["approval_token_ref"] == approval
-
-    def test_write_call_result_contains_provider_id(self, full_stack):
-        adapter, tokens, ledger = full_stack
-        adapter.sync_provider_tools(
-            "test_provider",
-            tools=_make_tools(),
-            handlers={"create_doc": _create_handler},
-        )
-        mapped_id = to_mcp_tool_id("test_provider", "create_doc")
-        approval = tokens.issue_approval_token(
-            intent_id="intent_write_03",
-            skill_name=mapped_id,
-            session_id="session_audit",
-            seq=12,
-            now_ts_ms=NOW_MS,
-        )
-        result = adapter.execute_mcp_tool(
-            "create_doc",
-            {"title": "Provider ID Test"},
-            provider_id="test_provider",
-            request_id="req_write_03",
-            intent_id="intent_write_03",
-            session_id="session_audit",
-            seq=12,
-            approval_token_ref=approval,
-            ts_ms=NOW_MS,
-        )
-        assert result["provider_id"] == "test_provider"
-
-
-# ── T-MCP-AUDIT-03: AIRLOCK 净化报告可回放（removed_fields/payload_digest）────
-
-class TestAirlockAuditReplay:
-    """T-MCP-AUDIT-03: AIRLOCK 净化报告可回放（removed_fields/payload_digest）。"""
-
-    def test_sanitization_report_replayable(self, full_stack):
-        adapter, tokens, ledger = full_stack
-        adapter.sync_provider_tools(
-            "test_provider",
-            tools=_make_tools(),
-            handlers={"search_docs": _search_handler},
-        )
-        result = adapter.execute_mcp_tool(
-            "search_docs",
-            {"query": "replay test", "api_key": "secret_123"},
-            provider_id="test_provider",
-            request_id="req_replay_01",
-            intent_id="intent_replay_01",
-            session_id="session_audit",
-            seq=20,
-            ts_ms=NOW_MS,
-        )
         report = result["sanitization_report"]
-        # 净化报告可回放：removed_fields 记录了被移除的字段
-        assert "api_key" in report["removed_fields"]
-        # payload_digest 可用于回放验证
-        assert report["payload_digest"].startswith("sha256:")
-
-    def test_sanitization_report_field_counts(self, full_stack):
-        adapter, tokens, ledger = full_stack
-        adapter.sync_provider_tools(
-            "test_provider",
-            tools=_make_tools(),
-            handlers={"search_docs": _search_handler},
-        )
-        result = adapter.execute_mcp_tool(
-            "search_docs",
-            {"query": "count test", "api_key": "secret", "hard_state": "raw"},
-            provider_id="test_provider",
-            request_id="req_replay_02",
-            intent_id="intent_replay_02",
-            session_id="session_audit",
-            seq=21,
-            ts_ms=NOW_MS,
-        )
-        report = result["sanitization_report"]
-        # 原始 3 个字段，移除 2 个敏感字段，净化后 1 个
+        assert result["result_code"] == MCP_TASK_AUTHORITY_REQUIRED
+        assert set(report["removed_fields"]) == {"api_key", "hard_state"}
         assert report["original_field_count"] == 3
         assert report["sanitized_field_count"] == 1
-        assert len(report["removed_fields"]) == 2
+        assert report["payload_digest"].startswith("sha256:")
 
-    def test_same_payload_same_digest(self, full_stack):
-        adapter, tokens, ledger = full_stack
-        adapter.sync_provider_tools(
-            "test_provider",
-            tools=_make_tools(),
-            handlers={"search_docs": _search_handler},
-        )
-        result1 = adapter.execute_mcp_tool(
+    def test_same_payload_keeps_same_sanitization_digest(self, full_stack):
+        adapter, _tokens, _ledger = full_stack
+        adapter.sync_provider_tools("test_provider", tools=_make_tools())
+
+        first = _execute(
+            adapter,
             "search_docs",
-            {"query": "determinism"},
-            provider_id="test_provider",
-            request_id="req_replay_03a",
-            intent_id="intent_replay_03a",
-            session_id="session_audit",
-            seq=22,
-            ts_ms=NOW_MS,
+            request_id="req-digest-a",
+            intent_id="intent-digest-a",
+            seq=5,
+            args={"query": "deterministic"},
         )
-        result2 = adapter.execute_mcp_tool(
+        second = _execute(
+            adapter,
             "search_docs",
-            {"query": "determinism"},
-            provider_id="test_provider",
-            request_id="req_replay_03b",
-            intent_id="intent_replay_03b",
-            session_id="session_audit",
-            seq=23,
-            ts_ms=NOW_MS,
+            request_id="req-digest-b",
+            intent_id="intent-digest-b",
+            seq=6,
+            args={"query": "deterministic"},
         )
-        # 相同 payload 产生相同 digest（可回放）
-        assert result1["sanitization_report"]["payload_digest"] == result2["sanitization_report"]["payload_digest"]
+
+        assert first["sanitization_report"]["payload_digest"] == second[
+            "sanitization_report"
+        ]["payload_digest"]

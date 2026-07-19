@@ -28,7 +28,11 @@ from host_brain.secure_ingress import (
 from host_brain.secure_ingress.graph_cancellation_authority import (
     SecureIngressGraphCancellationAuthorityVerifier,
 )
-from host_brain.tools.broker import ToolBroker
+from host_brain.tools.broker import (
+    ToolBroker,
+    ToolRuntimeBoundary,
+    build_tool_runtime_boundary,
+)
 from host_brain.tools.catalog import ToolCatalog
 
 
@@ -40,7 +44,7 @@ class GovernedHostToolRuntimeDependencies:
     token_service: Callable[[], Any]
     capability_broker: Callable[[], Any]
     resource_manager: Callable[..., Any]
-    tool_broker: Callable[[], ToolBroker]
+    ledger: Callable[[], Any]
     tool_catalog: Callable[[], ToolCatalog]
     intent_engine: Callable[[], IntentDecisionEngine]
 
@@ -50,6 +54,11 @@ class GovernedHostToolRuntimeComposition:
     """Own the governed Host and Tool applications for one app lifespan."""
 
     dependencies: GovernedHostToolRuntimeDependencies
+    _boundary: ToolRuntimeBoundary | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
     _runtime: GovernedHostRuntime | None = field(default=None, init=False, repr=False)
     _application: GovernedToolHttpApplication | None = field(
         default=None,
@@ -62,6 +71,21 @@ class GovernedHostToolRuntimeComposition:
 
     def provide_tool_application(self) -> GovernedToolHttpApplication | None:
         return self._application
+
+    def _require_boundary(self) -> ToolRuntimeBoundary:
+        if self._boundary is None:
+            dependencies = self.dependencies
+            self._boundary = build_tool_runtime_boundary(
+                catalog=dependencies.tool_catalog(),
+                token_service=dependencies.token_service(),
+                ledger=dependencies.ledger(),
+            )
+        return self._boundary
+
+    def provide_tool_broker(self) -> ToolBroker:
+        """Expose metadata/registration only; execution stays app-local."""
+
+        return self._require_boundary().broker
 
     def activate(
         self,
@@ -81,6 +105,9 @@ class GovernedHostToolRuntimeComposition:
     ) -> GovernedHostRuntime:
         context = runtime_context_application.composition
         dependencies = self.dependencies
+        boundary = self._require_boundary()
+        broker = boundary.broker
+        catalog = broker.catalog
         runtime = build_governed_host_runtime(
             task_runtime_container=task_runtime,
             ledger=ledger,
@@ -92,8 +119,9 @@ class GovernedHostToolRuntimeComposition:
             resource_manager=dependencies.resource_manager(create_if_missing=False),
             episodic_store=episodic_store,
             semantic_recaller=semantic_recaller,
-            tool_broker=dependencies.tool_broker(),
-            tool_catalog=dependencies.tool_catalog(),
+            tool_binding_resolver=broker.resolve_execution_binding,
+            tool_execution_port_factory=boundary.bind_execution_port,
+            tool_catalog=catalog,
             cancellation_authority_verifier=cancellation_authority_verifier,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id=owner_id,
@@ -114,7 +142,7 @@ class GovernedHostToolRuntimeComposition:
             action_preview_service=action_preview_service,
         )
         application = GovernedToolHttpApplication(
-            catalog=dependencies.tool_catalog(),
+            catalog=catalog,
             governed_runtime=runtime,
             intent_engine=dependencies.intent_engine(),
             ingress_adapter=SecureIngressHttpAuthorityAdapter(
@@ -123,7 +151,7 @@ class GovernedHostToolRuntimeComposition:
             ),
             ingress_store=command_ingress.store,
             tool_binding_resolver=(
-                dependencies.tool_broker().resolve_execution_binding
+                broker.resolve_execution_binding
             ),
             governance_snapshot_builder=build_chat_governance_snapshot,
             clock_ms=now_ms,
@@ -135,6 +163,7 @@ class GovernedHostToolRuntimeComposition:
     def clear(self) -> None:
         self._runtime = None
         self._application = None
+        self._boundary = None
 
 
 __all__ = [

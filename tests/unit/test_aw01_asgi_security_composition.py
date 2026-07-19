@@ -328,7 +328,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     intent_engine = object()
     resource_manager = object()
     tool_catalog = object()
-    tool_broker = SimpleNamespace(resolve_execution_binding=object())
     governed_tool_application = object()
     canonical_executor = object()
     workspace_runtime = object()
@@ -844,7 +843,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     )
     monkeypatch.setattr(asgi, "get_intent_engine", lambda: intent_engine)
     monkeypatch.setattr(asgi, "get_resource_manager", lambda **_kwargs: resource_manager)
-    monkeypatch.setattr(asgi, "get_tool_broker", lambda: tool_broker)
     monkeypatch.setattr(asgi, "get_tool_catalog", lambda: tool_catalog)
     monkeypatch.setattr(
         tool_runtime_composition,

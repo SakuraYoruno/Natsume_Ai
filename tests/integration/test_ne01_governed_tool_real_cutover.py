@@ -21,6 +21,7 @@ from natsume_contracts.identity import (
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.governed_task_adapter import build_governed_host_runtime
 from host_brain.app.governed_tool_runtime import (
+    DurableToolTaskAuthorityVerifier,
     GovernedToolExecutionError,
     GovernedToolHttpApplication,
 )
@@ -33,6 +34,7 @@ from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.composition.task_runtime import build_process_task_runtime_container
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
+from host_brain.persistence.task_store_types import TaskStoreError
 from host_brain.runtime.degradation_authority import (
     LegacyModuleGlobalDegradationAdapter,
 )
@@ -47,7 +49,8 @@ from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_r
 from host_brain.skills.capability_scorecard_provider import (
     FederatedCapabilityScorecardProvider,
 )
-from host_brain.tools.broker import ToolBroker
+from host_brain.task_runtime.governed_workers import FrozenNodeInput
+from host_brain.tools.broker import build_tool_runtime_boundary
 from host_brain.tools.catalog import ToolCatalog, ToolMeta
 
 
@@ -151,7 +154,7 @@ def _signed_http_request(raw_body: bytes) -> object:
     )
 
 
-def _runtime(container, *, ledger, registry, tokens, broker, catalog, owner):  # noqa: ANN001
+def _runtime(container, *, ledger, registry, tokens, boundary, catalog, owner):  # noqa: ANN001
     return build_governed_host_runtime(
         task_runtime_container=container,
         ledger=ledger,
@@ -163,7 +166,8 @@ def _runtime(container, *, ledger, registry, tokens, broker, catalog, owner):  #
         resource_manager=None,
         episodic_store=None,
         semantic_recaller=None,
-        tool_broker=broker,
+        tool_binding_resolver=boundary.broker.resolve_execution_binding,
+        tool_execution_port_factory=boundary.bind_execution_port,
         tool_catalog=catalog,
         runtime_router=CanonicalRuntimeRouter(),
         owner_id=owner,
@@ -187,6 +191,328 @@ class _NoopContinuationWorker:
 
     async def join(self) -> None:
         return None
+
+
+class _ExactNodeGrantVerifier:
+    """Minimal node-grant port for isolating the canonical live-state gate."""
+
+    def __init__(self, *, intent_id: str) -> None:
+        self._intent_id = intent_id
+
+    def verify(self, **kwargs):  # noqa: ANN003, ANN201
+        return SimpleNamespace(
+            intent_id=self._intent_id,
+            session_id=kwargs["session_id"],
+            graph_id=kwargs["graph_id"],
+            graph_revision=kwargs["graph_revision"],
+            node_id=kwargs["node_id"],
+            route=kwargs["route"],
+            target_id=kwargs["target_id"],
+        )
+
+
+def _seed_live_tool_authority(db_path: Path, *, case_id: str) -> dict[str, object]:
+    """Seed one internally coherent live worker authority in real SQLite."""
+
+    identity: dict[str, object] = {
+        "reservation_id": f"reservation::live-tool::{case_id}",
+        "business_scope": f"tool:live-authority:{case_id}",
+        "operation_fingerprint": "sha256:" + "b" * 64,
+        "graph_id": f"graph-live-tool-{case_id}",
+        "graph_revision": 1,
+        "node_id": "node-live-tool",
+        "attempt_id": f"attempt::live-tool::{case_id}",
+        "lease_id": f"lease::live-tool::{case_id}",
+        "lease_owner_id": f"worker-live-tool::{case_id}",
+        "fencing_token": 1,
+    }
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        now_value = int(
+            conn.execute("SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000").fetchone()[
+                0
+            ]
+        )
+        expires_at = now_value + 600_000
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref, status,
+                status_version, graph_json, source_kind, created_ts_ms, updated_ts_ms
+            ) VALUES (?, 1, ?, ?, 'ACTIVE', 1, '{}', 'CANONICAL', ?, ?)
+            """,
+            (
+                identity["graph_id"],
+                f"work-order::{case_id}",
+                f"planner://live-tool/{case_id}",
+                now_value,
+                now_value,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_node(
+                graph_id, graph_revision, node_id, status, status_version,
+                node_json, created_ts_ms, updated_ts_ms
+            ) VALUES (?, 1, ?, 'RUNNING', 4, '{}', ?, ?)
+            """,
+            (
+                identity["graph_id"],
+                identity["node_id"],
+                now_value,
+                now_value,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, owner_id, operation_scope,
+                operation_fingerprint, created_ts_ms, acquired_ts_ms,
+                started_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, 1, ?, 1, 'RUNNING', 2, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                identity["attempt_id"],
+                identity["graph_id"],
+                identity["node_id"],
+                identity["lease_owner_id"],
+                identity["business_scope"],
+                identity["operation_fingerprint"],
+                now_value,
+                now_value,
+                now_value,
+                now_value,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_lease(
+                lease_id, attempt_id, owner_id, fencing_token, acquired_ts_ms,
+                heartbeat_ts_ms, expires_ts_ms, status, status_version
+            ) VALUES (?, ?, ?, 1, ?, ?, ?, 'ACTIVE', 0)
+            """,
+            (
+                identity["lease_id"],
+                identity["attempt_id"],
+                identity["lease_owner_id"],
+                now_value,
+                now_value,
+                expires_at,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_idempotency_reservation(
+                reservation_id, business_scope, operation_fingerprint,
+                attempt_id, lease_id, owner_id, fencing_token, expires_ts_ms,
+                status, status_version, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'RESERVED', 0, ?, ?)
+            """,
+            (
+                identity["reservation_id"],
+                identity["business_scope"],
+                identity["operation_fingerprint"],
+                identity["attempt_id"],
+                identity["lease_id"],
+                identity["lease_owner_id"],
+                expires_at,
+                now_value,
+                now_value,
+            ),
+        )
+        conn.commit()
+    return identity
+
+
+def _invalidate_live_tool_authority(
+    db_path: Path,
+    *,
+    case_id: str,
+    authority: dict[str, object],
+) -> None:
+    with sqlite3.connect(db_path) as conn:
+        if case_id == "graph_cancelled":
+            conn.execute(
+                """
+                UPDATE task_runtime_graph
+                SET status = 'CANCELLED', status_version = status_version + 1
+                WHERE graph_id = ? AND revision = ?
+                """,
+                (authority["graph_id"], authority["graph_revision"]),
+            )
+        elif case_id == "attempt_terminal":
+            conn.execute(
+                """
+                UPDATE task_runtime_attempt
+                SET status = 'FAILED', status_version = status_version + 1,
+                    completed_ts_ms = updated_ts_ms
+                WHERE attempt_id = ?
+                """,
+                (authority["attempt_id"],),
+            )
+        elif case_id == "lease_expired":
+            conn.execute(
+                """
+                UPDATE task_runtime_lease
+                SET expires_ts_ms = 1, status_version = status_version + 1
+                WHERE lease_id = ?
+                """,
+                (authority["lease_id"],),
+            )
+        elif case_id == "fence_takeover":
+            conn.execute(
+                """
+                UPDATE task_runtime_lease
+                SET owner_id = 'worker-live-tool-takeover',
+                    fencing_token = fencing_token + 1,
+                    status_version = status_version + 1
+                WHERE lease_id = ?
+                """,
+                (authority["lease_id"],),
+            )
+        else:  # pragma: no cover - parametrization owns the exhaustive cases.
+            raise AssertionError(f"unknown live-authority case: {case_id}")
+        conn.commit()
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    ("graph_cancelled", "attempt_terminal", "lease_expired", "fence_takeover"),
+)
+def test_real_sqlite_live_authority_blocks_tool_handler_and_token_service(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case_id: str,
+) -> None:
+    """Historical Frozen input cannot outlive canonical cancellation/ownership."""
+
+    db_path = tmp_path / f"live-tool-authority-{case_id}.sqlite3"
+    ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    container = build_process_task_runtime_container(
+        ledger=ledger,
+        canonical_db_path=db_path,
+    )
+    authority = _seed_live_tool_authority(db_path, case_id=case_id)
+    catalog = ToolCatalog(
+        [
+            ToolMeta(
+                id="write_live_status",
+                name="write live status",
+                desc="write local status",
+                schema_hash="sha256:" + "c" * 64,
+                side_effect_level="WRITE",
+                auth_level="APPROVAL",
+                domain_tags=("integration",),
+                version="1",
+            )
+        ]
+    )
+    tokens = TokenService()
+    token_validation_calls: list[dict[str, object]] = []
+    original_validate = tokens.validate_execution_tokens
+
+    def counted_validate(**kwargs):  # noqa: ANN003, ANN201
+        token_validation_calls.append(dict(kwargs))
+        return original_validate(**kwargs)
+
+    monkeypatch.setattr(tokens, "validate_execution_tokens", counted_validate)
+    boundary = build_tool_runtime_boundary(
+        catalog=catalog,
+        token_service=tokens,
+        ledger=ledger,
+    )
+    handler_calls: list[dict[str, object]] = []
+
+    def handler(args, context):  # noqa: ANN001, ANN201
+        handler_calls.append({"args": dict(args), "context": dict(context or {})})
+        return {"status": "must-not-run"}
+
+    boundary.broker.register_handler(
+        "write_live_status",
+        handler,
+        replay_safe_local=True,
+    )
+    intent_id = f"intent-live-tool-{case_id}"
+    verifier = DurableToolTaskAuthorityVerifier(
+        task_store=container.task_store,
+        node_grants=_ExactNodeGrantVerifier(intent_id=intent_id),
+    )
+    execution_port = boundary.bind_execution_port(
+        authority_verifier=verifier.verify,
+    )
+    frozen = FrozenNodeInput(
+        command_id=f"command-live-tool-{case_id}",
+        request_id=f"request-live-tool-{case_id}",
+        session_id=f"session-live-tool-{case_id}",
+        principal_id="principal-live-tool",
+        work_order_id=f"work-order::{case_id}",
+        root_work_order_id=f"work-order::{case_id}",
+        graph_id=str(authority["graph_id"]),
+        graph_revision=int(authority["graph_revision"]),
+        node_id=str(authority["node_id"]),
+        attempt_id=str(authority["attempt_id"]),
+        lease_id=str(authority["lease_id"]),
+        lease_owner_id=str(authority["lease_owner_id"]),
+        fencing_token=int(authority["fencing_token"]),
+        node_risk_level=4,
+        route="tool",
+        target_id="write_live_status",
+        objective="prove stale authority cannot execute",
+        input_refs=(),
+        _input_pack_json="{}",
+        _input_artifacts_json="[]",
+        node_grant_ref=f"grant://live-tool/{case_id}",
+        parent_grant_ref=f"grant://parent/{case_id}",
+        reservation_id=str(authority["reservation_id"]),
+        business_scope=str(authority["business_scope"]),
+        operation_fingerprint=str(authority["operation_fingerprint"]),
+    )
+    gate_kwargs = {
+        key: authority[key]
+        for key in (
+            "reservation_id",
+            "business_scope",
+            "operation_fingerprint",
+            "graph_id",
+            "graph_revision",
+            "node_id",
+            "attempt_id",
+            "lease_id",
+            "lease_owner_id",
+            "fencing_token",
+        )
+    }
+    valid = container.task_store.assert_live_node_execution_authority(**gate_kwargs)
+    assert valid["attempt_id"] == authority["attempt_id"]
+
+    _invalidate_live_tool_authority(
+        db_path,
+        case_id=case_id,
+        authority=authority,
+    )
+    with pytest.raises(TaskStoreError):
+        container.task_store.assert_live_node_execution_authority(**gate_kwargs)
+    dispatch_markers: list[str] = []
+    with pytest.raises(PermissionError, match="GOVERNED_TOOL_TASK_AUTHORITY_REQUIRED"):
+        execution_port.execute_bound(
+            task_authority=frozen,
+            expected_binding=boundary.broker.resolve_execution_binding(
+                "write_live_status"
+            ),
+            request_id=frozen.request_id,
+            intent_id=intent_id,
+            session_id=frozen.session_id,
+            seq=1,
+            tool_id=frozen.target_id,
+            args={"status": "unsafe"},
+            context={"workspace": "acceptance"},
+            before_handler=lambda: dispatch_markers.append("PENDING"),
+        )
+    assert dispatch_markers == []
+    assert handler_calls == []
+    assert token_validation_calls == []
+    ledger.close()
 
 
 @pytest.mark.asyncio
@@ -221,7 +547,12 @@ async def test_real_hmac_airlock_review_resume_and_restart_duplicate(
         confirm_ttl_ms=600_000,
         undo_ttl_ms=600_000,
     )
-    broker = ToolBroker(catalog=catalog, token_service=tokens, ledger=ledger)
+    boundary = build_tool_runtime_boundary(
+        catalog=catalog,
+        token_service=tokens,
+        ledger=ledger,
+    )
+    broker = boundary.broker
     handler_calls: list[dict] = []
 
     def handler(args, context):  # noqa: ANN001, ANN201
@@ -252,7 +583,7 @@ async def test_real_hmac_airlock_review_resume_and_restart_duplicate(
         ledger=ledger,
         registry=registry,
         tokens=tokens,
-        broker=broker,
+        boundary=boundary,
         catalog=catalog,
         owner="real-tool-owner-1",
     )
@@ -452,7 +783,7 @@ async def test_real_hmac_airlock_review_resume_and_restart_duplicate(
         ledger=ledger,
         registry=registry,
         tokens=tokens,
-        broker=broker,
+        boundary=boundary,
         catalog=catalog,
         owner="real-tool-owner-2",
     )

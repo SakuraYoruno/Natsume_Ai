@@ -2,6 +2,7 @@
 
 from ._shared import *  # noqa: F403
 from .ports import ExecutiveRuntimeApplicationPorts
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.runtime.scene_consumer_projection import (
     SCENE_PROJECTION_BLOCK,
     SCENE_PROJECTION_REVIEW,
@@ -323,6 +324,40 @@ def _execute_skill(
     if ledger is None:
         ledger = ports.get_ledger()
     registry = skill_registry
+    if str(skill_id or "").strip().startswith("mcp::"):
+        # Older durable graphs may still contain the retired bridge target.
+        # Reject with an exact stable reason before registry lookup so restart
+        # recovery never degrades into a generic missing-Skill failure and no
+        # stale provider callback can be invoked.
+        skill_receipt_ref = _skill_receipt_ref(request_id, skill_id)
+        execution_intent_id = _normalize_text(intent_id) or f"intent::{request_id}::{skill_id}"
+        latency_ms = int((time.time() - started) * 1000)
+        _log_skill_exec_row(
+            request_id=request_id,
+            intent_id=execution_intent_id,
+            skill_name=skill_id,
+            result_status="REJECTED",
+            result_code=MCP_TASK_AUTHORITY_REQUIRED,
+            result_digest=MCP_TASK_AUTHORITY_REQUIRED,
+            approval_token_ref=None,
+            ts_ms=int(time.time() * 1000),
+            ledger=ledger,
+            evidence_ref=skill_receipt_ref,
+        )
+        return _ExecutionOutcome(
+            route_type="skill",
+            target_id=skill_id,
+            skill_family="mcp",
+            success=False,
+            result_text="",
+            error_text=MCP_TASK_AUTHORITY_REQUIRED,
+            latency_ms=latency_ms,
+            payload={
+                "approval_token_ref": None,
+                "fallback_policy": "strict_fail",
+                "receipt_ref": skill_receipt_ref,
+            },
+        )
     skill_meta = registry.require(skill_id)
     skill_receipt_ref = _skill_receipt_ref(request_id, skill_id)
     approval_token_ref = _normalize_text(dict(governor_result or {}).get("tokens", {}).get("approval_token_ref"))

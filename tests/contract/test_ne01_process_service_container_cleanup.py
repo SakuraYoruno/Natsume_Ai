@@ -47,8 +47,8 @@ def test_ne01_dead_process_locators_are_removed_from_the_container() -> None:
     container_fields = {field.name for field in fields(ProcessServiceContainer)}
 
     assert container_fields.isdisjoint(RETIRED_PROCESS_LOCATORS)
-    assert len(container_fields) == 60
-    assert len(container_fields - PROCESS_LOCKS - {"application_ports"}) == 53
+    assert len(container_fields) == 59
+    assert len(container_fields - PROCESS_LOCKS - {"application_ports"}) == 52
 
 
 def test_ne01_dead_process_accessors_are_not_reexported() -> None:

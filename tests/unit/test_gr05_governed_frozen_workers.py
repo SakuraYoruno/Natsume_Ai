@@ -148,6 +148,9 @@ def _contracts(route: str = "chat", target: str = "surface_reply"):
         "worker_route": f"{route}:{target}",
         "node_input_refs": ["artifact://input/one"],
         "node_grant_ref": "governor-grant://child/node",
+        "reservation_id": "operation-reservation://worker-test",
+        "business_scope": order.business_idempotency_scope,
+        "operation_fingerprint": order.operation_fingerprint,
         "budget": _active_budget(),
     }
     return command, order, context

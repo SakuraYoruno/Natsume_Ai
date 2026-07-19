@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
 from host_brain.skills.registry import SkillMeta, SkillRegistry
 
@@ -27,6 +28,7 @@ def register_mcp_tools_into_skill_registry(
     mcp_registry: MCPToolRegistry,
     broker: Any | None = None,
 ) -> int:
+    del broker
     count = 0
     for meta in mcp_registry.list_all():
         if not isinstance(meta, ToolMeta):
@@ -43,31 +45,17 @@ def register_mcp_tools_into_skill_registry(
             _provider_id: str = meta.provider_id,
             _tool_id: str = meta.tool_id,
         ) -> dict[str, Any]:
-            context = dict(ctx or {})
-            if broker is None:
-                return {
-                    "status": "SKIPPED",
-                    "reason_code": "MCP_BROKER_UNBOUND",
-                    "provider_id": _provider_id,
-                    "tool_id": _tool_id,
-                }
-            result = broker.call(
-                provider_id=_provider_id,
-                tool_id=_tool_id,
-                request_id=str(context.get("request_id") or "") or None,
-                intent_id=str(context.get("intent_id") or ""),
-                session_id=str(context.get("session_id") or ""),
-                seq=int(context.get("seq") or 0),
-                args=dict(args or {}),
-                approval_token_ref=str(context.get("approval_token_ref") or "") or None,
-            )
+            del args, ctx
             return {
-                "status": ("OK" if bool(getattr(result, "success", False)) else "REJECTED"),
-                "reason_code": getattr(result, "reason_code", None),
+                "status": "REJECTED",
+                "reason_code": MCP_TASK_AUTHORITY_REQUIRED,
                 "provider_id": _provider_id,
                 "tool_id": _tool_id,
-                "detail": str(getattr(result, "detail", "") or ""),
-                "output": getattr(result, "output", None),
+                "detail": (
+                    "MCP provider execution requires a governed Tool Task node; "
+                    "nested Skill execution is retired"
+                ),
+                "output": None,
             }
 
         skill_registry.register(

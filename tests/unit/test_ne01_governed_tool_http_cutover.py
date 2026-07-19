@@ -425,9 +425,23 @@ async def test_frozen_executor_restart_reconciles_before_second_handler_call() -
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
+        def resolve_execution_binding(self, tool_id):  # noqa: ANN001, ANN201
+            assert tool_id == "read_status"
+            return _binding()
+
+    class Port:
+        def __init__(self, broker, ledger):  # noqa: ANN001
+            self._broker = broker
+            self._ledger = ledger
+
         def execute_bound(self, **kwargs):  # noqa: ANN003, ANN201
+            assert isinstance(kwargs.pop("task_authority"), FrozenNodeInput)
             assert kwargs.pop("expected_binding") == _binding()
-            self.calls.append(dict(kwargs))
+            before_handler = kwargs.pop("before_handler")
+            assert self._ledger.skill_exec_log == []
+            before_handler()
+            assert self._ledger.skill_exec_log[0]["result_status"] == "PENDING"
+            self._broker.calls.append(dict(kwargs))
             return ToolExecutionResult(
                 status="SUCCESS",
                 result_code="TOOL_EXECUTED",
@@ -438,14 +452,11 @@ async def test_frozen_executor_restart_reconciles_before_second_handler_call() -
                 output={"status": "ok"},
             )
 
-        def resolve_execution_binding(self, tool_id):  # noqa: ANN001, ANN201
-            assert tool_id == "read_status"
-            return _binding()
-
     broker = Broker()
     ledger = Ledger()
     executor = FrozenToolRouteExecutor(
-        broker=broker,
+        binding_resolver=broker.resolve_execution_binding,
+        execution_port=Port(broker, ledger),
         catalog=_catalog(),
         ledger=ledger,
     )
@@ -473,7 +484,8 @@ async def test_frozen_executor_restart_reconciles_before_second_handler_call() -
     # the new executor observes the durable PENDING dispatch marker and must
     # reconcile instead of invoking the handler a second time.
     restarted_executor = FrozenToolRouteExecutor(
-        broker=broker,
+        binding_resolver=broker.resolve_execution_binding,
+        execution_port=Port(broker, ledger),
         catalog=_catalog(),
         ledger=ledger,
     )

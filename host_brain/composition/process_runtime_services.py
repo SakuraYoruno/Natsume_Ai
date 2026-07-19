@@ -30,7 +30,6 @@ from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
-from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
 from host_brain.observability.metrics import MetricsCollector
@@ -124,35 +123,24 @@ def get_mcp_tool_registry() -> MCPToolRegistry:
             db_path=db_path,
             check_same_thread=False,
         )
-        _container().mcp_tool_broker = None
     return _container().mcp_tool_registry
 
 
-def get_mcp_tool_broker() -> MCPToolBroker:
-    registry = get_mcp_tool_registry()
-    ledger = _foundation().get_ledger()
-    if (
-        _container().mcp_tool_broker is None
-        or _container().mcp_tool_broker.registry is not registry
-        or _container().mcp_tool_broker.ledger is not ledger
-    ):
-        _container().mcp_tool_broker = MCPToolBroker(
-            registry=registry,
-            capability_broker=_foundation().get_capability_broker(),
-            ledger=ledger,
-            token_service=get_token_service(),
-        )
-    return _container().mcp_tool_broker
-
-
 def _sync_mcp_skills_into_registry(skill_registry: SkillRegistry) -> None:
-    if not _parse_bool_env("HOST_SKILL_MCP_BRIDGE_ENABLED", default=True):
+    bridge_enabled = _parse_bool_env("HOST_SKILL_MCP_BRIDGE_ENABLED", default=False)
+    if not bridge_enabled:
+        # The registry can outlive a controlled feature-flag change. Purge
+        # stale bridge entries so a previously enabled ``mcp::*`` closure
+        # cannot remain routable after the bridge is disabled.
+        for skill_name in tuple(skill_registry.list_skill_names()):
+            if str(skill_name).startswith("mcp::"):
+                skill_registry.unregister(skill_name)
         return
     try:
         register_mcp_tools_into_skill_registry(
             skill_registry=skill_registry,
             mcp_registry=get_mcp_tool_registry(),
-            broker=get_mcp_tool_broker(),
+            broker=None,
         )
     except Exception as exc:
         _logger.warning("mcp skill bridge sync skipped: %s", exc)
@@ -369,7 +357,10 @@ def get_capability_scorecard_provider(
 ) -> FederatedCapabilityScorecardProvider:
     """Return the read-only federated projection used by Governor policy."""
     registry = skill_registry if skill_registry is not None else get_skill_registry()
-    mcp_registry = _container().mcp_tool_registry
+    # MCP metadata remains a supported read-only discovery source. Do not
+    # make it depend on the retired execution broker or on the disabled
+    # MCP-to-Skill bridge having initialized the registry first.
+    mcp_registry = get_mcp_tool_registry()
     current_skill_registry = getattr(
         _container().capability_scorecard_provider, "_skill_registry", None
     )

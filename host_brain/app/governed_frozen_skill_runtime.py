@@ -27,6 +27,7 @@ from host_brain.app.governed_task_authority import (
     require_fail_closed_governed_work_order as _require_fail_closed_governed_work_order,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernorGrantError,
@@ -138,6 +139,14 @@ class _FrozenSkillWorker:
             raise GovernedHostAdapterError(
                 GOVERNED_HOST_ROUTE_UNSUPPORTED,
                 "durable skill intent target differs from its frozen TaskNode binding",
+            )
+        if target.startswith("mcp::"):
+            # Stale durable graphs must fail before Preview issuance, grant
+            # reopening or registry/handler access. MCP provider execution is
+            # legal only as a governed Tool node with an immutable binding.
+            raise GovernedHostAdapterError(
+                MCP_TASK_AUTHORITY_REQUIRED,
+                "retired MCP Skill target requires a governed Tool Task node",
             )
         if target not in set(work_order.capability_requirements):
             raise GovernedHostAdapterError(
