@@ -25,7 +25,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
 
     assert report.status == PROGRAM_INCOMPLETE
     assert report.evaluated_commit_sha == "f379d6dbe34f9ef5946bb812c430467d36c6f86d"
-    assert report.migration_head == "0116_agent_workspace_lifecycle.sql"
+    assert report.migration_head == "0117_scheduler_clock_retry_authority.sql"
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
         "chat": "INCOMPLETE",
@@ -39,6 +39,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert report.missing_route_controls == {
         "chat": (
             "budget_enforcement",
+            "transactional_side_effects",
             "commit_bound_acceptance",
         ),
         "skill": (
@@ -174,6 +175,7 @@ def test_route_cannot_pass_commit_bound_acceptance_without_receipt_binding(
 ) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
     payload["routes"]["chat"]["controls"]["budget_enforcement"] = "PASS"
+    payload["routes"]["chat"]["controls"]["transactional_side_effects"] = "PASS"
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"
     payload["routes"]["chat"]["status"] = "COMPLETE"
     candidate = tmp_path / "coverage.json"
@@ -188,6 +190,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
 ) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
     payload["routes"]["chat"]["controls"]["budget_enforcement"] = "PASS"
+    payload["routes"]["chat"]["controls"]["transactional_side_effects"] = "PASS"
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"
     payload["routes"]["chat"]["status"] = "COMPLETE"
     payload["routes"]["chat"]["acceptance_binding"] = {
@@ -210,6 +213,7 @@ def test_historical_four_route_receipt_cannot_satisfy_current_commit_binding(
 ) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
     payload["routes"]["chat"]["controls"]["budget_enforcement"] = "PASS"
+    payload["routes"]["chat"]["controls"]["transactional_side_effects"] = "PASS"
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"
     payload["routes"]["chat"]["status"] = "COMPLETE"
     payload["routes"]["chat"]["acceptance_binding"] = {

@@ -34,6 +34,8 @@ SCHEDULER_TERMINAL_OUTCOME_INVALID = "SCHEDULER_TERMINAL_OUTCOME_INVALID"
 SCHEDULER_TERMINAL_OUTCOME_CONFLICT = "SCHEDULER_TERMINAL_OUTCOME_CONFLICT"
 SCHEDULER_ADMIN_OPERATION_INVALID = "SCHEDULER_ADMIN_OPERATION_INVALID"
 SCHEDULER_ADMIN_OPERATION_CONFLICT = "SCHEDULER_ADMIN_OPERATION_CONFLICT"
+SCHEDULER_CLOCK_RETRY_INVALID = "SCHEDULER_CLOCK_RETRY_INVALID"
+SCHEDULER_CLOCK_RETRY_CONFLICT = "SCHEDULER_CLOCK_RETRY_CONFLICT"
 
 SCHEDULER_MIGRATION_ASSET_KEY = "0065#scheduler_runtime"
 # Frozen to host_brain/audit/migrations/0065_scheduler_runtime.sql.
@@ -41,6 +43,9 @@ SCHEDULER_MIGRATION_SHA256 = "447387f6a5b0e085d3e3155baaa25e2164070c6a5875d89490
 SCHEDULER_UOW_MIGRATION_ASSET_KEY = "0066#scheduler_durable_uow"
 # Frozen to host_brain/audit/migrations/0066_scheduler_durable_uow.sql.
 SCHEDULER_UOW_MIGRATION_SHA256 = "c91a8941b5a9abe182399e9408789218cd2fc4614e279ff4a35a578087007c1b"
+SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY = "0117#scheduler_clock_retry_authority"
+# Frozen to host_brain/audit/migrations/0117_scheduler_clock_retry_authority.sql.
+SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256 = "a15ab6660d9daf5b7c6c97321699f3410676772df2e248a31a24a37446d113ed"
 
 _ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
     {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
@@ -142,6 +147,21 @@ _REQUIRED_TABLE_COLUMNS = {
             "created_at_ms",
         }
     ),
+    "scheduler_clock_retry_state": frozenset(
+        {
+            "retry_key",
+            "retry_kind",
+            "task_id",
+            "occurrence_id",
+            "failure_count",
+            "next_retry_at_ms",
+            "last_reason_code",
+            "lease_owner_id",
+            "lease_fencing_token",
+            "lease_expires_at_ms",
+            "updated_at_ms",
+        }
+    ),
 }
 _REQUIRED_INDEXES = frozenset(
     {
@@ -151,6 +171,8 @@ _REQUIRED_INDEXES = frozenset(
         "uq_scheduler_clock_occurrence_fence",
         "idx_scheduler_terminal_outcome_created",
         "idx_scheduler_admin_operation_task",
+        "idx_scheduler_clock_retry_due",
+        "uq_scheduler_clock_retry_occurrence",
     }
 )
 _REQUIRED_TRIGGERS = frozenset(
@@ -248,11 +270,12 @@ class _SchedulerSQLiteRepository:
                     """
                     SELECT asset_key, checksum, disposition
                     FROM schema_migration_assets
-                    WHERE asset_key IN (?, ?)
+                    WHERE asset_key IN (?, ?, ?)
                     """,
                     (
                         SCHEDULER_MIGRATION_ASSET_KEY,
                         SCHEDULER_UOW_MIGRATION_ASSET_KEY,
+                        SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY,
                     ),
                 ).fetchall()
                 columns = {
@@ -293,6 +316,9 @@ class _SchedulerSQLiteRepository:
         expected_assets = {
             SCHEDULER_MIGRATION_ASSET_KEY: SCHEDULER_MIGRATION_SHA256,
             SCHEDULER_UOW_MIGRATION_ASSET_KEY: SCHEDULER_UOW_MIGRATION_SHA256,
+            SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY: (
+                SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256
+            ),
         }
         assets_ready = all(
             key in asset_records
@@ -310,7 +336,7 @@ class _SchedulerSQLiteRepository:
         ):
             raise SchedulerRepositoryError(
                 SCHEDULER_SCHEMA_NOT_READY,
-                "scheduler migrations 0065/0066 are missing, stale, or checksum-drifted",
+                "scheduler migrations 0065/0066/0117 are missing, stale, or checksum-drifted",
             )
 
 
@@ -717,6 +743,440 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             return records
         finally:
             conn.close()
+
+    def claim_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        retry_kind: str,
+        task_id: str,
+        occurrence_id: str | None,
+        owner_id: str,
+        at_ms: int,
+        lease_duration_ms: int,
+    ) -> dict[str, Any]:
+        """Claim one clock dispatch/retry key with a durable fencing token."""
+
+        key = _required_text(
+            retry_key,
+            field_name="retry_key",
+            limit=512,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        kind = str(retry_kind or "").strip().upper()
+        if kind not in {"DUE", "OCCURRENCE"}:
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_INVALID,
+                "retry_kind must be DUE or OCCURRENCE",
+            )
+        task_ref = _required_task_id(task_id)
+        occurrence_ref = None
+        if occurrence_id is not None:
+            occurrence_ref = _required_reference(
+                occurrence_id,
+                field_name="occurrence_id",
+                reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+            )
+        if (kind == "DUE") != (occurrence_ref is None):
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_INVALID,
+                "DUE retries cannot bind an occurrence and OCCURRENCE retries must bind one",
+            )
+        owner = _required_text(
+            owner_id,
+            field_name="owner_id",
+            limit=240,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        now_value = _required_int(
+            at_ms,
+            field_name="at_ms",
+            minimum=0,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        duration = _required_int(
+            lease_duration_ms,
+            field_name="lease_duration_ms",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        expires = now_value + duration
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM scheduler_clock_retry_state WHERE retry_key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO scheduler_clock_retry_state(
+                        retry_key, retry_kind, task_id, occurrence_id,
+                        failure_count, next_retry_at_ms, last_reason_code,
+                        lease_owner_id, lease_fencing_token,
+                        lease_expires_at_ms, updated_at_ms
+                    ) VALUES (?, ?, ?, ?, 0, 0, NULL, ?, 1, ?, ?)
+                    """,
+                    (key, kind, task_ref, occurrence_ref, owner, expires, now_value),
+                )
+                claimed = True
+            else:
+                current = self._clock_retry_record(row)
+                if (
+                    current["retry_kind"] != kind
+                    or current["task_id"] != task_ref
+                    or current["occurrence_id"] != occurrence_ref
+                ):
+                    raise SchedulerRepositoryError(
+                        SCHEDULER_CLOCK_RETRY_CONFLICT,
+                        "clock retry key identity drifted",
+                    )
+                active_lease = (
+                    current["lease_owner_id"] is not None
+                    and int(current["lease_expires_at_ms"] or 0) > now_value
+                )
+                if current["next_retry_at_ms"] > now_value or active_lease:
+                    conn.commit()
+                    return {**current, "claimed": False}
+                updated = conn.execute(
+                    """
+                    UPDATE scheduler_clock_retry_state
+                    SET lease_owner_id = ?,
+                        lease_fencing_token = lease_fencing_token + 1,
+                        lease_expires_at_ms = ?, updated_at_ms = ?
+                    WHERE retry_key = ? AND lease_fencing_token = ?
+                    """,
+                    (
+                        owner,
+                        expires,
+                        now_value,
+                        key,
+                        current["lease_fencing_token"],
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise SchedulerRepositoryError(
+                        SCHEDULER_CLOCK_RETRY_CONFLICT,
+                        "clock retry lease CAS was lost",
+                    )
+                claimed = True
+            claimed_row = conn.execute(
+                "SELECT * FROM scheduler_clock_retry_state WHERE retry_key = ?",
+                (key,),
+            ).fetchone()
+            if claimed_row is None:
+                raise SchedulerRepositoryError(
+                    SCHEDULER_CLOCK_RETRY_CONFLICT,
+                    "claimed clock retry state cannot be read back",
+                )
+            record = self._clock_retry_record(claimed_row)
+            conn.commit()
+            return {**record, "claimed": claimed}
+        except SchedulerRepositoryError:
+            conn.rollback()
+            raise
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_CONFLICT,
+                "clock retry identity conflicts",
+            ) from exc
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def renew_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        owner_id: str,
+        fencing_token: int,
+        at_ms: int,
+        lease_duration_ms: int,
+    ) -> dict[str, Any]:
+        """Extend only a still-live lease owned by the exact fencing token.
+
+        An expired owner is deliberately unable to revive its lease.  It must
+        compete for a new fencing token through :meth:`claim_clock_retry`.
+        """
+
+        key = _required_text(
+            retry_key,
+            field_name="retry_key",
+            limit=512,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        owner = _required_text(
+            owner_id,
+            field_name="owner_id",
+            limit=240,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        fence = _required_int(
+            fencing_token,
+            field_name="fencing_token",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        now_value = _required_int(
+            at_ms,
+            field_name="at_ms",
+            minimum=0,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        duration = _required_int(
+            lease_duration_ms,
+            field_name="lease_duration_ms",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        expires = now_value + duration
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            renewed = conn.execute(
+                """
+                UPDATE scheduler_clock_retry_state
+                SET lease_expires_at_ms = ?, updated_at_ms = ?
+                WHERE retry_key = ? AND lease_owner_id = ?
+                  AND lease_fencing_token = ?
+                  AND lease_expires_at_ms > ?
+                """,
+                (expires, now_value, key, owner, fence, now_value),
+            )
+            if renewed.rowcount != 1:
+                raise SchedulerRepositoryError(
+                    SCHEDULER_CLOCK_RETRY_CONFLICT,
+                    "stale or expired clock retry lease cannot be renewed",
+                )
+            row = conn.execute(
+                "SELECT * FROM scheduler_clock_retry_state WHERE retry_key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                raise SchedulerRepositoryError(
+                    SCHEDULER_CLOCK_RETRY_CONFLICT,
+                    "renewed clock retry state cannot be read back",
+                )
+            record = self._clock_retry_record(row)
+            conn.commit()
+            return record
+        except SchedulerRepositoryError:
+            conn.rollback()
+            raise
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def defer_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        owner_id: str,
+        fencing_token: int,
+        at_ms: int,
+        next_retry_at_ms: int,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        key = _required_text(
+            retry_key,
+            field_name="retry_key",
+            limit=512,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        owner = _required_text(
+            owner_id,
+            field_name="owner_id",
+            limit=240,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        fence = _required_int(
+            fencing_token,
+            field_name="fencing_token",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        now_value = _required_int(
+            at_ms,
+            field_name="at_ms",
+            minimum=0,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        next_at = _required_int(
+            next_retry_at_ms,
+            field_name="next_retry_at_ms",
+            minimum=0,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        reason = _required_text(
+            reason_code,
+            field_name="reason_code",
+            limit=128,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            updated = conn.execute(
+                """
+                UPDATE scheduler_clock_retry_state
+                SET failure_count = failure_count + 1,
+                    next_retry_at_ms = ?, last_reason_code = ?,
+                    lease_owner_id = NULL, lease_expires_at_ms = NULL,
+                    updated_at_ms = ?
+                WHERE retry_key = ? AND lease_owner_id = ?
+                  AND lease_fencing_token = ?
+                  AND lease_expires_at_ms > ?
+                """,
+                (next_at, reason, now_value, key, owner, fence, now_value),
+            )
+            if updated.rowcount != 1:
+                raise SchedulerRepositoryError(
+                    SCHEDULER_CLOCK_RETRY_CONFLICT,
+                    "stale clock retry lease cannot defer work",
+                )
+            row = conn.execute(
+                "SELECT * FROM scheduler_clock_retry_state WHERE retry_key = ?",
+                (key,),
+            ).fetchone()
+            record = self._clock_retry_record(row)
+            conn.commit()
+            return record
+        except SchedulerRepositoryError:
+            conn.rollback()
+            raise
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def clear_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        owner_id: str,
+        fencing_token: int,
+        at_ms: int,
+    ) -> bool:
+        key = _required_text(
+            retry_key,
+            field_name="retry_key",
+            limit=512,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        owner = _required_text(
+            owner_id,
+            field_name="owner_id",
+            limit=240,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        fence = _required_int(
+            fencing_token,
+            field_name="fencing_token",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        now_value = _required_int(
+            at_ms,
+            field_name="at_ms",
+            minimum=0,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cleared = conn.execute(
+                """
+                UPDATE scheduler_clock_retry_state
+                SET failure_count = 0, next_retry_at_ms = 0,
+                    last_reason_code = NULL, lease_owner_id = NULL,
+                    lease_expires_at_ms = NULL, updated_at_ms = ?
+                WHERE retry_key = ? AND lease_owner_id = ?
+                  AND lease_fencing_token = ?
+                  AND lease_expires_at_ms > ?
+                """,
+                (now_value, key, owner, fence, now_value),
+            )
+            if cleared.rowcount != 1:
+                raise SchedulerRepositoryError(
+                    SCHEDULER_CLOCK_RETRY_CONFLICT,
+                    "stale clock retry lease cannot clear work",
+                )
+            conn.commit()
+            return True
+        except SchedulerRepositoryError:
+            conn.rollback()
+            raise
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def clock_retry_summary(self) -> dict[str, int | None]:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS retry_count,
+                       MIN(next_retry_at_ms) AS next_retry_at_ms
+                FROM scheduler_clock_retry_state
+                WHERE failure_count > 0
+                """
+            ).fetchone()
+            return {
+                "retry_count": int(row["retry_count"] or 0),
+                "next_retry_at_ms": (
+                    int(row["next_retry_at_ms"])
+                    if row["next_retry_at_ms"] is not None
+                    else None
+                ),
+            }
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _clock_retry_record(row: sqlite3.Row) -> dict[str, Any]:
+        if row is None:
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_CONFLICT,
+                "clock retry state is missing",
+            )
+        return {
+            "retry_key": str(row["retry_key"]),
+            "retry_kind": str(row["retry_kind"]),
+            "task_id": str(row["task_id"]),
+            "occurrence_id": (
+                str(row["occurrence_id"])
+                if row["occurrence_id"] is not None
+                else None
+            ),
+            "failure_count": int(row["failure_count"]),
+            "next_retry_at_ms": int(row["next_retry_at_ms"]),
+            "last_reason_code": (
+                str(row["last_reason_code"])
+                if row["last_reason_code"] is not None
+                else None
+            ),
+            "lease_owner_id": (
+                str(row["lease_owner_id"])
+                if row["lease_owner_id"] is not None
+                else None
+            ),
+            "lease_fencing_token": int(row["lease_fencing_token"]),
+            "lease_expires_at_ms": (
+                int(row["lease_expires_at_ms"])
+                if row["lease_expires_at_ms"] is not None
+                else None
+            ),
+            "updated_at_ms": int(row["updated_at_ms"]),
+        }
 
     def compare_and_set_head(
         self,
@@ -1382,8 +1842,16 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
         next_scheduled_at_ms: int | None,
         payload: Mapping[str, Any],
         authority: Mapping[str, Any],
+        due_retry_key: str,
+        lease_owner_id: str,
+        lease_fencing_token: int,
+        lease_duration_ms: int,
     ) -> dict[str, Any]:
-        """Atomically append one clock occurrence and advance its due pointer."""
+        """Admit a clock occurrence and atomically transfer its DUE lease.
+
+        The returned ``clock_retry_claim`` is already keyed by the immutable
+        occurrence id.  Callers must never dispatch with the former DUE claim.
+        """
 
         task_ref = _required_task_id(task_id)
         revision = _required_int(
@@ -1432,6 +1900,36 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
         )
         request_id = _clock_request_id(task_ref, revision, scheduled_at)
         authority_value = _normalize_authority(authority, request_id=request_id)
+        due_key = _required_text(
+            due_retry_key,
+            field_name="due_retry_key",
+            limit=512,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        expected_due_key = f"due:{task_ref}:{revision}:{scheduled_at}"
+        if due_key != expected_due_key:
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_CONFLICT,
+                "clock admission DUE retry identity drifted",
+            )
+        lease_owner = _required_text(
+            lease_owner_id,
+            field_name="lease_owner_id",
+            limit=240,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        lease_fence = _required_int(
+            lease_fencing_token,
+            field_name="lease_fencing_token",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        lease_duration = _required_int(
+            lease_duration_ms,
+            field_name="lease_duration_ms",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
         return self._admit_occurrence(
             occurrence_id=occurrence_id,
             task_id=task_ref,
@@ -1445,6 +1943,10 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             payload_digest=payload_digest,
             expected_head_version=expected,
             authority=authority_value,
+            due_retry_key=due_key,
+            lease_owner_id=lease_owner,
+            lease_fencing_token=lease_fence,
+            lease_duration_ms=lease_duration,
         )
 
     def admit_manual_occurrence(
@@ -1508,6 +2010,10 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             payload_digest=payload_digest,
             expected_head_version=None,
             authority=authority_value,
+            due_retry_key=None,
+            lease_owner_id=None,
+            lease_fencing_token=None,
+            lease_duration_ms=None,
         )
 
     def get_occurrence(self, occurrence_id: str) -> dict[str, Any] | None:
@@ -1799,6 +2305,10 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
         payload_digest: str,
         expected_head_version: int | None,
         authority: dict[str, str],
+        due_retry_key: str | None,
+        lease_owner_id: str | None,
+        lease_fencing_token: int | None,
+        lease_duration_ms: int | None,
     ) -> dict[str, Any]:
         now_value = self._now()
         conn = self._connect()
@@ -1859,13 +2369,28 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
                         "scheduler occurrence lost its durable definition head",
                     )
                 replay_head_version = self._head_record(replay_head)["head_version"]
+                retry_claim = None
+                if source == "CLOCK":
+                    retry_claim = self._transfer_due_retry_claim(
+                        conn,
+                        due_retry_key=str(due_retry_key),
+                        occurrence_id=occurrence_id,
+                        task_id=task_id,
+                        owner_id=str(lease_owner_id),
+                        fencing_token=int(lease_fencing_token or 0),
+                        at_ms=now_value,
+                        lease_duration_ms=int(lease_duration_ms or 0),
+                    )
                 conn.commit()
-                return {
+                replay_result = {
                     **record,
                     "head_version": replay_head_version,
                     "created": False,
                     "replayed": True,
                 }
+                if retry_claim is not None:
+                    replay_result["clock_retry_claim"] = retry_claim
+                return replay_result
 
             self._validate_ingress_authority(
                 conn,
@@ -1953,6 +2478,18 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
                     )
                 new_head_version += 1
                 self._fault("after_reschedule")
+            retry_claim = None
+            if source == "CLOCK":
+                retry_claim = self._transfer_due_retry_claim(
+                    conn,
+                    due_retry_key=str(due_retry_key),
+                    occurrence_id=occurrence_id,
+                    task_id=task_id,
+                    owner_id=str(lease_owner_id),
+                    fencing_token=int(lease_fencing_token or 0),
+                    at_ms=now_value,
+                    lease_duration_ms=int(lease_duration_ms or 0),
+                )
             row = conn.execute(
                 "SELECT * FROM scheduler_occurrence WHERE occurrence_id = ?",
                 (occurrence_id,),
@@ -1964,12 +2501,15 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
                 )
             result = self._occurrence_record(row)
             conn.commit()
-            return {
+            admitted_result = {
                 **result,
                 "head_version": new_head_version,
                 "created": True,
                 "replayed": False,
             }
+            if retry_claim is not None:
+                admitted_result["clock_retry_claim"] = retry_claim
+            return admitted_result
         except SchedulerRepositoryError:
             conn.rollback()
             raise
@@ -1984,6 +2524,103 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             raise
         finally:
             conn.close()
+
+    def _transfer_due_retry_claim(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        due_retry_key: str,
+        occurrence_id: str,
+        task_id: str,
+        owner_id: str,
+        fencing_token: int,
+        at_ms: int,
+        lease_duration_ms: int,
+    ) -> dict[str, Any]:
+        """Move DUE ownership to OCCURRENCE inside the admission UoW."""
+
+        if not due_retry_key or not owner_id or fencing_token < 1 or lease_duration_ms < 1:
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_INVALID,
+                "clock admission requires an exact live DUE lease",
+            )
+        expires = at_ms + lease_duration_ms
+        occurrence_row = conn.execute(
+            "SELECT * FROM scheduler_clock_retry_state WHERE retry_key = ?",
+            (occurrence_id,),
+        ).fetchone()
+        if occurrence_row is not None:
+            current = self._clock_retry_record(occurrence_row)
+            if (
+                current["retry_kind"] != "OCCURRENCE"
+                or current["task_id"] != task_id
+                or current["occurrence_id"] != occurrence_id
+                or current["lease_owner_id"] != owner_id
+                or current["lease_fencing_token"] != fencing_token
+                or int(current["lease_expires_at_ms"] or 0) <= at_ms
+            ):
+                raise SchedulerRepositoryError(
+                    SCHEDULER_CLOCK_RETRY_CONFLICT,
+                    "clock occurrence replay does not own the live occurrence fence",
+                )
+            conn.execute(
+                """
+                UPDATE scheduler_clock_retry_state
+                SET lease_expires_at_ms = ?, updated_at_ms = ?
+                WHERE retry_key = ? AND lease_owner_id = ?
+                  AND lease_fencing_token = ? AND lease_expires_at_ms > ?
+                """,
+                (expires, at_ms, occurrence_id, owner_id, fencing_token, at_ms),
+            )
+        else:
+            transferred = conn.execute(
+                """
+                UPDATE scheduler_clock_retry_state
+                SET retry_key = ?, retry_kind = 'OCCURRENCE',
+                    occurrence_id = ?, lease_expires_at_ms = ?, updated_at_ms = ?
+                WHERE retry_key = ? AND retry_kind = 'DUE'
+                  AND task_id = ? AND occurrence_id IS NULL
+                  AND lease_owner_id = ? AND lease_fencing_token = ?
+                  AND lease_expires_at_ms > ?
+                """,
+                (
+                    occurrence_id,
+                    occurrence_id,
+                    expires,
+                    at_ms,
+                    due_retry_key,
+                    task_id,
+                    owner_id,
+                    fencing_token,
+                    at_ms,
+                ),
+            )
+            if transferred.rowcount != 1:
+                raise SchedulerRepositoryError(
+                    SCHEDULER_CLOCK_RETRY_CONFLICT,
+                    "clock admission lost its DUE owner or fencing token",
+                )
+        row = conn.execute(
+            "SELECT * FROM scheduler_clock_retry_state WHERE retry_key = ?",
+            (occurrence_id,),
+        ).fetchone()
+        if row is None:
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_CONFLICT,
+                "transferred occurrence claim cannot be read back",
+            )
+        record = self._clock_retry_record(row)
+        if (
+            record["retry_kind"] != "OCCURRENCE"
+            or record["occurrence_id"] != occurrence_id
+            or record["lease_owner_id"] != owner_id
+            or record["lease_fencing_token"] != fencing_token
+        ):
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_CONFLICT,
+                "transferred occurrence claim identity drifted",
+            )
+        return {**record, "claimed": True}
 
     @staticmethod
     def _validate_ingress_authority(
@@ -2875,6 +3512,10 @@ def _bounded_limit(value: Any) -> int:
 __all__ = [
     "SCHEDULER_ADMIN_OPERATION_CONFLICT",
     "SCHEDULER_ADMIN_OPERATION_INVALID",
+    "SCHEDULER_CLOCK_RETRY_CONFLICT",
+    "SCHEDULER_CLOCK_RETRY_INVALID",
+    "SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY",
+    "SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256",
     "SCHEDULER_DEFINITION_CONFLICT",
     "SCHEDULER_DEFINITION_INVALID",
     "SCHEDULER_DEFINITION_NOT_FOUND",

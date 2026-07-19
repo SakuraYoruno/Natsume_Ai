@@ -5,7 +5,7 @@
   "evaluated_source": "AUDITED_ANCESTOR_COMMIT",
   "evidence_binding": {
     "evaluated_commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
-    "migration_head": "0116_agent_workspace_lifecycle.sql"
+    "migration_head": "0117_scheduler_clock_retry_authority.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
@@ -15,6 +15,8 @@
     "durable_cancellation": "OFF",
     "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "effect_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
+    "generic_acceptance_effect_reconciliation": "PARTIAL_CONVERSATION_VISIBLE_TURN_MEMORY_EVENT_EXACT_PREFERENCE_SIDE_WRITE_UNRECEIPTED_LIFE_EFFECT_EXACT_SURFACE_UNKNOWN_AUTHENTICATED_GATEWAY_READ_PORT_MISSING",
+    "acceptance_effect_recovery_guardian": "WIRED_APP_LOCAL_DURABLE_SLO_OPAQUE_INCIDENT_ONLY",
     "terminal_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "terminal_reconciliation_auto": "DEFAULT_OFF",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
@@ -50,7 +52,7 @@
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PASS",
+        "transactional_side_effects": "PARTIAL",
         "commit_bound_acceptance": "MISSING"
       }
     },
@@ -132,13 +134,16 @@
     },
     "scheduler": {
       "status": "INCOMPLETE",
-      "production_boundary": "Scheduler governed occurrences enter HostCommand and a single-node immutable TaskGraph. The production worker now emits only an immutable scheduler.operation.execute plan; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW. The shared app-local AcceptanceEffectDispatcher invokes the real handler only after Acceptance and persists the actual result in the existing immutable SchedulerExecutionResultRepository. Review-before-resume calls the handler zero times, committed delivery calls it once, and duplicate replay does not call it again. Every reclaimed Effect must use an explicit read-only reconciler; missing reconciliation stays unknown, production sys-mode only reopens exact HardState, and empty or ambiguous Scheduler results and synthetic receipts fail closed. The route remains INCOMPLETE because definition/admin direct authority, mutable batch and clock retry semantics, general unknown-effect human attribution, program-wide Budget measurement, commit-bound acceptance, wave integration and production canary remain missing.",
+      "production_boundary": "Scheduler governed occurrences enter HostCommand and a single-node immutable TaskGraph. The worker emits only an immutable scheduler.operation.execute plan; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW, and the real handler runs after Acceptance. Migration 0117 atomically validates the live DUE owner/fence, inserts the occurrence, advances the definition head and converts the same retry row to an occurrence-bound claim in one BEGIN IMMEDIATE transaction. Dispatch renews first and an execution lifecycle heartbeat renews while running; expired owners cannot self-revive, a second owner cannot dispatch, and clear/defer require the exact live fence and actual call time. Thirty-seven Scheduler, migration and coverage tests succeeded; the 19-test atomic fence subset in 47.53 seconds overlaps that scope and is not added. The route remains INCOMPLETE because definition/admin direct authority, mutable batch freezing, general unknown-effect human attribution, program-wide Budget measurement, commit-bound acceptance, wave integration and production canary remain missing.",
       "evidence_refs": [
         "host_brain/scheduler/governed_runtime.py",
         "host_brain/scheduler/operation_plan.py",
         "host_brain/scheduler/accepted_operation.py",
         "host_brain/scheduler/accepted_effect_runtime.py",
         "host_brain/scheduler/worker_registry.py",
+        "host_brain/scheduler/clock.py",
+        "host_brain/persistence/scheduler_repository.py",
+        "host_brain/audit/migrations/0117_scheduler_clock_retry_authority.sql",
         "host_brain/task_runtime/acceptance_effect_dispatcher.py",
         "tests/unit/test_ne01_scheduler_operation_plan.py",
         "tests/unit/test_ne01_scheduler_accepted_operation.py",
@@ -170,11 +175,15 @@
     },
     "internal": {
       "status": "INCOMPLETE",
-      "production_boundary": "Internal ingress is compiled into WorkOrderV3 and admitted through a single-node immutable TaskGraph, but execution still bridges to the legacy AgentWorkOrder executor. Write-capable work remains blocked and artifact writes are not yet atomically committed by Acceptance; current-commit live acceptance is absent.",
+      "production_boundary": "Internal ingress is compiled into WorkOrderV3 and admitted through a single-node immutable TaskGraph, but execution still bridges to the legacy AgentWorkOrder executor. FrozenNodeInput projects exact root WorkOrder, graph/revision, node, attempt, lease, command, principal, lease owner and fence into DurableWorkspaceRuntime. Verifier, outer Acceptance and the final result handler all require strict EXECUTED + ACCEPT + review_required=false, so NOT_RUN/RETRY/REVIEW/SPLIT cannot be promoted through generic Review. The worker produces a sanitized bounded result proposal; internal.agent.result_commit writes the canonical result only after Acceptance. The ingress claim closes only after the Effect is COMMITTED and the exact result receipt reopens; PENDING, FAILED and NO_EFFECTS remain OPEN. A pre-Acceptance local artifact, complete public WorkerProjection and current-commit live acceptance remain absent.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
+        "host_brain/agent_runtime/internal_result_proposal.py",
+        "host_brain/agent_runtime/accepted_result.py",
+        "host_brain/agent_runtime/accepted_effect_runtime.py",
         "host_brain/agent_runtime/executor.py",
-        "tests/integration/test_aw02_internal_agent_runtime_cutover.py"
+        "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/unit/test_ne01_internal_accepted_result.py"
       ],
       "controls": {
         "host_command": "PASS",
@@ -187,7 +196,7 @@
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "MISSING",
+        "transactional_side_effects": "PARTIAL",
         "commit_bound_acceptance": "MISSING"
       }
     },

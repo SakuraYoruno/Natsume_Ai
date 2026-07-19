@@ -19,6 +19,102 @@ from host_brain.secure_ingress import SecureIngressAuthority
 NOW = 1_800_000_000_000
 
 
+class _RetryStateRepository:
+    def __init__(self) -> None:
+        self.retry: dict[str, dict] = {}
+
+    def claim_clock_retry(self, **kwargs):
+        key = kwargs["retry_key"]
+        current = self.retry.get(key)
+        if current is not None and (
+            current["next_retry_at_ms"] > kwargs["at_ms"]
+            or (
+                current.get("lease_owner_id") is not None
+                and int(current.get("lease_expires_at_ms") or 0) > kwargs["at_ms"]
+            )
+        ):
+            return {**current, "claimed": False}
+        fence = int((current or {}).get("lease_fencing_token") or 0) + 1
+        value = {
+            **dict(current or {}),
+            **kwargs,
+            "failure_count": int((current or {}).get("failure_count") or 0),
+            "next_retry_at_ms": int((current or {}).get("next_retry_at_ms") or 0),
+            "lease_owner_id": kwargs["owner_id"],
+            "lease_fencing_token": fence,
+            "lease_expires_at_ms": kwargs["at_ms"] + kwargs["lease_duration_ms"],
+            "claimed": True,
+        }
+        self.retry[key] = value
+        return value
+
+    def renew_clock_retry(self, **kwargs):
+        value = self.retry[kwargs["retry_key"]]
+        assert value["lease_owner_id"] == kwargs["owner_id"]
+        assert value["lease_fencing_token"] == kwargs["fencing_token"]
+        assert value["lease_expires_at_ms"] > kwargs["at_ms"]
+        value.update(
+            lease_expires_at_ms=kwargs["at_ms"] + kwargs["lease_duration_ms"],
+            at_ms=kwargs["at_ms"],
+        )
+        return dict(value)
+
+    def defer_clock_retry(self, **kwargs):
+        value = self.retry[kwargs["retry_key"]]
+        assert value["lease_owner_id"] == kwargs["owner_id"]
+        assert value["lease_fencing_token"] == kwargs["fencing_token"]
+        assert value["lease_expires_at_ms"] > kwargs["at_ms"]
+        value.update(
+            failure_count=int(value["failure_count"]) + 1,
+            next_retry_at_ms=kwargs["next_retry_at_ms"],
+            lease_owner_id=None,
+            lease_expires_at_ms=None,
+            last_reason_code=kwargs["reason_code"],
+        )
+        return dict(value)
+
+    def clear_clock_retry(self, **kwargs):
+        value = self.retry[kwargs["retry_key"]]
+        assert value["lease_owner_id"] == kwargs["owner_id"]
+        assert value["lease_fencing_token"] == kwargs["fencing_token"]
+        assert value["lease_expires_at_ms"] > kwargs["at_ms"]
+        value.update(
+            failure_count=0,
+            next_retry_at_ms=0,
+            lease_owner_id=None,
+            lease_expires_at_ms=None,
+            last_reason_code=None,
+        )
+        return True
+
+    def transfer_due_retry(self, kwargs, occurrence):
+        due = self.retry.pop(kwargs["due_retry_key"])
+        assert due["retry_kind"] == "DUE"
+        assert due["lease_owner_id"] == kwargs["lease_owner_id"]
+        assert due["lease_fencing_token"] == kwargs["lease_fencing_token"]
+        occurrence_id = occurrence["occurrence_id"]
+        claim = {
+            **due,
+            "retry_key": occurrence_id,
+            "retry_kind": "OCCURRENCE",
+            "occurrence_id": occurrence_id,
+            "lease_expires_at_ms": due["at_ms"] + kwargs["lease_duration_ms"],
+            "claimed": True,
+        }
+        self.retry[occurrence_id] = claim
+        return {**occurrence, "clock_retry_claim": dict(claim)}
+
+    def clock_retry_summary(self):
+        failed = [row for row in self.retry.values() if row["failure_count"] > 0]
+        return {
+            "retry_count": len(failed),
+            "next_retry_at_ms": min(
+                (row["next_retry_at_ms"] for row in failed),
+                default=None,
+            ),
+        }
+
+
 def _request_id(task_id: str, revision: int, scheduled_at_ms: int) -> str:
     material = json.dumps(
         {
@@ -99,7 +195,7 @@ async def test_clock_recovers_durable_authority_then_preflights_and_admits_due()
         },
     }
 
-    class Repository:
+    class Repository(_RetryStateRepository):
         def list_pending_occurrences(self, *, limit):
             assert limit == 10
             return [pending]
@@ -114,11 +210,14 @@ async def test_clock_recovers_durable_authority_then_preflights_and_admits_due()
             assert kwargs["next_scheduled_at_ms"] == NOW + 30_000
             assert kwargs["authority"]["principal_id"] == "scheduler-clock-service"
             auth = SecureIngressAuthority(**kwargs["authority"])
-            return _occurrence(
-                "due_task",
-                scheduled_at_ms=NOW,
-                occurrence_id="scheduleroccurrence://sha256/" + "2" * 64,
-                authority=auth,
+            return self.transfer_due_retry(
+                kwargs,
+                _occurrence(
+                    "due_task",
+                    scheduled_at_ms=NOW,
+                    occurrence_id="scheduleroccurrence://sha256/" + "2" * 64,
+                    authority=auth,
+                ),
             )
 
     class Ingress:
@@ -146,6 +245,7 @@ async def test_clock_recovers_durable_authority_then_preflights_and_admits_due()
         definition_repository=Repository(),
         command_ingress=Ingress(),
         command_service=Service(),
+        owner_id="test-clock-owner",
         now_ms=lambda: NOW,
         poll_interval_s=60,
         limit=10,
@@ -193,7 +293,7 @@ async def test_clock_policy_block_does_not_mint_authority_or_advance_head() -> N
         },
     }
 
-    class Repository:
+    class Repository(_RetryStateRepository):
         def list_pending_occurrences(self, *, limit):
             return []
 
@@ -223,6 +323,7 @@ async def test_clock_policy_block_does_not_mint_authority_or_advance_head() -> N
         definition_repository=Repository(),
         command_ingress=Ingress(),
         command_service=Service(),
+        owner_id="test-clock-owner",
         now_ms=lambda: NOW,
     )
     result = await clock.run_once()
@@ -283,7 +384,7 @@ async def test_clock_shutdown_is_bounded_without_cancelling_runtime_dispatch() -
     finished = asyncio.Event()
     cancelled = False
 
-    class Repository:
+    class Repository(_RetryStateRepository):
         def list_pending_occurrences(self, *, limit):
             return [pending]
 
@@ -306,6 +407,7 @@ async def test_clock_shutdown_is_bounded_without_cancelling_runtime_dispatch() -
         definition_repository=Repository(),
         command_ingress=object(),
         command_service=Service(),
+        owner_id="test-clock-owner",
         now_ms=lambda: NOW,
         poll_interval_s=60,
         shutdown_timeout_s=0.05,
@@ -318,5 +420,45 @@ async def test_clock_shutdown_is_bounded_without_cancelling_runtime_dispatch() -
     assert clock.health()["dispatch_in_flight"] == 1
     release.set()
     await asyncio.wait_for(finished.wait(), timeout=1)
-    await asyncio.sleep(0)
+    for _ in range(10):
+        if clock.health()["dispatch_in_flight"] == 0:
+            break
+        await asyncio.sleep(0)
     assert clock.health()["dispatch_in_flight"] == 0
+
+
+@pytest.mark.asyncio
+async def test_clock_failure_backoff_starts_from_actual_failure_time() -> None:
+    current_ms = [NOW]
+    authority = _authority("failed_late", 1, NOW)
+    pending = _occurrence(
+        "failed_late",
+        scheduled_at_ms=NOW,
+        occurrence_id="scheduleroccurrence://sha256/" + "4" * 64,
+        authority=authority,
+    )
+    repository = _RetryStateRepository()
+    repository.list_pending_occurrences = lambda *, limit: [pending]  # type: ignore[attr-defined]
+    repository.list_due = lambda *, due_at_ms, limit: []  # type: ignore[attr-defined]
+
+    class Service:
+        async def execute_occurrence(self, **_):
+            current_ms[0] = NOW + 7_000
+            raise RuntimeError("late failure")
+
+    clock = SchedulerClock(
+        definition_repository=repository,
+        command_ingress=object(),
+        command_service=Service(),
+        owner_id="failure-clock-owner",
+        now_ms=lambda: current_ms[0],
+        failure_backoff_initial_s=5,
+        retry_lease_duration_s=60,
+    )
+
+    result = await clock.run_once()
+
+    assert result["failed"] == 1
+    retry = repository.retry[pending["occurrence_id"]]
+    assert retry["failure_count"] == 1
+    assert retry["next_retry_at_ms"] == NOW + 12_000

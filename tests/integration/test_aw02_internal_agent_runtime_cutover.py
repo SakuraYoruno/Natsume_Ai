@@ -3,13 +3,28 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import subprocess
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
+import host_brain.agent_runtime.executor as agent_runtime_executor_module
+from host_brain.agent_runtime.internal_result_proposal import (
+    InternalAgentProposalExecutor,
+)
+from host_brain.agent_runtime.result_contract import AgentResult
+from host_brain.agent_runtime.workspace_allocator import (
+    ManagedGitSource,
+    ManagedWorkspaceRoot,
+    WorkspaceAllocator,
+)
+from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
+from host_brain.agent_runtime.accepted_result import InternalAcceptedResultHandler
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.agent_tools import (
     AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
@@ -21,6 +36,7 @@ from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.governor.tokens import TokenService
 from host_brain.app.internal_task_runtime import (
     InternalAgentCommandService,
+    _build_contracts,
     build_governed_internal_runtime,
 )
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
@@ -32,6 +48,8 @@ from host_brain.persistence.agent_execution_repository import (
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.review_continuation_store import ReviewContinuationStore
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
+from host_brain.persistence.workspace_repository import WorkspaceRepository
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.model_runtime import (
     ModelAttemptResult,
@@ -40,9 +58,91 @@ from host_brain.model_runtime import (
     RouteDecision,
     build_live_production_prompt_registry,
 )
+from host_brain.runtime.context_application import FrozenRuntimeContextV1
+from host_brain.runtime.context_contracts import WorldSnapshotV2
+from host_brain.task_runtime.acceptance_effect_dispatcher import (
+    AcceptanceEffectDispatcher,
+)
+from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
 NOW = 1_800_000_000_000
+
+
+class _RuntimeContextAuthority:
+    def __init__(self, *, principal_id: str) -> None:
+        workspace_id = "workspace-internal-integration"
+        subject_id = principal_id
+        world = WorldSnapshotV2(
+            workspace_id=workspace_id,
+            subject_id=subject_id,
+            revision=1,
+            facts=(),
+        )
+        self._payload = {
+            "runtime_context_schema": "natsume.runtime-context.request.v1",
+            "runtime_context_observed_at_ms": NOW,
+            "runtime_context_principal_id": principal_id,
+            "workspace_id": workspace_id,
+            "subject_id": subject_id,
+            "world_snapshot_v2": world.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": workspace_id,
+                "subject_id": subject_id,
+                "scene_id": "scene.internal-integration",
+                "revision": 1,
+                "decision_digest": hashlib.sha256(
+                    b"internal-integration-scene"
+                ).hexdigest(),
+            },
+        }
+
+    def freeze_request(self, **_kwargs: Any) -> FrozenRuntimeContextV1:
+        return FrozenRuntimeContextV1(payload=deepcopy(self._payload))
+
+    def require_frozen(self, value: Any) -> FrozenRuntimeContextV1:
+        source = dict(value or {})
+        if any(source.get(key) != expected for key, expected in self._payload.items()):
+            raise ValueError("Internal Runtime Context drifted")
+        return FrozenRuntimeContextV1(payload=deepcopy(self._payload))
+
+
+class _ExactPreviewAuthority:
+    def __init__(self) -> None:
+        self._records: dict[str, tuple[dict[str, Any], SimpleNamespace]] = {}
+
+    def issue_receipt(self, **kwargs: Any) -> dict[str, Any]:
+        index = len(self._records) + 1
+        event_id = f"runtimeevent://internal-cutover/{index}"
+        receipt_ref = f"action-preview://internal-cutover/{index}"
+        authority = dict(kwargs.get("authority_context") or {})
+        authority_kind = (
+            "ACCEPTANCE_EFFECT"
+            if authority.get("schema_version")
+            == "Natsume.action_preview.acceptance_effect_authority_request.v1"
+            else "TASK_NODE"
+        )
+        boundary = {
+            key: deepcopy(value)
+            for key, value in kwargs.items()
+            if key != "guardian_capability_id"
+        }
+        receipt = SimpleNamespace(
+            receipt_ref=receipt_ref,
+            payload={"authority_kind": authority_kind},
+        )
+        self._records[event_id] = (boundary, receipt)
+        return {
+            "event_id": event_id,
+            "receipt_ref": receipt_ref,
+            "receipt": {"authority_kind": authority_kind},
+        }
+
+    def require_execution(self, *, event_id: str, **kwargs: Any) -> Any:
+        boundary, receipt = self._records[event_id]
+        assert kwargs == boundary
+        return receipt
 
 
 def _sha256(value: bytes | str) -> str:
@@ -117,9 +217,18 @@ class _Executor:
     def __init__(self, calls: list[str]) -> None:
         self._calls = calls
         self.review_required = False
+        self.before_return = None
 
-    def execute(self, order: AgentWorkOrder) -> dict:
+    def execute(
+        self,
+        order: AgentWorkOrder,
+        *,
+        workspace_execution_authority: dict[str, Any] | None = None,
+    ) -> dict:
+        assert workspace_execution_authority is not None
         self._calls.append(order.work_order_id)
+        if self.before_return is not None:
+            self.before_return(order)
         return {
             "status": "EXECUTED",
             "work_order_id": order.work_order_id,
@@ -210,6 +319,215 @@ class _FinishOnlyAttemptService:
 
 
 @pytest.mark.asyncio
+async def test_internal_proposal_supplies_exact_durable_workspace_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "internal-workspace@example.invalid"),
+        ("config", "user.name", "Internal Workspace Test"),
+    ):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+    (source / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    for args in (("add", "baseline.txt"), ("commit", "-m", "initial")):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+    request_id = "request-internal-durable-workspace"
+    suffix = hashlib.sha256(f"internal\n{request_id}".encode()).hexdigest()[:40]
+    graph_id = f"graph-internal-{suffix}"
+    workspace_id = DurableWorkspaceRuntime.workspace_id_for(
+        graph_id=graph_id,
+        graph_revision=1,
+    )
+    command, work_order, graph = _build_contracts(
+        work_order=AgentWorkOrder(
+            work_order_id="work-order-internal-durable-workspace",
+            domain="code",
+            run_mode="inspect",
+            objective="read from the durable workspace",
+            workspace={
+                "strategy": "durable_workspace",
+                "workspace_id": workspace_id,
+            },
+            allowed_actions=["read_files"],
+            forbidden_actions=["write_files"],
+            acceptance_criteria=["result executed"],
+            review_policy={"review_required": False},
+        ),
+        request_id=request_id,
+        session_id="session-internal-durable-workspace",
+        ts_ms=NOW,
+        governor_grant_ref="governor-grant://internal/durable-workspace",
+        command_authority={
+            "principal_id": "principal-internal-durable-workspace",
+            "claim_ref": "ingress-claim://internal/durable-workspace",
+            "audit_ref": "audit://internal/durable-workspace",
+            "body_sha256": _sha256("internal-durable-workspace"),
+        },
+        frozen_runtime_context={},
+    )
+    node = graph.nodes[0]
+    assignment = CanonicalRuntimeRouter(clock=lambda: NOW).assign_new_task(
+        work_order.work_order_id,
+        assigned_at_ms=NOW,
+    )
+    db_path = tmp_path / "internal-durable-workspace.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="internal-durable-workspace-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref,
+                status, status_version, graph_json, source_kind,
+                created_ts_ms, updated_ts_ms
+            ) VALUES (?, 1, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', ?, ?)
+            """,
+            (
+                graph.graph_id,
+                work_order.root_work_order_id,
+                graph.planner_ref,
+                NOW,
+                NOW,
+            ),
+        )
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    repository = WorkspaceRepository(db_path)
+    allocator = WorkspaceAllocator(
+        repository=repository,
+        managed_roots={
+            "internal-worktrees": ManagedWorkspaceRoot(
+                root_ref="internal-worktrees",
+                path=managed,
+                isolation_modes=frozenset({"DIRECTORY_FENCE"}),
+            )
+        },
+        git_sources={
+            "internal-source": ManagedGitSource(
+                source_key="internal-source",
+                source_ref_prefix="git-worktree://internal-source",
+                repository=source.resolve(),
+            )
+        },
+    )
+    runtime_owner = "internal-durable-worker"
+    workspace_runtime = DurableWorkspaceRuntime(
+        repository=repository,
+        allocator=allocator,
+        runtime_owner_id=runtime_owner,
+        managed_root_ref="internal-worktrees",
+        git_source_key="internal-source",
+        lease_ms=30_000,
+        heartbeat_interval_ms=1_000,
+        token_secret=b"i" * 48,
+    )
+
+    class _CanonicalAgentExecutor:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+            assert candidate.work_order_id == work_order.work_order_id
+            assert workspace == (managed / workspace_id).resolve()
+            assert cancelled is not None and cancelled() is False
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=candidate.work_order_id,
+                summary="durable workspace authority accepted",
+                result_text="durable workspace authority accepted",
+                verification={"status": "PASS"},
+                acceptance={"decision": "ACCEPT"},
+                review_required=False,
+            )
+
+    monkeypatch.setattr(
+        agent_runtime_executor_module,
+        "AgentExecutor",
+        _CanonicalAgentExecutor,
+    )
+    proposal_executor = InternalAgentProposalExecutor(
+        command_repository=type(
+            "CommandReader",
+            (),
+            {
+                "get": lambda self, command_id: (
+                    {
+                        "command": command,
+                        "work_order": work_order,
+                        "graph": graph,
+                        "assignment": assignment,
+                    }
+                    if command_id == command.command_id
+                    else None
+                )
+            },
+        )(),
+        executor=AgentRuntimeExecutor(
+            artifact_store=AgentArtifactStore(tmp_path / "agent-runs"),
+            workspace_runtime=workspace_runtime,
+            model_attempt_service=object(),
+            prompt_registry=object(),
+        ),
+    )
+    frozen = FrozenNodeInput(
+        command_id=command.command_id,
+        request_id=command.request_id,
+        session_id=command.session_id,
+        principal_id=command.principal_id,
+        work_order_id=work_order.work_order_id,
+        root_work_order_id=work_order.root_work_order_id or work_order.work_order_id,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        node_id=node.node_id,
+        attempt_id="attempt-internal-durable-workspace",
+        lease_id="lease-internal-durable-workspace",
+        lease_owner_id=runtime_owner,
+        fencing_token=7,
+        node_risk_level=node.risk_level,
+        route="delegate",
+        target_id="agent_runtime",
+        objective=work_order.objective,
+        input_refs=tuple(work_order.input_refs),
+        _input_pack_json=json.dumps(work_order.input_pack),
+        _input_artifacts_json="[]",
+        node_grant_ref="node-grant://internal/durable-workspace",
+        parent_grant_ref="governor-grant://internal/durable-workspace",
+        business_scope=command.business_scope,
+        operation_fingerprint=command.operation_fingerprint,
+    )
+
+    events = [event async for event in proposal_executor.execute_stream(frozen)]
+
+    assert events[-1]["decision"] == "APPROVE"
+    authority = repository.get(workspace_id)
+    assert authority.graph_id == graph.graph_id
+    assert authority.root_work_order_id == work_order.root_work_order_id
+    assert authority.owner_principal_id == command.principal_id
+    assert authority.lease_fencing_token == 1
+
+
+@pytest.mark.asyncio
 async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path: Path) -> None:
     db_path = tmp_path / "internal-runtime.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -244,11 +562,35 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             review_continuation_store=ReviewContinuationStore(db_path),
             command_repository=HostCommandRepository(db_path),
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
+            worker_projection_store=WorkerProjectionStore(db_path),
         )
         result_repository = AgentExecutionResultRepository(db_path)
         calls: list[str] = []
         executor = _Executor(calls)
+        def _assert_result_not_published(order: AgentWorkOrder) -> None:
+            with sqlite3.connect(str(db_path)) as conn:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM agent_execution_result "
+                    "WHERE work_order_id = ?",
+                    (order.work_order_id,),
+                ).fetchone()[0]
+            assert count == 0
+
+        executor.before_return = _assert_result_not_published
         token_service = TokenService(approval_ttl_ms=180_000)
+        runtime_context = _RuntimeContextAuthority(principal_id=principal_id)
+        preview_authority = _ExactPreviewAuthority()
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=infrastructure.command_repository,
+            projection_store=infrastructure.worker_projection_store,
+            result_repository=result_repository,
+        )
+        acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
+            task_store=task_store,
+            handlers={"internal.agent.result_commit": accepted_result},
+            owner_id="internal-integration-acceptance-effect-owner",
+            action_preview_service=preview_authority,
+        )
         runtime = build_governed_internal_runtime(
             task_runtime_container=infrastructure,
             ledger=ledger,
@@ -257,6 +599,9 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="internal-owner",
             canonical_executor=executor,
+            runtime_context_application=runtime_context,
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         )
         await runtime.activate()
         intent_engine = _IntentEngine(ledger, token_service)
@@ -306,6 +651,7 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
         assert first["execution_receipt"]["status"] == "ACCEPTED"
         assert first["execution_receipt"]["verification_status"] == "PASS"
         assert first["execution_receipt"]["accepted"] is True
+        assert first["internal_agent_effect_status"] == "COMMITTED"
         assert first["result"]["result_text"] == "durable internal result"
         assert replay["replayed"] is True
         assert replay["result"]["result_text"] == "durable internal result"
@@ -372,7 +718,10 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
                 """,
                 (claim_ref,),
             ).fetchone()
-        assert completed == (request_id, first["execution_receipt"]["receipt_ref"])
+        assert completed == (
+            request_id,
+            first["internal_agent_result_receipt_ref"],
+        )
 
         review_request_id = "request-internal-runtime-review"
         review_body_sha256 = _sha256("internal-review-request-body")
@@ -408,12 +757,12 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             },
         )
         review_receipt = review_terminal["execution_receipt"]
-        assert review_receipt["status"] == "WAITING_ACCEPTANCE_REVIEW"
-        assert review_receipt["verification_status"] == "PASS"
+        assert review_terminal["decision"] == "REJECT"
+        assert review_receipt["status"] == "VERIFICATION_FAILED"
+        assert review_receipt["verification_status"] == "FAIL"
         assert review_receipt["accepted"] is False
-        assert review_receipt["projection"]["review"]["resume_phase"] == (
-            "POST_EXECUTION_ACCEPTANCE"
-        )
+        assert review_receipt["reason_code"] == "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"
+        assert "review" not in review_receipt["projection"]
         review_command = HostCommandRepository(db_path).get(
             review_receipt["command_id"]
         )
@@ -423,13 +772,9 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             review_command["command"].graph_revision,
             review_command["work_order"].task_node_id,
         )
-        assert review_node["status"] == "WAITING_ACCEPTANCE_REVIEW"
+        assert review_node["status"] == "VERIFICATION_FAILED"
         open_reviews = review_store.list_open_reviews(limit=10)
-        assert len(open_reviews) == 1
-        assert (
-            open_reviews[0]["review"]["review_type"]
-            == "POST_EXECUTION_ACCEPTANCE"
-        )
+        assert open_reviews == []
         assert calls == [
             "work-order-internal-runtime",
             "work-order-internal-runtime-review",
@@ -483,10 +828,7 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             row["review"]["review_type"]
             for row in review_store.list_open_reviews(limit=10)
         }
-        assert open_review_types == {
-            "PRE_EXECUTION_APPROVAL",
-            "POST_EXECUTION_ACCEPTANCE",
-        }
+        assert open_review_types == {"PRE_EXECUTION_APPROVAL"}
         with sqlite3.connect(str(db_path)) as conn:
             pre_claim_result = conn.execute(
                 "SELECT result_ref FROM secure_ingress_idempotency_claim "
@@ -543,9 +885,23 @@ async def test_write_agent_finish_cannot_create_durable_acceptance(
                 task_store,
                 RuntimeEventStore(db_path),
             ),
+            worker_projection_store=WorkerProjectionStore(db_path),
         )
         result_repository = AgentExecutionResultRepository(db_path)
         token_service = TokenService(approval_ttl_ms=180_000)
+        runtime_context = _RuntimeContextAuthority(principal_id=principal_id)
+        preview_authority = _ExactPreviewAuthority()
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=infrastructure.command_repository,
+            projection_store=infrastructure.worker_projection_store,
+            result_repository=result_repository,
+        )
+        acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
+            task_store=task_store,
+            handlers={"internal.agent.result_commit": accepted_result},
+            owner_id="internal-write-acceptance-effect-owner",
+            action_preview_service=preview_authority,
+        )
         runtime = build_governed_internal_runtime(
             task_runtime_container=infrastructure,
             ledger=ledger,
@@ -558,6 +914,9 @@ async def test_write_agent_finish_cannot_create_durable_acceptance(
                 model_attempt_service=attempt_service,
                 prompt_registry=build_live_production_prompt_registry(),
             ),
+            runtime_context_application=runtime_context,
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         )
         await runtime.activate()
         service = InternalAgentCommandService(
@@ -590,13 +949,22 @@ async def test_write_agent_finish_cannot_create_durable_acceptance(
         receipt = terminal["execution_receipt"]
         assert receipt["accepted"] is False
         assert receipt["verification_status"] != "PASS"
+        # A rejected proposal never becomes canonical Agent result authority.
         durable_result = result_repository.get_by_command(receipt["command_id"])
-        assert durable_result is not None
-        assert durable_result["result_status"] == "BLOCKED"
-        assert durable_result["result"]["reason_code"] == (
-            AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
-        )
-        assert durable_result["result"]["acceptance"]["decision"] == "NOT_RUN"
+        assert durable_result is None
+        worker_rows = infrastructure.worker_projection_store
+        with sqlite3.connect(str(db_path)) as conn:
+            proposed = conn.execute(
+                "SELECT projection_json FROM task_runtime_worker_projection "
+                "WHERE command_id = ?",
+                (receipt["command_id"],),
+            ).fetchone()
+        assert proposed is not None
+        projection = json.loads(str(proposed[0]))
+        result_proposal = projection["acceptance_effect_intents"][0]["payload"]["result"]
+        assert result_proposal["status"] == "BLOCKED"
+        assert result_proposal["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+        assert result_proposal["acceptance"]["decision"] == "NOT_RUN"
         assert attempt_service.calls == 0
 
         command = HostCommandRepository(db_path).get(receipt["command_id"])

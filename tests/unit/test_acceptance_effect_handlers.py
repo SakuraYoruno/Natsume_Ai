@@ -277,8 +277,10 @@ def test_sys_mode_acceptance_handler_propagates_authoritatively_absent_failure()
         {"success": False, "error": "MODE_TRANSITION_CONFLICT"}
     )
 
-    with pytest.raises(RuntimeError, match="MODE_TRANSITION_CONFLICT"):
+    with pytest.raises(RuntimeError) as rejected:
         _handler(service)(_payload())
+    assert "MODE_TRANSITION_CONFLICT" not in str(rejected.value)
+    assert "SYS_MODE_TRANSITION_NOT_COMMITTED" in str(rejected.value)
 
     assert len(service.calls) == 1
 
@@ -328,7 +330,8 @@ def test_sys_mode_acceptance_handler_reclaimed_reconcile_never_switches_again() 
 
     assert unknown.value.reason_code == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
     assert _EVENT_ID in unknown.value.detail
-    assert "HardState reader temporarily unavailable" in unknown.value.detail
+    assert "HardState reader temporarily unavailable" not in unknown.value.detail
+    assert "OSError[incident:" in unknown.value.detail
     assert len(service.calls) == 1
     assert len(service.reopen_calls) == 1
 

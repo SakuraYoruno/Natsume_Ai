@@ -8,6 +8,7 @@ from copy import deepcopy
 import inspect
 import logging
 import re
+import secrets
 from typing import Any
 
 from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
@@ -27,8 +28,16 @@ _SCHEDULER_OPERATION_EFFECT_TYPE = "scheduler.operation.execute"
 _SCHEDULER_DERIVED_CONTEXT_SCHEMA = (
     "Natsume.scheduler.action_preview_context.v2"
 )
+_INTERNAL_RESULT_COMMIT_EFFECT_TYPE = "internal.agent.result_commit"
+_INTERNAL_DERIVED_CONTEXT_SCHEMA = (
+    "Natsume.internal.action_preview_context.v2"
+)
+_NODE_RISK_EFFECT_TYPES = frozenset(
+    {_SCHEDULER_OPERATION_EFFECT_TYPE, _INTERNAL_RESULT_COMMIT_EFFECT_TYPE}
+)
 
 AcceptanceEffectHandler = Callable[[Mapping[str, Any]], Mapping[str, Any] | str | Awaitable[Any]]
+AcceptanceEffectRecoveryObserver = Callable[[Mapping[str, Any]], Any]
 
 
 _EFFECT_TYPE_ORDER = {
@@ -36,6 +45,7 @@ _EFFECT_TYPE_ORDER = {
     "conversation.user_turn": 1,
     "life.foreground_completed": 2,
     "surface.reply_delivery": 3,
+    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 4,
 }
 
 _RECOVERY_POLL_SECONDS = 0.25
@@ -142,11 +152,11 @@ class AcceptanceEffectDispatcher:
             handler_payload, preview = self._require_action_preview(effect)
             if preview is not None:
                 terminal_boundary = dict(preview["_terminal_execution_boundary"])
-                if effect_type == _SCHEDULER_OPERATION_EFFECT_TYPE:
+                if effect_type in _NODE_RISK_EFFECT_TYPES:
                     if _contains_reserved_preview_context(handler_payload):
                         raise AcceptanceEffectDispatchError(
                             "ACTION_PREVIEW_INVALID",
-                            "Scheduler Acceptance Effect payload collides with private Preview context",
+                            "operation Acceptance Effect payload collides with private Preview context",
                         )
                     receipt = preview.get("receipt")
                     if (
@@ -156,13 +166,17 @@ class AcceptanceEffectDispatcher:
                     ):
                         raise AcceptanceEffectDispatchError(
                             "ACTION_PREVIEW_INVALID",
-                            "Scheduler Acceptance Effect has no exact origin receipt",
+                            "operation Acceptance Effect has no exact origin receipt",
                         )
                     # This live claim context exists only inside the current
                     # handler invocation.  Persisting it would turn a short
                     # fence into replayable authority after COMMIT/expiry.
                     handler_payload["_action_preview_context"] = {
-                        "schema_version": _SCHEDULER_DERIVED_CONTEXT_SCHEMA,
+                        "schema_version": (
+                            _SCHEDULER_DERIVED_CONTEXT_SCHEMA
+                            if effect_type == _SCHEDULER_OPERATION_EFFECT_TYPE
+                            else _INTERNAL_DERIVED_CONTEXT_SCHEMA
+                        ),
                         "origin_authority_kind": "ACCEPTANCE_EFFECT",
                         "origin_event_id": str(preview["event_id"]),
                         "origin_receipt_ref": str(preview["receipt_ref"]),
@@ -208,17 +222,23 @@ class AcceptanceEffectDispatcher:
             # marker and retry only through the immutable effect identity.
             return self._reschedule_reconciliation(
                 effect,
-                detail=exc.detail,
+                detail=_opaque_dispatch_failure(exc),
             )
         except AcceptanceEffectDispatchError as exc:
             return self._fail(
                 effect,
-                reason_code=exc.reason_code,
-                detail=exc.detail,
+                reason_code=_safe_reason_code(
+                    exc.reason_code,
+                    fallback=ACCEPTANCE_EFFECT_HANDLER_FAILED,
+                ),
+                detail=_opaque_dispatch_failure(exc),
             )
         except Exception as exc:
-            reason = getattr(exc, "reason_code", None) or ACCEPTANCE_EFFECT_HANDLER_FAILED
-            detail = f"{type(exc).__name__}: {str(exc)[:1800]}"
+            reason = _safe_reason_code(
+                getattr(exc, "reason_code", None),
+                fallback=ACCEPTANCE_EFFECT_HANDLER_FAILED,
+            )
+            detail = _opaque_dispatch_failure(exc)
             if int(effect.get("attempt_count") or 0) >= self._max_attempts:
                 return self._fail(
                     effect,
@@ -277,12 +297,12 @@ class AcceptanceEffectDispatcher:
             "life.foreground_completed": 2,
             "surface.reply_delivery": 3,
         }.get(effect_type, 5)
-        if effect_type == _SCHEDULER_OPERATION_EFFECT_TYPE:
+        if effect_type in _NODE_RISK_EFFECT_TYPES:
             get_node = getattr(self._store, "get_node", None)
             if not callable(get_node):
                 raise AcceptanceEffectDispatchError(
                     "ACTION_PREVIEW_INVALID",
-                    "Scheduler Acceptance Effect cannot reopen canonical TaskNode risk",
+                    "operation Acceptance Effect cannot reopen canonical TaskNode risk",
                 )
             node = get_node(
                 str(effect.get("graph_id") or ""),
@@ -300,7 +320,7 @@ class AcceptanceEffectDispatcher:
             if not 1 <= int(risk_level) <= 5:
                 raise AcceptanceEffectDispatchError(
                     "ACTION_PREVIEW_INVALID",
-                    "Scheduler Acceptance Effect TaskNode risk is invalid",
+                    "operation Acceptance Effect TaskNode risk is invalid",
                 )
         try:
             kwargs = {
@@ -349,8 +369,12 @@ class AcceptanceEffectDispatcher:
             raise
         except Exception as exc:
             raise AcceptanceEffectDispatchError(
-                str(getattr(exc, "reason_code", None) or "ACTION_PREVIEW_INVALID"),
-                str(getattr(exc, "detail", None) or "Acceptance Effect preview failed"),
+                _safe_reason_code(
+                    getattr(exc, "reason_code", None),
+                    fallback="ACTION_PREVIEW_INVALID",
+                ),
+                "Acceptance Effect preview failed; "
+                + _opaque_dispatch_failure(exc),
             ) from exc
         preview = dict(issued)
         preview["_terminal_execution_boundary"] = execution_boundary
@@ -558,6 +582,7 @@ class AcceptanceEffectRuntime:
         poll_seconds: float = _RECOVERY_POLL_SECONDS,
         startup_limit: int = 1_000,
         recovery_limit: int = 100,
+        recovery_observer: AcceptanceEffectRecoveryObserver | None = None,
     ) -> None:
         if not isinstance(dispatcher, AcceptanceEffectDispatcher):
             raise TypeError("dispatcher must be AcceptanceEffectDispatcher")
@@ -565,6 +590,12 @@ class AcceptanceEffectRuntime:
         self._poll_seconds = max(0.01, float(poll_seconds))
         self._startup_limit = min(1_000, max(1, int(startup_limit)))
         self._recovery_limit = min(1_000, max(1, int(recovery_limit)))
+        if recovery_observer is not None and not callable(recovery_observer):
+            raise TypeError("recovery_observer must be callable")
+        self._recovery_observer = recovery_observer
+        self._recovery_failure_active = False
+        self._recovery_failure_observed = False
+        self._pending_failure_observation: dict[str, Any] | None = None
         self._stop = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._lifecycle_lock = asyncio.Lock()
@@ -584,14 +615,26 @@ class AcceptanceEffectRuntime:
                 return
             # Startup recovery is completed before any governed surface can
             # accept a new command.
-            await self._dispatcher.drain_ready(limit=self._startup_limit)
-            remaining = self._dispatcher.list_recovery_pending(limit=1)
+            try:
+                await self._dispatcher.drain_ready(limit=self._startup_limit)
+                remaining = self._dispatcher.list_recovery_pending(limit=1)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await self._record_recovery_failure(exc)
+                raise
             if remaining:
                 effect_id = str(remaining[0].get("effect_id") or "<unknown>")
-                raise AcceptanceEffectDispatchError(
+                pending = AcceptanceEffectDispatchError(
                     ACCEPTANCE_EFFECT_RECOVERY_PENDING,
                     f"durable Acceptance Effect still requires recovery: {effect_id}",
                 )
+                await self._record_recovery_failure(pending)
+                raise pending
+            # A previous process may have recorded a durable recovery breach.
+            # The production observer resolves it only after this process has
+            # completed a real startup recovery pass.
+            await self._record_recovery_success(force=True)
             self._stop.clear()
             self._task = asyncio.create_task(
                 self._run(),
@@ -623,15 +666,96 @@ class AcceptanceEffectRuntime:
             except TimeoutError:
                 pass
             try:
+                await self._flush_pending_failure_observation()
                 await self._dispatcher.drain_ready(limit=self._recovery_limit)
+                await self._record_recovery_success()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 # Durable rows and leases remain the source of truth.  A
                 # transient store/transport failure must not kill recovery,
                 # but it must be observable rather than silently swallowed.
-                logger.exception("ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED")
+                logger.error(
+                    "ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED error_type=%s",
+                    f"{type(exc).__module__}.{type(exc).__qualname__}",
+                )
+                await self._record_recovery_failure(exc)
                 continue
+
+    async def _record_recovery_failure(self, exc: BaseException) -> None:
+        error_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
+        self._recovery_failure_active = True
+        # One active failure owns one durable Guardian breach.  Repeated poll
+        # failures must not grow the journal, and an observer outage must not
+        # replace the still-pending observation with another identity.
+        if self._pending_failure_observation is not None:
+            await self._flush_pending_failure_observation()
+            return
+        if self._recovery_failure_active and getattr(
+            self, "_recovery_failure_observed", False
+        ):
+            return
+        observation = {
+            "schema": "natsume.acceptance_effect.recovery_observation.v1",
+            "status": "FAILED",
+            "reason_code": "ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED",
+            "error_type": error_type,
+            # This is an unguessable event identity, not a digest of exception
+            # text.  Low-entropy passwords, paths and provider payloads cannot
+            # be recovered by testing candidate hashes against the journal.
+            "error_digest": f"sha256:{secrets.token_hex(32)}",
+        }
+        self._pending_failure_observation = observation
+        await self._flush_pending_failure_observation()
+
+    async def _flush_pending_failure_observation(self) -> None:
+        observation = self._pending_failure_observation
+        if observation is None:
+            return
+        if await self._notify_recovery_observer(observation):
+            if self._pending_failure_observation is observation:
+                self._pending_failure_observation = None
+                self._recovery_failure_observed = True
+
+    async def _record_recovery_success(self, *, force: bool = False) -> None:
+        if not force and not self._recovery_failure_active:
+            return
+        if self._pending_failure_observation is not None:
+            return
+        observation = {
+            "schema": "natsume.acceptance_effect.recovery_observation.v1",
+            "status": "RECOVERED",
+            "reason_code": "ACCEPTANCE_EFFECT_RECOVERY_PASS_RECOVERED",
+        }
+        if await self._notify_recovery_observer(observation):
+            self._recovery_failure_active = False
+            self._recovery_failure_observed = False
+        else:
+            # Keep retrying the recovery projection on later successful
+            # passes.  This is especially important after restart, where the
+            # breach may exist only in the durable Guardian journal.
+            self._recovery_failure_active = True
+
+    async def _notify_recovery_observer(
+        self,
+        observation: Mapping[str, Any],
+    ) -> bool:
+        observer = self._recovery_observer
+        if observer is None:
+            return True
+        try:
+            result = observer(deepcopy(dict(observation)))
+            if inspect.isawaitable(result):
+                await result
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "ACCEPTANCE_EFFECT_RECOVERY_OBSERVER_FAILED error_type=%s",
+                f"{type(exc).__module__}.{type(exc).__qualname__}",
+            )
+            return False
 
 
 def _receipt_ref(value: Any) -> str:
@@ -652,6 +776,25 @@ def _receipt_ref(value: Any) -> str:
             "effect handler returned a non-durable receipt reference",
         )
     return receipt
+
+
+def _opaque_dispatch_failure(exc: BaseException) -> str:
+    """Return a durable-safe incident identity without exception text.
+
+    Provider responses, filesystem paths and credentials routinely appear in
+    exception messages.  The durable effect row needs a correlation identity,
+    not the raw diagnostic payload or a guessable hash of it.
+    """
+
+    error_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
+    return f"error_type={error_type} incident=sha256:{secrets.token_hex(32)}"
+
+
+def _safe_reason_code(value: Any, *, fallback: str) -> str:
+    candidate = str(value or "").strip().upper()
+    if re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", candidate):
+        return candidate
+    return str(fallback)
 
 
 def _contains_reserved_preview_context(value: Any) -> bool:
@@ -706,5 +849,6 @@ __all__ = [
     "AcceptanceEffectDispatchError",
     "AcceptanceEffectDispatcher",
     "AcceptanceEffectOutcomeUnknown",
+    "AcceptanceEffectRecoveryObserver",
     "AcceptanceEffectRuntime",
 ]

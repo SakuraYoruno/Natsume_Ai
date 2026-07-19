@@ -293,6 +293,7 @@ def build_process_scheduler_container(
             definition_repository=definitions,
             command_ingress=ingress,
             command_service=service,
+            owner_id=owner_id,
             now_ms=clock_now,
             poll_interval_s=float(clock_poll_interval_seconds),
             limit=int(clock_batch_limit),

@@ -437,7 +437,9 @@ async def test_handler_exception_fails_closed_before_life_and_delivery(
     assert len(results) == 1
     assert results[0]["status"] == AcceptanceEffectStatus.FAILED.value
     assert results[0]["reason_code"] == ACCEPTANCE_EFFECT_HANDLER_FAILED
-    assert "conversation persistence unavailable" in results[0]["last_error"]
+    assert "conversation persistence unavailable" not in results[0]["last_error"]
+    assert "error_type=builtins.RuntimeError" in results[0]["last_error"]
+    assert "incident=sha256:" in results[0]["last_error"]
     assert store.get_acceptance_effect_intent(
         str(effects["life.foreground_completed"]["effect_id"])
     )["status"] == AcceptanceEffectStatus.PENDING.value
@@ -796,7 +798,11 @@ async def test_handler_without_explicit_durable_receipt_fails_closed(
     assert failed["status"] == AcceptanceEffectStatus.FAILED.value
     assert failed["reason_code"] == ACCEPTANCE_EFFECT_HANDLER_FAILED
     assert failed["receipt_ref"] is None
-    assert "authoritative durable receipt_ref" in failed["last_error"]
+    assert failed["last_error"].startswith(
+        "error_type=host_brain.task_runtime.acceptance_effect_dispatcher."
+        "AcceptanceEffectDispatchError incident=sha256:"
+    )
+    assert "authoritative durable receipt_ref" not in failed["last_error"]
 
 
 @pytest.mark.asyncio

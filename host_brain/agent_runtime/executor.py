@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 import logging
 from pathlib import Path
+import secrets
 from typing import Any
 
 from host_brain.contracts.agent_runtime.acceptance_judge import (
@@ -37,6 +38,11 @@ from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.evolution_lab import validate_evolution_branch
 
 logger = logging.getLogger(__name__)
+
+
+def _opaque_executor_failure(exc: BaseException) -> str:
+    error_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
+    return f"error_type={error_type} incident={secrets.token_hex(24)}"
 
 
 def _collect_git_summary(workspace: Path) -> dict[str, Any]:
@@ -336,7 +342,11 @@ class AgentRuntimeExecutor:
                         ),
                     )
                 except Exception as exc:
-                    logger.warning("Canonical AgentExecutor execution failed: %s", exc)
+                    failure = _opaque_executor_failure(exc)
+                    logger.warning(
+                        "Canonical AgentExecutor execution failed: %s",
+                        failure,
+                    )
                     result = AgentResult(
                         status="FAILED",
                         work_order_id=order.work_order_id,
@@ -346,7 +356,7 @@ class AgentRuntimeExecutor:
                         risk_flags=["agent_error"],
                         review_required=self.review_policy.review_required(order),
                         reason_code="AGENT_ERROR",
-                        detail=str(exc),
+                        detail=failure,
                     )
 
                 if workspace_scope is not None:
@@ -379,7 +389,12 @@ class AgentRuntimeExecutor:
                     work_order_id=order.work_order_id,
                 )
         except DurableWorkspaceRuntimeError as exc:
-            logger.error("Durable workspace lease lost for %s: %s", order.work_order_id, exc)
+            failure = _opaque_executor_failure(exc)
+            logger.error(
+                "Durable workspace lease lost for %s: %s",
+                order.work_order_id,
+                failure,
+            )
             result = AgentResult(
                 status="FAILED",
                 work_order_id=order.work_order_id,
@@ -389,7 +404,7 @@ class AgentRuntimeExecutor:
                 risk_flags=["workspace_lease_lost"],
                 review_required=True,
                 reason_code=exc.reason_code,
-                detail=exc.detail,
+                detail=f"{exc.reason_code}; {failure}",
             )
             git_summary = {
                 "changed_files": [],

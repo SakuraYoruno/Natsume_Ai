@@ -39,6 +39,7 @@ ACTION_PREVIEW_AUTHORITY_BINDING_SCHEMA = (
 )
 EFFECT_DESCRIPTOR_SCHEMA = "Natsume.action_preview.effect_descriptor.v1"
 SCHEDULER_OPERATION_EFFECT_TYPE = "scheduler.operation.execute"
+INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE = "internal.agent.result_commit"
 _SCENE_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _ACTION_PREVIEW_SCENE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -276,25 +277,32 @@ def _effect_descriptor(
     *,
     scheduler_risk_level: int | None = None,
 ) -> tuple[str, int, str]:
-    if effect_type == SCHEDULER_OPERATION_EFFECT_TYPE:
+    if effect_type in {
+        SCHEDULER_OPERATION_EFFECT_TYPE,
+        INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE,
+    }:
         if scheduler_risk_level is None:
             raise ActionPreviewAuthorityError(
                 ACTION_PREVIEW_BLOCKED,
-                "Scheduler Acceptance Effect has no canonical TaskNode risk",
+                "operation Acceptance Effect has no canonical TaskNode risk",
             )
         risk = _integer(
             scheduler_risk_level,
-            "Scheduler TaskNode.risk_level",
+            "operation TaskNode.risk_level",
         )
         if risk > 5:
             raise ActionPreviewAuthorityError(
                 ACTION_PREVIEW_INVALID,
-                "Scheduler TaskNode.risk_level is outside [1, 5]",
+                "operation TaskNode.risk_level is outside [1, 5]",
             )
         return (
             f"acceptance-effect.{effect_type}",
             risk,
-            "acceptance_effect_scheduler_operation_execute",
+            (
+                "acceptance_effect_scheduler_operation_execute"
+                if effect_type == SCHEDULER_OPERATION_EFFECT_TYPE
+                else "acceptance_effect_internal_agent_result_commit"
+            ),
         )
     risk = {
         "conversation.user_turn": 1,
@@ -860,6 +868,36 @@ class ProductionActionPreviewAuthorityResolver:
             # scheduler_production and every other Scheduler target receive no
             # derived authority.
             descriptors = _scheduler_effect_descriptors(target)
+        elif effect_type == INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE:
+            command_surface = str(
+                getattr(getattr(command, "surface", ""), "value", None)
+                or getattr(command, "surface", "")
+            ).strip().lower()
+            command_route = str(
+                getattr(command, "route_type", "") or ""
+            ).strip().lower()
+            command_target = str(
+                getattr(command, "target_id", "") or ""
+            ).strip()
+            if (
+                command_surface != "internal"
+                or route != "delegate"
+                or command_route != "delegate"
+                or target != "agent_runtime"
+                or command_target != "agent_runtime"
+            ):
+                raise ActionPreviewAuthorityError(
+                    ACTION_PREVIEW_BLOCKED,
+                    "Internal Agent result commit is outside its canonical route",
+                )
+            node_payload = _mapping(node.get("node"), "TaskNode")
+            action, canonical_risk, capability = _effect_descriptor(
+                effect_type,
+                scheduler_risk_level=_integer(
+                    node_payload.get("risk_level"),
+                    "TaskNode.risk_level",
+                ),
+            )
         else:
             action, canonical_risk, capability = _effect_descriptor(effect_type)
         if (
@@ -960,6 +998,13 @@ class ProductionActionPreviewAuthorityResolver:
                     "effect_descriptors_digest": _digest(
                         [dict(item) for item in descriptors]
                     ),
+                }
+            )
+        elif effect_type == INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE:
+            binding.update(
+                {
+                    "internal_route": route,
+                    "internal_target": target,
                 }
             )
         return ResolvedActionPreviewAuthority(
@@ -1250,6 +1295,7 @@ __all__ = [
     "ACTION_PREVIEW_AUTHORITY_BINDING_SCHEMA",
     "DERIVED_EFFECT_AUTHORITY_SCHEMA",
     "EFFECT_DESCRIPTOR_SCHEMA",
+    "INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE",
     "NODE_AUTHORITY_SCHEMA",
     "SCHEDULER_OPERATION_EFFECT_TYPE",
     "ProductionActionPreviewAuthorityResolver",

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from host_brain.app import acceptance_effect_handlers
+from host_brain.task_runtime.acceptance_effect_dispatcher import _receipt_ref
 from host_brain.app.observability_runtime.domain_command_ports import (
     BLOCKED_OPERATOR_COMMAND_IDS,
     _DomainCommandPort,
@@ -423,29 +424,64 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
 
     async def _submit_gateway_reply(**kwargs):
         submitted.append(dict(kwargs))
-        return {"success": True, "status": "ACCEPTED", "latency_ms": 2}
+        surface_value = {
+            "request_id": kwargs["request_id"],
+            "reply_channel": kwargs["platform"],
+            "reply_target": kwargs["conversation_id"],
+            "narrative": kwargs["content"],
+        }
+        return {
+            "success": True,
+            "status": "ACCEPTED",
+            "event": {
+                "outbox_id": "gateway-outbox-accepted-handler",
+                "delivery_id": acceptance_effect_handlers._surface_delivery_id(
+                    surface_value
+                ),
+                "platform": kwargs["platform"],
+                "conversation_id": kwargs["conversation_id"],
+                "payload_digest": (
+                    acceptance_effect_handlers._surface_gateway_payload_digest(
+                        surface_value
+                    )
+                ),
+            },
+            "latency_ms": 2,
+        }
 
     monkeypatch.setattr(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         _submit_gateway_reply,
     )
     result = await acceptance_effect_handlers._deliver_accepted_surface_reply(
-        {
-            "request_id": "request-accepted-handler",
-            "decision": "APPROVE",
+            {
+                "request_id": "request-accepted-handler",
+                "session_id": "session-accepted-handler",
+                "person_id": "person-accepted-handler",
+                "decision": "APPROVE",
             "reply_channel": "qq",
             "reply_target": "conversation-accepted-handler",
             "narrative": "immutable accepted narrative",
-            "authority": {"opaque": "must-not-be-forwarded"},
+                "authority": {
+                    "request_id": "request-accepted-handler",
+                    "opaque": "must-not-be-forwarded",
+                },
             "_action_preview_terminal_proof": {
-                "service": object(),
+                "service": SimpleNamespace(
+                    require_execution=lambda **_kwargs: object()
+                ),
                 "event_id": "runtime-event://accepted-handler",
                 "boundary": {"exact": True},
             },
         }
     )
     assert result["status"] == "ACCEPTED"
-    assert result["receipt_ref"].startswith("surface-reply-delivery://sha256/")
+    assert (
+        result["receipt_ref"]
+        == "gateway-outbox://id/gateway-outbox-accepted-handler"
+    )
+    assert result["outbox_id"] == "gateway-outbox-accepted-handler"
+    assert _receipt_ref(result) == result["receipt_ref"]
     assert len(submitted) == 1
     assert submitted[0]["platform"] == "qq"
     assert submitted[0]["conversation_id"] == "conversation-accepted-handler"

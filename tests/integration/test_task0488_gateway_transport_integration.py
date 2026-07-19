@@ -315,6 +315,12 @@ def test_task0488_gateway_raw_verify_durable_restart_and_reply_wave(
             assert first_reply.json()["status"] == "sent"
             outbox_id = first_reply.json()["outbox_id"]
             first_outbox = restarted_store.get_outbox(outbox_id=outbox_id)
+            assert first_reply.json()["delivery_id"] == (
+                "task0488-business-reply-1-primary"
+            )
+            assert first_reply.json()["platform"] == "qq"
+            assert first_reply.json()["conversation_id"] == "qq_dm_480100"
+            assert first_reply.json()["payload_digest"] == first_outbox["payload_sha256"]
             assert first_outbox["status"] == "ACKED"
             assert first_outbox["attempt_count"] == 1
             assert len(adapter.sent) == 1

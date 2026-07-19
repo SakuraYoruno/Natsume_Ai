@@ -354,11 +354,10 @@ def test_sys_mode_negative_response_recovers_one_real_sqlite_commit_after_restar
             reason=reason,
         )
 
-        with pytest.raises(
-            AcceptanceEffectOutcomeUnknown,
-            match="SQLite history temporarily unavailable",
-        ):
+        with pytest.raises(AcceptanceEffectOutcomeUnknown) as unknown:
             handler(payload)
+        assert "SQLite history temporarily unavailable" not in unknown.value.detail
+        assert "OSError[incident:" in unknown.value.detail
         assert service_results[0]["success"] is False
         assert "response lost after SQLite commit" in service_results[0]["error"]
         assert owner.get_hard_state().sys_mode == "focus"

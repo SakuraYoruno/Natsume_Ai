@@ -161,7 +161,8 @@ class _RejectingIntentEngine:
 
 
 class _NeverExecutesRuntime:
-    def existing_command(self, *, request_id: str):
+    def existing_command(self, *, request_id: str, command_surface=None):
+        del request_id, command_surface
         return None
 
     def health(self) -> dict[str, bool]:
@@ -217,6 +218,18 @@ async def test_governor_reject_is_terminal_recoverable_and_never_reevaluated(
         suffix="governor-reject",
         body_material="governor-reject",
     )
+    due_retry_key = (
+        f"due:scheduler.reject.task:{head['definition_revision']}:{NOW}"
+    )
+    due_claim = definitions.claim_clock_retry(
+        retry_key=due_retry_key,
+        retry_kind="DUE",
+        task_id="scheduler.reject.task",
+        occurrence_id=None,
+        owner_id="governor-reject-clock-owner",
+        at_ms=NOW - 1,
+        lease_duration_ms=120_000,
+    )
     occurrence = definitions.admit_due_occurrence(
         task_id="scheduler.reject.task",
         definition_revision=head["definition_revision"],
@@ -225,6 +238,10 @@ async def test_governor_reject_is_terminal_recoverable_and_never_reevaluated(
         next_scheduled_at_ms=NOW + 60_000,
         payload={"source": "clock"},
         authority=authority,
+        due_retry_key=due_retry_key,
+        lease_owner_id="governor-reject-clock-owner",
+        lease_fencing_token=int(due_claim["lease_fencing_token"]),
+        lease_duration_ms=120_000,
     )
     engine = _RejectingIntentEngine()
     fail_once = _FailFirstCompletion(claim_store)

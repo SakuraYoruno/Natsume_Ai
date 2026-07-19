@@ -17,6 +17,7 @@ from host_brain.runtime.action_preview_authority import (
 from host_brain.runtime.action_preview_resolver import (
     ACCEPTANCE_EFFECT_AUTHORITY_SCHEMA,
     DERIVED_EFFECT_AUTHORITY_SCHEMA,
+    INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE,
     ProductionActionPreviewAuthorityResolver,
     SCHEDULER_OPERATION_EFFECT_TYPE,
 )
@@ -314,6 +315,40 @@ async def test_dispatcher_rejects_durable_private_context_collision() -> None:
     assert result is not None and result["status"] == "FAILED"
     assert result["reason_code"] == "ACTION_PREVIEW_INVALID"
     assert called is False
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_never_persists_preview_exception_detail() -> None:
+    effect = _dispatcher_effect()
+    store = _DispatcherStore(effect)
+    secret = "provider-secret=must-not-enter-effect-ledger"
+
+    class PreviewFailure(RuntimeError):
+        reason_code = secret
+        detail = secret
+
+    class FailingPreviewService(_DispatcherPreviewService):
+        def issue_receipt(self, **_kwargs: Any) -> dict[str, Any]:
+            raise PreviewFailure(secret)
+
+    dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={
+            SCHEDULER_OPERATION_EFFECT_TYPE: lambda _payload: {
+                "receipt_ref": "scheduler-operation://must-not-run"
+            }
+        },
+        owner_id="scheduler-effect-owner",
+        action_preview_service=FailingPreviewService(),
+    )
+    result = await dispatcher.dispatch_effect(effect["effect_id"])
+
+    assert result is not None and result["status"] == "FAILED"
+    assert result["reason_code"] == "ACTION_PREVIEW_INVALID"
+    assert secret not in str(result)
+    assert store.failed is not None
+    assert secret not in str(store.failed)
+    assert "error_type=" in str(store.failed["detail"])
 
 
 @pytest.mark.asyncio
@@ -619,3 +654,36 @@ def test_resolver_allows_only_bound_operator_scheduler_task_trigger(
     with pytest.raises(ActionPreviewAuthorityError) as forged_surface:
         resolver.resolve(**values)
     assert forged_surface.value.reason_code == ACTION_PREVIEW_BLOCKED
+
+
+def test_resolver_allows_only_canonical_internal_result_commit_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver, values, effect, command, work_order = _resolver_harness(monkeypatch)
+    effect["effect_type"] = INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE
+    command.surface = "internal"
+    command.target_id = "agent_runtime"
+    work_order.metadata["planning_lineage"]["node_bindings"][0][
+        "target_id"
+    ] = "agent_runtime"
+    values.update(
+        {
+            "action_kind": "acceptance-effect.internal.agent.result_commit",
+            "guardian_capability_id": (
+                "acceptance_effect_internal_agent_result_commit"
+            ),
+        }
+    )
+
+    origin = resolver.resolve(**values)
+
+    assert origin.authority_kind == "ACCEPTANCE_EFFECT"
+    assert origin.risk_level == 3
+    assert origin.effect_descriptors == ()
+    assert origin.binding["internal_route"] == "delegate"
+    assert origin.binding["internal_target"] == "agent_runtime"
+
+    command.target_id = "legacy_agent_runtime"
+    with pytest.raises(ActionPreviewAuthorityError) as blocked:
+        resolver.resolve(**values)
+    assert blocked.value.reason_code == ACTION_PREVIEW_BLOCKED

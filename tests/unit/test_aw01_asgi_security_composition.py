@@ -744,6 +744,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["cancellation_authority_verifier"] is captured[
             "cancellation_authority_verifier"
         ]
+        assert kwargs["runtime_context_application"] is runtime_context_application
+        assert kwargs["action_preview_service"] is captured[
+            "action_preview_service"
+        ]
+        assert kwargs["acceptance_effect_dispatcher"] is (
+            acceptance_effect_dispatcher
+        )
         events.append("internal-runtime-built")
         return internal_runtime
 
@@ -777,6 +784,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         captured["cancellation_authority_verifier"] = kwargs[
             "cancellation_authority_verifier"
         ]
+        assert callable(kwargs["life_receipt_reader_provider"])
         assert kwargs == {
             "task_runtime_container": task_runtime_container,
             "ledger": ledger,
@@ -793,6 +801,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "secure_ingress_authority_resolver": command_store,
             "runtime_owner_id": "test-canonical-owner::runtime::test-boot",
             "scheduler_operation_handler": scheduler_operation_handler,
+            "life_receipt_reader_provider": kwargs[
+                "life_receipt_reader_provider"
+            ],
         }
         fake_build_acceptance_effect_dispatcher(
             task_store=canonical_task_store,

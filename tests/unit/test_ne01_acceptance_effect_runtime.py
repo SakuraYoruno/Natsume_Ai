@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from typing import Any
 
@@ -161,7 +162,17 @@ async def test_effect_runtime_reports_recovery_pass_failure_without_stopping(
 ) -> None:
     dispatcher = _dispatcher()
     attempted = asyncio.Event()
+    recovered = asyncio.Event()
     pass_no = 0
+    observations: list[dict[str, Any]] = []
+
+    def observe(item: dict[str, Any]) -> None:
+        observations.append(dict(item))
+        if (
+            item.get("status") == "RECOVERED"
+            and any(row.get("status") == "FAILED" for row in observations)
+        ):
+            recovered.set()
 
     async def drain_ready(*, limit: int):
         nonlocal pass_no
@@ -177,6 +188,7 @@ async def test_effect_runtime_reports_recovery_pass_failure_without_stopping(
     runtime = AcceptanceEffectRuntime(
         dispatcher=dispatcher,
         poll_seconds=0.01,
+        recovery_observer=observe,
     )
     caplog.set_level(
         logging.ERROR,
@@ -186,6 +198,7 @@ async def test_effect_runtime_reports_recovery_pass_failure_without_stopping(
     await runtime.activate()
     try:
         await asyncio.wait_for(attempted.wait(), timeout=1.0)
+        await asyncio.wait_for(recovered.wait(), timeout=1.0)
         for _ in range(50):
             if any(
                 record.message == "ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED"
@@ -196,12 +209,140 @@ async def test_effect_runtime_reports_recovery_pass_failure_without_stopping(
         assert runtime.active is True
         assert pass_no >= 2
         assert any(
-            record.message == "ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED"
-            and record.exc_info is not None
+            record.message.startswith("ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED")
+            and record.exc_info is None
             for record in caplog.records
         )
+        failure = next(
+            item for item in observations if item.get("status") == "FAILED"
+        )
+        assert failure["reason_code"] == "ACCEPTANCE_EFFECT_RECOVERY_PASS_FAILED"
+        assert failure["error_type"].endswith("RuntimeError")
+        assert failure["error_digest"].startswith("sha256:")
+        assert "temporary recovery store failure" not in str(failure)
+        assert "temporary recovery store failure" not in caplog.text
+        candidate = hashlib.sha256(
+            b"builtins.RuntimeError\0temporary recovery store failure"
+        ).hexdigest()
+        assert failure["error_digest"] != f"sha256:{candidate}"
+        assert observations[-1]["status"] == "RECOVERED"
     finally:
         await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_effect_runtime_retries_observer_before_resolving_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    dispatcher = _dispatcher()
+    pass_no = 0
+    observer_calls: list[str] = []
+    recovered = asyncio.Event()
+
+    async def drain_ready(*, limit: int):
+        nonlocal pass_no
+        pass_no += 1
+        if pass_no == 1:
+            return ()
+        if pass_no == 2:
+            raise RuntimeError("sensitive provider detail")
+        return ()
+
+    failed_once = False
+
+    def observe(item: dict[str, Any]) -> None:
+        nonlocal failed_once
+        status = str(item["status"])
+        observer_calls.append(status)
+        if status == "FAILED" and not failed_once:
+            failed_once = True
+            raise OSError("guardian temporarily unavailable")
+        if status == "RECOVERED" and "FAILED" in observer_calls:
+            recovered.set()
+
+    dispatcher.drain_ready = drain_ready  # type: ignore[method-assign]
+    runtime = AcceptanceEffectRuntime(
+        dispatcher=dispatcher,
+        poll_seconds=0.01,
+        recovery_observer=observe,
+    )
+    caplog.set_level(logging.ERROR, logger="Natsume.acceptance_effect_recovery")
+
+    await runtime.activate()
+    try:
+        await asyncio.wait_for(recovered.wait(), timeout=1.0)
+        assert observer_calls[-3:] == ["FAILED", "FAILED", "RECOVERED"]
+        assert any(
+            row.message.startswith("ACCEPTANCE_EFFECT_RECOVERY_OBSERVER_FAILED")
+            and row.exc_info is None
+            for row in caplog.records
+        )
+        assert "guardian temporarily unavailable" not in caplog.text
+        assert runtime.active is True
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_effect_runtime_retries_restart_resolution_projection() -> None:
+    dispatcher = _dispatcher()
+    resolution_projected = asyncio.Event()
+    calls = 0
+
+    async def drain_ready(*, limit: int):
+        return ()
+
+    def observe(item: dict[str, Any]) -> None:
+        nonlocal calls
+        if item["status"] != "RECOVERED":
+            return
+        calls += 1
+        if calls == 1:
+            raise OSError("guardian temporarily unavailable")
+        resolution_projected.set()
+
+    dispatcher.drain_ready = drain_ready  # type: ignore[method-assign]
+    runtime = AcceptanceEffectRuntime(
+        dispatcher=dispatcher,
+        poll_seconds=0.01,
+        recovery_observer=observe,
+    )
+
+    await runtime.activate()
+    try:
+        await asyncio.wait_for(resolution_projected.wait(), timeout=1.0)
+        assert calls == 2
+        assert runtime.active is True
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_effect_runtime_observes_startup_pending_query_failure() -> None:
+    dispatcher = _dispatcher()
+    observations: list[dict[str, Any]] = []
+
+    async def drain_ready(*, limit: int):
+        return ()
+
+    def fail_pending_query(*, limit: int):
+        raise OSError("sensitive pending-query detail")
+
+    dispatcher.drain_ready = drain_ready  # type: ignore[method-assign]
+    dispatcher.list_recovery_pending = fail_pending_query  # type: ignore[method-assign]
+    runtime = AcceptanceEffectRuntime(
+        dispatcher=dispatcher,
+        recovery_observer=lambda item: observations.append(dict(item)),
+    )
+
+    with pytest.raises(OSError, match="pending-query"):
+        await runtime.activate()
+
+    assert runtime.active is False
+    assert len(observations) == 1
+    assert observations[0]["status"] == "FAILED"
+    assert observations[0]["error_type"].endswith("OSError")
+    assert "sensitive pending-query detail" not in str(observations[0])
 
 
 @pytest.mark.asyncio
@@ -312,9 +453,11 @@ async def test_effect_runtime_blocks_admission_while_startup_recovery_is_pending
         "fencing_token": 3,
         "created_ts_ms": 10,
     }
+    observations: list[dict[str, Any]] = []
     runtime = AcceptanceEffectRuntime(
         dispatcher=_dispatcher(_EffectStore((row,))),
         poll_seconds=0.01,
+        recovery_observer=lambda item: observations.append(dict(item)),
     )
 
     with pytest.raises(AcceptanceEffectDispatchError) as pending:
@@ -322,3 +465,9 @@ async def test_effect_runtime_blocks_admission_while_startup_recovery_is_pending
 
     assert pending.value.reason_code == ACCEPTANCE_EFFECT_RECOVERY_PENDING
     assert runtime.active is False
+    assert len(observations) == 1
+    assert observations[0]["status"] == "FAILED"
+    assert observations[0]["error_type"].endswith(
+        "AcceptanceEffectDispatchError"
+    )
+    assert "startup-held" not in str(observations[0])

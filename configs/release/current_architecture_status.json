@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "DELIVERY_METADATA_GATE_LOCAL_ONLY_WORKSPACE_0116_LIFECYCLE_FOUNDATION_UNIVERSAL_RUNTIME_SEVEN_ROUTE_GATE_V2_ALL_ROUTES_INCOMPLETE_SCHEDULER_GOVERNED_OCCURRENCE_POST_ACCEPTANCE_HANDLER_CUTOVER_IMMUTABLE_OPERATION_PLAN_CANONICAL_EFFECT_STAGING_SHARED_APP_LOCAL_DISPATCHER_ACTUAL_RESULT_LEDGER_DUPLICATE_NO_RECALL_RESPONSE_LOSS_READ_ONLY_RECONCILIATION_DEFINITION_ADMIN_MUTABLE_BATCH_CLOCK_RETRY_AND_CANARY_STILL_INCOMPLETE_LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_AND_HARD_STATE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_REACT_RUN_SKILL_AND_DISPATCH_SUB_AGENT_DISCOVERY_AND_LOW_LEVEL_BYPASSES_RETIRED_VISUAL_AGENT_DIRECT_HTTP_LOOP_RAW_CLIENT_LEDGER_WRITER_AND_LEGACY_ACTION_PLANNER_MODEL_ENTRY_RETIRED_HARD_STATE_PROCESS_FACADES_SLOT_LOCK_AND_TARGETED_BINDINGS_ZERO_HOST_HARD_STATE_0115_DURABLE_JOURNAL_OWNER_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_LOOKUP_NO_CHANGE_NO_FAKE_EVENT_REPLAY_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_PRODUCTION_WIRED_OPERATOR_2_OF_37_GOVERNED_SYS_MODE_TYPED_TASKGRAPH_REVIEW_CONTINUATION_SINGLE_ACCEPTANCE_EFFECT_OWNER_EXACT_HARD_STATE_REPLAY_OUTER_WAL_TERMINALIZATION_35_BLOCKED_CANARY_NOT_RUN_CURRENT_NAMED_PROCESS_SERVICES_40_MODULES_116_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_46_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_NE01_STILL_INCOMPLETE",
+  "active_wave_detail": "MIGRATION_HEAD_0117_UNIVERSAL_RUNTIME_ALL_SEVEN_ROUTES_INCOMPLETE_SCHEDULER_DUE_TO_OCCURRENCE_ATOMIC_FENCE_AND_HEARTBEAT_WIRED_INTERNAL_CANONICAL_RESULT_POST_ACCEPTANCE_EFFECT_WIRED_CONVERSATION_LIFE_EXACT_RECONCILIATION_SURFACE_RESPONSE_LOSS_UNKNOWN_WITHOUT_AUTHENTICATED_GATEWAY_OUTBOX_READ_PORT_ACCEPTANCE_EFFECT_RECOVERY_GUARDIAN_DURABLE_SLO_OPAQUE_ONLY_LEGACY_INTERNAL_BRIDGE_PRE_ACCEPTANCE_ARTIFACT_COMPLETE_PUBLIC_WORKER_PROJECTION_DEFINITION_ADMIN_MUTABLE_BATCH_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_AND_CANARY_REMAIN_NE01_IN_PROGRESS",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,14 +26,38 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "CONSOLIDATED_TARGETED_BATCH_PASSED_POST_COMMIT_ARTIFACT_REQUIRED_PROGRAM_INCOMPLETE",
+    "status": "CURRENT_BATCH_TARGETED_VALIDATION_IN_PROGRESS_COMMIT_BOUND_CONSOLIDATED_EVIDENCE_PENDING_PROGRAM_INCOMPLETE",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_COMMIT_SHA_PATH_GENERATED_AFTER_COMMIT",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_SCHEDULER_POST_ACCEPTANCE_HANDLER_CUTOVER_ON_OPERATOR_SYS_MODE_AND_EXISTING_AUTHORITY_RETIREMENT_BASELINE",
+    "slice": "NE01_SCHEDULER_DURABLE_OCCURRENCE_FENCE_GENERIC_ACCEPTANCE_EFFECT_RECONCILIATION_AND_INTERNAL_POST_ACCEPTANCE_RESULT",
     "reclaimed_acceptance_effect_policy": "READ_ONLY_RECONCILE_REQUIRED_MISSING_RECONCILER_STAYS_RECONCILIATION_REQUIRED_NO_ORDINARY_HANDLER_REPLAY",
     "scheduler_handler_result_policy": "EXPLICIT_CANONICAL_STATUS_AND_AUTHORITATIVE_DURABLE_RECEIPT_REQUIRED_NO_SYNTHETIC_SUCCESS_OR_RECEIPT",
     "sys_mode_reconciliation": "EXACT_HARD_STATE_REOPEN_ONLY_SWITCH_MODE_NOT_REINVOKED",
-    "recovery_loop_observability": "ERROR_LOGGED_NOT_SILENT_DURABLE_GUARDIAN_EVIDENCE_REMAINS_FOLLOW_UP",
+    "recovery_loop_observability": "APP_LOCAL_RUNTIME_GUARDIAN_DURABLE_SLO_FAILURE_AND_RECOVERY_OPAQUE_INCIDENT_ONLY_NO_EXCEPTION_BODY",
+    "generic_effect_reconciliation": "CONVERSATION_VISIBLE_TURN_AND_MEMORY_EVENT_EXACT_ONLY_PREFERENCE_SIDE_WRITE_EXCEPTION_SWALLOW_AND_NO_RECEIPT_REMAIN_LIFE_PROJECTION_MAY_DEGRADE_SEPARATE_LIFE_EFFECT_EXACT_SURFACE_RESPONSE_LOSS_UNKNOWN_AUTHENTICATED_GATEWAY_READ_PORT_MISSING",
+    "internal_result_boundary": "FROZEN_ATTEMPT_TEN_FIELD_WORKSPACE_AUTHORITY_EXACT_TERMINAL_THREE_GATE_PROPOSAL_BEFORE_ACCEPTANCE_CANONICAL_RESULT_EFFECT_AFTER_ACCEPTANCE_CLAIM_CLOSE_ONLY_AFTER_EXACT_COMMITTED_RESULT_RECEIPT_LEGACY_BRIDGE_AND_PRE_ACCEPTANCE_ARTIFACT_REMAIN",
+    "scheduler_clock_targeted_validation": {
+      "status": "37_TARGETED_SCHEDULER_MIGRATION_AND_COVERAGE_TESTS_SUCCEEDED",
+      "scope": "SCHEDULER_MIGRATION_COVERAGE_PLUS_ATOMIC_DUE_TO_OCCURRENCE_FENCE_HEARTBEAT_ACTUAL_FAILURE_TIME_BACKOFF",
+      "atomic_fence_subset_tests": 19,
+      "atomic_fence_subset_duration_seconds": 47.53,
+      "count_boundary": "THE_19_TEST_ATOMIC_FENCE_SUBSET_IS_INCLUDED_IN_OR_OVERLAPS_THE_37_TEST_SCOPE_DO_NOT_SUM",
+      "py_compile": "SUCCEEDED",
+      "scoped_diff_check": "SUCCEEDED"
+    },
+    "current_affected_combination_validation": {
+      "initial": "203_SUCCEEDED_1_FAILED_TEST_COMPOSITION_MISSING_NEW_CONVERSATION_AND_LIFE_READERS",
+      "corrected_failed_case_rerun": "1_SUCCEEDED_AFTER_PRODUCTION_EQUIVALENT_READER_INJECTION",
+      "count_boundary": "DO_NOT_REPORT_AS_ONE_204_TEST_BATCH",
+      "generic_exact_life_surface_tests": 25,
+      "internal_p0_unit_tests": 10,
+      "internal_real_durable_workspace_integration_tests": 3,
+      "agent_executor_raw_detail_redaction_tests": 1,
+      "dispatcher_opaque_failure_followup_tests": 5,
+      "final_internal_p0_and_security_focused_batch": "19_SUCCEEDED_IN_29_41_SECONDS_INCLUDES_THE_COMPONENT_GROUPS",
+      "followup_count_boundary": "FOCUSED_FOLLOWUPS_MAY_OVERLAP_THE_203_TEST_COMBINATION_AND_MUST_NOT_BE_SUMMED",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY"
+    },
     "test_batches": {
       "structure_and_runtime_context_passed": 59,
       "action_preview_and_embodiment_passed": 43,
@@ -803,13 +827,13 @@
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
         "evaluated_commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
-        "migration_head": "0116_agent_workspace_lifecycle.sql",
+        "migration_head": "0117_scheduler_clock_retry_authority.sql",
         "route_status": "ALL_SEVEN_INCOMPLETE",
         "commit_bound_acceptance": "MISSING_ALL_SEVEN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler governed occurrences now stage an immutable scheduler.operation.execute effect in the canonical Acceptance UoW and invoke the real handler through the shared app-local dispatcher after Acceptance; actual results remain in the existing immutable Scheduler result ledger. Definition/admin direct authority, mutable batch/clock retry, general unknown-effect attribution and current-commit integrated acceptance remain missing. Internal artifacts are not yet atomically committed by Acceptance. Operator has migrated scheduler.task.trigger and sys_mode.switch; the other 35 audited write commands remain blocked, while commit-bound acceptance, wave integration and production canary are still missing. Host candidate-plan generation remains MISSING; approved-plan topology execution is not generic planning search.",
+      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler stages immutable operation effects after Acceptance; migration 0117 atomically transfers a live DUE retry claim to an occurrence-bound owner/fence and execution renews that fence. Definition/admin direct authority, mutable batch freezing, general unknown-effect attribution and current-commit integrated acceptance remain missing. Internal canonical results now write through an Acceptance Effect and ingress closes only after exact COMMITTED result replay, but the legacy executor bridge, pre-Acceptance local artifact and complete public result WorkerProjection remain. Conversation/Life have exact read-only reconciliation; Surface stays UNKNOWN without an authenticated Gateway outbox read port. Operator has migrated two of 37 commands. Wave integration and production canary remain missing; Host candidate-plan generation is still MISSING.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -896,13 +920,15 @@
       ]
     },
     "scheduler_governed_runtime": {
-      "status": "PARTIAL_POST_ACCEPTANCE_HANDLER_CUTOVER",
+      "status": "PARTIAL_POST_ACCEPTANCE_HANDLER_CUTOVER_DURABLE_CLOCK_OCCURRENCE_FENCE",
       "scope": ["clock occurrence", "manual occurrence"],
-      "semantics": "HostCommand + WorkOrderV3 + BudgetPolicy + TaskGraph + child grant + Review + immutable operation plan + Verification/Acceptance and scheduler.operation.execute staging in the canonical TaskStore UoW + shared app-local AcceptanceEffectDispatcher + actual immutable Scheduler result receipt",
+      "semantics": "HostCommand + WorkOrderV3 + BudgetPolicy + TaskGraph + child grant + Review + immutable operation plan + Verification/Acceptance and scheduler.operation.execute staging in the canonical TaskStore UoW + shared app-local AcceptanceEffectDispatcher + actual immutable Scheduler result receipt + 0117 atomic DUE-to-OCCURRENCE retry claim transfer + execution renew/heartbeat + actual-failure-time backoff",
       "side_effect_boundary": "The Task worker never calls the real Scheduler handler. Review-before-resume produces zero calls; a committed Acceptance Effect calls once; duplicate replay returns the immutable operation/result authority without a second call. Expired claims and response loss after handler invocation are read-only reconciliation boundaries and may remain RECOVERY_REQUIRED rather than blind-replaying the effect.",
+      "clock_authority": "admit_due_occurrence validates the live DUE owner/fence, inserts the immutable occurrence, advances the definition head and converts the same retry row into an occurrence-bound claim in one BEGIN IMMEDIATE transaction. Dispatch renews first; a lifecycle heartbeat renews during execution. Expired owners cannot self-renew, and clear/defer require the exact live owner/fence and actual call time.",
+      "local_validation": "37 targeted Scheduler, migration and coverage tests succeeded. The atomic claim/heartbeat subset is 19 tests in 47.53 seconds and is included in that scope, not added to it.",
       "remaining": [
         "definition and admin direct write authority",
-        "mutable batch freezing and durable clock retry/backoff semantics",
+        "mutable batch freezing",
         "general unknown external effect human attribution",
         "program-wide Budget measurement",
         "consolidated commit-bound acceptance evidence",
@@ -914,7 +940,11 @@
         "host_brain/scheduler/accepted_operation.py",
         "host_brain/scheduler/accepted_effect_runtime.py",
         "host_brain/scheduler/worker_registry.py",
+        "host_brain/scheduler/clock.py",
+        "host_brain/audit/migrations/0117_scheduler_clock_retry_authority.sql",
         "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/unit/test_aw02_scheduler_clock.py",
+        "tests/contract/test_aw02_scheduler_repository.py",
         "tests/unit/test_ne01_scheduler_operation_plan.py",
         "tests/unit/test_ne01_scheduler_accepted_operation.py",
         "tests/unit/test_ne01_scheduler_accepted_effect_runtime.py",
@@ -924,16 +954,45 @@
         "tests/integration/test_aw02_scheduler_production_cutover.py"
       ]
     },
+    "generic_acceptance_effect_reconciliation": {
+      "status": "PARTIAL_EXACT_READ_ONLY_RECONCILIATION_SURFACE_UNKNOWN",
+      "conversation": "Exact reconciliation covers the visible turn and MemoryEvent only. Preference side writes inside the conversation writer may still swallow exceptions and have no independent receipt; later Life projection may degrade while the outer Effect succeeds. This is not a preference/Life atomic receipt.",
+      "life": "Writer failure reopens the exact command hash, state/version and durable receipt without resubmitting the command.",
+      "surface": "Success requires exact Gateway outbox, delivery, platform, conversation and payload-digest identity. HTTP errors, malformed or missing fields and response loss stay UNKNOWN. Host has no authenticated Gateway outbox read port, so restart does not POST again.",
+      "guardian": "Startup and background recovery failure/recovery are projected into an app-local RuntimeGuardian durable SLO. Durable evidence and logs retain an opaque random incident and error type only, not exception text or traceback.",
+      "local_validation": "The exact Life/Surface batch has 25 tests. The affected combination first reported 203 succeeded and one test-composition failure; after injecting the production-equivalent Conversation/Life readers, that failed case succeeded on rerun. These are not represented as one 204-test batch.",
+      "remaining": [
+        "authenticated Gateway outbox read/reconciliation port",
+        "general unknown external effect human attribution",
+        "commit-bound consolidated evidence",
+        "NE-01 wave integration and production canary"
+      ],
+      "evidence_refs": [
+        "host_brain/app/acceptance_effect_handlers.py",
+        "host_brain/app/acceptance_effect_recovery_observer.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/integration/test_ne01_generic_acceptance_effect_reconciliation.py",
+        "tests/integration/test_ne01_acceptance_effect_guardian_observer.py"
+      ]
+    },
     "internal_agent_governed_runtime": {
-      "status": "WIRED",
+      "status": "PARTIAL_POST_ACCEPTANCE_RESULT_COMMIT_LEGACY_EXECUTOR_BRIDGE",
       "scope": ["authenticated internal Agent WorkOrder"],
-      "semantics": "Secure Ingress principal + Governor grant + WorkOrderV3 + positive BudgetPolicy + delegate:agent_runtime TaskNode + verified child grant + Review + Verification + Acceptance + Receipt + replay",
-      "compatibility_boundary": "AgentWorkOrder is accepted only at ingress and projected back to the existing executor only after canonical admission and child-grant verification.",
-      "review_continuation": "Task-bound Review decisions automatically re-enter the original surface through migration 0096 coordination. Credentials cover budget time plus child TTL up to 24 hours, but READY and first worker entry remain live-claim-fenced; in-flight execution then belongs to the exact Task Attempt/Lease.",
+      "semantics": "Secure Ingress principal + Governor grant + WorkOrderV3 + positive BudgetPolicy + delegate:agent_runtime TaskNode + verified child grant + exact FrozenNodeInput workspace authority + strict EXECUTED/ACCEPT/review_required=false Verifier/Acceptance/final-handler gates + sanitized bounded result proposal + internal.agent.result_commit + exact canonical result receipt + replay",
+      "workspace_execution_authority": "root WorkOrder, graph/revision, node, attempt, lease, command, principal, lease owner and fencing token are projected exactly into DurableWorkspaceRuntime; real SQLite plus Git worktree integration succeeded",
+      "terminal_result_gate": "NOT_RUN, RETRY, REVIEW, SPLIT, non-EXECUTED and review_required results fail verification and outer Acceptance, and the final result handler rechecks the same terminal predicate",
+      "compatibility_boundary": "AgentWorkOrder remains an executor projection after canonical admission and child-grant verification. A local attempt artifact and the complete bounded public result WorkerProjection still exist before Acceptance; these are not an isolated accepted artifact boundary.",
+      "claim_boundary": "The ingress claim closes only when the result Effect is COMMITTED and the exact canonical result receipt reopens. PENDING, FAILED and NO_EFFECTS keep the claim OPEN; response loss reconciles read-only without rerunning the Agent.",
+      "exception_redaction": "Canonical executor/workspace failures persist and log error_type plus a random incident only; raw detail is removed. One focused redaction test succeeded.",
+      "review_continuation": "Explicit task-bound Review decisions may re-enter the original surface through migration 0096 coordination, but a non-terminal inner Agent result is not review-eligible and cannot be promoted by the generic post-acceptance continuation. READY and first worker entry remain live-claim-fenced.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
+        "host_brain/agent_runtime/internal_result_proposal.py",
+        "host_brain/agent_runtime/accepted_result.py",
+        "host_brain/agent_runtime/accepted_effect_runtime.py",
         "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
-        "tests/unit/test_ne01_internal_task_runtime.py"
+        "tests/unit/test_ne01_internal_task_runtime.py",
+        "tests/unit/test_ne01_internal_accepted_result.py"
       ]
     },
     "task_graph_cancellation_operator_entry": {

@@ -143,7 +143,8 @@ flowchart TD
 - Operator continuation 不把 `secure_ingress_idempotency_claim.result_ref` 当成任意非空 bearer。ASGI 从同一个 app-local OBS composition 向 Task Runtime 注入 Outcome Journal 的只读 lookup；HostCommand validation 精确绑定 checksum-chained outer receipt、claim/audit、command/action/scopes/body、`SUCCEEDED` 终态和可重建 domain result。lookup 缺失、异常、记录缺失或字段漂移均 fail closed，且 validation 不创建第二个 Journal/Store/UoW。
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
-- Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。Review 前 handler=0、Effect commit 后=1，duplicate 不重调；response-loss/过期 claim 只能进入 handler 显式提供的只读 `reconcile()`，无 reconciler 时保持 unknown。生产 sys-mode 对账只重开 exact HardState；Scheduler handler 必须给出显式 canonical status，Effect handler 必须给出真实 durable receipt，禁止合成成功或回执。definition/admin、mutable batch/clock retry、通用未知效果人工归因和 canary 仍未完成。Internal 已通过真实 admission，但 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
+- Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。0117 在 occurrence admission 的同一 `BEGIN IMMEDIATE` 中把 live DUE retry row 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前 renew、运行中 heartbeat，过期 lease 不能自我复活，第二实例/stale fence不能 dispatch/clear/defer，backoff 取真实失败时刻。该 Clock 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因和 canary 仍未完成。
+- Internal 已通过真实 admission，但 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。executor result 先形成 proposal；Acceptance 后的 `internal.agent.result_commit` 才写 canonical result，且只有 Effect `COMMITTED` 与 exact result receipt 可重开时才封 ingress claim。pre-Acceptance local attempt artifact、完整有界 public result WorkerProjection 和 legacy executor bridge 仍保留。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 - TaskStore 生产写流已收窄到两个 private hook：Graph/Node 只能由 `HostCommandRepository._admit_normalized() → _insert_graph_from_host_command_in_transaction()` 在同一 admission UoW 写入，生产调用数为 1；Effect 只能由 `transition_graph_and_stage_acceptance_effects`、`commit_node_acceptance`、`complete_parallel_graph_success` 三个 canonical UoW 通过 `_stage_acceptance_effect_intent_in_transaction()` 写入，共 6 个调用点。对应 Graph/Node/Effect INSERT SQL 也各自只在这两个 hook 中。public `create_graph`、`insert_graph_in_transaction`、`stage_acceptance_effect_intent` 已删除。
 - 这条流只证明 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED`。SQLite 仍允许 direct SQL 制造无 `host_command_journal` 的 raw/orphan 状态，本轮无 migration/trigger，因此必须同时标记 `SQL_DIRECT_BYPASS_PRESENT`。`tests/task_runtime_authority_fixtures.py` 只是 test-only raw/orphan 构造器，不属于 canonical 流。定向分组与首跑 fixture 失败均已保留，修正后最终 key regression 为 `26 passed in 35.33s`；wave integration `NOT_RUN_PER_WAVE_POLICY`。TaskStore 切片当时 full architecture static 为 `FAIL [1,6,10]`；后续 Gate 1/6/10/11 均已关闭，当前 fresh 为 `PASS`、`failed_gates=[]`，NE-01 仍 `IN_PROGRESS`。
@@ -473,11 +474,13 @@ claim runnable node
 
 Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。concurrency charge 和超限后的完整 `DEGRADE` / `REVIEW` 分支还没有闭环。
 
-### 5.3 Scheduler post-Acceptance 切流与 Internal 兼容桥
+### 5.3 Scheduler Clock/Effect 与 Internal result 边界
 
 [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py) 已构造 `WorkOrderV3 + BudgetPolicy`，以 `delegate:<worker_key>` 冻结 TaskNode。`operation_plan.py` 的 worker 在 durable child grant、occurrence、definition 和 fingerprint 全部重验后只生成 `scheduler.operation.execute` descriptor，不调用领域 handler；canonical WorkerProjection 是 Acceptance 前的 plan checkpoint。Graph Verification/Acceptance 与 Effect staging 使用同一 TaskStore UoW。提交后，共享 app-local dispatcher 才派生 exact Preview 并交给 `accepted_operation.py` 调用真实 handler；实际结果写原有 immutable result repository，native claim 只凭该 result receipt 收口；Operator 外层继续持有独立的 checksum-chained outcome receipt，并只在实际结果可归因后收口。
 
 Review 前 handler 调用数为 0，Effect commit 后为 1；duplicate 只读重放实际 result。过期 claim 或 handler 调用后的响应丢失必须先按 operation/result authority 对账，不能盲目再次执行。该切流不覆盖 Scheduler definition/admin direct authority、mutable batch/clock retry、一般未知外部效果人工归因、wave integration 或 canary。
+
+Clock 的 occurrence admission 不再经历“清 DUE claim→另行领取 occurrence claim”的空窗：repository 在同一事务校验 live DUE owner/fence、插入 immutable occurrence、推进 definition head，并把 retry row 的 key/type 原子转成 occurrence/`OCCURRENCE`，保持同 owner/fence 后续租。Clock 仅接受返回的 exact occurrence claim。dispatch 前和执行中 heartbeat 续租；lease 已过期的 owner不能自我续活，clear/defer 也必须使用当前实际时间与 exact owner/fence。故慢执行不会被第二实例重复 dispatch，异常退避也不再基于旧 tick timestamp。
 
 [internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py) 在认证 ingress 接受兼容 `AgentWorkOrder`，清除调用方伪造的 lineage/approval authority 后立即构造 `WorkOrderV3 + BudgetPolicy`。TaskNode 冻结为 `delegate:agent_runtime`；worker 只有在 durable child grant 完整验证后才向既有 Agent executor 投影兼容对象。
 
@@ -491,11 +494,15 @@ authenticated Internal ingress
   → TaskNode delegate:agent_runtime + child-grant verification
   → PRE Review if required
   → existing Agent executor compatibility projection
-  → durable result + Verification + Acceptance / POST Review
-  → execution receipt + replay
+  → sanitized/bounded result proposal in WorkerProjection
+  → Verification + Acceptance / POST Review
+  → internal.agent.result_commit Acceptance Effect
+  → canonical Agent result repository
+  → exact COMMITTED result receipt
+  → ingress claim terminalization + replay
 ```
 
-前置 Review 不执行 handler，且在尚无 worker receipt 时保持 ingress claim result 未绑定；执行结果声明 `review_required` 或内部 Acceptance 为 `REVIEW` 时进入 `WAITING_ACCEPTANCE_REVIEW`，即使已有 pre-acceptance worker receipt 也不得提前完成 ingress。0096 后，ReviewStore 的终态 mutation 与 continuation enqueue 同事务；worker 按 surface 重入并通过 completion hook 收口 Host effect 或 Internal/Scheduler secure-ingress result。续跑 credential 覆盖 budget time window 加 child TTL、最多 24 小时；READY 与首次 worker entry 分别校验 live claim 和 exact Attempt/Lease。拒绝/过期使用 durable decision ref，历史 POST receipt 只有 exact lineage CAS 才能替换。
+前置 Review 不执行 handler，且在尚无 worker receipt 时保持 ingress claim result 未绑定；内部 acceptance decision 不是 `ACCEPT` 时不允许进入 canonical result commit。0096 后，ReviewStore 的终态 mutation 与 continuation enqueue 同事务；worker 按 surface 重入。`InternalAgentCommandService` 只有在 result Effect 为 `COMMITTED` 且重新读取 exact result receipt 后才封 claim；`PENDING/FAILED/NO_EFFECTS` 保持 OPEN，响应丢失只读对账且不重跑 Agent。续跑 credential 覆盖 budget time window 加 child TTL、最多 24 小时；READY 与首次 worker entry 分别校验 live claim 和 exact Attempt/Lease。当前完整但有界/脱敏的 public result 仍在 WorkerProjection，local attempt artifact 仍在 Acceptance 前写入，V3→legacy executor bridge 也未删除。
 
 ## 6. Acceptance Effect 与对话提交语义
 
@@ -503,13 +510,29 @@ authenticated Internal ingress
 
 1. `conversation.user_turn`；
 2. `life.foreground_completed`；
-3. 在存在 reply channel/target 时的 `surface.reply_delivery`。
+3. 在存在 reply channel/target 时的 `surface.reply_delivery`；
+4. Internal Agent 路线的 `internal.agent.result_commit`。
 
 worker 不能提供这些 effect 的 authority 或 idempotency key。Compiler 只使用已接纳 HostCommand 和 graph 事实重建，避免 worker 扩权。
 
 Legacy completion 的崩溃重入也经过同一编译/落库边界。`AcceptedGraphFinalizationRuntime` 不信任 terminal replay 的任意 mapping，而是要求 Store 返回 exact COMMITTED Operation checkpoint，并验证历史 Lease、Attempt SUCCEEDED、COMMITTED Outbox evidence、hash receipt 与 canonical WorkerProjection lineage；随后才在一个 UoW 中提交 Graph COMPLETED 和 Effect intents。测试覆盖 ACCEPTED 已提交但 Effect 为空的进程退出、重启无 worker replay、重复执行 Effect 幂等，以及篡改 projection 时零 Effect/Graph 不完成。
 
 [acceptance_effect_dispatcher.py](../../../host_brain/task_runtime/acceptance_effect_dispatcher.py) 使用 durable queue、lease 和 fence 按以下语义顺序提交：
+
+```mermaid
+flowchart LR
+    Claim["Effect claim + fence"] --> Handler["领域 handler"]
+    Handler --> Conversation["Conversation exact row/event reopen"]
+    Handler --> Life["Life exact receipt reopen"]
+    Handler --> Surface["Surface exact Gateway outbox identity"]
+    Handler --> InternalResult["Internal canonical result reopen"]
+    Surface -->|"响应丢失或不完整"| Unknown["UNKNOWN / no blind replay"]
+    Unknown -. "Host 无 authenticated outbox read port" .-> Pending["reconciliation pending"]
+    Claim --> Observer["Recovery observer"]
+    Observer --> Guardian["app-local RuntimeGuardian durable SLO"]
+```
+
+Conversation exact reopen 当前只覆盖 visible turn 与 `MemoryEvent`；偏好 side-write 可吞异常、无独立 receipt，后续 Life projection 可降级。独立 Life Effect 以 command hash/state/version/receipt 重开。Surface 仅在 Gateway 精确绑定 outbox/delivery/platform/conversation/payload digest 时提交；HTTP/畸形/响应丢失保持 `UNKNOWN`，Host 无 authenticated query port。Internal 的 frozen attempt authority 先进入 Durable Workspace，只有严格 terminal success 可越过 Verifier/Acceptance/final-handler 三重门，canonical result 只在 Acceptance 后写；recovery failure/recovery 进入 Guardian SLO且不含异常正文。
 
 ### 6.1 Operator `sys_mode.switch` 的 Review、Effect 与 outer receipt
 
@@ -675,15 +698,16 @@ flowchart LR
     class PersonaMigration,Persona wired;
 ```
 
-[acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) 分别调用 durable conversation writer、提交 `LifeCommand` 和进入 Gateway delivery。[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py) 再由 Life projection 触发 `_async_post_process`。
+[acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) 分别调用 durable conversation writer、提交 `LifeCommand` 和进入 Gateway delivery。Conversation/Life handler 都在返回后以独立 reader 重开 exact authority，writer 异常也只允许只读 reconcile；Surface response 必须携带 exact Gateway outbox identity，否则保持未知。[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py) 再由 Life projection 触发 `_async_post_process`。
 
 [postprocess.py](../../../host_brain/agent_runtime/postprocess.py) 在 Life projection mode 下对 assistant turn 和 LifeMemory admission 使用 durable-required 语义；失败会向上抛出，不当作成功。它随后在该 mode 提前返回，避免重复执行 persona/tribe mutation 和 VTS/TTS。
 
 因此 canonical 对话的准确定级是 `POST_ACCEPTANCE_DURABLE_EVENTUAL`：
 
 - graph Acceptance 与 effect intents 原子绑定；
-- user turn、Life command、assistant turn、Memory 和 delivery 分阶段持久提交；
+- user turn 与 Life command 的 response-loss 可用 exact authority 对账；assistant turn、Memory 和 delivery仍分阶段持久提交；
 - 队列可重试并保存状态；
+- Surface 未知响应在 Host 尚无 authenticated Gateway outbox read port 时不重发、不伪造成功；
 - 不存在把上述所有操作包进单个数据库事务的语义。
 
 ## 7. Gateway 双向链路
@@ -723,6 +747,8 @@ sequenceDiagram
 ### 7.2 Outbound reply
 
 accepted reply effect 经 [gateway_delivery.py](../../../host_brain/input_runtime/gateway_delivery.py) 调用 [edge_transport.py](../../../host_brain/channels/edge_transport.py) 的 `submit_gateway_reply`，使用稳定 `delivery_id` 和 HMAC 发送 `/v1/gateway/reply`。Gateway server 把 payload 放入 durable outbox，并以 platform + conversation 作 ordering key。
+
+Host 侧只把精确回传的 outbox/delivery/platform/conversation/payload digest 当提交证据；HTTP 500、缺字段或 response loss 都不能证明 Gateway 未持久化。当前没有 Host 可调用的 authenticated Gateway outbox read API，因此这类 Effect 在恢复时保持 `UNKNOWN`，不会以普通 retry 再次发送。
 
 [outbound.py](../../../edge_client/gateway/outbound.py) 在 dispatch 前验证并冻结 payload。只有 adapter 返回确认证据时才能写入 ACK；在 send boundary 之后发生异常或返回 false 会被定级为 `MAY_HAVE_COMMITTED` / uncertain，不会伪造成功。
 

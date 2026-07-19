@@ -323,12 +323,18 @@ def _security_rejection(exc: WebhookVerificationError) -> JSONResponse:
 
 
 def _delivery_rejection(exc: Exception, *, status_code: int = 503) -> JSONResponse:
+    reason_code = str(
+        getattr(exc, "reason_code", "GW_TRANSPORT_DELIVERY_FAILED")
+    )
     return JSONResponse(
         status_code=status_code,
         content={
             "status": "rejected",
-            "reason_code": str(getattr(exc, "reason_code", "GW_TRANSPORT_DELIVERY_FAILED")),
-            "detail": str(getattr(exc, "detail", str(exc)))[:240],
+            "reason_code": reason_code,
+            # Store/provider exception messages may contain paths, SQL text,
+            # payload fragments or credentials.  The stable reason code is
+            # the public diagnostic contract; raw details remain process-local.
+            "detail": f"gateway delivery rejected ({reason_code})",
         },
     )
 
@@ -849,6 +855,26 @@ def create_gateway_app(
             return _delivery_rejection(exc, status_code=409 if conflict else 503)
 
         duplicate = receipt.status == "DUPLICATE_SAME"
+        canonical_outbox = _delivery.get_outbox(receipt.record_id) or {}
+        canonical_payload_digest = str(
+            canonical_outbox.get("payload_sha256") or ""
+        ).strip()
+        if not canonical_payload_digest.startswith("sha256:"):
+            # Intake may already have crossed SQLite commit.  Returning a
+            # positive response without its immutable payload binding would
+            # make Host-side attribution unsafe.
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "in_doubt",
+                    "reason_code": "GW_REPLY_OUTBOX_ATTRIBUTION_MISSING",
+                    "outbox_id": receipt.record_id,
+                },
+            )
+        durable_identity = {
+            "delivery_id": delivery_id,
+            "payload_digest": canonical_payload_digest,
+        }
         if duplicate:
             # Replayed proof/business requests must not allocate another
             # long-poll thread. Return the authoritative cached state while
@@ -859,6 +885,7 @@ def create_gateway_app(
                 return JSONResponse({
                     "status": "failed",
                     "duplicate": True,
+                    **durable_identity,
                     "outbox_id": receipt.record_id,
                     "conversation_id": durable_payload["conversation_id"],
                     "platform": platform.value,
@@ -867,6 +894,7 @@ def create_gateway_app(
             return JSONResponse({
                 "status": "sent" if state in {"ACKED", "DELIVERED", "SENT"} else "queued",
                 "duplicate": True,
+                **durable_identity,
                 "outbox_id": receipt.record_id,
                 "conversation_id": durable_payload["conversation_id"],
                 "platform": platform.value,
@@ -876,6 +904,7 @@ def create_gateway_app(
             return JSONResponse({
                 "status": "queued",
                 "duplicate": False,
+                **durable_identity,
                 "outbox_id": receipt.record_id,
                 "conversation_id": durable_payload["conversation_id"],
                 "platform": platform.value,
@@ -890,6 +919,7 @@ def create_gateway_app(
         if state in {"DLQ", "DEAD_LETTER"}:
             return JSONResponse({
                 "status": "failed",
+                **durable_identity,
                 "outbox_id": receipt.record_id,
                 "conversation_id": durable_payload["conversation_id"],
                 "platform": platform.value,
@@ -897,6 +927,7 @@ def create_gateway_app(
             })
         return JSONResponse({
             "status": "sent" if state in {"ACKED", "DELIVERED", "SENT"} else "queued",
+            **durable_identity,
             "outbox_id": receipt.record_id,
             "duplicate": duplicate,
             "conversation_id": durable_payload["conversation_id"],

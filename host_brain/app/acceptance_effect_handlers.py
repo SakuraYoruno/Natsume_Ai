@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 import hashlib
 import json
+import re
+import secrets
 from typing import Any
+import urllib.parse
 
 from host_brain.digital_life.application_boundary import submit_life_command
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
@@ -17,11 +20,20 @@ def build_production_acceptance_effect_handlers(
     *,
     mode_transition_service_provider: Callable[[], Any] | None = None,
     scheduler_operation_handler: Callable[[Mapping[str, Any]], Any] | None = None,
+    internal_result_commit_handler: Callable[[Mapping[str, Any]], Any] | None = None,
+    conversation_turn_reader: Any | None = None,
+    conversation_event_reader: Any | None = None,
+    life_receipt_reader_provider: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
-        "conversation.user_turn": _record_accepted_user_turn,
-        "life.foreground_completed": _submit_accepted_life_foreground,
-        "surface.reply_delivery": _deliver_accepted_surface_reply,
+        "conversation.user_turn": _AcceptedConversationUserTurnHandler(
+            turn_reader=conversation_turn_reader,
+            event_reader=conversation_event_reader,
+        ),
+        "life.foreground_completed": _AcceptedLifeForegroundHandler(
+            receipt_reader_provider=life_receipt_reader_provider,
+        ),
+        "surface.reply_delivery": _AcceptedSurfaceReplyDeliveryHandler(),
     }
     if mode_transition_service_provider is not None:
         handlers["host.sys_mode_transition"] = _AcceptedSysModeTransitionHandler(
@@ -31,7 +43,107 @@ def build_production_acceptance_effect_handlers(
         if not callable(scheduler_operation_handler):
             raise TypeError("scheduler_operation_handler must be callable")
         handlers["scheduler.operation.execute"] = scheduler_operation_handler
+    if internal_result_commit_handler is not None:
+        if not callable(internal_result_commit_handler):
+            raise TypeError("internal_result_commit_handler must be callable")
+        handlers["internal.agent.result_commit"] = internal_result_commit_handler
     return handlers
+
+
+class _AcceptedConversationUserTurnHandler:
+    """Commit one visible turn and reconcile only from canonical SQLite rows."""
+
+    def __init__(self, *, turn_reader: Any | None, event_reader: Any | None) -> None:
+        self._turn_reader = turn_reader
+        self._event_reader = event_reader
+
+    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Validate the immutable identity before crossing the writer boundary.
+        _accepted_conversation_request(payload)
+        try:
+            invoked = _record_accepted_user_turn(payload)
+            reopened = self.reconcile(payload)
+            return {**reopened, "status": str(invoked["status"])}
+        except Exception as exc:
+            try:
+                return self.reconcile(payload)
+            except AcceptanceEffectOutcomeUnknown as reconciliation:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "conversation user-turn invocation has no exact durable "
+                    f"attribution after {_opaque_failure(exc)}; "
+                    f"{reconciliation.detail}"
+                ) from exc
+
+    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _reconcile_accepted_user_turn(
+            payload,
+            turn_reader=self._turn_reader,
+            event_reader=self._event_reader,
+        )
+
+
+class _AcceptedLifeForegroundHandler:
+    """Submit one Life command and reopen only its immutable command receipt."""
+
+    def __init__(
+        self,
+        *,
+        receipt_reader_provider: Callable[[], Any] | None,
+    ) -> None:
+        self._receipt_reader_provider = receipt_reader_provider
+
+    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        _accepted_life_request(payload)
+        try:
+            return _submit_accepted_life_foreground(payload)
+        except Exception as exc:
+            try:
+                return self.reconcile(payload)
+            except AcceptanceEffectOutcomeUnknown as reconciliation:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "Life foreground invocation has no exact durable attribution "
+                    f"after {_opaque_failure(exc)}; "
+                    f"{reconciliation.detail}"
+                ) from exc
+
+    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _reconcile_accepted_life_foreground(
+            payload,
+            receipt_reader_provider=self._receipt_reader_provider,
+        )
+
+
+class _AcceptedSurfaceReplyDeliveryHandler:
+    """Gateway delivery remains fail-closed until Host has an exact read port."""
+
+    async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Reject request/proof drift before entering the transport.  Once the
+        # transport has been invoked, any non-terminal exception may have been
+        # raised after Gateway intake and therefore cannot be retried safely.
+        _accepted_surface_invocation(payload)
+        try:
+            return await _deliver_accepted_surface_reply(payload)
+        except AcceptanceEffectOutcomeUnknown:
+            raise
+        except _AcceptedSurfaceNoEffectFailure:
+            # The authenticated transport explicitly proved that it did not
+            # enqueue or send anything.  Only this narrow result is safe for
+            # the dispatcher's ordinary failure/retry policy.
+            raise
+        except Exception as exc:
+            raise AcceptanceEffectOutcomeUnknown(
+                "surface reply invocation crossed the transport boundary but "
+                "has no authenticated read-only Gateway attribution after "
+                f"{_opaque_failure(exc)}"
+            ) from exc
+
+    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        value = _accepted_surface_request(payload)
+        raise AcceptanceEffectOutcomeUnknown(
+            "surface reply delivery cannot be read-only reconciled: the Host has "
+            "no authenticated Gateway outbox query port for delivery identity "
+            f"{_surface_delivery_id(value)}"
+        )
 
 
 class _AcceptedSysModeTransitionHandler:
@@ -53,6 +165,10 @@ class _AcceptedSysModeTransitionHandler:
             payload,
             service_provider=self._service_provider,
         )
+
+
+class _AcceptedSurfaceNoEffectFailure(RuntimeError):
+    """A trusted Gateway response explicitly attested zero external effects."""
 
 
 def _accepted_sys_mode_transition_request(
@@ -188,7 +304,7 @@ def _apply_accepted_sys_mode_transition(
         # the response was lost.  Only the exact event identity may settle it.
         raise AcceptanceEffectOutcomeUnknown(
             "sys_mode transition invocation lost its durable attribution "
-            f"for event {event_id}: {type(exc).__name__}: {str(exc)[:1200]}"
+            f"for event {event_id}: {_opaque_failure(exc)}"
         ) from exc
     projected = dict(result or {}) if isinstance(result, Mapping) else {}
     reported_failure = projected.get("success") is not True
@@ -278,13 +394,15 @@ def _apply_accepted_sys_mode_transition(
             ),
         }
     except _SysModeTransitionDefinitelyNotCommitted as exc:
-        raise RuntimeError(str(exc)) from exc
+        raise RuntimeError(
+            "SYS_MODE_TRANSITION_NOT_COMMITTED: " + _opaque_failure(exc)
+        ) from exc
     except AcceptanceEffectOutcomeUnknown:
         raise
     except Exception as exc:
         raise AcceptanceEffectOutcomeUnknown(
             "sys_mode transition requires exact HardState reconciliation "
-            f"for event {event_id}: {type(exc).__name__}: {str(exc)[:1200]}"
+            f"for event {event_id}: {_opaque_failure(exc)}"
         ) from exc
 
 
@@ -371,7 +489,7 @@ def _reconcile_accepted_sys_mode_transition(
     except Exception as exc:
         raise AcceptanceEffectOutcomeUnknown(
             "sys_mode transition requires read-only exact HardState reconciliation "
-            f"for event {event_id}: {type(exc).__name__}: {str(exc)[:1200]}"
+            f"for event {event_id}: {_opaque_failure(exc)}"
         ) from exc
 
 
@@ -409,11 +527,59 @@ def sys_mode_transition_handler_receipt_ref(
     )
 
 
+def _accepted_conversation_request(payload: Mapping[str, Any]) -> dict[str, Any]:
+    value = dict(payload or {})
+    value.pop("_action_preview_terminal_proof", None)
+    expected_fields = {
+        "request_id",
+        "session_id",
+        "person_id",
+        "content",
+        "ts_ms",
+        "lang",
+        "metadata",
+    }
+    if set(value) != expected_fields:
+        raise ValueError("accepted conversation user-turn payload drifted")
+    request_id = _exact_conversation_identity(
+        value.get("request_id"), field="request_id", limit=180
+    )
+    session_id = _exact_conversation_identity(
+        value.get("session_id"), field="session_id", limit=180
+    )
+    person_id = _exact_conversation_identity(
+        value.get("person_id"), field="person_id", limit=120
+    )
+    lang = _exact_conversation_identity(value.get("lang"), field="lang", limit=32)
+    content = value.get("content")
+    metadata = value.get("metadata")
+    if (
+        not isinstance(content, str)
+        or not content.strip()
+        or len(content) > 4_000
+        or content != re.sub(r"\s+", " ", content.strip())
+        or not isinstance(metadata, Mapping)
+    ):
+        raise ValueError("accepted conversation user-turn identity is incomplete")
+    ts_ms = value.get("ts_ms")
+    if isinstance(ts_ms, bool) or not isinstance(ts_ms, int) or ts_ms < 0:
+        raise ValueError("accepted conversation user-turn timestamp is invalid")
+    return {
+        **value,
+        "request_id": request_id,
+        "session_id": session_id,
+        "person_id": person_id,
+        "content": content,
+        "ts_ms": ts_ms,
+        "lang": lang,
+        "metadata": dict(metadata),
+    }
+
+
 def _record_accepted_user_turn(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
 
-    value = dict(payload or {})
-    value.pop("_action_preview_terminal_proof", None)
+    value = _accepted_conversation_request(payload)
     result = AGENT_RUNTIME_PORTS.record_user_turn(
         request_id=str(value.get("request_id") or ""),
         session_id=str(value.get("session_id") or ""),
@@ -433,6 +599,7 @@ def _record_accepted_user_turn(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         )
     if status == "SKIPPED" and reason_code not in {
         "DUPLICATE_CONVERSATION_TURN",
+        "DUPLICATE_VISIBLE_TURN",
         "DUPLICATE_COMMAND",
     }:
         raise RuntimeError(
@@ -440,16 +607,141 @@ def _record_accepted_user_turn(payload: Mapping[str, Any]) -> Mapping[str, Any]:
             + ": accepted user turn was unexpectedly skipped"
         )
     return {
-        "receipt_ref": _receipt("conversation-user-turn", value),
         "status": "APPLIED" if status == "OK" else "REPLAYED",
     }
+
+
+def _reconcile_accepted_user_turn(
+    payload: Mapping[str, Any],
+    *,
+    turn_reader: Any | None,
+    event_reader: Any | None,
+) -> Mapping[str, Any]:
+    """Reopen one exact visible turn without invoking either canonical writer."""
+
+    value = _accepted_conversation_request(payload)
+    find_turn = getattr(turn_reader, "find_turn", None)
+    find_event = getattr(event_reader, "find_visible_event", None)
+    get_event = getattr(event_reader, "get_event", None)
+    if not callable(find_turn) or not callable(find_event) or not callable(get_event):
+        raise AcceptanceEffectOutcomeUnknown(
+            "conversation reconciliation requires app-local ContextRepository "
+            "and MemoryEventRepository read ports"
+        )
+    try:
+        turn = find_turn(
+            session_id=value["session_id"],
+            request_id=value["request_id"],
+            role="user",
+        )
+        event_head = find_event(
+            session_id=value["session_id"],
+            request_id=value["request_id"],
+            role="user",
+        )
+        if not isinstance(turn, Mapping) or not isinstance(event_head, Mapping):
+            raise LookupError("exact visible conversation event/turn is absent")
+        event_id = str(event_head.get("event_id") or "").strip()
+        event = get_event(event_id=event_id)
+        if not event_id or not isinstance(event, Mapping):
+            raise LookupError("exact MemoryEvent is absent")
+        _validate_conversation_authority(value=value, turn=turn, event=event)
+        return {
+            "receipt_ref": _canonical_id_ref("memory-event", event_id),
+            "memory_event_id": event_id,
+            "turn_id": str(turn.get("turn_id") or ""),
+            "status": "REPLAYED",
+        }
+    except AcceptanceEffectOutcomeUnknown:
+        raise
+    except Exception as exc:
+        raise AcceptanceEffectOutcomeUnknown(
+            "conversation user-turn requires exact read-only SQLite reconciliation: "
+            f"{_opaque_failure(exc)}"
+        ) from exc
+
+
+def _validate_conversation_authority(
+    *,
+    value: Mapping[str, Any],
+    turn: Mapping[str, Any],
+    event: Mapping[str, Any],
+) -> None:
+    expected_turn_id = "turn::sha256:" + hashlib.sha256(
+        "\x1f".join(
+            (value["session_id"], value["request_id"], "user")
+        ).encode("utf-8")
+    ).hexdigest()
+    turn_metadata = _json_object(turn.get("metadata"), "conversation turn metadata")
+    event_refs = _json_object(event.get("refs_json"), "MemoryEvent refs")
+    event_projection = _json_object(
+        event.get("projection_status_json"),
+        "MemoryEvent projection status",
+    )
+    event_id = str(event.get("event_id") or "").strip()
+    turn_id = str(turn.get("turn_id") or "").strip()
+    stored_metadata = dict(turn_metadata)
+    memory_event_id = str(stored_metadata.pop("memory_event_id", "") or "").strip()
+    expected_metadata = dict(value["metadata"])
+    # Soul compilation may append a stable summary identifier before the
+    # canonical write.  It is allowed only as one extra field; caller-owned
+    # metadata must otherwise remain byte-semantically equal.
+    stored_metadata.pop("soul_id", None)
+    event_metadata = event_refs.get("metadata")
+    if isinstance(event_metadata, Mapping):
+        normalized_event_metadata = dict(event_metadata)
+        normalized_event_metadata.pop("soul_id", None)
+    else:
+        normalized_event_metadata = None
+    conversation_projection = event_projection.get("conversation_turn")
+    if (
+        turn_id != expected_turn_id
+        or str(turn.get("session_id") or "") != value["session_id"]
+        or str(turn.get("request_id") or "") != value["request_id"]
+        or str(turn.get("person_id") or "") != value["person_id"]
+        or str(turn.get("role") or "") != "user"
+        or str(turn.get("content") or "") != value["content"]
+        or int(turn.get("ts_ms") or 0) != value["ts_ms"]
+        or str(turn.get("lang") or "") != value["lang"]
+        or int(turn.get("corrupted") or 0) != 0
+        or stored_metadata != expected_metadata
+        or memory_event_id != event_id
+        or str(event.get("person_id") or "") != value["person_id"]
+        or str(event.get("session_id") or "") != value["session_id"]
+        or str(event.get("conversation_id") or "") != value["session_id"]
+        or str(event.get("source_kind") or "") != "conversation_turn.user"
+        or str(event.get("event_kind") or "") != "user_message"
+        or str(event.get("visibility") or "") != "visible"
+        or str(event.get("role") or "") != "user"
+        or str(event.get("content") or "") != value["content"]
+        or int(event.get("created_at_ms") or 0) != value["ts_ms"]
+        or str(event_refs.get("request_id") or "") != value["request_id"]
+        or str(event_refs.get("lang") or "") != value["lang"]
+        or normalized_event_metadata != expected_metadata
+        or str(event_refs.get("turn_id") or "") != turn_id
+        or not isinstance(conversation_projection, Mapping)
+        or str(conversation_projection.get("status") or "") != "OK"
+        or str(conversation_projection.get("turn_id") or "") != turn_id
+    ):
+        raise RuntimeError("CONVERSATION_USER_TURN_DURABLE_RECEIPT_INVALID")
+
+
+def _exact_conversation_identity(value: Any, *, field: str, limit: int) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > limit
+        or re.search(r"[\x00-\x1f\x7f]", value)
+    ):
+        raise ValueError(f"accepted conversation {field} is invalid")
+    return value
 
 
 def _submit_accepted_life_foreground(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
 
-    value = dict(payload or {})
-    value.pop("_action_preview_terminal_proof", None)
+    value = _accepted_life_request(payload)
     life = PROCESS_LIFE_PROVIDER.require()
     receipt = submit_life_command(
         service=life.command_service,
@@ -469,8 +761,152 @@ def _submit_accepted_life_foreground(payload: Mapping[str, Any]) -> Mapping[str,
             str(projected.get("reason_code") or "LIFE_FOREGROUND_NOT_APPLIED")
             + ": accepted foreground command has no applied Life receipt"
         )
-    projected["receipt_ref"] = _receipt("life-foreground", value)
-    return projected
+    return _validated_life_receipt(value=value, receipt=projected, replay=False)
+
+
+def _accepted_life_request(payload: Mapping[str, Any]) -> dict[str, Any]:
+    value = dict(payload or {})
+    value.pop("_action_preview_terminal_proof", None)
+    required = {
+        "command_type",
+        "person_id",
+        "command_id",
+        "correlation_id",
+        "payload",
+        "created_at_ms",
+        "metadata",
+    }
+    if set(value) != required:
+        raise ValueError("accepted Life foreground payload drifted")
+    command_type = value.get("command_type")
+    person_id = value.get("person_id")
+    command_id = value.get("command_id")
+    correlation_id = value.get("correlation_id")
+    command_payload = value.get("payload")
+    metadata = value.get("metadata")
+    if (
+        command_type != "foreground_completed"
+        or not _is_exact_effect_identity(person_id, limit=120)
+        or not _is_exact_effect_identity(command_id, limit=240)
+        or not _is_exact_effect_identity(correlation_id, limit=180)
+        or not isinstance(command_payload, Mapping)
+        or not isinstance(metadata, Mapping)
+    ):
+        raise ValueError("accepted Life foreground identity is incomplete")
+    if command_id != f"life::foreground_completed::{correlation_id}":
+        raise ValueError("accepted Life foreground command identity drifted")
+    created_at_ms = value.get("created_at_ms")
+    if (
+        isinstance(created_at_ms, bool)
+        or not isinstance(created_at_ms, int)
+        or created_at_ms < 0
+    ):
+        raise ValueError("accepted Life foreground timestamp is invalid")
+    return {
+        **value,
+        "command_type": command_type,
+        "person_id": person_id,
+        "command_id": command_id,
+        "correlation_id": correlation_id,
+        "payload": dict(command_payload),
+        "created_at_ms": created_at_ms,
+        "metadata": dict(metadata),
+    }
+
+
+def _reconcile_accepted_life_foreground(
+    payload: Mapping[str, Any],
+    *,
+    receipt_reader_provider: Callable[[], Any] | None,
+) -> Mapping[str, Any]:
+    """Read one immutable Life command receipt without submitting a command."""
+
+    value = _accepted_life_request(payload)
+    if not callable(receipt_reader_provider):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Life foreground reconciliation requires an app-local "
+            "LifeSnapshotReader provider"
+        )
+    try:
+        reader = receipt_reader_provider()
+        get_receipt = getattr(reader, "get_receipt", None)
+        if not callable(get_receipt):
+            raise RuntimeError("LIFE_COMMAND_RECEIPT_READER_UNAVAILABLE")
+        receipt = get_receipt(value["command_id"])
+        if receipt is None:
+            raise LookupError("exact Life command receipt is absent")
+        projected = (
+            dict(receipt)
+            if isinstance(receipt, Mapping)
+            else dict(receipt.as_dict())
+            if callable(getattr(receipt, "as_dict", None))
+            else None
+        )
+        if not isinstance(projected, Mapping):
+            raise TypeError("Life command receipt is not mapping-compatible")
+        return _validated_life_receipt(
+            value=value,
+            receipt=projected,
+            replay=True,
+        )
+    except AcceptanceEffectOutcomeUnknown:
+        raise
+    except Exception as exc:
+        raise AcceptanceEffectOutcomeUnknown(
+            "Life foreground requires exact read-only command-receipt reconciliation: "
+            f"{_opaque_failure(exc)}"
+        ) from exc
+
+
+def _validated_life_receipt(
+    *,
+    value: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    replay: bool,
+) -> dict[str, Any]:
+    from natsume_contracts.life import LifeCommand  # noqa: PLC0415
+
+    projected = dict(receipt)
+    status = str(projected.get("status") or "").strip().upper()
+    event_id = str(projected.get("event_id") or "").strip()
+    command_hash = str(projected.get("command_hash") or "").strip()
+    state_digest = str(projected.get("state_digest") or "").strip()
+    try:
+        state_version = int(projected.get("state_version") or 0)
+        outbox_count = int(projected.get("outbox_count") or 0)
+        persisted_created_at_ms = int(projected.get("created_at_ms") or 0)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("LIFE_FOREGROUND_DURABLE_RECEIPT_INVALID") from exc
+    candidate = LifeCommand(
+        command_id=str(value["command_id"]),
+        person_id=str(value["person_id"]),
+        command_type=str(value["command_type"]),
+        payload=dict(value["payload"]),
+        expected_version=max(0, state_version - 1),
+        created_at_ms=int(value["created_at_ms"]),
+        correlation_id=str(value["correlation_id"]),
+        metadata=dict(value["metadata"]),
+    )
+    if (
+        status != "APPLIED"
+        or str(projected.get("command_id") or "") != value["command_id"]
+        or str(projected.get("person_id") or "") != value["person_id"]
+        or not event_id.startswith("life_evt_")
+        or not command_hash
+        or candidate.command_hash != command_hash
+        or state_version <= 0
+        or not state_digest
+        or outbox_count < 0
+        or persisted_created_at_ms < int(value["created_at_ms"])
+    ):
+        raise RuntimeError("LIFE_FOREGROUND_DURABLE_RECEIPT_INVALID")
+    return {
+        **projected,
+        "replayed": bool(replay or projected.get("replayed")),
+        # The Life event id is the canonical immutable journal identity bound
+        # atomically by life_command_receipt; no synthetic URI is emitted.
+        "receipt_ref": _canonical_id_ref("life-event", event_id),
+    }
 
 
 async def _deliver_accepted_surface_reply(payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -478,17 +914,10 @@ async def _deliver_accepted_surface_reply(payload: Mapping[str, Any]) -> Mapping
         submit_gateway_reply,
     )
 
-    value = dict(payload or {})
-    terminal_proof = value.pop("_action_preview_terminal_proof", None)
-    if not isinstance(terminal_proof, Mapping):
-        raise ValueError("accepted delivery lacks terminal ActionPreview proof")
-    channel = str(value.get("reply_channel") or "").strip()
-    target = str(value.get("reply_target") or "").strip()
-    request_id = str(value.get("request_id") or "").strip()
-    if not request_id or not channel or not target:
-        raise ValueError(
-            "accepted delivery requires request_id, reply_channel and reply_target"
-        )
+    value, terminal_proof = _accepted_surface_invocation(payload)
+    channel = value["reply_channel"]
+    target = value["reply_target"]
+    request_id = value["request_id"]
     # The Acceptance Effect binds one exact, visible text result.  Reply-form,
     # voice, avatar, media and arbitrary ``raw_extra`` transforms require
     # their own accepted effect/Preview receipts; allowing them here would
@@ -510,15 +939,234 @@ async def _deliver_accepted_surface_reply(payload: Mapping[str, Any]) -> Mapping
         else dict(result or {})
     )
     if projected.get("success") is not True:
-        raise RuntimeError(
-            str(projected.get("reason_code") or "SURFACE_REPLY_DELIVERY_FAILED")
-            + ": "
-            + str(projected.get("detail") or "delivery failed")
+        event = projected.get("event")
+        evidence = _opaque_failure(
+            RuntimeError(
+                repr(
+                    {
+                        "status": projected.get("status"),
+                        "reason_code": projected.get("reason_code"),
+                        "detail": projected.get("detail"),
+                        "event": event,
+                    }
+                )
+            )
+        )
+        if (
+            isinstance(event, Mapping)
+            and event.get("external_side_effects") is False
+        ):
+            raise _AcceptedSurfaceNoEffectFailure(
+                "Gateway explicitly attested external_side_effects=false for "
+                f"{_surface_delivery_id(value)} after {evidence}"
+            )
+        # A 500, missing/malformed body, apparently queued response, string
+        # "false", or any other non-success is not proof of no effect.  Host
+        # has no authenticated outbox read port, so all remain unknown.
+        raise AcceptanceEffectOutcomeUnknown(
+            "Gateway reply has no trusted zero-effect attestation after the "
+            f"transport boundary for {_surface_delivery_id(value)}; {evidence}"
+        )
+    event = projected.get("event")
+    outbox_id = (
+        str(event.get("outbox_id") or "").strip()
+        if isinstance(event, Mapping)
+        else ""
+    )
+    expected_delivery_id = _surface_delivery_id(value)
+    expected_payload_digest = _surface_gateway_payload_digest(value)
+    if (
+        not outbox_id.startswith("gateway-outbox-")
+        or not isinstance(event, Mapping)
+        or str(event.get("delivery_id") or "") != expected_delivery_id
+        or str(event.get("platform") or "") != channel
+        or str(event.get("conversation_id") or "") != target
+        or str(event.get("payload_digest") or "") != expected_payload_digest
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Gateway accepted the reply without returning an exact canonical "
+            "outbox/delivery/destination/payload binding for "
+            f"{expected_delivery_id}"
         )
     return {
         **projected,
-        "receipt_ref": _receipt("surface-reply-delivery", value),
+        "outbox_id": outbox_id,
+        "delivery_id": expected_delivery_id,
+        "payload_digest": expected_payload_digest,
+        "receipt_ref": _canonical_id_ref("gateway-outbox", outbox_id),
     }
+
+
+def _accepted_surface_request(payload: Mapping[str, Any]) -> dict[str, Any]:
+    value = dict(payload or {})
+    value.pop("_action_preview_terminal_proof", None)
+    required = {
+        "request_id",
+        "session_id",
+        "person_id",
+        "reply_channel",
+        "reply_target",
+        "decision",
+        "narrative",
+        "authority",
+    }
+    if set(value) != required:
+        raise ValueError("accepted surface delivery payload drifted")
+    authority = value.get("authority")
+    request_id = value.get("request_id")
+    session_id = value.get("session_id")
+    person_id = value.get("person_id")
+    channel = value.get("reply_channel")
+    target = value.get("reply_target")
+    decision = value.get("decision")
+    narrative = value.get("narrative")
+    if (
+        not _is_exact_effect_identity(request_id, limit=180)
+        or not _is_exact_effect_identity(session_id, limit=180)
+        or not _is_exact_effect_identity(person_id, limit=120)
+        or not _is_exact_effect_identity(channel, limit=32)
+        or channel != channel.lower()
+        or not _is_exact_effect_identity(target, limit=240)
+        or decision != "APPROVE"
+        or not isinstance(narrative, str)
+        or not isinstance(authority, Mapping)
+        or authority.get("request_id") != request_id
+    ):
+        raise ValueError("accepted surface delivery identity is incomplete")
+    return {
+        **value,
+        "request_id": request_id,
+        "session_id": session_id,
+        "person_id": person_id,
+        "reply_channel": channel,
+        "reply_target": target,
+        "decision": "APPROVE",
+        "narrative": narrative,
+        "authority": dict(authority),
+    }
+
+
+def _is_exact_effect_identity(value: Any, *, limit: int) -> bool:
+    """Return true only for an already-canonical immutable effect identity."""
+
+    return bool(
+        isinstance(value, str)
+        and value
+        and value == value.strip()
+        and len(value) <= limit
+        and re.search(r"[\x00-\x1f\x7f]", value) is None
+    )
+
+
+def _accepted_surface_invocation(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate all local input/proof structure before Gateway invocation."""
+
+    value = _accepted_surface_request(payload)
+    terminal_proof = dict(payload).get("_action_preview_terminal_proof")
+    if not isinstance(terminal_proof, Mapping) or set(terminal_proof) != {
+        "service",
+        "event_id",
+        "boundary",
+    }:
+        raise ValueError("accepted delivery lacks exact terminal ActionPreview proof")
+    service = terminal_proof.get("service")
+    event_id = str(terminal_proof.get("event_id") or "").strip()
+    boundary = terminal_proof.get("boundary")
+    if (
+        not callable(getattr(service, "require_execution", None))
+        or not event_id
+        or not isinstance(boundary, Mapping)
+        or not boundary
+    ):
+        raise ValueError("accepted delivery terminal ActionPreview proof is incomplete")
+    return value, {
+        "service": service,
+        "event_id": event_id,
+        "boundary": dict(boundary),
+    }
+
+
+def _surface_delivery_id(value: Mapping[str, Any]) -> str:
+    material = json.dumps(
+        {
+            "platform": str(value.get("reply_channel") or "").strip().lower(),
+            "conversation_id": str(value.get("reply_target") or "").strip(),
+            "content": str(value.get("narrative") or ""),
+            "msg_type": "text",
+            "media_path": "",
+            "raw_extra": {},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "reply:" + hashlib.sha256(
+        str(value.get("request_id") or "").encode("utf-8") + b"\n" + material
+    ).hexdigest()
+
+
+def _surface_gateway_payload_digest(value: Mapping[str, Any]) -> str:
+    """Digest the exact durable payload accepted by GatewayDeliveryRuntime."""
+
+    delivery_id = _surface_delivery_id(value)
+    durable_payload = {
+        "request_id": str(value.get("request_id") or ""),
+        "delivery_id": delivery_id,
+        "platform": str(value.get("reply_channel") or ""),
+        "conversation_id": str(value.get("reply_target") or ""),
+        "msg_type": "text",
+        "content": str(value.get("narrative") or ""),
+        "media_path": None,
+        "reply_to_msg_id": None,
+        "raw_extra": {},
+    }
+    encoded = json.dumps(
+        durable_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _json_object(value: Any, field_name: str) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    try:
+        decoded = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{field_name} is not canonical JSON") from exc
+    if not isinstance(decoded, Mapping):
+        raise ValueError(f"{field_name} is not an object")
+    return dict(decoded)
+
+
+def _opaque_failure(exc: BaseException) -> str:
+    """Return a non-secret failure identity safe for a durable effect row."""
+
+    # Do not hash attacker/provider-controlled text: low-entropy errors and
+    # secrets could be guessed offline.  Correlation uses a random incident id;
+    # the full exception remains only in ephemeral exception chaining/logging.
+    return f"{type(exc).__name__}[incident:{secrets.token_hex(12)}]"
+
+
+def _canonical_id_ref(kind: str, identity: str) -> str:
+    """Wrap one stored primary key in a reversible typed durable reference."""
+
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_identity = str(identity or "").strip()
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,31}", normalized_kind):
+        raise ValueError("canonical reference kind is invalid")
+    if not normalized_identity:
+        raise ValueError("canonical reference identity is required")
+    return (
+        f"{normalized_kind}://id/"
+        + urllib.parse.quote(normalized_identity, safe="")
+    )
 
 
 def _receipt(kind: str, payload: Mapping[str, Any]) -> str:

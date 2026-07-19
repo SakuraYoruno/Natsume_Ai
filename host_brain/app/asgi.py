@@ -1018,6 +1018,9 @@ def create_app() -> FastAPI:
                     secure_ingress_authority_resolver=command_ingress.store,
                     runtime_owner_id=canonical_owner,
                     scheduler_operation_handler=scheduler_operation_handler,
+                    life_receipt_reader_provider=(
+                        lambda: life_command_authority_provider(ledger)[1]
+                    ),
                 )
                 acceptance_effect_dispatcher = (
                     operator_composition.acceptance_effect_dispatcher
@@ -1054,6 +1057,9 @@ def create_app() -> FastAPI:
                     owner_id=canonical_owner,
                     canonical_executor=AgentRuntimeExecutor(**canonical_agent_executor_kwargs),
                     cancellation_authority_verifier=cancellation_authority_verifier,
+                    runtime_context_application=runtime_context_application,
+                    action_preview_service=action_preview_service,
+                    acceptance_effect_dispatcher=acceptance_effect_dispatcher,
                 )
 
                 try:

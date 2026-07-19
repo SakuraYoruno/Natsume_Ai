@@ -49,6 +49,9 @@ _OPERATOR_SYS_MODE_EFFECT = "host.sys_mode_transition"
 _SCHEDULER_OPERATION_EFFECT = "scheduler.operation.execute"
 _SCHEDULER_PLAN_SCHEMA = "Natsume.scheduler.operation_plan.v1"
 _SCHEDULER_EFFECT_SCHEMA = "Natsume.scheduler.accepted_operation.v1"
+_INTERNAL_RESULT_COMMIT_EFFECT = "internal.agent.result_commit"
+_INTERNAL_PROPOSAL_SCHEMA = "Natsume.internal.agent_result_proposal.v1"
+_INTERNAL_EFFECT_SCHEMA = "Natsume.internal.accepted_agent_result.v1"
 _SYS_MODES = frozenset(
     {"normal", "sleep", "gaming", "focus", "maintenance", "locked"}
 )
@@ -94,6 +97,16 @@ def compile_graph_acceptance_effects(
             attempt_id=attempt_ref,
             commit=commit,
             pack=pack,
+        )
+    if command.surface is HostCommandSurface.INTERNAL or _proposes_internal_result_commit(
+        commit
+    ):
+        return _compile_internal_result_commit(
+            command=command,
+            work_order=work_order,
+            node_id=node_ref,
+            attempt_id=attempt_ref,
+            commit=commit,
         )
     if command.surface is HostCommandSurface.OPERATOR:
         return _compile_operator_effects(
@@ -222,6 +235,153 @@ def _proposes_scheduler_operation(commit: Mapping[str, Any]) -> bool:
             == _SCHEDULER_OPERATION_EFFECT
             for item in raw
         )
+    )
+
+
+def _proposes_internal_result_commit(commit: Mapping[str, Any]) -> bool:
+    raw = commit.get("acceptance_effect_intents")
+    return bool(
+        isinstance(raw, Sequence)
+        and not isinstance(raw, (str, bytes, bytearray))
+        and any(
+            isinstance(item, Mapping)
+            and str(item.get("effect_type") or "").strip()
+            == _INTERNAL_RESULT_COMMIT_EFFECT
+            for item in raw
+        )
+    )
+
+
+def _compile_internal_result_commit(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    attempt_id: str,
+    commit: Mapping[str, Any],
+) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    if command.surface is not HostCommandSurface.INTERNAL:
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result commit requires Internal ingress"
+        )
+    if command.route_type != "delegate" or command.target_id != "agent_runtime":
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result commit requires delegate:agent_runtime"
+        )
+    raw = commit.get("acceptance_effect_intents")
+    if (
+        not isinstance(raw, Sequence)
+        or isinstance(raw, (str, bytes, bytearray))
+        or len(raw) != 1
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent worker must propose exactly one result commit"
+        )
+    descriptor = _json_mapping(
+        raw[0],
+        field_name="Internal Agent result descriptor",
+    )
+    if set(descriptor) != {"effect_type", "commit_scope", "payload"} or (
+        descriptor.get("effect_type") != _INTERNAL_RESULT_COMMIT_EFFECT
+        or str(descriptor.get("commit_scope") or "").strip().upper() != "NODE"
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent worker proposed an unsupported result effect"
+        )
+    proposed = _json_mapping(
+        descriptor.get("payload"),
+        field_name="Internal Agent result proposal",
+    )
+    _reject_worker_authority(proposed)
+    required = {
+        "schema_version",
+        "work_order_id",
+        "target_id",
+        "operation_fingerprint",
+        "result_digest",
+        "result",
+    }
+    if set(proposed) != required or proposed.get("schema_version") != (
+        _INTERNAL_PROPOSAL_SCHEMA
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result proposal fields drifted"
+        )
+    result = _json_mapping(
+        proposed.get("result"),
+        field_name="Internal Agent proposed result",
+    )
+    result_digest = "sha256:" + hashlib.sha256(
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    work_order_id = _required(
+        getattr(work_order, "work_order_id", ""),
+        "work_order.work_order_id",
+    )
+    operation_fingerprint = _required(
+        getattr(work_order, "operation_fingerprint", ""),
+        "work_order.operation_fingerprint",
+    )
+    worker_projection_ref = _required(
+        commit.get("receipt_ref"),
+        "worker_commit.receipt_ref",
+    )
+    if (
+        not worker_projection_ref.startswith("worker-projection://")
+        or proposed.get("work_order_id") != work_order_id
+        or proposed.get("target_id") != "agent_runtime"
+        or proposed.get("operation_fingerprint") != operation_fingerprint
+        or operation_fingerprint != command.operation_fingerprint
+        or proposed.get("result_digest") != result_digest
+        or str(result.get("status") or "").strip().upper() != "EXECUTED"
+        or str(getattr(work_order, "task_graph_id", "") or "")
+        != command.graph_id
+        or int(getattr(work_order, "graph_revision", 0) or 0)
+        != command.graph_revision
+        or str(getattr(work_order, "task_node_id", "") or "") != node_id
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result proposal differs from canonical admission"
+        )
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_id,
+        worker_commit=commit,
+    )
+    if preview_context is None:
+        raise AcceptanceEffectCompileError(
+            "governed Internal Agent result has no Runtime Context preview binding"
+        )
+    payload = {
+        "schema_version": _INTERNAL_EFFECT_SCHEMA,
+        "command_id": command.command_id,
+        "request_id": command.request_id,
+        "work_order_id": work_order_id,
+        "graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "node_id": node_id,
+        "attempt_id": attempt_id,
+        "target_id": "agent_runtime",
+        "operation_fingerprint": operation_fingerprint,
+        "worker_projection_ref": worker_projection_ref,
+        "result_digest": result_digest,
+        "_action_preview_context": preview_context,
+    }
+    return (
+        _spec(
+            effect_type=_INTERNAL_RESULT_COMMIT_EFFECT,
+            payload=payload,
+            command=command,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        ),
     )
 
 

@@ -108,9 +108,12 @@ flowchart TB
 - `host_brain/scheduler/operation_plan.py`：把冻结 occurrence/definition/worker/fingerprint 编译为 `scheduler.operation.execute` descriptor，并从 canonical WorkerProjection 与 Scheduler repository 独立 Verification/Acceptance；不执行领域副作用。
 - `host_brain/scheduler/accepted_operation.py`：共享 dispatcher 的 Scheduler Effect handler；在 Graph Acceptance 后重开 exact operation/Preview authority、调用真实 handler，并将实际结果写入既有 immutable Scheduler result ledger。
 - `host_brain/scheduler/accepted_effect_runtime.py`：投递已提交的 Scheduler Effect，并在向调用方暴露领域结果前独立重开 actual-result 与 occurrence authority；缺失或读取不确定时保持 `RECOVERY_REQUIRED`。
+- `host_brain/scheduler/clock.py` + `persistence/scheduler_repository.py` + 0117：在一个 SQLite UoW 内把 live DUE retry authority 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前续租并在运行中 heartbeat，实际 failure time 决定退避，过期 lease 和 stale fence 均失败关闭。
 - `host_brain/app/governed_task_authority.py`：无状态的 HostCommand/WorkOrder/planning lineage、route-aware exact replay 与 fail-closed authority 校验；不写 Store、不执行 TaskGraph。
 - `host_brain/app/governed_operator_runtime.py`：当前只为 `sys_mode.switch` 冻结 typed Operator action、server-reopened Secure Ingress authority、HostCommand/TaskGraph 与 HardState effect replay；加上已有 `scheduler.task.trigger` 后 Operator 进度为 2/37，其余 35 条命令不进入 handler。
-- `host_brain/task_runtime/acceptance_effect_dispatcher.py::AcceptanceEffectRuntime`：Host 与 Operator 共用的单一 app-local Effect 投递/恢复 owner；`RECOVERY_PENDING` 只允许 durable defer，不得先 terminalize outer claim。
+- `host_brain/task_runtime/acceptance_effect_dispatcher.py::AcceptanceEffectRuntime`：Host、Operator、Scheduler 与 Internal result 共用的 app-local Effect 投递/恢复 owner；`RECOVERY_PENDING` 只允许 durable defer，不得先 terminalize outer claim。handler/transport 异常只保存 opaque incident，不把异常正文写入持久状态。
+- `host_brain/app/acceptance_effect_recovery_observer.py`：把 Effect 启动扫描/后台恢复失败与恢复投影为 app-local RuntimeGuardian durable SLO；它只观察恢复状态，不取得 Effect 或 Guardian 之外的业务 writer authority。
+- `host_brain/agent_runtime/internal_result_proposal.py`、`accepted_result.py`、`accepted_effect_runtime.py`：Internal worker 的脱敏 result proposal、Acceptance 后 canonical result commit，以及 exact Effect/result receipt 重开；仍保留 legacy executor bridge 和 pre-Acceptance local attempt artifact。
 - `host_brain/app/observability_runtime/review_wait_recovery.py`：只在 Host 启动阶段用 Secure Ingress、HostCommand、TaskNode 与 ReviewItem 四方 canonical authority 修复 Review 已落库但 outer WAL append 失败的崩溃窗；恢复前 OBS admission 保持关闭，绑定漂移失败关闭。
 
 该层决定“是否允许做、冻结成什么图”，但不应把模型输出直接当成已经执行的事实。
@@ -148,7 +151,7 @@ flowchart TB
 - `host_brain/task_runtime/budget_runtime.py`：预算预留、计量和结算。
 - `host_brain/task_runtime/review_runtime.py`：PRE/POST Review 与 continuation 材料。
 - `host_brain/task_runtime/acceptance_effects.py`：Acceptance effect intent 构造。
-- `host_brain/task_runtime/acceptance_effect_dispatcher.py`：验收后副作用投递；Host、Operator 与 Scheduler 复用同一 app-local owner，`scheduler.operation.execute` 只有在 canonical Effect claim 和 derived Preview 重开后才进入真实 handler。
+- `host_brain/task_runtime/acceptance_effect_dispatcher.py`：验收后副作用投递；Conversation exact 仅覆盖 visible turn+MemoryEvent，独立 Life Effect 可 exact reconcile；偏好 side-write receipt仍缺。Surface 无 authenticated Gateway outbox read port 时保持 `UNKNOWN`。
 - `host_brain/persistence/task_repository.py`：Durable TaskGraph、Node、Attempt、Lease、Budget 的唯一 Store 组合、连接与事务 authority；通过无状态 persistence mixin 复用窄职责实现。
 - `host_brain/persistence/task_dag_state_store.py`：Graph/Node 读取、状态转换与一致 scheduler snapshot；Graph/Node INSERT 只存在 private `_insert_graph_from_host_command_in_transaction()`，它仅借用 HostCommand admission 的 caller-owned transaction。public `create_graph` 与 `insert_graph_in_transaction` 已删除。
 - `host_brain/persistence/task_ready_claim_store.py`：READY claim 与 response-loss exact replay；一个 writer transaction 内复核容量并提交 Attempt、Node、Lease、Heartbeat 与三条 Outbox。
@@ -184,7 +187,11 @@ flowchart TB
 
 ActionPreview 的生产重开使用 canonical Runtime Context 投影，不把 Host request 的其他 input-pack 字段混入 context identity。Scene 合同内部的 64hex digest 在 Preview receipt 边界转换为 `sha256:`，两侧都从 canonical WorkOrder 重算；Guardian 续租仅在 scope/owner/lease/fence/revision 和 policy 完全一致时允许 expiry 单调延长。Acceptance terminal boundary 对 `action_args` 深拷贝后才向 handler payload 注入 proof，避免自引用图进入 canonical digest。上述规则都保留 fail-closed：expiry 缩短、身份漂移、Scene/Context 漂移和非 canonical payload 仍拒绝。
 
-Scheduler governed occurrence 当前沿同一边界运行：Task worker 只提交 immutable operation plan，Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 在 TaskStore canonical UoW 同成同败；共享 app-local `AcceptanceEffectDispatcher` 在提交后派生 exact Scheduler Preview 并调用真实 handler，实际结果仍由既有 `SchedulerExecutionResultRepository` 持久化。native ingress claim 绑定实际 result receipt；Operator 外层仍使用独立 checksum-chained OBS outcome receipt，并只在实际结果可归因后终结。Review 前 handler=0、Effect commit 后=1，duplicate 不重调；所有过期 claim 或 handler 调用后的响应丢失只能调用显式只读 `reconcile()`，无 reconciler 时保持 `RECONCILIATION_REQUIRED`。生产 sys-mode 仅重开 exact HardState，Scheduler/Effect handler 的空结果、歧义状态或非真实 receipt 均失败关闭，恢复轮询异常不再静默。该切流不覆盖 definition/admin direct authority、mutable batch/clock retry、一般未知外部效果人工归因、wave integration 或 canary，所以 Scheduler/NE-01 仍未完成。
+Scheduler governed occurrence 当前沿同一边界运行：Task worker 只提交 immutable operation plan，Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 在 TaskStore canonical UoW 同成同败；共享 app-local `AcceptanceEffectDispatcher` 在提交后派生 exact Scheduler Preview 并调用真实 handler，实际结果仍由既有 `SchedulerExecutionResultRepository` 持久化。0117 让 `admit_due_occurrence` 在同一 `BEGIN IMMEDIATE` 中验证 DUE owner/fence并把 retry row 原子转为 occurrence claim，消除 clear-DUE 后再 claim 的并发窗口；execution lifecycle 在 dispatch 前/中续租，过期 owner不能自我复活，clear/defer 使用实际调用时间。native ingress claim 仍只绑定 actual result receipt；Operator outer outcome 仍须等结果可归因。该 Clock 定向批次为 19 项、47.53 秒；definition/admin direct authority、mutable batch freezing、一般未知外部效果人工归因、wave integration 与 canary 仍缺，所以 Scheduler/NE-01 未完成。
+
+通用 Effect 恢复按领域 authority 只读重开：Conversation 仅重验 visible turn+MemoryEvent；偏好 side-write 可吞异常且无 receipt，Life projection 可降级。独立 Life Effect 重验 command receipt；Surface 成功精确绑定 Gateway outbox identity，无 authenticated query port时未知结果保持 `UNKNOWN`。恢复 failure/recovery 进入 Guardian durable SLO且不含异常正文。
+
+Internal worker 的 real result 在 Acceptance 前只形成 proposal。Frozen node 的 root WorkOrder、graph/revision、node、attempt、lease、command、principal、owner/fence 会原样传给 Durable Workspace；Verifier、outer Acceptance 与最终 handler 共同拒绝非严格 `EXECUTED + ACCEPT + review_required=false`，不能由通用 Review continuation 提升。Graph Acceptance 之后才 staging `internal.agent.result_commit`，handler 重开 immutable command/graph/node/projection/Preview 后写 `AgentExecutionResultRepository`；入口仅在 Effect `COMMITTED` 且 exact result receipt 可读时封 claim，其余状态保持 OPEN。`WorkOrderV3 → AgentWorkOrder` bridge、pre-Acceptance local artifact 和完整 public WorkerProjection 仍是兼容/隔离缺口。
 
 TaskStore 的 DAG state、READY claim、中央 mutation Outbox、BudgetUsage contention 与 Operation checkpoint read 均已拆为 focused mixin。`task_repository.py` 当前 4,358 行，`task_budget_usage_store.py` 732 行，`task_operation_checkpoint_store.py` 214 行；`DurableTaskStore` 仍是唯一组合/连接/UoW owner，没有新增 architecture policy 白名单或第二 Store authority。
 
@@ -258,7 +265,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0116_agent_workspace_lifecycle.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。
+当前连续 SQLite migration head 为 `0117_scheduler_clock_retry_authority.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0117 只封闭 Scheduler Clock 的 retry/backoff、lease/fence 重启真相，不代表 Scheduler 或 NE-01 完成。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -372,7 +379,7 @@ flowchart LR
 | Acceptance | 是否接纳结果并允许副作用 | 决定 effect intent |
 | Receipt | 外部或持久副作用实际发生了什么 | 不可变证据 |
 
-Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admission，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 的 `AgentWorkOrder` 只保留为 ingress/executor 兼容对象：调用方 authority 在边界清除，child grant 验证前不能调用 executor。0096 已闭环 task-bound 长时间 Review 的 renewal/derivation：续跑 authority 不携带 bearer token，只绑定当前 Review claim 的 owner、token digest、expiry、fence 与 decision version；READY claim 在创建 Attempt/Lease 的同一事务复核它，worker 再复核 exact Attempt、Lease owner 与 fencing token。该闭环不等于一般 recoverable Attempt takeover，也不改变 cancellation 的 `PRODUCTION_OFF` 定级。
+Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admission，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 的 `AgentWorkOrder` 只保留为 ingress/executor 兼容对象：调用方 authority 在边界清除，child grant 验证前不能调用 executor；executor result 先成为 proposal，canonical result 只在 Acceptance 后由 Effect handler 写入，exact `COMMITTED` receipt 后才封入口 claim。0096 已建立 task-bound 长时间 Review 的 renewal/derivation；这不等于一般 recoverable Attempt takeover。Internal 的 pre-Acceptance artifact/WorkerProjection 边界和 cancellation 的 `PRODUCTION_OFF` 定级均未改变。
 
 ## 6. 状态与数据 authority
 
@@ -385,12 +392,14 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Model invocation | `ModelAttemptService` 及持久记录 | 用量和健康投影 | terminal attempt 去重；三维 token 为 Optional 并携带 measured coverage/lower-bound；provider 缺失时不得伪造精确成本；stream 当前无生产调用者且最终 usage 未接，启用前必须补 typed final usage |
 | Capability execution | Capability Broker journal/receipt | maturity scorecard | maturity 投影本身不是执行 authority |
 | Life | Life command/event/reducer | Life projection、UI | 业务模块不能直接改 projection |
+| Acceptance Effect recovery | Effect row + app-local dispatcher + domain read authority | Guardian SLO | Conversation visible turn+MemoryEvent exact；偏好 side-write无receipt；独立Life Effect exact；Surface无authenticated read port时`UNKNOWN`；异常正文不持久化 |
+| Internal Agent result | result proposal + Acceptance Effect + canonical result repository | execution/read projection | 只在 Acceptance 后写 canonical result；exact `COMMITTED` receipt 才封 claim；legacy bridge与pre-Acceptance artifact仍保留 |
 | Persona policy | Persona/version authority（目标） | Surface context | 当前直接 growth writer 必须封禁 |
 | Memory / Canon | typed repository + governed apply | vector、semantic、graph、prompt slots | 衍生召回不能反写事实 |
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为0116；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0117_scheduler_clock_retry_authority.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0117 只定义 Scheduler Clock retry/owner/fence authority，不改变七路线总体 `INCOMPLETE`。
 
 ## 7. 数字生命状态模型
 

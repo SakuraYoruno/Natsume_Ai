@@ -14,9 +14,13 @@ import hmac
 from typing import Any
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.accepted_result import InternalAcceptedResultHandler
 from host_brain.app.acceptance_effect_handlers import (
     build_production_acceptance_effect_handlers,
     sys_mode_transition_handler_receipt_ref,
+)
+from host_brain.app.acceptance_effect_recovery_observer import (
+    AcceptanceEffectRecoveryGuardianObserver,
 )
 from host_brain.app.governed_frozen_skill_runtime import (
     _WorkerCommitAcceptance,
@@ -35,6 +39,8 @@ from host_brain.orchestration.node_grants import (
     NodeBoundGrantService,
 )
 from host_brain.persistence.task_repository import OutboxMessage
+from host_brain.persistence.context_memory_repository import MemoryEventRepository
+from host_brain.persistence.context_repository import ContextRepository
 from host_brain.runtime.context_application import RuntimeContextApplicationService
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
@@ -646,6 +652,7 @@ def build_governed_operator_composition(
     secure_ingress_authority_resolver: Any,
     runtime_owner_id: str,
     scheduler_operation_handler: Any | None = None,
+    life_receipt_reader_provider: Any | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
@@ -654,11 +661,24 @@ def build_governed_operator_composition(
         handlers=build_production_acceptance_effect_handlers(
             mode_transition_service_provider=mode_transition_service_provider,
             scheduler_operation_handler=scheduler_operation_handler,
+            internal_result_commit_handler=InternalAcceptedResultHandler(
+                command_repository=task_runtime_container.command_repository,
+                projection_store=task_runtime_container.worker_projection_store,
+                result_repository=task_runtime_container.agent_result_repository,
+            ),
+            conversation_turn_reader=ContextRepository.from_ledger(ledger),
+            conversation_event_reader=MemoryEventRepository.from_ledger(ledger),
+            life_receipt_reader_provider=life_receipt_reader_provider,
         ),
         owner_id=f"{runtime_owner_id}::acceptance-effects",
         action_preview_service=action_preview_service,
     )
-    effect_runtime = AcceptanceEffectRuntime(dispatcher=dispatcher)
+    effect_runtime = AcceptanceEffectRuntime(
+        dispatcher=dispatcher,
+        recovery_observer=AcceptanceEffectRecoveryGuardianObserver(
+            guardian=runtime_context_application.composition.guardian,
+        ),
+    )
     runtime = build_governed_operator_runtime(
         task_runtime_container=task_runtime_container,
         ledger=ledger,

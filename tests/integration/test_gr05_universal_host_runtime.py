@@ -11,6 +11,8 @@ import pytest
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.host_runtime_context_wiring import compose_host_runtime_context
 from host_brain.app.acceptance_effect_handlers import (
+    _surface_delivery_id,
+    _surface_gateway_payload_digest,
     build_production_acceptance_effect_handlers,
 )
 from host_brain.app.governed_task_adapter import (
@@ -43,6 +45,8 @@ from host_brain.orchestration.node_grants import DurableNodeGrantVerifier
 from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
+from host_brain.persistence.context_memory_repository import MemoryEventRepository
+from host_brain.persistence.context_repository import ContextRepository
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.runtime.action_preview_resolver import (
     ProductionActionPreviewAuthorityResolver,
@@ -266,12 +270,24 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 "timeout_ms": timeout_ms,
             }
         )
+        surface_value = {
+            "request_id": str(payload.get("request_id") or ""),
+            "reply_channel": str(payload.get("platform") or ""),
+            "reply_target": str(payload.get("conversation_id") or ""),
+            "narrative": str(payload.get("content") or ""),
+        }
         return EdgeTransportResult(
             success=True,
             status="SENT",
             reason_code=None,
             detail="frozen terminal network transport accepted",
-            event={"delivery_id": str(payload.get("delivery_id") or "")},
+            event={
+                "delivery_id": _surface_delivery_id(surface_value),
+                "outbox_id": "gateway-outbox-gr05-universal-runtime",
+                "platform": str(payload.get("platform") or ""),
+                "conversation_id": str(payload.get("conversation_id") or ""),
+                "payload_digest": _surface_gateway_payload_digest(surface_value),
+            },
             latency_ms=1,
         )
 
@@ -362,7 +378,13 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         )
         acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
             task_store=container.task_store,
-            handlers=build_production_acceptance_effect_handlers(),
+            handlers=build_production_acceptance_effect_handlers(
+                conversation_turn_reader=ContextRepository.from_ledger(ledger),
+                conversation_event_reader=MemoryEventRepository.from_ledger(
+                    ledger
+                ),
+                life_receipt_reader_provider=lambda: life.snapshot_reader,
+            ),
             owner_id="gr05-universal-acceptance-effects",
             action_preview_service=action_preview_service,
         )
