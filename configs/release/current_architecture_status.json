@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_REACT_RUN_SKILL_AND_DISPATCH_SUB_AGENT_DISCOVERY_AND_LOW_LEVEL_BYPASSES_RETIRED_VISUAL_AGENT_DIRECT_HTTP_LOOP_RAW_CLIENT_LEDGER_WRITER_AND_LEGACY_ACTION_PLANNER_MODEL_ENTRY_RETIRED_CURRENT_NAMED_PROCESS_SERVICES_41_MODULES_117_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_47_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_NE01_STILL_INCOMPLETE",
+  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_AND_HARD_STATE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_REACT_RUN_SKILL_AND_DISPATCH_SUB_AGENT_DISCOVERY_AND_LOW_LEVEL_BYPASSES_RETIRED_VISUAL_AGENT_DIRECT_HTTP_LOOP_RAW_CLIENT_LEDGER_WRITER_AND_LEGACY_ACTION_PLANNER_MODEL_ENTRY_RETIRED_HARD_STATE_PROCESS_FACADES_SLOT_LOCK_AND_TARGETED_BINDINGS_ZERO_CURRENT_NAMED_PROCESS_SERVICES_40_MODULES_116_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_46_CONTAINER_52_FIELDS_3_LOCKS_48_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_HARD_STATE_DURABLE_OWNER_AND_RESTART_RECOVERY_MISSING_NE01_STILL_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -27,7 +27,7 @@
     "status": "TARGETED_SLICE_PASSED_PROGRAM_INCOMPLETE",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_REACT_SKILL_DELEGATE_AND_VISUAL_AGENT_DIRECT_ENTRY_CUTOFF_WITH_EXISTING_OPERATOR_TOOL_HTTP_AND_LEGACY_TOOL_MCP_AUTHORITY_RETIREMENT",
+    "slice": "NE01_APP_LOCAL_HARD_STATE_OWNER_WITH_REACT_VISUAL_AND_LEGACY_TOOL_MCP_AUTHORITY_RETIREMENT_HISTORY",
     "test_batches": {
       "structure_and_runtime_context_passed": 59,
       "action_preview_and_embodiment_passed": 43,
@@ -109,7 +109,12 @@
       "final_authority_contract_and_metadata_regression_passed": 89,
       "visual_agent_authority_cutoff_focused_passed": 61,
       "visual_agent_edge_migration_and_document_regression_passed": 89,
-      "frozen_0104_receipt_loss_regression_passed": 7
+      "frozen_0104_receipt_loss_regression_passed": 7,
+      "hard_state_app_local_targeted_passed": 210,
+      "hard_state_d7b_durable_life_body_projection_passed": 7,
+      "hard_state_operator_focus_runtime_projection_passed": 29,
+      "hard_state_validation_overlap_boundary": "210_7_AND_29_ARE_RECORDED_AS_INDEPENDENT_BATCHES_DO_NOT_SUM",
+      "hard_state_broad_obs_batch": "TIMED_OUT_NOT_COUNTED_AS_PASS"
     },
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "completed_large_file_splits": [
@@ -147,7 +152,7 @@
         "process_tool_broker_container_slot_count": 0,
         "host_lifecycle_tool_broker_provider_count": 0
       },
-      "boundary": "ORIGIN_DEV_C2BE993BC_REACT_CUTOFF_AND_CURRENT_VISUAL_CUTOFF_KEEP_GATES_1_6_10_11_GREEN_FAILED_EMPTY_PERSISTENCE_TO_APPLICATION_ZERO_STATIC_ONLY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_AND_NE01_REMAIN_INCOMPLETE"
+      "boundary": "ORIGIN_DEV_C2BE993BC_REACT_VISUAL_AND_CURRENT_HARD_STATE_APP_LOCAL_CUTOFF_KEEP_GATES_1_6_10_11_GREEN_FAILED_EMPTY_PERSISTENCE_TO_APPLICATION_ZERO_STATIC_ONLY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_FULL_TYPED_COMPOSITION_DURABLE_HARD_STATE_RESTART_RECOVERY_AND_NE01_REMAIN_INCOMPLETE"
     },
     "focused_structure_current_lines": {
       "host_brain/app/asgi.py": 1469,
@@ -162,12 +167,12 @@
     },
     "locator_consumer_inventory": {
       "combined_current_inventory": {
-        "named_modules": 41,
-        "named_imported_names": 117,
-        "all_import_form_consumer_modules": 47,
-        "process_service_container_fields": 54,
-        "process_service_container_lock_fields": 4,
-        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49
+        "named_modules": 40,
+        "named_imported_names": 116,
+        "all_import_form_consumer_modules": 46,
+        "process_service_container_fields": 52,
+        "process_service_container_lock_fields": 3,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 48
       },
       "dev_c2be993bc_commit_bound_history": {
         "named_modules": 45,
@@ -186,6 +191,15 @@
         "process_service_container_lock_fields": 4,
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49,
         "scope": "PREVIOUS_REACT_SKILL_DELEGATE_CUTOFF_BEFORE_VISUAL_DIRECT_ENTRY_CUTOFF"
+      },
+      "visual_cutoff_commit_bound_history": {
+        "named_modules": 41,
+        "named_imported_names": 117,
+        "all_import_form_consumer_modules": 47,
+        "process_service_container_fields": 54,
+        "process_service_container_lock_fields": 4,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49,
+        "scope": "PREVIOUS_VISUAL_DIRECT_ENTRY_CUTOFF_BEFORE_APP_LOCAL_HARD_STATE_OWNER"
       },
       "host_lifecycle_commit_bound_history": {
         "before_modules": 47,
@@ -208,10 +222,10 @@
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 52,
         "scope": "TOOL_MCP_SLICE_SNAPSHOT_BEFORE_HOST_LIFECYCLE_REBASE"
       },
-      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker"],
+      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
-      "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker"],
-      "boundary": "COMBINED_CURRENT_IS_41_MODULES_117_NAMES_47_ALL_FORM_CONSUMERS_AND_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_REMAINS"
+      "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state"],
+      "boundary": "COMBINED_CURRENT_IS_40_MODULES_116_NAMES_46_ALL_FORM_CONSUMERS_AND_CONTAINER_52_FIELDS_3_LOCKS_48_MUTABLE_REFS_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_REMAINS"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
@@ -219,7 +233,8 @@
       "app_local_services": [
         "ModeTransitionService",
         "ActivityMonitor",
-        "SystemResourceManager"
+        "SystemResourceManager",
+        "HostHardStateOwner"
       ],
       "consumers": [
         "http_hooks_startup",
@@ -229,7 +244,9 @@
         "tribe_port_bundle_prepared_per_app_then_LIFESPAN_BOUND_TO_PROCESS_GLOBAL_OWNER_FENCE",
         "governed_tool_runtime",
         "scheduler",
-        "runtime_guardian_health_heartbeat"
+        "runtime_guardian_health_heartbeat",
+        "chat_and_routing_explicit_mode",
+        "tribe_lifecycle_and_scheduler_shared_hard_state_owner"
       ],
       "publication_boundary": "FACTORY_AND_START_MUST_SUCCEED_BEFORE_APP_LOCAL_PROVIDER_PUBLICATION",
       "activity_factory_failure": "MODE_AUTHORITY_NOT_PUBLISHED",
@@ -239,9 +256,16 @@
       "tribe_lifespan_binding": "PROCESS_GLOBAL_EXACT_OWNER_BIND_UNBIND_ONLY_ONE_LIVE_HOST_SECOND_LIVE_HOST_FAILS_CLOSED_SEQUENTIAL_REBIND_AFTER_RELEASE_ALLOWED",
       "concurrent_multi_app_tribe_isolation": "NOT_SUPPORTED_NOT_CLAIMED",
       "obs_activity_projection": "READ_ONLY_NO_LAZY_START",
+      "hard_state_bootstrap": "CORE_SETTINGS_SYS_MODE_BOOTSTRAP_ONLY_NO_RUNTIME_ENV_READ_OR_WRITE",
+      "hard_state_transition": "ATOMIC_IMMUTABLE_REPLACEMENT_WITH_ENDOCRINE_RESOLUTION_AFTER_OWNER_LOCK_RELEASE",
+      "hard_state_process_facades_slot_lock_and_targeted_bindings": "ZERO",
+      "hard_state_runtime_snapshot": "APP_LOCAL_OWNER_ONLY_NO_ENV_FALLBACK",
+      "hard_state_obs_life_body_projection": "DURABLE_READ_ONLY",
+      "hard_state_fake_writers": "LIMBIC_AND_PREFRONTAL_ZERO",
       "http_hooks_process_service_locator_imports": 0,
       "known_boundaries": [
-        "HardState and set_sys_mode remain process-global",
+        "HostHardStateOwner has no durable state owner or restart recovery",
+        "Endocrine agent remains process-global behind an app-local immutable HardState snapshot",
         "heartbeat cache and client remain process-global",
         "Tribe agents and bus remain process-global behind a single-live-Host owner fence",
         "SystemResourceManager status file remains a shared path",
@@ -1697,14 +1721,14 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor and SystemResourceManager, and publication occurs only after each factory/start succeeds; Activity factory failure publishes no Mode authority, aclose raises a closing fence that blocks begin, and the ResourceManager startup sample runs in its sole owned loop. Per-app Tribe ports bind only during lifespan through a process-global exact-owner fence: one live Host is allowed, a second fails closed, and concurrent multi-app Tribe isolation is neither supported nor claimed. ToolBroker/MCP direct and callback authority is retired; get_mcp_tool_broker, get_tool_broker and their process-owned slots are deleted, HostLifecycleApplicationPorts has no ToolBroker provider, and the sole ToolBroker constructor is host_brain/tools/broker.py inside an app-local ToolRuntimeBoundary. A real workspace-bound governed Tool/MCP/Visual executor is still absent. http_hooks has zero process_services imports and the activity/resource global publication slots and setters are retired. The original Host lifecycle slice recorded 47/152 to 45/124 named imports, 52 to 51 all-form consumer modules, and 56 fields/4 locks/51 mutable refs; the #89 Gate 11 repair snapshot is 45 modules/123 imported names, 51 all-form consumer modules, and 54 fields/4 locks/49 mutable refs. The ReAct narrow slice inventory is 43 modules/120 imported names and 49 all-form consumer modules; after Visual direct-entry retirement, current inventory is 41/117/47 and the Container remains 54/4/49. Heartbeat cache/client, HardState/set_sys_mode, Tribe agents/bus, the shared ResourceManager status path, underlying Host sources, Chat/Delegate boundaries and most Worker authorities remain process-global or process-shared. Full Host/Worker typed composition, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. This slice does not complete NE-01 or the full architecture; only the full architecture static Gate is now green.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. HostHardStateOwner receives CoreSettings.sys_mode only at bootstrap, never reads or writes the environment at runtime, atomically replaces immutable state, and resolves the process-global endocrine agent only after releasing its owner lock. Invalid bootstrap modes fail closed as maintenance. The Chat mode gate, Tribe, Lifecycle and Scheduler consume the same app-local owner; runtime snapshot has no environment fallback, Obs Life Body reads the durable projection, and Limbic/Prefrontal fake HardState writes are absent. The chat-generation and routing helpers no longer read mode from the environment and accept an explicit mode, but their positive production propagation is not proven. The three process HardState facades, hard_state slot/lock and six targeted bindings are zero. Per-app Tribe ports still bind through a process-global exact-owner fence: one live Host is allowed, a second fails closed, and concurrent multi-app Tribe isolation is neither supported nor claimed. ToolBroker/MCP direct and callback authority remains retired. The original Host lifecycle, #89, ReAct and Visual inventories remain commit-bound history; Visual was 41/117/47 with Container 54/4/49. Current inventory is 40/116/46 with Container 52/3/48. Heartbeat cache/client, the endocrine agent, Tribe agents/bus, shared ResourceManager status path, underlying Host sources, Chat/Delegate boundaries and most Worker authorities remain process-global or process-shared. HardState still lacks a durable owner and restart recovery. Full Host/Worker typed composition, positive mode propagation into the chat-generation/routing helpers, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. Focused tests passed 210, D7b durable Life Body tests passed 7, and operator/focus/runtime projection tests passed 29; these independent batches must not be summed. A broad Obs batch timed out and is not counted. Wave integration is NOT_RUN_PER_WAVE_POLICY and REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA. This slice does not complete NE-01 or the full architecture; the fresh architecture static Gate alone is PASS with failed_gates=[].",
       "mixed_file_gate": "GREEN_ISSUES_EMPTY_WITHOUT_POLICY_EXPANSION",
       "mixed_file_gate_findings": [],
       "effect_slice_structure_boundary": "The second NE-01 split moved ASGI lifecycle wiring, Obs response models, immutable Degradation policy, Node Grant and Planning codecs, Intent Review continuation, and Guardian contracts/commands into focused modules. The original authority owners remain the only lifecycle, connection, RuntimeEvent append, or journal-store owners. All eleven former findings are within the 1,500-line or pre-existing cohesive ceiling and the fresh repository gate returns no issues without adding or widening an allowlist. Service Locator, old execution bypasses, general recovery, and production enablement remain incomplete.",
       "cleanup_progress": {
-        "container_fields": 54,
-        "container_lock_fields": 4,
-        "mutable_service_references_excluding_locks_and_application_ports": 49,
+        "container_fields": 52,
+        "container_lock_fields": 3,
+        "mutable_service_references_excluding_locks_and_application_ports": 48,
         "retired_zero_consumer_slots": [
           "retrieval_orchestrator",
           "retrieval_pipeline",
@@ -1714,7 +1738,8 @@
           "skill_composer",
           "activity_monitor",
           "resource_manager",
-          "tool_broker"
+          "tool_broker",
+          "hard_state"
         ],
         "retired_global_publication_setters": [
           "set_activity_monitor",

@@ -11,6 +11,7 @@ from host_brain.tribe.application_ports import TribeApplicationPorts
 def build_tribe_application_ports(
     *,
     activity_monitor_provider: Callable[..., Any] | None = None,
+    hard_state_provider: Callable[[], Any] | None = None,
     mode_transition_service_provider: Callable[[], Any | None] | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
 ) -> TribeApplicationPorts:
@@ -58,7 +59,7 @@ def build_tribe_application_ports(
         silence_engine=process_services.get_silence_engine,
         state_write_arbiter=process_services.get_state_write_arbiter,
         emotion_timeline=process_services.get_emotion_timeline,
-        hard_state=process_services.get_hard_state,
+        hard_state=hard_state_provider or _missing_host_hard_state_owner,
         resource_manager=resolved_resource_manager_provider,
         bond_stage_engine=process_services.get_bond_stage_engine,
         shared_memory_index=process_services.get_shared_memory_index,
@@ -72,6 +73,12 @@ def build_tribe_application_ports(
         build_conversation_understanding_pack=build_conversation_understanding_pack,
         allocate_intent_seq=allocate_intent_seq,
     )
+
+
+def _missing_host_hard_state_owner(*_args: Any, **_kwargs: Any) -> Any:
+    """Reject Tribe HardState access when an app owner was not injected."""
+
+    raise RuntimeError("HOST_HARD_STATE_OWNER_NOT_INJECTED")
 
 
 def bind_tribe_application_ports(*, owner: Any, ports: TribeApplicationPorts) -> None:

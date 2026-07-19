@@ -90,8 +90,6 @@ def _ports(
         skill_registry=provider,
         tool_catalog=provider,
         capability_broker=provider,
-        hard_state=lambda: SimpleNamespace(sys_mode="normal"),
-        set_sys_mode=lambda _mode: {},
         model_attempt_service=provider,
         mode_transition_service_factory=build_mode,
         activity_monitor_factory=build_activity,
@@ -105,6 +103,94 @@ def test_host_lifecycle_ports_are_frozen_and_slotted() -> None:
     with pytest.raises(FrozenInstanceError):
         ports.memory_guard = object  # type: ignore[misc]
     assert not hasattr(ports, "__dict__")
+
+
+def test_hard_state_is_app_local_and_never_writes_bootstrap_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    first = HostLifecycleContainer(_ports([]), initial_sys_mode="normal")
+    second = HostLifecycleContainer(_ports([]), initial_sys_mode="gaming")
+
+    transition = first.set_sys_mode("focus")
+
+    assert transition["from_mode"] == "normal"
+    assert transition["to_mode"] == "focus"
+    assert first.get_hard_state().sys_mode == "focus"
+    assert second.get_hard_state().sys_mode == "gaming"
+    assert first.get_hard_state() is not second.get_hard_state()
+    assert __import__("os").environ["HOST_SYS_MODE"] == "normal"
+    monkeypatch.setenv("HOST_SYS_MODE", "locked")
+    assert first.get_hard_state().sys_mode == "focus"
+
+
+def test_invalid_bootstrap_mode_fails_closed_as_maintenance() -> None:
+    container = HostLifecycleContainer(
+        _ports([]),
+        initial_sys_mode="not-a-runtime-mode",
+    )
+
+    assert container.get_hard_state().sys_mode == "maintenance"
+
+
+def test_first_mode_switch_completes_without_recursive_lock_deadlock() -> None:
+    container = HostLifecycleContainer(_ports([]), initial_sys_mode="normal")
+    completed = threading.Event()
+
+    def switch() -> None:
+        container.set_sys_mode("focus")
+        completed.set()
+
+    worker = threading.Thread(target=switch, daemon=True)
+    worker.start()
+    worker.join(timeout=1.0)
+
+    assert completed.is_set()
+    assert not worker.is_alive()
+    assert container.get_hard_state().sys_mode == "focus"
+
+
+def test_endocrine_resolver_runs_outside_owner_lock() -> None:
+    resolver_events: list[str] = []
+    container: HostLifecycleContainer
+
+    def resolve(**kwargs):
+        resolver_events.append(kwargs["hard_state"].sys_mode)
+        switched = threading.Event()
+
+        def switch_mode() -> None:
+            container.set_sys_mode("focus")
+            switched.set()
+
+        worker = threading.Thread(target=switch_mode)
+        worker.start()
+        worker.join(timeout=1.0)
+        assert switched.is_set(), "endocrine resolver must not run under owner lock"
+        return {"gate_state": "open", "source": "test_resolver"}
+
+    container = HostLifecycleContainer(
+        _ports([]),
+        initial_sys_mode="normal",
+        endocrine_resolver=resolve,
+    )
+
+    result = container.get_endocrine_state(
+        emotion_tag="CALM",
+        emotion_intensity=0.2,
+    )
+
+    assert result == {"gate_state": "open", "source": "test_resolver"}
+    assert resolver_events == ["normal"]
+    assert container.get_hard_state().sys_mode == "focus"
+
+
+def test_endocrine_resolver_failure_preserves_fallback_contract() -> None:
+    def fail(**_kwargs):
+        raise RuntimeError("resolver unavailable")
+
+    container = HostLifecycleContainer(_ports([]), endocrine_resolver=fail)
+
+    assert container.get_endocrine_state()["source"] == "endocrine_fallback"
 
 
 @pytest.mark.asyncio
@@ -458,9 +544,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 45
-    assert sum(named_import_modules.values()) == 123
-    assert len(all_import_modules) == 51
+    assert len(named_import_modules) == 40
+    assert sum(named_import_modules.values()) == 116
+    assert len(all_import_modules) == 46
     assert ROOT / "host_brain" / "app" / "http_hooks.py" not in all_import_modules
     asgi_imports = named_import_modules[ROOT / "host_brain" / "app" / "asgi.py"]
     assert asgi_imports == 13

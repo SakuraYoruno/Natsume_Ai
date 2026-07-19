@@ -20,7 +20,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Callable, Dict
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -506,11 +506,40 @@ def _resolve_sys_mode_narrative(mode: str, *, render_target_lang: str = "zh") ->
     return "当前 host 处于维护状态，稍后再试。" if lang_key == "zh" else "現在 host はメンテナンス中です。"
 
 
+def _resolve_injected_sys_mode(
+    hard_state_provider: Callable[[], Any] | None,
+) -> tuple[str, str | None]:
+    """Read the app-owned mode and reject missing/invalid ownership safely."""
+
+    if not callable(hard_state_provider):
+        return "maintenance", "SYS_MODE_OWNER_UNAVAILABLE"
+    try:
+        hard_state = hard_state_provider()
+        if isinstance(hard_state, dict):
+            raw_mode = hard_state.get("sys_mode")
+        else:
+            raw_mode = getattr(hard_state, "sys_mode", None)
+        mode = str(raw_mode or "").strip().lower()
+    except Exception:
+        return "maintenance", "SYS_MODE_OWNER_UNAVAILABLE"
+    if mode not in {
+        "normal",
+        "focus",
+        "gaming",
+        "sleep",
+        "maintenance",
+        "locked",
+    }:
+        return "maintenance", "SYS_MODE_OWNER_INVALID"
+    return mode, None
+
+
 async def handle_chat(
     request_body: ChatRequest,
     request: Request,
     metrics: Any,
     governed_command_application: Any | None = None,
+    hard_state_provider: Callable[[], Any] | None = None,
 ) -> StreamingResponse:
     """POST /v1/chat 统一入口。
 
@@ -539,7 +568,9 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     )
 
     # ── sys_mode 门控：locked / maintenance 模式下拦截 chat 请求 ──
-    _current_sys_mode = get_chat_settings().sys_mode.strip().lower()
+    _current_sys_mode, _sys_mode_owner_error = _resolve_injected_sys_mode(
+        hard_state_provider
+    )
     if _current_sys_mode == "locked":
         async def _locked_sse():
             yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': _resolve_sys_mode_narrative('locked', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
@@ -550,7 +581,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
         )
     if _current_sys_mode == "maintenance":
         async def _maintenance_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': _resolve_sys_mode_narrative('maintenance', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': _sys_mode_owner_error or 'SYS_MODE_MAINTENANCE', 'narrative': _resolve_sys_mode_narrative('maintenance', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _maintenance_sse(),
             media_type="text/event-stream",

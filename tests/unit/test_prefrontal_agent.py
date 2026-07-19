@@ -228,16 +228,7 @@ def test_prefrontal_resolve_style_evolution_summary(monkeypatch) -> None:
     assert result == {"warmth": "rising", "humor": "stable"}
 
 
-def test_prefrontal_run_persona_drift_cycle_sets_hard_state_hint(monkeypatch) -> None:
-    class _FakeHardState:
-        def __init__(self) -> None:
-            self.last_key: str | None = None
-            self.last_value: str | None = None
-
-        def set(self, key: str, value: str) -> None:
-            self.last_key = key
-            self.last_value = value
-
+def test_prefrontal_run_persona_drift_cycle_does_not_write_hard_state(monkeypatch) -> None:
     class _FakeDetector:
         def on_turn(self, *, llm_output_text: str, user_input_text: str):
             assert llm_output_text == "reply"
@@ -248,12 +239,14 @@ def test_prefrontal_run_persona_drift_cycle_sets_hard_state_hint(monkeypatch) ->
                 correction_hint="be warmer",
             )
 
-    hard_state = _FakeHardState()
-    monkeypatch.setattr("host_brain.composition.process_services.get_hard_state", lambda: hard_state)
     monkeypatch.setattr("host_brain.persona.drift_detector.PersonaDriftDetector", _FakeDetector)
 
     result = PrefrontalAgent(
-        application_ports=TribeApplicationPorts(hard_state=lambda: hard_state),
+        application_ports=TribeApplicationPorts(
+            hard_state=lambda: (_ for _ in ()).throw(
+                AssertionError("Prefrontal must not write Host HardState")
+            )
+        ),
     ).run_persona_drift_cycle(
         llm_output_text="reply",
         user_input_text="input",
@@ -262,8 +255,6 @@ def test_prefrontal_run_persona_drift_cycle_sets_hard_state_hint(monkeypatch) ->
     assert result["alert_level"] == "MODERATE"
     assert result["drift_dims"] == ["warmth_LOW"]
     assert result["correction_hint"] == "be warmer"
-    assert hard_state.last_key == "drift_correction_hint"
-    assert hard_state.last_value == "be warmer"
 
 
 def test_prefrontal_run_growth_feedback_cycle(monkeypatch) -> None:

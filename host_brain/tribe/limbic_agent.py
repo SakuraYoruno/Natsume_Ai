@@ -1314,27 +1314,9 @@ class LimbicAgent:
                     "ts_ms": int(event.ts_ms or 0),
                 },
             )
-            # 只有明确传感器/显式上游情绪才同步 hard_state。ASR 文本兜底提示
-            # 交给 chat 入口按当前文本重新解析，避免把文本关键词误当成声学情绪。
-            if (
-                trusted_runtime_emotion
-                and isinstance(emotion_intensity, (int, float))
-                and float(emotion_intensity) >= 0.6
-            ):
-                try:
-                    hard_state = self.application_ports.require("hard_state")()
-                    if hasattr(hard_state, "emotion_tag"):
-                        hard_state.emotion_tag = emotion_tag
-                    if hasattr(hard_state, "emotion_intensity"):
-                        hard_state.emotion_intensity = float(emotion_intensity)
-                    if mood_state and hasattr(hard_state, "mood_state"):
-                        hard_state.mood_state = mood_state
-                    _log.info(
-                        "LimbicAgent 可信运行期情绪已同步到 hard_state: emotion_tag=%s intensity=%s",
-                        emotion_tag, emotion_intensity,
-                    )
-                except Exception as _hs_exc:
-                    _log.debug("LimbicAgent 同步 hard_state 失败（降级）: %s", _hs_exc)
+            # HardState 是 Host app-local 的 frozen 运行快照，Limbic 不拥有其写权。
+            # 可信情绪只进入 TribeStateRegistry 与 emotion timeline，后续上下文
+            # 从这些 canonical 来源组装，不尝试对 HardState 属性就地赋值。
             if trusted_runtime_emotion:
                 # T-138：只有可信传感器/显式情绪写入 emotion_timeline。
                 # ASR 转写文本只能作为低可信提示，不能伪装成声学情绪进入长期情绪链路。

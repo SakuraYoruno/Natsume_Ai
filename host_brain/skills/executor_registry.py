@@ -84,10 +84,11 @@ def _with_context(handler: Callable[[dict[str, Any], dict[str, Any] | None], Any
 
 
 def _focus_mode_with_mode_changer(payload: dict[str, Any]) -> Any:
-    """focus_mode 的特殊包装器——自动注入 mode_changer 回调。
+    """focus_mode 的受控上下文包装器。
 
     focus_mode skill 期望 context 中有 mode_changer 回调来实际切换 sys_mode。
-    如果调用方未提供 mode_changer，则自动注入 dependencies.set_sys_mode。
+    调用方必须显式注入 Host app-local owner 的回调；本层不回退到
+    process-global 模式写入器。
     """
     ctx = dict(payload.get("_context") or {})
     return execute_focus_mode(payload, ctx)

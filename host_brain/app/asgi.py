@@ -243,6 +243,7 @@ def create_app() -> FastAPI:
     host_services = host_lifecycle.ports
     tribe_application_ports = build_tribe_application_ports(
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
+        hard_state_provider=host_lifecycle.get_hard_state,
         mode_transition_service_provider=(
             host_lifecycle.get_mode_transition_service
         ),
@@ -250,8 +251,9 @@ def create_app() -> FastAPI:
     )
     lifecycle_runtime_ports = build_lifecycle_runtime_application_ports(
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
+        endocrine_state_provider=host_lifecycle.get_endocrine_state,
         episodic_store_provider=host_services.episodic_store,
-        hard_state_provider=host_services.hard_state,
+        hard_state_provider=host_lifecycle.get_hard_state,
         model_attempt_service_provider=host_services.model_attempt_service,
     )
     input_runtime_ports = build_input_runtime_application_ports(
@@ -406,6 +408,7 @@ def create_app() -> FastAPI:
             request,
             metrics,
             governed_command_application=tool_composition.provide_runtime(),
+            hard_state_provider=host_lifecycle.get_hard_state,
         )
 
     async def chat_endpoint_with_runtime(
@@ -1129,7 +1132,7 @@ def create_app() -> FastAPI:
                     return result
 
                 def scheduler_current_mode() -> str:
-                    return str(host_services.hard_state().sys_mode or "normal")
+                    return str(host_lifecycle.get_hard_state().sys_mode)
 
                 def scheduler_resource_gate(definition: Any, mode: str) -> Any:
                     del mode

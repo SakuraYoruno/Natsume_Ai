@@ -119,14 +119,15 @@ def test_limbic_agent_keeps_asr_text_emotion_hint_untrusted(monkeypatch) -> None
 
     hard_state = _HardState()
     timeline = _Timeline()
-    monkeypatch.setattr("host_brain.composition.process_services.get_hard_state", lambda: hard_state)
     monkeypatch.setattr("host_brain.composition.process_services.get_emotion_timeline", lambda: timeline)
     monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
     registry = TribeStateRegistry(persist_throttle=999999)
     agent = LimbicAgent(
         state_registry=registry,
         application_ports=TribeApplicationPorts(
-            hard_state=lambda: hard_state,
+            hard_state=lambda: (_ for _ in ()).throw(
+                AssertionError("Limbic must not write Host HardState")
+            ),
             emotion_timeline=lambda: timeline,
         ),
     )
@@ -177,14 +178,15 @@ def test_limbic_agent_accepts_explicit_or_acoustic_runtime_emotion(monkeypatch) 
 
     hard_state = _HardState()
     timeline = _Timeline()
-    monkeypatch.setattr("host_brain.composition.process_services.get_hard_state", lambda: hard_state)
     monkeypatch.setattr("host_brain.composition.process_services.get_emotion_timeline", lambda: timeline)
     monkeypatch.setattr("host_brain.tribe.edge_command_pusher.get_edge_command_pusher", lambda: None)
     registry = TribeStateRegistry(persist_throttle=999999)
     agent = LimbicAgent(
         state_registry=registry,
         application_ports=TribeApplicationPorts(
-            hard_state=lambda: hard_state,
+            hard_state=lambda: (_ for _ in ()).throw(
+                AssertionError("Limbic must not write Host HardState")
+            ),
             emotion_timeline=lambda: timeline,
         ),
     )
@@ -207,9 +209,9 @@ def test_limbic_agent_accepts_explicit_or_acoustic_runtime_emotion(monkeypatch) 
 
     asyncio.run(agent._on_emotion_inference_updated(event))
 
-    assert hard_state.emotion_tag == "HAPPY"
-    assert hard_state.emotion_intensity == 0.82
-    assert hard_state.mood_state == "warm"
+    assert hard_state.emotion_tag == "NEUTRAL"
+    assert hard_state.emotion_intensity == 0.0
+    assert hard_state.mood_state == "steady"
     assert timeline.rows[-1]["emotion_tag"] == "HAPPY"
     limbic_state = dict((registry.get_state("limbic") or {}).get("state") or {})
     hint = dict(limbic_state["last_voice_emotion_inference"])

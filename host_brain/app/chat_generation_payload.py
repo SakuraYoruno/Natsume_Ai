@@ -29,24 +29,6 @@ from host_brain.core.soft_fail import soft_fail
 logger = logging.getLogger(__name__)
 
 
-def _resolve_sys_mode_default() -> str:
-    try:
-        from host_brain.app.settings import get_core_settings  # noqa: PLC0415
-
-        resolved = str(get_core_settings().sys_mode or "").strip().lower()
-        if resolved:
-            return resolved
-    except Exception:
-        pass
-    try:
-        resolved = str(os.environ.get("HOST_SYS_MODE") or "").strip().lower()
-        if resolved:
-            return resolved
-    except Exception:
-        pass
-    return "normal"
-
-
 def build_prompt_context(
     *,
     request_id: str,
@@ -59,6 +41,7 @@ def build_prompt_context(
     bond_summary: Mapping[str, Any] | None = None,
     emotion_context: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
+    sys_mode: str = "normal",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
     from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
@@ -199,7 +182,7 @@ def build_prompt_context(
         "hard_snapshot": {
             "session_id": session_id,
             "thread_id": thread_id,
-            "sys_mode": _resolve_sys_mode_default(),
+            "sys_mode": str(sys_mode or "normal").strip().lower() or "normal",
             "mood_state": mood_state,
             "allowed_emotion_tags": allowed_emotion_tags,
             "emotion_range_hint": emotion_range_hint,
@@ -274,14 +257,17 @@ def build_runtime_mode_flags(
     prompt_context: Mapping[str, Any] | None,
     *,
     activity_monitor_provider: Callable[[], Any | None] | None = None,
+    sys_mode: str = "normal",
 ) -> dict[str, Any]:
     context = dict(prompt_context or {}) if isinstance(prompt_context, Mapping) else {}
     hard_snapshot_raw = context.get("hard_snapshot")
     hard_snapshot = dict(hard_snapshot_raw) if isinstance(hard_snapshot_raw, Mapping) else {}
 
-    sys_mode = str(hard_snapshot.get("sys_mode") or _resolve_sys_mode_default() or "normal").strip().lower() or "normal"
+    resolved_sys_mode = str(
+        hard_snapshot.get("sys_mode") or sys_mode or "normal"
+    ).strip().lower() or "normal"
 
-    runtime_flags: dict[str, Any] = {"sys_mode": sys_mode}
+    runtime_flags: dict[str, Any] = {"sys_mode": resolved_sys_mode}
     with soft_fail("chat.runtime_mode.activity_monitor", fallback=None) as box:
         if activity_monitor_provider is None:
             from host_brain.composition import process_services as _deps  # noqa: PLC0415
@@ -310,6 +296,7 @@ def build_chat_generation_prompt_payload(
     emotion_context: Mapping[str, Any] | None = None,
     emotion_snapshot: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
+    sys_mode: str = "normal",
 ) -> dict[str, Any]:
     from host_brain.app.emotion_context import build_chat_emotion_snapshot, normalize_chat_emotion_context  # noqa: PLC0415
 
@@ -335,6 +322,7 @@ def build_chat_generation_prompt_payload(
         bond_summary=bond_summary,
         emotion_context=normalized_emotion_context,
         render_target_lang=resolved_render_lang,
+        sys_mode=sys_mode,
     )
     prompt_context_observability = build_prompt_context_observability(
         prompt_context=prompt_context,

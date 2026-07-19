@@ -22,9 +22,6 @@ from host_brain.app.obs_routes_stats_capability_skill import (
 from host_brain.app.obs_routes_summary import (
     _build_digital_life_overview_snapshot_async,
 )
-from host_brain.app.obs_routes_sysmode import (
-    _build_runtime_snapshot_response,
-)
 from host_brain.app.obs_routes_trace import (
     _get_trace_builders,
 )
@@ -36,6 +33,9 @@ from host_brain.app.observability_runtime.projection_runtime import (
 from host_brain.app.observability_runtime.process_state_projection import (
     LIFE_BODY_KIND,
     LIFE_BODY_MAX_AGE_MS,
+    RUNTIME_MAX_AGE_MS,
+    RUNTIME_SNAPSHOT_KEY,
+    RUNTIME_SNAPSHOT_KIND,
     read_process_projection,
     window_key,
 )
@@ -1911,10 +1911,6 @@ def _build_life_body_payload(
     from host_brain.app.observability_runtime.projection_ledger_view import (
         ProjectionLedgerView,
     )
-    from host_brain.app.lifecycle_runtime_composition import (
-        build_lifecycle_runtime_application_ports,
-    )
-
     overview_payload = asyncio.run(
         _build_digital_life_overview_snapshot_async(
             window_minutes,
@@ -1922,12 +1918,15 @@ def _build_life_body_payload(
             projection_store=projection_store,
         )
     )
-    runtime_payload = _model_dump_compat(
-        _build_runtime_snapshot_response(
-            "",
-            lifecycle_ports=build_lifecycle_runtime_application_ports(),
-        )
+    runtime_document, runtime_projection = read_process_projection(
+        projection_store,
+        RUNTIME_SNAPSHOT_KIND,
+        RUNTIME_SNAPSHOT_KEY,
+        max_age_ms=RUNTIME_MAX_AGE_MS,
     )
+    runtime_payload = dict(runtime_document or {})
+    if runtime_document is not None:
+        runtime_payload["projection"] = runtime_projection
     prompt_stats = _model_dump_compat(
         build_prompt_builder_stats_from_view(
             ProjectionLedgerView(projection_store),

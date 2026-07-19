@@ -41,11 +41,26 @@ def build_digital_life_runtime_snapshot(
             detail=str(exc)[:120],
         )
 
-    sys_mode = str(
-        hard_state.get("sys_mode")
-        or _os.environ.get("HOST_SYS_MODE")
-        or "normal"
-    ).strip().lower() or "normal"
+    # Environment settings are bootstrap input for the app-owned HardState,
+    # never a second live runtime truth.  An unavailable/invalid owner keeps
+    # the projection in maintenance mode instead of silently failing open.
+    sys_mode = str(hard_state.get("sys_mode") or "maintenance").strip().lower()
+    if sys_mode not in {
+        "normal",
+        "focus",
+        "gaming",
+        "sleep",
+        "maintenance",
+        "locked",
+    }:
+        sys_mode = "maintenance"
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="hard_state",
+            status="degraded",
+            detail="invalid sys_mode",
+        )
 
     activity_monitor: dict[str, Any] = {}
     try:
