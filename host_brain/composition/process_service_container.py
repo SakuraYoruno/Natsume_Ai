@@ -17,7 +17,6 @@ class ProcessServiceContainer:
     """The single mutable service registry owned by the Host process."""
 
     ledger: Any = None
-    query_projection_store: Any = None
     token_service: Any = None
     intent_engine: Any = None
     skill_registry: Any = None
@@ -31,7 +30,6 @@ class ProcessServiceContainer:
     episodic_store: Any = None
     life_memory_store: Any = None
     memory_service_container: Any = None
-    obs_metrics_collector: Any = None
     graph_runtime: Any = None
     routing_matrix: Any = None
     memory_guard: Any = None

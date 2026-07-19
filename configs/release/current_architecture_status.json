@@ -204,9 +204,9 @@
         "named_modules": 40,
         "named_imported_names": 116,
         "all_import_form_consumer_modules": 46,
-        "process_service_container_fields": 52,
+        "process_service_container_fields": 50,
         "process_service_container_lock_fields": 3,
-        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 48
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 46
       },
       "dev_c2be993bc_commit_bound_history": {
         "named_modules": 45,
@@ -256,10 +256,10 @@
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 52,
         "scope": "TOOL_MCP_SLICE_SNAPSHOT_BEFORE_HOST_LIFECYCLE_REBASE"
       },
-      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state"],
+      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state", "obs_metrics_collector", "query_projection_store"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
-      "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state"],
-      "boundary": "COMBINED_CURRENT_IS_40_MODULES_116_NAMES_46_ALL_FORM_CONSUMERS_AND_CONTAINER_52_FIELDS_3_LOCKS_48_MUTABLE_REFS_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_REMAINS"
+      "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state", "get_obs_metrics_collector", "get_query_projection_store", "peek_query_projection_store"],
+      "boundary": "COMBINED_CURRENT_IS_40_MODULES_116_NAMES_46_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_REMAINS"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_DURABLE_RUNTIME_FENCED_HARD_STATE_AND_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
@@ -765,10 +765,18 @@
   },
   "capabilities": {
     "host_canonical_routes": {
-      "status": "PENTEST_READONLY_DELEGATE_WIRED / UNIVERSAL_RUNTIME_INCOMPLETE",
-      "scope": ["chat", "skill", "delegate", "plan"],
+      "status": "SEVEN_ROUTE_GATE_ACTIVE / ALL_INCOMPLETE",
+      "scope": ["chat", "skill", "plan", "delegate", "scheduler", "internal", "operator"],
+      "coverage_gate": {
+        "schema_version": "natsume.universal-governed-runtime-coverage.v2",
+        "evaluated_commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
+        "migration_head": "0116_agent_workspace_lifecycle.sql",
+        "route_status": "ALL_SEVEN_INCOMPLETE",
+        "commit_bound_acceptance": "MISSING_ALL_SEVEN",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+      },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "D10 replaces the Host Delegate inner global dispatcher only for pentest_agent: immutable invocation carries command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/fence/parent+node grant, the node grant is revalidated immediately before an effect-free Domain Pack/SecureRun handoff, and no skill_exec_log is written. intent_agent, translate_agent, vision_agent, repair_agent and unregistered targets fail before HostCommand/TaskGraph admission. This is not a general delegate platform. Host candidate-plan generation remains MISSING; approved-plan topology execution is not generic planning search.",
+      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler domain effects and Internal artifacts are not yet atomically committed by Acceptance. Operator has migrated scheduler.task.trigger only; 36 audited write commands remain blocked. Host candidate-plan generation remains MISSING; approved-plan topology execution is not generic planning search.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -778,7 +786,10 @@
         "tests/unit/test_aw02_governed_host_runtime.py",
         "tests/unit/test_ne01_governed_delegate_dispatch.py",
         "tests/integration/test_gr05_universal_host_runtime.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py",
+        "tests/contract/test_universal_governed_runtime_coverage.py",
+        "configs/release/universal_governed_runtime_coverage.json"
       ]
     },
     "governed_chat_surface_model_budget": {
@@ -1777,16 +1788,16 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Production requires durable binding before mutation. Migration 0115 stores the runtime-scoped append-only event and canonical head in one SQLite UoW, binds each write to the exact active Host owner/lease/fence, uses mutating expected revision plus mode exact CAS, verifies the full revision/digest/head chain, supports permanent exact historical-receipt lookup after newer heads, and reconciles committed response loss without reapplying the effect. HOST_SYS_MODES and HOST_MODE_TRANSITIONS now live in the neutral HardState contract; persistence imports that contract instead of core application, the target persistence-to-application edge is zero and the static SCC is empty. The owner updates memory only after durable commit and recovers the verified head before runtime-context publication. NO_CHANGE emits no fake event; replay payload drift remains failure and is never converted to success. The 0115 HardState journal is the only canonical audit for successful transitions: success no longer writes legacy error_log, and exact replay returns the existing receipt without appending process-local history or legacy audit. Failures may still use the legacy diagnostic error path. Chat, Tribe, Lifecycle and Scheduler share this owner, while durable history survives restart. ModeTransitionService auto-rule configuration and last-interaction timestamp remain process-local. The blocked Obs Operator adapter only prepares a stable authenticated request identity at contract level; Operator/HTTP E2E is NOT_PROVEN and stays blocked until exact node-bound Preview Receipt and immutable TaskGraph admission are wired. HardState process facades, slot/lock, targeted bindings and Limbic/Prefrontal fake writers remain zero. Current locator inventory remains 40/116/46 with Container 52/3/48; earlier Host lifecycle, #89, ReAct and Visual figures remain commit-bound history. Heartbeat cache/client, endocrine, Tribe agents/bus, shared ResourceManager status path and most Host/Worker authorities remain process-global or process-shared. The final consolidated slice authority is 84 passed in 66.37 seconds. The previous 83-test and historical 82-test batches are superseded; the 84-test authority includes or overlaps them plus the older 17-test and standalone 1001-transition evidence, so none may be summed. The earlier 210, 7 and 29 batches remain independent historical evidence and also must not be summed. A broad Obs batch timed out and is not counted. Full architecture static is PASS with failed_gates=[]; production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN. This slice does not complete NE-01 or the full architecture.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Migration 0115 supplies the runtime-scoped durable mode authority. The two unused Obs process caches query_projection_store and obs_metrics_collector plus their accessors are now removed, reducing the current Container to 50 fields, 3 locks and 46 mutable references; named/all-form consumer inventory remains 40/116/46. This is measurable debt reduction, not Service Locator removal: heartbeat cache/client, endocrine, Tribe agents/bus, shared ResourceManager status path and most Host/Worker authorities remain process-global or process-shared. Full architecture static remains a static-only PASS; production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
       "hard_state_receipt_boundary": "PERMANENT_HISTORICAL_LOOKUP_MUTATING_REVISION_MODE_EXACT_CAS_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE",
       "hard_state_operator_boundary": "REQUEST_IDENTITY_CONTRACT_PREPARED_ONLY_OPERATOR_HTTP_E2E_NOT_PROVEN_BLOCKED_BY_PREVIEW_AND_TASKGRAPH",
       "mixed_file_gate": "GREEN_ISSUES_EMPTY_WITHOUT_POLICY_EXPANSION",
       "mixed_file_gate_findings": [],
       "effect_slice_structure_boundary": "The second NE-01 split moved ASGI lifecycle wiring, Obs response models, immutable Degradation policy, Node Grant and Planning codecs, Intent Review continuation, and Guardian contracts/commands into focused modules. The original authority owners remain the only lifecycle, connection, RuntimeEvent append, or journal-store owners. All eleven former findings are within the 1,500-line or pre-existing cohesive ceiling and the fresh repository gate returns no issues without adding or widening an allowlist. Service Locator, old execution bypasses, general recovery, and production enablement remain incomplete.",
       "cleanup_progress": {
-        "container_fields": 52,
+        "container_fields": 50,
         "container_lock_fields": 3,
-        "mutable_service_references_excluding_locks_and_application_ports": 48,
+        "mutable_service_references_excluding_locks_and_application_ports": 46,
         "retired_zero_consumer_slots": [
           "retrieval_orchestrator",
           "retrieval_pipeline",
@@ -1797,13 +1808,15 @@
           "activity_monitor",
           "resource_manager",
           "tool_broker",
-          "hard_state"
+          "hard_state",
+          "obs_metrics_collector",
+          "query_projection_store"
         ],
         "retired_global_publication_setters": [
           "set_activity_monitor",
           "set_resource_manager"
         ],
-        "retired_get_accessors": 5,
+        "retired_get_accessors": 8,
         "retired_broad_facade_reexports": [
           "BondDynamicsWriter",
           "BondStageEngine",
@@ -2029,8 +2042,9 @@
       "status": "PARTIAL",
       "path_safety": "D0_WIRED",
       "write_fuse": "FAIL_CLOSED_W0_STOPGAP",
-      "durable_authority": "PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED",
-      "migration": "0101_agent_workspace_authority",
+      "durable_authority": "PARTIAL_W2_WITH_0116_LIFECYCLE_FOUNDATION",
+      "migration": "0101_agent_workspace_authority + 0116_agent_workspace_lifecycle",
+      "durable_lifecycle": "FOUNDATION_ONLY_ACTIVE_ACCEPTED_PROMOTED_ABANDONED_APPEND_ONLY_EXACT_REPLAY_NOT_YET_TASK_ACCEPTANCE_WIRED",
       "physical_root_authority": "PROCESS_CONFIGURATION_ONLY",
       "work_order_lease_payload": "SERVER_DERIVED_LOGICAL_WORKSPACE_ID_ONLY",
       "production_scope": "W2_ASSETS_WIRED_TO_INTERNAL_AGENT_ADMISSION__NO_POSITIVE_AGENT_TOOL_CONSUMER",
@@ -2060,7 +2074,10 @@
         "host_brain/app/asgi.py",
         "host_brain/persistence/workspace_repository.py",
         "host_brain/persistence/workspace_operation_fencing.py",
+        "host_brain/persistence/workspace_lifecycle_repository.py",
+        "host_brain/contracts/agent_runtime/workspace_lifecycle.py",
         "host_brain/audit/migrations/0101_agent_workspace_authority.sql",
+        "host_brain/audit/migrations/0116_agent_workspace_lifecycle.sql",
         "tests/unit/test_workspace_path_resolver.py",
         "tests/unit/test_agent_tool_workspace_paths.py",
         "tests/unit/test_ne01_workspace_w0_fuse.py",
@@ -2079,15 +2096,15 @@
         "runtime_repo retirement for read-only inspection",
         "new graph-revision Tool node binding exact node Grant and WorkspaceRuntime",
         "per-operation durable fence and lease-loss preemption for future governed Tool execution",
-        "successful promotion and failed/abandoned workspace terminal lifecycle",
-        "accepted HEAD authority instead of ancestor-only replay validation",
-        "restart recovery for accepted HEAD, promotion and abandon transitions",
+        "Task Acceptance UoW wiring for the 0116 accepted receipt",
+        "real workspace write executor that produces accepted HEAD/tree/diff evidence",
+        "promotion/abandon Acceptance Effect and cleanup continuation production wiring",
         "Domain Pack and codex_runtime durable-workspace injection",
         "cleanup worker health route and automatic shutdown retry orchestration",
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path resolution, the W0 fuse, migration 0101 and the W2 worktree/lease/cleanup assets remain active. They bind one server-derived logical workspace to the exact graph epoch, root WorkOrder, owner, configured root, frozen Git source commit and canonical allow-list, and retain namespace worktree allocation, runtime-instance/PID lease, exclusive scope, heartbeat, monotonic handoff/takeover, trusted cleanup receipt and CLEANUP_PENDING continuation. Provisioning/allocator/cleanup callbacks still run outside SQLite transactions under workspace/source cross-process locks and one lease-bounded deadline with pre/post exact-authority validation. W2 currently has no positive Agent Tool consumer. The first PR commit retires only ReAct run_skill and dispatch_sub_agent discovery and low-level execution; the second separately retires the Visual Agent direct HTTP loop. Neither proves general AgentExecutor, file, Web, browser or other Tool authority retirement. Positive Skill, Delegate or visual automation may return only through a new graph revision node that receives the exact node Grant and WorkspaceRuntime. Per-operation durable fencing, lease-loss preemption, accepted HEAD, promotion/abandon and restart recovery must be implemented before enablement. Missing secret keeps admission fail closed, and Domain Pack/codex_runtime injection, cleanup health, OS/container/tenant isolation, handle-level TOCTOU protection and real canary remain missing; this is PARTIAL W2 rather than completed Workspace Isolation."
+      "reason": "Canonical path resolution, the W0 fuse, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Migration 0116 adds an append-only lifecycle overlay for ACTIVE→ACCEPTED→PROMOTED/ABANDONED with exact Task/Workspace lease fences, accepted HEAD/tree/diff, Verification/Acceptance refs, digest chain, CAS and permanent exact replay. It is deliberately not connected to Task Acceptance, a real workspace write executor, promotion Effect or cleanup continuation yet. Provisioning/allocator/cleanup callbacks still run outside SQLite transactions under workspace/source cross-process locks and one lease-bounded deadline with pre/post exact-authority validation. W2 has no positive Agent Tool consumer. Missing secret keeps admission fail closed; per-operation preemption, Domain Pack/codex_runtime injection, cleanup health, OS/container/tenant isolation, handle-level TOCTOU protection and real canary remain missing. This is a durable lifecycle foundation inside PARTIAL W2, not completed Workspace Isolation."
     },
     "evolution_lab": {
       "status": "SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER",

@@ -32,7 +32,6 @@ from host_brain.governor.tokens import TokenService
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
-from host_brain.observability.metrics import MetricsCollector
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.capability_scorecard_provider import FederatedCapabilityScorecardProvider
@@ -63,12 +62,6 @@ def get_graph_runtime() -> GraphRuntimeContract:
         for handler_id, handler in require_process_application_ports().graph_handler_bindings():
             _container().graph_runtime.register_node_handler(handler_id, handler)
     return _container().graph_runtime
-
-
-def get_obs_metrics_collector() -> MetricsCollector:
-    if _container().obs_metrics_collector is None:
-        _container().obs_metrics_collector = MetricsCollector(ledger=_foundation().get_ledger())
-    return _container().obs_metrics_collector
 
 
 def get_tool_catalog() -> ToolCatalog:

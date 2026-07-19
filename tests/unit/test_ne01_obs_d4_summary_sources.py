@@ -104,11 +104,13 @@ def test_summary_callbacks_use_only_explicit_app_local_sources(monkeypatch) -> N
         process_services,
         "peek_query_projection_store",
         _forbidden_locator,
+        raising=False,
     )
     monkeypatch.setattr(
         process_services,
         "get_query_projection_store",
         _forbidden_locator,
+        raising=False,
     )
     for module in (
         obs_routes_stats_agent,
@@ -267,11 +269,13 @@ def test_insights_callback_recovers_after_typed_unavailable_first_wave(
         process_services,
         "peek_query_projection_store",
         _forbidden_locator,
+        raising=False,
     )
     monkeypatch.setattr(
         process_services,
         "get_query_projection_store",
         _forbidden_locator,
+        raising=False,
     )
     store = _MutableProjectionStore()
     for table in summary._INSIGHTS_LEDGER_TABLES:
@@ -339,11 +343,13 @@ def test_digital_life_callback_recovers_when_query_dependencies_arrive(
         process_services,
         "peek_query_projection_store",
         _forbidden_locator,
+        raising=False,
     )
     monkeypatch.setattr(
         process_services,
         "get_query_projection_store",
         _forbidden_locator,
+        raising=False,
     )
     store = _MutableProjectionStore()
     for table in summary._DIGITAL_LIFE_LEDGER_TABLES:

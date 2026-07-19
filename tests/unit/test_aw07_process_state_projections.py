@@ -76,7 +76,12 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
     monkeypatch.setattr(life, "_build_targeted_request_event", forbidden)
     monkeypatch.setattr(core, "_load_resource_manager_status_file", forbidden)
     monkeypatch.setattr(dependencies, "get_resource_manager", forbidden)
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", forbidden)
+    monkeypatch.setattr(
+        dependencies,
+        "peek_query_projection_store",
+        forbidden,
+        raising=False,
+    )
 
     insights = summary.get_insights_summary_snapshot(
         request=request,
@@ -157,7 +162,12 @@ def test_bio_ops_gets_use_metadata_projection_only(monkeypatch) -> None:
     monkeypatch.setattr(routes.BioOpsOwnerIntakeConsumer, "scan_queue", forbidden)
     monkeypatch.setattr(routes.OwnerCandidateStateStore, "scan_state", forbidden)
     monkeypatch.setattr(routes.OwnerCandidateStateStore, "scan_runtime_hints", forbidden)
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", forbidden)
+    monkeypatch.setattr(
+        dependencies,
+        "peek_query_projection_store",
+        forbidden,
+        raising=False,
+    )
 
     overview = routes.get_codex_bio_ops_observability(request, "run-1")
     adoptions = routes.list_codex_bio_ops_adoptions(request, "run-1", "pending")
@@ -201,6 +211,7 @@ def test_empty_process_projections_preserve_shape_and_degradation(monkeypatch) -
         dependencies,
         "peek_query_projection_store",
         lambda: (_ for _ in ()).throw(AssertionError("GET touched process locator")),
+        raising=False,
     )
 
     values = (

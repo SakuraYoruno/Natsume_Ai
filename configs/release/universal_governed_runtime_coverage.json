@@ -1,9 +1,13 @@
 {
-  "schema_version": "natsume.universal-governed-runtime-coverage.v1",
+  "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT",
-  "route_control_scope": "Route PASS means the actual enabled worker path consumes the control, not merely that an outer admitted graph has it. Delegate is intentionally narrower: D10 proves the read-only pentest_agent adapter only; every other delegate target is rejected before HostCommand/TaskGraph admission. It does not prove program-wide Budget coverage, production feature enablement, a general delegate platform, or a real canary. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
+  "evaluated_source": "AUDITED_ANCESTOR_COMMIT",
+  "evidence_binding": {
+    "evaluated_commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
+    "migration_head": "0116_agent_workspace_lifecycle.sql"
+  },
+  "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
     "atomic_graph_success": "OFF",
     "bounded_fanout": "OFF",
@@ -26,49 +30,51 @@
   "active_wave_status": "IN_PROGRESS",
   "routes": {
     "chat": {
-      "status": "COMPLETE",
+      "status": "INCOMPLETE",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_route_executors.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
-        "tests/integration/test_gr05_universal_host_runtime.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PASS",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
-        "budget_enforcement": "PASS",
+        "budget_enforcement": "PARTIAL",
         "review_resume": "PASS",
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PASS"
+        "transactional_side_effects": "PASS",
+        "commit_bound_acceptance": "MISSING"
       }
     },
     "skill": {
-      "status": "COMPLETE",
+      "status": "INCOMPLETE",
       "evidence_refs": [
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_skill_execution_ports.py",
-        "tests/integration/test_aw0203_governed_host_cutover.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_aw0203_governed_host_cutover.py"
       ],
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
-        "budget_enforcement": "PASS",
+        "budget_enforcement": "PARTIAL",
         "review_resume": "PASS",
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PASS"
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
       }
     },
     "delegate": {
@@ -80,13 +86,13 @@
         "host_brain/app/governed_route_executors.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
         "tests/unit/test_ne01_governed_delegate_dispatch.py",
-        "tests/integration/test_gr05_universal_host_runtime.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "enabled_target_scope": "PENTEST_READONLY_ONLY: pentest_agent receives an immutable invocation carrying command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/fence/parent+node grant; its node grant is revalidated before an effect-free Domain Pack/SecureRun handoff while the outer durable worker retains Attempt/Lease/Fence checks. intent_agent, translate_agent, vision_agent, repair_agent and unregistered targets are rejected before persistence.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PASS",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
         "budget_enforcement": "PARTIAL",
@@ -94,7 +100,8 @@
         "verification": "PARTIAL",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PARTIAL"
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
       }
     },
     "plan": {
@@ -106,12 +113,12 @@
         "host_brain/app/governed_delegate_dispatch.py",
         "tests/unit/test_ne01_governed_delegate_dispatch.py",
         "tests/integration/test_gr04_planning_replan_sqlite.py",
-        "tests/integration/test_gr05_universal_host_runtime.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PARTIAL",
         "budget_enforcement": "PARTIAL",
@@ -119,7 +126,77 @@
         "verification": "PARTIAL",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PARTIAL"
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
+      }
+    },
+    "scheduler": {
+      "status": "INCOMPLETE",
+      "production_boundary": "Scheduler occurrences enter HostCommand and a single-node immutable TaskGraph, but the production handler may perform its domain side effect before the outer Verification/Acceptance boundary. Program-wide Budget measurement, transactional Effect staging and current-commit live acceptance remain unproven.",
+      "evidence_refs": [
+        "host_brain/scheduler/governed_runtime.py",
+        "host_brain/scheduler/worker_registry.py",
+        "tests/unit/test_aw02_governed_scheduler_runtime.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PASS",
+        "verification": "PARTIAL",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "MISSING",
+        "commit_bound_acceptance": "MISSING"
+      }
+    },
+    "internal": {
+      "status": "INCOMPLETE",
+      "production_boundary": "Internal ingress is compiled into WorkOrderV3 and admitted through a single-node immutable TaskGraph, but execution still bridges to the legacy AgentWorkOrder executor. Write-capable work remains blocked and artifact writes are not yet atomically committed by Acceptance; current-commit live acceptance is absent.",
+      "evidence_refs": [
+        "host_brain/app/internal_task_runtime.py",
+        "host_brain/agent_runtime/executor.py",
+        "tests/integration/test_aw02_internal_agent_runtime_cutover.py"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PASS",
+        "verification": "PASS",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "MISSING",
+        "commit_bound_acceptance": "MISSING"
+      }
+    },
+    "operator": {
+      "status": "INCOMPLETE",
+      "production_boundary": "Only scheduler.task.trigger currently crosses Secure Ingress, HostCommand and TaskGraph; the other 36 audited Operator write commands remain deliberately blocked before their handlers. This is a safe cutoff, not universal Operator migration or live route acceptance.",
+      "evidence_refs": [
+        "host_brain/app/observability_runtime/domain_command_ports.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py"
+      ],
+      "controls": {
+        "host_command": "PARTIAL",
+        "immutable_task_graph": "PARTIAL",
+        "canonical_execution_authority": "PARTIAL",
+        "durable_attempt_lease": "PARTIAL",
+        "node_bound_grant": "PARTIAL",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PARTIAL",
+        "verification": "PARTIAL",
+        "acceptance": "PARTIAL",
+        "receipt": "PARTIAL",
+        "transactional_side_effects": "MISSING",
+        "commit_bound_acceptance": "MISSING"
       }
     }
   },

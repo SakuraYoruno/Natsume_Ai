@@ -250,7 +250,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0115_host_hard_state_journal.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。
+当前连续 SQLite migration head 为 `0116_agent_workspace_lifecycle.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -308,7 +308,7 @@ Capability v1的兼容child provider异常仅把该字段降级为带reason code
 
 D7关闭了两个更窄的结构边界。第一，`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用均从5降到0，四个projection兼容模块的全局reader/factory/source fallback也已删除；显式reader和composition-owned source job保留。第二，Host world/canon-sync/startup/3个memory GET由lifespan Query Projection Store服务，sys-mode通过`HostRoutePorts.mode_transition_service_provider`，Life action-preview通过可选trusted context/token validator端口；缺端口全部失败关闭，preview仍只DRY_RUN。无挂载消费者的core ledger compatibility handlers已删除，不保留伪ledger route port；Host factory强制typed `ObsRoutePorts`，Process/Tribe全局ports不再捕获某个app closure。这个结果只证明已识别route/helper不再反向定位服务，不证明底层authority已脱离process-global对象图。
 
-D7b另将Direct Skill worker的resource manager、episodic store与semantic recaller改为Host lifespan捕获的实例快照；执行线程不再导入或回读`process_services`，双runtime交错及单侧关闭已有隔离证据。节点授权与durable child intent先验证，依赖预检随后执行；缺后端稳定失败且不进入低层执行或生成成功receipt。Life Body保留prompt injection/high-risk、Gateway与capability风险，并用稳定source identity避免未变化轮询追加journal。D7c把Obs application/job assembly移入app层，composition→app NLE违规归零且没有白名单。当前 HardState 由 app-local `HostHardStateOwner` 与 0115 journal 共同所有：bootstrap mode 不在运行期读写 env，生产 owner 在 durable bind 前拒绝 mutation；绑定后 event/head 同事务、expected revision/mode CAS，并精确复验 Host scope/owner/lease/fence，restart 从完整校验的 chain/head 恢复。Chat/Tribe/Lifecycle/Scheduler 共享 owner，runtime snapshot不做env fallback，Obs只读durable Life Body投影。三项process facade、slot/lock、6个目标binding和Limbic/Prefrontal伪写均为0。视觉commit-bound库存named41/117、all-form47、Container54/4/49已是历史；当前为named40/116、all-form46、Container52/3/48。`process_services.py`与`process_runtime_services.py`仍暴露大量accessor；process-global Endocrine/Tribe、heartbeat/shared status、auto-rules/last-interaction、Host source、Chat/Delegate、Acceptance Effect、其余Worker typed composition、真实Edge和全局Service Locator删除均未完成，NE-01不能封板。
+D7b另将Direct Skill worker的resource manager、episodic store与semantic recaller改为Host lifespan捕获的实例快照；执行线程不再导入或回读`process_services`，双runtime交错及单侧关闭已有隔离证据。节点授权与durable child intent先验证，依赖预检随后执行；缺后端稳定失败且不进入低层执行或生成成功receipt。Life Body保留prompt injection/high-risk、Gateway与capability风险，并用稳定source identity避免未变化轮询追加journal。D7c把Obs application/job assembly移入app层，composition→app NLE违规归零且没有白名单。当前 HardState 由 app-local `HostHardStateOwner` 与 0115 journal 共同所有：bootstrap mode 不在运行期读写 env，生产 owner 在 durable bind 前拒绝 mutation；绑定后 event/head 同事务、expected revision/mode CAS，并精确复验 Host scope/owner/lease/fence，restart 从完整校验的 chain/head 恢复。Chat/Tribe/Lifecycle/Scheduler 共享 owner，runtime snapshot不做env fallback，Obs只读durable Life Body投影。三项process facade、slot/lock、6个目标binding和Limbic/Prefrontal伪写均为0。视觉与 HardState commit-bound库存均为历史；删除两个无消费者的 Obs cache slot/accessor 后，当前为named40/116、all-form46、Container50/3/46。`process_services.py`与`process_runtime_services.py`仍暴露大量accessor；process-global Endocrine/Tribe、heartbeat/shared status、auto-rules/last-interaction、Host source、Chat/Delegate、Acceptance Effect、其余Worker typed composition、真实Edge和全局Service Locator删除均未完成，NE-01不能封板。
 
 Workspace 已推进到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT_FAIL_CLOSED`。0101 authority、`WorkspaceRepository` 和配置根 allocator 继续持有 exact graph epoch/root WorkOrder/owner/allow-list；认证 Internal Agent admission 只携带服务端派生的逻辑 ID。显式配置稳定 HMAC secret 后，Host composition 冻结 source commit、创建独立 namespace Git worktree，并注入实例/PID 绑定 lease、独占 heartbeat scope、顺序 handoff/过期 takeover、cleanup receipt 与 pending cleanup worker；启动同步最多续清 1 条，其余 durable backlog 交 worker。Provisioning/allocator/cleanup callback 继续受 workspace→source 固定锁序、monotonic deadline 和前后 exact authority 短事务约束。Agent tool 只在动作间协作取消，Verification 只在整体启动前验活；二者没有逐操作 fence或强杀。前一 ReAct 切片仅封口 `run_skill` / `dispatch_sub_agent`，不改变 W2 的正向 authority 或隔离定级。Workspace worker 仍须先于 Task Store 静止，缺 secret 时写入 fail closed。promotion/abandon、accepted checkpoint HEAD、Domain/Skill 接线、OS/container/tenant、handle-level TOCTOU 与真实 canary仍未完成。
 
@@ -318,7 +318,7 @@ Workspace 已推进到 `PARTIAL_W2_INTERNAL_GIT_WORKTREE_WIRED / DEFAULT_FAIL_CL
 
 activation rollback 或 `aclose` quiescence 任一未完成都返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`，容器随即拒绝 bind/activate，只允许 `aclose` 重试。Coordinator admission close、drain 或 `aclose` 中任一步失败时，Task/Command Store 及其他 infrastructure 均保持打开；只有 Coordinator 和 worker 都已静默后才能 drain Outbox 并进入反向关闭。
 
-但整个 Host 尚未完成显式对象图迁移。既有 Tool/MCP、ToolBroker、ReAct 与视觉安全收口保持成立；HardState 切片再删除 process `get_hard_state`、`set_sys_mode`、`get_endocrine_state` 三 facade、`hard_state` slot/lock 与 6 个目标 binding。Host lifecycle、#89、ReAct 及视觉统计均为提交绑定历史，其中视觉是 named41/117、all-form47、Container54/4/49；当前机械库存为 named40/116、all-form46、Container52/3/48。
+但整个 Host 尚未完成显式对象图迁移。既有 Tool/MCP、ToolBroker、ReAct、视觉与 HardState 安全收口保持成立；所有早期统计均为提交绑定历史。删除 `query_projection_store`、`obs_metrics_collector` 及三个无消费者 accessor 后，当前机械库存为 named40/116、all-form46、Container50/3/46。
 
 前一 ReAct 切片仅把 `run_skill` / `dispatch_sub_agent` 从发现面清除，并让注入的旧 ToolSpec 在低层执行器前拒绝；这不代表普通 ReAct `GovernedToolNode → CapabilityBroker`、其他 Tool 路线或完整 executor 已退役。本视觉切片再封口 route-local 执行 authority：`/v1/agent/run` 只发出 `AGENT_INIT`，随后以 `LOOP_DONE / REJECTED` 结束，并固定 `side_effects_executed=false`；它不解析或调用模型、Ledger、Edge session、HTTP client 或 automation executor。raw Agent Loop、ClawdBot/Edge client、历史 Ledger writer 与死列常量已删除；`generate_action_plan()` 固定抛出 `VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED`，剩余 `ActionPlan` schema/parser 仅 proposal-only。视觉聊天只有 `text` 可进入 handle/model 链，其他值在 handle/model/Memory/Ledger 前拒绝，历史 vision text helper 无生产 caller。该路径不是 Delegate `vision_agent`，也没有恢复 ToolBroker、MCP、Skill、Delegate、registry 或 closure 的直执行 authority；恢复视觉自动化必须经 Secure Ingress/Governor 新建 immutable TaskGraph revision。
 
@@ -382,7 +382,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为0115；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为0116；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。
 
 ## 7. 数字生命状态模型
 

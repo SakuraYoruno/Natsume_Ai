@@ -376,7 +376,12 @@ def test_view_construction_uses_only_the_explicit_store(monkeypatch) -> None:
     def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise AssertionError("explicit view touched a process locator")
 
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", forbidden)
+    monkeypatch.setattr(
+        dependencies,
+        "peek_query_projection_store",
+        forbidden,
+        raising=False,
+    )
     monkeypatch.setattr(dependencies, "get_ledger", forbidden)
     now = 2_000_000_000_000
     view = ProjectionLedgerView(

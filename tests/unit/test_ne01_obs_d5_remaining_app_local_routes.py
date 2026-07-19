@@ -287,6 +287,7 @@ def test_seven_gets_keep_two_obs_apps_and_sqlite_databases_distinct(
         process_services,
         "get_query_projection_store",
         forbidden_global_source,
+        raising=False,
     )
     monkeypatch.setattr(
         process_services,
