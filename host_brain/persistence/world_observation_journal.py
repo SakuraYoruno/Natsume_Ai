@@ -10,14 +10,14 @@ import sqlite3
 from collections.abc import Mapping
 from typing import Any, Callable, Iterator, Sequence
 
-from host_brain.core.ids import now_ms
-from host_brain.runtime.context_contracts import (
+from host_brain.contracts.runtime_context import (
     ContextContractError,
     WorldFactExpiryV1,
     WorldFactV2,
     WorldObservationBatchV1,
     WorldObservationHeadV1,
 )
+from host_brain.core.ids import now_ms
 
 
 WORLD_OBSERVATION_MIGRATION_ASSET_KEY = "0111#world_observation_journal"

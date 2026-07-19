@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_6_10_CLOSED_SERVICE_CATALOG_AND_PLANNING_SEARCH_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_GATE_1_APPLICATION_PERSISTENCE_SCC_REMAINS_WITH_4_REVERSE_IMPORTS_GATE_11_TOOLBROKER_INVENTORY_REMAINS_COMBINED_NAMED_PROCESS_SERVICES_45_MODULES_123_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_51_CONTAINER_55_FIELDS_4_LOCKS_50_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_NE01_STILL_INCOMPLETE",
+  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_CLOSED_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_GATE_11_TOOLBROKER_INVENTORY_REMAINS_COMBINED_NAMED_PROCESS_SERVICES_45_MODULES_123_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_51_CONTAINER_55_FIELDS_4_LOCKS_50_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_NE01_STILL_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -27,7 +27,7 @@
     "status": "TARGETED_SLICE_PASSED_PROGRAM_INCOMPLETE",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_PLANNING_SEARCH_PERSISTENCE_CONTRACT_LAYERING_AFTER_SERVICE_CATALOG_OBS_PROJECTION_BUSINESS_SQLITE_TASK_STORE_AND_HOST_LIFECYCLE_SLICES",
+    "slice": "NE01_FINAL_PERSISTENCE_CONTRACT_LAYERING_AFTER_PLANNING_SEARCH_SERVICE_CATALOG_OBS_PROJECTION_BUSINESS_SQLITE_TASK_STORE_AND_HOST_LIFECYCLE_SLICES",
     "test_batches": {
       "structure_and_runtime_context_passed": 59,
       "action_preview_and_embodiment_passed": 43,
@@ -91,7 +91,11 @@
       "planning_search_d13_d18_d19_d20_skipped": 1,
       "planning_search_skip_reason": "WINDOWS_SYMLINK_PERMISSION_UNAVAILABLE_NOT_COUNTED_AS_PASS",
       "planning_search_py_compile": "PASS",
-      "planning_search_diff_check": "PASS"
+      "planning_search_diff_check": "PASS",
+      "final_persistence_contract_boundary_passed": 4,
+      "final_persistence_contract_targeted_passed": 32,
+      "final_persistence_contract_py_compile": "PASS",
+      "final_persistence_contract_diff_check": "PASS"
     },
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "completed_large_file_splits": [
@@ -111,15 +115,18 @@
     "mixed_file_gate": "GREEN_ISSUES_EMPTY_WITHOUT_POLICY_EXPANSION",
     "full_architecture_static_gate": {
       "status": "FAIL_PROGRAM_GAPS_CHANGED_FROM_ORIGIN_DEV",
-      "failed_gates": [1, 11],
+      "failed_gates": [11],
       "origin_dev_failed_gates": [1, 6, 10],
       "current_slice_added_failures": [11],
-      "resolved_gates": [6, 10],
+      "resolved_gates": [1, 6, 10],
       "issues": [
-        "Gate 1: application/persistence target-layer dependency SCC",
         "Gate 11: production service ToolBroker expected only host_brain/composition/process_runtime_services.py but also found host_brain/tools/broker.py"
       ],
-      "boundary": "GATES_6_10_GREEN_SERVICE_CATALOG_AND_PLANNING_SEARCH_SUB_BOUNDARIES_CLOSED_BUT_FULL_ARCHITECTURE_STATIC_GATE_REMAINS_FAILED_ON_GATE_1_APPLICATION_PERSISTENCE_SCC_WITH_EVOLUTION_LAB_SKILL_WORLD_4_AND_GATE_11_TOOLBROKER_DOUBLE_HIT_NE01_IN_PROGRESS"
+      "strongly_connected_components": [],
+      "edge_findings": 0,
+      "edge_violations": 0,
+      "reverse_imports": [],
+      "boundary": "GATES_1_6_10_GREEN_AND_PERSISTENCE_TO_APPLICATION_ZERO_BUT_FULL_ARCHITECTURE_STATIC_GATE_REMAINS_FAILED_ON_GATE_11_TOOLBROKER_PRODUCTION_SERVICE_INVENTORY_NE01_IN_PROGRESS"
     },
     "focused_structure_current_lines": {
       "host_brain/app/asgi.py": 1469,
@@ -252,14 +259,14 @@
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "task_store_slice_static_gate": "FAIL_GATES_1_6_10",
         "full_architecture_static_gate_at_slice_completion": "FAIL_GATES_1_6_10_NOT_PASS",
-        "full_architecture_static_gate_current": "FAIL_GATES_1_11_NOT_PASS"
+        "full_architecture_static_gate_current": "FAIL_GATE_11_NOT_PASS"
       },
       "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_SQLITE_ORPHAN_RAW_SQL_REMAINS_NE01_IN_PROGRESS"
     },
     "business_sqlite_boundary": {
       "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
       "origin_dev_status": "FAIL_GATES_1_6_10",
-      "current_status": "FAIL_GATES_1_11",
+      "current_status": "FAIL_GATE_11",
       "runtime_context_readiness": {
         "schema": "0112_RUNTIME_CONTEXT_AUTHORITY",
         "owner": "RuntimeEventRepository",
@@ -295,14 +302,14 @@
         "repository_and_global_independent_rerun_passed": 16,
         "root_batch_overlap": "OVERLAPS_ROLLOUT_15_DO_NOT_SUM",
         "global_sqlite_boundary": "PASS",
-        "full_architecture_static_gate": "FAIL_GATES_1_11_NOT_PASS",
+        "full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "boundary": "GATE_10_ONLY_TYPED_COMPOSITION_AND_NE01_REMAIN_INCOMPLETE"
     },
     "service_catalog_layering_boundary": {
-      "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_PLANNING_SEARCH_LAYER_EDGES_SUBSEQUENTLY_CLOSED_GATE_1_STILL_FAILED_NE01_IN_PROGRESS",
+      "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_GATE_1_SUBSEQUENTLY_PASSED_NE01_IN_PROGRESS",
       "application_to_composition_imports": 0,
       "service_catalog_persistence_to_application_imports": 0,
       "startup_coordinator": "host_brain/service_catalog/startup_coordinator.py",
@@ -312,13 +319,15 @@
       "rollout_authority_responsibility": "GUARDIAN_OBSERVER_ONLY",
       "repository_dependency": "STABLE_CONTRACTS_ONLY",
       "full_architecture_static_gate": {
-        "status": "FAIL_GATE_1_NOT_PASS",
+        "status": "FAIL_GATE_11_NOT_PASS",
+        "failed_gates": [11],
         "scc_before": ["application", "composition", "persistence"],
-        "scc_current": ["application", "persistence"],
-        "remaining_persistence_to_application_imports": 4,
+        "scc_after_service_catalog": ["application", "persistence"],
+        "scc_current": [],
+        "remaining_persistence_to_application_imports": 0,
         "remaining_breakdown": {
           "planning_search": 0,
-          "evolution_lab_skill_world": 4
+          "evolution_lab_skill_world": 0
         },
         "edge_violations": 0,
         "reverse_imports": 0
@@ -334,10 +343,10 @@
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "migration_added_this_slice": false,
-      "boundary": "SERVICE_CATALOG_LAYERING_VALIDATED_PLANNING_SEARCH_SUBSEQUENTLY_CLOSED_7_MORE_REVERSE_IMPORTS_GATE_1_COMPOSITION_AND_NE01_NOT_COMPLETE"
+      "boundary": "SERVICE_CATALOG_SLICE_WAS_PARTIAL_SUBSEQUENT_CONTRACT_SLICES_CLOSE_GATE_1_BUT_TYPED_COMPOSITION_AND_NE01_NOT_COMPLETE"
     },
     "planning_search_persistence_contract_layering_boundary": {
-      "status": "PLANNING_SEARCH_PERSISTENCE_TO_APPLICATION_EDGES_CLOSED_GATE_1_STILL_FAILED_NE01_IN_PROGRESS",
+      "status": "PLANNING_SEARCH_PERSISTENCE_TO_APPLICATION_EDGES_CLOSED_GATE_1_SUBSEQUENTLY_PASSED_NE01_IN_PROGRESS",
       "pure_contract_package": "host_brain/contracts/planning_search/",
       "migrated_contract_groups": [
         "core",
@@ -361,11 +370,12 @@
       ],
       "removed_persistence_to_application_imports": 7,
       "full_architecture_static_gate": {
-        "status": "FAIL_GATE_1_NOT_PASS",
-        "scc_current": ["application", "persistence"],
-        "remaining_persistence_to_application_imports": 4,
+        "status": "FAIL_GATE_11_NOT_PASS",
+        "failed_gates": [11],
+        "scc_current": [],
+        "remaining_persistence_to_application_imports": 0,
         "remaining_breakdown": {
-          "evolution_lab_skill_world": 4
+          "evolution_lab_skill_world": 0
         },
         "application_to_composition_imports": 0,
         "edge_violations": 0,
@@ -386,6 +396,51 @@
       "migration_added_this_slice": false,
       "boundary": "PERSISTENCE_CONTRACT_LAYERING_ONLY_PLANNING_SEARCH_PRODUCTION_FUNCTION_AND_BENEFIT_NOT_PROVEN_GATE_1_TYPED_COMPOSITION_AND_NE01_NOT_COMPLETE"
     },
+    "final_persistence_contract_layering_boundary": {
+      "status": "GATE_1_PASS_LAYERING_ONLY_NE01_STILL_IN_PROGRESS",
+      "pure_contract_modules": [
+        "host_brain/contracts/evolution.py",
+        "host_brain/contracts/evolution_lab.py",
+        "host_brain/contracts/runtime_context.py",
+        "host_brain/contracts/skill_lifecycle.py"
+      ],
+      "legacy_same_object_reexports": [
+        "host_brain/evolution/contracts.py",
+        "host_brain/evolution_lab/contracts.py",
+        "host_brain/runtime/context_contracts.py",
+        "host_brain/skills/skill_lifecycle.py"
+      ],
+      "repositories_using_neutral_contracts_only": [
+        "evolution_governance",
+        "evolution_lab",
+        "skill_lifecycle",
+        "world_observation"
+      ],
+      "removed_persistence_to_application_imports": 4,
+      "full_architecture_static_gate": {
+        "status": "FAIL_GATE_11_NOT_PASS",
+        "failed_gates": [11],
+        "gate_1_issues": [],
+        "strongly_connected_components": [],
+        "application_to_composition_imports": 0,
+        "persistence_to_application_imports": 0,
+        "edge_findings": 0,
+        "edge_violations": 0,
+        "reverse_imports": [],
+        "gate_6": "PASS",
+        "gate_10": "PASS"
+      },
+      "validation": {
+        "boundary_passed": 4,
+        "context_world_evolution_lab_skill_evolution_governance_targeted_passed": 32,
+        "py_compile": "PASS",
+        "diff_check": "PASS",
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+      },
+      "migration_added_this_slice": false,
+      "boundary": "LAYERING_AND_TYPE_IDENTITY_ONLY_NE04_TO_NE06_PRODUCTION_FUNCTIONS_UNIVERSAL_RUNTIME_TYPED_COMPOSITION_AND_PLANNING_SEARCH_BENEFIT_REMAIN_INCOMPLETE"
+    },
     "obs_projection_lifecycle_boundary": {
       "status": "GATE_6_PASS_CONTINUOUS_SLO_INCOMPLETE_NE01_STILL_IN_PROGRESS",
       "production_start_api": "ObsApplicationContainer.start_projection_jobs",
@@ -405,7 +460,7 @@
         "final_targeted_passed": 19,
         "batch_overlap": "BATCHES_OVERLAP_DO_NOT_SUM",
         "gate_6_issues": [],
-        "full_architecture_static_gate": "FAIL_GATES_1_11_NOT_PASS",
+        "full_architecture_static_gate": "FAIL_GATE_11_NOT_PASS",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
