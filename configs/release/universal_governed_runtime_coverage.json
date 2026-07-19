@@ -485,7 +485,7 @@
         ]
       },
       "service_catalog_layering_authority": {
-        "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_GATE_1_STILL_FAILED_NE01_IN_PROGRESS",
+        "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_PLANNING_SEARCH_LAYER_EDGES_SUBSEQUENTLY_CLOSED_GATE_1_STILL_FAILED_NE01_IN_PROGRESS",
         "application_to_composition_imports": 0,
         "service_catalog_persistence_to_application_imports": 0,
         "startup_coordinator": "host_brain/service_catalog/startup_coordinator.py",
@@ -498,9 +498,9 @@
           "status": "FAIL",
           "scc_before": ["application", "composition", "persistence"],
           "scc_current": ["application", "persistence"],
-          "remaining_persistence_to_application_imports": 11,
+          "remaining_persistence_to_application_imports": 4,
           "remaining_breakdown": {
-            "planning_search": 7,
+            "planning_search": 0,
             "evolution_lab_skill_world": 4
           },
           "edge_violations": 0,
@@ -517,7 +517,56 @@
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
         "migration_added_this_slice": false,
-        "boundary": "SERVICE_CATALOG_LAYERING_ONLY_GATE_1_COMPOSITION_AND_NE01_NOT_COMPLETE"
+        "boundary": "SERVICE_CATALOG_LAYERING_VALIDATED_PLANNING_SEARCH_SUBSEQUENTLY_CLOSED_7_MORE_REVERSE_IMPORTS_GATE_1_COMPOSITION_AND_NE01_NOT_COMPLETE"
+      },
+      "planning_search_persistence_contract_layering_authority": {
+        "status": "PLANNING_SEARCH_PERSISTENCE_TO_APPLICATION_EDGES_CLOSED_GATE_1_STILL_FAILED_NE01_IN_PROGRESS",
+        "pure_contract_package": "host_brain/contracts/planning_search/",
+        "contract_groups": [
+          "core",
+          "benchmark",
+          "calibration",
+          "code",
+          "research",
+          "eight_contract_and_model_modules_total"
+        ],
+        "legacy_paths": "SAME_OBJECT_REEXPORT_ONLY",
+        "compatibility_preserved": [
+          "__all__",
+          "type_identity",
+          "isinstance",
+          "serialization_shape"
+        ],
+        "repositories": [
+          "code_benchmark",
+          "calibration",
+          "research_shadow"
+        ],
+        "removed_persistence_to_application_imports": 7,
+        "gate_1": {
+          "status": "FAIL",
+          "scc_current": ["application", "persistence"],
+          "remaining_persistence_to_application_imports": 4,
+          "remaining_breakdown": {
+            "evolution_lab_skill_world": 4
+          },
+          "application_to_composition_imports": 0,
+          "edge_violations": 0,
+          "reverse_imports": 0
+        },
+        "validation": {
+          "boundary_passed": 5,
+          "d13_d18_d19_d20_passed": 60,
+          "d13_d18_d19_d20_skipped": 1,
+          "skip_reason": "WINDOWS_SYMLINK_PERMISSION_UNAVAILABLE_NOT_COUNTED_AS_PASS",
+          "py_compile": "PASS",
+          "diff_check": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "migration_added_this_slice": false,
+        "planning_search_function_and_benefit": "NOT_PROVEN",
+        "boundary": "PERSISTENCE_CONTRACT_LAYERING_ONLY_GATE_1_TYPED_COMPOSITION_AND_NE01_NOT_COMPLETE"
       },
       "obs_projection_lifecycle_authority": {
         "status": "GATE_6_PASS_CONTINUOUS_SLO_INCOMPLETE_NE01_STILL_IN_PROGRESS",
@@ -539,7 +588,8 @@
           "final_targeted_passed": 19,
           "batch_overlap": "BATCHES_OVERLAP_DO_NOT_SUM",
           "gate_6_issues": [],
-          "full_architecture_static_gate": "FAIL_GATE_1_NOT_PASS",
+          "full_architecture_static_gate": "FAIL_GATES_1_11_NOT_PASS",
+          "full_architecture_static_gate_boundary": "GATE_1_APPLICATION_PERSISTENCE_SCC_AND_GATE_11_TOOLBROKER_PRODUCTION_SERVICE_INVENTORY_DOUBLE_HIT",
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
@@ -549,7 +599,7 @@
         "before_modules": 47,
         "before_imported_names": 152,
         "current_modules": 45,
-        "current_imported_names": 124,
+        "current_imported_names": 123,
         "scope": "ONLY_EXACT_FROM_HOST_BRAIN_COMPOSITION_PROCESS_SERVICES_IMPORT_FORM_NOT_FULL_REPOSITORY"
       },
       "all_process_services_import_consumer_modules": {
@@ -558,9 +608,9 @@
         "scope": "ALL_IMPORT_FORMS"
       },
       "process_service_container": {
-        "fields": 56,
+        "fields": 55,
         "lock_fields": 4,
-        "mutable_service_references_excluding_locks_and_application_ports": 51
+        "mutable_service_references_excluding_locks_and_application_ports": 50
       },
       "host_lifecycle_boundary": {
         "publication": "FACTORY_AND_START_MUST_SUCCEED_BEFORE_APP_LOCAL_PROVIDER_PUBLICATION",
@@ -581,7 +631,8 @@
         "structure_and_single_clock_passed": 22,
         "batch_overlap": "OVERLAP_4_TEST_AW08_TRIBE_DEPENDENCY_DIRECTION_DEDUPLICATED_161",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
-        "full_architecture_static_gate": "FAIL_GATE_1_NOT_PASS"
+        "full_architecture_static_gate": "FAIL_GATES_1_11_NOT_PASS",
+        "full_architecture_static_gate_boundary": "GATE_1_APPLICATION_PERSISTENCE_SCC_AND_GATE_11_TOOLBROKER_PRODUCTION_SERVICE_INVENTORY_DOUBLE_HIT"
       },
       "boundary": "45_MODULES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_51_CONSUMER_MODULES_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
       "evidence_refs": [

@@ -15,13 +15,13 @@ import sqlite3
 from typing import Any, Callable, Iterator, Mapping
 
 from host_brain.core.ids import now_ms
-from host_brain.planning_search.benchmarking import (
+from host_brain.contracts.planning_search.benchmarking import (
     BenchmarkArm,
     BenchmarkArmOutcome,
     DomainBenchmarkReport,
     DomainBenchmarkWorkload,
 )
-from host_brain.planning_search.code_benchmark_ledger import (
+from host_brain.contracts.planning_search.code_benchmark_ledger import (
     CODE_BENCHMARK_EXPERIMENT_SCOPE,
     CODE_BENCHMARK_RECEIPT_STATUS,
     CodeBenchmarkExecutionBudget,
@@ -30,18 +30,18 @@ from host_brain.planning_search.code_benchmark_ledger import (
     CodeBenchmarkRunSpec,
     CodeBenchmarkWorkloadRegistration,
 )
-from host_brain.planning_search.code_benchmark_models import (
+from host_brain.contracts.planning_search.code_benchmark_models import (
     CODE_BENCHMARK_CLEANUP_STATUS,
     CodeBenchmarkArmEvidence,
     CodeBenchmarkCleanupReceipt,
     CodeHistoricalBenchmarkRun,
     CodeVerifierResult,
 )
-from host_brain.planning_search.code_benchmark_verification_contracts import (
+from host_brain.contracts.planning_search.code_benchmark_verification_contracts import (
     CodeBenchmarkControlledVerificationReceipt,
     CodeBenchmarkVerificationPlan,
 )
-from host_brain.planning_search.contracts import SearchBudget
+from host_brain.contracts.planning_search.contracts import SearchBudget
 
 
 CODE_BENCHMARK_DURABLE_DATA_INVALID = "CODE_BENCHMARK_DURABLE_DATA_INVALID"

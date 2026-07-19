@@ -9,7 +9,7 @@ import sqlite3
 from typing import Any, Callable, Iterator, Mapping
 
 from host_brain.core.ids import now_ms
-from host_brain.planning_search.calibration import (
+from host_brain.contracts.planning_search.calibration import (
     CalibrationContractError,
     CalibrationMetrics,
     CalibrationOutcome,
