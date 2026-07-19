@@ -154,12 +154,6 @@ class RoutingMatrix:
         # 默认：cloud
         return ModelTarget.CLOUD
 
-    @staticmethod
-    def _is_gaming_mode() -> bool:
-        """检测当前是否处于 gaming 模式（读取 HOST_SYS_MODE 环境变量）。"""
-        import os
-        return os.environ.get("HOST_SYS_MODE", "normal").strip().lower() == "gaming"
-
     def select_with_fallback(
         self,
         task_type: TaskType,
@@ -168,6 +162,7 @@ class RoutingMatrix:
         context_length: int = 0,
         requires_structured_output: bool = False,
         failed_models: Optional[List[ModelTarget]] = None,
+        sys_mode: str = "normal",
     ) -> RouteDecision:
         """
         带降级链的路由选择。
@@ -176,6 +171,7 @@ class RoutingMatrix:
 
         Args:
             failed_models: 已失败的模型列表，降级时跳过这些模型。
+            sys_mode: 由 Host app-local HardState owner 提供的当前模式。
 
         Returns:
             RouteDecision 路由决策记录（is_fallback=True 表示已降级）。
@@ -193,7 +189,8 @@ class RoutingMatrix:
         # 主路由失败，走降级链（需求 5.5）
         # Gaming 模式使用专用降级链（跳过海外云端，保证低延迟）
         original_model = primary_decision.selected_model
-        chain = GAMING_FALLBACK_CHAIN if self._is_gaming_mode() else FALLBACK_CHAIN
+        resolved_sys_mode = str(sys_mode or "normal").strip().lower() or "normal"
+        chain = GAMING_FALLBACK_CHAIN if resolved_sys_mode == "gaming" else FALLBACK_CHAIN
 
         for fallback_model in chain:
             if fallback_model in failed_models:

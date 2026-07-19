@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.3
+版本：v2.4
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-18
+维护日期：2026-07-19
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -249,6 +249,18 @@ Event
 - 投影和外发通过 outbox 恢复。
 
 这些合同当前位于 [共享 Life contracts](../../natsume_contracts/life/v1.py)。
+
+### 5.5 控制状态也必须拥有可证明的连续性
+
+`sys_mode`、maintenance、sleep 等运行控制状态虽然不是人格或长期记忆，也不能退化成环境变量、进程内列表或“最后一次赋值”。只要它会改变 admission、调度或表达边界，就必须同时满足：
+
+- 一个 runtime scope 只有一个可持久提交的 writer；持久化所需的合法状态集合与转换图必须由中立合同冻结，不能让 persistence 反向依赖 application 决策模块；
+- 每次 transition 绑定旧 revision/旧 mode、稳定 event identity 与当前 runtime lease/fence；
+- 不可变事件和 canonical head 在同一事务中提交，内存快照只能在 durable commit 后更新；
+- 重启先验证完整 revision/digest chain，再恢复 head，不能重新采用 bootstrap 默认值覆盖历史；
+- 成功 transition 只留下一个 canonical durable audit；exact replay 返回已有事实但不重复追加内存 history、兼容日志或第二审计，payload drift、并发 stale head、失效 lease、旧 fence 和篡改都失败关闭。
+
+这类 journal 证明的是“模式为何从 A 变成 B，以及重启后仍是 B”。自动规则、last-interaction、健康推断等派生输入若仍是易失状态，就必须单独标明，不能借 mode head 已持久化而宣称整个生命周期系统已可恢复。当前代码对应 [HardState contracts](../../host_brain/contracts/host_hard_state.py) 与 [SQLite journal](../../host_brain/persistence/hard_state_journal.py)；其生产完成度仍以当前架构事实为准。
 
 ---
 

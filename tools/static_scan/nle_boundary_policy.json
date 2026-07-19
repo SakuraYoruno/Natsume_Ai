@@ -66,22 +66,22 @@
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._delete_authorized_document",
-          "line": 1235
+          "line": 1246
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
-          "line": 1240
+          "line": 1251
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._replace_authorized_payload",
-          "line": 1243
+          "line": 1254
         },
         {
           "path": "host_brain/memory/canon_apply_service.py",
           "symbol": "WorldCanonStore._CANON_APPLY_PERMIT",
-          "line": 1248
+          "line": 1259
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
@@ -106,12 +106,12 @@
         {
           "path": "host_brain/app/observability_runtime/domain_command_ports.py",
           "symbol": "WorldCanonStore.approve_proposal",
-          "line": 419
+          "line": 456
         },
         {
           "path": "host_brain/app/observability_runtime/domain_command_ports.py",
           "symbol": "WorldCanonStore.rollback_proposal",
-          "line": 459
+          "line": 496
         }
       ]
     },

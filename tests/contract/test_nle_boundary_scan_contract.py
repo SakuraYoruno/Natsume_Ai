@@ -60,22 +60,22 @@ def test_t_nle_01_world_canon_trusted_sites_are_exact_apply_authority() -> None:
         (
             "host_brain/memory/canon_apply_service.py",
             "WorldCanonStore._delete_authorized_document",
-            1235,
+            1246,
         ),
         (
             "host_brain/memory/canon_apply_service.py",
             "WorldCanonStore._CANON_APPLY_PERMIT",
-            1240,
+            1251,
         ),
         (
             "host_brain/memory/canon_apply_service.py",
             "WorldCanonStore._replace_authorized_payload",
-            1243,
+            1254,
         ),
         (
             "host_brain/memory/canon_apply_service.py",
             "WorldCanonStore._CANON_APPLY_PERMIT",
-            1248,
+            1259,
         ),
         (
             "host_brain/memory/canon_world_store.py",
@@ -100,12 +100,12 @@ def test_t_nle_01_world_canon_trusted_sites_are_exact_apply_authority() -> None:
         (
             "host_brain/app/observability_runtime/domain_command_ports.py",
             "WorldCanonStore.approve_proposal",
-            419,
+            456,
         ),
         (
             "host_brain/app/observability_runtime/domain_command_ports.py",
             "WorldCanonStore.rollback_proposal",
-            459,
+            496,
         ),
     }
 

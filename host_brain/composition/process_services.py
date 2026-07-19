@@ -74,12 +74,9 @@ from host_brain.composition.process_environment import (
     get_edge_base_url,
     get_edge_base_urls,
     get_emotion_timeline,
-    get_endocrine_state,
-    get_hard_state,
     get_resource_manager,
     notify_user_interaction,
     probe_edge_rpc_health,
-    set_sys_mode,
 )
 
 

@@ -8,7 +8,7 @@ typed services and never create a second object graph.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from threading import Lock, RLock
+from threading import RLock
 from typing import Any
 
 
@@ -63,19 +63,16 @@ class ProcessServiceContainer:
     security_immune_agent: Any = None
     model_runtime_composition: Any = None
     capability_runtime_composition: Any = None
-    hard_state: Any = None
     application_ports: Any = None
     tribe_runtime_composition: Any = None
     model_runtime_lock: RLock = None  # type: ignore[assignment]
     capability_runtime_lock: RLock = None  # type: ignore[assignment]
     tribe_runtime_lock: RLock = None  # type: ignore[assignment]
-    hard_state_lock: Lock = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         self.model_runtime_lock = RLock()
         self.capability_runtime_lock = RLock()
         self.tribe_runtime_lock = RLock()
-        self.hard_state_lock = Lock()
 
     def clear_service_references(self) -> None:
         """Reset service references while preserving synchronization objects."""

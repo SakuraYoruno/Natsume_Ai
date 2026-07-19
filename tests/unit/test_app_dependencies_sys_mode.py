@@ -2,28 +2,22 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.core.metabolism import HardState
+from host_brain.app.host_hard_state import HostHardStateOwner
 
 
-def test_set_sys_mode_rejects_unknown_mode(monkeypatch) -> None:
-    import host_brain.composition.process_services as deps
+def test_set_sys_mode_rejects_unknown_mode_without_mutating_state_or_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    owner = HostHardStateOwner.bootstrap(
+        initial_sys_mode="normal",
+        clock_ms=lambda: 1,
+    )
+    original_state = owner.get_hard_state()
 
-    original_state = deps.get_process_service_container().hard_state
-    try:
-        deps.get_process_service_container().hard_state = HardState(
-            energy_level=60,
-            mood_state="steady",
-            sys_mode="normal",
-            safety_flag=False,
-            last_event_id=None,
-            ts_ms=1,
-        )
-        monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    with pytest.raises(ValueError, match="invalid sys_mode"):
+        owner.set_sys_mode("debug")
 
-        with pytest.raises(ValueError, match="invalid sys_mode"):
-            deps.set_sys_mode("debug")
-
-        assert deps.get_process_service_container().hard_state.sys_mode == "normal"
-        assert deps.get_hard_state().sys_mode == "normal"
-    finally:
-        deps.get_process_service_container().hard_state = original_state
+    assert owner.get_hard_state() is original_state
+    assert owner.get_hard_state().sys_mode == "normal"
+    assert __import__("os").environ["HOST_SYS_MODE"] == "normal"

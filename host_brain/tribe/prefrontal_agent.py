@@ -768,13 +768,8 @@ class PrefrontalAgent:
             "drift_dims": list(getattr(result, "drift_dims", []) or []),
             "correction_hint": str(getattr(result, "correction_hint", "") or ""),
         }
-        if payload["alert_level"] in {"MODERATE", "SEVERE"}:
-            try:
-                hard_state = self.application_ports.require("hard_state")()
-                if hard_state is not None:
-                    hard_state.set("drift_correction_hint", payload["correction_hint"])
-            except Exception:
-                pass
+        # Persona drift 仅产生显式结果/后续 Feedback proposal。HardState 是
+        # Host app-local frozen snapshot，Prefrontal 不得把 correction hint 写入其中。
         return payload
 
     def run_growth_feedback_cycle(

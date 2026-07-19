@@ -116,6 +116,7 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         request=_build_request(),
         metrics=metrics,
         governed_command_application=governed_command_application,
+        hard_state_provider=lambda: {"sys_mode": "normal"},
     )
 
     assert fake_thalamus.calls == 0
@@ -172,6 +173,7 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
         ),
         request=_build_request(),
         metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
     )
 
     body_iter = response.body_iterator
@@ -235,6 +237,7 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         ),
         request=_build_request(),
         metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
     )
 
     body_iter = response.body_iterator
@@ -296,6 +299,7 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
         request_body=ChatRequest(message="还记得我说推荐格式要怎样吗？"),
         request=_build_request(),
         metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
     )
 
     body_iter = response.body_iterator

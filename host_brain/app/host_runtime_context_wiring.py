@@ -6,6 +6,7 @@ import hashlib
 from typing import Any, Callable, Mapping
 
 from host_brain.composition.task_runtime import ProcessTaskRuntimeContainer
+from host_brain.persistence.hard_state_journal import SQLiteHardStateJournal
 from host_brain.persistence.world_observation_journal import (
     SQLiteWorldObservationJournal,
 )
@@ -74,6 +75,43 @@ def compose_host_runtime_context(
     return RuntimeContextApplicationService(composition)
 
 
+def bind_host_hard_state_runtime(
+    *,
+    task_runtime: ProcessTaskRuntimeContainer,
+    embodiment_runtime: Any,
+    host_lifecycle: Any,
+) -> Mapping[str, object]:
+    """Bind HardState only after migration and the Host fence are active."""
+
+    runtime_scope_id = str(
+        getattr(embodiment_runtime, "runtime_scope_id", "") or ""
+    ).strip()
+    if not runtime_scope_id:
+        raise RuntimeError("HOST_HARD_STATE_SCOPE_UNAVAILABLE")
+
+    def runtime_authority_provider() -> dict[str, Any]:
+        renew = getattr(embodiment_runtime, "renew_authority", None)
+        if not callable(renew):
+            raise RuntimeError("HOST_HARD_STATE_AUTHORITY_UNAVAILABLE")
+        claim = renew()
+        if not isinstance(claim, Mapping):
+            raise RuntimeError("HOST_HARD_STATE_AUTHORITY_INVALID")
+        return {**dict(claim), "runtime_scope_id": runtime_scope_id}
+
+    journal = SQLiteHardStateJournal(
+        task_runtime.canonical_db_path,
+        runtime_scope_id=runtime_scope_id,
+        runtime_authority_provider=runtime_authority_provider,
+    )
+    bind = getattr(host_lifecycle, "bind_hard_state_journal", None)
+    if not callable(bind):
+        raise RuntimeError("HOST_HARD_STATE_COMPOSITION_UNAVAILABLE")
+    result = bind(journal)
+    if not isinstance(result, Mapping):
+        raise RuntimeError("HOST_HARD_STATE_BIND_RESULT_INVALID")
+    return dict(result)
+
+
 def runtime_environment_observation_provider(
     mode_transition_service: Any,
 ) -> Callable[..., Mapping[str, Any]]:
@@ -111,6 +149,7 @@ def runtime_environment_observation_provider(
 
 
 __all__ = [
+    "bind_host_hard_state_runtime",
     "compose_host_runtime_context",
     "runtime_environment_observation_provider",
 ]

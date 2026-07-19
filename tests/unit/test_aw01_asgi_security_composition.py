@@ -348,7 +348,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     mode_transition_service = SimpleNamespace(
         get_current_status=lambda: {"sys_mode": "gaming"}
     )
-    activity_monitor = object()
+    activity_monitor = SimpleNamespace(_gaming_interval=30, _idle_interval=60)
     host_lifecycle = SimpleNamespace(
         ports=SimpleNamespace(
             memory_guard=lambda: object(),
@@ -359,13 +359,20 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             skill_registry=lambda: skill_registry,
             tool_catalog=lambda: tool_catalog,
             capability_broker=lambda: capability_broker,
-            hard_state=lambda: SimpleNamespace(sys_mode="gaming"),
-            set_sys_mode=lambda _mode: {},
             model_attempt_service=lambda: model_attempt_service,
         ),
+        get_hard_state=lambda: SimpleNamespace(sys_mode="gaming"),
+        get_endocrine_state=lambda **_kwargs: {},
+        set_sys_mode=lambda _mode: {},
         get_activity_monitor=lambda **_kwargs: activity_monitor,
         get_resource_manager=lambda **_kwargs: resource_manager,
         get_mode_transition_service=lambda: mode_transition_service,
+        start_activity_monitor=lambda **_kwargs: (
+            events.append("activity-monitor-started") or activity_monitor
+        ),
+        stop_activity_monitor=lambda **_kwargs: events.append(
+            "activity-monitor-stopped"
+        ),
         notify_user_interaction=lambda: None,
     )
     class EmbodimentRuntime:
@@ -770,6 +777,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "runtime_lifespan",
         lambda **kwargs: (
             kwargs["host_lifecycle"] is host_lifecycle
+            and kwargs["defer_activity_monitor"] is True
             and base_lifespan()
         ),
     )
@@ -828,6 +836,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         asgi,
         "_compose_host_runtime_context",
         fake_compose_runtime_context,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "_bind_host_hard_state_runtime",
+        lambda **_kwargs: events.append("hard-state-journal-bound") or {},
     )
     monkeypatch.setattr(
         tool_runtime_composition,
@@ -1074,6 +1087,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "container-built",
         "task-runtime-built",
         "embodiment-transport-fenced",
+        "hard-state-journal-bound",
+        "activity-monitor-started",
         "runtime-context-built",
         "guardian-startup-observed",
         "canon-built",
@@ -1090,6 +1105,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "governed-runtime-activated",
         "scheduler-clock-activated",
         "serving",
+        "activity-monitor-stopped",
         "guardian-heartbeat-stopped",
         "scheduler-clock-stopped",
         "workspace-closed",
@@ -1237,13 +1253,15 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
             skill_registry=provider,
             tool_catalog=provider,
             capability_broker=provider,
-            hard_state=lambda: SimpleNamespace(sys_mode="normal"),
-            set_sys_mode=lambda _mode: {},
             model_attempt_service=provider,
         ),
+        get_hard_state=lambda: SimpleNamespace(sys_mode="normal"),
+        get_endocrine_state=lambda **_kwargs: {},
+        set_sys_mode=lambda _mode: {},
         get_activity_monitor=lambda **_kwargs: None,
         get_resource_manager=lambda **_kwargs: None,
         get_mode_transition_service=lambda: None,
+        stop_activity_monitor=lambda **_kwargs: None,
         notify_user_interaction=lambda: None,
     )
 

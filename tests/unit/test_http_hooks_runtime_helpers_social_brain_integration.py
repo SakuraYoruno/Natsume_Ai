@@ -391,16 +391,15 @@ def test_runtime_snapshot_uses_social_brain_bond_snapshot(monkeypatch) -> None:
         lambda: _FakeSocialBrain(),
     )
     monkeypatch.setattr(
-        "host_brain.composition.process_services.get_hard_state",
-        lambda: _FakeHardState(),
-    )
-    monkeypatch.setattr(
         "host_brain.bond.user_identity.get_canonical_bond_user_id",
         lambda: "persona-user-001",
     )
 
     snapshot = build_digital_life_runtime_snapshot(
-        ports=build_lifecycle_runtime_application_ports(),
+        ports=build_lifecycle_runtime_application_ports(
+            hard_state_provider=lambda: _FakeHardState(),
+            endocrine_state_provider=lambda **_kwargs: {},
+        ),
         current_topic="hello",
     )
 
