@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -63,6 +64,16 @@ class WorkspaceCleanupResult:
     workspace_id: str
     source_ref: str
     already_absent: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceNoChangeSnapshot:
+    workspace_id: str
+    base_commit: str
+    accepted_head: str
+    tree_digest: str
+    diff_digest: str
+    receipt_ref: str
 
 
 _SOURCE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$")
@@ -272,6 +283,90 @@ class WorkspaceAllocator:
         )
         self._require_status(authority, expected="ACTIVE", operation="execution")
         return authority
+
+    def capture_no_change_head(
+        self,
+        lease: DurableWorkspaceLease,
+    ) -> WorkspaceNoChangeSnapshot:
+        """Capture a fenced, explicit read-only/no-change Git receipt.
+
+        This deliberately refuses dirty worktrees and advanced branches.  It
+        never invents an ``accepted_head`` for a non-Git workspace and cannot
+        silently promote uncommitted Agent writes.
+        """
+
+        def capture(authority: WorkspaceAuthority) -> WorkspaceNoChangeSnapshot:
+            resolved_source = self._git_source_for(authority)
+            if resolved_source is None:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "accepted HEAD requires a configured Git workspace",
+                )
+            source, base_commit = resolved_source
+            del source
+            workspace = self._prepare_from_authority(authority).path
+            status = self._git_output(
+                workspace,
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            )
+            accepted_head = self._git_output(
+                workspace,
+                "rev-parse",
+                "--verify",
+                "HEAD^{commit}",
+            ).lower()
+            tree_object = self._git_output(
+                workspace,
+                "rev-parse",
+                "--verify",
+                "HEAD^{tree}",
+            ).lower()
+            if status or accepted_head != base_commit:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "read-only Workspace changed and has no governed write promotion",
+                )
+            if not _GIT_OBJECT.fullmatch(accepted_head) or not _GIT_OBJECT.fullmatch(
+                tree_object
+            ):
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "Git no-change snapshot returned a non-canonical object id",
+                )
+            tree_digest = "sha256:" + hashlib.sha256(
+                f"git-tree:{tree_object}".encode("ascii")
+            ).hexdigest()
+            diff_digest = "sha256:" + hashlib.sha256(b"").hexdigest()
+            receipt_digest = hashlib.sha256(
+                (
+                    f"{authority.workspace_id}\n{base_commit}\n{accepted_head}\n"
+                    f"{tree_digest}\n{diff_digest}"
+                ).encode("utf-8")
+            ).hexdigest()
+            return WorkspaceNoChangeSnapshot(
+                workspace_id=authority.workspace_id,
+                base_commit=base_commit,
+                accepted_head=accepted_head,
+                tree_digest=tree_digest,
+                diff_digest=diff_digest,
+                receipt_ref=f"workspace-no-change://sha256/{receipt_digest}",
+            )
+
+        return self.repository.run_fenced(
+            lease.workspace_id,
+            lease_owner=lease.lease_owner,
+            lease_token=lease.lease_token,
+            lease_fencing_token=lease.lease_fencing_token,
+            expected_status="ACTIVE",
+            max_operation_ms=int(_GIT_COMMAND_TIMEOUT_S * 1000),
+            operation=lambda context: self._run_authority_operation(
+                context,
+                operation="accepted-head",
+                callback=capture,
+            ),
+        )
 
     def write_bytes(
         self,
@@ -881,5 +976,6 @@ __all__ = [
     "ManagedGitSource",
     "ManagedWorkspaceRoot",
     "WorkspaceCleanupResult",
+    "WorkspaceNoChangeSnapshot",
     "WorkspaceAllocator",
 ]

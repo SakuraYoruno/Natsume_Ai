@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -30,6 +31,13 @@ GW_TRANSPORT_OUTBOX_CONFLICT = "GW_TRANSPORT_OUTBOX_CONFLICT"
 GW_TRANSPORT_DELIVERY_FAILED = "GW_TRANSPORT_DELIVERY_FAILED"
 GW_TRANSPORT_REPLY_INVALID = "GW_TRANSPORT_REPLY_INVALID"
 GW_TRANSPORT_WORKER_STOP_TIMEOUT = "GW_TRANSPORT_WORKER_STOP_TIMEOUT"
+GW_REPLY_QUERY_NOT_FOUND = "GW_REPLY_QUERY_NOT_FOUND"
+GW_REPLY_QUERY_IDENTITY_MISMATCH = "GW_REPLY_QUERY_IDENTITY_MISMATCH"
+GW_REPLY_QUERY_STATE_UNKNOWN = "GW_REPLY_QUERY_STATE_UNKNOWN"
+
+GATEWAY_REPLY_QUERY_SCHEMA_VERSION = "Natsume.gateway.reply-query.v1"
+_SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_QUERY_IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,254}$")
 
 
 class GatewayTransportMode(str, Enum):
@@ -449,6 +457,201 @@ class GatewayDeliveryRuntime:
             return None
         return _mapping(row)
 
+    def query_reply(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        effect_id: str,
+        delivery_id: str,
+        platform: str,
+        conversation_id: str,
+        payload_digest: str,
+    ) -> dict[str, Any]:
+        """Read one exact Host reply identity without creating or claiming work.
+
+        The authenticated principal participates in the deterministic outbox
+        primary key.  Consequently one HMAC principal cannot probe another
+        principal's reply even when it guesses the business delivery id.
+        Missing rows are deliberately ``UNKNOWN``: an HTTP response may have
+        been lost while the original request is still crossing SQLite intake.
+        """
+
+        tenant = str(tenant_id or "")
+        principal = str(principal_id or "")
+        effect = str(effect_id or "")
+        delivery = str(delivery_id or "")
+        destination_platform = str(platform or "")
+        conversation = str(conversation_id or "")
+        digest = str(payload_digest or "")
+        if (
+            not tenant
+            or tenant != tenant.strip()
+            or not principal
+            or principal != principal.strip()
+            or _QUERY_IDENTITY_RE.fullmatch(effect) is None
+            or _QUERY_IDENTITY_RE.fullmatch(delivery) is None
+            or _QUERY_IDENTITY_RE.fullmatch(destination_platform) is None
+            or destination_platform != destination_platform.lower()
+            or not conversation
+            or conversation != conversation.strip()
+            or len(conversation) > 512
+            or _SHA256_DIGEST_RE.fullmatch(digest) is None
+        ):
+            raise GatewayDeliveryError(
+                GW_TRANSPORT_REPLY_INVALID,
+                "Gateway reply query identity is invalid",
+            )
+        if self._store is None:
+            raise GatewayDeliveryError(
+                GW_TRANSPORT_SCHEMA_UNAVAILABLE,
+                "durable Gateway transport store is not configured",
+            )
+
+        idempotency_key = f"gateway-reply:{delivery}"
+        outbox_id = _stable_record_id(
+            "gateway-outbox",
+            tenant,
+            principal,
+            idempotency_key,
+        )
+        query_identity = {
+            "schema_version": GATEWAY_REPLY_QUERY_SCHEMA_VERSION,
+            "effect_id": effect,
+            "delivery_id": delivery,
+            "platform": destination_platform,
+            "conversation_id": conversation,
+            "payload_digest": digest,
+        }
+        try:
+            # The immutable reply payload and mutable delivery state must be
+            # reopened as one SQLite snapshot.  In particular, effect_id is a
+            # payload field rather than an outbox index column, so echoing the
+            # caller value would not prove which accepted effect owns the row.
+            raw = self._store.get_outbox(
+                outbox_id=outbox_id,
+                include_payload=True,
+            )
+        except Exception as exc:
+            reason = str(getattr(exc, "reason_code", "") or "")
+            if reason == "GATEWAY_TRANSPORT_MESSAGE_NOT_FOUND":
+                return {
+                    **query_identity,
+                    "effect_status": "UNKNOWN",
+                    "reason_code": GW_REPLY_QUERY_NOT_FOUND,
+                    "outbox_id": None,
+                    "delivery_state": "NOT_FOUND",
+                    "status_version": None,
+                    "fencing_token": None,
+                    "delivery_receipt_digest": None,
+                }
+            raise GatewayDeliveryError(
+                GW_TRANSPORT_DELIVERY_FAILED,
+                "Gateway reply query could not reopen durable state",
+            ) from exc
+        row = _mapping(raw)
+        if not row:
+            return {
+                **query_identity,
+                "effect_status": "UNKNOWN",
+                "reason_code": GW_REPLY_QUERY_NOT_FOUND,
+                "outbox_id": None,
+                "delivery_state": "NOT_FOUND",
+                "status_version": None,
+                "fencing_token": None,
+                "delivery_receipt_digest": None,
+            }
+
+        persisted_payload: dict[str, Any] = {}
+        payload_body = row.get("payload")
+        if isinstance(payload_body, (bytes, bytearray, memoryview)):
+            try:
+                decoded_payload = json.loads(bytes(payload_body).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                decoded_payload = None
+            if isinstance(decoded_payload, dict):
+                persisted_payload = decoded_payload
+
+        expected_idempotency_digest = "sha256:" + hashlib.sha256(
+            idempotency_key.encode("utf-8")
+        ).hexdigest()
+        exact = (
+            str(row.get("outbox_id") or "") == outbox_id
+            and str(row.get("tenant_id") or "") == tenant
+            and str(row.get("principal_id") or "") == principal
+            and str(row.get("destination") or "")
+            == f"gateway.platform.{destination_platform}"
+            and str(row.get("idempotency_digest") or "")
+            == expected_idempotency_digest
+            and str(row.get("payload_sha256") or "") == digest
+            and str(row.get("ordering_key") or "")
+            == f"{destination_platform}:{conversation}"
+            and str(persisted_payload.get("effect_id") or "") == effect
+        )
+        if not exact:
+            return {
+                **query_identity,
+                "effect_status": "UNKNOWN",
+                "reason_code": GW_REPLY_QUERY_IDENTITY_MISMATCH,
+                "outbox_id": None,
+                "delivery_state": "IDENTITY_MISMATCH",
+                "status_version": None,
+                "fencing_token": None,
+                "delivery_receipt_digest": None,
+            }
+
+        state = str(row.get("status") or "").strip().upper()
+        try:
+            status_version = int(row.get("status_version"))
+            fencing_token = int(row.get("fencing_token"))
+        except (TypeError, ValueError):
+            status_version = -1
+            fencing_token = -1
+        if (
+            state not in {"READY", "CLAIMED", "RETRY_WAIT", "ACKED", "DLQ"}
+            or status_version < 0
+            or fencing_token < 0
+        ):
+            return {
+                **query_identity,
+                "effect_status": "UNKNOWN",
+                "reason_code": GW_REPLY_QUERY_STATE_UNKNOWN,
+                "outbox_id": None,
+                "delivery_state": "UNKNOWN",
+                "status_version": None,
+                "fencing_token": None,
+                "delivery_receipt_digest": None,
+            }
+        receipt_digest = str(row.get("ack_digest") or "").strip()
+        if (
+            (receipt_digest and _SHA256_DIGEST_RE.fullmatch(receipt_digest) is None)
+            or (state == "ACKED" and not receipt_digest)
+            or (state == "CLAIMED" and fencing_token < 1)
+        ):
+            return {
+                **query_identity,
+                "effect_status": "UNKNOWN",
+                "reason_code": GW_REPLY_QUERY_STATE_UNKNOWN,
+                "outbox_id": None,
+                "delivery_state": "UNKNOWN",
+                "status_version": None,
+                "fencing_token": None,
+                "delivery_receipt_digest": None,
+            }
+        return {
+            **query_identity,
+            # COMMITTED means the exact durable Gateway outbox intake exists.
+            # The separate delivery_state/receipt digest state whether the
+            # platform adapter has also confirmed its outbound attempt.
+            "effect_status": "COMMITTED",
+            "reason_code": None,
+            "outbox_id": outbox_id,
+            "delivery_state": state,
+            "status_version": status_version,
+            "fencing_token": fencing_token,
+            "delivery_receipt_digest": receipt_digest or None,
+        }
+
     def wait_outbox(self, outbox_id: str, *, timeout_ms: int) -> dict[str, Any] | None:
         deadline = time.monotonic() + (max(1, int(timeout_ms)) / 1000.0)
         last: dict[str, Any] | None = None
@@ -754,8 +957,12 @@ class GatewayDeliveryRuntime:
 
 
 __all__ = [
+    "GATEWAY_REPLY_QUERY_SCHEMA_VERSION",
     "GATEWAY_ACCEPT_NEW_INTAKE_ENV",
     "GATEWAY_TRANSPORT_MODE_ENV",
+    "GW_REPLY_QUERY_IDENTITY_MISMATCH",
+    "GW_REPLY_QUERY_NOT_FOUND",
+    "GW_REPLY_QUERY_STATE_UNKNOWN",
     "GW_TRANSPORT_DELIVERY_FAILED",
     "GW_TRANSPORT_DISABLED",
     "GW_TRANSPORT_INBOX_CONFLICT",

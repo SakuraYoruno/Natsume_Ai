@@ -24,7 +24,10 @@ from host_brain.agent_runtime.workspace_allocator import (
     WorkspaceAllocator,
 )
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
-from host_brain.agent_runtime.accepted_result import InternalAcceptedResultHandler
+from host_brain.agent_runtime.accepted_result import (
+    InternalAcceptedResultError,
+    InternalAcceptedResultHandler,
+)
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.agent_tools import (
     AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
@@ -32,6 +35,9 @@ from host_brain.agent_runtime.agent_tools import (
 from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
+from host_brain.contracts.agent_runtime.workspace_lifecycle import (
+    WorkspaceLifecycleState,
+)
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.governor.tokens import TokenService
 from host_brain.app.internal_task_runtime import (
@@ -525,6 +531,284 @@ async def test_internal_proposal_supplies_exact_durable_workspace_authority(
     assert authority.root_work_order_id == work_order.root_work_order_id
     assert authority.owner_principal_id == command.principal_id
     assert authority.lease_fencing_token == 1
+
+
+@pytest.mark.asyncio
+async def test_internal_accepted_artifact_promotes_with_real_git_and_sqlite(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "accepted-source"
+    source.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "accepted-artifact@example.invalid"),
+        ("config", "user.name", "Accepted Artifact Test"),
+    ):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+    (source / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    for args in (("add", "baseline.txt"), ("commit", "-m", "initial")):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+    db_path = tmp_path / "accepted-artifact.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="internal-accepted-artifact-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    request_id = "request-internal-accepted-artifact"
+    principal_id = "principal-internal-accepted-artifact"
+    body_sha256 = _sha256("internal-accepted-artifact")
+    claim_ref = "ingress-claim://internal/accepted-artifact"
+    audit_ref = "audit://secure-ingress/internal/accepted-artifact"
+    _insert_secure_authority(
+        db_path,
+        request_id=request_id,
+        principal_id=principal_id,
+        body_sha256=body_sha256,
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+    suffix = hashlib.sha256(f"internal\n{request_id}".encode()).hexdigest()[:40]
+    graph_id = f"graph-internal-{suffix}"
+    workspace_id = DurableWorkspaceRuntime.workspace_id_for(
+        graph_id=graph_id,
+        graph_revision=1,
+    )
+    managed = tmp_path / "accepted-worktrees"
+    managed.mkdir()
+    workspace_repository = WorkspaceRepository(db_path)
+    allocator = WorkspaceAllocator(
+        repository=workspace_repository,
+        managed_roots={
+            "accepted-worktrees": ManagedWorkspaceRoot(
+                root_ref="accepted-worktrees",
+                path=managed,
+                isolation_modes=frozenset({"DIRECTORY_FENCE"}),
+            )
+        },
+        git_sources={
+            "accepted-source": ManagedGitSource(
+                source_key="accepted-source",
+                source_ref_prefix="git-worktree://accepted-source",
+                repository=source.resolve(),
+            )
+        },
+    )
+    workspace_runtime = DurableWorkspaceRuntime(
+        repository=workspace_repository,
+        allocator=allocator,
+        runtime_owner_id="internal-accepted-owner",
+        managed_root_ref="accepted-worktrees",
+        git_source_key="accepted-source",
+        lease_ms=30_000,
+        heartbeat_interval_ms=1_000,
+        token_secret=b"a" * 48,
+    )
+    artifacts = AgentArtifactStore(tmp_path / "accepted-agent-runs")
+    agent_calls: list[str] = []
+
+    class _CanonicalAgentExecutor:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+            assert workspace == (managed / workspace_id).resolve()
+            assert cancelled is not None and cancelled() is False
+            agent_calls.append(candidate.work_order_id)
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=candidate.work_order_id,
+                summary="result executed with real accepted artifact",
+                result_text="result executed with real accepted artifact",
+                verification={"status": "PASS"},
+                acceptance={"decision": "ACCEPT"},
+                review_required=False,
+            )
+
+    monkeypatch.setattr(
+        agent_runtime_executor_module,
+        "AgentExecutor",
+        _CanonicalAgentExecutor,
+    )
+    ledger = SQLiteLedger(str(db_path))
+    claim_store = SQLiteSecureIngressStore(db_path)
+    runtime = None
+    try:
+        task_store = DurableTaskStore(db_path)
+        event_store = RuntimeEventStore(db_path)
+        infrastructure = SimpleNamespace(
+            task_store=task_store,
+            review_store=ReviewStore(db_path),
+            review_continuation_store=ReviewContinuationStore(db_path),
+            command_repository=HostCommandRepository(db_path),
+            outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
+            worker_projection_store=WorkerProjectionStore(db_path),
+        )
+        result_repository = AgentExecutionResultRepository(db_path)
+        preview_authority = _ExactPreviewAuthority()
+        token_service = TokenService(approval_ttl_ms=180_000)
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=infrastructure.command_repository,
+            projection_store=infrastructure.worker_projection_store,
+            result_repository=result_repository,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            task_store=task_store,
+        )
+        dispatcher = AcceptanceEffectDispatcher(
+            task_store=task_store,
+            handlers={"internal.agent.result_commit": accepted_result},
+            owner_id="internal-accepted-effect-owner",
+            action_preview_service=preview_authority,
+        )
+        runtime = build_governed_internal_runtime(
+            task_runtime_container=infrastructure,
+            ledger=ledger,
+            token_service=token_service,
+            result_repository=result_repository,
+            runtime_router=CanonicalRuntimeRouter(),
+            owner_id="internal-accepted-owner",
+            canonical_executor=AgentRuntimeExecutor(
+                artifact_store=artifacts,
+                workspace_runtime=workspace_runtime,
+                model_attempt_service=object(),
+                prompt_registry=object(),
+            ),
+            runtime_context_application=_RuntimeContextAuthority(
+                principal_id=principal_id
+            ),
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=dispatcher,
+        )
+        await runtime.activate()
+        service = InternalAgentCommandService(
+            runtime=runtime,
+            intent_engine=_IntentEngine(
+                ledger,
+                token_service,
+            ),
+            claim_result_store=claim_store,
+        )
+        terminal = await service.execute(
+            work_order=AgentWorkOrder(
+                work_order_id="work-order-internal-accepted-artifact",
+                domain="code",
+                run_mode="inspect",
+                objective="promote one clean read-only result",
+                workspace={
+                    "strategy": "durable_workspace",
+                    "workspace_id": workspace_id,
+                },
+                allowed_actions=["read_files"],
+                forbidden_actions=["write_files"],
+                verification_plan={
+                    "required": True,
+                    "commands": [["git", "status", "--porcelain"]],
+                },
+                review_policy={"review_required": False},
+            ),
+            request_id=request_id,
+            session_id="session-internal-accepted-artifact",
+            ts_ms=NOW,
+            command_authority={
+                "principal_id": principal_id,
+                "claim_ref": claim_ref,
+                "audit_ref": audit_ref,
+                "body_sha256": body_sha256,
+            },
+        )
+
+        assert terminal["decision"] == "APPROVE", json.dumps(
+            terminal,
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+        assert terminal["internal_agent_effect_status"] == "COMMITTED"
+        assert agent_calls == ["work-order-internal-accepted-artifact"]
+        lifecycle = workspace_repository.get_lifecycle(workspace_id)
+        assert lifecycle.state is WorkspaceLifecycleState.PROMOTED
+        assert lifecycle.accepted_event is not None
+        assert lifecycle.accepted_event.accepted_head
+        command_id = terminal["execution_receipt"]["command_id"]
+        durable_result = result_repository.get_by_command(command_id)
+        assert durable_result is not None
+        assert durable_result["result_status"] == "EXECUTED"
+
+        with sqlite3.connect(str(db_path)) as conn:
+            effect_id = str(
+                conn.execute(
+                    "SELECT effect_id FROM task_runtime_acceptance_effect_intent "
+                    "WHERE effect_type = 'internal.agent.result_commit'"
+                ).fetchone()[0]
+            )
+        effect = task_store.get_acceptance_effect_intent(effect_id)
+        assert effect["status"] == "COMMITTED"
+        durable_payload = dict(effect["payload"])
+        assert durable_payload.pop("_action_preview_context")["schema_version"] == (
+            "Natsume.acceptance_effect.action_preview_context.v1"
+        )
+        matching_preview = next(
+            (
+                (event_id, boundary, receipt)
+                for event_id, (boundary, receipt) in preview_authority._records.items()
+                if dict(boundary.get("authority_context") or {}).get("effect_id")
+                == effect_id
+            ),
+            None,
+        )
+        assert matching_preview is not None
+        event_id, boundary, receipt = matching_preview
+        reconcile_payload = {
+            **durable_payload,
+            "_action_preview_context": {
+                "schema_version": "Natsume.internal.action_preview_context.v2",
+                "origin_authority_kind": "ACCEPTANCE_EFFECT",
+                "origin_event_id": event_id,
+                "origin_receipt_ref": receipt.receipt_ref,
+                "origin_boundary": deepcopy(boundary),
+            },
+        }
+        replay = await accepted_result.reconcile(reconcile_payload)
+        assert replay["replayed"] is True
+        assert replay["artifact_ref"] == lifecycle.latest_event.terminal_ref
+        assert agent_calls == ["work-order-internal-accepted-artifact"]
+
+        stage_authority = next(
+            (tmp_path / "accepted-agent-runs" / "governed" / "accepted").glob(
+                "*/*/owner.json"
+            )
+        )
+        owner = json.loads(stage_authority.read_text(encoding="utf-8"))
+        lease_id = owner["execution_authority"]["lease_id"]
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "UPDATE task_runtime_lease SET owner_id = 'tampered-owner' "
+                "WHERE lease_id = ?",
+                (lease_id,),
+            )
+        with pytest.raises(InternalAcceptedResultError, match="exact durable"):
+            await accepted_result.reconcile(reconcile_payload)
+    finally:
+        if runtime is not None:
+            await runtime.aclose()
+        claim_store.close()
+        ledger.close()
 
 
 @pytest.mark.asyncio

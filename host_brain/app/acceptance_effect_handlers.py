@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 import hashlib
+import inspect
 import json
 import re
 import secrets
 from typing import Any
 import urllib.parse
 
+from host_brain.contracts.conversation_acceptance_effects import (
+    AcceptedLifeConversationProjectionV1,
+    AcceptedPreferenceSignalV1,
+)
 from host_brain.digital_life.application_boundary import submit_life_command
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
@@ -23,17 +28,27 @@ def build_production_acceptance_effect_handlers(
     internal_result_commit_handler: Callable[[Mapping[str, Any]], Any] | None = None,
     conversation_turn_reader: Any | None = None,
     conversation_event_reader: Any | None = None,
+    preference_store: Any | None = None,
     life_receipt_reader_provider: Callable[[], Any] | None = None,
+    gateway_reply_query_port: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
         "conversation.user_turn": _AcceptedConversationUserTurnHandler(
             turn_reader=conversation_turn_reader,
             event_reader=conversation_event_reader,
         ),
+        "conversation.preference_signal": _AcceptedPreferenceSignalHandler(
+            preference_store=preference_store,
+        ),
+        "life.conversation_turn_recorded": _AcceptedLifeConversationHandler(
+            receipt_reader_provider=life_receipt_reader_provider,
+        ),
         "life.foreground_completed": _AcceptedLifeForegroundHandler(
             receipt_reader_provider=life_receipt_reader_provider,
         ),
-        "surface.reply_delivery": _AcceptedSurfaceReplyDeliveryHandler(),
+        "surface.reply_delivery": _AcceptedSurfaceReplyDeliveryHandler(
+            query_port=gateway_reply_query_port,
+        ),
     }
     if mode_transition_service_provider is not None:
         handlers["host.sys_mode_transition"] = _AcceptedSysModeTransitionHandler(
@@ -82,6 +97,167 @@ class _AcceptedConversationUserTurnHandler:
         )
 
 
+class _AcceptedPreferenceSignalHandler:
+    """Commit one extraction evaluation and reopen its immutable receipt."""
+
+    def __init__(self, *, preference_store: Any | None) -> None:
+        self._preference_store = preference_store
+
+    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        request = AcceptedPreferenceSignalV1.from_mapping(
+            _without_terminal_preview_proof(payload)
+        )
+        store = self._preference_store
+        repository = getattr(store, "repository", None)
+        if store is None or repository is None:
+            raise AcceptanceEffectOutcomeUnknown(
+                "preference signal has no app-local canonical store"
+            )
+        try:
+            repository.assert_signal_effect_schema_ready(
+                require_catalog=repository.db_path != ":memory:"
+            )
+            from host_brain.app.recommendation_feedback import (  # noqa: PLC0415
+                derive_user_preference_signal_events,
+            )
+            from host_brain.app.user_preference_store import (  # noqa: PLC0415
+                build_profile_from_events,
+            )
+
+            enabled = getattr(store, "signal_writes_enabled", None)
+            if not isinstance(enabled, bool):
+                raise RuntimeError("PREFERENCE_PRIVACY_GATE_UNAVAILABLE")
+            metadata = request.conversation.metadata
+            events = []
+            if enabled:
+                events = derive_user_preference_signal_events(
+                    session_id=request.conversation.session_id,
+                    person_id=request.conversation.person_id,
+                    user_message=request.conversation.content,
+                    payload={
+                        **metadata,
+                        "request_id": request.conversation.request_id,
+                        "session_id": request.conversation.session_id,
+                        "conversation_id": (
+                            metadata.get("conversation_id")
+                            or metadata.get("reply_target")
+                            or request.conversation.session_id
+                        ),
+                        "platform": (
+                            metadata.get("platform")
+                            or metadata.get("reply_channel")
+                            or ""
+                        ),
+                    },
+                    store=store,
+                    ts_ms=request.conversation.ts_ms,
+                    operation_id=request.operation_id,
+                )
+            receipt = repository.commit_signal_effect(
+                operation_id=request.operation_id,
+                payload_sha256=request.payload_sha256,
+                events=[store.event_to_dict(event) for event in events],
+                profile_builder=build_profile_from_events,
+                completed_at_ms=request.conversation.ts_ms,
+                evaluation_disposition=None if enabled else "DISABLED",
+            )
+            return _validated_preference_effect_receipt(request, receipt)
+        except Exception as exc:
+            try:
+                return self.reconcile(payload)
+            except AcceptanceEffectOutcomeUnknown as reconciliation:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "preference signal invocation has no exact durable attribution "
+                    f"after {_opaque_failure(exc)}; {reconciliation.detail}"
+                ) from exc
+
+    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        request = AcceptedPreferenceSignalV1.from_mapping(
+            _without_terminal_preview_proof(payload)
+        )
+        repository = getattr(self._preference_store, "repository", None)
+        get_receipt = getattr(repository, "get_signal_effect_receipt", None)
+        if not callable(get_receipt):
+            raise AcceptanceEffectOutcomeUnknown(
+                "preference signal reconciliation requires an app-local read port"
+            )
+        try:
+            repository.assert_signal_effect_schema_ready(
+                require_catalog=repository.db_path != ":memory:"
+            )
+            receipt = get_receipt(request.operation_id)
+            if not isinstance(receipt, Mapping):
+                raise LookupError("exact preference effect receipt is absent")
+            return _validated_preference_effect_receipt(request, receipt)
+        except AcceptanceEffectOutcomeUnknown:
+            raise
+        except Exception as exc:
+            raise AcceptanceEffectOutcomeUnknown(
+                "preference signal requires exact read-only SQLite reconciliation: "
+                f"{_opaque_failure(exc)}"
+            ) from exc
+
+
+class _AcceptedLifeConversationHandler:
+    """Submit a deterministic conversation Life command after Acceptance."""
+
+    def __init__(
+        self,
+        *,
+        receipt_reader_provider: Callable[[], Any] | None,
+    ) -> None:
+        self._receipt_reader_provider = receipt_reader_provider
+
+    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        request = AcceptedLifeConversationProjectionV1.from_mapping(
+            _without_terminal_preview_proof(payload)
+        )
+        try:
+            return _submit_accepted_life_conversation(request)
+        except Exception as exc:
+            try:
+                return self.reconcile(payload)
+            except AcceptanceEffectOutcomeUnknown as reconciliation:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "Life conversation invocation has no exact durable attribution "
+                    f"after {_opaque_failure(exc)}; {reconciliation.detail}"
+                ) from exc
+
+    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        request = AcceptedLifeConversationProjectionV1.from_mapping(
+            _without_terminal_preview_proof(payload)
+        )
+        if not callable(self._receipt_reader_provider):
+            raise AcceptanceEffectOutcomeUnknown(
+                "Life conversation reconciliation requires an app-local receipt reader"
+            )
+        try:
+            reader = self._receipt_reader_provider()
+            get_receipt = getattr(reader, "get_receipt", None)
+            if not callable(get_receipt):
+                raise RuntimeError("LIFE_COMMAND_RECEIPT_READER_UNAVAILABLE")
+            receipt = get_receipt(request.command_id)
+            if receipt is None:
+                raise LookupError("exact Life conversation receipt is absent")
+            projected = (
+                dict(receipt)
+                if isinstance(receipt, Mapping)
+                else dict(receipt.as_dict())
+                if callable(getattr(receipt, "as_dict", None))
+                else None
+            )
+            if not isinstance(projected, Mapping):
+                raise TypeError("Life conversation receipt is not mapping-compatible")
+            return _validated_life_conversation_receipt(request, projected)
+        except AcceptanceEffectOutcomeUnknown:
+            raise
+        except Exception as exc:
+            raise AcceptanceEffectOutcomeUnknown(
+                "Life conversation requires exact read-only command reconciliation: "
+                f"{_opaque_failure(exc)}"
+            ) from exc
+
+
 class _AcceptedLifeForegroundHandler:
     """Submit one Life command and reopen only its immutable command receipt."""
 
@@ -114,7 +290,12 @@ class _AcceptedLifeForegroundHandler:
 
 
 class _AcceptedSurfaceReplyDeliveryHandler:
-    """Gateway delivery remains fail-closed until Host has an exact read port."""
+    """Submit once, then recover exclusively through exact Gateway reads."""
+
+    def __init__(self, *, query_port: Callable[..., Any] | None) -> None:
+        if query_port is not None and not callable(query_port):
+            raise TypeError("gateway_reply_query_port must be callable")
+        self._query_port = query_port
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         # Reject request/proof drift before entering the transport.  Once the
@@ -123,26 +304,61 @@ class _AcceptedSurfaceReplyDeliveryHandler:
         _accepted_surface_invocation(payload)
         try:
             return await _deliver_accepted_surface_reply(payload)
-        except AcceptanceEffectOutcomeUnknown:
-            raise
         except _AcceptedSurfaceNoEffectFailure:
             # The authenticated transport explicitly proved that it did not
             # enqueue or send anything.  Only this narrow result is safe for
             # the dispatcher's ordinary failure/retry policy.
             raise
         except Exception as exc:
+            try:
+                return await self.reconcile(payload)
+            except _AcceptedSurfaceNoEffectFailure:
+                raise
+            except AcceptanceEffectOutcomeUnknown as reconciliation:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "surface reply invocation crossed the transport boundary "
+                    "without exact Gateway attribution after "
+                    f"{_opaque_failure(exc)}; {reconciliation.detail}"
+                ) from exc
+
+    async def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        value = _accepted_surface_request(payload)
+        if self._query_port is None:
             raise AcceptanceEffectOutcomeUnknown(
-                "surface reply invocation crossed the transport boundary but "
-                "has no authenticated read-only Gateway attribution after "
+                "surface reply delivery cannot be read-only reconciled: the Host "
+                "has no authenticated Gateway outbox query port for delivery "
+                f"identity {_surface_delivery_id(value)}"
+            )
+        value, terminal_proof = _accepted_surface_invocation(payload)
+        effect_id = _surface_effect_id(
+            value=value,
+            terminal_proof=terminal_proof,
+            reopen_preview=True,
+        )
+        delivery_id = _surface_delivery_id(value)
+        payload_digest = _surface_gateway_payload_digest(
+            value,
+            effect_id=effect_id,
+        )
+        try:
+            result = self._query_port(
+                effect_id=effect_id,
+                delivery_id=delivery_id,
+                platform=value["reply_channel"],
+                conversation_id=value["reply_target"],
+                payload_digest=payload_digest,
+            )
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            raise AcceptanceEffectOutcomeUnknown(
+                "authenticated Gateway reply query is unavailable after "
                 f"{_opaque_failure(exc)}"
             ) from exc
-
-    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        value = _accepted_surface_request(payload)
-        raise AcceptanceEffectOutcomeUnknown(
-            "surface reply delivery cannot be read-only reconciled: the Host has "
-            "no authenticated Gateway outbox query port for delivery identity "
-            f"{_surface_delivery_id(value)}"
+        return _validated_surface_query_result(
+            value=value,
+            effect_id=effect_id,
+            result=result,
         )
 
 
@@ -738,6 +954,203 @@ def _exact_conversation_identity(value: Any, *, field: str, limit: int) -> str:
     return value
 
 
+def _without_terminal_preview_proof(payload: Mapping[str, Any]) -> dict[str, Any]:
+    value = dict(payload or {})
+    value.pop("_action_preview_terminal_proof", None)
+    return value
+
+
+def _validated_preference_effect_receipt(
+    request: AcceptedPreferenceSignalV1,
+    receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    projected = dict(receipt)
+    disposition = str(projected.get("disposition") or "")
+    event_bindings = projected.get("event_bindings")
+    profile_receipts = projected.get("profile_receipts")
+    receipt_digest = str(projected.get("receipt_digest") or "")
+    if (
+        projected.get("operation_id") != request.operation_id
+        or projected.get("payload_sha256") != request.payload_sha256
+        or disposition not in {"APPLIED", "NO_SIGNAL", "DISABLED"}
+        or not isinstance(event_bindings, list)
+        or not isinstance(profile_receipts, list)
+        or ((disposition == "APPLIED") != bool(event_bindings))
+        or (disposition == "DISABLED" and profile_receipts)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", receipt_digest)
+    ):
+        raise RuntimeError("PREFERENCE_EFFECT_DURABLE_RECEIPT_INVALID")
+    return {
+        **projected,
+        "status": disposition,
+        "receipt_ref": _canonical_id_ref(
+            "preference-effect",
+            request.operation_id,
+        ),
+    }
+
+
+def _submit_accepted_life_conversation(
+    request: AcceptedLifeConversationProjectionV1,
+) -> Mapping[str, Any]:
+    from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
+
+    fields = _life_conversation_command_fields(request)
+    life = PROCESS_LIFE_PROVIDER.require()
+    receipt = submit_life_command(
+        service=life.command_service,
+        reader=life.snapshot_reader,
+        command_type="conversation_turn_recorded",
+        person_id=request.conversation.person_id,
+        command_id=request.command_id,
+        correlation_id=request.conversation.request_id,
+        causation_id=request.conversation.turn_id,
+        payload=fields["payload"],
+        created_at_ms=request.conversation.ts_ms,
+        metadata=fields["metadata"],
+    )
+    return _validated_life_conversation_receipt(request, receipt)
+
+
+def _validated_life_conversation_receipt(
+    request: AcceptedLifeConversationProjectionV1,
+    receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    from natsume_contracts.life import LifeCommand  # noqa: PLC0415
+
+    projected = dict(receipt)
+    fields = _life_conversation_command_fields(request)
+    try:
+        state_version = int(projected.get("state_version") or 0)
+        created_at_ms = int(projected.get("created_at_ms") or 0)
+        outbox_count = int(projected.get("outbox_count") or 0)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("LIFE_CONVERSATION_DURABLE_RECEIPT_INVALID") from exc
+    candidate = LifeCommand(
+        command_id=request.command_id,
+        person_id=request.conversation.person_id,
+        command_type="conversation_turn_recorded",
+        payload=fields["payload"],
+        expected_version=max(0, state_version - 1),
+        created_at_ms=request.conversation.ts_ms,
+        correlation_id=request.conversation.request_id,
+        causation_id=request.conversation.turn_id,
+        metadata=fields["metadata"],
+    )
+    event_id = str(projected.get("event_id") or "")
+    if (
+        str(projected.get("status") or "").upper() != "APPLIED"
+        or projected.get("command_id") != request.command_id
+        or projected.get("person_id") != request.conversation.person_id
+        or projected.get("command_hash") != candidate.command_hash
+        or event_id != fields["event_id"]
+        or state_version <= 0
+        or not str(projected.get("state_digest") or "")
+        or outbox_count < 0
+        or created_at_ms < request.conversation.ts_ms
+    ):
+        raise RuntimeError("LIFE_CONVERSATION_DURABLE_RECEIPT_INVALID")
+    return {
+        **projected,
+        "receipt_ref": _canonical_id_ref("life-event", event_id),
+    }
+
+
+def _life_conversation_command_fields(
+    request: AcceptedLifeConversationProjectionV1,
+) -> dict[str, Any]:
+    from host_brain.conversation.memory_spine import _signal_weights  # noqa: PLC0415
+    from natsume_contracts.life import digest_json  # noqa: PLC0415
+
+    conversation = request.conversation
+    metadata = conversation.metadata
+    source_kind = "conversation_turn.user"
+    event_kind = "user_message"
+    salience, valence, uncertainty = _signal_weights(
+        role="user",
+        source_kind=source_kind,
+        content=conversation.content,
+        metadata=metadata,
+    )
+    event_id = f"life_evt_{digest_json({'command_id': request.command_id})[:32]}"
+    stable_identity = {
+        "request_id": conversation.request_id,
+        "session_id": conversation.session_id,
+        "turn_id": conversation.turn_id,
+        "turn_index": None,
+        "role": "user",
+        "content_sha256": hashlib.sha256(
+            conversation.content[:1000].encode("utf-8")
+        ).hexdigest(),
+        "ts_ms": conversation.ts_ms,
+    }
+    evidence = {
+        "memory_spine": "conversation_turn",
+        "request_id": conversation.request_id,
+        "turn_id": conversation.turn_id,
+        "turn_index": None,
+        "session_id": conversation.session_id,
+        "role": "user",
+        "lang": conversation.lang,
+        "ts_ms": conversation.ts_ms,
+        "source_kind": str(metadata.get("source_kind") or ""),
+        "input_source": str(metadata.get("input_source") or ""),
+        "reply_source": str(metadata.get("reply_source") or ""),
+        "command_id": request.command_id,
+        "idempotency_key": request.command_id,
+        "canonical_life_command_id": request.command_id,
+        "canonical_life_command_type": "conversation_turn_recorded",
+        "canonical_idempotency_strategy": "request_id_role",
+        "canonical_turn_identity": stable_identity,
+    }
+    semantic = {
+        "person_id": conversation.person_id,
+        "session_id": conversation.session_id,
+        "source_kind": source_kind,
+        "event_kind": event_kind,
+        "content_summary": conversation.content[:1000],
+        "evidence": evidence,
+        "salience": salience,
+        "valence": valence,
+        "uncertainty": uncertainty,
+        "consume": True,
+    }
+    experience = {
+        **semantic,
+        "command_id": request.command_id,
+        "command_type": "conversation_turn_recorded",
+        "event_id": event_id,
+        "memory_event_id": "",
+        "occurred_at_ms": conversation.ts_ms,
+    }
+    payload = {
+        **semantic,
+        "state_patch": {
+            "continuity": {
+                "last_experience_event_id": event_id,
+                "last_experience_digest": digest_json(semantic),
+                "last_visible_event_id": event_id,
+            }
+        },
+        "projection_intents": [
+            {"projection_id": "life.experience", "payload": experience}
+        ],
+        "organ_intents": [
+            {"organ_id": "experience", "payload": experience}
+        ],
+    }
+    return {
+        "payload": payload,
+        "event_id": event_id,
+        "metadata": {
+            "source": "governed_conversation_acceptance",
+            "source_kind": source_kind,
+            "event_kind": event_kind,
+            "identity_kind": "canonical_life_command_id",
+        },
+    }
+
+
 def _submit_accepted_life_foreground(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
 
@@ -918,6 +1331,12 @@ async def _deliver_accepted_surface_reply(payload: Mapping[str, Any]) -> Mapping
     channel = value["reply_channel"]
     target = value["reply_target"]
     request_id = value["request_id"]
+    effect_id = _surface_effect_id(
+        value=value,
+        terminal_proof=terminal_proof,
+        reopen_preview=False,
+    )
+    delivery_id = _surface_delivery_id(value)
     # The Acceptance Effect binds one exact, visible text result.  Reply-form,
     # voice, avatar, media and arbitrary ``raw_extra`` transforms require
     # their own accepted effect/Preview receipts; allowing them here would
@@ -928,6 +1347,7 @@ async def _deliver_accepted_surface_reply(payload: Mapping[str, Any]) -> Mapping
         content=str(value.get("narrative") or ""),
         msg_type="text",
         request_id=request_id,
+        effect_id=effect_id,
         wait_result=True,
         action_preview_service=terminal_proof.get("service"),
         action_preview_event_id=str(terminal_proof.get("event_id") or ""),
@@ -973,8 +1393,11 @@ async def _deliver_accepted_surface_reply(payload: Mapping[str, Any]) -> Mapping
         if isinstance(event, Mapping)
         else ""
     )
-    expected_delivery_id = _surface_delivery_id(value)
-    expected_payload_digest = _surface_gateway_payload_digest(value)
+    expected_delivery_id = delivery_id
+    expected_payload_digest = _surface_gateway_payload_digest(
+        value,
+        effect_id=effect_id,
+    )
     if (
         not outbox_id.startswith("gateway-outbox-")
         or not isinstance(event, Mapping)
@@ -1108,7 +1531,11 @@ def _surface_delivery_id(value: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
-def _surface_gateway_payload_digest(value: Mapping[str, Any]) -> str:
+def _surface_gateway_payload_digest(
+    value: Mapping[str, Any],
+    *,
+    effect_id: str | None = None,
+) -> str:
     """Digest the exact durable payload accepted by GatewayDeliveryRuntime."""
 
     delivery_id = _surface_delivery_id(value)
@@ -1123,6 +1550,8 @@ def _surface_gateway_payload_digest(value: Mapping[str, Any]) -> str:
         "reply_to_msg_id": None,
         "raw_extra": {},
     }
+    if effect_id is not None:
+        durable_payload["effect_id"] = str(effect_id)
     encoded = json.dumps(
         durable_payload,
         ensure_ascii=False,
@@ -1131,6 +1560,188 @@ def _surface_gateway_payload_digest(value: Mapping[str, Any]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _surface_effect_id(
+    *,
+    value: Mapping[str, Any],
+    terminal_proof: Mapping[str, Any],
+    reopen_preview: bool,
+) -> str:
+    """Reopen the stable Effect id; claim owner/fence remain live authority.
+
+    The effect id is persisted inside the Gateway payload digest.  The current
+    Acceptance Effect owner/fence is checked through ActionPreview but is not
+    persisted downstream, so a later recovery owner can reconcile the same
+    immutable outbox after a claim takeover.
+    """
+
+    boundary = terminal_proof.get("boundary")
+    if not isinstance(boundary, Mapping):
+        raise AcceptanceEffectOutcomeUnknown(
+            "surface reply delivery lacks an exact ActionPreview boundary"
+        )
+    exact = dict(boundary)
+    effect_id = str(exact.get("action_scope") or "")
+    authority = exact.get("authority_context")
+    args = exact.get("action_args")
+    valid = (
+        _is_exact_effect_identity(effect_id, limit=255)
+        and exact.get("action_kind")
+        == "acceptance-effect.surface.reply_delivery"
+        and isinstance(authority, Mapping)
+        and set(authority)
+        == {
+            "schema_version",
+            "effect_id",
+            "lease_owner_id",
+            "fencing_token",
+        }
+        and authority.get("schema_version")
+        == "Natsume.action_preview.acceptance_effect_authority_request.v1"
+        and authority.get("effect_id") == effect_id
+        and _is_exact_effect_identity(authority.get("lease_owner_id"), limit=255)
+        and isinstance(authority.get("fencing_token"), int)
+        and not isinstance(authority.get("fencing_token"), bool)
+        and int(authority.get("fencing_token")) >= 1
+        and isinstance(args, Mapping)
+        and dict(args) == dict(value)
+    )
+    if not valid:
+        raise AcceptanceEffectOutcomeUnknown(
+            "surface reply authority/effect identity drifted"
+        )
+    if not reopen_preview:
+        # The terminal POST boundary below performs the authoritative Preview
+        # reopen.  Avoid consuming or double-counting a one-shot implementation
+        # while still persisting the stable effect id in the outbox digest.
+        return effect_id
+    try:
+        terminal_proof["service"].require_execution(
+            event_id=str(terminal_proof.get("event_id") or ""),
+            **exact,
+        )
+    except Exception as exc:
+        raise AcceptanceEffectOutcomeUnknown(
+            "surface reply query could not reopen current Preview authority "
+            f"after {_opaque_failure(exc)}"
+        ) from exc
+    return effect_id
+
+
+def _validated_surface_query_result(
+    *,
+    value: Mapping[str, Any],
+    effect_id: str,
+    result: Any,
+) -> dict[str, Any]:
+    """Accept only an exact, authenticated Gateway outbox projection."""
+
+    try:
+        projected = (
+            dict(result.as_dict())
+            if callable(getattr(result, "as_dict", None))
+            else dict(result or {})
+        )
+    except Exception as exc:
+        raise AcceptanceEffectOutcomeUnknown(
+            "authenticated Gateway reply query returned a malformed transport "
+            f"projection after {_opaque_failure(exc)}"
+        ) from exc
+    event = projected.get("event")
+    if projected.get("success") is not True or not isinstance(event, Mapping):
+        raise AcceptanceEffectOutcomeUnknown(
+            "authenticated Gateway reply query returned no trusted snapshot"
+        )
+    snapshot = dict(event)
+    required = {
+        "status",
+        "schema_version",
+        "effect_id",
+        "delivery_id",
+        "platform",
+        "conversation_id",
+        "payload_digest",
+        "effect_status",
+        "reason_code",
+        "outbox_id",
+        "delivery_state",
+        "status_version",
+        "fencing_token",
+        "delivery_receipt_digest",
+    }
+    if set(snapshot) != required:
+        raise AcceptanceEffectOutcomeUnknown(
+            "authenticated Gateway reply query shape drifted"
+        )
+    delivery_id = _surface_delivery_id(value)
+    payload_digest = _surface_gateway_payload_digest(
+        value,
+        effect_id=effect_id,
+    )
+    if (
+        snapshot.get("schema_version") != "Natsume.gateway.reply-query.v1"
+        or snapshot.get("effect_id") != effect_id
+        or snapshot.get("delivery_id") != delivery_id
+        or snapshot.get("platform") != value["reply_channel"]
+        or snapshot.get("conversation_id") != value["reply_target"]
+        or snapshot.get("payload_digest") != payload_digest
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "authenticated Gateway reply query identity drifted"
+        )
+    effect_status = str(snapshot.get("effect_status") or "")
+    if effect_status != "COMMITTED":
+        # NOT_FOUND, mismatches, cancellations and any future state are not a
+        # negative receipt.  Never turn them into a second POST.
+        raise AcceptanceEffectOutcomeUnknown(
+            "Gateway reply query did not prove an exact committed outbox"
+        )
+    outbox_id = snapshot.get("outbox_id")
+    delivery_state = snapshot.get("delivery_state")
+    status_version = snapshot.get("status_version")
+    fencing_token = snapshot.get("fencing_token")
+    receipt_digest = snapshot.get("delivery_receipt_digest")
+    if (
+        snapshot.get("status") != "committed"
+        or not isinstance(outbox_id, str)
+        or not outbox_id.startswith("gateway-outbox-")
+        or delivery_state
+        not in {"READY", "CLAIMED", "RETRY_WAIT", "ACKED", "DLQ"}
+        or not isinstance(status_version, int)
+        or isinstance(status_version, bool)
+        or status_version < 0
+        or not isinstance(fencing_token, int)
+        or isinstance(fencing_token, bool)
+        or fencing_token < 0
+        or (
+            receipt_digest is not None
+            and (
+                not isinstance(receipt_digest, str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", receipt_digest) is None
+            )
+        )
+        or (delivery_state == "ACKED" and receipt_digest is None)
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Gateway reply query committed snapshot is invalid"
+        )
+    return {
+        "success": True,
+        "status": "committed",
+        "effect_status": "COMMITTED",
+        "outbox_id": outbox_id,
+        "delivery_id": delivery_id,
+        "platform": value["reply_channel"],
+        "conversation_id": value["reply_target"],
+        "payload_digest": payload_digest,
+        "delivery_state": delivery_state,
+        "status_version": status_version,
+        "fencing_token": fencing_token,
+        "delivery_receipt_digest": receipt_digest,
+        "replayed": True,
+        "receipt_ref": _canonical_id_ref("gateway-outbox", outbox_id),
+    }
 
 
 def _json_object(value: Any, field_name: str) -> dict[str, Any]:

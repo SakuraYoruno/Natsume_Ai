@@ -18,7 +18,7 @@ import re
 from typing import Any, Protocol
 
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
-from host_brain.core.trace_redaction import content_ref, sanitize_public_payload
+from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.persistence.worker_projection_repository import (
@@ -58,15 +58,6 @@ _SAFE_TOKEN_METADATA = re.compile(
     r"(?:first_token|time_to_first_token|stream_after_first_token)(?:_latency)?_ms)$",
     re.IGNORECASE,
 )
-_LOCAL_RESULT_FIELD = re.compile(
-    r"^(?:artifacts?_dir|path|paths|.*_path|.*_paths|"
-    r"lease_owner|lease_fence|lease_fencing_token|"
-    r"workspace_lease_owner|workspace_lease_fence|"
-    r"workspace_lease_fencing_token)$",
-    re.IGNORECASE,
-)
-
-
 class InternalAgentProposalError(RuntimeError):
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or INTERNAL_AGENT_PROPOSAL_INVALID)
@@ -706,64 +697,69 @@ def validate_internal_agent_result_payload(value: Mapping[str, Any]) -> None:
 def build_public_internal_agent_result(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Build the bounded public proposal persisted before outer Acceptance.
+    """Build the small public proposal persisted before outer Acceptance.
 
-    ``AgentRuntimeExecutor`` intentionally keeps local paths and workspace
-    lease authority in its process-local result for diagnostics.  Neither is
-    execution evidence and neither may cross into the durable worker
-    projection.  Artifact directories become opaque digest references; all
-    free-form values first pass through the shared public trace sanitizer.
+    Full WorkOrder/prompt/result material remains in the sealed governed
+    stage.  WorkerProjection carries only terminal gates, bounded narrative
+    fields and a protected content reference/digest; local paths, lease
+    ownership and arbitrary executor metadata never cross this boundary.
     """
 
-    sanitized = sanitize_public_payload(dict(value or {}))
+    raw = dict(value or {})
+    protected_raw = raw.pop("_protected_stage", None)
+    sanitized = sanitize_public_payload(raw)
     if not isinstance(sanitized, Mapping):
         raise InternalAgentProposalError(
             INTERNAL_AGENT_PROPOSAL_INVALID,
             "sanitized Agent result proposal must be a mapping",
         )
 
-    def _publicize(current: Any) -> Any:
-        if isinstance(current, Mapping):
-            public: dict[str, Any] = {}
-            artifact_refs: list[str] = []
-            for raw_key, child in current.items():
-                key = str(raw_key or "").strip()
-                normalized_key = re.sub(
-                    r"[^a-z0-9]+",
-                    "_",
-                    key.lower(),
-                ).strip("_")
-                if normalized_key in {"workspace", "workspace_source"}:
-                    continue
-                if _LOCAL_RESULT_FIELD.fullmatch(normalized_key):
-                    if normalized_key in {"artifact_dir", "artifacts_dir"} and child not in (
-                        None,
-                        "",
-                    ):
-                        artifact_refs.append(
-                            content_ref("opaque-agent-artifact", child)
-                        )
-                    continue
-                public[key] = _publicize(child)
-            if artifact_refs:
-                existing = public.get("artifact_refs")
-                values = (
-                    [str(item) for item in existing]
-                    if isinstance(existing, list)
-                    else []
-                )
-                public["artifact_refs"] = list(
-                    dict.fromkeys((*values, *artifact_refs))
-                )
-            return public
-        if isinstance(current, list):
-            return [_publicize(item) for item in current]
-        return current
+    def _bounded_text(field: str, limit: int) -> str:
+        return str(sanitized.get(field) or "").strip()[:limit]
 
-    return _json_mapping(
-        _publicize(sanitized),
-        field_name="public Agent result proposal",
-    )
+    verification_raw = sanitized.get("verification")
+    acceptance_raw = sanitized.get("acceptance")
+    verification = dict(verification_raw) if isinstance(verification_raw, Mapping) else {}
+    acceptance = dict(acceptance_raw) if isinstance(acceptance_raw, Mapping) else {}
+    public: dict[str, Any] = {
+        "status": _bounded_text("status", 32).upper(),
+        "work_order_id": _bounded_text("work_order_id", 240),
+        "summary": _bounded_text("summary", 4_000),
+        "result_text": _bounded_text("result_text", 24_000),
+        "verification": {
+            "status": str(verification.get("status") or "NOT_RUN").strip()[:64],
+            "reason_code": str(verification.get("reason_code") or "").strip()[:128]
+            or None,
+        },
+        "acceptance": {
+            "decision": str(acceptance.get("decision") or "NOT_RUN").strip()[:64],
+            "reason_code": str(acceptance.get("reason_code") or "").strip()[:128]
+            or None,
+        },
+        "review_required": sanitized.get("review_required") is True,
+        "reason_code": _bounded_text("reason_code", 128) or None,
+        "risk_flags": [
+            str(item or "").strip()[:128]
+            for item in list(sanitized.get("risk_flags") or [])[:64]
+            if str(item or "").strip()
+        ],
+    }
+    if protected_raw is not None:
+        if not isinstance(protected_raw, Mapping):
+            _invalid("governed Agent protected stage is malformed")
+        protected = dict(protected_raw)
+        if set(protected) != {"schema_version", "ref", "digest"} or (
+            protected.get("schema_version")
+            != "Natsume.agent.governed_artifact_stage.v1"
+            or not str(protected.get("ref") or "").startswith("agent-stage://")
+            or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}",
+                str(protected.get("digest") or ""),
+            )
+        ):
+            _invalid("governed Agent protected stage attribution is invalid")
+        public["protected_artifact"] = protected
+    return _json_mapping(public, field_name="public Agent result proposal")
 
 
 def internal_agent_terminal_result_reason(

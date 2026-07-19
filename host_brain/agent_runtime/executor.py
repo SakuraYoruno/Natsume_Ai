@@ -198,10 +198,10 @@ class AgentRuntimeExecutor:
         workspace_execution_authority: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         order = work_order if isinstance(work_order, AgentWorkOrder) else AgentWorkOrder.from_mapping(work_order)
-        run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
-        self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
         event_id = new_event_id()
         ts = now_ms()
+        run_dir: Path | None = None
+        governed_stage = None
 
         try:
             order.validate()
@@ -211,7 +211,7 @@ class AgentRuntimeExecutor:
                     summary=(
                         "Agent write execution requires a governed Tool TaskGraph node."
                     ),
-                    artifacts_dir=str(run_dir),
+                    artifacts_dir="",
                     reason_code=AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
                     detail=(
                         "The proposal-only Agent runtime cannot execute or accept a "
@@ -233,13 +233,6 @@ class AgentRuntimeExecutor:
                     "model_attempts": [],
                     "side_effects_executed": False,
                 }
-                self._persist_result(
-                    run_dir,
-                    result,
-                    order=order,
-                    event_id=event_id,
-                    ts_ms=ts,
-                )
                 return result.to_dict()
             effective_workspace_policy = self.workspace_policy
             if (
@@ -263,12 +256,11 @@ class AgentRuntimeExecutor:
                 result = blocked_result(
                     work_order_id=order.work_order_id,
                     summary="Agent WorkOrder blocked by workspace or approval policy.",
-                    artifacts_dir=str(run_dir),
+                    artifacts_dir="",
                     detail=reason,
                     risk_flags=["policy_block"],
                     review_required=self.review_policy.review_required(order),
                 )
-                self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
                 return result.to_dict()
             if order.run_mode == "self_evolve":
                 current_branch = _current_git_branch(resolution.path)
@@ -277,32 +269,65 @@ class AgentRuntimeExecutor:
                     result = blocked_result(
                         work_order_id=order.work_order_id,
                         summary="Agent self-evolve WorkOrders require an experiment branch.",
-                        artifacts_dir=str(run_dir),
+                        artifacts_dir="",
                         detail=branch_reason or "EVOLUTION_EXPERIMENT_BRANCH_REQUIRED",
                         risk_flags=["evolution_branch_required"],
                         review_required=True,
                         reason_code=branch_reason or "EVOLUTION_EXPERIMENT_BRANCH_REQUIRED",
                     )
-                    self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
                     return result.to_dict()
+
+            # Prompt construction may validate or normalize private WorkOrder
+            # material.  Do it before allocating a governed stage so a
+            # preparation exception cannot strand a half-written owner.
+            prompt = build_agent_prompt(order, workspace=resolution.path)
+            if workspace_execution_authority is not None:
+                if (
+                    self.workspace_runtime is None
+                    or resolution.source != "durable_workspace"
+                    or not resolution.workspace_id
+                ):
+                    raise DurableWorkspaceRuntimeError(
+                        "WORKSPACE_RUNTIME_BINDING_INVALID",
+                        "governed execution has no durable Workspace staging owner",
+                    )
+                governed_stage = self.artifact_store.prepare_governed_stage(
+                    workspace_id=resolution.workspace_id,
+                    execution_authority=workspace_execution_authority,
+                )
+                run_dir = governed_stage.stage_dir
+            else:
+                run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
+            # Raw WorkOrder material is written only after validation, policy
+            # enforcement and durable Workspace/Attempt ownership succeed.
+            self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
+            self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
         except Exception as exc:
+            if governed_stage is not None:
+                try:
+                    self.artifact_store.discard_unsealed_governed_stage(
+                        governed_stage
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not safely discard incomplete governed Agent stage"
+                    )
             reason_code = str(getattr(exc, "reason_code", "") or "").strip() or None
+            failure = _opaque_executor_failure(exc)
             result = blocked_result(
                 work_order_id=order.work_order_id,
                 summary="Agent WorkOrder could not be prepared.",
-                artifacts_dir=str(run_dir),
-                detail=str(exc),
+                artifacts_dir="",
+                detail=failure,
                 risk_flags=[
                     "workspace_grant_required" if reason_code == "WORKSPACE_WRITE_GRANT_REQUIRED" else "work_order_invalid"
                 ],
                 review_required=order.review_required,
                 reason_code=reason_code,
             )
-            self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
             return result.to_dict()
 
-        prompt = build_agent_prompt(order, workspace=resolution.path)
-        self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
+        assert run_dir is not None
 
         empty_git_summary = {
             "changed_files": [],
@@ -439,7 +464,13 @@ class AgentRuntimeExecutor:
         result = _apply_required_verification_gate(result, order)
         result = _apply_acceptance_judge(result, order)
         self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
-        return result.to_dict()
+        payload = result.to_dict()
+        if governed_stage is not None:
+            seal = self.artifact_store.seal_governed_stage(governed_stage)
+            # This private transfer object never enters result.json.  The
+            # proposal boundary converts it to a bounded protected ref/digest.
+            payload["_protected_stage"] = seal.protected_payload()
+        return payload
 
     def _persist_result(self, run_dir: Path, result: AgentResult, *, order: AgentWorkOrder, event_id: str, ts_ms: int) -> None:
         metadata = sanitize_public_payload({

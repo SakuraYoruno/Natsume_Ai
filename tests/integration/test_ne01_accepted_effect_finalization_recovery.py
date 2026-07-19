@@ -289,6 +289,8 @@ async def test_accepted_node_restart_stages_effects_without_worker_rerun(
     )
     assert {effect["effect_type"] for effect in effects} == {
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
     }
     frozen_effects = [

@@ -6,6 +6,7 @@
 端点：
   POST /v1/gateway/{platform}/webhook   接收平台消息推送
   POST /v1/gateway/reply                接收 Host Brain 的回复指令
+  POST /v1/gateway/reply/query          认证只读查询 durable reply
   GET  /v1/gateway/health               健康检查
   GET  /v1/gateway/stats                统计信息
 """
@@ -24,6 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from edge_client.gateway.delivery_runtime import (
+    GATEWAY_REPLY_QUERY_SCHEMA_VERSION,
     GW_TRANSPORT_DISABLED,
     GatewayDeliveryError,
     GatewayDeliveryRuntime,
@@ -732,6 +734,110 @@ def create_gateway_app(
     # POST /v1/gateway/reply — 接收 Host Brain 的回复指令
     # ------------------------------------------------------------------
 
+    @app.post("/v1/gateway/reply/query")
+    async def query_reply(request: Request) -> JSONResponse:
+        """Reopen one exact durable reply through the authenticated surface.
+
+        This endpoint never enqueues, claims, retries or sends an outbox row.
+        A missing row is intentionally UNKNOWN rather than negative proof,
+        because the original reply request may still be crossing intake after
+        the Host lost its HTTP response.
+        """
+
+        if _delivery is None or not _delivery.verification_enabled:
+            return _delivery_rejection(
+                GatewayDeliveryError(
+                    GW_TRANSPORT_DISABLED,
+                    "durable Gateway reply query is disabled",
+                )
+            )
+        raw_body = await request.body()
+        if not raw_body or len(raw_body) > _MAX_HTTP_BODY_BYTES:
+            return JSONResponse(
+                status_code=413 if raw_body else 400,
+                content={
+                    "status": "rejected",
+                    "reason_code": "GW_BODY_INVALID",
+                    "detail": "query body is empty or too large",
+                },
+            )
+        try:
+            verified = _verified_request(
+                registry=reply_verifiers,
+                platform="internal_reply",
+                request=request,
+                raw_body=raw_body,
+            )
+        except WebhookVerificationError as exc:
+            return _security_rejection(exc)
+        try:
+            parsed = json.loads(
+                verified.payload_bytes.decode("utf-8"),
+                object_pairs_hook=_strict_json_object,
+                parse_constant=_reject_nonfinite_json,
+            )
+            required = {
+                "schema_version",
+                "effect_id",
+                "delivery_id",
+                "platform",
+                "conversation_id",
+                "payload_digest",
+            }
+            if not isinstance(parsed, dict) or set(parsed) != required:
+                raise ValueError("reply query shape is invalid")
+            if parsed.get("schema_version") != GATEWAY_REPLY_QUERY_SCHEMA_VERSION:
+                raise ValueError("reply query schema is invalid")
+            platform = parsed.get("platform")
+            conversation_id = parsed.get("conversation_id")
+            effect_id = parsed.get("effect_id")
+            delivery_id = parsed.get("delivery_id")
+            payload_digest = parsed.get("payload_digest")
+            if (
+                not isinstance(platform, str)
+                or platform != platform.strip().lower()
+                or not isinstance(conversation_id, str)
+                or conversation_id != conversation_id.strip()
+                or not isinstance(effect_id, str)
+                or _IDEMPOTENCY_TOKEN_RE.fullmatch(effect_id) is None
+                or not isinstance(delivery_id, str)
+                or _IDEMPOTENCY_TOKEN_RE.fullmatch(delivery_id) is None
+                or not isinstance(payload_digest, str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", payload_digest) is None
+            ):
+                raise ValueError("reply query identity is invalid")
+            Platform(platform)
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "rejected",
+                    "reason_code": "GW_REPLY_QUERY_INVALID",
+                    "detail": "invalid authenticated reply query",
+                },
+            )
+        try:
+            snapshot = _delivery.query_reply(
+                tenant_id="local",
+                principal_id=str(verified.principal_id),
+                effect_id=effect_id,
+                delivery_id=delivery_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                payload_digest=payload_digest,
+            )
+        except GatewayDeliveryError as exc:
+            return _delivery_rejection(exc)
+        effect_status = str(snapshot.get("effect_status") or "UNKNOWN")
+        return JSONResponse(
+            {
+                "status": (
+                    "committed" if effect_status == "COMMITTED" else "unknown"
+                ),
+                **snapshot,
+            }
+        )
+
     @app.post("/v1/gateway/reply")
     async def receive_reply(request: Request) -> JSONResponse:
         """Authenticate and durably enqueue one Host Brain reply."""
@@ -822,6 +928,21 @@ def create_gateway_app(
                 "reply_to_msg_id": payload.get("reply_to_msg_id"),
                 "raw_extra": dict(payload.get("raw_extra") or {}),
             }
+            effect_id_raw = payload.get("effect_id")
+            if effect_id_raw is not None:
+                if (
+                    not isinstance(effect_id_raw, str)
+                    or _IDEMPOTENCY_TOKEN_RE.fullmatch(effect_id_raw) is None
+                ):
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "status": "rejected",
+                            "reason_code": "GW_REPLY_EFFECT_ID_INVALID",
+                            "detail": "authenticated reply effect_id is invalid",
+                        },
+                    )
+                durable_payload["effect_id"] = effect_id_raw
             request_id = str(durable_payload.get("request_id") or "").strip()
             if _IDEMPOTENCY_TOKEN_RE.fullmatch(request_id) is None:
                 return JSONResponse(

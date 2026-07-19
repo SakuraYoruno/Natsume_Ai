@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -21,6 +22,12 @@ from host_brain.agent_runtime.internal_result_proposal import (
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.app.internal_task_runtime import InternalAgentCommandService
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
+from host_brain.contracts.agent_runtime.workspace_lifecycle import (
+    WorkspaceLifecycleState,
+)
+from host_brain.persistence.task_record_codec import (
+    build_acceptance_effect_payload_digest,
+)
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
 )
@@ -68,10 +75,14 @@ async def test_unknown_result_commit_redacts_sensitive_exception_detail(
     )
 
     async def _reopen(_canonical, _preview):  # noqa: ANN001, ANN202
-        return {
-            "status": "EXECUTED",
-            "summary": "safe result",
-        }
+        return accepted_result_module._ReopenedInternalResult(
+            result={
+                "status": "EXECUTED",
+                "summary": "safe result",
+            },
+            command=None,
+            work_order=None,
+        )
 
     monkeypatch.setattr(handler, "_reopen", _reopen)
 
@@ -85,6 +96,257 @@ async def test_unknown_result_commit_redacts_sensitive_exception_detail(
     assert "private-value" not in detail
     assert "error_type=builtins.RuntimeError" in detail
     assert "error_digest=sha256:" in detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "artifact_fault"),
+    [
+        ("after_workspace_accept", None),
+        ("after_artifact_fault", "after_promotion_record"),
+        ("after_artifact_fault", "after_promotion_rename"),
+        ("after_workspace_promote", None),
+    ],
+)
+async def test_internal_artifact_crash_windows_become_reconciliation_only(
+    tmp_path: Path,
+    mode: str,
+    artifact_fault: str | None,
+) -> None:
+    graph_id = "graph-internal-promotion"
+    node_id = "node-internal-promotion"
+    attempt_id = "attempt-internal-promotion"
+    command = build_host_command(
+        surface=HostCommandSurface.INTERNAL,
+        request_id="request-internal-promotion",
+        session_id="session-internal-promotion",
+        principal_id="principal-internal-promotion",
+        input_ref="internal-input://sha256/" + "1" * 64,
+        input_sha256="sha256:" + "1" * 64,
+        root_work_order_id="work-order-internal-promotion",
+        graph_id=graph_id,
+        graph_revision=1,
+        route_type="delegate",
+        target_id="agent_runtime",
+        business_scope="internal-agent:code",
+        operation_fingerprint="sha256:" + "2" * 64,
+        created_at_ms=1_900_000_000_000,
+        ingress_claim_ref="ingress-claim://internal/promotion",
+        ingress_audit_ref="audit://internal/promotion",
+        governor_grant_ref="governor-grant://internal/promotion",
+    )
+    work_order = WorkOrderV3(
+        work_order_id=command.root_work_order_id,
+        root_work_order_id=command.root_work_order_id,
+        domain="code",
+        run_mode="inspect",
+        objective="promote an accepted read-only artifact",
+        task_graph_id=graph_id,
+        task_node_id=node_id,
+        graph_revision=1,
+        operation_fingerprint=command.operation_fingerprint,
+    )
+    canonical = {
+        "schema_version": "Natsume.internal.accepted_agent_result.v1",
+        "command_id": command.command_id,
+        "request_id": command.request_id,
+        "work_order_id": command.root_work_order_id,
+        "graph_id": graph_id,
+        "graph_revision": 1,
+        "node_id": node_id,
+        "attempt_id": attempt_id,
+        "target_id": "agent_runtime",
+        "operation_fingerprint": command.operation_fingerprint,
+        "worker_projection_ref": "worker-projection://internal/promotion",
+        "result_digest": "sha256:" + "3" * 64,
+    }
+    effect_id = "acceptance-effect://internal/promotion"
+    effect_owner = "acceptance-effect-owner"
+    effect_fence = 19
+    scene = {
+        "schema_version": "Natsume.scene.identity.v2",
+        "scene_revision": 4,
+        "scene_digest": "sha256:" + "4" * 64,
+    }
+    boundary = {
+        "context_pack_digest": "sha256:" + "5" * 64,
+        "scene_identity": scene,
+        "task_graph_id": graph_id,
+        "graph_revision": 1,
+        "task_node_id": node_id,
+        "parent_governor_grant_ref": command.governor_grant_ref,
+        "node_grant_ref": "node-grant://internal/promotion",
+        "node_grant": {
+            "grant_ref": "node-grant://internal/promotion",
+            "binding_digest": "sha256:" + "6" * 64,
+        },
+        "authority_context": {
+            "schema_version": (
+                "Natsume.action_preview.acceptance_effect_authority_request.v1"
+            ),
+            "effect_id": effect_id,
+            "lease_owner_id": effect_owner,
+            "fencing_token": effect_fence,
+        },
+    }
+    preview = {"origin_boundary": boundary}
+    durable_preview = {
+        "schema_version": "Natsume.acceptance_effect.action_preview_context.v1",
+        "context_pack_digest": boundary["context_pack_digest"],
+        "scene_identity": scene,
+        "task_graph_id": graph_id,
+        "graph_revision": 1,
+        "task_node_id": node_id,
+        "parent_governor_grant_ref": command.governor_grant_ref,
+        "node_grant_ref": boundary["node_grant_ref"],
+        "node_grant_digest": boundary["node_grant"]["binding_digest"],
+    }
+    full_effect_payload = {
+        **canonical,
+        "_action_preview_context": durable_preview,
+    }
+    authority = {
+        "root_work_order_id": command.root_work_order_id,
+        "graph_id": graph_id,
+        "graph_revision": 1,
+        "node_id": node_id,
+        "attempt_id": attempt_id,
+        "lease_id": "lease-internal-promotion",
+        "command_id": command.command_id,
+        "principal_id": command.principal_id,
+        "lease_owner_id": "worker-internal-promotion",
+        "fencing_token": 7,
+    }
+    fired = False
+
+    def inject(point: str) -> None:
+        nonlocal fired
+        if artifact_fault == point and not fired:
+            fired = True
+            raise RuntimeError(f"injected-{point}")
+
+    artifacts = AgentArtifactStore(tmp_path / "runs", fault_injector=inject)
+    workspace_id = "workspace-" + hashlib.sha256(
+        f"{graph_id}\n1".encode("utf-8")
+    ).hexdigest()[:48]
+    stage = artifacts.prepare_governed_stage(
+        workspace_id=workspace_id,
+        execution_authority=authority,
+    )
+    for name in (
+        "work_order.json",
+        "metadata.json",
+        "result.json",
+        "changed_files.json",
+        "verification.json",
+    ):
+        artifacts.write_json(stage.stage_dir / name, {})
+    artifacts.write_text(stage.stage_dir / "prompt.txt", "private prompt")
+    seal = artifacts.seal_governed_stage(stage)
+    result = {"protected_artifact": seal.protected_payload()}
+
+    class TaskStore:
+        async def get_node(self, *_args):  # noqa: ANN002, ANN202
+            return {"status": "ACCEPTED"}
+
+        async def get_attempt(self, _attempt_id):  # noqa: ANN001, ANN202
+            return {
+                "attempt_id": attempt_id,
+                "graph_id": graph_id,
+                "graph_revision": 1,
+                "node_id": node_id,
+                "status": "SUCCEEDED",
+                "owner_id": authority["lease_owner_id"],
+            }
+
+        async def get_lease(self, _lease_id):  # noqa: ANN001, ANN202
+            return {
+                "lease_id": authority["lease_id"],
+                "attempt_id": attempt_id,
+                "owner_id": authority["lease_owner_id"],
+                "fencing_token": authority["fencing_token"],
+                "status": "RELEASED",
+            }
+
+        async def get_node_artifact(self, *_args):  # noqa: ANN002, ANN202
+            return {
+                "graph_id": graph_id,
+                "graph_revision": 1,
+                "node_id": node_id,
+                "attempt_id": attempt_id,
+                "artifact_ref": "task-artifact://internal/promotion",
+                "receipt_ref": "verification-receipt://internal/promotion",
+            }
+
+        async def get_acceptance_effect_intent(self, _effect_id):  # noqa: ANN001, ANN202
+            return {
+                "graph_id": graph_id,
+                "graph_revision": 1,
+                "node_id": node_id,
+                "attempt_id": attempt_id,
+                "effect_type": "internal.agent.result_commit",
+                "commit_scope": "GRAPH",
+                "payload": full_effect_payload,
+                "payload_sha256": build_acceptance_effect_payload_digest(
+                    full_effect_payload
+                ),
+                "status": "CLAIMED",
+                "lease_owner": effect_owner,
+                "fencing_token": effect_fence,
+            }
+
+    repository = SimpleNamespace(
+        snapshot=SimpleNamespace(state=WorkspaceLifecycleState.ACTIVE)
+    )
+    repository.get_lifecycle = lambda _workspace_id: repository.snapshot
+
+    class Workspace:
+        def __init__(self) -> None:
+            self.repository = repository
+
+        def promote_no_change_artifact(self, **kwargs):  # noqa: ANN003, ANN202
+            if mode == "unstarted":
+                raise RuntimeError("injected-before-start")
+            repository.snapshot = SimpleNamespace(
+                state=WorkspaceLifecycleState.ACCEPTED
+            )
+            if mode == "after_workspace_accept":
+                raise RuntimeError("injected-after-workspace-accept")
+            artifact_ref = kwargs["artifact_promoter"]()
+            repository.snapshot = SimpleNamespace(
+                state=WorkspaceLifecycleState.PROMOTED
+            )
+            if mode == "after_workspace_promote":
+                raise RuntimeError("injected-after-workspace-promote")
+            return SimpleNamespace(artifact_ref=artifact_ref)
+
+    dummy = type(
+        "Dummy",
+        (),
+        {
+            "get": lambda *_args: None,
+            "load": lambda *_args: None,
+            "get_by_command": lambda *_args: None,
+            "append": lambda *_args, **_kwargs: None,
+        },
+    )()
+    handler = InternalAcceptedResultHandler(
+        command_repository=dummy,
+        projection_store=dummy,
+        result_repository=dummy,
+        artifact_store=artifacts,
+        workspace_runtime=Workspace(),
+        task_store=TaskStore(),
+    )
+
+    with pytest.raises(AcceptanceEffectOutcomeUnknown):
+        await handler._promote_protected_artifact(
+            canonical=canonical,
+            preview=preview,
+            result=result,
+            command=command,
+            work_order=work_order,
+        )
 
 
 def test_internal_result_projection_rejects_secret_and_oversize_payload() -> None:
@@ -164,13 +426,11 @@ def test_public_projection_strips_real_executor_local_authority(
     public = build_public_internal_agent_result(raw)
     encoded = str(public)
     assert "artifacts_dir" not in public
-    assert public["artifact_refs"][0].startswith(
-        "opaque-agent-artifact://sha256/"
-    )
-    assert "workspace" not in public["metadata"]
-    assert "workspace_source" not in public["metadata"]
-    assert "workspace_lease_owner" not in public["metadata"]
-    assert "workspace_lease_fencing_token" not in public["metadata"]
+    # Ungoverned temp-workspace diagnostics do not gain a protected durable
+    # artifact identity merely because a local run directory exists.
+    assert "artifact_refs" not in public
+    assert "protected_artifact" not in public
+    assert "metadata" not in public
     assert str(tmp_path) not in encoded
     assert "must-not-enter-the-public-projection" not in encoded
     validate_internal_agent_result_payload(public)

@@ -27,6 +27,8 @@ from host_brain.app.governed_frozen_skill_runtime import (
     _WorkerCommitVerifier,
 )
 from host_brain.app.governed_task_adapter import GovernedHostRuntime
+from host_brain.app.user_preference_store import UserPreferenceStore
+from host_brain.channels.edge_transport import query_gateway_reply_delivery
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
 from host_brain.core.mode_transition import TransitionSource
@@ -653,6 +655,9 @@ def build_governed_operator_composition(
     runtime_owner_id: str,
     scheduler_operation_handler: Any | None = None,
     life_receipt_reader_provider: Any | None = None,
+    gateway_reply_query_port: Any | None = None,
+    internal_agent_artifact_store: Any | None = None,
+    internal_agent_workspace_runtime: Any | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
@@ -665,10 +670,17 @@ def build_governed_operator_composition(
                 command_repository=task_runtime_container.command_repository,
                 projection_store=task_runtime_container.worker_projection_store,
                 result_repository=task_runtime_container.agent_result_repository,
+                artifact_store=internal_agent_artifact_store,
+                workspace_runtime=internal_agent_workspace_runtime,
+                task_store=task_runtime_container.task_store,
             ),
             conversation_turn_reader=ContextRepository.from_ledger(ledger),
             conversation_event_reader=MemoryEventRepository.from_ledger(ledger),
+            preference_store=UserPreferenceStore(ledger=ledger),
             life_receipt_reader_provider=life_receipt_reader_provider,
+            gateway_reply_query_port=(
+                gateway_reply_query_port or query_gateway_reply_delivery
+            ),
         ),
         owner_id=f"{runtime_owner_id}::acceptance-effects",
         action_preview_service=action_preview_service,

@@ -309,6 +309,8 @@ def _stage_semantic_chain(
         ("surface.reply_delivery", "a-delivery"),
         *([("unknown.audit", "b-unknown")] if include_unknown else []),
         ("life.foreground_completed", "m-life"),
+        ("life.conversation_turn_recorded", "n-life-conversation"),
+        ("conversation.preference_signal", "y-preference"),
         ("conversation.user_turn", "z-conversation"),
     ]
     return {
@@ -337,6 +339,8 @@ def _handlers(calls: list[tuple[str, str]]) -> dict[str, Any]:
         effect_type: build(effect_type)
         for effect_type in (
             "conversation.user_turn",
+            "conversation.preference_signal",
+            "life.conversation_turn_recorded",
             "life.foreground_completed",
             "surface.reply_delivery",
         )
@@ -365,16 +369,22 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
 
     assert [row[1] for row in calls] == [
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
     ]
     assert [row["effect_type"] for row in results] == [
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
         "unknown.audit",
     ]
     assert [row["status"] for row in results] == [
+        AcceptanceEffectStatus.COMMITTED.value,
+        AcceptanceEffectStatus.COMMITTED.value,
         AcceptanceEffectStatus.COMMITTED.value,
         AcceptanceEffectStatus.COMMITTED.value,
         AcceptanceEffectStatus.COMMITTED.value,
@@ -386,8 +396,10 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
         graph_id="graph-dispatch-order",
         graph_revision=1,
     )
-    assert len(calls) == 3
+    assert len(calls) == 5
     assert [row["status"] for row in replay] == [
+        "COMMITTED",
+        "COMMITTED",
         "COMMITTED",
         "COMMITTED",
         "COMMITTED",
@@ -396,7 +408,7 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
     assert await dispatcher.dispatch_effect(
         str(effects["conversation.user_turn"]["effect_id"])
     ) is None
-    assert len(calls) == 3
+    assert len(calls) == 5
 
 
 @pytest.mark.asyncio
@@ -420,6 +432,8 @@ async def test_handler_exception_fails_closed_before_life_and_delivery(
         task_store=store,
         handlers={
             "conversation.user_turn": fail_conversation,
+            "conversation.preference_signal": forbidden_later,
+            "life.conversation_turn_recorded": forbidden_later,
             "life.foreground_completed": forbidden_later,
             "surface.reply_delivery": forbidden_later,
         },
@@ -472,6 +486,8 @@ async def test_transient_handler_failure_is_rescheduled_then_commits_chain(
         task_store=store,
         handlers={
             "conversation.user_turn": flaky_conversation,
+            "conversation.preference_signal": committed_later,
+            "life.conversation_turn_recorded": committed_later,
             "life.foreground_completed": committed_later,
             "surface.reply_delivery": committed_later,
         },
@@ -500,10 +516,14 @@ async def test_transient_handler_failure_is_rescheduled_then_commits_chain(
         "COMMITTED",
         "COMMITTED",
         "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
     ]
     assert calls == [
         "conversation.user_turn",
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
     ]
@@ -826,16 +846,25 @@ async def test_drain_ready_preserves_each_graph_chain_and_limit(
     assert len(first) == 4
     assert calls == [
         ("graph-drain-a", "conversation.user_turn"),
+        ("graph-drain-a", "conversation.preference_signal"),
+        ("graph-drain-a", "life.conversation_turn_recorded"),
         ("graph-drain-a", "life.foreground_completed"),
-        ("graph-drain-a", "surface.reply_delivery"),
-        ("graph-drain-b", "conversation.user_turn"),
     ]
 
     second = await dispatcher.drain_ready(limit=4)
-    assert len(second) == 2
+    assert len(second) == 4
+    assert calls[-4:] == [
+        ("graph-drain-a", "surface.reply_delivery"),
+        ("graph-drain-b", "conversation.user_turn"),
+        ("graph-drain-b", "conversation.preference_signal"),
+        ("graph-drain-b", "life.conversation_turn_recorded"),
+    ]
+
+    third = await dispatcher.drain_ready(limit=4)
+    assert len(third) == 2
     assert calls[-2:] == [
         ("graph-drain-b", "life.foreground_completed"),
         ("graph-drain-b", "surface.reply_delivery"),
     ]
     assert await dispatcher.drain_ready(limit=4) == ()
-    assert len(calls) == 6
+    assert len(calls) == 10

@@ -5,7 +5,7 @@
 
 版本：v2.8
 
-核对日期：2026-07-19
+核对日期：2026-07-20
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -125,11 +125,14 @@ flowchart TD
     SchedulerResult -.-> SchedulerClaim["native ingress 绑定 actual receipt\nOperator 独立 outcome 仅在可归因后封口"]
     Internal["Internal Agent"] --> InternalWO["边界 v2 → WorkOrderV3\nBudget + child grant"]
     InternalWO --> Admission
+    Worker -.-> ProtectedStage["protected raw artifact stage\nexact inventory + ref/digest projection"]
+    ProtectedStage -.-> InternalEffect["internal.agent.result_commit\npost-Acceptance exact TaskStore evidence"]
+    InternalEffect -.-> WorkspacePromotion["clean/no-change Git Workspace\n0116 ACTIVE→ACCEPTED→PROMOTED"]
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
     class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,GraphHook,Schema,Worker,HB,Checkpoint,VA,Receipt,EffectHook,Effects,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
-    class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim partial;
+    class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim,ProtectedStage,InternalEffect,WorkspacePromotion partial;
 ```
 
 上图的核心结论是：
@@ -144,7 +147,7 @@ flowchart TD
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。0117 在 occurrence admission 的同一 `BEGIN IMMEDIATE` 中把 live DUE retry row 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前 renew、运行中 heartbeat，过期 lease 不能自我复活，第二实例/stale fence不能 dispatch/clear/defer，backoff 取真实失败时刻。该 Clock 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因和 canary 仍未完成。
-- Internal 已通过真实 admission，但 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。executor result 先形成 proposal；Acceptance 后的 `internal.agent.result_commit` 才写 canonical result，且只有 Effect `COMMITTED` 与 exact result receipt 可重开时才封 ingress claim。pre-Acceptance local attempt artifact、完整有界 public result WorkerProjection 和 legacy executor bridge 仍保留。
+- Internal 已通过真实 admission，但 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。worker 将 raw material写入exact-inventory protected stage，公共projection只含ref/digest与摘要。Artifact path从configured root到target逐层`lstat`并拒绝symlink/reparse/junction，目录逐层创建，raw/metadata open、replace、remove前重验，legacy alias反向指入governed namespace同样拒绝。Acceptance后的`internal.agent.result_commit`重开真实TaskStore evidence，只允许clean/no-change走0116 lifecycle；post-Acceptance response-loss exact continue且Agent调用数不增加。seal后、projection持久化前崩溃会把Operation checkpoint标为`RECOVERY_REQUIRED`并阻断自动worker replay，但sealed-stage→projection resume缺失，只能一般/人工reconciliation。上述重验不是handle-level原子TOCTOU；一般write、reject/cancel continuation、OS/container isolation与legacy bridge仍为缺口。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 - TaskStore 生产写流已收窄到两个 private hook：Graph/Node 只能由 `HostCommandRepository._admit_normalized() → _insert_graph_from_host_command_in_transaction()` 在同一 admission UoW 写入，生产调用数为 1；Effect 只能由 `transition_graph_and_stage_acceptance_effects`、`commit_node_acceptance`、`complete_parallel_graph_success` 三个 canonical UoW 通过 `_stage_acceptance_effect_intent_in_transaction()` 写入，共 6 个调用点。对应 Graph/Node/Effect INSERT SQL 也各自只在这两个 hook 中。public `create_graph`、`insert_graph_in_transaction`、`stage_acceptance_effect_intent` 已删除。
 - 这条流只证明 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED`。SQLite 仍允许 direct SQL 制造无 `host_command_journal` 的 raw/orphan 状态，本轮无 migration/trigger，因此必须同时标记 `SQL_DIRECT_BYPASS_PRESENT`。`tests/task_runtime_authority_fixtures.py` 只是 test-only raw/orphan 构造器，不属于 canonical 流。定向分组与首跑 fixture 失败均已保留，修正后最终 key regression 为 `26 passed in 35.33s`；wave integration `NOT_RUN_PER_WAVE_POLICY`。TaskStore 切片当时 full architecture static 为 `FAIL [1,6,10]`；后续 Gate 1/6/10/11 均已关闭，当前 fresh 为 `PASS`、`failed_gates=[]`，NE-01 仍 `IN_PROGRESS`。
@@ -494,15 +497,21 @@ authenticated Internal ingress
   → TaskNode delegate:agent_runtime + child-grant verification
   → PRE Review if required
   → existing Agent executor compatibility projection
-  → sanitized/bounded result proposal in WorkerProjection
+  → raw work-order/prompt/metadata/result/changed-files/verification
+    写入 protected exact-inventory stage
+  → WorkerProjection 只携带 protected stage ref/digest + bounded summary
   → Verification + Acceptance / POST Review
   → internal.agent.result_commit Acceptance Effect
+  → reopen exact TaskStore Node=ACCEPTED / Attempt=SUCCEEDED
+    / Lease=RELEASED / Node artifact / claimed Effect
+  → clean/no-change Git Workspace only
+  → 0116 ACTIVE → ACCEPTED → PROMOTED
   → canonical Agent result repository
   → exact COMMITTED result receipt
   → ingress claim terminalization + replay
 ```
 
-前置 Review 不执行 handler，且在尚无 worker receipt 时保持 ingress claim result 未绑定；内部 acceptance decision 不是 `ACCEPT` 时不允许进入 canonical result commit。0096 后，ReviewStore 的终态 mutation 与 continuation enqueue 同事务；worker 按 surface 重入。`InternalAgentCommandService` 只有在 result Effect 为 `COMMITTED` 且重新读取 exact result receipt 后才封 claim；`PENDING/FAILED/NO_EFFECTS` 保持 OPEN，响应丢失只读对账且不重跑 Agent。续跑 credential 覆盖 budget time window 加 child TTL、最多 24 小时；READY 与首次 worker entry 分别校验 live claim 和 exact Attempt/Lease。当前完整但有界/脱敏的 public result 仍在 WorkerProjection，local attempt artifact 仍在 Acceptance 前写入，V3→legacy executor bridge 也未删除。
+前置 Review 不执行 handler，且在尚无 worker receipt 时保持 ingress claim result 未绑定；内部 acceptance decision 不是 `ACCEPT` 时不允许进入 canonical result commit。protected stage seal验证exact inventory/bytes；路径链link/reparse/junction拒绝、逐层mkdir、关键I/O前重验和legacy alias反向拒绝均在Artifact Store内执行，公共projection不携带raw prompt/result。post-Acceptance handler以真实TaskStore evidence和0116推进no-change artifact；reconcile不能从仍为`ACTIVE`的全新promotion擅自启动，只续做已持久开始的ACCEPTED/PROMOTED边界且不重跑Agent。pre-projection crash则由Operation recovery转为`RECOVERY_REQUIRED`并阻断自动重跑，但缺sealed-stage projection resume。当前Internal/Workspace fresh集中批次`63 passed, 3 skipped in 62.06s`，3项为Windows文件symlink权限1314且不计通过、目录junction已实跑；与Conversation/Gateway fresh批次`65 passed in 118.52s`不相加，当前均为pre-commit local。handle-level TOCTOU、一般write、reject/cancel continuation、OS/container isolation与legacy bridge未删除。
 
 ## 6. Acceptance Effect 与对话提交语义
 
@@ -522,17 +531,23 @@ Legacy completion 的崩溃重入也经过同一编译/落库边界。`AcceptedG
 ```mermaid
 flowchart LR
     Claim["Effect claim + fence"] --> Handler["领域 handler"]
-    Handler --> Conversation["Conversation exact row/event reopen"]
-    Handler --> Life["Life exact receipt reopen"]
+    Handler --> Visible["visible turn exact row/event reopen"]
+    Handler --> Privacy["Preference store gate\nmissing/non-bool: fail closed + zero write"]
+    Privacy -->|"config false/malformed env → bool false"| Disabled["DISABLED receipt\nzero event/profile"]
+    Privacy -->|"enabled"| Preference["0118 event + sealed child profile\n+ evaluation receipt / same UoW"]
+    Preference --> DeliveryBinding["admitted-time + exact conversation/session\ncanonical delivery digest"]
+    Handler --> Life["Life projection exact command receipt"]
     Handler --> Surface["Surface exact Gateway outbox identity"]
     Handler --> InternalResult["Internal canonical result reopen"]
     Surface -->|"响应丢失或不完整"| Unknown["UNKNOWN / no blind replay"]
-    Unknown -. "Host 无 authenticated outbox read port" .-> Pending["reconciliation pending"]
+    Unknown --> Query["internal_reply HMAC + timestamp + nonce\nread-only query"]
+    Query -->|"same SQLite payload effect_id + exact durable identity"| Surface
+    Query -->|"NOT_FOUND / drift / uncertain"| Pending["UNKNOWN / reconciliation pending"]
     Claim --> Observer["Recovery observer"]
     Observer --> Guardian["app-local RuntimeGuardian durable SLO"]
 ```
 
-Conversation exact reopen 当前只覆盖 visible turn 与 `MemoryEvent`；偏好 side-write 可吞异常、无独立 receipt，后续 Life projection 可降级。独立 Life Effect 以 command hash/state/version/receipt 重开。Surface 仅在 Gateway 精确绑定 outbox/delivery/platform/conversation/payload digest 时提交；HTTP/畸形/响应丢失保持 `UNKNOWN`，Host 无 authenticated query port。Internal 的 frozen attempt authority 先进入 Durable Workspace，只有严格 terminal success 可越过 Verifier/Acceptance/final-handler 三重门，canonical result 只在 Acceptance 后写；recovery failure/recovery 进入 Guardian SLO且不含异常正文。
+visible turn、Preference evaluation 与 Life conversation projection 是三个独立 post-Acceptance Effect。visible turn 精确重开 `MemoryEvent`。Preference store gate缺失/非`bool`时失败关闭且零写；配置false或malformed env保守解析为`bool false`，只写`DISABLED` receipt且event/current profile/child version均为0。启用路径以effect-bound operation ID在0118同一SQLite UoW写event、append-only child profile与evaluation receipt；parent receipt可见后trigger封住child集，reconcile比较声明与实际全集以发现绕过trigger的篡改，零信号写真实`NO_SIGNAL`。推荐反馈只读取admitted-time以前且exact person/conversation/session的delivery，并将canonical full-delivery digest放入evidence。Surface response loss只允许通过`internal_reply` HMAC只读query；Gateway从同一SQLite outbox snapshot的canonical payload精确校验`effect_id`，Host重新派生delivery/payload digest后才归因，`NOT_FOUND`永远不是`NO_SIDE_EFFECT`。
 
 ### 6.1 Operator `sys_mode.switch` 的 Review、Effect 与 outer receipt
 
@@ -707,7 +722,7 @@ flowchart LR
 - graph Acceptance 与 effect intents 原子绑定；
 - user turn 与 Life command 的 response-loss 可用 exact authority 对账；assistant turn、Memory 和 delivery仍分阶段持久提交；
 - 队列可重试并保存状态；
-- Surface 未知响应在 Host 尚无 authenticated Gateway outbox read port 时不重发、不伪造成功；
+- Surface 未知响应只能经 authenticated Gateway read-only query 精确重开；`NOT_FOUND`、identity drift 或 query 不确定时不重发、不伪造成功；
 - 不存在把上述所有操作包进单个数据库事务的语义。
 
 ## 7. Gateway 双向链路
@@ -1000,7 +1015,7 @@ All ingress sources
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
 10. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
-11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 写路线执行 `server-derived workspace_id → exact source commit freeze → instance/PID lease → namespace worktree → heartbeat scope → Agent tools → verification → ACTIVE 留待后续决策`；顺序 node/attempt 通过 fence handoff，过期实例只能 takeover，cleanup 先进入 durable pending 再写不可变 receipt，启动同步最多续清 1 条，剩余 backlog 由后台 worker 逐行处理。Provisioning/allocator/cleanup callback 仍受 workspace/source 跨进程锁、lease-bounded deadline 与前后 exact authority 短事务约束。Agent tool 只在动作间协作取消，Verification 只在整体启动前验活；二者不在逐操作 fence 内，也不能被强杀。PR #88 第一提交仅退役 ReAct 的 `run_skill` / `dispatch_sub_agent` 嵌套直执行，第二提交另行退役 Visual Agent route-local loop；两者都不改变 W2 的正向消费或隔离定级，也不证明通用 Agent Tool executor 已退役。默认缺 secret 时在 provider 注入前失败关闭；ACTIVE promotion/abandon、accepted HEAD、crash recovery、文件句柄/reparse-point 与 OS/container/tenant 隔离仍未解决。
+11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 路线执行 `server-derived workspace_id → source commit freeze → lease/worktree → worker protected stage → Acceptance → real TaskStore evidence → clean/no-change HEAD capture → 0116 ACTIVE→ACCEPTED→PROMOTED`；response loss 只续做已持久开始的 lifecycle/artifact operation，不重跑 Agent。Artifact namespace已用逐层`lstat`拒绝symlink/reparse/junction、逐层mkdir与关键I/O前重验封住已知路径重定向，反向legacy alias也拒绝。顺序 node/attempt 仍通过 fence handoff，cleanup backlog由既有worker处理。该正向路径拒绝dirty/advanced HEAD，只覆盖no-change inspect；一般write promotion、rejected/cancelled protected stage自动continuation、逐操作fence/强杀、handle-level原子TOCTOU与OS/container/tenant隔离仍未解决。
 
 ## 13. 代码证据索引
 

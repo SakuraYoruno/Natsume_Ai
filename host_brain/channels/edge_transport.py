@@ -346,6 +346,7 @@ async def submit_gateway_reply(
     raw_extra: Mapping[str, Any] | None = None,
     request_id: str | None = None,
     delivery_id: str | None = None,
+    effect_id: str | None = None,
     wait_result: bool = True,
     timeout_ms: int = 12_000,
     action_preview_service: Any | None = None,
@@ -414,10 +415,46 @@ async def submit_gateway_reply(
         payload["media_path"] = str(media_path).strip()
     if extra:
         payload["raw_extra"] = extra
+    if effect_id is not None:
+        # The stable Acceptance Effect identity is transport metadata.  It is
+        # persisted in the durable outbox payload/digest but never forwarded
+        # to a platform adapter or folded into the visible Preview action.
+        payload["effect_id"] = str(effect_id)
     return await _submit_gateway_payload(
         path="/v1/gateway/reply",
         payload=payload,
         timeout_ms=max(12_000, int(timeout_ms) + 3_000 if wait_result else int(timeout_ms)),
+    )
+
+
+async def query_gateway_reply_delivery(
+    *,
+    effect_id: str,
+    delivery_id: str,
+    platform: str,
+    conversation_id: str,
+    payload_digest: str,
+    timeout_ms: int = 5_000,
+) -> EdgeTransportResult:
+    """Read an exact Gateway outbox snapshot without resubmitting a reply.
+
+    The query uses the same internal_reply HMAC profile, timestamp/nonce
+    envelope and loopback-or-TLS policy as reply intake.  ``UNKNOWN`` is a
+    successful *read* result, not proof that no effect exists.
+    """
+
+    return await _submit_gateway_payload(
+        path="/v1/gateway/reply/query",
+        payload={
+            "schema_version": "Natsume.gateway.reply-query.v1",
+            "effect_id": str(effect_id),
+            "delivery_id": str(delivery_id),
+            "platform": str(platform),
+            "conversation_id": str(conversation_id),
+            "payload_digest": str(payload_digest),
+        },
+        timeout_ms=max(500, int(timeout_ms)),
+        accepted_statuses=frozenset({"committed", "unknown"}),
     )
 
 
@@ -573,6 +610,7 @@ async def _submit_gateway_payload(
     path: str,
     payload: Mapping[str, Any],
     timeout_ms: int,
+    accepted_statuses: frozenset[str] | None = None,
 ) -> EdgeTransportResult:
     started = time.monotonic()
     secret = str(_resolve_gateway_reply_key() or "")
@@ -640,8 +678,11 @@ async def _submit_gateway_payload(
         raw = {}
     parsed = dict(raw) if isinstance(raw, Mapping) else {}
     status = str(parsed.get("status") or "unknown").strip().lower()
+    accepted = accepted_statuses or frozenset(
+        {"sent", "queued", "accepted", "acked", "duplicate", "ok"}
+    )
     success = response.status_code == 200 and (
-        status in {"sent", "queued", "accepted", "acked", "duplicate", "ok"}
+        status in accepted
         or parsed.get("success") is True
     )
     return EdgeTransportResult(
@@ -663,6 +704,7 @@ __all__ = [
     "resolve_edge_base_url",
     "resolve_gateway_base_urls",
     "resolve_host_edge_rpc_shared_key",
+    "query_gateway_reply_delivery",
     "submit_gateway_reply",
     "submit_proactive_push",
 ]

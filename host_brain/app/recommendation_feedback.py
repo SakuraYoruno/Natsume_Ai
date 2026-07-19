@@ -1,6 +1,9 @@
 ﻿from __future__ import annotations
 
+import hashlib
+import json
 import re
+import time
 from typing import Any, Mapping
 
 from host_brain.app.user_preference_store import (
@@ -111,6 +114,17 @@ def _confidence(value: float) -> float:
     return max(0.0, min(1.0, float(value or 0.0)))
 
 
+def _delivery_sha256(delivery: Mapping[str, Any]) -> str:
+    material = json.dumps(
+        dict(delivery),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(material).hexdigest()
+
+
 def _parse_index(text: str) -> int | None:
     match = _INDEX_RE.search(text)
     if not match:
@@ -148,7 +162,7 @@ def _event(
         confidence=_confidence(confidence),
         attributes=dict(attributes or {}),
         evidence_refs=list(evidence_refs or []),
-        created_at_ms=ts_ms or 0,
+        created_at_ms=(int(time.time() * 1000) if ts_ms is None else int(ts_ms)),
     )
 
 
@@ -268,21 +282,15 @@ def _recommendation_feedback_events(
         return []
 
     conversation_id = _clean(payload.get("conversation_id"), limit=180)
-    delivery = store.get_latest_delivery(
+    if ts_ms is None:
+        return []
+    delivery = store.get_feedback_delivery(
         person_id=person_id,
         session_id=session_id,
         conversation_id=conversation_id,
         domain=LIGHTNOVEL_DOMAIN,
-        created_before_ms=ts_ms,
+        admitted_at_ms=int(ts_ms),
     )
-    if not delivery and ts_ms is not None:
-        delivery = store.get_latest_delivery(
-            person_id=person_id,
-            session_id=session_id,
-            conversation_id=conversation_id,
-            domain=LIGHTNOVEL_DOMAIN,
-            created_before_ms=None,
-        )
     if not delivery:
         return []
 
@@ -291,6 +299,7 @@ def _recommendation_feedback_events(
     confidence = 0.95 if item is not None else 0.55
     source_kind = "recommendation_feedback"
     delivery_id = _clean(delivery.get("delivery_id"), limit=160)
+    delivery_digest = _delivery_sha256(delivery)
     evidence_refs = [
         f"recommendation_delivery://{delivery_id}",
         f"input://session/{session_id}/recommendation_feedback",
@@ -309,6 +318,8 @@ def _recommendation_feedback_events(
                 confidence=confidence,
                 attributes={
                     "bind_reason": bind_reason,
+                    "delivery_id": delivery_id,
+                    "delivery_sha256": delivery_digest,
                     "raw_text": text,
                     "selected_titles": [_clean(row.get("title"), limit=120) for row in list(delivery.get("items") or [])],
                 },
@@ -330,6 +341,8 @@ def _recommendation_feedback_events(
             confidence=confidence,
             attributes={
                 "bind_reason": bind_reason,
+                "delivery_id": delivery_id,
+                "delivery_sha256": delivery_digest,
                 "rank": item.get("rank"),
                 "detail_url": item.get("detail_url"),
                 "selection_reason": item.get("selection_reason"),
@@ -359,6 +372,8 @@ def _recommendation_feedback_events(
                 target_label=label,
                 confidence=trait_confidence,
                 attributes={
+                    "delivery_id": delivery_id,
+                    "delivery_sha256": delivery_digest,
                     "keywords": [_clean(keyword, limit=60) for keyword in list(trait.get("keywords") or []) if _clean(keyword)],
                     "score": trait.get("score"),
                     "source_item": item.get("title"),
@@ -380,32 +395,15 @@ def record_user_preference_signal_if_present(
     ledger: Any | None = None,
     ts_ms: int | None = None,
 ) -> dict[str, Any] | None:
-    text = _clean(user_message, limit=500)
-    resolved_person_id = _clean(person_id, limit=120) or "unknown"
-    resolved_session_id = _clean(session_id, limit=180)
-    if not text or not resolved_session_id:
-        return None
-    if _looks_like_preference_query(text):
-        return None
-    if _looks_like_recommendation_question(text):
-        return None
-
     store = UserPreferenceStore(ledger=ledger)
-    events = _recommendation_feedback_events(
-        text=text,
-        person_id=resolved_person_id,
-        session_id=resolved_session_id,
+    events = derive_user_preference_signal_events(
+        session_id=session_id,
+        person_id=person_id,
+        user_message=user_message,
         payload=dict(payload or {}),
         store=store,
         ts_ms=ts_ms,
     )
-    if not events:
-        events = _explicit_preference_events(
-            text=text,
-            person_id=resolved_person_id,
-            session_id=resolved_session_id,
-            ts_ms=ts_ms,
-        )
     if not events:
         return None
     rows = store.append_events(events)
@@ -422,5 +420,83 @@ def record_user_preference_signal_if_present(
     }
 
 
-__all__ = ["record_user_preference_signal_if_present"]
+def derive_user_preference_signal_events(
+    *,
+    session_id: str,
+    person_id: str | None,
+    user_message: str,
+    payload: Mapping[str, Any] | None,
+    store: UserPreferenceStore,
+    ts_ms: int | None,
+    operation_id: str = "",
+) -> list[UserPreferenceEvent]:
+    """Derive candidates without writing and optionally bind stable IDs."""
 
+    text = _clean(user_message, limit=500)
+    resolved_person_id = _clean(person_id, limit=120) or "unknown"
+    resolved_session_id = _clean(session_id, limit=180)
+    if (
+        not text
+        or not resolved_session_id
+        or _looks_like_preference_query(text)
+        or _looks_like_recommendation_question(text)
+    ):
+        return []
+    events = _recommendation_feedback_events(
+        text=text,
+        person_id=resolved_person_id,
+        session_id=resolved_session_id,
+        payload=dict(payload or {}),
+        store=store,
+        ts_ms=ts_ms,
+    )
+    if not events:
+        events = _explicit_preference_events(
+            text=text,
+            person_id=resolved_person_id,
+            session_id=resolved_session_id,
+            ts_ms=ts_ms,
+        )
+    operation = str(operation_id or "")
+    if not operation:
+        return events
+    bound: list[UserPreferenceEvent] = []
+    for index, event in enumerate(events):
+        normalized = event.normalized()
+        semantic = {
+            "person_id": normalized.person_id,
+            "session_id": normalized.session_id,
+            "domain": normalized.domain,
+            "source_kind": normalized.source_kind,
+            "polarity": normalized.polarity,
+            "target_kind": normalized.target_kind,
+            "target_id": normalized.target_id,
+            "target_label": normalized.target_label,
+            "attributes": dict(normalized.attributes),
+            "evidence_refs": list(normalized.evidence_refs),
+            "confidence": normalized.confidence,
+            "created_at_ms": normalized.created_at_ms,
+            "active": normalized.active,
+        }
+        digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "operation_id": operation,
+                    "candidate_index": index,
+                    "event": semantic,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        normalized.event_id = f"prefevt_{digest}"
+        bound.append(normalized)
+    return bound
+
+
+__all__ = [
+    "derive_user_preference_signal_events",
+    "record_user_preference_signal_if_present",
+]

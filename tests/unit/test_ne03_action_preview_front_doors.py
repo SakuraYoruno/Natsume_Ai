@@ -421,6 +421,20 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
     monkeypatch,
 ) -> None:
     submitted: list[dict[str, Any]] = []
+    effect_id = "effect-accepted-surface-handler"
+    accepted_value = {
+        "request_id": "request-accepted-handler",
+        "session_id": "session-accepted-handler",
+        "person_id": "person-accepted-handler",
+        "decision": "APPROVE",
+        "reply_channel": "qq",
+        "reply_target": "conversation-accepted-handler",
+        "narrative": "immutable accepted narrative",
+        "authority": {
+            "request_id": "request-accepted-handler",
+            "opaque": "must-not-be-forwarded",
+        },
+    }
 
     async def _submit_gateway_reply(**kwargs):
         submitted.append(dict(kwargs))
@@ -442,7 +456,8 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
                 "conversation_id": kwargs["conversation_id"],
                 "payload_digest": (
                     acceptance_effect_handlers._surface_gateway_payload_digest(
-                        surface_value
+                        surface_value,
+                        effect_id=kwargs["effect_id"],
                     )
                 ),
             },
@@ -454,24 +469,36 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
         _submit_gateway_reply,
     )
     result = await acceptance_effect_handlers._deliver_accepted_surface_reply(
-            {
-                "request_id": "request-accepted-handler",
-                "session_id": "session-accepted-handler",
-                "person_id": "person-accepted-handler",
-                "decision": "APPROVE",
-            "reply_channel": "qq",
-            "reply_target": "conversation-accepted-handler",
-            "narrative": "immutable accepted narrative",
-                "authority": {
-                    "request_id": "request-accepted-handler",
-                    "opaque": "must-not-be-forwarded",
-                },
+        {
+            **accepted_value,
             "_action_preview_terminal_proof": {
                 "service": SimpleNamespace(
                     require_execution=lambda **_kwargs: object()
                 ),
                 "event_id": "runtime-event://accepted-handler",
-                "boundary": {"exact": True},
+                "boundary": {
+                    "action_kind": "acceptance-effect.surface.reply_delivery",
+                    "action_scope": effect_id,
+                    "risk_level": 3,
+                    "action_args": accepted_value,
+                    "context_pack_digest": "sha256:" + "1" * 64,
+                    "scene_identity": "scene://accepted-handler",
+                    "task_graph_id": "graph-accepted-handler",
+                    "graph_revision": 1,
+                    "task_node_id": "node-accepted-handler",
+                    "parent_governor_grant_ref": "grant://accepted-parent",
+                    "node_grant_ref": "grant://accepted-node",
+                    "node_grant": {"grant_ref": "grant://accepted-node"},
+                    "authority_context": {
+                        "schema_version": (
+                            "Natsume.action_preview."
+                            "acceptance_effect_authority_request.v1"
+                        ),
+                        "effect_id": effect_id,
+                        "lease_owner_id": "accepted-handler-owner",
+                        "fencing_token": 1,
+                    },
+                },
             },
         }
     )
@@ -487,6 +514,7 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
     assert submitted[0]["conversation_id"] == "conversation-accepted-handler"
     assert submitted[0]["content"] == "immutable accepted narrative"
     assert submitted[0]["msg_type"] == "text"
+    assert submitted[0]["effect_id"] == effect_id
     assert "raw_extra" not in submitted[0]
     assert "media_path" not in submitted[0]
     assert "authority" not in submitted[0]

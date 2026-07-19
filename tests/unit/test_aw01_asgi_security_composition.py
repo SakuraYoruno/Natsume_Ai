@@ -784,6 +784,14 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         captured["cancellation_authority_verifier"] = kwargs[
             "cancellation_authority_verifier"
         ]
+        assert isinstance(
+            kwargs["internal_agent_artifact_store"],
+            asgi.AgentArtifactStore,
+        )
+        captured["internal_agent_artifact_store"] = kwargs[
+            "internal_agent_artifact_store"
+        ]
+        assert kwargs["internal_agent_workspace_runtime"] is workspace_runtime
         assert callable(kwargs["life_receipt_reader_provider"])
         assert kwargs == {
             "task_runtime_container": task_runtime_container,
@@ -801,6 +809,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "secure_ingress_authority_resolver": command_store,
             "runtime_owner_id": "test-canonical-owner::runtime::test-boot",
             "scheduler_operation_handler": scheduler_operation_handler,
+            "internal_agent_artifact_store": kwargs[
+                "internal_agent_artifact_store"
+            ],
+            "internal_agent_workspace_runtime": workspace_runtime,
             "life_receipt_reader_provider": kwargs[
                 "life_receipt_reader_provider"
             ],
@@ -1043,6 +1055,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "model_attempt_service": model_attempt_service,
             "prompt_registry": prompt_registry,
             "workspace_runtime": workspace_runtime,
+            "artifact_store": captured["internal_agent_artifact_store"],
         }
         else pytest.fail("wrong canonical agent executor ports"),
     )

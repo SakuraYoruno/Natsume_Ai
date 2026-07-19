@@ -102,6 +102,7 @@ from host_brain.app.settings import (
 )
 from host_brain.app.settings.input import get_input_settings
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.core.ids import now_ms
 from host_brain.observability.projection_store import QueryProjectionStore
@@ -992,6 +993,11 @@ def create_app() -> FastAPI:
                 agent_workspace_container = workspace.compose_agent_workspace_application_scope(
                     application, task_runtime, runtime_settings, canonical_owner
                 )
+                internal_agent_artifact_store = (
+                    AgentArtifactStore()
+                    if agent_workspace_container is not None
+                    else None
+                )
                 scheduler_workers = SchedulerWorkerRegistry()
                 scheduler_operation_handler = SchedulerAcceptedOperationHandler(
                     worker_registry=scheduler_workers,
@@ -1021,6 +1027,12 @@ def create_app() -> FastAPI:
                     life_receipt_reader_provider=(
                         lambda: life_command_authority_provider(ledger)[1]
                     ),
+                    internal_agent_artifact_store=internal_agent_artifact_store,
+                    internal_agent_workspace_runtime=(
+                        agent_workspace_container.runtime
+                        if agent_workspace_container is not None
+                        else None
+                    ),
                 )
                 acceptance_effect_dispatcher = (
                     operator_composition.acceptance_effect_dispatcher
@@ -1048,6 +1060,9 @@ def create_app() -> FastAPI:
                 }
                 if agent_workspace_container is not None:
                     canonical_agent_executor_kwargs["workspace_runtime"] = agent_workspace_container.runtime
+                    canonical_agent_executor_kwargs["artifact_store"] = (
+                        internal_agent_artifact_store
+                    )
                 internal_runtime = build_governed_internal_runtime(
                     task_runtime_container=task_runtime,
                     ledger=ledger,

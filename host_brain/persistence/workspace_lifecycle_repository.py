@@ -804,6 +804,7 @@ class WorkspaceLifecycleRepositoryMixin:
         row = conn.execute(
             """
             SELECT attempt.graph_id, attempt.graph_revision, attempt.node_id,
+                   attempt.status AS attempt_status,
                    lease.attempt_id, lease.fencing_token,
                    lease.status, lease.expires_ts_ms
             FROM task_runtime_attempt AS attempt
@@ -824,10 +825,16 @@ class WorkspaceLifecycleRepositoryMixin:
             or int(row["fencing_token"]) != task_lease_fencing_token
             or (
                 require_live
-                and (
-                    str(row["status"]) != "ACTIVE"
-                    or type(row["expires_ts_ms"]) is not int
-                    or int(row["expires_ts_ms"]) <= ts_ms
+                and not (
+                    (
+                        str(row["status"]) == "ACTIVE"
+                        and type(row["expires_ts_ms"]) is int
+                        and int(row["expires_ts_ms"]) > ts_ms
+                    )
+                    or (
+                        str(row["attempt_status"]) == "SUCCEEDED"
+                        and str(row["status"]) == "RELEASED"
+                    )
                 )
             )
         ):

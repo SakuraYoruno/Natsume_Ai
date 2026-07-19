@@ -18,6 +18,7 @@ from host_brain.app.acceptance_effect_handlers import (
 from host_brain.app.governed_task_adapter import (
     build_governed_host_runtime as _build_governed_host_runtime,
 )
+from host_brain.app.user_preference_store import UserPreferenceStore
 from host_brain.channels.embodiment import HostEmbodimentRuntime
 from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
 
@@ -286,7 +287,10 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 "outbox_id": "gateway-outbox-gr05-universal-runtime",
                 "platform": str(payload.get("platform") or ""),
                 "conversation_id": str(payload.get("conversation_id") or ""),
-                "payload_digest": _surface_gateway_payload_digest(surface_value),
+                    "payload_digest": _surface_gateway_payload_digest(
+                        surface_value,
+                        effect_id=str(payload.get("effect_id") or ""),
+                    ),
             },
             latency_ms=1,
         )
@@ -378,12 +382,13 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         )
         acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
             task_store=container.task_store,
-            handlers=build_production_acceptance_effect_handlers(
-                conversation_turn_reader=ContextRepository.from_ledger(ledger),
-                conversation_event_reader=MemoryEventRepository.from_ledger(
-                    ledger
-                ),
-                life_receipt_reader_provider=lambda: life.snapshot_reader,
+                handlers=build_production_acceptance_effect_handlers(
+                    conversation_turn_reader=ContextRepository.from_ledger(ledger),
+                    conversation_event_reader=MemoryEventRepository.from_ledger(
+                        ledger
+                    ),
+                    preference_store=UserPreferenceStore(ledger=ledger),
+                    life_receipt_reader_provider=lambda: life.snapshot_reader,
             ),
             owner_id="gr05-universal-acceptance-effects",
             action_preview_service=action_preview_service,
@@ -661,13 +666,15 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         )
         assert legacy_delegate_logs == 0
         assert acceptance_effects == [
+            ("conversation.preference_signal", "GRAPH", "COMMITTED", 3),
             ("conversation.user_turn", "GRAPH", "COMMITTED", 3),
+            ("life.conversation_turn_recorded", "GRAPH", "COMMITTED", 3),
             ("life.foreground_completed", "GRAPH", "COMMITTED", 3),
             ("surface.reply_delivery", "GRAPH", "COMMITTED", 1),
         ]
         assert results["chat"][-1]["audit_refs"]["acceptance_effects"] == {
-            "count": 3,
-            "committed": 3,
+            "count": 5,
+            "committed": 5,
             "failed": 0,
             "pending": 0,
             "recovery_pending": 0,
@@ -676,8 +683,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         assert all(
             results[route][-1]["audit_refs"]["acceptance_effects"]
             == {
-                "count": 2,
-                "committed": 2,
+                "count": 4,
+                "committed": 4,
                 "failed": 0,
                 "pending": 0,
                 "recovery_pending": 0,

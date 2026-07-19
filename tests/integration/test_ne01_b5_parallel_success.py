@@ -324,6 +324,8 @@ def _assert_b5_terminal_assets(
     )
     assert {effect["effect_type"] for effect in effects} == {
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
     }
     decision = store.get_latest_parallel_success_decision("graph-gr03a", 1)

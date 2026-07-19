@@ -80,7 +80,7 @@ def _life_payload() -> dict[str, Any]:
 
 
 def _surface_payload() -> dict[str, Any]:
-    return {
+    value = {
         "request_id": "request-ne01-surface-response-loss",
         "session_id": "session-ne01-surface-response-loss",
         "person_id": "person-ne01-surface-response-loss",
@@ -94,10 +94,39 @@ def _surface_payload() -> dict[str, Any]:
             "authority_kind": "governed_task_acceptance",
             "authority_principal_id": "person-ne01-surface-response-loss",
         },
+    }
+    effect_id = "effect-ne01-surface-response-loss"
+    return {
+        **value,
         "_action_preview_terminal_proof": {
             "service": SimpleNamespace(require_execution=lambda **_kwargs: object()),
             "event_id": "runtimeevent://ne01/surface-response-loss",
-            "boundary": {"exact": True},
+            "boundary": {
+                "action_kind": "acceptance-effect.surface.reply_delivery",
+                "action_scope": effect_id,
+                "risk_level": 3,
+                "action_args": value,
+                "context_pack_digest": "sha256:" + "1" * 64,
+                "scene_identity": "scene://ne01/surface-response-loss",
+                "task_graph_id": "graph-ne01-surface-response-loss",
+                "graph_revision": 1,
+                "task_node_id": "node-ne01-surface-response-loss",
+                "parent_governor_grant_ref": "governor-grant://ne01/surface",
+                "node_grant_ref": "node-grant://ne01/surface",
+                "node_grant": {
+                    "grant_ref": "node-grant://ne01/surface",
+                    "binding_digest": "sha256:" + "2" * 64,
+                },
+                "authority_context": {
+                    "schema_version": (
+                        "Natsume.action_preview."
+                        "acceptance_effect_authority_request.v1"
+                    ),
+                    "effect_id": effect_id,
+                    "lease_owner_id": "acceptance-effect-owner",
+                    "fencing_token": 1,
+                },
+            },
         },
     }
 
@@ -360,7 +389,7 @@ async def test_surface_response_loss_and_restart_never_resend_without_query_port
         "surface.reply_delivery"
     ]
     with pytest.raises(AcceptanceEffectOutcomeUnknown, match="no authenticated"):
-        restarted.reconcile(_surface_payload())
+        await restarted.reconcile(_surface_payload())
 
     assert calls == 1
 
@@ -380,9 +409,16 @@ async def test_surface_non_success_without_explicit_no_effect_stays_unknown(
             "delivery_id": acceptance_effect_handlers._surface_delivery_id(payload),
             "platform": payload["reply_channel"],
             "conversation_id": payload["reply_target"],
-            "payload_digest": (
-                acceptance_effect_handlers._surface_gateway_payload_digest(payload)
-            ),
+                "payload_digest": (
+                    acceptance_effect_handlers._surface_gateway_payload_digest(
+                        payload,
+                        effect_id=str(
+                            payload["_action_preview_terminal_proof"]["boundary"][
+                                "action_scope"
+                            ]
+                        ),
+                    )
+                ),
         }
         if response_kind == "enqueued_then_500"
         else {}
@@ -409,7 +445,7 @@ async def test_surface_non_success_without_explicit_no_effect_stays_unknown(
     with pytest.raises(AcceptanceEffectOutcomeUnknown) as uncertain:
         await handler(payload)
     with pytest.raises(AcceptanceEffectOutcomeUnknown):
-        handler.reconcile(payload)
+        await handler.reconcile(payload)
 
     assert "provider-secret-must-not-persist" not in uncertain.value.detail
     assert calls == 1

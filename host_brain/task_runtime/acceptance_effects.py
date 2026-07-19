@@ -19,6 +19,12 @@ from host_brain.persistence.task_repository import (
     AcceptanceEffectCommitScope,
     AcceptanceEffectIntentSpec,
 )
+from host_brain.contracts.conversation_acceptance_effects import (
+    LIFE_CONVERSATION_PROJECTION_SCHEMA_V1,
+    PREFERENCE_SIGNAL_SCHEMA_V1,
+    conversation_life_command_id,
+    preference_operation_id,
+)
 from natsume_contracts.task import HostCommand, HostCommandSurface
 from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
@@ -171,6 +177,28 @@ def compile_graph_acceptance_effects(
     }
     payloads: list[tuple[str, Mapping[str, Any]]] = [
         ("conversation.user_turn", user_turn),
+        (
+            "conversation.preference_signal",
+            {
+                "schema_version": PREFERENCE_SIGNAL_SCHEMA_V1,
+                "operation_id": preference_operation_id(
+                    graph_id=command.graph_id,
+                    graph_revision=command.graph_revision,
+                    node_id=node_ref,
+                    attempt_id=attempt_ref,
+                    request_id=command.request_id,
+                ),
+                **user_turn,
+            },
+        ),
+        (
+            "life.conversation_turn_recorded",
+            {
+                "schema_version": LIFE_CONVERSATION_PROJECTION_SCHEMA_V1,
+                "command_id": conversation_life_command_id(command.request_id),
+                **user_turn,
+            },
+        ),
         ("life.foreground_completed", foreground),
     ]
     reply_channel = str(delivery_context.get("reply_channel") or "").strip()

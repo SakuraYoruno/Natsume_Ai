@@ -5,7 +5,7 @@
   "evaluated_source": "AUDITED_ANCESTOR_COMMIT",
   "evidence_binding": {
     "evaluated_commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
-    "migration_head": "0117_scheduler_clock_retry_authority.sql"
+    "migration_head": "0118_conversation_acceptance_effects.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
@@ -15,7 +15,8 @@
     "durable_cancellation": "OFF",
     "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "effect_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
-    "generic_acceptance_effect_reconciliation": "PARTIAL_CONVERSATION_VISIBLE_TURN_MEMORY_EVENT_EXACT_PREFERENCE_SIDE_WRITE_UNRECEIPTED_LIFE_EFFECT_EXACT_SURFACE_UNKNOWN_AUTHENTICATED_GATEWAY_READ_PORT_MISSING",
+    "generic_acceptance_effect_reconciliation": "PARTIAL_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_NON_BOOLEAN_FAIL_CLOSED_ZERO_WRITE_FALSE_OR_MALFORMED_ENV_BOOLEAN_FALSE_DISABLED_ZERO_EVENT_PROFILE_0118_SEALED_CHILD_FULL_SET_TAMPER_CHECK_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_DELIVERY_DIGEST_AUTHENTICATED_GATEWAY_SAME_SQLITE_PAYLOAD_EFFECT_ID_QUERY_NOT_FOUND_ALWAYS_UNKNOWN",
+    "internal_protected_artifact_promotion": "PARTIAL_CLEAN_NO_CHANGE_ONLY_FULL_PATH_CHAIN_LSTAT_REJECTS_SYMLINK_REPARSE_JUNCTION_CRITICAL_IO_REVALIDATION_REAL_TASKSTORE_EVIDENCE_0116_ACTIVE_ACCEPTED_PROMOTED_POST_ACCEPTANCE_RECONCILIATION_NO_AGENT_RERUN_PRE_PROJECTION_CRASH_FAIL_CLOSED_RECOVERY_REQUIRED_WORKER_REPLAY_BLOCKED_SEALED_STAGE_PROJECTION_RESUME_MISSING_HANDLE_LEVEL_TOCTOU_GENERAL_WRITE_REJECT_CANCEL_CONTINUATION_OS_CONTAINER_ISOLATION_INCOMPLETE",
     "acceptance_effect_recovery_guardian": "WIRED_APP_LOCAL_DURABLE_SLO_OPAQUE_INCIDENT_ONLY",
     "terminal_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "terminal_reconciliation_auto": "DEFAULT_OFF",
@@ -33,12 +34,22 @@
   "routes": {
     "chat": {
       "status": "INCOMPLETE",
+      "production_boundary": "Visible turn, Preference evaluation and Life projection are independent post-Acceptance effects. A missing or non-boolean store privacy-gate contract fails closed with zero writes; explicit false or malformed environment configuration is conservatively parsed to boolean false and writes only a DISABLED receipt with zero events/current profiles/0118 child versions. Enabled mode atomically commits event bindings, append-only child profile versions and the evaluation receipt; parent-sealed plus full-set reconciliation rejects tamper, and NO_SIGNAL is durable. Recommendation feedback is bounded by admitted time, exact person/conversation/session and a canonical full-delivery digest. Surface response loss uses the existing internal_reply HMAC read-only query; Gateway validates effect_id from the same SQLite persisted payload and Host re-derives delivery/payload identity. NOT_FOUND remains UNKNOWN. The current fresh pre-commit local Conversation/Gateway/GR05/GR06 batch reports 65 passed in 118.52 seconds; earlier focused groups are superseded history and are not added. Wave integration, real model and NE-07 Docker full stack are not run.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_route_executors.py",
+        "host_brain/contracts/conversation_acceptance_effects.py",
+        "host_brain/audit/migrations/0118_conversation_acceptance_effects.sql",
+        "host_brain/app/acceptance_effect_handlers.py",
+        "edge_client/gateway/delivery_runtime.py",
+        "edge_client/gateway/server.py",
+        "host_brain/channels/edge_transport.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
+        "tests/integration/test_ne01_conversation_atomic_effects.py",
+        "tests/integration/test_ne01_gateway_reply_query.py",
+        "tests/unit/test_ne01_gateway_reply_query_client.py",
         "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "controls": {
@@ -175,14 +186,17 @@
     },
     "internal": {
       "status": "INCOMPLETE",
-      "production_boundary": "Internal ingress is compiled into WorkOrderV3 and admitted through a single-node immutable TaskGraph, but execution still bridges to the legacy AgentWorkOrder executor. FrozenNodeInput projects exact root WorkOrder, graph/revision, node, attempt, lease, command, principal, lease owner and fence into DurableWorkspaceRuntime. Verifier, outer Acceptance and the final result handler all require strict EXECUTED + ACCEPT + review_required=false, so NOT_RUN/RETRY/REVIEW/SPLIT cannot be promoted through generic Review. The worker produces a sanitized bounded result proposal; internal.agent.result_commit writes the canonical result only after Acceptance. The ingress claim closes only after the Effect is COMMITTED and the exact result receipt reopens; PENDING, FAILED and NO_EFFECTS remain OPEN. A pre-Acceptance local artifact, complete public WorkerProjection and current-commit live acceptance remain absent.",
+      "production_boundary": "Internal ingress is compiled into WorkOrderV3 and admitted through a single-node immutable TaskGraph, but execution still bridges to legacy AgentWorkOrder. The worker writes raw work-order/prompt/metadata/result/changed-files/verification into an exact-inventory protected stage. Every existing component from configured root to target is checked with lexical lstat; symlinks, Windows reparse points and junctions fail closed. Directories are created componentwise, raw/metadata open, atomic replace and controlled remove revalidate the path, and reverse legacy aliases into the governed namespace are rejected. Extra files and byte drift also fail closed, and public WorkerProjection carries only its ref/digest plus a bounded summary. After Acceptance, internal.agent.result_commit reopens real TaskStore evidence and only a clean Git worktree with HEAD equal to the frozen base can advance migration 0116 ACTIVE to ACCEPTED to PROMOTED. Post-Acceptance Effect/promotion response-loss reconciliation continues an already-started durable operation without rerunning Agent. If the process exits after seal but before WorkerProjection persistence, the non-COMMITTED Operation checkpoint becomes RECOVERY_REQUIRED and DurableOperationRecoveryRuntime blocks worker replay; positive sealed-stage-to-projection resume is missing. The current fresh pre-commit local Internal artifact/accepted result/real cutover/Workspace lifecycle/TaskStore heartbeat/Tool migration batch reports 63 passed and 3 skipped in 62.06 seconds; every skip is a Windows file-symlink creation privilege error 1314 and is not counted as pass, while the directory-junction case executed. Earlier focused groups are superseded history and are not added. Handle-level atomic TOCTOU, general write, rejected/cancelled continuation, OS/container isolation, legacy bridge and current-commit route acceptance remain incomplete.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
         "host_brain/agent_runtime/internal_result_proposal.py",
+        "host_brain/agent_runtime/artifact_store.py",
         "host_brain/agent_runtime/accepted_result.py",
         "host_brain/agent_runtime/accepted_effect_runtime.py",
         "host_brain/agent_runtime/executor.py",
+        "host_brain/agent_runtime/workspace_runtime.py",
         "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/unit/test_ne01_internal_artifact_stage.py",
         "tests/unit/test_ne01_internal_accepted_result.py"
       ],
       "controls": {

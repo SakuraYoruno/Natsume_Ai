@@ -43,9 +43,11 @@ AcceptanceEffectRecoveryObserver = Callable[[Mapping[str, Any]], Any]
 _EFFECT_TYPE_ORDER = {
     "host.sys_mode_transition": 0,
     "conversation.user_turn": 1,
-    "life.foreground_completed": 2,
-    "surface.reply_delivery": 3,
-    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 4,
+    "conversation.preference_signal": 2,
+    "life.conversation_turn_recorded": 3,
+    "life.foreground_completed": 4,
+    "surface.reply_delivery": 5,
+    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 6,
 }
 
 _RECOVERY_POLL_SECONDS = 0.25
@@ -294,6 +296,8 @@ class AcceptanceEffectDispatcher:
         risk_level = {
             "host.sys_mode_transition": 4,
             "conversation.user_turn": 1,
+            "conversation.preference_signal": 1,
+            "life.conversation_turn_recorded": 2,
             "life.foreground_completed": 2,
             "surface.reply_delivery": 3,
         }.get(effect_type, 5)

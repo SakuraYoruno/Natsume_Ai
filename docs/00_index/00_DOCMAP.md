@@ -4,7 +4,7 @@
 # Natsume AI 文档地图与权威顺序
 
 版本：v8.6
-维护日期：2026-07-19
+维护日期：2026-07-20
 状态：`CURRENT_AUTHORITY_MAP`
 
 ## 1. 权威顺序
@@ -68,8 +68,8 @@ flowchart TD
 
 - Full Architecture：`INCOMPLETE`。
 - Host `chat/skill/delegate/plan`：`WIRED`。
-- Scheduler：`WIRED`；Internal Agent：`WIRED`（v2 仅为 executor 兼容边界）。
-- Host HardState：`WIRED_DURABLE_MODE_AUTHORITY / OPERATOR_HTTP_E2E_BLOCKED / NE01_IN_PROGRESS`。HardState 使用 migration 0115；仓库当前 migration head 已推进到 `0117_scheduler_clock_retry_authority.sql`（0116 Workspace lifecycle 仍为连续历史资产）。`HOST_SYS_MODES`/`HOST_MODE_TRANSITIONS`位于neutral contract，HardState persistence→application=0，full architecture static=`PASS`、`failed_gates=[]`。app-local owner 在 exact Host lease/fence 下原子提交 event/head并可restart恢复，成功transition以journal为唯一canonical audit且exact replay不重复追加兼容日志。权威consolidated=`84 passed in 66.37s`，旧83/82为被取代历史且禁止相加；自动模式规则、last-interaction、production canary和NE-01 wave integration仍未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- Scheduler：`PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE`；Internal Agent：`PARTIAL / PROTECTED_NO_CHANGE_ARTIFACT_PROMOTION`。Internal raw artifact只进入protected exact-inventory stage，公共projection只含ref/digest；路径祖先/目标逐层拒绝symlink/reparse/junction并在关键I/O前重验，legacy alias反向指入governed namespace也失败关闭。Acceptance后以真实TaskStore evidence仅对clean/no-change推进0116 lifecycle，post-Acceptance reconcile不重跑Agent。seal后projection前崩溃会`RECOVERY_REQUIRED`且阻断自动replay，但`SEALED_STAGE_PROJECTION_RESUME_MISSING`。当前fresh集中批次为Conversation/Gateway等`65 passed in 118.52s`与Internal/Workspace等`63 passed, 3 skipped in 62.06s`；3项为Windows文件symlink权限1314且不计通过，目录junction已实跑，两批不相加且仍为pre-commit local。handle-level TOCTOU、一般write、reject/cancel continuation、OS/container isolation与legacy bridge仍缺。
+- Host HardState：`WIRED_DURABLE_MODE_AUTHORITY / OPERATOR_HTTP_E2E_BLOCKED / NE01_IN_PROGRESS`。HardState 使用 migration 0115；仓库当前 migration head 已推进到 `0118_conversation_acceptance_effects.sql`（0116 Workspace lifecycle、0117 Scheduler Clock 仍为连续历史资产）。0118 将 visible turn、Preference、Life projection 拆为独立 post-Acceptance effects：store gate缺失/非bool失败关闭零写，配置false/malformed env保守映射为`DISABLED`零event/profile，启用路径使用sealed child profile + full-set tamper check；推荐反馈绑定admitted-time、exact conversation/session与canonical delivery digest。Surface query从Gateway同SQLite payload复验effect_id，`NOT_FOUND`保持`UNKNOWN`。这些是局部运行时资产，不改变NE-01 `IN_PROGRESS`；波次集成、真实模型、Docker全栈和canary均未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 - Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 已推进到 0098。Cancellation、Operation 签名对账与 Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`，开启 cancellation 时要求两类对账入口、Secure Ingress `ENFORCE`、可用 Gateway 和 verification-only Ed25519 公钥。0098 只追加 immutable case/proof sidecar：PENDING proof 可作为新 cancellation decision evidence；FINALIZED correction 只在 trusted read 验证 immutable legacy decision ref/payload digest，绝不改写旧 decision、fence 或 evidence。proof 的 case/intent/effect/fence/Attempt/resolution/actor/Outbox 与 `graph_revision` 均被签名和物理 trigger 绑定。生产门禁只阻断实际持久化且未修复/未隔离的 legacy inventory；仓库无 SQLite 资产不能证明外部生产数据已清理。Budget 高竞争、部署密钥/凭据、完整 key lifecycle 与真实 canary 仍缺，atomic、bounded 与 cancellation 均保持 OFF。
 - PlanningSearch：内核可用；Code D16 有 dynamic pure-shadow catalog/compile，D17 有 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 的双 detached worktree 本地实验机械链，D18 有独立 0106 preregistration → paired evidence → `VERIFIED_CLEAN` → terminal receipt 的 append-only durable ledger。D19 仅为已预注册的冻结 `python -m pytest -q <repo-relative-test>` 在同一主机受信 worktree 子进程中强制 argv、测试次数和总验证时限，并把无路径命令回执嵌入 arm evidence；它不是模型/插件/网络/文件系统隔离、通用硬预算或 production influence。跨领域真实收益仍 `UNPROVEN`。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。

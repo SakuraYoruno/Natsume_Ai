@@ -62,7 +62,9 @@ def _migrated_runtime(
         ts_ms=1,
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 116
+    # The fixture always migrates through the current catalog head; 0116 is
+    # verified below as an immutable historical asset, not as the latest head.
+    assert result.summary["current_version"] == 118
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -156,7 +158,9 @@ def _accept_values(fence: int, **overrides: object) -> dict[str, object]:
     return values
 
 
-def test_0116_is_next_free_checksum_bound_and_append_only(tmp_path: Path) -> None:
+def test_0116_is_checksum_bound_and_append_only_with_later_migrations(
+    tmp_path: Path,
+) -> None:
     repository, db_path, fence = _migrated_runtime(tmp_path)
     migration = (
         Path(__file__).resolve().parents[2]

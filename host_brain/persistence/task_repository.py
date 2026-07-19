@@ -1530,6 +1530,16 @@ class DurableTaskStore(
         finally:
             conn.close()
 
+    def get_lease(self, lease_id: str) -> dict[str, Any]:
+        """Return one exact lease row, including terminal RELEASED evidence."""
+
+        conn = self._connect()
+        try:
+            row = self._require_lease(conn, str(lease_id))
+            return dict(row)
+        finally:
+            conn.close()
+
     def get_active_lease(self, attempt_id: str) -> dict[str, Any] | None:
         """Return the exact ACTIVE lease row for one attempt, if present.
 

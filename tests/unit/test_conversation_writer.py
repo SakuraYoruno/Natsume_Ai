@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
@@ -54,6 +56,13 @@ def test_record_turn_writers_persist_through_canonical_repositories(monkeypatch,
         ("user", "你好"),
         ("assistant", "我是夏目蓝。"),
     ]
+    with sqlite3.connect(str(ledger.canonical_db_path)) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM life_command WHERE command_type = 'conversation_turn_recorded'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM user_preference_event"
+        ).fetchone()[0] == 0
 
 
 def test_record_user_turn_is_idempotent_for_same_request_role(monkeypatch, tmp_path) -> None:

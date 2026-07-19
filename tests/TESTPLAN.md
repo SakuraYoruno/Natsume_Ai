@@ -2,7 +2,7 @@
 标题：TESTPLAN（测试契约索引）
 
 版本：v0.8
-日期：2026-07-19
+日期：2026-07-20
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
@@ -316,24 +316,24 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 
 ### NE-01 通用 Acceptance Effect 对账与 Guardian 观测
 
-- T-NE01-EFFECT-RECONCILE-01：Conversation exact 只覆盖 visible turn 与 `MemoryEvent`；writer 返回 ID 不构成 authority。偏好 side-write 吞异常/无 receipt 与 Life projection 降级必须列为未覆盖，不能外推为偏好/Life 原子提交。独立 Life Effect 按 command hash/state/version/receipt 对账且不重放。
-- T-NE01-EFFECT-RECONCILE-02：Surface 成功响应必须精确绑定 outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 一律进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持 1；当前 Host 无 authenticated Gateway outbox read port，不得用普通 retry 或测试 fake reader伪造收口。
+- T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
+- T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应定向文件为 `tests/unit/test_acceptance_effect_handlers.py`、`tests/integration/test_ne01_generic_acceptance_effect_reconciliation.py`、`tests/unit/test_ne01_acceptance_effect_runtime.py`、`tests/integration/test_ne01_acceptance_effect_guardian_observer.py` 与 `tests/integration/test_gr06_acceptance_effect_dispatcher.py`。当前提交的集中结果由上层交付 Gate 统一记录；在该结果生成前状态保持 `IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06等当前fresh单一命令为`65 passed in 118.52s`；早期零散定向只作被覆盖历史，不得叠加。migration head=`0118_conversation_acceptance_effects.sql`。该结果仍为pre-commit local，提交后才生成ignored commit-bound receipt。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 
-- T-NE01-INTERNAL-RESULT-01：executor result 必须先经过 public sanitizer/有界校验形成 proposal；FrozenNodeInput 的 root WorkOrder、graph/revision、node、attempt、lease、command、principal、owner/fence 必须显式传给真实 Durable Workspace。Verifier、outer Acceptance 与最终 handler 都必须严格要求 `EXECUTED + ACCEPT + review_required=false`；`NOT_RUN/RETRY/REVIEW/SPLIT`、非 EXECUTED 与 review_required 不得进入通用 Review continuation或 result Effect。Graph Acceptance 后才允许 `internal.agent.result_commit` 重开 exact HostCommand/WorkOrder/Graph/Node/WorkerProjection/Preview 并写 canonical result repository。最终 P0/安全 focused 批次为 `19 passed in 29.41s`，其中 unit 10、Internal integration 3 及 executor/dispatcher 脱敏均为包含关系，不再相加。
-- T-NE01-INTERNAL-RESULT-02：`InternalAgentCommandService` 只有在 result Effect 为 `COMMITTED` 且 exact canonical result receipt 可重新读取时才能封 ingress claim。`PENDING/FAILED/NO_EFFECTS` 均保持 claim OPEN；response loss 只读 reconcile，不得重跑 Agent或重复写 result。
-- T-NE01-INTERNAL-RESULT-03：真实 `AgentRuntimeExecutor` metadata 中的 workspace lease owner/fence/path 不得进入 public result；canonical executor/workspace exception 只允许 `error_type + random incident`，raw detail不得日志或持久化，`test_ne01_agent_executor_redaction` 定向1项已成功。完整bounded public result仍在WorkerProjection，pre-Acceptance work_order/prompt/result/artifact文件未promotion，P1维持。
-- 对应定向文件为 `tests/unit/test_ne01_internal_accepted_result.py`、`tests/integration/test_aw02_internal_agent_runtime_cutover.py` 与 `tests/integration/test_gr05_universal_host_runtime.py`。最终集中结果、current-commit route receipt、NE-01 波次集成和真实模型 canary仍待统一执行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- T-NE01-INTERNAL-RESULT-01：executor必须把raw work order、prompt、metadata、result、changed-files、verification写入protected stage；seal只接受exact inventory/regular files并校验所有byte digest。configured root到target的所有既有component必须以lexical `lstat`校验并拒绝symlink/reparse/junction或错误类型；目录逐层创建，raw/metadata open、atomic replace、受控remove前重验；legacy alias反向指入governed namespace也必须拒绝。extra/link/tamper失败，公共WorkerProjection只允许stage ref/digest与bounded summary。FrozenNodeInput十字段authority必须原样传给Durable Workspace；Verifier、outer Acceptance与final handler都严格要求`EXECUTED + ACCEPT + review_required=false`。
+- T-NE01-INTERNAL-RESULT-02：`internal.agent.result_commit`必须在Acceptance后重开真实TaskStore exact Command/Graph/Node、`Node=ACCEPTED`、`Attempt=SUCCEEDED`、同owner/fence的`Lease=RELEASED`、Node artifact、Effect payload/digest/claim fence；任一漂移零promotion。只允许clean且HEAD等于frozen base的no-change Git Workspace进入0116 `ACTIVE→ACCEPTED→PROMOTED`；dirty/advanced HEAD失败。post-Acceptance Effect/promotion response loss只能续做已持久开始的operation且不能重跑Agent。seal后、WorkerProjection持久化前崩溃必须由既有Operation reservation恢复为`RECOVERY_REQUIRED`并阻断worker自动重跑；当前缺sealed-stage→projection正向resume，测试不得写成worker crash recovery完成。
+- T-NE01-INTERNAL-RESULT-03：真实 migrated SQLite+Git worktree integration必须证明accepted Node/Attempt/Lease/artifact/Effect→protected promotion→0116 PROMOTED→canonical result→post-Acceptance reconcile，Agent调用数保持1。当前Internal artifact/accepted result/真实cutover/Workspace lifecycle/TaskStore heartbeat/Tool migration单一fresh命令为`63 passed, 3 skipped in 62.06s`；3项均因当前Windows进程创建文件symlink返回权限错误1314，不计通过，目录junction场景已实际执行。它不得与Conversation/Gateway等`65 passed in 118.52s`或旧零散分组相加；当前仍为pre-commit local，提交后才生成ignored commit-bound receipt。`FAIL_CLOSED_RECOVERY_REQUIRED / SEALED_STAGE_PROJECTION_RESUME_MISSING`、handle-level TOCTOU、一般write、reject/cancel continuation、OS/container isolation与legacy bridge仍`INCOMPLETE`。
+- 对应定向文件为 `tests/unit/test_ne01_internal_artifact_stage.py`、`tests/unit/test_ne01_internal_accepted_result.py`、`tests/integration/test_aw02_internal_agent_runtime_cutover.py`。当前路径校验是多次`lstat`与I/O前重验，不是open-handle级原子TOCTOU或OS隔离。current-commit七路线receipt、NE-01波次集成和真实模型canary仍待统一执行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 本批当前验证账本必须保留失败与修正过程：Scheduler+0117 migration+coverage 合同为 37 项；其中原子 occurrence fence/heartbeat 子集为 19 项、47.53 秒，不得与 37 相加。generic exact Life/Surface 为 25 项。受影响组合首跑为 203 项成功、1 项失败，失败原因是 direct integration 未注入新增 Conversation/Life readers；使用 production-equivalent composition 修正测试接线后，仅该失败项复跑成功。报告禁止写成单次 204 项，也不得将这些定向批次提升为 NE-01 波次集成、真实模型或 NE-07 服务栈验收。
 
-### NE-01 Workspace lifecycle 持久底座
+### NE-01 Workspace lifecycle 与 no-change promotion
 
 - T-NE01-WORKSPACE-LIFECYCLE-01：0116 必须在 0101 既有 authority 之上提供 append-only `ACTIVE→ACCEPTED→PROMOTED/ABANDONED` 状态机；Accepted receipt 必须精确绑定 graph revision、Task/Workspace 双 lease/fence、accepted HEAD、tree/diff digest、Verification 与 Acceptance ref。CAS 冲突、非法跃迁、重复请求 payload drift、链篡改和旧 fence 均失败关闭；exact replay 与重启读取必须返回同一 canonical receipt。
-- 该测试只证明 lifecycle repository 的 durable authority foundation；尚未接入 Task Acceptance UoW、真实 workspace 写 executor、promotion/abandon Effect 或 cleanup continuation，因此状态保持 `PARTIAL_W2_WITH_0116_LIFECYCLE_FOUNDATION`，不得写成 Workspace Isolation 完成。
+- T-NE01-WORKSPACE-LIFECYCLE-02：Internal clean/no-change path必须以真实TaskStore evidence触发accepted HEAD capture并推进`ACTIVE→ACCEPTED→PROMOTED`；响应丢失exact continue且不重跑Agent。Artifact namespace虽逐层拒绝link/reparse/junction并在关键I/O前重验，仍不是handle-level原子TOCTOU防线。该正向路径不覆盖一般write。rejected/cancelled protected stage自动continuation目前没有生产recovery worker；OS/container/tenant隔离也未提供。状态保持`PARTIAL_W2_NO_CHANGE_PROMOTION_WIRED / GENERAL_WRITE_INCOMPLETE`，不得写成Workspace Isolation完成。
 
 ### 本地交付元数据 Gate
 

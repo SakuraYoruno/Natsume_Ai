@@ -185,6 +185,8 @@ def test_compiler_rebuilds_graph_scoped_user_life_and_delivery_effects() -> None
     assert first == replay
     assert [item.effect_type for item in first] == [
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
     ]
@@ -193,10 +195,16 @@ def test_compiler_rebuilds_graph_scoped_user_life_and_delivery_effects() -> None
     assert all(item.attempt_id == "attempt-gr06-compiler" for item in first)
     user = first[0].payload
     assert user["content"] == "original user turn"
-    life = first[1].payload
+    preference = first[1].payload
+    assert preference["schema_version"] == "Natsume.conversation.preference_signal.v1"
+    assert preference["operation_id"].startswith("preference-effect://sha256/")
+    conversation_life = first[2].payload
+    assert conversation_life["schema_version"] == "Natsume.conversation.life_projection.v1"
+    assert conversation_life["command_id"].endswith("::user")
+    life = first[3].payload
     assert life["payload"]["assistant_reply"] == "accepted assistant reply"
     assert life["payload"]["deliveries"] == []
-    delivery = first[2].payload
+    delivery = first[4].payload
     assert delivery["reply_target"] == "conversation-gr06"
     assert delivery["authority"]["governor_grant_ref"] == contracts.command.governor_grant_ref
 
