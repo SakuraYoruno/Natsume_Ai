@@ -109,12 +109,13 @@ def test_scoped_host_production_direct_effect_inventory_is_31_to_zero() -> None:
 
 def test_host_device_transports_delegate_to_embodiment_and_have_no_physical_io() -> None:
     embodiment = (ROOT / "host_brain/channels/embodiment.py").read_text(encoding="utf-8")
-    vision = (ROOT / "host_brain/app/vision/edge_rpc_client.py").read_text(encoding="utf-8")
     notification = (ROOT / "host_brain/skills/impl/notification_executor.py").read_text(encoding="utf-8")
     mateengine = (ROOT / "host_brain/channels/mateengine.py").read_text(encoding="utf-8")
     host_desktop = (ROOT / "host_brain/app/automation/host_desktop.py").read_text(encoding="utf-8")
 
     assert not (ROOT / "host_brain/channels/edge_rpc_client.py").exists()
+    assert not (ROOT / "host_brain/app/vision/edge_rpc_client.py").exists()
+    assert not (ROOT / "host_brain/app/vision/agent_loop.py").exists()
     assert "async def submit_avatar_behavior" in embodiment
     for retired in (
         "post_vts", "post_asr_control", "post_barge_in", "post_desktop_pet",
@@ -122,7 +123,6 @@ def test_host_device_transports_delegate_to_embodiment_and_have_no_physical_io()
     ):
         assert f"async def {retired}" not in embodiment
     assert "submit_avatar_command" in embodiment
-    assert vision.count("submit_desktop_command") >= 3
     assert "submit_voice_command" in notification
     assert "socket.socket(" not in mateengine
     assert "urllib.request.urlopen(" not in mateengine

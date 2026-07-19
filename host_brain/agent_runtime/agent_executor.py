@@ -1,7 +1,8 @@
 ﻿"""AgentExecutor — 基于 API Agent 替代本地 CLI 子进程。
 
-使用 ReAct 循环（Think → Act → Observe）+ 沙箱工具执行，
-通过唯一 ModelAttemptService 驱动，不再依赖本地 CLI 或旧 LLM 池子。
+使用 proposal-only ReAct 循环（Think → propose → stop）。模型调用由唯一
+ModelAttemptService 驱动；任何工具提案必须由外层规划器编译为新的不可变
+TaskGraph revision，当前 Agent 节点没有嵌套工具执行 authority。
 
 Provider/Model 选择：由服务端 RoutePolicy 控制，scene=NATSUME_AGENT，tier 按 run_mode 分：
   inspect/research → C, audit/translate/worker/self_heal/self_evolve → B
@@ -23,11 +24,11 @@ from host_brain.agent_runtime.agent_prompt import (
     build_agent_system_prompt,
 )
 from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
     build_agent_tool_specs,
-    execute_agent_tool,
     is_tool_allowed_for_run_mode,
 )
-from host_brain.agent_runtime.result_contract import AgentResult
+from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.core.trace_redaction import (
     build_redacted_trace,
@@ -406,8 +407,38 @@ class AgentExecutor:
 
         start_ts = time.time()
         run_mode = str(work_order.run_mode or "inspect").strip().lower()
-        sandbox_enabled = run_mode in {"worker", "self_heal", "self_evolve", "audit"}
         request_id = str(work_order.metadata.get("request_id") or work_order.work_order_id)
+
+        if work_order.requires_write:
+            result = blocked_result(
+                work_order_id=work_order.work_order_id,
+                summary=(
+                    "Agent write execution is disabled until each proposed action "
+                    "is admitted as a governed TaskGraph node."
+                ),
+                reason_code=AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                detail=(
+                    "A write-capable WorkOrder cannot complete through agent_finish; "
+                    "it requires a new immutable TaskGraph revision with independent "
+                    "Attempt, Lease, Grant, Budget, Verification and Acceptance."
+                ),
+                review_required=True,
+                risk_flags=[AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED],
+            )
+            result.verification = {
+                "status": "NOT_RUN",
+                "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+            }
+            result.acceptance = {
+                "decision": "NOT_RUN",
+                "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+            }
+            result.metadata = {
+                "stopped_reason": "WRITE_WORK_ORDER_GOVERNED_ADMISSION_REQUIRED",
+                "model_attempts": [],
+                "side_effects_executed": False,
+            }
+            return result
 
         # 1. 构建工具
         tool_specs = build_agent_tool_specs(
@@ -424,17 +455,12 @@ class AgentExecutor:
             tools_description=tools_desc,
         )
         system_prompt = (
-            "You are a code execution agent. You think step-by-step, then call exactly ONE tool per turn.\n"
-            "Output a JSON object with: thought (your reasoning), tool_id (tool name), tool_args (parameters).\n"
-            "\n"
-            "BROWSER tips for SPA / JS-heavy pages:\n"
-            "  - After browser_navigate, first use browser_scrape with selector=\"body\" to get full page text.\n"
-            "  - If scrape returns 0 results, use browser_execute_script with script:\n"
-            "    (() => document.body.innerText.substring(0, 2000))()\n"
-            "    to inspect what's actually rendered in the DOM.\n"
-            "  - Then use more specific selectors based on what you find.\n"
-            "  - browser_execute_script is the most powerful tool — use it to extract structured data via JS.\n"
-            "\n"
+            "You are a proposal-only analysis agent. You cannot execute tools inside this node.\n"
+            "Output one JSON object with thought, tool_id and tool_args.\n"
+            "If the supplied evidence is sufficient, use agent_finish with a self-contained final_answer.\n"
+            "If a file, network, browser or other action is required, propose exactly one tool; "
+            "the runtime will stop so an outer planner can admit a new TaskGraph revision.\n"
+            "Never claim that a proposed tool ran or that its effects occurred.\n\n"
             "CRITICAL — when you call agent_finish:\n"
             "  - ALWAYS provide a `final_answer` field with a natural-language summary of your findings.\n"
             "  - The final_answer must be self-contained: describe what you did, what you found, and the outcome.\n"
@@ -453,7 +479,7 @@ class AgentExecutor:
         last_provider = ""
         last_model = ""
 
-        objective_msg = f"Execute the WorkOrder.\n\nObjective: {work_order.objective}"
+        objective_msg = f"Analyze the WorkOrder.\n\nObjective: {work_order.objective}"
         durable_input_refs = trace_input_refs(
             {
                 "request_id": request_id,
@@ -575,30 +601,29 @@ class AgentExecutor:
                 stopped_reason = "FINISH"
                 break
 
-            # 执行工具
+            # Tool selection is a proposal, not authority.  Executing it here
+            # would dynamically add work inside an already approved TaskNode
+            # without its own Attempt/Lease/Grant/Budget/Acceptance/Receipt.
             if cancellation_requested():
                 stopped_reason = "CANCELLED"
                 risk_flags.append("agent_cancelled")
                 break
-            obs = execute_agent_tool(
-                tool_id=tool_id,
-                args=tool_args,
-                workspace=workspace,
-                sandbox_enabled=sandbox_enabled,
-            )
+            obs = {
+                "error": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                "proposed_tool_id": tool_id,
+                "side_effects_executed": False,
+                "required_execution_surface": "new immutable TaskGraph revision",
+            }
             step_duration = int((time.time() - step_start) * 1000)
             steps.append(AgentStep(
                 step=step_num, thought=thought,
                 tool_id=tool_id, tool_args=tool_args,
                 observation=obs, duration_ms=step_duration,
             ))
-
-            if obs.get("error"):
-                logger.debug("Agent executor tool %s error: %s", tool_id, obs["error"])
-            if cancellation_requested():
-                stopped_reason = "CANCELLED"
-                risk_flags.append("agent_cancelled")
-                break
+            stopped_reason = "TOOL_GOVERNED_ADMISSION_REQUIRED"
+            risk_flags.append(AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED)
+            break
 
         # 4. 构建结果
         result_text = final_answer or "Agent did not produce a final answer."

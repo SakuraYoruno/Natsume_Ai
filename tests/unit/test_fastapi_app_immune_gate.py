@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import pytest
 from fastapi.testclient import TestClient
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -73,6 +74,57 @@ def test_chat_returns_immune_block_commit_and_skips_handle_chat() -> None:
     assert str(commit.get("narrative") or "") == ""
     assert commit["bio_ops_runtime_trace"]["proposal_only"] is True
     assert commit["bio_ops_runtime_trace"]["source"] == "bio_ops.runtime_trace"
+
+
+@pytest.mark.parametrize(
+    ("response_format", "expected_format"),
+    [
+        ("actions", "actions"),
+        ("ACTIONS", "actions"),
+        (" actions ", "actions"),
+        ("invalid", "unsupported"),
+        ("", "unsupported"),
+    ],
+)
+def test_visual_action_formats_fail_closed_at_real_v1_chat_route(
+    monkeypatch: pytest.MonkeyPatch,
+    response_format: str,
+    expected_format: str,
+) -> None:
+    def _forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("visual action rejection must precede all chat services")
+
+    monkeypatch.setattr(
+        "host_brain.composition.process_services.notify_user_interaction",
+        _forbidden,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.chat_routes.build_chat_bio_ops_preflight_trace",
+        _forbidden,
+    )
+    client = _build_client(
+        evaluate_immune_gate_fn=_forbidden,
+        schedule_immune_gate_fn=_forbidden,
+        handle_chat_fn=_forbidden,
+    )
+
+    response = client.post(
+        "/v1/chat",
+        json={"message": "点击登录按钮", "response_format": response_format},
+    )
+    commit = _extract_commit_event(response.text)
+
+    assert response.status_code == 200
+    assert commit == {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "REJECT",
+        "reason_code": "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED",
+        "response_format": expected_format,
+        "action_plan_available": False,
+        "side_effects_executed": False,
+        "request_id": commit["request_id"],
+    }
 
 
 def test_chat_allows_and_delegates_to_handle_chat_when_immune_passes() -> None:

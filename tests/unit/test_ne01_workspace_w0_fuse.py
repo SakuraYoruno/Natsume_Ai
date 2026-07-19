@@ -6,6 +6,7 @@ import pytest
 
 import host_brain.agent_runtime.workspace_policy as workspace_policy_module
 from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
     build_agent_tool_specs,
     execute_agent_tool,
     is_tool_allowed_for_run_mode,
@@ -164,7 +165,8 @@ def test_default_subprocess_python_is_not_a_controlled_workspace_tool(
         sandbox_enabled=True,
     )
 
-    assert "fail-closed container isolation" in str(result.get("error"))
+    assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    assert result["side_effects_executed"] is False
     assert not (tmp_path / "escape").exists()
 
 
@@ -185,7 +187,8 @@ def test_shell_is_not_advertised_or_executable_before_container_executor(
         sandbox_enabled=True,
     )
 
-    assert "controlled shell execution is unavailable" in str(result.get("error"))
+    assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    assert result["side_effects_executed"] is False
 
 
 def test_browser_screenshot_cannot_persist_into_workspace_without_grant(
@@ -197,5 +200,6 @@ def test_browser_screenshot_cannot_persist_into_workspace_without_grant(
         workspace=tmp_path,
     )
 
-    assert "requires durable WorkspaceGrant" in str(result.get("error"))
+    assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+    assert result["side_effects_executed"] is False
     assert not (tmp_path / "capture.png").exists()

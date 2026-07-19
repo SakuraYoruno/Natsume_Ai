@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from host_brain.app import chat_handler_vision as vision
@@ -13,7 +11,6 @@ from host_brain.model_runtime import (
     ProviderTarget,
     RouteDecision,
     StaticRoutePolicy,
-    VISION_ACTION_PLANNER_PROMPT_ID,
     VISION_UI_ANALYSIS_PROMPT_ID,
     build_live_production_prompt_registry,
 )
@@ -58,9 +55,8 @@ def _install_service(monkeypatch, responses: list[str]):  # noqa: ANN001, ANN202
         provider_adapters=ProviderAdapterRegistry((adapter,)),
         audit_repository=InMemoryAttemptAuditRepository(),
     )
-    for module in (vision, action_planner):
-        monkeypatch.setattr(module, "get_prompt_registry", lambda: registry)
-        monkeypatch.setattr(module, "get_model_attempt_service", lambda: service)
+    monkeypatch.setattr(vision, "get_prompt_registry", lambda: registry)
+    monkeypatch.setattr(vision, "get_model_attempt_service", lambda: service)
     return adapter
 
 
@@ -95,42 +91,24 @@ async def test_vision_narrative_ignores_forged_provider_and_records_attempt_trac
 
 
 @pytest.mark.asyncio
-async def test_vision_action_planner_uses_registered_json_attempt(monkeypatch) -> None:
-    adapter = _install_service(
-        monkeypatch,
-        [
-            json.dumps(
-                {
-                    "goal_understood": "点击登录",
-                    "visual_summary": "看到了登录按钮",
-                    "confidence": 0.9,
-                    "actions": [
-                        {"type": "click", "target_desc": "登录按钮", "x": 100, "y": 200},
-                        {"type": "done", "target_desc": "完成"},
-                    ],
-                },
-                ensure_ascii=False,
-            )
-        ],
-    )
+async def test_vision_action_planner_model_entry_is_retired(monkeypatch) -> None:
+    adapter = _install_service(monkeypatch, ['{"actions": []}'])
 
-    plan = await action_planner.generate_action_plan(
-        request_id="req-action-aw05",
-        session_id="session-action-aw05",
-        goal="点击登录按钮",
-        vision_context={"screen_description": "登录按钮位于右下角"},
-        llm_runtime={
-            "provider_name": "forged",
-            "llm_api_key": "secret",
-            "available": True,
-            "timeout_ms": 5_000,
-        },
-    )
+    with pytest.raises(
+        RuntimeError,
+        match=action_planner.VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED,
+    ):
+        await action_planner.generate_action_plan(
+            request_id="req-action-aw05",
+            session_id="session-action-aw05",
+            goal="点击登录按钮",
+            vision_context={"screen_description": "登录按钮位于右下角"},
+            llm_runtime={
+                "provider_name": "forged",
+                "llm_api_key": "secret",
+                "available": True,
+                "timeout_ms": 5_000,
+            },
+        )
 
-    assert [action.type.value for action in plan.actions] == ["click", "done"]
-    assert plan.extra["model_attempt"]["route_decision_id"] == "route-vision-test"
-    request = adapter.requests[0]
-    assert request.prompt.prompt_id == VISION_ACTION_PLANNER_PROMPT_ID
-    assert request.prompt.version == "v1.0.0"
-    assert request.scene_type == "VISION_ACTION_PLANNER"
-
+    assert adapter.requests == []

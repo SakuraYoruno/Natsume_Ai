@@ -1,356 +1,22 @@
-﻿"""Agent 专用工具定义与权限矩阵。
+"""Agent 工具提案元数据与权限矩阵。
 
-每个工具使用 ToolSpec 格式（与 app/agents/tool_registry.py 兼容），
-工作区写操作委托给 SandboxExecutor，文件操作限制在工作区边界内。
+ToolSpec 只描述模型可提出的动作，不授予执行权限。旧的本进程文件、网络、
+浏览器和 subprocess handler 已删除；兼容 dispatcher 固定失败关闭。
+任何正向执行都必须进入新的 immutable TaskGraph revision。
 """
 
 from __future__ import annotations
 
-import json
-import logging
 import os
 from pathlib import Path
 from typing import Any
 
-from host_brain.agent_runtime.workspace_paths import (
-    normalize_workspace_root,
-    resolve_workspace_path,
-)
-from host_brain.core.subprocess_utils import run as _subprocess_run
-
-from host_brain.skills.impl.browser_executor import execute_browser_skill
-
 from host_brain.tools.contracts import ToolSpec
 
-logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# 工具执行器函数
-# ---------------------------------------------------------------------------
-
-_ALLOWED_READ_EXTENSIONS = {
-    ".py", ".txt", ".md", ".yaml", ".yml", ".json", ".toml", ".cfg",
-    ".ini", ".env.example", ".sh", ".ps1", ".bat", ".xml", ".html",
-    ".css", ".js", ".ts", ".jsx", ".tsx", ".vue", ".sql", ".csv",
-    ".log", ".rst", ".conf", ".cfg",
-}
-
-_MAX_READ_BYTES = 128 * 1024  # 128KB
-
-
-def _ensure_path(value: Path | str) -> Path:
-    """确保值是 Path 对象。"""
-    if isinstance(value, Path):
-        return value
-    return Path(str(value))
-
-
-def _check_path_within_workspace(
-    target: Path | str,
-    workspace: Path,
-    *,
-    must_exist: bool = False,
-    allow_root: bool = False,
-) -> Path:
-    """兼容入口：所有工作区路径统一委托给 canonical resolver。"""
-
-    return resolve_workspace_path(
-        workspace,
-        target,
-        must_exist=must_exist,
-        allow_root=allow_root,
-    )
-
-
-def _tool_agent_read_file(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """读取工作区内文件内容。"""
-    ws = _ensure_path(workspace)
-    path = str(args.get("path") or args.get("file_path") or "").strip()
-    if not path:
-        return {"error": "missing path argument"}
-    try:
-        resolved = _check_path_within_workspace(path, ws, must_exist=True)
-    except PermissionError as exc:
-        return {"error": str(exc)}
-    if not resolved.exists():
-        return {"error": f"file not found: {path}"}
-    if not resolved.is_file():
-        return {"error": f"not a file: {path}"}
-    suffix = resolved.suffix.lower()
-    if suffix not in _ALLOWED_READ_EXTENSIONS:
-        return {"error": f"file type not allowed for reading: {suffix}"}
-    try:
-        text = resolved.read_text(encoding="utf-8", errors="replace")
-        truncated = text[:_MAX_READ_BYTES]
-        return {
-            "path": str(resolved),
-            "content": truncated,
-            "size_bytes": len(text),
-            "truncated": len(text) > _MAX_READ_BYTES,
-        }
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def _tool_agent_write_file(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """在工作区内写入文件。"""
-    ws = _ensure_path(workspace)
-    path = str(args.get("path") or args.get("file_path") or "").strip()
-    content = str(args.get("content") or "")
-    if not path:
-        return {"error": "missing path argument"}
-    try:
-        resolved = _check_path_within_workspace(path, ws)
-    except PermissionError as exc:
-        return {"error": str(exc)}
-    # 禁止覆盖 .env、secrets、密钥文件
-    filename = resolved.name.lower()
-    forbidden_names = {"secrets", ".env", "secret_store", "key_profiles", "credentials"}
-    if any(fn in filename for fn in forbidden_names) or filename.endswith(".key"):
-        return {"error": f"forbidden file: {filename}"}
-    try:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(content, encoding="utf-8", errors="replace")
-        return {
-            "path": str(resolved),
-            "written_bytes": len(content),
-            "action": "written",
-        }
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def _tool_agent_list_files(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """列出工作区目录内容。"""
-    ws = _ensure_path(workspace)
-    subdir = str(args.get("path") or "").strip()
-    try:
-        target = _check_path_within_workspace(
-            subdir or ".",
-            ws,
-            must_exist=True,
-            allow_root=not subdir,
-        )
-    except PermissionError as exc:
-        return {"error": str(exc)}
-    if not target.exists():
-        return {"error": f"directory not found: {subdir}"}
-    if not target.is_dir():
-        return {"error": f"not a directory: {subdir}"}
-    try:
-        entries = []
-        for entry in sorted(target.iterdir()):
-            safe_entry = resolve_workspace_path(
-                ws,
-                entry.name,
-                base=target,
-                must_exist=True,
-            )
-            entries.append({
-                "name": entry.name,
-                "type": "dir" if safe_entry.is_dir() else "file",
-                "size_bytes": safe_entry.stat().st_size if safe_entry.is_file() else None,
-            })
-        return {"path": str(target), "entries": entries[:200]}
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def _tool_agent_run_shell(args: dict[str, Any], *, workspace: Path, sandbox_enabled: bool = True) -> dict[str, Any]:
-    """Fail closed until a container-backed shell executor exists."""
-    command = str(args.get("command") or args.get("cmd") or "").strip()
-    if not command:
-        return {"error": "missing command argument"}
-    if not sandbox_enabled:
-        return {"error": "shell execution requires sandbox mode"}
-    return {
-        "error": (
-            "controlled shell execution is unavailable; "
-            "SandboxExecutor does not implement a container-backed shell"
-        )
-    }
-
-
-def _tool_agent_run_python(args: dict[str, Any], *, workspace: Path, sandbox_enabled: bool = True) -> dict[str, Any]:
-    """在沙箱中运行 Python 代码。"""
-    code = str(args.get("code") or args.get("source") or "").strip()
-    if not code:
-        return {"error": "missing code argument"}
-    if not sandbox_enabled:
-        return {"error": "python execution requires sandbox mode"}
-    if not _container_isolation_required():
-        return {
-            "error": (
-                "python execution requires fail-closed container isolation; "
-                "the subprocess backend is not a controlled workspace"
-            )
-        }
-    try:
-        from host_brain.airlock import SandboxExecutor  # noqa: PLC0415
-
-        result = SandboxExecutor().execute(
-            code,
-            request_id=None,
-            intent_id="agent_python",
-            language="python",
-        )
-        return {
-            "exit_code": result.exit_code,
-            "stdout": (result.stdout or "")[:8000],
-            "stderr": (result.stderr or "")[:4000],
-            "status": result.status,
-            "duration_ms": result.duration_ms,
-        }
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def _tool_agent_web_fetch(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """HTTP 获取网页内容（用于浏览器研究类任务）。"""
-    import urllib.request
-
-    url = str(args.get("url") or "").strip()
-    if not url:
-        return {"error": "missing url argument"}
-    if not url.startswith(("http://", "https://")):
-        return {"error": "url must start with http:// or https://"}
-    timeout = min(int(args.get("timeout") or 30), 120)
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Natsume-Agent/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", errors="replace")[:_MAX_READ_BYTES * 2]
-            return {
-                "url": url,
-                "status": resp.status,
-                "content_type": resp.headers.get("Content-Type", ""),
-                "body": body,
-                "truncated": len(body) >= _MAX_READ_BYTES * 2,
-            }
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def _tool_agent_git_diff(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """获取工作区 git diff。"""
-    ws = normalize_workspace_root(workspace)
-    try:
-        completed = _subprocess_run(
-            ["git", "-C", str(ws), "diff", "--stat"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-            check=False,
-        )
-        return {
-            "diff_stat": str(completed.stdout or "")[:8000],
-            "untracked": _git_untracked(ws),
-        }
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def _git_untracked(workspace: Path) -> list[str]:
-    try:
-        completed = _subprocess_run(
-            ["git", "-C", str(workspace), "ls-files", "--others", "--exclude-standard"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=15,
-            check=False,
-        )
-        return [line for line in str(completed.stdout or "").splitlines() if line.strip()]
-    except Exception:
-        return []
-
-
-def _tool_agent_finish(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """标记任务完成，返回最终结果。"""
-    return {
-        "status": "finished",
-        "summary": str(args.get("summary") or "Task completed."),
-        "result": args.get("result") or "",
-    }
-
-
-# ---------------------------------------------------------------------------
-# 浏览器自动化工具 — 委托给 execute_browser_skill()
-# ---------------------------------------------------------------------------
-
-def _tool_browser_navigate(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """使用无头浏览器导航到指定 URL。"""
-    url = str(args.get("url") or "").strip()
-    if not url:
-        return {"error": "url is required"}
-    return execute_browser_skill({
-        "action": "navigate",
-        "url": url,
-        "wait_until": str(args.get("wait_until") or "load").strip(),
-        "timeout_ms": int(args.get("timeout_ms") or 30000),
-    })
-
-
-def _tool_browser_scrape(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """从当前浏览器页面抓取内容。"""
-    selector = str(args.get("selector") or "body").strip() or "body"
-    extract = str(args.get("extract") or "text").strip().lower()
-    limit = int(args.get("limit") or 50)
-    return execute_browser_skill({
-        "action": "scrape",
-        "selector": selector,
-        "extract": extract,
-        "limit": max(1, min(limit, 200)),
-        "attribute": str(args.get("attribute") or "").strip() or None,
-        "timeout_ms": int(args.get("timeout_ms") or 15000),
-    })
-
-
-def _tool_browser_screenshot(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """对当前浏览器页面截图并返回 base64 图片。"""
-    save_path = str(args.get("save_path") or "").strip() or None
-    full_page = bool(args.get("full_page", False))
-    if save_path:
-        return {
-            "error": (
-                "browser screenshot workspace persistence requires durable WorkspaceGrant; "
-                "request an in-memory screenshot instead"
-            )
-        }
-    return execute_browser_skill({
-        "action": "screenshot",
-        "save_path": save_path,
-        "full_page": full_page,
-        "return_base64": True,
-        "timeout_ms": int(args.get("timeout_ms") or 30000),
-    })
-
-
-def _tool_browser_click(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """点击浏览器页面中的元素。"""
-    selector = str(args.get("selector") or "").strip()
-    if not selector:
-        return {"error": "selector is required"}
-    return execute_browser_skill({
-        "action": "click",
-        "selector": selector,
-        "timeout_ms": int(args.get("timeout_ms") or 10000),
-    })
-
-
-def _tool_browser_execute_script(args: dict[str, Any], *, workspace: Path) -> dict[str, Any]:
-    """在浏览器页面中执行 JavaScript。"""
-    script = str(args.get("script") or "").strip()
-    if not script:
-        return {"error": "script is required"}
-    return execute_browser_skill({
-        "action": "execute_script",
-        "script": script,
-        "timeout_ms": int(args.get("timeout_ms") or 15000),
-    })
-
+AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED = (
+    "AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED"
+)
 
 # ---------------------------------------------------------------------------
 # 工具权限矩阵
@@ -651,7 +317,7 @@ def build_agent_tool_specs(
             description=tool_def["description"],
             parameters=tool_def["parameters"],
             has_side_effects=tool_def.get("has_side_effects", False),
-            executor=None,  # 由 AgentExecutor 自行调度
+            executor=None,  # proposal metadata only
         ))
     return specs
 
@@ -663,39 +329,20 @@ def execute_agent_tool(
     workspace: Path,
     sandbox_enabled: bool = True,
 ) -> dict[str, Any]:
-    """执行单个 Agent 工具并返回结果字典。"""
-    tool_id_norm = str(tool_id or "").strip().lower()
-    args_clean = dict(args or {})
-    workspace_path = _ensure_path(workspace)
-
-    handlers: dict[str, Any] = {
-        "agent_read_file":    lambda: _tool_agent_read_file(args_clean, workspace=workspace_path),
-        "agent_write_file":   lambda: _tool_agent_write_file(args_clean, workspace=workspace_path),
-        "agent_list_files":   lambda: _tool_agent_list_files(args_clean, workspace=workspace_path),
-        "agent_run_shell":    lambda: _tool_agent_run_shell(args_clean, workspace=workspace_path, sandbox_enabled=sandbox_enabled),
-        "agent_run_python":   lambda: _tool_agent_run_python(args_clean, workspace=workspace_path, sandbox_enabled=sandbox_enabled),
-        "agent_web_fetch":          lambda: _tool_agent_web_fetch(args_clean, workspace=workspace_path),
-        "browser_navigate":   lambda: _tool_browser_navigate(args_clean, workspace=workspace_path),
-        "browser_scrape":     lambda: _tool_browser_scrape(args_clean, workspace=workspace_path),
-        "browser_screenshot": lambda: _tool_browser_screenshot(args_clean, workspace=workspace_path),
-        "browser_click":          lambda: _tool_browser_click(args_clean, workspace=workspace_path),
-        "browser_execute_script": lambda: _tool_browser_execute_script(args_clean, workspace=workspace_path),
-        "agent_git_diff":               lambda: _tool_agent_git_diff(args_clean, workspace=workspace_path),
-        "agent_finish":             lambda: _tool_agent_finish(args_clean, workspace=workspace_path),
+    """Retired raw dispatcher retained only as a fail-closed compatibility API."""
+    del args, workspace, sandbox_enabled
+    return {
+        "error": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+        "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+        "proposed_tool_id": str(tool_id or "").strip().lower(),
+        "result": None,
+        "side_effects_executed": False,
+        "required_execution_surface": "new immutable TaskGraph revision",
     }
-
-    handler = handlers.get(tool_id_norm)
-    if handler is None:
-        return {"error": f"unknown tool: {tool_id}"}
-    try:
-        return handler()
-    except Exception as exc:
-        logger.warning("Agent tool %s failed: %s", tool_id, exc)
-        return {"error": str(exc)}
 
 
 __all__ = [
+    "AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED",
     "build_agent_tool_specs",
-    "execute_agent_tool",
     "is_tool_allowed_for_run_mode",
 ]

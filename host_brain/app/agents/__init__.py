@@ -30,12 +30,8 @@ from host_brain.app.agents.react_loop import (
     ReactStep,
     run_react_loop,
 )
-from host_brain.app.agents.tool_registry import (
-    ToolSpec,
-    execute_tool,
-    get_tools_for_agent,
-    is_tool_allowed,
-)
+from host_brain.app.agents.tool_registry import get_tools_for_agent, is_tool_allowed
+from host_brain.tools.contracts import ToolSpec
 
 __all__ = [
     # registry
@@ -63,7 +59,6 @@ __all__ = [
     "run_react_loop",
     # tool_registry（M-MA6）
     "ToolSpec",
-    "execute_tool",
     "get_tools_for_agent",
     "is_tool_allowed",
 ]

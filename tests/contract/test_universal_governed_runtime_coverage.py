@@ -49,6 +49,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert report.missing_architecture_controls == (
         "generic_three_layer_planning_search",
         "native_multi_node_task_graph",
+        "visual_agent_direct_execution_authority",
         "revision_plus_one_replan",
         "composition_without_global_service_locator",
     )
@@ -84,6 +85,7 @@ def test_manifest_requires_every_control_for_every_route(tmp_path: Path) -> None
 def test_manifest_distinguishes_partial_and_not_wired_from_pass(tmp_path: Path) -> None:
     report = load_universal_runtime_coverage(ROOT)
     assert "generic_three_layer_planning_search" in report.missing_architecture_controls
+    assert "visual_agent_direct_execution_authority" in report.missing_architecture_controls
     assert "revision_plus_one_replan" in report.missing_architecture_controls
     assert "composition_without_global_service_locator" in report.missing_architecture_controls
 

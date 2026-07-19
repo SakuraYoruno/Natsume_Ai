@@ -13,6 +13,9 @@ from host_brain.contracts.agent_runtime.acceptance_judge import (
     judge_acceptance_result,
 )
 from host_brain.agent_runtime.agent_executor import AgentExecutor
+from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
@@ -196,6 +199,42 @@ class AgentRuntimeExecutor:
 
         try:
             order.validate()
+            if order.requires_write:
+                result = blocked_result(
+                    work_order_id=order.work_order_id,
+                    summary=(
+                        "Agent write execution requires a governed Tool TaskGraph node."
+                    ),
+                    artifacts_dir=str(run_dir),
+                    reason_code=AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                    detail=(
+                        "The proposal-only Agent runtime cannot execute or accept a "
+                        "write-capable WorkOrder."
+                    ),
+                    review_required=True,
+                    risk_flags=[AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED],
+                )
+                result.verification = {
+                    "status": "NOT_RUN",
+                    "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                }
+                result.acceptance = {
+                    "decision": "NOT_RUN",
+                    "reason_code": AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+                }
+                result.metadata = {
+                    "execution_authority": "proposal_only_agent_executor",
+                    "model_attempts": [],
+                    "side_effects_executed": False,
+                }
+                self._persist_result(
+                    run_dir,
+                    result,
+                    order=order,
+                    event_id=event_id,
+                    ts_ms=ts,
+                )
+                return result.to_dict()
             effective_workspace_policy = self.workspace_policy
             if (
                 self.workspace_runtime is not None

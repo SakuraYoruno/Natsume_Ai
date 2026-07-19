@@ -121,13 +121,11 @@ class ChatRequest(BaseModel):
         None,
         description="Optional vision context for SCENE_VISION_UI (image_base64/image_url/screen_description etc.)",
     )
-    # 响应格式：text（自然语言建议，给用户看）或 actions（结构化指令，给 ClawdBot 执行）
-    # 默认 text，兼容现有行为。
-    # 设为 actions 时，夏目会分析截图并生成 ActionPlan JSON，
-    # COMMIT 事件中的 action_plan 字段包含完整指令序列。
+    # 响应格式：只有 text 保留自然语言分析；其他值在生产中固定拒绝。
+    # 正向视觉动作必须经新 TaskGraph revision 和独立节点 authority。
     response_format: str = Field(
         "text",
-        description="视觉场景响应格式：'text'（自然语言建议）或 'actions'（ClawdBot 可执行指令序列）",
+        description="视觉场景响应格式：仅 'text' 进入分析链；'actions' 和未知值仅兼容接收并固定拒绝",
     )
 
     # 图片上传隐私授权标志

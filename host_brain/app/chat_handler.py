@@ -10,7 +10,8 @@ Phase XV 收口架构：
 
 子模块职责：
   - chat_handler_complex.py — 复杂场景 LangGraph 编排（_complex_scene_sse_generator）
-  - chat_handler_vision.py  — 视觉界面场景（_vision_ui_sse_generator）
+  - chat_handler_vision.py  — 当前无生产 caller 的历史视觉 text helper；
+                              非 text 门禁在 chat_routes 真实入口
 """
 
 from __future__ import annotations

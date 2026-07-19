@@ -1,16 +1,10 @@
-"""夏目 ↔ ClawdBot 通信协议定义。
+"""Historical Visual Action proposal and result schemas.
 
 协议版本：v1
 
-消息流向：
-  夏目（大脑）→ ActionPlan → ClawdBot（执行器）
-  ClawdBot    → ActionResult → 夏目（大脑）
-
-设计原则：
-  1. 所有坐标均为屏幕绝对像素坐标（左上角为原点）
-  2. 每条指令携带 target_desc（自然语言描述），便于 ClawdBot 做视觉校验
-  3. ActionPlan 支持 response_format 字段，区分"文字建议"和"可执行指令"两种模式
-  4. 协议版本号写入每条消息，便于未来扩展
+这些类型只保留历史数据兼容和未来受治理 proposal 编译输入；`ActionPlan`
+本身不携带 Grant、Attempt、Acceptance 或执行权限。旧 ClawdBot/Edge raw client
+和 Agent Loop 已删除，任何正向执行都必须先进入新的 immutable TaskGraph revision。
 """
 
 from __future__ import annotations
@@ -20,6 +14,9 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED = (
+    "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED"
+)
 
 # ---------------------------------------------------------------------------
 # 枚举：操作类型
@@ -43,7 +40,7 @@ class ActionType(str, Enum):
 class ResponseFormat(str, Enum):
     """夏目返回给调用方的格式。"""
     TEXT    = "text"    # 自然语言建议（给用户看）
-    ACTIONS = "actions" # 结构化操作指令（给 ClawdBot 执行）
+    ACTIONS = "actions" # 历史兼容值；生产入口固定拒绝
 
 
 class ActionStatus(str, Enum):
@@ -105,7 +102,7 @@ class Action(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ActionPlan(BaseModel):
-    """夏目生成的完整操作计划，发送给 ClawdBot 执行。"""
+    """无执行 authority 的历史/候选操作提案结构。"""
 
     # 协议版本
     protocol_version: str = Field("v1", description="协议版本号")
@@ -118,7 +115,7 @@ class ActionPlan(BaseModel):
     goal: str = Field(..., description="本次自动化的目标，如'填写并提交登录表单'")
 
     # 操作序列
-    actions: List[Action] = Field(default_factory=list, description="按顺序执行的操作列表")
+    actions: List[Action] = Field(default_factory=list, description="候选操作列表，不授予执行权限")
 
     # 执行策略
     stop_on_error: bool = Field(True, description="遇到错误时是否立即停止")
@@ -189,6 +186,7 @@ class ActionReport(BaseModel):
 # ---------------------------------------------------------------------------
 
 __all__ = [
+    "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED",
     "ActionType",
     "ResponseFormat",
     "ActionStatus",

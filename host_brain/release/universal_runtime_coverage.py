@@ -38,6 +38,7 @@ REQUIRED_ROUTE_CONTROLS = (
 REQUIRED_ARCHITECTURE_CONTROLS = (
     "generic_three_layer_planning_search",
     "native_multi_node_task_graph",
+    "visual_agent_direct_execution_authority",
     "revision_plus_one_replan",
     "single_durable_task_truth",
     "conversation_acceptance_outbox",

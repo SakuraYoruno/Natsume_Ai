@@ -7,12 +7,14 @@ from typing import Any
 
 from host_brain.agent_runtime.agent_registry import AGENT_ID_EMOTION
 from host_brain.app.agents.react_loop import run_react_loop
-from host_brain.app.agents.tool_registry import get_tools_for_agent
 from host_brain.model_runtime.prompt_contract import (
     resolve_prompt_contract_json,
     resolve_prompt_contract_text,
 )
-from host_brain.core.trace_redaction import public_decision_summary
+from host_brain.core.trace_redaction import (
+    build_public_agent_output,
+    public_decision_summary,
+)
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
 
@@ -41,6 +43,11 @@ def _resolve_emotion_agent_error_summary() -> str:
     return resolve_prompt_contract_text("emotion_agent_handler.error_summary")
 
 
+EMOTION_AGENT_GOVERNED_OUTPUT_REQUIRED = (
+    "EMOTION_AGENT_GOVERNED_OUTPUT_REQUIRED"
+)
+
+
 def emotion_agent_handler(
     payload: dict[str, Any],
     context: dict[str, Any] | None = None,
@@ -65,13 +72,12 @@ def emotion_agent_handler(
             user_profile=user_profile,
         )
 
-        tools = get_tools_for_agent(AGENT_ID_EMOTION, allow_side_effects=False)
         gateway = ctx.get("gateway") or payload.get("_gateway")
 
         react_result = run_react_loop(
             agent_id=AGENT_ID_EMOTION,
             user_input=user_input,
-            tools=tools,
+            tools=[],
             gateway=gateway,
             system_prompt_extra=system_prompt_extra,
             max_steps=int(os.environ.get("EMOTION_AGENT_REACT_MAX_STEPS") or "3"),
@@ -80,6 +86,23 @@ def emotion_agent_handler(
         )
 
         out["react_scratchpad"] = react_result.to_scratchpad_dict()
+        if react_result.stopped_reason != "FINAL_ANSWER":
+            out["agent_output"] = build_public_agent_output(
+                "情感分析未产生可发布结果；工具提案需要新的受治理任务图。"
+            )
+            out["emotion_agent_trace"] = {
+                "agent_id": AGENT_ID_EMOTION,
+                "mode": "proposal_only",
+                "status": "DEGRADED",
+                "reason_code": EMOTION_AGENT_GOVERNED_OUTPUT_REQUIRED,
+                "stopped_reason": react_result.stopped_reason,
+                "risk_flags": list(react_result.risk_flags),
+                "artifact_ref": None,
+                "side_effects_executed": False,
+                "ts_ms": int(time.time() * 1000),
+            }
+            return out
+
         out["agent_output"] = react_result.to_public_output_dict()
         emotion_analysis = _parse_emotion_analysis(react_result.final_answer)
 
@@ -165,23 +188,6 @@ def _build_emotion_agent_system_prompt(
 
     parts.extend(
         [
-            "",
-            _mapping_text(
-                templates,
-                "tools_intro",
-            ),
-            _mapping_text(
-                templates,
-                "tool_emotion_history_search",
-            ),
-            _mapping_text(
-                templates,
-                "tool_emotion_timeline_query",
-            ),
-            _mapping_text(
-                templates,
-                "tool_search_knowledge",
-            ),
             "",
             _mapping_text(
                 templates,

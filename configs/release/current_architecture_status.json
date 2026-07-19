@@ -2,7 +2,7 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-19",
   "source_baseline": {
-    "dev_commit": "e9c4da1026dca865a21343153b7d93913a5e2e9f",
+    "dev_commit": "c2be993bc9fabb155811163b5b5e028964e9a12a",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
     "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT"
@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_COMBINED_NAMED_PROCESS_SERVICES_45_MODULES_123_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_51_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_NE01_STILL_INCOMPLETE",
+  "active_wave_detail": "LEGACY_TOOL_MCP_EXECUTION_AUTHORITY_ZERO_HOST_LIFECYCLE_APP_LOCAL_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE_TASK_STORE_APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED_SQL_DIRECT_BYPASS_PRESENT_FULL_STATIC_GATES_1_6_10_11_PASS_FAILED_GATES_EMPTY_SERVICE_CATALOG_PLANNING_SEARCH_AND_FINAL_PERSISTENCE_CONTRACT_SUB_BOUNDARIES_CLOSED_PERSISTENCE_TO_APPLICATION_ZERO_NO_TARGET_LAYER_SCC_TOOLBROKER_APP_LOCAL_SINGLE_CONSTRUCTOR_PROCESS_ACCESSOR_SLOT_AND_HOST_LIFECYCLE_PROVIDER_ZERO_REACT_RUN_SKILL_AND_DISPATCH_SUB_AGENT_DISCOVERY_AND_LOW_LEVEL_BYPASSES_RETIRED_VISUAL_AGENT_DIRECT_HTTP_LOOP_RAW_CLIENT_LEDGER_WRITER_AND_LEGACY_ACTION_PLANNER_MODEL_ENTRY_RETIRED_CURRENT_NAMED_PROCESS_SERVICES_41_MODULES_117_NAMES_ALL_PROCESS_SERVICES_CONSUMER_MODULES_47_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_MISSING_NE01_STILL_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -27,7 +27,7 @@
     "status": "TARGETED_SLICE_PASSED_PROGRAM_INCOMPLETE",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_FINAL_PERSISTENCE_CONTRACT_LAYERING_AFTER_PLANNING_SEARCH_SERVICE_CATALOG_OBS_PROJECTION_BUSINESS_SQLITE_TASK_STORE_AND_HOST_LIFECYCLE_SLICES",
+    "slice": "NE01_REACT_SKILL_DELEGATE_AND_VISUAL_AGENT_DIRECT_ENTRY_CUTOFF_WITH_EXISTING_OPERATOR_TOOL_HTTP_AND_LEGACY_TOOL_MCP_AUTHORITY_RETIREMENT",
     "test_batches": {
       "structure_and_runtime_context_passed": 59,
       "action_preview_and_embodiment_passed": 43,
@@ -102,7 +102,14 @@
       "gate_11_overlap_boundary": "SUPPLEMENTAL_ONE_OVERLAPS_THE_43_TEST_BATCH_DO_NOT_SUM",
       "gate_11_py_compile": "PASS",
       "gate_11_policy_json": "PASS",
-      "gate_11_whitespace": "PASS"
+      "gate_11_whitespace": "PASS",
+      "react_agent_tool_and_document_contract_concentrated_passed": 213,
+      "sqlite_internal_workspace_and_governed_tool_integration_passed": 33,
+      "final_document_coverage_and_locator_gate_passed": 27,
+      "final_authority_contract_and_metadata_regression_passed": 89,
+      "visual_agent_authority_cutoff_focused_passed": 61,
+      "visual_agent_edge_migration_and_document_regression_passed": 89,
+      "frozen_0104_receipt_loss_regression_passed": 7
     },
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "completed_large_file_splits": [
@@ -123,7 +130,8 @@
     "full_architecture_static_gate": {
       "status": "PASS",
       "failed_gates": [],
-      "origin_dev_failed_gates": [1, 6, 10],
+      "origin_dev_failed_gates": [],
+      "pre_89_origin_dev_failed_gates": [1, 6, 10],
       "current_slice_added_failures": [],
       "resolved_gates": [1, 6, 10, 11],
       "issues": [],
@@ -139,7 +147,7 @@
         "process_tool_broker_container_slot_count": 0,
         "host_lifecycle_tool_broker_provider_count": 0
       },
-      "boundary": "GATES_1_6_10_11_GREEN_AND_PERSISTENCE_TO_APPLICATION_ZERO_STATIC_ONLY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_AND_NE01_REMAIN_INCOMPLETE"
+      "boundary": "ORIGIN_DEV_C2BE993BC_REACT_CUTOFF_AND_CURRENT_VISUAL_CUTOFF_KEEP_GATES_1_6_10_11_GREEN_FAILED_EMPTY_PERSISTENCE_TO_APPLICATION_ZERO_STATIC_ONLY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_AND_NE01_REMAIN_INCOMPLETE"
     },
     "focused_structure_current_lines": {
       "host_brain/app/asgi.py": 1469,
@@ -154,12 +162,30 @@
     },
     "locator_consumer_inventory": {
       "combined_current_inventory": {
+        "named_modules": 41,
+        "named_imported_names": 117,
+        "all_import_form_consumer_modules": 47,
+        "process_service_container_fields": 54,
+        "process_service_container_lock_fields": 4,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49
+      },
+      "dev_c2be993bc_commit_bound_history": {
         "named_modules": 45,
         "named_imported_names": 123,
         "all_import_form_consumer_modules": 51,
         "process_service_container_fields": 54,
         "process_service_container_lock_fields": 4,
-        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49,
+        "scope": "PREVIOUS_DEV_BASELINE_BEFORE_REACT_SKILL_DELEGATE_CUTOFF"
+      },
+      "react_cutoff_commit_bound_history": {
+        "named_modules": 43,
+        "named_imported_names": 120,
+        "all_import_form_consumer_modules": 49,
+        "process_service_container_fields": 54,
+        "process_service_container_lock_fields": 4,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49,
+        "scope": "PREVIOUS_REACT_SKILL_DELEGATE_CUTOFF_BEFORE_VISUAL_DIRECT_ENTRY_CUTOFF"
       },
       "host_lifecycle_commit_bound_history": {
         "before_modules": 47,
@@ -185,7 +211,7 @@
       "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
       "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker"],
-      "boundary": "COMBINED_CURRENT_IS_45_MODULES_123_NAMES_51_ALL_FORM_CONSUMERS_AND_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_HISTORICAL_SLICE_INVENTORIES_HAVE_DIFFERENT_BASELINES_PROCESS_WIDE_LOCATOR_REMAINS"
+      "boundary": "COMBINED_CURRENT_IS_41_MODULES_117_NAMES_47_ALL_FORM_CONSUMERS_AND_CONTAINER_54_FIELDS_4_LOCKS_49_MUTABLE_REFS_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_REMAINS"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
@@ -480,10 +506,55 @@
       "known_boundary": "UNCAUGHT_BACKGROUND_RENEW_OR_OTHER_DAEMON_EXIT_NOT_YET_DIRECTLY_EXPOSED_BY_HEALTH_RUNNING_LAST_FAILURE_CONTINUOUS_SLO_INCOMPLETE"
     },
     "react_nested_execution_cutoff": {
-      "retired_tools": ["run_skill", "dispatch_sub_agent"],
+      "retired_tools": [
+        "run_skill",
+        "dispatch_sub_agent"
+      ],
       "discovery_usage": 0,
+      "low_level_execution_usage": 0,
       "injected_legacy_tool_spec_behavior": "FAIL_CLOSED_BEFORE_LOW_LEVEL_EXECUTOR",
-      "boundary": "PENTEST_AGENT_REMAINS_THE_ONLY_SUPPORTED_POSITIVE_HOST_DELEGATE"
+      "behavior": "SKILL_DELEGATE_NESTED_EXECUTION_CUTOFF_FAIL_CLOSED",
+      "reason_codes": [
+        "REACT_TOOL_GOVERNED_ADMISSION_REQUIRED"
+      ],
+      "positive_tool_execution": "PRODUCTION_OFF",
+      "missing": "NEW_IMMUTABLE_TASK_GRAPH_REVISION_WITH_INDEPENDENT_SKILL_OR_DELEGATE_NODE_AUTHORITY",
+      "boundary": "ONLY_RUN_SKILL_AND_DISPATCH_SUB_AGENT_ARE_COVERED_THIS_DOES_NOT_RETIRE_GENERAL_GRAPH_AGENT_FILE_WEB_BROWSER_MEMORY_EMOTION_OR_OTHER_TOOL_AUTHORITIES"
+    },
+    "visual_agent_direct_entry_cutoff": {
+      "surface": "/v1/agent/run",
+      "status": "RETIRED_COMPATIBILITY_ONLY_PRODUCTION_OFF",
+      "compatibility_envelope": "AGENT_INIT_TO_LOOP_DONE",
+      "terminal_status": "REJECTED",
+      "reason_code": "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED",
+      "side_effects_executed": false,
+      "execution_rounds": 0,
+      "legacy_loop_production_callers": 0,
+      "retired_raw_paths": [
+        "host_brain/app/vision/agent_loop.py",
+        "host_brain/app/vision/edge_rpc_client.py"
+      ],
+      "legacy_execution_symbol_production_references": 0,
+      "legacy_ledger_writer": "REMOVED",
+      "legacy_ledger_column_constant": "REMOVED",
+      "model_ledger_edge_or_clawdbot_resolution": 0,
+      "chat_actions_boundary": "ONLY_TEXT_CONTINUES_ACTIONS_AND_UNKNOWN_REJECT_BEFORE_RUNTIME_MODEL_PROMPT_MEMORY_LEDGER",
+      "legacy_action_planner_model_entry": "SEALED_FIXED_REJECTION",
+      "retained_parser_authority": "NONE_PROPOSAL_ONLY",
+      "positive_execution": "MISSING_PROPOSAL_TO_NEW_IMMUTABLE_TASK_GRAPH_REVISION",
+      "boundary": "AUTHORITY_RETIREMENT_IS_NOT_VISUAL_AGENT_CAPABILITY_PASS",
+      "evidence_refs": [
+        "host_brain/app/agent_routes.py",
+        "host_brain/app/chat_routes.py",
+        "host_brain/app/chat_handler_vision.py",
+        "host_brain/app/vision/action_planner.py",
+        "tests/unit/test_agent_routes.py",
+        "tests/unit/test_ne01_visual_agent_authority_cutover.py",
+        "tests/unit/test_fastapi_app_immune_gate.py",
+        "tests/unit/test_vision_ui_handler.py",
+        "tests/unit/test_clawdbot_pipeline.py",
+        "tests/unit/test_agent_loop_persistence.py"
+      ]
     },
     "governed_operator_progress": {
       "migrated": 1,
@@ -666,7 +737,7 @@
       "implemented": "After CapabilityBroker has revalidated a sealed governed task authority, the private codex_runtime adapter takes the composed ModelAttemptService from that trusted context and derives PromptRegistry from the same service before constructing AgentRuntimeExecutor. The payload has no service-injection field; missing authority, governed execution mode, service, or prompt registry fails closed with AGENT_RUNTIME_PORTS_NOT_COMPOSED.",
       "positive_evidence_boundary": "The D15 unit contract proves port identity and rejects legacy direct execution. It is not a live-provider run, model-budget settlement receipt, or a production canary.",
       "not_completed": [
-        "agent_worker write execution still has no task-bound durable WorkspaceRuntime/WorkspaceGrant injection and remains fail-closed before model work",
+        "ReAct run_skill and dispatch_sub_agent are fail-closed until compiled as new immutable TaskGraph revision nodes; general AgentExecutor tool authority remains separately audited",
         "AgentExecutor ReAct ModelAttempt calls do not yet consume ModelBudgetGuard or settle a universal budget ledger",
         "Code has a pure dynamic catalog, D17 trusted-in-process private-bare paired worktrees, D18 0106 cleanup-gated durable experiment evidence, and D19 allowlisted pytest child receipts. D20a adds a Research public-metadata catalog and a trusted-input readonly corpus loader, but it has no snapshot-manifest-document exact handshake, actual Research cohort, model, verifier, paired comparison or production influence. Controlled model/tool execution, general budget authority, OS/container/network isolation and production influence remain unimplemented",
         "generic chat/delegate/runtime cutover remains incomplete"
@@ -674,8 +745,30 @@
       "evidence_refs": [
         "host_brain/skills/executor_registry.py",
         "host_brain/agent_runtime/executor.py",
+        "host_brain/agent_runtime/agent_executor.py",
+        "host_brain/agent_runtime/agent_tools.py",
         "host_brain/executive_runtime/skill_execution.py",
-        "tests/unit/test_d15_governed_agent_runtime_model_bridge.py"
+        "tests/unit/test_d15_governed_agent_runtime_model_bridge.py",
+        "tests/unit/test_ne01_react_tool_authority_cutover.py"
+      ]
+    },
+    "visual_agent_direct_http": {
+      "status": "RETIRED_COMPATIBILITY_ONLY_PRODUCTION_OFF",
+      "surface": "/v1/agent/run",
+      "delegate_target_distinction": "NOT_THE_VISION_AGENT_DELEGATE_ROUTE",
+      "semantics": "The raw route-local loop, execution clients and public Ledger writer are removed. The compatibility endpoint returns a deterministic two-event SSE rejection with zero execution rounds and side effects. Vision chat permits only text to continue; actions and unknown formats reject before runtime, model, prompt, Memory or Ledger resolution. The legacy Action Planner model entry is sealed and its pure parser is proposal-only.",
+      "positive_reenable_boundary": "A governed proposal must compile to a new immutable TaskGraph revision whose Visual Agent node owns Attempt, Lease, Grant, Budget, Verification, Acceptance and Receipt.",
+      "evidence_refs": [
+        "host_brain/app/agent_routes.py",
+        "host_brain/app/chat_routes.py",
+        "host_brain/app/chat_handler_vision.py",
+        "host_brain/app/vision/action_planner.py",
+        "tests/unit/test_agent_routes.py",
+        "tests/unit/test_ne01_visual_agent_authority_cutover.py",
+        "tests/unit/test_fastapi_app_immune_gate.py",
+        "tests/unit/test_vision_ui_handler.py",
+        "tests/unit/test_clawdbot_pipeline.py",
+        "tests/unit/test_agent_loop_persistence.py"
       ]
     },
     "scheduler_governed_runtime": {
@@ -1604,7 +1697,7 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor and SystemResourceManager, and publication occurs only after each factory/start succeeds; Activity factory failure publishes no Mode authority, aclose raises a closing fence that blocks begin, and the ResourceManager startup sample runs in its sole owned loop. Per-app Tribe ports bind only during lifespan through a process-global exact-owner fence: one live Host is allowed, a second fails closed, and concurrent multi-app Tribe isolation is neither supported nor claimed. ToolBroker/MCP direct and callback authority is retired; get_mcp_tool_broker, get_tool_broker and their process-owned slots are deleted, HostLifecycleApplicationPorts has no ToolBroker provider, and the sole ToolBroker constructor is host_brain/tools/broker.py inside an app-local ToolRuntimeBoundary. A real workspace-bound governed Tool/MCP executor is still absent. http_hooks has zero process_services imports and the activity/resource global publication slots and setters are retired. The original Host lifecycle slice recorded 47/152 to 45/124 named imports, 52 to 51 all-form consumer modules, and 56 fields/4 locks/51 mutable refs; the Gate 11 repair leaves the current inventory at 45 modules/123 imported names, 51 all-form consumer modules, and 54 fields/4 locks/49 mutable refs. Heartbeat cache/client, HardState/set_sys_mode, Tribe agents/bus, the shared ResourceManager status path, underlying Host sources, Chat/Delegate boundaries and most Worker authorities remain process-global or process-shared. Full Host/Worker typed composition, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. This slice does not complete NE-01 or the full architecture; only the full architecture static Gate is now green.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor and SystemResourceManager, and publication occurs only after each factory/start succeeds; Activity factory failure publishes no Mode authority, aclose raises a closing fence that blocks begin, and the ResourceManager startup sample runs in its sole owned loop. Per-app Tribe ports bind only during lifespan through a process-global exact-owner fence: one live Host is allowed, a second fails closed, and concurrent multi-app Tribe isolation is neither supported nor claimed. ToolBroker/MCP direct and callback authority is retired; get_mcp_tool_broker, get_tool_broker and their process-owned slots are deleted, HostLifecycleApplicationPorts has no ToolBroker provider, and the sole ToolBroker constructor is host_brain/tools/broker.py inside an app-local ToolRuntimeBoundary. A real workspace-bound governed Tool/MCP/Visual executor is still absent. http_hooks has zero process_services imports and the activity/resource global publication slots and setters are retired. The original Host lifecycle slice recorded 47/152 to 45/124 named imports, 52 to 51 all-form consumer modules, and 56 fields/4 locks/51 mutable refs; the #89 Gate 11 repair snapshot is 45 modules/123 imported names, 51 all-form consumer modules, and 54 fields/4 locks/49 mutable refs. The ReAct narrow slice inventory is 43 modules/120 imported names and 49 all-form consumer modules; after Visual direct-entry retirement, current inventory is 41/117/47 and the Container remains 54/4/49. Heartbeat cache/client, HardState/set_sys_mode, Tribe agents/bus, the shared ResourceManager status path, underlying Host sources, Chat/Delegate boundaries and most Worker authorities remain process-global or process-shared. Full Host/Worker typed composition, positive migration of blocked embodiment paths and global Service Locator removal remain unproven. This slice does not complete NE-01 or the full architecture; only the full architecture static Gate is now green.",
       "mixed_file_gate": "GREEN_ISSUES_EMPTY_WITHOUT_POLICY_EXPANSION",
       "mixed_file_gate_findings": [],
       "effect_slice_structure_boundary": "The second NE-01 split moved ASGI lifecycle wiring, Obs response models, immutable Degradation policy, Node Grant and Planning codecs, Intent Review continuation, and Guardian contracts/commands into focused modules. The original authority owners remain the only lifecycle, connection, RuntimeEvent append, or journal-store owners. All eleven former findings are within the 1,500-line or pre-existing cohesive ceiling and the fresh repository gate returns no issues without adding or widening an allowlist. Service Locator, old execution bypasses, general recovery, and production enablement remain incomplete.",
@@ -1847,20 +1940,20 @@
       "migration": "0101_agent_workspace_authority",
       "physical_root_authority": "PROCESS_CONFIGURATION_ONLY",
       "work_order_lease_payload": "SERVER_DERIVED_LOGICAL_WORKSPACE_ID_ONLY",
-      "production_scope": "AUTHENTICATED_INTERNAL_AGENT_WRITE_PATH_ONLY",
+      "production_scope": "W2_ASSETS_WIRED_TO_INTERNAL_AGENT_ADMISSION__NO_POSITIVE_AGENT_TOOL_CONSUMER",
       "production_default": "FAIL_CLOSED_WITHOUT_HOST_AGENT_WORKSPACE_HMAC_SECRET",
       "production_canary": "NOT_RUN",
       "source_freeze": "EXACT_CONFIGURED_GIT_COMMIT_FIRST_ALLOCATION",
       "physical_workspace": "NAMESPACE_GIT_WORKTREE_UNDER_CONFIGURED_ROOT",
       "lease_fencing": "BOOT_OWNER_RUNTIME_INSTANCE_PID_TOKEN_DIGEST_EXPIRY_MONOTONIC_FENCE",
       "execution_scope": "PROCESS_LOCAL_EXCLUSIVE_WITH_CROSS_RUNTIME_LIVE_LEASE_CONFLICT",
-      "heartbeat": "WIRED_COOPERATIVE_BETWEEN_ACTION_CANCELLATION_NO_PREEMPTION",
+      "heartbeat": "W2_LEASE_ASSET_WIRED__NO_CURRENT_AGENT_TOOL_CONSUMER__FUTURE_PER_OPERATION_FENCE_AND_PREEMPTION_REQUIRED",
       "external_operation_fencing": "PROVISIONING_ALLOCATOR_CLEANUP_ONLY__WORKSPACE_THEN_SOURCE_CROSS_PROCESS_LOCK_SINGLE_DEADLINE_PRE_POST_EXACT_AUTHORITY",
       "sqlite_external_io": "REMOVED_FROM_TRANSACTION_HEARTBEAT_CONCURRENT",
       "postcheck_semantics": "FENCE_STATUS_EXPIRY_DRIFT_NEVER_RETURNS_CALLBACK_RESULT_SIDE_EFFECT_MAY_REQUIRE_RECONCILIATION",
       "cleanup": "TRUSTED_GIT_WORKTREE_REMOVE_RECEIPT__STARTUP_ONE_ROW_THEN_BACKGROUND_CLEANUP_PENDING_CONTINUATION",
       "application_lifecycle": "WORKSPACE_QUIESCES_BEFORE_TASK_STORE_RETRY_HANDLE_RETAINED_ON_FAILURE",
-      "tool_authority": "RUN_MODE_INTERSECT_ALLOWED_MINUS_FORBIDDEN",
+      "tool_authority": "REACT_SKILL_DELEGATE_AND_VISUAL_HTTP_DIRECT_ENTRIES_RETIRED_FAIL_CLOSED_GENERAL_AGENT_TOOL_AUTHORITY_SEPARATE_NO_PRODUCTION_TOOL_EXECUTION",
       "subprocess_python": "DENIED_AS_WORKSPACE_ISOLATION",
       "shell_execution": "REMOVED_UNTIL_CONTROLLED_CONTAINER_EXECUTOR_EXISTS",
       "evidence": [
@@ -1891,15 +1984,17 @@
       ],
       "missing": [
         "runtime_repo retirement for read-only inspection",
-        "process-level cancellation or force termination for an already-running model or tool",
+        "new graph-revision Tool node binding exact node Grant and WorkspaceRuntime",
+        "per-operation durable fence and lease-loss preemption for future governed Tool execution",
         "successful promotion and failed/abandoned workspace terminal lifecycle",
-        "accepted-checkpoint HEAD authority instead of ancestor-only replay validation",
+        "accepted HEAD authority instead of ancestor-only replay validation",
+        "restart recovery for accepted HEAD, promotion and abandon transitions",
         "Domain Pack and codex_runtime durable-workspace injection",
         "cleanup worker health route and automatic shutdown retry orchestration",
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path resolution and the W0 fuse remain active. Migration 0101 plus the W2 runtime bind one server-derived logical workspace to the exact graph epoch, root WorkOrder, owner, configured root, frozen Git source commit and canonical allow-list. The authenticated Internal Agent write path can explicitly opt in with a stable HMAC secret; it then uses a namespace worktree, runtime-instance/PID lease, exclusive local execution scope, heartbeat, monotonic handoff/takeover, trusted git cleanup receipt and CLEANUP_PENDING continuation. Startup synchronously continues at most one pending cleanup; the app-scoped worker owns the remaining durable backlog. Only provisioning/allocator/cleanup adapter Filesystem/Git callbacks run outside SQLite transactions under workspace/source cross-process locks and one lease-bounded deadline; exact authority is revalidated before and after, heartbeat can advance status_version, and a changed fence/status/expiry never releases the callback result even though physical reconciliation may still be required. Agent tools probe cooperative cancellation between actions; Verification checks live authority only before the whole run starts. Neither has a per-operation repository fence or preemption. Missing secret keeps Host online but write admission fail closed, and no real canary has run. Heartbeat loss cannot terminate an already-running model/tool/Verification. ACTIVE promotion/abandon, accepted-checkpoint HEAD authority, Domain Pack/codex_runtime injection, cleanup health, OS/container/tenant isolation and handle-level TOCTOU protection remain missing, so this is PARTIAL W2 rather than completed Workspace Isolation."
+      "reason": "Canonical path resolution, the W0 fuse, migration 0101 and the W2 worktree/lease/cleanup assets remain active. They bind one server-derived logical workspace to the exact graph epoch, root WorkOrder, owner, configured root, frozen Git source commit and canonical allow-list, and retain namespace worktree allocation, runtime-instance/PID lease, exclusive scope, heartbeat, monotonic handoff/takeover, trusted cleanup receipt and CLEANUP_PENDING continuation. Provisioning/allocator/cleanup callbacks still run outside SQLite transactions under workspace/source cross-process locks and one lease-bounded deadline with pre/post exact-authority validation. W2 currently has no positive Agent Tool consumer. The first PR commit retires only ReAct run_skill and dispatch_sub_agent discovery and low-level execution; the second separately retires the Visual Agent direct HTTP loop. Neither proves general AgentExecutor, file, Web, browser or other Tool authority retirement. Positive Skill, Delegate or visual automation may return only through a new graph revision node that receives the exact node Grant and WorkspaceRuntime. Per-operation durable fencing, lease-loss preemption, accepted HEAD, promotion/abandon and restart recovery must be implemented before enablement. Missing secret keeps admission fail closed, and Domain Pack/codex_runtime injection, cleanup health, OS/container/tenant isolation, handle-level TOCTOU protection and real canary remain missing; this is PARTIAL W2 rather than completed Workspace Isolation."
     },
     "evolution_lab": {
       "status": "SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER",

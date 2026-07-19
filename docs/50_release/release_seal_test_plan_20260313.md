@@ -4,7 +4,7 @@
 # Natsume AI 上线前封测计划（草案）
 
 更新时间：2026-03-17
-状态：Draft（仅仓库扫描与计划，不执行正式实测）；已纳入**多智能体（P1～P16 封板）**专项封测矩阵 MA-01～MA-06
+状态：`HISTORICAL_SUPERSEDED`。本文件保留 2026-03-17 的旧封测基线，不再作为当前生产能力或 NE-07 放行依据；现行验收以 v3.1、`tests/TESTPLAN.md` 与后续 `FullStackAcceptanceReceiptV1` 为准。
 
 ## 1. 扫描结果快照
 
@@ -110,7 +110,7 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 | W-02 | WebUI API 合约（链路面板） | `/api/ui/timeline` `/api/ui/status-distribution` `/api/ui/request/{id}` `/api/ui/link-topology` `/api/ui/search-requests` | 状态码与结构满足约定 | 阻断 |
 | W-03 | WebUI API 合约（观测面板） | `monitor_ui/src/api/obs.js` 引用的 `/obs/*` `/v1/agent/*` | 页面依赖端点可用，无 5xx | 阻断 |
 | W-04 | WebUI 前端路由烟测 | `#/overview/sessions/trace/metrics/insights/canon/bond/tools/automation/agent/wechat` | 页面可打开，无白屏/致命 JS 错误 | 阻断 |
-| W-05 | WebUI Agent 页面 | 从页面触发 `/v1/agent/run` 并解析 SSE | 可看到阶段事件与结束态 | 阻断 |
+| W-05 | WebUI Agent 兼容页面 | 从页面触发 `/v1/agent/run` 并解析 SSE | 只能看到 `AGENT_INIT → LOOP_DONE / REJECTED`，执行轮次和副作用为 0；正向视觉自动化另由受治理 TaskGraph/Edge 路径验收 | 阻断 |
 | W-06 | WebUI 打包一致性 | `monitor_ui` 执行 `npm run build` 并对比产物路径 | 构建成功，产物落入 `app/static/monitor` | 非阻断 |
 | S-01 | Host 治理与防重放 | Governor + Intent + replay_guard + token gate | 重放/过期/越权被拒且 reason_code 稳定 | 阻断 |
 | S-02 | Edge RPC 鉴权与重放 | HMAC 签名、ts 窗口、nonce 唯一性 | 伪签名/超时/重放全部拒绝，合法请求通过 | 阻断 |
@@ -151,7 +151,7 @@ Edge 关键路由组：`/v1/edge/health` `/v1/edge/speak` `/v1/edge/vts` `/v1/ed
 
 1. `DEGRADED` 统一视为阻断
 2. `edge.rpc.fallback_llm=false` 可带条件放行
-3. Agent Loop 必须 `goal_achieved=true` 才放行
+3. 旧 Agent Loop 已退役，`/v1/agent/run` 必须固定 `REJECTED`；任何正向视觉自动化必须经新的 immutable TaskGraph revision 验收，不能复用本文件旧口径放行
 4. `scheduler 未初始化` 与 `tools catalog_size=0` 强阻断
 5. WebUI 路由烟测要求必须“真实浏览器”执行（建议：必须，避免仅接口通过但页面白屏）。
 6. 回滚演练（R-01）纳入本次上线前“必做阻断项”。

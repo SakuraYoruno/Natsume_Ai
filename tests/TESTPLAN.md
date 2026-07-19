@@ -70,6 +70,19 @@
 
 - T-Tool-04：`before_handler` 必须位于 `SAFE_LOCAL_REPLAY` 和 WRITE child token 校验成功之后、handler 调用之前；Graph/Attempt/Lease/Reservation 失效或 WRITE token 无效时，dispatch marker 与 handler 调用都必须为 0。
 
+## T-ReAct-Authority
+- T-ReAct-01：ReAct 工具发现不得再返回 `run_skill` 或 `dispatch_sub_agent`；即使注入这两种 legacy ToolSpec，也必须在 Skill executor / Delegate dispatcher 前以 `REACT_TOOL_GOVERNED_ADMISSION_REQUIRED` 失败关闭，`side_effects_executed=false`。
+- T-ReAct-02：两种嵌套入口在重复调用和重启回放后仍保持低层执行次数为 0，不得恢复旧 handler、隐式 fallback 或在当前 Agent 节点内直接执行 Skill/Delegate。
+- T-ReAct-03：该矩阵只覆盖 `run_skill` / `dispatch_sub_agent`。普通 `GovernedToolNode → CapabilityBroker`、`AgentExecutor` 的文件/Web/Browser/Memory/Emotion 与其他 Tool authority 必须另行审计，不能由这组负向测试宣称已退役。
+- T-ReAct-04：正向 Skill/Delegate 能力只有在 proposal 被编译为新的 immutable TaskGraph revision，且独立节点拥有 Attempt/Lease/Grant/Budget/Verification/Acceptance/Receipt 后才能恢复；安全阻断不得记为 Tool PASS。
+
+## T-Visual-Agent-Authority
+- T-Visual-Agent-01：`/v1/agent/run` 的 mock、Edge 和 ClawdBot 参数组合都只能产生 `AGENT_INIT → LOOP_DONE`；终态固定 `REJECTED / VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED`、`side_effects_executed=false`、执行轮次为 0。
+- T-Visual-Agent-02：请求方提供的 ClawdBot/Edge URL 不得触发连接或出现在响应；route 不得导入或调用模型 resolver、legacy loop/client、Ledger、Edge HMAC 或动作执行器，raw `agent_loop.py`/`edge_rpc_client.py` 与 `log_agent_loop` writer 必须物理删除，生产旧符号导入和调用为 0。
+- T-Visual-Agent-03：`/v1/agent/info` 仅提供兼容元数据并明示 `execution_available=false`、`mock_mode_available=false`；安全退役不得记为 Visual Agent PASS。底层 T-ClawdUI 组件测试不构成生产入口授权。
+- T-Visual-Agent-04：真实 `/v1/chat` route 仅允许 `response_format=text` 进入预检和模型链；`actions`、大小写/空白变体、空值和未知值必须在 notify/Bio Ops/Immune、runtime resolver、模型、Prompt Registry、Memory、Ledger 前产生单一固定拒绝。测试必须通过真实 FastAPI route，而非只调用无生产 caller 的 helper。legacy Action Planner 公共模型入口固定拒绝，纯 parser 结果只能标记 `NONE_PROPOSAL_ONLY`。
+- T-Visual-Agent-05：旧 0104 具身 authority receipt-loss 回归必须在当前完整 migration catalog 上验证“0104 精确存在并可重放”，不得把 0104 永久硬编码成 catalog latest version；后续 migration 增长不能制造假失败。
+
 ## T-MCP
 - T-MCP-01：MCP provider 只同步 metadata 到 registry/scorecard；process-owned `get_mcp_tool_broker` accessor 与 `mcp_tool_broker` container slot 必须不存在，`MCPAdapter`、未进入 ASGI 的兼容 `MCPToolBroker` 与 MCP Skill bridge 均不得保留 callback 或调用 provider，READ/WRITE/有效或伪造旧 Token/未知 tool 都固定 `MCP_TASK_AUTHORITY_REQUIRED`。bridge 默认关闭并 purge stale `mcp::*`；旧持久图必须在 registry lookup 前以同一 reason 拒绝。真实 MCP 执行只有编译为 governed Tool Task 后才可新增正向测试。
 
@@ -85,9 +98,10 @@
 - T-Avatar-03: Host/Edge `EMOTION_TO_EXPRESSION_ID` contracts must remain aligned for the active 16-tag mapping set.
 
 ## T-ClawdUI
+以下仅验证保留的低层 guard/schema/receipt 合同，不授权 Host route、legacy Action Planner 或 raw client 执行，也不能作为 Visual Agent 生产 `PASS`；正向动作必须在受治理 TaskGraph/Edge 节点链中重新验收。
 - T-41: ClawdBot UI action with confidence < 0.80 must be blocked; no click side effect is produced and clawd_action_log records confidence/target_desc/reason_code.
 - T-42: Redline scene and missing UI element must be rejected with stable reason_code (VISUAL_REDLINE/UI_ELEMENT_NOT_FOUND) and guard stage in clawd_action_log.
-- T-43: Successful UI action must produce before/after artifacts and manifest linkage; clawd_action_log stores before_artifact_ref/after_artifact_ref/manifest_ref for replay.
+- T-43: A directly invoked low-level action contract that reports success must produce before/after artifacts and manifest linkage; clawd_action_log stores before_artifact_ref/after_artifact_ref/manifest_ref for replay. This does not prove a production caller exists.
 
 ## T-Svc
 - T-Svc-01: Service registry health output must be parseable and deterministic; same unavailable kind maps to the same reason_code/stage, and each health row is auditable by request_id in service_health_log.
@@ -251,7 +265,7 @@ NE-01 第三个切片及其 Tool/MCP authority 收口的强制测试矩阵：Obs
 
 本次本地结果：旧 Tool/MCP authority 合同 78 项、ASGI/Capability/lifespan/locator 回归 75 项、governed Tool route/seed/真实 SQLite authority 回归 40 项、Frozen Tool Worker 边界回归 12 项、文档/metadata/coverage Gate 42 项均通过；`compileall`、JSON、`git diff --check` 与 fresh mixed-file Gate 也通过。证据由 `artifacts/local-gates/<commit-sha>/` 绑定，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
-同一 rebase 后的 Host lifecycle 测试矩阵还必须证明：每个 `create_app()` 独立拥有 monitor/resource/mode container；只有 factory/start 全成功才发布；Activity factory failure 不发布 Mode；closing fence 阻断新 `begin()`；ResourceManager startup sample 只使用唯一 owned loop；Chat/Input/Tool/Scheduler/Guardian/snapshot读取同一 app-local instance；Obs只读不懒启；Tribe exact owner bind/unbind同一时刻只允许一个live Host并令第二个fail closed，且不得冒充并发multi-app隔离。原Host lifecycle commit-bound inventory为named 45/124、all-form 51、Container56/4/51；Gate 11 收口前的45/123、51、55/4/50继续作为历史，fresh current必须精确为45 modules/123 names、51 consumer modules、54 fields/4 locks/49 refs。定向回归批次为`143 passed`，补充结构/单时钟批次为`22 passed`，两批仅重叠`test_aw08_tribe_dependency_direction.py`的4项，去重161项；原始与去重口径同时保留。波次integration为`NOT_RUN_PER_WAVE_POLICY`；full architecture static 当前为 PASS，但不得由静态 Gate 推导为 NE-01 或完整架构项目完成。
+同一 rebase 后的 Host lifecycle 测试矩阵还必须证明：每个 `create_app()` 独立拥有 monitor/resource/mode container；只有 factory/start 全成功才发布；Activity factory failure 不发布 Mode；closing fence 阻断新 `begin()`；ResourceManager startup sample 只使用唯一 owned loop；Chat/Input/Tool/Scheduler/Guardian/snapshot 读取同一 app-local instance；Obs 只读不懒启；Tribe exact owner bind/unbind 同一时刻只允许一个 live Host 并令第二个 fail closed，且不得冒充并发 multi-app 隔离。原 Host lifecycle commit-bound inventory 为 named 45/124、all-form 51、Container 56/4/51；#89 Gate 11 收口后的 45/123/51 和 ReAct 切片后的 43/120/49 继续作为历史，当前 Visual 切片后的 fresh inventory 必须精确为 named 41 modules/117 names、all-form 47 consumer modules、Container 54 fields/4 locks/49 refs。定向回归批次为 `143 passed`，补充结构/单时钟批次为 `22 passed`，两批仅重叠 `test_aw08_tribe_dependency_direction.py` 的 4 项，去重 161 项；原始与去重口径同时保留。波次 integration 为 `NOT_RUN_PER_WAVE_POLICY`；full architecture static 当前为 PASS，但不得由静态 Gate 推导为 NE-01 或完整架构项目完成。
 
 本轮 TaskStore 写 authority 封口证据必须继续按原始批次报告，禁止相加成一个伪造总数：authority/structure `19 passed`；HostCommand admission `1 passed`；NLE/Operation/Heartbeat `77 passed`；Acceptance Effect Store `15 passed`；Parallel/Settlement/Atomic `45 passed`；Cancellation 首跑 `29 passed + 1 fixture failed`，修正后该 case `1 passed`；Integration 首跑 `46 passed + 3 fixture failed`，修正后 3 个 cases 通过；Terminal classification `32 passed`。前两个 fixture 失败来自旧测试在 Acceptance 后 standalone 补 Effect，与新 canonical fence 冲突；第三个 fixture 缺 `node_risk_level`，该失败已在干净 `origin/dev` 复现，修正只补当前必填测试输入。全部 fixture 修复/重命名后，authority、两份结构合同、两类 recovery、代表性 cancellation、durable artifact baseline、dispatcher semantic order 与 HostCommand admission 的最终关键回归为 `26 passed in 35.33s`；该结果不能用来隐藏首轮失败。波次 integration 仍为 `NOT_RUN_PER_WAVE_POLICY`；该切片完成时 full architecture 静态 Gate 为 `FAIL [1,6,10]`，不得由 focused/mixed-file/authority Gate 推导为 PASS。
 
@@ -265,7 +279,15 @@ PlanningSearch 持久化合同分层切片的证据独立记录为：边界合�
 
 最终 persistence 合同分层切片的证据独立记录为：边界合同 `4 passed`；Context/World、Evolution Lab、Skill、Evolution Governance 定向 `32 passed`；`py_compile` 与 `git diff --check` 通过。新增四个纯 contracts，旧路径保持同对象 identity，四个 repository 不再导入 application；fresh Gate 1=`PASS`，issues=[]、SCC=[]、Edge finding/violation=0、reverse imports=[]，Gate 6/10 继续通过。该切片完成时 #87 组合后的 full static=`FAIL [11]`，随后由 ToolBroker composition 收口关闭 Gate 11。本切片无 migration；wave integration=`NOT_RUN_PER_WAVE_POLICY`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。该结果只验收 Gate 1 分层，Universal Runtime、typed Composition、PlanningSearch 收益、NE-04～NE-06 生产功能与 Full Architecture 仍未完成，NE-01 保持 `IN_PROGRESS`。
 
-Gate 11 ToolBroker composition 收口必须独立验证：生产 constructor 只允许 `host_brain/tools/broker.py` 且 count=`1`；process `get_tool_broker` accessor、`tool_broker` slot、`HostLifecycleToolBrokerProvider` 必须为 0；Container 必须为 54 fields/4 locks/49 mutable refs，named process_services 仍为45 modules/123 names、all-form仍为51 consumer modules。证据按原始批次记录为结构/生命周期/bridge/route-token/seed `43 passed`，ASGI+Tool/MCP+HTTP+broker+MCP audit+真实 SQLite `98 passed`，补充 `1 passed` 与43项批次重叠、不得相加；`py_compile`、policy JSON、whitespace通过。fresh full architecture static=`PASS`、`failed_gates=[]`，但真实 workspace-bound governed executor、完整 typed Composition、NE-01 wave integration 与生产 canary仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+Gate 11 ToolBroker composition 收口必须独立验证：生产 constructor 只允许 `host_brain/tools/broker.py` 且 count=`1`；process `get_tool_broker` accessor、`tool_broker` slot、`HostLifecycleToolBrokerProvider` 必须为 0；Container 必须为 54 fields/4 locks/49 mutable refs。#89 的 named 45 modules/123 names、all-form 51 consumer modules 和 ReAct 切片的 43/120/49 是历史快照；当前 Visual 切片后的 fresh inventory 为 named 41 modules/117 names、all-form 47 consumer modules。证据按原始批次记录为结构/生命周期/bridge/route-token/seed `43 passed`，ASGI+Tool/MCP+HTTP+broker+MCP audit+真实 SQLite `98 passed`，补充 `1 passed` 与 43 项批次重叠、不得相加；`py_compile`、policy JSON、whitespace 通过。fresh full architecture static=`PASS`、`failed_gates=[]`，但真实 workspace-bound governed executor、完整 typed Composition、NE-01 wave integration 与生产 canary 仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+ReAct authority 窄切片只扩大两条负向矩阵：`run_skill` 与 `dispatch_sub_agent` 不再出现在 discovery，注入同名 legacy `ToolSpec` 必须在低层 executor 前以 `REACT_TOOL_GOVERNED_ADMISSION_REQUIRED` 失败关闭。测试不得把该结论外推为旧 Graph ReAct、`AgentExecutor`、`GovernedToolNode → CapabilityBroker`、文件/Web/浏览器/Memory/Emotion 或其他 Agent Tool authority 已退役；canonical `/tools/execute` 的真实 SQLite TaskGraph 正向链必须继续通过。
+
+Visual Agent 旧 authority 退役矩阵必须证明：`/v1/agent/run` 无论 mock、Edge 或自定义 URL 参数都只返回 `AGENT_INIT → LOOP_DONE` 两个固定 SSE 事件，终态为 `REJECTED / VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED`，execution rounds 与 side effects 均为 0；raw Agent Loop/ClawdBot/Edge client、Ledger writer/列常量与 legacy Action Planner 模型入口不得保留生产 caller。真实 `/v1/chat` 仅允许 `response_format=text` 进入预检和模型链，`actions`、大小写/空白变体与未知值必须在 Bio Ops、Immune、runtime resolver、模型、Prompt Registry、Memory 和 Ledger 前拒绝；纯 ActionPlan parser 只能产生 `NONE_PROPOSAL_ONLY`。该矩阵不得写成视觉能力 PASS；正向恢复必须先形成受治理 proposal 并编译新的 immutable TaskGraph revision。
+
+本切片最终集中回归分两组：ReAct/Agent/Tool/文档/静态合同 `213 passed`；真实 SQLite Internal Runtime、W2 底层资产与 canonical Tool Task 主链 `33 passed`。机器状态更新后复跑文档、coverage 与 locator Gate `27 passed`；P1 与 prompt 口径收口后再跑写 authority alias、Graph 参数去回显、SQLite 拒绝终态、HostCommand 合同与元数据回归 `89 passed`；fresh mixed-file Gate 为 `issues=[]`。这些计数只证明上述窄 ReAct Skill/Delegate 边界及相关回归，不证明通用 Agent Tool authority 退役；均为本地证据，远程 CI 继续如实记录 `NOT_RUN_ACCOUNT_QUOTA`。
+
+Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` format fence、兼容 route/raw authority/legacy parser/SQLite 历史只读/locator `61 passed`；Universal coverage、文档、ClawdUI 低层合同、Edge HMAC/Gateway、migration 与具身 receipt 扩展回归 `89 passed`；冻结到 0104 的 receipt-loss compatibility catalog `7 passed`。该冻结 fixture 只隔离 0104 自身的 COMMIT 后丢回执语义，当前生产 catalog 仍连续应用到 0114，未回退或重写 migration。远程 CI 继续记录 `NOT_RUN_ACCOUNT_QUOTA`，本切片不执行 Docker/真实附属服务；后者只在 NE-07 集中验收。
 
 ## T-ARCH（完整架构发布 Gate）
 

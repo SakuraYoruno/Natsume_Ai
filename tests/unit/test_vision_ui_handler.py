@@ -127,6 +127,86 @@ class TestVisionHelpers:
 class TestVisionUiSseGenerator:
     """_vision_ui_sse_generator 测试。"""
 
+    @pytest.mark.parametrize(
+        ("response_format", "expected_format"),
+        [
+            ("actions", "actions"),
+            ("ACTIONS", "actions"),
+            (" actions ", "actions"),
+            ("invalid", "unsupported"),
+            ("", "unsupported"),
+            (None, "unsupported"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_actions_mode_fails_closed_before_model_memory_or_ledger(
+        self,
+        response_format: object,
+        expected_format: str,
+    ):
+        request_body = _make_request_body(
+            message="点击登录按钮",
+            vision_context={"image_url": "http://attacker.invalid/screen.png"},
+        )
+        request_body.response_format = response_format
+        metrics = _make_metrics()
+        forbidden = MagicMock(side_effect=AssertionError("must not resolve"))
+
+        with patch(
+            "host_brain.app.chat_handler_vision._call_vision_llm",
+            new_callable=AsyncMock,
+        ) as model_call, patch(
+            "host_brain.app.chat_handler_vision.resolve_host_llm_runtime_async",
+            new_callable=AsyncMock,
+        ) as runtime_resolver, patch(
+            "host_brain.app.chat_handler_vision.get_model_attempt_service",
+            forbidden,
+        ), patch(
+            "host_brain.app.chat_handler_vision.get_prompt_registry",
+            forbidden,
+        ), patch(
+            "host_brain.app.chat_handler_vision.get_life_memory_service",
+            forbidden,
+        ), patch(
+            "host_brain.app.chat_handler_vision.get_ledger",
+            forbidden,
+        ):
+            events = [
+                event
+                async for event in _vision_ui_sse_generator(
+                    request_body=request_body,
+                    request_id="req-vision-actions-rejected",
+                    session_id="session-vision-actions-rejected",
+                    ts_ms=1_000_000,
+                    intent_draft={"id": "intent-vision-actions"},
+                    scene_type="SCENE_VISION_UI",
+                    scene_type_source="pre_classifier",
+                    governor_result=_make_governor_result(),
+                    emotion_context={},
+                    emotion_snapshot={},
+                    intent_id="intent-vision-actions",
+                    reason_code=None,
+                    metrics=metrics,
+                )
+            ]
+
+        model_call.assert_not_awaited()
+        runtime_resolver.assert_not_awaited()
+        parsed = _parse_sse_events(events)
+        assert parsed == [
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED",
+                "response_format": expected_format,
+                "action_plan_available": False,
+                "side_effects_executed": False,
+                "request_id": "req-vision-actions-rejected",
+            }
+        ]
+        assert "attacker.invalid" not in events[0]
+
     @pytest.mark.asyncio
     async def test_text_only_mode_yields_commit(self):
         """验证纯文字模式（无图片）能正常产出 COMMIT 事件。"""

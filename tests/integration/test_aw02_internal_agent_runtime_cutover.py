@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,11 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.executor import AgentRuntimeExecutor
+from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
@@ -27,6 +33,13 @@ from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.model_runtime import (
+    ModelAttemptResult,
+    ProviderResponse,
+    ProviderTarget,
+    RouteDecision,
+    build_live_production_prompt_registry,
+)
 
 
 NOW = 1_800_000_000_000
@@ -158,6 +171,42 @@ class _IntentEngine:
         }
         self._ledger.log_governor(decision)
         return decision
+
+
+class _FinishOnlyAttemptService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete_sync(self, request):  # noqa: ANN001, ANN201
+        self.calls += 1
+        target = ProviderTarget(
+            adapter_id="test.finish-only",
+            provider="test",
+            model_id="finish-only",
+            timeout_ms=5_000,
+        )
+        return ModelAttemptResult(
+            request_id=request.request_id,
+            success=True,
+            route_decision=RouteDecision(
+                decision_id="route-finish-only",
+                targets=(target,),
+                reason="write-finish-laundering-regression",
+                max_attempts=1,
+            ),
+            attempts=(),
+            response=ProviderResponse(
+                content=json.dumps(
+                    {
+                        "thought": "claim completion without an admitted tool",
+                        "tool_id": "agent_finish",
+                        "tool_args": {},
+                        "final_answer": "pretend the write completed",
+                    }
+                )
+            ),
+            final_target=target,
+        )
 
 
 @pytest.mark.asyncio
@@ -446,6 +495,124 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             ).fetchone()
         assert pre_claim_result == (None,)
         assert task_store.list_pending_outbox(limit=100) == []
+    finally:
+        if runtime is not None:
+            await runtime.aclose()
+        claim_store.close()
+        ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_write_agent_finish_cannot_create_durable_acceptance(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "internal-write-finish.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw02-write-finish",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+
+    request_id = "request-internal-write-finish"
+    principal_id = "principal-internal-write-finish"
+    body_sha256 = _sha256("internal-write-finish-body")
+    claim_ref = "ingress-claim://internal/write-finish"
+    audit_ref = "audit://secure-ingress/internal/write-finish"
+    _insert_secure_authority(
+        db_path,
+        request_id=request_id,
+        principal_id=principal_id,
+        body_sha256=body_sha256,
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+
+    ledger = SQLiteLedger(str(db_path))
+    claim_store = SQLiteSecureIngressStore(db_path)
+    runtime = None
+    attempt_service = _FinishOnlyAttemptService()
+    try:
+        task_store = DurableTaskStore(db_path)
+        review_store = ReviewStore(db_path)
+        infrastructure = SimpleNamespace(
+            task_store=task_store,
+            review_store=review_store,
+            review_continuation_store=ReviewContinuationStore(db_path),
+            command_repository=HostCommandRepository(db_path),
+            outbox_publisher=RuntimeOutboxPublisher(
+                task_store,
+                RuntimeEventStore(db_path),
+            ),
+        )
+        result_repository = AgentExecutionResultRepository(db_path)
+        token_service = TokenService(approval_ttl_ms=180_000)
+        runtime = build_governed_internal_runtime(
+            task_runtime_container=infrastructure,
+            ledger=ledger,
+            token_service=token_service,
+            result_repository=result_repository,
+            runtime_router=CanonicalRuntimeRouter(),
+            owner_id="internal-write-finish-owner",
+            canonical_executor=AgentRuntimeExecutor(
+                artifact_store=AgentArtifactStore(tmp_path / "agent-runs"),
+                model_attempt_service=attempt_service,
+                prompt_registry=build_live_production_prompt_registry(),
+            ),
+        )
+        await runtime.activate()
+        service = InternalAgentCommandService(
+            runtime=runtime,
+            intent_engine=_IntentEngine(ledger, token_service),
+            claim_result_store=claim_store,
+        )
+        terminal = await service.execute(
+            work_order=AgentWorkOrder(
+                work_order_id="work-order-internal-write-finish",
+                domain="code",
+                run_mode="worker",
+                objective="write a file and claim completion",
+                allowed_actions=["write_files", "generate_report"],
+                forbidden_actions=["modify_secret_files"],
+                review_policy={"review_required": False},
+            ),
+            request_id=request_id,
+            session_id="session-internal-write-finish",
+            ts_ms=NOW,
+            command_authority={
+                "principal_id": principal_id,
+                "claim_ref": claim_ref,
+                "audit_ref": audit_ref,
+                "body_sha256": body_sha256,
+            },
+        )
+
+        assert terminal["decision"] == "REJECT"
+        receipt = terminal["execution_receipt"]
+        assert receipt["accepted"] is False
+        assert receipt["verification_status"] != "PASS"
+        durable_result = result_repository.get_by_command(receipt["command_id"])
+        assert durable_result is not None
+        assert durable_result["result_status"] == "BLOCKED"
+        assert durable_result["result"]["reason_code"] == (
+            AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+        )
+        assert durable_result["result"]["acceptance"]["decision"] == "NOT_RUN"
+        assert attempt_service.calls == 0
+
+        command = HostCommandRepository(db_path).get(receipt["command_id"])
+        assert command is not None
+        snapshot = task_store.read_scheduler_snapshot(
+            command["command"].graph_id,
+            command["command"].graph_revision,
+        )
+        assert snapshot["graph_record"]["nodes"][0]["status"] != "ACCEPTED"
+        with sqlite3.connect(str(db_path)) as conn:
+            accepted_events = conn.execute(
+                "SELECT COUNT(*) FROM task_runtime_outbox "
+                "WHERE aggregate_type = 'TASK_NODE' "
+                "AND event_type = 'TASK_NODE_ACCEPTED'"
+            ).fetchone()[0]
+        assert accepted_events == 0
     finally:
         if runtime is not None:
             await runtime.aclose()
