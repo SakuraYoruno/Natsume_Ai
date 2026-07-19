@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -294,6 +295,14 @@ async def test_internal_artifact_crash_windows_become_reconciliation_only(
                 "lease_owner": effect_owner,
                 "fencing_token": effect_fence,
             }
+
+        async def resolve_internal_agent_completion_lineage(
+            self,
+            **_kwargs: Any,
+        ) -> Mapping[str, Any] | None:
+            # This fixture uses the original RELEASED Lease. Recovered
+            # promotion tests provide a real TaskStore lineage separately.
+            return None
 
     repository = SimpleNamespace(
         snapshot=SimpleNamespace(state=WorkspaceLifecycleState.ACTIVE)

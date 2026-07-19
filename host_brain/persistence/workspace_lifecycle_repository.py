@@ -27,6 +27,10 @@ from host_brain.persistence.workspace_operation_fencing import (
     WORKSPACE_AUTHORITY_INVALID,
     WORKSPACE_STALE_FENCE,
 )
+from host_brain.persistence.worker_projection_repository import (
+    WorkerProjectionStoreError,
+    validate_worker_projection_record,
+)
 
 
 WORKSPACE_LIFECYCLE_CONFLICT = "WORKSPACE_LIFECYCLE_CONFLICT"
@@ -231,6 +235,85 @@ class WorkspaceLifecycleRepositoryMixin:
         with self._transaction(write=False) as conn:
             self._require_row(conn, reference)
             return self._read_lifecycle(conn, reference)
+
+    def list_terminal_lifecycle_candidates(
+        self,
+        *,
+        limit: int = 100,
+        after_workspace_id: str | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return bounded terminal lifecycle/workspace pairs from one snapshot.
+
+        The 0116 journal deliberately does not mutate the frozen 0101
+        workspace row.  A PROMOTED or ABANDONED lifecycle can therefore still
+        own an ACTIVE worktree after a crash.  This read is the authoritative
+        discovery boundary used to start, or resume, cleanup; it never changes
+        either authority.
+        """
+
+        self.assert_lifecycle_schema_ready()
+        if isinstance(limit, bool):
+            raise self._workspace_operation_error(
+                WORKSPACE_AUTHORITY_INVALID,
+                "terminal lifecycle limit must be an integer",
+            )
+        try:
+            bounded = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise self._workspace_operation_error(
+                WORKSPACE_AUTHORITY_INVALID,
+                "terminal lifecycle limit must be an integer",
+            ) from exc
+        if bounded < 1 or bounded > 1_000:
+            raise self._workspace_operation_error(
+                WORKSPACE_AUTHORITY_INVALID,
+                "terminal lifecycle limit must be between 1 and 1000",
+            )
+        cursor = str(after_workspace_id or "").strip()
+        if cursor and len(cursor) > 120:
+            raise self._workspace_operation_error(
+                WORKSPACE_AUTHORITY_INVALID,
+                "terminal lifecycle cursor is invalid",
+            )
+        with self._transaction(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT workspace.*
+                FROM agent_workspace_authority AS workspace
+                JOIN agent_workspace_lifecycle_event AS lifecycle
+                  ON lifecycle.workspace_id = workspace.workspace_id
+                WHERE workspace.status = 'ACTIVE'
+                  AND (? = '' OR workspace.workspace_id > ?)
+                  AND lifecycle.transition_revision = (
+                      SELECT MAX(latest.transition_revision)
+                      FROM agent_workspace_lifecycle_event AS latest
+                      WHERE latest.workspace_id = workspace.workspace_id
+                  )
+                  AND lifecycle.to_state IN ('PROMOTED', 'ABANDONED')
+                ORDER BY workspace.workspace_id
+                LIMIT ?
+                """,
+                (cursor, cursor, bounded),
+            ).fetchall()
+            candidates: list[dict[str, Any]] = []
+            for row in rows:
+                authority = self._authority(row)
+                lifecycle = self._read_lifecycle(conn, authority.workspace_id)
+                if lifecycle.state not in {
+                    WorkspaceLifecycleState.PROMOTED,
+                    WorkspaceLifecycleState.ABANDONED,
+                }:
+                    raise self._workspace_operation_error(
+                        WORKSPACE_LIFECYCLE_DATA_INVALID,
+                        "terminal lifecycle inventory changed within one snapshot",
+                    )
+                candidates.append(
+                    {
+                        "authority": authority,
+                        "lifecycle": lifecycle,
+                    }
+                )
+            return tuple(candidates)
 
     def accept_workspace(
         self,
@@ -591,6 +674,11 @@ class WorkspaceLifecycleRepositoryMixin:
             task_lease_fencing_token=int(values["task_lease_fencing_token"]),
             ts_ms=ts_ms,
             require_live=(from_state is WorkspaceLifecycleState.ACTIVE),
+            allow_terminal_abandonment=(
+                from_state is WorkspaceLifecycleState.ACTIVE
+                and WorkspaceLifecycleState(str(values["to_state"]))
+                is WorkspaceLifecycleState.ABANDONED
+            ),
         )
         try:
             event = WorkspaceLifecycleEventV1.create(
@@ -800,20 +888,107 @@ class WorkspaceLifecycleRepositoryMixin:
         task_lease_fencing_token: int,
         ts_ms: int,
         require_live: bool,
+        allow_terminal_abandonment: bool,
     ) -> None:
         row = conn.execute(
             """
             SELECT attempt.graph_id, attempt.graph_revision, attempt.node_id,
                    attempt.status AS attempt_status,
+                   attempt.owner_id AS attempt_owner_id,
+                   attempt.operation_scope AS attempt_operation_scope,
+                   attempt.operation_fingerprint AS attempt_operation_fingerprint,
                    lease.attempt_id, lease.fencing_token,
-                   lease.status, lease.expires_ts_ms
+                   lease.lease_id, lease.owner_id AS lease_owner_id,
+                   lease.status AS lease_status, lease.expires_ts_ms,
+                   lease.released_ts_ms AS lease_released_ts_ms,
+                   graph.status AS graph_status,
+                   node.status AS node_status,
+                   node.node_json AS node_json
             FROM task_runtime_attempt AS attempt
             JOIN task_runtime_lease AS lease
               ON lease.attempt_id = attempt.attempt_id
+            JOIN task_runtime_graph AS graph
+              ON graph.graph_id = attempt.graph_id
+             AND graph.revision = attempt.graph_revision
+            JOIN task_runtime_node AS node
+              ON node.graph_id = attempt.graph_id
+             AND node.graph_revision = attempt.graph_revision
+             AND node.node_id = attempt.node_id
             WHERE attempt.attempt_id = ? AND lease.lease_id = ?
             """,
             (attempt_id, task_lease_id),
         ).fetchone()
+        active_binding = bool(
+            row is not None
+            and str(row["lease_status"]) == "ACTIVE"
+            and type(row["expires_ts_ms"]) is int
+            and int(row["expires_ts_ms"]) > ts_ms
+        )
+        completed_binding = bool(
+            row is not None
+            and str(row["attempt_status"]) == "SUCCEEDED"
+            and str(row["lease_status"]) == "RELEASED"
+        )
+        recovered_task_binding = (
+            self._internal_agent_recovered_task_binding(
+                conn,
+                row=row,
+                attempt_id=attempt_id,
+                historical_lease_id=task_lease_id,
+                historical_fencing_token=task_lease_fencing_token,
+            )
+            if row is not None
+            else None
+        )
+        recovered_completed_binding = bool(
+            row is not None
+            and str(row["attempt_status"]) == "SUCCEEDED"
+            and str(row["graph_status"]) == "COMPLETED"
+            and str(row["node_status"]) == "ACCEPTED"
+            and recovered_task_binding is not None
+        )
+        terminal_abandonment_binding = bool(
+            allow_terminal_abandonment
+            and row is not None
+            and (
+                (
+                    str(row["graph_status"]) == "FAILED"
+                    and str(row["node_status"])
+                    in {"FAILED", "VERIFICATION_FAILED"}
+                    and str(row["attempt_status"]) in {"FAILED", "SUCCEEDED"}
+                    and (
+                        str(row["lease_status"]) == "RELEASED"
+                        or recovered_task_binding is not None
+                    )
+                )
+                or (
+                    str(row["graph_status"]) == "CANCELLED"
+                    and str(row["node_status"]) == "CANCELLED"
+                    and (
+                        (
+                            str(row["attempt_status"]) == "CANCELLED"
+                            and str(row["lease_status"]) == "CANCELLED"
+                        )
+                        or (
+                            str(row["attempt_status"]) == "SUCCEEDED"
+                            and (
+                                str(row["lease_status"]) == "RELEASED"
+                                or recovered_task_binding is not None
+                            )
+                        )
+                    )
+                )
+                or (
+                    str(row["graph_status"]) == "BLOCKED"
+                    and str(row["node_status"]) == "FAILED"
+                    and str(row["attempt_status"]) == "FAILED"
+                    and (
+                        str(row["lease_status"]) == "RELEASED"
+                        or recovered_task_binding is not None
+                    )
+                )
+            )
+        )
         if (
             row is None
             or str(row["graph_id"]) != graph_id
@@ -826,14 +1001,12 @@ class WorkspaceLifecycleRepositoryMixin:
             or (
                 require_live
                 and not (
-                    (
-                        str(row["status"]) == "ACTIVE"
-                        and type(row["expires_ts_ms"]) is int
-                        and int(row["expires_ts_ms"]) > ts_ms
-                    )
-                    or (
-                        str(row["attempt_status"]) == "SUCCEEDED"
-                        and str(row["status"]) == "RELEASED"
+                    terminal_abandonment_binding
+                    if allow_terminal_abandonment
+                    else (
+                        active_binding
+                        or completed_binding
+                        or recovered_completed_binding
                     )
                 )
             )
@@ -842,6 +1015,157 @@ class WorkspaceLifecycleRepositoryMixin:
                 WORKSPACE_STALE_FENCE,
                 "TaskNode Attempt/Lease binding is absent, expired, or stale",
             )
+
+    def _internal_agent_recovered_task_binding(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        row: sqlite3.Row,
+        attempt_id: str,
+        historical_lease_id: str,
+        historical_fencing_token: int,
+    ) -> dict[str, Any] | None:
+        """Return one exact historical→takeover lineage, otherwise ``None``."""
+
+        if (
+            str(row["attempt_id"]) != str(attempt_id)
+            or str(row["lease_id"]) != str(historical_lease_id)
+            or int(row["fencing_token"] or 0) != int(historical_fencing_token)
+            or str(row["lease_status"]) != "EXPIRED"
+            or row["lease_released_ts_ms"] is None
+        ):
+            return None
+        reservations = conn.execute(
+            """
+            SELECT * FROM task_runtime_idempotency_reservation
+            WHERE attempt_id = ? ORDER BY reservation_id
+            """,
+            (str(attempt_id),),
+        ).fetchall()
+        leases = conn.execute(
+            """
+            SELECT * FROM task_runtime_lease
+            WHERE attempt_id = ?
+            ORDER BY fencing_token, acquired_ts_ms, lease_id
+            """,
+            (str(attempt_id),),
+        ).fetchall()
+        if len(reservations) != 1 or len(leases) < 2:
+            return None
+        reservation = reservations[0]
+        final_lease = leases[-1]
+        historical_index = next(
+            (
+                index
+                for index, lease in enumerate(leases)
+                if str(lease["lease_id"]) == str(historical_lease_id)
+            ),
+            -1,
+        )
+        if historical_index < 0 or historical_index == len(leases) - 1:
+            return None
+        tokens = [int(lease["fencing_token"] or 0) for lease in leases]
+        if any(
+            right != left + 1
+            for left, right in zip(tokens, tokens[1:], strict=False)
+        ):
+            return None
+        if any(
+            str(lease["status"]) != "EXPIRED"
+            or lease["released_ts_ms"] is None
+            for lease in leases[:-1]
+        ):
+            return None
+        if any(
+            int(leases[index + 1]["acquired_ts_ms"])
+            < int(lease["released_ts_ms"])
+            for index, lease in enumerate(leases[:-1])
+        ):
+            return None
+        projection = conn.execute(
+            """
+            SELECT * FROM task_runtime_worker_projection
+            WHERE projection_id = ?
+            """,
+            (str(reservation["receipt_ref"] or ""),),
+        ).fetchone()
+        commands = conn.execute(
+            """
+            SELECT * FROM host_command_journal
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY command_id
+            """,
+            (str(row["graph_id"]), int(row["graph_revision"])),
+        ).fetchall()
+        command = commands[0] if len(commands) == 1 else None
+        node_count = conn.execute(
+            """
+            SELECT COUNT(*) AS total FROM task_runtime_node
+            WHERE graph_id = ? AND graph_revision = ?
+            """,
+            (str(row["graph_id"]), int(row["graph_revision"])),
+        ).fetchone()
+        try:
+            node_payload = json.loads(str(row["node_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        try:
+            projection_record = (
+                validate_worker_projection_record(projection)
+                if projection is not None
+                else None
+            )
+        except WorkerProjectionStoreError:
+            return None
+        exact = (
+            projection_record is not None
+            and command is not None
+            and node_count is not None
+            and int(node_count["total"]) == 1
+            and isinstance(node_payload, Mapping)
+            and str(node_payload.get("node_id") or "") == str(row["node_id"])
+            and str(node_payload.get("route") or "")
+            == "delegate:agent_runtime"
+            and str(reservation["status"]) == "COMMITTED"
+            and str(reservation["lease_id"]) == str(historical_lease_id)
+            and str(reservation["owner_id"]) == str(row["lease_owner_id"])
+            and int(reservation["fencing_token"] or 0)
+            == int(historical_fencing_token)
+            and str(reservation["business_scope"])
+            == str(row["attempt_operation_scope"])
+            and str(reservation["operation_fingerprint"])
+            == str(row["attempt_operation_fingerprint"])
+            and str(command["surface"]) == "internal"
+            and str(command["route_type"]) == "delegate"
+            and str(command["target_id"]) == "agent_runtime"
+            and str(command["graph_id"]) == str(row["graph_id"])
+            and int(command["graph_revision"]) == int(row["graph_revision"])
+            and str(command["business_scope"])
+            == str(reservation["business_scope"])
+            and str(command["operation_fingerprint"])
+            == str(reservation["operation_fingerprint"])
+            and str(projection_record["command_id"]) == str(command["command_id"])
+            and str(projection_record["graph_id"]) == str(row["graph_id"])
+            and int(projection_record["graph_revision"])
+            == int(row["graph_revision"])
+            and str(projection_record["node_id"]) == str(row["node_id"])
+            and str(projection_record["attempt_id"]) == str(attempt_id)
+            and str(projection_record["route_type"]) == "delegate"
+            and str(projection_record["target_id"]) == "agent_runtime"
+            and str(final_lease["status"]) == "RELEASED"
+            and final_lease["released_ts_ms"] is not None
+            and int(final_lease["fencing_token"])
+            > int(historical_fencing_token)
+            and str(final_lease["owner_id"]) == str(row["attempt_owner_id"])
+        )
+        if not exact:
+            return None
+        return {
+            "historical_lease": dict(leases[historical_index]),
+            "completion_lease": dict(final_lease),
+            "operation_reservation": dict(reservation),
+            "recovered": True,
+        }
 
     def _assert_workspace_lease_binding_at_commit(
         self,

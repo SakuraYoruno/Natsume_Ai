@@ -794,6 +794,37 @@ class DurableActionPreviewAuthority:
             )
         return receipt
 
+    def reopen_receipt(self, *, event_id: str) -> dict[str, Any]:
+        """Reopen one immutable issuance receipt without granting execution.
+
+        Terminal checkpoint recovery uses this read-only proof to establish
+        that a seal-bound Preview really exists in the append-only RuntimeEvent
+        journal.  It deliberately does not renew expiry, re-evaluate policy, or
+        return an execution proof.
+        """
+
+        event_ref = _ref(event_id, "event_id")
+        record = self._store.get_event_by_id(event_id=event_ref)
+        if not isinstance(record, Mapping):
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_INVALID,
+                "preview receipt is missing",
+            )
+        raw_payload = record.get("payload")
+        if not isinstance(raw_payload, Mapping):
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_INVALID,
+                "preview receipt payload is missing",
+            )
+        receipt = ActionPreviewReceiptV1.from_mapping(raw_payload)
+        expected_event = self._event(receipt)
+        return self._validate_record(
+            record,
+            receipt=receipt,
+            expected_event=expected_event,
+            replayed=True,
+        )
+
     def _origin_receipt(
         self,
         authority_context: Mapping[str, Any] | None,

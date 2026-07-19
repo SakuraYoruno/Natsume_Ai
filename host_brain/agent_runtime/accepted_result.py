@@ -165,6 +165,7 @@ class InternalAcceptedResultHandler:
                 "get_lease",
                 "get_node_artifact",
                 "get_acceptance_effect_intent",
+                "resolve_internal_agent_completion_lineage",
             ):
                 _require_method(task_store, method)
         self._tasks = task_store
@@ -336,6 +337,31 @@ class InternalAcceptedResultHandler:
             lease = await _resolve(
                 self._tasks.get_lease(str(authority.get("lease_id") or ""))
             )
+            completion_lease = lease
+            if (
+                isinstance(lease, Mapping)
+                and str(lease.get("status") or "") == "EXPIRED"
+            ):
+                completion_lineage = await _resolve(
+                    self._tasks.resolve_internal_agent_completion_lineage(
+                        graph_id=canonical["graph_id"],
+                        graph_revision=canonical["graph_revision"],
+                        node_id=canonical["node_id"],
+                        attempt_id=canonical["attempt_id"],
+                        historical_lease_id=str(authority.get("lease_id") or ""),
+                        historical_lease_owner=str(
+                            authority.get("lease_owner_id") or ""
+                        ),
+                        historical_fencing_token=int(
+                            authority.get("fencing_token") or 0
+                        ),
+                    )
+                )
+                if not isinstance(completion_lineage, Mapping):
+                    _invalid(
+                        "recovered Agent promotion lacks exact takeover Lease lineage"
+                    )
+                completion_lease = completion_lineage.get("completion_lease")
             node_artifact = await _resolve(
                 self._tasks.get_node_artifact(
                     canonical["graph_id"],
@@ -383,12 +409,28 @@ class InternalAcceptedResultHandler:
                 or attempt.get("graph_id") != canonical["graph_id"]
                 or attempt.get("graph_revision") != canonical["graph_revision"]
                 or attempt.get("node_id") != canonical["node_id"]
-                or attempt.get("owner_id") != authority.get("lease_owner_id")
                 or lease.get("lease_id") != authority.get("lease_id")
                 or lease.get("attempt_id") != canonical["attempt_id"]
                 or lease.get("owner_id") != authority.get("lease_owner_id")
                 or lease.get("fencing_token") != authority.get("fencing_token")
-                or lease.get("status") != "RELEASED"
+                or lease.get("status") not in {"RELEASED", "EXPIRED"}
+                or not isinstance(completion_lease, Mapping)
+                or completion_lease.get("attempt_id") != canonical["attempt_id"]
+                or completion_lease.get("owner_id") != attempt.get("owner_id")
+                or completion_lease.get("status") != "RELEASED"
+                or type(completion_lease.get("fencing_token")) is not int
+                or int(completion_lease["fencing_token"])
+                < int(authority.get("fencing_token") or 0)
+                or (
+                    lease.get("status") == "EXPIRED"
+                    and int(completion_lease["fencing_token"])
+                    <= int(authority.get("fencing_token") or 0)
+                )
+                or (
+                    lease.get("status") == "RELEASED"
+                    and completion_lease.get("lease_id")
+                    != authority.get("lease_id")
+                )
                 or node_artifact.get("graph_id") != canonical["graph_id"]
                 or node_artifact.get("graph_revision") != canonical["graph_revision"]
                 or node_artifact.get("node_id") != canonical["node_id"]

@@ -17,6 +17,8 @@ import re
 import stat
 from typing import Any, BinaryIO, Callable
 
+from . import artifact_store_read_model as _read_model
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CODEX_RUNS_ROOT = REPO_ROOT / "artifacts" / "codex_runs"
@@ -52,6 +54,7 @@ _SEALED_FILES = (
     "changed_files.json",
     "verification.json",
 )
+_PROJECTION_RECOVERY_FILE = "projection_recovery.json"
 
 
 class GovernedAgentArtifactError(RuntimeError):
@@ -92,6 +95,12 @@ class GovernedAgentArtifactSeal:
 def sanitize_segment(value: str, fallback: str = "agent-run") -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in str(value or "").strip()).strip(".-")
     return cleaned or fallback
+
+
+def governed_attempt_segment(attempt_id: str) -> str:
+    """Return the canonical opaque directory segment for a raw Attempt id."""
+
+    return _attempt_segment(attempt_id)
 
 
 class AgentArtifactStore:
@@ -245,16 +254,23 @@ class AgentArtifactStore:
             raise GovernedAgentArtifactError("stage identity drifted before sealing")
         self._discard_stale_metadata_temp(stage.stage_dir)
         seal_exists = _path_lexists(stage.stage_dir / "seal.json")
+        recovery_exists = _path_lexists(
+            stage.stage_dir / _PROJECTION_RECOVERY_FILE
+        )
+        sealed_files = (
+            *_SEALED_FILES,
+            *((_PROJECTION_RECOVERY_FILE,) if recovery_exists else ()),
+        )
         _require_exact_inventory(
             stage.stage_dir,
             allowed={
                 "owner.json",
-                *_SEALED_FILES,
+                *sealed_files,
                 *({"seal.json"} if seal_exists else set()),
             },
         )
         files: dict[str, str] = {}
-        for relative in _SEALED_FILES:
+        for relative in sealed_files:
             path = stage.stage_dir / relative
             _require_regular_file(path, root=stage.stage_dir)
             files[relative] = _file_digest(path)
@@ -308,7 +324,7 @@ class AgentArtifactStore:
         ):
             raise GovernedAgentArtifactError("sealed stage cannot be discarded")
         entries = list(stage.stage_dir.iterdir())
-        allowed = {"owner.json", *_SEALED_FILES}
+        allowed = {"owner.json", *_SEALED_FILES, _PROJECTION_RECOVERY_FILE}
         for entry in entries:
             if entry.name not in allowed or not _is_regular_file_without_reparse(entry):
                 raise GovernedAgentArtifactError(
@@ -323,6 +339,7 @@ class AgentArtifactStore:
         *,
         stage_ref: str,
         seal_digest: str,
+        discard_stale_temp: bool = True,
     ) -> GovernedAgentArtifactSeal:
         """Reopen either STAGING or ACCEPTED material and verify every byte."""
 
@@ -330,13 +347,24 @@ class AgentArtifactStore:
         if not _DIGEST.fullmatch(expected_digest):
             raise GovernedAgentArtifactError("stage seal digest is invalid")
         stage = self._load_stage(stage_ref, allow_accepted=True)
-        self._discard_stale_metadata_temp(stage.stage_dir)
+        if discard_stale_temp:
+            self._discard_stale_metadata_temp(stage.stage_dir)
         seal = _read_json_object(stage.stage_dir / "seal.json", field="stage seal")
+        files = seal.get("files")
+        if not isinstance(files, dict):
+            raise GovernedAgentArtifactError("stage sealed file inventory drifted")
+        actual_files = tuple(sorted(str(value) for value in files))
+        base_files = tuple(sorted(_SEALED_FILES))
+        recoverable_files = tuple(
+            sorted((*_SEALED_FILES, _PROJECTION_RECOVERY_FILE))
+        )
+        if actual_files not in {base_files, recoverable_files}:
+            raise GovernedAgentArtifactError("stage sealed file inventory drifted")
         _require_exact_inventory(
             stage.stage_dir,
             allowed={
                 "owner.json",
-                *_SEALED_FILES,
+                *actual_files,
                 "seal.json",
                 *(
                     {"promotion.json"}
@@ -355,9 +383,9 @@ class AgentArtifactStore:
         ):
             raise GovernedAgentArtifactError("stage seal attribution drifted")
         files = seal_without_digest.get("files")
-        if not isinstance(files, dict) or tuple(sorted(files)) != tuple(sorted(_SEALED_FILES)):
+        if not isinstance(files, dict) or tuple(sorted(files)) != actual_files:
             raise GovernedAgentArtifactError("stage sealed file inventory drifted")
-        for relative in _SEALED_FILES:
+        for relative in actual_files:
             path = stage.stage_dir / relative
             _require_regular_file(path, root=stage.stage_dir)
             if files.get(relative) != _file_digest(path):
@@ -375,6 +403,70 @@ class AgentArtifactStore:
             stage_dir=stage.stage_dir,
             accepted_dir=accepted_dir,
         )
+
+    def inventory_governed_seals(
+        self,
+        *,
+        namespace: str,
+        limit: int = 100,
+        after_stage_ref: str | None = None,
+    ) -> tuple[GovernedAgentArtifactSeal, ...]:
+        """Return a bounded, fully verified, read-only seal inventory."""
+
+        return _read_model.inventory_governed_seals(
+            self,
+            namespace=namespace,
+            limit=limit,
+            after_stage_ref=after_stage_ref,
+        )
+
+    def inspect_governed_promotion(
+        self,
+        *,
+        stage_ref: str,
+        seal_digest: str,
+    ) -> dict[str, str]:
+        """Reopen one exact accepted promotion without mutating storage."""
+
+        return _read_model.inspect_governed_promotion(
+            self,
+            stage_ref=stage_ref,
+            seal_digest=seal_digest,
+        )
+
+    def inspect_governed_stage_for_authority(
+        self,
+        *,
+        workspace_id: str,
+        execution_authority: dict[str, Any],
+    ) -> GovernedAgentArtifactSeal:
+        """Reopen the exact sealed stage derived from immutable Task authority."""
+
+        return _read_model.inspect_governed_stage_for_authority(
+            self,
+            workspace_id=workspace_id,
+            execution_authority=execution_authority,
+        )
+
+    def read_projection_recovery(
+        self,
+        seal: GovernedAgentArtifactSeal,
+    ) -> dict[str, Any]:
+        """Read the seal-bound recovery envelope; legacy seals fail closed."""
+
+        return _read_model.read_projection_recovery(self, seal)
+
+    def read_sealed_json(
+        self,
+        seal: GovernedAgentArtifactSeal,
+        relative: str,
+    ) -> dict[str, Any]:
+        """Read one fixed protected JSON member after revalidating the seal."""
+
+        return _read_model.read_sealed_json(self, seal, relative)
+
+    def _sealed_digest_for_ref(self, stage_ref: str) -> str:
+        return _read_model.sealed_digest_for_ref(self, stage_ref)
 
     def promote_governed_stage(
         self,
@@ -550,31 +642,36 @@ class AgentArtifactStore:
     ) -> str:
         """Return an exact ref without deleting material or writing authority."""
 
-        workspace, attempt_id, expected = _governed_tombstone_record(
+        return _read_model.plan_governed_abandonment(
+            self,
             stage_ref=stage_ref,
             seal_digest=seal_digest,
             reason_code=reason_code,
         )
-        self._guard_authority_paths(workspace, attempt_id)
-        if _path_lexists(self._accepted_dir(workspace, attempt_id)):
-            raise GovernedAgentArtifactError("accepted artifact cannot be abandoned")
-        tombstone_path = self._tombstone_path(workspace, attempt_id)
-        if _path_lexists(tombstone_path):
-            existing = _validate_tombstone(
-                _read_json_object(tombstone_path, field="stage tombstone")
-            )
-            if existing != expected:
-                raise GovernedAgentArtifactError(
-                    "stage tombstone attribution drifted"
-                )
-            return str(existing["tombstone_ref"])
-        seal = self.inspect_governed_stage(
+
+    def inspect_governed_tombstone(
+        self,
+        *,
+        stage_ref: str,
+        seal_digest: str,
+        reason_code: str,
+    ) -> str:
+        """Reopen an exact abandonment tombstone without mutating storage."""
+
+        return _read_model.inspect_governed_tombstone(
+            self,
             stage_ref=stage_ref,
             seal_digest=seal_digest,
+            reason_code=reason_code,
         )
-        if seal.accepted_dir is not None:
-            raise GovernedAgentArtifactError("accepted artifact cannot be abandoned")
-        return str(expected["tombstone_ref"])
+
+    def inspect_governed_tombstone_ref(
+        self,
+        tombstone_ref: str,
+    ) -> dict[str, str]:
+        """Resolve a tombstone reference into its canonical read-only proof."""
+
+        return _read_model.inspect_governed_tombstone_ref(self, tombstone_ref)
 
     def _load_stage(
         self,
@@ -1257,5 +1354,6 @@ __all__ = [
     "GovernedAgentArtifactSeal",
     "GovernedAgentArtifactStage",
     "REPO_ROOT",
+    "governed_attempt_segment",
     "sanitize_segment",
 ]

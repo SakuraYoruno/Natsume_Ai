@@ -18,6 +18,10 @@ import re
 from typing import Any, Protocol
 
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
+from host_brain.contracts.agent_runtime.projection_recovery import (
+    ProjectionRecoveryContractError,
+    validate_projection_recovery_envelope,
+)
 from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
@@ -26,7 +30,7 @@ from host_brain.persistence.worker_projection_repository import (
     validate_worker_projection_payload,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
-from host_brain.task_runtime.worker_budget_usage import (
+from host_brain.contracts.agent_runtime.worker_budget_usage import (
     build_worker_budget_usage,
     stable_worker_usage_id,
 )
@@ -93,6 +97,27 @@ class InternalAgentProposalExecutor:
         self,
         frozen: FrozenNodeInput,
     ) -> AsyncIterator[Mapping[str, Any]]:
+        async for event in self._execute_stream(frozen, recovery_context=None):
+            yield event
+
+    async def execute_stream_with_recovery(
+        self,
+        frozen: FrozenNodeInput,
+        *,
+        recovery_context: Mapping[str, Any],
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        async for event in self._execute_stream(
+            frozen,
+            recovery_context=dict(recovery_context or {}),
+        ):
+            yield event
+
+    async def _execute_stream(
+        self,
+        frozen: FrozenNodeInput,
+        *,
+        recovery_context: dict[str, Any] | None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
         command, work_order, _, _ = _reopen_frozen_admission(
             frozen=frozen,
             command_repository=self._commands,
@@ -101,12 +126,20 @@ class InternalAgentProposalExecutor:
         # still accepts the v2 object.  It owns no grant, result ledger, graph
         # mutation or publication authority.
         legacy_order = work_order.to_agent_work_order()
+        execute_kwargs: dict[str, Any] = {
+            "workspace_execution_authority": _workspace_execution_authority(
+                frozen
+            )
+        }
+        # Only the production AgentRuntimeExecutor owns the protected artifact
+        # envelope.  Compatibility executors remain usable, but cannot claim
+        # seal-based recovery merely because this wrapper supplied metadata.
+        if isinstance(self._executor, AgentRuntimeExecutor):
+            execute_kwargs["projection_recovery_context"] = recovery_context
         result = await asyncio.to_thread(
             self._executor.execute,
             legacy_order,
-            workspace_execution_authority=(
-                _workspace_execution_authority(frozen)
-            ),
+            **execute_kwargs,
         )
         if not isinstance(result, Mapping):
             raise InternalAgentProposalError(
@@ -120,64 +153,154 @@ class InternalAgentProposalExecutor:
                 INTERNAL_AGENT_PROPOSAL_INVALID,
                 "canonical Agent result status is invalid",
             )
-        usage = build_worker_budget_usage(
-            usage_id=stable_worker_usage_id(
-                graph_id=frozen.graph_id,
-                graph_revision=frozen.graph_revision,
-                node_id=frozen.node_id,
-                attempt_id=frozen.attempt_id,
-                route=frozen.route,
-            ),
-            observations=_trusted_agent_budget_observations(normalized),
-            include_agent_tool_calls=True,
+        yield _build_internal_terminal_event(
+            frozen=frozen,
+            command=command,
+            normalized=normalized,
         )
-        public_result = build_public_internal_agent_result(normalized)
-        validate_internal_agent_result_payload(public_result)
-        result_digest = _canonical_digest(public_result)
-        descriptor = {
-            "effect_type": INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE,
-            "commit_scope": "NODE",
-            "payload": {
-                "schema_version": INTERNAL_AGENT_PROPOSAL_SCHEMA_VERSION,
-                "work_order_id": frozen.work_order_id,
-                "target_id": frozen.target_id,
-                "operation_fingerprint": frozen.operation_fingerprint,
-                "result_digest": result_digest,
-                "result": public_result,
-            },
-        }
-        narrative = str(
-            public_result.get("result_text")
-            or public_result.get("summary")
-            or public_result.get("detail")
-            or result_status
-        ).strip()
-        event: dict[str, Any] = {
-            "phase": "COMMIT",
-            "done": True,
-            "decision": "APPROVE" if result_status == "EXECUTED" else "REJECT",
-            "reason_code": (
-                None
-                if result_status == "EXECUTED"
-                else str(
-                    normalized.get("reason_code")
-                    or f"AGENT_RESULT_{result_status}"
-                )
+
+    def recover_terminal_projection(
+        self,
+        frozen: FrozenNodeInput,
+    ) -> dict[str, Any]:
+        """Reopen a seal-bound terminal without invoking Agent/model code."""
+
+        command, _work_order, _, _ = _reopen_frozen_admission(
+            frozen=frozen,
+            command_repository=self._commands,
+        )
+        workspace_runtime = self._executor.workspace_runtime
+        artifact_store = self._executor.artifact_store
+        if workspace_runtime is None or artifact_store is None:
+            raise InternalAgentProposalError(
+                INTERNAL_AGENT_PROPOSAL_PROJECTION_INVALID,
+                "sealed projection recovery has no governed Workspace authority",
+            )
+        authority = _workspace_execution_authority(frozen)
+        workspace_id = workspace_runtime.workspace_id_for(
+            graph_id=frozen.graph_id,
+            graph_revision=frozen.graph_revision,
+        )
+        seal = artifact_store.inspect_governed_stage_for_authority(
+            workspace_id=workspace_id,
+            execution_authority=authority,
+        )
+        if seal.accepted_dir is not None:
+            raise InternalAgentProposalError(
+                INTERNAL_AGENT_PROPOSAL_PROJECTION_INVALID,
+                "accepted artifact cannot rebuild a pre-commit worker projection",
+            )
+        try:
+            envelope = validate_projection_recovery_envelope(
+                artifact_store.read_projection_recovery(seal)
+            )
+        except ProjectionRecoveryContractError as exc:
+            raise InternalAgentProposalError(
+                INTERNAL_AGENT_PROPOSAL_PROJECTION_INVALID,
+                "sealed projection recovery envelope is invalid",
+            ) from exc
+        worker_timing = envelope["worker_timing"]
+        if envelope.get("frozen_node_input") != frozen.to_dict():
+            raise InternalAgentProposalError(
+                INTERNAL_AGENT_PROPOSAL_PROJECTION_INVALID,
+                "sealed projection recovery envelope drifted",
+            )
+        normalized = artifact_store.read_sealed_json(seal, "result.json")
+        normalized["_protected_stage"] = seal.protected_payload()
+        terminal = _build_internal_terminal_event(
+            frozen=frozen,
+            command=command,
+            normalized=normalized,
+        )
+        return {
+            "terminal": terminal,
+            "verified_node_grant": dict(envelope["verified_node_grant"]),
+            "action_preview": (
+                dict(envelope["action_preview"])
+                if isinstance(envelope.get("action_preview"), Mapping)
+                else None
             ),
-            "request_id": command.request_id,
-            "narrative": narrative,
-            "route_type": frozen.route,
-            "target_id": frozen.target_id,
-            "acceptance_effect_intents": [descriptor],
-            "audit_refs": {
-                "path": "internal_agent:leased_result_proposal",
-                "result_digest": result_digest,
-                "compatibility_adapter": "WorkOrderV3.to_agent_work_order",
-            },
+            "buffered_pre_acceptance_events": 0,
+            "worker_timing": dict(worker_timing),
+            "stage_ref": seal.stage_ref,
+            "seal_digest": seal.seal_digest,
         }
-        if usage is not None:
-            event["budget_usage"] = usage.to_payload()
-        yield event
+
+
+def _build_internal_terminal_event(
+    *,
+    frozen: FrozenNodeInput,
+    command: HostCommand,
+    normalized: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = _json_mapping(
+        normalized,
+        field_name="Agent result proposal",
+    )
+    result_status = str(normalized.get("status") or "").strip().upper()
+    if result_status not in {"EXECUTED", "FAILED", "BLOCKED", "DEGRADED"}:
+        raise InternalAgentProposalError(
+            INTERNAL_AGENT_PROPOSAL_INVALID,
+            "canonical Agent result status is invalid",
+        )
+    usage = build_worker_budget_usage(
+        usage_id=stable_worker_usage_id(
+            graph_id=frozen.graph_id,
+            graph_revision=frozen.graph_revision,
+            node_id=frozen.node_id,
+            attempt_id=frozen.attempt_id,
+            route=frozen.route,
+        ),
+        observations=_trusted_agent_budget_observations(normalized),
+        include_agent_tool_calls=True,
+    )
+    public_result = build_public_internal_agent_result(normalized)
+    validate_internal_agent_result_payload(public_result)
+    result_digest = _canonical_digest(public_result)
+    descriptor = {
+        "effect_type": INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE,
+        "commit_scope": "NODE",
+        "payload": {
+            "schema_version": INTERNAL_AGENT_PROPOSAL_SCHEMA_VERSION,
+            "work_order_id": frozen.work_order_id,
+            "target_id": frozen.target_id,
+            "operation_fingerprint": frozen.operation_fingerprint,
+            "result_digest": result_digest,
+            "result": public_result,
+        },
+    }
+    narrative = str(
+        public_result.get("result_text")
+        or public_result.get("summary")
+        or public_result.get("detail")
+        or result_status
+    ).strip()
+    event: dict[str, Any] = {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "APPROVE" if result_status == "EXECUTED" else "REJECT",
+        "reason_code": (
+            None
+            if result_status == "EXECUTED"
+            else str(
+                normalized.get("reason_code")
+                or f"AGENT_RESULT_{result_status}"
+            )
+        ),
+        "request_id": command.request_id,
+        "narrative": narrative,
+        "route_type": frozen.route,
+        "target_id": frozen.target_id,
+        "acceptance_effect_intents": [descriptor],
+        "audit_refs": {
+            "path": "internal_agent:leased_result_proposal",
+            "result_digest": result_digest,
+            "compatibility_adapter": "WorkOrderV3.to_agent_work_order",
+        },
+    }
+    if usage is not None:
+        event["budget_usage"] = usage.to_payload()
+    return event
 
 
 class InternalAgentProposalVerifier:
@@ -555,10 +678,25 @@ def _require_public_commit_binding(
     }
     if "budget_usage" in commit:
         allowed.add("budget_usage")
+    recovery_checkpoint = commit.get("recovery_checkpoint")
+    if recovery_checkpoint is not None:
+        allowed.add("recovery_checkpoint")
+    persisted_projection_fields = {
+        "projection_id",
+        "payload_digest",
+        "schema_version",
+    }
+    if persisted_projection_fields.intersection(commit):
+        allowed.update(persisted_projection_fields)
     if set(commit) != allowed:
         _invalid("public Internal Agent commit contains missing or domain-result fields")
     if commit.get("receipt_ref") != projection.get("projection_id"):
         _invalid("worker commit receipt differs from canonical projection")
+    if persisted_projection_fields.intersection(commit) and any(
+        commit.get(key) != projection.get(key)
+        for key in persisted_projection_fields
+    ):
+        _invalid("worker commit persisted projection identity drifted")
     keys = (
         "phase",
         "done",
@@ -583,6 +721,50 @@ def _require_public_commit_binding(
                 _invalid(f"public Internal Agent commit drifted from {key}")
     if projection.get("decision") != "APPROVE":
         _invalid("Internal Agent result proposal is not approved")
+    if recovery_checkpoint is not None:
+        _require_recovery_checkpoint_binding(
+            recovery_checkpoint=recovery_checkpoint,
+            projection=projection,
+        )
+
+
+def _require_recovery_checkpoint_binding(
+    *,
+    recovery_checkpoint: Any,
+    projection: Mapping[str, Any],
+) -> None:
+    if not isinstance(recovery_checkpoint, Mapping):
+        _invalid("Internal Agent recovery checkpoint is malformed")
+    checkpoint = dict(recovery_checkpoint)
+    expected_fields = {
+        "worker_replayed",
+        "payload_digest",
+        "payload_digest_source",
+        "budget_usage_state",
+        "budget_usage_reconstructed",
+        "durable_elapsed_ms",
+    }
+    state = checkpoint.get("budget_usage_state")
+    elapsed = checkpoint.get("durable_elapsed_ms")
+    reconstructed = checkpoint.get("budget_usage_reconstructed")
+    if (
+        set(checkpoint) != expected_fields
+        or checkpoint.get("worker_replayed") is not False
+        or checkpoint.get("payload_digest") != projection.get("payload_digest")
+        or checkpoint.get("payload_digest_source") != "receipt_identity_digest"
+        or state not in {"EXACT_ACCEPTED", "EXACT_REJECTED", "MISSING"}
+        or type(reconstructed) is not bool
+        or reconstructed is not (state == "MISSING")
+        or (
+            state in {"EXACT_ACCEPTED", "EXACT_REJECTED"}
+            and elapsed is not None
+        )
+        or (
+            state == "MISSING"
+            and (type(elapsed) is not int or elapsed <= 0)
+        )
+    ):
+        _invalid("Internal Agent recovery checkpoint binding drifted")
 
 
 def _require_verification_binding(

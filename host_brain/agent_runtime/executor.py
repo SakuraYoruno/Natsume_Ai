@@ -6,6 +6,7 @@ from contextlib import nullcontext
 import logging
 from pathlib import Path
 import secrets
+import time
 from typing import Any
 
 from host_brain.contracts.agent_runtime.acceptance_judge import (
@@ -19,6 +20,10 @@ from host_brain.agent_runtime.agent_tools import (
 )
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
+from host_brain.contracts.agent_runtime.projection_recovery import (
+    WORKER_TIMING_SCHEMA_VERSION,
+    validate_projection_recovery_context,
+)
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
 from host_brain.contracts.agent_runtime.review_policy import ReviewPolicy
 from host_brain.agent_runtime.verification_policy import (
@@ -196,12 +201,14 @@ class AgentRuntimeExecutor:
         work_order: AgentWorkOrder | dict[str, Any],
         *,
         workspace_execution_authority: dict[str, Any] | None = None,
+        projection_recovery_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         order = work_order if isinstance(work_order, AgentWorkOrder) else AgentWorkOrder.from_mapping(work_order)
         event_id = new_event_id()
         ts = now_ms()
         run_dir: Path | None = None
         governed_stage = None
+        recovery_envelope: dict[str, Any] | None = None
 
         try:
             order.validate()
@@ -297,11 +304,23 @@ class AgentRuntimeExecutor:
                 )
                 run_dir = governed_stage.stage_dir
             else:
+                if projection_recovery_context is not None:
+                    raise ValueError(
+                        "projection recovery context requires governed execution"
+                    )
                 run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
             # Raw WorkOrder material is written only after validation, policy
             # enforcement and durable Workspace/Attempt ownership succeed.
             self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
             self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
+            if projection_recovery_context is not None:
+                recovery_envelope = validate_projection_recovery_context(
+                    projection_recovery_context
+                )
+                self.artifact_store.write_json(
+                    run_dir / "projection_recovery.json",
+                    recovery_envelope,
+                )
         except Exception as exc:
             if governed_stage is not None:
                 try:
@@ -349,6 +368,8 @@ class AgentRuntimeExecutor:
             else None
         )
         scope = workspace_scope or nullcontext()
+        worker_started_ts_ms = now_ms()
+        worker_started_ns = time.monotonic_ns()
         try:
             with scope:
                 try:
@@ -463,6 +484,27 @@ class AgentRuntimeExecutor:
         self.artifact_store.write_json(run_dir / "verification.json", verification)
         result = _apply_required_verification_gate(result, order)
         result = _apply_acceptance_judge(result, order)
+        if recovery_envelope is not None:
+            worker_finished_ts_ms = now_ms()
+            worker_elapsed_ms = max(
+                1,
+                (time.monotonic_ns() - worker_started_ns + 999_999) // 1_000_000,
+            )
+            recovery_envelope = {
+                **recovery_envelope,
+                "worker_timing": {
+                    "schema_version": WORKER_TIMING_SCHEMA_VERSION,
+                    "started_ts_ms": worker_started_ts_ms,
+                    "finished_ts_ms": worker_finished_ts_ms,
+                    "elapsed_ms": worker_elapsed_ms,
+                },
+            }
+            # This authority is measured inside the canonical executor after
+            # Agent/verification complete and before the immutable seal.
+            self.artifact_store.write_json(
+                run_dir / "projection_recovery.json",
+                recovery_envelope,
+            )
         self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
         payload = result.to_dict()
         if governed_stage is not None:

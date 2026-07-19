@@ -1075,6 +1075,13 @@ def create_app() -> FastAPI:
                     runtime_context_application=runtime_context_application,
                     action_preview_service=action_preview_service,
                     acceptance_effect_dispatcher=acceptance_effect_dispatcher,
+                    artifact_store=internal_agent_artifact_store,
+                    workspace_runtime=(
+                        agent_workspace_container.runtime
+                        if agent_workspace_container is not None
+                        else None
+                    ),
+                    claim_result_store=command_ingress.store,
                 )
 
                 try:

@@ -170,6 +170,9 @@ from host_brain.persistence.task_operation_reconciliation_store import (
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
 )
+from host_brain.persistence.task_internal_agent_checkpoint_store import (
+    TaskInternalAgentCheckpointStoreMixin,
+)
 from host_brain.persistence.task_effect_reconciliation_store import (
     TaskEffectReconciliationStoreMixin,
 )
@@ -421,6 +424,7 @@ class DurableTaskStore(
     TaskRetryMutationStoreMixin,
     TaskRetryReplayStoreMixin,
     TaskAtomicFailureStoreMixin,
+    TaskInternalAgentCheckpointStoreMixin,
     TaskOperationCheckpointStoreMixin,
     TaskOperationReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,

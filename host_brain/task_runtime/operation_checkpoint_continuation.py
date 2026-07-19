@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
@@ -42,6 +41,9 @@ from .errors import (
 )
 from .node_execution_records import build_review_context
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
+from .internal_checkpoint_budget_rejection import InternalCheckpointBudgetRejectionRuntime
+from .node_worker_stream import _maybe_await
+from .operation_checkpoint_budget_recovery import recover_checkpoint_budget
 from .operation_checkpoint_records import build_checkpoint_execution_context
 from .operation_checkpoint_validation import WorkerBudgetUsageCheckpointState
 from .operation_recovery_runtime import CommittedOperationCheckpoint
@@ -75,6 +77,13 @@ class CommittedCheckpointContinuation:
         self._reviews = review_runtime
         self._owner_id = str(owner_id)
         self._graph_finalizer = graph_finalizer
+        self._internal_budget_rejection = (
+            InternalCheckpointBudgetRejectionRuntime(
+                task_store=task_store,
+                runtime_outbox=runtime_outbox,
+                owner_id=owner_id,
+            )
+        )
 
     async def resume(
         self,
@@ -118,11 +127,36 @@ class CommittedCheckpointContinuation:
         }
         active_lease = checkpoint.lease
 
-        # A takeover lease is execution authority only until the checkpoint is
-        # durably settled.  Enter RUNNING before budget mutation so a denied
-        # charge can use the existing fenced failure bundle to close both the
-        # Attempt and Lease instead of creating an endless recovery loop.
         attempt_status = _status(attempt)
+        if attempt_status not in {"LEASED", "RUNNING", "SUCCEEDED"}:
+            self._blocked(
+                f"committed checkpoint Attempt cannot resume from {attempt_status}"
+            )
+
+        current_node = dict(node)
+        node_status = _status(current_node)
+        charge, recovery_hold = await recover_checkpoint_budget(
+            budget_runtime=self._budgets,
+            runtime_outbox=self._runtime_outbox,
+            admitted=admitted,
+            budget=budget,
+            checkpoint=checkpoint,
+            worker_commit=worker_commit,
+            attempt_id=attempt_id,
+            receipt_ref=receipt_ref,
+            payload_digest=payload_digest,
+            evidence_refs=evidence_refs,
+        )
+        if recovery_hold is not None:
+            yield recovery_hold
+            return
+        if charge is None:
+            self._blocked("checkpoint budget recovery returned no decision")
+        budget = charge.context
+
+        # Only an authoritative budget result may advance the Attempt/Node.
+        # A denied result still enters RUNNING first so the Store-owned atomic
+        # rejection bundle can close Attempt/Lease/Node/Graph/Budget together.
         if attempt_status == "LEASED":
             lease_id = _required_record_text(active_lease or {}, "lease_id")
             fence = _record_positive_int(active_lease or {}, "fencing_token")
@@ -139,9 +173,6 @@ class CommittedCheckpointContinuation:
             self._blocked(
                 f"committed checkpoint Attempt cannot resume from {attempt_status}"
             )
-
-        current_node = dict(node)
-        node_status = _status(current_node)
         if node_status == "LEASED":
             current_node = await self._node_lifecycle.transition_node(
                 admitted,
@@ -150,96 +181,6 @@ class CommittedCheckpointContinuation:
                 evidence_refs=evidence_refs,
             )
             node_status = _status(current_node)
-        try:
-            if (
-                checkpoint.budget_usage_state
-                is WorkerBudgetUsageCheckpointState.EXACT_ACCEPTED
-            ):
-                if not isinstance(checkpoint.budget_usage, Mapping):
-                    self._blocked(
-                        "exact worker BudgetUsage checkpoint lost its durable row"
-                    )
-                charge = await self._budgets.reconcile_worker_checkpoint(
-                    budget,
-                    node_id=admitted.node_id,
-                    attempt_id=attempt_id,
-                    worker_commit=worker_commit,
-                    durable_usage=checkpoint.budget_usage,
-                )
-            elif (
-                checkpoint.budget_usage_state
-                is WorkerBudgetUsageCheckpointState.MISSING
-            ):
-                durable_elapsed_ms = checkpoint.durable_elapsed_ms
-                if (
-                    type(durable_elapsed_ms) is not int
-                    or durable_elapsed_ms <= 0
-                    or active_lease is None
-                ):
-                    self._blocked(
-                        "missing worker BudgetUsage has no positive durable elapsed time and takeover Lease"
-                    )
-                charge = await self._budgets.settle_worker_checkpoint(
-                    budget,
-                    node_id=admitted.node_id,
-                    attempt_id=attempt_id,
-                    worker_commit=worker_commit,
-                    durable_elapsed_ms=durable_elapsed_ms,
-                )
-            else:
-                self._blocked("worker BudgetUsage checkpoint is conflicting")
-        except GovernedRuntimeError as exc:
-            failure_fence = (
-                _record_positive_int(active_lease, "fencing_token")
-                if active_lease is not None
-                else _record_positive_int(
-                    checkpoint.reservation,
-                    "fencing_token",
-                )
-            )
-            await self._node_lifecycle.mark_worker_failure(
-                admitted,
-                attempt_id=attempt_id,
-                fencing_token=failure_fence,
-                reason_code=_exception_reason(
-                    exc,
-                    GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                ),
-                graph_target=(None if defer_shared_terminal else "BLOCKED"),
-                evidence_refs=evidence_refs,
-            )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            await self._runtime_outbox.publish_pending()
-            yield terminal_event(
-                build_execution_receipt(
-                    admitted,
-                    attempt_id=attempt_id,
-                    receipt_ref=receipt_ref,
-                    payload_digest=payload_digest,
-                    status="RECOVERY_REQUIRED",
-                    verification_status="NOT_RUN",
-                    accepted=False,
-                    reason_code=_exception_reason(
-                        exc,
-                        GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                    ),
-                    evidence_refs=evidence_refs,
-                    projection={
-                        "worker_replayed": False,
-                        "budget_usage_reconstructed": (
-                            checkpoint.budget_usage_state
-                            is WorkerBudgetUsageCheckpointState.MISSING
-                        ),
-                        "budget": budget.execution_payload(),
-                    },
-                )
-            )
-            return
-        budget = charge.context
         if not charge.accepted:
             rejection_fence = (
                 _record_positive_int(active_lease, "fencing_token")
@@ -249,13 +190,36 @@ class CommittedCheckpointContinuation:
                     "fencing_token",
                 )
             )
-            receipt = await self._node_lifecycle.reject_budget_charge(
-                admitted,
-                charge,
-                attempt_id=attempt_id,
-                fencing_token=rejection_fence,
-                defer_shared_terminal=defer_shared_terminal,
-            )
+            if (
+                not defer_shared_terminal
+                and str(getattr(command.surface, "value", command.surface)).lower()
+                == "internal"
+                and str(command.route_type).lower() == "delegate"
+                and str(command.target_id) == "agent_runtime"
+                and admitted.worker_route == "delegate:agent_runtime"
+            ):
+                receipt = await self._internal_budget_rejection.reject(
+                    admitted=admitted,
+                    charge=charge,
+                    attempt=attempt,
+                    node=current_node,
+                    graph=graph,
+                    reservation=checkpoint.reservation,
+                    lease=_mapping(
+                        checkpoint.lease,
+                        field_name="Internal Agent budget rejection Lease",
+                    ),
+                    fencing_token=rejection_fence,
+                    evidence_refs=evidence_refs,
+                )
+            else:
+                receipt = await self._node_lifecycle.reject_budget_charge(
+                    admitted,
+                    charge,
+                    attempt_id=attempt_id,
+                    fencing_token=rejection_fence,
+                    defer_shared_terminal=defer_shared_terminal,
+                )
             yield terminal_event(receipt)
             return
 
@@ -580,10 +544,5 @@ class CommittedCheckpointContinuation:
     @staticmethod
     def _blocked(detail: str) -> None:
         raise GovernedRuntimeError(GOVERNED_OPERATION_RECOVERY_REQUIRED, detail)
-
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
-
 
 __all__ = ["CommittedCheckpointContinuation"]

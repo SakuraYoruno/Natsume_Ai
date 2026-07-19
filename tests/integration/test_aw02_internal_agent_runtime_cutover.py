@@ -33,7 +33,10 @@ from host_brain.agent_runtime.agent_tools import (
     AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
 )
 from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.task_store_types import TaskStoreError
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
+from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
+import host_brain.app.internal_task_runtime as internal_task_runtime_module
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
@@ -69,10 +72,22 @@ from host_brain.runtime.context_contracts import WorldSnapshotV2
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
+from host_brain.task_runtime.admission import AdmittedExecution
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
 NOW = 1_800_000_000_000
+
+
+class _MutableClock:
+    def __init__(self, value: int = NOW) -> None:
+        self.value = int(value)
+
+    def __call__(self) -> int:
+        return self.value
+
+    def advance(self, milliseconds: int) -> None:
+        self.value += int(milliseconds)
 
 
 class _RuntimeContextAuthority:
@@ -117,6 +132,7 @@ class _RuntimeContextAuthority:
 class _ExactPreviewAuthority:
     def __init__(self) -> None:
         self._records: dict[str, tuple[dict[str, Any], SimpleNamespace]] = {}
+        self._issued: dict[str, dict[str, Any]] = {}
 
     def issue_receipt(self, **kwargs: Any) -> dict[str, Any]:
         index = len(self._records) + 1
@@ -134,21 +150,158 @@ class _ExactPreviewAuthority:
             for key, value in kwargs.items()
             if key != "guardian_capability_id"
         }
+        node_grant = dict(kwargs.get("node_grant") or {})
+        grant_digest = "sha256:" + _sha256(
+            json.dumps(
+                node_grant,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        receipt_payload = {
+            "authority_kind": authority_kind,
+            "node_grant_ref": str(kwargs.get("node_grant_ref") or ""),
+            "node_grant_digest": grant_digest,
+        }
         receipt = SimpleNamespace(
             receipt_ref=receipt_ref,
-            payload={"authority_kind": authority_kind},
+            payload=receipt_payload,
         )
         self._records[event_id] = (boundary, receipt)
-        return {
+        issued = {
             "event_id": event_id,
             "receipt_ref": receipt_ref,
-            "receipt": {"authority_kind": authority_kind},
+            "receipt": deepcopy(receipt_payload),
         }
+        self._issued[event_id] = deepcopy(issued)
+        return issued
 
     def require_execution(self, *, event_id: str, **kwargs: Any) -> Any:
         boundary, receipt = self._records[event_id]
         assert kwargs == boundary
         return receipt
+
+    def reopen_receipt(self, *, event_id: str) -> dict[str, Any]:
+        return {**deepcopy(self._issued[event_id]), "replayed": True}
+
+
+class _SimulatedProjectionProcessStop(BaseException):
+    pass
+
+
+class _CrashBeforeProjectionStore:
+    def __init__(self, delegate: WorkerProjectionStore) -> None:
+        self._delegate = delegate
+        self.stage_calls = 0
+        self.crash_enabled = True
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def stage(self, *, projection_id: str, projection: Any) -> Any:
+        self.stage_calls += 1
+        if self.crash_enabled:
+            self.crash_enabled = False
+            raise _SimulatedProjectionProcessStop(
+                "process stopped after Agent seal and before projection"
+            )
+        return self._delegate.stage(
+            projection_id=projection_id,
+            projection=projection,
+        )
+
+
+class _RecoveredCheckpointResponseLossStore:
+    def __init__(self, delegate: DurableTaskStore) -> None:
+        self._delegate = delegate
+        self.commit_calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def commit_internal_agent_recovered_checkpoint(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.commit_calls += 1
+        result = self._delegate.commit_internal_agent_recovered_checkpoint(
+            *args,
+            **kwargs,
+        )
+        if self.commit_calls == 1:
+            raise TimeoutError("simulated recovered checkpoint response loss")
+        return result
+
+
+class _RejectedBudgetResponseLossStore:
+    def __init__(self, delegate: DurableTaskStore) -> None:
+        self._delegate = delegate
+        self.reject_calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def reject_internal_agent_checkpoint_budget_bundle(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.reject_calls += 1
+        result = self._delegate.reject_internal_agent_checkpoint_budget_bundle(
+            *args,
+            **kwargs,
+        )
+        if self.reject_calls == 1:
+            raise TimeoutError("simulated rejected budget bundle response loss")
+        return result
+
+
+class _SimulatedAttemptSucceededProcessStop(BaseException):
+    pass
+
+
+class _CrashAfterSucceededAttemptStore:
+    def __init__(self, delegate: Any) -> None:
+        self._delegate = delegate
+        self.crash_count = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def transition_attempt(self, *args: Any, **kwargs: Any) -> Any:
+        result = self._delegate.transition_attempt(*args, **kwargs)
+        target = getattr(kwargs.get("target_status"), "value", kwargs.get("target_status"))
+        if str(target or "").upper() == "SUCCEEDED" and self.crash_count == 0:
+            self.crash_count += 1
+            raise _SimulatedAttemptSucceededProcessStop(
+                "process stopped after Attempt SUCCEEDED and before Node continuation"
+            )
+        return result
+
+
+class _RejectedBudgetFaultStore(DurableTaskStore):
+    def __init__(self, *args: Any, fail_event: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fail_event = str(fail_event)
+        self.captured_rejection: tuple[tuple[Any, ...], dict[str, Any]] | None = None
+
+    def reject_internal_agent_checkpoint_budget_bundle(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.captured_rejection = (tuple(args), dict(kwargs))
+        return super().reject_internal_agent_checkpoint_budget_bundle(
+            *args,
+            **kwargs,
+        )
+
+    def _insert_outbox(self, conn, message, **kwargs):  # noqa: ANN001, ANN202
+        if message.event_type == self.fail_event:
+            raise RuntimeError(f"fault before {self.fail_event} outbox insert")
+        return super()._insert_outbox(conn, message, **kwargs)
 
 
 def _sha256(value: bytes | str) -> str:
@@ -453,7 +606,13 @@ async def test_internal_proposal_supplies_exact_durable_workspace_authority(
         def __init__(self, **_kwargs: Any) -> None:
             pass
 
-        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+        def execute(
+            self,
+            candidate,
+            *,
+            workspace,
+            cancelled=None,
+        ):  # noqa: ANN001, ANN202
             assert candidate.work_order_id == work_order.work_order_id
             assert workspace == (managed / workspace_id).resolve()
             assert cancelled is not None and cancelled() is False
@@ -806,6 +965,1282 @@ async def test_internal_accepted_artifact_promotes_with_real_git_and_sqlite(
             await accepted_result.reconcile(reconcile_payload)
     finally:
         if runtime is not None:
+            await runtime.aclose()
+        claim_store.close()
+        ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_internal_post_checkpoint_budget_rejection_is_one_transaction_and_replay_safe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "internal-budget-rejected.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="internal-budget-rejected-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    request_id = "request-internal-budget-rejected"
+    principal_id = "principal-internal-budget-rejected"
+    body_sha256 = _sha256("internal-budget-rejected")
+    claim_ref = "ingress-claim://internal/budget-rejected"
+    audit_ref = "audit://secure-ingress/internal/budget-rejected"
+    _insert_secure_authority(
+        db_path,
+        request_id=request_id,
+        principal_id=principal_id,
+        body_sha256=body_sha256,
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+    monkeypatch.setattr(
+        internal_task_runtime_module,
+        "_INTERNAL_AGENT_BUDGET_LIMITS",
+        BudgetAmount(
+            token_count=100,
+            tool_call_count=1,
+            time_ms=0,
+            concurrency=1,
+            retry_count=1,
+            model_cost_micros=100_000,
+        ),
+    )
+
+    clock = _MutableClock()
+    durable_store = DurableTaskStore(db_path, clock=clock)
+    response_loss_store = _RejectedBudgetResponseLossStore(durable_store)
+    event_store = RuntimeEventStore(db_path)
+    projection_store = WorkerProjectionStore(db_path, clock=clock)
+    command_repository = HostCommandRepository(db_path, clock=clock)
+    infrastructure = SimpleNamespace(
+        task_store=response_loss_store,
+        review_store=ReviewStore(db_path),
+        review_continuation_store=ReviewContinuationStore(db_path),
+        command_repository=command_repository,
+        outbox_publisher=RuntimeOutboxPublisher(response_loss_store, event_store),
+        worker_projection_store=projection_store,
+    )
+    ledger = SQLiteLedger(str(db_path))
+    claim_store = SQLiteSecureIngressStore(db_path)
+    runtime = None
+    calls: list[str] = []
+
+    class _ProtectedExecutor(_Executor):
+        def execute(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            result = super().execute(*args, **kwargs)
+            result["_protected_stage"] = {
+                "schema_version": "Natsume.agent.governed_artifact_stage.v1",
+                "ref": "agent-stage://internal-budget-rejected/sealed",
+                "digest": "sha256:" + "b" * 64,
+            }
+            return result
+
+    try:
+        token_service = TokenService(approval_ttl_ms=180_000)
+        preview_authority = _ExactPreviewAuthority()
+        result_repository = AgentExecutionResultRepository(db_path)
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=command_repository,
+            projection_store=projection_store,
+            result_repository=result_repository,
+        )
+        runtime = build_governed_internal_runtime(
+            task_runtime_container=infrastructure,
+            ledger=ledger,
+            token_service=token_service,
+            result_repository=result_repository,
+            runtime_router=CanonicalRuntimeRouter(),
+            owner_id="internal-budget-rejected-owner",
+            canonical_executor=_ProtectedExecutor(calls),
+            runtime_context_application=_RuntimeContextAuthority(
+                principal_id=principal_id
+            ),
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=AcceptanceEffectDispatcher(
+                task_store=response_loss_store,
+                handlers={"internal.agent.result_commit": accepted_result},
+                owner_id="internal-budget-rejected-effect-owner",
+                action_preview_service=preview_authority,
+            ),
+        )
+        await runtime.activate()
+        service = InternalAgentCommandService(
+            runtime=runtime,
+            intent_engine=_IntentEngine(ledger, token_service),
+            claim_result_store=claim_store,
+        )
+        terminal = await service.execute(
+            work_order=AgentWorkOrder(
+                work_order_id="work-order-internal-budget-rejected",
+                domain="code",
+                run_mode="inspect",
+                objective="prove atomic post-checkpoint budget rejection",
+                acceptance_criteria=["result executed"],
+                review_policy={"review_required": False},
+            ),
+            request_id=request_id,
+            session_id="session-internal-budget-rejected",
+            ts_ms=NOW,
+            command_authority={
+                "principal_id": principal_id,
+                "claim_ref": claim_ref,
+                "audit_ref": audit_ref,
+                "body_sha256": body_sha256,
+            },
+        )
+
+        assert terminal["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+        assert terminal["execution_receipt"]["accepted"] is False
+        assert terminal["execution_receipt"]["reason_code"] == (
+            "GOVERNED_BUDGET_EXCEEDED"
+        )
+        assert response_loss_store.reject_calls == 2
+        assert calls == ["work-order-internal-budget-rejected"]
+        admitted = command_repository.get_by_request(
+            surface="internal",
+            request_id=request_id,
+        )
+        assert admitted is not None
+        command = admitted["command"]
+        snapshot = durable_store.read_scheduler_snapshot(
+            command.graph_id,
+            command.graph_revision,
+        )
+        assert snapshot["graph_record"]["status"] == "BLOCKED"
+        assert snapshot["graph_record"]["nodes"][0]["status"] == "FAILED"
+        assert snapshot["attempts"][0]["status"] == "FAILED"
+        assert snapshot["active_leases"] == []
+        assert snapshot["budgets"][0]["status"] == "RELEASED"
+
+        attempt = snapshot["attempts"][0]
+        budget = snapshot["budgets"][0]
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            assert conn.execute(
+                "SELECT status FROM task_runtime_lease WHERE attempt_id = ?",
+                (attempt["attempt_id"],),
+            ).fetchone()[0] == "RELEASED"
+            assert conn.execute(
+                "SELECT status FROM task_runtime_idempotency_reservation",
+            ).fetchone()[0] == "COMMITTED"
+            usages = conn.execute(
+                "SELECT * FROM task_runtime_budget_usage WHERE budget_id = ?",
+                (budget["budget_id"],),
+            ).fetchall()
+            assert len(usages) == 2
+            rejected = [row for row in usages if int(row["accepted"]) == 0]
+            assert len(rejected) == 1
+            assert rejected[0]["reason_code"] == "TASK_STORE_BUDGET_EXCEEDED"
+            assert rejected[0]["usage_id"] in tuple(
+                terminal["execution_receipt"]["evidence_refs"]
+            )
+            terminal_outboxes = conn.execute(
+                """
+                SELECT aggregate_type, aggregate_version, event_type,
+                       attempt_id, created_ts_ms
+                FROM task_runtime_outbox
+                WHERE attempt_id = ? AND event_type IN (
+                    'TASK_ATTEMPT_FAILED', 'TASK_NODE_FAILED',
+                    'TASK_GRAPH_BLOCKED', 'TASK_LEASE_RELEASED_TERMINAL',
+                    'BUDGET_RESERVATION_RELEASED'
+                )
+                ORDER BY aggregate_type
+                """,
+                (attempt["attempt_id"],),
+            ).fetchall()
+            assert len(terminal_outboxes) == 5
+            assert {int(row["created_ts_ms"]) for row in terminal_outboxes} == {
+                int(attempt["completed_ts_ms"])
+            }
+        assert durable_store.list_terminal_reconciliation_inventory_candidates() == ()
+    finally:
+        if runtime is not None:
+            await runtime.aclose()
+        claim_store.close()
+        ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_internal_budget_rejection_rolls_back_every_terminal_mutation_fault(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "internal-budget-rejected-fault.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="internal-budget-rejected-fault-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    request_id = "request-internal-budget-rejected-fault"
+    principal_id = "principal-internal-budget-rejected-fault"
+    body_sha256 = _sha256("internal-budget-rejected-fault")
+    claim_ref = "ingress-claim://internal/budget-rejected-fault"
+    audit_ref = "audit://secure-ingress/internal/budget-rejected-fault"
+    _insert_secure_authority(
+        db_path,
+        request_id=request_id,
+        principal_id=principal_id,
+        body_sha256=body_sha256,
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+    monkeypatch.setattr(
+        internal_task_runtime_module,
+        "_INTERNAL_AGENT_BUDGET_LIMITS",
+        BudgetAmount(
+            token_count=100,
+            tool_call_count=1,
+            time_ms=0,
+            concurrency=1,
+            retry_count=1,
+            model_cost_micros=100_000,
+        ),
+    )
+    clock = _MutableClock()
+    store = _RejectedBudgetFaultStore(
+        db_path,
+        clock=clock,
+        fail_event="TASK_ATTEMPT_FAILED",
+    )
+    event_store = RuntimeEventStore(db_path)
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    commands = HostCommandRepository(db_path, clock=clock)
+    infrastructure = SimpleNamespace(
+        task_store=store,
+        review_store=ReviewStore(db_path),
+        review_continuation_store=ReviewContinuationStore(db_path),
+        command_repository=commands,
+        outbox_publisher=RuntimeOutboxPublisher(store, event_store),
+        worker_projection_store=projections,
+    )
+    ledger = SQLiteLedger(str(db_path))
+    claim_store = SQLiteSecureIngressStore(db_path)
+    runtime = None
+
+    class _ProtectedExecutor(_Executor):
+        def execute(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            result = super().execute(*args, **kwargs)
+            result["_protected_stage"] = {
+                "schema_version": "Natsume.agent.governed_artifact_stage.v1",
+                "ref": "agent-stage://internal-budget-rejected-fault/sealed",
+                "digest": "sha256:" + "c" * 64,
+            }
+            return result
+
+    try:
+        token_service = TokenService(approval_ttl_ms=180_000)
+        preview_authority = _ExactPreviewAuthority()
+        result_repository = AgentExecutionResultRepository(db_path)
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=commands,
+            projection_store=projections,
+            result_repository=result_repository,
+        )
+        runtime = build_governed_internal_runtime(
+            task_runtime_container=infrastructure,
+            ledger=ledger,
+            token_service=token_service,
+            result_repository=result_repository,
+            runtime_router=CanonicalRuntimeRouter(),
+            owner_id="internal-budget-rejected-fault-owner",
+            canonical_executor=_ProtectedExecutor([]),
+            runtime_context_application=_RuntimeContextAuthority(
+                principal_id=principal_id
+            ),
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=AcceptanceEffectDispatcher(
+                task_store=store,
+                handlers={"internal.agent.result_commit": accepted_result},
+                owner_id="internal-budget-rejected-fault-effect-owner",
+                action_preview_service=preview_authority,
+            ),
+        )
+        await runtime.activate()
+        service = InternalAgentCommandService(
+            runtime=runtime,
+            intent_engine=_IntentEngine(ledger, token_service),
+            claim_result_store=claim_store,
+        )
+        with pytest.raises(RuntimeError, match="TASK_ATTEMPT_FAILED"):
+            await service.execute(
+                work_order=AgentWorkOrder(
+                    work_order_id="work-order-internal-budget-rejected-fault",
+                    domain="code",
+                    run_mode="inspect",
+                    objective="rollback every rejected budget terminal mutation",
+                    acceptance_criteria=["result executed"],
+                    review_policy={"review_required": False},
+                ),
+                request_id=request_id,
+                session_id="session-internal-budget-rejected-fault",
+                ts_ms=NOW,
+                command_authority={
+                    "principal_id": principal_id,
+                    "claim_ref": claim_ref,
+                    "audit_ref": audit_ref,
+                    "body_sha256": body_sha256,
+                },
+            )
+        assert store.captured_rejection is not None
+        captured_args, captured_kwargs = store.captured_rejection
+
+        def assert_pre_bundle_state() -> None:
+            with sqlite3.connect(str(db_path)) as conn:
+                assert conn.execute(
+                    "SELECT status FROM task_runtime_graph"
+                ).fetchone()[0] == "ACTIVE"
+                assert conn.execute(
+                    "SELECT status FROM task_runtime_node"
+                ).fetchone()[0] == "RUNNING"
+                assert conn.execute(
+                    "SELECT status FROM task_runtime_attempt"
+                ).fetchone()[0] == "RUNNING"
+                assert conn.execute(
+                    "SELECT status FROM task_runtime_lease ORDER BY fencing_token DESC"
+                ).fetchone()[0] == "ACTIVE"
+                assert conn.execute(
+                    "SELECT status FROM task_runtime_budget_reservation"
+                ).fetchone()[0] == "EXCEEDED"
+                assert conn.execute(
+                    "SELECT status FROM task_runtime_idempotency_reservation"
+                ).fetchone()[0] == "COMMITTED"
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM task_runtime_outbox WHERE event_type IN ("
+                    "'TASK_ATTEMPT_FAILED','TASK_NODE_FAILED','TASK_GRAPH_BLOCKED',"
+                    "'TASK_LEASE_RELEASED_TERMINAL','BUDGET_RESERVATION_RELEASED')"
+                ).fetchone()[0] == 0
+
+        assert_pre_bundle_state()
+        fault_events = (
+            "TASK_ATTEMPT_FAILED",
+            "TASK_NODE_FAILED",
+            "TASK_GRAPH_BLOCKED",
+            "TASK_LEASE_RELEASED_TERMINAL",
+            "BUDGET_RESERVATION_RELEASED",
+        )
+        for event_type in fault_events:
+            store.fail_event = event_type
+            with pytest.raises(RuntimeError, match=event_type):
+                store.reject_internal_agent_checkpoint_budget_bundle(
+                    *captured_args,
+                    **captured_kwargs,
+                )
+            assert_pre_bundle_state()
+
+        store.fail_event = "NO_FAULT"
+        committed = store.reject_internal_agent_checkpoint_budget_bundle(
+            *captured_args,
+            **captured_kwargs,
+        )
+        replayed = store.reject_internal_agent_checkpoint_budget_bundle(
+            *captured_args,
+            **captured_kwargs,
+        )
+        assert committed["replayed"] is False
+        assert replayed["replayed"] is True
+        assert replayed["attempt"]["status"] == "FAILED"
+        assert replayed["node"]["status"] == "FAILED"
+        assert replayed["graph"]["status"] == "BLOCKED"
+        assert replayed["lease"]["status"] == "RELEASED"
+        assert replayed["budget"]["status"] == "RELEASED"
+    finally:
+        if runtime is not None:
+            await runtime.aclose()
+        claim_store.close()
+        ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_clean_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "s"
+    source.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "budget-rejection@example.invalid"),
+        ("config", "user.name", "Budget Rejection Test"),
+    ):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+    (source / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    for args in (("add", "baseline.txt"), ("commit", "-m", "initial")):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+    db_path = tmp_path / "internal-real-budget-rejected.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="internal-real-budget-rejected-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    request_id = "request-internal-real-budget-rejected"
+    principal_id = "principal-internal-real-budget-rejected"
+    body_sha256 = _sha256("internal-real-budget-rejected")
+    claim_ref = "ingress-claim://internal/real-budget-rejected"
+    audit_ref = "audit://secure-ingress/internal/real-budget-rejected"
+    _insert_secure_authority(
+        db_path,
+        request_id=request_id,
+        principal_id=principal_id,
+        body_sha256=body_sha256,
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+    monkeypatch.setattr(
+        internal_task_runtime_module,
+        "_INTERNAL_AGENT_BUDGET_LIMITS",
+        BudgetAmount(
+            token_count=100,
+            tool_call_count=10,
+            time_ms=60_000,
+            concurrency=1,
+            retry_count=1,
+            model_cost_micros=100_000,
+        ),
+    )
+
+    suffix = hashlib.sha256(f"internal\n{request_id}".encode()).hexdigest()[:40]
+    graph_id = f"graph-internal-{suffix}"
+    workspace_id = DurableWorkspaceRuntime.workspace_id_for(
+        graph_id=graph_id,
+        graph_revision=1,
+    )
+    managed = tmp_path / "w"
+    managed.mkdir()
+    # Keep the physical test roots short enough for the governed
+    # Workspace/Attempt segments on Windows without weakening production ids.
+    artifact_root = tmp_path / "a"
+    clock = _MutableClock()
+    token_secret = b"b" * 48
+    agent_calls: list[str] = []
+    runtimes: list[Any] = []
+
+    class _CanonicalBudgetAgentExecutor:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+            assert workspace == (managed / workspace_id).resolve()
+            assert cancelled is not None and cancelled() is False
+            agent_calls.append(candidate.work_order_id)
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=candidate.work_order_id,
+                summary="result executed before exact budget rejection",
+                result_text="result executed before exact budget rejection",
+                verification={"status": "PASS"},
+                acceptance={"decision": "ACCEPT"},
+                review_required=False,
+                metadata={
+                    "model_attempts": [
+                        {
+                            "schema_version": (
+                                "Natsume.model_runtime.budget_measurement.v1"
+                            ),
+                            "measurement_ref": (
+                                "model-budget://internal-real-budget-rejected/1"
+                            ),
+                            "attempt_count": 1,
+                            "retry_count": 0,
+                            "token_count": 101,
+                            "model_cost_micros": 10_000,
+                        }
+                    ],
+                    "trace": {
+                        "schema_version": "nle.trace.redacted.v1",
+                        "payload_hash": "sha256:" + "d" * 64,
+                        "steps": [],
+                    },
+                },
+            )
+
+    monkeypatch.setattr(
+        agent_runtime_executor_module,
+        "AgentExecutor",
+        _CanonicalBudgetAgentExecutor,
+    )
+
+    def build_workspace_runtime(
+        *, owner_id: str
+    ) -> tuple[WorkspaceRepository, DurableWorkspaceRuntime]:
+        repository = WorkspaceRepository(db_path, clock=clock)
+        runtime = DurableWorkspaceRuntime(
+            repository=repository,
+            allocator=WorkspaceAllocator(
+                repository=repository,
+                managed_roots={
+                    "budget-rejection-worktrees": ManagedWorkspaceRoot(
+                        root_ref="budget-rejection-worktrees",
+                        path=managed,
+                        isolation_modes=frozenset({"DIRECTORY_FENCE"}),
+                    )
+                },
+                git_sources={
+                    "budget-rejection-source": ManagedGitSource(
+                        source_key="budget-rejection-source",
+                        source_ref_prefix="git-worktree://budget-rejection-source",
+                        repository=source.resolve(),
+                    )
+                },
+            ),
+            runtime_owner_id=owner_id,
+            managed_root_ref="budget-rejection-worktrees",
+            git_source_key="budget-rejection-source",
+            lease_ms=60_000,
+            heartbeat_interval_ms=1_000,
+            token_secret=token_secret,
+        )
+        return repository, runtime
+
+    ledger = SQLiteLedger(str(db_path))
+    claim_store = SQLiteSecureIngressStore(db_path)
+    token_service = TokenService(approval_ttl_ms=180_000)
+    intent_engine = _IntentEngine(ledger, token_service)
+    preview_authority = _ExactPreviewAuthority()
+    result_repository = AgentExecutionResultRepository(db_path)
+
+    def build_runtime(
+        *,
+        owner_id: str,
+        task_store: DurableTaskStore,
+        workspace_runtime: DurableWorkspaceRuntime,
+        artifacts: AgentArtifactStore,
+    ) -> Any:
+        command_repository = HostCommandRepository(db_path, clock=clock)
+        projections = WorkerProjectionStore(db_path, clock=clock)
+        event_store = RuntimeEventStore(db_path)
+        infrastructure = SimpleNamespace(
+            task_store=task_store,
+            review_store=ReviewStore(db_path),
+            review_continuation_store=ReviewContinuationStore(db_path),
+            command_repository=command_repository,
+            outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
+            worker_projection_store=projections,
+        )
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=command_repository,
+            projection_store=projections,
+            result_repository=result_repository,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            task_store=task_store,
+        )
+        dispatcher = AcceptanceEffectDispatcher(
+            task_store=task_store,
+            handlers={"internal.agent.result_commit": accepted_result},
+            owner_id=f"{owner_id}-effect",
+            action_preview_service=preview_authority,
+        )
+        canonical_executor = AgentRuntimeExecutor(
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            model_attempt_service=object(),
+            prompt_registry=object(),
+        )
+        return build_governed_internal_runtime(
+            task_runtime_container=infrastructure,
+            ledger=ledger,
+            token_service=token_service,
+            result_repository=result_repository,
+            runtime_router=CanonicalRuntimeRouter(),
+            owner_id=owner_id,
+            canonical_executor=canonical_executor,
+            runtime_context_application=_RuntimeContextAuthority(
+                principal_id=principal_id
+            ),
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=dispatcher,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            claim_result_store=claim_store,
+        )
+
+    work_order = AgentWorkOrder(
+        work_order_id="work-order-internal-real-budget-rejected",
+        domain="code",
+        run_mode="inspect",
+        objective="seal one real result before exact budget rejection",
+        workspace={
+            "strategy": "durable_workspace",
+            "workspace_id": workspace_id,
+        },
+        allowed_actions=["read_files"],
+        forbidden_actions=["write_files"],
+        verification_plan={
+            "required": True,
+            "commands": [["git", "status", "--porcelain"]],
+        },
+        acceptance_criteria=["result executed"],
+        review_policy={"review_required": False},
+    )
+    authority = {
+        "principal_id": principal_id,
+        "claim_ref": claim_ref,
+        "audit_ref": audit_ref,
+        "body_sha256": body_sha256,
+    }
+    try:
+        first_store = DurableTaskStore(db_path, clock=clock)
+        first_workspace_repository, first_workspace_runtime = build_workspace_runtime(
+            owner_id="internal-real-budget-rejected-owner-a"
+        )
+        first_artifacts = AgentArtifactStore(artifact_root)
+        first_runtime = build_runtime(
+            owner_id="internal-real-budget-rejected-owner-a",
+            task_store=first_store,
+            workspace_runtime=first_workspace_runtime,
+            artifacts=first_artifacts,
+        )
+        runtimes.append(first_runtime)
+        await first_runtime.activate()
+
+        # Freeze the continuation worker to model an abrupt process stop after
+        # the atomic Task terminal bundle but before artifact/workspace cleanup.
+        first_terminal_worker = first_runtime._terminal_continuation_worker
+        assert first_terminal_worker is not None
+        first_terminal_worker.stop()
+        first_terminal_worker.join()
+        first_runtime._terminal_worker_quiesced = True
+
+        first_service = InternalAgentCommandService(
+            runtime=first_runtime,
+            intent_engine=intent_engine,
+            claim_result_store=claim_store,
+        )
+        terminal = await first_service.execute(
+            work_order=work_order,
+            request_id=request_id,
+            session_id="session-internal-real-budget-rejected",
+            ts_ms=NOW,
+            command_authority=authority,
+        )
+        assert terminal["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+        assert terminal["execution_receipt"]["reason_code"] == (
+            "GOVERNED_BUDGET_EXCEEDED"
+        )
+        assert agent_calls == ["work-order-internal-real-budget-rejected"]
+
+        admitted = HostCommandRepository(db_path, clock=clock).get_by_request(
+            surface="internal",
+            request_id=request_id,
+        )
+        assert admitted is not None
+        command = admitted["command"]
+        snapshot = first_store.read_scheduler_snapshot(
+            command.graph_id,
+            command.graph_revision,
+        )
+        assert snapshot["graph_record"]["status"] == "BLOCKED"
+        assert snapshot["graph_record"]["nodes"][0]["status"] == "FAILED"
+        assert snapshot["attempts"][0]["status"] == "FAILED"
+        assert snapshot["active_leases"] == []
+        assert snapshot["budgets"][0]["status"] == "RELEASED"
+        with sqlite3.connect(str(db_path)) as conn:
+            assert conn.execute(
+                "SELECT status FROM task_runtime_lease WHERE attempt_id = ?",
+                (snapshot["attempts"][0]["attempt_id"],),
+            ).fetchone()[0] == "RELEASED"
+            rejected_usage = conn.execute(
+                "SELECT accepted, reason_code, delta_json "
+                "FROM task_runtime_budget_usage WHERE accepted = 0"
+            ).fetchall()
+            assert len(rejected_usage) == 1
+            assert rejected_usage[0][0] == 0
+            assert rejected_usage[0][1] == "TASK_STORE_BUDGET_EXCEEDED"
+            assert json.loads(rejected_usage[0][2])["token_count"] == 101
+
+        staging = first_artifacts.inventory_governed_seals(
+            namespace="staging",
+            limit=10,
+        )
+        assert len(staging) == 1
+        sealed = staging[0]
+        assert sealed.workspace_id == workspace_id
+        assert first_artifacts.inventory_governed_seals(
+            namespace="accepted",
+            limit=10,
+        ) == ()
+        assert first_workspace_repository.get_lifecycle(workspace_id).state is (
+            WorkspaceLifecycleState.ACTIVE
+        )
+        assert first_workspace_repository.get(workspace_id).status == "ACTIVE"
+        assert (managed / workspace_id).is_dir()
+
+        await first_runtime.aclose()
+        runtimes.remove(first_runtime)
+        clock.advance(60_001)
+
+        reopened_store = DurableTaskStore(db_path, clock=clock)
+        reopened_workspace_repository, reopened_workspace_runtime = (
+            build_workspace_runtime(
+                owner_id="internal-real-budget-rejected-owner-b"
+            )
+        )
+        reopened_artifacts = AgentArtifactStore(artifact_root)
+        reopened_runtime = build_runtime(
+            owner_id="internal-real-budget-rejected-owner-b",
+            task_store=reopened_store,
+            workspace_runtime=reopened_workspace_runtime,
+            artifacts=reopened_artifacts,
+        )
+        runtimes.append(reopened_runtime)
+        await reopened_runtime.activate()
+
+        assert agent_calls == ["work-order-internal-real-budget-rejected"]
+        assert reopened_artifacts.inventory_governed_seals(
+            namespace="staging",
+            limit=10,
+        ) == ()
+        assert reopened_artifacts.inventory_governed_seals(
+            namespace="accepted",
+            limit=10,
+        ) == ()
+        lifecycle = reopened_workspace_repository.get_lifecycle(workspace_id)
+        assert lifecycle.state is WorkspaceLifecycleState.ABANDONED
+        assert lifecycle.latest_event is not None
+        assert lifecycle.latest_event.reason_code == "TERMINAL_BUDGET_REJECTED"
+        tombstone_ref = reopened_artifacts.inspect_governed_tombstone(
+            stage_ref=sealed.stage_ref,
+            seal_digest=sealed.seal_digest,
+            reason_code="TERMINAL_BUDGET_REJECTED",
+        )
+        assert tombstone_ref == lifecycle.latest_event.terminal_ref
+        assert reopened_workspace_repository.get(workspace_id).status == "CLEANED"
+        assert not (managed / workspace_id).exists()
+        assert reopened_store.list_terminal_reconciliation_inventory_candidates() == ()
+
+        reopened_service = InternalAgentCommandService(
+            runtime=reopened_runtime,
+            intent_engine=intent_engine,
+            claim_result_store=claim_store,
+        )
+        replay = await reopened_service.execute(
+            work_order=work_order,
+            request_id=request_id,
+            session_id="session-internal-real-budget-rejected",
+            ts_ms=NOW + 60_002,
+            command_authority=authority,
+        )
+        assert replay["replayed"] is True
+        assert replay["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+        assert agent_calls == ["work-order-internal-real-budget-rejected"]
+        assert reopened_artifacts.inspect_governed_tombstone_ref(
+            tombstone_ref
+        )["reason_code"] == "TERMINAL_BUDGET_REJECTED"
+    finally:
+        for runtime in reversed(runtimes):
+            await runtime.aclose()
+        claim_store.close()
+        ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_internal_seal_recovers_projection_after_restart_without_agent_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "recovery-source"
+    source.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "seal-recovery@example.invalid"),
+        ("config", "user.name", "Seal Recovery Test"),
+    ):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+    (source / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    for args in (("add", "baseline.txt"), ("commit", "-m", "initial")):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+    db_path = tmp_path / "internal-seal-recovery.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="internal-seal-recovery-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    request_id = "request-internal-seal-recovery"
+    principal_id = "principal-internal-seal-recovery"
+    body_sha256 = _sha256("internal-seal-recovery")
+    claim_ref = "ingress-claim://internal/seal-recovery"
+    audit_ref = "audit://secure-ingress/internal/seal-recovery"
+    _insert_secure_authority(
+        db_path,
+        request_id=request_id,
+        principal_id=principal_id,
+        body_sha256=body_sha256,
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+    suffix = hashlib.sha256(f"internal\n{request_id}".encode()).hexdigest()[:40]
+    graph_id = f"graph-internal-{suffix}"
+    workspace_id = DurableWorkspaceRuntime.workspace_id_for(
+        graph_id=graph_id,
+        graph_revision=1,
+    )
+    managed = tmp_path / "recovery-worktrees"
+    managed.mkdir()
+    workspace_repository = WorkspaceRepository(db_path)
+    workspace_runtime = DurableWorkspaceRuntime(
+        repository=workspace_repository,
+        allocator=WorkspaceAllocator(
+            repository=workspace_repository,
+            managed_roots={
+                "recovery-worktrees": ManagedWorkspaceRoot(
+                    root_ref="recovery-worktrees",
+                    path=managed,
+                    isolation_modes=frozenset({"DIRECTORY_FENCE"}),
+                )
+            },
+            git_sources={
+                "recovery-source": ManagedGitSource(
+                    source_key="recovery-source",
+                    source_ref_prefix="git-worktree://recovery-source",
+                    repository=source.resolve(),
+                )
+            },
+        ),
+        runtime_owner_id="internal-seal-recovery-owner-a",
+        managed_root_ref="recovery-worktrees",
+        git_source_key="recovery-source",
+        lease_ms=300_000,
+        heartbeat_interval_ms=1_000,
+        token_secret=b"r" * 48,
+    )
+    artifacts = AgentArtifactStore(tmp_path / "recovery-agent-runs")
+    agent_calls: list[str] = []
+
+    class _CanonicalAgentExecutor:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+            assert workspace == (managed / workspace_id).resolve()
+            assert cancelled is not None and cancelled() is False
+            agent_calls.append(candidate.work_order_id)
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=candidate.work_order_id,
+                summary="result executed and recover one exact sealed result",
+                result_text="result executed and recover one exact sealed result",
+                verification={"status": "PASS"},
+                acceptance={"decision": "ACCEPT"},
+                review_required=False,
+                metadata={
+                    "trace": {
+                        "schema_version": "nle.trace.redacted.v1",
+                        "payload_hash": "sha256:" + "a" * 64,
+                        "steps": [],
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        agent_runtime_executor_module,
+        "AgentExecutor",
+        _CanonicalAgentExecutor,
+    )
+    canonical_executor = AgentRuntimeExecutor(
+        artifact_store=artifacts,
+        workspace_runtime=workspace_runtime,
+        model_attempt_service=object(),
+        prompt_registry=object(),
+    )
+    clock = _MutableClock()
+    ledger = SQLiteLedger(str(db_path))
+    claim_store = SQLiteSecureIngressStore(db_path)
+    token_service = TokenService(approval_ttl_ms=180_000)
+    intent_engine = _IntentEngine(ledger, token_service)
+    preview_authority = _ExactPreviewAuthority()
+    result_repository = AgentExecutionResultRepository(db_path)
+    projection_delegate = WorkerProjectionStore(db_path, clock=clock)
+    crashing_projections = _CrashBeforeProjectionStore(projection_delegate)
+    runtimes: list[Any] = []
+
+    def build_runtime(
+        *,
+        store: Any,
+        projections: Any,
+        owner_id: str,
+    ) -> Any:
+        command_repository = HostCommandRepository(db_path, clock=clock)
+        event_store = RuntimeEventStore(db_path)
+        infrastructure = SimpleNamespace(
+            task_store=store,
+            review_store=ReviewStore(db_path),
+            review_continuation_store=ReviewContinuationStore(db_path),
+            command_repository=command_repository,
+            outbox_publisher=RuntimeOutboxPublisher(store, event_store),
+            worker_projection_store=projections,
+        )
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=command_repository,
+            projection_store=projections,
+            result_repository=result_repository,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            task_store=store,
+        )
+        dispatcher = AcceptanceEffectDispatcher(
+            task_store=store,
+            handlers={"internal.agent.result_commit": accepted_result},
+            owner_id=f"{owner_id}-effect",
+            action_preview_service=preview_authority,
+        )
+        return build_governed_internal_runtime(
+            task_runtime_container=infrastructure,
+            ledger=ledger,
+            token_service=token_service,
+            result_repository=result_repository,
+            runtime_router=CanonicalRuntimeRouter(),
+            owner_id=owner_id,
+            canonical_executor=canonical_executor,
+            runtime_context_application=_RuntimeContextAuthority(
+                principal_id=principal_id
+            ),
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=dispatcher,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            claim_result_store=claim_store,
+        )
+
+    work_order = AgentWorkOrder(
+        work_order_id="work-order-internal-seal-recovery",
+        domain="code",
+        run_mode="inspect",
+        objective="recover one exact sealed result",
+        workspace={
+            "strategy": "durable_workspace",
+            "workspace_id": workspace_id,
+        },
+        allowed_actions=["read_files"],
+        forbidden_actions=["write_files"],
+        verification_plan={
+            "required": True,
+            "commands": [["git", "status", "--porcelain"]],
+        },
+        review_policy={"review_required": False},
+    )
+    authority = {
+        "principal_id": principal_id,
+        "claim_ref": claim_ref,
+        "audit_ref": audit_ref,
+        "body_sha256": body_sha256,
+    }
+    try:
+        first_store = DurableTaskStore(db_path, clock=clock)
+        first_runtime = build_runtime(
+            store=first_store,
+            projections=crashing_projections,
+            owner_id="internal-seal-recovery-owner-a",
+        )
+        runtimes.append(first_runtime)
+        await first_runtime.activate()
+        first_service = InternalAgentCommandService(
+            runtime=first_runtime,
+            intent_engine=intent_engine,
+            claim_result_store=claim_store,
+        )
+        with pytest.raises(_SimulatedProjectionProcessStop):
+            await first_service.execute(
+                work_order=work_order,
+                request_id=request_id,
+                session_id="session-internal-seal-recovery",
+                ts_ms=NOW,
+                command_authority=authority,
+            )
+        await first_runtime.aclose()
+        runtimes.remove(first_runtime)
+
+        assert agent_calls == ["work-order-internal-seal-recovery"]
+        assert crashing_projections.stage_calls == 1
+        sealed = artifacts.inventory_governed_seals(
+            namespace="staging",
+            limit=10,
+        )
+        assert len(sealed) == 1
+        admitted = HostCommandRepository(db_path, clock=clock).get_by_request(
+            surface="internal",
+            request_id=request_id,
+        )
+        assert admitted is not None
+        command = admitted["command"]
+        admitted_execution = AdmittedExecution.from_contracts(
+            command=command,
+            assignment=admitted["assignment"],
+            graph=admitted["graph"],
+        )
+        snapshot = first_store.read_scheduler_snapshot(graph_id, 1)
+        original_attempt = snapshot["attempts"][0]
+        assert original_attempt["status"] == "RUNNING"
+        reservation = first_store.get_operation_reservation(
+            admitted_execution.reservation_id
+        )
+        assert reservation["status"] == "RESERVED"
+
+        clock.advance(120_001)
+        reopened_store = DurableTaskStore(db_path, clock=clock)
+        recovery_report = reopened_store.recover_startup(
+            recovery_id="internal-seal-recovery-startup"
+        )
+        assert original_attempt["attempt_id"] in recovery_report.recovered_attempt_ids
+        response_loss_store = _RecoveredCheckpointResponseLossStore(
+            reopened_store
+        )
+        succeeded_crash_store = _CrashAfterSucceededAttemptStore(
+            response_loss_store
+        )
+        interrupted_runtime = build_runtime(
+            store=succeeded_crash_store,
+            projections=projection_delegate,
+            owner_id="internal-seal-recovery-owner-b",
+        )
+        with pytest.raises(_SimulatedAttemptSucceededProcessStop):
+            await interrupted_runtime.activate()
+        assert succeeded_crash_store.crash_count == 1
+        interrupted_snapshot = reopened_store.read_scheduler_snapshot(graph_id, 1)
+        assert interrupted_snapshot["graph_record"]["status"] == "ACTIVE"
+        assert interrupted_snapshot["graph_record"]["nodes"][0]["status"] == "RUNNING"
+        assert interrupted_snapshot["attempts"][0]["status"] == "SUCCEEDED"
+        assert response_loss_store.commit_calls == 1
+
+        reopened_runtime = build_runtime(
+            store=response_loss_store,
+            projections=projection_delegate,
+            owner_id="internal-seal-recovery-owner-c",
+        )
+        runtimes.append(reopened_runtime)
+        await reopened_runtime.activate()
+        assert reopened_runtime.startup_checkpoint_report == (
+            {
+                "stage_ref": sealed[0].stage_ref,
+                "status": "COMPLETED",
+                "reason_code": None,
+            },
+        )
+        assert agent_calls == ["work-order-internal-seal-recovery"]
+        assert response_loss_store.commit_calls == 1
+        committed = reopened_store.get_operation_reservation(
+            reservation["reservation_id"]
+        )
+        assert committed["status"] == "COMMITTED"
+        assert str(committed["receipt_ref"]).startswith("worker-projection://")
+        final_snapshot = reopened_store.read_scheduler_snapshot(graph_id, 1)
+        assert final_snapshot["graph_record"]["status"] == "COMPLETED"
+        assert final_snapshot["graph_record"]["nodes"][0]["status"] == "ACCEPTED"
+        assert final_snapshot["attempts"][0]["status"] == "SUCCEEDED"
+        assert artifacts.inventory_governed_seals(
+            namespace="staging",
+            limit=10,
+        ) == ()
+        accepted = artifacts.inventory_governed_seals(
+            namespace="accepted",
+            limit=10,
+        )
+        assert len(accepted) == 1
+        promotion = artifacts.inspect_governed_promotion(
+            stage_ref=accepted[0].stage_ref,
+            seal_digest=accepted[0].seal_digest,
+        )
+        lifecycle = workspace_repository.get_lifecycle(workspace_id)
+        assert promotion["accepted_ref"] == lifecycle.latest_event.terminal_ref
+        assert workspace_repository.get(workspace_id).status == "CLEANED"
+        assert not (managed / workspace_id).exists()
+        with sqlite3.connect(str(db_path)) as conn:
+            assert conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (claim_ref,),
+            ).fetchone()[0] is not None
+            assert conn.execute(
+                "SELECT COUNT(*) FROM agent_execution_result WHERE command_id = ?",
+                (command.command_id,),
+            ).fetchone()[0] == 1
+
+        # The first client call after activation is now only an idempotent replay.
+        reopened_service = InternalAgentCommandService(
+            runtime=reopened_runtime,
+            intent_engine=intent_engine,
+            claim_result_store=claim_store,
+        )
+        terminal = await reopened_service.execute(
+            work_order=work_order,
+            request_id=request_id,
+            session_id="session-internal-seal-recovery",
+            ts_ms=NOW + 120_001,
+            command_authority=authority,
+        )
+
+        assert terminal["decision"] == "APPROVE", json.dumps(
+            terminal,
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+        assert terminal["execution_receipt"]["accepted"] is True
+        assert agent_calls == ["work-order-internal-seal-recovery"]
+        assert response_loss_store.commit_calls == 1
+        with sqlite3.connect(str(db_path)) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM task_runtime_worker_projection "
+                "WHERE attempt_id = ?",
+                (original_attempt["attempt_id"],),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM task_runtime_outbox "
+                "WHERE aggregate_type = 'OPERATION_RESERVATION' "
+                "AND aggregate_id = ? AND event_type = 'OPERATION_COMMITTED'",
+                (reservation["reservation_id"],),
+            ).fetchone()[0] == 1
+        replay = await reopened_service.execute(
+            work_order=work_order,
+            request_id=request_id,
+            session_id="session-internal-seal-recovery",
+            ts_ms=NOW + 120_002,
+            command_authority=authority,
+        )
+        assert replay["replayed"] is True
+        assert agent_calls == ["work-order-internal-seal-recovery"]
+        assert response_loss_store.commit_calls == 1
+
+        historical_authority = dict(accepted[0].execution_authority)
+        lineage_kwargs = {
+            "graph_id": graph_id,
+            "graph_revision": 1,
+            "node_id": str(historical_authority["node_id"]),
+            "attempt_id": str(historical_authority["attempt_id"]),
+            "historical_lease_id": str(historical_authority["lease_id"]),
+            "historical_lease_owner": str(
+                historical_authority["lease_owner_id"]
+            ),
+            "historical_fencing_token": int(
+                historical_authority["fencing_token"]
+            ),
+        }
+        lineage = reopened_store.resolve_internal_agent_completion_lineage(
+            **lineage_kwargs
+        )
+        assert lineage["recovered"] is True
+        final_lease = dict(lineage["completion_lease"])
+        historical_lease = dict(lineage["historical_lease"])
+
+        def _tamper_then_restore(
+            tamper_sql: str,
+            tamper_params: tuple[Any, ...],
+            restore_sql: str,
+            restore_params: tuple[Any, ...],
+        ) -> None:
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute(tamper_sql, tamper_params)
+                conn.commit()
+            try:
+                with pytest.raises(TaskStoreError):
+                    reopened_store.resolve_internal_agent_completion_lineage(
+                        **lineage_kwargs
+                    )
+            finally:
+                with sqlite3.connect(str(db_path)) as conn:
+                    conn.execute(restore_sql, restore_params)
+                    conn.commit()
+
+        _tamper_then_restore(
+            "UPDATE task_runtime_lease SET fencing_token = ? WHERE lease_id = ?",
+            (int(final_lease["fencing_token"]) + 1, final_lease["lease_id"]),
+            "UPDATE task_runtime_lease SET fencing_token = ? WHERE lease_id = ?",
+            (int(final_lease["fencing_token"]), final_lease["lease_id"]),
+        )
+        _tamper_then_restore(
+            "UPDATE task_runtime_lease SET status = 'RELEASED' WHERE lease_id = ?",
+            (historical_lease["lease_id"],),
+            "UPDATE task_runtime_lease SET status = 'EXPIRED' WHERE lease_id = ?",
+            (historical_lease["lease_id"],),
+        )
+        _tamper_then_restore(
+            "UPDATE task_runtime_lease SET owner_id = ? WHERE lease_id = ?",
+            ("tampered-owner", final_lease["lease_id"]),
+            "UPDATE task_runtime_lease SET owner_id = ? WHERE lease_id = ?",
+            (final_lease["owner_id"], final_lease["lease_id"]),
+        )
+        _tamper_then_restore(
+            "UPDATE host_command_journal SET target_id = ? WHERE command_id = ?",
+            ("tampered-target", command.command_id),
+            "UPDATE host_command_journal SET target_id = ? WHERE command_id = ?",
+            ("agent_runtime", command.command_id),
+        )
+        projection_id = str(committed["receipt_ref"])
+        _tamper_then_restore(
+            "UPDATE task_runtime_worker_projection SET target_id = ? "
+            "WHERE projection_id = ?",
+            ("tampered-target", projection_id),
+            "UPDATE task_runtime_worker_projection SET target_id = ? "
+            "WHERE projection_id = ?",
+            ("agent_runtime", projection_id),
+        )
+
+        rogue_lease_id = "lease-internal-seal-recovery-rogue"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                """
+                INSERT INTO task_runtime_lease(
+                    lease_id, attempt_id, owner_id, fencing_token,
+                    acquired_ts_ms, heartbeat_ts_ms, expires_ts_ms,
+                    released_ts_ms, status, status_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RELEASED', 1)
+                """,
+                (
+                    rogue_lease_id,
+                    final_lease["attempt_id"],
+                    final_lease["owner_id"],
+                    int(final_lease["fencing_token"]) + 1,
+                    int(final_lease["released_ts_ms"]) + 1,
+                    int(final_lease["released_ts_ms"]) + 1,
+                    int(final_lease["released_ts_ms"]) + 2,
+                    int(final_lease["released_ts_ms"]) + 1,
+                ),
+            )
+            conn.commit()
+        try:
+            with pytest.raises(TaskStoreError):
+                reopened_store.resolve_internal_agent_completion_lineage(
+                    **lineage_kwargs
+                )
+        finally:
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute(
+                    "DELETE FROM task_runtime_lease WHERE lease_id = ?",
+                    (rogue_lease_id,),
+                )
+                conn.commit()
+    finally:
+        for runtime in reversed(runtimes):
             await runtime.aclose()
         claim_store.close()
         ledger.close()

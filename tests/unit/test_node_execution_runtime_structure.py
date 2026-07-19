@@ -7,10 +7,14 @@ import inspect
 from collections import Counter
 
 from host_brain.task_runtime import coordinator
+from host_brain.task_runtime import internal_agent_sealed_checkpoint_recovery
 from host_brain.task_runtime import node_execution_projection
 from host_brain.task_runtime import node_execution_records
 from host_brain.task_runtime import node_execution_runtime
+from host_brain.task_runtime import node_worker_stream
+from host_brain.task_runtime import operation_checkpoint_budget_recovery
 from host_brain.task_runtime import operation_checkpoint_continuation
+from host_brain.task_runtime import operation_recovery_checkpoint_loader
 from host_brain.task_runtime import operation_recovery_runtime
 from host_brain.task_runtime.node_execution_projection import NodeExecutionProjection
 from host_brain.task_runtime.node_execution_runtime import DurableNodeExecutionRuntime
@@ -46,7 +50,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "1fc33b2e4811fa03b6aa1a460f055245f0349c95856a02c96828c28a74fdd977"
+    "2da8cbe326036b953bf7bb1510fcef3877fc8b106f7960b65a26517ddfa6a8b4"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "57abfa566ae8b8546838b9fc0001beecd8cd59da10f526bed5c9ef245a5cfa94",
@@ -98,6 +102,17 @@ def _self_dependency_calls(owner: ast.AST, dependency: str) -> list[ast.Call]:
         and isinstance(node.func.value.value, ast.Name)
         and node.func.value.value.id == "self"
         and node.func.value.attr == dependency
+    ]
+
+
+def _named_dependency_calls(owner: ast.AST, dependency: str) -> list[ast.Call]:
+    return [
+        node
+        for node in ast.walk(owner)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == dependency
     ]
 
 
@@ -371,6 +386,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         "_budgets",
         "_checkpoint_continuation",
         "_graph_finalizer",
+        "_internal_budget_rejection",
         "_node_lifecycle",
         "_node_grant_verifier",
         "_operation_recovery",
@@ -431,6 +447,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         },
         "_checkpoint_continuation": {"resume": 1},
         "_graph_finalizer": {"complete": 1},
+        "_internal_budget_rejection": {"reject": 1},
     }
     for dependency, expected in expected_matrices.items():
         assert Counter(
@@ -487,6 +504,114 @@ def test_online_recovery_is_split_into_focused_non_worker_boundaries() -> None:
     assert not any(
         isinstance(node, ast.Attribute) and node.attr in {"resolve", "execute_stream"}
         for node in ast.walk(continuation_owner)
+    )
+
+
+def test_extracted_recovery_helpers_keep_narrow_authority_boundaries() -> None:
+    sealed_tree = _tree(internal_agent_sealed_checkpoint_recovery)
+    assert not [node for node in sealed_tree.body if isinstance(node, ast.ClassDef)]
+    assert {
+        node.name
+        for node in sealed_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    } == {"recover_internal_agent_sealed_checkpoint"}
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(sealed_tree, "task_store")
+    ) == Counter(
+        {
+            "get_lease": 1,
+            "resolve_node_input_artifacts": 1,
+            "commit_internal_agent_recovered_checkpoint": 1,
+        }
+    )
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(sealed_tree, "worker_resolver")
+    ) == Counter({"resolve": 1})
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(sealed_tree, "operation_recovery")
+    ) == Counter({"commit_or_reconcile": 1})
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(sealed_tree, "runtime_outbox")
+    ) == Counter({"build": 1})
+    assert not any(
+        isinstance(node, ast.Attribute)
+        and node.attr
+        in {
+            "transition_attempt",
+            "transition_node",
+            "transition_graph",
+            "finalize_node_budget",
+        }
+        for node in ast.walk(sealed_tree)
+    )
+
+    stream_tree = _tree(node_worker_stream)
+    assert not [node for node in stream_tree.body if isinstance(node, ast.ClassDef)]
+    assert {
+        node.name
+        for node in stream_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    } == {
+        "worker_event_stream",
+        "_maybe_await",
+        "stop_heartbeat_after_interruption",
+    }
+    stream_imports = {
+        (node.module or "").split(".")[-1]
+        for node in stream_tree.body
+        if isinstance(node, ast.ImportFrom)
+    }
+    assert not {"ports", "runtime_outbox", "persistence"} & stream_imports
+
+    loader_tree = _tree(operation_recovery_checkpoint_loader)
+    assert not [node for node in loader_tree.body if isinstance(node, ast.ClassDef)]
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(loader_tree, "task_store")
+    ) == Counter(
+        {
+            "get_committed_operation_checkpoint": 1,
+            "read_scheduler_snapshot": 1,
+        }
+    )
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(loader_tree, "projection_reader")
+    ) == Counter({"load": 1})
+    assert not any(
+        isinstance(node, ast.Attribute)
+        and node.attr in {"resolve", "execute", "execute_stream"}
+        for node in ast.walk(loader_tree)
+    )
+
+    budget_tree = _tree(operation_checkpoint_budget_recovery)
+    assert not [node for node in budget_tree.body if isinstance(node, ast.ClassDef)]
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(budget_tree, "budget_runtime")
+    ) == Counter(
+        {"reconcile_worker_checkpoint": 1, "settle_worker_checkpoint": 1}
+    )
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(budget_tree, "runtime_outbox")
+    ) == Counter({"publish_pending": 1})
+    assert not any(
+        isinstance(node, ast.Attribute)
+        and node.attr
+        in {
+            "build",
+            "transition_attempt",
+            "transition_node",
+            "transition_graph",
+            "finalize_node_budget",
+            "mark_worker_failure",
+        }
+        for node in ast.walk(budget_tree)
     )
 
 

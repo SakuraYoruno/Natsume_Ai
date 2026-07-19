@@ -316,10 +316,23 @@ def test_workspace_lease_is_resampled_at_the_final_commit_boundary(
 def test_active_and_accepted_abandonment_are_distinct_exact_transitions(
     tmp_path: Path,
 ) -> None:
-    active_repo, _, active_fence = _migrated_runtime(
+    active_repo, active_db, active_fence = _migrated_runtime(
         tmp_path,
         name="workspace-active-abandon.sqlite3",
     )
+    with sqlite3.connect(active_db) as conn:
+        conn.execute(
+            "UPDATE task_runtime_graph SET status = 'FAILED' WHERE graph_id = 'graph-workspace'"
+        )
+        conn.execute(
+            "UPDATE task_runtime_node SET status = 'VERIFICATION_FAILED' WHERE node_id = 'node-write'"
+        )
+        conn.execute(
+            "UPDATE task_runtime_attempt SET status = 'SUCCEEDED' WHERE attempt_id = 'attempt-write'"
+        )
+        conn.execute(
+            "UPDATE task_runtime_lease SET status = 'RELEASED' WHERE lease_id = 'task-lease-write'"
+        )
     direct = active_repo.abandon_workspace(
         "workspace-write",
         event_id="workspace-abandoned-direct",
@@ -360,6 +373,162 @@ def test_active_and_accepted_abandonment_are_distinct_exact_transitions(
     assert abandoned.current_state is WorkspaceLifecycleState.ABANDONED
     assert abandoned.event.acceptance_event_id == accepted.event.event_id
     assert abandoned.event.accepted_head == accepted.event.accepted_head
+
+
+@pytest.mark.parametrize(
+    ("graph_status", "node_status", "attempt_status", "lease_status"),
+    (
+        ("FAILED", "VERIFICATION_FAILED", "SUCCEEDED", "RELEASED"),
+        ("FAILED", "FAILED", "FAILED", "RELEASED"),
+        ("FAILED", "FAILED", "SUCCEEDED", "RELEASED"),
+        ("CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"),
+        ("CANCELLED", "CANCELLED", "SUCCEEDED", "RELEASED"),
+    ),
+)
+def test_direct_abandonment_accepts_only_exact_terminal_task_lineage(
+    tmp_path: Path,
+    graph_status: str,
+    node_status: str,
+    attempt_status: str,
+    lease_status: str,
+) -> None:
+    repository, db_path, fence = _migrated_runtime(
+        tmp_path,
+        name="workspace-terminal.sqlite3",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE task_runtime_graph SET status = ? WHERE graph_id = 'graph-workspace'",
+            (graph_status,),
+        )
+        conn.execute(
+            "UPDATE task_runtime_node SET status = ? WHERE node_id = 'node-write'",
+            (node_status,),
+        )
+        conn.execute(
+            "UPDATE task_runtime_attempt SET status = ? WHERE attempt_id = 'attempt-write'",
+            (attempt_status,),
+        )
+        conn.execute(
+            "UPDATE task_runtime_lease SET status = ? WHERE lease_id = 'task-lease-write'",
+            (lease_status,),
+        )
+    mutation = repository.abandon_workspace(
+        "workspace-write",
+        event_id="workspace-terminal-abandonment",
+        expected_transition_revision=0,
+        node_id="node-write",
+        attempt_id="attempt-write",
+        task_lease_id="task-lease-write",
+        task_lease_fencing_token=7,
+        abandonment_ref="agent-tombstone://workspace-write/attempt-write/sha256/"
+        + ("e" * 64),
+        reason_code="TERMINAL_ARTIFACT_REJECTED",
+        lease_owner="workspace-owner",
+        lease_token=TOKEN,
+        lease_fencing_token=fence,
+    )
+    assert mutation.current_state is WorkspaceLifecycleState.ABANDONED
+
+
+@pytest.mark.parametrize(
+    ("graph_status", "node_status", "attempt_status", "lease_status"),
+    (
+        ("BLOCKED", "WAITING_ACCEPTANCE_REVIEW", "SUCCEEDED", "RELEASED"),
+        ("COMPLETED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
+        ("ACTIVE", "RUNNING", "RUNNING", "ACTIVE"),
+        ("FAILED", "FAILED", "RECOVERABLE", "RELEASED"),
+        ("CANCELLED", "CANCELLED", "FAILED", "RELEASED"),
+    ),
+)
+def test_direct_abandonment_rejects_live_review_recoverable_and_success_states(
+    tmp_path: Path,
+    graph_status: str,
+    node_status: str,
+    attempt_status: str,
+    lease_status: str,
+) -> None:
+    repository, db_path, fence = _migrated_runtime(
+        tmp_path,
+        name="workspace-held.sqlite3",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE task_runtime_graph SET status = ? WHERE graph_id = 'graph-workspace'",
+            (graph_status,),
+        )
+        conn.execute(
+            "UPDATE task_runtime_node SET status = ? WHERE node_id = 'node-write'",
+            (node_status,),
+        )
+        conn.execute(
+            "UPDATE task_runtime_attempt SET status = ? WHERE attempt_id = 'attempt-write'",
+            (attempt_status,),
+        )
+        conn.execute(
+            "UPDATE task_runtime_lease SET status = ? WHERE lease_id = 'task-lease-write'",
+            (lease_status,),
+        )
+    with pytest.raises(WorkspaceRepositoryError) as raised:
+        repository.abandon_workspace(
+            "workspace-write",
+            event_id="workspace-held-abandonment",
+            expected_transition_revision=0,
+            node_id="node-write",
+            attempt_id="attempt-write",
+            task_lease_id="task-lease-write",
+            task_lease_fencing_token=7,
+            abandonment_ref="agent-tombstone://workspace-write/attempt-write/sha256/"
+            + ("f" * 64),
+            reason_code="TERMINAL_ARTIFACT_REJECTED",
+            lease_owner="workspace-owner",
+            lease_token=TOKEN,
+            lease_fencing_token=fence,
+        )
+    assert raised.value.reason_code == WORKSPACE_STALE_FENCE
+    assert repository.get_lifecycle("workspace-write").state is (
+        WorkspaceLifecycleState.ACTIVE
+    )
+
+
+def test_terminal_lifecycle_inventory_is_bounded_and_snapshot_bound(
+    tmp_path: Path,
+) -> None:
+    repository, db_path, fence = _migrated_runtime(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE task_runtime_graph SET status = 'FAILED' WHERE graph_id = 'graph-workspace'"
+        )
+        conn.execute(
+            "UPDATE task_runtime_node SET status = 'FAILED' WHERE node_id = 'node-write'"
+        )
+        conn.execute(
+            "UPDATE task_runtime_attempt SET status = 'FAILED' WHERE attempt_id = 'attempt-write'"
+        )
+        conn.execute(
+            "UPDATE task_runtime_lease SET status = 'RELEASED' WHERE lease_id = 'task-lease-write'"
+        )
+    repository.abandon_workspace(
+        "workspace-write",
+        event_id="workspace-inventory-abandonment",
+        expected_transition_revision=0,
+        node_id="node-write",
+        attempt_id="attempt-write",
+        task_lease_id="task-lease-write",
+        task_lease_fencing_token=7,
+        abandonment_ref="agent-tombstone://workspace-write/attempt-write/sha256/"
+        + ("a" * 64),
+        reason_code="TERMINAL_ARTIFACT_REJECTED",
+        lease_owner="workspace-owner",
+        lease_token=TOKEN,
+        lease_fencing_token=fence,
+    )
+    candidates = repository.list_terminal_lifecycle_candidates(limit=1)
+    assert len(candidates) == 1
+    assert candidates[0]["authority"].workspace_id == "workspace-write"
+    assert candidates[0]["lifecycle"].state is WorkspaceLifecycleState.ABANDONED
+    with pytest.raises(WorkspaceRepositoryError):
+        repository.list_terminal_lifecycle_candidates(limit=0)
 
 
 def test_competing_terminal_cas_has_one_winner(tmp_path: Path) -> None:

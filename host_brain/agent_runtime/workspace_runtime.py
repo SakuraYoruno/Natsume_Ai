@@ -62,6 +62,15 @@ class WorkspaceArtifactPromotionReceipt:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceArtifactAbandonmentReceipt:
+    workspace_id: str
+    abandonment_event_id: str
+    tombstone_ref: str
+    reason_code: str
+    replayed: bool
+
+
 class DurableWorkspaceRuntimeError(RuntimeError):
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or WORKSPACE_RUNTIME_BINDING_INVALID)
@@ -770,6 +779,172 @@ class DurableWorkspaceRuntime:
             replayed=replayed,
         )
 
+    def abandon_terminal_artifact(
+        self,
+        *,
+        workspace_id: str,
+        execution_authority: dict[str, Any],
+        stage_ref: str,
+        seal_digest: str,
+        reason_code: str,
+        artifact_planner: Callable[[], str],
+        artifact_abandoner: Callable[[], str],
+    ) -> WorkspaceArtifactAbandonmentReceipt:
+        """Persist ACTIVE→ABANDONED before deleting one sealed stage.
+
+        Both callbacks must be exact-replay operations owned by the artifact
+        store.  The planner is read-only, so the 0116 lifecycle CAS always wins
+        before a tombstone is written or stage bytes are removed.
+        """
+
+        if not callable(artifact_planner) or not callable(artifact_abandoner):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "artifact abandonment requires planner and abandoner callbacks",
+            )
+        authority = self._promotion_authority(
+            workspace_id=workspace_id,
+            value=execution_authority,
+        )
+        stage = self._durable_ref(stage_ref, "stage_ref")
+        seal = str(seal_digest or "").strip().lower()
+        if (
+            len(seal) != 71
+            or not seal.startswith("sha256:")
+            or any(character not in "0123456789abcdef" for character in seal[7:])
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "seal_digest is not canonical",
+            )
+        reason = self._required(reason_code, "reason_code", 128).upper()
+        if (
+            reason != str(reason_code).strip()
+            or not reason[0].isalpha()
+            or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for character in reason)
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "reason_code is not canonical",
+            )
+        tombstone_ref = self._durable_ref(
+            artifact_planner(),
+            "tombstone_ref",
+        )
+        identity_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "workspace_id": workspace_id,
+                    "execution_authority": authority,
+                    "stage_ref": stage,
+                    "seal_digest": seal,
+                    "tombstone_ref": tombstone_ref,
+                    "reason_code": reason,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        event_id = f"workspace-abandoned-{identity_digest}"
+        snapshot = self.repository.get_lifecycle(workspace_id)
+        replayed = snapshot.state is WorkspaceLifecycleState.ABANDONED
+        if snapshot.state is WorkspaceLifecycleState.ACTIVE:
+            lease = self._continuation_lease(
+                workspace_id,
+                purpose=f"abandon:{identity_digest}",
+            )
+            mutation = self.repository.abandon_workspace(
+                workspace_id,
+                event_id=event_id,
+                expected_transition_revision=0,
+                node_id=authority["node_id"],
+                attempt_id=authority["attempt_id"],
+                task_lease_id=authority["lease_id"],
+                task_lease_fencing_token=authority["fencing_token"],
+                abandonment_ref=tombstone_ref,
+                reason_code=reason,
+                lease_owner=lease.lease_owner,
+                lease_token=lease.lease_token,
+                lease_fencing_token=lease.lease_fencing_token,
+            )
+            if mutation.event.event_id != event_id:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_RUNTIME_BINDING_INVALID,
+                    "workspace abandonment returned a different event",
+                )
+            snapshot = self.repository.get_lifecycle(workspace_id)
+        terminal = snapshot.latest_event
+        if (
+            snapshot.state is not WorkspaceLifecycleState.ABANDONED
+            or snapshot.revision != 1
+            or terminal is None
+            or terminal.event_id != event_id
+            or terminal.from_state is not WorkspaceLifecycleState.ACTIVE
+            or terminal.graph_id != authority["graph_id"]
+            or terminal.graph_revision != authority["graph_revision"]
+            or terminal.node_id != authority["node_id"]
+            or terminal.attempt_id != authority["attempt_id"]
+            or terminal.task_lease_id != authority["lease_id"]
+            or terminal.task_lease_fencing_token != authority["fencing_token"]
+            or terminal.terminal_ref != tombstone_ref
+            or terminal.reason_code != reason
+            or terminal.acceptance_event_id is not None
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace abandonment differs from the sealed terminal artifact",
+            )
+        actual_ref = self._durable_ref(
+            artifact_abandoner(),
+            "tombstone_ref",
+        )
+        if actual_ref != tombstone_ref:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "artifact tombstone differs from the durable lifecycle event",
+            )
+        return WorkspaceArtifactAbandonmentReceipt(
+            workspace_id=workspace_id,
+            abandonment_event_id=event_id,
+            tombstone_ref=tombstone_ref,
+            reason_code=reason,
+            replayed=replayed,
+        )
+
+    def cleanup_terminal_workspace(
+        self,
+        *,
+        workspace_id: str,
+        expected_state: WorkspaceLifecycleState,
+        expected_terminal_ref: str,
+    ) -> WorkspaceCleanupReceipt:
+        """Start 0101 cleanup only after reopening exact 0116 terminal truth."""
+
+        state = WorkspaceLifecycleState(str(expected_state))
+        if state not in {
+            WorkspaceLifecycleState.PROMOTED,
+            WorkspaceLifecycleState.ABANDONED,
+        }:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_CLEANUP_UNAVAILABLE,
+                "workspace cleanup requires a terminal lifecycle state",
+            )
+        terminal_ref = self._durable_ref(
+            expected_terminal_ref,
+            "expected_terminal_ref",
+        )
+        snapshot = self.repository.get_lifecycle(workspace_id)
+        if (
+            snapshot.state is not state
+            or snapshot.latest_event is None
+            or snapshot.latest_event.terminal_ref != terminal_ref
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_CLEANUP_UNAVAILABLE,
+                "workspace cleanup lifecycle identity is missing or drifted",
+            )
+        return self.cleanup(workspace_id)
+
     def _continuation_lease(
         self,
         workspace_id: str,
@@ -1250,5 +1425,6 @@ __all__ = [
     "WORKSPACE_HEARTBEAT_LOST",
     "WORKSPACE_RUNTIME_BINDING_INVALID",
     "WorkspaceArtifactPromotionReceipt",
+    "WorkspaceArtifactAbandonmentReceipt",
     "WorkspaceCleanupReceipt",
 ]

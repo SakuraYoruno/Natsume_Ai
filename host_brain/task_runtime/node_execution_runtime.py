@@ -1,15 +1,9 @@
-"""Durable execution of one admitted TaskNode.
-
-This runtime owns the node-local execution sequence from durable READY claim
-through worker receipt, verification, review, and acceptance. It composes the
-existing authorities without becoming another persistence authority.
-"""
+"""Durable execution of one admitted TaskNode through acceptance."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import inspect
 import logging
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -66,6 +60,8 @@ from .errors import (
     RetryableWorkerPreparationError,
 )
 from .heartbeat import DurableExecutionHeartbeat
+from .internal_checkpoint_budget_rejection import InternalCheckpointBudgetRejectionRuntime
+from .internal_agent_sealed_checkpoint_recovery import recover_internal_agent_sealed_checkpoint
 from .node_execution_projection import NodeExecutionProjection
 from .node_execution_records import (
     _heartbeat_failure_phase,
@@ -78,6 +74,7 @@ from .node_execution_records import (
     build_review_context,
 )
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
+from .node_worker_stream import _maybe_await, stop_heartbeat_after_interruption, worker_event_stream
 from .operation_checkpoint_continuation import CommittedCheckpointContinuation
 from .operation_recovery_runtime import DurableOperationRecoveryRuntime
 from .ports import (
@@ -103,6 +100,7 @@ class DurableNodeExecutionRuntime:
         "_budgets",
         "_checkpoint_continuation",
         "_graph_finalizer",
+        "_internal_budget_rejection",
         "_lease_ttl_ms",
         "_node_lifecycle",
         "_node_grant_verifier",
@@ -153,6 +151,13 @@ class DurableNodeExecutionRuntime:
             runtime_outbox=runtime_outbox,
             owner_id=owner_id,
             lease_ttl_ms=lease_ttl_ms,
+        )
+        self._internal_budget_rejection = (
+            InternalCheckpointBudgetRejectionRuntime(
+                task_store=task_store,
+                runtime_outbox=runtime_outbox,
+                owner_id=owner_id,
+            )
         )
         self._checkpoint_continuation = CommittedCheckpointContinuation(
             task_store=task_store,
@@ -230,6 +235,38 @@ class DurableNodeExecutionRuntime:
                 )
             )
             reservation_status = _status(existing_reservation)
+            sealed_recovery_detail: str | None = None
+            sealed_worker_elapsed_ms: int | None = None
+            if reservation_status in {"RECOVERY_REQUIRED", "COMMITTED"}:
+                try:
+                    recovered = await recover_internal_agent_sealed_checkpoint(
+                        task_store=self._store,
+                        worker_resolver=self._workers,
+                        operation_recovery=self._operation_recovery,
+                        runtime_outbox=self._runtime_outbox,
+                        admitted=admitted,
+                        command=command,
+                        work_order=work_order,
+                        budget=budget,
+                        graph=graph,
+                        node=node,
+                        reservation=existing_reservation,
+                        latest_attempt=latest_attempt,
+                        node_grant_ref=node_grant_ref,
+                    )
+                except Exception as exc:
+                    recovered = None
+                    _logger.warning(
+                        "Internal Agent sealed checkpoint recovery was rejected: %s",
+                        exc,
+                    )
+                    sealed_recovery_detail = _exception_reason(
+                        exc,
+                        GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    )
+                if recovered is not None:
+                    existing_reservation, sealed_worker_elapsed_ms = recovered
+                    reservation_status = _status(existing_reservation)
             if reservation_status != "COMMITTED":
                 active_lease = await _maybe_await(
                     self._store.get_active_lease(
@@ -248,6 +285,11 @@ class DurableNodeExecutionRuntime:
                     ),
                     "budget": budget.execution_payload(),
                 }
+                if sealed_recovery_detail:
+                    recovery_projection["sealed_checkpoint_state"] = "INVALID"
+                    recovery_projection["sealed_checkpoint_detail"] = (
+                        sealed_recovery_detail
+                    )
                 receipt = build_execution_receipt(
                     admitted,
                     attempt_id=_required_record_text(latest_attempt, "attempt_id"),
@@ -278,8 +320,13 @@ class DurableNodeExecutionRuntime:
                     latest_attempt=latest_attempt,
                     node_grant_ref=node_grant_ref,
                     budget_id=budget.budget_id,
+                    durable_elapsed_ms_override=sealed_worker_elapsed_ms,
                 )
             except GovernedRuntimeError as exc:
+                _logger.warning(
+                    "Committed checkpoint takeover was rejected: %s",
+                    exc,
+                )
                 receipt = build_execution_receipt(
                     admitted,
                     attempt_id=_required_record_text(
@@ -878,10 +925,10 @@ class DurableNodeExecutionRuntime:
                 reservation_version=_version(reservation),
             )
         except asyncio.CancelledError:
-            await _stop_heartbeat_after_interruption(heartbeat)
+            await stop_heartbeat_after_interruption(heartbeat)
             raise
         except Exception as exc:
-            await _stop_heartbeat_after_interruption(heartbeat)
+            await stop_heartbeat_after_interruption(heartbeat)
             await self._runtime_outbox.publish_pending(best_effort=True)
             receipt = build_execution_receipt(
                 admitted,
@@ -904,7 +951,7 @@ class DurableNodeExecutionRuntime:
         heartbeat_error: BaseException | None = None
         try:
             commit_count = 0
-            async for raw_event in _worker_event_stream(
+            async for raw_event in worker_event_stream(
                 worker,
                 command=command,
                 work_order=work_order,
@@ -1185,13 +1232,36 @@ class DurableNodeExecutionRuntime:
             return
         budget = charge.context
         if not charge.accepted:
-            receipt = await self._node_lifecycle.reject_budget_charge(
-                admitted,
-                charge,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                defer_shared_terminal=defer_shared_terminal,
-            )
+            if (
+                not defer_shared_terminal
+                and str(getattr(command.surface, "value", command.surface)).lower()
+                == "internal"
+                and str(command.route_type).lower() == "delegate"
+                and str(command.target_id) == "agent_runtime"
+                and admitted.worker_route == "delegate:agent_runtime"
+            ):
+                receipt = await self._internal_budget_rejection.reject(
+                    admitted=admitted,
+                    charge=charge,
+                    attempt=attempt,
+                    node=node,
+                    graph=graph,
+                    reservation=_mapping(
+                        reservation,
+                        field_name="Internal Agent committed reservation",
+                    ),
+                    lease=lease,
+                    fencing_token=fencing_token,
+                    evidence_refs=evidence_refs,
+                )
+            else:
+                receipt = await self._node_lifecycle.reject_budget_charge(
+                    admitted,
+                    charge,
+                    attempt_id=attempt_id,
+                    fencing_token=fencing_token,
+                    defer_shared_terminal=defer_shared_terminal,
+                )
             yield terminal_event(receipt)
             return
         execution_context["budget"] = budget.execution_payload()
@@ -1423,64 +1493,6 @@ class DurableNodeExecutionRuntime:
             projection=worker_commit,
         )
         yield approved_commit_event(worker_commit, receipt)
-
-async def _worker_event_stream(
-    worker: Any,
-    *,
-    command: HostCommand,
-    work_order: Any,
-    execution_context: Mapping[str, Any],
-) -> AsyncIterator[Mapping[str, Any]]:
-    stream_method = getattr(worker, "execute_stream", None)
-    if callable(stream_method):
-        stream = stream_method(
-            command=command,
-            work_order=work_order,
-            execution_context=execution_context,
-        )
-        if inspect.isawaitable(stream):
-            stream = await stream
-        if hasattr(stream, "__aiter__"):
-            async for event in stream:
-                yield event
-            return
-        if isinstance(stream, Sequence) and not isinstance(stream, (str, bytes, bytearray)):
-            for event in stream:
-                yield event
-            return
-        raise GovernedRuntimeError(GOVERNED_WORKER_FAILED, "worker stream is not iterable")
-
-    execute_method = getattr(worker, "execute", None)
-    if not callable(execute_method):
-        raise GovernedRuntimeError(
-            GOVERNED_WORKER_FAILED,
-            "selected worker exposes neither execute_stream nor execute",
-        )
-    result = execute_method(
-        command=command,
-        work_order=work_order,
-        execution_context=execution_context,
-    )
-    result = await _maybe_await(result)
-    payload = _mapping(result, field_name="worker result")
-    if not _is_terminal_commit(payload):
-        payload = {**payload, "phase": "COMMIT", "done": True}
-    yield payload
-
-
-async def _maybe_await(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
-
-
-async def _stop_heartbeat_after_interruption(
-    heartbeat: DurableExecutionHeartbeat,
-) -> None:
-    """Best-effort join without replacing the caller's original failure."""
-
-    try:
-        await heartbeat.stop()
-    except BaseException:
-        return
 
 
 __all__ = ["DurableNodeExecutionRuntime"]

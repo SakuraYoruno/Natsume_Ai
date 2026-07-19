@@ -16,7 +16,7 @@
     "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "effect_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "generic_acceptance_effect_reconciliation": "PARTIAL_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_NON_BOOLEAN_FAIL_CLOSED_ZERO_WRITE_FALSE_OR_MALFORMED_ENV_BOOLEAN_FALSE_DISABLED_ZERO_EVENT_PROFILE_0118_SEALED_CHILD_FULL_SET_TAMPER_CHECK_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_DELIVERY_DIGEST_AUTHENTICATED_GATEWAY_SAME_SQLITE_PAYLOAD_EFFECT_ID_QUERY_NOT_FOUND_ALWAYS_UNKNOWN",
-    "internal_protected_artifact_promotion": "PARTIAL_CLEAN_NO_CHANGE_ONLY_FULL_PATH_CHAIN_LSTAT_REJECTS_SYMLINK_REPARSE_JUNCTION_CRITICAL_IO_REVALIDATION_REAL_TASKSTORE_EVIDENCE_0116_ACTIVE_ACCEPTED_PROMOTED_POST_ACCEPTANCE_RECONCILIATION_NO_AGENT_RERUN_PRE_PROJECTION_CRASH_FAIL_CLOSED_RECOVERY_REQUIRED_WORKER_REPLAY_BLOCKED_SEALED_STAGE_PROJECTION_RESUME_MISSING_HANDLE_LEVEL_TOCTOU_GENERAL_WRITE_REJECT_CANCEL_CONTINUATION_OS_CONTAINER_ISOLATION_INCOMPLETE",
+    "internal_protected_artifact_promotion": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION_STARTUP_ACTIVATION_ONLY_EXACT_BUDGET_REJECTION_ATOMIC_TERMINAL_BUNDLE_TERMINAL_SEALED_ARTIFACT_ABANDON_CLEANUP_PERIODIC_SURVIVOR_CONTINUATION_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_FAILURE_CANCEL_BUDGET_SECURE_INGRESS_CLAIM_CLOSEOUT_GENERAL_SETTLE_WORKER_CRASH_BUNDLE_HANDLE_LEVEL_TOCTOU_GENERAL_WRITE_OS_CONTAINER_ISOLATION_LEGACY_BRIDGE_INCOMPLETE",
     "acceptance_effect_recovery_guardian": "WIRED_APP_LOCAL_DURABLE_SLO_OPAQUE_INCIDENT_ONLY",
     "terminal_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "terminal_reconciliation_auto": "DEFAULT_OFF",
@@ -186,16 +186,27 @@
     },
     "internal": {
       "status": "INCOMPLETE",
-      "production_boundary": "Internal ingress is compiled into WorkOrderV3 and admitted through a single-node immutable TaskGraph, but execution still bridges to legacy AgentWorkOrder. The worker writes raw work-order/prompt/metadata/result/changed-files/verification into an exact-inventory protected stage. Every existing component from configured root to target is checked with lexical lstat; symlinks, Windows reparse points and junctions fail closed. Directories are created componentwise, raw/metadata open, atomic replace and controlled remove revalidate the path, and reverse legacy aliases into the governed namespace are rejected. Extra files and byte drift also fail closed, and public WorkerProjection carries only its ref/digest plus a bounded summary. After Acceptance, internal.agent.result_commit reopens real TaskStore evidence and only a clean Git worktree with HEAD equal to the frozen base can advance migration 0116 ACTIVE to ACCEPTED to PROMOTED. Post-Acceptance Effect/promotion response-loss reconciliation continues an already-started durable operation without rerunning Agent. If the process exits after seal but before WorkerProjection persistence, the non-COMMITTED Operation checkpoint becomes RECOVERY_REQUIRED and DurableOperationRecoveryRuntime blocks worker replay; positive sealed-stage-to-projection resume is missing. The current fresh pre-commit local Internal artifact/accepted result/real cutover/Workspace lifecycle/TaskStore heartbeat/Tool migration batch reports 63 passed and 3 skipped in 62.06 seconds; every skip is a Windows file-symlink creation privilege error 1314 and is not counted as pass, while the directory-junction case executed. Earlier focused groups are superseded history and are not added. Handle-level atomic TOCTOU, general write, rejected/cancelled continuation, OS/container isolation, legacy bridge and current-commit route acceptance remain incomplete.",
+      "production_boundary": "PARTIAL / INTERNAL_SEALED_CHECKPOINT_CONTINUATION. Internal ingress enters a single-node immutable TaskGraph but still bridges to legacy AgentWorkOrder. Startup continuation can reopen one exact sealed checkpoint, acquire a higher-fence completion Lease, rebuild the unique WorkerProjection and continue Verification, Acceptance, Effect, claim, canonical result and clean/no-change promotion without Agent replay. Exact post-checkpoint Budget rejection remains one atomic terminal bundle; the periodic worker only reconciles exact terminal sealed artifacts. The sole fresh current slice evidence is one consolidated affected batch: 87 passed in 121.66 seconds with zero failed or skipped. Historical 35/3/62/46/4 groups are included or overlapping and must not be summed. A separate neutral Budget/Projection contract regression first reported 11 passed and 5 old-fixture failures because only migration 0086 was applied; after the fixture applied contiguous 0086 plus 0114, the rerun was 16 passed and is not added to 87. Periodic survivor continuation, crash-left unsealed cleanup, failure/cancel/budget claim closeout, general settle_worker recovery, general write, handle-level TOCTOU, OS/container isolation, legacy bridge and commit-bound seven-route acceptance remain incomplete. REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
+        "host_brain/agent_runtime/projection_recovery_contract.py",
+        "host_brain/agent_runtime/internal_artifact_terminal_reconciliation.py",
         "host_brain/agent_runtime/internal_result_proposal.py",
         "host_brain/agent_runtime/artifact_store.py",
+        "host_brain/agent_runtime/artifact_store_read_model.py",
+        "host_brain/app/internal_startup_checkpoint_continuation.py",
+        "host_brain/task_runtime/internal_agent_sealed_checkpoint_recovery.py",
+        "host_brain/task_runtime/node_worker_stream.py",
+        "host_brain/task_runtime/operation_recovery_checkpoint_loader.py",
         "host_brain/agent_runtime/accepted_result.py",
         "host_brain/agent_runtime/accepted_effect_runtime.py",
         "host_brain/agent_runtime/executor.py",
         "host_brain/agent_runtime/workspace_runtime.py",
+        "host_brain/persistence/task_internal_agent_checkpoint_store.py",
+        "host_brain/persistence/task_terminal_reconciliation_read_store.py",
         "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/unit/test_ne01_internal_artifact_terminal_reconciliation.py",
+        "tests/contract/test_ne01_workspace_lifecycle_authority.py",
         "tests/unit/test_ne01_internal_artifact_stage.py",
         "tests/unit/test_ne01_internal_accepted_result.py"
       ],
@@ -298,6 +309,25 @@
         "reason_code": "REACT_TOOL_GOVERNED_ADMISSION_REQUIRED",
         "positive_execution": "MISSING_NEW_IMMUTABLE_GRAPH_REVISION_WITH_INDEPENDENT_SKILL_OR_DELEGATE_NODE_AUTHORITY",
         "boundary": "ONLY_THE_TWO_NESTED_SKILL_DELEGATE_TOOLS_ARE_COVERED_GENERAL_GRAPH_AGENT_FILE_WEB_BROWSER_MEMORY_EMOTION_AND_OTHER_TOOL_AUTHORITIES_REMAIN_SEPARATE"
+      },
+      "current_slice_focused_structure": {
+        "policy_allowlist_expanded": false,
+        "owner_line_counts": {
+          "host_brain/agent_runtime/artifact_store.py": 1359,
+          "host_brain/app/internal_task_runtime.py": 1311,
+          "host_brain/task_runtime/node_execution_runtime.py": 1499,
+          "host_brain/task_runtime/operation_recovery_runtime.py": 205
+        },
+        "focused_modules": {
+          "host_brain/agent_runtime/artifact_store_read_model.py": "BOUNDED_VERIFIED_SEAL_INVENTORY_PROMOTION_RECOVERY_TOMBSTONE_READS_NO_MUTATION_AUTHORITY",
+          "host_brain/app/internal_startup_checkpoint_continuation.py": "ACTIVATION_SCAN_AND_EXACT_SEALED_CHECKPOINT_ADMISSION_CONTINUATION",
+          "host_brain/task_runtime/internal_agent_sealed_checkpoint_recovery.py": "EXACT_LINEAGE_HIGHER_FENCE_PROJECTION_REBUILD_WITHOUT_WORKER_REPLAY",
+          "host_brain/task_runtime/node_worker_stream.py": "AUTHORITY_FREE_STREAM_NORMALIZATION_AND_INTERRUPTION_HEARTBEAT_CLEANUP",
+          "host_brain/task_runtime/operation_recovery_checkpoint_loader.py": "VALIDATE_TAKEOVER_AND_LOAD_CANONICAL_COMMITTED_CHECKPOINT_WITHOUT_WORKER_REPLAY"
+        },
+        "fresh_consolidated_validation": "87_PASSED_IN_121_66_SECONDS_ZERO_FAILED_ZERO_SKIPPED",
+        "historical_batch_boundary": "OLD_35_3_62_46_4_GROUPS_INCLUDED_OR_OVERLAPPING_DO_NOT_SUM",
+        "full_repository_static_gate": "FAIL_GATE_3_THREE_PREEXISTING_LARGE_FILE_FINDINGS"
       },
       "wiring_progress": "PRODUCTION_OFF. Two NE-01 responsibility slices reduced all eleven former mixed/ceiling findings below 1,500 lines or their pre-existing cohesive ceiling. The fresh repository-wide mixed-file gate now returns issues=[] without adding or widening an allowlist. ASGI retains app lifecycle and shutdown ownership; IntentAdmission and RuntimeGuardian retain the only durable RuntimeEvent/journal writers; extracted wiring, codecs, contracts, models, catalogs, and private command mixins own no second Store or connection. A third slice removes ReAct nested Skill/Delegate discovery and rejects injected legacy run_skill/dispatch_sub_agent ToolSpecs before low-level execution, migrates scheduler.task.trigger as Operator 1/37, and moves external HTTP /tools/execute through TOOL Secure Ingress, HostCommand, immutable TaskGraph, durable Review, node grant/Budget/Attempt/Lease, exact binding, Verification, Acceptance and Receipt. Migration 0114 extends the canonical Worker Projection route check. The Tool core chain is proven with real SQLite and an explicit SAFE_LOCAL_REPLAY test adapter; production seeding exposes zero governed executable handlers and health remains DEGRADED / FAIL_CLOSED_NO_GOVERNED_EXECUTOR. Raw ToolBroker.execute and execute_bound now reject before handler or Token access and never persist caller bearer material; ToolBroker exposes no execution-port factory. The app-local ToolRuntimeBoundary alone binds the Frozen Tool port. TaskStore atomically revalidates canonical Graph/Node/Attempt/Lease/Reservation plus owner/fence/expiry inside one SQLite read transaction; node grant, exact binding, SAFE_LOCAL_REPLAY, and WRITE child-token validation then run as separate fail-closed stages, not one cross-Store atomic interval. Only after all checks pass does before_handler write the PENDING dispatch marker immediately before the handler. MCPAdapter is metadata-only and maps every direct call to MCP_TASK_AUTHORITY_REQUIRED; the process get_mcp_tool_broker accessor and mcp_tool_broker container slot are deleted, while the inert compatibility MCPToolBroker retains no CapabilityBroker, Token or callback and is not composed by ASGI; the MCP Skill bridge is default-off, purges stale mcp::* entries and rejects stale durable targets before registry lookup. Read-only MCP registry/scorecard discovery remains available. Tool seed readiness still runs before governed runtime activation; executor=0 currently prevents a false READY, but the first real executor must not be enabled until activation is part of the same readiness state machine. The app-local Python capability boundary prevents accidental production wiring misuse; it is not an OS/container sandbox against hostile same-process reflection, and production must not load unapproved external Python. This removes the old Tool/MCP direct and nested callback authority but does not provide a real governed MCP provider or workspace-bound production Tool executor. DurableDagSchedulingRuntime remains the temporary outer orchestrator. Migrations 0093 through 0099 retain Outbox delivery, cancellation coordination, revision identity, task-bound Review continuation, grant uniqueness, append-only signed Effect reconciliation, and schema-only terminal case/proof/supersession authority. Canonical Store Budget contention is proven for 8/16/32 threads and cross-process writers. One single-node canonical post-budget checkpoint, the ACCEPTED-to-Effect restart window, and 0099 default-off exact/signed/quarantine mechanics plus proof-ending historical supersession chains are proven without worker replay. General/multi-node/pre-budget recovery, remaining execution bypass removal, Service Locator removal, and Scheduler/Internal public projections remain INCOMPLETE. External deployment terminal inventory, deployed credentials, active/retired/revoked key lifecycle, and real canaries remain UNKNOWN or NOT_RUN. Atomic, bounded, and cancellation production paths remain OFF; overall status remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF.",
       "acceptance_effect_cancellation_boundary": "Only exact virgin PENDING (attempt_count=0, fencing_token=0, status_version=0, reason_code and last_error absent) becomes CANCELLED automatically. Full codec validation rejects mixed tuples. Current production claim/cancellation authority cannot produce a fenceable retry PENDING: accepted NODE effects retain delivery authority and COMPLETED GRAPH effects are terminal. A retry PENDING encountered by the fence path is therefore legacy/corrupt state and remains RECONCILIATION_REQUIRED unless a valid signed 0098 proof resolves it. Only COMMITTED with a durable receipt becomes COMMITTED_EVIDENCE automatically; ambiguous FAILED/CLAIMED states require signed evidence and exact state binding.",
@@ -638,22 +668,26 @@
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 48
       },
       "full_architecture_static_gate": {
-        "status": "PASS",
-        "failed_gates": [],
-        "origin_dev_failed_gates": [],
+        "status": "FAIL",
+        "failed_gates": [3],
+        "origin_dev_failed_gates": [3],
         "pre_89_origin_dev_failed_gates": [1, 6, 10],
         "resolved_gates": [1, 6, 10, 11],
-        "issues": [],
+        "issues": [
+          "production file >1500 lines has no mixed/cohesive responsibility decision: host_brain/app/acceptance_effect_handlers.py:1798",
+          "production file >1500 lines has no mixed/cohesive responsibility decision: host_brain/app/asgi.py:1527",
+          "cohesive file exceeded approved line ceiling: host_brain/persistence/scheduler_repository.py:3537"
+        ],
         "strongly_connected_components": [],
         "edge_findings": 0,
         "edge_violations": 0,
         "reverse_imports": [],
-        "boundary": "ORIGIN_DEV_57A54D76B_REACT_VISUAL_AND_CURRENT_0115_DURABLE_HARD_STATE_CUTOFF_WITH_NEUTRAL_HOST_MODE_CONTRACT_KEEP_STATIC_GATES_GREEN_FAILED_EMPTY_PERSISTENCE_TO_APPLICATION_ZERO_TARGET_SCC_EMPTY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_FULL_TYPED_COMPOSITION_PRODUCTION_CANARY_GLOBAL_SERVICE_LOCATOR_REMOVAL_AND_NE01_REMAIN_INCOMPLETE"
+        "boundary": "CURRENT_FULL_REPOSITORY_STATIC_FAIL_GATE_3_THREE_PREEXISTING_LARGE_FILE_FINDINGS_CURRENT_SLICE_FOUR_OWNERS_BELOW_1500_WITHOUT_ALLOWLIST_EXPANSION_PROGRAM_REMAINS_INCOMPLETE"
       },
       "business_layer_sqlite_authority": {
         "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
         "baseline": "ORIGIN_DEV_FAIL_GATES_1_6_10",
-        "current_full_architecture_static_gate": "PASS",
+        "current_full_architecture_static_gate": "FAIL_GATE_3",
         "runtime_context_0112": {
           "readiness_owner": "RuntimeEventRepository",
           "application_surface": "RuntimeEventStore readiness port",
@@ -688,7 +722,11 @@
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
-        "remaining_static_gaps": []
+        "remaining_static_gaps": [
+          "host_brain/app/acceptance_effect_handlers.py:1798_UNCLASSIFIED",
+          "host_brain/app/asgi.py:1527_UNCLASSIFIED",
+          "host_brain/persistence/scheduler_repository.py:3537_EXCEEDS_3200_CEILING"
+        ]
       },
       "service_catalog_layering_authority": {
         "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_GATE_1_SUBSEQUENTLY_PASSED_NE01_IN_PROGRESS",

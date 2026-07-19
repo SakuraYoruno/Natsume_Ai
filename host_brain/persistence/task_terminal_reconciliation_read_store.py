@@ -891,6 +891,17 @@ class TaskTerminalReconciliationReadMixin:
                     and not authority_conflict
                     and terminal_lineage_valid
                 ):
+                    if (
+                        budget["status"] == "RELEASED"
+                        and self._exact_internal_agent_budget_rejection_terminal(
+                            conn,
+                            observation=observation,
+                            selected_node=selected_node,
+                            selected_attempt=selected_attempt,
+                            selected_budget=budget,
+                        )
+                    ):
+                        return None
                     if budget["status"] in {"PENDING", "CONSUMED"}:
                         return _quarantine(
                             "BLOCKED_FAILURE_BUDGET_STATE_AMBIGUOUS",
@@ -1098,6 +1109,42 @@ class TaskTerminalReconciliationReadMixin:
                 "failure_bundle": None,
             }
         return None
+
+    def _exact_internal_agent_budget_rejection_terminal(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        observation: Mapping[str, Any],
+        selected_node: Mapping[str, Any],
+        selected_attempt: Mapping[str, Any],
+        selected_budget: Mapping[str, Any],
+    ) -> bool:
+        """Delegate recognition to the sole TaskStore terminal authority."""
+        try:
+            resolved = self._resolve_internal_agent_budget_rejection_terminal_uow(
+                conn,
+                str(selected_attempt["attempt_id"]),
+            )
+            graph = resolved["graph"]
+            node = resolved["node"]
+            attempt = resolved["attempt"]
+            budget = resolved["budget"]
+            return (
+                str(graph["graph_id"]) == str(observation["graph"]["graph_id"])
+                and int(graph["revision"])
+                == int(observation["graph"]["revision"])
+                and str(node["node_id"]) == str(selected_node["node_id"])
+                and int(node["status_version"])
+                == int(selected_node["status_version"])
+                and int(attempt["status_version"])
+                == int(selected_attempt["status_version"])
+                and str(budget["budget_id"])
+                == str(selected_budget["budget_id"])
+                and int(budget["status_version"])
+                == int(selected_budget["status_version"])
+            )
+        except (KeyError, TypeError, ValueError, TaskStoreError):
+            return False
 
     @staticmethod
     def _parallel_terminal_snapshot_matches(

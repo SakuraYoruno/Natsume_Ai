@@ -21,6 +21,10 @@ from host_brain.agent_runtime.internal_result_proposal import (
     InternalAgentProposalExecutor,
     InternalAgentProposalVerifier,
 )
+from host_brain.agent_runtime.internal_artifact_terminal_reconciliation import (
+    InternalArtifactTerminalContinuationWorker,
+    InternalArtifactTerminalReconciler,
+)
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.task_graph import (
@@ -56,6 +60,9 @@ from host_brain.task_runtime.worker_registry import (
     GovernedWorkerRegistryError,
     GovernedWorkerRoute,
 )
+from host_brain.app.internal_startup_checkpoint_continuation import (
+    InternalStartupCheckpointContinuation,
+)
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 
 
@@ -66,6 +73,9 @@ INTERNAL_RUNTIME_DRAIN_TIMEOUT = "INTERNAL_RUNTIME_DRAIN_TIMEOUT"
 INTERNAL_RUNTIME_GOVERNOR_REJECTED = "INTERNAL_RUNTIME_GOVERNOR_REJECTED"
 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED = (
     "INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED"
+)
+INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED = (
+    "INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED"
 )
 INTERNAL_AGENT_WORKER_ROUTE = "delegate"
 _INTERNAL_TASK_NODE_ROUTE = "delegate:agent_runtime"
@@ -181,6 +191,10 @@ class GovernedInternalRuntime:
         governor_grants: DurableGovernorGrantResolver,
         runtime_context_application: Any,
         accepted_effect_runtime: InternalAcceptedEffectRuntime,
+        terminal_continuation_worker: Any | None = None,
+        startup_task_store: Any | None = None,
+        startup_artifact_store: Any | None = None,
+        startup_claim_result_store: Any | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
@@ -197,6 +211,27 @@ class GovernedInternalRuntime:
             )
         self._runtime_context_application = runtime_context_application
         self._accepted_effect_runtime = accepted_effect_runtime
+        if terminal_continuation_worker is not None:
+            for method_name in ("run_once", "start", "wake", "stop", "join"):
+                if not callable(getattr(terminal_continuation_worker, method_name, None)):
+                    raise TypeError(
+                        f"Internal artifact terminal worker lacks {method_name}"
+                    )
+        self._terminal_continuation_worker = terminal_continuation_worker
+        self._terminal_worker_quiesced = terminal_continuation_worker is None
+        self._startup_checkpoint_continuation = InternalStartupCheckpointContinuation(
+            task_store=startup_task_store,
+            artifact_store=startup_artifact_store,
+            claim_result_store=startup_claim_result_store,
+            command_repository=command_repository,
+            application=application,
+            accepted_effect_runtime=accepted_effect_runtime,
+            expected_node_route=_INTERNAL_TASK_NODE_ROUTE,
+            authority_invalid_code=INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            ingress_completion_failed_code=INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
+            deferred_code=INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED,
+            error_factory=GovernedInternalRuntimeError,
+        )
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
         self._condition = asyncio.Condition()
         self._active = False
@@ -204,6 +239,14 @@ class GovernedInternalRuntime:
         self._in_flight = 0
 
     async def activate(self) -> None:
+        worker = self._terminal_continuation_worker
+        if worker is not None:
+            await asyncio.to_thread(worker.run_once)
+        await self._recover_startup_sealed_checkpoints()
+        if worker is not None:
+            await asyncio.to_thread(worker.run_once)
+            worker.start()
+            self._terminal_worker_quiesced = False
         async with self._condition:
             self._active = True
             self._accepting = True
@@ -224,6 +267,12 @@ class GovernedInternalRuntime:
                 INTERNAL_RUNTIME_DRAIN_TIMEOUT,
                 f"internal runtime still has {self._in_flight} in-flight command(s)",
             ) from exc
+        worker = self._terminal_continuation_worker
+        if worker is not None and not self._terminal_worker_quiesced:
+            worker.stop()
+            await asyncio.to_thread(worker.join)
+            await asyncio.to_thread(worker.run_once)
+            self._terminal_worker_quiesced = True
 
     async def aclose(self) -> None:
         await self.close_admission()
@@ -327,6 +376,7 @@ class GovernedInternalRuntime:
                 else:
                     yield event
         finally:
+            self._wake_terminal_continuation()
             async with self._condition:
                 self._in_flight -= 1
                 if self._in_flight == 0:
@@ -436,6 +486,7 @@ class GovernedInternalRuntime:
                 command=command,
             )
         finally:
+            self._wake_terminal_continuation()
             async with self._condition:
                 self._in_flight -= 1
                 if self._in_flight == 0:
@@ -477,6 +528,7 @@ class GovernedInternalRuntime:
                 reason_code=reason_code,
             )
         finally:
+            self._wake_terminal_continuation()
             async with self._condition:
                 self._in_flight -= 1
                 if self._in_flight == 0:
@@ -486,6 +538,26 @@ class GovernedInternalRuntime:
         return self._commands.get_by_request(
             surface=HostCommandSurface.INTERNAL.value,
             request_id=str(request_id or "").strip(),
+        )
+
+    @property
+    def startup_checkpoint_report(self) -> tuple[dict[str, Any], ...]:
+        return self._startup_checkpoint_continuation.report
+
+    def _wake_terminal_continuation(self) -> None:
+        worker = self._terminal_continuation_worker
+        if worker is not None:
+            worker.wake()
+
+    async def _recover_startup_sealed_checkpoints(
+        self,
+        *,
+        page_limit: int = 100,
+        scan_limit: int = 1_000,
+    ) -> tuple[dict[str, Any], ...]:
+        return await self._startup_checkpoint_continuation.recover(
+            page_limit=page_limit,
+            scan_limit=scan_limit,
         )
 
     async def exact_accepted_result_receipt(
@@ -684,6 +756,9 @@ def build_governed_internal_runtime(
     runtime_context_application: Any | None = None,
     action_preview_service: Any | None = None,
     acceptance_effect_dispatcher: Any | None = None,
+    artifact_store: Any | None = None,
+    workspace_runtime: DurableWorkspaceRuntime | None = None,
+    claim_result_store: Any | None = None,
 ) -> GovernedInternalRuntime:
     review_store = getattr(task_runtime_container, "review_store", None)
     continuation_store = getattr(
@@ -761,6 +836,21 @@ def build_governed_internal_runtime(
         dispatcher=acceptance_effect_dispatcher,
         result_repository=result_repository,
     )
+    terminal_worker: InternalArtifactTerminalContinuationWorker | None = None
+    if artifact_store is not None or workspace_runtime is not None:
+        if artifact_store is None or workspace_runtime is None:
+            raise TypeError(
+                "Internal artifact terminal continuation requires both store and Workspace"
+            )
+        terminal_worker = InternalArtifactTerminalContinuationWorker(
+            reconciler=InternalArtifactTerminalReconciler(
+                artifact_store=artifact_store,
+                workspace_runtime=workspace_runtime,
+                task_store=task_runtime_container.task_store,
+                command_repository=task_runtime_container.command_repository,
+                projection_store=projection_store,
+            )
+        )
     return GovernedInternalRuntime(
         application=application,
         runtime_router=runtime_router,
@@ -768,6 +858,12 @@ def build_governed_internal_runtime(
         governor_grants=DurableGovernorGrantResolver(ledger),
         runtime_context_application=runtime_context_application,
         accepted_effect_runtime=accepted_effect_runtime,
+        terminal_continuation_worker=terminal_worker,
+        startup_task_store=(
+            task_runtime_container.task_store if artifact_store is not None else None
+        ),
+        startup_artifact_store=artifact_store,
+        startup_claim_result_store=claim_result_store,
     )
 
 
