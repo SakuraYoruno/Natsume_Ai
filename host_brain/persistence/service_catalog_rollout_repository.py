@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
-from host_brain.service_catalog.rollout_authority import (
+from host_brain.contracts.service_catalog import (
     _STAGE_RANK,
     _TERMINAL_EVENTS,
     _canonical,

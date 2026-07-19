@@ -13,7 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
-from host_brain.composition.service_catalog_startup import (
+from host_brain.service_catalog.startup_coordinator import (
     MODE_CANARY,
     MODE_ENFORCE,
     ServiceCatalogStartupCoordinator,
@@ -25,13 +25,14 @@ from host_brain.persistence.service_catalog_rollout_repository import (
     SQLiteServiceCatalogRolloutRepository,
 )
 from host_brain.service_catalog.defaults import build_local_catalog
-from host_brain.service_catalog.models import CatalogMode, EndpointSpec, Transport
-from host_brain.service_catalog.probes import HealthProbeResult, strict_socket_addresses
-from host_brain.service_catalog.rollout_authority import (
+from host_brain.contracts.service_catalog import (
+    CatalogMode,
     ServiceCatalogRolloutError,
     ServiceCatalogRolloutRepository,
     catalog_operation_identity_digest,
 )
+from host_brain.service_catalog.models import EndpointSpec, Transport
+from host_brain.service_catalog.probes import HealthProbeResult, strict_socket_addresses
 from host_brain.service_catalog.rollout_runtime import (
     CatalogActivationOutcomeV1,
     DurableServiceCatalogActivationRunner,

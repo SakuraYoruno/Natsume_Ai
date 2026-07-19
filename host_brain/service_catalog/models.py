@@ -10,6 +10,8 @@ import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from host_brain.contracts.service_catalog import CatalogMode
+
 
 SERVICE_CATALOG_SCHEMA_VERSION = "natsume.service-catalog.v1"
 SERVICE_CATALOG_MODE_ENV = "HOST_SERVICE_CATALOG_MODE"
@@ -18,14 +20,6 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
 _PROTOCOL_RE = re.compile(r"^[a-z][a-z0-9.+_-]{0,63}$")
 _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
-
-
-class CatalogMode(str, Enum):
-    AUDIT = "AUDIT"
-    SHADOW = "SHADOW"
-    PREFLIGHT = "PREFLIGHT"
-    CANARY = "CANARY"
-    ENFORCE = "ENFORCE"
 
 
 class EndpointKind(str, Enum):

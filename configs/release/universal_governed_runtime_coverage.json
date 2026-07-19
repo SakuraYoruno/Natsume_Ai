@@ -458,11 +458,11 @@
             "SQL",
             "transaction"
           ],
-          "rollout_authority_owns": [
-            "contracts",
-            "Protocol",
-            "Guardian Observer"
-          ],
+          "stable_contracts": "host_brain/contracts/service_catalog.py",
+          "legacy_contract_path": "SAME_OBJECT_REEXPORT_ONLY",
+          "startup_coordinator": "host_brain/service_catalog/startup_coordinator.py",
+          "composition_legacy_path": "SAME_OBJECT_REEXPORT_ONLY",
+          "rollout_authority_owns": ["Guardian Observer"],
           "runner_dependency": "PROTOCOL",
           "concrete_wiring": "HOST_STARTUP_AND_ASGI_STILL_REQUIRED",
           "typed_composition": "INCOMPLETE",
@@ -481,8 +481,43 @@
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
         "remaining_static_gaps": [
-          "Gate 1 application/composition/persistence target-layer SCC"
+          "Gate 1 application/persistence target-layer SCC"
         ]
+      },
+      "service_catalog_layering_authority": {
+        "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_GATE_1_STILL_FAILED_NE01_IN_PROGRESS",
+        "application_to_composition_imports": 0,
+        "service_catalog_persistence_to_application_imports": 0,
+        "startup_coordinator": "host_brain/service_catalog/startup_coordinator.py",
+        "composition_compatibility_path": "SAME_OBJECT_REEXPORT_ONLY",
+        "stable_contracts": "host_brain/contracts/service_catalog.py",
+        "legacy_contract_path": "SAME_OBJECT_REEXPORT_ONLY",
+        "rollout_authority_responsibility": "GUARDIAN_OBSERVER_ONLY",
+        "repository_dependency": "STABLE_CONTRACTS_ONLY",
+        "gate_1": {
+          "status": "FAIL",
+          "scc_before": ["application", "composition", "persistence"],
+          "scc_current": ["application", "persistence"],
+          "remaining_persistence_to_application_imports": 11,
+          "remaining_breakdown": {
+            "planning_search": 7,
+            "evolution_lab_skill_world": 4
+          },
+          "edge_violations": 0,
+          "reverse_imports": 0
+        },
+        "validation": {
+          "service_catalog_contract_unit_passed": 61,
+          "real_catalog_host_socket_integration_passed": 7,
+          "boundary_rerun_passed": 7,
+          "batch_overlap": "MAY_OVERLAP_DO_NOT_SUM",
+          "py_compile": "PASS",
+          "diff_check": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "migration_added_this_slice": false,
+        "boundary": "SERVICE_CATALOG_LAYERING_ONLY_GATE_1_COMPOSITION_AND_NE01_NOT_COMPLETE"
       },
       "obs_projection_lifecycle_authority": {
         "status": "GATE_6_PASS_CONTINUOUS_SLO_INCOMPLETE_NE01_STILL_IN_PROGRESS",
