@@ -28,6 +28,9 @@ ACTION_ALLOWLIST = {
     "noop",
     # M45：场景路由 action（由 chat_handler._action_map 注入，Governor 需感知真实意图类型）
     "exec_intent",
+    # Server-owned Operator control intent.  It is not a discoverable Skill;
+    # the action exists only so Governor can bind an exact typed payload.
+    "operator_sys_mode_transition",
     "work_code",
     "work_translate",
 }
@@ -77,6 +80,18 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "pragmatic_frame": dict,
             "conversation_understanding": dict,
         },
+    },
+    "operator_sys_mode_transition": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "target_mode": str,
+            "source": str,
+            "reason": str,
+        },
+        "optional": {},
     },
     "work_code": {"required": {"text": str}, "optional": {}},
     "work_translate": {"required": {"text": str}, "optional": {}},

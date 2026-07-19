@@ -179,11 +179,23 @@
     },
     "operator": {
       "status": "INCOMPLETE",
-      "production_boundary": "Only scheduler.task.trigger currently crosses Secure Ingress, HostCommand and TaskGraph; the other 36 audited Operator write commands remain deliberately blocked before their handlers. This is a safe cutoff, not universal Operator migration or live route acceptance.",
+      "production_boundary": "scheduler.task.trigger and sys_mode.switch now cross Secure Ingress, typed OPERATOR HostCommand, immutable TaskGraph and the governed runtime; the other 35 audited Operator write commands remain deliberately blocked before their handlers. sys_mode.switch additionally uses durable Review continuation, one app-local AcceptanceEffect recovery owner shared with Host, exact HardState event replay and terminal outer WAL/claim finalization. This is a 2/37 vertical-slice boundary, not universal Operator migration or commit-bound live route acceptance.",
       "evidence_refs": [
         "host_brain/app/observability_runtime/domain_command_ports.py",
-        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py"
+        "host_brain/app/governed_operator_runtime.py",
+        "host_brain/composition/runtime_group.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py",
+        "tests/integration/test_ne01_governed_operator_sys_mode.py",
+        "tests/unit/test_ne01_acceptance_effect_runtime.py"
       ],
+      "governed_commands": ["scheduler.task.trigger", "sys_mode.switch"],
+      "blocked_command_count": 35,
+      "review_continuation_boundary": "The outer OBS outcome remains WAITING_REVIEW while task-bound Review is pending. If durable Review admission succeeds but the outer WAL append fails, startup keeps admission closed. Zero bound Reviews conservatively become UNCERTAIN; one exact PENDING, APPROVED, CONSUMED, REJECTED, EXPIRED or CANCELLED Review reopens Secure Ingress, HostCommand, TaskNode, ReviewItem and any required terminal continuation before restoring the same WAITING_REVIEW; multiple Reviews or binding drift fail startup closed. RECOVERY_PENDING or uncertain Acceptance Effect ownership durably defers continuation and leaves the central Secure Ingress claim unsettled.",
+      "side_effect_boundary": "APPLIED and REPLAYED use status-specific runtime-scope-bound handler receipts and require the exact durable HardState event. NO_CHANGE uses its own status-specific receipt, requires no event and reports side_effects_executed=false. Response loss, success=false or attribution failure after the HardState call must first reopen the exact event: an existing commit becomes REPLAYED, an uncertain read remains PENDING with RECONCILIATION_REQUIRED and UNKNOWN regardless of ordinary max attempts, and only authoritative absence may enter ordinary failure. Historical replay never re-executes the effect, including after more than 1000 newer events.",
+      "startup_recovery_boundary": "Governed admission activates only after the shared Acceptance Effect owner drains recovery work and proves no PENDING or CLAIMED effect remains.",
+      "shutdown_boundary": "Operator ingress drains first, then Scheduler producers stop, Task Runtime closes the shared Acceptance Effect owner, Workspace quiesces, mode-transition dependencies stop, command/security stores close, and app references clear last. A live OBS, Scheduler or Task Runtime close failure preserves dependencies and published references and returns a stable retry-required error.",
+      "validation_boundary": "One final consolidated affected batch passed 265 tests in 179.82 seconds. Its first attempt reported 264 passed and one stale ASGI fixture failure before the fixture was corrected; counts are not added. NE-01 wave integration, commit-bound acceptance and production canary remain NOT_RUN or MISSING; REMOTE_CI remains NOT_RUN_ACCOUNT_QUOTA.",
       "controls": {
         "host_command": "PARTIAL",
         "immutable_task_graph": "PARTIAL",
@@ -195,7 +207,7 @@
         "verification": "PARTIAL",
         "acceptance": "PARTIAL",
         "receipt": "PARTIAL",
-        "transactional_side_effects": "MISSING",
+        "transactional_side_effects": "PARTIAL",
         "commit_bound_acceptance": "MISSING"
       }
     }

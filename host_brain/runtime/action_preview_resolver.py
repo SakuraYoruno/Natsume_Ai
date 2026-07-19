@@ -273,6 +273,7 @@ def _scheduler_effect_descriptors(target: str) -> tuple[dict[str, Any], ...]:
 def _effect_descriptor(effect_type: str) -> tuple[str, int, str]:
     risk = {
         "conversation.user_turn": 1,
+        "host.sys_mode_transition": 4,
         "life.foreground_completed": 2,
         "surface.reply_delivery": 3,
     }.get(effect_type)

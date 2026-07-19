@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
+import hmac
 import json
 import threading
 import time
@@ -30,6 +31,7 @@ from .command_ports import (
     ObsCommandSpec,
     SecureIngressClaimResultStore,
     bind_server_authority,
+    governed_review_continuation_ref,
 )
 from .command_outcome_journal import (
     ObsCommandOutcomeJournal,
@@ -123,6 +125,7 @@ class SecureObsCommandIngress:
         registry: ObsCommandPortRegistry,
         router: ObsCommandRouter | None,
         clock_ms: Callable[[], int] | None = None,
+        admission_open: bool = True,
     ) -> None:
         self._adapter = ingress_adapter
         self._service = ingress_service
@@ -132,7 +135,8 @@ class SecureObsCommandIngress:
         self._router = router
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
         self._admission = threading.Condition()
-        self._admission_open = True
+        self._admission_open = bool(admission_open)
+        self._recovery_admission_pending = not bool(admission_open)
         self._in_flight = 0
 
     @property
@@ -147,6 +151,19 @@ class SecureObsCommandIngress:
             self._admission_open = False
             if self._in_flight == 0:
                 self._admission.notify_all()
+
+    def open_admission_after_recovery(self) -> None:
+        """Open initial admission exactly once after the durable recovery gate."""
+
+        with self._admission:
+            if (
+                not self._recovery_admission_pending
+                or self._admission_open
+                or self._in_flight != 0
+            ):
+                raise RuntimeError("OBS_COMMAND_RECOVERY_ADMISSION_STATE_INVALID")
+            self._admission_open = True
+            self._recovery_admission_pending = False
 
     async def close_admission_and_drain(self) -> None:
         """Close admission and asynchronously wait for admitted work to leave."""
@@ -483,6 +500,24 @@ class SecureObsCommandIngress:
                 principal_id=authority.principal_id,
             )
 
+        try:
+            continuation_ref = governed_review_continuation_ref(execution)
+        except ObsCommandContractError as exc:
+            return self._finalize_outcome(
+                begin_record,
+                state=ObsCommandOutcomeState.UNCERTAIN,
+                reason_code=exc.reason_code,
+                certainty=SideEffectCertainty.MAY_HAVE_EXECUTED,
+                principal_id=authority.principal_id,
+            )
+        if continuation_ref is not None:
+            return self._mark_waiting_review(
+                begin_record,
+                domain_result_ref=execution.result_ref,
+                continuation_ref=continuation_ref,
+                principal_id=authority.principal_id,
+            )
+
         if execution.success:
             return self._finalize_outcome(
                 begin_record,
@@ -512,6 +547,71 @@ class SecureObsCommandIngress:
             certainty=SideEffectCertainty.NOT_EXECUTED,
             principal_id=authority.principal_id,
         )
+
+    def finalize_review_outcome(
+        self,
+        *,
+        claim_ref: str,
+        state: str,
+        reason_code: str,
+        side_effects_executed: bool,
+        terminal_result_ref: str,
+        continuation_ref: str,
+    ) -> ObsCommandIngressOutcome:
+        """Append a terminal Review outcome, then bind the central claim.
+
+        The canonical DomainCommand result remains ``domain_result_ref``;
+        Task/Review settlement is retained separately as ``terminal_result_ref``.
+        Secure Ingress always receives the stable outer
+        ``obs-command-outcome://`` receipt, including an exact retry after a
+        crash between the WAL append and central claim completion.
+        """
+
+        if self._outcomes is None or self._claim_results is None:
+            raise RuntimeError("OBS_COMMAND_OUTCOME_JOURNAL_UNAVAILABLE")
+        normalized_state = str(state or "").strip().upper()
+        if normalized_state not in {"SUCCEEDED", "REJECTED"}:
+            raise ValueError("OBS_COMMAND_REVIEW_FINAL_STATE_INVALID")
+        if type(side_effects_executed) is not bool:
+            raise ValueError("OBS_COMMAND_REVIEW_CERTAINTY_INVALID")
+        record = self._outcomes.lookup_by_claim_ref(str(claim_ref or "").strip())
+        if record is None:
+            raise RuntimeError("OBS_COMMAND_REVIEW_OUTCOME_NOT_FOUND")
+        waiting = self._outcomes.lookup_waiting_review_by_claim_ref(
+            str(claim_ref or "").strip()
+        )
+        expected_continuation = str(continuation_ref or "").strip()
+        if (
+            waiting is None
+            or waiting.receipt_ref != record.receipt_ref
+            or waiting.continuation_ref is None
+            or not hmac.compare_digest(
+                waiting.continuation_ref,
+                expected_continuation,
+            )
+        ):
+            raise RuntimeError("OBS_COMMAND_REVIEW_CONTINUATION_BINDING_DRIFT")
+        terminal = self._outcomes.finalize(
+            record.receipt_ref,
+            state=ObsCommandOutcomeState(normalized_state),
+            reason_code=str(reason_code or "").strip().upper(),
+            side_effect_certainty=(
+                SideEffectCertainty.EXECUTED
+                if side_effects_executed
+                else SideEffectCertainty.NOT_EXECUTED
+            ),
+            domain_result_ref=waiting.domain_result_ref,
+            terminal_result_ref=terminal_result_ref,
+            recorded_at_ms=int(self._clock_ms()),
+        )
+        if terminal.claim_ref != str(claim_ref or "").strip():
+            raise RuntimeError("OBS_COMMAND_REVIEW_CLAIM_BINDING_DRIFT")
+        self._claim_results.complete_claim(
+            claim_ref=terminal.claim_ref,
+            result_ref=terminal.receipt_ref,
+            at_ms=int(self._clock_ms()),
+        )
+        return self._outcome_from_record(terminal, duplicate=False)
 
     def _parse_authenticated_envelope(
         self,
@@ -661,6 +761,49 @@ class SecureObsCommandIngress:
             )
         return self._outcome_from_record(final_record, duplicate=False)
 
+    def _mark_waiting_review(
+        self,
+        begin_record: ObsCommandOutcomeRecord,
+        *,
+        domain_result_ref: str,
+        continuation_ref: str,
+        principal_id: str | None,
+    ) -> ObsCommandIngressOutcome:
+        if self._outcomes is None:
+            return self._unavailable(
+                "OBS_COMMAND_OUTCOME_JOURNAL_UNAVAILABLE",
+                command_id=begin_record.key.command_id,
+            )
+        try:
+            waiting = self._outcomes.mark_waiting_review(
+                begin_record.receipt_ref,
+                domain_result_ref=domain_result_ref,
+                continuation_ref=continuation_ref,
+                recorded_at_ms=int(self._clock_ms()),
+            )
+        except Exception:
+            # The graph is durably waiting and no public effect ran, but the
+            # outer WAL did not commit its pending transition.  Keep the claim
+            # open and surface an executing/uncertain transport result; never
+            # manufacture a terminal claim receipt.
+            return ObsCommandIngressOutcome(
+                allowed=False,
+                executed=False,
+                duplicate=False,
+                reason_code="OBS_COMMAND_OUTCOME_FINALIZE_FAILED",
+                command_id=begin_record.key.command_id,
+                principal_id=principal_id,
+                claim_ref=begin_record.claim_ref,
+                audit_ref=begin_record.audit_ref,
+                result_ref=begin_record.receipt_ref,
+                terminal_state=ObsCommandOutcomeState.EXECUTING.value,
+                certainty=SideEffectCertainty.NOT_EXECUTED.value,
+            )
+        return replace(
+            self._outcome_from_record(waiting, duplicate=False),
+            principal_id=principal_id,
+        )
+
     def _outcome_from_record(
         self,
         record: ObsCommandOutcomeRecord,
@@ -676,7 +819,11 @@ class SecureObsCommandIngress:
             terminal_state = ObsCommandOutcomeState.UNCERTAIN
             certainty = SideEffectCertainty.MAY_HAVE_EXECUTED
         return ObsCommandIngressOutcome(
-            allowed=terminal_state is ObsCommandOutcomeState.SUCCEEDED,
+            allowed=terminal_state
+            in {
+                ObsCommandOutcomeState.SUCCEEDED,
+                ObsCommandOutcomeState.WAITING_REVIEW,
+            },
             executed=(False if duplicate else self._certainty_executed(certainty)),
             duplicate=bool(duplicate),
             reason_code=reason_code,
@@ -684,7 +831,12 @@ class SecureObsCommandIngress:
             claim_ref=record.claim_ref,
             audit_ref=record.audit_ref,
             result_ref=record.receipt_ref,
-            result=None,
+            result=(
+                {"continuation_ref": record.continuation_ref}
+                if state is ObsCommandOutcomeState.WAITING_REVIEW
+                and record.continuation_ref is not None
+                else None
+            ),
             terminal_state=terminal_state.value,
             certainty=certainty.value,
         )

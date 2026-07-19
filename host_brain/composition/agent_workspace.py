@@ -314,7 +314,7 @@ def quiesce_agent_workspace_application_scope(
     container: ProcessAgentWorkspaceContainer | None,
     task_runtime_container: Any,
 ) -> None:
-    """Stop workspace workers before Task Store and retain handles on failure."""
+    """Stop workspace cleanup after Task execution drains; retain failed handles."""
 
     if container is None:
         application.state.agent_workspace_container = None

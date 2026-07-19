@@ -28,7 +28,11 @@ from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngress
 from host_brain.observability.command_ports import ObsCommandPortRegistry
 from host_brain.observability.command_outcome_journal import ObsCommandOutcomeJournal
 from host_brain.observability.command_router import ObsCommandRouter
-from .domain_command_ports import build_default_obs_domain_command_registry
+from .domain_command_ports import (
+    GOVERNED_OPERATOR_COMMAND_IDS,
+    build_default_obs_domain_command_registry,
+)
+from .review_wait_recovery import CanonicalReviewWaitRecoveryResolver
 from host_brain.observability.secure_command_ingress import SecureObsCommandIngress
 from host_brain.observability.shadow_ingress_state import ShadowIngressStateStore
 
@@ -149,6 +153,7 @@ class ObsCommandComposition:
         repr=False,
     )
     _closed: bool = field(default=False, init=False, repr=False)
+    _review_recovery_deferred: bool = field(default=False, repr=False)
     _close_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def close(self) -> None:
@@ -180,6 +185,37 @@ class ObsCommandComposition:
         if callable(drain):
             await drain()
         self.close()
+
+    def recover_deferred_review_admissions(
+        self,
+        *,
+        command_repository: Any,
+        task_store: Any,
+        review_store: Any,
+        review_continuation_store: Any,
+    ) -> tuple[Any, ...]:
+        """Settle crash-left Operator Review waits before opening admission."""
+
+        if not self._review_recovery_deferred:
+            return ()
+        if self.outcome_journal is None or self.store is None:
+            raise RuntimeError("OBS_COMMAND_REVIEW_RECOVERY_UNAVAILABLE")
+        resolver = CanonicalReviewWaitRecoveryResolver(
+            command_repository=command_repository,
+            task_store=task_store,
+            review_store=review_store,
+            review_continuation_store=review_continuation_store,
+            secure_ingress_authority_resolver=self.store,
+        )
+        recovered = self.outcome_journal.recover_incomplete(
+            review_wait_resolver=resolver,
+        )
+        opener = getattr(self.ingress, "open_admission_after_recovery", None)
+        if not callable(opener):
+            raise RuntimeError("OBS_COMMAND_REVIEW_RECOVERY_ADMISSION_UNAVAILABLE")
+        opener()
+        self._review_recovery_deferred = False
+        return tuple(recovered)
 
     def __enter__(self) -> "ObsCommandComposition":
         return self
@@ -297,6 +333,7 @@ def build_obs_command_composition(
     degradation_capability_port_provider: (
         Callable[[], DegradationCapabilityPort | None] | None
     ) = None,
+    defer_review_recovery: bool = False,
 ) -> ObsCommandComposition:
     """Build one command plane or a terminal disabled composition.
 
@@ -362,7 +399,12 @@ def build_obs_command_composition(
         owner_lease = _OutcomeJournalOwnerLease(
             resolved_outcome_journal_path.resolve()
         ).acquire()
-        outcome_journal.recover_incomplete()
+        if defer_review_recovery:
+            outcome_journal.recover_incomplete(
+                defer_review_command_ids=GOVERNED_OPERATOR_COMMAND_IDS,
+            )
+        else:
+            outcome_journal.recover_incomplete()
 
         def _resolve_hmac_secret(authority: Any) -> str | None:
             return secrets.get(str(getattr(authority, "key_id", "") or ""))
@@ -402,6 +444,7 @@ def build_obs_command_composition(
             registry=registry,
             router=router,
             outcome_journal=outcome_journal,
+            admission_open=not defer_review_recovery,
         )
     except Exception:
         if store is not None:
@@ -435,6 +478,7 @@ def build_obs_command_composition(
         emergency_audit=emergency_audit,
         adapter=adapter,
         _owner_lease=owner_lease,
+        _review_recovery_deferred=bool(defer_review_recovery),
     )
 
 

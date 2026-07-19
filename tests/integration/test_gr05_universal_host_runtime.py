@@ -10,6 +10,9 @@ import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.host_runtime_context_wiring import compose_host_runtime_context
+from host_brain.app.acceptance_effect_handlers import (
+    build_production_acceptance_effect_handlers,
+)
 from host_brain.app.governed_task_adapter import (
     build_governed_host_runtime as _build_governed_host_runtime,
 )
@@ -47,6 +50,9 @@ from host_brain.runtime.action_preview_resolver import (
 from host_brain.runtime.environment_state import build_environment_snapshot
 from host_brain.secure_ingress import ClaimStatus, IngressAuditEvent
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
+from host_brain.task_runtime.acceptance_effect_dispatcher import (
+    AcceptanceEffectDispatcher,
+)
 from natsume_contracts.edge.transport_v1 import EdgeTransportResult
 from natsume_contracts.task import HostCommandSurface
 
@@ -354,6 +360,12 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 runtime_context_application=runtime_context_application,
             ),
         )
+        acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
+            task_store=container.task_store,
+            handlers=build_production_acceptance_effect_handlers(),
+            owner_id="gr05-universal-acceptance-effects",
+            action_preview_service=action_preview_service,
+        )
         runtime = build_governed_host_runtime(
             task_runtime_container=container,
             ledger=ledger,
@@ -372,6 +384,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 runtime_context_application.composition.guardian
             ),
             action_preview_service=action_preview_service,
+            acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         )
         await runtime.activate()
 
@@ -635,10 +648,19 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             "committed": 3,
             "failed": 0,
             "pending": 0,
+            "recovery_pending": 0,
+            "dispatch_status": "COMMITTED",
         }
         assert all(
             results[route][-1]["audit_refs"]["acceptance_effects"]
-            == {"count": 2, "committed": 2, "failed": 0, "pending": 0}
+            == {
+                "count": 2,
+                "committed": 2,
+                "failed": 0,
+                "pending": 0,
+                "recovery_pending": 0,
+                "dispatch_status": "COMMITTED",
+            }
             for route in ("delegate", "plan")
         )
         graph = container.task_store.get_graph(plan_graph[0], plan_graph[1])

@@ -17,8 +17,10 @@ from host_brain.observability.command_outcome_journal import (
     ObsCommandOutcomeJournalError,
     ObsCommandOutcomeKey,
     ObsCommandOutcomeState,
+    ObsCommandReviewWaitRecovery,
     ObsCommandOutcomeTransitionError,
     OutcomeBeginDisposition,
+    OutcomeJournalEvent,
     SideEffectCertainty,
 )
 
@@ -98,6 +100,54 @@ def test_begin_finalize_restart_lookup_and_terminal_immutability(tmp_path: Path)
             reason_code="OBS_COMMAND_DOMAIN_REJECTED",
             side_effect_certainty=SideEffectCertainty.NOT_EXECUTED,
         )
+
+
+def test_existing_v1_wal_reopens_and_appends_v2_terminal_record(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-v1.jsonl"
+    key = _key()
+    started = _begin(path, key)
+    v2_record = json.loads(path.read_text(encoding="utf-8"))
+    v2_record.pop("continuation_ref")
+    v2_record.pop("terminal_result_ref")
+    v2_record["schema_version"] = outcome_journal.OUTCOME_JOURNAL_SCHEMA_V1
+    unsigned = {key: value for key, value in v2_record.items() if key != "checksum"}
+    v2_record["checksum"] = outcome_journal._checksum(unsigned)
+    wal_bytes = outcome_journal._canonical_json(v2_record) + b"\n"
+    path.write_bytes(wal_bytes)
+    anchor_unsigned = {
+        "schema_version": outcome_journal._OUTCOME_JOURNAL_ANCHOR_SCHEMA,
+        "sequence": 1,
+        "wal_size": len(wal_bytes),
+        "head_checksum": v2_record["checksum"],
+    }
+    anchor = {
+        **anchor_unsigned,
+        "anchor_checksum": outcome_journal._checksum(anchor_unsigned),
+    }
+    path.with_suffix(path.suffix + ".head").write_bytes(
+        outcome_journal._canonical_json(anchor) + b"\n"
+    )
+
+    reopened = ObsCommandOutcomeJournal(path, clock_ms=lambda: NOW + 1)
+    legacy = reopened.lookup(key)
+    assert legacy is not None
+    assert legacy.schema_version == outcome_journal.OUTCOME_JOURNAL_SCHEMA_V1
+    assert legacy.receipt_ref == started.record.receipt_ref
+
+    terminal = reopened.finalize(
+        legacy.receipt_ref,
+        state=ObsCommandOutcomeState.SUCCEEDED,
+        reason_code="OBS_COMMAND_COMPLETED",
+        side_effect_certainty=SideEffectCertainty.EXECUTED,
+        domain_result_ref="obs-command-result://legacy-v1/accepted",
+    )
+    assert terminal.schema_version == outcome_journal.OUTCOME_JOURNAL_SCHEMA
+    assert [record.schema_version for record in reopened.records()] == [
+        outcome_journal.OUTCOME_JOURNAL_SCHEMA_V1,
+        outcome_journal.OUTCOME_JOURNAL_SCHEMA,
+    ]
 
 
 def test_rejected_may_record_confirmed_domain_side_effect(tmp_path: Path) -> None:
@@ -243,6 +293,103 @@ def test_crash_recovery_marks_executing_uncertain_and_never_reopens(tmp_path: Pa
     assert retry.disposition is OutcomeBeginDisposition.EXISTING_SAME
     assert retry.record.state is ObsCommandOutcomeState.UNCERTAIN
     assert len(restarted.records()) == 2
+
+
+def test_crash_recovery_reopens_exact_durable_review_wait(tmp_path: Path) -> None:
+    path = tmp_path / "review-crash.jsonl"
+    key = _key()
+    started = _begin(path, key)
+    restarted = ObsCommandOutcomeJournal(path, clock_ms=lambda: NOW + 10)
+    assert restarted.recover_incomplete(
+        defer_review_command_ids=frozenset({key.command_id})
+    ) == ()
+
+    def resolve(record):  # noqa: ANN001
+        return ObsCommandReviewWaitRecovery(
+            receipt_ref=record.receipt_ref,
+            claim_ref=str(record.claim_ref),
+            audit_ref=str(record.audit_ref),
+            command_id=record.key.command_id,
+            action=record.key.action,
+            required_scopes=record.key.required_scopes,
+            body_sha256=record.key.body_sha256,
+            domain_result_ref="obs-command://result/sys-mode/switch/recovered",
+            continuation_ref=(
+                "governed-review://graph-recovered/1/review-recovered"
+                "?checkpoint=checkpoint-recovered"
+            ),
+        )
+
+    recovered = restarted.recover_incomplete(review_wait_resolver=resolve)
+
+    assert len(recovered) == 1
+    assert recovered[0].state is ObsCommandOutcomeState.WAITING_REVIEW
+    assert recovered[0].reason_code == "OBS_COMMAND_WAITING_REVIEW_RECOVERED"
+    assert recovered[0].side_effect_certainty is SideEffectCertainty.NOT_EXECUTED
+    assert restarted.recover_incomplete(review_wait_resolver=resolve) == ()
+    assert started.record.receipt_ref == recovered[0].receipt_ref
+
+
+def test_waiting_review_survives_restart_and_resolves_append_only(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "waiting-review.jsonl"
+    key = _key()
+    journal = ObsCommandOutcomeJournal(path, clock_ms=lambda: NOW)
+    started = journal.begin(
+        key,
+        claim_ref="secure-ingress-claim://waiting-review-claim",
+        audit_ref="secure-ingress-audit://waiting-review-audit",
+    )
+    continuation_ref = (
+        "governed-review://graph-operator/1/review-operator"
+        "?checkpoint=checkpoint-operator"
+    )
+
+    waiting = journal.mark_waiting_review(
+        started.record.receipt_ref,
+        domain_result_ref="obs-command://result/sys-mode/switch/canonical",
+        continuation_ref=continuation_ref,
+    )
+    assert waiting.state is ObsCommandOutcomeState.WAITING_REVIEW
+    assert waiting.event_type is OutcomeJournalEvent.WAIT_REVIEW
+    assert waiting.domain_result_ref == (
+        "obs-command://result/sys-mode/switch/canonical"
+    )
+    assert waiting.continuation_ref == continuation_ref
+    assert waiting.side_effect_certainty is SideEffectCertainty.NOT_EXECUTED
+
+    restarted = ObsCommandOutcomeJournal(path, clock_ms=lambda: NOW + 1)
+    assert restarted.recover_incomplete() == ()
+    replay = restarted.begin(
+        key,
+        claim_ref="secure-ingress-claim://waiting-review-claim",
+        audit_ref="secure-ingress-audit://waiting-review-audit",
+    )
+    assert replay.disposition is OutcomeBeginDisposition.EXISTING_SAME
+    assert replay.record == waiting
+    assert (
+        restarted.lookup_by_claim_ref(
+            "secure-ingress-claim://waiting-review-claim"
+        )
+        == waiting
+    )
+
+    terminal = restarted.finalize(
+        waiting.receipt_ref,
+        state=ObsCommandOutcomeState.SUCCEEDED,
+        reason_code="OBS_COMMAND_COMPLETED",
+        side_effect_certainty=SideEffectCertainty.EXECUTED,
+        domain_result_ref="obs-command://result/sys-mode/switch/canonical",
+        terminal_result_ref="task-execution-receipt://operator/accepted",
+    )
+    assert terminal.event_type is OutcomeJournalEvent.RESOLVE_REVIEW
+    assert terminal.state is ObsCommandOutcomeState.SUCCEEDED
+    assert [record.state for record in restarted.records()] == [
+        ObsCommandOutcomeState.EXECUTING,
+        ObsCommandOutcomeState.WAITING_REVIEW,
+        ObsCommandOutcomeState.SUCCEEDED,
+    ]
 
 
 def test_shadow_requires_explicit_promotion(tmp_path: Path) -> None:

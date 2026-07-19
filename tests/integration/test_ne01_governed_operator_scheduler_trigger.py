@@ -538,6 +538,9 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
     )
 
     manifest = {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
-    assert GOVERNED_OPERATOR_COMMAND_IDS == {COMMAND_ID}
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 36
+    assert GOVERNED_OPERATOR_COMMAND_IDS == {
+        COMMAND_ID,
+        "sys_mode.switch",
+    }
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 35
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == manifest

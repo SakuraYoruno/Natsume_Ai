@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -22,6 +23,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
+from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.persistence.task_repository import (
     AcceptanceEffectStatus,
     DurableTaskStore,
@@ -33,7 +35,12 @@ from host_brain.persistence.task_repository import (
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     ACCEPTANCE_EFFECT_HANDLER_FAILED,
     ACCEPTANCE_EFFECT_HANDLER_MISSING,
+    ACCEPTANCE_EFFECT_RECOVERY_PENDING,
+    ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED,
+    AcceptanceEffectDispatchError,
     AcceptanceEffectDispatcher,
+    AcceptanceEffectOutcomeUnknown,
+    AcceptanceEffectRuntime,
 )
 from tests.task_runtime_authority_fixtures import (
     seed_raw_task_graph_for_test,
@@ -61,6 +68,18 @@ class _TestActionPreviewAuthority:
 
     def require_execution(self, **_kwargs: Any) -> None:
         return None
+
+
+def _typed_test_action_preview_authority() -> ActionPreviewService:
+    service = ActionPreviewService(
+        runtime_event_store=object(),
+        guardian=SimpleNamespace(evaluate_capability=lambda **_kwargs: {}),
+        authority_resolver=SimpleNamespace(resolve=lambda **_kwargs: None),
+    )
+    delegate = _TestActionPreviewAuthority()
+    service.issue_receipt = delegate.issue_receipt  # type: ignore[method-assign]
+    service.require_execution = delegate.require_execution  # type: ignore[method-assign]
+    return service
 
 
 def _store(tmp_path: Path, clock: MutableClock) -> DurableTaskStore:
@@ -235,10 +254,14 @@ def _stage_effect(
     attempt_id: str,
     effect_type: str,
     opaque_order: str,
+    business_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
-        "effect_type": effect_type,
-        "graph_id": graph_id,
+        **(
+            dict(business_payload)
+            if business_payload is not None
+            else {"effect_type": effect_type, "graph_id": graph_id}
+        ),
         "_action_preview_context": {
             "schema_version": "Natsume.acceptance_effect.action_preview_context.v1",
             "context_pack_digest": "sha256:" + ("1" * 64),
@@ -487,6 +510,123 @@ async def test_transient_handler_failure_is_rescheduled_then_commits_chain(
     )
     assert conversation["attempt_count"] == 2
     assert conversation["fencing_token"] == 2
+
+
+@pytest.mark.asyncio
+async def test_unknown_handler_outcome_survives_retry_limit_and_restart_reconciles(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    graph_id = "graph-sys-mode-unknown-outcome"
+    node_id, attempt_id = _seed_completed_graph(store, graph_id)
+    event_id = "obs-sys-mode:" + "7" * 64
+    frozen_business_payload = {
+        "operator_command_id": "sys_mode.switch",
+        "request_id": "request-sys-mode-unknown-outcome",
+        "target_mode": "focus",
+        "source": "manual",
+        "reason": "reconcile response loss",
+        "event_id": event_id,
+        "runtime_scope_id": "runtime-scope-unknown-outcome",
+    }
+    effect = _stage_effect(
+        store,
+        graph_id=graph_id,
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="host.sys_mode_transition",
+        opaque_order="sys-mode",
+        business_payload=frozen_business_payload,
+    )
+    durable_hard_state_events: dict[str, dict[str, Any]] = {}
+    calls: list[str] = []
+
+    def reconcile_by_exact_event(payload: dict[str, Any]) -> str:
+        exact_payload = {
+            key: payload[key] for key in frozen_business_payload
+        }
+        exact_event_id = str(exact_payload["event_id"])
+        calls.append(exact_event_id)
+        committed = durable_hard_state_events.get(exact_event_id)
+        if committed is None:
+            # Simulate HardState committing before its caller loses the
+            # response/reopen attribution boundary.
+            durable_hard_state_events[exact_event_id] = exact_payload
+            raise AcceptanceEffectOutcomeUnknown(
+                f"HardState commit {exact_event_id} requires exact reopen"
+            )
+        assert committed == exact_payload
+        return "host-sys-mode-replayed://sha256/" + "8" * 64
+
+    first_dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"host.sys_mode_transition": reconcile_by_exact_event},
+        owner_id="dispatcher-sys-mode-before-restart",
+        max_attempts=1,
+        retry_base_ms=10,
+        retry_max_ms=10,
+        action_preview_service=_typed_test_action_preview_authority(),
+    )
+
+    first = await first_dispatcher.dispatch_effect(str(effect["effect_id"]))
+
+    assert first is not None
+    assert first["status"] == AcceptanceEffectStatus.PENDING.value, json.dumps(
+        first, sort_keys=True, default=str
+    )
+    assert first["reason_code"] == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+    assert first["side_effect_state"] == "UNKNOWN"
+    assert first["dispatch_state"] == "RECOVERY_PENDING"
+    assert first["reconciliation_state"] == "RECONCILIATION_REQUIRED"
+    assert first["reconciliation_required"] is True
+    durable_pending = store.get_acceptance_effect_intent(str(effect["effect_id"]))
+    assert durable_pending["status"] == AcceptanceEffectStatus.PENDING.value
+    assert (
+        durable_pending["reason_code"]
+        == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+    )
+    assert durable_pending["attempt_count"] == 1
+    assert durable_hard_state_events[event_id] == frozen_business_payload
+
+    # Before the durable retry time, startup must not admit new governed work.
+    blocked_runtime = AcceptanceEffectRuntime(dispatcher=first_dispatcher)
+    with pytest.raises(AcceptanceEffectDispatchError) as blocked:
+        await blocked_runtime.activate()
+    assert blocked.value.reason_code == ACCEPTANCE_EFFECT_RECOVERY_PENDING
+    assert blocked_runtime.active is False
+
+    clock.advance(10)
+    restarted_store = DurableTaskStore(store.db_path, clock=clock)
+    restarted_dispatcher = AcceptanceEffectDispatcher(
+        task_store=restarted_store,
+        handlers={"host.sys_mode_transition": reconcile_by_exact_event},
+        owner_id="dispatcher-sys-mode-after-restart",
+        max_attempts=1,
+        retry_base_ms=10,
+        retry_max_ms=10,
+        action_preview_service=_typed_test_action_preview_authority(),
+    )
+    restarted_runtime = AcceptanceEffectRuntime(
+        dispatcher=restarted_dispatcher,
+        poll_seconds=0.01,
+    )
+
+    await restarted_runtime.activate()
+    try:
+        assert restarted_runtime.active is True
+        committed = restarted_store.get_acceptance_effect_intent(
+            str(effect["effect_id"])
+        )
+        assert committed["status"] == AcceptanceEffectStatus.COMMITTED.value
+        assert committed["receipt_ref"] == (
+            "host-sys-mode-replayed://sha256/" + "8" * 64
+        )
+        assert committed["attempt_count"] == 2
+        assert calls == [event_id, event_id]
+        assert len(durable_hard_state_events) == 1
+    finally:
+        await restarted_runtime.aclose()
 
 
 @pytest.mark.asyncio

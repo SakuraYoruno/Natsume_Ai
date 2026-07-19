@@ -28,6 +28,7 @@ _TERMINAL_DELIVERY_STATUSES = frozenset(
         ReviewStatus.CONSUMED.value,
         ReviewStatus.REJECTED.value,
         ReviewStatus.EXPIRED.value,
+        ReviewStatus.CANCELLED.value,
     }
 )
 _AUTHORITY_FIELDS = frozenset(

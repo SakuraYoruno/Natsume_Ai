@@ -171,6 +171,7 @@ class GovernedFrozenNodeWorker:
         node_grants: NodeGrantVerifierPort,
         projections: WorkerProjectionWriterPort,
         action_preview_service: Any | None = None,
+        allowed_acceptance_effect_types: frozenset[str] | None = None,
     ) -> None:
         kind = str(route_kind or "").strip().lower()
         if kind not in {"chat", "delegate", "tool"}:
@@ -186,6 +187,18 @@ class GovernedFrozenNodeWorker:
         self._node_grants = node_grants
         self._projections = projections
         self._action_preview_service = action_preview_service
+        allowed_effects = (
+            frozenset({"life.foreground_completed"})
+            if allowed_acceptance_effect_types is None
+            else frozenset(
+                str(value or "").strip()
+                for value in allowed_acceptance_effect_types
+                if str(value or "").strip()
+            )
+        )
+        if not allowed_effects:
+            raise ValueError("allowed_acceptance_effect_types must not be empty")
+        self._allowed_acceptance_effect_types = allowed_effects
 
     async def execute_stream(
         self,
@@ -263,7 +276,8 @@ class GovernedFrozenNodeWorker:
             "audit_refs": _safe_audit_refs(terminal.get("audit_refs")),
         }
         acceptance_effect_intents = _safe_acceptance_effect_intents(
-            terminal.get("acceptance_effect_intents")
+            terminal.get("acceptance_effect_intents"),
+            allowed_effect_types=self._allowed_acceptance_effect_types,
         )
         if acceptance_effect_intents:
             normalized["acceptance_effect_intents"] = acceptance_effect_intents
@@ -763,7 +777,11 @@ def _safe_audit_refs(value: Any) -> dict[str, Any]:
     return public
 
 
-def _safe_acceptance_effect_intents(value: Any) -> list[dict[str, Any]]:
+def _safe_acceptance_effect_intents(
+    value: Any,
+    *,
+    allowed_effect_types: frozenset[str],
+) -> list[dict[str, Any]]:
     if value in (None, (), []):
         return []
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
@@ -782,7 +800,7 @@ def _safe_acceptance_effect_intents(value: Any) -> list[dict[str, Any]]:
         commit_scope = str(raw.get("commit_scope") or "").strip().upper()
         payload = raw.get("payload")
         if (
-            effect_type != "life.foreground_completed"
+            effect_type not in allowed_effect_types
             or commit_scope != "NODE"
             or not isinstance(payload, Mapping)
         ):

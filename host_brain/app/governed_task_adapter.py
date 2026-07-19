@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from contextlib import suppress
 import inspect
-import logging
 from typing import Any
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
@@ -96,8 +94,6 @@ from host_brain.runtime.context_application import RuntimeContextApplicationServ
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
-_logger = logging.getLogger(__name__)
-
 GOVERNED_HOST_RUNTIME_INACTIVE = "GOVERNED_HOST_RUNTIME_INACTIVE"
 GOVERNED_HOST_DRAIN_TIMEOUT = "GOVERNED_HOST_DRAIN_TIMEOUT"
 GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE = (
@@ -107,7 +103,6 @@ GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE = (
     "GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE"
 )
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
-_ACCEPTANCE_EFFECT_POLL_SECONDS = 0.25
 class GovernedHostRuntime:
     """Lifecycle-aware application facade published by the ASGI composition."""
 
@@ -141,10 +136,8 @@ class GovernedHostRuntime:
         ):
             raise TypeError(
                 "runtime_context_application must be RuntimeContextApplicationService"
-            )
+        )
         self._runtime_context_application = runtime_context_application
-        self._acceptance_effect_stop = asyncio.Event()
-        self._acceptance_effect_task: asyncio.Task[None] | None = None
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
         self._lifecycle = asyncio.Condition()
         self._in_flight = 0
@@ -152,22 +145,9 @@ class GovernedHostRuntime:
         self._accepting = False
 
     async def activate(self) -> None:
-        dispatcher = self._acceptance_effect_dispatcher
-        if dispatcher is not None:
-            # Recover durable effects left PENDING (or behind an expired
-            # claim) by an earlier process before this runtime accepts new
-            # Host commands.  The dispatcher is fence-protected, so replaying
-            # a COMMITTED effect cannot invoke its handler again.
-            await dispatcher.drain_ready(limit=1_000)
         async with self._lifecycle:
             self._active = True
             self._accepting = True
-        if dispatcher is not None and self._acceptance_effect_task is None:
-            self._acceptance_effect_stop.clear()
-            self._acceptance_effect_task = asyncio.create_task(
-                self._run_acceptance_effect_recovery(),
-                name="governed-acceptance-effect-recovery",
-            )
 
     async def close_admission(self) -> None:
         async with self._lifecycle:
@@ -189,48 +169,8 @@ class GovernedHostRuntime:
     async def aclose(self) -> None:
         await self.close_admission()
         await self.drain()
-        self._acceptance_effect_stop.set()
-        effect_task = self._acceptance_effect_task
-        self._acceptance_effect_task = None
-        if effect_task is not None:
-            try:
-                await asyncio.wait_for(
-                    effect_task,
-                    timeout=min(5.0, self._drain_timeout_s),
-                )
-            except TimeoutError:
-                effect_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await effect_task
         async with self._lifecycle:
             self._active = False
-
-    async def _run_acceptance_effect_recovery(self) -> None:
-        dispatcher = self._acceptance_effect_dispatcher
-        if dispatcher is None:
-            return
-        while not self._acceptance_effect_stop.is_set():
-            try:
-                await asyncio.wait_for(
-                    self._acceptance_effect_stop.wait(),
-                    timeout=_ACCEPTANCE_EFFECT_POLL_SECONDS,
-                )
-                continue
-            except TimeoutError:
-                pass
-            try:
-                await dispatcher.drain_ready(limit=100)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                # Durable claims remain recoverable through their lease/fence;
-                # a transient store or transport error must not kill the
-                # process-owned recovery loop.
-                _logger.warning(
-                    "acceptance effect recovery pass failed: %s: %s",
-                    type(exc).__name__,
-                    str(exc)[:500],
-                )
 
     def supports(self, intent_draft: Mapping[str, Any] | None) -> bool:
         draft = dict(intent_draft or {})
@@ -378,6 +318,7 @@ class GovernedHostRuntime:
                     HostCommandSurface.HOST_INPUT,
                     HostCommandSurface.TOOL,
                     HostCommandSurface.GATEWAY,
+                    HostCommandSurface.OPERATOR,
                 }
             ):
                 raise GovernedHostAdapterError(
@@ -610,6 +551,10 @@ class GovernedHostRuntime:
                     ),
                     ingress_claim_ref=ingress_claim_ref,
                     ingress_audit_ref=ingress_audit_ref,
+                    operator_command_id=(
+                        str(authority.get("operator_command_id") or "").strip()
+                        or None
+                    ),
                     frozen_context=frozen_context,
                 )
                 candidate_command = contracts.command
@@ -696,6 +641,7 @@ class GovernedHostRuntime:
                     HostCommandSurface.HOST_INPUT,
                     HostCommandSurface.TOOL,
                     HostCommandSurface.GATEWAY,
+                    HostCommandSurface.OPERATOR,
                 }
                 or not isinstance(work_order, WorkOrderV3)
                 or assignment is None
@@ -859,12 +805,27 @@ class GovernedHostRuntime:
             graph_revision=graph_revision,
         )
         statuses = [str(row.get("status") or "") for row in results]
+        recovery_pending = sum(
+            bool(row.get("recovery_pending"))
+            or str(row.get("dispatch_state") or "") == "RECOVERY_PENDING"
+            for row in results
+        )
         audit_refs = dict(projected.get("audit_refs") or {})
         audit_refs["acceptance_effects"] = {
             "count": len(results),
             "committed": statuses.count("COMMITTED"),
             "failed": statuses.count("FAILED"),
             "pending": sum(status not in {"COMMITTED", "FAILED"} for status in statuses),
+            "recovery_pending": recovery_pending,
+            "dispatch_status": (
+                "FAILED"
+                if "FAILED" in statuses
+                else "RECOVERY_PENDING"
+                if recovery_pending
+                else "COMMITTED"
+                if results and all(status == "COMMITTED" for status in statuses)
+                else "NO_EFFECTS"
+            ),
         }
         projected["audit_refs"] = audit_refs
         return projected
@@ -891,6 +852,7 @@ def build_governed_host_runtime(
     bounded_fanout_enabled: bool = False,
     atomic_graph_success_enabled: bool = False,
     allow_uncomposed_acceptance_effects: bool = False,
+    acceptance_effect_dispatcher: AcceptanceEffectDispatcher | None = None,
     runtime_context_application: RuntimeContextApplicationService | None = None,
     intent_admission_verifier: Any | None = None,
     degradation_capability_port: Any | None = None,
@@ -1040,29 +1002,21 @@ def build_governed_host_runtime(
         cancellation_authority_verifier=cancellation_authority_verifier,
         intent_admission_verifier=intent_admission_verifier,
     )
-    effect_dispatcher = None
-    try:
-        from host_brain.app.acceptance_effect_handlers import (  # noqa: PLC0415
-            build_production_acceptance_effect_handlers,
+    effect_dispatcher = acceptance_effect_dispatcher
+    if effect_dispatcher is None and not allow_uncomposed_acceptance_effects:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE,
+            "production governed runtime requires the app-local shared "
+            "Acceptance Effect dispatcher",
         )
-        from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
-
-        PROCESS_LIFE_PROVIDER.require()
-        effect_dispatcher = AcceptanceEffectDispatcher(
-            task_store=task_runtime_container.task_store,
-            handlers=build_production_acceptance_effect_handlers(),
-            owner_id=f"{owner_id}:acceptance-effects",
-            action_preview_service=action_preview_service,
+    if effect_dispatcher is not None and not isinstance(
+        effect_dispatcher,
+        AcceptanceEffectDispatcher,
+    ):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE,
+            "Acceptance Effect dispatcher is not the app-local durable dispatcher",
         )
-    except RuntimeError as exc:
-        if str(exc) != "PROCESS_LIFE_AUTHORITY_NOT_COMPOSED":
-            raise
-        if not allow_uncomposed_acceptance_effects:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE,
-                "production governed runtime requires the composed Life authority "
-                "and Acceptance Effect dispatcher",
-            ) from exc
     return GovernedHostRuntime(
         application=application,
         runtime_router=runtime_router,

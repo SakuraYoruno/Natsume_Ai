@@ -8,8 +8,11 @@ handler.  Composition must explicitly provide a domain port for a command.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from types import MappingProxyType
 from typing import Any, Awaitable, Mapping, Protocol
+from urllib.parse import quote
 
 
 OBS_COMMAND_ENVELOPE_SCHEMA = "natsume.obs-command.v1"
@@ -155,6 +158,123 @@ class ObsCommandExecutionResult:
     side_effects_executed: bool = True
 
 
+def governed_review_continuation_ref(
+    execution: ObsCommandExecutionResult,
+) -> str | None:
+    """Return the recoverable Review ref for a trusted governed-port result.
+
+    A normal terminal domain result returns ``None``.  A result that declares
+    ``WAITING_REVIEW`` must carry one exact graph revision and ReviewItem; a
+    malformed pending result is rejected instead of being mistaken for
+    successful command completion.
+    """
+
+    if not isinstance(execution, ObsCommandExecutionResult):
+        raise ObsCommandContractError("OBS_COMMAND_RESULT_INVALID")
+    result = execution.result
+    if not isinstance(result, Mapping):
+        raise ObsCommandContractError("OBS_COMMAND_RESULT_INVALID")
+    raw_output = result.get("output")
+    output = raw_output if isinstance(raw_output, Mapping) else result
+    status = str(output.get("status") or "").strip().upper()
+    if status != "WAITING_REVIEW":
+        return None
+    reviews = output.get("reviews")
+    graph_id = _safe_pending_identity(output.get("graph_id"), field="graph_id")
+    graph_revision = output.get("graph_revision")
+    if (
+        execution.success is not True
+        or execution.side_effects_executed is not False
+        or output.get("success") is not True
+        or type(graph_revision) is not int
+        or graph_revision < 1
+        or not isinstance(reviews, (list, tuple))
+        or len(reviews) != 1
+        or not isinstance(reviews[0], Mapping)
+    ):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    review = reviews[0]
+    review_status = str(review.get("status") or "").strip().upper()
+    if review_status not in {"PENDING", "APPROVED"}:
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    return build_governed_review_continuation_ref(
+        graph_id=graph_id,
+        graph_revision=graph_revision,
+        review=review,
+    )
+
+
+def build_governed_review_continuation_ref(
+    *,
+    graph_id: Any,
+    graph_revision: Any,
+    review: Mapping[str, Any],
+) -> str:
+    """Build the exact, secret-free graph/Review continuation binding."""
+
+    graph = _safe_pending_identity(graph_id, field="graph_id")
+    if type(graph_revision) is not int or graph_revision < 1:
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    if not isinstance(review, Mapping):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    review_id = _safe_pending_identity(review.get("review_id"), field="review_id")
+    subject_ref = str(review.get("subject_ref") or "").strip()
+    subject_version = review.get("subject_version")
+    checkpoint_id = _safe_pending_identity(
+        review.get("checkpoint_id"),
+        field="checkpoint_id",
+    )
+    resume_phase = str(review.get("resume_phase") or "").strip().upper()
+    if (
+        not subject_ref.startswith("task-node://")
+        or len(subject_ref) > 2_016
+        or type(subject_version) is not int
+        or subject_version < 0
+        or resume_phase
+        not in {"PRE_EXECUTION", "POST_EXECUTION_ACCEPTANCE"}
+    ):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    binding_payload = {
+        "checkpoint_id": checkpoint_id,
+        "graph_id": graph,
+        "graph_revision": graph_revision,
+        "resume_phase": resume_phase,
+        "review_id": review_id,
+        "subject_ref": subject_ref,
+        "subject_version": subject_version,
+    }
+    binding = hashlib.sha256(
+        json.dumps(
+            binding_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    # Graph/review identity stays recoverable; the exact subject/checkpoint
+    # binding is represented only by a digest so private Review content never
+    # enters the OBS WAL or HTTP response.
+    reference = (
+        f"governed-review://{quote(graph, safe='')}/{graph_revision}/"
+        f"{quote(review_id, safe='')}?binding=sha256:{binding}"
+    )
+    if len(reference) > 2_016:
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    return reference
+
+
+def _safe_pending_identity(value: Any, *, field: str) -> str:
+    text = str(value or "").strip()
+    if (
+        not text
+        or len(text) > 512
+        or any(ord(character) < 32 or ord(character) == 127 for character in text)
+    ):
+        raise ObsCommandContractError("OBS_COMMAND_WAITING_REVIEW_INVALID")
+    return text
+
+
 class ObsCommandPort(Protocol):
     def execute(
         self,
@@ -184,6 +304,19 @@ class SecureIngressClaimResultStore(Protocol):
         result_ref: str,
         at_ms: int | None = None,
     ) -> None: ...
+
+
+class ObsCommandReviewOutcomeFinalizer(Protocol):
+    def finalize_review_outcome(
+        self,
+        *,
+        claim_ref: str,
+        state: str,
+        reason_code: str,
+        side_effects_executed: bool,
+        terminal_result_ref: str,
+        continuation_ref: str,
+    ) -> Any: ...
 
 
 def bind_server_authority(
@@ -646,9 +779,11 @@ __all__ = [
     "DEFAULT_OBS_COMMAND_SPECS",
     "OBS_COMMAND_ENVELOPE_SCHEMA",
     "ObsCommandAuthority",
+    "build_governed_review_continuation_ref",
     "ObsCommandContractError",
     "ObsCommandEnvelope",
     "ObsCommandExecutionResult",
+    "ObsCommandReviewOutcomeFinalizer",
     "ObsCommandPayloadSchema",
     "ObsCommandPort",
     "ObsCommandPortExecutionError",
@@ -656,4 +791,5 @@ __all__ = [
     "ObsCommandSpec",
     "SecureIngressClaimResultStore",
     "bind_server_authority",
+    "governed_review_continuation_ref",
 ]

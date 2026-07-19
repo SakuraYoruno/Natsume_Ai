@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -41,7 +40,6 @@ from host_brain.app.observability_runtime.domain_command_ports import (
     ObsDomainCommandError,
     build_default_obs_domain_command_registry,
 )
-from host_brain.app.observability_runtime import domain_command_ports
 from host_brain.app.host_route_ports import HostRoutePorts
 
 
@@ -94,11 +92,38 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     assert len(expected) == 37
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
-    assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset({"scheduler.task.trigger"})
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 36
+    assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset(
+        {"scheduler.task.trigger", "sys_mode.switch"}
+    )
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 35
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
         expected
     )
+    authority = ObsCommandAuthority.bind(
+        principal_id="principal.blocked-matrix",
+        tenant_id="tenant-test",
+        request_id="request-blocked-matrix",
+    )
+    for command_id in sorted(BLOCKED_OPERATOR_COMMAND_IDS):
+        spec = registry.resolve_spec(command_id)
+        port = registry.resolve_port(command_id)
+        assert spec is not None
+        assert port is not None
+        envelope = ObsCommandEnvelope(
+            schema_version=OBS_COMMAND_ENVELOPE_SCHEMA,
+            command_id=command_id,
+            action=spec.action,
+            required_scopes=spec.required_scopes,
+            payload={},
+            authority=authority,
+            claim_ref=f"secure-ingress://claim/{command_id}",
+            audit_ref=f"audit://obs-command/{command_id}",
+            body_sha256="0" * 64,
+        )
+        with pytest.raises(ObsCommandPortExecutionError) as blocked:
+            asyncio.run(port.execute(envelope))
+        assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+        assert blocked.value.side_effects_may_have_run is False
 
 
 def test_scheduler_trigger_enters_operator_surface_and_reports_review_pause() -> None:
@@ -228,48 +253,75 @@ def test_avatar_adapter_fails_before_async_edge_port_without_task_preview(monkey
     assert captured == {}
 
 
-def test_sysmode_adapter_fails_closed_until_governed_operator_cutover() -> None:
-    captured: dict[str, object] = {}
+def test_sysmode_switch_uses_request_bound_governed_operator_runtime() -> None:
+    governed_calls: list[dict[str, object]] = []
+    direct_mode_calls: list[dict[str, object]] = []
 
     class _ModeService:
         @staticmethod
         def switch_mode(target_mode, **kwargs):  # noqa: ANN001, ANN003
-            captured.update(target_mode=target_mode, **kwargs)
-            return {"success": True, "from_mode": "normal", "to_mode": target_mode}
+            direct_mode_calls.append({"target_mode": target_mode, **kwargs})
+            raise AssertionError("route_ports ModeTransitionService must not run")
 
-    with pytest.raises(ObsCommandPortExecutionError) as blocked:
-        _execute(
-            "sys_mode.switch",
-            {"target_mode": "focus", "reason": "work", "source": "manual"},
-            route_ports=HostRoutePorts(
-                mode_transition_service_provider=lambda: _ModeService(),
-            ),
-        )
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert captured == {}
-
-
-def test_sysmode_adapter_prepares_stable_request_identity_behind_gate() -> None:
-    captured: dict[str, object] = {}
-
-    class _ModeService:
+    class _GovernedOperatorRuntime:
         @staticmethod
-        def switch_mode(target_mode, **kwargs):  # noqa: ANN001, ANN003
-            captured.update(target_mode=target_mode, **kwargs)
-            return {"success": True}
+        async def execute_sys_mode_switch(payload, request_id):  # noqa: ANN001
+            governed_calls.append(
+                {"payload": dict(payload), "request_id": request_id}
+            )
+            return {
+                "success": True,
+                "side_effects_executed": False,
+                "target_mode": "focus",
+                "current_mode": "focus",
+                "execution_receipt": {"status": "ACCEPTED"},
+            }
 
-    result = domain_command_ports._sysmode_switch(  # noqa: SLF001
-        {"target_mode": "focus", "reason": "work", "source": "manual"},
-        "authenticated-command-request",
+    registry = build_default_obs_domain_command_registry(
         route_ports=HostRoutePorts(
             mode_transition_service_provider=lambda: _ModeService(),
-        ),
+        )
     )
-    assert result == {"success": True}
-    assert captured["event_id"] == (
-        "obs-sys-mode:"
-        + hashlib.sha256(b"authenticated-command-request").hexdigest()
+    port = registry.resolve_port("sys_mode.switch")
+    assert port is not None
+    envelope = _envelope(
+        "sys_mode.switch",
+        {"target_mode": "focus", "reason": "work", "source": "manual"},
     )
+    state = SimpleNamespace(
+        governed_operator_runtime=_GovernedOperatorRuntime(),
+    )
+
+    with bind_operator_command_runtime(state, raw_body=b"authenticated-mode-switch"):
+        result = asyncio.run(port.execute(envelope))
+
+    assert result.success is True
+    assert result.side_effects_executed is False
+    assert result.result["output"]["execution_receipt"] == {"status": "ACCEPTED"}
+    assert len(governed_calls) == 1
+    call = governed_calls[0]
+    assert call["request_id"] == envelope.authority.request_id
+    payload = call["payload"]
+    assert isinstance(payload, dict)
+    assert payload["target_mode"] == "focus"
+    assert payload["principal_id"] == "principal.authenticated"
+    authority = payload["_operator_authority"]
+    assert isinstance(authority, dict)
+    assert authority["operator_command_id"] == "sys_mode.switch"
+    assert authority["principal_id"] == "principal.authenticated"
+    assert authority["request_id"] == envelope.authority.request_id
+    assert authority["tenant_id"] == envelope.authority.tenant_id
+    assert authority["action"] == "obs:command:sys_mode.switch"
+    assert authority["required_scopes"] == (
+        "obs:write",
+        "obs:sys-mode:write",
+    )
+    assert authority["ingress_surface"] == "obs.command"
+    assert authority["method"] == "POST"
+    assert authority["normalized_path"] == (
+        "/v1/host/obs-commands/sys_mode.switch"
+    )
+    assert direct_mode_calls == []
 
 
 def test_direct_avatar_exception_is_unreachable_without_task_preview(monkeypatch) -> None:

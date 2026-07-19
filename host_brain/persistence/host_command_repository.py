@@ -893,6 +893,34 @@ class HostCommandRepository(HostCommandClaimResultValidationMixin):
         finally:
             conn.close()
 
+    def get_by_ingress_claim(self, claim_ref: str) -> dict[str, Any] | None:
+        """Resolve the one immutable command admitted by an ingress claim."""
+
+        normalized_claim = _required_text(
+            claim_ref,
+            field_name="ingress_claim_ref",
+            max_length=2_016,
+        )
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM host_command_journal
+                WHERE ingress_claim_ref = ?
+                ORDER BY command_id
+                LIMIT 2
+                """,
+                (normalized_claim,),
+            ).fetchall()
+            if len(rows) > 1:
+                raise HostCommandRepositoryError(
+                    HOST_COMMAND_DURABLE_DATA_INVALID,
+                    "ingress claim resolves to multiple durable commands",
+                )
+            return self._validated_record(conn, rows[0]) if rows else None
+        finally:
+            conn.close()
+
     def validate_ingress_claim_result(self, command_id: str) -> dict[str, Any]:
         """Reopen one command and verify its current terminal claim authority."""
 

@@ -21,6 +21,9 @@ from host_brain.core.ids import now_ms
 from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.runtime.context_application import RuntimeContextApplicationService
 from host_brain.runtime.intent_admission import DurableIntentAdmissionVerifier
+from host_brain.task_runtime.acceptance_effect_dispatcher import (
+    AcceptanceEffectDispatcher,
+)
 from host_brain.secure_ingress import (
     IngressSurface,
     SecureIngressHttpAuthorityAdapter,
@@ -100,6 +103,7 @@ class GovernedHostToolRuntimeComposition:
             SecureIngressGraphCancellationAuthorityVerifier
         ),
         action_preview_service: ActionPreviewService,
+        acceptance_effect_dispatcher: AcceptanceEffectDispatcher,
         episodic_store: Any | None,
         semantic_recaller: Any | None,
     ) -> GovernedHostRuntime:
@@ -140,6 +144,7 @@ class GovernedHostToolRuntimeComposition:
             ),
             degradation_capability_port=context.guardian,
             action_preview_service=action_preview_service,
+            acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         )
         application = GovernedToolHttpApplication(
             catalog=catalog,

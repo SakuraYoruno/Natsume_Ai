@@ -14,7 +14,10 @@ from threading import RLock
 from typing import Any
 
 from host_brain.app.host_hard_state import HostHardStateOwner
-from host_brain.contracts.host_hard_state import HostHardStateJournalPort
+from host_brain.contracts.host_hard_state import (
+    HostHardStateCommitV1,
+    HostHardStateJournalPort,
+)
 
 
 ServiceProvider = Callable[[], Any]
@@ -127,6 +130,7 @@ class HostLifecycleContainer:
                     get_hard_state=self.get_hard_state,
                     set_sys_mode=self.set_sys_mode,
                     history_provider=self.get_sys_mode_history,
+                    exact_history_provider=self.reopen_sys_mode_transition,
                     ledger=ledger,
                 )
                 monitor = self.ports.activity_monitor_factory(
@@ -224,6 +228,23 @@ class HostLifecycleContainer:
 
     def get_sys_mode_history(self, *, limit: int = 100) -> list[dict[str, object]]:
         return self._hard_state_owner.durable_history(limit=limit)
+
+    def reopen_sys_mode_transition(
+        self,
+        *,
+        event_id: str,
+        target_mode: str,
+        source: str,
+        reason: str,
+    ) -> HostHardStateCommitV1 | None:
+        """Reopen an exact historical HardState commit through this app scope."""
+
+        return self._hard_state_owner.reopen_sys_mode_transition(
+            event_id=event_id,
+            target_mode=target_mode,
+            source=source,
+            reason=reason,
+        )
 
     def get_hard_state_durability_status(self) -> dict[str, object]:
         return self._hard_state_owner.durability_status()

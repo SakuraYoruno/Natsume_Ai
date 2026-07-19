@@ -8,7 +8,7 @@ returned router in the protected Host router registry.
 from __future__ import annotations
 
 import base64
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import json
 import os
 import secrets
@@ -887,6 +887,15 @@ def _outcome_response(outcome: ObsCommandIngressOutcome) -> JSONResponse:
     ):
         if value:
             payload[key] = str(value)
+    if outcome.terminal_state == "WAITING_REVIEW" and isinstance(
+        outcome.result,
+        Mapping,
+    ):
+        continuation_ref = str(
+            outcome.result.get("continuation_ref") or ""
+        ).strip()
+        if continuation_ref.startswith("governed-review://"):
+            payload["continuation_ref"] = continuation_ref
     return JSONResponse(status_code=status_code, content=payload)
 
 
@@ -904,6 +913,8 @@ def _status_for_outcome(outcome: ObsCommandIngressOutcome) -> tuple[int, str]:
         return 503, "uncertain"
     if terminal_state == "SHADOW_EVALUATED":
         return 503, "shadow"
+    if terminal_state == "WAITING_REVIEW":
+        return 202, "pending"
     if terminal_state == "SUCCEEDED":
         return 200, "duplicate" if outcome.duplicate else "completed"
     if outcome.allowed:

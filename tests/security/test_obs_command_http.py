@@ -586,6 +586,53 @@ def test_secret_free_stable_outcome_status_mapping(
     assert "must-never-cross-http-boundary" not in response.text
 
 
+def test_waiting_review_returns_202_with_only_durable_continuation_ref() -> None:
+    continuation_ref = (
+        "governed-review://graph-operator/1/review-operator"
+        "?binding=sha256:" + "a" * 64
+    )
+    pending = ObsCommandIngressOutcome(
+        allowed=True,
+        executed=False,
+        duplicate=False,
+        reason_code="OBS_COMMAND_WAITING_REVIEW",
+        command_id=COMMAND_ID,
+        principal_id="service.obs.http.test",
+        claim_ref="claim://obs/http/pending",
+        audit_ref="secure-ingress-audit://obs/http/pending",
+        result_ref="obs-command-outcome://obs/http/pending",
+        result={
+            "continuation_ref": continuation_ref,
+            "private_review": "must-never-cross-http-boundary",
+        },
+        terminal_state="WAITING_REVIEW",
+        certainty="NOT_EXECUTED",
+    )
+
+    response = _client(_FakeIngress(pending)).post(
+        PATH,
+        content=b"opaque-secret-body",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "allowed": True,
+        "audit_ref": "secure-ingress-audit://obs/http/pending",
+        "certainty": "NOT_EXECUTED",
+        "claim_ref": "claim://obs/http/pending",
+        "command_id": COMMAND_ID,
+        "continuation_ref": continuation_ref,
+        "duplicate": False,
+        "executed": False,
+        "reason_code": "OBS_COMMAND_WAITING_REVIEW",
+        "result_ref": "obs-command-outcome://obs/http/pending",
+        "status": "pending",
+        "terminal_state": "WAITING_REVIEW",
+    }
+    assert "must-never-cross-http-boundary" not in response.text
+
+
 def test_provider_or_ingress_exception_is_secret_free_503() -> None:
     def _raise_provider():
         raise RuntimeError("provider-secret")

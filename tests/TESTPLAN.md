@@ -292,6 +292,15 @@ Visual Agent 旧 authority 退役矩阵必须证明：`/v1/agent/run` 无论 moc
 
 Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` format fence、兼容 route/raw authority/legacy parser/SQLite 历史只读/locator `61 passed`；Universal coverage、文档、ClawdUI 低层合同、Edge HMAC/Gateway、migration 与具身 receipt 扩展回归 `89 passed`；冻结到 0104 的 receipt-loss compatibility catalog `7 passed`。该冻结 fixture 只隔离 0104 自身的 COMMIT 后丢回执语义，当前生产 catalog 已连续应用到 0115，未回退或重写任何既有 migration。远程 CI 继续记录 `NOT_RUN_ACCOUNT_QUOTA`，本切片不执行 Docker/真实附属服务；后者只在 NE-07 集中验收。
 
+### NE-01 Governed Operator `sys_mode.switch`
+
+- T-NE01-OPERATOR-SYS-MODE-01：`sys_mode.switch` 必须由 server-reopened Secure Ingress authority 冻结为 typed Operator action，再进入 HostCommand、immutable TaskGraph、task-bound Review continuation、单一 app-local `AcceptanceEffectRuntime` 与 0115 HardState journal。caller 不得自报 source/request/runtime scope；每个 Effect 必须绑定 exact graph/node/Attempt/Grant/Budget/Preview 与 active Host `runtime_scope_id`。
+- T-NE01-OPERATOR-SYS-MODE-02：`APPLIED`、`REPLAYED` 与 `NO_CHANGE` 必须使用三个不同的 durable handler receipt namespace。前两者必须按永久 event ID 重开并校验 scope、target、source、reason 与 digest；后者必须证明没有 event 且 `side_effects_executed=false`。同 Effect/HardState event 的历史重放不得再次执行，即使已有超过1000条更新事件。
+- T-NE01-OPERATOR-SYS-MODE-03：Review pending 时外层 OBS outcome 与中央 claim 不得提前终结；`RECOVERY_PENDING`、其他 owner claim、retry 或未知结果必须 durable defer；`REJECTED/EXPIRED/CANCELLED` 只在 exact Review/Task cancellation authority 存在时收口。Review 已落库而 outer WAL 标记失败的崩溃窗必须可在 restart 后恢复为同一 `WAITING_REVIEW`，不能永久转成 `UNCERTAIN`。
+- T-NE01-OPERATOR-SYS-MODE-04：handler 已越过 HardState commit 后发生读取/归因故障时，Effect 不得耗尽重试后写成 `FAILED`；必须进入未知副作用 reconciliation，启动门在 PENDING/CLAIMED/待对账 Effect 清零前拒绝新的 governed admission。
+- T-NE01-OPERATOR-SYS-MODE-05：关停顺序必须为 OBS ingress drain→Scheduler producer stop→Task Runtime/Effect owner close→Workspace quiesce→ModeTransition依赖→command/security stores→app refs。Review worker stop失败仍须穷尽关闭Surface和Effect owner；live OBS/Scheduler/Task close失败必须保留依赖与发布引用并抛稳定可重试错误；未形成live runtime的部分启动失败须穷尽释放已构造资源。
+- 最终受影响集中回归为单一批次 `265 passed in 179.82s`，包含真实 SQLite 的 Review→outer WAL append fault、六种 Review 状态、0/1/>1 authority、进程重启、`WAITING_REVIEW` 恢复、一次性 continuation、post-HardState response loss/`success=False`/unknown effect、`max_attempts=1` 与 exact event replay。首轮集中批次为 `264 passed + 1 failed`，唯一失败是 ASGI 测试桩尚未接收新增的 `review_continuation_store` 参数；修正后该用例单独通过，再运行同一完整集合得到上述265项，首轮与终轮不得相加，也不得与既有 HardState `84`、外围 `67` 或其他历史批次相加。该结果只证明 Operator 2/37 的第二条 vertical slice；commit-bound acceptance、NE-01 wave integration 和 production canary 仍未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+
 ### NE-01 Workspace lifecycle 持久底座
 
 - T-NE01-WORKSPACE-LIFECYCLE-01：0116 必须在 0101 既有 authority 之上提供 append-only `ACTIVE→ACCEPTED→PROMOTED/ABANDONED` 状态机；Accepted receipt 必须精确绑定 graph revision、Task/Workspace 双 lease/fence、accepted HEAD、tree/diff digest、Verification 与 Acceptance ref。CAS 冲突、非法跃迁、重复请求 payload drift、链篡改和旧 fence 均失败关闭；exact replay 与重启读取必须返回同一 canonical receipt。

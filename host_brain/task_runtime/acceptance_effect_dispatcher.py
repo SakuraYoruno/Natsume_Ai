@@ -9,25 +9,50 @@ import inspect
 import re
 from typing import Any
 
+from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
+
 
 ACCEPTANCE_EFFECT_HANDLER_MISSING = "ACCEPTANCE_EFFECT_HANDLER_MISSING"
 ACCEPTANCE_EFFECT_HANDLER_FAILED = "ACCEPTANCE_EFFECT_HANDLER_FAILED"
+ACCEPTANCE_EFFECT_RECOVERY_PENDING = "ACCEPTANCE_EFFECT_RECOVERY_PENDING"
+ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED = (
+    "ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED"
+)
 _DURABLE_REF = re.compile(r"^[a-z][a-z0-9+.-]{1,31}://\S+$")
 
 AcceptanceEffectHandler = Callable[[Mapping[str, Any]], Mapping[str, Any] | str | Awaitable[Any]]
 
 
 _EFFECT_TYPE_ORDER = {
-    "conversation.user_turn": 0,
-    "life.foreground_completed": 1,
-    "surface.reply_delivery": 2,
+    "host.sys_mode_transition": 0,
+    "conversation.user_turn": 1,
+    "life.foreground_completed": 2,
+    "surface.reply_delivery": 3,
 }
+
+_RECOVERY_POLL_SECONDS = 0.25
 
 
 class AcceptanceEffectDispatchError(RuntimeError):
     def __init__(self, reason_code: str, detail: str) -> None:
         self.reason_code = str(reason_code or ACCEPTANCE_EFFECT_HANDLER_FAILED)
         self.detail = str(detail or "acceptance effect dispatch failed")
+        super().__init__(f"{self.reason_code}: {self.detail}")
+
+
+class AcceptanceEffectOutcomeUnknown(RuntimeError):
+    """Signal that a handler crossed its effect boundary without attribution.
+
+    This is deliberately distinct from a retryable pre-effect failure.  The
+    immutable Acceptance Effect payload must contain the identity needed by
+    the handler to reconcile the outcome on a later exact replay.
+    """
+
+    def __init__(self, detail: str) -> None:
+        self.reason_code = ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+        self.detail = str(
+            detail or "acceptance effect outcome requires exact reconciliation"
+        )
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
@@ -99,15 +124,35 @@ class AcceptanceEffectDispatcher:
         try:
             handler_payload, preview = self._require_action_preview(effect)
             if preview is not None:
-                handler_payload["_action_preview_terminal_proof"] = {
-                    "service": self._action_preview_service,
-                    "event_id": str(preview["event_id"]),
-                    "boundary": dict(preview["_terminal_execution_boundary"]),
-                }
+                terminal_boundary = dict(preview["_terminal_execution_boundary"])
+                if effect_type == "host.sys_mode_transition":
+                    handler_payload["_action_preview_terminal_proof"] = (
+                        ActionPreviewExecutionProof(
+                            service=self._action_preview_service,
+                            event_id=str(preview["event_id"]),
+                            boundary=terminal_boundary,
+                        )
+                    )
+                else:
+                    handler_payload["_action_preview_terminal_proof"] = {
+                        "service": self._action_preview_service,
+                        "event_id": str(preview["event_id"]),
+                        "boundary": terminal_boundary,
+                    }
             outcome = handler(handler_payload)
             if inspect.isawaitable(outcome):
                 outcome = await outcome
             receipt_ref = _receipt_ref(outcome, effect_id=str(effect["effect_id"]))
+        except AcceptanceEffectOutcomeUnknown as exc:
+            # An invoked handler may already have committed its external or
+            # cross-authority effect.  It must never become terminal FAILED
+            # merely because attribution remained unavailable after the
+            # ordinary retry budget.  Persist an explicit reconciliation
+            # marker and retry only through the immutable effect identity.
+            return self._reschedule_reconciliation(
+                effect,
+                detail=exc.detail,
+            )
         except AcceptanceEffectDispatchError as exc:
             return self._fail(
                 effect,
@@ -170,6 +215,7 @@ class AcceptanceEffectDispatcher:
             )
         effect_type = str(effect.get("effect_type") or "").strip()
         risk_level = {
+            "host.sys_mode_transition": 4,
             "conversation.user_turn": 1,
             "life.foreground_completed": 2,
             "surface.reply_delivery": 3,
@@ -260,7 +306,17 @@ class AcceptanceEffectDispatcher:
             dispatched = await self.dispatch_effect(str(row.get("effect_id") or ""))
             if dispatched is None:
                 # A prior semantic phase may be owned by another live
-                # dispatcher.  Do not let this dispatcher overtake it.
+                # dispatcher (or be waiting for its durable retry time).  Do
+                # not let this dispatcher overtake it, and do not collapse a
+                # non-terminal durable row into an empty ``committed=0``
+                # result.  Callers must be able to distinguish recovery from
+                # a graph with no Acceptance Effects.
+                current = self._current_graph_effect(
+                    graph_id=str(graph_id),
+                    graph_revision=int(graph_revision),
+                    effect_id=str(row.get("effect_id") or ""),
+                )
+                results.append(_recovery_pending_projection(current or row))
                 break
             results.append(dispatched)
             newly_dispatched += 1
@@ -271,6 +327,22 @@ class AcceptanceEffectDispatcher:
                 # accepted result.
                 break
         return tuple(results)
+
+    def _current_graph_effect(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        effect_id: str,
+    ) -> dict[str, Any] | None:
+        for current in self._store.list_acceptance_effect_intents(
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            limit=1_000,
+        ):
+            if str(current.get("effect_id") or "") == effect_id:
+                return dict(current)
+        return None
 
     async def drain_ready(self, *, limit: int = 100) -> tuple[dict[str, Any], ...]:
         dispatch_limit = min(1_000, max(1, int(limit)))
@@ -314,6 +386,25 @@ class AcceptanceEffectDispatcher:
                     break
         return tuple(results)
 
+    def list_recovery_pending(self, *, limit: int = 1) -> tuple[dict[str, Any], ...]:
+        """Return bounded durable work which still blocks clean admission."""
+
+        bounded = min(1_000, max(1, int(limit)))
+        rows = [
+            *self._store.list_acceptance_effect_intents(
+                status="PENDING",
+                limit=bounded,
+            ),
+            *self._store.list_acceptance_effect_intents(
+                status="CLAIMED",
+                limit=bounded,
+            ),
+        ]
+        return tuple(
+            _recovery_pending_projection(row)
+            for row in sorted(rows, key=_effect_dispatch_key)[:bounded]
+        )
+
     def _fail(
         self,
         effect: Mapping[str, Any],
@@ -354,6 +445,110 @@ class AcceptanceEffectDispatcher:
             )
         )
 
+    def _reschedule_reconciliation(
+        self,
+        effect: Mapping[str, Any],
+        *,
+        detail: str,
+    ) -> dict[str, Any]:
+        pending = self._reschedule(
+            effect,
+            reason_code=ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED,
+            detail=detail,
+        )
+        return _recovery_pending_projection(pending)
+
+
+class AcceptanceEffectRuntime:
+    """Single app-local recovery owner for one shared dispatcher.
+
+    Surface runtimes may use the dispatcher inline, but they never start a
+    second recovery loop.  Shutdown signals the loop and then *awaits* the
+    current pass.  It deliberately never timeout-cancels an effect handler:
+    doing so after an external side effect has started would turn a clean
+    shutdown into an unknown-effect replay hazard.
+    """
+
+    def __init__(
+        self,
+        *,
+        dispatcher: AcceptanceEffectDispatcher,
+        poll_seconds: float = _RECOVERY_POLL_SECONDS,
+        startup_limit: int = 1_000,
+        recovery_limit: int = 100,
+    ) -> None:
+        if not isinstance(dispatcher, AcceptanceEffectDispatcher):
+            raise TypeError("dispatcher must be AcceptanceEffectDispatcher")
+        self._dispatcher = dispatcher
+        self._poll_seconds = max(0.01, float(poll_seconds))
+        self._startup_limit = min(1_000, max(1, int(startup_limit)))
+        self._recovery_limit = min(1_000, max(1, int(recovery_limit)))
+        self._stop = asyncio.Event()
+        self._task: asyncio.Task[None] | None = None
+        self._lifecycle_lock = asyncio.Lock()
+
+    @property
+    def dispatcher(self) -> AcceptanceEffectDispatcher:
+        return self._dispatcher
+
+    @property
+    def active(self) -> bool:
+        task = self._task
+        return task is not None and not task.done()
+
+    async def activate(self) -> None:
+        async with self._lifecycle_lock:
+            if self.active:
+                return
+            # Startup recovery is completed before any governed surface can
+            # accept a new command.
+            await self._dispatcher.drain_ready(limit=self._startup_limit)
+            remaining = self._dispatcher.list_recovery_pending(limit=1)
+            if remaining:
+                effect_id = str(remaining[0].get("effect_id") or "<unknown>")
+                raise AcceptanceEffectDispatchError(
+                    ACCEPTANCE_EFFECT_RECOVERY_PENDING,
+                    f"durable Acceptance Effect still requires recovery: {effect_id}",
+                )
+            self._stop.clear()
+            self._task = asyncio.create_task(
+                self._run(),
+                name="governed-acceptance-effect-recovery",
+            )
+
+    async def drain(self) -> tuple[dict[str, Any], ...]:
+        return await self._dispatcher.drain_ready(limit=self._startup_limit)
+
+    async def aclose(self) -> None:
+        async with self._lifecycle_lock:
+            task = self._task
+            if task is None:
+                return
+            self._stop.set()
+            # Never cancel a pass which may already be executing a handler.
+            await asyncio.shield(task)
+            if self._task is task:
+                self._task = None
+
+    async def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=self._poll_seconds,
+                )
+                continue
+            except TimeoutError:
+                pass
+            try:
+                await self._dispatcher.drain_ready(limit=self._recovery_limit)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Durable rows and leases remain the source of truth.  A
+                # transient store/transport failure must not kill recovery.
+                continue
+
 
 def _receipt_ref(value: Any, *, effect_id: str) -> str:
     if isinstance(value, str):
@@ -387,9 +582,34 @@ def _effect_dispatch_key(effect: Mapping[str, Any]) -> tuple[int, int, str]:
     )
 
 
+def _recovery_pending_projection(effect: Mapping[str, Any]) -> dict[str, Any]:
+    projected = dict(effect)
+    durable_status = str(projected.get("status") or "PENDING").strip().upper()
+    if durable_status in {"COMMITTED", "FAILED"}:
+        return projected
+    projected["status"] = durable_status or "PENDING"
+    projected["dispatch_state"] = "RECOVERY_PENDING"
+    reason_code = str(projected.get("reason_code") or "").strip().upper()
+    if reason_code == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED:
+        projected["dispatch_reason_code"] = reason_code
+        projected["side_effect_state"] = "UNKNOWN"
+        projected["reconciliation_state"] = "RECONCILIATION_REQUIRED"
+        projected["reconciliation_required"] = True
+    else:
+        projected["dispatch_reason_code"] = (
+            "ACCEPTANCE_EFFECT_CLAIM_OR_RETRY_PENDING"
+        )
+    projected["recovery_pending"] = True
+    return projected
+
+
 __all__ = [
     "ACCEPTANCE_EFFECT_HANDLER_FAILED",
     "ACCEPTANCE_EFFECT_HANDLER_MISSING",
+    "ACCEPTANCE_EFFECT_RECOVERY_PENDING",
+    "ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED",
     "AcceptanceEffectDispatchError",
     "AcceptanceEffectDispatcher",
+    "AcceptanceEffectOutcomeUnknown",
+    "AcceptanceEffectRuntime",
 ]

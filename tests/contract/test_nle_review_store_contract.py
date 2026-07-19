@@ -91,7 +91,7 @@ def _insert_graph_cancellation(
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
-            INSERT INTO task_runtime_graph(
+            INSERT OR IGNORE INTO task_runtime_graph(
                 graph_id, revision, root_work_order_id, planner_ref,
                 status, status_version, graph_json, source_kind, source_ref,
                 legacy_snapshot_json, created_ts_ms, updated_ts_ms
@@ -148,6 +148,43 @@ def _insert_graph_cancellation(
                 payload_sha256,
                 outbox_id,
             ),
+        )
+
+
+def _insert_review_checkpoint(
+    store: ReviewStore,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> None:
+    with sqlite3.connect(str(store.db_path)) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref,
+                status, status_version, graph_json, source_kind, source_ref,
+                legacy_snapshot_json, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, 'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL,
+                      1000, 1000)
+            """,
+            (
+                graph_id,
+                graph_revision,
+                f"work-order-{graph_id}-{graph_revision}",
+                "planner://review/checkpoint",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_node(
+                graph_id, graph_revision, node_id, status, status_version,
+                node_json, cancellation_requested_ts_ms,
+                created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, 'node-1', 'WAITING_APPROVAL', 0, '{}', NULL,
+                      1000, 1000)
+            """,
+            (graph_id, graph_revision),
         )
 
 
@@ -451,6 +488,11 @@ def test_t_nle_10_graph_cancellation_fences_create_approve_and_resume(
         graph_id="graph-approve-fenced",
         graph_revision=1,
     )
+    _insert_review_checkpoint(
+        store,
+        graph_id="graph-approve-fenced",
+        graph_revision=1,
+    )
     store.create_review(
         approve_review,
         task_graph_id="graph-approve-fenced",
@@ -464,6 +506,11 @@ def test_t_nle_10_graph_cancellation_fences_create_approve_and_resume(
 
     resume_review = _task_node_review(
         "review-resume-fenced",
+        graph_id="graph-resume-fenced",
+        graph_revision=1,
+    )
+    _insert_review_checkpoint(
+        store,
         graph_id="graph-resume-fenced",
         graph_revision=1,
     )
@@ -489,6 +536,11 @@ def test_t_nle_10_graph_cancellation_fences_create_approve_and_resume(
     _insert_graph_cancellation(store, graph_id="graph-adjacent", graph_revision=1)
     adjacent_review = _task_node_review(
         "review-adjacent-revision",
+        graph_id="graph-adjacent",
+        graph_revision=2,
+    )
+    _insert_review_checkpoint(
+        store,
         graph_id="graph-adjacent",
         graph_revision=2,
     )

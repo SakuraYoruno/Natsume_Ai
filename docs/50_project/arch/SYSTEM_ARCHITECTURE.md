@@ -106,6 +106,9 @@ flowchart TB
 - `host_brain/persistence/review_continuation_store.py`：Review continuation 的 claim/takeover/complete Store；Subject/Intent receipt authority 与纯 row/schema codec 分别位于 focused binding/codec 模块。
 - `host_brain/scheduler/governed_runtime.py`：Scheduler occurrence 的 Governed Task Runtime；定义管理、Secure Ingress 校验与 terminal replay command service 由 `scheduler/command_service.py` 拥有并从旧路径兼容重导出。
 - `host_brain/app/governed_task_authority.py`：无状态的 HostCommand/WorkOrder/planning lineage、route-aware exact replay 与 fail-closed authority 校验；不写 Store、不执行 TaskGraph。
+- `host_brain/app/governed_operator_runtime.py`：当前只为 `sys_mode.switch` 冻结 typed Operator action、server-reopened Secure Ingress authority、HostCommand/TaskGraph 与 HardState effect replay；加上已有 `scheduler.task.trigger` 后 Operator 进度为 2/37，其余 35 条命令不进入 handler。
+- `host_brain/task_runtime/acceptance_effect_dispatcher.py::AcceptanceEffectRuntime`：Host 与 Operator 共用的单一 app-local Effect 投递/恢复 owner；`RECOVERY_PENDING` 只允许 durable defer，不得先 terminalize outer claim。
+- `host_brain/app/observability_runtime/review_wait_recovery.py`：只在 Host 启动阶段用 Secure Ingress、HostCommand、TaskNode 与 ReviewItem 四方 canonical authority 修复 Review 已落库但 outer WAL append 失败的崩溃窗；恢复前 OBS admission 保持关闭，绑定漂移失败关闭。
 
 该层决定“是否允许做、冻结成什么图”，但不应把模型输出直接当成已经执行的事实。
 

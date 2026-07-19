@@ -100,12 +100,12 @@ def test_t_nle_01_world_canon_trusted_sites_are_exact_apply_authority() -> None:
         (
             "host_brain/app/observability_runtime/domain_command_ports.py",
             "WorldCanonStore.approve_proposal",
-            456,
+            448,
         ),
         (
             "host_brain/app/observability_runtime/domain_command_ports.py",
             "WorldCanonStore.rollback_proposal",
-            496,
+            488,
         ),
     }
 
