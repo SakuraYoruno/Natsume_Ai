@@ -74,11 +74,11 @@ async def handle_v1_chat_route(
     evaluate_immune_gate_fn: Callable[[ChatRequest], dict[str, Any]],
     schedule_immune_gate_fn: Callable[..., None],
     handle_chat_fn: Callable[..., Any],
+    notify_user_interaction_fn: Callable[[], None] | None = None,
 ) -> StreamingResponse:
     try:
-        from host_brain.composition.process_services import notify_user_interaction  # noqa: PLC0415
-
-        notify_user_interaction()
+        if notify_user_interaction_fn is not None:
+            notify_user_interaction_fn()
     except Exception:
         pass
     request_id = getattr(request.state, "request_id", None) or new_request_id()

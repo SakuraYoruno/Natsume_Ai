@@ -201,7 +201,8 @@ def test_lifecycle_runtime_uses_typed_explicit_application_ports() -> None:
         assert parameter.default is inspect.Signature.empty
 
     asgi_source = (ROOT / "host_brain/app/asgi.py").read_text(encoding="utf-8-sig")
-    assert "lifecycle_runtime_ports = build_lifecycle_runtime_application_ports()" in asgi_source
+    assert "lifecycle_runtime_ports = build_lifecycle_runtime_application_ports(" in asgi_source
+    assert "activity_monitor_provider=host_lifecycle.get_activity_monitor" in asgi_source
     assert "ports=lifecycle_runtime_ports" in asgi_source
 
 
@@ -270,5 +271,6 @@ def test_input_runtime_uses_one_typed_explicit_application_boundary() -> None:
     assert application_ports.default is inspect.Signature.empty
 
     asgi_source = (ROOT / "host_brain/app/asgi.py").read_text(encoding="utf-8-sig")
-    assert "input_runtime_ports = build_input_runtime_application_ports()" in asgi_source
+    assert "input_runtime_ports = build_input_runtime_application_ports(" in asgi_source
+    assert "notify_user_interaction_callback=(" in asgi_source
     assert "application.state.input_runtime_ports = input_runtime_ports" in asgi_source

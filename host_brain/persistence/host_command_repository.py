@@ -342,7 +342,7 @@ class HostCommandRepository(HostCommandClaimResultValidationMixin):
                     replan=replan,
                 )
             self._validate_ingress_claim(conn, normalized)
-            self._task_store.insert_graph_in_transaction(
+            self._task_store._insert_graph_from_host_command_in_transaction(
                 conn,
                 normalized["graph"],
                 outbox=graph_outbox,

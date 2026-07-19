@@ -18,6 +18,12 @@ from host_brain.lifecycle_runtime._shared import (
     read_world_canon_fact,
 )
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
+from host_brain.app.host_lifecycle_composition import HostLifecycleContainer
+from host_brain.app.tribe_composition import (
+    bind_tribe_application_ports,
+    unbind_tribe_application_ports,
+)
+from host_brain.tribe.application_ports import TribeApplicationPorts
 # P3-2：导入拆分后的子模块
 from host_brain.app.http_hooks_inbound import add_request_id_and_audit, should_emit_request_info
 from host_brain.app.http_hooks_outbound import global_exception_handler, startup_status_is_degraded
@@ -154,6 +160,8 @@ def runtime_lifespan(
     get_ledger: Callable[[], Any],
     logger: Any,
     lifecycle_ports: LifecycleRuntimeApplicationPorts,
+    host_lifecycle: HostLifecycleContainer,
+    tribe_application_ports: TribeApplicationPorts,
     canon_service_provider: Callable[[], Any | None] | None = None,
     mode_transition_service_sink: Callable[[Any | None], None] | None = None,
     startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
@@ -166,18 +174,26 @@ def runtime_lifespan(
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
         logger.info("Natsume AI Host Brain starting up ...")
-        ledger = get_ledger()
-        _activity_monitor = None
-        _resource_manager = None
+        host_lifecycle.begin()
+        tribe_ports_bound = False
+        try:
+            bind_tribe_application_ports(
+                owner=host_lifecycle,
+                ports=tribe_application_ports,
+            )
+            tribe_ports_bound = True
+            ledger = get_ledger()
+        except Exception:
+            try:
+                if tribe_ports_bound:
+                    unbind_tribe_application_ports(owner=host_lifecycle)
+            finally:
+                await host_lifecycle.aclose(logger=logger)
+            raise
+        lifecycle_services = host_lifecycle.ports
         try:
             # 预初始化新模块，确保启动时即可感知降级状态
             # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
-            from host_brain.composition.process_services import (
-                get_memory_guard,
-                get_state_arbiter,
-                get_distillation_engine,
-                get_semantic_recaller,
-            )
             new_module_statuses: dict[str, str] = {}
             core_settings = get_core_settings()
             scheduler_settings = get_scheduler_settings()
@@ -213,8 +229,8 @@ def runtime_lifespan(
                     "DEFERRED: production Canon composition"
                 )
             for name, factory in [
-                ("memory_guard", get_memory_guard),
-                ("state_arbiter", get_state_arbiter),
+                ("memory_guard", lifecycle_services.memory_guard),
+                ("state_arbiter", lifecycle_services.state_arbiter),
             ]:
                 try:
                     factory()
@@ -227,8 +243,8 @@ def runtime_lifespan(
                         extra={"startup_module": name, "error": str(exc)},
                     )
             for name, factory in [
-                ("distillation_engine", get_distillation_engine),
-                ("semantic_recaller", get_semantic_recaller),
+                ("distillation_engine", lifecycle_services.distillation_engine),
+                ("semantic_recaller", lifecycle_services.semantic_recaller),
             ]:
                 if not _startup_eager_warmup:
                     new_module_statuses[name] = "OK (lazy init)"
@@ -277,9 +293,8 @@ def runtime_lifespan(
 
             # [选项二] 接入 StateArbiter：注册状态源（WorldCanon、EpisodicStore）
             try:
-                from host_brain.composition.process_services import get_state_arbiter  # noqa: PLC0415
                 from host_brain.app.memory.state_arbiter import StateSource  # noqa: PLC0415
-                _arbiter = get_state_arbiter()
+                _arbiter = lifecycle_services.state_arbiter()
 
                 # 注册 WorldCanonStore（最高优先级 SSOT）
                 try:
@@ -297,11 +312,9 @@ def runtime_lifespan(
 
                 # 注册 EpisodicStore（取最新记录）
                 try:
-                    from host_brain.composition.process_services import get_episodic_store  # noqa: PLC0415
-
                     def _episodic_get_fact(fact_key: str) -> Any:
                         return read_episodic_latest_fact(
-                            get_episodic_store(),
+                            lifecycle_services.episodic_store(),
                             fact_key,
                         )
 
@@ -401,7 +414,6 @@ def runtime_lifespan(
                 from host_brain.domain_packs.production_runtime import (  # noqa: PLC0415
                     recover_interrupted_production_jobs,
                 )
-                from host_brain.composition.process_services import get_capability_broker  # noqa: PLC0415
                 from host_brain.app.model_provider_composition import (  # noqa: PLC0415
                     ApplicationModelAttemptServicePort,
                 )
@@ -420,7 +432,7 @@ def runtime_lifespan(
                         max_age_hours=72,
                         push_deliveries=True,
                         skill_ids={"agent_lightnovel_recommender"},
-                        capability_broker=get_capability_broker(),
+                        capability_broker=lifecycle_services.capability_broker(),
                         model_attempt_service=ApplicationModelAttemptServicePort(),
                         authority_verifier=verify_durable_production_authority,
                     )
@@ -511,23 +523,13 @@ def runtime_lifespan(
 
             # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
             try:
-                from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
-                from host_brain.composition.process_services import get_hard_state, set_sys_mode  # noqa: PLC0415
-                from host_brain.composition.process_services import set_activity_monitor  # noqa: PLC0415
-
-                # 初始化 ModeTransitionService（obs_routes 也会延迟初始化，此处确保提前可用）
-                from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
-                _mode_service = ModeTransitionService(
-                    get_hard_state=get_hard_state,
-                    set_sys_mode=set_sys_mode,
+                _activity_monitor = host_lifecycle.start_activity_monitor(
                     ledger=ledger,
                 )
                 if mode_transition_service_sink is not None:
-                    mode_transition_service_sink(_mode_service)
-
-                _activity_monitor = ActivityMonitor(mode_transition_service=_mode_service)
-                _activity_monitor.start()
-                set_activity_monitor(_activity_monitor)  # 注册到 dependencies 供消息链路调用
+                    mode_transition_service_sink(
+                        host_lifecycle.get_mode_transition_service()
+                    )
 
                 new_module_statuses["activity_monitor"] = (
                     f"OK (gaming_check={_activity_monitor._gaming_interval}s, "
@@ -549,19 +551,12 @@ def runtime_lifespan(
                 elif not core_settings.resource_manager_enabled:
                     new_module_statuses["system_resource_manager"] = "SKIPPED: HOST_RESOURCE_MANAGER_ENABLED=false"
                 else:
-                    from host_brain.composition.process_services import set_resource_manager  # noqa: PLC0415
-                    from host_brain.core.resource_manager import SystemResourceManager  # noqa: PLC0415
-
-                    from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
-
-                    _resource_manager = SystemResourceManager(
-                        model_attempt_service=get_model_attempt_service(),
+                    _resource_manager = host_lifecycle.start_resource_manager(
                         degradation_state_provider=degradation_state_provider,
+                        run_immediately=(
+                            core_settings.resource_manager_run_on_startup
+                        ),
                     )
-                    _resource_manager.start(
-                        run_immediately=core_settings.resource_manager_run_on_startup
-                    )
-                    set_resource_manager(_resource_manager)
                     _rm_status = _resource_manager.get_status()
                     new_module_statuses["system_resource_manager"] = (
                         f"OK (interval={_rm_status.get('interval_s')}s, "
@@ -673,11 +668,21 @@ def runtime_lifespan(
         finally:
             if mode_transition_service_sink is not None:
                 mode_transition_service_sink(None)
-            await _shutdown_runtime(
-                activity_monitor=_activity_monitor,
-                resource_manager=_resource_manager,
-                logger=logger,
-            )
+            try:
+                # Stop the process-owned Tribe bus before releasing its exact
+                # Host application-port owner.  A second concurrent Host
+                # lifespan cannot overwrite this fenced binding.
+                await _shutdown_runtime(
+                    activity_monitor=None,
+                    resource_manager=None,
+                    logger=logger,
+                )
+            finally:
+                try:
+                    if tribe_ports_bound:
+                        unbind_tribe_application_ports(owner=host_lifecycle)
+                finally:
+                    await host_lifecycle.aclose(logger=logger)
 
     return _lifespan()
 

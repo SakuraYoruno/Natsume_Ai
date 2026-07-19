@@ -47,6 +47,10 @@ from host_brain.persistence.task_repository import (
     build_acceptance_effect_payload_digest,
     build_outbox_payload_ref,
 )
+from tests.task_runtime_authority_fixtures import (
+    seed_raw_task_graph_for_test,
+    seed_raw_acceptance_effect_for_test,
+)
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 
 
@@ -129,7 +133,8 @@ def _store(tmp_path: Path, graph_id: str) -> DurableTaskStore:
     )
     assert migrated.success is True, migrated.as_dict()
     store = DurableTaskStore(db_path, clock=Clock())
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(graph_id),
         outbox=_event("TASK_GRAPH", graph_id, 0, "TASK_GRAPH_CREATED"),
     )
@@ -657,7 +662,8 @@ def test_parallel_success_rejects_rogue_graph_effect_and_freezes_effect_set(
         payload_ref="acceptance-payload://graph-parallel-success-effect-fence/rogue",
         idempotency_key="acceptance-idempotency://graph-parallel-success-effect-fence/rogue",
     )
-    store.stage_acceptance_effect_intent(
+    seed_raw_acceptance_effect_for_test(
+        store,
         effect_id=rogue.effect_id,
         graph_id=rogue.graph_id,
         graph_revision=rogue.graph_revision,
@@ -698,7 +704,8 @@ def test_parallel_success_rejects_rogue_graph_effect_and_freezes_effect_set(
         node_states,
     )
     with pytest.raises(TaskStoreError, match="permanently freezes"):
-        store.stage_acceptance_effect_intent(
+        seed_raw_acceptance_effect_for_test(
+            store,
             effect_id=rogue.effect_id,
             graph_id=rogue.graph_id,
             graph_revision=rogue.graph_revision,

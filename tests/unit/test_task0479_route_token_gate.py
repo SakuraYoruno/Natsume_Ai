@@ -89,28 +89,44 @@ def test_route_validator_fails_closed_on_missing_or_inconsistent_pair() -> None:
     assert mismatch.consistent is False
 
 
-def test_governor_and_tool_broker_share_process_token_service(monkeypatch) -> None:
-    import host_brain.composition.process_services as dependencies
-    from host_brain.skills.registry import SkillRegistry
+def test_governor_and_app_local_tool_boundary_share_injected_token_service() -> None:
+    from host_brain.app.tool_runtime_composition import (
+        GovernedHostToolRuntimeComposition,
+        GovernedHostToolRuntimeDependencies,
+    )
+    from host_brain.composition import process_runtime_services, process_services
+    from host_brain.governor.decision import IntentDecisionEngine
+    from host_brain.governor.tokens import TokenService
+    from host_brain.tools.catalog import ToolCatalog
 
-    skill_registry = SkillRegistry()
+    token_service = TokenService()
+    catalog = ToolCatalog()
+    ledger = object()
+    engine = IntentDecisionEngine(ledger=ledger, token_service=token_service)
 
-    monkeypatch.setattr(dependencies.get_process_service_container(), "token_service", None)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "tool_broker", None)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "intent_engine", None)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "capability_scorecard_provider", None)
-    monkeypatch.setattr(dependencies, "get_ledger", lambda: object())
-    monkeypatch.setattr(dependencies, "get_tool_catalog", lambda: object())
-    monkeypatch.setattr(dependencies, "get_skill_registry", lambda: skill_registry)
-    monkeypatch.setattr(dependencies, "get_policy_cache", lambda: object())
+    def composition() -> GovernedHostToolRuntimeComposition:
+        return GovernedHostToolRuntimeComposition(
+            GovernedHostToolRuntimeDependencies(
+                skill_registry=lambda: object(),
+                token_service=lambda: token_service,
+                capability_broker=lambda: object(),
+                resource_manager=lambda **_kwargs: object(),
+                ledger=lambda: ledger,
+                tool_catalog=lambda: catalog,
+                intent_engine=lambda: engine,
+            )
+        )
 
-    token_service = dependencies.get_token_service()
-    broker = dependencies.get_tool_broker()
-    engine = dependencies.get_intent_engine()
+    first = composition()
+    second = composition()
+    first_broker = first.provide_tool_broker()
 
-    assert dependencies.get_token_service() is token_service
-    assert broker.token_service is token_service
+    assert first.provide_tool_broker() is first_broker
+    assert second.provide_tool_broker() is not first_broker
+    assert first_broker.token_service is token_service
     assert engine.token_service is token_service
+    assert not hasattr(process_runtime_services, "get_tool_broker")
+    assert not hasattr(process_services, "get_tool_broker")
 
 
 class _Metrics:

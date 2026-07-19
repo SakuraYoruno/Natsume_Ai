@@ -119,17 +119,6 @@ def test_client(mem_ledger):
               new=_mock_astream),
     ):
         from host_brain.app.asgi import app
-        from host_brain.app.tribe_composition import (
-            configure_tribe_application_ports,
-        )
-
-        # The global pytest isolation fixture clears process references
-        # between examples, while this module intentionally reuses the
-        # process app object.  Recompose the app-owned Tribe authority
-        # before entering its lifespan; production creates this authority
-        # in ``create_app`` and never performs that test-only reset.
-        configure_tribe_application_ports()
-
         # ``TestClient`` only enters the ASGI lifespan when used as a context
         # manager.  Host readiness/startup endpoints deliberately depend on
         # lifespan-owned, migration-gated projections, so bypassing it would

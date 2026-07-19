@@ -27,6 +27,12 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     normalize_graph_cancellation_decision,
     normalize_graph_cancellation_intent,
 )
+from host_brain.contracts.agent_runtime.node_artifact import (
+    NODE_ARTIFACT_SCHEMA_VERSION,
+    artifact_digest,
+    build_task_result_artifact_ref,
+    canonical_artifact_json,
+)
 from host_brain.contracts.agent_runtime.operation_reconciliation import (
     GraphCancellationOperationStoreRejected,
 )
@@ -50,6 +56,10 @@ from host_brain.persistence.task_repository import (
     build_acceptance_effect_payload_digest,
     build_outbox_payload_ref,
     build_reconciliation_attestation_binding,
+)
+from tests.task_runtime_authority_fixtures import (
+    seed_raw_acceptance_effect_for_test,
+    seed_raw_task_graph_for_test,
 )
 from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
     GraphCancellationOperationReconciliationError,
@@ -131,7 +141,7 @@ def _store(
                 dependencies=(),
                 route="skill:test",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=(),
@@ -141,7 +151,8 @@ def _store(
         ),
         result_node_id="node-1",
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event(
             "TASK_GRAPH", "graph-cancel", 0, "TASK_GRAPH_CREATED",
@@ -379,7 +390,33 @@ def _stage_effect(
             """,
             (NOW, NOW, attempt_id),
         )
-        if accepted:
+        conn.commit()
+    effect_payload = {"message": effect_id}
+    seed_raw_acceptance_effect_for_test(
+        store,
+        effect_id=effect_id,
+        graph_id="graph-cancel",
+        graph_revision=1,
+        node_id="node-1",
+        attempt_id=attempt_id,
+        commit_scope=AcceptanceEffectCommitScope.NODE,
+        effect_type="surface.reply_delivery",
+        payload_ref=f"effect-payload://{effect_id.rsplit('/', 1)[-1]}",
+        payload=effect_payload,
+        payload_sha256=build_acceptance_effect_payload_digest(effect_payload),
+        idempotency_key=f"idempotency-{effect_id}",
+    )
+    if accepted:
+        # This fixture models a pre-0102 intent that existed before the Node
+        # reached ACCEPTED.  The current production API commits artifact,
+        # Acceptance, and NODE effects in one UoW and never permits a later
+        # append to an already accepted Node.
+        with sqlite3.connect(store.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            suffix = effect_id.rsplit("/", 1)[-1]
+            receipt_ref = f"worker-projection://cancellation/{suffix}"
+            output_contract = {"type": "object"}
+            artifact_payload = {"receipt_ref": receipt_ref}
             row = conn.execute(
                 """
                 SELECT node_json FROM task_runtime_node
@@ -398,21 +435,52 @@ def _stage_effect(
                 """,
                 (json.dumps(payload, sort_keys=True, separators=(",", ":")), NOW),
             )
-        conn.commit()
-    effect_payload = {"message": effect_id}
-    store.stage_acceptance_effect_intent(
-        effect_id=effect_id,
-        graph_id="graph-cancel",
-        graph_revision=1,
-        node_id="node-1",
-        attempt_id=attempt_id,
-        commit_scope=AcceptanceEffectCommitScope.NODE,
-        effect_type="surface.reply_delivery",
-        payload_ref=f"effect-payload://{effect_id.rsplit('/', 1)[-1]}",
-        payload=effect_payload,
-        payload_sha256=build_acceptance_effect_payload_digest(effect_payload),
-        idempotency_key=f"idempotency-{effect_id}",
-    )
+            conn.execute(
+                """
+                INSERT INTO task_runtime_idempotency_reservation(
+                    reservation_id, business_scope, operation_fingerprint,
+                    attempt_id, expires_ts_ms, status, status_version,
+                    receipt_ref, created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, 'COMMITTED', 1, ?, ?, ?)
+                """,
+                (
+                    f"reservation-cancel-effect-{suffix}",
+                    f"cancel-effect:{suffix}",
+                    "sha256:"
+                    + hashlib.sha256(effect_id.encode("utf-8")).hexdigest(),
+                    attempt_id,
+                    NOW + 60_000,
+                    receipt_ref,
+                    NOW,
+                    NOW,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO task_runtime_node_artifact(
+                    artifact_ref, schema_version, graph_id, graph_revision,
+                    node_id, attempt_id, receipt_ref, output_contract_json,
+                    output_contract_sha256, payload_json, payload_sha256,
+                    created_ts_ms
+                ) VALUES (?, ?, 'graph-cancel', 1, 'node-1', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    build_task_result_artifact_ref(
+                        "graph-cancel",
+                        1,
+                        "node-1",
+                    ),
+                    NODE_ARTIFACT_SCHEMA_VERSION,
+                    attempt_id,
+                    receipt_ref,
+                    canonical_artifact_json(output_contract),
+                    artifact_digest(output_contract),
+                    canonical_artifact_json(artifact_payload),
+                    artifact_digest(artifact_payload),
+                    NOW,
+                ),
+            )
+            conn.commit()
 
 
 def _effect_fence(store: DurableTaskStore, effect_id: str) -> dict[str, object]:
@@ -1924,7 +1992,8 @@ def test_review_revocation_uses_canonical_encoded_graph_subject(tmp_path: Path) 
         ),
         result_node_id="node-1",
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event(
             "TASK_GRAPH",

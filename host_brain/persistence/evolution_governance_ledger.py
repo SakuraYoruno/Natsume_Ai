@@ -9,8 +9,12 @@ import re
 import sqlite3
 from typing import Any, Callable, Iterator, Mapping
 
+from host_brain.contracts.evolution import (
+    FeedbackProposalV1,
+    IdentityMigrationPlanV1,
+    KnowledgeEntryV1,
+)
 from host_brain.core.ids import now_ms
-from host_brain.evolution import FeedbackProposalV1, IdentityMigrationPlanV1, KnowledgeEntryV1
 
 
 EVOLUTION_GOVERNANCE_MIGRATION_ASSET_KEY = "0110#evolution_governance_ledger"

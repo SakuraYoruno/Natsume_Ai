@@ -39,23 +39,7 @@ from host_brain.persistence.task_store_types import (
 class TaskDagStateStoreMixin:
     """Persist and read DAG state without owning concrete store state."""
 
-    def create_graph(
-        self,
-        graph: TaskGraph,
-        *,
-        outbox: OutboxMessage,
-    ) -> dict[str, Any]:
-        ts_ms = self._now()
-        with self._transaction() as conn:
-            self.insert_graph_in_transaction(
-                conn,
-                graph,
-                outbox=outbox,
-                ts_ms=ts_ms,
-            )
-        return self.get_graph(graph.graph_id, graph.revision)
-
-    def insert_graph_in_transaction(
+    def _insert_graph_from_host_command_in_transaction(
         self,
         conn: sqlite3.Connection,
         graph: TaskGraph,
@@ -63,12 +47,12 @@ class TaskDagStateStoreMixin:
         outbox: OutboxMessage,
         ts_ms: int,
     ) -> None:
-        """Insert one canonical graph and its event into an existing UoW.
+        """Insert one Host-admitted canonical graph into its owning UoW.
 
         The caller owns commit, rollback, and connection lifetime.  This narrow
-        hook lets a higher-level admission repository atomically bind a command
-        to the exact graph it creates without duplicating TaskStore SQL or
-        opening a nested SQLite transaction.
+        private hook lets ``HostCommandRepository`` atomically bind a command
+        to the exact graph it creates without exposing a second standalone
+        graph-creation authority or opening a nested SQLite transaction.
         """
 
         if not isinstance(conn, sqlite3.Connection) or not conn.in_transaction:

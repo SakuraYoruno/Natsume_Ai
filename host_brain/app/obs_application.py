@@ -8,8 +8,9 @@ both ASGI applications happen to run in one interpreter.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from host_brain.app.observability_runtime.domain_state_projection import (
@@ -85,6 +86,20 @@ class ObsProjectionJob:
             )
 
 
+class _ObsApplicationPortsLifecycleClaim:
+    """Bundle-local, process-local single-use ownership fence."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._claimed = False
+
+    def claim(self) -> None:
+        with self._lock:
+            if self._claimed:
+                raise RuntimeError("OBS_APPLICATION_PORTS_ALREADY_CONSUMED")
+            self._claimed = True
+
+
 @dataclass(frozen=True, slots=True)
 class ObsApplicationPorts:
     """Narrow query/projection ports consumed by one Obs application."""
@@ -99,6 +114,11 @@ class ObsApplicationPorts:
     close_owned_resources: Callable[[], None] | None = None
     projection_coverage: str = "CALLER_DEFINED"
     missing_projection_jobs: tuple[str, ...] = ()
+    _lifecycle_claim: _ObsApplicationPortsLifecycleClaim = field(
+        default_factory=_ObsApplicationPortsLifecycleClaim,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         canonical_db_path = str(
@@ -127,6 +147,11 @@ class ObsApplicationPorts:
         if any(not str(name or "").strip() for name in self.missing_projection_jobs):
             raise ValueError("missing projection job names must be non-empty")
 
+    def claim_lifecycle_owner(self) -> None:
+        """Fence this exact mutable resource bundle to one app lifespan."""
+
+        self._lifecycle_claim.claim()
+
 
 @dataclass(slots=True)
 class ObsApplicationContainer:
@@ -147,7 +172,13 @@ class ObsApplicationContainer:
             )
         return cls(ports=ports, projection_daemon=daemon)
 
-    def start(self, *, interval_ms: int = 5_000) -> dict[str, object]:
+    def start_projection_jobs(
+        self,
+        *,
+        interval_ms: int = 5_000,
+    ) -> dict[str, object]:
+        """Start this app's sole projection daemon from its ASGI lifespan."""
+
         if self.closed:
             raise RuntimeError("OBS_APPLICATION_CONTAINER_CLOSED")
         return self.projection_daemon.start(

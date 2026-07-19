@@ -257,7 +257,7 @@ class RuntimeWorldObservationApplication:
         self._journal = observation_port
         self._resolver = world_resolver
         self._environment = environment_observation_provider
-        self._write_lock = RLock()
+        self._transition_lock = RLock()
 
     def observe_and_resolve(
         self,
@@ -309,7 +309,7 @@ class RuntimeWorldObservationApplication:
                 "World source authority projections are ambiguous"
             )
 
-        with self._write_lock:
+        with self._transition_lock:
             due = self._resolver.due_expiry_facts(
                 workspace_id=workspace,
                 subject_id=subject,

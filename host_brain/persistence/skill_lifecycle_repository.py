@@ -8,11 +8,11 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Callable, Iterator
 
-from host_brain.core.ids import now_ms
-from host_brain.skills.skill_lifecycle import (
+from host_brain.contracts.skill_lifecycle import (
     SkillActivationEvidenceV1,
     SkillLifecycleReceiptV1,
 )
+from host_brain.core.ids import now_ms
 
 
 SKILL_LIFECYCLE_MIGRATION_ASSET_KEY = "0109#skill_lifecycle"

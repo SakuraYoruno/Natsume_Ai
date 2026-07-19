@@ -294,7 +294,7 @@ def test_obs_container_does_not_close_resources_while_projection_thread_runs(
         close_owned_resources=close_resources,
     )
     container = ObsApplicationContainer.compose(ports)
-    container.start(interval_ms=10)
+    container.start_projection_jobs(interval_ms=10)
     assert entered.wait(timeout=1.0)
 
     original_stop = container.projection_daemon.stop
@@ -411,6 +411,45 @@ def test_direct_obs_ports_are_single_use_across_lifespans(tmp_path):
             pass
 
 
+def test_two_obs_apps_cannot_share_one_mutable_ports_bundle(tmp_path):
+    ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / "obs-shared-ports-rejected.sqlite3",
+    )
+    first_app = create_obs_app(ports=ports)
+    second_app = create_obs_app(ports=ports)
+
+    with TestClient(first_app) as first:
+        assert first.get("/health").status_code == 200
+        with pytest.raises(
+            RuntimeError,
+            match="OBS_APPLICATION_PORTS_ALREADY_CONSUMED",
+        ):
+            with TestClient(second_app):
+                pass
+        assert first.get("/health").status_code == 200
+        assert second_app.state.obs_application_container is None
+
+
+def test_replaced_ports_preserve_the_same_lifecycle_claim(tmp_path):
+    ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / "obs-derived-ports-rejected.sqlite3",
+    )
+    derived = replace(ports, projection_coverage="DERIVED_TEST_BUNDLE")
+    first_app = create_obs_app(ports=ports)
+    derived_app = create_obs_app(ports=derived)
+
+    with TestClient(first_app) as first:
+        assert first.get("/health").status_code == 200
+        with pytest.raises(
+            RuntimeError,
+            match="OBS_APPLICATION_PORTS_ALREADY_CONSUMED",
+        ):
+            with TestClient(derived_app):
+                pass
+        assert first.get("/health").status_code == 200
+        assert derived_app.state.obs_application_container is None
+
+
 def test_obs_ports_factory_can_supply_fresh_bundle_for_each_lifespan(tmp_path):
     created = []
 
@@ -469,7 +508,7 @@ def test_obs_app_startup_failure_closes_owned_ports_and_clears_state(
     else:
         monkeypatch.setattr(
             ObsApplicationContainer,
-            "start",
+            "start_projection_jobs",
             lambda self, **_kwargs: (_ for _ in ()).throw(
                 RuntimeError("start failed")
             ),

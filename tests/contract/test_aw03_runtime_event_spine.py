@@ -21,6 +21,10 @@ from host_brain.integrations.runtime_events import (
     RuntimeEventError,
     RuntimeEventStore,
 )
+from host_brain.persistence.runtime_event_repository import (
+    RUNTIME_CONTEXT_AUTHORITY_MIGRATION_ASSET_KEY,
+    RUNTIME_CONTEXT_AUTHORITY_MIGRATION_SHA256,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -132,6 +136,58 @@ def test_aw03_event_migration_is_catalogued_and_schema_drift_fails_closed(
     with pytest.raises(RuntimeEventError) as error:
         RuntimeEventStore(db_path)
     assert error.value.reason_code == RUNTIME_EVENT_SCHEMA_NOT_READY
+
+
+def test_ne03_runtime_context_schema_is_owned_by_runtime_event_repository(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    assert (
+        hashlib.sha256(
+            (MIGRATIONS / "0112_runtime_context_authority.sql").read_bytes()
+        ).hexdigest()
+        == RUNTIME_CONTEXT_AUTHORITY_MIGRATION_SHA256
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT checksum, disposition FROM schema_migration_assets "
+            "WHERE asset_key = ?",
+            (RUNTIME_CONTEXT_AUTHORITY_MIGRATION_ASSET_KEY,),
+        ).fetchone()
+    assert row == (RUNTIME_CONTEXT_AUTHORITY_MIGRATION_SHA256, "APPLIED")
+
+    RuntimeEventStore(db_path).assert_runtime_context_authority_schema()
+
+
+@pytest.mark.parametrize(
+    ("damage", "detail"),
+    (
+        ("asset", "checksum drift"),
+        ("index", "object missing"),
+        ("trigger", "object missing"),
+    ),
+)
+def test_ne03_runtime_context_schema_port_fails_closed_on_drift(
+    tmp_path: Path,
+    damage: str,
+    detail: str,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        if damage == "asset":
+            conn.execute(
+                "UPDATE schema_migration_assets SET checksum = ? "
+                "WHERE asset_key = ?",
+                ("0" * 64, RUNTIME_CONTEXT_AUTHORITY_MIGRATION_ASSET_KEY),
+            )
+        elif damage == "index":
+            conn.execute("DROP INDEX ux_runtime_context_aggregate_revision")
+        else:
+            conn.execute("DROP TRIGGER scene_state_requires_active_host_lease")
+
+    with pytest.raises(RuntimeEventError, match=detail) as rejected:
+        RuntimeEventStore(db_path).assert_runtime_context_authority_schema()
+    assert rejected.value.reason_code == RUNTIME_EVENT_SCHEMA_NOT_READY
 
 
 def test_aw03_task_event_journal_and_projection_intent_commit_as_one_uow(

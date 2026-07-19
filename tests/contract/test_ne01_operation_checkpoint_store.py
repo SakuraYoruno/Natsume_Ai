@@ -17,7 +17,7 @@ from host_brain.persistence.task_repository import (
 from tests.contract.test_nle_task_store_contract import (
     MutableClock,
     _create_attempt,
-    _create_graph,
+    _seed_raw_graph,
     _event,
     _migrated_store,
 )
@@ -37,7 +37,7 @@ def _reserved_operation(
     operation_ttl_ms: int = 20,
 ) -> tuple[DurableTaskStore, dict[str, Any]]:
     store = _migrated_store(tmp_path, name=name, clock=clock)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",

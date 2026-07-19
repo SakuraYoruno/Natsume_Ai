@@ -92,7 +92,6 @@ from host_brain.persistence.task_ready_claim_store import (
 
 
 STAGING_METHODS = (
-    "stage_acceptance_effect_intent",
     "transition_node_and_stage_acceptance_effects",
     "transition_graph_and_stage_acceptance_effects",
     "_normalize_acceptance_effect_intent_specs",
@@ -179,6 +178,13 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
             TaskAcceptanceEffectStagingMixin,
             name,
         )
+    assert "stage_acceptance_effect_intent" not in (
+        TaskAcceptanceEffectStagingMixin.__dict__
+    )
+    assert not hasattr(
+        task_repository.DurableTaskStore,
+        "stage_acceptance_effect_intent",
+    )
     assert task_repository.DurableTaskStore.commit_node_acceptance is (
         TaskNodeArtifactStoreMixin.commit_node_acceptance
     )

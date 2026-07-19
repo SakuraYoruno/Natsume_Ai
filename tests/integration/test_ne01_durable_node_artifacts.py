@@ -43,6 +43,7 @@ from host_brain.persistence.task_node_artifact_store import (
     TASK_NODE_ARTIFACT_MIGRATION_ASSET_KEY,
     TASK_NODE_ARTIFACT_MIGRATION_SHA256,
 )
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from natsume_contracts.task import HostCommandSurface, build_host_command
 
@@ -171,7 +172,8 @@ def _seed_graph(
     attempt_id: str = ATTEMPT_ID,
     receipt_ref: str = RECEIPT_REF,
 ) -> None:
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event(
             "TASK_GRAPH",
@@ -750,7 +752,8 @@ def test_upgraded_terminal_effect_without_exact_artifact_is_quarantined(
             ),
         ),
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event(
             "TASK_GRAPH",
@@ -983,6 +986,7 @@ async def test_frozen_successor_worker_receives_resolved_durable_artifact(
                 "lease_id": "lease-artifact-child",
                 "lease_owner_id": "worker-artifact-child",
                 "fencing_token": 1,
+                "node_risk_level": 1,
                 "worker_route": "chat:child",
                 "node_input_refs": [artifact_ref],
                 "node_input_artifacts": artifacts,

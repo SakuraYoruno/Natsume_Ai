@@ -31,6 +31,7 @@ from host_brain.integrations.runtime_events import (
     RuntimeOutboxPublisher,
 )
 from host_brain.tribe.event_bus import TribeEvent
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -214,7 +215,7 @@ def test_t_nle_12_runtime_event_rejects_sensitive_payload_fields(tmp_path: Path)
 
 def test_t_nle_12_task_outbox_publisher_is_at_least_once_without_duplicate_events(tmp_path: Path) -> None:
     task_store, event_store = _migrated_combined_store(tmp_path)
-    task_store.create_graph(_graph(), outbox=_outbox())
+    seed_raw_task_graph_for_test(task_store, _graph(), outbox=_outbox())
     assert len(task_store.list_pending_outbox()) == 1
 
     publisher = RuntimeOutboxPublisher(task_store=task_store, event_store=event_store)
@@ -235,7 +236,7 @@ def test_t_nle_12_task_outbox_publisher_is_at_least_once_without_duplicate_event
 
 def test_t_nle_12_task_outbox_retry_marks_pending_duplicate_without_duplicate_timeline(tmp_path: Path) -> None:
     task_store, event_store = _migrated_combined_store(tmp_path)
-    task_store.create_graph(_graph(), outbox=_outbox())
+    seed_raw_task_graph_for_test(task_store, _graph(), outbox=_outbox())
     pending = task_store.list_pending_outbox()
     event_store.append_task_outbox(pending[0])
 

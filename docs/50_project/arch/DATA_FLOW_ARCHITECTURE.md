@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.5
+版本：v2.6
 
-核对日期：2026-07-18
+核对日期：2026-07-19
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -50,7 +50,8 @@ flowchart TD
     Plan --> Compile
     Compile --> PolicyGate["atomic policy capability + node-grant service\n+ parent grant：admission 前 fail-close"]
     PolicyGate --> Admission["HostCommandRepository 原子 admission"]
-    Admission --> Schema["0090 + 0092；atomic 时再校验 0091\nBudget / worker 前 fail-fast"]
+    Admission --> GraphHook["private Graph insert hook\n同一 admission UoW，唯一调用"]
+    GraphHook --> Schema["0090 + 0092；atomic 时再校验 0091\nBudget / worker 前 fail-fast"]
     Schema --> Runtime["Durable Task Runtime"]
     Runtime --> Worker["Attempt + Lease + Grant + Budget + Worker"]
     Runtime -.->|"atomic / bounded 独立默认 OFF\n三处生产 composition 未启用"| ShadowFanOut["atomic outer authority\nbounded 时 terminal-leaf 有界 child"]
@@ -75,9 +76,10 @@ flowchart TD
     Window -->|"是"| InProgress
     Window -->|"纯 CAS"| Conflict["GOVERNED_DURABLE_STATE_CONFLICT"]
     VA --> Receipt["Execution receipt"]
-    VA --> Effects["Acceptance effect intents"]
+    VA --> EffectHook["private Effect insert hook\n3 个 canonical UoW / 6 个调用点"]
+    EffectHook --> Effects["Acceptance effect intents"]
     SuccessUow --> Receipt
-    SuccessUow --> Effects
+    SuccessUow --> EffectHook
     Effects --> Conversation["Conversation / Life / Memory"]
     Effects --> Delivery["Gateway / Edge 副作用"]
 
@@ -119,7 +121,7 @@ flowchart TD
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
-    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,Schema,Worker,HB,Checkpoint,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
+    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,GraphHook,Schema,Worker,HB,Checkpoint,VA,Receipt,EffectHook,Effects,Scheduler,SchedulerWO,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
     class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine partial;
 ```
 
@@ -130,12 +132,32 @@ flowchart TD
 - Task Runtime 当前为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。Budget 高竞争唯一 winner、single-node post-budget checkpoint continuation、ACCEPTED→Effect restart 和 0099 窄 terminal reconciliation 已有证据；general/multi-node/pre-budget recovery、外部 deployment inventory/remediation、现实 resolver、部署凭据、完整 key lifecycle 和真实 canary仍缺，atomic/bounded/cancellation 均保持 OFF。
 - Chat 的 frozen model budget guard 属于执行约束，不是公开投影数据：route executor 先精确验证 terminal 携带的 guard 和 measurement，worker 再从公开 `audit_refs.trace_stage_meta` 移除已消费 guard，只把 typed `budget_usage.measurements` 写入 WorkerProjection。这样既保留 fail-closed Budget 证据，也不会让 `max_output_tokens/max_token_count` 绕过 projection 的敏感 token 字段门禁。
 - Preview 数据流固定为 `canonical WorkOrder → Runtime Context projection → Scene sha256 identity → Guardian exact authority → issue → terminal reopen`。同 Guardian lease 续租只能单调延长 expiry；terminal proof 的 boundary 使用独立 `action_args` 副本，再把 proof 注入 handler payload，因而不会形成 `payload → proof → boundary → payload` 循环。
-- 两批职责拆分后的数据方向仍是 `app-local wiring/纯 codec/私有 command mixin → 原 authority owner`；focused 模块不能反向取得 SQLite connection、RuntimeEvent append 或独立 journal store。第三个切片删除五个无消费者的 Obs locator refresher，本切片再删除 process-owned `get_mcp_tool_broker` accessor 与 `mcp_tool_broker` container slot，并从 ASGI/http_hooks 退役 Tool seed/route 的 process locator 导入，使 locator 消费库存降为 47 模块/147 个导入名；ReAct 的 `run_skill`/`dispatch_sub_agent` 直接分支改为 execution 前拒绝；Operator 只有 `scheduler.task.trigger` 按 `Secure Ingress → HostCommand → TaskGraph → Review/resume → node worker → Acceptance/Receipt` 流动，其他 36 个命令仍在 handler 前阻断。外部 Tool HTTP 则按 `TOOL Secure Ingress → HostCommand → immutable TaskGraph → durable Review/resume → node grant/Budget/Attempt/Lease → exact Tool binding → app-local governed execution port → Verification/Acceptance/Receipt` 流动；原始 Broker 的 direct/bound API 都只产生脱敏拒绝审计。正向 port 先让 `TaskStore` 在单个 SQLite 读事务内原子复验 Graph/Node/Attempt/Lease/Reservation 与 owner/fence/expiry，再分阶段 fail-closed 复验 node grant 和 exact binding；全部检查通过后，`before_handler` 才在 handler 前写入 `PENDING` dispatch marker，三段不属于一个原子区间。生产 seed 没有 safe-local executor，因而在 admission 前以 reconciliation-required 拒绝，只有测试 adapter 证明了真实 SQLite core chain。旧 MCP callback、Token 与 provider 调用均为 0；MCP metadata 只进入 registry/scorecard，不进入 Skill 执行。普通 ReAct 的 `GovernedToolNode → CapabilityBroker` 是另一条仍待独立审计的路线；本切片只清零 ToolBroker/MCP direct/callback authority，不能外推为全部 Tool authority 已清零。Tool seed readiness 当前先于 governed runtime activation；生产 executor=0 暂时阻止了 `READY` 误报，但启用首个真实 executor 前必须把 activation 纳入同一 readiness 状态机，该 P2 仍未修复。fresh mixed-file Gate 为 0，但这些结构结果不改变 atomic/fan-out/cancellation 生产开关，也不代表真实 Tool/MCP executor 或剩余 52 个 Service Locator 服务引用已完成。
+- 两批职责拆分后的数据方向仍是 `app-local wiring/纯 codec/私有 command mixin → 原 authority owner`；focused 模块不能反向取得 SQLite connection、RuntimeEvent append 或独立 journal store。第三个切片删除五个无消费者的 Obs locator refresher；此前 Tool/MCP 切片删除的是 process-owned `get_mcp_tool_broker` accessor/`mcp_tool_broker` slot，并从 ASGI/http_hooks 退役 Tool seed/route locator。本次 Gate 11 另行删除 process `get_tool_broker` accessor、`tool_broker` slot与 `HostLifecycleToolBrokerProvider`；`ToolBroker` 只由 app-local Tool composition 所有的 `ToolRuntimeBoundary` 构造并沿同一 app 的 provider 流动。ReAct 的 `run_skill`/`dispatch_sub_agent` 直接分支在 execution 前拒绝；Operator 只有 `scheduler.task.trigger` 按 `Secure Ingress → HostCommand → TaskGraph → Review/resume → node worker → Acceptance/Receipt` 流动，其他36个命令仍在 handler 前阻断。外部 Tool HTTP 按 `TOOL Secure Ingress → HostCommand → immutable TaskGraph → durable Review/resume → node grant/Budget/Attempt/Lease → exact Tool binding → app-local governed execution port → Verification/Acceptance/Receipt` 流动；原始 Broker direct/bound API 只产拒绝审计。正向 port 先在单个 SQLite 读事务内原子复验 Graph/Node/Attempt/Lease/Reservation 与 owner/fence/expiry，再分阶段复验 node grant 和 exact binding；全部通过后 `before_handler` 才写 `PENDING` marker，三段不是同一原子区间。生产 seed 没有 safe-local executor，只有测试 adapter 证明真实 SQLite core chain。旧 MCP callback、Token/provider 调用为0，metadata只进入registry/scorecard；普通 ReAct `GovernedToolNode → CapabilityBroker` 是另一条待审路线，不能由本切片外推为全部 Tool authority 已清零。Host lifecycle 又把 monitor/resource/mode 数据流收进 app-local owner，并用 process-global exact owner fence 保证 Tribe 单活；当前 fresh inventory 为 named 45 modules/123 names、all-form 51 consumer modules、Container 54 fields/4 locks/49 mutable refs。Tool seed readiness 早于 governed runtime activation 的 P2、真实 workspace-bound governed Tool/MCP executor、process-wide locator 与完整 Worker scope仍未完成；full architecture static 已通过也不改变 atomic/fan-out/cancellation生产开关或完整架构项目状态。
 - Operator continuation 不把 `secure_ingress_idempotency_claim.result_ref` 当成任意非空 bearer。ASGI 从同一个 app-local OBS composition 向 Task Runtime 注入 Outcome Journal 的只读 lookup；HostCommand validation 精确绑定 checksum-chained outer receipt、claim/audit、command/action/scopes/body、`SUCCEEDED` 终态和可重建 domain result。lookup 缺失、异常、记录缺失或字段漂移均 fail closed，且 validation 不创建第二个 Journal/Store/UoW。
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler 与 Internal Agent 均已通过真实 occurrence/admission；Internal 的 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
+- TaskStore 生产写流已收窄到两个 private hook：Graph/Node 只能由 `HostCommandRepository._admit_normalized() → _insert_graph_from_host_command_in_transaction()` 在同一 admission UoW 写入，生产调用数为 1；Effect 只能由 `transition_graph_and_stage_acceptance_effects`、`commit_node_acceptance`、`complete_parallel_graph_success` 三个 canonical UoW 通过 `_stage_acceptance_effect_intent_in_transaction()` 写入，共 6 个调用点。对应 Graph/Node/Effect INSERT SQL 也各自只在这两个 hook 中。public `create_graph`、`insert_graph_in_transaction`、`stage_acceptance_effect_intent` 已删除。
+- 这条流只证明 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED`。SQLite 仍允许 direct SQL 制造无 `host_command_journal` 的 raw/orphan 状态，本轮无 migration/trigger，因此必须同时标记 `SQL_DIRECT_BYPASS_PRESENT`。`tests/task_runtime_authority_fixtures.py` 只是 test-only raw/orphan 构造器，不属于 canonical 流。定向分组与首跑 fixture 失败均已保留，修正后最终 key regression 为 `26 passed in 35.33s`；wave integration `NOT_RUN_PER_WAVE_POLICY`，full architecture static Gate 仍 `FAIL [1,6,10]`，NE-01 仍 `IN_PROGRESS`。
+
+Host lifecycle 的当前数据流为：
+
+```mermaid
+flowchart LR
+    ASGI["Host create_app"] --> Container["HostLifecycleContainer"]
+    Container --> Start["factory/start success\nthen publish"]
+    Start --> Services["ActivityMonitor + ResourceManager + ModeTransition"]
+    Services --> Readers["Chat/Input · Tool · Scheduler · Guardian heartbeat · snapshot"]
+    Services --> Snapshot["OBS/runtime snapshot\nread-only; no lazy start"]
+    Container --> ResourceLoop["Resource startup sample\nsole owned loop"]
+    ASGI --> TribePorts["app-local Tribe application ports"]
+    TribePorts --> TribeFence["process-global exact owner fence\none live Host; second rejected"]
+    TribeFence --> TribeGlobal["process-global Tribe agents/bus"]
+    Container --> Close["closing fence → unpublish\nblock begin → exact-once close"]
+```
+
+Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。Tribe 的 bind/unbind 围栏允许前一个 Host 完整解绑后顺序重绑，但不提供并发 multi-app Tribe 隔离。该切片使 `http_hooks.py` 的 locator 直接导入降为 0，删除全局 `set_activity_monitor` / `set_resource_manager` 及 2 slot + 2 lock。原始 commit-bound 清单为 named47/152→45/124、all-form52→51、Container56/4/51；此前 Tool/MCP 删除后的 named45/123、all-form51、Container55/4/50 是历史中间值。Gate 11 再清除 process ToolBroker accessor/slot/provider 后，named/all-form 保持45/123与51，Container 当前为54 fields/4 locks/49 mutable refs。process-wide locator、heartbeat cache/client、HardState、Tribe bus、shared resource status file、真实 workspace-bound governed Tool/MCP executor与其余 Host/Worker authority 仍在，所以 NE-01 继续 `IN_PROGRESS`。
 
 ## 3. 入口与路由分流
 
@@ -402,7 +424,7 @@ claim runnable node
 | Resume | 消费 token 后由 composition worker 按原 HostCommand surface 自动重调度；PRE 无伪 Attempt，POST 不重跑 worker | `WIRED_0096` |
 | B0/B1 调度决策 | Coordinator 从 durable snapshot 消费稳定 READY/fan-in/retry due 决策 | `WIRED_PARTIAL_RUNTIME` |
 | 原子 claim | ACTIVE graph + Budget concurrency 下原子写 Attempt/Node/Lease/Heartbeat/Outbox，并支持 exact replay | `WIRED` |
-| Node Acceptance / result artifact | 0102+GR06 将 production normal/checkpoint/Review 的 exact NODE Effect set、`ACCEPTED`、artifact 与 Attempt-bound Node Outbox 放入一个 UoW；response loss 只能 exact replay，Effect claim 必须重验同 lineage artifact。后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs。新 admission 拒绝空合同，startup 隔离 active legacy 空合同/缺 artifact和缺 exact artifact 的可投递 terminal legacy Effect。应用低层 ACCEPTED writer 已封口；pre-stage、legacy/internal graph create 与 direct SQL 仍存在 | `UNIFIED_APPLICATION_STORE_UOW_WIRED / PRESTAGE_COMPATIBILITY_PRESENT / SQL_DIRECT_BYPASS_PRESENT` |
+| Node Acceptance / result artifact | 0102+GR06 将 production normal/checkpoint/Review 的 exact NODE Effect set、`ACCEPTED`、artifact 与 Attempt-bound Node Outbox 放入一个 UoW；response loss 只能 exact replay，Effect claim 必须重验同 lineage artifact。后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs。新 admission 拒绝空合同，startup 隔离 active legacy 空合同/缺 artifact和缺 exact artifact 的可投递 terminal legacy Effect。public Graph create/transaction insert 与 standalone Effect stage 已删除；生产 Graph/Effect 只能经过各自私有 canonical UoW hook。SQLite 仍允许 orphan/raw SQL 且本轮没有新 migration/trigger | `UNIFIED_APPLICATION_STORE_UOW_WIRED / APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED / SQL_DIRECT_BYPASS_PRESENT` |
 | Completion policy | TaskGraph v1 可选 `ATOMIC_GRAPH_SUCCESS_V1` 必须显式 sink result；legacy 多 sink 无 result。PlanningGraphCompiler 默认 legacy，只有显式请求/重规划继承才 atomic | `B5_DURABLE_POLICY_WIRED_SHADOW` |
 | DAG 并发 | `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 独立默认 OFF，三处生产 composition 未启用。atomic 可单节点/串行 outer 封口；bounded 才允许 terminal-leaf 实际有界并发 | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW` |
 | 并行合流 | progress 用 `fanout_event_buffer_size` 个 semaphore slot（默认 32、非正值拒绝）限制在途事件，并为每个 child 预留独立 control 容量；size=1 慢消费者仍会反压 child，自发 `CancelledError` 也不会因 progress 满而丢失监督信号。fan-in 只在依赖 `ACCEPTED` 后执行 | `SHADOW_BOUNDED_FLOW` |
@@ -559,7 +581,7 @@ Host lifespan
 
 Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode history非durable，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照：前者已证明两app两SQLite、Host停止、缺根失败关闭、风险语义保留、未变化源不追加journal和隐私字段不落盘，后者已证明双runtime交错与关闭不串线，并在durable authority通过后按Skill语义让缺依赖失败关闭。D7c把Obs application/job assembly从composition移入app，清零composition→app反向依赖违规且不增加allowlist。D8 另为每个 Host ASGI lifespan 建立显式具身 runtime；0104 以 canonical DB 派生 scope、durable runtime lease/fence 与持久 Edge reconnect credential 阻止同库双 writer，Edge 0002 冻结 command owner。child Edge 的 loopback TCP/HMAC/SQLite receipt query v2 与重启 exact replay 已测，但真实设备仍未测试。NE-03 又在最终出站前强制重开 ActionPreview：只有 exact proof 路径可入队；旧 reply-performance、Gateway voice 等调用目前失败关闭，待 NE-01 正向迁移。这个收敛仍不改变Host source、Chat/Delegate等底层process authority共享：`ProcessServiceContainer`仍有52个非锁可变服务引用，完整Host/Worker composition、剩余 direct embodiment adapter 和全局 locator 删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照：前者已证明两app两SQLite、Host停止、缺根失败关闭、风险语义保留、未变化源不追加journal和隐私字段不落盘，后者已证明双runtime交错与关闭不串线，并在durable authority通过后按Skill语义让缺依赖失败关闭。D7c把Obs application/job assembly从composition移入app，清零composition→app反向依赖违规且不增加allowlist。D8为每个Host lifespan建立具身runtime；0104以canonical DB派生scope、durable lease/fence与持久Edge credential阻止同库双writer，Edge 0002冻结command owner。child Edge的loopback TCP/HMAC/SQLite receipt query v2与重启exact replay已测，但真实设备未测。NE-03在最终出站前强制重开ActionPreview，旧reply-performance/Gateway voice等缺proof路径失败关闭。Host lifecycle进一步收口app-local monitor/resource/mode与单活Tribe fence；ToolBroker/MCP direct/callback authority也已退役。本次 Gate 11 还将非 MCP 的 process ToolBroker accessor/slot/provider 清零，唯一 constructor 由 app-local Tool boundary 所有。这个收敛仍不改变Host source、Chat/Delegate等底层process authority共享：当前Container为54 fields/4 locks/49 mutable refs，按全部import形式仍有51个`process_services` consumer modules，named inventory 仍为45 modules/123 names；真实 workspace-bound governed Tool/MCP executor、heartbeat cache/client、HardState、Tribe bus、共享status、完整Host/Worker composition、剩余direct embodiment adapter和全局locator删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 
@@ -750,7 +772,33 @@ Host 请求经 [context_application.py](../../../host_brain/runtime/context_appl
 
 [action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway 与 Scheduler-derived Life Edge/Gateway/VTS/MateEngine。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和 37 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明安全封口，不代表这些功能已正向迁移。
 
-0113 [Service Catalog rollout authority](../../../host_brain/service_catalog/rollout_authority.py) 将 operation、receipt 和 head 写入同一 file-backed SQLite authority。Host 生产入口以 ENFORCE 为默认目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，每阶段通过真实 HTTP Host/Guardian identity 后才推进 head，中间 listener 关闭后才进入下一阶段。Pending health 必须同时绑定 exact operation ID digest、snapshot、stage 与 candidate；另一个健康 listener 不得替它推进 head。`REGISTERED` 崩溃以同 operation ID 续跑；stop 失败或 listener 未停时维持 `STARTING` 等待对账，绝不伪造 `ROLLED_BACK`。Store 与 SQLite trigger 同时拒绝非法 event/status、terminal-first、第二终态、stage/rank 漂移、runtime-scope/activation identity 漂移、rollback-ref replay drift 与 stage skip/regression。部署多实例 canary 仍是未执行边界。
+0113 Service Catalog 的应用数据流现在通过 [rollout_authority.py](../../../host_brain/service_catalog/rollout_authority.py) 中的 repository Protocol 进入 [SQLiteServiceCatalogRolloutRepository](../../../host_brain/persistence/service_catalog_rollout_repository.py)。authority 只拥有合同、Protocol 和 Guardian Observer；具体 SQLite 连接、SQL 与事务归 persistence repository。Host 生产入口以 ENFORCE 为默认目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，每阶段通过真实 HTTP Host/Guardian identity 后才推进 head，中间 listener 关闭后才进入下一阶段。Pending health 必须同时绑定 exact operation ID digest、snapshot、stage 与 candidate；另一个健康 listener 不得替它推进 head。`REGISTERED` 崩溃以同 operation ID 续跑；stop 失败或 listener 未停时维持 `STARTING` 等待对账，绝不伪造 `ROLLED_BACK`。`ACTIVATION_STARTED` receipt 与 rollout head 在同一 repository 事务内提交，任一写入失败共同回滚；Store 与 SQLite trigger 继续拒绝非法 event/status、terminal-first、第二终态、stage/rank 漂移、runtime-scope/activation identity 漂移、rollback-ref replay drift 与 stage skip/regression。`host_startup.py` 与 ASGI 仍是 concrete repository wiring，typed composition 和部署多实例 canary 均未完成。
+
+0112 Runtime Context 的 schema readiness 也已沿同一分层方向迁移：runtime 只通过 `RuntimeEventStore` readiness port 发起检查，具体 SQLite/schema 读取归 `RuntimeEventRepository`；World Observation 的 `_write_lock` 只是 `RLock` 命名误判，现为 `_transition_lock`，不形成第二数据库 writer。该切片无新 migration。Global SQLite boundary 与 Gate 10 已 `PASS`。
+
+Obs projection 生命周期现在只有一条生产控制流：`ObsApplicationPorts` bundle 先执行内部原子 single-use claim，`ObsApplicationContainer.compose()` 创建 app-local daemon，嵌套 ASGI `lifespan` 唯一调用 `start_projection_jobs()`，启动后才 `yield`。finally 先 stop/join 并等待 background/manual in-flight fence，再释放 exact leader lease、关闭 owned SQLite，最后清除 app state。stop timeout 或 rollback close failure 会保留原 container/ports 句柄，供后续精确重试。`dataclasses.replace()` 继承同一 claim，不能生成可二次消费的 derived bundle；全新独立 ports/app 则保持隔离。无 module-global daemon，无新 migration。
+
+Gate 6 最终定向集合为 `19 passed`；原始证据仍保留完整 Obs app `13 passed + 1 test fixture failed`、修正旧 `start` monkeypatch 后单 case `1 passed`、生命周期关键 `12 passed`、daemon cadence/shutdown/serialization/start-single-flight `4 passed`，批次重叠禁止相加。该切片完成时 full architecture static 已从 `origin/dev` 的 `FAIL [1,6,10]` 变为 `FAIL [1,11]`；Gate 6/Gate 10 均通过，Gate 1 当时仍是 application/composition/persistence SCC，Gate 11 已是 ToolBroker production-service inventory 双命中，NE-01 继续 `IN_PROGRESS`。wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。后台 daemon 若因未捕获 renew 等异常退出，`/health` 还不直接呈现 `daemon.running/last_failure`，continuous-SLO supervision 未闭环。
+
+Service Catalog 分层切片随后把启动数据流固定为 `Host/ASGI → service_catalog/startup_coordinator.py → ServiceCatalogRolloutAuthority Protocol → SQLiteServiceCatalogRolloutRepository`；DTO、校验和 port 从 `contracts/service_catalog.py` 进入，旧 composition/类型路径仅作同对象重导出，`rollout_authority.py` 只观察 Guardian。该流清除了 application→composition 两条与 Catalog persistence→application 一条依赖，Gate 1 SCC 缩为 application/persistence；该切片完成时仍有 11 条 persistence→application 反向依赖（PlanningSearch 7、Evolution/Lab/Skill/World 4）。验证为 contract/unit `61 passed`、真实 socket integration `7 passed`、边界复跑 `7 passed`，集合可能重叠不得相加。
+
+PlanningSearch 持久化合同分层切片把仓储依赖流改为 `SQLite repositories → contracts/planning_search`，不再形成 `persistence → planning_search application`。core、benchmark、calibration、code、research 八组合同与模型由纯合同包持有，旧 application 模块只做同对象兼容重导出，因此调用者的 `__all__`、类型 identity、`isinstance` 与序列化形状不变。code benchmark、calibration、research shadow 三条 SQLite 流合计清除 7 条反向依赖；边界 `5 passed`，D13/D18/D19/D20 `60 passed, 1 skipped`（Windows 无 symlink 权限）。Gate 1 仍因 Evolution/Lab/Skill/World 4 条反向依赖维持 `FAIL`，application/persistence SCC 未消失；application→composition=0、Edge violation=0、reverse import=0，Gate 6/10 保持 `PASS`。该数据流调整无 migration，也没有增加候选生成、执行或收益 authority；wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+最终合同切片把剩余仓储依赖流固定为 `Evolution Governance / Evolution Lab / Skill Lifecycle / World Observation repositories → contracts/{evolution,evolution_lab,skill_lifecycle,runtime_context}`。旧 Evolution/Lab/Runtime Context 模块仅同对象重导出，Skill Lifecycle 应用模块只保留服务与合同重导出，因此不再存在 `persistence → application` 回流。fresh static Gate 1 `issues=[]`、SCC=`[]`、persistence→application=0、Edge finding/violation=0、reverse imports=`[]`，Gate 6/10 继续通过。边界 `4 passed`、相关定向 `32 passed`、py_compile/diff-check 通过；无 migration。该流只收口类型依赖方向，不新增 Lab、Skill activation、Feedback/Knowledge/Identity 或 PlanningSearch 的生产 authority。
+
+随后 Gate 11 把 Tool 对象流固定为 `Host ASGI lifespan → GovernedHostToolRuntimeComposition → ToolRuntimeBoundary → ToolBroker`。此前 MCP 切片已经删除 `get_mcp_tool_broker`/`mcp_tool_broker`；本次另行删除 process `get_tool_broker`、`tool_broker` 与 `HostLifecycleToolBrokerProvider`，因此 route/provider 不再能反向定位 process Broker。唯一 `ToolBroker(...)` constructor 位于 `host_brain/tools/broker.py`，count=1，且只创建同一 app-local boundary 的 metadata/binding facade。fresh full architecture static=`PASS`、`failed_gates=[]`，Gate 1/6/10/11 均通过；定向 `43 passed`、另组 `98 passed`，补充 `1 passed` 与 43 项组重叠不得相加，py_compile、policy JSON、whitespace 通过。静态 Gate 全绿不等于完整项目完成：真实 workspace-bound governed executor 与剩余全局对象图仍缺，NE-01 继续 `IN_PROGRESS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+```mermaid
+flowchart LR
+    Claim["Ports bundle atomic claim"] --> Compose["Compose app-local daemon"]
+    Compose --> Start["Lifespan start_projection_jobs"]
+    Start --> Yield["ASGI yield"]
+    Yield --> Fence["Stop + join + in-flight fence"]
+    Fence --> Lease["Release exact leader lease"]
+    Lease --> Close["Close owned SQLite"]
+    Close --> Clear["Clear app state"]
+    Fence -. "timeout / close failure" .-> Retry["Retain exact handles for retry"]
+```
 
 ```mermaid
 flowchart LR
@@ -772,9 +820,12 @@ flowchart LR
     Source[Canonical observation source verifier] --> Obs
     Guardian --> Events[(0112 CAS Runtime Event ledger)]
     Scene --> Events
-    Catalog[0113 Catalog operation / receipt / head] --> Guardian
-    Catalog --> HostStart[real Uvicorn candidate]
+    Catalog[Catalog authority / repository Protocol] --> CatalogRepo[(0113 SQLite rollout repository)]
+    CatalogRepo --> Guardian
+    CatalogRepo --> HostStart[real Uvicorn candidate]
 ```
+
+本数据流切片的本地证据分组为 Runtime Context `7 passed`、Catalog unit/contract `15 passed`、真实 Host socket integration `6 passed`、Repository/Global 独立复跑 `16 passed`；最后一组与 15 项有重叠，禁止合计。wave integration=`NOT_RUN_PER_WAVE_POLICY`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Surface、Proactive 和 Task 已消费一致的 scene revision/digest。长周期目标尚无独立 durable owner，Bond 原始证据仍来自既有上游投影，因此空 `long_term_goal_refs` 不得被臆造值填充。
 
@@ -879,6 +930,7 @@ All ingress sources
 ```text
 Host canonical four-route data flow        WIRED
 Durable TaskGraph execution                PARTIAL
+TaskStore application write authority      SEALED / SQL DIRECT BYPASS PRESENT
 Scheduler governed admission               WIRED
 Internal governed admission                WIRED
 Conversation effects                       POST_ACCEPTANCE_DURABLE_EVENTUAL

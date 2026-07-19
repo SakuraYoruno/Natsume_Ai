@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 
 import pytest
 from fastapi import Request, Response
@@ -39,7 +40,19 @@ def _host_app(tool_id: str) -> tuple[object, dict[str, int], HostRoutePorts]:
         calls["catalog"] += 1
         return catalog
 
-    route_ports = HostRoutePorts(tool_catalog_provider=get_catalog)
+    broker = SimpleNamespace(
+        readiness_snapshot=lambda: {
+            "status": "FAIL_CLOSED_NO_GOVERNED_EXECUTOR",
+            "catalog_ids": (tool_id,),
+            "registered_ids": (tool_id,),
+            "governed_executable_ids": (),
+        }
+    )
+
+    route_ports = HostRoutePorts(
+        tool_catalog_provider=get_catalog,
+        tool_broker_provider=lambda: broker,
+    )
 
     async def chat(_body: object, _request: Request) -> Response:
         return Response(status_code=204)
@@ -55,7 +68,7 @@ def _host_app(tool_id: str) -> tuple[object, dict[str, int], HostRoutePorts]:
         metrics=RuntimeMetrics(),
         logger=__import__("logging").getLogger(f"test.route-scope.{tool_id}"),
         get_ledger=lambda: None,
-        get_tool_broker=lambda: None,
+        get_tool_broker=lambda: broker,
         get_tool_catalog=get_catalog,
         get_bond_engine=lambda: None,
         chat_endpoint=chat,
@@ -108,7 +121,7 @@ def test_host_route_ports_are_immutable_and_scoped_per_app() -> None:
     assert calls_b["catalog"] > calls_a["catalog"]
 
 
-def test_process_and_tribe_composition_do_not_capture_one_host_app_mode_closure() -> None:
+def test_process_and_tribe_composition_fence_one_live_host_mode_owner() -> None:
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2] / "host_brain" / "app"
@@ -117,7 +130,12 @@ def test_process_and_tribe_composition_do_not_capture_one_host_app_mode_closure(
     asgi_source = (root / "asgi.py").read_text(encoding="utf-8")
 
     assert "mode_transition_service_provider" not in process_source
-    assert "mode_transition_service_provider" not in tribe_source
+    assert "mode_transition_service_provider" in tribe_source
     assert "configure_process_service_ports()" in asgi_source
-    assert "configure_tribe_application_ports()" in asgi_source
-    assert "mode_transition_service_provider=mode_transition_service_provider" in asgi_source
+    assert "build_tribe_application_ports(" in asgi_source
+    assert "tribe_application_ports=tribe_application_ports" in asgi_source
+    assert "bind_tribe_application_ports(" in (
+        root / "http_hooks.py"
+    ).read_text(encoding="utf-8")
+    assert "host_lifecycle.get_mode_transition_service" in asgi_source
+    assert "mode_transition_service_provider=mode_transition_service_provider" not in asgi_source

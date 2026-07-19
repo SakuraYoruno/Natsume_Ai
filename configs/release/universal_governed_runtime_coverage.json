@@ -18,6 +18,8 @@
     "production_canary": "NOT_RUN"
   },
   "declared_program_status": "INCOMPLETE",
+  "active_wave": "NE-01",
+  "active_wave_status": "IN_PROGRESS",
   "routes": {
     "chat": {
       "status": "COMPLETE",
@@ -169,6 +171,58 @@
       "revisioned_graph_outbox_boundary": "Migration 0095 adds nullable graph_revision while preserving the legacy governed outbox_id and idempotency_key byte-for-byte, so response-loss replay remains stable. SQLiteMigrationRunner registers deterministic natsume_sha256_hex; backfill accepts exact decision/intent/attempt/unique-revision authority, immutable HostCommand evidence for CREATED, or recomputation of the revision-bound command's legacy governed ID/key for ACTIVE and other non-attempt transitions. Conflicts or unresolved custom-producer rows abort the whole migration. New TASK_GRAPH payload_ref is taskstore://event/TASK_GRAPH/{graph_id}@{revision}/{version}; only durable codec/replay accepts the legacy ref and new insert/update triggers reject it. Readiness and receipt-loss gates freeze graph_revision as INTEGER/nullable/no-default/non-PK, payload trigger shape, revision delivery index, the unique partial TASK_STORE_OUTBOX source_ref index, and persisted bindings. Claim/head ordering uses aggregate_type + aggregate_id + graph_revision. New Runtime Events use graph_id@revision; immutable legacy journal rows are not rewritten and exact-revision queries resolve them through source Outbox. The unique source fence permits retry after legacy event append but before Outbox confirmation only when an existing event exactly reconstructs, preventing duplicate projection. For created_ts_ms=0, timestamp compatibility may apply to either the current revisioned or legacy unrevisioned candidate because both historical append paths may have substituted the clock; all fields other than timestamp remain exact. Scheduler snapshot Outbox loading is opt-in and defaults false; PlanningRecovery alone requests include_graph_outboxes=true in the same read transaction, uses the actual matching terminal payload_ref and preserves legacy refs. Revisioned synthesis is allowed only when an older or alternative Store omits the optional graph_outboxes extension; production DurableTaskStore supplies it when requested, and malformed, missing, or ambiguous present inventory fails closed. Operator and ReviewStore filter exact revision, and marker scans cover multi-revision histories. Migration 0098 narrowly permits GRAPH_CANCELLATION_EFFECT_RECONCILIATION as the only non-TASK_GRAPH revisioned aggregate; insert/update triggers require its positive graph_revision and payload ref to match the immutable Effect reconciliation case, trusted reads revalidate that signed/physical binding, and every other aggregate keeps graph_revision null.",
       "review_continuation_boundary": "Migration 0096 closes task-bound Review continuation without creating a second Review or Task truth. ReviewStore atomically queues CONSUMED, REJECTED, and EXPIRED decisions and validates create-time Task bindings; expiration, reconciliation, and claim processing isolate poison rows. Fixed-field secret-free authority is checked in the READY Attempt/Lease transaction and at first worker entry with exact owner/fence. Credentials cover budget time plus child TTL up to 24 hours but cannot replace the live hand-off. After first worker verification, Task Attempt/Lease owns an already-started blocking call; Review heartbeat loss cannot revoke external effects or authorize stale completion. PRE uses null Attempt and POST does not rerun the reviewed worker. Denial refs, legacy POST claim repair, and review.operator/review:decide identity are exact. Migration 0097 makes all node grants atomic and unique across processes. Real production canary remains NOT_RUN.",
       "task_runtime_lifecycle_boundary": "Any incomplete activation rollback or aclose quiescence returns TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED, locks bind and activate, and permits only aclose retry. Rollback unbinds only after cancellation/Review workers and coordinator cleanup all succeed; GovernedRuntimeGroup retains children that fail to close. Coordinator admission close, drain, or aclose failure keeps all Stores open. Outbox drain and infrastructure close begin only after Coordinator and both continuation workers are quiescent.",
+      "application_write_authority": {
+        "status": "APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED",
+        "physical_database_boundary": "SQL_DIRECT_BYPASS_PRESENT",
+        "removed_public_durable_task_store_methods": [
+          "create_graph",
+          "insert_graph_in_transaction",
+          "stage_acceptance_effect_intent"
+        ],
+        "graph_hook": {
+          "caller": "HostCommandRepository._admit_normalized",
+          "hook": "_insert_graph_from_host_command_in_transaction",
+          "static_call_count": 1,
+          "same_uow": true,
+          "graph_and_node_insert_sql": "PRIVATE_GRAPH_HOOK_ONLY"
+        },
+        "effect_hook": {
+          "hook": "_stage_acceptance_effect_intent_in_transaction",
+          "canonical_uows": [
+            "transition_graph_and_stage_acceptance_effects",
+            "commit_node_acceptance",
+            "complete_parallel_graph_success"
+          ],
+          "static_call_count": 6,
+          "uses_caller_connection": true,
+          "effect_insert_sql": "PRIVATE_EFFECT_HOOK_ONLY"
+        },
+        "test_fixture": "EXPLICIT_RAW_ORPHAN_STATE_WITHOUT_HOST_COMMAND_JOURNAL_PRODUCTION_IMPORT_FORBIDDEN",
+        "sqlite_enforcement": {
+          "raw_orphan_sql": "PRESENT",
+          "migration_added_this_slice": false,
+          "trigger_added_this_slice": false,
+          "physical_single_writer_claim": "NOT_MADE"
+        },
+        "validation": {
+          "authority_and_structure_passed": 19,
+          "host_command_admission_passed": 1,
+          "nle_operation_heartbeat_passed": 77,
+          "acceptance_effect_passed": 15,
+          "parallel_settlement_atomic_passed": 45,
+          "cancellation_initial": "29_PASSED_1_FIXTURE_FAILED",
+          "cancellation_corrected_case_passed": 1,
+          "integration_initial": "46_PASSED_3_FIXTURE_FAILED",
+          "integration_corrected_cases_passed": 3,
+          "terminal_passed": 32,
+          "third_fixture_node_risk_level": "REPRODUCIBLE_ON_ORIGIN_DEV_AND_FIXED",
+          "final_key_regression_passed": 26,
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "full_architecture_static_gate_at_slice_completion": "FAIL_GATES_1_6_10_NOT_PASS",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_NE01_REMAINS_IN_PROGRESS"
+      },
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
@@ -254,6 +308,8 @@
         "tests/unit/test_ne01_review_ingress_lifecycle_regressions.py",
         "tests/security/test_internal_scheduler_ingress_authority.py",
         "host_brain/persistence/task_repository.py",
+        "tests/contract/test_ne01_task_store_write_authority.py",
+        "tests/task_runtime_authority_fixtures.py",
         "host_brain/persistence/task_budget_usage_store.py",
         "host_brain/persistence/task_operation_checkpoint_store.py",
         "host_brain/persistence/task_dag_state_store.py",
@@ -385,10 +441,299 @@
       ]
     },
     "composition_without_global_service_locator": {
-      "status": "MISSING",
+      "status": "PARTIAL",
+      "full_architecture_static_gate": {
+        "status": "PASS",
+        "failed_gates": [],
+        "origin_dev_failed_gates": [1, 6, 10],
+        "resolved_gates": [1, 6, 10, 11],
+        "issues": [],
+        "strongly_connected_components": [],
+        "edge_findings": 0,
+        "edge_violations": 0,
+        "reverse_imports": [],
+        "boundary": "STATIC_GATES_GREEN_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_TYPED_COMPOSITION_GLOBAL_SERVICE_LOCATOR_REMOVAL_AND_NE01_REMAIN_INCOMPLETE"
+      },
+      "business_layer_sqlite_authority": {
+        "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
+        "baseline": "ORIGIN_DEV_FAIL_GATES_1_6_10",
+        "current_full_architecture_static_gate": "PASS",
+        "runtime_context_0112": {
+          "readiness_owner": "RuntimeEventRepository",
+          "application_surface": "RuntimeEventStore readiness port",
+          "runtime_private_sqlite_connection": "REMOVED"
+        },
+        "service_catalog_rollout": {
+          "repository": "SQLiteServiceCatalogRolloutRepository",
+          "repository_owns": [
+            "SQLite connection",
+            "SQL",
+            "transaction"
+          ],
+          "stable_contracts": "host_brain/contracts/service_catalog.py",
+          "legacy_contract_path": "SAME_OBJECT_REEXPORT_ONLY",
+          "startup_coordinator": "host_brain/service_catalog/startup_coordinator.py",
+          "composition_legacy_path": "SAME_OBJECT_REEXPORT_ONLY",
+          "rollout_authority_owns": ["Guardian Observer"],
+          "runner_dependency": "PROTOCOL",
+          "concrete_wiring": "HOST_STARTUP_AND_ASGI_STILL_REQUIRED",
+          "typed_composition": "INCOMPLETE",
+          "activation_started_atomicity": "RECEIPT_AND_ROLLOUT_HEAD_SHARE_ONE_TRANSACTION_AND_ROLL_BACK_TOGETHER"
+        },
+        "world_observation_lock": "RLOCK_FALSE_POSITIVE_RENAMED_FROM_WRITE_LOCK_TO_TRANSITION_LOCK_NO_NEW_WRITE_AUTHORITY",
+        "migration_added_this_slice": false,
+        "validation": {
+          "runtime_context_targeted_passed": 7,
+          "rollout_unit_contract_passed": 15,
+          "host_socket_integration_passed": 6,
+          "repository_and_global_independent_rerun_passed": 16,
+          "batch_overlap": "OVERLAPS_ROLLOUT_15_DO_NOT_SUM",
+          "global_sqlite_boundary": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "remaining_static_gaps": []
+      },
+      "service_catalog_layering_authority": {
+        "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_GATE_1_SUBSEQUENTLY_PASSED_NE01_IN_PROGRESS",
+        "application_to_composition_imports": 0,
+        "service_catalog_persistence_to_application_imports": 0,
+        "startup_coordinator": "host_brain/service_catalog/startup_coordinator.py",
+        "composition_compatibility_path": "SAME_OBJECT_REEXPORT_ONLY",
+        "stable_contracts": "host_brain/contracts/service_catalog.py",
+        "legacy_contract_path": "SAME_OBJECT_REEXPORT_ONLY",
+        "rollout_authority_responsibility": "GUARDIAN_OBSERVER_ONLY",
+        "repository_dependency": "STABLE_CONTRACTS_ONLY",
+        "gate_1": {
+          "status": "PASS_STATIC_ONLY_PROGRAM_INCOMPLETE",
+          "scc_before": ["application", "composition", "persistence"],
+          "scc_after_service_catalog": ["application", "persistence"],
+          "scc_current": [],
+          "remaining_persistence_to_application_imports": 0,
+          "remaining_breakdown": {
+            "planning_search": 0,
+            "evolution_lab_skill_world": 0
+          },
+          "edge_violations": 0,
+          "reverse_imports": 0
+        },
+        "validation": {
+          "service_catalog_contract_unit_passed": 61,
+          "real_catalog_host_socket_integration_passed": 7,
+          "boundary_rerun_passed": 7,
+          "batch_overlap": "MAY_OVERLAP_DO_NOT_SUM",
+          "py_compile": "PASS",
+          "diff_check": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "migration_added_this_slice": false,
+        "boundary": "SERVICE_CATALOG_SLICE_WAS_PARTIAL_SUBSEQUENT_CONTRACT_SLICES_CLOSE_GATE_1_BUT_TYPED_COMPOSITION_AND_NE01_NOT_COMPLETE"
+      },
+      "planning_search_persistence_contract_layering_authority": {
+        "status": "PLANNING_SEARCH_PERSISTENCE_TO_APPLICATION_EDGES_CLOSED_GATE_1_SUBSEQUENTLY_PASSED_NE01_IN_PROGRESS",
+        "pure_contract_package": "host_brain/contracts/planning_search/",
+        "contract_groups": [
+          "core",
+          "benchmark",
+          "calibration",
+          "code",
+          "research",
+          "eight_contract_and_model_modules_total"
+        ],
+        "legacy_paths": "SAME_OBJECT_REEXPORT_ONLY",
+        "compatibility_preserved": [
+          "__all__",
+          "type_identity",
+          "isinstance",
+          "serialization_shape"
+        ],
+        "repositories": [
+          "code_benchmark",
+          "calibration",
+          "research_shadow"
+        ],
+        "removed_persistence_to_application_imports": 7,
+        "gate_1": {
+          "status": "PASS_STATIC_ONLY_PROGRAM_INCOMPLETE",
+          "scc_current": [],
+          "remaining_persistence_to_application_imports": 0,
+          "remaining_breakdown": {
+            "evolution_lab_skill_world": 0
+          },
+          "application_to_composition_imports": 0,
+          "edge_violations": 0,
+          "reverse_imports": 0
+        },
+        "validation": {
+          "boundary_passed": 5,
+          "d13_d18_d19_d20_passed": 60,
+          "d13_d18_d19_d20_skipped": 1,
+          "skip_reason": "WINDOWS_SYMLINK_PERMISSION_UNAVAILABLE_NOT_COUNTED_AS_PASS",
+          "py_compile": "PASS",
+          "diff_check": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "migration_added_this_slice": false,
+        "planning_search_function_and_benefit": "NOT_PROVEN",
+        "boundary": "PERSISTENCE_CONTRACT_LAYERING_ONLY_GATE_1_TYPED_COMPOSITION_AND_NE01_NOT_COMPLETE"
+      },
+      "final_persistence_contract_layering_authority": {
+        "status": "GATE1_PASS_FULL_STATIC_PASS_NE01_IN_PROGRESS",
+        "pure_contract_modules": [
+          "host_brain/contracts/evolution.py",
+          "host_brain/contracts/evolution_lab.py",
+          "host_brain/contracts/runtime_context.py",
+          "host_brain/contracts/skill_lifecycle.py"
+        ],
+        "legacy_same_object_reexports": [
+          "host_brain/evolution/contracts.py",
+          "host_brain/evolution_lab/contracts.py",
+          "host_brain/runtime/context_contracts.py",
+          "host_brain/skills/skill_lifecycle.py"
+        ],
+        "repositories_using_neutral_contracts_only": [
+          "evolution_governance",
+          "evolution_lab",
+          "skill_lifecycle",
+          "world_observation"
+        ],
+        "removed_persistence_to_application_imports": 4,
+        "gate_1": {
+          "status": "PASS",
+          "issues": [],
+          "strongly_connected_components": [],
+          "application_to_composition_imports": 0,
+          "persistence_to_application_imports": 0,
+          "edge_findings": 0,
+          "edge_violations": 0,
+          "reverse_imports": [],
+          "failed_gates": [],
+          "full_architecture_static_gate": "PASS",
+          "gate_6": "PASS",
+          "gate_10": "PASS"
+        },
+        "validation": {
+          "boundary_passed": 4,
+          "context_world_evolution_lab_skill_evolution_governance_targeted_passed": 32,
+          "py_compile": "PASS",
+          "diff_check": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "migration_added_this_slice": false,
+        "boundary": "LAYERING_AND_TYPE_IDENTITY_ONLY_NE04_TO_NE06_PRODUCTION_FUNCTIONS_UNIVERSAL_RUNTIME_TYPED_COMPOSITION_AND_PLANNING_SEARCH_BENEFIT_REMAIN_INCOMPLETE"
+      },
+      "gate_11_tool_broker_app_local_authority": {
+        "status": "PASS",
+        "tool_broker_constructor_count": 1,
+        "tool_broker_constructor_path": "host_brain/tools/broker.py",
+        "tool_broker_owner": "APP_LOCAL_TOOL_RUNTIME_BOUNDARY_LAZY_OWNED_BY_GOVERNED_HOST_TOOL_RUNTIME_COMPOSITION",
+        "process_get_tool_broker_accessor_count": 0,
+        "process_tool_broker_container_slot_count": 0,
+        "host_lifecycle_tool_broker_provider_count": 0,
+        "named_process_services_import_modules": 45,
+        "named_process_services_imported_names": 123,
+        "all_process_services_import_form_consumer_modules": 51,
+        "process_service_container_fields": 54,
+        "process_service_container_lock_fields": 4,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 49,
+        "validation": {
+          "structure_lifecycle_bridge_route_token_seed_passed": 43,
+          "asgi_tool_mcp_http_broker_mcp_audit_real_sqlite_passed": 98,
+          "supplemental_overlap_passed": 1,
+          "overlap_boundary": "SUPPLEMENTAL_ONE_OVERLAPS_THE_43_TEST_BATCH_DO_NOT_SUM",
+          "py_compile": "PASS",
+          "policy_json": "PASS",
+          "whitespace": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "boundary": "STATIC_INVENTORY_ONLY_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_TOOL_MCP_EXECUTOR_AND_NE01_REMAIN_INCOMPLETE"
+      },
+      "obs_projection_lifecycle_authority": {
+        "status": "GATE_6_PASS_CONTINUOUS_SLO_INCOMPLETE_NE01_STILL_IN_PROGRESS",
+        "production_start_api": "ObsApplicationContainer.start_projection_jobs",
+        "production_start_call_count": 1,
+        "production_start_owner": "host_brain/app/obs_fastapi_app.py nested ASGI lifespan",
+        "ownership_sequence": "PORTS_BUNDLE_ATOMIC_SINGLE_USE_CLAIM_COMPOSE_APP_LOCAL_DAEMON_START_YIELD",
+        "shutdown_sequence": "STOP_JOIN_INFLIGHT_FENCE_EXACT_LEADER_LEASE_RELEASE_CLOSE_OWNED_SQLITE_CLEAR_STATE",
+        "failed_close_retry": "STOP_TIMEOUT_OR_ROLLBACK_CLOSE_FAILURE_RETAINS_EXACT_CONTAINER_AND_PORTS",
+        "shared_bundle_behavior": "FAIL_CLOSED_INCLUDING_DATACLASSES_REPLACE_DERIVED_BUNDLE",
+        "independent_ports_apps": "ISOLATED",
+        "module_global_daemon": "ABSENT",
+        "migration_added_this_slice": false,
+        "validation": {
+          "obs_app_initial": "13_PASSED_1_TEST_FIXTURE_FAILED_OLD_START_MONKEYPATCH",
+          "corrected_fixture_case_passed": 1,
+          "final_lifecycle_key_passed": 12,
+          "daemon_cadence_shutdown_serialization_start_single_flight_passed": 4,
+          "final_targeted_passed": 19,
+          "batch_overlap": "BATCHES_OVERLAP_DO_NOT_SUM",
+          "gate_6_issues": [],
+          "full_architecture_static_gate": "PASS",
+          "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_CONTINUOUS_SLO_AND_NE01_REMAIN_INCOMPLETE",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "known_boundary": "UNCAUGHT_BACKGROUND_RENEW_OR_OTHER_DAEMON_EXIT_NOT_YET_DIRECTLY_EXPOSED_BY_HEALTH_RUNNING_LAST_FAILURE_CONTINUOUS_SLO_INCOMPLETE"
+      },
+      "named_from_process_services_import_inventory": {
+        "before_modules": 47,
+        "before_imported_names": 152,
+        "current_modules": 45,
+        "current_imported_names": 123,
+        "scope": "ONLY_EXACT_FROM_HOST_BRAIN_COMPOSITION_PROCESS_SERVICES_IMPORT_FORM_NOT_FULL_REPOSITORY"
+      },
+      "all_process_services_import_consumer_modules": {
+        "before": 52,
+        "current": 51,
+        "scope": "ALL_IMPORT_FORMS"
+      },
+      "process_service_container": {
+        "fields": 54,
+        "lock_fields": 4,
+        "mutable_service_references_excluding_locks_and_application_ports": 49
+      },
+      "host_lifecycle_boundary": {
+        "publication": "FACTORY_AND_START_MUST_SUCCEED_BEFORE_APP_LOCAL_PROVIDER_PUBLICATION",
+        "activity_factory_failure": "MODE_AUTHORITY_NOT_PUBLISHED",
+        "close_begin_fence": "ACLOSE_CLOSING_BLOCKS_BEGIN",
+        "resource_manager_startup_sample": "RUNS_IN_THE_SOLE_OWNED_RESOURCE_MANAGER_LOOP_THREAD",
+        "tribe_lifespan_binding": "PROCESS_GLOBAL_EXACT_OWNER_BIND_UNBIND_ONLY_ONE_LIVE_HOST_SECOND_LIVE_HOST_FAILS_CLOSED_SEQUENTIAL_REBIND_AFTER_RELEASE_ALLOWED",
+        "concurrent_multi_app_tribe_isolation": "NOT_SUPPORTED_NOT_CLAIMED"
+      },
+      "process_global_boundaries": [
+        "heartbeat cache and client",
+        "HardState and set_sys_mode",
+        "Tribe agents and bus behind the single-live-Host owner fence",
+        "SystemResourceManager shared status path"
+      ],
+      "validation": {
+        "final_targeted_regression_passed": 143,
+        "structure_and_single_clock_passed": 22,
+        "batch_overlap": "OVERLAP_4_TEST_AW08_TRIBE_DEPENDENCY_DIRECTION_DEDUPLICATED_161",
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "full_architecture_static_gate": "PASS",
+        "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
+      },
+      "boundary": "45_MODULES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_51_CONSUMER_MODULES_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
       "evidence_refs": [
+        "host_brain/app/host_lifecycle_composition.py",
+        "host_brain/app/http_hooks.py",
+        "host_brain/app/tribe_composition.py",
+        "host_brain/composition/tribe_runtime.py",
+        "host_brain/core/resource_manager.py",
+        "tests/unit/test_ne01_host_lifecycle_composition.py",
+        "tests/unit/test_aw04_single_clock.py",
         "host_brain/composition/process_service_container.py",
-        "host_brain/composition/process_services.py"
+        "host_brain/composition/process_services.py",
+        "host_brain/composition/process_runtime_services.py",
+        "host_brain/tools/broker.py",
+        "host_brain/app/tool_runtime_composition.py",
+        "tests/unit/test_ne01_legacy_tool_mcp_authority_retirement.py",
+        "tests/contract/test_ne01_process_service_container_cleanup.py"
       ]
     }
   }

@@ -148,19 +148,16 @@ class TestChatContextBuilderSoftFailIntegration:
         """当 activity_monitor.get_status 抛异常时，runtime_flags 必须降级为
         仅含 sys_mode，且 SoftFailure 计数器记录 stage=chat.runtime_mode.activity_monitor。
         """
-        from host_brain.composition import process_services as _deps
         from host_brain.app.chat_generation_payload import build_runtime_mode_flags
 
         class _BrokenMonitor:
             def get_status(self):  # noqa: D401, ANN001
                 raise RuntimeError("monitor down")
 
-        original = getattr(_deps.get_process_service_container(), "activity_monitor", None)
-        try:
-            _deps.get_process_service_container().activity_monitor = _BrokenMonitor()
-            flags = build_runtime_mode_flags({})
-        finally:
-            _deps.get_process_service_container().activity_monitor = original
+        flags = build_runtime_mode_flags(
+            {},
+            activity_monitor_provider=_BrokenMonitor,
+        )
 
         assert flags["sys_mode"] == "normal"
         assert "activity_monitor" not in flags  # 降级为无该字段
@@ -170,19 +167,16 @@ class TestChatContextBuilderSoftFailIntegration:
 
     def test_runtime_mode_flags_happy_path_no_soft_failure(self) -> None:
         """正常路径不应产生 SoftFailure。"""
-        from host_brain.composition import process_services as _deps
         from host_brain.app.chat_generation_payload import build_runtime_mode_flags
 
         class _HealthyMonitor:
             def get_status(self):  # noqa: D401, ANN001
                 return {"cpu": 0.1, "mem": 0.2}
 
-        original = getattr(_deps.get_process_service_container(), "activity_monitor", None)
-        try:
-            _deps.get_process_service_container().activity_monitor = _HealthyMonitor()
-            flags = build_runtime_mode_flags({})
-        finally:
-            _deps.get_process_service_container().activity_monitor = original
+        flags = build_runtime_mode_flags(
+            {},
+            activity_monitor_provider=_HealthyMonitor,
+        )
 
         assert flags.get("activity_monitor") == {"cpu": 0.1, "mem": 0.2}
         assert snapshot_soft_failures() == {}

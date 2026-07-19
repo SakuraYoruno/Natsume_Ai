@@ -580,6 +580,14 @@ class RuntimeEventStore:
         except RuntimeEventRepositoryError as exc:
             raise RuntimeEventError(exc.reason_code, exc.detail) from exc
 
+    def assert_runtime_context_authority_schema(self) -> None:
+        """Expose persistence-owned Runtime Context readiness as a typed port."""
+
+        try:
+            self._repository.assert_runtime_context_authority_schema()
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+
     def append_event(self, event: RuntimeEvent | Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(event, RuntimeEvent):
             item = RuntimeEvent.create(

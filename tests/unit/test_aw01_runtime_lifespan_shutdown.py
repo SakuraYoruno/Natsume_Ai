@@ -8,6 +8,10 @@ from host_brain.app import http_hooks
 from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
 )
+from host_brain.app.host_lifecycle_composition import (
+    build_host_lifecycle_container,
+)
+from host_brain.tribe.application_ports import TribeApplicationPorts
 
 
 @pytest.mark.asyncio
@@ -28,17 +32,35 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
         stop_startup_after_initialization,
     )
     monkeypatch.setattr(http_hooks, "_shutdown_runtime", record_shutdown)
+    monkeypatch.setattr(
+        http_hooks,
+        "bind_tribe_application_ports",
+        lambda **_kwargs: events.append("tribe-bind"),
+    )
+    monkeypatch.setattr(
+        http_hooks,
+        "unbind_tribe_application_ports",
+        lambda **_kwargs: events.append("tribe-unbind"),
+    )
+    host_lifecycle = build_host_lifecycle_container()
 
     with pytest.raises(RuntimeError, match="lifespan body failed"):
         async with http_hooks.runtime_lifespan(
             get_ledger=object,
             logger=logging.getLogger("test.aw01.runtime-lifespan"),
-            lifecycle_ports=build_lifecycle_runtime_application_ports(),
+            lifecycle_ports=build_lifecycle_runtime_application_ports(
+                activity_monitor_provider=(
+                    host_lifecycle.get_activity_monitor
+                ),
+            ),
+            host_lifecycle=host_lifecycle,
+            tribe_application_ports=TribeApplicationPorts(),
         ):
             events.append("body")
             raise RuntimeError("lifespan body failed")
 
-    assert events == ["body", "shutdown"]
+    assert events == ["tribe-bind", "body", "shutdown", "tribe-unbind"]
+    assert host_lifecycle.is_open is False
 
 
 @pytest.mark.asyncio

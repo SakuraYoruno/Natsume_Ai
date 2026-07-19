@@ -9,7 +9,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import logging
 import os
-import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -179,9 +178,6 @@ def create_obs_app(
     if ports is not None and ports_factory is not None:
         raise ValueError("provide ports or ports_factory, not both")
     resolve_ports = ports_factory or ((lambda: ports) if ports is not None else _default_ports_factory)
-    consumed_ports: list[ObsApplicationPorts] = []
-    ports_consumption_lock = threading.Lock()
-
     def clear_application_state(application: FastAPI) -> None:
         application.state.obs_application_container = None
         application.state.obs_route_ports = None
@@ -197,10 +193,7 @@ def create_obs_app(
         start successfully and fail later on the first query or projection.
         """
 
-        with ports_consumption_lock:
-            if any(candidate is consumed for consumed in consumed_ports):
-                raise RuntimeError("OBS_APPLICATION_PORTS_ALREADY_CONSUMED")
-            consumed_ports.append(candidate)
+        candidate.claim_lifecycle_owner()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -265,7 +258,9 @@ def create_obs_app(
             application.state.task_terminal_reconciliation_read_authority = (
                 terminal_reader
             )
-            projection_status = container.start(interval_ms=5_000)
+            projection_status = container.start_projection_jobs(
+                interval_ms=5_000
+            )
             _logger.info("operator projection daemon startup: %s", projection_status)
             yield
         finally:

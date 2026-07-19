@@ -25,7 +25,6 @@ class ProcessServiceContainer:
     capability_scorecard_provider: Any = None
     mcp_tool_registry: Any = None
     tool_catalog: Any = None
-    tool_broker: Any = None
     bond_stage_engine: Any = None
     bond_dynamics_writer: Any = None
     bond_update_queue: Any = None
@@ -65,24 +64,18 @@ class ProcessServiceContainer:
     model_runtime_composition: Any = None
     capability_runtime_composition: Any = None
     hard_state: Any = None
-    activity_monitor: Any = None
-    resource_manager: Any = None
     application_ports: Any = None
     tribe_runtime_composition: Any = None
     model_runtime_lock: RLock = None  # type: ignore[assignment]
     capability_runtime_lock: RLock = None  # type: ignore[assignment]
     tribe_runtime_lock: RLock = None  # type: ignore[assignment]
     hard_state_lock: Lock = None  # type: ignore[assignment]
-    activity_monitor_lock: Lock = None  # type: ignore[assignment]
-    resource_manager_lock: Lock = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         self.model_runtime_lock = RLock()
         self.capability_runtime_lock = RLock()
         self.tribe_runtime_lock = RLock()
         self.hard_state_lock = Lock()
-        self.activity_monitor_lock = Lock()
-        self.resource_manager_lock = Lock()
 
     def clear_service_references(self) -> None:
         """Reset service references while preserving synchronization objects."""

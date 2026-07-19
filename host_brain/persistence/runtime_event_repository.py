@@ -30,6 +30,13 @@ RUNTIME_EVENT_DELIVERY_CLAIM_LOST = "RUNTIME_EVENT_DELIVERY_CLAIM_LOST"
 RUNTIME_EVENT_DELIVERY_CONFLICT = "RUNTIME_EVENT_DELIVERY_CONFLICT"
 RUNTIME_EVENT_DURABLE_DATA_INVALID = "RUNTIME_EVENT_DURABLE_DATA_INVALID"
 
+RUNTIME_CONTEXT_AUTHORITY_MIGRATION_ASSET_KEY = (
+    "0112#runtime_context_authority"
+)
+RUNTIME_CONTEXT_AUTHORITY_MIGRATION_SHA256 = (
+    "1ce9bd319094e965a91d958e23b3a034a6e9a74dc4429d533d8f0efe68960f7f"
+)
+
 RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY = "0068#runtime_event_delivery"
 RUNTIME_EVENT_DELIVERY_MIGRATION_SHA256 = (
     "91f114e2d0f199a9d9fa772f207e9154aba577f8469a0be0ff59dcbe854d63e2"
@@ -175,6 +182,11 @@ def _revisioned_task_graph_ref(value: str) -> tuple[str, int] | None:
         return None
     revision = int(raw_revision)
     return (graph_id, revision) if revision >= 1 else None
+
+
+def _normalized_sql(value: object) -> str:
+    compact = "".join(str(value or "").lower().split())
+    return compact.translate(str.maketrans("", "", "'\"`[]"))
 
 
 class RuntimeEventRepository:
@@ -384,6 +396,108 @@ class RuntimeEventRepository:
                 RUNTIME_EVENT_REPOSITORY_SCHEMA_NOT_READY,
                 "runtime event migrations 0056/0068 are missing, stale, or checksum-drifted",
             )
+
+    def assert_runtime_context_authority_schema(self) -> None:
+        """Verify the exact 0112 CAS and Host-lease fencing authority.
+
+        Runtime callers consume this as a readiness port. The repository is
+        the sole owner of the SQLite connection and schema inspection SQL.
+        """
+
+        if not self.db_path.is_file():
+            raise RuntimeEventRepositoryError(
+                RUNTIME_EVENT_REPOSITORY_SCHEMA_NOT_READY,
+                "runtime context SQLite authority is unavailable",
+            )
+        try:
+            conn = self._connect()
+            try:
+                asset = conn.execute(
+                    "SELECT checksum, disposition FROM schema_migration_assets "
+                    "WHERE asset_key = ?",
+                    (RUNTIME_CONTEXT_AUTHORITY_MIGRATION_ASSET_KEY,),
+                ).fetchone()
+                rows = conn.execute(
+                    "SELECT type, name, sql FROM sqlite_master "
+                    "WHERE name IN (?, ?, ?)",
+                    (
+                        "ux_runtime_context_aggregate_revision",
+                        "runtime_guardian_requires_active_host_lease",
+                        "scene_state_requires_active_host_lease",
+                    ),
+                ).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError as exc:
+            raise RuntimeEventRepositoryError(
+                RUNTIME_EVENT_REPOSITORY_SCHEMA_NOT_READY,
+                "runtime context authority schema cannot be inspected",
+            ) from exc
+        if (
+            asset is None
+            or str(asset["checksum"])
+            != RUNTIME_CONTEXT_AUTHORITY_MIGRATION_SHA256
+            or str(asset["disposition"])
+            not in _ALLOWED_MIGRATION_DISPOSITIONS
+        ):
+            raise RuntimeEventRepositoryError(
+                RUNTIME_EVENT_REPOSITORY_SCHEMA_NOT_READY,
+                "runtime context migration checksum drift",
+            )
+        objects = {
+            str(row["name"]): (
+                str(row["type"]),
+                _normalized_sql(row["sql"]),
+            )
+            for row in rows
+        }
+        expected = {
+            "ux_runtime_context_aggregate_revision": (
+                "index",
+                (
+                    "uniqueindex",
+                    "runtime_event_timeline(aggregate_type,aggregate_id,aggregate_version)",
+                    "aggregate_typein('scene_state','runtime_guardian')",
+                ),
+            ),
+            "runtime_guardian_requires_active_host_lease": (
+                "trigger",
+                (
+                    "host_embodiment_runtime_lease",
+                    "$.details.runtime_scope_id",
+                    "$.details.runtime_owner_id",
+                    "$.details.runtime_lease_id",
+                    "$.details.fencing_token",
+                    "lease.expires_at_ms>new.created_ts_ms",
+                ),
+            ),
+            "scene_state_requires_active_host_lease": (
+                "trigger",
+                (
+                    "host_embodiment_runtime_lease",
+                    "$.runtime_scope_id",
+                    "$.runtime_owner_id",
+                    "$.runtime_lease_id",
+                    "$.fencing_token",
+                    "lease.expires_at_ms>new.created_ts_ms",
+                ),
+            ),
+        }
+        for name, (kind, fragments) in expected.items():
+            actual = objects.get(name)
+            if actual is None or actual[0] != kind:
+                raise RuntimeEventRepositoryError(
+                    RUNTIME_EVENT_REPOSITORY_SCHEMA_NOT_READY,
+                    f"runtime context schema object missing: {name}",
+                )
+            if any(
+                _normalized_sql(fragment) not in actual[1]
+                for fragment in fragments
+            ):
+                raise RuntimeEventRepositoryError(
+                    RUNTIME_EVENT_REPOSITORY_SCHEMA_NOT_READY,
+                    f"runtime context schema object drift: {name}",
+                )
 
     # -- Append-only journal -------------------------------------------------
 
@@ -1194,6 +1308,8 @@ class RuntimeEventRepository:
 
 
 __all__ = [
+    "RUNTIME_CONTEXT_AUTHORITY_MIGRATION_ASSET_KEY",
+    "RUNTIME_CONTEXT_AUTHORITY_MIGRATION_SHA256",
     "RUNTIME_EVENT_DELIVERY_CLAIM_LOST",
     "RUNTIME_EVENT_DELIVERY_CONFLICT",
     "RUNTIME_EVENT_DELIVERY_MIGRATION_ASSET_KEY",

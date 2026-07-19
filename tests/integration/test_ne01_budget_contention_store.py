@@ -35,6 +35,7 @@ from host_brain.persistence.task_repository import (
 from host_brain.persistence.task_decision_integrity import (
     _assert_parallel_budget_usage_lineage,
 )
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 
 
 NOW = 2_000_000_000_000
@@ -122,7 +123,8 @@ def _migrated_budget_db(tmp_path: Path, *, name: str, limit: int = 1) -> Path:
             ),
         ),
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event(
             "TASK_GRAPH",

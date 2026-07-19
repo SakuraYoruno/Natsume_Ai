@@ -38,6 +38,10 @@ from host_brain.persistence.task_repository import (
     TaskStoreError,
     build_outbox_payload_ref,
 )
+from tests.task_runtime_authority_fixtures import (
+    seed_raw_acceptance_effect_for_test,
+    seed_raw_task_graph_for_test,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -229,7 +233,8 @@ def _seed_attempt(store: DurableTaskStore) -> None:
             ),
         ),
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event("TASK_GRAPH", graph.graph_id, 0, "TASK_GRAPH_CREATED"),
     )
@@ -492,7 +497,8 @@ def _stage(
     idempotency_key: str = "gr06:assistant-turn",
     payload: bytes = b'{"role":"assistant"}',
 ) -> dict[str, object]:
-    return store.stage_acceptance_effect_intent(
+    return seed_raw_acceptance_effect_for_test(
+        store,
         effect_id=effect_id,
         graph_id="graph-gr06",
         graph_revision=1,
@@ -637,7 +643,8 @@ def test_gr06_stage_get_list_are_exactly_idempotent_and_binding_safe(
     assert reused_key.value.reason_code == TASK_STORE_OUTBOX_CONFLICT
 
     with pytest.raises(TaskStoreError) as bad_digest:
-        store.stage_acceptance_effect_intent(
+        seed_raw_acceptance_effect_for_test(
+            store,
             effect_id="acceptance-effect://gr06/bad-digest",
             graph_id="graph-gr06",
             graph_revision=1,
@@ -653,7 +660,8 @@ def test_gr06_stage_get_list_are_exactly_idempotent_and_binding_safe(
     assert bad_digest.value.reason_code == TASK_STORE_INVALID
 
     with pytest.raises(TaskStoreError) as digest_mismatch:
-        store.stage_acceptance_effect_intent(
+        seed_raw_acceptance_effect_for_test(
+            store,
             effect_id="acceptance-effect://gr06/digest-mismatch",
             graph_id="graph-gr06",
             graph_revision=1,
@@ -1115,7 +1123,7 @@ def test_gr06_effect_replay_is_exact_and_drift_rolls_back_node_acceptance(
     _seed_attempt(store)
     judgement = _prepare_node_acceptance(store)
     original = _effect_spec()
-    store.stage_acceptance_effect_intent(**original)
+    seed_raw_acceptance_effect_for_test(store, **original)
     drifted = _effect_spec(payload=b'{"role":"user"}')
 
     with pytest.raises(TaskStoreError) as conflict:

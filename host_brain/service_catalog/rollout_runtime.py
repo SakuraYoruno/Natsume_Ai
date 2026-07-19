@@ -7,20 +7,21 @@ import time
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from host_brain.composition.service_catalog_startup import (
+from host_brain.service_catalog.startup_coordinator import (
     MODE_AUDIT,
     STATUS_STARTED,
     ServiceCatalogStartupCoordinator,
 )
-from host_brain.service_catalog.models import CatalogMode, CatalogSnapshot, EndpointSpec
-from host_brain.service_catalog.probes import HealthProbe, HealthProbeResult
-from host_brain.service_catalog.rollout_authority import (
+from host_brain.contracts.service_catalog import (
     CatalogCoordinatorAuthorityV1,
+    CatalogMode,
     CatalogRolloutOperationV1,
     ServiceCatalogRolloutError,
-    ServiceCatalogRolloutStore,
+    ServiceCatalogRolloutRepository,
     catalog_operation_identity_digest,
 )
+from host_brain.service_catalog.models import CatalogSnapshot, EndpointSpec
+from host_brain.service_catalog.probes import HealthProbe, HealthProbeResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +65,7 @@ class DurableServiceCatalogActivationRunner:
         *,
         snapshot: CatalogSnapshot,
         coordinator: ServiceCatalogStartupCoordinator,
-        store: ServiceCatalogRolloutStore,
+        store: ServiceCatalogRolloutRepository,
         authority: CatalogCoordinatorAuthorityV1,
         health_probe: IdentityCapturingHealthProbe,
         candidate_owner_id: str,

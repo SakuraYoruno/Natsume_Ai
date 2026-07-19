@@ -79,8 +79,6 @@ from host_brain.composition.process_environment import (
     get_resource_manager,
     notify_user_interaction,
     probe_edge_rpc_health,
-    set_activity_monitor,
-    set_resource_manager,
     set_sys_mode,
 )
 
@@ -458,7 +456,6 @@ from host_brain.composition.process_runtime_services import (
     get_state_arbiter,
     get_state_write_arbiter,
     get_token_service,
-    get_tool_broker,
     get_tool_catalog,
     get_tts_context_router,
 )

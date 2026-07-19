@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
+from threading import RLock
 from typing import Any
 
 from host_brain.composition.process_service_container import get_process_service_container
@@ -13,6 +14,15 @@ from host_brain.tribe.registry import HostTribeRegistry
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
+@dataclass(slots=True)
+class ProcessTribeApplicationPortBinding:
+    """Fenced lease for the process-global Tribe agents' application ports."""
+
+    owner: Any | None = None
+    ports: TribeApplicationPorts | None = None
+    lock: RLock = field(default_factory=RLock, repr=False)
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessTribeRuntime:
     """One process-owned Tribe state, catalog, and handoff authority."""
@@ -20,6 +30,7 @@ class ProcessTribeRuntime:
     state_registry: TribeStateRegistry
     tribe_registry: HostTribeRegistry
     handoff_coordinator: TribeHandoffCoordinator
+    application_port_binding: ProcessTribeApplicationPortBinding
 
 
 def compose_process_tribe_runtime(
@@ -52,6 +63,7 @@ def compose_process_tribe_runtime(
                 state_registry=state_registry,
                 tribe_registry=tribe_registry,
             ),
+            application_port_binding=ProcessTribeApplicationPortBinding(),
         )
         process.tribe_runtime_composition = runtime
         return runtime
@@ -75,6 +87,12 @@ def clear_process_tribe_runtime(runtime: ProcessTribeRuntime | None = None) -> N
     with process.tribe_runtime_lock:
         if runtime is not None and process.tribe_runtime_composition is not runtime:
             return
+        current = process.tribe_runtime_composition
+        if current is not None:
+            binding = current.application_port_binding
+            with binding.lock:
+                if binding.owner is not None:
+                    raise RuntimeError("PROCESS_TRIBE_APPLICATION_PORTS_STILL_BOUND")
         process.tribe_runtime_composition = None
 
 
@@ -132,12 +150,58 @@ def _tribe_agents() -> tuple[tuple[str, Any], ...]:
     )
 
 
-def configure_tribe_application_ports(ports: TribeApplicationPorts) -> TribeApplicationPorts:
+def bind_process_tribe_application_ports(
+    *,
+    owner: Any,
+    ports: TribeApplicationPorts,
+) -> TribeApplicationPorts:
+    """Bind one live Host owner without allowing another app to overwrite it."""
+
+    if owner is None:
+        raise TypeError("owner is required")
     if not isinstance(ports, TribeApplicationPorts):
         raise TypeError("ports must be TribeApplicationPorts")
-    for _name, agent in _tribe_agents():
-        agent.application_ports = ports
-    return ports
+    binding = require_process_tribe_runtime().application_port_binding
+    with binding.lock:
+        if binding.owner is not None:
+            if binding.owner is owner and binding.ports is ports:
+                return ports
+            raise RuntimeError("PROCESS_TRIBE_APPLICATION_PORTS_ALREADY_BOUND")
+        agents = _tribe_agents()
+        previous = [
+            (agent, getattr(agent, "application_ports", None))
+            for _, agent in agents
+        ]
+        try:
+            for _name, agent in agents:
+                agent.application_ports = ports
+        except Exception:
+            for agent, prior in previous:
+                agent.application_ports = prior
+            raise
+        binding.owner = owner
+        binding.ports = ports
+        return ports
+
+
+def unbind_process_tribe_application_ports(*, owner: Any) -> bool:
+    """Release only the exact live owner; a different app cannot unbind it."""
+
+    if owner is None:
+        raise TypeError("owner is required")
+    binding = require_process_tribe_runtime().application_port_binding
+    with binding.lock:
+        if binding.owner is None:
+            return False
+        if binding.owner is not owner:
+            raise RuntimeError("PROCESS_TRIBE_APPLICATION_PORTS_OWNER_MISMATCH")
+        ports = binding.ports
+        for _name, agent in _tribe_agents():
+            if getattr(agent, "application_ports", None) is ports:
+                agent.application_ports = None
+        binding.owner = None
+        binding.ports = None
+        return True
 
 
 def register_tribe_subscriptions(*, logger: logging.Logger) -> list[str]:
@@ -156,9 +220,11 @@ def register_tribe_subscriptions(*, logger: logging.Logger) -> list[str]:
 
 __all__ = [
     "ProcessTribeRuntime",
+    "ProcessTribeApplicationPortBinding",
+    "bind_process_tribe_application_ports",
     "clear_process_tribe_runtime",
     "compose_process_tribe_runtime",
-    "configure_tribe_application_ports",
     "register_tribe_subscriptions",
     "require_process_tribe_runtime",
+    "unbind_process_tribe_application_ports",
 ]

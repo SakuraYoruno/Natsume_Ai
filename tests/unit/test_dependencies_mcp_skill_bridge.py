@@ -37,7 +37,6 @@ def _reset_dependency_singletons() -> None:
     dep.get_process_service_container().capability_scorecard_provider = None
     dep.get_process_service_container().mcp_tool_registry = None
     dep.get_process_service_container().tool_catalog = None
-    dep.get_process_service_container().tool_broker = None
     dep.get_process_service_container().bond_stage_engine = None
     dep.get_process_service_container().bond_update_queue = None
     dep.get_process_service_container().episodic_store = None

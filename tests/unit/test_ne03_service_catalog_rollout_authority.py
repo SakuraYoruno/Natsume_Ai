@@ -7,13 +7,15 @@ from pathlib import Path
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.persistence.service_catalog_rollout_repository import (
+    SQLiteServiceCatalogRolloutRepository as ServiceCatalogRolloutStore,
+)
 from host_brain.service_catalog.models import CatalogMode, load_catalog_mode
 from host_brain.service_catalog.rollout_authority import (
     CatalogCoordinatorAuthorityV1,
     CatalogRolloutOperationV1,
     ServiceCatalogRolloutError,
     ServiceCatalogRolloutGuardianObserver,
-    ServiceCatalogRolloutStore,
     catalog_operation_identity_digest,
 )
 
@@ -474,6 +476,57 @@ def test_rollout_head_reopens_terminal_health_authority(tmp_path: Path) -> None:
             runtime_scope_id="runtime-head",
             candidate_owner_id="host.main",
         )
+
+
+def test_activation_started_and_rollout_head_commit_in_one_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = _database(tmp_path)
+    now = 45_000
+    store = ServiceCatalogRolloutStore(db_path)
+    authority = store.acquire_authority(
+        runtime_scope_id="runtime-atomic-head",
+        owner_id="catalog-owner",
+        lease_ms=100_000,
+        now_ms=now,
+    )
+    assert authority is not None
+    host_authority = _host_authority(
+        db_path,
+        scope="runtime-atomic-head",
+        now=now,
+    )
+    operation = _operation("operation-atomic-head", CatalogMode.AUDIT)
+    store.register_operation(operation, authority, now_ms=now + 1)
+    _append_starting(store, operation.operation_id, now=now + 2)
+
+    def fail_head_projection(*_args: object, **_kwargs: object) -> None:
+        raise ServiceCatalogRolloutError("injected head projection failure")
+
+    monkeypatch.setattr(store, "_advance_head", fail_head_projection)
+    with pytest.raises(
+        ServiceCatalogRolloutError,
+        match="injected head projection failure",
+    ):
+        store.append_receipt(
+            operation.operation_id,
+            event_type="ACTIVATION_STARTED",
+            status="STARTED",
+            payload=_terminal_payload(
+                operation.operation_id,
+                CatalogMode.AUDIT,
+                host_authority,
+            ),
+            now_ms=now + 3,
+        )
+
+    reopened = ServiceCatalogRolloutStore(db_path)
+    assert reopened.operation_state(operation.operation_id) == "STARTING"
+    assert reopened.rollout_head(
+        runtime_scope_id="runtime-atomic-head",
+        candidate_owner_id="host.main",
+    ) is None
 
 
 def test_pending_operation_can_be_reconciled_by_new_coordinator_fence(

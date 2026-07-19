@@ -8,14 +8,14 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Callable, Iterator
 
-from host_brain.core.ids import now_ms
-from host_brain.evolution_lab import (
+from host_brain.contracts.evolution_lab import (
     EvolutionProposalV1,
     ExperimentReportV1,
     ExperimentRunReceiptV1,
     ExperimentSpecV1,
     RedactionReceiptV1,
 )
+from host_brain.core.ids import now_ms
 
 
 EVOLUTION_LAB_MIGRATION_ASSET_KEY = "0108#evolution_lab_ledger"
