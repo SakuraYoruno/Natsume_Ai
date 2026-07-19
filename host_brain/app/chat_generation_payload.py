@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from host_brain.app.prompt_builder import _truncate_for_prompt, infer_render_target_lang
@@ -270,7 +270,11 @@ def build_prompt_context(
     )
 
 
-def build_runtime_mode_flags(prompt_context: Mapping[str, Any] | None) -> dict[str, Any]:
+def build_runtime_mode_flags(
+    prompt_context: Mapping[str, Any] | None,
+    *,
+    activity_monitor_provider: Callable[[], Any | None] | None = None,
+) -> dict[str, Any]:
     context = dict(prompt_context or {}) if isinstance(prompt_context, Mapping) else {}
     hard_snapshot_raw = context.get("hard_snapshot")
     hard_snapshot = dict(hard_snapshot_raw) if isinstance(hard_snapshot_raw, Mapping) else {}
@@ -279,9 +283,11 @@ def build_runtime_mode_flags(prompt_context: Mapping[str, Any] | None) -> dict[s
 
     runtime_flags: dict[str, Any] = {"sys_mode": sys_mode}
     with soft_fail("chat.runtime_mode.activity_monitor", fallback=None) as box:
-        from host_brain.composition import process_services as _deps  # noqa: PLC0415
+        if activity_monitor_provider is None:
+            from host_brain.composition import process_services as _deps  # noqa: PLC0415
 
-        monitor = _deps.get_activity_monitor()
+            activity_monitor_provider = _deps.get_activity_monitor
+        monitor = activity_monitor_provider()
         if monitor is not None and hasattr(monitor, "get_status"):
             activity_status = monitor.get_status()
             if isinstance(activity_status, Mapping):

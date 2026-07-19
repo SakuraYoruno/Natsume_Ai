@@ -35,6 +35,7 @@ from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
 def build_input_runtime_application_ports(
     *,
     embodiment_runtime_provider: Callable[[], Any | None] | None = None,
+    notify_user_interaction_callback: Callable[[], None] | None = None,
 ) -> InputRuntimeApplicationPorts:
     """Build one immutable dependency graph for one Host application."""
 
@@ -59,7 +60,9 @@ def build_input_runtime_application_ports(
         get_multimodal_observer=get_multimodal_observer,
         get_multimodal_processor=get_multimodal_processor,
         get_task_status_projection=get_task_status_projection,
-        notify_user_interaction=notify_user_interaction,
+        notify_user_interaction=(
+            notify_user_interaction_callback or notify_user_interaction
+        ),
         evaluate_governor_with_timing=_evaluate_governor_with_timing,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_chat_governance_snapshot=build_chat_governance_snapshot,

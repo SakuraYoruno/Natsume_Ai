@@ -49,7 +49,9 @@ def build_digital_life_runtime_snapshot(
 
     activity_monitor: dict[str, Any] = {}
     try:
-        monitor = ports.get_activity_monitor(create_if_missing=True)
+        # Projection code is read-only.  It must never lazily start a second
+        # ActivityMonitor (especially in the OBS process).
+        monitor = ports.get_activity_monitor()
         if monitor is not None:
             if hasattr(monitor, "get_status"):
                 activity_monitor = _as_plain_dict(monitor.get_status())

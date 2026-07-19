@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Mapping, Optional, Protocol, Sequence
+from typing import Any, Callable, Dict, Mapping, Optional, Protocol, Sequence
 from urllib.parse import urlparse
 
 from host_brain.observability.service_registry import (
@@ -779,11 +779,14 @@ def _reconcile_degradation_observations(
     )
 
 
-def _resource_gate_llm_probe_decision() -> Dict[str, Any]:
+def _resource_gate_llm_probe_decision(
+    *,
+    resource_manager_provider: Callable[..., Any] | None = None,
+) -> Dict[str, Any]:
+    if resource_manager_provider is None:
+        return {"allowed": True}
     try:
-        from host_brain.composition.process_services import get_resource_manager  # noqa: PLC0415
-
-        manager = get_resource_manager(create_if_missing=False)
+        manager = resource_manager_provider(create_if_missing=False)
     except Exception as exc:
         logger.debug("Heartbeat resource gate unavailable: %s", exc)
         return {"allowed": True}
@@ -809,6 +812,7 @@ def _resource_gate_llm_probe_decision() -> Dict[str, Any]:
 async def run_once(
     *,
     degradation_observer: DegradationObserver | None = None,
+    resource_manager_provider: Callable[..., Any] | None = None,
 ) -> None:
     """执行一轮心跳探测并更新缓存。
 
@@ -830,7 +834,9 @@ async def run_once(
         host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
 
     # LLM 节点独立探活：资源高压时由资源管家延后，避免心跳探活与主链/后台 LLM 抢窗口。
-    llm_gate = _resource_gate_llm_probe_decision()
+    llm_gate = _resource_gate_llm_probe_decision(
+        resource_manager_provider=resource_manager_provider,
+    )
     if bool(llm_gate.get("allowed", True)):
         try:
             llm_results = await _probe_llm_nodes()
@@ -907,13 +913,17 @@ async def heartbeat_loop(
     interval_sec: float = 30.0,
     *,
     degradation_observer: DegradationObserver | None = None,
+    resource_manager_provider: Callable[..., Any] | None = None,
 ) -> None:
     """后台循环：每 interval_sec 执行一次 run_once()，直到任务被取消。"""
     logger.info("Service health heartbeat started (interval=%.0fs, initial_delay=%.0fs)", interval_sec, HEARTBEAT_INITIAL_DELAY_SEC)
     await asyncio.sleep(HEARTBEAT_INITIAL_DELAY_SEC)
     while True:
         try:
-            await run_once(degradation_observer=degradation_observer)
+            await run_once(
+                degradation_observer=degradation_observer,
+                resource_manager_provider=resource_manager_provider,
+            )
         except asyncio.CancelledError:
             logger.info("Service health heartbeat stopped")
             raise

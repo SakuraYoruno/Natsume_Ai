@@ -549,7 +549,7 @@ def test_gateway_reply_text_and_voice_summary_use_chinese() -> None:
     assert voice_text == "我在呢，你慢慢说。"
 
 
-def test_send_gateway_voice_reply_durably_queues_chinese_tts_without_claiming_playback() -> None:
+def test_send_gateway_voice_reply_without_task_preview_fails_closed() -> None:
     embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock()
 
@@ -567,29 +567,22 @@ def test_send_gateway_voice_reply_durably_queues_chinese_tts_without_claiming_pl
             )
         )
 
-    assert len(embodiment_runtime.commands) == 1
-    command = embodiment_runtime.commands[0]
-    assert command.kind == "voice"
-    assert command.action == "speak"
-    assert command.payload["text"] == "我在呢。"
-    assert command.payload["lang_hint"] == "zh"
-    assert command.payload["export_audio"] is False
-    assert command.request_id == "req_gateway_voice_lang"
-    assert command.idempotency_key == "req_gateway_voice_lang:gateway-voice"
+    assert embodiment_runtime.commands == []
     post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "PENDING"
-    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
-    assert result["voice_durable_admitted"] is True
-    assert result["voice_success"] is None
+    assert result["voice_status"] == "FAILED"
+    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_durable_admitted"] is False
+    assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_audio_path"] == ""
     assert result["voice_physical_effect_verified"] is False
     assert result["voice_gateway_sent"] is False
-    assert "disabled" in result["voice_gateway_detail"].lower()
+    assert "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED" in result["voice_detail"]
 
 
-def test_send_gateway_voice_reply_platform_voice_waits_for_later_receipt() -> None:
+def test_send_gateway_platform_voice_without_task_preview_fails_before_delivery() -> None:
     embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock()
 
@@ -608,18 +601,17 @@ def test_send_gateway_voice_reply_platform_voice_waits_for_later_receipt() -> No
             )
         )
 
-    assert len(embodiment_runtime.commands) == 1
-    command = embodiment_runtime.commands[0]
-    assert command.payload["export_audio"] is True
+    assert embodiment_runtime.commands == []
     post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "PENDING"
-    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
-    assert result["voice_success"] is None
+    assert result["voice_status"] == "FAILED"
+    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_audio_path"] == ""
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] == "WAITING_RECEIPT"
-    assert "later Edge receipt" in result["voice_gateway_detail"]
+    assert result["voice_gateway_status"] is None
+    assert result["voice_gateway_detail"] is None
 
 
 def test_send_gateway_voice_reply_without_app_runtime_fails_closed() -> None:

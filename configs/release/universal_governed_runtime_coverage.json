@@ -18,6 +18,8 @@
     "production_canary": "NOT_RUN"
   },
   "declared_program_status": "INCOMPLETE",
+  "active_wave": "NE-01",
+  "active_wave_status": "IN_PROGRESS",
   "routes": {
     "chat": {
       "status": "COMPLETE",
@@ -385,8 +387,54 @@
       ]
     },
     "composition_without_global_service_locator": {
-      "status": "MISSING",
+      "status": "PARTIAL",
+      "named_from_process_services_import_inventory": {
+        "before_modules": 47,
+        "before_imported_names": 152,
+        "current_modules": 45,
+        "current_imported_names": 124,
+        "scope": "ONLY_EXACT_FROM_HOST_BRAIN_COMPOSITION_PROCESS_SERVICES_IMPORT_FORM_NOT_FULL_REPOSITORY"
+      },
+      "all_process_services_import_consumer_modules": {
+        "before": 52,
+        "current": 51,
+        "scope": "ALL_IMPORT_FORMS"
+      },
+      "process_service_container": {
+        "fields": 56,
+        "lock_fields": 4,
+        "mutable_service_references_excluding_locks_and_application_ports": 51
+      },
+      "host_lifecycle_boundary": {
+        "publication": "FACTORY_AND_START_MUST_SUCCEED_BEFORE_APP_LOCAL_PROVIDER_PUBLICATION",
+        "activity_factory_failure": "MODE_AUTHORITY_NOT_PUBLISHED",
+        "close_begin_fence": "ACLOSE_CLOSING_BLOCKS_BEGIN",
+        "resource_manager_startup_sample": "RUNS_IN_THE_SOLE_OWNED_RESOURCE_MANAGER_LOOP_THREAD",
+        "tribe_lifespan_binding": "PROCESS_GLOBAL_EXACT_OWNER_BIND_UNBIND_ONLY_ONE_LIVE_HOST_SECOND_LIVE_HOST_FAILS_CLOSED_SEQUENTIAL_REBIND_AFTER_RELEASE_ALLOWED",
+        "concurrent_multi_app_tribe_isolation": "NOT_SUPPORTED_NOT_CLAIMED"
+      },
+      "process_global_boundaries": [
+        "heartbeat cache and client",
+        "HardState and set_sys_mode",
+        "Tribe agents and bus behind the single-live-Host owner fence",
+        "SystemResourceManager shared status path"
+      ],
+      "validation": {
+        "final_targeted_regression_passed": 143,
+        "structure_and_single_clock_passed": 22,
+        "batch_overlap": "OVERLAP_4_TEST_AW08_TRIBE_DEPENDENCY_DIRECTION_DEDUPLICATED_161",
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "full_architecture_static_gate": "FAIL_GATES_1_6_10_NOT_PASS"
+      },
+      "boundary": "45_MODULES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_51_CONSUMER_MODULES_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
       "evidence_refs": [
+        "host_brain/app/host_lifecycle_composition.py",
+        "host_brain/app/http_hooks.py",
+        "host_brain/app/tribe_composition.py",
+        "host_brain/composition/tribe_runtime.py",
+        "host_brain/core/resource_manager.py",
+        "tests/unit/test_ne01_host_lifecycle_composition.py",
+        "tests/unit/test_aw04_single_clock.py",
         "host_brain/composition/process_service_container.py",
         "host_brain/composition/process_services.py"
       ]

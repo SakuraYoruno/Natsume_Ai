@@ -693,16 +693,11 @@ class SystemResourceManager:
         self._shutdown_event.clear()
         self._thread = threading.Thread(
             target=self._loop,
+            kwargs={"run_immediately": bool(run_immediately)},
             name="system-resource-manager",
             daemon=True,
         )
         self._thread.start()
-        if run_immediately:
-            threading.Thread(
-                target=lambda: self.run_once(reason="startup"),
-                name="system-resource-manager-startup-sample",
-                daemon=True,
-            ).start()
         logger.info(
             "SystemResourceManager started (interval=%.1fs, llm=%s, auto_gc=%s, auto_trim=%s)",
             self._interval_s,
@@ -824,7 +819,9 @@ class SystemResourceManager:
             self._persist_status()
             return {"status": "FAILED", "reason": reason, "error": str(exc), "ts_ms": now_ms()}
 
-    def _loop(self) -> None:
+    def _loop(self, *, run_immediately: bool = False) -> None:
+        if run_immediately and not self._shutdown_event.is_set():
+            self.run_once(reason="startup")
         while not self._shutdown_event.wait(timeout=self._interval_s):
             self.run_once(reason="periodic")
 

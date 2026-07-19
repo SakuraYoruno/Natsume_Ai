@@ -24,72 +24,22 @@ def _foundation():
     return process_services
 
 
-def set_activity_monitor(monitor) -> None:
-    """注册进程级 ActivityMonitor 实例（由 http_hooks 启动时调用）。"""
-    _container().activity_monitor = monitor
-
-
-def set_resource_manager(manager) -> None:
-    """注册进程级 SystemResourceManager 实例（由 http_hooks 启动时调用）。"""
-    _container().resource_manager = manager
-
-
 def get_resource_manager(*, create_if_missing: bool = False):
-    """获取进程级 SystemResourceManager，可选在缺失时懒启动。"""
-    manager = _container().resource_manager
-    if manager is not None or not create_if_missing:
-        return manager
-    if not _parse_bool_env("HOST_RESOURCE_MANAGER_ENABLED", default=False):
-        return None
+    """Compatibility read after app-local ownership retired global publication."""
 
-    with _container().resource_manager_lock:
-        manager = _container().resource_manager
-        if manager is not None:
-            return manager
-        from host_brain.core.resource_manager import SystemResourceManager  # noqa: PLC0415
-
-        manager = SystemResourceManager()
-        manager.start()
-        _container().resource_manager = manager
-        _logger.info("SystemResourceManager 已注册到 dependencies")
-        return manager
+    del create_if_missing
+    return None
 
 
 def get_activity_monitor(*, create_if_missing: bool = False, ledger: Any | None = None):
-    """获取进程级 ActivityMonitor，可选在缺失时懒启动。"""
-    monitor = _container().activity_monitor
-    if monitor is not None or not create_if_missing:
-        return monitor
+    """Compatibility read; it never starts a process-global monitor."""
 
-    with _container().activity_monitor_lock:
-        monitor = _container().activity_monitor
-        if monitor is not None:
-            return monitor
-
-        from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
-
-        from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
-
-        mode_service = ModeTransitionService(
-            get_hard_state=get_hard_state,
-            set_sys_mode=set_sys_mode,
-            ledger=ledger if ledger is not None else _foundation().get_ledger(),
-        )
-
-        monitor = ActivityMonitor(mode_transition_service=mode_service)
-        monitor.start()
-        _container().activity_monitor = monitor
-        _logger.info("ActivityMonitor 已注册到 dependencies")
-        return monitor
+    del create_if_missing, ledger
+    return None
 
 
 def notify_user_interaction() -> None:
-    """通知 ActivityMonitor 有用户互动（消息输入、语音输入等）。
-
-    由 input_routes / chat route 在收到用户消息时调用，
-    触发 sleep→normal 唤醒 和 空闲计时器重置。
-    安全降级：如果 ActivityMonitor 未初始化则静默跳过。
-    """
+    """Compatibility no-op after Host input paths moved to app-local ports."""
     monitor = get_activity_monitor()
     if monitor is not None:
         try:

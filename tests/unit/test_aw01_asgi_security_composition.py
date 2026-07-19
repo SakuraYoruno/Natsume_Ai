@@ -326,7 +326,15 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     model_attempt_service = object()
     prompt_registry = object()
     intent_engine = object()
-    resource_manager = object()
+    resource_gate_calls: list[dict[str, object]] = []
+
+    def assess_background_task(**kwargs):
+        resource_gate_calls.append(dict(kwargs))
+        return {"allowed": True, "source": "app-local"}
+
+    resource_manager = SimpleNamespace(
+        assess_background_task=assess_background_task,
+    )
     tool_catalog = object()
     governed_tool_application = object()
     canonical_executor = object()
@@ -337,6 +345,29 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     signed_ingress = object()
     skill_registry = object()
     query_projection_store = object()
+    mode_transition_service = SimpleNamespace(
+        get_current_status=lambda: {"sys_mode": "gaming"}
+    )
+    activity_monitor = object()
+    host_lifecycle = SimpleNamespace(
+        ports=SimpleNamespace(
+            memory_guard=lambda: object(),
+            state_arbiter=lambda: object(),
+            distillation_engine=lambda: object(),
+            semantic_recaller=lambda: object(),
+            episodic_store=lambda: object(),
+            skill_registry=lambda: skill_registry,
+            tool_catalog=lambda: tool_catalog,
+            capability_broker=lambda: capability_broker,
+            hard_state=lambda: SimpleNamespace(sys_mode="gaming"),
+            set_sys_mode=lambda _mode: {},
+            model_attempt_service=lambda: model_attempt_service,
+        ),
+        get_activity_monitor=lambda **_kwargs: activity_monitor,
+        get_resource_manager=lambda **_kwargs: resource_manager,
+        get_mode_transition_service=lambda: mode_transition_service,
+        notify_user_interaction=lambda: None,
+    )
     class EmbodimentRuntime:
         async def establish_transport_authority(self) -> None:
             events.append("embodiment-transport-fenced")
@@ -605,6 +636,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["skill_registry"] is skill_registry
         assert kwargs["token_service"] is token_service
         assert kwargs["capability_broker"] is capability_broker
+        assert kwargs["resource_manager"] is resource_manager
         assert kwargs["model_attempt_service"] is model_attempt_service
         assert kwargs["production_authority_verifier"] is (
             tool_runtime_composition.verify_durable_production_authority
@@ -697,6 +729,16 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "cancellation_authority_verifier"
         ]
         assert kwargs["runtime_context_application"] is runtime_context_application
+        assert kwargs["current_mode"]() == "gaming"
+        gate_result = kwargs["resource_gate"](
+            SimpleNamespace(
+                resource_profile={},
+                task_id="test-scheduler-task",
+                priority="LOW",
+            ),
+            "gaming",
+        )
+        assert gate_result == {"allowed": True, "source": "app-local"}
         events.append("scheduler-runtime-built")
         return scheduler_container
 
@@ -709,7 +751,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         events.append("runtime-context-built")
         return runtime_context_application
 
-    async def fake_guardian_heartbeat(*_args, **_kwargs):
+    async def fake_guardian_heartbeat(*_args, **kwargs):
+        assert kwargs["resource_manager_provider"]() is resource_manager
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -719,15 +762,16 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
         asgi,
+        "build_host_lifecycle_container",
+        lambda: host_lifecycle,
+    )
+    monkeypatch.setattr(
+        asgi,
         "runtime_lifespan",
         lambda **kwargs: (
-            kwargs["mode_transition_service_sink"](
-                SimpleNamespace(
-                    get_current_status=lambda: {"sys_mode": "gaming"}
-                )
-            ),
-            base_lifespan(),
-        )[1],
+            kwargs["host_lifecycle"] is host_lifecycle
+            and base_lifespan()
+        ),
     )
     monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
     monkeypatch.setattr(
@@ -799,13 +843,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         else pytest.fail("wrong Intent admission composition"),
     )
     monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
-    monkeypatch.setattr(asgi, "get_capability_broker", lambda: capability_broker)
     monkeypatch.setattr(
         tool_runtime_composition,
         "ApplicationModelAttemptServicePort",
         lambda: model_attempt_service,
     )
-    monkeypatch.setattr(asgi, "get_model_attempt_service", lambda: model_attempt_service)
     monkeypatch.setattr(asgi, "get_prompt_registry", lambda: prompt_registry)
     monkeypatch.setattr(
         asgi,
@@ -818,7 +860,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         }
         else pytest.fail("wrong canonical agent executor ports"),
     )
-    monkeypatch.setattr(asgi, "get_skill_registry", lambda: skill_registry)
     monkeypatch.setattr(
         asgi,
         "get_core_settings",
@@ -842,8 +883,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         ),
     )
     monkeypatch.setattr(asgi, "get_intent_engine", lambda: intent_engine)
-    monkeypatch.setattr(asgi, "get_resource_manager", lambda **_kwargs: resource_manager)
-    monkeypatch.setattr(asgi, "get_tool_catalog", lambda: tool_catalog)
     monkeypatch.setattr(
         tool_runtime_composition,
         "SecureIngressHttpAuthorityAdapter",
@@ -854,8 +893,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "GovernedToolHttpApplication",
         lambda **_kwargs: governed_tool_application,
     )
-    monkeypatch.setattr(asgi, "get_episodic_store", object)
-    monkeypatch.setattr(asgi, "get_memory_guard", object)
     monkeypatch.setattr(asgi, "get_memory_worth_evaluator", object)
     monkeypatch.setattr(
         asgi,
@@ -944,6 +981,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     lifespan = captured["lifespan"]
     assert application.state.task_runtime_container is None
     assert application.state.task_runtime_container_provider() is None
+    assert application.state.host_lifecycle_container is host_lifecycle
+    assert (
+        application.state.lifecycle_runtime_ports.get_activity_monitor()
+        is activity_monitor
+    )
 
     async def scenario() -> None:
         async with lifespan(application):
@@ -1015,6 +1057,17 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert captured["route_ports"].governed_tool_application_provider() is None
 
     asyncio.run(scenario())
+
+    assert resource_gate_calls == [
+        {
+            "task_id": "test-scheduler-task",
+            "priority": "LOW",
+            "task_type": "host_scheduler",
+            "uses_llm": False,
+            "uses_gpu": False,
+            "reason": "governed_scheduler",
+        }
+    ]
 
     assert events == [
         "base-started",
@@ -1173,6 +1226,28 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
         calls.append("scorecards-prewarmed")
         return Scorecards()
 
+    provider = lambda: object()
+    host_lifecycle = SimpleNamespace(
+        ports=SimpleNamespace(
+            memory_guard=provider,
+            state_arbiter=provider,
+            distillation_engine=provider,
+            semantic_recaller=fail_semantic_recaller,
+            episodic_store=provider,
+            skill_registry=provider,
+            tool_broker=provider,
+            tool_catalog=provider,
+            capability_broker=provider,
+            hard_state=lambda: SimpleNamespace(sys_mode="normal"),
+            set_sys_mode=lambda _mode: {},
+            model_attempt_service=provider,
+        ),
+        get_activity_monitor=lambda **_kwargs: None,
+        get_resource_manager=lambda **_kwargs: None,
+        get_mode_transition_service=lambda: None,
+        notify_user_interaction=lambda: None,
+    )
+
     def read_governance_then_stop(current_ledger):
         assert current_ledger is ledger
         ports = captured["host_obs_read_ports"]
@@ -1183,6 +1258,11 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
     monkeypatch.setenv("PENTEST_WEB_LAB_MODE", "true")
     monkeypatch.setenv("PENTEST_ALLOW_EXPLOIT", "1")
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
+    monkeypatch.setattr(
+        asgi,
+        "build_host_lifecycle_container",
+        lambda: host_lifecycle,
+    )
     monkeypatch.setattr(
         asgi,
         "runtime_lifespan",
@@ -1218,7 +1298,6 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
     )
     monkeypatch.setattr(asgi, "get_capability_gap_telemetry", object)
     monkeypatch.setattr(asgi, "get_capability_forge_service", object)
-    monkeypatch.setattr(asgi, "get_semantic_recaller", fail_semantic_recaller)
     monkeypatch.setattr(asgi, "get_capability_scorecard_provider", get_scorecards)
     monkeypatch.setattr(
         asgi,

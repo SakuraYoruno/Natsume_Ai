@@ -186,10 +186,7 @@ def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> Non
     with heartbeat._cache_lock:
         heartbeat._cache.clear()
 
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_resource_manager",
-        lambda create_if_missing=False: FakeResourceManager(),
-    )
+    resource_manager = FakeResourceManager()
     with (
         patch.object(
             heartbeat,
@@ -207,7 +204,11 @@ def test_run_once_defers_llm_probe_when_resource_gate_blocks(monkeypatch) -> Non
             new=AsyncMock(side_effect=AssertionError("LLM probe should be resource-gated")),
         ),
     ):
-        asyncio.run(heartbeat.run_once())
+        asyncio.run(
+            heartbeat.run_once(
+                resource_manager_provider=lambda **_kwargs: resource_manager,
+            )
+        )
 
     for service_id in heartbeat.LLM_NODE_IDS:
         cached = heartbeat.get_cached(service_id)
@@ -245,7 +246,7 @@ def test_run_once_uses_explicit_degradation_observer_without_global_machine(
     monkeypatch.setattr(
         heartbeat,
         "_resource_gate_llm_probe_decision",
-        lambda: {"allowed": True},
+        lambda **_kwargs: {"allowed": True},
     )
     with (
         patch.object(
@@ -309,7 +310,12 @@ def test_heartbeat_loop_forwards_explicit_degradation_observer(monkeypatch) -> N
 
     captured: list[object] = []
 
-    async def one_iteration(*, degradation_observer=None):  # type: ignore[no-untyped-def]
+    async def one_iteration(  # type: ignore[no-untyped-def]
+        *,
+        degradation_observer=None,
+        resource_manager_provider=None,
+    ):
+        assert resource_manager_provider is None
         captured.append(degradation_observer)
         raise asyncio.CancelledError
 

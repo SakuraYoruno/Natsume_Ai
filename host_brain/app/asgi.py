@@ -20,31 +20,24 @@ from host_brain.app.chat_routes import handle_v1_chat_route
 from host_brain.composition.process_services import (
     get_ledger,
     get_intent_engine,
-    get_episodic_store,
-    get_skill_registry,
-    get_memory_guard,
     get_memory_worth_evaluator,
-    get_distillation_engine,
-    get_hard_state,
-    get_resource_manager,
     get_security_immune_agent,
     set_memory_service_container,
     get_token_service,
-    get_tool_catalog,
     get_bond_dynamics_writer,
-    get_model_attempt_service,
     get_prompt_registry,
-    get_capability_broker,
     get_capability_forge_service,
     get_capability_gap_telemetry,
     get_capability_scorecard_provider,
-    get_semantic_recaller,
     get_life_snapshot_reader,
 )
 from host_brain.app.edge_event_routes import handle_edge_events_route
 from host_brain.app.http_hooks import runtime_lifespan
 from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
+)
+from host_brain.app.host_lifecycle_composition import (
+    build_host_lifecycle_container,
 )
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
@@ -243,18 +236,29 @@ def _scheduler_seed_configs():
 
 
 def create_app() -> FastAPI:
-    from host_brain.app.tribe_composition import configure_tribe_application_ports
+    from host_brain.app.tribe_composition import build_tribe_application_ports
 
-    mode_transition_service: Any | None = None
-
-    def mode_transition_service_provider() -> Any | None:
-        return mode_transition_service
-
-    configure_tribe_application_ports()
     configure_process_service_ports()
-    lifecycle_runtime_ports = build_lifecycle_runtime_application_ports()
+    host_lifecycle = build_host_lifecycle_container()
+    host_services = host_lifecycle.ports
+    tribe_application_ports = build_tribe_application_ports(
+        activity_monitor_provider=host_lifecycle.get_activity_monitor,
+        mode_transition_service_provider=(
+            host_lifecycle.get_mode_transition_service
+        ),
+        resource_manager_provider=host_lifecycle.get_resource_manager,
+    )
+    lifecycle_runtime_ports = build_lifecycle_runtime_application_ports(
+        activity_monitor_provider=host_lifecycle.get_activity_monitor,
+        episodic_store_provider=host_services.episodic_store,
+        hard_state_provider=host_services.hard_state,
+        model_attempt_service_provider=host_services.model_attempt_service,
+    )
     input_runtime_ports = build_input_runtime_application_ports(
         embodiment_runtime_provider=lambda: embodiment_runtime,
+        notify_user_interaction_callback=(
+            host_lifecycle.notify_user_interaction
+        ),
     )
     # This slot belongs to one FastAPI application factory invocation.  Route
     # providers close over it explicitly; there is no module-global service
@@ -266,12 +270,12 @@ def create_app() -> FastAPI:
     agent_workspace_container: workspace.ProcessAgentWorkspaceContainer | None = None
     tool_composition = GovernedHostToolRuntimeComposition(
         GovernedHostToolRuntimeDependencies(
-            skill_registry=get_skill_registry,
+            skill_registry=host_services.skill_registry,
             token_service=get_token_service,
-            capability_broker=get_capability_broker,
-            resource_manager=get_resource_manager,
+            capability_broker=host_services.capability_broker,
+            resource_manager=host_lifecycle.get_resource_manager,
             ledger=get_ledger,
-            tool_catalog=get_tool_catalog,
+            tool_catalog=host_services.tool_catalog,
             intent_engine=get_intent_engine,
         )
     )
@@ -330,10 +334,6 @@ def create_app() -> FastAPI:
         current = scheduler_container
         return current.command_service if current is not None else None
 
-    def capture_mode_transition_service(service: Any | None) -> None:
-        nonlocal mode_transition_service
-        mode_transition_service = service
-
     def read_host_obs_tribe_state() -> Mapping[str, Any]:
         reader = host_obs_tribe_state_reader
         if reader is None:
@@ -350,11 +350,13 @@ def create_app() -> FastAPI:
     route_ports = HostRoutePorts(
         canon_service_provider=canon_service_provider,
         tool_broker_provider=tool_composition.provide_tool_broker,
-        tool_catalog_provider=get_tool_catalog,
+        tool_catalog_provider=host_services.tool_catalog,
         governed_tool_application_provider=tool_composition.provide_tool_application,
         bond_engine_provider=resolve_bond_engine,
         bond_writer_provider=get_bond_dynamics_writer,
-        mode_transition_service_provider=mode_transition_service_provider,
+        mode_transition_service_provider=(
+            host_lifecycle.get_mode_transition_service
+        ),
         embodiment_runtime_provider=embodiment_runtime_provider,
     )
     host_obs_route_ports = ObsRoutePorts(
@@ -363,7 +365,7 @@ def create_app() -> FastAPI:
 
     host_obs_read_ports = build_host_obs_read_ports(
         HostObsSourceRuntimePorts(
-            mode_service_provider=lambda: mode_transition_service,
+            mode_service_provider=host_lifecycle.get_mode_transition_service,
             capability_gap_telemetry_provider=(
                 lambda: host_obs_capability_gap_telemetry
             ),
@@ -418,6 +420,9 @@ def create_app() -> FastAPI:
             evaluate_immune_gate_fn=evaluate_immune_gate_for_chat,
             schedule_immune_gate_fn=schedule_immune_gate_audit,
             handle_chat_fn=handle_chat_with_runtime,
+            notify_user_interaction_fn=(
+                host_lifecycle.notify_user_interaction
+            ),
         )
 
     async def edge_events_endpoint_with_runtime(
@@ -467,7 +472,6 @@ def create_app() -> FastAPI:
         nonlocal governed_internal_runtime, internal_agent_command_service
         nonlocal task_review_command_service
         nonlocal internal_agent_ingress, scheduler_container
-        nonlocal mode_transition_service
         nonlocal host_obs_ledger, host_query_projection_store
         nonlocal host_obs_capability_gap_telemetry
         nonlocal host_obs_capability_forge, host_obs_semantic_recaller
@@ -485,15 +489,16 @@ def create_app() -> FastAPI:
             get_ledger=get_ledger,
             logger=logger,
             lifecycle_ports=lifecycle_runtime_ports,
+            host_lifecycle=host_lifecycle,
+            tribe_application_ports=tribe_application_ports,
             canon_service_provider=canon_service_provider,
-            mode_transition_service_sink=capture_mode_transition_service,
             startup_probe_sink=capture_startup_probe_statuses,
             degradation_state_provider=(
                 lambda: host_obs_degradation_state_provider()
             ),
             tool_broker_provider=tool_composition.provide_tool_broker,
-            tool_catalog_provider=get_tool_catalog,
-            skill_registry_provider=get_skill_registry,
+            tool_catalog_provider=host_services.tool_catalog,
+            skill_registry_provider=host_services.skill_registry,
             start_service_heartbeat=False,
         ):
             security: ProcessSecurityServiceContainer | None = None
@@ -545,7 +550,7 @@ def create_app() -> FastAPI:
                         exc_info=True,
                     )
                 try:
-                    host_obs_semantic_recaller = get_semantic_recaller()
+                    host_obs_semantic_recaller = host_services.semantic_recaller()
                 except Exception:
                     logger.warning(
                         "HOST_OBS_SEMANTIC_RECALL_SOURCE_PREWARM_FAILED",
@@ -674,7 +679,7 @@ def create_app() -> FastAPI:
                     embodiment_runtime=embodiment_runtime,
                     environment_observation_provider=(
                         _runtime_environment_observation_provider(
-                            mode_transition_service
+                            host_lifecycle.get_mode_transition_service()
                         )
                     ),
                 )
@@ -732,6 +737,9 @@ def create_app() -> FastAPI:
                         30.0,
                         degradation_observer=(
                             runtime_context_composition.guardian.observe_service_batch
+                        ),
+                        resource_manager_provider=(
+                            host_lifecycle.get_resource_manager
                         ),
                     ),
                     name="host-runtime-guardian-health-heartbeat",
@@ -888,7 +896,7 @@ def create_app() -> FastAPI:
                     evaluator=command_ingress.evaluator,
                 )
                 try:
-                    episodic_projection_store = get_episodic_store()
+                    episodic_projection_store = host_services.episodic_store()
                 except Exception:
                     episodic_projection_store = None
                     logger.warning(
@@ -899,7 +907,9 @@ def create_app() -> FastAPI:
                     ledger=ledger,
                     canonical_db_path=task_runtime.canonical_db_path,
                     worth_evaluator=get_memory_worth_evaluator(),
-                    memory_guard=ExistingMemoryGuardAdapter(get_memory_guard()),
+                    memory_guard=ExistingMemoryGuardAdapter(
+                        host_services.memory_guard()
+                    ),
                     episodic_projection_store=episodic_projection_store,
                 )
                 set_memory_service_container(memory)
@@ -921,7 +931,7 @@ def create_app() -> FastAPI:
                     semantic_recaller=host_obs_semantic_recaller,
                 )
                 canonical_agent_executor_kwargs: dict[str, Any] = {
-                    "model_attempt_service": get_model_attempt_service(),
+                    "model_attempt_service": host_services.model_attempt_service(),
                     "prompt_registry": get_prompt_registry(),
                 }
                 if agent_workspace_container is not None:
@@ -996,7 +1006,7 @@ def create_app() -> FastAPI:
                     return _scheduler_handler_result(result)
 
                 async def distillation_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    report = await get_distillation_engine().run_batch()
+                    report = await host_services.distillation_engine().run_batch()
                     return _scheduler_handler_result(report)
 
                 async def security_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
@@ -1117,11 +1127,13 @@ def create_app() -> FastAPI:
                     return result
 
                 def scheduler_current_mode() -> str:
-                    return str(get_hard_state().sys_mode or "normal")
+                    return str(host_services.hard_state().sys_mode or "normal")
 
                 def scheduler_resource_gate(definition: Any, mode: str) -> Any:
                     del mode
-                    manager = get_resource_manager(create_if_missing=False)
+                    manager = host_lifecycle.get_resource_manager(
+                        create_if_missing=False
+                    )
                     if manager is None or not callable(
                         getattr(manager, "assess_background_task", None)
                     ):
@@ -1389,7 +1401,7 @@ def create_app() -> FastAPI:
         logger=logger,
         get_ledger=get_ledger,
         get_tool_broker=tool_composition.provide_tool_broker,
-        get_tool_catalog=get_tool_catalog,
+        get_tool_catalog=host_services.tool_catalog,
         get_bond_engine=resolve_bond_engine,
         get_bond_writer=get_bond_dynamics_writer,
         chat_endpoint=chat_endpoint_with_runtime,
@@ -1441,6 +1453,8 @@ def create_app() -> FastAPI:
     application.state.canon_container = None
     application.state.embodiment_runtime = None
     application.state.runtime_context_composition = None
+    application.state.host_lifecycle_container = host_lifecycle
+    application.state.tribe_application_ports = tribe_application_ports
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports
     application.state.input_runtime_ports = input_runtime_ports
     application.state.task_runtime_container_provider = (
