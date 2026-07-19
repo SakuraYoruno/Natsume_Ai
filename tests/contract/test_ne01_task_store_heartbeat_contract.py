@@ -17,7 +17,7 @@ from host_brain.persistence.task_repository import (
 from host_brain.task_runtime.ports import TaskStorePort
 from tests.contract.test_nle_task_store_contract import (
     _create_attempt,
-    _create_graph,
+    _seed_raw_graph,
     _event,
     _migrated_store,
     _set_time,
@@ -31,7 +31,7 @@ def _leased_store(
     lease_ttl_ms: int = 20,
 ) -> tuple[DurableTaskStore, dict[str, object]]:
     store = _migrated_store(tmp_path, name=name)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",

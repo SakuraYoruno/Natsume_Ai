@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.5
+版本：v2.6
 
-核对日期：2026-07-18
+核对日期：2026-07-19
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -50,7 +50,8 @@ flowchart TD
     Plan --> Compile
     Compile --> PolicyGate["atomic policy capability + node-grant service\n+ parent grant：admission 前 fail-close"]
     PolicyGate --> Admission["HostCommandRepository 原子 admission"]
-    Admission --> Schema["0090 + 0092；atomic 时再校验 0091\nBudget / worker 前 fail-fast"]
+    Admission --> GraphHook["private Graph insert hook\n同一 admission UoW，唯一调用"]
+    GraphHook --> Schema["0090 + 0092；atomic 时再校验 0091\nBudget / worker 前 fail-fast"]
     Schema --> Runtime["Durable Task Runtime"]
     Runtime --> Worker["Attempt + Lease + Grant + Budget + Worker"]
     Runtime -.->|"atomic / bounded 独立默认 OFF\n三处生产 composition 未启用"| ShadowFanOut["atomic outer authority\nbounded 时 terminal-leaf 有界 child"]
@@ -75,9 +76,10 @@ flowchart TD
     Window -->|"是"| InProgress
     Window -->|"纯 CAS"| Conflict["GOVERNED_DURABLE_STATE_CONFLICT"]
     VA --> Receipt["Execution receipt"]
-    VA --> Effects["Acceptance effect intents"]
+    VA --> EffectHook["private Effect insert hook\n3 个 canonical UoW / 6 个调用点"]
+    EffectHook --> Effects["Acceptance effect intents"]
     SuccessUow --> Receipt
-    SuccessUow --> Effects
+    SuccessUow --> EffectHook
     Effects --> Conversation["Conversation / Life / Memory"]
     Effects --> Delivery["Gateway / Edge 副作用"]
 
@@ -119,7 +121,7 @@ flowchart TD
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
-    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,Schema,Worker,HB,Checkpoint,VA,Receipt,Effects,Scheduler,SchedulerWO,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
+    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,GraphHook,Schema,Worker,HB,Checkpoint,VA,Receipt,EffectHook,Effects,Scheduler,SchedulerWO,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
     class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine partial;
 ```
 
@@ -136,6 +138,8 @@ flowchart TD
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler 与 Internal Agent 均已通过真实 occurrence/admission；Internal 的 v2 只在 ingress/executor 兼容边界存在，canonical lineage 使用 V3。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
+- TaskStore 生产写流已收窄到两个 private hook：Graph/Node 只能由 `HostCommandRepository._admit_normalized() → _insert_graph_from_host_command_in_transaction()` 在同一 admission UoW 写入，生产调用数为 1；Effect 只能由 `transition_graph_and_stage_acceptance_effects`、`commit_node_acceptance`、`complete_parallel_graph_success` 三个 canonical UoW 通过 `_stage_acceptance_effect_intent_in_transaction()` 写入，共 6 个调用点。对应 Graph/Node/Effect INSERT SQL 也各自只在这两个 hook 中。public `create_graph`、`insert_graph_in_transaction`、`stage_acceptance_effect_intent` 已删除。
+- 这条流只证明 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED`。SQLite 仍允许 direct SQL 制造无 `host_command_journal` 的 raw/orphan 状态，本轮无 migration/trigger，因此必须同时标记 `SQL_DIRECT_BYPASS_PRESENT`。`tests/task_runtime_authority_fixtures.py` 只是 test-only raw/orphan 构造器，不属于 canonical 流。定向分组与首跑 fixture 失败均已保留，修正后最终 key regression 为 `26 passed in 35.33s`；wave integration `NOT_RUN_PER_WAVE_POLICY`，full architecture static Gate 仍 `FAIL [1,6,10]`，NE-01 仍 `IN_PROGRESS`。
 
 Host lifecycle 的当前数据流为：
 
@@ -420,7 +424,7 @@ claim runnable node
 | Resume | 消费 token 后由 composition worker 按原 HostCommand surface 自动重调度；PRE 无伪 Attempt，POST 不重跑 worker | `WIRED_0096` |
 | B0/B1 调度决策 | Coordinator 从 durable snapshot 消费稳定 READY/fan-in/retry due 决策 | `WIRED_PARTIAL_RUNTIME` |
 | 原子 claim | ACTIVE graph + Budget concurrency 下原子写 Attempt/Node/Lease/Heartbeat/Outbox，并支持 exact replay | `WIRED` |
-| Node Acceptance / result artifact | 0102+GR06 将 production normal/checkpoint/Review 的 exact NODE Effect set、`ACCEPTED`、artifact 与 Attempt-bound Node Outbox 放入一个 UoW；response loss 只能 exact replay，Effect claim 必须重验同 lineage artifact。后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs。新 admission 拒绝空合同，startup 隔离 active legacy 空合同/缺 artifact和缺 exact artifact 的可投递 terminal legacy Effect。应用低层 ACCEPTED writer 已封口；pre-stage、legacy/internal graph create 与 direct SQL 仍存在 | `UNIFIED_APPLICATION_STORE_UOW_WIRED / PRESTAGE_COMPATIBILITY_PRESENT / SQL_DIRECT_BYPASS_PRESENT` |
+| Node Acceptance / result artifact | 0102+GR06 将 production normal/checkpoint/Review 的 exact NODE Effect set、`ACCEPTED`、artifact 与 Attempt-bound Node Outbox 放入一个 UoW；response loss 只能 exact replay，Effect claim 必须重验同 lineage artifact。后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs。新 admission 拒绝空合同，startup 隔离 active legacy 空合同/缺 artifact和缺 exact artifact 的可投递 terminal legacy Effect。public Graph create/transaction insert 与 standalone Effect stage 已删除；生产 Graph/Effect 只能经过各自私有 canonical UoW hook。SQLite 仍允许 orphan/raw SQL 且本轮没有新 migration/trigger | `UNIFIED_APPLICATION_STORE_UOW_WIRED / APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED / SQL_DIRECT_BYPASS_PRESENT` |
 | Completion policy | TaskGraph v1 可选 `ATOMIC_GRAPH_SUCCESS_V1` 必须显式 sink result；legacy 多 sink 无 result。PlanningGraphCompiler 默认 legacy，只有显式请求/重规划继承才 atomic | `B5_DURABLE_POLICY_WIRED_SHADOW` |
 | DAG 并发 | `atomic_graph_success_enabled` 与 `bounded_fanout_enabled` 独立默认 OFF，三处生产 composition 未启用。atomic 可单节点/串行 outer 封口；bounded 才允许 terminal-leaf 实际有界并发 | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW` |
 | 并行合流 | progress 用 `fanout_event_buffer_size` 个 semaphore slot（默认 32、非正值拒绝）限制在途事件，并为每个 child 预留独立 control 容量；size=1 慢消费者仍会反压 child，自发 `CancelledError` 也不会因 progress 满而丢失监督信号。fan-in 只在依赖 `ACCEPTED` 后执行 | `SHADOW_BOUNDED_FLOW` |
@@ -897,6 +901,7 @@ All ingress sources
 ```text
 Host canonical four-route data flow        WIRED
 Durable TaskGraph execution                PARTIAL
+TaskStore application write authority      SEALED / SQL DIRECT BYPASS PRESENT
 Scheduler governed admission               WIRED
 Internal governed admission                WIRED
 Conversation effects                       POST_ACCEPTANCE_DURABLE_EVENTUAL

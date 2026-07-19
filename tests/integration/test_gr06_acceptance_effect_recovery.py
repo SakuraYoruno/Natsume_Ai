@@ -11,6 +11,12 @@ import threading
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.contracts.agent_runtime.node_artifact import (
+    NODE_ARTIFACT_SCHEMA_VERSION,
+    artifact_digest,
+    build_task_result_artifact_ref,
+    canonical_artifact_json,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
@@ -25,6 +31,10 @@ from host_brain.persistence.task_repository import (
     TASK_STORE_LEASE_CONFLICT,
     TaskStoreError,
     build_outbox_payload_ref,
+)
+from tests.task_runtime_authority_fixtures import (
+    seed_raw_acceptance_effect_for_test,
+    seed_raw_task_graph_for_test,
 )
 
 
@@ -48,33 +58,41 @@ def _accepted_store(tmp_path: Path, clock: LockedClock) -> DurableTaskStore:
         request_id="gr06-effect-recovery"
     )
     assert migrated.success is True, migrated.as_dict()
+    store = DurableTaskStore(db_path, clock=clock)
+    graph = TaskGraph(
+        graph_id="graph-gr06-recovery",
+        root_work_order_id="work-order::graph-gr06-recovery",
+        revision=1,
+        planner_ref="planner://gr06/recovery",
+        status=TaskGraphStatus.ACTIVE,
+        created_at=clock(),
+        nodes=(
+            TaskNode(
+                node_id="node-gr06-recovery",
+                dependencies=(),
+                route="chat",
+                input_refs=("input://gr06/recovery",),
+                output_contract={"type": "object"},
+                retry_policy={"max_attempts": 1},
+                risk_level=1,
+                acceptance_criteria=(),
+                status=TaskNodeStatus.READY,
+                status_version=0,
+            ),
+        ),
+    )
+    seed_raw_task_graph_for_test(
+        store,
+        graph,
+        outbox=_event(
+            "TASK_GRAPH",
+            graph.graph_id,
+            0,
+            "TASK_GRAPH_CREATED",
+        ),
+    )
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref, status,
-                status_version, graph_json, source_kind, created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, ?, ?, 'ACTIVE', 1, '{}', 'CANONICAL', ?, ?)
-            """,
-            (
-                "graph-gr06-recovery",
-                1,
-                "work-order::graph-gr06-recovery",
-                "planner://gr06/recovery",
-                clock(),
-                clock(),
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO task_runtime_node(
-                graph_id, graph_revision, node_id, status, status_version,
-                node_json, created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, ?, 'ACCEPTED', 7, '{}', ?, ?)
-            """,
-            ("graph-gr06-recovery", 1, "node-gr06-recovery", clock(), clock()),
-        )
         conn.execute(
             """
             INSERT INTO task_runtime_attempt(
@@ -95,7 +113,92 @@ def _accepted_store(tmp_path: Path, clock: LockedClock) -> DurableTaskStore:
             ),
         )
         conn.commit()
-    return DurableTaskStore(db_path, clock=clock)
+    return store
+
+
+def _promote_raw_node_with_artifact(
+    store: DurableTaskStore,
+    *,
+    graph_id: str,
+    node_id: str,
+    attempt_id: str,
+    receipt_ref: str,
+    output_contract: dict[str, object],
+    clock: LockedClock,
+) -> None:
+    artifact_payload = {"receipt_ref": receipt_ref}
+    suffix = node_id.rsplit("-", 1)[-1]
+    with sqlite3.connect(store.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        row = conn.execute(
+            """
+            SELECT node_json FROM task_runtime_node
+            WHERE graph_id = ? AND graph_revision = 1 AND node_id = ?
+            """,
+            (graph_id, node_id),
+        ).fetchone()
+        node_payload = json.loads(str(row["node_json"]))
+        node_payload["status"] = TaskNodeStatus.ACCEPTED.value
+        node_payload["status_version"] = 7
+        conn.execute(
+            """
+            UPDATE task_runtime_node
+            SET status = 'ACCEPTED', status_version = 7,
+                node_json = ?, updated_ts_ms = ?
+            WHERE graph_id = ? AND graph_revision = 1 AND node_id = ?
+            """,
+            (
+                json.dumps(node_payload, sort_keys=True, separators=(",", ":")),
+                clock(),
+                graph_id,
+                node_id,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_idempotency_reservation(
+                reservation_id, business_scope, operation_fingerprint,
+                attempt_id, expires_ts_ms, status, status_version,
+                receipt_ref, created_ts_ms, updated_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, 'COMMITTED', 1, ?, ?, ?)
+            """,
+            (
+                f"reservation-gr06-recovery-{suffix}",
+                f"gr06-recovery:{suffix}",
+                "sha256:"
+                + hashlib.sha256(node_id.encode("utf-8")).hexdigest(),
+                attempt_id,
+                clock() + 60_000,
+                receipt_ref,
+                clock(),
+                clock(),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_node_artifact(
+                artifact_ref, schema_version, graph_id, graph_revision,
+                node_id, attempt_id, receipt_ref, output_contract_json,
+                output_contract_sha256, payload_json, payload_sha256,
+                created_ts_ms
+            ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                build_task_result_artifact_ref(graph_id, 1, node_id),
+                NODE_ARTIFACT_SCHEMA_VERSION,
+                graph_id,
+                node_id,
+                attempt_id,
+                receipt_ref,
+                canonical_artifact_json(output_contract),
+                artifact_digest(output_contract),
+                canonical_artifact_json(artifact_payload),
+                artifact_digest(artifact_payload),
+                clock(),
+            ),
+        )
+        conn.commit()
 
 
 def _event(
@@ -134,7 +237,8 @@ def test_gr06_effect_claim_is_single_winner_restart_safe_and_fenced(
     store = _accepted_store(tmp_path, clock)
     effect_id = "acceptance-effect://gr06/recovery/final-reply"
     payload = b'{"text":"accepted"}'
-    store.stage_acceptance_effect_intent(
+    seed_raw_acceptance_effect_for_test(
+        store,
         effect_id=effect_id,
         graph_id="graph-gr06-recovery",
         graph_revision=1,
@@ -146,6 +250,15 @@ def test_gr06_effect_claim_is_single_winner_restart_safe_and_fenced(
         payload=json.loads(payload.decode("utf-8")),
         payload_sha256="sha256:" + hashlib.sha256(payload).hexdigest(),
         idempotency_key="gr06:recovery:final-reply",
+    )
+    _promote_raw_node_with_artifact(
+        store,
+        graph_id="graph-gr06-recovery",
+        node_id="node-gr06-recovery",
+        attempt_id="attempt-gr06-recovery",
+        receipt_ref="worker-projection://gr06/recovery/final-reply",
+        output_contract={"type": "object"},
+        clock=clock,
     )
 
     barrier = threading.Barrier(2)
@@ -238,7 +351,8 @@ def test_gr06_atomic_graph_acceptance_effect_survives_process_restart(
             ),
         ),
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event(
             "TASK_GRAPH",
@@ -269,6 +383,16 @@ def test_gr06_atomic_graph_acceptance_effect_survives_process_restart(
             ),
         )
         conn.commit()
+
+    _promote_raw_node_with_artifact(
+        store,
+        graph_id=graph.graph_id,
+        node_id="node-gr06-atomic-restart",
+        attempt_id="attempt-gr06-atomic-restart",
+        receipt_ref="worker-projection://gr06/atomic-restart",
+        output_contract={"type": "accepted-chat"},
+        clock=clock,
+    )
 
     payload = b'{"text":"accepted after restart"}'
     effect_id = "acceptance-effect://gr06/atomic-restart/final-delivery"

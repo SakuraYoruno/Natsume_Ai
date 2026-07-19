@@ -40,6 +40,7 @@ from host_brain.persistence.terminal_reconciliation_query_repository import (
 from host_brain.task_runtime.terminal_state_reconciliation import (
     TerminalStateReconciliationService,
 )
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 from tests.contract.test_ne01_atomic_failure_bundle import (
     ATTEMPT_ID,
     GRAPH_ID,
@@ -203,7 +204,8 @@ def _simple_cancelled_store(
         root_work_order_id=f"work-order-{name}",
         planner_ref=f"planner://terminal-reconciliation/{name}",
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event(
             "TASK_GRAPH",
@@ -487,7 +489,8 @@ def test_active_and_created_graphs_are_not_inventoried_and_write_nothing(
         root_work_order_id="work-order-terminal-created",
         planner_ref="planner://terminal-reconciliation/created",
     )
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         created_graph,
         outbox=_event(
             "TASK_GRAPH",

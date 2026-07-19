@@ -171,6 +171,58 @@
       "revisioned_graph_outbox_boundary": "Migration 0095 adds nullable graph_revision while preserving the legacy governed outbox_id and idempotency_key byte-for-byte, so response-loss replay remains stable. SQLiteMigrationRunner registers deterministic natsume_sha256_hex; backfill accepts exact decision/intent/attempt/unique-revision authority, immutable HostCommand evidence for CREATED, or recomputation of the revision-bound command's legacy governed ID/key for ACTIVE and other non-attempt transitions. Conflicts or unresolved custom-producer rows abort the whole migration. New TASK_GRAPH payload_ref is taskstore://event/TASK_GRAPH/{graph_id}@{revision}/{version}; only durable codec/replay accepts the legacy ref and new insert/update triggers reject it. Readiness and receipt-loss gates freeze graph_revision as INTEGER/nullable/no-default/non-PK, payload trigger shape, revision delivery index, the unique partial TASK_STORE_OUTBOX source_ref index, and persisted bindings. Claim/head ordering uses aggregate_type + aggregate_id + graph_revision. New Runtime Events use graph_id@revision; immutable legacy journal rows are not rewritten and exact-revision queries resolve them through source Outbox. The unique source fence permits retry after legacy event append but before Outbox confirmation only when an existing event exactly reconstructs, preventing duplicate projection. For created_ts_ms=0, timestamp compatibility may apply to either the current revisioned or legacy unrevisioned candidate because both historical append paths may have substituted the clock; all fields other than timestamp remain exact. Scheduler snapshot Outbox loading is opt-in and defaults false; PlanningRecovery alone requests include_graph_outboxes=true in the same read transaction, uses the actual matching terminal payload_ref and preserves legacy refs. Revisioned synthesis is allowed only when an older or alternative Store omits the optional graph_outboxes extension; production DurableTaskStore supplies it when requested, and malformed, missing, or ambiguous present inventory fails closed. Operator and ReviewStore filter exact revision, and marker scans cover multi-revision histories. Migration 0098 narrowly permits GRAPH_CANCELLATION_EFFECT_RECONCILIATION as the only non-TASK_GRAPH revisioned aggregate; insert/update triggers require its positive graph_revision and payload ref to match the immutable Effect reconciliation case, trusted reads revalidate that signed/physical binding, and every other aggregate keeps graph_revision null.",
       "review_continuation_boundary": "Migration 0096 closes task-bound Review continuation without creating a second Review or Task truth. ReviewStore atomically queues CONSUMED, REJECTED, and EXPIRED decisions and validates create-time Task bindings; expiration, reconciliation, and claim processing isolate poison rows. Fixed-field secret-free authority is checked in the READY Attempt/Lease transaction and at first worker entry with exact owner/fence. Credentials cover budget time plus child TTL up to 24 hours but cannot replace the live hand-off. After first worker verification, Task Attempt/Lease owns an already-started blocking call; Review heartbeat loss cannot revoke external effects or authorize stale completion. PRE uses null Attempt and POST does not rerun the reviewed worker. Denial refs, legacy POST claim repair, and review.operator/review:decide identity are exact. Migration 0097 makes all node grants atomic and unique across processes. Real production canary remains NOT_RUN.",
       "task_runtime_lifecycle_boundary": "Any incomplete activation rollback or aclose quiescence returns TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED, locks bind and activate, and permits only aclose retry. Rollback unbinds only after cancellation/Review workers and coordinator cleanup all succeed; GovernedRuntimeGroup retains children that fail to close. Coordinator admission close, drain, or aclose failure keeps all Stores open. Outbox drain and infrastructure close begin only after Coordinator and both continuation workers are quiescent.",
+      "application_write_authority": {
+        "status": "APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED",
+        "physical_database_boundary": "SQL_DIRECT_BYPASS_PRESENT",
+        "removed_public_durable_task_store_methods": [
+          "create_graph",
+          "insert_graph_in_transaction",
+          "stage_acceptance_effect_intent"
+        ],
+        "graph_hook": {
+          "caller": "HostCommandRepository._admit_normalized",
+          "hook": "_insert_graph_from_host_command_in_transaction",
+          "static_call_count": 1,
+          "same_uow": true,
+          "graph_and_node_insert_sql": "PRIVATE_GRAPH_HOOK_ONLY"
+        },
+        "effect_hook": {
+          "hook": "_stage_acceptance_effect_intent_in_transaction",
+          "canonical_uows": [
+            "transition_graph_and_stage_acceptance_effects",
+            "commit_node_acceptance",
+            "complete_parallel_graph_success"
+          ],
+          "static_call_count": 6,
+          "uses_caller_connection": true,
+          "effect_insert_sql": "PRIVATE_EFFECT_HOOK_ONLY"
+        },
+        "test_fixture": "EXPLICIT_RAW_ORPHAN_STATE_WITHOUT_HOST_COMMAND_JOURNAL_PRODUCTION_IMPORT_FORBIDDEN",
+        "sqlite_enforcement": {
+          "raw_orphan_sql": "PRESENT",
+          "migration_added_this_slice": false,
+          "trigger_added_this_slice": false,
+          "physical_single_writer_claim": "NOT_MADE"
+        },
+        "validation": {
+          "authority_and_structure_passed": 19,
+          "host_command_admission_passed": 1,
+          "nle_operation_heartbeat_passed": 77,
+          "acceptance_effect_passed": 15,
+          "parallel_settlement_atomic_passed": 45,
+          "cancellation_initial": "29_PASSED_1_FIXTURE_FAILED",
+          "cancellation_corrected_case_passed": 1,
+          "integration_initial": "46_PASSED_3_FIXTURE_FAILED",
+          "integration_corrected_cases_passed": 3,
+          "terminal_passed": 32,
+          "third_fixture_node_risk_level": "REPRODUCIBLE_ON_ORIGIN_DEV_AND_FIXED",
+          "final_key_regression_passed": 26,
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "full_architecture_static_gate": "FAIL_GATES_1_6_10_NOT_PASS",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_NE01_REMAINS_IN_PROGRESS"
+      },
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
         "host_brain/task_runtime/coordinator.py",
@@ -256,6 +308,8 @@
         "tests/unit/test_ne01_review_ingress_lifecycle_regressions.py",
         "tests/security/test_internal_scheduler_ingress_authority.py",
         "host_brain/persistence/task_repository.py",
+        "tests/contract/test_ne01_task_store_write_authority.py",
+        "tests/task_runtime_authority_fixtures.py",
         "host_brain/persistence/task_budget_usage_store.py",
         "host_brain/persistence/task_operation_checkpoint_store.py",
         "host_brain/persistence/task_dag_state_store.py",

@@ -26,6 +26,7 @@ from host_brain.persistence.task_repository import (
     build_operation_fingerprint,
     build_outbox_payload_ref,
 )
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 
 
 NOW = 1_910_000_000_000
@@ -109,7 +110,8 @@ def _running_store(tmp_path: Path) -> tuple[DurableTaskStore, dict[str, Any]]:
     assert migration.success is True, migration.as_dict()
     store = DurableTaskStore(db_path, clock=MutableClock())
     graph = _graph()
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event("TASK_GRAPH", GRAPH_ID, 0, "TASK_GRAPH_CREATED"),
     )

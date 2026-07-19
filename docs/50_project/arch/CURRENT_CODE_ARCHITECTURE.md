@@ -3,8 +3,8 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.19
-核对日期：2026-07-18
+版本：v5.20
+核对日期：2026-07-19
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
@@ -20,7 +20,7 @@
 | Host `chat/skill/delegate/plan` | `PENTEST_READONLY_DELEGATE_WIRED / UNIVERSAL_RUNTIME_INCOMPLETE` | 四条路线进入 `GovernedHostRuntime`，Executive 对它们 fail closed。D9 已冻结认证 ingress→Governor→HostCommand lineage；D10 仅让 `pentest_agent` 消费带完整 node grant/Attempt/Lease/Fence 的 invocation，并在调用前重验 node grant；其他 Delegate target 在 admission 前 fail closed |
 | Scheduler | `WIRED` | Clock/Manual occurrence 已贯通 `WorkOrderV3 + BudgetPolicy + child grant + Review + Verification + Acceptance + Receipt` |
 | Internal Agent | `WIRED` | v2 只在 ingress/executor 兼容边界存在；canonical admission 使用 `WorkOrderV3 + BudgetPolicy + delegate:agent_runtime`，并验证 child grant、Review、Verification、Acceptance、Receipt 与 replay |
-| 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW，successor input 与 Effect claim 均重验 exact artifact；startup 隔离活动 legacy 空合同/缺 artifact及缺 artifact 的可投递 terminal Effect。应用 ACCEPTED writer 和完成后 standalone Effect insert 已封口；按 scope 的 pre-stage、legacy/internal graph create 与 direct SQL 仍是兼容/物理旁路。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
+| 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW。TaskStore 的 public graph/effect staging 写入 API 已删除；生产 Graph 只能从 HostCommand admission 同一 UoW 进入，Effect 只能从 canonical Acceptance UoW 进入。应用 Python 写 authority 定级为 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED`，但 SQLite 无新 migration/trigger，raw/orphan SQL 仍可绕过，因此同时保留 `SQL_DIRECT_BYPASS_PRESENT`。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
 | 通用 PlanningSearch | `PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService、shadow benchmark 合同与 context-owned compiler 已存在；D16 落下 Code 动态纯 shadow catalog，D17/D18 增加实验专用 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 双 worktree、`VERIFIED_CLEAN` 和 0106 preregistered durable ledger；D19 只增加预注册冻结 pytest argv 的受控子进程证据，尚无生产 domain cutover 或收益结论 |
 | Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
 | Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
@@ -156,7 +156,11 @@ operation reservation 建立后，`DurableNodeExecutionRuntime` 会创建 `Durab
 
 0102 `task_runtime_node_artifact` 现在是 Node 结果权威，GR06 NODE Effect 也已并入 canonical `commit_node_acceptance()`。normal、COMMITTED checkpoint continuation 与 Review approve 在同一个 SQLite writer transaction 中冻结 exact NODE Effect 集（可为空）、写 immutable artifact、推进 Node `ACCEPTED` 并追加绑定 exact Attempt 的 Node Outbox；任何 effect set、artifact、CAS、judgement 或 Outbox 漂移整笔回滚，响应丢失只能逐项重验后精确 replay。Effect dispatcher 在 0102 存在时还会命中并重新验证同 graph/revision/node/Attempt 的 artifact，旧 `SUCCEEDED Attempt` 不能借用另一个 Attempt 的 Acceptance。compiler 生成的 dependency result refs 不能由 planner 伪造，READY/执行/恢复前只解析同 revision 的全部前驱 artifact，`FrozenNodeInput` 再校验 ref 集合与 payload digest。新 HostCommand/Task admission 拒绝空 `output_contract`；`ProcessTaskRuntimeContainer` 在 recovery 前校验 0102 asset/schema checksum，并把非终态 active legacy 空合同/缺 artifact，以及缺 exact artifact 的可投递 terminal legacy Effect 隔离为 reconciliation required。
 
-应用 Store 的 public `transition_node(ACCEPTED)` 在 0102 存在时已要求有效 artifact，生产三条 acceptance 路径不再拥有第二 writer。但这仍不是数据库物理全封闭：Acceptance 前 standalone Effect pre-stage 仍是兼容入口，低层 `create_graph()` 仍服务 legacy/internal 状态构造，SQL 也没有跨 Effect/artifact/Node/Outbox 的强制 trigger。准确定级是 `UNIFIED_APPLICATION_STORE_UOW_WIRED / PRESTAGE_COMPATIBILITY_PRESENT / SQL_DIRECT_BYPASS_PRESENT`，不能据此宣称一般 recovery 或 production fan-out 完成。
+应用 Store 的 public `transition_node(ACCEPTED)` 在 0102 存在时已要求有效 artifact，生产三条 acceptance 路径不再拥有第二 writer。本轮进一步删除 `DurableTaskStore.create_graph`、`insert_graph_in_transaction`、`stage_acceptance_effect_intent` 三个 public 入口。唯一生产 Graph hook 是 `_insert_graph_from_host_command_in_transaction()`：它仅由 `HostCommandRepository._admit_normalized()` 调用 1 次，并借用同一 admission transaction。唯一 Effect INSERT hook 是 `_stage_acceptance_effect_intent_in_transaction()`：它仅由 `transition_graph_and_stage_acceptance_effects`、`commit_node_acceptance`、`complete_parallel_graph_success` 三个 canonical UoW 使用，共 6 个生产调用点。Graph/Node INSERT SQL 只存在于前一 hook，Acceptance Effect INSERT SQL 只存在于后一 hook。
+
+这个结果只能定级为 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED / SQL_DIRECT_BYPASS_PRESENT`。应用 Python 生产调用面已封口，但 SQLite 仍允许 raw/orphan SQL 构造无 `host_command_journal` 的 Graph/Node/Effect，本轮没有增加 migration 或 trigger。`tests/task_runtime_authority_fixtures.py` 是显式 test-only raw/orphan fixture，不得被引用为 canonical HostCommand admission 或生产单写的证据；也不能据此宣称一般 recovery、production fan-out 或 NE-01 已完成。
+
+本轮定向证据不做重叠汇总，分组如下：authority/structure `19 passed`；HostCommand `1 passed`；NLE/operation/heartbeat `77 passed`；acceptance-effect `15 passed`；parallel/settlement/atomic `45 passed`；terminal classification `32 passed`。Cancellation 首跑为 `29 passed + 1 fixture failed`，修正 fixture 后该 case `1 passed`；integration 首跑为 `46 passed + 3 fixture failed`，修正后 3 个 cases 分别通过。第三个 fixture 的 `node_risk_level` 断点已在 `origin/dev` 复现后修正。波次 integration 为 `NOT_RUN_PER_WAVE_POLICY`；full architecture static Gate 仍为 `FAIL [1,6,10]`。
 
 Coordinator 现在有两个独立实验能力：`atomic_graph_success_enabled` 决定进程是否能执行 frozen atomic policy，`bounded_fanout_enabled` 决定 scheduler 多节点批次是否实际并发；二者构造默认值均为 `false`，Host、Scheduler、Internal 三处生产 composition 均未传入启用值。Application 在 `repository.admit` 前检查 atomic capability、node-grant service 与 parent grant，任一缺失即拒绝且不写 durable admission。Coordinator 再要求 `node_grant_refs` 精确覆盖整个 admitted Graph。atomic 图即使是单节点或顺序执行也使用 deferred child + outer terminal authority；terminal-leaf 实际并行还必须另开 bounded fan-out。progress buffer/控制槽的反压语义保持 B4 合同。
 

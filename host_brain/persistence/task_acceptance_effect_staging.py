@@ -39,56 +39,6 @@ from host_brain.persistence.task_store_types import (
 class TaskAcceptanceEffectStagingMixin:
     """Normalize and stage acceptance effects inside owner transactions."""
 
-    def stage_acceptance_effect_intent(
-        self,
-        *,
-        effect_id: str,
-        graph_id: str,
-        graph_revision: int,
-        node_id: str,
-        attempt_id: str,
-        commit_scope: AcceptanceEffectCommitScope | str,
-        effect_type: str,
-        payload_ref: str,
-        payload: Mapping[str, Any],
-        payload_sha256: str,
-        idempotency_key: str,
-    ) -> dict[str, Any]:
-        """Stage one immutable effect intent with exact replay semantics.
-
-        Staging does not authorize dispatch.  ``claim_acceptance_effect_intent``
-        independently verifies the durable attempt and acceptance scope.
-        """
-
-        self.assert_acceptance_effect_intent_ready()
-        spec = self._normalize_acceptance_effect_intent_spec(
-            AcceptanceEffectIntentSpec(
-                effect_id=effect_id,
-                graph_id=graph_id,
-                graph_revision=graph_revision,
-                node_id=node_id,
-                attempt_id=attempt_id,
-                commit_scope=commit_scope,
-                effect_type=effect_type,
-                payload_ref=payload_ref,
-                payload=payload,
-                payload_sha256=payload_sha256,
-                idempotency_key=idempotency_key,
-            )
-        )
-        ts_ms = self._now()
-        with self._transaction() as conn:
-            self._assert_graph_not_cancelling(
-                conn,
-                graph_id=spec.graph_id,
-                graph_revision=spec.graph_revision,
-            )
-            return self._stage_acceptance_effect_intent_in_transaction(
-                conn,
-                spec,
-                ts_ms=ts_ms,
-            )
-
     def transition_node_and_stage_acceptance_effects(
         self,
         graph_id: str,

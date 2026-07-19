@@ -46,6 +46,7 @@ from host_brain.persistence.task_repository import (
     TaskStoreError,
     build_outbox_payload_ref,
 )
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 
 
 NOW = 1_920_000_000_000
@@ -138,7 +139,8 @@ def _store(
     )
     assert migration.success is True, migration.as_dict()
     store = DurableTaskStore(db_path, clock=Clock())
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(graph_id),
         outbox=_event("TASK_GRAPH", graph_id, 0, "TASK_GRAPH_CREATED"),
     )
@@ -1329,7 +1331,8 @@ def test_latest_parallel_decision_scans_only_the_exact_graph_revision(
 ) -> None:
     graph_id = "graph-parallel-multi-revision-marker"
     store = _store(tmp_path, graph_id)
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(graph_id, revision=2),
         outbox=_event(
             "TASK_GRAPH",

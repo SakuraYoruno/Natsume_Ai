@@ -43,6 +43,7 @@ from tests.contract.test_ne01_parallel_store_settlement import (
     BUDGET_ID,
     _budget_settlement_fixture,
 )
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 
 
 def _active_budget(store, *, budget_id: str = "budget-terminal-reconciliation") -> str:
@@ -115,7 +116,8 @@ def _fresh_graph_store(tmp_path: Path) -> DurableTaskStore:
     )
     assert migration.success is True, migration.as_dict()
     store = DurableTaskStore(db_path, clock=MutableClock())
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(),
         outbox=_event(
             "TASK_GRAPH",
@@ -556,7 +558,8 @@ def test_incremental_inventory_advances_past_already_persisted_batch(
     second_payload["planner_ref"] = "planner://ne01/terminal-pagination"
     second_payload["nodes"][0]["node_id"] = "node-terminal-pagination"
     second_graph = type(_graph()).from_mapping(second_payload)
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         second_graph,
         outbox=_event(
             "TASK_GRAPH",
@@ -613,7 +616,8 @@ def test_small_inventory_limit_scans_past_healthy_terminal_prefix(
         payload["planner_ref"] = f"planner://ne01/healthy-prefix/{index:02d}"
         payload["nodes"][0]["node_id"] = f"node-healthy-prefix-{index:02d}"
         graph = type(_graph()).from_mapping(payload)
-        store.create_graph(
+        seed_raw_task_graph_for_test(
+            store,
             graph,
             outbox=_event(
                 "TASK_GRAPH",

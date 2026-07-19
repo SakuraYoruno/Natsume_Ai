@@ -36,6 +36,7 @@ from tests.unit.test_ne01_terminal_reconciliation_classification import (
     _active_budget,
 )
 from tests.fakes.obs_projection_runtime import compose_durable_obs_projection_runtime
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 
 
 def test_dedicated_obs_app_reads_terminal_reconciliation_query_only(
@@ -191,7 +192,8 @@ def test_http_challenge_bytes_round_trip_through_signed_terminal_repair(
                 ),
             )
             graph = _graph()
-            store.create_graph(
+            seed_raw_task_graph_for_test(
+                store,
                 graph,
                 outbox=_event(
                     "TASK_GRAPH",

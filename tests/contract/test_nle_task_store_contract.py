@@ -62,6 +62,7 @@ from host_brain.persistence.task_repository import (
     build_reconciliation_attestation_binding,
     build_operation_fingerprint,
 )
+from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 from host_brain.agent_runtime.verification_policy import (
     VERIFICATION_EVIDENCE_REQUIRED,
     VERIFICATION_REQUIRED_NOT_PASSED,
@@ -239,8 +240,9 @@ def _migrated_store(
     )
 
 
-def _create_graph(store: DurableTaskStore, *, graph_id: str = "graph-1") -> None:
-    store.create_graph(
+def _seed_raw_graph(store: DurableTaskStore, *, graph_id: str = "graph-1") -> None:
+    seed_raw_task_graph_for_test(
+        store,
         _graph(graph_id=graph_id),
         outbox=_event("TASK_GRAPH", graph_id, 0, "TASK_GRAPH_CREATED"),
     )
@@ -362,7 +364,8 @@ def _advance_node_to_waiting_acceptance(store: DurableTaskStore) -> None:
 def test_gr03a_attempt_claim_requires_every_dependency_to_be_accepted(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path, name="dependency-gate.sqlite3")
     graph = _dependency_graph()
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event("TASK_GRAPH", graph.graph_id, 0, "TASK_GRAPH_CREATED"),
     )
@@ -399,7 +402,8 @@ def test_t_nle_08_required_verification_non_pass_cannot_reach_verified_or_accept
     status: VerificationStatus,
 ) -> None:
     store = _migrated_store(tmp_path)
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(node_status=TaskNodeStatus.VERIFYING),
         outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
     )
@@ -433,7 +437,8 @@ def test_t_nle_08_required_verification_non_pass_cannot_reach_verified_or_accept
 
 def test_t_nle_08_verified_transition_requires_pass_result_and_bound_evidence(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path)
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(node_status=TaskNodeStatus.VERIFYING),
         outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
     )
@@ -478,7 +483,8 @@ def test_t_nle_08_verified_transition_requires_pass_result_and_bound_evidence(tm
 
 def test_t_nle_09_accepted_transition_requires_acceptance_judgement_and_evidence(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path)
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(node_status=TaskNodeStatus.WAITING_ACCEPTANCE_REVIEW),
         outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
     )
@@ -786,7 +792,7 @@ def test_t_nle_06_ed25519_runtime_is_public_key_only_rotatable_and_dependency_fa
 
 def test_t_nle_06_competing_expected_version_cas_has_one_winner_and_one_outbox(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
 
     def transition(label: str) -> str:
         contender = DurableTaskStore(store.db_path, clock=store._clock)
@@ -828,7 +834,7 @@ def test_t_nle_06_wrong_or_duplicate_outbox_rolls_back_state_transition(tmp_path
         "TASK_GRAPH_CREATED",
         idempotency_key="shared-outbox-key",
     )
-    store.create_graph(_graph(), outbox=create_event)
+    seed_raw_task_graph_for_test(store, _graph(), outbox=create_event)
 
     with pytest.raises(TaskStoreError) as wrong_version:
         store.transition_node(
@@ -880,7 +886,8 @@ def test_t_nle_06_graph_transition_rejects_outbox_from_another_revision(
     )
     graph_id = "graph-revision-boundary"
     for revision in (1, 2):
-        store.create_graph(
+        seed_raw_task_graph_for_test(
+            store,
             _graph(graph_id=graph_id, revision=revision),
             outbox=_event(
                 "TASK_GRAPH",
@@ -952,7 +959,7 @@ def test_t_nle_06_outbox_metadata_is_store_timed_durable_bounded_and_atomic(
     )
     for message in invalid_messages:
         with pytest.raises(TaskStoreError) as invalid:
-            store.create_graph(_graph(), outbox=message)
+            seed_raw_task_graph_for_test(store, _graph(), outbox=message)
         assert invalid.value.reason_code == TASK_STORE_INVALID
         with sqlite3.connect(str(store.db_path)) as conn:
             assert conn.execute("SELECT COUNT(*) FROM task_runtime_graph").fetchone() == (0,)
@@ -964,7 +971,7 @@ def test_t_nle_06_wrong_event_rolls_back_node_attempt_lease_operation_recovery_a
 ) -> None:
     private_key, verifier = _proof_authority()
     store = _migrated_store(tmp_path, verifier=verifier)
-    _create_graph(store)
+    _seed_raw_graph(store)
 
     with pytest.raises(TaskStoreError) as node_event:
         store.transition_node(
@@ -1250,7 +1257,7 @@ def test_t_nle_06_wrong_event_rolls_back_node_attempt_lease_operation_recovery_a
 
 def test_t_nle_06_lease_competition_restart_recovery_and_fencing(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
 
     with pytest.raises(TaskStoreError) as competing_attempt:
@@ -1370,7 +1377,7 @@ def test_t_nle_06_lease_competition_restart_recovery_and_fencing(tmp_path: Path)
 
 def test_t_nle_06_direct_expired_lease_takeover_uses_new_fencing_token(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     first = store.acquire_lease(
         "attempt-1",
@@ -1401,7 +1408,7 @@ def test_t_nle_06_trusted_clock_prevents_backdated_lease_renew_and_commit(
 ) -> None:
     clock = MutableClock(100)
     store = _migrated_store(tmp_path, clock=clock)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",
@@ -1535,7 +1542,7 @@ def test_t_nle_06_repeated_business_fingerprint_has_one_reservation(tmp_path: Pa
         parameters={"digest": "sha256:abc", "path": "a.py"},
     )
     assert fingerprint_a == fingerprint_b
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store, operation_fingerprint=fingerprint_a)
     lease = store.acquire_lease(
         "attempt-1",
@@ -1634,7 +1641,7 @@ def test_t_nle_06_idempotency_recovery_reacquire_is_proof_gated_and_fenced(
 ) -> None:
     private_key, verifier = _proof_authority()
     store = _migrated_store(tmp_path, verifier=verifier)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease_a = store.acquire_lease(
         "attempt-1",
@@ -2019,7 +2026,7 @@ def test_t_nle_06_expired_reservation_commit_persists_recovery_required_first(
     tmp_path: Path,
 ) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",
@@ -2078,7 +2085,7 @@ def test_t_nle_06_recovery_can_commit_only_with_explicit_downstream_receipt(
 ) -> None:
     private_key, verifier = _proof_authority()
     store = _migrated_store(tmp_path, verifier=verifier)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease_a = store.acquire_lease(
         "attempt-1",
@@ -2247,7 +2254,7 @@ def test_t_nle_06_durable_reconciliation_action_status_matrix_rejects_tamper(
         name=f"action-status-{action.lower()}.sqlite3",
         verifier=verifier,
     )
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",
@@ -2389,7 +2396,7 @@ def test_graph_bound_budget_creation_rejects_non_executable_graph_without_writes
     terminal_path: tuple[TaskGraphStatus, ...],
 ) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     _transition_graph_path(store, *terminal_path)
     terminal_status = terminal_path[-1].value
     budget_id = f"budget-create-{terminal_status.lower()}"
@@ -2450,7 +2457,7 @@ def test_graph_bound_budget_activation_rejects_non_executable_graph_without_writ
     terminal_path: tuple[TaskGraphStatus, ...],
 ) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     terminal_status = terminal_path[-1].value
     budget_id = f"budget-activate-{terminal_status.lower()}"
     store.create_budget_reservation(
@@ -2516,7 +2523,7 @@ def test_terminal_graph_budget_guard_does_not_block_settlement_or_unbound_budget
     tmp_path: Path,
 ) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     graph_budget_id = "budget-terminal-settlement"
     store.create_budget_reservation(
         BudgetReservation(
@@ -2664,7 +2671,7 @@ def test_t_nle_06_budget_consumption_and_denied_overage_are_reconcilable(tmp_pat
 
 def test_t_nle_06_cancellation_is_cas_guarded_and_emits_matching_outbox(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     with pytest.raises(TaskStoreError) as generic_cancel:
         store.transition_node(
             "graph-1",
@@ -2705,7 +2712,8 @@ def test_ne01_retry_deadline_invariant_and_backoff_cancellation(tmp_path: Path) 
     assert migrated.success is True, migrated.as_dict()
     store = DurableTaskStore(db_path, clock=MutableClock(200))
     graph = _graph(node_status=TaskNodeStatus.RETRY_PENDING)
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         graph,
         outbox=_event("TASK_GRAPH", graph.graph_id, 0, "TASK_GRAPH_CREATED"),
     )
@@ -2763,7 +2771,7 @@ def test_t_nle_06_cancel_fences_workers_waits_for_signed_reconciliation_then_con
         name=f"cancel-{action.lower()}.sqlite3",
         verifier=verifier,
     )
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",
@@ -2918,7 +2926,8 @@ def test_t_nle_06_cancel_fences_workers_waits_for_signed_reconciliation_then_con
 
 def test_t_nle_06_waiting_approval_uses_frozen_direct_cancel_transition(tmp_path: Path) -> None:
     store = _migrated_store(tmp_path)
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         _graph(node_status=TaskNodeStatus.WAITING_APPROVAL),
         outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
     )
@@ -2947,7 +2956,7 @@ def test_t_nle_06_direct_cancel_closes_orphan_active_lease_for_terminal_attempt(
         tmp_path,
         name=f"terminal-direct-cancel-{terminal_status.value.lower()}.sqlite3",
     )
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",
@@ -3032,7 +3041,7 @@ def test_t_nle_06_startup_cleans_terminal_attempt_orphan_lease_and_unresolved_bl
     tmp_path: Path,
 ) -> None:
     store = _migrated_store(tmp_path, name="terminal-startup-cleanup.sqlite3")
-    _create_graph(store)
+    _seed_raw_graph(store)
     _create_attempt(store)
     lease = store.acquire_lease(
         "attempt-1",
@@ -3154,7 +3163,7 @@ def test_t_nle_06_startup_recovery_cancels_created_and_expired_cancel_requested(
     tmp_path: Path,
 ) -> None:
     created_store = _migrated_store(tmp_path, name="created-cancel.sqlite3")
-    _create_graph(created_store)
+    _seed_raw_graph(created_store)
     _create_attempt(created_store)
     first = created_store.recover_startup(recovery_id="boot-created")
     assert first.cancelled_attempt_ids == ("attempt-1",)
@@ -3166,7 +3175,7 @@ def test_t_nle_06_startup_recovery_cancels_created_and_expired_cancel_requested(
     assert len(created_store.list_pending_outbox()) == outbox_before_repeat
 
     requested_store = _migrated_store(tmp_path, name="requested-cancel.sqlite3")
-    _create_graph(requested_store)
+    _seed_raw_graph(requested_store)
     _create_attempt(requested_store)
     lease = requested_store.acquire_lease(
         "attempt-1",
@@ -3213,7 +3222,7 @@ def test_t_nle_06_durable_json_and_contract_corruption_fail_closed_without_overw
     tmp_path: Path,
 ) -> None:
     store = _migrated_store(tmp_path)
-    _create_graph(store)
+    _seed_raw_graph(store)
     baseline_outbox = len(store.list_pending_outbox())
     with sqlite3.connect(str(store.db_path)) as conn:
         conn.execute(
@@ -3366,7 +3375,8 @@ def test_t_nle_06_durable_json_rejects_non_finite_numbers_on_write_and_read(
         float(public_v1_graph.nodes[0].output_contract["non_finite"])
     )
     with pytest.raises(TaskStoreError) as rejected_write:
-        store.create_graph(
+        seed_raw_task_graph_for_test(
+            store,
             public_v1_graph,
             outbox=_event("TASK_GRAPH", "graph-1", 0, "TASK_GRAPH_CREATED"),
         )
@@ -3376,7 +3386,7 @@ def test_t_nle_06_durable_json_rejects_non_finite_numbers_on_write_and_read(
         assert conn.execute("SELECT COUNT(*) FROM task_runtime_node").fetchone() == (0,)
         assert conn.execute("SELECT COUNT(*) FROM task_runtime_outbox").fetchone() == (0,)
 
-    _create_graph(store)
+    _seed_raw_graph(store)
     corrupt_payload = _graph().to_dict()
     corrupt_payload["nodes"][0]["output_contract"]["non_finite"] = non_finite
     non_standard_json = json.dumps(
@@ -3425,7 +3435,8 @@ def test_ne01_optional_result_authority_preserves_legacy_graph_wire_and_store_sh
     assert restored.to_dict() == legacy_payload
 
     store = _migrated_store(tmp_path, name="legacy-result-authority.sqlite3")
-    store.create_graph(
+    seed_raw_task_graph_for_test(
+        store,
         restored,
         outbox=_event(
             "TASK_GRAPH",

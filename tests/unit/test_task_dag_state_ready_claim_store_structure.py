@@ -19,8 +19,7 @@ from host_brain.persistence.task_retry_mutation_store import (
 
 
 DAG_STATE_METHODS = (
-    "create_graph",
-    "insert_graph_in_transaction",
+    "_insert_graph_from_host_command_in_transaction",
     "insert_outbox_in_transaction",
     "get_graph",
     "list_graphs",
@@ -173,24 +172,19 @@ def test_dag_state_and_ready_claim_mixins_borrow_store_state() -> None:
         )
 
 
-def test_create_graph_keeps_graph_nodes_and_outbox_in_one_transaction() -> None:
-    create = _method_ast(TaskDagStateStoreMixin, "create_graph")
-    transactions = _transaction_blocks(create)
-    assert len(transactions) == 1
-    _assert_first_arg_is_conn(create, {"insert_graph_in_transaction"})
-    insert_call = _named_calls(create, "insert_graph_in_transaction")[0]
-    assert id(insert_call) in {id(node) for node in ast.walk(transactions[0])}
-
+def test_graph_insertion_is_private_and_borrows_host_command_transaction() -> None:
+    assert "create_graph" not in TaskDagStateStoreMixin.__dict__
+    assert not hasattr(task_repository.DurableTaskStore, "create_graph")
     insert_graph = _method_ast(
         TaskDagStateStoreMixin,
-        "insert_graph_in_transaction",
+        "_insert_graph_from_host_command_in_transaction",
     )
     assert [arg.arg for arg in insert_graph.args.args[:2]] == ["self", "conn"]
     assert _transaction_blocks(insert_graph) == []
     _assert_execute_calls_use_conn(insert_graph)
     _assert_first_arg_is_conn(insert_graph, {"insert_outbox_in_transaction"})
     insert_source = inspect.getsource(
-        TaskDagStateStoreMixin.insert_graph_in_transaction
+        TaskDagStateStoreMixin._insert_graph_from_host_command_in_transaction
     )
     assert "not conn.in_transaction" in insert_source
     graph_insert = insert_source.index("INSERT INTO task_runtime_graph")
