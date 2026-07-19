@@ -218,7 +218,7 @@
           "third_fixture_node_risk_level": "REPRODUCIBLE_ON_ORIGIN_DEV_AND_FIXED",
           "final_key_regression_passed": 26,
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
-          "full_architecture_static_gate": "FAIL_GATES_1_6_NOT_PASS",
+          "full_architecture_static_gate_at_slice_completion": "FAIL_GATES_1_6_10_NOT_PASS",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
         "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_NE01_REMAINS_IN_PROGRESS"
@@ -445,7 +445,7 @@
       "business_layer_sqlite_authority": {
         "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
         "baseline": "ORIGIN_DEV_FAIL_GATES_1_6_10",
-        "current_full_architecture_static_gate": "FAIL_GATES_1_6",
+        "current_full_architecture_static_gate": "FAIL_GATE_1",
         "runtime_context_0112": {
           "readiness_owner": "RuntimeEventRepository",
           "application_surface": "RuntimeEventStore readiness port",
@@ -481,9 +481,34 @@
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
         "remaining_static_gaps": [
-          "Gate 1 application/composition/persistence target-layer SCC",
-          "Gate 6 projection daemon app lifecycle owner"
+          "Gate 1 application/composition/persistence target-layer SCC"
         ]
+      },
+      "obs_projection_lifecycle_authority": {
+        "status": "GATE_6_PASS_CONTINUOUS_SLO_INCOMPLETE_NE01_STILL_IN_PROGRESS",
+        "production_start_api": "ObsApplicationContainer.start_projection_jobs",
+        "production_start_call_count": 1,
+        "production_start_owner": "host_brain/app/obs_fastapi_app.py nested ASGI lifespan",
+        "ownership_sequence": "PORTS_BUNDLE_ATOMIC_SINGLE_USE_CLAIM_COMPOSE_APP_LOCAL_DAEMON_START_YIELD",
+        "shutdown_sequence": "STOP_JOIN_INFLIGHT_FENCE_EXACT_LEADER_LEASE_RELEASE_CLOSE_OWNED_SQLITE_CLEAR_STATE",
+        "failed_close_retry": "STOP_TIMEOUT_OR_ROLLBACK_CLOSE_FAILURE_RETAINS_EXACT_CONTAINER_AND_PORTS",
+        "shared_bundle_behavior": "FAIL_CLOSED_INCLUDING_DATACLASSES_REPLACE_DERIVED_BUNDLE",
+        "independent_ports_apps": "ISOLATED",
+        "module_global_daemon": "ABSENT",
+        "migration_added_this_slice": false,
+        "validation": {
+          "obs_app_initial": "13_PASSED_1_TEST_FIXTURE_FAILED_OLD_START_MONKEYPATCH",
+          "corrected_fixture_case_passed": 1,
+          "final_lifecycle_key_passed": 12,
+          "daemon_cadence_shutdown_serialization_start_single_flight_passed": 4,
+          "final_targeted_passed": 19,
+          "batch_overlap": "BATCHES_OVERLAP_DO_NOT_SUM",
+          "gate_6_issues": [],
+          "full_architecture_static_gate": "FAIL_GATE_1_NOT_PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "known_boundary": "UNCAUGHT_BACKGROUND_RENEW_OR_OTHER_DAEMON_EXIT_NOT_YET_DIRECTLY_EXPOSED_BY_HEALTH_RUNNING_LAST_FAILURE_CONTINUOUS_SLO_INCOMPLETE"
       },
       "named_from_process_services_import_inventory": {
         "before_modules": 47,
@@ -521,7 +546,7 @@
         "structure_and_single_clock_passed": 22,
         "batch_overlap": "OVERLAP_4_TEST_AW08_TRIBE_DEPENDENCY_DIRECTION_DEDUPLICATED_161",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
-        "full_architecture_static_gate": "FAIL_GATES_1_6_NOT_PASS"
+        "full_architecture_static_gate": "FAIL_GATE_1_NOT_PASS"
       },
       "boundary": "45_MODULES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_51_CONSUMER_MODULES_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
       "evidence_refs": [

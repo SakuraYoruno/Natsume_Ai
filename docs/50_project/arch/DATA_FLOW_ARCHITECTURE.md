@@ -774,7 +774,23 @@ Host 请求经 [context_application.py](../../../host_brain/runtime/context_appl
 
 0113 Service Catalog 的应用数据流现在通过 [rollout_authority.py](../../../host_brain/service_catalog/rollout_authority.py) 中的 repository Protocol 进入 [SQLiteServiceCatalogRolloutRepository](../../../host_brain/persistence/service_catalog_rollout_repository.py)。authority 只拥有合同、Protocol 和 Guardian Observer；具体 SQLite 连接、SQL 与事务归 persistence repository。Host 生产入口以 ENFORCE 为默认目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，每阶段通过真实 HTTP Host/Guardian identity 后才推进 head，中间 listener 关闭后才进入下一阶段。Pending health 必须同时绑定 exact operation ID digest、snapshot、stage 与 candidate；另一个健康 listener 不得替它推进 head。`REGISTERED` 崩溃以同 operation ID 续跑；stop 失败或 listener 未停时维持 `STARTING` 等待对账，绝不伪造 `ROLLED_BACK`。`ACTIVATION_STARTED` receipt 与 rollout head 在同一 repository 事务内提交，任一写入失败共同回滚；Store 与 SQLite trigger 继续拒绝非法 event/status、terminal-first、第二终态、stage/rank 漂移、runtime-scope/activation identity 漂移、rollback-ref replay drift 与 stage skip/regression。`host_startup.py` 与 ASGI 仍是 concrete repository wiring，typed composition 和部署多实例 canary 均未完成。
 
-0112 Runtime Context 的 schema readiness 也已沿同一分层方向迁移：runtime 只通过 `RuntimeEventStore` readiness port 发起检查，具体 SQLite/schema 读取归 `RuntimeEventRepository`；World Observation 的 `_write_lock` 只是 `RLock` 命名误判，现为 `_transition_lock`，不形成第二数据库 writer。该切片无新 migration。Global SQLite boundary 已 `PASS`，full architecture static 从 `origin/dev` 的 `FAIL [1,6,10]` 收敛到当前 `FAIL [1,6]`；剩余 SCC 与 projection daemon lifecycle owner 使 NE-01 继续 `IN_PROGRESS`。
+0112 Runtime Context 的 schema readiness 也已沿同一分层方向迁移：runtime 只通过 `RuntimeEventStore` readiness port 发起检查，具体 SQLite/schema 读取归 `RuntimeEventRepository`；World Observation 的 `_write_lock` 只是 `RLock` 命名误判，现为 `_transition_lock`，不形成第二数据库 writer。该切片无新 migration。Global SQLite boundary 与 Gate 10 已 `PASS`。
+
+Obs projection 生命周期现在只有一条生产控制流：`ObsApplicationPorts` bundle 先执行内部原子 single-use claim，`ObsApplicationContainer.compose()` 创建 app-local daemon，嵌套 ASGI `lifespan` 唯一调用 `start_projection_jobs()`，启动后才 `yield`。finally 先 stop/join 并等待 background/manual in-flight fence，再释放 exact leader lease、关闭 owned SQLite，最后清除 app state。stop timeout 或 rollback close failure 会保留原 container/ports 句柄，供后续精确重试。`dataclasses.replace()` 继承同一 claim，不能生成可二次消费的 derived bundle；全新独立 ports/app 则保持隔离。无 module-global daemon，无新 migration。
+
+Gate 6 最终定向集合为 `19 passed`；原始证据仍保留完整 Obs app `13 passed + 1 test fixture failed`、修正旧 `start` monkeypatch 后单 case `1 passed`、生命周期关键 `12 passed`、daemon cadence/shutdown/serialization/start-single-flight `4 passed`，批次重叠禁止相加。full architecture static 已从 `origin/dev` 的 `FAIL [1,6,10]` 收敛到当前 `FAIL [1]`；Gate 6/Gate 10 均通过，只剩 application/composition/persistence SCC，NE-01 继续 `IN_PROGRESS`。wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。后台 daemon 若因未捕获 renew 等异常退出，`/health` 还不直接呈现 `daemon.running/last_failure`，continuous-SLO supervision 未闭环。
+
+```mermaid
+flowchart LR
+    Claim["Ports bundle atomic claim"] --> Compose["Compose app-local daemon"]
+    Compose --> Start["Lifespan start_projection_jobs"]
+    Start --> Yield["ASGI yield"]
+    Yield --> Fence["Stop + join + in-flight fence"]
+    Fence --> Lease["Release exact leader lease"]
+    Lease --> Close["Close owned SQLite"]
+    Close --> Clear["Clear app state"]
+    Fence -. "timeout / close failure" .-> Retry["Retain exact handles for retry"]
+```
 
 ```mermaid
 flowchart LR
