@@ -297,6 +297,12 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-WORKSPACE-LIFECYCLE-01：0116 必须在 0101 既有 authority 之上提供 append-only `ACTIVE→ACCEPTED→PROMOTED/ABANDONED` 状态机；Accepted receipt 必须精确绑定 graph revision、Task/Workspace 双 lease/fence、accepted HEAD、tree/diff digest、Verification 与 Acceptance ref。CAS 冲突、非法跃迁、重复请求 payload drift、链篡改和旧 fence 均失败关闭；exact replay 与重启读取必须返回同一 canonical receipt。
 - 该测试只证明 lifecycle repository 的 durable authority foundation；尚未接入 Task Acceptance UoW、真实 workspace 写 executor、promotion/abandon Effect 或 cleanup continuation，因此状态保持 `PARTIAL_W2_WITH_0116_LIFECYCLE_FOUNDATION`，不得写成 Workspace Isolation 完成。
 
+### 本地交付元数据 Gate
+
+- T-DELIVERY-METADATA-01：`origin/dev..HEAD` 的每个提交必须是单父中文 vertical slice，标题只允许 `重构/修复/功能/测试/文档/性能/安全/构建：中文结果`；merge commit、英文 merge 标题、字面量 `\\n` 与无中文结果均失败关闭。
+- T-DELIVERY-METADATA-02：PR 标题必须包含中文；正文必须由真实 Markdown 文件传入，固定七个二级章节各出现一次且顺序不变。字面量 `\\n` 和未带 `INCOMPLETE/PARTIAL/未完成/不宣称` 等边界的整体 `PASS/DONE/闭环` 声明必须阻断。
+- 当前远程 CI 只能记录 `NOT_RUN_ACCOUNT_QUOTA`；本地 Gate 通过不能替代 Actions 实际执行，也不能提升任何架构完成状态。
+
 ### NE-01 Universal Runtime 覆盖 Gate
 
 - T-NE01-UGR-GATE-01：coverage manifest 必须精确包含 `chat/skill/plan/delegate/scheduler/internal/operator` 七条路线及完整控制集；缺任一路线、缺任一控制或 declared/derived 状态不一致均失败关闭。
