@@ -18,7 +18,7 @@ from host_brain.service_catalog.rollout_authority import (
     CatalogCoordinatorAuthorityV1,
     CatalogRolloutOperationV1,
     ServiceCatalogRolloutError,
-    ServiceCatalogRolloutStore,
+    ServiceCatalogRolloutRepository,
     catalog_operation_identity_digest,
 )
 
@@ -64,7 +64,7 @@ class DurableServiceCatalogActivationRunner:
         *,
         snapshot: CatalogSnapshot,
         coordinator: ServiceCatalogStartupCoordinator,
-        store: ServiceCatalogRolloutStore,
+        store: ServiceCatalogRolloutRepository,
         authority: CatalogCoordinatorAuthorityV1,
         health_probe: IdentityCapturingHealthProbe,
         candidate_owner_id: str,

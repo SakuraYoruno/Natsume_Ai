@@ -772,7 +772,9 @@ Host 请求经 [context_application.py](../../../host_brain/runtime/context_appl
 
 [action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway 与 Scheduler-derived Life Edge/Gateway/VTS/MateEngine。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和 37 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明安全封口，不代表这些功能已正向迁移。
 
-0113 [Service Catalog rollout authority](../../../host_brain/service_catalog/rollout_authority.py) 将 operation、receipt 和 head 写入同一 file-backed SQLite authority。Host 生产入口以 ENFORCE 为默认目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，每阶段通过真实 HTTP Host/Guardian identity 后才推进 head，中间 listener 关闭后才进入下一阶段。Pending health 必须同时绑定 exact operation ID digest、snapshot、stage 与 candidate；另一个健康 listener 不得替它推进 head。`REGISTERED` 崩溃以同 operation ID 续跑；stop 失败或 listener 未停时维持 `STARTING` 等待对账，绝不伪造 `ROLLED_BACK`。Store 与 SQLite trigger 同时拒绝非法 event/status、terminal-first、第二终态、stage/rank 漂移、runtime-scope/activation identity 漂移、rollback-ref replay drift 与 stage skip/regression。部署多实例 canary 仍是未执行边界。
+0113 Service Catalog 的应用数据流现在通过 [rollout_authority.py](../../../host_brain/service_catalog/rollout_authority.py) 中的 repository Protocol 进入 [SQLiteServiceCatalogRolloutRepository](../../../host_brain/persistence/service_catalog_rollout_repository.py)。authority 只拥有合同、Protocol 和 Guardian Observer；具体 SQLite 连接、SQL 与事务归 persistence repository。Host 生产入口以 ENFORCE 为默认目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，每阶段通过真实 HTTP Host/Guardian identity 后才推进 head，中间 listener 关闭后才进入下一阶段。Pending health 必须同时绑定 exact operation ID digest、snapshot、stage 与 candidate；另一个健康 listener 不得替它推进 head。`REGISTERED` 崩溃以同 operation ID 续跑；stop 失败或 listener 未停时维持 `STARTING` 等待对账，绝不伪造 `ROLLED_BACK`。`ACTIVATION_STARTED` receipt 与 rollout head 在同一 repository 事务内提交，任一写入失败共同回滚；Store 与 SQLite trigger 继续拒绝非法 event/status、terminal-first、第二终态、stage/rank 漂移、runtime-scope/activation identity 漂移、rollback-ref replay drift 与 stage skip/regression。`host_startup.py` 与 ASGI 仍是 concrete repository wiring，typed composition 和部署多实例 canary 均未完成。
+
+0112 Runtime Context 的 schema readiness 也已沿同一分层方向迁移：runtime 只通过 `RuntimeEventStore` readiness port 发起检查，具体 SQLite/schema 读取归 `RuntimeEventRepository`；World Observation 的 `_write_lock` 只是 `RLock` 命名误判，现为 `_transition_lock`，不形成第二数据库 writer。该切片无新 migration。Global SQLite boundary 已 `PASS`，full architecture static 从 `origin/dev` 的 `FAIL [1,6,10]` 收敛到当前 `FAIL [1,6]`；剩余 SCC 与 projection daemon lifecycle owner 使 NE-01 继续 `IN_PROGRESS`。
 
 ```mermaid
 flowchart LR
@@ -794,9 +796,12 @@ flowchart LR
     Source[Canonical observation source verifier] --> Obs
     Guardian --> Events[(0112 CAS Runtime Event ledger)]
     Scene --> Events
-    Catalog[0113 Catalog operation / receipt / head] --> Guardian
-    Catalog --> HostStart[real Uvicorn candidate]
+    Catalog[Catalog authority / repository Protocol] --> CatalogRepo[(0113 SQLite rollout repository)]
+    CatalogRepo --> Guardian
+    CatalogRepo --> HostStart[real Uvicorn candidate]
 ```
+
+本数据流切片的本地证据分组为 Runtime Context `7 passed`、Catalog unit/contract `15 passed`、真实 Host socket integration `6 passed`、Repository/Global 独立复跑 `16 passed`；最后一组与 15 项有重叠，禁止合计。wave integration=`NOT_RUN_PER_WAVE_POLICY`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 Guardian、Scene transition 与 ContextPack 构造均不得写 Memory/Life；Surface、Proactive 和 Task 已消费一致的 scene revision/digest。长周期目标尚无独立 durable owner，Bond 原始证据仍来自既有上游投影，因此空 `long_term_goal_refs` 不得被臆造值填充。
 

@@ -21,12 +21,15 @@ from host_brain.composition.service_catalog_startup import (
 from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
+from host_brain.persistence.service_catalog_rollout_repository import (
+    SQLiteServiceCatalogRolloutRepository,
+)
 from host_brain.service_catalog.defaults import build_local_catalog
 from host_brain.service_catalog.models import CatalogMode, EndpointSpec, Transport
 from host_brain.service_catalog.probes import HealthProbeResult, strict_socket_addresses
 from host_brain.service_catalog.rollout_authority import (
     ServiceCatalogRolloutError,
-    ServiceCatalogRolloutStore,
+    ServiceCatalogRolloutRepository,
     catalog_operation_identity_digest,
 )
 from host_brain.service_catalog.rollout_runtime import (
@@ -350,7 +353,7 @@ class HostCatalogRuntime:
     stage_outcomes: tuple[CatalogActivationOutcomeV1, ...]
     target_stage: CatalogMode
     candidate: HostUvicornCandidate
-    store: ServiceCatalogRolloutStore
+    store: ServiceCatalogRolloutRepository
     authority: Any
     reservation_probe: OwnedSocketReservationProbe
 
@@ -394,7 +397,7 @@ def start_host_through_service_catalog(
     source["HOST_APP_PORT"] = str(int(port))
     snapshot = build_local_catalog(source)
     endpoint = snapshot.by_id()[HOST_MAIN_ENDPOINT_ID]
-    store = ServiceCatalogRolloutStore(db_path)
+    store = SQLiteServiceCatalogRolloutRepository(db_path)
     runtime_scope = EmbodimentOutboxRepository(db_path).runtime_scope_id
     authority = store.acquire_authority(
         runtime_scope_id=runtime_scope,

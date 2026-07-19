@@ -218,7 +218,7 @@
           "third_fixture_node_risk_level": "REPRODUCIBLE_ON_ORIGIN_DEV_AND_FIXED",
           "final_key_regression_passed": 26,
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
-          "full_architecture_static_gate": "FAIL_GATES_1_6_10_NOT_PASS",
+          "full_architecture_static_gate": "FAIL_GATES_1_6_NOT_PASS",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
         "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_NE01_REMAINS_IN_PROGRESS"
@@ -442,6 +442,49 @@
     },
     "composition_without_global_service_locator": {
       "status": "PARTIAL",
+      "business_layer_sqlite_authority": {
+        "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
+        "baseline": "ORIGIN_DEV_FAIL_GATES_1_6_10",
+        "current_full_architecture_static_gate": "FAIL_GATES_1_6",
+        "runtime_context_0112": {
+          "readiness_owner": "RuntimeEventRepository",
+          "application_surface": "RuntimeEventStore readiness port",
+          "runtime_private_sqlite_connection": "REMOVED"
+        },
+        "service_catalog_rollout": {
+          "repository": "SQLiteServiceCatalogRolloutRepository",
+          "repository_owns": [
+            "SQLite connection",
+            "SQL",
+            "transaction"
+          ],
+          "rollout_authority_owns": [
+            "contracts",
+            "Protocol",
+            "Guardian Observer"
+          ],
+          "runner_dependency": "PROTOCOL",
+          "concrete_wiring": "HOST_STARTUP_AND_ASGI_STILL_REQUIRED",
+          "typed_composition": "INCOMPLETE",
+          "activation_started_atomicity": "RECEIPT_AND_ROLLOUT_HEAD_SHARE_ONE_TRANSACTION_AND_ROLL_BACK_TOGETHER"
+        },
+        "world_observation_lock": "RLOCK_FALSE_POSITIVE_RENAMED_FROM_WRITE_LOCK_TO_TRANSITION_LOCK_NO_NEW_WRITE_AUTHORITY",
+        "migration_added_this_slice": false,
+        "validation": {
+          "runtime_context_targeted_passed": 7,
+          "rollout_unit_contract_passed": 15,
+          "host_socket_integration_passed": 6,
+          "repository_and_global_independent_rerun_passed": 16,
+          "batch_overlap": "OVERLAPS_ROLLOUT_15_DO_NOT_SUM",
+          "global_sqlite_boundary": "PASS",
+          "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+        },
+        "remaining_static_gaps": [
+          "Gate 1 application/composition/persistence target-layer SCC",
+          "Gate 6 projection daemon app lifecycle owner"
+        ]
+      },
       "named_from_process_services_import_inventory": {
         "before_modules": 47,
         "before_imported_names": 152,
@@ -478,7 +521,7 @@
         "structure_and_single_clock_passed": 22,
         "batch_overlap": "OVERLAP_4_TEST_AW08_TRIBE_DEPENDENCY_DIRECTION_DEDUPLICATED_161",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
-        "full_architecture_static_gate": "FAIL_GATES_1_6_10_NOT_PASS"
+        "full_architecture_static_gate": "FAIL_GATES_1_6_NOT_PASS"
       },
       "boundary": "45_MODULES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_51_CONSUMER_MODULES_GLOBAL_SERVICE_LOCATOR_REMAINS_NE01_IN_PROGRESS",
       "evidence_refs": [

@@ -278,6 +278,10 @@ host_brain.__main__
 
 `host_brain/composition/task_runtime.py::ProcessTaskRuntimeContainer` 已显式拥有 TaskStore、ReviewStore、CommandRepository、EventStore 和 lifecycle，是当前较清晰的 composition 范例。
 
+NE-01 Gate 10 切片进一步把两个业务层私有 SQLite 边界下沉：0112 schema readiness 由 `RuntimeEventRepository` 实现，runtime 只消费 `RuntimeEventStore` readiness port；Service Catalog rollout 通过 Protocol 调用 `SQLiteServiceCatalogRolloutRepository`，后者独占 SQLite connection、SQL 与 transaction，`rollout_authority.py` 只保留合同和 Guardian Observer。`ACTIVATION_STARTED` receipt 与 rollout head 在同一 repository transaction 中同成同败。World Observation 原 `_write_lock` 只是 transition `RLock` 的命名误判，现更名 `_transition_lock`，没有形成第二 writer。该切片未新增 migration。
+
+这只使 full architecture static Gate 10 从红转绿：当前 Gate 为 `FAIL [1,6]`，`origin/dev` 基线为 `FAIL [1,6,10]`。`host_startup.py` 与 ASGI 仍负责 concrete repository wiring，application/composition/persistence SCC 与 projection daemon app lifecycle owner 仍未关闭，所以 typed composition 与 NE-01 均保持 `IN_PROGRESS`。定向证据为 Context `7 passed`、Catalog unit/contract `15 passed`、Host socket integration `6 passed`、Repository/Global 独立复跑 `16 passed`（后者与 15 项重叠，禁止相加）；Global SQLite boundary=`PASS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 D1 route scope 另将 Canon/Tool/Bond 从模块全局 provider 迁到每个 app 的 frozen `HostRoutePorts`。`app_factory`/`router_registry` 用 `create_canon_router/create_tool_router/create_bond_router` 闭包注册，Security→OBS composition 把同一个 ports bundle 传给三类 command adapters；构造或关闭另一个 Host app 不会覆盖已有 app。该切片没有删除 Capability Forge、Scheduler/Review、Life、Tribe 或其余 `process_services` locator。
 
 D2 为独立Obs增加`create_obs_app()`与app-local `ObsApplicationPorts/Container`。D3最初注册19个producer并先迁移17个端点。D4将BioOps 8、Life 3、Operator live 4、summary/runtime/resource 4共19个GET的store discovery改为必需显式参数；36个已识别端点（35 HTTP + 1 WebSocket）及stats查询使用当前app Store/View。D5又修正5个`/api/ui/*` GET，以及Security 3、Skill 1、Life 1、Semantic 1、Governance 1共7个实际GET，并以双Obs app/双SQLite验证隔离。Semantic/Governance拆为独立认证job后总producer增至21。
@@ -441,7 +445,7 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 | Durable TaskStore | 无第二 task registry；0094/0096 coordination、single-node post-budget checkpoint 与 0099 窄终态 reconciliation 已有；general/multi-node/pre-budget recovery仍缺，外部 deployment inventory/remediation 未知 |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
 | TaskGraph revision + `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091～0099 authority、Budget unique-winner contention、single-node post-budget takeover、ACCEPTED→Effect restart 与窄 terminal reconciliation已有证据；general/multi-node/pre-budget recovery、现实 resolver、外部 inventory/凭据/key lifecycle/canary未完成，atomic/bounded/cancellation仍 OFF |
-| Typed task composition | 全局 ProcessServiceContainer accessor |
+| Typed task composition；0112 readiness 与 Catalog SQLite 已归 repository，Gate 10 `PASS` | 全局 ProcessServiceContainer accessor；`host_startup.py`/ASGI concrete Catalog wiring、Gate 1 SCC 与 Gate 6 daemon lifecycle owner仍在 |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | ASGI app-local Runtime Context、0111 World observation/resolver、0112 Scene/Guardian、三消费者 Scene identity、durable Intent admission、Action Preview authority、0113 Host Catalog 五阶段及 commit-bound 本地 Gate | 长周期目标 owner、Bond 上游原始证据、Windows graceful stop、Governed Operator 功能迁移、legacy compatibility adapter 清理与部署多实例 canary 尚未收口 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |

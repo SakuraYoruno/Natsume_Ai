@@ -748,13 +748,15 @@ def create_app() -> FastAPI:
                     os.environ.get("HOST_SERVICE_CATALOG_OPERATION_ID") or ""
                 ).strip()
                 if catalog_operation_id:
+                    from host_brain.persistence.service_catalog_rollout_repository import (  # noqa: PLC0415
+                        SQLiteServiceCatalogRolloutRepository,
+                    )
                     from host_brain.service_catalog.rollout_authority import (  # noqa: PLC0415
                         ServiceCatalogRolloutGuardianObserver,
-                        ServiceCatalogRolloutStore,
                     )
 
                     catalog_guardian = runtime_context_composition.guardian
-                    catalog_rollout_store = ServiceCatalogRolloutStore(
+                    catalog_rollout_store = SQLiteServiceCatalogRolloutRepository(
                         task_runtime.canonical_db_path
                     )
                     catalog_rollout_observer = (

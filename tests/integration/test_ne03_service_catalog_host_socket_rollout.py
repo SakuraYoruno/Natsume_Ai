@@ -15,6 +15,9 @@ from host_brain.composition.service_catalog_startup import (
 from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
+from host_brain.persistence.service_catalog_rollout_repository import (
+    SQLiteServiceCatalogRolloutRepository as ServiceCatalogRolloutStore,
+)
 from host_brain.service_catalog.host_startup import (
     HostCatalogRuntime,
     HostHttpHealthProbe,
@@ -36,7 +39,6 @@ from host_brain.service_catalog.models import (
 from host_brain.service_catalog.rollout_authority import (
     CatalogRolloutOperationV1,
     ServiceCatalogRolloutError,
-    ServiceCatalogRolloutStore,
     catalog_operation_identity_digest,
 )
 from host_brain.service_catalog.rollout_runtime import (
