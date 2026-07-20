@@ -4,8 +4,15 @@
 # 测试与验收目录
 
 版本：v2.1
-维护日期：2026-07-18
+维护日期：2026-07-20
 状态：当前证据
+
+## NE-01 当前结构切片
+
+- owner 行数：Acceptance 1798→1262、ASGI 1527→1376、Scheduler 3537→2942；focused 模块保持原 writer、lifespan/task 和 repository UoW authority。
+- 独立 Gate 1–14：`PASS`、`failed_gates=[]`、`各 Gate issues=[]`；Gate 3 `new_mixed_over_800=[]`，无 allowlist 扩张。`task_internal_agent_budget_rejection_store.py:905` 为 cohesive seal-bound Store。
+- fresh 主证据：36 文件 `265 passed in 210.19s`、0 fail/skip。61/73/102/54/14 项批次均为重叠子集，不累计。
+- 状态边界：静态 PASS 不等于 NE-01 或完整架构完成；NE-01=`PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## Governed Runtime
 

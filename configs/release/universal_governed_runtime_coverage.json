@@ -316,18 +316,30 @@
           "host_brain/agent_runtime/artifact_store.py": 1359,
           "host_brain/app/internal_task_runtime.py": 1311,
           "host_brain/task_runtime/node_execution_runtime.py": 1499,
-          "host_brain/task_runtime/operation_recovery_runtime.py": 205
+          "host_brain/task_runtime/operation_recovery_runtime.py": 205,
+          "host_brain/app/acceptance_effect_handlers.py": 1262,
+          "host_brain/app/asgi.py": 1376,
+          "host_brain/persistence/scheduler_repository.py": 2942
         },
         "focused_modules": {
           "host_brain/agent_runtime/artifact_store_read_model.py": "BOUNDED_VERIFIED_SEAL_INVENTORY_PROMOTION_RECOVERY_TOMBSTONE_READS_NO_MUTATION_AUTHORITY",
           "host_brain/app/internal_startup_checkpoint_continuation.py": "ACTIVATION_SCAN_AND_EXACT_SEALED_CHECKPOINT_ADMISSION_CONTINUATION",
           "host_brain/task_runtime/internal_agent_sealed_checkpoint_recovery.py": "EXACT_LINEAGE_HIGHER_FENCE_PROJECTION_REBUILD_WITHOUT_WORKER_REPLAY",
           "host_brain/task_runtime/node_worker_stream.py": "AUTHORITY_FREE_STREAM_NORMALIZATION_AND_INTERRUPTION_HEARTBEAT_CLEANUP",
-          "host_brain/task_runtime/operation_recovery_checkpoint_loader.py": "VALIDATE_TAKEOVER_AND_LOAD_CANONICAL_COMMITTED_CHECKPOINT_WITHOUT_WORKER_REPLAY"
+          "host_brain/task_runtime/operation_recovery_checkpoint_loader.py": "VALIDATE_TAKEOVER_AND_LOAD_CANONICAL_COMMITTED_CHECKPOINT_WITHOUT_WORKER_REPLAY",
+          "host_brain/app/acceptance_effect_handler_common.py": "PURE_JSON_EFFECT_IDENTITY_OPAQUE_FAILURE_RECEIPT_HELPERS_NO_WRITER",
+          "host_brain/app/acceptance_surface_effect_handler.py": "GATEWAY_SURFACE_REPLY_HANDLER_AND_READ_ONLY_RECONCILER_NO_SECOND_WRITER",
+          "host_brain/app/internal_runtime_composition.py": "INTERNAL_WORKSPACE_OPERATOR_RUNTIME_GROUP_COMPOSE_ACTIVATE_NO_LIFESPAN_OWNER",
+          "host_brain/app/host_runtime_context_wiring.py": "RUNTIME_CONTEXT_PREVIEW_GUARDIAN_CATALOG_WIRING_ASGI_RETAINS_TASK_LIFECYCLE",
+          "host_brain/persistence/scheduler_clock_retry_store.py": "CLOCK_RETRY_LEASE_FENCE_TRANSACTIONS_REUSE_REPOSITORY_CONNECTION_UOW",
+          "host_brain/persistence/scheduler_repository_primitives.py": "PURE_VALIDATION_AND_STABLE_ERRORS",
+          "host_brain/persistence/task_internal_agent_budget_rejection_store.py": "COHESIVE_SEAL_BOUND_BUDGET_REJECTION_REPLAY_RECOVERY_NOT_SECOND_AUTHORITY"
         },
-        "fresh_consolidated_validation": "87_PASSED_IN_121_66_SECONDS_ZERO_FAILED_ZERO_SKIPPED",
-        "historical_batch_boundary": "OLD_35_3_62_46_4_GROUPS_INCLUDED_OR_OVERLAPPING_DO_NOT_SUM",
-        "full_repository_static_gate": "FAIL_GATE_3_THREE_PREEXISTING_LARGE_FILE_FINDINGS"
+        "fresh_consolidated_validation": "36_FILES_265_PASSED_IN_210_19_SECONDS_ZERO_FAILED_ZERO_SKIPPED",
+        "historical_batch_boundary": "OLD_61_73_102_54_14_GROUPS_INCLUDED_OR_OVERLAPPING_DO_NOT_SUM",
+        "new_over_800_lines": ["host_brain/persistence/task_internal_agent_budget_rejection_store.py:905"],
+        "new_mixed_over_800_lines": [],
+        "full_repository_static_gate": "PASS_ISSUES_EMPTY_PROGRAM_INCOMPLETE"
       },
       "wiring_progress": "PRODUCTION_OFF. Two NE-01 responsibility slices reduced all eleven former mixed/ceiling findings below 1,500 lines or their pre-existing cohesive ceiling. The fresh repository-wide mixed-file gate now returns issues=[] without adding or widening an allowlist. ASGI retains app lifecycle and shutdown ownership; IntentAdmission and RuntimeGuardian retain the only durable RuntimeEvent/journal writers; extracted wiring, codecs, contracts, models, catalogs, and private command mixins own no second Store or connection. A third slice removes ReAct nested Skill/Delegate discovery and rejects injected legacy run_skill/dispatch_sub_agent ToolSpecs before low-level execution, migrates scheduler.task.trigger as Operator 1/37, and moves external HTTP /tools/execute through TOOL Secure Ingress, HostCommand, immutable TaskGraph, durable Review, node grant/Budget/Attempt/Lease, exact binding, Verification, Acceptance and Receipt. Migration 0114 extends the canonical Worker Projection route check. The Tool core chain is proven with real SQLite and an explicit SAFE_LOCAL_REPLAY test adapter; production seeding exposes zero governed executable handlers and health remains DEGRADED / FAIL_CLOSED_NO_GOVERNED_EXECUTOR. Raw ToolBroker.execute and execute_bound now reject before handler or Token access and never persist caller bearer material; ToolBroker exposes no execution-port factory. The app-local ToolRuntimeBoundary alone binds the Frozen Tool port. TaskStore atomically revalidates canonical Graph/Node/Attempt/Lease/Reservation plus owner/fence/expiry inside one SQLite read transaction; node grant, exact binding, SAFE_LOCAL_REPLAY, and WRITE child-token validation then run as separate fail-closed stages, not one cross-Store atomic interval. Only after all checks pass does before_handler write the PENDING dispatch marker immediately before the handler. MCPAdapter is metadata-only and maps every direct call to MCP_TASK_AUTHORITY_REQUIRED; the process get_mcp_tool_broker accessor and mcp_tool_broker container slot are deleted, while the inert compatibility MCPToolBroker retains no CapabilityBroker, Token or callback and is not composed by ASGI; the MCP Skill bridge is default-off, purges stale mcp::* entries and rejects stale durable targets before registry lookup. Read-only MCP registry/scorecard discovery remains available. Tool seed readiness still runs before governed runtime activation; executor=0 currently prevents a false READY, but the first real executor must not be enabled until activation is part of the same readiness state machine. The app-local Python capability boundary prevents accidental production wiring misuse; it is not an OS/container sandbox against hostile same-process reflection, and production must not load unapproved external Python. This removes the old Tool/MCP direct and nested callback authority but does not provide a real governed MCP provider or workspace-bound production Tool executor. DurableDagSchedulingRuntime remains the temporary outer orchestrator. Migrations 0093 through 0099 retain Outbox delivery, cancellation coordination, revision identity, task-bound Review continuation, grant uniqueness, append-only signed Effect reconciliation, and schema-only terminal case/proof/supersession authority. Canonical Store Budget contention is proven for 8/16/32 threads and cross-process writers. One single-node canonical post-budget checkpoint, the ACCEPTED-to-Effect restart window, and 0099 default-off exact/signed/quarantine mechanics plus proof-ending historical supersession chains are proven without worker replay. General/multi-node/pre-budget recovery, remaining execution bypass removal, Service Locator removal, and Scheduler/Internal public projections remain INCOMPLETE. External deployment terminal inventory, deployed credentials, active/retired/revoked key lifecycle, and real canaries remain UNKNOWN or NOT_RUN. Atomic, bounded, and cancellation production paths remain OFF; overall status remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF.",
       "acceptance_effect_cancellation_boundary": "Only exact virgin PENDING (attempt_count=0, fencing_token=0, status_version=0, reason_code and last_error absent) becomes CANCELLED automatically. Full codec validation rejects mixed tuples. Current production claim/cancellation authority cannot produce a fenceable retry PENDING: accepted NODE effects retain delivery authority and COMPLETED GRAPH effects are terminal. A retry PENDING encountered by the fence path is therefore legacy/corrupt state and remains RECONCILIATION_REQUIRED unless a valid signed 0098 proof resolves it. Only COMMITTED with a durable receipt becomes COMMITTED_EVIDENCE automatically; ambiguous FAILED/CLAIMED states require signed evidence and exact state binding.",
@@ -668,26 +680,22 @@
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 48
       },
       "full_architecture_static_gate": {
-        "status": "FAIL",
-        "failed_gates": [3],
+        "status": "PASS",
+        "failed_gates": [],
         "origin_dev_failed_gates": [3],
         "pre_89_origin_dev_failed_gates": [1, 6, 10],
-        "resolved_gates": [1, 6, 10, 11],
-        "issues": [
-          "production file >1500 lines has no mixed/cohesive responsibility decision: host_brain/app/acceptance_effect_handlers.py:1798",
-          "production file >1500 lines has no mixed/cohesive responsibility decision: host_brain/app/asgi.py:1527",
-          "cohesive file exceeded approved line ceiling: host_brain/persistence/scheduler_repository.py:3537"
-        ],
+        "resolved_gates": [1, 3, 6, 10, 11],
+        "issues": [],
         "strongly_connected_components": [],
         "edge_findings": 0,
         "edge_violations": 0,
         "reverse_imports": [],
-        "boundary": "CURRENT_FULL_REPOSITORY_STATIC_FAIL_GATE_3_THREE_PREEXISTING_LARGE_FILE_FINDINGS_CURRENT_SLICE_FOUR_OWNERS_BELOW_1500_WITHOUT_ALLOWLIST_EXPANSION_PROGRAM_REMAINS_INCOMPLETE"
+        "boundary": "CURRENT_GATE_1_TO_14_STATIC_PASS_ONLY_NE01_AND_FULL_ARCHITECTURE_REMAIN_PARTIAL_IN_PROGRESS"
       },
       "business_layer_sqlite_authority": {
         "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
         "baseline": "ORIGIN_DEV_FAIL_GATES_1_6_10",
-        "current_full_architecture_static_gate": "FAIL_GATE_3",
+        "current_full_architecture_static_gate": "PASS_ISSUES_EMPTY_PROGRAM_INCOMPLETE",
         "runtime_context_0112": {
           "readiness_owner": "RuntimeEventRepository",
           "application_surface": "RuntimeEventStore readiness port",
@@ -722,10 +730,11 @@
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
-        "remaining_static_gaps": [
-          "host_brain/app/acceptance_effect_handlers.py:1798_UNCLASSIFIED",
-          "host_brain/app/asgi.py:1527_UNCLASSIFIED",
-          "host_brain/persistence/scheduler_repository.py:3537_EXCEEDS_3200_CEILING"
+        "remaining_static_gaps": [],
+        "resolved_static_owner_splits": [
+          "ACCEPTANCE_1798_TO_1262",
+          "ASGI_1527_TO_1376",
+          "SCHEDULER_3537_TO_2942"
         ]
       },
       "service_catalog_layering_authority": {

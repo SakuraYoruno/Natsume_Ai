@@ -4,6 +4,7 @@ import inspect
 
 from host_brain.app import asgi
 from host_brain.app import host_life_scheduler_wiring
+from host_brain.app import internal_runtime_composition
 from host_brain.app import host_runtime_context_wiring
 from host_brain.app import host_runtime_startup_guards
 from host_brain.app import host_runtime_shutdown
@@ -11,8 +12,9 @@ from host_brain.app import tool_runtime_composition
 
 
 def test_asgi_composition_root_and_focused_helpers_stay_below_large_file_gate() -> None:
-    assert len(inspect.getsource(asgi).splitlines()) < 1_500
+    assert len(inspect.getsource(asgi).splitlines()) < 1_400
     assert len(inspect.getsource(host_life_scheduler_wiring).splitlines()) < 1_500
+    assert len(inspect.getsource(internal_runtime_composition).splitlines()) < 500
     assert len(inspect.getsource(host_runtime_context_wiring).splitlines()) < 1_500
     assert len(inspect.getsource(host_runtime_startup_guards).splitlines()) < 1_500
     assert len(inspect.getsource(host_runtime_shutdown).splitlines()) < 1_500
@@ -57,6 +59,7 @@ def test_asgi_keeps_lifespan_state_and_reverse_close_order_in_one_scope() -> Non
 def test_focused_helpers_do_not_own_asgi_lifecycle() -> None:
     for module in (
         host_life_scheduler_wiring,
+        internal_runtime_composition,
         host_runtime_context_wiring,
         host_runtime_startup_guards,
         tool_runtime_composition,
@@ -71,3 +74,5 @@ def test_focused_helpers_do_not_own_asgi_lifecycle() -> None:
     assert callable(asgi._submit_life_tick_command)
     assert callable(asgi._command_ingress_hmac_secrets)
     assert callable(asgi._compose_host_runtime_context)
+    assert callable(asgi._compose_internal_runtime)
+    assert callable(asgi._activate_internal_runtime)

@@ -9,6 +9,8 @@
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
 
+当前结构边界：Acceptance、ASGI、Scheduler 三个 owner 已分别从 1798→1262、1527→1376、3537→2942 行。focused 模块只承接纯 Acceptance helper/Gateway Surface handler、Internal 与 Runtime Context composition wiring、同 connection/UoW 的 Scheduler retry 事务和纯 primitives；原 writer、lifespan/task owner、repository UoW owner不变。独立 Gate 1–14 为 `PASS`、`failed_gates=[]`、`各 Gate issues=[]`，Gate 3 为 `new_mixed_over_800=[]`，没有扩 allowlist；`task_internal_agent_budget_rejection_store.py:905` 是职责聚焦的 seal-bound Store。fresh 主证据仅为 36 文件 `265 passed in 210.19s`，61/73/102/54/14 项子集不得相加。该静态 PASS 不等于 NE-01 或完整架构完成，NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## 1. 系统边界
 
 Natsume AI 由一个 Host 控制面、多个接入/外显运行面和若干可选基础服务组成。Host 负责业务决策和长期状态，Gateway 负责平台协议，Edge 负责本机感知与物理动作，Observability 负责只读投影和 Operator 交互。
@@ -112,6 +114,9 @@ flowchart TB
 - `host_brain/app/governed_task_authority.py`：无状态的 HostCommand/WorkOrder/planning lineage、route-aware exact replay 与 fail-closed authority 校验；不写 Store、不执行 TaskGraph。
 - `host_brain/app/governed_operator_runtime.py`：当前只为 `sys_mode.switch` 冻结 typed Operator action、server-reopened Secure Ingress authority、HostCommand/TaskGraph 与 HardState effect replay；加上已有 `scheduler.task.trigger` 后 Operator 进度为 2/37，其余 35 条命令不进入 handler。
 - `host_brain/task_runtime/acceptance_effect_dispatcher.py::AcceptanceEffectRuntime`：Host、Operator、Scheduler 与 Internal result 共用的 app-local Effect 投递/恢复 owner；`RECOVERY_PENDING` 只允许 durable defer，不得先 terminalize outer claim。handler/transport 异常只保存 opaque incident，不把异常正文写入持久状态。
+- `host_brain/app/acceptance_effect_handler_common.py` + `acceptance_surface_effect_handler.py`：前者只提供 JSON、effect identity、opaque failure 和 receipt 纯 helper；后者只提供 Gateway Surface reply Acceptance Effect handler 与只读 reconciler；写 authority 仍由原 Acceptance runtime 所有。
+- `host_brain/app/internal_runtime_composition.py` + `host_runtime_context_wiring.py`：前者只组合并激活 Internal/Workspace/Operator/runtime group，后者只接 Runtime Context、Action Preview、Guardian 与 Service Catalog terminal observation；ASGI 继续唯一拥有 lifespan、task 创建/取消和关停顺序。
+- `host_brain/persistence/scheduler_clock_retry_store.py` + `scheduler_repository_primitives.py`：Clock retry lease/fence 事务复用 `SchedulerRepository` 的 connection/UoW，primitives 只提供纯验证与稳定错误，不形成第二 repository authority。
 - `host_brain/app/acceptance_effect_recovery_observer.py`：把 Effect 启动扫描/后台恢复失败与恢复投影为 app-local RuntimeGuardian durable SLO；它只观察恢复状态，不取得 Effect 或 Guardian 之外的业务 writer authority。
 - `host_brain/agent_runtime/artifact_store.py`、`projection_recovery_contract.py`、`internal_artifact_terminal_reconciliation.py`、`accepted_result.py`、`task_internal_agent_checkpoint_store.py`：Internal raw material进入protected exact-inventory stage，公共projection只携带ref/digest。下一次runtime activation可从受治理单节点sealed checkpoint重开完整lineage、以更高fence completion Lease重建唯一projection并继续Acceptance/Effect/claim/promotion，Agent不重跑。exact Budget拒绝terminal bundle原子且可replay；终态worker处理精确sealed abandon/cleanup。周期survivor continuation、crash-left unsealed partial cleanup、failure/cancel/budget claim closeout、general `settle_worker` crash bundle仍缺；handle-level TOCTOU、一般write、OS/container isolation与legacy bridge也未完成。
 - `host_brain/app/observability_runtime/review_wait_recovery.py`：只在 Host 启动阶段用 Secure Ingress、HostCommand、TaskNode 与 ReviewItem 四方 canonical authority 修复 Review 已落库但 outer WAL append 失败的崩溃窗；恢复前 OBS admission 保持关闭，绑定漂移失败关闭。
