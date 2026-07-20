@@ -12,6 +12,11 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetReservation,
+    BudgetReservationStatus,
+)
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.persistence.task_repository import (
     AcceptanceEffectCommitScope,
@@ -91,7 +96,36 @@ def seed_raw_acceptance_effect_for_test(
         )
 
 
+def seed_active_graph_budget_for_test(
+    store: DurableTaskStore,
+    *,
+    graph_id: str,
+    graph_revision: int,
+    budget_id: str,
+    scope: str,
+    outbox: OutboxMessage,
+    limits: BudgetAmount | None = None,
+) -> dict[str, Any]:
+    """Create the one ACTIVE graph Budget required by execution authority."""
+
+    amount = limits or BudgetAmount(token_count=1_000_000)
+    return store.create_budget_reservation(
+        BudgetReservation(
+            budget_id=budget_id,
+            scope=scope,
+            limits=amount,
+            reserved=amount,
+            status=BudgetReservationStatus.ACTIVE,
+            status_version=0,
+        ),
+        graph_id=graph_id,
+        graph_revision=graph_revision,
+        outbox=outbox,
+    )
+
+
 __all__ = [
     "seed_raw_task_graph_for_test",
     "seed_raw_acceptance_effect_for_test",
+    "seed_active_graph_budget_for_test",
 ]

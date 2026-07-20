@@ -26,7 +26,10 @@ from host_brain.persistence.task_repository import (
     build_operation_fingerprint,
     build_outbox_payload_ref,
 )
-from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
+from tests.task_runtime_authority_fixtures import (
+    seed_active_graph_budget_for_test,
+    seed_raw_task_graph_for_test,
+)
 
 
 NOW = 1_910_000_000_000
@@ -126,6 +129,19 @@ def _running_store(tmp_path: Path) -> tuple[DurableTaskStore, dict[str, Any]]:
         business_scope=BUSINESS_SCOPE,
         operation="resolve-worker",
         parameters={"node_id": NODE_ID},
+    )
+    seed_active_graph_budget_for_test(
+        store,
+        graph_id=GRAPH_ID,
+        graph_revision=1,
+        budget_id="budget-ne01-atomic-failure",
+        scope=f"graph:{GRAPH_ID}@1:atomic-failure",
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            "budget-ne01-atomic-failure",
+            0,
+            "BUDGET_RESERVATION_CREATED",
+        ),
     )
     store.create_attempt(
         attempt_id=ATTEMPT_ID,

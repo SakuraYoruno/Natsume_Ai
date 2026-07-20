@@ -31,28 +31,43 @@ async def acquire_checkpoint_takeover_lease(
         _blocked(f"committed checkpoint Attempt cannot continue from {attempt_status}")
     attempt_id = _required_text(attempt_record.get("attempt_id"), "attempt_id")
     previous = await _maybe_await(task_store.get_active_lease(attempt_id))
-    try:
-        claimed = await _maybe_await(
+    expected_attempt_version = _version(attempt_record)
+    lease_outbox = runtime_outbox.build(
+        command_id=admitted.command_id,
+        aggregate_type="TASK_ATTEMPT",
+        aggregate_id=attempt_id,
+        aggregate_version=expected_attempt_version + 1,
+        event_type="TASK_ATTEMPT_LEASED",
+        attempt_id=attempt_id,
+    )
+
+    async def _acquire() -> Any:
+        return await _maybe_await(
             task_store.acquire_lease(
                 attempt_id,
                 owner_id=owner_id,
                 ttl_ms=lease_ttl_ms,
-                expected_attempt_version=_version(attempt_record),
-                outbox=runtime_outbox.build(
-                    command_id=admitted.command_id,
-                    aggregate_type="TASK_ATTEMPT",
-                    aggregate_id=attempt_id,
-                    aggregate_version=_version(attempt_record) + 1,
-                    event_type="TASK_ATTEMPT_LEASED",
-                    attempt_id=attempt_id,
-                ),
+                expected_attempt_version=expected_attempt_version,
+                existing_operation_reservation_id=admitted.reservation_id,
+                outbox=lease_outbox,
             )
         )
+
+    try:
+        claimed = await _acquire()
     except Exception as exc:
-        raise GovernedRuntimeError(
-            GOVERNED_OPERATION_RECOVERY_REQUIRED,
-            "committed checkpoint is waiting for its former lease to expire",
-        ) from exc
+        if _text(getattr(exc, "reason_code", None)):
+            raise GovernedRuntimeError(
+                GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                "committed checkpoint is waiting for its former lease to expire",
+            ) from exc
+        try:
+            claimed = await _acquire()
+        except Exception as replay_exc:
+            raise GovernedRuntimeError(
+                GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                "committed checkpoint is waiting for its former lease to expire",
+            ) from replay_exc
     if not isinstance(claimed, Mapping):
         _blocked("online takeover returned no durable lease")
     lease = dict(claimed)

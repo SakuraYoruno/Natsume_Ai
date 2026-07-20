@@ -411,6 +411,8 @@ class TaskStorePort(Protocol):
         ttl_ms: int,
         expected_attempt_version: int,
         outbox: Any,
+        absent_operation_reservation_id: str | None = None,
+        existing_operation_reservation_id: str | None = None,
     ) -> Mapping[str, Any]: ...
 
     def heartbeat_lease(

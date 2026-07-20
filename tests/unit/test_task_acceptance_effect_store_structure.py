@@ -83,6 +83,9 @@ from host_brain.persistence.task_budget_usage_store import (
 from host_brain.persistence.task_node_artifact_store import (
     TaskNodeArtifactStoreMixin,
 )
+from host_brain.persistence.task_lease_takeover_authority import (
+    TaskLeaseTakeoverAuthorityMixin,
+)
 from host_brain.persistence.reconciliation_proof_verifier import (
     Ed25519ReconciliationProofVerifier,
 )
@@ -173,6 +176,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskGraphCancellationEffectOverlayMixin,
         TaskTerminalReconciliationStoreMixin,
         TaskNodeArtifactStoreMixin,
+        TaskLeaseTakeoverAuthorityMixin,
         TaskBudgetUsageStoreMixin,
         TaskDagStateStoreMixin,
         TaskReadyClaimStoreMixin,

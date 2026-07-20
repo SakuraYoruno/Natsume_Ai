@@ -64,6 +64,7 @@ from host_brain.runtime.production_intent_authority import (
 from host_brain.task_runtime.review_continuation_worker import (
     ReviewContinuationWorker,
 )
+from tests.task_runtime_authority_fixtures import seed_active_graph_budget_for_test
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 from natsume_contracts.task.v1 import ExecutorAssignment, TaskExecutor
 
@@ -1192,6 +1193,28 @@ async def test_consumed_intent_review_is_automatically_resumed_after_process_res
         clock=clock,
     )
     task_store = DurableTaskStore(store.db_path, clock=lambda: clock[0])
+    budget_id = "budget-intent-review-restart"
+    seed_active_graph_budget_for_test(
+        task_store,
+        graph_id="graph-a",
+        graph_revision=1,
+        budget_id=budget_id,
+        scope="graph:graph-a@1:intent-review-restart",
+        limits=record["work_order"].budget_policy.limits,  # type: ignore[union-attr]
+        outbox=OutboxMessage.create(
+            aggregate_type="BUDGET_RESERVATION",
+            aggregate_id=budget_id,
+            aggregate_version=0,
+            event_type="BUDGET_RESERVATION_CREATED",
+            payload_ref=build_outbox_payload_ref(
+                aggregate_type="BUDGET_RESERVATION",
+                aggregate_id=budget_id,
+                aggregate_version=0,
+            ),
+            idempotency_key=f"ne03:{budget_id}",
+            outbox_id=f"outbox::ne03::{budget_id}",
+        ),
+    )
 
     class _RestartedRuntime:
         def __init__(self) -> None:

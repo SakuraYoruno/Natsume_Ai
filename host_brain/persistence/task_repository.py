@@ -194,6 +194,12 @@ from host_brain.persistence.task_dag_state_store import (
 from host_brain.persistence.task_ready_claim_store import (
     TaskReadyClaimStoreMixin,
 )
+from host_brain.persistence.task_lease_takeover_authority import (
+    TaskLeaseTakeoverAuthorityMixin,
+)
+from host_brain.persistence.task_lease_replay_identity import (
+    build_lease_acquisition_identity,
+)
 from host_brain.persistence.task_outbox_delivery_store import (
     TaskOutboxDeliveryStoreMixin,
 )
@@ -431,6 +437,7 @@ class DurableTaskStore(
     TaskGraphCancellationEffectOverlayMixin,
     TaskTerminalReconciliationStoreMixin,
     TaskNodeArtifactStoreMixin,
+    TaskLeaseTakeoverAuthorityMixin,
     TaskBudgetUsageStoreMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
@@ -1222,12 +1229,11 @@ class DurableTaskStore(
             FROM task_runtime_budget_reservation
             WHERE graph_id = ? AND graph_revision = ?
               AND node_id IS NULL AND attempt_id IS NULL
-              AND status = 'ACTIVE'
             ORDER BY budget_id
             """,
             (str(graph_id), int(graph_revision)),
         ).fetchall()
-        if len(rows) != 1:
+        if len(rows) != 1 or str(rows[0]["status"]) != "ACTIVE":
             raise TaskStoreError(
                 TASK_STORE_INVALID,
                 "DAG scheduling requires exactly one ACTIVE graph-level budget",
@@ -1451,6 +1457,12 @@ class DurableTaskStore(
                 graph_id=graph_id,
                 graph_revision=graph_revision,
             )
+            self._assert_graph_accepts_execution_authority(
+                conn,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+                action="Attempt creation",
+            )
             node = self._require_node(conn, graph_id, graph_revision, node_id)
             self._require_version(node, expected_node_version, subject=f"TaskNode {node_id}")
             if str(node["status"]) != TaskNodeStatus.READY.value:
@@ -1573,14 +1585,30 @@ class DurableTaskStore(
         ttl_ms: int,
         expected_attempt_version: int,
         outbox: OutboxMessage,
+        absent_operation_reservation_id: str | None = None,
+        existing_operation_reservation_id: str | None = None,
     ) -> dict[str, Any]:
         owner = str(owner_id or "").strip()
         if not owner or int(ttl_ms) <= 0:
             raise TaskStoreError(TASK_STORE_INVALID, "lease owner and positive ttl_ms are required")
+        if (
+            absent_operation_reservation_id is not None
+            and existing_operation_reservation_id is not None
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Lease takeover cannot require Operation presence and absence",
+            )
+        lease_id, heartbeat_id = build_lease_acquisition_identity(
+            attempt_id=str(attempt_id),
+            owner_id=owner,
+            ttl_ms=int(ttl_ms),
+            expected_attempt_version=int(expected_attempt_version),
+            absent_operation_reservation_id=absent_operation_reservation_id,
+            existing_operation_reservation_id=existing_operation_reservation_id,
+        )
         ts_ms = self._now()
         expires_ts_ms = ts_ms + int(ttl_ms)
-        lease_id = f"lease::{uuid.uuid4().hex}"
-        heartbeat_id = f"heartbeat::{uuid.uuid4().hex}"
         with self._transaction() as conn:
             attempt = self._require_attempt(conn, attempt_id)
             self._assert_graph_not_cancelling(
@@ -1588,6 +1616,27 @@ class DurableTaskStore(
                 graph_id=str(attempt["graph_id"]),
                 graph_revision=int(attempt["graph_revision"]),
             )
+            self._assert_lease_takeover_operation_authority(
+                conn,
+                attempt_id=str(attempt_id),
+                attempt=attempt,
+                absent_operation_reservation_id=absent_operation_reservation_id,
+                existing_operation_reservation_id=existing_operation_reservation_id,
+            )
+            replayed_lease = self._replay_committed_lease_acquisition(
+                conn,
+                attempt=attempt,
+                attempt_id=str(attempt_id),
+                owner_id=owner,
+                expected_attempt_version=int(expected_attempt_version),
+                expected_lease_id=lease_id,
+                expected_heartbeat_id=heartbeat_id,
+                ttl_ms=int(ttl_ms),
+                now_ts_ms=ts_ms,
+                outbox=outbox,
+            )
+            if replayed_lease is not None:
+                return replayed_lease
             self._require_version(
                 attempt,
                 expected_attempt_version,
@@ -2720,6 +2769,12 @@ class DurableTaskStore(
                 graph_id=str(attempt["graph_id"]),
                 graph_revision=int(attempt["graph_revision"]),
             )
+            self._assert_graph_accepts_execution_authority(
+                conn,
+                graph_id=str(attempt["graph_id"]),
+                graph_revision=int(attempt["graph_revision"]),
+                action="Operation reservation",
+            )
             self._assert_attempt_operation_identity(
                 attempt,
                 business_scope=scope,
@@ -3381,6 +3436,16 @@ class DurableTaskStore(
                     graph_revision=int(row["graph_revision"]),
                     action="Budget transition",
                 )
+                if target in {
+                    BudgetReservationStatus.CONSUMED,
+                    BudgetReservationStatus.RELEASED,
+                }:
+                    self._assert_graph_execution_authority_quiescent(
+                        conn,
+                        graph_id=str(row["graph_id"]),
+                        graph_revision=int(row["graph_revision"]),
+                        action=f"BudgetReservation {target.value} transition",
+                    )
             if (
                 target is BudgetReservationStatus.ACTIVE
                 and row["graph_id"] is not None

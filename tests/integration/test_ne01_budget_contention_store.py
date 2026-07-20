@@ -134,22 +134,6 @@ def _migrated_budget_db(tmp_path: Path, *, name: str, limit: int = 1) -> Path:
             discriminator=f"graph:{name}",
         ),
     )
-    store.create_attempt(
-        attempt_id=ATTEMPT_ID,
-        graph_id=GRAPH_ID,
-        graph_revision=1,
-        node_id=NODE_ID,
-        attempt_no=1,
-        expected_node_version=0,
-        outbox=_event(
-            "TASK_ATTEMPT",
-            ATTEMPT_ID,
-            0,
-            "TASK_ATTEMPT_CREATED",
-            attempt_id=ATTEMPT_ID,
-            discriminator=f"attempt:{name}",
-        ),
-    )
     store.create_budget_reservation(
         BudgetReservation(
             budget_id=BUDGET_ID,
@@ -167,6 +151,22 @@ def _migrated_budget_db(tmp_path: Path, *, name: str, limit: int = 1) -> Path:
             0,
             "BUDGET_RESERVATION_CREATED",
             discriminator=f"budget:{name}",
+        ),
+    )
+    store.create_attempt(
+        attempt_id=ATTEMPT_ID,
+        graph_id=GRAPH_ID,
+        graph_revision=1,
+        node_id=NODE_ID,
+        attempt_no=1,
+        expected_node_version=0,
+        outbox=_event(
+            "TASK_ATTEMPT",
+            ATTEMPT_ID,
+            0,
+            "TASK_ATTEMPT_CREATED",
+            attempt_id=ATTEMPT_ID,
+            discriminator=f"attempt:{name}",
         ),
     )
     return db_path
@@ -239,6 +239,101 @@ def _sql_budget_truth(db_path: Path) -> tuple[Any, list[Any], list[Any]]:
         ).fetchall()
     assert budget is not None
     return dict(budget), [dict(row) for row in usages], [dict(row) for row in outboxes]
+
+
+def test_terminal_budget_transition_refuses_unsettled_attempt_authority(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_budget_db(tmp_path, name="terminal-budget-fence.sqlite3")
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    before = store.reconcile_budget(BUDGET_ID)
+
+    with pytest.raises(TaskStoreError) as blocked:
+        store.transition_budget(
+            BUDGET_ID,
+            expected_version=int(before["status_version"]),
+            target_status=BudgetReservationStatus.RELEASED,
+            outbox=_event(
+                "BUDGET_RESERVATION",
+                BUDGET_ID,
+                int(before["status_version"]) + 1,
+                "BUDGET_RESERVATION_RELEASED",
+                discriminator="terminal-budget-fenced",
+            ),
+        )
+
+    assert blocked.value.reason_code == TASK_STORE_CAS_CONFLICT
+    assert store.reconcile_budget(BUDGET_ID) == before
+
+
+def test_terminal_budget_atomically_fences_later_attempt_authority(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_budget_db(tmp_path, name="terminal-budget-wins.sqlite3")
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM task_runtime_attempt WHERE attempt_id = ?",
+            (ATTEMPT_ID,),
+        )
+    store.transition_graph(
+        GRAPH_ID,
+        1,
+        expected_version=0,
+        target_status=TaskGraphStatus.ACTIVE,
+        outbox=_event(
+            "TASK_GRAPH",
+            GRAPH_ID,
+            1,
+            "TASK_GRAPH_ACTIVE",
+            discriminator="terminal-budget-wins:graph-active",
+        ),
+    )
+    store.transition_budget(
+        BUDGET_ID,
+        expected_version=0,
+        target_status=BudgetReservationStatus.RELEASED,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            BUDGET_ID,
+            1,
+            "BUDGET_RESERVATION_RELEASED",
+            discriminator="terminal-budget-wins:released",
+        ),
+    )
+    attempt_id = "attempt::after-budget-terminal"
+    with pytest.raises(TaskStoreError) as blocked:
+        store.create_attempt(
+            attempt_id=attempt_id,
+            graph_id=GRAPH_ID,
+            graph_revision=1,
+            node_id=NODE_ID,
+            attempt_no=1,
+            expected_node_version=0,
+            operation_scope="host-command:after-budget-terminal",
+            operation_fingerprint="sha256:" + "a" * 64,
+            outbox=_event(
+                "TASK_ATTEMPT",
+                attempt_id,
+                0,
+                "TASK_ATTEMPT_CREATED",
+                attempt_id=attempt_id,
+                discriminator="terminal-budget-wins:attempt",
+            ),
+        )
+
+    assert blocked.value.reason_code == TASK_STORE_CAS_CONFLICT
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_attempt WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone() == (0,)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_lease"
+        ).fetchone() == (0,)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_idempotency_reservation"
+        ).fetchone() == (0,)
 
 
 def test_parallel_decision_read_revalidates_terminal_sibling_authority(

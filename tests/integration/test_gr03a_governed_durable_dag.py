@@ -34,6 +34,9 @@ from host_brain.persistence.host_command_repository import (
     HostCommandRepository,
     HostCommandRepositoryError,
 )
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import (
     TASK_STORE_BUDGET_ALREADY_EXCEEDED,
@@ -53,6 +56,7 @@ from host_brain.task_runtime import (
     RetryableWorkerPreparationError,
 )
 from host_brain.task_runtime.budget_runtime import _budget_id
+from host_brain.task_runtime.coordinator_records import _attempt_id
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
@@ -487,6 +491,16 @@ class _StaticResolver:
         return self._worker
 
 
+class _CanonicalChatResolver:
+    def __init__(self, worker: _Worker) -> None:
+        self._worker = worker
+
+    def resolve(self, *, executor: str, worker_route: str) -> _Worker:
+        assert executor == "canonical"
+        assert worker_route == "chat:root"
+        return self._worker
+
+
 class _FailingNodeResolver(_StaticResolver):
     def __init__(self, worker: _Worker, *, fail_node_id: str) -> None:
         super().__init__(worker)
@@ -651,13 +665,17 @@ def _coordinator(
     projection_reader: Any = None,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
+    durable_store = DurableTaskStore(db_path, clock=resolved_clock)
+    resolved_task_store = task_store if task_store is not None else durable_store
     return GovernedTaskCoordinator(
-        task_store=(
-            task_store
-            if task_store is not None
-            else DurableTaskStore(db_path, clock=resolved_clock)
+        task_store=resolved_task_store,
+        internal_agent_checkpoint_uow=DurableInternalAgentCheckpointUnitOfWork(
+            task_store=durable_store,
+            worker_projection_store=WorkerProjectionStore(
+                db_path,
+                clock=resolved_clock,
+            ),
         ),
-        internal_agent_checkpoint_uow=object(),
         outbox_publisher=(
             outbox_publisher if outbox_publisher is not None else _Publisher()
         ),
@@ -1110,7 +1128,7 @@ async def test_ne01_parallel_post_reservation_failure_stays_recovery_required(
 
     store = DurableTaskStore(db_path, clock=lambda: NOW)
     assert store.get_node("graph-gr03a", 1, "left")["status"] == "RUNNING"
-    assert store.get_node("graph-gr03a", 1, "right")["status"] == "FAILED"
+    assert store.get_node("graph-gr03a", 1, "right")["status"] == "RUNNING"
     assert store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
     assert "left" in probe.cancelled_nodes
     snapshot = store.read_scheduler_snapshot("graph-gr03a", 1)
@@ -1138,21 +1156,278 @@ async def test_ne01_parallel_post_reservation_failure_stays_recovery_required(
             """
         ).fetchone()[0] == 0
 
-    replay_events = [
-        event
-        async for event in app.execute_stream(
-            command=contracts[0],
-            work_order=contracts[1],
-            assignment=contracts[2],
-            graph=contracts[3],
-        )
-    ]
-    assert replay_events[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+    calls_before_replay = list(calls)
+    with pytest.raises(GovernedRuntimeError) as live_owner:
+        _ = [
+            event
+            async for event in app.execute_stream(
+                command=contracts[0],
+                work_order=contracts[1],
+                assignment=contracts[2],
+                graph=contracts[3],
+            )
+        ]
+    assert live_owner.value.reason_code == "GOVERNED_EXECUTION_IN_PROGRESS"
+    assert calls == calls_before_replay
     assert store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
     assert store.read_scheduler_snapshot("graph-gr03a", 1)["budgets"][0][
         "status"
     ] == "ACTIVE"
     assert "join" not in calls
+
+
+class _MixedOwnerClock:
+    def __init__(self) -> None:
+        self.value = NOW
+
+    def __call__(self) -> int:
+        return self.value
+
+
+async def _seed_mixed_owner_node(
+    *,
+    store: DurableTaskStore,
+    runtime: GovernedTaskCoordinator,
+    admitted: AdmittedExecution,
+    budget: Any,
+    node_id: str,
+    owner_id: str,
+    lease_ttl_ms: int,
+    reserve_operation: bool,
+) -> dict[str, Any]:
+    node_admission = admitted.for_node(node_id)
+    node = store.get_node(admitted.graph_id, admitted.graph_revision, node_id)
+    attempt_id = _attempt_id(node_admission, attempt_no=1)
+    claim = store.claim_ready_node(
+        attempt_id=attempt_id,
+        graph_id=admitted.graph_id,
+        graph_revision=admitted.graph_revision,
+        node_id=node_id,
+        expected_node_version=node["status_version"],
+        expected_attempt_count=0,
+        owner_id=owner_id,
+        lease_ttl_ms=lease_ttl_ms,
+        budget_id=budget.budget_id,
+        operation_scope=node_admission.business_scope,
+        operation_fingerprint=node_admission.operation_fingerprint,
+        attempt_created_outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            0,
+            "TASK_ATTEMPT_CREATED",
+            attempt_id=attempt_id,
+        ),
+        attempt_leased_outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            1,
+            "TASK_ATTEMPT_LEASED",
+            attempt_id=attempt_id,
+        ),
+    )
+    running_node = store.transition_node(
+        admitted.graph_id,
+        admitted.graph_revision,
+        node_id,
+        expected_version=claim["node"]["status_version"],
+        target_status="RUNNING",
+        outbox=_runtime_outbox(
+            "TASK_NODE",
+            f"{admitted.graph_id}@{admitted.graph_revision}/{node_id}",
+            claim["node"]["status_version"] + 1,
+            "TASK_NODE_RUNNING",
+        ),
+    )
+    running_attempt = store.transition_attempt(
+        attempt_id,
+        owner_id=owner_id,
+        fencing_token=claim["lease"]["fencing_token"],
+        expected_version=claim["attempt"]["status_version"],
+        target_status="RUNNING",
+        outbox=_runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            claim["attempt"]["status_version"] + 1,
+            "TASK_ATTEMPT_RUNNING",
+            attempt_id=attempt_id,
+        ),
+    )
+    precharge = await runtime._budgets.precharge(  # noqa: SLF001
+        budget,
+        node_id=node_id,
+        attempt_id=attempt_id,
+        tool_call_count=1,
+    )
+    assert precharge.accepted is True
+    operation: dict[str, Any] | None = None
+    if reserve_operation:
+        reservation = store.reserve_operation(
+            reservation_id=node_admission.reservation_id,
+            business_scope=node_admission.business_scope,
+            operation_fingerprint=node_admission.operation_fingerprint,
+            attempt_id=attempt_id,
+            lease_id=claim["lease"]["lease_id"],
+            owner_id=owner_id,
+            fencing_token=claim["lease"]["fencing_token"],
+            ttl_ms=lease_ttl_ms,
+            outbox=_runtime_outbox(
+                "OPERATION_RESERVATION",
+                node_admission.reservation_id,
+                0,
+                "OPERATION_RESERVED",
+                attempt_id=attempt_id,
+            ),
+        )
+        assert reservation.acquired is True
+        operation = dict(reservation.reservation)
+    return {
+        "attempt": dict(running_attempt),
+        "lease": dict(claim["lease"]),
+        "node": dict(running_node),
+        "operation": operation,
+    }
+
+
+def _mixed_owner_authority_snapshot(
+    store: DurableTaskStore,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> dict[str, Any]:
+    with sqlite3.connect(store.db_path) as conn:
+        operation_rows = conn.execute(
+            """
+            SELECT * FROM task_runtime_idempotency_reservation
+            ORDER BY reservation_id
+            """
+        ).fetchall()
+        outbox_rows = conn.execute(
+            "SELECT * FROM task_runtime_outbox ORDER BY outbox_id"
+        ).fetchall()
+    return {
+        "scheduler": store.read_scheduler_snapshot(graph_id, graph_revision),
+        "operations": [tuple(row) for row in operation_rows],
+        "outboxes": [tuple(row) for row in outbox_rows],
+    }
+
+
+async def _assert_mixed_live_owner_blocks_recovery(
+    tmp_path: Path,
+    *,
+    reserve_operations: bool,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("expired", ()), ("live", ())),
+        concurrency=2,
+    )
+    clock = _MixedOwnerClock()
+    repository = HostCommandRepository(db_path, clock=clock)
+    record = repository.admit(command, work_order, assignment, graph)
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    setup_runtime = _coordinator(db_path, [], clock=clock, bounded_fanout_enabled=True)
+    budget = await setup_runtime._budgets.ensure_active(  # noqa: SLF001
+        admitted=admitted,
+        work_order=record["work_order"],
+    )
+    store = DurableTaskStore(db_path, clock=clock)
+    graph_record = store.get_graph(graph.graph_id, graph.revision)
+    store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=graph_record["status_version"],
+        target_status="ACTIVE",
+        outbox=_runtime_outbox(
+            "TASK_GRAPH",
+            graph.graph_id,
+            graph_record["status_version"] + 1,
+            "TASK_GRAPH_ACTIVE",
+        ),
+    )
+    expired = await _seed_mixed_owner_node(
+        store=store,
+        runtime=setup_runtime,
+        admitted=admitted,
+        budget=budget,
+        node_id="expired",
+        owner_id="expired-owner",
+        lease_ttl_ms=20,
+        reserve_operation=reserve_operations,
+    )
+    clock.value = NOW + 21
+    live = await _seed_mixed_owner_node(
+        store=store,
+        runtime=setup_runtime,
+        admitted=admitted,
+        budget=budget,
+        node_id="live",
+        owner_id="live-owner",
+        lease_ttl_ms=20,
+        reserve_operation=reserve_operations,
+    )
+    assert expired["lease"]["expires_ts_ms"] < clock.value
+    assert live["lease"]["expires_ts_ms"] > clock.value
+    assert (expired["operation"] is not None) is reserve_operations
+    assert (live["operation"] is not None) is reserve_operations
+
+    before = _mixed_owner_authority_snapshot(
+        store,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+    )
+    worker_calls: list[str] = []
+    forbidden_resolver = _FailingResolver()
+    reentry = _coordinator(
+        db_path,
+        worker_calls,
+        clock=clock,
+        worker_resolver=forbidden_resolver,
+        bounded_fanout_enabled=True,
+    )
+
+    with pytest.raises(GovernedRuntimeError) as in_progress:
+        _ = [
+            event
+            async for event in reentry.execute_stream(
+                admitted=admitted,
+                command=record["command"],
+                work_order=record["work_order"],
+            )
+        ]
+
+    assert in_progress.value.reason_code == "GOVERNED_EXECUTION_IN_PROGRESS"
+    assert forbidden_resolver.resolve_count == 0
+    assert worker_calls == []
+    after = _mixed_owner_authority_snapshot(
+        store,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+    )
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_ne01_mixed_operation_owners_block_expired_recovery_before_mutation(
+    tmp_path: Path,
+) -> None:
+    await _assert_mixed_live_owner_blocks_recovery(
+        tmp_path,
+        reserve_operations=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ne01_mixed_preoperation_owners_block_expired_takeover_before_mutation(
+    tmp_path: Path,
+) -> None:
+    await _assert_mixed_live_owner_blocks_recovery(
+        tmp_path,
+        reserve_operations=False,
+    )
 
 
 @pytest.mark.asyncio
@@ -3685,7 +3960,9 @@ async def test_ne01_coordinator_heartbeat_loss_blocks_operation_commit(
 
 
 @pytest.mark.asyncio
-async def test_gr03a_failed_dependency_never_executes_descendant(tmp_path: Path) -> None:
+async def test_gr03a_unknown_failed_dependency_never_executes_descendant(
+    tmp_path: Path,
+) -> None:
     db_path = _migrated_db(tmp_path)
     contracts = _contracts(
         (("root", ()), ("failed", ("root",)), ("descendant", ("failed",)))
@@ -3707,16 +3984,45 @@ async def test_gr03a_failed_dependency_never_executes_descendant(tmp_path: Path)
     ]
 
     assert calls == ["root", "failed"]
+    receipt = events[-1]["execution_receipt"]
     assert events[-1]["decision"] == "REJECT"
-    graph_record = DurableTaskStore(db_path, clock=lambda: NOW).get_graph("graph-gr03a", 1)
-    assert graph_record["status"] == "FAILED"
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    graph_record = store.get_graph("graph-gr03a", 1)
+    assert graph_record["status"] == "ACTIVE"
     assert {node["node_id"]: node["status"] for node in graph_record["nodes"]}[
         "descendant"
     ] == "BLOCKED"
-    failed_snapshot = DurableTaskStore(db_path, clock=lambda: NOW).read_scheduler_snapshot(
-        "graph-gr03a", 1
+    assert {node["node_id"]: node["status"] for node in graph_record["nodes"]}[
+        "failed"
+    ] == "RUNNING"
+    failed_snapshot = store.read_scheduler_snapshot("graph-gr03a", 1)
+    assert failed_snapshot["budgets"][0]["status"] == "ACTIVE"
+    failed_attempt = next(
+        attempt
+        for attempt in failed_snapshot["attempts"]
+        if attempt["node_id"] == "failed"
     )
-    assert failed_snapshot["budgets"][0]["status"] == "RELEASED"
+    assert failed_attempt["status"] == "RUNNING"
+    failed_admission = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    ).for_node("failed")
+    assert store.get_operation_reservation(failed_admission.reservation_id)[
+        "status"
+    ] == "RESERVED"
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type IN (
+                'TASK_GRAPH_FAILED', 'TASK_GRAPH_BLOCKED',
+                'BUDGET_RESERVATION_RELEASED'
+            )
+            """
+        ).fetchone()[0] == 0
 
 
 @pytest.mark.asyncio
@@ -3968,12 +4274,23 @@ async def test_gr03b_typed_worker_usage_exceeded_blocks_acceptance_and_is_durabl
         ),
     )
     calls: list[str] = []
+    graph = replace(
+        graph,
+        nodes=(replace(graph.nodes[0], route="chat:root"),),
+    )
+    projection_store = WorkerProjectionStore(db_path, clock=lambda: NOW)
+    worker = _DurableReviewWorker(calls, projection_store)
 
     events = [
         event
         async for event in GovernedCommandApplication(
             command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
-            coordinator=_coordinator(db_path, calls),
+            coordinator=_coordinator(
+                db_path,
+                calls,
+                worker_resolver=_CanonicalChatResolver(worker),
+                projection_reader=projection_store,
+            ),
         ).execute_stream(
             command=command,
             work_order=limited,
@@ -4684,17 +5001,20 @@ async def test_ne01_b2_post_reservation_worker_failure_is_never_auto_retried(
             work_order=record["work_order"],
         )
     ]
-    assert events[-1]["execution_receipt"]["status"] == "FAILED"
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
     assert calls == ["root"]
     snapshot = DurableTaskStore(db_path, clock=lambda: NOW).read_scheduler_snapshot(
         graph.graph_id,
         graph.revision,
     )
-    assert snapshot["graph_record"]["status"] == "FAILED"
-    assert snapshot["graph_record"]["nodes"][0]["status"] == "FAILED"
+    assert snapshot["graph_record"]["status"] == "ACTIVE"
+    assert snapshot["graph_record"]["nodes"][0]["status"] == "RUNNING"
     assert [(row["attempt_no"], row["status"]) for row in snapshot["attempts"]] == [
-        (1, "FAILED"),
+        (1, "RUNNING"),
     ]
+    assert len(snapshot["active_leases"]) == 1
     assert not any(row["charge_kind"] == "RETRY" for row in snapshot["budget_usage"])
     with sqlite3.connect(db_path) as conn:
         reservations = conn.execute(

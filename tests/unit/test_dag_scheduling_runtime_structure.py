@@ -14,10 +14,11 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 )
 
 
-# Frozen after active Operation checkpoints were fenced ahead of aggregate
-# EXCEEDED Budget closure; this preserves exact node/Attempt/Lease lineage.
+# Frozen after every live owner gained precedence over both Operation recovery
+# and pre-Operation takeover, while recoverable candidates still entered the
+# same bounded schedule as in-memory READY candidates.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "44280f37befbbc8a8537f5e6fb4b8c8e6cf57df2af8330c91c0fa557028ca9d6"
+    "56e92fd3f46fa0e4de48e74dd99d988376be649c5ec8be2d1a1a1cdc5b158a97"
 )
 _REENTERED_OUTCOMES_BASELINE_SHA256 = (
     "a26863cbe141c9bc8ce85633b45e3e2881c994fc99656732c939391320960058"
@@ -252,6 +253,248 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
         for call in outbox_calls
         for keyword in call.keywords
     )
+
+
+def test_preoperation_recovery_joins_bounded_schedule_without_review_replay() -> None:
+    owner = _class(dag_scheduling_runtime, "DurableDagSchedulingRuntime")
+    execute = _method(owner, "execute_stream")
+    classifier_calls = [
+        node
+        for node in ast.walk(execute)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "classify_preoperation_recovery_candidates"
+    ]
+    scheduler_calls = [
+        node
+        for node in ast.walk(execute)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "compute_dag_schedule"
+    ]
+    assert len(classifier_calls) == len(scheduler_calls) == 1
+    classifier = classifier_calls[0]
+    scheduler = scheduler_calls[0]
+    operation_checks = [
+        call
+        for call in _self_dependency_calls(execute, "_node_execution_projection")
+        if call.func.attr == "try_operation"
+    ]
+    snapshot_reads = [
+        call
+        for call in _self_dependency_calls(execute, "_store")
+        if call.func.attr == "read_scheduler_snapshot"
+    ]
+    assert operation_checks
+    assert len(snapshot_reads) == 1
+    snapshot_read = snapshot_reads[0]
+    assert min(call.lineno for call in operation_checks) < snapshot_read.lineno
+    assert snapshot_read.lineno < classifier.lineno
+    assert classifier.lineno < scheduler.lineno
+    assert {keyword.arg for keyword in classifier.keywords} == {
+        "graph_id",
+        "graph_revision",
+        "operation_free_node_ids",
+    }
+
+    def has_negated_name(test: ast.AST, name: str) -> bool:
+        return any(
+            isinstance(child, ast.UnaryOp)
+            and isinstance(child.op, ast.Not)
+            and isinstance(child.operand, ast.Name)
+            and child.operand.id == name
+            for child in ast.walk(test)
+        )
+
+    preoperation_live_owner_guards = [
+        node
+        for node in ast.walk(execute)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.BinOp)
+        and isinstance(node.test.op, ast.Sub)
+        and {
+            "operation_free_node_ids",
+            "preoperation_recovery_node_ids",
+        }.issubset(
+            {
+                child.id
+                for child in ast.walk(node.test)
+                if isinstance(child, ast.Name)
+            }
+        )
+        and any(
+            isinstance(child, ast.Name)
+            and child.id == "GOVERNED_EXECUTION_IN_PROGRESS"
+            for statement in node.body
+            for child in ast.walk(statement)
+        )
+    ]
+    operation_live_owner_guards = [
+        node
+        for node in ast.walk(execute)
+        if isinstance(node, ast.If)
+        and {
+            "raw_active_leases",
+            "reservation_attempt_ids",
+            "observed_ts_ms",
+        }.issubset(
+            {
+                child.id
+                for child in ast.walk(node.test)
+                if isinstance(child, ast.Name)
+            }
+        )
+        and any(
+            isinstance(child, ast.Name)
+            and child.id == "GOVERNED_EXECUTION_IN_PROGRESS"
+            for statement in node.body
+            for child in ast.walk(statement)
+        )
+    ]
+    unresolved_failure_blocks = [
+        node
+        for node in ast.walk(execute)
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(child, ast.Name) and child.id == "unresolved_failure"
+            for child in ast.walk(node.test)
+        )
+    ]
+    assert len(preoperation_live_owner_guards) == 1
+    assert len(operation_live_owner_guards) == 1
+    assert len(unresolved_failure_blocks) == 1
+    live_owner_guards = (
+        preoperation_live_owner_guards[0],
+        operation_live_owner_guards[0],
+    )
+    assert classifier.lineno < min(guard.lineno for guard in live_owner_guards)
+    assert max(guard.lineno for guard in live_owner_guards) < (
+        unresolved_failure_blocks[0].lineno
+    )
+    mutation_dependencies = {
+        "_budgets",
+        "_node_lifecycle",
+        "_parallel_settlement",
+        "_parallel_success",
+        "_reviews",
+        "_runtime_outbox",
+    }
+    assert not [
+        call
+        for dependency in mutation_dependencies
+        for call in _self_dependency_calls(execute, dependency)
+        if classifier.lineno < call.lineno < max(
+            guard.lineno for guard in live_owner_guards
+        )
+    ]
+
+    def shortcut_testing(*names: str) -> ast.If:
+        matches = [
+            node
+            for node in ast.walk(execute)
+            if isinstance(node, ast.If)
+            and set(names).issubset(
+                {
+                    child.id
+                    for child in ast.walk(node.test)
+                    if isinstance(child, ast.Name)
+                }
+            )
+        ]
+        assert len(matches) == 1
+        return matches[0]
+
+    recovery_deferred_shortcuts = (
+        shortcut_testing("pre_review_node_id"),
+        shortcut_testing("post_review_node_id"),
+        shortcut_testing("blocked_node_id", "failed_node_id"),
+    )
+    assert all(
+        has_negated_name(shortcut.test, "preoperation_recovery_node_ids")
+        for shortcut in recovery_deferred_shortcuts
+    )
+
+    def budget_status_shortcuts(status: str) -> list[ast.If]:
+        def compares_status(child: ast.AST) -> bool:
+            return (
+                isinstance(child, ast.Compare)
+                and len(child.ops) == 1
+                and isinstance(child.ops[0], ast.Eq)
+                and isinstance(child.left, ast.Attribute)
+                and isinstance(child.left.value, ast.Name)
+                and child.left.value.id == "budget"
+                and child.left.attr == "status"
+                and len(child.comparators) == 1
+                and isinstance(child.comparators[0], ast.Constant)
+                and child.comparators[0].value == status
+            )
+
+        return [
+            node
+            for node in ast.walk(execute)
+            if isinstance(node, ast.If)
+            and any(compares_status(child) for child in ast.walk(node.test))
+        ]
+
+    def has_operation_free_precedence(shortcut: ast.If) -> bool:
+        return has_negated_name(shortcut.test, "operation_free_node_ids")
+
+    budget_exceeded_terminal_ifs = budget_status_shortcuts("EXCEEDED")
+    budget_released_terminal_ifs = budget_status_shortcuts("RELEASED")
+    parallel_terminal_calls = [
+        call
+        for call in _self_dependency_calls(execute, "_parallel_settlement")
+        if call.func.attr
+        in {"assert_parallel_reentry_idle", "resolve_parallel_outcomes"}
+    ]
+    assert len(budget_exceeded_terminal_ifs) == 2
+    assert len(budget_released_terminal_ifs) == 1
+    assert parallel_terminal_calls
+    assert classifier.lineno < min(
+        node.lineno for node in budget_exceeded_terminal_ifs
+    )
+    assert classifier.lineno < min(call.lineno for call in parallel_terminal_calls)
+    assert all(
+        has_operation_free_precedence(shortcut)
+        for shortcut in (
+            *budget_exceeded_terminal_ifs,
+            *budget_released_terminal_ifs,
+        )
+    )
+
+    ready_overrides = [
+        node
+        for node in ast.walk(scheduler)
+        if isinstance(node, ast.IfExp)
+        and isinstance(node.body, ast.Attribute)
+        and node.body.attr == "READY"
+        and isinstance(node.test, ast.Compare)
+        and any(isinstance(operator, ast.In) for operator in node.test.ops)
+        and any(
+            isinstance(comparator, ast.Name)
+            and comparator.id == "preoperation_recovery_node_ids"
+            for comparator in node.test.comparators
+        )
+    ]
+    assert len(ready_overrides) == 1
+    assert isinstance(ready_overrides[0].orelse, ast.Call)
+
+    review_filters = [
+        node
+        for node in ast.walk(execute)
+        if isinstance(node, ast.ListComp)
+        and any(
+            isinstance(child, ast.Compare)
+            and any(isinstance(operator, ast.NotIn) for operator in child.ops)
+            and any(
+                isinstance(comparator, ast.Name)
+                and comparator.id == "preoperation_recovery_node_ids"
+                for comparator in child.comparators
+            )
+            for child in ast.walk(node)
+        )
+    ]
+    assert len(review_filters) == 1
 
 
 def test_records_module_is_one_pure_validation_helper() -> None:

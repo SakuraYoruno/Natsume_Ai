@@ -339,6 +339,30 @@ class _BarrierAcquireStore:
         return self._delegate.acquire_lease(*args, **kwargs)
 
 
+class _LeaseAcquireResponseLossStore:
+    """Commit one takeover Lease, then lose only its first response."""
+
+    def __init__(self, delegate: DurableTaskStore) -> None:
+        self._delegate = delegate
+        self.acquire_calls = 0
+        self.response_lost = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def acquire_lease(self, *args: Any, **kwargs: Any) -> Any:
+        self.acquire_calls += 1
+        result = self._delegate.acquire_lease(*args, **kwargs)
+        is_takeover = bool(
+            kwargs.get("absent_operation_reservation_id")
+            or kwargs.get("existing_operation_reservation_id")
+        )
+        if is_takeover and not self.response_lost:
+            self.response_lost = True
+            raise TimeoutError("simulated takeover Lease response loss")
+        return result
+
+
 class _StopBeforeAttemptSuccessStore:
     def __init__(self, delegate: DurableTaskStore, failure: BaseException) -> None:
         self._delegate = delegate
@@ -353,6 +377,235 @@ class _StopBeforeAttemptSuccessStore:
             self.stopped = True
             raise self._failure
         return self._delegate.transition_attempt(attempt_id, **kwargs)
+
+
+class _ReserveBoundaryStopStore:
+    """Stop exactly at the Operation reservation durability boundary."""
+
+    def __init__(
+        self,
+        delegate: DurableTaskStore,
+        failure: BaseException,
+        *,
+        commit_before_stop: bool,
+        reservation_id: str | None = None,
+    ) -> None:
+        self._delegate = delegate
+        self._failure = failure
+        self._commit_before_stop = bool(commit_before_stop)
+        self._reservation_id = reservation_id
+        self.reserve_calls = 0
+        self.stopped = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def reserve_operation(self, *args: Any, **kwargs: Any) -> Any:
+        reservation_id = str(
+            kwargs.get("reservation_id")
+            or (args[0] if args else "")
+        )
+        if (
+            self.stopped
+            or (
+                self._reservation_id is not None
+                and reservation_id != self._reservation_id
+            )
+        ):
+            return self._delegate.reserve_operation(*args, **kwargs)
+        self.reserve_calls += 1
+        self.stopped = True
+        if self._commit_before_stop:
+            self._delegate.reserve_operation(*args, **kwargs)
+        raise self._failure
+
+
+class _SiblingStateBoundaryStopStore:
+    """Stop one node before Operation only after a parallel sibling is durable."""
+
+    def __init__(
+        self,
+        delegate: DurableTaskStore,
+        failure: BaseException,
+        *,
+        reservation_id: str,
+        sibling_node_id: str,
+        release_on: str,
+    ) -> None:
+        self._delegate = delegate
+        self._failure = failure
+        self._reservation_id = reservation_id
+        self._sibling_node_id = sibling_node_id
+        self._release_on = release_on
+        self._sibling_durable = asyncio.Event()
+        self._sibling_budget_exceeded = False
+        self.stopped = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    async def reserve_operation(self, *args: Any, **kwargs: Any) -> Any:
+        reservation_id = str(
+            kwargs.get("reservation_id")
+            or (args[0] if args else "")
+        )
+        if reservation_id != self._reservation_id or self.stopped:
+            return self._delegate.reserve_operation(*args, **kwargs)
+        await asyncio.wait_for(self._sibling_durable.wait(), timeout=5.0)
+        self.stopped = True
+        raise self._failure
+
+    def commit_node_acceptance(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        **kwargs: Any,
+    ) -> Any:
+        result = self._delegate.commit_node_acceptance(
+            graph_id,
+            graph_revision,
+            node_id,
+            **kwargs,
+        )
+        if (
+            self._release_on == "ACCEPTED"
+            and node_id == self._sibling_node_id
+        ):
+            self._sibling_durable.set()
+        return result
+
+    def consume_budget_once(self, *args: Any, **kwargs: Any) -> Any:
+        result = self._delegate.consume_budget_once(*args, **kwargs)
+        if (
+            self._release_on == "BUDGET_EXCEEDED"
+            and kwargs.get("node_id") == self._sibling_node_id
+            and str(kwargs.get("charge_kind") or "").startswith("WORKER_USAGE")
+            and result.accepted is False
+        ):
+            self._sibling_budget_exceeded = True
+        return result
+
+    def fail_running_attempt_node_bundle(
+        self,
+        attempt_id: str,
+        **kwargs: Any,
+    ) -> Any:
+        result = self._delegate.fail_running_attempt_node_bundle(
+            attempt_id,
+            **kwargs,
+        )
+        node = result.get("node") if isinstance(result, dict) else None
+        if (
+            self._release_on == "FAILED"
+            and isinstance(node, dict)
+            and node.get("node_id") == self._sibling_node_id
+            and node.get("status") == "FAILED"
+        ):
+            self._sibling_durable.set()
+        return result
+
+    def transition_node(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        **kwargs: Any,
+    ) -> Any:
+        result = self._delegate.transition_node(
+            graph_id,
+            graph_revision,
+            node_id,
+            **kwargs,
+        )
+        if (
+            self._release_on == "WAITING_ACCEPTANCE_REVIEW"
+            and node_id == self._sibling_node_id
+            and result.get("status") == "WAITING_ACCEPTANCE_REVIEW"
+        ):
+            self._sibling_durable.set()
+        if (
+            self._release_on == "BUDGET_EXCEEDED"
+            and self._sibling_budget_exceeded
+            and node_id == self._sibling_node_id
+            and result.get("status") == "FAILED"
+        ):
+            self._sibling_durable.set()
+        return result
+
+
+class _PreReservationTerminalStopStore:
+    """Stop after a rejected PRECHARGE but before terminal closeout."""
+
+    def __init__(self, delegate: DurableTaskStore, failure: BaseException) -> None:
+        self._delegate = delegate
+        self._failure = failure
+        self.stopped = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def fail_running_attempt_bundle(self, *args: Any, **kwargs: Any) -> Any:
+        if not self.stopped:
+            self.stopped = True
+            raise self._failure
+        return self._delegate.fail_running_attempt_bundle(*args, **kwargs)
+
+
+class _ReservationAwareProjectedWorker(_ProjectedWorker):
+    """Record the durable Operation row observed at the worker boundary."""
+
+    def __init__(
+        self,
+        *,
+        projections: WorkerProjectionStore,
+        calls: list[str],
+        task_store: DurableTaskStore,
+        starts: list[dict[str, Any]],
+        delay_seconds: float = 0.0,
+    ) -> None:
+        super().__init__(
+            projections=projections,
+            calls=calls,
+            delay_seconds=delay_seconds,
+        )
+        self._task_store = task_store
+        self._starts = starts
+
+    async def execute_stream(
+        self,
+        *,
+        execution_context: dict[str, Any],
+        **kwargs: Any,
+    ):
+        reservation = self._task_store.get_operation_reservation(
+            str(execution_context["reservation_id"])
+        )
+        self._starts.append(
+            {
+                "reservation_id": reservation["reservation_id"],
+                "reservation_status": reservation["status"],
+                "attempt_id": reservation["attempt_id"],
+                "owner_id": reservation["owner_id"],
+                "fencing_token": reservation["fencing_token"],
+            }
+        )
+        async for event in super().execute_stream(
+            execution_context=execution_context,
+            **kwargs,
+        ):
+            yield event
+
+
+class _SelectedPreparationFailureResolver(_ProductionRouteResolver):
+    def __init__(self, worker: Any, *, failed_node_id: str) -> None:
+        super().__init__(worker)
+        self._failed_route = f"chat:{failed_node_id}"
+
+    def resolve(self, *, executor: str, worker_route: str) -> Any:
+        if worker_route == self._failed_route:
+            raise RuntimeError("selected sibling preparation failed")
+        return super().resolve(executor=executor, worker_route=worker_route)
 
 
 class _ProcessStopped(BaseException):
@@ -420,6 +673,96 @@ def _lease_lineage(
     return [(str(row[0]), int(row[1]), str(row[2])) for row in rows]
 
 
+def _operation_rows_for_attempt(
+    store: DurableTaskStore,
+    *,
+    attempt_id: str,
+) -> list[dict[str, Any]]:
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT reservation_id, attempt_id, lease_id, owner_id, "
+            "fencing_token, status, status_version, receipt_ref "
+            "FROM task_runtime_idempotency_reservation "
+            "WHERE attempt_id = ? ORDER BY reservation_id",
+            (attempt_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _outbox_rows_for_attempt(
+    store: DurableTaskStore,
+    *,
+    attempt_id: str,
+) -> list[dict[str, Any]]:
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM task_runtime_outbox "
+            "WHERE attempt_id = ? ORDER BY created_ts_ms, outbox_id",
+            (attempt_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _accepted_node_snapshot(
+    store: DurableTaskStore,
+    projections: WorkerProjectionStore,
+    *,
+    admitted: AdmittedExecution,
+    node_id: str,
+    attempt: dict[str, Any],
+) -> dict[str, Any]:
+    artifact = dict(
+        store.get_node_artifact(
+            admitted.graph_id,
+            admitted.graph_revision,
+            node_id,
+        )
+    )
+    receipt_ref = str(artifact["receipt_ref"])
+    receipt = projections.load(receipt_ref)
+    assert receipt is not None
+    return {
+        "node": dict(
+            store.get_node(
+                admitted.graph_id,
+                admitted.graph_revision,
+                node_id,
+            )
+        ),
+        "attempt": dict(attempt),
+        "artifact": artifact,
+        "operation": dict(
+            store.get_operation_reservation(
+                admitted.for_node(node_id).reservation_id
+            )
+        ),
+        "effects": store.list_acceptance_effect_intents(
+            graph_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
+            node_id=node_id,
+        ),
+        "outbox": _outbox_rows_for_attempt(
+            store,
+            attempt_id=str(attempt["attempt_id"]),
+        ),
+        "receipt": dict(receipt),
+    }
+
+
+def _budget_usage_for_attempt(
+    snapshot: dict[str, Any],
+    *,
+    attempt_id: str,
+    charge_kind: str,
+) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in snapshot["budget_usage"]
+        if row["attempt_id"] == attempt_id
+        and row["charge_kind"] == charge_kind
+    ]
+
+
 class _ContextVerifier(_Verifier):
     def __init__(self) -> None:
         self.contexts: list[dict[str, Any]] = []
@@ -440,6 +783,8 @@ def _coordinator(
     bounded_fanout_enabled: bool = False,
     atomic_graph_success_enabled: bool = False,
     checkpoint_uow: Any | None = None,
+    worker_resolver: Any | None = None,
+    acceptance: Any | None = None,
 ) -> GovernedTaskCoordinator:
     durable_store = store
     while type(durable_store) is not DurableTaskStore:
@@ -455,9 +800,13 @@ def _coordinator(
         ),
         outbox_publisher=_Publisher(),
         outbox_factory=OutboxMessage,
-        worker_resolver=_ProductionRouteResolver(worker),
+        worker_resolver=(
+            worker_resolver
+            if worker_resolver is not None
+            else _ProductionRouteResolver(worker)
+        ),
         verifier=verifier or _Verifier(),
-        acceptance=_Acceptance("ACCEPT"),
+        acceptance=acceptance if acceptance is not None else _Acceptance("ACCEPT"),
         projection_reader=projections,
         owner_id=owner_id,
         lease_ttl_ms=lease_ttl_ms,
@@ -572,12 +921,13 @@ async def test_reopened_runtime_takes_over_same_attempt_from_committed_checkpoin
 
     clock.advance(25)
     reopened_store = DurableTaskStore(db_path, clock=clock)
+    response_loss_store = _LeaseAcquireResponseLossStore(reopened_store)
     reopened_projections = WorkerProjectionStore(db_path, clock=clock)
     verifier = _ContextVerifier()
     reopened_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=clock),
         coordinator=_coordinator(
-            store=reopened_store,
+            store=response_loss_store,
             projections=reopened_projections,
             worker=worker,
             owner_id="online-owner-b",
@@ -588,6 +938,8 @@ async def test_reopened_runtime_takes_over_same_attempt_from_committed_checkpoin
     resumed = await _events(reopened_app, contracts)
 
     assert resumed[-1]["execution_receipt"]["accepted"] is True
+    assert response_loss_store.response_lost is True
+    assert response_loss_store.acquire_calls == 2
     assert calls == ["root"]
     assert verifier.contexts
     recovery = verifier.contexts[-1]["recovery"]
@@ -1184,11 +1536,12 @@ async def test_post_commit_budget_process_stop_propagates_without_terminal_write
 
     clock.advance(25)
     reopened = DurableTaskStore(db_path, clock=clock)
+    response_loss_store = _LeaseAcquireResponseLossStore(reopened)
     resumed = await _events(
         GovernedCommandApplication(
             command_repository=HostCommandRepository(db_path, clock=clock),
             coordinator=_coordinator(
-                store=reopened,
+                store=response_loss_store,
                 projections=WorkerProjectionStore(db_path, clock=clock),
                 worker=worker,
                 owner_id="settlement-stop-owner-b",
@@ -1480,6 +1833,7 @@ async def test_heartbeat_loss_keeps_unknown_side_effect_blocked_for_signed_recon
     first = await _events(first_app, contracts)
     assert first[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
     assert calls == ["root"]
+    clock.advance(31)
 
     second_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=clock),
@@ -1569,3 +1923,875 @@ async def test_reserved_operation_expires_online_without_restart_or_worker_repla
             ("expiry-owner-b",),
         ).fetchone()[0]
     assert new_owner_lease_count == 0
+
+
+@pytest.mark.asyncio
+async def test_preoperation_hard_stop_replays_same_attempt_under_higher_fence(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    durable = DurableTaskStore(db_path, clock=clock)
+    calls: list[str] = []
+    starts: list[dict[str, Any]] = []
+    worker = _ReservationAwareProjectedWorker(
+        projections=projections,
+        calls=calls,
+        task_store=durable,
+        starts=starts,
+    )
+    stopped_store = _ReserveBoundaryStopStore(
+        durable,
+        _ProcessStopped("process stopped before Operation reservation"),
+        commit_before_stop=False,
+    )
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=stopped_store,
+            projections=projections,
+            worker=worker,
+            owner_id="preoperation-owner-a",
+        ),
+    )
+
+    with pytest.raises(_ProcessStopped):
+        await _events(first_app, contracts)
+
+    held = durable.read_scheduler_snapshot("graph-gr03a", 1)
+    original_attempt = dict(held["attempts"][0])
+    original_lease = dict(held["active_leases"][0])
+    original_precharge = _budget_usage_for_attempt(
+        held,
+        attempt_id=original_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    )
+    assert stopped_store.reserve_calls == 1
+    assert held["graph_record"]["status"] == "ACTIVE"
+    assert durable.get_node("graph-gr03a", 1, "root")["status"] == "RUNNING"
+    assert original_attempt["status"] == "RUNNING"
+    assert original_lease["owner_id"] == "preoperation-owner-a"
+    assert original_precharge and original_precharge[0]["accepted"] is True
+    assert _operation_rows_for_attempt(
+        durable,
+        attempt_id=original_attempt["attempt_id"],
+    ) == []
+    assert calls == []
+    assert starts == []
+
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    response_loss_store = _LeaseAcquireResponseLossStore(reopened)
+    resumed = await _events(
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=response_loss_store,
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                owner_id="preoperation-owner-b",
+            ),
+        ),
+        contracts,
+    )
+
+    assert resumed[-1]["execution_receipt"]["status"] == "ACCEPTED"
+    assert resumed[-1]["execution_receipt"]["accepted"] is True
+    assert response_loss_store.response_lost is True
+    assert response_loss_store.acquire_calls == 2
+    final = reopened.read_scheduler_snapshot("graph-gr03a", 1)
+    assert len(final["attempts"]) == 1
+    assert final["attempts"][0]["attempt_id"] == original_attempt["attempt_id"]
+    assert final["attempts"][0]["status"] == "SUCCEEDED"
+    assert _budget_usage_for_attempt(
+        final,
+        attempt_id=original_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    ) == original_precharge
+    assert _lease_lineage(
+        reopened,
+        attempt_id=original_attempt["attempt_id"],
+    ) == [
+        (
+            "preoperation-owner-a",
+            original_lease["fencing_token"],
+            "EXPIRED",
+        ),
+        (
+            "preoperation-owner-b",
+            original_lease["fencing_token"] + 1,
+            "RELEASED",
+        ),
+    ]
+    operation_rows = _operation_rows_for_attempt(
+        reopened,
+        attempt_id=original_attempt["attempt_id"],
+    )
+    assert len(operation_rows) == 1
+    assert operation_rows[0]["reservation_id"] == admitted.reservation_id
+    assert operation_rows[0]["status"] == "COMMITTED"
+    assert operation_rows[0]["owner_id"] == "preoperation-owner-b"
+    assert operation_rows[0]["fencing_token"] == (
+        original_lease["fencing_token"] + 1
+    )
+    assert calls == ["root"]
+    assert starts == [
+        {
+            "reservation_id": admitted.reservation_id,
+            "reservation_status": "RESERVED",
+            "attempt_id": original_attempt["attempt_id"],
+            "owner_id": "preoperation-owner-b",
+            "fencing_token": original_lease["fencing_token"] + 1,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reserve_response_loss_uses_operation_recovery_without_worker_replay(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    durable = DurableTaskStore(db_path, clock=clock)
+    calls: list[str] = []
+    starts: list[dict[str, Any]] = []
+    worker = _ReservationAwareProjectedWorker(
+        projections=projections,
+        calls=calls,
+        task_store=durable,
+        starts=starts,
+    )
+    response_loss = _ReserveBoundaryStopStore(
+        durable,
+        _ProcessStopped("Operation reserve response lost"),
+        commit_before_stop=True,
+    )
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=response_loss,
+            projections=projections,
+            worker=worker,
+            owner_id="reserve-loss-owner-a",
+        ),
+    )
+
+    with pytest.raises(_ProcessStopped):
+        await _events(first_app, contracts)
+
+    held = durable.read_scheduler_snapshot("graph-gr03a", 1)
+    original_attempt = dict(held["attempts"][0])
+    original_precharge = _budget_usage_for_attempt(
+        held,
+        attempt_id=original_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    )
+    operation_before = durable.get_operation_reservation(admitted.reservation_id)
+    assert response_loss.reserve_calls == 1
+    assert operation_before["status"] == "RESERVED"
+    assert operation_before["attempt_id"] == original_attempt["attempt_id"]
+    assert calls == []
+    assert starts == []
+
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    pending = await _events(
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=reopened,
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                owner_id="reserve-loss-owner-b",
+            ),
+        ),
+        contracts,
+    )
+
+    receipt = pending[-1]["execution_receipt"]
+    operation_after = reopened.get_operation_reservation(admitted.reservation_id)
+    final = reopened.read_scheduler_snapshot("graph-gr03a", 1)
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["accepted"] is False
+    assert receipt["projection"]["online_takeover_state"] == (
+        "SIGNED_RECONCILIATION_REQUIRED"
+    )
+    assert operation_after["status"] == "RECOVERY_REQUIRED"
+    assert operation_after["status_version"] == operation_before["status_version"] + 1
+    assert operation_after["attempt_id"] == original_attempt["attempt_id"]
+    assert len(final["attempts"]) == 1
+    assert final["attempts"][0]["attempt_id"] == original_attempt["attempt_id"]
+    assert _budget_usage_for_attempt(
+        final,
+        attempt_id=original_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    ) == original_precharge
+    assert calls == []
+    assert starts == []
+    with reopened._connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_lease WHERE owner_id = ?",
+            ("reserve-loss-owner-b",),
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_preoperation_recovery_has_one_higher_fence_winner(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    durable = DurableTaskStore(db_path, clock=clock)
+    calls: list[str] = []
+    starts: list[dict[str, Any]] = []
+    worker = _ReservationAwareProjectedWorker(
+        projections=projections,
+        calls=calls,
+        task_store=durable,
+        starts=starts,
+        delay_seconds=0.05,
+    )
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=_ReserveBoundaryStopStore(
+                durable,
+                _ProcessStopped("process stopped before concurrent recovery"),
+                commit_before_stop=False,
+            ),
+            projections=projections,
+            worker=worker,
+            owner_id="preoperation-race-owner-a",
+        ),
+    )
+    with pytest.raises(_ProcessStopped):
+        await _events(first_app, contracts)
+
+    held = durable.read_scheduler_snapshot("graph-gr03a", 1)
+    original_attempt = dict(held["attempts"][0])
+    original_lease = dict(held["active_leases"][0])
+    original_precharge = _budget_usage_for_attempt(
+        held,
+        attempt_id=original_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    )
+    clock.advance(25)
+
+    barrier = threading.Barrier(2)
+    apps = [
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=_BarrierAcquireStore(
+                    DurableTaskStore(db_path, clock=clock),
+                    barrier,
+                ),
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                owner_id=f"preoperation-race-owner-{suffix}",
+            ),
+        )
+        for suffix in ("b", "c")
+    ]
+
+    async def threaded_events(app: GovernedCommandApplication) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(lambda: asyncio.run(_events(app, contracts)))
+
+    outcomes = await asyncio.gather(
+        *(threaded_events(app) for app in apps),
+        return_exceptions=True,
+    )
+    receipts = [
+        outcome[-1]["execution_receipt"]
+        for outcome in outcomes
+        if isinstance(outcome, list)
+    ]
+
+    assert sum(receipt["accepted"] is True for receipt in receipts) == 1
+    assert len(outcomes) == 2
+    assert sum(isinstance(outcome, BaseException) for outcome in outcomes) <= 1
+    assert calls == ["root"]
+    assert len(starts) == 1
+
+    reopened = DurableTaskStore(db_path, clock=clock)
+    final = reopened.read_scheduler_snapshot("graph-gr03a", 1)
+    assert len(final["attempts"]) == 1
+    assert final["attempts"][0]["attempt_id"] == original_attempt["attempt_id"]
+    assert final["attempts"][0]["status"] == "SUCCEEDED"
+    assert _budget_usage_for_attempt(
+        final,
+        attempt_id=original_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    ) == original_precharge
+    lineage = _lease_lineage(
+        reopened,
+        attempt_id=original_attempt["attempt_id"],
+    )
+    assert len(lineage) == 2
+    assert lineage[0] == (
+        "preoperation-race-owner-a",
+        original_lease["fencing_token"],
+        "EXPIRED",
+    )
+    assert lineage[1][0] in {
+        "preoperation-race-owner-b",
+        "preoperation-race-owner-c",
+    }
+    assert lineage[1][1:] == (
+        original_lease["fencing_token"] + 1,
+        "RELEASED",
+    )
+    operation_rows = _operation_rows_for_attempt(
+        reopened,
+        attempt_id=original_attempt["attempt_id"],
+    )
+    assert len(operation_rows) == 1
+    assert operation_rows[0]["owner_id"] == lineage[1][0]
+    assert operation_rows[0]["fencing_token"] == lineage[1][1]
+    assert starts[0]["reservation_status"] == "RESERVED"
+    assert starts[0]["owner_id"] == lineage[1][0]
+    assert starts[0]["fencing_token"] == lineage[1][1]
+
+
+@pytest.mark.asyncio
+async def test_parallel_preoperation_recovery_preserves_accepted_sibling_snapshot(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (
+            ("accepted", ()),
+            ("recovering", ()),
+            ("join", ("accepted", "recovering")),
+        ),
+        concurrency=2,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    durable = DurableTaskStore(db_path, clock=clock)
+    calls: list[str] = []
+    starts: list[dict[str, Any]] = []
+    worker = _ReservationAwareProjectedWorker(
+        projections=projections,
+        calls=calls,
+        task_store=durable,
+        starts=starts,
+    )
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=_SiblingStateBoundaryStopStore(
+                durable,
+                _ProcessStopped("parallel node stopped before Operation reservation"),
+                reservation_id=admitted.for_node("recovering").reservation_id,
+                sibling_node_id="accepted",
+                release_on="ACCEPTED",
+            ),
+            projections=projections,
+            worker=worker,
+            owner_id="preoperation-dag-owner-a",
+            bounded_fanout_enabled=True,
+        ),
+    )
+
+    with pytest.raises(_ProcessStopped):
+        await _events(first_app, contracts)
+
+    held = durable.read_scheduler_snapshot("graph-gr03a", 1)
+    recovering_node = dict(durable.get_node("graph-gr03a", 1, "recovering"))
+    accepted_attempt = next(
+        dict(row) for row in held["attempts"] if row["node_id"] == "accepted"
+    )
+    recovering_attempt = next(
+        dict(row) for row in held["attempts"] if row["node_id"] == "recovering"
+    )
+    accepted_snapshot = _accepted_node_snapshot(
+        durable,
+        projections,
+        admitted=admitted,
+        node_id="accepted",
+        attempt=accepted_attempt,
+    )
+    recovering_lease = next(
+        dict(row)
+        for row in held["active_leases"]
+        if row["attempt_id"] == recovering_attempt["attempt_id"]
+    )
+    recovering_precharge = _budget_usage_for_attempt(
+        held,
+        attempt_id=recovering_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    )
+    assert held["graph_record"]["status"] == "ACTIVE"
+    assert accepted_snapshot["node"]["status"] == "ACCEPTED"
+    assert accepted_attempt["status"] == "SUCCEEDED"
+    assert accepted_snapshot["operation"]["status"] == "COMMITTED"
+    assert accepted_snapshot["artifact"]["attempt_id"] == accepted_attempt["attempt_id"]
+    assert accepted_snapshot["receipt"]["attempt_id"] == accepted_attempt["attempt_id"]
+    assert accepted_snapshot["effects"] == []
+    assert recovering_node["status"] == "RUNNING"
+    assert recovering_attempt["status"] == "RUNNING"
+    assert _operation_rows_for_attempt(
+        durable,
+        attempt_id=recovering_attempt["attempt_id"],
+    ) == []
+    assert calls == ["accepted"]
+    assert [item["reservation_status"] for item in starts] == ["RESERVED"]
+
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    resumed = await _events(
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=reopened,
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                owner_id="preoperation-dag-owner-b",
+                bounded_fanout_enabled=True,
+            ),
+        ),
+        contracts,
+    )
+
+    assert resumed[-1]["execution_receipt"]["status"] == "ACCEPTED"
+    final = reopened.read_scheduler_snapshot("graph-gr03a", 1)
+    assert final["graph_record"]["status"] == "COMPLETED"
+    final_accepted_attempt = next(
+        dict(row) for row in final["attempts"] if row["node_id"] == "accepted"
+    )
+    assert _accepted_node_snapshot(
+        reopened,
+        WorkerProjectionStore(db_path, clock=clock),
+        admitted=admitted,
+        node_id="accepted",
+        attempt=final_accepted_attempt,
+    ) == accepted_snapshot
+    final_recovering_attempts = [
+        dict(row) for row in final["attempts"] if row["node_id"] == "recovering"
+    ]
+    assert len(final_recovering_attempts) == 1
+    assert final_recovering_attempts[0]["attempt_id"] == (
+        recovering_attempt["attempt_id"]
+    )
+    assert final_recovering_attempts[0]["status"] == "SUCCEEDED"
+    assert _budget_usage_for_attempt(
+        final,
+        attempt_id=recovering_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    ) == recovering_precharge
+    assert _lease_lineage(
+        reopened,
+        attempt_id=recovering_attempt["attempt_id"],
+    ) == [
+        (
+            "preoperation-dag-owner-a",
+            recovering_lease["fencing_token"],
+            "EXPIRED",
+        ),
+        (
+            "preoperation-dag-owner-b",
+            recovering_lease["fencing_token"] + 1,
+            "RELEASED",
+        ),
+    ]
+    assert calls == ["accepted", "recovering", "join"]
+    assert [item["reservation_status"] for item in starts] == [
+        "RESERVED",
+        "RESERVED",
+        "RESERVED",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_accepted_precharge_recovery_stops_when_sibling_exceeds_shared_budget(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (
+            ("recovering", ()),
+            ("budget-sibling", ()),
+            ("join", ("recovering", "budget-sibling")),
+        ),
+        concurrency=2,
+        token_limit=100,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    durable = DurableTaskStore(db_path, clock=clock)
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ProjectedWorker(
+        projections=projections,
+        calls=calls,
+        token_counts={"budget-sibling": 101},
+    )
+    stopped_store = _SiblingStateBoundaryStopStore(
+        durable,
+        _ProcessStopped("candidate stopped after sibling exceeded shared Budget"),
+        reservation_id=admitted.for_node("recovering").reservation_id,
+        sibling_node_id="budget-sibling",
+        release_on="BUDGET_EXCEEDED",
+    )
+
+    with pytest.raises(_ProcessStopped):
+        await _events(
+            GovernedCommandApplication(
+                command_repository=HostCommandRepository(db_path, clock=clock),
+                coordinator=_coordinator(
+                    store=stopped_store,
+                    projections=projections,
+                    worker=worker,
+                    owner_id="preoperation-budget-owner-a",
+                    bounded_fanout_enabled=True,
+                ),
+            ),
+            contracts,
+        )
+
+    held = durable.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
+    recovering_attempt = next(
+        dict(row) for row in held["attempts"] if row["node_id"] == "recovering"
+    )
+    sibling_attempt = next(
+        dict(row)
+        for row in held["attempts"]
+        if row["node_id"] == "budget-sibling"
+    )
+    recovering_precharge = _budget_usage_for_attempt(
+        held,
+        attempt_id=recovering_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    )
+    sibling_usage = [
+        dict(row)
+        for row in held["budget_usage"]
+        if row["attempt_id"] == sibling_attempt["attempt_id"]
+        and row["charge_kind"].startswith("WORKER_USAGE")
+    ]
+    sibling_operation = dict(
+        durable.get_operation_reservation(
+            admitted.for_node("budget-sibling").reservation_id
+        )
+    )
+    committed_operation_outbox = _operation_commit_outbox_count(durable)
+
+    assert held["graph_record"]["status"] == "ACTIVE"
+    assert held["budgets"][0]["status"] == "EXCEEDED"
+    assert durable.get_node(admitted.graph_id, 1, "recovering")["status"] == "RUNNING"
+    assert recovering_attempt["status"] == "RUNNING"
+    assert len(recovering_precharge) == 1
+    assert recovering_precharge[0]["accepted"] is True
+    assert _operation_rows_for_attempt(
+        durable,
+        attempt_id=recovering_attempt["attempt_id"],
+    ) == []
+    assert durable.get_node(admitted.graph_id, 1, "budget-sibling")["status"] == "FAILED"
+    assert sibling_attempt["status"] == "FAILED"
+    assert len(sibling_usage) == 1
+    assert sibling_usage[0]["accepted"] is False
+    assert sibling_operation["status"] == "COMMITTED"
+    assert calls == ["budget-sibling"]
+
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    resumed = await _events(
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=reopened,
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                owner_id="preoperation-budget-owner-b",
+                bounded_fanout_enabled=True,
+            ),
+        ),
+        contracts,
+    )
+
+    receipt = resumed[-1]["execution_receipt"]
+    final = reopened.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
+    final_recovering_attempt = next(
+        dict(row) for row in final["attempts"] if row["node_id"] == "recovering"
+    )
+    assert receipt["status"] == "BUDGET_BLOCKED"
+    assert receipt["reason_code"] == "GOVERNED_BUDGET_EXCEEDED"
+    assert final["graph_record"]["status"] == "BLOCKED"
+    assert final["budgets"][0]["status"] == "RELEASED"
+    assert reopened.get_node(admitted.graph_id, 1, "recovering")["status"] == "FAILED"
+    assert final_recovering_attempt["attempt_id"] == recovering_attempt["attempt_id"]
+    assert final_recovering_attempt["status"] == "FAILED"
+    assert _budget_usage_for_attempt(
+        final,
+        attempt_id=recovering_attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    ) == recovering_precharge
+    assert _operation_rows_for_attempt(
+        reopened,
+        attempt_id=recovering_attempt["attempt_id"],
+    ) == []
+    assert _operation_commit_outbox_count(reopened) == committed_operation_outbox
+    assert calls == ["budget-sibling"]
+
+
+@pytest.mark.parametrize(
+    ("sibling_mode", "release_on", "held_status", "final_graph", "final_receipt"),
+    (
+        ("failed", "FAILED", "FAILED", "FAILED", "FAILED"),
+        (
+            "review",
+            "WAITING_ACCEPTANCE_REVIEW",
+            "WAITING_ACCEPTANCE_REVIEW",
+            "BLOCKED",
+            "WAITING_ACCEPTANCE_REVIEW",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_terminal_sibling_does_not_preempt_operation_free_candidate_recovery(
+    tmp_path: Path,
+    sibling_mode: str,
+    release_on: str,
+    held_status: str,
+    final_graph: str,
+    final_receipt: str,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    sibling_node_id = f"{sibling_mode}-sibling"
+    contracts = _contracts(
+        (
+            ("recovering", ()),
+            (sibling_node_id, ()),
+            ("join", ("recovering", sibling_node_id)),
+        ),
+        concurrency=2,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    durable = DurableTaskStore(db_path, clock=clock)
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ProjectedWorker(projections=projections, calls=calls)
+    resolver = (
+        _SelectedPreparationFailureResolver(
+            worker,
+            failed_node_id=sibling_node_id,
+        )
+        if sibling_mode == "failed"
+        else _ProductionRouteResolver(worker)
+    )
+    acceptance = _Acceptance(
+        "ACCEPT",
+        decisions_by_node=(
+            {sibling_node_id: "REVIEW"}
+            if sibling_mode == "review"
+            else None
+        ),
+    )
+    stopped_store = _SiblingStateBoundaryStopStore(
+        durable,
+        _ProcessStopped(f"candidate stopped beside {sibling_mode} sibling"),
+        reservation_id=admitted.for_node("recovering").reservation_id,
+        sibling_node_id=sibling_node_id,
+        release_on=release_on,
+    )
+
+    with pytest.raises(_ProcessStopped):
+        await _events(
+            GovernedCommandApplication(
+                command_repository=HostCommandRepository(db_path, clock=clock),
+                coordinator=_coordinator(
+                    store=stopped_store,
+                    projections=projections,
+                    worker=worker,
+                    worker_resolver=resolver,
+                    acceptance=acceptance,
+                    owner_id=f"preoperation-{sibling_mode}-owner-a",
+                    bounded_fanout_enabled=True,
+                ),
+            ),
+            contracts,
+        )
+
+    held = durable.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
+    recovering_attempt = next(
+        dict(row) for row in held["attempts"] if row["node_id"] == "recovering"
+    )
+    sibling_attempt = next(
+        dict(row)
+        for row in held["attempts"]
+        if row["node_id"] == sibling_node_id
+    )
+    assert held["graph_record"]["status"] == "ACTIVE"
+    assert durable.get_node(admitted.graph_id, 1, "recovering")["status"] == "RUNNING"
+    assert recovering_attempt["status"] == "RUNNING"
+    assert _operation_rows_for_attempt(
+        durable,
+        attempt_id=recovering_attempt["attempt_id"],
+    ) == []
+    assert durable.get_node(admitted.graph_id, 1, sibling_node_id)["status"] == held_status
+    assert sibling_attempt["status"] == (
+        "FAILED" if sibling_mode == "failed" else "SUCCEEDED"
+    )
+    assert calls == ([] if sibling_mode == "failed" else [sibling_node_id])
+
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    resumed = await _events(
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=reopened,
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                worker_resolver=resolver,
+                acceptance=acceptance,
+                owner_id=f"preoperation-{sibling_mode}-owner-b",
+                bounded_fanout_enabled=True,
+            ),
+        ),
+        contracts,
+    )
+
+    final = reopened.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
+    final_recovering_attempt = next(
+        dict(row) for row in final["attempts"] if row["node_id"] == "recovering"
+    )
+    assert resumed[-1]["execution_receipt"]["status"] == final_receipt
+    assert final["graph_record"]["status"] == final_graph
+    assert reopened.get_node(admitted.graph_id, 1, "recovering")["status"] == "ACCEPTED"
+    assert final_recovering_attempt["attempt_id"] == recovering_attempt["attempt_id"]
+    assert final_recovering_attempt["status"] == "SUCCEEDED"
+    assert len(
+        _operation_rows_for_attempt(
+            reopened,
+            attempt_id=recovering_attempt["attempt_id"],
+        )
+    ) == 1
+    assert calls == (
+        ["recovering"]
+        if sibling_mode == "failed"
+        else [sibling_node_id, "recovering"]
+    )
+    assert all(call != "join" for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_rejected_precharge_orphan_closes_before_shared_budget_shortcut(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    work_order = replace(
+        work_order,
+        budget_policy=replace(
+            work_order.budget_policy,
+            limits=replace(
+                work_order.budget_policy.limits,
+                tool_call_count=0,
+            ),
+        ),
+    )
+    graph = replace(
+        graph,
+        nodes=(replace(graph.nodes[0], route="skill:root"),),
+    )
+    contracts = (command, work_order, assignment, graph)
+    clock = _Clock()
+    durable = DurableTaskStore(db_path, clock=clock)
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    stopped = _PreReservationTerminalStopStore(
+        durable,
+        _ProcessStopped("process stopped before rejected PRECHARGE closeout"),
+    )
+
+    with pytest.raises(_ProcessStopped):
+        await _events(
+            GovernedCommandApplication(
+                command_repository=HostCommandRepository(db_path, clock=clock),
+                coordinator=_coordinator(
+                    store=stopped,
+                    projections=projections,
+                    worker=_ProjectedWorker(projections=projections, calls=calls),
+                    owner_id="precharge-reject-owner-a",
+                ),
+            ),
+            contracts,
+        )
+
+    held = durable.read_scheduler_snapshot("graph-gr03a", 1)
+    attempt = dict(held["attempts"][0])
+    rejected_usage = _budget_usage_for_attempt(
+        held,
+        attempt_id=attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    )
+    assert held["graph_record"]["status"] == "ACTIVE"
+    assert durable.get_node("graph-gr03a", 1, "root")["status"] == "RUNNING"
+    assert attempt["status"] == "RUNNING"
+    assert held["budgets"][0]["status"] == "EXCEEDED"
+    assert len(rejected_usage) == 1
+    assert rejected_usage[0]["accepted"] is False
+    assert _operation_rows_for_attempt(durable, attempt_id=attempt["attempt_id"]) == []
+    assert calls == []
+
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    resumed = await _events(
+        GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=reopened,
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=_ProjectedWorker(projections=projections, calls=calls),
+                owner_id="precharge-reject-owner-b",
+            ),
+        ),
+        contracts,
+    )
+
+    receipt = resumed[-1]["execution_receipt"]
+    final = reopened.read_scheduler_snapshot("graph-gr03a", 1)
+    assert receipt["status"] == "BUDGET_BLOCKED"
+    assert receipt["reason_code"] == "GOVERNED_BUDGET_EXCEEDED"
+    assert final["graph_record"]["status"] == "BLOCKED"
+    assert reopened.get_node("graph-gr03a", 1, "root")["status"] == "FAILED"
+    assert final["attempts"][0]["status"] == "FAILED"
+    assert final["budgets"][0]["status"] == "RELEASED"
+    assert _budget_usage_for_attempt(
+        final,
+        attempt_id=attempt["attempt_id"],
+        charge_kind="PRECHARGE",
+    ) == rejected_usage
+    assert calls == []
