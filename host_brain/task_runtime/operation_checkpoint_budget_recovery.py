@@ -8,7 +8,6 @@ from typing import Any
 from .admission import AdmittedExecution
 from .budget_runtime import BudgetCharge, BudgetRuntimeContext, DurableBudgetRuntime
 from .coordinator_receipts import build_execution_receipt, terminal_event
-from .coordinator_records import _exception_reason
 from .errors import GOVERNED_OPERATION_RECOVERY_REQUIRED, GovernedRuntimeError
 from .operation_checkpoint_validation import WorkerBudgetUsageCheckpointState
 from .operation_recovery_runtime import CommittedOperationCheckpoint
@@ -70,8 +69,12 @@ async def recover_checkpoint_budget(
             )
         else:
             _blocked("worker BudgetUsage checkpoint is conflicting")
-    except GovernedRuntimeError as exc:
-        await runtime_outbox.publish_pending()
+    except Exception:
+        # A committed Operation may already own a BudgetUsage whose write or
+        # read-back response was lost.  Any ordinary reconciliation error is
+        # therefore an ambiguity hold; cancellation and process-control
+        # BaseException values continue to propagate without lifecycle writes.
+        await runtime_outbox.publish_pending(best_effort=True)
         receipt = build_execution_receipt(
             admitted,
             attempt_id=attempt_id,
@@ -80,10 +83,7 @@ async def recover_checkpoint_budget(
             status="RECOVERY_REQUIRED",
             verification_status="NOT_RUN",
             accepted=False,
-            reason_code=_exception_reason(
-                exc,
-                GOVERNED_OPERATION_RECOVERY_REQUIRED,
-            ),
+            reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
             evidence_refs=evidence_refs,
             projection={
                 "worker_replayed": False,
@@ -92,6 +92,7 @@ async def recover_checkpoint_budget(
                     is WorkerBudgetUsageCheckpointState.MISSING
                 ),
                 "budget": budget.execution_payload(),
+                "budget_settlement_state": "UNKNOWN",
                 "recovery_state": "HOLD",
             },
         )

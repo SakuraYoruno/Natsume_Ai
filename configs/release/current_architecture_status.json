@@ -2,7 +2,7 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-20",
   "source_baseline": {
-    "dev_commit": "57a54d76b4f38ecc23e5ba4c1834625b6c17907a",
+    "dev_commit": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
     "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT"
@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-    "active_wave_detail": "MIGRATION_HEAD_0118_GATE_1_TO_14_STATIC_PASS_ALL_SEVEN_ROUTES_INCOMPLETE_INTERNAL_SINGLE_NODE_STARTUP_SEALED_CHECKPOINT_CONTINUATION_EXPLICIT_CHECKPOINT_UOW_SINGLE_WORKER_PROJECTION_INSERT_OWNER_ABC_SEPARATE_ATOMIC_BOUNDARIES_RESPONSE_LOSS_SINGLE_MUTATION_READ_ONLY_REOPEN_AND_TERMINAL_SEALED_ARTIFACT_ABANDON_CLEANUP_PROVEN_PERIODIC_SURVIVOR_CONTINUATION_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_FAILURE_CANCEL_BUDGET_SECURE_INGRESS_CLAIM_CLOSEOUT_GENERAL_SETTLE_WORKER_CRASH_BUNDLE_HANDLE_LEVEL_TOCTOU_GENERAL_WRITE_OS_CONTAINER_ISOLATION_LEGACY_BRIDGE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_AND_CANARY_REMAIN_INCOMPLETE",
+    "active_wave_detail": "MIGRATION_HEAD_0118_GATE_1_TO_14_STATIC_PASS_ALL_SEVEN_ROUTES_INCOMPLETE_INTERNAL_SINGLE_NODE_STARTUP_SEALED_CHECKPOINT_CONTINUATION_EXPLICIT_CHECKPOINT_UOW_SINGLE_WORKER_PROJECTION_INSERT_OWNER_ABC_SEPARATE_ATOMIC_BOUNDARIES_RESPONSE_LOSS_SINGLE_MUTATION_READ_ONLY_REOPEN_TERMINAL_SEALED_ARTIFACT_ABANDON_CLEANUP_AND_SINGLE_NODE_POST_COMMIT_BUDGET_SETTLEMENT_DOUBLE_LOSS_HOLD_HIGHER_FENCE_TAKEOVER_PROVEN_PERIODIC_SURVIVOR_CONTINUATION_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_FAILURE_CANCEL_BUDGET_SECURE_INGRESS_CLAIM_CLOSEOUT_MULTI_NODE_BATCH_SETTLEMENT_RECOVERY_HANDLE_LEVEL_TOCTOU_GENERAL_WRITE_OS_CONTAINER_ISOLATION_LEGACY_BRIDGE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_AND_CANARY_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,16 +26,16 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "CURRENT_CHECKPOINT_UOW_TARGETED_VALIDATION_SUCCEEDED_COMMIT_BOUND_EVIDENCE_PENDING_PROGRAM_INCOMPLETE",
+    "status": "CURRENT_POST_COMMIT_BUDGET_SETTLEMENT_RECOVERY_TARGETED_VALIDATION_SUCCEEDED_COMMIT_BOUND_EVIDENCE_PENDING_PROGRAM_INCOMPLETE",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_COMMIT_SHA_PATH_GENERATED_AFTER_COMMIT",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_INTERNAL_AGENT_EXPLICIT_CHECKPOINT_UOW_AND_SINGLE_WORKER_PROJECTION_INSERT_AUTHORITY",
+    "slice": "NE01_POST_COMMIT_BUDGET_SETTLEMENT_DOUBLE_LOSS_RECOVERY_HOLD_AND_HIGHER_FENCE_TAKEOVER",
     "reclaimed_acceptance_effect_policy": "READ_ONLY_RECONCILE_REQUIRED_MISSING_RECONCILER_STAYS_RECONCILIATION_REQUIRED_NO_ORDINARY_HANDLER_REPLAY",
     "scheduler_handler_result_policy": "EXPLICIT_CANONICAL_STATUS_AND_AUTHORITATIVE_DURABLE_RECEIPT_REQUIRED_NO_SYNTHETIC_SUCCESS_OR_RECEIPT",
     "sys_mode_reconciliation": "EXACT_HARD_STATE_REOPEN_ONLY_SWITCH_MODE_NOT_REINVOKED",
     "recovery_loop_observability": "APP_LOCAL_RUNTIME_GUARDIAN_DURABLE_SLO_FAILURE_AND_RECOVERY_OPAQUE_INCIDENT_ONLY_NO_EXCEPTION_BODY",
     "generic_effect_reconciliation": "VISIBLE_TURN_PREFERENCE_AND_LIFE_PROJECTION_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_OR_NON_BOOLEAN_FAILS_CLOSED_ZERO_WRITE_EXPLICIT_FALSE_OR_MALFORMED_ENV_PARSES_BOOLEAN_FALSE_AND_WRITES_ONLY_DISABLED_RECEIPT_ZERO_EVENT_PROFILE_0118_EVENT_APPEND_ONLY_CHILD_PROFILE_AND_RECEIPT_SAME_UOW_PARENT_SEALED_TRIGGER_AND_FULL_SET_RECONCILIATION_REAL_NO_SIGNAL_STRICT_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_CANONICAL_DELIVERY_DIGEST_GATEWAY_READ_ONLY_QUERY_REOPENS_SAME_SQLITE_PAYLOAD_AND_VALIDATES_EFFECT_ID_NOT_FOUND_ALWAYS_UNKNOWN",
-    "internal_result_boundary": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION_SINGLE_NODE_STARTUP_ACTIVATION_REOPENS_SEAL_BOUND_RECOVERY_ENVELOPE_HIGHER_FENCE_COMPLETION_LEASE_AND_OPERATION_BUDGET_PREVIEW_GRANT_TASK_LINEAGE_REBUILDS_UNIQUE_WORKER_PROJECTION_CONTINUES_VERIFICATION_ACCEPTANCE_EFFECT_SECURE_INGRESS_CLAIM_CANONICAL_RESULT_AND_CLEAN_NO_CHANGE_0116_PROMOTION_WITHOUT_AGENT_REPLAY_EXPLICIT_CHECKPOINT_UOW_SINGLE_WORKER_PROJECTION_INSERT_OWNER_ABC_SEPARATE_ATOMIC_BOUNDARIES_RESPONSE_LOSS_SINGLE_MUTATION_READ_ONLY_REOPEN_TERMINAL_WORKER_ONLY_ABANDONS_AND_CLEANS_EXACT_TERMINAL_SEALED_ARTIFACTS_PERIODIC_SURVIVOR_CONTINUATION_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_FAILURE_CANCEL_BUDGET_CLAIM_CLOSEOUT_GENERAL_SETTLE_WORKER_CRASH_BUNDLE_GENERAL_WRITE_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_AND_LEGACY_BRIDGE_INCOMPLETE",
+    "internal_result_boundary": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION_SINGLE_NODE_STARTUP_ACTIVATION_REOPENS_SEAL_BOUND_RECOVERY_ENVELOPE_HIGHER_FENCE_COMPLETION_LEASE_AND_OPERATION_BUDGET_PREVIEW_GRANT_TASK_LINEAGE_REBUILDS_UNIQUE_WORKER_PROJECTION_CONTINUES_VERIFICATION_ACCEPTANCE_EFFECT_SECURE_INGRESS_CLAIM_CANONICAL_RESULT_AND_CLEAN_NO_CHANGE_0116_PROMOTION_WITHOUT_AGENT_REPLAY_EXPLICIT_CHECKPOINT_UOW_SINGLE_WORKER_PROJECTION_INSERT_OWNER_ABC_SEPARATE_ATOMIC_BOUNDARIES_RESPONSE_LOSS_SINGLE_MUTATION_READ_ONLY_REOPEN_TERMINAL_WORKER_ONLY_ABANDONS_AND_CLEANS_EXACT_TERMINAL_SEALED_ARTIFACTS_SINGLE_NODE_POST_COMMIT_BUDGET_SETTLEMENT_DOUBLE_LOSS_RETURNS_RECOVERY_REQUIRED_WITHOUT_ADDITIONAL_LIFECYCLE_FINALIZATION_MUTATION_AND_HIGHER_FENCE_TAKEOVER_HANDLES_EXACT_ACCEPTED_EXACT_REJECTED_OR_MISSING_WHILE_CONFLICT_FAILS_CLOSED_WITHOUT_WORKER_REPLAY_PERIODIC_SURVIVOR_CONTINUATION_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_FAILURE_CANCEL_BUDGET_CLAIM_CLOSEOUT_MULTI_NODE_BATCH_SETTLEMENT_RECOVERY_GENERAL_WRITE_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_AND_LEGACY_BRIDGE_INCOMPLETE",
     "scheduler_clock_targeted_validation": {
       "status": "37_TARGETED_SCHEDULER_MIGRATION_AND_COVERAGE_TESTS_SUCCEEDED",
       "scope": "SCHEDULER_MIGRATION_COVERAGE_PLUS_ATOMIC_DUE_TO_OCCURRENCE_FENCE_HEARTBEAT_ACTUAL_FAILURE_TIME_BACKOFF",
@@ -77,7 +77,7 @@
         "skipped": 0,
         "duration_seconds": 296.69,
         "file_count": 10,
-        "authority": "SOLE_CURRENT_SLICE_TEST_COUNT"
+        "authority": "HISTORICAL_PREVIOUS_CHECKPOINT_UOW_BATCH_DO_NOT_SUM_WITH_ACTIVE_SLICE"
       },
       "initial_consolidated_affected_batch": {
         "passed": 128,
@@ -107,10 +107,85 @@
       "periodic_survivor_continuation": "INCOMPLETE",
       "crash_left_unsealed_partial_cleanup": "INCOMPLETE",
       "failure_cancel_budget_secure_ingress_claim_closeout": "INCOMPLETE",
-      "general_settle_worker_crash_bundle": "INCOMPLETE",
+      "single_node_post_commit_budget_settlement_double_loss": "PROVEN_NO_ADDITIONAL_LIFECYCLE_FINALIZATION_MUTATION_HOLD_EXACT_HIGHER_FENCE_TAKEOVER_EXACT_ACCEPTED_EXACT_REJECTED_MISSING_CONFLICT_FAIL_CLOSED",
+      "multi_node_batch_settlement_recovery": "INCOMPLETE",
       "handle_level_toctou": "INCOMPLETE_NOT_CLAIMED",
       "general_write_promotion": "INCOMPLETE",
       "os_container_isolation": "INCOMPLETE",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+    },
+    "post_commit_budget_settlement_current_validation": {
+      "status": "TARGETED_VALIDATION_PASSED_PROGRAM_INCOMPLETE",
+      "fresh_unique_affected_batch": {
+        "status": "PASS_SCOPED_SLICE",
+        "files": 12,
+        "passed": 71,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 99.5,
+        "scope": "NODE_AND_DAG_EXECUTION_STRUCTURE_CHECKPOINT_BUDGET_HOLD_FULL_ONLINE_TAKEOVER_PRODUCTION_SUPPORTED_ROUTES_GENERIC_AND_INTERNAL_ATOMIC_REJECTION_RESPONSE_LOSS_EXACT_ROUTE_AUTHORITY_UNKNOWN_CONFLICTING_OUTBOX_FAIL_CLOSED_DUPLICATE_REPLAY_TERMINAL_RECONCILIATION_RUNTIME_DURABLE_CORRUPTION_PROPAGATION_MULTI_NODE_SAFE_HOLD_AND_SELECTED_COORDINATOR_DAG_PARALLEL_REGRESSIONS"
+      },
+      "documentation_metadata_coverage_freshness_gate": {
+        "status": "PASS_SCOPED_SLICE",
+        "passed": 39,
+        "failed": 0,
+        "skipped": 0,
+        "duration_seconds": 10.59
+      },
+      "pre_fix_strict_lineage_run": {
+        "status": "FAILED_AND_FIXED",
+        "passed": 3,
+        "failed": 1,
+        "deselected": 10,
+        "finding": "EXACT_REJECTED_RECOVERY_WAS_PREEMPTED_BY_AGGREGATE_EXCEEDED_FINALIZATION_AND_LEFT_THE_OLD_LEASE_ACTIVE",
+        "resolution": "ACTIVE_OPERATION_CHECKPOINT_NOW_PRECEDES_AGGREGATE_EXCEEDED_FINALIZATION"
+      },
+      "initial_full_unique_run": {
+        "status": "FAILED_STALE_EXACT_STRUCTURE_BASELINES_THEN_FIXED",
+        "passed": 37,
+        "failed": 3,
+        "duration_seconds": 69.91,
+        "resolution": "UPDATED_EXACT_AST_HASH_CALL_MATRIX_AND_EXISTING_SOURCE_LINE_BASELINES_WITHOUT_RAISING_A_THRESHOLD_OR_ALLOWLIST"
+      },
+      "production_route_fixture_first_run": {
+        "status": "FAILED_TEST_FIXTURE_ROUTE_THEN_FIXED",
+        "passed": 68,
+        "failed": 2,
+        "duration_seconds": 118.43,
+        "finding": "MULTI_NODE_TEST_IMPORTED_LEGACY_WORKER_ROUTE_WHILE_THE_SHARED_TEST_RESOLVER_NOW_REQUIRED_A_PRODUCTION_SUPPORTED_ROUTE",
+        "resolution": "THE_MULTI_NODE_TEST_NOW_IMPORTS_THE_LOCAL_CHAT_TARGET_CONTRACT_FACTORY; NO_PRODUCTION_ROUTE_EXCEPTION_WAS_RESTORED"
+      },
+      "heartbeat_timing_attempt": {
+        "status": "EXISTING_120MS_LEASE_TIMING_TEST_FLAKED_THEN_FULL_BATCH_RERAN_GREEN",
+        "passed": 70,
+        "failed": 1,
+        "duration_seconds": 94.53,
+        "isolated_rerun": "1_PASSED_IN_2_43_SECONDS",
+        "final_full_batch": "71_PASSED_IN_99_50_SECONDS"
+      },
+      "superseded_focused_runs": [
+        "25_PASSED_IN_46_60_SECONDS",
+        "5_PASSED_9_DESELECTED_IN_18_14_SECONDS",
+        "34_PASSED_OVERLAPPING_HISTORY",
+        "40_PASSED_IN_71_76_SECONDS_OVERLAPPING_HISTORY",
+        "42_PASSED_IN_69_54_SECONDS_OVERLAPPING_HISTORY",
+        "26_PASSED_IN_18_63_SECONDS_OVERLAPPING_HISTORY",
+        "28_PASSED_IN_33_16_SECONDS_OVERLAPPING_HISTORY"
+      ],
+      "count_boundary": "FRESH_12_FILE_71_TEST_BATCH_IS_THE_CURRENT_SLICE_AUTHORITY; FOCUSED_25_5_34_40_42_26_AND_28_RUNS_ARE_OVERLAPPING_HISTORY_AND_MUST_NOT_BE_SUMMED",
+      "worker_budget_usage_states": ["EXACT_ACCEPTED", "EXACT_REJECTED", "MISSING", "CONFLICT"],
+      "exact_accepted_response_and_read_loss": "RECOVERY_REQUIRED_NO_ADDITIONAL_LIFECYCLE_FINALIZATION_MUTATION_THEN_READ_ONLY_HIGHER_FENCE_ACCEPTANCE",
+      "missing_response_and_read_loss": "RECOVERY_REQUIRED_NO_ADDITIONAL_LIFECYCLE_FINALIZATION_MUTATION_THEN_IDEMPOTENT_HIGHER_FENCE_SETTLEMENT",
+      "exact_rejected_response_and_read_loss": "RECOVERY_REQUIRED_PRESERVES_EXISTING_EXCEEDED_THEN_READ_ONLY_HIGHER_FENCE_BUDGET_BLOCKED_TERMINAL",
+      "conflict_response_and_read_loss": "FAIL_CLOSED_WITHOUT_WORKER_REPLAY_OR_TERMINAL_INFERENCE",
+      "dag_outer_active_operation_precedence": "ACTIVE_OPERATION_CHECKPOINT_PRECEDES_AGGREGATE_EXCEEDED_FINALIZATION",
+      "exact_rejected_lease_closeout": "HIGHER_FENCE_TAKEOVER_REQUIRED_AND_NEW_LEASE_RELEASED_AT_BUDGET_BLOCKED_TERMINAL",
+      "exact_rejected_atomic_terminal": "GENERIC_AND_INTERNAL_SINGLE_NODE_SHARE_ONE_STORE_TRANSACTION_CANONICAL_AUTHORITY_BINDS_HOST_COMMAND_TASK_NODE_WORKER_PROJECTION_AND_REJECTS_INTERNAL_DOWNGRADE_RESPONSE_LOSS_DUPLICATE_REPLAY_AND_TERMINAL_RECONCILIATION_SHARE_ONE_READ_ONLY_RESOLVER_UNKNOWN_OR_CONFLICTING_OUTBOX_FAILS_CLOSED",
+      "process_control_base_exception": "PROPAGATES_WITHOUT_TERMINAL_LIFECYCLE_WRITES_AND_RESTART_TAKEOVER_ACCEPTS",
+      "single_node_higher_fence_recovery": "PROVEN_NARROW_BOUNDARY",
+      "multi_node_batch_settlement_hold": "SAFE_HOLD_REQUIRED",
+      "multi_node_batch_settlement_recovery": "INCOMPLETE_NO_AUTOMATIC_TAKEOVER_CLAIMED",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
     },
@@ -307,10 +382,13 @@
       "host_brain/persistence/scheduler_repository.py": 2942,
       "host_brain/persistence/scheduler_clock_retry_store.py": 540,
       "host_brain/persistence/scheduler_repository_primitives.py": 137,
-      "host_brain/persistence/task_internal_agent_budget_rejection_store.py": 1033,
+      "host_brain/persistence/task_internal_agent_budget_rejection_store.py": 967,
+      "host_brain/persistence/task_checkpoint_budget_terminal_read_store.py": 444,
+      "host_brain/persistence/task_checkpoint_budget_route_authority.py": 93,
       "host_brain/agent_runtime/artifact_store.py": 1359,
       "host_brain/app/internal_task_runtime.py": 1311,
       "host_brain/task_runtime/node_execution_runtime.py": 1498,
+      "host_brain/task_runtime/node_execution_projection.py": 477,
       "host_brain/task_runtime/operation_recovery_runtime.py": 205,
       "host_brain/agent_runtime/artifact_store_read_model.py": 412,
       "host_brain/app/internal_startup_checkpoint_continuation.py": 324,
@@ -318,7 +396,7 @@
       "host_brain/task_runtime/node_worker_stream.py": 86,
       "host_brain/task_runtime/operation_recovery_checkpoint_loader.py": 331
     },
-    "current_slice_focused_structure": {
+    "historical_previous_structure_slice": {
       "policy_allowlist_expanded": false,
       "owner_files_below_1500": true,
       "artifact_store_read_model": "BOUNDED_VERIFIED_SEAL_INVENTORY_PROMOTION_RECOVERY_AND_TOMBSTONE_READS_NO_MUTATION_AUTHORITY",
@@ -332,10 +410,12 @@
       "host_runtime_context_wiring": "RUNTIME_CONTEXT_PREVIEW_GUARDIAN_AND_CATALOG_WIRING_ASGI_RETAINS_TASK_LIFECYCLE",
       "scheduler_clock_retry_store": "CLOCK_RETRY_LEASE_FENCE_TRANSACTIONS_REUSE_REPOSITORY_CONNECTION_AND_UOW",
       "scheduler_repository_primitives": "PURE_VALIDATION_AND_STABLE_ERRORS",
-      "task_internal_agent_budget_rejection_store": "COHESIVE_SEAL_BOUND_ATOMIC_BUDGET_REJECTION_AND_REPLAY_RECOVERY_NOT_SECOND_STORE_AUTHORITY",
-      "new_over_800_lines": ["host_brain/persistence/task_internal_agent_budget_rejection_store.py:1033"],
+      "task_internal_agent_budget_rejection_store": "COHESIVE_AUTHORITY_MODE_BOUND_ATOMIC_BUDGET_REJECTION_WRITER_NOT_SECOND_STORE_AUTHORITY",
+      "task_checkpoint_budget_terminal_read_store": "READ_ONLY_EXACT_INTERNAL_CANONICAL_TERMINAL_AUTHORITY_SHARED_BY_RESPONSE_LOSS_DUPLICATE_REPLAY_AND_RECONCILIATION",
+      "task_checkpoint_budget_route_authority": "PURE_HOST_COMMAND_TASK_NODE_WORKER_PROJECTION_ROUTE_BINDING_INTERNAL_DOWNGRADE_REJECTED",
+      "new_over_800_lines": ["host_brain/persistence/task_internal_agent_budget_rejection_store.py:967"],
       "new_mixed_over_800_lines": [],
-      "fresh_validation": {
+      "historical_consolidated_validation": {
         "files": 36,
         "passed": 265,
         "failed": 0,
@@ -1099,11 +1179,11 @@
       "post_acceptance_evidence": "Promotion reopens the real TaskStore Command/Graph/Node, ACCEPTED Node, SUCCEEDED Attempt, exact owner/fence RELEASED Lease, Node artifact and claimed/committed Effect payload/digest/fence before any Workspace transition.",
       "workspace_promotion_boundary": "Only a clean Git worktree whose HEAD still equals the frozen base is accepted. Migration 0116 advances ACTIVE to ACCEPTED to PROMOTED; response-loss reconciliation can continue only an already-started durable operation and never reruns the Agent.",
       "pre_projection_crash_boundary": "For one governed Internal single-node sealed checkpoint, the next runtime activation scans the sealed inventory before any client retry, reopens the seal-bound recovery envelope and exact Operation, Budget, Preview, Grant, Task and historical Lease lineage, acquires a strictly higher-fence completion Lease, reconstructs the unique WorkerProjection and continues Verification, Acceptance, Effect, Secure Ingress claim completion, canonical result, clean/no-change promotion and cleanup without rerunning Agent. This is startup activation continuation only, not periodic survivor continuation or general recovery.",
-      "budget_rejection_boundary": "The explicit composition-owned checkpoint UoW is the only public mutation authority and WorkerProjection has one physical INSERT owner. Boundary A atomically commits the unique WorkerProjection, Operation COMMITTED and its Outbox. Boundary B separately atomically commits the rejected BudgetUsage, Budget ACTIVE-to-EXCEEDED transition and BUDGET_EXCEEDED Outbox. Boundary C revalidates A and B, then atomically commits Graph BLOCKED, Node and Attempt FAILED, Lease and Budget RELEASED plus five terminal Outboxes. Five injected faults prove rollback only inside C; A, B and C are not one transaction. Response loss invokes the mutation once and reopens the exact original reservation, budget, lease, owner, fence, versions, error, usage and Outbox through a read-only authority.",
+      "budget_rejection_boundary": "The explicit composition-owned checkpoint UoW is the only public mutation authority and WorkerProjection has one physical INSERT owner. Boundary A atomically commits the unique WorkerProjection, Operation COMMITTED and its Outbox. Boundary B separately atomically commits the rejected BudgetUsage, Budget ACTIVE-to-EXCEEDED transition and BUDGET_EXCEEDED Outbox. Boundary C revalidates A and B, then atomically commits Graph BLOCKED, Node and Attempt FAILED, Lease and Budget RELEASED plus five terminal Outboxes. Internal and canonical single-node checkpoints share that exact SQL transaction with separate strict authority modes. Canonical mode binds the durable HostCommand, TaskNode route and WorkerProjection and rejects any Internal Agent marker instead of permitting authority downgrade. Five injected faults prove rollback only inside C; A, B and C are not one transaction. Response loss, later duplicate HostCommand replay and terminal reconciliation consume one read-only exact internal/canonical terminal authority; identity drift is fail-closed.",
       "terminal_artifact_boundary": "The app-local periodic worker only reconciles exact terminal sealed artifacts through abandon and cleanup. It does not periodically re-enter live sealed checkpoints.",
-      "compatibility_boundary": "AgentWorkOrder remains an executor projection. Periodic survivor continuation, crash-left unsealed partial cleanup, failure/cancel/budget Secure Ingress claim closeout, the general settle_worker crash bundle, general write promotion, handle-level atomic TOCTOU and OS/container isolation remain incomplete.",
+      "compatibility_boundary": "AgentWorkOrder remains an executor projection. Single-node post-COMMIT Budget settlement double-loss now returns a RECOVERY_REQUIRED hold without additional lifecycle/finalization mutation and preserves any already-committed usage or EXCEEDED fact. Worker BudgetUsage is classified only as EXACT_ACCEPTED, EXACT_REJECTED, MISSING, or CONFLICT. After Lease expiry, exact higher-fence takeover reads the first two states, idempotently settles MISSING, and fails closed on CONFLICT without worker replay. EXACT_REJECTED terminal closeout for generic and Internal single-node checkpoints is one Store transaction; response loss, later duplicate replay and terminal reconciliation share one exact read authority. The DAG outer path prioritizes an active Operation checkpoint over aggregate EXCEEDED finalization. Process-control BaseException propagates without terminal writes. Multi-node/batch currently has only a safe hold and no automatic settlement recovery. Periodic survivor continuation, crash-left unsealed partial cleanup, failure/cancel/budget Secure Ingress claim closeout, general write promotion, handle-level atomic TOCTOU and OS/container isolation remain incomplete.",
       "claim_boundary": "Accepted startup continuation proves exact Secure Ingress result completion. Failure, cancellation and Budget-rejection claim closeout remain incomplete and must not be inferred from the accepted path.",
-      "local_validation": "The final unique explicit-checkpoint-UoW affected batch covers 10 files and reports 130 passed in 296.69 seconds with zero failures or skips. Its first full run reported 128 passed and two failures: the existing structure threshold caught a module at exactly 550 lines, and the exact read-only reopen fixture adapter still consumed the old nested usage shape. Both were corrected without a Gate or allowlist expansion and the complete batch was rerun. Historical 87/35/3/62/46/4 and previous-structure 265 groups are overlapping or superseded evidence and are never added. Targeted compileall, JSON, documentation/coverage contracts, diff check and static Gate 1-14 are rerun for the owning commit. Remote CI is NOT_RUN_ACCOUNT_QUOTA.",
+      "local_validation": "The previous explicit-checkpoint-UoW 130 batch remains historical for this slice and is not the current authority. The fresh unique 12-file post-COMMIT Budget settlement batch reports 71 passed in 99.50 seconds with zero failures or skips; focused 25, 5, 34, 40, 42, 26, and 28 runs are overlapping history and are not added. It covers EXACT_ACCEPTED, EXACT_REJECTED, MISSING, and CONFLICT BudgetUsage states, process-control propagation, single-node higher-fence online takeover, production-supported route authority, Internal downgrade rejection, generic and Internal atomic rejected closeout, response-loss read-only reopen, unknown/conflicting release Outbox fail-closed, later duplicate replay, terminal reconciliation, Runtime durable-corruption propagation, multi-node/batch safe hold, structure, and selected coordinator/DAG/parallel response-loss regressions. A 68-pass/2-fail fixture-route attempt was fixed without restoring the worker route exception; a later 70-pass/1-fail existing 120ms heartbeat timing flake passed alone and the complete batch then reran green. Compileall, JSON, documentation/coverage contracts, diff check and static Gate 1-14 are rerun for the owning commit. Remote CI is NOT_RUN_ACCOUNT_QUOTA.",
       "exception_redaction": "Canonical executor/workspace failures persist and log error_type plus a random incident only; raw detail is removed. One focused redaction test succeeded.",
       "review_continuation": "Explicit task-bound Review decisions may re-enter the original surface through migration 0096 coordination, but a non-terminal inner Agent result is not review-eligible and cannot be promoted by the generic post-acceptance continuation. READY and first worker entry remain live-claim-fenced.",
       "evidence_refs": [
@@ -1117,10 +1197,25 @@
         "host_brain/agent_runtime/workspace_runtime.py",
         "host_brain/persistence/internal_agent_checkpoint_uow.py",
         "host_brain/persistence/task_internal_agent_checkpoint_store.py",
+        "host_brain/persistence/task_internal_agent_budget_rejection_store.py",
+        "host_brain/persistence/task_checkpoint_budget_terminal_read_store.py",
+        "host_brain/persistence/task_checkpoint_budget_route_authority.py",
         "host_brain/persistence/worker_projection_repository.py",
         "host_brain/persistence/task_terminal_reconciliation_read_store.py",
+        "host_brain/task_runtime/budget_runtime.py",
+        "host_brain/task_runtime/node_execution_runtime.py",
+        "host_brain/task_runtime/node_execution_projection.py",
+        "host_brain/task_runtime/operation_checkpoint_budget_recovery.py",
+        "host_brain/task_runtime/dag_scheduling_runtime.py",
         "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/integration/test_ne01_operation_online_takeover.py",
+        "tests/integration/test_ne01_multinode_budget_settlement_hold.py",
+        "tests/unit/test_ne01_checkpoint_budget_recovery_hold.py",
+        "tests/unit/test_node_execution_runtime_structure.py",
+        "tests/unit/test_dag_scheduling_runtime_structure.py",
         "tests/unit/test_ne01_internal_agent_checkpoint_uow.py",
+        "tests/unit/test_node_execution_projection_checkpoint_budget.py",
+        "tests/unit/test_terminal_reconciliation_checkpoint_budget_authority.py",
         "tests/unit/test_ne01_internal_artifact_terminal_reconciliation.py",
         "tests/contract/test_ne01_workspace_lifecycle_authority.py",
         "tests/unit/test_ne01_internal_artifact_stage.py",
@@ -1177,7 +1272,7 @@
         "deployed reconciliation public keys and credentials",
         "full reconciliation attestation key lifecycle including active, retired, and revoked states",
         "audit and remediation evidence for any legacy Effect inventory in external deployment databases",
-        "general, multi-node, pre-budget, and non-canonical-projection recovery beyond the proven single-node post-budget checkpoint",
+        "general, multi-node/batch, pre-operation, and non-canonical-projection recovery beyond the proven single-node canonical COMMITTED checkpoint; multi-node/batch has only a safe hold",
         "real Effect reconciliation and cancellation canaries"
       ],
       "evidence_refs": [
@@ -1303,7 +1398,7 @@
         "Coordinator checkpoints every worker stream event and final result and returns RECOVERY_REQUIRED without COMMIT on heartbeat failure",
         "8/16/32-thread and cross-process Budget contention has exactly one BUDGET_EXCEEDED winner and Outbox; refreshed siblings persist ALREADY_EXCEEDED at the same terminal version and reference the winner authority",
         "Budget charge CAS attempts scale to at least the admitted BudgetPolicy concurrency plus one instead of the former fixed four-attempt ceiling",
-        "single-node canonical WorkerProjection COMMITTED-checkpoint continuation validates the exact Operation Outbox, Attempt, historical Lease, receipt digest, ACTIVE graph Budget, and worker-usage classification; an exact accepted usage is read, while a wholly missing non-conflicting usage is settled from a positive durable elapsed upper bound after same-Attempt higher-fence takeover, without worker replay",
+        "single-node canonical WorkerProjection COMMITTED-checkpoint continuation validates the exact Operation Outbox, Attempt, historical Lease, receipt digest, graph Budget, and the four-state worker-usage classification EXACT_ACCEPTED, EXACT_REJECTED, MISSING, or CONFLICT; the first two are reopened read-only, only MISSING is settled from a positive durable elapsed upper bound after same-Attempt higher-fence takeover, and CONFLICT fails closed without worker replay; the DAG outer path prioritizes an active Operation checkpoint over aggregate EXCEEDED finalization, and EXACT_REJECTED requires takeover plus release of the new Lease",
         "legacy all-ACCEPTED restart uses the shared graph finalizer to rebuild Effects from the exact committed SUCCEEDED checkpoint and atomically complete Graph plus Effect intents without worker replay",
         "migration 0102 adds checksum-bound immutable TaskNode result artifacts; production normal, committed-checkpoint continuation, and Review approval atomically commit Node ACCEPTED, one artifact, and the Node Outbox for non-empty output contracts",
         "each artifact revalidates exact graph revision, node, SUCCEEDED Attempt, one COMMITTED operation receipt, canonical output contract and payload digests; response-loss replay accepts only the exact existing artifact",
@@ -1416,16 +1511,16 @@
         "single transaction for promotion plus claim",
         "real production resolver sources that classify proven side-effect-free transient preparation failures",
         "Budget finalization inside the pre-reservation terminal failure transaction or an explicit compensation contract",
-        "general multi-node batch, pre-budget, Scheduler/Internal public-projection, and unknown-side-effect recovery beyond the proven single-node canonical post-budget checkpoint",
+        "general multi-node/batch, pre-operation, Scheduler/Internal public-projection, and unknown-side-effect recovery beyond the proven single-node canonical COMMITTED checkpoint; multi-node/batch has only a safe hold",
         "production activation and external-deployment remediation for 0099 terminal inventory; exact FAILED budget release is wired default off, BLOCKED/CANCELLED repair requires a signed Operator, and COMPLETED or structural cases remain permanently quarantined",
         "Review continuation poison rows are isolated but have no durable DLQ or alert; a 500-candidate scan cap can delay healthy rows behind an extreme poison prefix",
         "Review wake is process-local; cross-process low-latency depends on bounded polling, leases, and takeover",
-        "execution persistence and orchestration remain modularized behind focused Store/runtime boundaries, but DurableDagSchedulingRuntime is still a temporary outer orchestrator. Migrations 0093 through 0099 retain their Outbox, cancellation, revision, Review, grant, signed Effect, and schema-only terminal reconciliation authorities. Canonical Store Budget contention is proven for 8/16/32 threads and cross-process writers, one single-node canonical post-budget checkpoint plus ACCEPTED-to-Effect restart window is proven, and 0099 exact/signed/quarantine mechanics are proven default off. General and multi-node recovery, pre-budget crashes, Scheduler/Internal public projections, external-deployment terminal inventory, full attestation-key lifecycle, deployed credentials, and real canaries remain UNKNOWN or unproven. Production atomic/bounded/cancellation paths remain OFF, and the overall stage remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF"
+        "execution persistence and orchestration remain modularized behind focused Store/runtime boundaries, but DurableDagSchedulingRuntime is still a temporary outer orchestrator. Migrations 0093 through 0099 retain their Outbox, cancellation, revision, Review, grant, signed Effect, and schema-only terminal reconciliation authorities. Canonical Store Budget contention is proven for 8/16/32 threads and cross-process writers, one single-node canonical COMMITTED checkpoint plus ACCEPTED-to-Effect restart window is proven, and 0099 exact/signed/quarantine mechanics are proven default off. General and multi-node/batch recovery, pre-operation crashes, Scheduler/Internal public projections, external-deployment terminal inventory, full attestation-key lifecycle, deployed credentials, and real canaries remain UNKNOWN or unproven; multi-node/batch settlement currently has only a safe hold. Production atomic/bounded/cancellation paths remain OFF, and the overall stage remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF"
       ],
       "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "failure_replan_boundary": "PARTIAL_DURABLE_SUPERSESSION_SAFE_SUBSET. Migration 0100 adds immutable append-only predecessor-to-replacement authority. HostCommandRepository admits revision+1 only in the same BEGIN IMMEDIATE transaction that revalidates one same-root FAILED predecessor, exact Graph terminal evidence, quiescent execution/review/budget/effect/cancellation/reconciliation facts, and then writes the deterministic supersession. Response-loss replay requires the exact row and injected post-insert failure rolls everything back. Shared TaskStore mutation guards fence old READY claim, retry, Budget, node/graph execution and Review continuation. BLOCKED remains denied; all historical Review continuation rows and all Acceptance Effect rows are conservatively rejected, automatic failure-triggered replan and a production/cross-process canary remain incomplete. SQL owns Graph/root/status/version checks and FK existence; repository transaction owns exact HostCommand lineage to preserve 0088 rebuild compatibility.",
       "terminal_failure_boundary": "DurableNodeLifecycleRuntime owns ordinary and exhausted pre-reservation failure orchestration but not persistence authority. It atomically closes Attempt, Node, Graph, Lease and four attempt/evidence-bound Outboxes through the same DurableTaskStore bundle, retries only that identical bundle once after an ordinary response exception, and never falls back to sequential transitions. Any existing operation reservation rejects this path, CancelledError remains unswallowed, and Budget finalization remains outside the bundle.",
-      "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker stream events and the final result, and joins before COMMIT. Renewal response loss is exactly replayed. RESERVED expiry is tightened online to RECOVERY_REQUIRED in one Store transaction. Automatic takeover is proven only for one single-node canonical WorkerProjection checkpoint after COMMIT: the Store validates the sole COMMITTED Outbox, exact Attempt, historical Lease, receipt digest, evidence, and one ACTIVE graph Budget before a same-Attempt higher-fence lease is acquired. An exact accepted worker BudgetUsage is reconciled read-only; a wholly missing non-conflicting usage is idempotently settled from the positive durable upper bound between Attempt start and Reservation commit. Concurrent takeover, settlement response loss, Budget rejection, conflict, and later re-entry are tested without worker replay. Invalid time, conflicting/rejected/drifted usage, public projections, multi-node graphs, pre-operation crashes, and unknown external side effects remain fail-closed and incomplete.",
+      "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker stream events and the final result, and joins before COMMIT. Renewal response loss is exactly replayed. RESERVED expiry is tightened online to RECOVERY_REQUIRED in one Store transaction. Automatic takeover is proven only for one single-node canonical WorkerProjection checkpoint after COMMIT: the Store validates the sole COMMITTED Outbox, exact Attempt, historical Lease, receipt digest, evidence, and one graph Budget before a same-Attempt higher-fence lease is acquired. Worker BudgetUsage is classified only as EXACT_ACCEPTED, EXACT_REJECTED, MISSING, or CONFLICT. The first two are reconciled read-only; only MISSING is idempotently settled from the positive durable upper bound between Attempt start and Reservation commit; CONFLICT fails closed. If the settlement write response and first usage read-back are both lost, the original owner adds no lifecycle/finalization mutation and preserves any already committed usage or EXCEEDED state; process-control BaseException propagates. The DAG outer path prioritizes an active Operation checkpoint over aggregate EXCEEDED finalization, and EXACT_REJECTED requires higher-fence takeover followed by release of the new Lease at BUDGET_BLOCKED. Concurrent single-node takeover and later re-entry do not replay the worker. Invalid or zero time, public projections, pre-operation crashes, and unknown external side effects remain fail-closed; multi-node/batch currently has only a safe hold and no automatic recovery.",
       "bounded_fanout_boundary": "PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF. TaskGraph.completion_policy is durable and optional: legacy remains the default, while ATOMIC_GRAPH_SUCCESS_V1 requires an explicit sink result_node_id. atomic_graph_success_enabled and bounded_fanout_enabled are independent, default false, and disabled in Host, Scheduler, and Internal production composition. Application capability and grant checks run before repository admission; Coordinator direct entry requires exact all-node grants. Migration 0091 atomically commits whole-Graph success and frozen result authority. B4/0090 failure, Budget, review, and crash-re-entry semantics remain active; their runtime read/validation and settlement orchestration now live in ParallelSettlementProjection and ParallelSettlementRuntime, while DurableTaskStore remains the only 0090 mutation and transaction authority. Migration 0092 adds verified two-phase durable cancellation; its Secure Ingress authority and controlled Operator entry are composed behind a default-off flag. Atomic, bounded, and cancellation production enablement is forbidden until their respective canaries pass.",
       "cancellation_boundary": "B5C durable two-phase cancellation, exact-revision Operator authority, first-writer-wins 0091/0092 terminal decisions, signed Operation/Effect reconciliation, and the 0099 terminal reconciliation production gate are wired, but cancellation remains OFF. 0099 inventory never silently re-enters workers: exact proofs mutate only bound terminal Graph/Budget state plus deterministic Outboxes in one UoW; signed-required BLOCKED/CANCELLED cases require valid Operator attestation, while COMPLETED and structural anomalies remain QUARANTINED_STRUCTURAL with action NONE. Secure Ingress authority, graph/revision, request identity, side-effect fences, Review state, Outboxes, and proof bindings remain fail-closed. Deployed Operator/attestation credentials, full key lifecycle, external-database inventory remediation, general/multi-node/pre-budget recovery, and real canaries remain UNKNOWN or outstanding.",
       "terminal_reconciliation_boundary": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN. Migration 0099 is schema-only and append-only. Readiness compares canonical sqlite_master SQL for exactly 3 tables, 4 indexes, and 10 triggers; Python validators independently recheck case/subject/proof semantics. Startup scans at most 10,000 terminal Graphs. Classification requires one graph-scope Budget, exactly one canonical 0090 decision, complete 0091/0092 validators, exact Graph/Node/Review/Attempt/Lease state, and canonical failure Outbox payload refs; unsafe ambiguity is quarantined. Any unresolved current case is a graph-wide fence for ordinary TaskGraph transitions, cancellation requests, and Budget transition/consume/usage/retry writers; only the 0099 proof UoW explicitly bypasses it. Historical chains must terminate at a trusted proof. Automatic exact processing uses immutable case created_ts_ms for cross-process-stable proof identity and reports side_effects_may_have_run after partial commits. TERMINAL_HEALTHY_CLOSURE is generated only for an unresolved historical case plus a healthy current classifier, requires SIGNED_OPERATOR + NONE, writes no Graph/Budget/Outbox state, and appends replacement/supersession on drift. Main Host and independent Obs use physical query-only readers. Operator and auto remain default OFF; external inventory, key lifecycle, and canary remain UNKNOWN/NOT_RUN; general, multi-node, and pre-budget recovery remain INCOMPLETE.",
@@ -2348,13 +2443,13 @@
         "periodic survivor continuation for live sealed checkpoints",
         "crash-left unsealed partial inventory and cleanup",
         "failure/cancel/budget Secure Ingress claim closeout",
-        "general settle_worker crash bundle",
+        "multi-node and batch post-COMMIT Budget settlement recovery",
         "Domain Pack and codex_runtime durable-workspace injection",
         "cleanup worker health route and automatic shutdown retry orchestration",
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. For a governed Internal single-node sealed checkpoint, the next runtime activation can reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C are three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. The app-local terminal worker can abandon and clean exact terminal sealed artifacts. This remains partial: periodic survivor continuation, crash-left unsealed partial cleanup, failure/cancel/budget Secure Ingress claim closeout and the general settle_worker crash bundle are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and legacy bridge retirement also remain missing."
+      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. For a governed Internal single-node sealed checkpoint, the next runtime activation can reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C are three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. A generic single-node post-COMMIT Budget settlement whose write response and first read-back are both lost now holds without additional lifecycle/finalization mutation, then handles EXACT_ACCEPTED, EXACT_REJECTED, or MISSING after Lease expiry while CONFLICT fails closed; process-control BaseException does not create a false terminal. The app-local terminal worker can abandon and clean exact terminal sealed artifacts. This remains partial: periodic survivor continuation, crash-left unsealed partial cleanup, failure/cancel/budget Secure Ingress claim closeout and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and legacy bridge retirement also remain missing."
     },
     "evolution_lab": {
       "status": "SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER",

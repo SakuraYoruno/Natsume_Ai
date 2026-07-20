@@ -1,10 +1,10 @@
-"""Narrow atomic recovery for a seal-bound Internal Agent checkpoint.
+"""Atomic closeout for one exact rejected COMMITTED worker checkpoint.
 
-This is not a generic reconciliation bypass.  It accepts only the production
-Internal/Agent route, validates the complete canonical worker projection in
-the same SQLite transaction, and then commits that exact projection as the
-already-completed operation checkpoint.  Other routes and effects continue to
-require the normal signed unknown-effect reconciliation path.
+The original seal-bound Internal Agent path and the canonical single-node path
+share one C-boundary SQL transaction.  Each mode validates its own immutable
+command/projection authority before closing Attempt, Node, Graph, Lease and
+Budget together.  This remains a rejected-usage terminal boundary, not a
+generic unknown-effect reconciliation bypass.
 """
 
 from __future__ import annotations
@@ -36,11 +36,17 @@ from host_brain.persistence.task_record_codec import (
     _graph_record,
     _loads_object,
     _node_record,
-    _outbox_record,
     _validated_node_payload,
+)
+from host_brain.persistence.task_checkpoint_budget_terminal_read_store import (
+    TaskCheckpointBudgetTerminalReadStoreMixin,
 )
 from host_brain.persistence.task_budget_usage_store import (
     _assert_terminal_budget_authority,
+)
+from host_brain.persistence.task_checkpoint_budget_route_authority import (
+    canonical_checkpoint_route_authority_matches,
+    requires_internal_agent_authority,
 )
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
@@ -51,12 +57,18 @@ from host_brain.contracts.agent_runtime.worker_budget_usage import (
     WorkerBudgetUsage,
     WorkerBudgetUsageError,
 )
+from natsume_contracts.task.v1 import HostCommand, TaskContractError
 
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_AUTHORITY_INTERNAL = "internal"
+_AUTHORITY_CANONICAL = "canonical"
+_AUTHORITY_MODES = frozenset({_AUTHORITY_INTERNAL, _AUTHORITY_CANONICAL})
 
 
-class TaskInternalAgentBudgetRejectionStoreMixin:
+class TaskInternalAgentBudgetRejectionStoreMixin(
+    TaskCheckpointBudgetTerminalReadStoreMixin
+):
     """Atomic budget rejection and exact rejected terminal authority."""
 
     def _reject_internal_agent_checkpoint_budget_bundle_uow(
@@ -76,9 +88,13 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         error_ref: str,
         usage_id: str,
         attempt_outbox: OutboxMessage,
+        authority_mode: str = _AUTHORITY_INTERNAL,
     ) -> dict[str, Any]:
         """Atomically close an exact post-checkpoint budget rejection."""
 
+        authority = self._validated_budget_rejection_authority_mode(
+            authority_mode
+        )
         attempt_ref, owner, lease_ref, failure_ref, usage_ref = (
             self._validated_internal_agent_budget_rejection_request(
                 attempt_id=attempt_id,
@@ -114,6 +130,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
                     error_ref=failure_ref,
                     usage_id=usage_ref,
                     attempt_outbox=attempt_outbox,
+                    authority_mode=authority,
                 )
 
             self._require_version(
@@ -160,6 +177,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
                 expected_lease_version=expected_lease_version,
                 owner_id=owner,
                 fencing_token=fencing_token,
+                authority_mode=authority,
             )
 
             attempt_cursor = conn.execute(
@@ -275,6 +293,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
                 aggregate_version=expected_budget_version + 1,
                 attempt_id=attempt_ref,
                 evidence_refs=evidence_refs,
+                authority_mode=authority,
             )
             self._insert_outbox(
                 conn,
@@ -318,9 +337,13 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         error_ref: str,
         usage_id: str,
         attempt_outbox: OutboxMessage,
+        authority_mode: str = _AUTHORITY_INTERNAL,
     ) -> dict[str, Any]:
         """Read-only exact replay authority for one ambiguous C-boundary call."""
 
+        authority = self._validated_budget_rejection_authority_mode(
+            authority_mode
+        )
         attempt_ref, owner, lease_ref, failure_ref, usage_ref = (
             self._validated_internal_agent_budget_rejection_request(
                 attempt_id=attempt_id,
@@ -351,6 +374,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
                 error_ref=failure_ref,
                 usage_id=usage_ref,
                 attempt_outbox=attempt_outbox,
+                authority_mode=authority,
             )
             conn.commit()
             return reopened
@@ -378,7 +402,11 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         error_ref: str,
         usage_id: str,
         attempt_outbox: OutboxMessage,
+        authority_mode: str = _AUTHORITY_INTERNAL,
     ) -> dict[str, Any]:
+        authority = self._validated_budget_rejection_authority_mode(
+            authority_mode
+        )
         attempt = self._require_attempt(conn, attempt_id)
         if (
             str(attempt["status"]) != "FAILED"
@@ -416,6 +444,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
             expected_lease_version=expected_lease_version + 1,
             owner_id=owner_id,
             fencing_token=fencing_token,
+            authority_mode=authority,
         )
         if (
             str(replay["lease"].get("lease_id") or "") != lease_id
@@ -431,6 +460,7 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
             aggregate_version=expected_budget_version + 1,
             attempt_id=attempt_id,
             evidence_refs=evidence_refs,
+            authority_mode=authority,
         )
         self._assert_mutation_outbox_replay(
             conn,
@@ -497,227 +527,64 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         attempt_outbox.validate()
         return attempt_ref, owner, lease_ref, failure_ref, usage_ref
 
-    def resolve_internal_agent_budget_rejection_terminal(
-        self,
-        attempt_id: str,
-    ) -> dict[str, Any]:
-        """Reopen one exact atomic Internal budget-rejection terminal.
-
-        This is the sole read authority used by artifact cleanup.  A status
-        tuple is insufficient: the committed projection, rejected usage,
-        historical/current Lease lineage and all five same-time terminal
-        Outboxes must remain exact.
-        """
-
-        attempt_ref = str(attempt_id or "").strip()
-        if not attempt_ref:
+    @staticmethod
+    def _validated_budget_rejection_authority_mode(value: str) -> str:
+        authority = str(value or "").strip().lower()
+        if authority not in _AUTHORITY_MODES:
             raise TaskStoreError(
                 TASK_STORE_INVALID,
-                "Internal Agent budget terminal requires attempt_id",
+                "checkpoint budget rejection authority mode is invalid",
             )
-        conn = self._connect()
+        return authority
+
+    @staticmethod
+    def _validated_canonical_host_command(
+        command: sqlite3.Row,
+    ) -> HostCommand:
         try:
-            conn.execute("BEGIN")
-            resolved = self._resolve_internal_agent_budget_rejection_terminal_uow(
-                conn,
-                attempt_ref,
+            payload = _loads_object(
+                str(command["command_json"]),
+                field_name="canonical HostCommand",
             )
-            conn.commit()
-            return resolved
-        except BaseException:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-
-    def _resolve_internal_agent_budget_rejection_terminal_uow(
-        self,
-        conn: sqlite3.Connection,
-        attempt_id: str,
-    ) -> dict[str, Any]:
-        """Validate and reopen the exact rejected terminal in an existing UoW."""
-
-        attempt_ref = str(attempt_id or "").strip()
-        attempt = self._require_attempt(conn, attempt_ref)
-        graph_id = str(attempt["graph_id"])
-        revision = int(attempt["graph_revision"])
-        node_id = str(attempt["node_id"])
-        node = self._require_node(conn, graph_id, revision, node_id)
-        graph = self._require_graph(conn, graph_id, revision)
-        budgets = conn.execute(
-            """
-            SELECT * FROM task_runtime_budget_reservation
-            WHERE graph_id = ? AND graph_revision = ?
-            ORDER BY budget_id
-            """,
-            (graph_id, revision),
-        ).fetchall()
-        operations = conn.execute(
-            """
-            SELECT * FROM task_runtime_idempotency_reservation
-            WHERE attempt_id = ? ORDER BY reservation_id
-            """,
-            (attempt_ref,),
-        ).fetchall()
-        leases = conn.execute(
-            """
-            SELECT * FROM task_runtime_lease
-            WHERE attempt_id = ? ORDER BY fencing_token, lease_id
-            """,
-            (attempt_ref,),
-        ).fetchall()
+            typed = HostCommand.from_mapping(payload)
+        except (TaskContractError, TypeError, ValueError) as exc:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "terminal rejected budget HostCommand is corrupt",
+            ) from exc
+        digest = "sha256:" + hashlib.sha256(
+            _dumps(payload).encode("utf-8")
+        ).hexdigest()
+        row_bindings = (
+            ("command_id", typed.command_id),
+            ("schema_version", typed.schema_version),
+            ("request_id", typed.request_id),
+            ("surface", typed.surface.value),
+            ("principal_id", typed.principal_id),
+            ("session_id", typed.session_id),
+            ("ingress_claim_ref", typed.ingress_claim_ref),
+            ("ingress_audit_ref", typed.ingress_audit_ref),
+            ("governor_grant_ref", typed.governor_grant_ref),
+            ("input_ref", typed.input_ref),
+            ("input_sha256", typed.input_sha256),
+            ("root_work_order_id", typed.root_work_order_id),
+            ("graph_id", typed.graph_id),
+            ("graph_revision", typed.graph_revision),
+            ("route_type", typed.route_type),
+            ("target_id", typed.target_id),
+            ("business_scope", typed.business_scope),
+            ("operation_fingerprint", typed.operation_fingerprint),
+        )
         if (
-            str(attempt["status"]) != "FAILED"
-            or str(node["status"]) != "FAILED"
-            or str(graph["status"]) != "BLOCKED"
-            or len(budgets) != 1
-            or budgets[0]["node_id"] is not None
-            or budgets[0]["attempt_id"] is not None
-            or str(budgets[0]["status"]) != "RELEASED"
-            or len(operations) != 1
-            or str(operations[0]["status"]) != "COMMITTED"
-            or not leases
-            or sum(str(item["status"]) == "RELEASED" for item in leases) != 1
-            or str(leases[-1]["status"]) != "RELEASED"
-            or any(str(item["status"]) == "ACTIVE" for item in leases)
+            typed.to_dict() != payload
+            or digest != str(command["command_digest"])
+            or any(command[field] != expected for field, expected in row_bindings)
         ):
             raise TaskStoreError(
                 TASK_STORE_DURABLE_DATA_INVALID,
-                "Internal Agent budget terminal state matrix drifted",
+                "terminal rejected budget HostCommand authority drifted",
             )
-        budget = self._budget_record(budgets[0])
-        terminal_version = int(budget["status_version"]) - 1
-        if terminal_version < 1:
-            raise TaskStoreError(
-                TASK_STORE_DURABLE_DATA_INVALID,
-                "Internal Agent budget terminal version is invalid",
-            )
-        winner, _dimensions = _assert_terminal_budget_authority(
-            conn,
-            budget_row=budgets[0],
-            terminal_version=terminal_version,
-        )
-        final_lease = leases[-1]
-        self._validate_internal_agent_rejected_usage_uow(
-            conn,
-            reservation_id=str(operations[0]["reservation_id"]),
-            budget_id=str(budget["budget_id"]),
-            attempt_id=attempt_ref,
-            expected_budget_version=terminal_version,
-            expected_budget_status="RELEASED",
-            expected_usage_id=str(winner["usage_id"]),
-            lease_id=str(final_lease["lease_id"]),
-            expected_lease_status="RELEASED",
-            expected_lease_version=int(final_lease["status_version"]),
-            owner_id=str(final_lease["owner_id"]),
-            fencing_token=int(final_lease["fencing_token"]),
-        )
-        self._validate_internal_rejected_terminal_outboxes_uow(
-            conn,
-            attempt=attempt,
-            node=node,
-            graph=graph,
-            lease=final_lease,
-            budget=budgets[0],
-            usage_id=str(winner["usage_id"]),
-        )
-        return {
-            "authority_kind": "INTERNAL_AGENT_BUDGET_REJECTED",
-            "attempt": dict(attempt),
-            "node": _node_record(node),
-            "graph": _graph_record(graph, [node]),
-            "lease": dict(final_lease),
-            "historical_lease_id": str(operations[0]["lease_id"]),
-            "budget": budget,
-            "reservation": self._operation_record(operations[0]),
-            "usage": dict(winner),
-        }
-
-    @staticmethod
-    def _validate_internal_rejected_terminal_outboxes_uow(
-        conn: sqlite3.Connection,
-        *,
-        attempt: sqlite3.Row,
-        node: sqlite3.Row,
-        graph: sqlite3.Row,
-        lease: sqlite3.Row,
-        budget: sqlite3.Row,
-        usage_id: str,
-    ) -> None:
-        attempt_ref = str(attempt["attempt_id"])
-        rows = conn.execute(
-            """
-            SELECT * FROM task_runtime_outbox
-            WHERE attempt_id = ? AND event_type IN (
-                'TASK_ATTEMPT_FAILED', 'TASK_NODE_FAILED',
-                'TASK_GRAPH_BLOCKED', 'TASK_LEASE_RELEASED_TERMINAL',
-                'BUDGET_RESERVATION_RELEASED'
-            )
-            ORDER BY event_type, outbox_id
-            """,
-            (attempt_ref,),
-        ).fetchall()
-        if len(rows) != 5:
-            raise TaskStoreError(
-                TASK_STORE_DURABLE_DATA_INVALID,
-                "Internal Agent budget terminal requires five exact Outboxes",
-            )
-        records = {_outbox_record(row)["event_type"]: _outbox_record(row) for row in rows}
-        graph_ref = str(graph["graph_id"])
-        revision = int(graph["revision"])
-        expected = {
-            "TASK_ATTEMPT_FAILED": (
-                "TASK_ATTEMPT",
-                attempt_ref,
-                int(attempt["status_version"]),
-            ),
-            "TASK_NODE_FAILED": (
-                "TASK_NODE",
-                f"{graph_ref}@{revision}/{node['node_id']}",
-                int(node["status_version"]),
-            ),
-            "TASK_GRAPH_BLOCKED": (
-                "TASK_GRAPH",
-                graph_ref,
-                int(graph["status_version"]),
-            ),
-            "TASK_LEASE_RELEASED_TERMINAL": (
-                "TASK_LEASE",
-                str(lease["lease_id"]),
-                int(lease["status_version"]),
-            ),
-            "BUDGET_RESERVATION_RELEASED": (
-                "BUDGET_RESERVATION",
-                str(budget["budget_id"]),
-                int(budget["status_version"]),
-            ),
-        }
-        completed = int(attempt["completed_ts_ms"] or -1)
-        error_ref = str(attempt["error_ref"] or "")
-        if completed < 0 or not error_ref:
-            raise TaskStoreError(
-                TASK_STORE_DURABLE_DATA_INVALID,
-                "Internal Agent rejected Attempt terminal evidence is incomplete",
-            )
-        for event_type, identity in expected.items():
-            record = records.get(event_type)
-            if (
-                record is None
-                or (
-                    str(record["aggregate_type"]),
-                    str(record["aggregate_id"]),
-                    int(record["aggregate_version"]),
-                )
-                != identity
-                or str(record.get("attempt_id") or "") != attempt_ref
-                or int(record.get("created_ts_ms") or -1) != completed
-                or error_ref not in tuple(record.get("evidence_refs") or ())
-                or usage_id not in tuple(record.get("evidence_refs") or ())
-            ):
-                raise TaskStoreError(
-                    TASK_STORE_DURABLE_DATA_INVALID,
-                    "Internal Agent budget terminal Outbox authority drifted",
-                )
+        return typed
 
     @staticmethod
     def _internal_rejected_budget_outbox(
@@ -726,11 +593,18 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         aggregate_version: int,
         attempt_id: str,
         evidence_refs: tuple[str, ...],
+        authority_mode: str = _AUTHORITY_INTERNAL,
     ) -> OutboxMessage:
-        key = (
-            f"internal-agent-budget-rejected:{attempt_id}:{budget_id}:"
-            f"{aggregate_version}"
+        authority = (
+            TaskInternalAgentBudgetRejectionStoreMixin
+            ._validated_budget_rejection_authority_mode(authority_mode)
         )
+        prefix = (
+            "internal-agent-budget-rejected"
+            if authority == _AUTHORITY_INTERNAL
+            else "committed-checkpoint-budget-rejected"
+        )
+        key = f"{prefix}:{attempt_id}:{budget_id}:{aggregate_version}"
         return OutboxMessage.create(
             aggregate_type="BUDGET_RESERVATION",
             aggregate_id=budget_id,
@@ -762,7 +636,11 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         expected_lease_version: int,
         owner_id: str,
         fencing_token: int,
+        authority_mode: str = _AUTHORITY_INTERNAL,
     ) -> str:
+        authority = self._validated_budget_rejection_authority_mode(
+            authority_mode
+        )
         reservation = self._require_operation_reservation(conn, reservation_id)
         attempt = self._require_attempt(conn, attempt_id)
         lease = self._require_lease(conn, lease_id)
@@ -803,18 +681,37 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "terminal rejected budget lacks HostCommand authority",
             )
+        typed_command = (
+            self._validated_canonical_host_command(command)
+            if authority == _AUTHORITY_CANONICAL
+            else None
+        )
         try:
+            work_order_payload = _loads_object(
+                str(command["work_order_json"]),
+                field_name=(
+                    "canonical WorkOrder"
+                    if authority == _AUTHORITY_CANONICAL
+                    else "Internal Agent WorkOrder"
+                ),
+            )
             work_order = WorkOrderV3.from_mapping(
-                _loads_object(
-                    str(command["work_order_json"]),
-                    field_name="Internal Agent WorkOrder",
-                )
+                work_order_payload
             )
         except (ContractViolation, TypeError, ValueError) as exc:
             raise TaskStoreError(
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "terminal rejected budget WorkOrder is corrupt",
             ) from exc
+        if authority == _AUTHORITY_CANONICAL:
+            work_order_digest = "sha256:" + hashlib.sha256(
+                _dumps(work_order_payload).encode("utf-8")
+            ).hexdigest()
+            if work_order_digest != str(command["work_order_digest"]):
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "terminal rejected budget WorkOrder authority drifted",
+                )
         graph_nodes = conn.execute(
             """
             SELECT * FROM task_runtime_node
@@ -827,7 +724,11 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         if len(graph_nodes) != 1 or len(graph_record.get("nodes") or ()) != 1:
             raise TaskStoreError(
                 TASK_STORE_DURABLE_DATA_INVALID,
-                "Internal Agent rejected checkpoint requires exactly one TaskNode",
+                (
+                    "Internal Agent rejected checkpoint requires exactly one TaskNode"
+                    if authority == _AUTHORITY_INTERNAL
+                    else "committed checkpoint budget rejection requires exactly one TaskNode"
+                ),
             )
         node_payload = _validated_node_payload(node)
         budget = self._budget_record(budget_row)
@@ -865,15 +766,16 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
             owner_id=owner_id,
             fencing_token=fencing_token,
         )
-        self._validate_internal_checkpoint_projection_authority(
-            projection,
-            command=command,
-            work_order=work_order,
-            graph=graph,
-            node_payload=node_payload,
-            reservation=reservation,
-            attempt=attempt,
-        )
+        if authority == _AUTHORITY_INTERNAL:
+            self._validate_internal_checkpoint_projection_authority(
+                projection,
+                command=command,
+                work_order=work_order,
+                graph=graph,
+                node_payload=node_payload,
+                reservation=reservation,
+                attempt=attempt,
+            )
         usage = winner
         expected_usage_id, expected_kind, expected_delta = (
             _projection_worker_usage_identity(
@@ -909,14 +811,52 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
         )
         durable_exceeded = tuple(budget.get("exceeded_dimensions") or ())
         usage_exceeded = tuple(usage.get("exceeded_dimensions") or ())
+        if authority == _AUTHORITY_INTERNAL:
+            route_authority_exact = (
+                str(command["surface"]) == "internal"
+                and str(command["route_type"]) == "delegate"
+                and str(command["target_id"]) == "agent_runtime"
+                and str(node_payload.get("route") or "")
+                == "delegate:agent_runtime"
+                and str(projection["route_type"]) == "delegate"
+                and str(projection["target_id"]) == "agent_runtime"
+            )
+        else:
+            if typed_command is None:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "terminal rejected budget lacks canonical HostCommand authority",
+                )
+            route_authority_exact = canonical_checkpoint_route_authority_matches(
+                command_surface=command["surface"],
+                command_route=typed_command.route_type,
+                command_target=typed_command.target_id,
+                node_route=node_payload.get("route"),
+                projection_route=projection["route_type"],
+                projection_target=projection["target_id"],
+            )
+        work_order_operation_exact = (
+            work_order.business_idempotency_scope
+            == str(reservation["business_scope"])
+            and work_order.operation_fingerprint
+            == str(reservation["operation_fingerprint"])
+        )
+        if authority == _AUTHORITY_CANONICAL:
+            # The canonical HostCommand is the required Operation authority.
+            # Older admitted WorkOrderV3 rows legitimately leave these two
+            # compatibility fields empty; a supplied value must still agree.
+            work_order_operation_exact = (
+                work_order.business_idempotency_scope
+                in {"", str(reservation["business_scope"])}
+                and work_order.operation_fingerprint
+                in {"", str(reservation["operation_fingerprint"])}
+            )
         exact = (
             str(reservation["status"]) == "COMMITTED"
             and str(reservation["attempt_id"]) == attempt_id
             and str(reservation["receipt_ref"] or "")
             == str(projection["projection_id"])
-            and str(command["surface"]) == "internal"
-            and str(command["route_type"]) == "delegate"
-            and str(command["target_id"]) == "agent_runtime"
+            and route_authority_exact
             and str(command["graph_id"]) == str(attempt["graph_id"])
             and int(command["graph_revision"]) == int(attempt["graph_revision"])
             and str(command["root_work_order_id"])
@@ -934,19 +874,13 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
             and work_order.task_graph_id == str(attempt["graph_id"])
             and work_order.task_node_id == str(attempt["node_id"])
             and work_order.graph_revision == int(attempt["graph_revision"])
-            and work_order.business_idempotency_scope
-            == str(reservation["business_scope"])
-            and work_order.operation_fingerprint
-            == str(reservation["operation_fingerprint"])
-            and str(node_payload.get("route") or "")
-            == "delegate:agent_runtime"
+            and work_order_operation_exact
             and str(projection["command_id"]) == str(command["command_id"])
+            and str(projection["request_id"]) == str(command["request_id"])
             and str(projection["graph_id"]) == str(attempt["graph_id"])
             and int(projection["graph_revision"]) == int(attempt["graph_revision"])
             and str(projection["node_id"]) == str(attempt["node_id"])
             and str(projection["attempt_id"]) == attempt_id
-            and str(projection["route_type"]) == "delegate"
-            and str(projection["target_id"]) == "agent_runtime"
             and str(budget["status"]) == expected_budget_status
             and int(budget["status_version"])
             == (

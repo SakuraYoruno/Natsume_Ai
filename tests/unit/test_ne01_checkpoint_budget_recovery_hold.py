@@ -25,22 +25,25 @@ from host_brain.task_runtime.operation_recovery_runtime import (
 
 
 class _FailingBudgetRuntime:
-    def __init__(self) -> None:
+    def __init__(self, *, raw_timeout: bool) -> None:
         self.calls: list[str] = []
+        self._raw_timeout = bool(raw_timeout)
+
+    def _raise(self, detail: str) -> None:
+        if self._raw_timeout:
+            raise TimeoutError(detail)
+        raise GovernedRuntimeError(
+            GOVERNED_OPERATION_RECOVERY_REQUIRED,
+            detail,
+        )
 
     async def reconcile_worker_checkpoint(self, *_: Any, **__: Any) -> Any:
         self.calls.append("reconcile")
-        raise GovernedRuntimeError(
-            GOVERNED_OPERATION_RECOVERY_REQUIRED,
-            "durable usage identity drift",
-        )
+        self._raise("durable usage identity drift")
 
     async def settle_worker_checkpoint(self, *_: Any, **__: Any) -> Any:
         self.calls.append("settle")
-        raise GovernedRuntimeError(
-            GOVERNED_OPERATION_RECOVERY_REQUIRED,
-            "durable usage write is ambiguous",
-        )
+        self._raise("durable usage write is ambiguous")
 
 
 class _ForbiddenLifecycle:
@@ -117,9 +120,11 @@ def _budget() -> BudgetRuntimeContext:
         (WorkerBudgetUsageCheckpointState.MISSING, "settle"),
     ),
 )
+@pytest.mark.parametrize("raw_timeout", (False, True))
 async def test_budget_recovery_error_holds_without_terminal_state_writes(
     usage_state: WorkerBudgetUsageCheckpointState,
     expected_budget_call: str,
+    raw_timeout: bool,
 ) -> None:
     admitted = _admitted()
     graph = {"graph_id": "graph-1", "status": "ACTIVE", "status_version": 2}
@@ -173,7 +178,7 @@ async def test_budget_recovery_error_holds_without_terminal_state_writes(
         ),
         lease=lease,
     )
-    budgets = _FailingBudgetRuntime()
+    budgets = _FailingBudgetRuntime(raw_timeout=raw_timeout)
     lifecycle = _ForbiddenLifecycle()
     outbox = _Outbox()
     continuation = CommittedCheckpointContinuation(
@@ -225,4 +230,6 @@ async def test_budget_recovery_error_holds_without_terminal_state_writes(
     assert receipt["status"] == "RECOVERY_REQUIRED"
     assert receipt["verification_status"] == "NOT_RUN"
     assert receipt["accepted"] is False
+    assert receipt["reason_code"] == GOVERNED_OPERATION_RECOVERY_REQUIRED
+    assert receipt["projection"]["budget_settlement_state"] == "UNKNOWN"
     assert receipt["projection"]["recovery_state"] == "HOLD"

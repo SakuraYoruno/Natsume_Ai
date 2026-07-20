@@ -39,7 +39,10 @@ from .errors import (
 )
 from .node_execution_records import build_review_context
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
-from .internal_checkpoint_budget_rejection import InternalCheckpointBudgetRejectionRuntime
+from .internal_checkpoint_budget_rejection import (
+    InternalCheckpointBudgetRejectionRuntime,
+    is_internal_agent_checkpoint_authority,
+)
 from .node_worker_stream import _maybe_await
 from .operation_checkpoint_budget_recovery import recover_checkpoint_budget
 from .operation_checkpoint_records import build_checkpoint_execution_context
@@ -190,14 +193,10 @@ class CommittedCheckpointContinuation:
                     "fencing_token",
                 )
             )
-            if (
-                not defer_shared_terminal
-                and str(getattr(command.surface, "value", command.surface)).lower()
-                == "internal"
-                and str(command.route_type).lower() == "delegate"
-                and str(command.target_id) == "agent_runtime"
-                and admitted.worker_route == "delegate:agent_runtime"
-            ):
+            internal_agent_checkpoint = is_internal_agent_checkpoint_authority(
+                command,
+            )
+            if not defer_shared_terminal:
                 receipt = await self._internal_budget_rejection.reject(
                     admitted=admitted,
                     charge=charge,
@@ -211,6 +210,7 @@ class CommittedCheckpointContinuation:
                     ),
                     fencing_token=rejection_fence,
                     evidence_refs=evidence_refs,
+                    require_internal_agent=internal_agent_checkpoint,
                 )
             else:
                 receipt = await self._node_lifecycle.reject_budget_charge(

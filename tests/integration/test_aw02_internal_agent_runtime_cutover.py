@@ -1132,6 +1132,11 @@ async def test_internal_checkpoint_charge_and_terminal_bundle_preserve_abc_bound
                 *reopen_args,
                 **drifted_reopen,
             )
+        with pytest.raises(TaskStoreError):
+            response_loss_uow.reject_committed_checkpoint_budget_bundle(
+                *reopen_args,
+                **reopen_kwargs,
+            )
         assert response_loss_uow.reject_calls == 1
         assert calls == ["work-order-internal-budget-rejected"]
         admitted = command_repository.get_by_request(

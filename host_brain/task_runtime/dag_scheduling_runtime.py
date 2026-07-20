@@ -221,6 +221,40 @@ class DurableDagSchedulingRuntime:
                 admitted.result_node_id or admitted.nodes[-1].node_id
             )
 
+            # Detect an active Operation checkpoint before any aggregate
+            # Budget or parallel-settlement shortcut.  A worker usage may
+            # already have atomically moved the shared Budget to EXCEEDED
+            # while its response was lost; node-bound recovery must retain
+            # precedence in both single-node and multi-node graphs.
+            recovery_binding = None
+            for binding in admitted.nodes:
+                if statuses[binding.node_id] not in {
+                    "LEASED",
+                    "RUNNING",
+                    "EXECUTED",
+                    "VERIFYING",
+                    "VERIFIED",
+                }:
+                    continue
+                candidate = admitted.for_node(binding.node_id)
+                reservation = await self._node_execution_projection.try_operation(
+                    candidate.reservation_id
+                )
+                if reservation is not None:
+                    recovery_binding = binding
+                    break
+            if recovery_binding is not None:
+                recovery_admission = admitted.for_node(recovery_binding.node_id)
+                async for event in self._node_execution.execute_stream(
+                    admitted=recovery_admission,
+                    command=command,
+                    work_order=work_order,
+                    budget=budget,
+                    node_grant_ref=grant_refs.get(recovery_admission.node_id),
+                ):
+                    yield event
+                return
+
             unresolved_failure: tuple[AdmittedExecution, dict[str, Any]] | None = None
             for binding in admitted.nodes:
                 if statuses[binding.node_id] not in {
@@ -810,35 +844,6 @@ class DurableDagSchedulingRuntime:
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     f"TaskGraph is not schedulable: {graph_status}",
                 )
-
-            recovery_binding = None
-            for binding in admitted.nodes:
-                if statuses[binding.node_id] not in {
-                    "LEASED",
-                    "RUNNING",
-                    "EXECUTED",
-                    "VERIFYING",
-                    "VERIFIED",
-                }:
-                    continue
-                candidate = admitted.for_node(binding.node_id)
-                reservation = await self._node_execution_projection.try_operation(
-                    candidate.reservation_id
-                )
-                if reservation is not None:
-                    recovery_binding = binding
-                    break
-            if recovery_binding is not None:
-                recovery_admission = admitted.for_node(recovery_binding.node_id)
-                async for event in self._node_execution.execute_stream(
-                    admitted=recovery_admission,
-                    command=command,
-                    work_order=work_order,
-                    budget=budget,
-                    node_grant_ref=grant_refs.get(recovery_admission.node_id),
-                ):
-                    yield event
-                return
 
             scheduler_snapshot = await _maybe_await(
                 self._store.read_scheduler_snapshot(

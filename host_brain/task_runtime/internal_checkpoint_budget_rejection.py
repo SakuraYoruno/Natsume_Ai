@@ -1,4 +1,4 @@
-"""Atomic terminal closure for a committed Internal Agent budget rejection."""
+"""Atomic terminal closure for one committed single-node budget rejection."""
 
 from __future__ import annotations
 
@@ -19,8 +19,19 @@ from .ports import InternalAgentCheckpointUnitOfWorkPort
 from .runtime_outbox import RuntimeOutbox
 
 
+def is_internal_agent_checkpoint_authority(
+    command: Any,
+) -> bool:
+    return (
+        str(getattr(command.surface, "value", command.surface)).lower()
+        == "internal"
+        and str(command.route_type).lower() == "delegate"
+        and str(command.target_id) == "agent_runtime"
+    )
+
+
 class InternalCheckpointBudgetRejectionRuntime:
-    """Use the Store-owned one-transaction rejection bundle on both paths."""
+    """Use one Store-owned transaction for internal or canonical checkpoints."""
 
     def __init__(
         self,
@@ -45,6 +56,7 @@ class InternalCheckpointBudgetRejectionRuntime:
         lease: Mapping[str, Any],
         fencing_token: int,
         evidence_refs: Sequence[str],
+        require_internal_agent: bool = True,
     ) -> Any:
         attempt_id = _required_record_text(attempt, "attempt_id")
         error_ref = "taskerror://" + hashlib.sha256(
@@ -92,9 +104,19 @@ class InternalCheckpointBudgetRejectionRuntime:
                 evidence_refs=evidence,
             ),
         }
+        mutation = (
+            self._checkpoint_uow.reject_internal_agent_checkpoint_budget_bundle
+            if require_internal_agent
+            else self._checkpoint_uow.reject_committed_checkpoint_budget_bundle
+        )
+        reopen = (
+            self._checkpoint_uow.reopen_internal_agent_budget_rejection_terminal
+            if require_internal_agent
+            else self._checkpoint_uow.reopen_committed_checkpoint_budget_rejection_terminal
+        )
         try:
             result_raw = await _maybe_await(
-                self._checkpoint_uow.reject_internal_agent_checkpoint_budget_bundle(
+                mutation(
                     attempt_id,
                     **arguments,
                 )
@@ -105,16 +127,21 @@ class InternalCheckpointBudgetRejectionRuntime:
             # invoke the terminal mutation a second time.
             try:
                 result_raw = await _maybe_await(
-                    self._checkpoint_uow.reopen_internal_agent_budget_rejection_terminal(
+                    reopen(
                         attempt_id,
                         **arguments,
                     )
                 )
-            except Exception:
+            except Exception as reopen_error:
+                if (
+                    str(getattr(reopen_error, "reason_code", ""))
+                    == "TASK_STORE_DURABLE_DATA_INVALID"
+                ):
+                    raise
                 raise mutation_error
         result = _mapping(
             result_raw,
-            field_name="atomic Internal Agent budget rejection",
+            field_name="atomic committed checkpoint budget rejection",
         )
         terminal_attempt = _mapping(result.get("attempt"), field_name="terminal attempt")
         terminal_node = _mapping(result.get("node"), field_name="terminal node")
@@ -131,7 +158,7 @@ class InternalCheckpointBudgetRejectionRuntime:
         ):
             raise GovernedRuntimeError(
                 GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                "atomic Internal Agent budget rejection is incomplete",
+                "atomic committed checkpoint budget rejection is incomplete",
             )
         await self._runtime_outbox.publish_pending()
         terminal_context = charge.context.refreshed(terminal_budget)
@@ -156,4 +183,7 @@ async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
-__all__ = ["InternalCheckpointBudgetRejectionRuntime"]
+__all__ = [
+    "InternalCheckpointBudgetRejectionRuntime",
+    "is_internal_agent_checkpoint_authority",
+]

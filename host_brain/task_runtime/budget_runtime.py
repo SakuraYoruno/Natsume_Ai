@@ -514,6 +514,12 @@ class DurableBudgetRuntime:
                     evidence_ref=_usage_evidence_ref(context.budget_id, usage_id),
                 )
             except BaseException as exc:
+                # Cancellation and process-control signals are not transport
+                # response-loss evidence.  Even if the durable usage row is
+                # already readable, the current task must propagate the
+                # signal and let a later fenced owner resume the checkpoint.
+                if not isinstance(exc, Exception):
+                    raise
                 last_exc = exc
                 replay = await self._try_budget_usage(context.budget_id, usage_id)
                 if replay is not None:

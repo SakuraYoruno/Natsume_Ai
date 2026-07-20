@@ -57,7 +57,10 @@ from .errors import (
     RetryableWorkerPreparationError,
 )
 from .heartbeat import DurableExecutionHeartbeat
-from .internal_checkpoint_budget_rejection import InternalCheckpointBudgetRejectionRuntime
+from .internal_checkpoint_budget_rejection import (
+    InternalCheckpointBudgetRejectionRuntime,
+    is_internal_agent_checkpoint_authority,
+)
 from .internal_agent_sealed_checkpoint_recovery import recover_internal_agent_sealed_checkpoint
 from .node_execution_projection import NodeExecutionProjection
 from .node_execution_records import (
@@ -1205,40 +1208,37 @@ class DurableNodeExecutionRuntime:
                     0, (time.monotonic_ns() - worker_started_ns + 999_999) // 1_000_000
                 ),
             )
-        except BaseException as exc:
-            await self._node_lifecycle.mark_worker_failure(
-                admitted,
-                attempt_id=attempt_id,
-                fencing_token=fencing_token,
-                reason_code=_exception_reason(exc, GOVERNED_BUDGET_STATE_CONFLICT),
-                graph_target=(None if defer_shared_terminal else "FAILED"),
-            )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
+        except Exception:
+            # Operation COMMITTED proves the worker boundary was crossed.  A
+            # BudgetUsage write may also have committed before its response or
+            # first read-back was lost.  Never rewrite that ambiguity as a
+            # worker failure or release the Budget.  A later higher-fence
+            # owner can resume the exact single-node checkpoint; multi-node
+            # batches remain durably held for their separate recovery path.
+            await self._runtime_outbox.publish_pending(best_effort=True)
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
-                status="FAILED",
+                status="RECOVERY_REQUIRED",
                 verification_status="NOT_RUN",
                 accepted=False,
-                reason_code=_exception_reason(exc, GOVERNED_BUDGET_STATE_CONFLICT),
-                projection={"budget": budget.execution_payload()},
+                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                evidence_refs=evidence_refs,
+                projection={
+                    "budget_settlement_state": "UNKNOWN",
+                    "operation_status": "COMMITTED",
+                    "worker_replayed": False,
+                    "budget": budget.execution_payload(),
+                },
             )
             yield terminal_event(receipt)
             return
         budget = charge.context
         if not charge.accepted:
-            if (
-                not defer_shared_terminal
-                and str(getattr(command.surface, "value", command.surface)).lower()
-                == "internal"
-                and str(command.route_type).lower() == "delegate"
-                and str(command.target_id) == "agent_runtime"
-                and admitted.worker_route == "delegate:agent_runtime"
-            ):
+            internal_agent_checkpoint = is_internal_agent_checkpoint_authority(
+                command,
+            )
+            if not defer_shared_terminal:
                 receipt = await self._internal_budget_rejection.reject(
                     admitted=admitted,
                     charge=charge,
@@ -1252,6 +1252,7 @@ class DurableNodeExecutionRuntime:
                     lease=lease,
                     fencing_token=fencing_token,
                     evidence_refs=evidence_refs,
+                    require_internal_agent=internal_agent_checkpoint,
                 )
             else:
                 receipt = await self._node_lifecycle.reject_budget_charge(
@@ -1495,4 +1496,3 @@ class DurableNodeExecutionRuntime:
 
 
 __all__ = ["DurableNodeExecutionRuntime"]
-# Keep composition dependent on the stateful execution boundary only.

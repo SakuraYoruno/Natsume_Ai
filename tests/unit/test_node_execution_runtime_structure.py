@@ -50,12 +50,12 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "eec38b20a7c70c951faed8de776f9ed56ab761cb67d1c4c1852bd3b9bfa9e3fd"
+    "6db602c1d546143152f5b78f7f533c9ff4d7d0e6c88eaa130a72a8a9ae7e80fe"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "57abfa566ae8b8546838b9fc0001beecd8cd59da10f526bed5c9ef245a5cfa94",
     "selected_parallel_decision_outcome": "f601f3cc6506170720737b6e739492328d6707d8b53890500762da1ce038b453",
-    "terminal_replay": "cb8f08e075f09a0293e2448e331262cd07298abe91abb7c8e8059bddc6d30c4b",
+    "terminal_replay": "145d9eff75428d109a7aad33f000d5cc6ccde5b6052334d077c4a4ef0d20b9ef",
     "attempts_for_node": "003bb661287f2e0b56314f00adffcb4af68cd79a8e85329cbc443ee8ac3fab00",
     "try_operation": "6896d47dd8bef7b3ac99547aabe3be258af6f74ab434b3dfd68f250f368714e6",
 }
@@ -223,8 +223,9 @@ def test_projection_and_record_helpers_are_narrow_boundaries() -> None:
         {
             "get_latest_parallel_settlement_decision": 1,
             "read_scheduler_snapshot": 1,
-                "get_operation_reservation": 1,
-                "get_node_artifact": 1,
+            "get_operation_reservation": 1,
+            "get_node_artifact": 1,
+            "try_resolve_checkpoint_budget_rejection_terminal": 1,
         }
     )
     assert Counter(
@@ -413,7 +414,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
                 "commit_operation": 1,
                 "resolve_node_input_artifacts": 1,
         },
-        "_runtime_outbox": {"build": 6, "publish_pending": 14},
+        "_runtime_outbox": {"build": 6, "publish_pending": 15},
         "_budgets": {
             "ensure_active": 1,
             "precharge": 1,
@@ -426,9 +427,9 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
                 "transition_node": 6,
                 "accept_node_output": 1,
             "transition_attempt": 2,
-            "finalize_node_budget": 8,
+            "finalize_node_budget": 7,
             "reject_budget_charge": 3,
-            "mark_worker_failure": 3,
+            "mark_worker_failure": 2,
             "mark_pre_reservation_failure": 4,
         },
         "_workers": {"resolve": 1},
