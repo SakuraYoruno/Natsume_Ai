@@ -583,6 +583,9 @@ def build_governed_operator_runtime(
     )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
+        internal_agent_checkpoint_uow=(
+            task_runtime_container.internal_agent_checkpoint_uow
+        ),
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
         worker_resolver=GovernedWorkerRegistry(delegate=worker),

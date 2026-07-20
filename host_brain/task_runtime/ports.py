@@ -69,40 +69,6 @@ class TaskStorePort(Protocol):
 
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
 
-    def commit_internal_agent_recovered_checkpoint(
-        self,
-        reservation_id: str,
-        *,
-        attempt_id: str,
-        lease_id: str,
-        owner_id: str,
-        fencing_token: int,
-        expected_version: int,
-        projection: Mapping[str, Any],
-        stage_ref: str,
-        seal_digest: str,
-        outbox: Any,
-    ) -> Mapping[str, Any]: ...
-
-    def reject_internal_agent_checkpoint_budget_bundle(
-        self,
-        attempt_id: str,
-        *,
-        reservation_id: str,
-        budget_id: str,
-        lease_id: str,
-        owner_id: str,
-        fencing_token: int,
-        expected_attempt_version: int,
-        expected_node_version: int,
-        expected_graph_version: int,
-        expected_budget_version: int,
-        expected_lease_version: int,
-        error_ref: str,
-        usage_id: str,
-        attempt_outbox: Any,
-    ) -> Mapping[str, Any]: ...
-
     def resolve_internal_agent_budget_rejection_terminal(
         self,
         attempt_id: str,
@@ -598,6 +564,63 @@ class TaskStorePort(Protocol):
     def reconcile_budget(self, budget_id: str) -> Mapping[str, Any]: ...
 
 
+class InternalAgentCheckpointUnitOfWorkPort(Protocol):
+    """Explicit mutation authority for sealed checkpoint continuation."""
+
+    def commit_internal_agent_recovered_checkpoint(
+        self,
+        reservation_id: str,
+        *,
+        attempt_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_version: int,
+        projection: Mapping[str, Any],
+        stage_ref: str,
+        seal_digest: str,
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def reject_internal_agent_checkpoint_budget_bundle(
+        self,
+        attempt_id: str,
+        *,
+        reservation_id: str,
+        budget_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_lease_version: int,
+        error_ref: str,
+        usage_id: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def reopen_internal_agent_budget_rejection_terminal(
+        self,
+        attempt_id: str,
+        *,
+        reservation_id: str,
+        budget_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_lease_version: int,
+        error_ref: str,
+        usage_id: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+
 class RuntimeOutboxPublisherPort(Protocol):
     def publish_pending(self, *, limit: int = 100) -> Mapping[str, Any]: ...
 
@@ -805,6 +828,7 @@ __all__ = [
     "GraphCancellationOperationReconciliationStorePort",
     "GovernedWorkerPort",
     "GovernedWorkerResolverPort",
+    "InternalAgentCheckpointUnitOfWorkPort",
     "RuntimeOutboxPublisherPort",
     "TerminalReconciliationStorePort",
     "TaskOutboxFactoryPort",

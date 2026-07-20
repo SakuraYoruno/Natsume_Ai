@@ -55,6 +55,9 @@ from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
@@ -212,8 +215,8 @@ class _CrashBeforeProjectionStore:
         )
 
 
-class _RecoveredCheckpointResponseLossStore:
-    def __init__(self, delegate: DurableTaskStore) -> None:
+class _RecoveredCheckpointResponseLossUow:
+    def __init__(self, delegate: DurableInternalAgentCheckpointUnitOfWork) -> None:
         self._delegate = delegate
         self.commit_calls = 0
 
@@ -235,10 +238,11 @@ class _RecoveredCheckpointResponseLossStore:
         return result
 
 
-class _RejectedBudgetResponseLossStore:
-    def __init__(self, delegate: DurableTaskStore) -> None:
+class _RejectedBudgetResponseLossUow:
+    def __init__(self, delegate: DurableInternalAgentCheckpointUnitOfWork) -> None:
         self._delegate = delegate
         self.reject_calls = 0
+        self.last_rejection: tuple[tuple[Any, ...], dict[str, Any]] | None = None
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._delegate, name)
@@ -249,6 +253,7 @@ class _RejectedBudgetResponseLossStore:
         **kwargs: Any,
     ) -> Any:
         self.reject_calls += 1
+        self.last_rejection = (tuple(args), dict(kwargs))
         result = self._delegate.reject_internal_agent_checkpoint_budget_bundle(
             *args,
             **kwargs,
@@ -256,6 +261,20 @@ class _RejectedBudgetResponseLossStore:
         if self.reject_calls == 1:
             raise TimeoutError("simulated rejected budget bundle response loss")
         return result
+
+
+def _checkpoint_uow(
+    task_store: Any,
+    projection_store: Any,
+) -> DurableInternalAgentCheckpointUnitOfWork:
+    while type(task_store) is not DurableTaskStore:
+        task_store = task_store._delegate
+    while type(projection_store) is not WorkerProjectionStore:
+        projection_store = projection_store._delegate
+    return DurableInternalAgentCheckpointUnitOfWork(
+        task_store=task_store,
+        worker_projection_store=projection_store,
+    )
 
 
 class _SimulatedAttemptSucceededProcessStop(BaseException):
@@ -281,11 +300,13 @@ class _CrashAfterSucceededAttemptStore:
         return result
 
 
-class _RejectedBudgetFaultStore(DurableTaskStore):
-    def __init__(self, *args: Any, fail_event: str, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.fail_event = str(fail_event)
+class _CapturingCheckpointUow:
+    def __init__(self, delegate: DurableInternalAgentCheckpointUnitOfWork) -> None:
+        self._delegate = delegate
         self.captured_rejection: tuple[tuple[Any, ...], dict[str, Any]] | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
 
     def reject_internal_agent_checkpoint_budget_bundle(
         self,
@@ -293,15 +314,10 @@ class _RejectedBudgetFaultStore(DurableTaskStore):
         **kwargs: Any,
     ) -> Any:
         self.captured_rejection = (tuple(args), dict(kwargs))
-        return super().reject_internal_agent_checkpoint_budget_bundle(
+        return self._delegate.reject_internal_agent_checkpoint_budget_bundle(
             *args,
             **kwargs,
         )
-
-    def _insert_outbox(self, conn, message, **kwargs):  # noqa: ANN001, ANN202
-        if message.event_type == self.fail_event:
-            raise RuntimeError(f"fault before {self.fail_event} outbox insert")
-        return super()._insert_outbox(conn, message, **kwargs)
 
 
 def _sha256(value: bytes | str) -> str:
@@ -818,6 +834,10 @@ async def test_internal_accepted_artifact_promotes_with_real_git_and_sqlite(
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
             worker_projection_store=WorkerProjectionStore(db_path),
         )
+        infrastructure.internal_agent_checkpoint_uow = _checkpoint_uow(
+            task_store,
+            infrastructure.worker_projection_store,
+        )
         result_repository = AgentExecutionResultRepository(db_path)
         preview_authority = _ExactPreviewAuthority()
         token_service = TokenService(approval_ttl_ms=180_000)
@@ -971,10 +991,12 @@ async def test_internal_accepted_artifact_promotes_with_real_git_and_sqlite(
 
 
 @pytest.mark.asyncio
-async def test_internal_post_checkpoint_budget_rejection_is_one_transaction_and_replay_safe(
+async def test_internal_checkpoint_charge_and_terminal_bundle_preserve_abc_boundaries(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # A commits the recovered projection/Operation checkpoint, B charges the
+    # Budget ledger, and C atomically closes only the rejected terminal bundle.
     db_path = tmp_path / "internal-budget-rejected.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="internal-budget-rejected-migrate",
@@ -1009,16 +1031,19 @@ async def test_internal_post_checkpoint_budget_rejection_is_one_transaction_and_
 
     clock = _MutableClock()
     durable_store = DurableTaskStore(db_path, clock=clock)
-    response_loss_store = _RejectedBudgetResponseLossStore(durable_store)
     event_store = RuntimeEventStore(db_path)
     projection_store = WorkerProjectionStore(db_path, clock=clock)
+    response_loss_uow = _RejectedBudgetResponseLossUow(
+        _checkpoint_uow(durable_store, projection_store)
+    )
     command_repository = HostCommandRepository(db_path, clock=clock)
     infrastructure = SimpleNamespace(
-        task_store=response_loss_store,
+        task_store=durable_store,
+        internal_agent_checkpoint_uow=response_loss_uow,
         review_store=ReviewStore(db_path),
         review_continuation_store=ReviewContinuationStore(db_path),
         command_repository=command_repository,
-        outbox_publisher=RuntimeOutboxPublisher(response_loss_store, event_store),
+        outbox_publisher=RuntimeOutboxPublisher(durable_store, event_store),
         worker_projection_store=projection_store,
     )
     ledger = SQLiteLedger(str(db_path))
@@ -1058,7 +1083,7 @@ async def test_internal_post_checkpoint_budget_rejection_is_one_transaction_and_
             ),
             action_preview_service=preview_authority,
             acceptance_effect_dispatcher=AcceptanceEffectDispatcher(
-                task_store=response_loss_store,
+                task_store=durable_store,
                 handlers={"internal.agent.result_commit": accepted_result},
                 owner_id="internal-budget-rejected-effect-owner",
                 action_preview_service=preview_authority,
@@ -1095,7 +1120,19 @@ async def test_internal_post_checkpoint_budget_rejection_is_one_transaction_and_
         assert terminal["execution_receipt"]["reason_code"] == (
             "GOVERNED_BUDGET_EXCEEDED"
         )
-        assert response_loss_store.reject_calls == 2
+        assert response_loss_uow.reject_calls == 1
+        assert response_loss_uow.last_rejection is not None
+        reopen_args, reopen_kwargs = response_loss_uow.last_rejection
+        drifted_reopen = {
+            **reopen_kwargs,
+            "owner_id": f"{reopen_kwargs['owner_id']}-drift",
+        }
+        with pytest.raises(TaskStoreError):
+            response_loss_uow.reopen_internal_agent_budget_rejection_terminal(
+                *reopen_args,
+                **drifted_reopen,
+            )
+        assert response_loss_uow.reject_calls == 1
         assert calls == ["work-order-internal-budget-rejected"]
         admitted = command_repository.get_by_request(
             surface="internal",
@@ -1162,7 +1199,7 @@ async def test_internal_post_checkpoint_budget_rejection_is_one_transaction_and_
 
 
 @pytest.mark.asyncio
-async def test_internal_budget_rejection_rolls_back_every_terminal_mutation_fault(
+async def test_internal_boundary_c_rolls_back_every_terminal_bundle_fault(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1198,16 +1235,27 @@ async def test_internal_budget_rejection_rolls_back_every_terminal_mutation_faul
         ),
     )
     clock = _MutableClock()
-    store = _RejectedBudgetFaultStore(
-        db_path,
-        clock=clock,
-        fail_event="TASK_ATTEMPT_FAILED",
-    )
+    store = DurableTaskStore(db_path, clock=clock)
     event_store = RuntimeEventStore(db_path)
     projections = WorkerProjectionStore(db_path, clock=clock)
+    checkpoint_uow = _CapturingCheckpointUow(
+        _checkpoint_uow(store, projections)
+    )
+    fault_event = {"value": "TASK_ATTEMPT_FAILED"}
+    insert_outbox = store._insert_outbox
+
+    def insert_outbox_with_fault(conn, message, **kwargs):  # noqa: ANN001, ANN202
+        if message.event_type == fault_event["value"]:
+            raise RuntimeError(
+                f"fault before {fault_event['value']} outbox insert"
+            )
+        return insert_outbox(conn, message, **kwargs)
+
+    monkeypatch.setattr(store, "_insert_outbox", insert_outbox_with_fault)
     commands = HostCommandRepository(db_path, clock=clock)
     infrastructure = SimpleNamespace(
         task_store=store,
+        internal_agent_checkpoint_uow=checkpoint_uow,
         review_store=ReviewStore(db_path),
         review_continuation_store=ReviewContinuationStore(db_path),
         command_repository=commands,
@@ -1282,8 +1330,8 @@ async def test_internal_budget_rejection_rolls_back_every_terminal_mutation_faul
                     "body_sha256": body_sha256,
                 },
             )
-        assert store.captured_rejection is not None
-        captured_args, captured_kwargs = store.captured_rejection
+        assert checkpoint_uow.captured_rejection is not None
+        captured_args, captured_kwargs = checkpoint_uow.captured_rejection
 
         def assert_pre_bundle_state() -> None:
             with sqlite3.connect(str(db_path)) as conn:
@@ -1320,20 +1368,20 @@ async def test_internal_budget_rejection_rolls_back_every_terminal_mutation_faul
             "BUDGET_RESERVATION_RELEASED",
         )
         for event_type in fault_events:
-            store.fail_event = event_type
+            fault_event["value"] = event_type
             with pytest.raises(RuntimeError, match=event_type):
-                store.reject_internal_agent_checkpoint_budget_bundle(
+                checkpoint_uow.reject_internal_agent_checkpoint_budget_bundle(
                     *captured_args,
                     **captured_kwargs,
                 )
             assert_pre_bundle_state()
 
-        store.fail_event = "NO_FAULT"
-        committed = store.reject_internal_agent_checkpoint_budget_bundle(
+        fault_event["value"] = "NO_FAULT"
+        committed = checkpoint_uow.reject_internal_agent_checkpoint_budget_bundle(
             *captured_args,
             **captured_kwargs,
         )
-        replayed = store.reject_internal_agent_checkpoint_budget_bundle(
+        replayed = checkpoint_uow.reject_internal_agent_checkpoint_budget_bundle(
             *captured_args,
             **captured_kwargs,
         )
@@ -1531,6 +1579,10 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
             command_repository=command_repository,
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
             worker_projection_store=projections,
+        )
+        infrastructure.internal_agent_checkpoint_uow = _checkpoint_uow(
+            task_store,
+            projections,
         )
         accepted_result = InternalAcceptedResultHandler(
             command_repository=command_repository,
@@ -1889,6 +1941,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
         store: Any,
         projections: Any,
         owner_id: str,
+        checkpoint_uow: Any | None = None,
     ) -> Any:
         command_repository = HostCommandRepository(db_path, clock=clock)
         event_store = RuntimeEventStore(db_path)
@@ -1899,6 +1952,9 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
             command_repository=command_repository,
             outbox_publisher=RuntimeOutboxPublisher(store, event_store),
             worker_projection_store=projections,
+        )
+        infrastructure.internal_agent_checkpoint_uow = (
+            checkpoint_uow or _checkpoint_uow(store, projections)
         )
         accepted_result = InternalAcceptedResultHandler(
             command_repository=command_repository,
@@ -2012,16 +2068,66 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
             recovery_id="internal-seal-recovery-startup"
         )
         assert original_attempt["attempt_id"] in recovery_report.recovered_attempt_ids
-        response_loss_store = _RecoveredCheckpointResponseLossStore(
-            reopened_store
+
+        original_insert_outbox = reopened_store._insert_outbox
+
+        def fail_operation_commit_outbox(conn, message, **kwargs):  # noqa: ANN001, ANN202
+            if message.event_type == "OPERATION_COMMITTED":
+                raise RuntimeError("fault after projection and Operation CAS")
+            return original_insert_outbox(conn, message, **kwargs)
+
+        monkeypatch.setattr(
+            reopened_store,
+            "_insert_outbox",
+            fail_operation_commit_outbox,
+        )
+        fault_runtime = build_runtime(
+            store=reopened_store,
+            projections=projection_delegate,
+            owner_id="internal-seal-recovery-owner-fault",
+        )
+        runtimes.append(fault_runtime)
+        await fault_runtime.activate()
+        assert fault_runtime.startup_checkpoint_report == (
+            {
+                "stage_ref": sealed[0].stage_ref,
+                "status": "DEFERRED",
+                "reason_code": "GOVERNED_OPERATION_RECOVERY_REQUIRED",
+            },
+        )
+        with sqlite3.connect(str(db_path)) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM task_runtime_worker_projection "
+                "WHERE attempt_id = ?",
+                (original_attempt["attempt_id"],),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT status FROM task_runtime_idempotency_reservation "
+                "WHERE reservation_id = ?",
+                (reservation["reservation_id"],),
+            ).fetchone()[0] == "RECOVERY_REQUIRED"
+            assert conn.execute(
+                "SELECT COUNT(*) FROM task_runtime_outbox "
+                "WHERE aggregate_type = 'OPERATION_RESERVATION' "
+                "AND aggregate_id = ? AND event_type = 'OPERATION_COMMITTED'",
+                (reservation["reservation_id"],),
+            ).fetchone()[0] == 0
+        monkeypatch.setattr(reopened_store, "_insert_outbox", original_insert_outbox)
+        await fault_runtime.aclose()
+        runtimes.remove(fault_runtime)
+        clock.advance(120_001)
+
+        response_loss_uow = _RecoveredCheckpointResponseLossUow(
+            _checkpoint_uow(reopened_store, projection_delegate)
         )
         succeeded_crash_store = _CrashAfterSucceededAttemptStore(
-            response_loss_store
+            reopened_store
         )
         interrupted_runtime = build_runtime(
             store=succeeded_crash_store,
             projections=projection_delegate,
             owner_id="internal-seal-recovery-owner-b",
+            checkpoint_uow=response_loss_uow,
         )
         with pytest.raises(_SimulatedAttemptSucceededProcessStop):
             await interrupted_runtime.activate()
@@ -2030,12 +2136,13 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
         assert interrupted_snapshot["graph_record"]["status"] == "ACTIVE"
         assert interrupted_snapshot["graph_record"]["nodes"][0]["status"] == "RUNNING"
         assert interrupted_snapshot["attempts"][0]["status"] == "SUCCEEDED"
-        assert response_loss_store.commit_calls == 1
+        assert response_loss_uow.commit_calls == 1
 
         reopened_runtime = build_runtime(
-            store=response_loss_store,
+            store=reopened_store,
             projections=projection_delegate,
             owner_id="internal-seal-recovery-owner-c",
+            checkpoint_uow=response_loss_uow,
         )
         runtimes.append(reopened_runtime)
         await reopened_runtime.activate()
@@ -2047,7 +2154,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
             },
         )
         assert agent_calls == ["work-order-internal-seal-recovery"]
-        assert response_loss_store.commit_calls == 1
+        assert response_loss_uow.commit_calls == 1
         committed = reopened_store.get_operation_reservation(
             reservation["reservation_id"]
         )
@@ -2107,7 +2214,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
         )
         assert terminal["execution_receipt"]["accepted"] is True
         assert agent_calls == ["work-order-internal-seal-recovery"]
-        assert response_loss_store.commit_calls == 1
+        assert response_loss_uow.commit_calls == 1
         with sqlite3.connect(str(db_path)) as conn:
             assert conn.execute(
                 "SELECT COUNT(*) FROM task_runtime_worker_projection "
@@ -2129,7 +2236,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
         )
         assert replay["replayed"] is True
         assert agent_calls == ["work-order-internal-seal-recovery"]
-        assert response_loss_store.commit_calls == 1
+        assert response_loss_uow.commit_calls == 1
 
         historical_authority = dict(accepted[0].execution_authority)
         lineage_kwargs = {
@@ -2282,6 +2389,10 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             command_repository=HostCommandRepository(db_path),
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
             worker_projection_store=WorkerProjectionStore(db_path),
+        )
+        infrastructure.internal_agent_checkpoint_uow = _checkpoint_uow(
+            task_store,
+            infrastructure.worker_projection_store,
         )
         result_repository = AgentExecutionResultRepository(db_path)
         calls: list[str] = []
@@ -2605,6 +2716,10 @@ async def test_write_agent_finish_cannot_create_durable_acceptance(
                 RuntimeEventStore(db_path),
             ),
             worker_projection_store=WorkerProjectionStore(db_path),
+        )
+        infrastructure.internal_agent_checkpoint_uow = _checkpoint_uow(
+            task_store,
+            infrastructure.worker_projection_store,
         )
         result_repository = AgentExecutionResultRepository(db_path)
         token_service = TokenService(approval_ttl_ms=180_000)

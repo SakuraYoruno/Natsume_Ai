@@ -12,6 +12,9 @@ import pytest
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
 from host_brain.orchestration import GovernedCommandApplication
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
@@ -263,8 +266,15 @@ def _coordinator(
     bounded_fanout_enabled: bool = False,
     atomic_graph_success_enabled: bool = False,
 ) -> GovernedTaskCoordinator:
+    durable_store = store
+    while type(durable_store) is not DurableTaskStore:
+        durable_store = durable_store._delegate
     return GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=DurableInternalAgentCheckpointUnitOfWork(
+            task_store=durable_store,
+            worker_projection_store=projections,
+        ),
         outbox_publisher=_Publisher(),
         outbox_factory=OutboxMessage,
         worker_resolver=_StaticResolver(worker),

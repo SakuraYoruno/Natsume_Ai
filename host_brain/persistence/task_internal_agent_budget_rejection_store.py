@@ -59,7 +59,7 @@ _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 class TaskInternalAgentBudgetRejectionStoreMixin:
     """Atomic budget rejection and exact rejected terminal authority."""
 
-    def reject_internal_agent_checkpoint_budget_bundle(
+    def _reject_internal_agent_checkpoint_budget_bundle_uow(
         self,
         attempt_id: str,
         *,
@@ -79,27 +79,17 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
     ) -> dict[str, Any]:
         """Atomically close an exact post-checkpoint budget rejection."""
 
-        attempt_ref = str(attempt_id or "").strip()
-        owner = str(owner_id or "").strip()
-        lease_ref = str(lease_id or "").strip()
-        failure_ref = self._validated_reference(error_ref, field_name="error_ref")
-        usage_ref = self._validated_reference(usage_id, field_name="usage_id")
-        if (
-            not attempt_ref
-            or not lease_ref
-            or not owner
-            or type(fencing_token) is not int
-            or fencing_token < 1
-            or not isinstance(attempt_outbox, OutboxMessage)
-            or attempt_outbox.attempt_id != attempt_ref
-            or failure_ref not in attempt_outbox.evidence_refs
-            or usage_ref not in attempt_outbox.evidence_refs
-        ):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "Internal Agent rejected checkpoint bundle identity is invalid",
+        attempt_ref, owner, lease_ref, failure_ref, usage_ref = (
+            self._validated_internal_agent_budget_rejection_request(
+                attempt_id=attempt_id,
+                lease_id=lease_id,
+                owner_id=owner_id,
+                fencing_token=fencing_token,
+                error_ref=error_ref,
+                usage_id=usage_id,
+                attempt_outbox=attempt_outbox,
             )
-        attempt_outbox.validate()
+        )
         evidence_refs = tuple(attempt_outbox.evidence_refs)
         ts_ms = self._now()
         with self._transaction() as conn:
@@ -108,81 +98,23 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
                 str(attempt["status"]) == "FAILED"
                 and int(attempt["status_version"]) == expected_attempt_version + 1
             ):
-                replay = self._replay_running_attempt_failure_bundle(
+                return self._reopen_internal_agent_budget_rejection_mutation_uow(
                     conn,
-                    attempt=attempt,
                     attempt_id=attempt_ref,
+                    reservation_id=reservation_id,
+                    budget_id=budget_id,
+                    lease_id=lease_ref,
                     owner_id=owner,
                     fencing_token=fencing_token,
                     expected_attempt_version=expected_attempt_version,
                     expected_node_version=expected_node_version,
                     expected_graph_version=expected_graph_version,
-                    error_ref=failure_ref,
-                    graph_target_status=TaskGraphStatus.BLOCKED,
-                    attempt_outbox=attempt_outbox,
-                    evidence_refs=evidence_refs,
-                )
-                self._validate_internal_agent_rejected_usage_uow(
-                    conn,
-                    reservation_id=reservation_id,
-                    budget_id=budget_id,
-                    attempt_id=attempt_ref,
                     expected_budget_version=expected_budget_version,
-                    expected_budget_status="RELEASED",
-                    expected_usage_id=usage_ref,
-                    lease_id=lease_ref,
-                    expected_lease_status="RELEASED",
-                    expected_lease_version=expected_lease_version + 1,
-                    owner_id=owner,
-                    fencing_token=fencing_token,
+                    expected_lease_version=expected_lease_version,
+                    error_ref=failure_ref,
+                    usage_id=usage_ref,
+                    attempt_outbox=attempt_outbox,
                 )
-                if (
-                    str(replay["lease"].get("lease_id") or "") != lease_ref
-                    or int(replay["lease"].get("status_version") or 0)
-                    != expected_lease_version + 1
-                ):
-                    raise TaskStoreError(
-                        TASK_STORE_CAS_CONFLICT,
-                        "rejected checkpoint replay Lease identity drifted",
-                    )
-                budget_outbox = self._internal_rejected_budget_outbox(
-                    budget_id=budget_id,
-                    aggregate_version=expected_budget_version + 1,
-                    attempt_id=attempt_ref,
-                    evidence_refs=evidence_refs,
-                )
-                self._assert_mutation_outbox_replay(
-                    conn,
-                    budget_outbox,
-                    expected_aggregate=(
-                        "BUDGET_RESERVATION",
-                        budget_id,
-                        expected_budget_version + 1,
-                    ),
-                    expected_event_type="BUDGET_RESERVATION_RELEASED",
-                    expected_attempt_id=attempt_ref,
-                )
-                budget_outbox_row = conn.execute(
-                    "SELECT created_ts_ms FROM task_runtime_outbox WHERE outbox_id = ?",
-                    (budget_outbox.outbox_id,),
-                ).fetchone()
-                if (
-                    budget_outbox_row is None
-                    or int(budget_outbox_row["created_ts_ms"])
-                    != int(attempt["completed_ts_ms"])
-                ):
-                    raise TaskStoreError(
-                        TASK_STORE_CAS_CONFLICT,
-                        "rejected checkpoint Budget Outbox timestamp drifted",
-                    )
-                return {
-                    **replay,
-                    "budget": self._budget_record(
-                        self._require_budget(conn, budget_id)
-                    ),
-                    "usage_id": usage_ref,
-                    "replayed": True,
-                }
 
             self._require_version(
                 attempt,
@@ -368,6 +300,202 @@ class TaskInternalAgentBudgetRejectionStoreMixin:
                 "usage_id": usage_ref,
                 "replayed": False,
             }
+
+    def _reopen_internal_agent_budget_rejection_mutation(
+        self,
+        attempt_id: str,
+        *,
+        reservation_id: str,
+        budget_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_lease_version: int,
+        error_ref: str,
+        usage_id: str,
+        attempt_outbox: OutboxMessage,
+    ) -> dict[str, Any]:
+        """Read-only exact replay authority for one ambiguous C-boundary call."""
+
+        attempt_ref, owner, lease_ref, failure_ref, usage_ref = (
+            self._validated_internal_agent_budget_rejection_request(
+                attempt_id=attempt_id,
+                lease_id=lease_id,
+                owner_id=owner_id,
+                fencing_token=fencing_token,
+                error_ref=error_ref,
+                usage_id=usage_id,
+                attempt_outbox=attempt_outbox,
+            )
+        )
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            reopened = self._reopen_internal_agent_budget_rejection_mutation_uow(
+                conn,
+                attempt_id=attempt_ref,
+                reservation_id=reservation_id,
+                budget_id=budget_id,
+                lease_id=lease_ref,
+                owner_id=owner,
+                fencing_token=fencing_token,
+                expected_attempt_version=expected_attempt_version,
+                expected_node_version=expected_node_version,
+                expected_graph_version=expected_graph_version,
+                expected_budget_version=expected_budget_version,
+                expected_lease_version=expected_lease_version,
+                error_ref=failure_ref,
+                usage_id=usage_ref,
+                attempt_outbox=attempt_outbox,
+            )
+            conn.commit()
+            return reopened
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _reopen_internal_agent_budget_rejection_mutation_uow(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        attempt_id: str,
+        reservation_id: str,
+        budget_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_lease_version: int,
+        error_ref: str,
+        usage_id: str,
+        attempt_outbox: OutboxMessage,
+    ) -> dict[str, Any]:
+        attempt = self._require_attempt(conn, attempt_id)
+        if (
+            str(attempt["status"]) != "FAILED"
+            or int(attempt["status_version"]) != expected_attempt_version + 1
+        ):
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "Internal Agent budget rejection terminal does not match the call",
+            )
+        evidence_refs = tuple(attempt_outbox.evidence_refs)
+        replay = self._replay_running_attempt_failure_bundle(
+            conn,
+            attempt=attempt,
+            attempt_id=attempt_id,
+            owner_id=owner_id,
+            fencing_token=fencing_token,
+            expected_attempt_version=expected_attempt_version,
+            expected_node_version=expected_node_version,
+            expected_graph_version=expected_graph_version,
+            error_ref=error_ref,
+            graph_target_status=TaskGraphStatus.BLOCKED,
+            attempt_outbox=attempt_outbox,
+            evidence_refs=evidence_refs,
+        )
+        self._validate_internal_agent_rejected_usage_uow(
+            conn,
+            reservation_id=reservation_id,
+            budget_id=budget_id,
+            attempt_id=attempt_id,
+            expected_budget_version=expected_budget_version,
+            expected_budget_status="RELEASED",
+            expected_usage_id=usage_id,
+            lease_id=lease_id,
+            expected_lease_status="RELEASED",
+            expected_lease_version=expected_lease_version + 1,
+            owner_id=owner_id,
+            fencing_token=fencing_token,
+        )
+        if (
+            str(replay["lease"].get("lease_id") or "") != lease_id
+            or int(replay["lease"].get("status_version") or 0)
+            != expected_lease_version + 1
+        ):
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "rejected checkpoint replay Lease identity drifted",
+            )
+        budget_outbox = self._internal_rejected_budget_outbox(
+            budget_id=budget_id,
+            aggregate_version=expected_budget_version + 1,
+            attempt_id=attempt_id,
+            evidence_refs=evidence_refs,
+        )
+        self._assert_mutation_outbox_replay(
+            conn,
+            budget_outbox,
+            expected_aggregate=(
+                "BUDGET_RESERVATION",
+                budget_id,
+                expected_budget_version + 1,
+            ),
+            expected_event_type="BUDGET_RESERVATION_RELEASED",
+            expected_attempt_id=attempt_id,
+        )
+        budget_outbox_row = conn.execute(
+            "SELECT created_ts_ms FROM task_runtime_outbox WHERE outbox_id = ?",
+            (budget_outbox.outbox_id,),
+        ).fetchone()
+        if (
+            budget_outbox_row is None
+            or int(budget_outbox_row["created_ts_ms"])
+            != int(attempt["completed_ts_ms"])
+        ):
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                "rejected checkpoint Budget Outbox timestamp drifted",
+            )
+        return {
+            **replay,
+            "budget": self._budget_record(self._require_budget(conn, budget_id)),
+            "usage_id": usage_id,
+            "replayed": True,
+        }
+
+    def _validated_internal_agent_budget_rejection_request(
+        self,
+        *,
+        attempt_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        error_ref: str,
+        usage_id: str,
+        attempt_outbox: OutboxMessage,
+    ) -> tuple[str, str, str, str, str]:
+        attempt_ref = str(attempt_id or "").strip()
+        owner = str(owner_id or "").strip()
+        lease_ref = str(lease_id or "").strip()
+        failure_ref = self._validated_reference(error_ref, field_name="error_ref")
+        usage_ref = self._validated_reference(usage_id, field_name="usage_id")
+        if (
+            not attempt_ref
+            or not lease_ref
+            or not owner
+            or type(fencing_token) is not int
+            or fencing_token < 1
+            or not isinstance(attempt_outbox, OutboxMessage)
+            or attempt_outbox.attempt_id != attempt_ref
+            or failure_ref not in attempt_outbox.evidence_refs
+            or usage_ref not in attempt_outbox.evidence_refs
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Internal Agent rejected checkpoint bundle identity is invalid",
+            )
+        attempt_outbox.validate()
+        return attempt_ref, owner, lease_ref, failure_ref, usage_ref
 
     def resolve_internal_agent_budget_rejection_terminal(
         self,

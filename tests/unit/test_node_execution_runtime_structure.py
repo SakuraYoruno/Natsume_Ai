@@ -50,7 +50,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "2da8cbe326036b953bf7bb1510fcef3877fc8b106f7960b65a26517ddfa6a8b4"
+    "eec38b20a7c70c951faed8de776f9ed56ab761cb67d1c4c1852bd3b9bfa9e3fd"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "57abfa566ae8b8546838b9fc0001beecd8cd59da10f526bed5c9ef245a5cfa94",
@@ -364,6 +364,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
     assert len(inspect.getsource(node_execution_runtime).splitlines()) < 1_500
     expected_parameters = (
         "task_store",
+        "checkpoint_uow",
         "runtime_outbox",
         "budget_runtime",
         "node_lifecycle",
@@ -384,6 +385,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         "_store",
         "_runtime_outbox",
         "_budgets",
+        "_checkpoint_uow",
         "_checkpoint_continuation",
         "_graph_finalizer",
         "_internal_budget_rejection",
@@ -522,9 +524,12 @@ def test_extracted_recovery_helpers_keep_narrow_authority_boundaries() -> None:
         {
             "get_lease": 1,
             "resolve_node_input_artifacts": 1,
-            "commit_internal_agent_recovered_checkpoint": 1,
         }
     )
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(sealed_tree, "checkpoint_uow")
+    ) == Counter({"commit_internal_agent_recovered_checkpoint": 1})
     assert Counter(
         call.func.attr
         for call in _named_dependency_calls(sealed_tree, "worker_resolver")

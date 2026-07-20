@@ -32,7 +32,6 @@ from host_brain.persistence.task_store_types import (
     build_outbox_payload_ref,
 )
 from host_brain.persistence.task_record_codec import (
-    _dumps,
     _graph_record,
     _loads_object,
     _node_record,
@@ -43,6 +42,8 @@ from host_brain.persistence.task_budget_usage_store import (
     _assert_terminal_budget_authority,
 )
 from host_brain.persistence.worker_projection_repository import (
+    WORKER_PROJECTION_REPLAY_DRIFT,
+    WorkerProjectionStore,
     WorkerProjectionStoreError,
     validate_worker_projection_payload,
     validate_worker_projection_record,
@@ -59,10 +60,11 @@ _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 class TaskInternalAgentCheckpointCommitStoreMixin:
     """Atomic commit of one recovered Internal Agent checkpoint."""
 
-    def commit_internal_agent_recovered_checkpoint(
+    def _commit_internal_agent_recovered_checkpoint_uow(
         self,
         reservation_id: str,
         *,
+        worker_projection_store: WorkerProjectionStore,
         attempt_id: str,
         lease_id: str,
         owner_id: str,
@@ -110,6 +112,7 @@ class TaskInternalAgentCheckpointCommitStoreMixin:
                     )
                 self._validate_internal_agent_recovery_uow(
                     conn,
+                    worker_projection_store=worker_projection_store,
                     reservation=reservation,
                     attempt_id=attempt_id,
                     lease_id=lease_id,
@@ -146,6 +149,7 @@ class TaskInternalAgentCheckpointCommitStoreMixin:
             )
             self._validate_internal_agent_recovery_uow(
                 conn,
+                worker_projection_store=worker_projection_store,
                 reservation=reservation,
                 attempt_id=attempt_id,
                 lease_id=lease_id,
@@ -205,6 +209,7 @@ class TaskInternalAgentCheckpointCommitStoreMixin:
         self,
         conn: sqlite3.Connection,
         *,
+        worker_projection_store: WorkerProjectionStore,
         reservation: sqlite3.Row,
         attempt_id: str,
         lease_id: str,
@@ -228,36 +233,20 @@ class TaskInternalAgentCheckpointCommitStoreMixin:
                 seal_digest=seal_digest,
             )
             try:
-                conn.execute(
-                    """
-                    INSERT INTO task_runtime_worker_projection(
-                        projection_id, schema_version, payload_digest,
-                        command_id, request_id, graph_id, graph_revision,
-                        node_id, attempt_id, route_type, target_id, decision,
-                        projection_json, created_ts_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        normalized["projection_id"],
-                        normalized["schema_version"],
-                        normalized["payload_digest"],
-                        normalized["command_id"],
-                        normalized["request_id"],
-                        normalized["graph_id"],
-                        normalized["graph_revision"],
-                        normalized["node_id"],
-                        normalized["attempt_id"],
-                        normalized["route_type"],
-                        normalized["target_id"],
-                        normalized["decision"],
-                        _dumps(normalized),
-                        int(ts_ms),
-                    ),
+                worker_projection_store._stage_in_transaction(  # noqa: SLF001
+                    conn,
+                    projection_id=projection_id,
+                    projection=normalized,
+                    created_ts_ms=int(ts_ms),
                 )
-            except sqlite3.IntegrityError as exc:
+            except WorkerProjectionStoreError as exc:
                 raise TaskStoreError(
-                    TASK_STORE_CAS_CONFLICT,
-                    "Internal Agent attempt already owns another worker projection",
+                    (
+                        TASK_STORE_CAS_CONFLICT
+                        if exc.reason_code == WORKER_PROJECTION_REPLAY_DRIFT
+                        else TASK_STORE_DURABLE_DATA_INVALID
+                    ),
+                    "Internal Agent recovered projection could not be staged",
                 ) from exc
             existing_projection = conn.execute(
                 "SELECT * FROM task_runtime_worker_projection WHERE projection_id = ?",

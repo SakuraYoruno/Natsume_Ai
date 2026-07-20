@@ -37,6 +37,9 @@ from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
@@ -123,6 +126,10 @@ CommandRepositoryBuilder = Callable[..., HostCommandRepository]
 ReviewStoreBuilder = Callable[..., ReviewStore]
 ReviewContinuationStoreBuilder = Callable[..., ReviewContinuationStore]
 WorkerProjectionStoreBuilder = Callable[..., WorkerProjectionStore]
+InternalAgentCheckpointUowBuilder = Callable[
+    ...,
+    DurableInternalAgentCheckpointUnitOfWork,
+]
 AgentResultRepositoryBuilder = Callable[..., AgentExecutionResultRepository]
 SchedulerDefinitionRepositoryBuilder = Callable[..., SchedulerDefinitionRepository]
 SchedulerResultRepositoryBuilder = Callable[..., SchedulerExecutionResultRepository]
@@ -141,6 +148,7 @@ _INFRASTRUCTURE_ORDER = (
     "review_store",
     "review_continuation_store",
     "worker_projection_store",
+    "internal_agent_checkpoint_uow",
     "command_repository",
     "agent_result_repository",
     "scheduler_definition_repository",
@@ -165,6 +173,7 @@ class ProcessTaskRuntimeContainer:
     review_store: ReviewStore
     review_continuation_store: ReviewContinuationStore
     worker_projection_store: WorkerProjectionStore
+    internal_agent_checkpoint_uow: DurableInternalAgentCheckpointUnitOfWork
     command_repository: HostCommandRepository
     agent_result_repository: AgentExecutionResultRepository
     scheduler_definition_repository: SchedulerDefinitionRepository
@@ -705,6 +714,9 @@ def build_process_task_runtime_container(
         ReviewContinuationStore
     ),
     worker_projection_store_builder: WorkerProjectionStoreBuilder = WorkerProjectionStore,
+    internal_agent_checkpoint_uow_builder: InternalAgentCheckpointUowBuilder = (
+        DurableInternalAgentCheckpointUnitOfWork
+    ),
     command_repository_builder: CommandRepositoryBuilder = HostCommandRepository,
     agent_result_repository_builder: AgentResultRepositoryBuilder = (
         AgentExecutionResultRepository
@@ -793,6 +805,13 @@ def build_process_task_runtime_container(
         constructed.append(("review_continuation_store", review_continuation_store))
         worker_projection_store = worker_projection_store_builder(canonical)
         constructed.append(("worker_projection_store", worker_projection_store))
+        internal_agent_checkpoint_uow = internal_agent_checkpoint_uow_builder(
+            task_store=task_store,
+            worker_projection_store=worker_projection_store,
+        )
+        constructed.append(
+            ("internal_agent_checkpoint_uow", internal_agent_checkpoint_uow)
+        )
         command_repository = (
             command_repository_builder(
                 canonical,
@@ -884,6 +903,7 @@ def build_process_task_runtime_container(
         review_store=review_store,
         review_continuation_store=review_continuation_store,
         worker_projection_store=worker_projection_store,
+        internal_agent_checkpoint_uow=internal_agent_checkpoint_uow,
         command_repository=command_repository,
         agent_result_repository=agent_result_repository,
         scheduler_definition_repository=scheduler_definition_repository,

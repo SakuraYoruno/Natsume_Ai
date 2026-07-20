@@ -17,6 +17,9 @@ from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
     WorkerProjectionStore,
 )
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
 from host_brain.task_runtime import GovernedRuntimeError, GovernedTaskCoordinator
 from tests.integration.test_gr03a_governed_durable_dag import (
     NOW,
@@ -162,8 +165,16 @@ def _runtime(
     worker_resolver: Any,
     task_store: DurableTaskStore | None = None,
 ) -> GovernedTaskCoordinator:
+    store = task_store or DurableTaskStore(db_path, clock=lambda: NOW)
+    bound_projection_store = projection_store
+    while type(bound_projection_store) is not WorkerProjectionStore:
+        bound_projection_store = bound_projection_store._delegate
     return GovernedTaskCoordinator(
-        task_store=task_store or DurableTaskStore(db_path, clock=lambda: NOW),
+        task_store=store,
+        internal_agent_checkpoint_uow=DurableInternalAgentCheckpointUnitOfWork(
+            task_store=store,
+            worker_projection_store=bound_projection_store,
+        ),
         outbox_publisher=_Publisher(),
         outbox_factory=OutboxMessage,
         worker_resolver=worker_resolver,
@@ -433,4 +444,4 @@ async def test_accepted_node_restart_rejects_tampered_projection_before_effects(
             graph_id=graph.graph_id,
             graph_revision=graph.revision,
         )
-    ) == 2
+    ) == 4

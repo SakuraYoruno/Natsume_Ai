@@ -261,6 +261,48 @@ class WorkerProjectionStore:
             conn.close()
 
     def stage(self, *, projection_id: str, projection: Mapping[str, Any]) -> dict[str, Any]:
+        created = int(self._clock())
+        if created < 0:
+            raise WorkerProjectionStoreError(
+                WORKER_PROJECTION_INVALID,
+                "clock returned a negative value",
+            )
+        with self._transaction() as conn:
+            return self._stage_in_transaction(
+                conn,
+                projection_id=projection_id,
+                projection=projection,
+                created_ts_ms=created,
+            )
+
+    def _stage_in_transaction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        projection_id: str,
+        projection: Mapping[str, Any],
+        created_ts_ms: int,
+    ) -> dict[str, Any]:
+        """Stage one projection inside the caller-owned canonical UoW.
+
+        This private hook is the sole physical ``INSERT`` authority for worker
+        projections.  It deliberately neither begins nor commits a
+        transaction so a composition-owned UoW can atomically bind a recovered
+        checkpoint to the Task ledger.
+        """
+
+        if not isinstance(conn, sqlite3.Connection) or not conn.in_transaction:
+            raise WorkerProjectionStoreError(
+                WORKER_PROJECTION_INVALID,
+                "worker projection connection hook requires an active transaction",
+            )
+        database = conn.execute("PRAGMA database_list").fetchone()
+        connected_path = "" if database is None else str(database[2] or "")
+        if not connected_path or Path(connected_path).resolve() != self.db_path.resolve():
+            raise WorkerProjectionStoreError(
+                WORKER_PROJECTION_INVALID,
+                "worker projection connection differs from the bound canonical database",
+            )
         projection_ref = str(projection_id or "").strip()
         if not _DURABLE_REF.fullmatch(projection_ref):
             raise WorkerProjectionStoreError(
@@ -273,54 +315,56 @@ class WorkerProjectionStore:
         )
         digest = normalized["payload_digest"]
         encoded = _canonical_json(normalized)
-        created = int(self._clock())
+        created = int(created_ts_ms)
         if created < 0:
-            raise WorkerProjectionStoreError(WORKER_PROJECTION_INVALID, "clock returned a negative value")
-        with self._transaction() as conn:
-            existing = conn.execute(
-                f"SELECT * FROM {_TABLE} WHERE projection_id = ?",
-                (projection_ref,),
-            ).fetchone()
-            if existing is not None:
-                record = self._record(existing)
-                if record != normalized:
-                    raise WorkerProjectionStoreError(
-                        WORKER_PROJECTION_REPLAY_DRIFT,
-                        "worker projection replay differs",
-                    )
-                return record
-            try:
-                conn.execute(
-                    f"""
-                    INSERT INTO {_TABLE}(
-                        projection_id, schema_version, payload_digest, command_id,
-                        request_id, graph_id, graph_revision, node_id, attempt_id,
-                        route_type, target_id, decision, projection_json, created_ts_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        projection_ref,
-                        WORKER_PROJECTION_SCHEMA_VERSION,
-                        digest,
-                        normalized["command_id"],
-                        normalized["request_id"],
-                        normalized["graph_id"],
-                        normalized["graph_revision"],
-                        normalized["node_id"],
-                        normalized["attempt_id"],
-                        normalized["route_type"],
-                        normalized["target_id"],
-                        normalized["decision"],
-                        encoded,
-                        created,
-                    ),
-                )
-            except sqlite3.IntegrityError as exc:
+            raise WorkerProjectionStoreError(
+                WORKER_PROJECTION_INVALID,
+                "created_ts_ms must be non-negative",
+            )
+        existing = conn.execute(
+            f"SELECT * FROM {_TABLE} WHERE projection_id = ?",
+            (projection_ref,),
+        ).fetchone()
+        if existing is not None:
+            record = self._record(existing)
+            if record != normalized:
                 raise WorkerProjectionStoreError(
                     WORKER_PROJECTION_REPLAY_DRIFT,
-                    "attempt already owns a different worker projection",
-                ) from exc
-            return normalized
+                    "worker projection replay differs",
+                )
+            return record
+        try:
+            conn.execute(
+                f"""
+                INSERT INTO {_TABLE}(
+                    projection_id, schema_version, payload_digest, command_id,
+                    request_id, graph_id, graph_revision, node_id, attempt_id,
+                    route_type, target_id, decision, projection_json, created_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    projection_ref,
+                    WORKER_PROJECTION_SCHEMA_VERSION,
+                    digest,
+                    normalized["command_id"],
+                    normalized["request_id"],
+                    normalized["graph_id"],
+                    normalized["graph_revision"],
+                    normalized["node_id"],
+                    normalized["attempt_id"],
+                    normalized["route_type"],
+                    normalized["target_id"],
+                    normalized["decision"],
+                    encoded,
+                    created,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise WorkerProjectionStoreError(
+                WORKER_PROJECTION_REPLAY_DRIFT,
+                "attempt already owns a different worker projection",
+            ) from exc
+        return normalized
 
     def get(self, projection_id: str) -> dict[str, Any]:
         conn = self._connect()

@@ -8,9 +8,7 @@ from typing import Any
 from natsume_contracts.task.v1 import HostCommand
 
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
-from host_brain.contracts.agent_runtime.node_artifact import (
-    is_task_result_artifact_ref,
-)
+from host_brain.contracts.agent_runtime.node_artifact import is_task_result_artifact_ref
 
 from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
 from .admission import AdmittedExecution
@@ -47,7 +45,8 @@ from .operation_checkpoint_budget_recovery import recover_checkpoint_budget
 from .operation_checkpoint_records import build_checkpoint_execution_context
 from .operation_checkpoint_validation import WorkerBudgetUsageCheckpointState
 from .operation_recovery_runtime import CommittedOperationCheckpoint
-from .ports import AcceptancePort, TaskStorePort, VerificationPort
+from .ports import AcceptancePort, InternalAgentCheckpointUnitOfWorkPort
+from .ports import TaskStorePort, VerificationPort
 from .review_runtime import TaskNodeReviewGate, TaskNodeReviewRuntime
 from .runtime_outbox import RuntimeOutbox
 
@@ -59,6 +58,7 @@ class CommittedCheckpointContinuation:
         self,
         *,
         task_store: TaskStorePort,
+        checkpoint_uow: InternalAgentCheckpointUnitOfWorkPort,
         runtime_outbox: RuntimeOutbox,
         budget_runtime: DurableBudgetRuntime,
         node_lifecycle: DurableNodeLifecycleRuntime,
@@ -79,7 +79,7 @@ class CommittedCheckpointContinuation:
         self._graph_finalizer = graph_finalizer
         self._internal_budget_rejection = (
             InternalCheckpointBudgetRejectionRuntime(
-                task_store=task_store,
+                checkpoint_uow=checkpoint_uow,
                 runtime_outbox=runtime_outbox,
                 owner_id=owner_id,
             )

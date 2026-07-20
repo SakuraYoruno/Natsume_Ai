@@ -613,6 +613,9 @@ def build_governed_scheduler_runtime(
     command_repository = task_runtime_container.command_repository
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
+        internal_agent_checkpoint_uow=(
+            task_runtime_container.internal_agent_checkpoint_uow
+        ),
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
         worker_resolver=SchedulerWorkerResolver(canonical_worker=canonical_worker),

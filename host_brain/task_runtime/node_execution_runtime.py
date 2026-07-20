@@ -11,10 +11,7 @@ from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
-from host_brain.contracts.agent_runtime.node_artifact import (
-    is_task_result_artifact_ref,
-)
-
+from host_brain.contracts.agent_runtime.node_artifact import is_task_result_artifact_ref
 from .accepted_graph_finalization import AcceptedGraphFinalizationRuntime
 from .admission import AdmittedExecution
 from .budget_runtime import BudgetRuntimeContext, DurableBudgetRuntime
@@ -81,6 +78,7 @@ from .ports import (
     AcceptancePort,
     ExecutionProjectionReaderPort,
     GovernedWorkerResolverPort,
+    InternalAgentCheckpointUnitOfWorkPort,
     TaskStorePort,
     VerificationPort,
 )
@@ -90,14 +88,12 @@ from .worker_registry import GovernedWorkerRoute
 
 
 _logger = logging.getLogger("Natsume.task_runtime.node_execution_runtime")
-
-
 class DurableNodeExecutionRuntime:
     """Run one admitted node while preserving all durable execution fences."""
-
     __slots__ = (
         "_acceptance",
         "_budgets",
+        "_checkpoint_uow",
         "_checkpoint_continuation",
         "_graph_finalizer",
         "_internal_budget_rejection",
@@ -119,6 +115,7 @@ class DurableNodeExecutionRuntime:
         self,
         *,
         task_store: TaskStorePort,
+        checkpoint_uow: InternalAgentCheckpointUnitOfWorkPort,
         runtime_outbox: RuntimeOutbox,
         budget_runtime: DurableBudgetRuntime,
         node_lifecycle: DurableNodeLifecycleRuntime,
@@ -135,6 +132,7 @@ class DurableNodeExecutionRuntime:
         operation_ttl_ms: int,
     ) -> None:
         self._store = task_store
+        self._checkpoint_uow = checkpoint_uow
         self._runtime_outbox = runtime_outbox
         self._budgets = budget_runtime
         self._node_lifecycle = node_lifecycle
@@ -154,13 +152,14 @@ class DurableNodeExecutionRuntime:
         )
         self._internal_budget_rejection = (
             InternalCheckpointBudgetRejectionRuntime(
-                task_store=task_store,
+                checkpoint_uow=checkpoint_uow,
                 runtime_outbox=runtime_outbox,
                 owner_id=owner_id,
             )
         )
         self._checkpoint_continuation = CommittedCheckpointContinuation(
             task_store=task_store,
+            checkpoint_uow=checkpoint_uow,
             runtime_outbox=runtime_outbox,
             budget_runtime=budget_runtime,
             node_lifecycle=node_lifecycle,
@@ -173,7 +172,6 @@ class DurableNodeExecutionRuntime:
         self._owner_id = owner_id
         self._lease_ttl_ms = int(lease_ttl_ms)
         self._operation_ttl_ms = int(operation_ttl_ms)
-
     async def execute_stream(
         self,
         *,
@@ -241,6 +239,7 @@ class DurableNodeExecutionRuntime:
                 try:
                     recovered = await recover_internal_agent_sealed_checkpoint(
                         task_store=self._store,
+                        checkpoint_uow=self._checkpoint_uow,
                         worker_resolver=self._workers,
                         operation_recovery=self._operation_recovery,
                         runtime_outbox=self._runtime_outbox,

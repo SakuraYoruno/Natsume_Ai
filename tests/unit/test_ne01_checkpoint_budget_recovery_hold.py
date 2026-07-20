@@ -178,6 +178,7 @@ async def test_budget_recovery_error_holds_without_terminal_state_writes(
     outbox = _Outbox()
     continuation = CommittedCheckpointContinuation(
         task_store=object(),
+        checkpoint_uow=object(),
         runtime_outbox=outbox,
         budget_runtime=budgets,
         node_lifecycle=lifecycle,

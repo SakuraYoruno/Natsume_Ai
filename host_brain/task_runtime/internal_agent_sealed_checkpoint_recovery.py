@@ -34,7 +34,11 @@ from .errors import (
 )
 from .node_worker_stream import _maybe_await
 from .operation_recovery_runtime import DurableOperationRecoveryRuntime
-from .ports import GovernedWorkerResolverPort, TaskStorePort
+from .ports import (
+    GovernedWorkerResolverPort,
+    InternalAgentCheckpointUnitOfWorkPort,
+    TaskStorePort,
+)
 from .runtime_outbox import RuntimeOutbox
 from .worker_registry import GovernedWorkerRoute
 
@@ -42,6 +46,7 @@ from .worker_registry import GovernedWorkerRoute
 async def recover_internal_agent_sealed_checkpoint(
     *,
     task_store: TaskStorePort,
+    checkpoint_uow: InternalAgentCheckpointUnitOfWorkPort,
     worker_resolver: GovernedWorkerResolverPort,
     operation_recovery: DurableOperationRecoveryRuntime,
     runtime_outbox: RuntimeOutbox,
@@ -207,7 +212,7 @@ async def recover_internal_agent_sealed_checkpoint(
             "Internal Agent recovery reservation version is invalid",
         )
     committed = await operation_recovery.commit_or_reconcile(
-        commit=lambda: task_store.commit_internal_agent_recovered_checkpoint(
+        commit=lambda: checkpoint_uow.commit_internal_agent_recovered_checkpoint(
             admitted.reservation_id,
             attempt_id=_required_record_text(latest_attempt, "attempt_id"),
             lease_id=lease_id,

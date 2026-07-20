@@ -15,6 +15,7 @@ from .coordinator_records import (
     _status,
 )
 from .errors import GOVERNED_OPERATION_RECOVERY_REQUIRED, GovernedRuntimeError
+from .ports import InternalAgentCheckpointUnitOfWorkPort
 from .runtime_outbox import RuntimeOutbox
 
 
@@ -24,11 +25,11 @@ class InternalCheckpointBudgetRejectionRuntime:
     def __init__(
         self,
         *,
-        task_store: Any,
+        checkpoint_uow: InternalAgentCheckpointUnitOfWorkPort,
         runtime_outbox: RuntimeOutbox,
         owner_id: str,
     ) -> None:
-        self._store = task_store
+        self._checkpoint_uow = checkpoint_uow
         self._runtime_outbox = runtime_outbox
         self._owner_id = str(owner_id)
 
@@ -93,21 +94,24 @@ class InternalCheckpointBudgetRejectionRuntime:
         }
         try:
             result_raw = await _maybe_await(
-                self._store.reject_internal_agent_checkpoint_budget_bundle(
+                self._checkpoint_uow.reject_internal_agent_checkpoint_budget_bundle(
                     attempt_id,
                     **arguments,
                 )
             )
-        except Exception:
-            # The first call may have committed but lost its response.  The
-            # Store replay branch reopens every mutation and Outbox identity;
-            # a deterministic authority failure therefore remains a failure.
-            result_raw = await _maybe_await(
-                self._store.reject_internal_agent_checkpoint_budget_bundle(
-                    attempt_id,
-                    **arguments,
+        except Exception as mutation_error:
+            # The mutation may have committed before its response was lost.
+            # Reopen the exact terminal through the read-only authority; never
+            # invoke the terminal mutation a second time.
+            try:
+                result_raw = await _maybe_await(
+                    self._checkpoint_uow.reopen_internal_agent_budget_rejection_terminal(
+                        attempt_id,
+                        **arguments,
+                    )
                 )
-            )
+            except Exception:
+                raise mutation_error
         result = _mapping(
             result_raw,
             field_name="atomic Internal Agent budget rejection",
