@@ -281,6 +281,9 @@ def test_gr06_effect_claim_is_single_winner_restart_safe_and_fenced(
     first_owner = str(first["lease_owner"])
     assert first["fencing_token"] == 1
     assert first["attempt_count"] == 1
+    assert first["claim_previous_status"] == "PENDING"
+    assert first["claim_previous_reason_code"] is None
+    assert first["claim_reconciliation_required"] is False
 
     clock.set(50_101)
     restarted = DurableTaskStore(store.db_path, clock=clock)
@@ -292,6 +295,9 @@ def test_gr06_effect_claim_is_single_winner_restart_safe_and_fenced(
     assert reclaimed is not None
     assert reclaimed["fencing_token"] == 2
     assert reclaimed["attempt_count"] == 2
+    assert reclaimed["claim_previous_status"] == "CLAIMED"
+    assert reclaimed["claim_previous_reason_code"] is None
+    assert reclaimed["claim_reconciliation_required"] is True
 
     with pytest.raises(TaskStoreError) as stale:
         store.commit_acceptance_effect_intent(

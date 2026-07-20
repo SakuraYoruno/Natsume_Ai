@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 
-from host_brain.app.internal_task_runtime import _AgentProjectionReader
 from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
 )
@@ -419,10 +418,10 @@ async def test_multiple_accepted_worker_budget_usages_block_takeover() -> None:
         )
 
 
-def test_projection_without_worker_budget_usage_identity_is_not_recoverable() -> None:
+def test_projection_without_worker_budget_usage_or_node_identity_is_not_recoverable() -> None:
     with pytest.raises(
         GovernedRuntimeError,
-        match="projection lacks worker BudgetUsage identity",
+        match="lacks node identity for worker elapsed usage",
     ):
         accepted_worker_budget_usage(
             {
@@ -509,7 +508,10 @@ async def test_noncanonical_public_reader_cannot_resume_from_partial_identity(
         "target_id": "demo",
         "receipt_ref": receipt_ref,
     }
-    with pytest.raises(GovernedRuntimeError, match="non-canonical public projection"):
+    with pytest.raises(
+        GovernedRuntimeError,
+        match="non-canonical public projection",
+    ):
         await _runtime(projection=projection).takeover_committed(
             admitted=_admitted(),
             command=_command(),
@@ -584,9 +586,12 @@ async def test_real_internal_agent_public_reader_is_not_auto_resumed() -> None:
                 "result": {"status": "EXECUTED", "result_text": "done"},
             }
 
+        def load(self, requested: str) -> dict[str, Any] | None:
+            return self.get(requested)
+
     runtime = DurableOperationRecoveryRuntime(
         task_store=_Store(_reservation(receipt_ref)),
-        projection_reader=_AgentProjectionReader(_AgentResults()),
+        projection_reader=_AgentResults(),
         runtime_outbox=object(),
         owner_id="owner-new",
         lease_ttl_ms=100,
@@ -598,7 +603,10 @@ async def test_real_internal_agent_public_reader_is_not_auto_resumed() -> None:
         target_id="agent_runtime",
     )
 
-    with pytest.raises(GovernedRuntimeError, match="non-canonical public projection"):
+    with pytest.raises(
+        GovernedRuntimeError,
+        match="not one exact COMMIT checkpoint",
+    ):
         await runtime.takeover_committed(
             admitted=_admitted(worker_route="delegate:agent_runtime"),
             command=command,

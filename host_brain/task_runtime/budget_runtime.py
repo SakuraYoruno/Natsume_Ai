@@ -343,12 +343,13 @@ class DurableBudgetRuntime:
         worker_commit: Mapping[str, Any],
         durable_usage: Mapping[str, Any],
     ) -> BudgetCharge:
-        """Read one already accepted worker usage without inventing a charge.
+        """Read one exact worker usage outcome without inventing a charge.
 
         Online takeover is intentionally narrower than same-process COMMIT
         reconciliation: it may only continue from a complete post-budget
-        checkpoint.  Missing, denied, or ambiguous usage evidence is rejected
-        before this method; this read also verifies the immutable Store row.
+        checkpoint.  Missing or ambiguous evidence is rejected before this
+        method.  An exact denied row is returned so the lifecycle layer can
+        finish the canonical budget-blocked terminal bundle after a crash.
         """
 
         usage_id = str(durable_usage.get("usage_id") or "").strip()
@@ -394,11 +395,6 @@ class DurableBudgetRuntime:
                 node_id=node_id,
                 attempt_id=attempt_id,
                 base_delta=base_delta,
-            )
-        if not bool(existing.get("accepted")):
-            raise GovernedRuntimeError(
-                GOVERNED_BUDGET_USAGE_INVALID,
-                "checkpoint BudgetUsage was not accepted",
             )
         updated = await self._required_reconcile(context.budget_id)
         return BudgetCharge(

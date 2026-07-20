@@ -657,6 +657,7 @@ def _coordinator(
             if task_store is not None
             else DurableTaskStore(db_path, clock=resolved_clock)
         ),
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=(
             outbox_publisher if outbox_publisher is not None else _Publisher()
         ),

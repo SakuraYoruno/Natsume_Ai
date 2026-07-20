@@ -17,7 +17,7 @@ from typing import Any, Protocol
 
 from host_brain.model_runtime.contracts import ModelBudgetGuard
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
-from host_brain.task_runtime.worker_budget_usage import (
+from host_brain.contracts.agent_runtime.worker_budget_usage import (
     build_worker_budget_usage,
     stable_worker_usage_id,
 )

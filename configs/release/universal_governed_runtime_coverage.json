@@ -1,9 +1,13 @@
 {
-  "schema_version": "natsume.universal-governed-runtime-coverage.v1",
+  "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "CURRENT_MANIFEST_OWNING_COMMIT",
-  "route_control_scope": "Route PASS means the actual enabled worker path consumes the control, not merely that an outer admitted graph has it. Delegate is intentionally narrower: D10 proves the read-only pentest_agent adapter only; every other delegate target is rejected before HostCommand/TaskGraph admission. It does not prove program-wide Budget coverage, production feature enablement, a general delegate platform, or a real canary. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
+  "evaluated_source": "AUDITED_ANCESTOR_COMMIT",
+  "evidence_binding": {
+    "evaluated_commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
+    "migration_head": "0118_conversation_acceptance_effects.sql"
+  },
+  "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
     "atomic_graph_success": "OFF",
     "bounded_fanout": "OFF",
@@ -11,6 +15,9 @@
     "durable_cancellation": "OFF",
     "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "effect_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
+    "generic_acceptance_effect_reconciliation": "PARTIAL_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_NON_BOOLEAN_FAIL_CLOSED_ZERO_WRITE_FALSE_OR_MALFORMED_ENV_BOOLEAN_FALSE_DISABLED_ZERO_EVENT_PROFILE_0118_SEALED_CHILD_FULL_SET_TAMPER_CHECK_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_DELIVERY_DIGEST_AUTHENTICATED_GATEWAY_SAME_SQLITE_PAYLOAD_EFFECT_ID_QUERY_NOT_FOUND_ALWAYS_UNKNOWN",
+    "internal_protected_artifact_promotion": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION_STARTUP_ACTIVATION_ONLY_EXPLICIT_CHECKPOINT_UOW_SINGLE_WORKER_PROJECTION_INSERT_OWNER_ABC_SEPARATE_ATOMIC_BOUNDARIES_RESPONSE_LOSS_SINGLE_MUTATION_READ_ONLY_REOPEN_TERMINAL_SEALED_ARTIFACT_ABANDON_CLEANUP_PERIODIC_SURVIVOR_CONTINUATION_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_FAILURE_CANCEL_BUDGET_SECURE_INGRESS_CLAIM_CLOSEOUT_GENERAL_SETTLE_WORKER_CRASH_BUNDLE_HANDLE_LEVEL_TOCTOU_GENERAL_WRITE_OS_CONTAINER_ISOLATION_LEGACY_BRIDGE_INCOMPLETE",
+    "acceptance_effect_recovery_guardian": "WIRED_APP_LOCAL_DURABLE_SLO_OPAQUE_INCIDENT_ONLY",
     "terminal_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "terminal_reconciliation_auto": "DEFAULT_OFF",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
@@ -26,49 +33,61 @@
   "active_wave_status": "IN_PROGRESS",
   "routes": {
     "chat": {
-      "status": "COMPLETE",
+      "status": "INCOMPLETE",
+      "production_boundary": "Visible turn, Preference evaluation and Life projection are independent post-Acceptance effects. A missing or non-boolean store privacy-gate contract fails closed with zero writes; explicit false or malformed environment configuration is conservatively parsed to boolean false and writes only a DISABLED receipt with zero events/current profiles/0118 child versions. Enabled mode atomically commits event bindings, append-only child profile versions and the evaluation receipt; parent-sealed plus full-set reconciliation rejects tamper, and NO_SIGNAL is durable. Recommendation feedback is bounded by admitted time, exact person/conversation/session and a canonical full-delivery digest. Surface response loss uses the existing internal_reply HMAC read-only query; Gateway validates effect_id from the same SQLite persisted payload and Host re-derives delivery/payload identity. NOT_FOUND remains UNKNOWN. The current fresh pre-commit local Conversation/Gateway/GR05/GR06 batch reports 65 passed in 118.52 seconds; earlier focused groups are superseded history and are not added. Wave integration, real model and NE-07 Docker full stack are not run.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_route_executors.py",
+        "host_brain/contracts/conversation_acceptance_effects.py",
+        "host_brain/audit/migrations/0118_conversation_acceptance_effects.sql",
+        "host_brain/app/acceptance_effect_handlers.py",
+        "edge_client/gateway/delivery_runtime.py",
+        "edge_client/gateway/server.py",
+        "host_brain/channels/edge_transport.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
-        "tests/integration/test_gr05_universal_host_runtime.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_ne01_conversation_atomic_effects.py",
+        "tests/integration/test_ne01_gateway_reply_query.py",
+        "tests/unit/test_ne01_gateway_reply_query_client.py",
+        "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PASS",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
-        "budget_enforcement": "PASS",
+        "budget_enforcement": "PARTIAL",
         "review_resume": "PASS",
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PASS"
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
       }
     },
     "skill": {
-      "status": "COMPLETE",
+      "status": "INCOMPLETE",
       "evidence_refs": [
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_skill_execution_ports.py",
-        "tests/integration/test_aw0203_governed_host_cutover.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_aw0203_governed_host_cutover.py"
       ],
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
-        "budget_enforcement": "PASS",
+        "budget_enforcement": "PARTIAL",
         "review_resume": "PASS",
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PASS"
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
       }
     },
     "delegate": {
@@ -80,13 +99,13 @@
         "host_brain/app/governed_route_executors.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
         "tests/unit/test_ne01_governed_delegate_dispatch.py",
-        "tests/integration/test_gr05_universal_host_runtime.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "enabled_target_scope": "PENTEST_READONLY_ONLY: pentest_agent receives an immutable invocation carrying command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/fence/parent+node grant; its node grant is revalidated before an effect-free Domain Pack/SecureRun handoff while the outer durable worker retains Attempt/Lease/Fence checks. intent_agent, translate_agent, vision_agent, repair_agent and unregistered targets are rejected before persistence.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PASS",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
         "budget_enforcement": "PARTIAL",
@@ -94,7 +113,8 @@
         "verification": "PARTIAL",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PARTIAL"
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
       }
     },
     "plan": {
@@ -106,12 +126,12 @@
         "host_brain/app/governed_delegate_dispatch.py",
         "tests/unit/test_ne01_governed_delegate_dispatch.py",
         "tests/integration/test_gr04_planning_replan_sqlite.py",
-        "tests/integration/test_gr05_universal_host_runtime.py",
-        "docs/45_testing/test_reports/gr06_universal_governed_runtime_live_acceptance_20260715.json"
+        "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PARTIAL",
         "budget_enforcement": "PARTIAL",
@@ -119,7 +139,127 @@
         "verification": "PARTIAL",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PARTIAL"
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
+      }
+    },
+    "scheduler": {
+      "status": "INCOMPLETE",
+      "production_boundary": "Scheduler governed occurrences enter HostCommand and a single-node immutable TaskGraph. The worker emits only an immutable scheduler.operation.execute plan; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW, and the real handler runs after Acceptance. Migration 0117 atomically validates the live DUE owner/fence, inserts the occurrence, advances the definition head and converts the same retry row to an occurrence-bound claim in one BEGIN IMMEDIATE transaction. Dispatch renews first and an execution lifecycle heartbeat renews while running; expired owners cannot self-revive, a second owner cannot dispatch, and clear/defer require the exact live fence and actual call time. Thirty-seven Scheduler, migration and coverage tests succeeded; the 19-test atomic fence subset in 47.53 seconds overlaps that scope and is not added. The route remains INCOMPLETE because definition/admin direct authority, mutable batch freezing, general unknown-effect human attribution, program-wide Budget measurement, commit-bound acceptance, wave integration and production canary remain missing.",
+      "evidence_refs": [
+        "host_brain/scheduler/governed_runtime.py",
+        "host_brain/scheduler/operation_plan.py",
+        "host_brain/scheduler/accepted_operation.py",
+        "host_brain/scheduler/accepted_effect_runtime.py",
+        "host_brain/scheduler/worker_registry.py",
+        "host_brain/scheduler/clock.py",
+        "host_brain/persistence/scheduler_repository.py",
+        "host_brain/audit/migrations/0117_scheduler_clock_retry_authority.sql",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/unit/test_ne01_scheduler_operation_plan.py",
+        "tests/unit/test_ne01_scheduler_accepted_operation.py",
+        "tests/unit/test_ne01_scheduler_accepted_effect_runtime.py",
+        "tests/unit/test_ne01_scheduler_handler_result_semantics.py",
+        "tests/unit/test_ne01_scheduler_ingress_terminal_boundary.py",
+        "tests/unit/test_ne01_acceptance_effect_derived_preview.py",
+        "tests/unit/test_ne01_acceptance_effect_runtime.py",
+        "tests/unit/test_aw02_governed_scheduler_runtime.py",
+        "tests/unit/test_acceptance_effect_handlers.py",
+        "tests/integration/test_gr06_acceptance_effect_dispatcher.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py",
+        "tests/integration/test_aw02_scheduler_production_cutover.py"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PASS",
+        "verification": "PARTIAL",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
+      }
+    },
+    "internal": {
+      "status": "INCOMPLETE",
+      "production_boundary": "PARTIAL / INTERNAL_SEALED_CHECKPOINT_CONTINUATION. Internal ingress enters a single-node immutable TaskGraph but still bridges to legacy AgentWorkOrder. Startup continuation can reopen one exact sealed checkpoint, acquire a higher-fence completion Lease, rebuild the unique WorkerProjection and continue Verification, Acceptance, Effect, claim, canonical result and clean/no-change promotion without Agent replay. A composition-owned InternalAgentCheckpointUnitOfWorkPort is the only public checkpoint mutation authority, all four production coordinators receive it explicitly, and WorkerProjection has one physical INSERT owner. A commits projection and Operation, B commits Budget charge, and C revalidates A/B before committing the rejected terminal; each boundary is atomic but the full chain is not one transaction. Response loss invokes C once and read-only reopens the exact original authority. The final unique 10-file affected batch reports 130 passed in 296.69 seconds with zero failures or skips; its initial 128-pass/two-failure result and corrections remain recorded, while historical 87/35/3/62/46/4 and previous-structure 265 groups are never added. Periodic survivor continuation, crash-left unsealed cleanup, failure/cancel/budget claim closeout, general settle_worker recovery, general write, handle-level TOCTOU, OS/container isolation, legacy bridge and commit-bound seven-route acceptance remain incomplete. REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA.",
+      "evidence_refs": [
+        "host_brain/app/internal_task_runtime.py",
+        "host_brain/agent_runtime/projection_recovery_contract.py",
+        "host_brain/agent_runtime/internal_artifact_terminal_reconciliation.py",
+        "host_brain/agent_runtime/internal_result_proposal.py",
+        "host_brain/agent_runtime/artifact_store.py",
+        "host_brain/agent_runtime/artifact_store_read_model.py",
+        "host_brain/app/internal_startup_checkpoint_continuation.py",
+        "host_brain/task_runtime/internal_agent_sealed_checkpoint_recovery.py",
+        "host_brain/task_runtime/node_worker_stream.py",
+        "host_brain/task_runtime/operation_recovery_checkpoint_loader.py",
+        "host_brain/agent_runtime/accepted_result.py",
+        "host_brain/agent_runtime/accepted_effect_runtime.py",
+        "host_brain/agent_runtime/executor.py",
+        "host_brain/agent_runtime/workspace_runtime.py",
+        "host_brain/persistence/internal_agent_checkpoint_uow.py",
+        "host_brain/persistence/task_internal_agent_checkpoint_store.py",
+        "host_brain/persistence/worker_projection_repository.py",
+        "host_brain/persistence/task_terminal_reconciliation_read_store.py",
+        "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/unit/test_ne01_internal_agent_checkpoint_uow.py",
+        "tests/unit/test_ne01_internal_artifact_terminal_reconciliation.py",
+        "tests/contract/test_ne01_workspace_lifecycle_authority.py",
+        "tests/unit/test_ne01_internal_artifact_stage.py",
+        "tests/unit/test_ne01_internal_accepted_result.py"
+      ],
+      "controls": {
+        "host_command": "PASS",
+        "immutable_task_graph": "PASS",
+        "canonical_execution_authority": "PARTIAL",
+        "durable_attempt_lease": "PASS",
+        "node_bound_grant": "PASS",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PASS",
+        "verification": "PASS",
+        "acceptance": "PASS",
+        "receipt": "PASS",
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
+      }
+    },
+    "operator": {
+      "status": "INCOMPLETE",
+      "production_boundary": "scheduler.task.trigger and sys_mode.switch now cross Secure Ingress, typed OPERATOR HostCommand, immutable TaskGraph and the governed runtime; the other 35 audited Operator write commands remain deliberately blocked before their handlers. sys_mode.switch additionally uses durable Review continuation, one app-local AcceptanceEffect recovery owner shared with Host, exact HardState event replay and terminal outer WAL/claim finalization. This is a 2/37 vertical-slice boundary, not universal Operator migration or commit-bound live route acceptance.",
+      "evidence_refs": [
+        "host_brain/app/observability_runtime/domain_command_ports.py",
+        "host_brain/app/governed_operator_runtime.py",
+        "host_brain/composition/runtime_group.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/integration/test_ne01_governed_operator_scheduler_trigger.py",
+        "tests/integration/test_ne01_governed_operator_sys_mode.py",
+        "tests/unit/test_ne01_acceptance_effect_runtime.py"
+      ],
+      "governed_commands": ["scheduler.task.trigger", "sys_mode.switch"],
+      "blocked_command_count": 35,
+      "review_continuation_boundary": "The outer OBS outcome remains WAITING_REVIEW while task-bound Review is pending. If durable Review admission succeeds but the outer WAL append fails, startup keeps admission closed. Zero bound Reviews conservatively become UNCERTAIN; one exact PENDING, APPROVED, CONSUMED, REJECTED, EXPIRED or CANCELLED Review reopens Secure Ingress, HostCommand, TaskNode, ReviewItem and any required terminal continuation before restoring the same WAITING_REVIEW; multiple Reviews or binding drift fail startup closed. RECOVERY_PENDING or uncertain Acceptance Effect ownership durably defers continuation and leaves the central Secure Ingress claim unsettled.",
+      "side_effect_boundary": "APPLIED and REPLAYED use status-specific runtime-scope-bound handler receipts and require the exact durable HardState event. NO_CHANGE uses its own status-specific receipt, requires no event and reports side_effects_executed=false. Response loss, success=false or attribution failure after the HardState call must first reopen the exact event: an existing commit becomes REPLAYED, an uncertain read remains PENDING with RECONCILIATION_REQUIRED and UNKNOWN regardless of ordinary max attempts, and only authoritative absence may enter ordinary failure. Historical replay never re-executes the effect, including after more than 1000 newer events.",
+      "startup_recovery_boundary": "Governed admission activates only after the shared Acceptance Effect owner drains recovery work and proves no PENDING or CLAIMED effect remains.",
+      "shutdown_boundary": "Operator ingress drains first, then Scheduler producers stop, Task Runtime closes the shared Acceptance Effect owner, Workspace quiesces, mode-transition dependencies stop, command/security stores close, and app references clear last. A live OBS, Scheduler or Task Runtime close failure preserves dependencies and published references and returns a stable retry-required error.",
+      "validation_boundary": "One final consolidated affected batch passed 265 tests in 179.82 seconds. Its first attempt reported 264 passed and one stale ASGI fixture failure before the fixture was corrected; counts are not added. NE-01 wave integration, commit-bound acceptance and production canary remain NOT_RUN or MISSING; REMOTE_CI remains NOT_RUN_ACCOUNT_QUOTA.",
+      "controls": {
+        "host_command": "PARTIAL",
+        "immutable_task_graph": "PARTIAL",
+        "canonical_execution_authority": "PARTIAL",
+        "durable_attempt_lease": "PARTIAL",
+        "node_bound_grant": "PARTIAL",
+        "budget_enforcement": "PARTIAL",
+        "review_resume": "PARTIAL",
+        "verification": "PARTIAL",
+        "acceptance": "PARTIAL",
+        "receipt": "PARTIAL",
+        "transactional_side_effects": "PARTIAL",
+        "commit_bound_acceptance": "MISSING"
       }
     }
   },
@@ -172,6 +312,37 @@
         "reason_code": "REACT_TOOL_GOVERNED_ADMISSION_REQUIRED",
         "positive_execution": "MISSING_NEW_IMMUTABLE_GRAPH_REVISION_WITH_INDEPENDENT_SKILL_OR_DELEGATE_NODE_AUTHORITY",
         "boundary": "ONLY_THE_TWO_NESTED_SKILL_DELEGATE_TOOLS_ARE_COVERED_GENERAL_GRAPH_AGENT_FILE_WEB_BROWSER_MEMORY_EMOTION_AND_OTHER_TOOL_AUTHORITIES_REMAIN_SEPARATE"
+      },
+      "current_slice_focused_structure": {
+        "policy_allowlist_expanded": false,
+        "owner_line_counts": {
+          "host_brain/agent_runtime/artifact_store.py": 1359,
+          "host_brain/app/internal_task_runtime.py": 1311,
+          "host_brain/task_runtime/node_execution_runtime.py": 1499,
+          "host_brain/task_runtime/operation_recovery_runtime.py": 205,
+          "host_brain/app/acceptance_effect_handlers.py": 1262,
+          "host_brain/app/asgi.py": 1376,
+          "host_brain/persistence/scheduler_repository.py": 2942
+        },
+        "focused_modules": {
+          "host_brain/agent_runtime/artifact_store_read_model.py": "BOUNDED_VERIFIED_SEAL_INVENTORY_PROMOTION_RECOVERY_TOMBSTONE_READS_NO_MUTATION_AUTHORITY",
+          "host_brain/app/internal_startup_checkpoint_continuation.py": "ACTIVATION_SCAN_AND_EXACT_SEALED_CHECKPOINT_ADMISSION_CONTINUATION",
+          "host_brain/task_runtime/internal_agent_sealed_checkpoint_recovery.py": "EXACT_LINEAGE_HIGHER_FENCE_PROJECTION_REBUILD_WITHOUT_WORKER_REPLAY",
+          "host_brain/task_runtime/node_worker_stream.py": "AUTHORITY_FREE_STREAM_NORMALIZATION_AND_INTERRUPTION_HEARTBEAT_CLEANUP",
+          "host_brain/task_runtime/operation_recovery_checkpoint_loader.py": "VALIDATE_TAKEOVER_AND_LOAD_CANONICAL_COMMITTED_CHECKPOINT_WITHOUT_WORKER_REPLAY",
+          "host_brain/app/acceptance_effect_handler_common.py": "PURE_JSON_EFFECT_IDENTITY_OPAQUE_FAILURE_RECEIPT_HELPERS_NO_WRITER",
+          "host_brain/app/acceptance_surface_effect_handler.py": "GATEWAY_SURFACE_REPLY_HANDLER_AND_READ_ONLY_RECONCILER_NO_SECOND_WRITER",
+          "host_brain/app/internal_runtime_composition.py": "INTERNAL_WORKSPACE_OPERATOR_RUNTIME_GROUP_COMPOSE_ACTIVATE_NO_LIFESPAN_OWNER",
+          "host_brain/app/host_runtime_context_wiring.py": "RUNTIME_CONTEXT_PREVIEW_GUARDIAN_CATALOG_WIRING_ASGI_RETAINS_TASK_LIFECYCLE",
+          "host_brain/persistence/scheduler_clock_retry_store.py": "CLOCK_RETRY_LEASE_FENCE_TRANSACTIONS_REUSE_REPOSITORY_CONNECTION_UOW",
+          "host_brain/persistence/scheduler_repository_primitives.py": "PURE_VALIDATION_AND_STABLE_ERRORS",
+          "host_brain/persistence/task_internal_agent_budget_rejection_store.py": "COHESIVE_SEAL_BOUND_BUDGET_REJECTION_REPLAY_RECOVERY_NOT_SECOND_AUTHORITY"
+        },
+        "fresh_consolidated_validation": "36_FILES_265_PASSED_IN_210_19_SECONDS_ZERO_FAILED_ZERO_SKIPPED",
+        "historical_batch_boundary": "OLD_61_73_102_54_14_GROUPS_INCLUDED_OR_OVERLAPPING_DO_NOT_SUM",
+        "new_over_800_lines": ["host_brain/persistence/task_internal_agent_budget_rejection_store.py:1033"],
+        "new_mixed_over_800_lines": [],
+        "full_repository_static_gate": "PASS_ISSUES_EMPTY_PROGRAM_INCOMPLETE"
       },
       "wiring_progress": "PRODUCTION_OFF. Two NE-01 responsibility slices reduced all eleven former mixed/ceiling findings below 1,500 lines or their pre-existing cohesive ceiling. The fresh repository-wide mixed-file gate now returns issues=[] without adding or widening an allowlist. ASGI retains app lifecycle and shutdown ownership; IntentAdmission and RuntimeGuardian retain the only durable RuntimeEvent/journal writers; extracted wiring, codecs, contracts, models, catalogs, and private command mixins own no second Store or connection. A third slice removes ReAct nested Skill/Delegate discovery and rejects injected legacy run_skill/dispatch_sub_agent ToolSpecs before low-level execution, migrates scheduler.task.trigger as Operator 1/37, and moves external HTTP /tools/execute through TOOL Secure Ingress, HostCommand, immutable TaskGraph, durable Review, node grant/Budget/Attempt/Lease, exact binding, Verification, Acceptance and Receipt. Migration 0114 extends the canonical Worker Projection route check. The Tool core chain is proven with real SQLite and an explicit SAFE_LOCAL_REPLAY test adapter; production seeding exposes zero governed executable handlers and health remains DEGRADED / FAIL_CLOSED_NO_GOVERNED_EXECUTOR. Raw ToolBroker.execute and execute_bound now reject before handler or Token access and never persist caller bearer material; ToolBroker exposes no execution-port factory. The app-local ToolRuntimeBoundary alone binds the Frozen Tool port. TaskStore atomically revalidates canonical Graph/Node/Attempt/Lease/Reservation plus owner/fence/expiry inside one SQLite read transaction; node grant, exact binding, SAFE_LOCAL_REPLAY, and WRITE child-token validation then run as separate fail-closed stages, not one cross-Store atomic interval. Only after all checks pass does before_handler write the PENDING dispatch marker immediately before the handler. MCPAdapter is metadata-only and maps every direct call to MCP_TASK_AUTHORITY_REQUIRED; the process get_mcp_tool_broker accessor and mcp_tool_broker container slot are deleted, while the inert compatibility MCPToolBroker retains no CapabilityBroker, Token or callback and is not composed by ASGI; the MCP Skill bridge is default-off, purges stale mcp::* entries and rejects stale durable targets before registry lookup. Read-only MCP registry/scorecard discovery remains available. Tool seed readiness still runs before governed runtime activation; executor=0 currently prevents a false READY, but the first real executor must not be enabled until activation is part of the same readiness state machine. The app-local Python capability boundary prevents accidental production wiring misuse; it is not an OS/container sandbox against hostile same-process reflection, and production must not load unapproved external Python. This removes the old Tool/MCP direct and nested callback authority but does not provide a real governed MCP provider or workspace-bound production Tool executor. DurableDagSchedulingRuntime remains the temporary outer orchestrator. Migrations 0093 through 0099 retain Outbox delivery, cancellation coordination, revision identity, task-bound Review continuation, grant uniqueness, append-only signed Effect reconciliation, and schema-only terminal case/proof/supersession authority. Canonical Store Budget contention is proven for 8/16/32 threads and cross-process writers. One single-node canonical post-budget checkpoint, the ACCEPTED-to-Effect restart window, and 0099 default-off exact/signed/quarantine mechanics plus proof-ending historical supersession chains are proven without worker replay. General/multi-node/pre-budget recovery, remaining execution bypass removal, Service Locator removal, and Scheduler/Internal public projections remain INCOMPLETE. External deployment terminal inventory, deployed credentials, active/retired/revoked key lifecycle, and real canaries remain UNKNOWN or NOT_RUN. Atomic, bounded, and cancellation production paths remain OFF; overall status remains PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF.",
       "acceptance_effect_cancellation_boundary": "Only exact virgin PENDING (attempt_count=0, fencing_token=0, status_version=0, reason_code and last_error absent) becomes CANCELLED automatically. Full codec validation rejects mixed tuples. Current production claim/cancellation authority cannot produce a fenceable retry PENDING: accepted NODE effects retain delivery authority and COMPLETED GRAPH effects are terminal. A retry PENDING encountered by the fence path is therefore legacy/corrupt state and remains RECONCILIATION_REQUIRED unless a valid signed 0098 proof resolves it. Only COMMITTED with a durable receipt becomes COMMITTED_EVIDENCE automatically; ambiguous FAILED/CLAIMED states require signed evidence and exact state binding.",
@@ -514,20 +685,20 @@
       "full_architecture_static_gate": {
         "status": "PASS",
         "failed_gates": [],
-        "origin_dev_failed_gates": [],
+        "origin_dev_failed_gates": [3],
         "pre_89_origin_dev_failed_gates": [1, 6, 10],
-        "resolved_gates": [1, 6, 10, 11],
+        "resolved_gates": [1, 3, 6, 10, 11],
         "issues": [],
         "strongly_connected_components": [],
         "edge_findings": 0,
         "edge_violations": 0,
         "reverse_imports": [],
-        "boundary": "ORIGIN_DEV_57A54D76B_REACT_VISUAL_AND_CURRENT_0115_DURABLE_HARD_STATE_CUTOFF_WITH_NEUTRAL_HOST_MODE_CONTRACT_KEEP_STATIC_GATES_GREEN_FAILED_EMPTY_PERSISTENCE_TO_APPLICATION_ZERO_TARGET_SCC_EMPTY_REAL_WORKSPACE_BOUND_GOVERNED_EXECUTOR_FULL_TYPED_COMPOSITION_PRODUCTION_CANARY_GLOBAL_SERVICE_LOCATOR_REMOVAL_AND_NE01_REMAIN_INCOMPLETE"
+        "boundary": "CURRENT_GATE_1_TO_14_STATIC_PASS_ONLY_NE01_AND_FULL_ARCHITECTURE_REMAIN_PARTIAL_IN_PROGRESS"
       },
       "business_layer_sqlite_authority": {
         "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
         "baseline": "ORIGIN_DEV_FAIL_GATES_1_6_10",
-        "current_full_architecture_static_gate": "PASS",
+        "current_full_architecture_static_gate": "PASS_ISSUES_EMPTY_PROGRAM_INCOMPLETE",
         "runtime_context_0112": {
           "readiness_owner": "RuntimeEventRepository",
           "application_surface": "RuntimeEventStore readiness port",
@@ -562,7 +733,12 @@
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
-        "remaining_static_gaps": []
+        "remaining_static_gaps": [],
+        "resolved_static_owner_splits": [
+          "ACCEPTANCE_1798_TO_1262",
+          "ASGI_1527_TO_1376",
+          "SCHEDULER_3537_TO_2942"
+        ]
       },
       "service_catalog_layering_authority": {
         "status": "SERVICE_CATALOG_LAYER_EDGES_CLOSED_GATE_1_SUBSEQUENTLY_PASSED_NE01_IN_PROGRESS",

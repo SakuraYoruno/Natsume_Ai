@@ -18,7 +18,18 @@ from host_brain.persistence.worker_projection_repository import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0086_task_runtime_worker_projection.sql"
+MIGRATIONS = (
+    ROOT
+    / "host_brain"
+    / "audit"
+    / "migrations"
+    / "0086_task_runtime_worker_projection.sql",
+    ROOT
+    / "host_brain"
+    / "audit"
+    / "migrations"
+    / "0114_task_runtime_tool_worker_projection.sql",
+)
 BODY_FIELDS = (
     "phase", "done", "decision", "reason_code", "command_id", "request_id", "narrative",
     "route_type", "target_id", "graph_id", "graph_revision", "node_id",
@@ -30,7 +41,8 @@ OPTIONAL_BODY_FIELDS = ("acceptance_effect_intents", "budget_usage")
 def _store(tmp_path: Path) -> WorkerProjectionStore:
     path = tmp_path / "runtime.sqlite3"
     with sqlite3.connect(path) as conn:
-        conn.executescript(MIGRATION.read_text(encoding="utf-8"))
+        for migration in MIGRATIONS:
+            conn.executescript(migration.read_text(encoding="utf-8"))
     return WorkerProjectionStore(path, clock=lambda: 123)
 
 

@@ -5,11 +5,13 @@ import pytest
 from host_brain.app.internal_task_runtime import (
     INTERNAL_RUNTIME_AUTHORITY_INVALID,
     GovernedInternalRuntimeError,
-    _AgentResultAcceptance,
     _AgentWorkerResolver,
     _build_contracts,
     _build_governor_intent,
     _sanitize_work_order,
+)
+from host_brain.agent_runtime.internal_result_proposal import (
+    internal_agent_terminal_result_reason,
 )
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
@@ -58,6 +60,7 @@ def _contracts(*, review_required: bool = False):
             "audit_ref": "audit://secure-ingress/internal/ne01",
             "body_sha256": "a" * 64,
         },
+        frozen_runtime_context={},
     )
 
 
@@ -123,42 +126,26 @@ def test_internal_governor_intent_binds_secure_ingress_principal() -> None:
 
 
 @pytest.mark.parametrize(
-    ("review_required", "inner_decision", "expected", "reason"),
+    ("review_required", "inner_decision", "reason"),
     [
-        (False, "ACCEPT", "ACCEPT", None),
-        (True, "ACCEPT", "REVIEW", "INTERNAL_AGENT_REVIEW_REQUIRED"),
-        (False, "REVIEW", "REVIEW", "INTERNAL_AGENT_REVIEW_REQUIRED"),
-        (False, "FAIL", "REVIEW", "INTERNAL_AGENT_ACCEPTANCE_FAIL"),
+        (False, "ACCEPT", None),
+        (True, "ACCEPT", "INTERNAL_AGENT_REVIEW_REQUIRED"),
+        (False, "REVIEW", "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
+        (False, "FAIL", "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
     ],
 )
 def test_internal_acceptance_never_hides_agent_review_semantics(
     review_required: bool,
     inner_decision: str,
-    expected: str,
     reason: str | None,
 ) -> None:
-    command, order, graph = _contracts()
-    judgement = _AgentResultAcceptance().judge(
-        command=command,
-        work_order=order,
-        execution_context={
-            "graph_id": graph.graph_id,
-            "node_id": graph.nodes[0].node_id,
-            "attempt_id": "attempt-ne01-internal",
-        },
-        worker_commit={
-            "decision": "APPROVE",
-            "result": {
-                "status": "EXECUTED",
-                "review_required": review_required,
-                "acceptance": {"decision": inner_decision},
-            },
-        },
-        evidence_refs=["agent-result://internal/ne01"],
-    )
-
-    assert judgement["decision"] == expected
-    assert judgement["reason_code"] == reason
+    assert internal_agent_terminal_result_reason(
+        {
+            "status": "EXECUTED",
+            "review_required": review_required,
+            "acceptance": {"decision": inner_decision},
+        }
+    ) == reason
 
 
 def test_internal_worker_resolver_accepts_only_frozen_delegate_route() -> None:

@@ -195,6 +195,8 @@ def build_process_scheduler_container(
     cancellation_authority_verifier: Any | None = None,
     runtime_context_application: Any | None = None,
     action_preview_service: Any | None = None,
+    worker_registry: SchedulerWorkerRegistry | None = None,
+    acceptance_effect_dispatcher: Any | None = None,
 ) -> ProcessSchedulerContainer:
     definitions = getattr(
         task_runtime_container,
@@ -208,7 +210,7 @@ def build_process_scheduler_container(
             "Task Runtime lacks scheduler repositories",
         )
     clock_now = now_ms or (lambda: int(time.time() * 1_000))
-    workers = SchedulerWorkerRegistry()
+    workers = worker_registry or SchedulerWorkerRegistry()
     workers.register("scheduler_production", default_handler)
     for worker_key, handler in dict(task_handlers or {}).items():
         workers.register(str(worker_key), handler)
@@ -228,6 +230,7 @@ def build_process_scheduler_container(
         cancellation_authority_verifier=cancellation_authority_verifier,
         runtime_context_application=runtime_context_application,
         action_preview_service=action_preview_service,
+        acceptance_effect_dispatcher=acceptance_effect_dispatcher,
     )
     service = SchedulerCommandService(
         runtime=runtime,
@@ -290,6 +293,7 @@ def build_process_scheduler_container(
             definition_repository=definitions,
             command_ingress=ingress,
             command_service=service,
+            owner_id=owner_id,
             now_ms=clock_now,
             poll_interval_s=float(clock_poll_interval_seconds),
             limit=int(clock_batch_limit),

@@ -10,6 +10,14 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     GraphCancellationContractError,
     normalize_graph_cancellation_intent,
 )
+from host_brain.contracts.agent_runtime.review_policy import ReviewItem
+from host_brain.persistence.review_continuation_binding import (
+    parse_task_review_subject,
+)
+from host_brain.persistence.review_continuation_store import (
+    ReviewContinuationStoreError,
+    enqueue_task_review_continuation_in_transaction,
+)
 from host_brain.persistence.task_record_codec import (
     _acceptance_effect_record,
     _dumps,
@@ -616,6 +624,7 @@ class TaskGraphCancellationRequestMixin:
                 """,
                 (graph_ref, review_subject_prefix, review_subject_prefix),
             ).fetchall()
+            cancelled_review_items: list[tuple[ReviewItem, Any, Any]] = []
             for review in review_rows:
                 review_payload = _loads_object(
                     review["review_json"], field_name="review_json"
@@ -645,6 +654,21 @@ class TaskGraphCancellationRequestMixin:
                     """,
                     (ts_ms, str(review["review_id"])),
                 )
+                if parse_task_review_subject(review_payload.get("subject_ref")) is not None:
+                    try:
+                        cancelled_item = ReviewItem.from_mapping(review_payload)
+                    except ValueError as exc:
+                        raise TaskStoreError(
+                            TASK_STORE_DURABLE_DATA_INVALID,
+                            "canonical cancelled ReviewItem is invalid",
+                        ) from exc
+                    cancelled_review_items.append(
+                        (
+                            cancelled_item,
+                            review["task_graph_id"],
+                            review["task_node_id"],
+                        )
+                    )
 
             conn.execute(
                 """
@@ -676,6 +700,21 @@ class TaskGraphCancellationRequestMixin:
                     ts_ms,
                 ),
             )
+            for cancelled_item, task_graph_id, task_node_id in cancelled_review_items:
+                try:
+                    enqueue_task_review_continuation_in_transaction(
+                        conn,
+                        review=cancelled_item,
+                        task_graph_id=task_graph_id,
+                        task_node_id=task_node_id,
+                        ts_ms=ts_ms,
+                        require_schema=True,
+                    )
+                except ReviewContinuationStoreError as exc:
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "cancelled Review continuation could not be bound",
+                    ) from exc
             effects = conn.execute(
                 """
                 SELECT effect.*, node.status AS node_status,

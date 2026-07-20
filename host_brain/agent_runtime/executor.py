@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import nullcontext
 import logging
 from pathlib import Path
+import secrets
+import time
 from typing import Any
 
 from host_brain.contracts.agent_runtime.acceptance_judge import (
@@ -18,6 +20,10 @@ from host_brain.agent_runtime.agent_tools import (
 )
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
+from host_brain.contracts.agent_runtime.projection_recovery import (
+    WORKER_TIMING_SCHEMA_VERSION,
+    validate_projection_recovery_context,
+)
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
 from host_brain.contracts.agent_runtime.review_policy import ReviewPolicy
 from host_brain.agent_runtime.verification_policy import (
@@ -37,6 +43,11 @@ from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.evolution_lab import validate_evolution_branch
 
 logger = logging.getLogger(__name__)
+
+
+def _opaque_executor_failure(exc: BaseException) -> str:
+    error_type = f"{type(exc).__module__}.{type(exc).__qualname__}"
+    return f"error_type={error_type} incident={secrets.token_hex(24)}"
 
 
 def _collect_git_summary(workspace: Path) -> dict[str, Any]:
@@ -190,12 +201,14 @@ class AgentRuntimeExecutor:
         work_order: AgentWorkOrder | dict[str, Any],
         *,
         workspace_execution_authority: dict[str, Any] | None = None,
+        projection_recovery_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         order = work_order if isinstance(work_order, AgentWorkOrder) else AgentWorkOrder.from_mapping(work_order)
-        run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
-        self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
         event_id = new_event_id()
         ts = now_ms()
+        run_dir: Path | None = None
+        governed_stage = None
+        recovery_envelope: dict[str, Any] | None = None
 
         try:
             order.validate()
@@ -205,7 +218,7 @@ class AgentRuntimeExecutor:
                     summary=(
                         "Agent write execution requires a governed Tool TaskGraph node."
                     ),
-                    artifacts_dir=str(run_dir),
+                    artifacts_dir="",
                     reason_code=AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
                     detail=(
                         "The proposal-only Agent runtime cannot execute or accept a "
@@ -227,13 +240,6 @@ class AgentRuntimeExecutor:
                     "model_attempts": [],
                     "side_effects_executed": False,
                 }
-                self._persist_result(
-                    run_dir,
-                    result,
-                    order=order,
-                    event_id=event_id,
-                    ts_ms=ts,
-                )
                 return result.to_dict()
             effective_workspace_policy = self.workspace_policy
             if (
@@ -257,12 +263,11 @@ class AgentRuntimeExecutor:
                 result = blocked_result(
                     work_order_id=order.work_order_id,
                     summary="Agent WorkOrder blocked by workspace or approval policy.",
-                    artifacts_dir=str(run_dir),
+                    artifacts_dir="",
                     detail=reason,
                     risk_flags=["policy_block"],
                     review_required=self.review_policy.review_required(order),
                 )
-                self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
                 return result.to_dict()
             if order.run_mode == "self_evolve":
                 current_branch = _current_git_branch(resolution.path)
@@ -271,32 +276,77 @@ class AgentRuntimeExecutor:
                     result = blocked_result(
                         work_order_id=order.work_order_id,
                         summary="Agent self-evolve WorkOrders require an experiment branch.",
-                        artifacts_dir=str(run_dir),
+                        artifacts_dir="",
                         detail=branch_reason or "EVOLUTION_EXPERIMENT_BRANCH_REQUIRED",
                         risk_flags=["evolution_branch_required"],
                         review_required=True,
                         reason_code=branch_reason or "EVOLUTION_EXPERIMENT_BRANCH_REQUIRED",
                     )
-                    self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
                     return result.to_dict()
+
+            # Prompt construction may validate or normalize private WorkOrder
+            # material.  Do it before allocating a governed stage so a
+            # preparation exception cannot strand a half-written owner.
+            prompt = build_agent_prompt(order, workspace=resolution.path)
+            if workspace_execution_authority is not None:
+                if (
+                    self.workspace_runtime is None
+                    or resolution.source != "durable_workspace"
+                    or not resolution.workspace_id
+                ):
+                    raise DurableWorkspaceRuntimeError(
+                        "WORKSPACE_RUNTIME_BINDING_INVALID",
+                        "governed execution has no durable Workspace staging owner",
+                    )
+                governed_stage = self.artifact_store.prepare_governed_stage(
+                    workspace_id=resolution.workspace_id,
+                    execution_authority=workspace_execution_authority,
+                )
+                run_dir = governed_stage.stage_dir
+            else:
+                if projection_recovery_context is not None:
+                    raise ValueError(
+                        "projection recovery context requires governed execution"
+                    )
+                run_dir = self.artifact_store.prepare_run_dir(order.work_order_id)
+            # Raw WorkOrder material is written only after validation, policy
+            # enforcement and durable Workspace/Attempt ownership succeed.
+            self.artifact_store.write_json(run_dir / "work_order.json", order.to_dict())
+            self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
+            if projection_recovery_context is not None:
+                recovery_envelope = validate_projection_recovery_context(
+                    projection_recovery_context
+                )
+                self.artifact_store.write_json(
+                    run_dir / "projection_recovery.json",
+                    recovery_envelope,
+                )
         except Exception as exc:
+            if governed_stage is not None:
+                try:
+                    self.artifact_store.discard_unsealed_governed_stage(
+                        governed_stage
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not safely discard incomplete governed Agent stage"
+                    )
             reason_code = str(getattr(exc, "reason_code", "") or "").strip() or None
+            failure = _opaque_executor_failure(exc)
             result = blocked_result(
                 work_order_id=order.work_order_id,
                 summary="Agent WorkOrder could not be prepared.",
-                artifacts_dir=str(run_dir),
-                detail=str(exc),
+                artifacts_dir="",
+                detail=failure,
                 risk_flags=[
                     "workspace_grant_required" if reason_code == "WORKSPACE_WRITE_GRANT_REQUIRED" else "work_order_invalid"
                 ],
                 review_required=order.review_required,
                 reason_code=reason_code,
             )
-            self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
             return result.to_dict()
 
-        prompt = build_agent_prompt(order, workspace=resolution.path)
-        self.artifact_store.write_text(run_dir / "prompt.txt", prompt)
+        assert run_dir is not None
 
         empty_git_summary = {
             "changed_files": [],
@@ -318,6 +368,8 @@ class AgentRuntimeExecutor:
             else None
         )
         scope = workspace_scope or nullcontext()
+        worker_started_ts_ms = now_ms()
+        worker_started_ns = time.monotonic_ns()
         try:
             with scope:
                 try:
@@ -336,7 +388,11 @@ class AgentRuntimeExecutor:
                         ),
                     )
                 except Exception as exc:
-                    logger.warning("Canonical AgentExecutor execution failed: %s", exc)
+                    failure = _opaque_executor_failure(exc)
+                    logger.warning(
+                        "Canonical AgentExecutor execution failed: %s",
+                        failure,
+                    )
                     result = AgentResult(
                         status="FAILED",
                         work_order_id=order.work_order_id,
@@ -346,7 +402,7 @@ class AgentRuntimeExecutor:
                         risk_flags=["agent_error"],
                         review_required=self.review_policy.review_required(order),
                         reason_code="AGENT_ERROR",
-                        detail=str(exc),
+                        detail=failure,
                     )
 
                 if workspace_scope is not None:
@@ -379,7 +435,12 @@ class AgentRuntimeExecutor:
                     work_order_id=order.work_order_id,
                 )
         except DurableWorkspaceRuntimeError as exc:
-            logger.error("Durable workspace lease lost for %s: %s", order.work_order_id, exc)
+            failure = _opaque_executor_failure(exc)
+            logger.error(
+                "Durable workspace lease lost for %s: %s",
+                order.work_order_id,
+                failure,
+            )
             result = AgentResult(
                 status="FAILED",
                 work_order_id=order.work_order_id,
@@ -389,7 +450,7 @@ class AgentRuntimeExecutor:
                 risk_flags=["workspace_lease_lost"],
                 review_required=True,
                 reason_code=exc.reason_code,
-                detail=exc.detail,
+                detail=f"{exc.reason_code}; {failure}",
             )
             git_summary = {
                 "changed_files": [],
@@ -423,8 +484,35 @@ class AgentRuntimeExecutor:
         self.artifact_store.write_json(run_dir / "verification.json", verification)
         result = _apply_required_verification_gate(result, order)
         result = _apply_acceptance_judge(result, order)
+        if recovery_envelope is not None:
+            worker_finished_ts_ms = now_ms()
+            worker_elapsed_ms = max(
+                1,
+                (time.monotonic_ns() - worker_started_ns + 999_999) // 1_000_000,
+            )
+            recovery_envelope = {
+                **recovery_envelope,
+                "worker_timing": {
+                    "schema_version": WORKER_TIMING_SCHEMA_VERSION,
+                    "started_ts_ms": worker_started_ts_ms,
+                    "finished_ts_ms": worker_finished_ts_ms,
+                    "elapsed_ms": worker_elapsed_ms,
+                },
+            }
+            # This authority is measured inside the canonical executor after
+            # Agent/verification complete and before the immutable seal.
+            self.artifact_store.write_json(
+                run_dir / "projection_recovery.json",
+                recovery_envelope,
+            )
         self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
-        return result.to_dict()
+        payload = result.to_dict()
+        if governed_stage is not None:
+            seal = self.artifact_store.seal_governed_stage(governed_stage)
+            # This private transfer object never enters result.json.  The
+            # proposal boundary converts it to a bounded protected ref/digest.
+            payload["_protected_stage"] = seal.protected_payload()
+        return payload
 
     def _persist_result(self, run_dir: Path, result: AgentResult, *, order: AgentWorkOrder, event_id: str, ts_ms: int) -> None:
         metadata = sanitize_public_payload({

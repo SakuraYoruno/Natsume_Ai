@@ -67,30 +67,6 @@ def record_user_turn(
             str(session_id or "").strip(),
             len(normalized_content),
         )
-        with soft_fail("conversation.record_user_turn.preference_spine", fallback=None):
-            from host_brain.app.recommendation_feedback import record_user_preference_signal_if_present  # noqa: PLC0415
-
-            preference_record = record_user_preference_signal_if_present(
-                session_id=session_id,
-                person_id=person_id,
-                user_message=normalized_content,
-                payload={
-                    **merged_metadata,
-                    "request_id": request_id,
-                    "session_id": session_id,
-                    "conversation_id": merged_metadata.get("conversation_id") or merged_metadata.get("reply_target") or session_id,
-                    "platform": merged_metadata.get("platform") or merged_metadata.get("reply_channel") or "",
-                },
-                ts_ms=resolved_ts_ms,
-            )
-            if preference_record:
-                _logger.info(
-                    "[%s] preference_spine events=%s domain=%s target=%s",
-                    request_id,
-                    int(preference_record.get("event_count") or 0),
-                    str(preference_record.get("domain") or ""),
-                    str(preference_record.get("target_label") or ""),
-                )
         return result
     return {"status": "DEGRADED", "reason_code": "SOFT_FAIL_USER_TURN"}
 

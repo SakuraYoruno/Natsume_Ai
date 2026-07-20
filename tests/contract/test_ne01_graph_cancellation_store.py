@@ -27,6 +27,12 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     normalize_graph_cancellation_decision,
     normalize_graph_cancellation_intent,
 )
+from host_brain.contracts.agent_runtime.review_policy import (
+    ReviewItem,
+    ReviewResumePhase,
+    ReviewStatus,
+    ReviewType,
+)
 from host_brain.contracts.agent_runtime.node_artifact import (
     NODE_ARTIFACT_SCHEMA_VERSION,
     artifact_digest,
@@ -57,6 +63,8 @@ from host_brain.persistence.task_repository import (
     build_outbox_payload_ref,
     build_reconciliation_attestation_binding,
 )
+from host_brain.persistence.review_continuation_store import ReviewContinuationStore
+from host_brain.persistence.review_repository import ReviewStore
 from tests.task_runtime_authority_fixtures import (
     seed_raw_acceptance_effect_for_test,
     seed_raw_task_graph_for_test,
@@ -1964,6 +1972,90 @@ def test_review_revocation_is_scoped_to_exact_graph_revision(tmp_path: Path) -> 
         "review-revision-1": "CANCELLED",
         "review-revision-2": "PENDING",
     }
+
+
+def test_cancellation_atomically_enqueues_canonical_review_continuation(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    store.transition_node(
+        "graph-cancel",
+        1,
+        "node-1",
+        expected_version=0,
+        target_status=TaskNodeStatus.WAITING_APPROVAL,
+        outbox=_event(
+            "TASK_NODE",
+            "graph-cancel@1/node-1",
+            1,
+            "TASK_NODE_WAITING_APPROVAL",
+            outbox_id="outbox-node-waiting-approval",
+        ),
+    )
+    review = ReviewItem(
+        review_id="review-cancellation-continuation",
+        review_type=ReviewType.PRE_EXECUTION_APPROVAL,
+        subject_ref=(
+            "task-node://graph-cancel/1/node-1"
+            "?root=work-order-cancel&attempt=not-started"
+        ),
+        subject_version=1,
+        requester="operator-test",
+        reason="approval required before cancellation",
+        risk_level=4,
+        side_effects=("host.sys_mode_transition",),
+        evidence_refs=("evidence://review/cancel",),
+        status=ReviewStatus.PENDING,
+        expires_at=NOW + 60_000,
+        resume_phase=ReviewResumePhase.PRE_EXECUTION,
+        checkpoint_id=(
+            "task-checkpoint://graph-cancel/1/node-1/pre_execution"
+            "?root=work-order-cancel&attempt=not-started"
+        ),
+    )
+    ReviewStore(store.db_path, clock=Clock()).create_review(
+        review,
+        work_order_id="work-order-cancel",
+        task_graph_id="graph-cancel",
+        task_node_id="node-1",
+    )
+
+    requested = _request_snapshot(
+        store,
+        before_status="WAITING_APPROVAL",
+        before_version=1,
+        after_status="CANCELLED",
+        after_version=2,
+    )
+
+    continuation_store = ReviewContinuationStore(store.db_path, clock=Clock())
+    continuation = continuation_store.get_review_continuation(review.review_id)
+    assert continuation is not None
+    assert continuation["review"]["status"] == "CANCELLED"
+    assert continuation["node"]["status"] == "CANCELLED"
+    assert continuation["checkpoint_crossed"] is True
+    claim = continuation_store.claim_pending_review_continuations(
+        worker_id="review-cancellation-worker",
+        lease_ms=30_000,
+        limit=1,
+    )[0]
+    authority = continuation_store.validate_review_continuation_claim(claim)
+    assert authority["review_status"] == "CANCELLED"
+    assert requested["intent"]["intent_ref"].startswith(
+        "taskcancel-intent://sha256/"
+    )
+
+    # A response-loss/legacy gap that drops only delivery coordination must
+    # be reconstructed from the immutable Review + cancellation authorities.
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "DELETE FROM task_runtime_review_continuation WHERE review_id = ?",
+            (review.review_id,),
+        )
+    recovered_store = ReviewContinuationStore(store.db_path, clock=Clock())
+    reconciliation = recovered_store.reconcile_terminal_reviews()
+    assert reconciliation["enqueued_count"] == 1
+    assert recovered_store.get_review_continuation(review.review_id) is not None
 
 
 def test_review_revocation_uses_canonical_encoded_graph_subject(tmp_path: Path) -> None:

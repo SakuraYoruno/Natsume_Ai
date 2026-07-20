@@ -387,7 +387,10 @@ class TestGatewayServer(unittest.TestCase):
             status=outbox_status,
         )
         delivery.wait_outbox.return_value = {"status": outbox_delivery_state}
-        delivery.get_outbox.return_value = {"status": outbox_delivery_state}
+        delivery.get_outbox.return_value = {
+            "status": outbox_delivery_state,
+            "payload_sha256": "sha256:" + "a" * 64,
+        }
         delivery.stats.return_value = {
             "mode": "DURABLE",
             "intake_enabled": True,
@@ -538,6 +541,10 @@ class TestGatewayServer(unittest.TestCase):
         self.assertEqual(200, resp.status_code)
         data = resp.json()
         self.assertEqual("sent", data["status"])
+        self.assertEqual("reply-dispatch-1", data["delivery_id"])
+        self.assertEqual("wechat", data["platform"])
+        self.assertEqual("conv_001", data["conversation_id"])
+        self.assertEqual("sha256:" + "a" * 64, data["payload_digest"])
         self.delivery.enqueue_reply.assert_called_once()
         outbound.dispatch.assert_not_called()
 
@@ -834,7 +841,10 @@ class TestGatewayServer(unittest.TestCase):
         self.delivery.accept_inbound.reset_mock()
         self.delivery.accept_inbound.side_effect = [
             GatewayDeliveryReceipt("inbox", "line-a", "NEW"),
-            GatewayDeliveryError("GATEWAY_TRANSPORT_SCHEMA_UNAVAILABLE", "db unavailable"),
+            GatewayDeliveryError(
+                "GATEWAY_TRANSPORT_SCHEMA_UNAVAILABLE",
+                "db unavailable; provider-secret=must-not-leak",
+            ),
         ]
         failure = client.post("/v1/gateway/line/webhook", json=body)
         self.assertEqual(503, failure.status_code)
@@ -842,6 +852,8 @@ class TestGatewayServer(unittest.TestCase):
             "GATEWAY_TRANSPORT_SCHEMA_UNAVAILABLE",
             failure.json()["reason_code"],
         )
+        self.assertNotIn("provider-secret", failure.text)
+        self.assertNotIn("must-not-leak", failure.text)
 
     def test_non_line_webhook_extracts_authenticated_source_sequence(self) -> None:
         client, _, _ = self._make_client()

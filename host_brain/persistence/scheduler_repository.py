@@ -19,10 +19,22 @@ import sqlite3
 from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.persistence.scheduler_clock_retry_store import (
+    SchedulerClockRetryStoreMixin,
+)
+from host_brain.persistence.scheduler_repository_primitives import (
+    SCHEDULER_CLOCK_RETRY_CONFLICT,
+    SCHEDULER_CLOCK_RETRY_INVALID,
+    SCHEDULER_DEFINITION_INVALID,
+    SchedulerRepositoryError,
+    _required_int,
+    _required_reference,
+    _required_task_id,
+    _required_text,
+)
 
 
 SCHEDULER_SCHEMA_NOT_READY = "SCHEDULER_SCHEMA_NOT_READY"
-SCHEDULER_DEFINITION_INVALID = "SCHEDULER_DEFINITION_INVALID"
 SCHEDULER_DEFINITION_CONFLICT = "SCHEDULER_DEFINITION_CONFLICT"
 SCHEDULER_DEFINITION_NOT_FOUND = "SCHEDULER_DEFINITION_NOT_FOUND"
 SCHEDULER_OCCURRENCE_INVALID = "SCHEDULER_OCCURRENCE_INVALID"
@@ -41,6 +53,9 @@ SCHEDULER_MIGRATION_SHA256 = "447387f6a5b0e085d3e3155baaa25e2164070c6a5875d89490
 SCHEDULER_UOW_MIGRATION_ASSET_KEY = "0066#scheduler_durable_uow"
 # Frozen to host_brain/audit/migrations/0066_scheduler_durable_uow.sql.
 SCHEDULER_UOW_MIGRATION_SHA256 = "c91a8941b5a9abe182399e9408789218cd2fc4614e279ff4a35a578087007c1b"
+SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY = "0117#scheduler_clock_retry_authority"
+# Frozen to host_brain/audit/migrations/0117_scheduler_clock_retry_authority.sql.
+SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256 = "a15ab6660d9daf5b7c6c97321699f3410676772df2e248a31a24a37446d113ed"
 
 _ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
     {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
@@ -51,11 +66,7 @@ _ALLOWED_RESULT_STATUSES = frozenset(
 )
 _ALLOWED_ADMIN_OPERATIONS = frozenset({"PUBLISH", "SET_ENABLED", "DELETE"})
 _ALLOWED_TERMINAL_OUTCOMES = frozenset({"GOVERNOR_REJECTED"})
-_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,254}$")
 _SHA256_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
-_REFERENCE_RE = re.compile(
-    r"^[a-z][a-z0-9+.-]{1,31}://[A-Za-z0-9][A-Za-z0-9._~:/@!$&'()*+,;=%-]{0,475}$"
-)
 _FORBIDDEN_KEY_RE = re.compile(
     r"(?:^|_)(?:api_?key|authorization|bearer|credential|password|raw_?body|secret|signature|(?:access|refresh|auth|raw)_?token)(?:$|_)|^token$",
     re.IGNORECASE,
@@ -142,6 +153,21 @@ _REQUIRED_TABLE_COLUMNS = {
             "created_at_ms",
         }
     ),
+    "scheduler_clock_retry_state": frozenset(
+        {
+            "retry_key",
+            "retry_kind",
+            "task_id",
+            "occurrence_id",
+            "failure_count",
+            "next_retry_at_ms",
+            "last_reason_code",
+            "lease_owner_id",
+            "lease_fencing_token",
+            "lease_expires_at_ms",
+            "updated_at_ms",
+        }
+    ),
 }
 _REQUIRED_INDEXES = frozenset(
     {
@@ -151,6 +177,8 @@ _REQUIRED_INDEXES = frozenset(
         "uq_scheduler_clock_occurrence_fence",
         "idx_scheduler_terminal_outcome_created",
         "idx_scheduler_admin_operation_task",
+        "idx_scheduler_clock_retry_due",
+        "uq_scheduler_clock_retry_occurrence",
     }
 )
 _REQUIRED_TRIGGERS = frozenset(
@@ -169,18 +197,6 @@ _REQUIRED_TRIGGERS = frozenset(
         "trg_scheduler_result_excludes_terminal_outcome",
     }
 )
-
-
-class SchedulerRepositoryError(RuntimeError):
-    """Fail-closed Scheduler persistence error with a stable reason code."""
-
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or SCHEDULER_DEFINITION_INVALID)
-        self.detail = str(detail or "scheduler persistence failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
-
-    def to_dict(self) -> dict[str, str]:
-        return {"reason_code": self.reason_code, "detail": self.detail}
 
 
 class _SchedulerSQLiteRepository:
@@ -248,11 +264,12 @@ class _SchedulerSQLiteRepository:
                     """
                     SELECT asset_key, checksum, disposition
                     FROM schema_migration_assets
-                    WHERE asset_key IN (?, ?)
+                    WHERE asset_key IN (?, ?, ?)
                     """,
                     (
                         SCHEDULER_MIGRATION_ASSET_KEY,
                         SCHEDULER_UOW_MIGRATION_ASSET_KEY,
+                        SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY,
                     ),
                 ).fetchall()
                 columns = {
@@ -293,6 +310,9 @@ class _SchedulerSQLiteRepository:
         expected_assets = {
             SCHEDULER_MIGRATION_ASSET_KEY: SCHEDULER_MIGRATION_SHA256,
             SCHEDULER_UOW_MIGRATION_ASSET_KEY: SCHEDULER_UOW_MIGRATION_SHA256,
+            SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY: (
+                SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256
+            ),
         }
         assets_ready = all(
             key in asset_records
@@ -310,11 +330,14 @@ class _SchedulerSQLiteRepository:
         ):
             raise SchedulerRepositoryError(
                 SCHEDULER_SCHEMA_NOT_READY,
-                "scheduler migrations 0065/0066 are missing, stale, or checksum-drifted",
+                "scheduler migrations 0065/0066/0117 are missing, stale, or checksum-drifted",
             )
 
 
-class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
+class SchedulerDefinitionRepository(
+    SchedulerClockRetryStoreMixin,
+    _SchedulerSQLiteRepository,
+):
     """Immutable definition revisions plus one CAS-protected mutable head."""
 
     def __init__(
@@ -1382,8 +1405,16 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
         next_scheduled_at_ms: int | None,
         payload: Mapping[str, Any],
         authority: Mapping[str, Any],
+        due_retry_key: str,
+        lease_owner_id: str,
+        lease_fencing_token: int,
+        lease_duration_ms: int,
     ) -> dict[str, Any]:
-        """Atomically append one clock occurrence and advance its due pointer."""
+        """Admit a clock occurrence and atomically transfer its DUE lease.
+
+        The returned ``clock_retry_claim`` is already keyed by the immutable
+        occurrence id.  Callers must never dispatch with the former DUE claim.
+        """
 
         task_ref = _required_task_id(task_id)
         revision = _required_int(
@@ -1432,6 +1463,36 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
         )
         request_id = _clock_request_id(task_ref, revision, scheduled_at)
         authority_value = _normalize_authority(authority, request_id=request_id)
+        due_key = _required_text(
+            due_retry_key,
+            field_name="due_retry_key",
+            limit=512,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        expected_due_key = f"due:{task_ref}:{revision}:{scheduled_at}"
+        if due_key != expected_due_key:
+            raise SchedulerRepositoryError(
+                SCHEDULER_CLOCK_RETRY_CONFLICT,
+                "clock admission DUE retry identity drifted",
+            )
+        lease_owner = _required_text(
+            lease_owner_id,
+            field_name="lease_owner_id",
+            limit=240,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        lease_fence = _required_int(
+            lease_fencing_token,
+            field_name="lease_fencing_token",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
+        lease_duration = _required_int(
+            lease_duration_ms,
+            field_name="lease_duration_ms",
+            minimum=1,
+            reason_code=SCHEDULER_CLOCK_RETRY_INVALID,
+        )
         return self._admit_occurrence(
             occurrence_id=occurrence_id,
             task_id=task_ref,
@@ -1445,6 +1506,10 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             payload_digest=payload_digest,
             expected_head_version=expected,
             authority=authority_value,
+            due_retry_key=due_key,
+            lease_owner_id=lease_owner,
+            lease_fencing_token=lease_fence,
+            lease_duration_ms=lease_duration,
         )
 
     def admit_manual_occurrence(
@@ -1508,6 +1573,10 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
             payload_digest=payload_digest,
             expected_head_version=None,
             authority=authority_value,
+            due_retry_key=None,
+            lease_owner_id=None,
+            lease_fencing_token=None,
+            lease_duration_ms=None,
         )
 
     def get_occurrence(self, occurrence_id: str) -> dict[str, Any] | None:
@@ -1799,6 +1868,10 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
         payload_digest: str,
         expected_head_version: int | None,
         authority: dict[str, str],
+        due_retry_key: str | None,
+        lease_owner_id: str | None,
+        lease_fencing_token: int | None,
+        lease_duration_ms: int | None,
     ) -> dict[str, Any]:
         now_value = self._now()
         conn = self._connect()
@@ -1859,13 +1932,28 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
                         "scheduler occurrence lost its durable definition head",
                     )
                 replay_head_version = self._head_record(replay_head)["head_version"]
+                retry_claim = None
+                if source == "CLOCK":
+                    retry_claim = self._transfer_due_retry_claim(
+                        conn,
+                        due_retry_key=str(due_retry_key),
+                        occurrence_id=occurrence_id,
+                        task_id=task_id,
+                        owner_id=str(lease_owner_id),
+                        fencing_token=int(lease_fencing_token or 0),
+                        at_ms=now_value,
+                        lease_duration_ms=int(lease_duration_ms or 0),
+                    )
                 conn.commit()
-                return {
+                replay_result = {
                     **record,
                     "head_version": replay_head_version,
                     "created": False,
                     "replayed": True,
                 }
+                if retry_claim is not None:
+                    replay_result["clock_retry_claim"] = retry_claim
+                return replay_result
 
             self._validate_ingress_authority(
                 conn,
@@ -1953,6 +2041,18 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
                     )
                 new_head_version += 1
                 self._fault("after_reschedule")
+            retry_claim = None
+            if source == "CLOCK":
+                retry_claim = self._transfer_due_retry_claim(
+                    conn,
+                    due_retry_key=str(due_retry_key),
+                    occurrence_id=occurrence_id,
+                    task_id=task_id,
+                    owner_id=str(lease_owner_id),
+                    fencing_token=int(lease_fencing_token or 0),
+                    at_ms=now_value,
+                    lease_duration_ms=int(lease_duration_ms or 0),
+                )
             row = conn.execute(
                 "SELECT * FROM scheduler_occurrence WHERE occurrence_id = ?",
                 (occurrence_id,),
@@ -1964,12 +2064,15 @@ class SchedulerDefinitionRepository(_SchedulerSQLiteRepository):
                 )
             result = self._occurrence_record(row)
             conn.commit()
-            return {
+            admitted_result = {
                 **result,
                 "head_version": new_head_version,
                 "created": True,
                 "replayed": False,
             }
+            if retry_claim is not None:
+                admitted_result["clock_retry_claim"] = retry_claim
+            return admitted_result
         except SchedulerRepositoryError:
             conn.rollback()
             raise
@@ -2762,52 +2865,6 @@ def _admin_operation_receipt_ref(
     return f"scheduleradminresult://sha256/{digest}"
 
 
-def _required_task_id(value: Any) -> str:
-    task_id = str(value or "").strip()
-    if _TASK_ID_RE.fullmatch(task_id) is None:
-        raise SchedulerRepositoryError(
-            SCHEDULER_DEFINITION_INVALID,
-            "task_id is invalid",
-        )
-    return task_id
-
-
-def _required_reference(
-    value: Any,
-    *,
-    field_name: str,
-    reason_code: str,
-) -> str:
-    normalized = _required_text(
-        value,
-        field_name=field_name,
-        limit=512,
-        reason_code=reason_code,
-    )
-    if _REFERENCE_RE.fullmatch(normalized) is None:
-        raise SchedulerRepositoryError(
-            reason_code,
-            f"{field_name} is not a durable reference",
-        )
-    return normalized
-
-
-def _required_text(
-    value: Any,
-    *,
-    field_name: str,
-    limit: int,
-    reason_code: str,
-) -> str:
-    normalized = str(value or "").strip()
-    if not normalized or len(normalized) > limit:
-        raise SchedulerRepositoryError(
-            reason_code,
-            f"{field_name} is missing or too long",
-        )
-    return normalized
-
-
 def _normalized_sha256(
     value: Any,
     *,
@@ -2821,21 +2878,6 @@ def _normalized_sha256(
             f"{field_name} must be a SHA-256 digest",
         )
     return normalized.removeprefix("sha256:")
-
-
-def _required_int(
-    value: Any,
-    *,
-    field_name: str,
-    minimum: int,
-    reason_code: str,
-) -> int:
-    if type(value) is not int or value < minimum:
-        raise SchedulerRepositoryError(
-            reason_code,
-            f"{field_name} must be an integer >= {minimum}",
-        )
-    return value
 
 
 def _required_bool(value: Any, *, field_name: str) -> bool:
@@ -2875,6 +2917,10 @@ def _bounded_limit(value: Any) -> int:
 __all__ = [
     "SCHEDULER_ADMIN_OPERATION_CONFLICT",
     "SCHEDULER_ADMIN_OPERATION_INVALID",
+    "SCHEDULER_CLOCK_RETRY_CONFLICT",
+    "SCHEDULER_CLOCK_RETRY_INVALID",
+    "SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY",
+    "SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256",
     "SCHEDULER_DEFINITION_CONFLICT",
     "SCHEDULER_DEFINITION_INVALID",
     "SCHEDULER_DEFINITION_NOT_FOUND",

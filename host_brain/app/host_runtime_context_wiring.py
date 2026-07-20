@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from host_brain.composition.task_runtime import ProcessTaskRuntimeContainer
+from host_brain.governor.action_preview import ActionPreviewService
+from host_brain.orchestration.node_grants import DurableNodeGrantVerifier
 from host_brain.persistence.hard_state_journal import SQLiteHardStateJournal
 from host_brain.persistence.world_observation_journal import (
     SQLiteWorldObservationJournal,
+)
+from host_brain.runtime.action_preview_resolver import (
+    ProductionActionPreviewAuthorityResolver,
 )
 from host_brain.runtime.context_application import RuntimeContextApplicationService
 from host_brain.runtime.intent_authority import IntentPolicyIdentityV1
@@ -17,6 +24,68 @@ from host_brain.runtime.production_intent_authority import (
     ProductionIntentAuthorityPort,
 )
 from host_brain.runtime.world_source_verifier import RuntimeEventWorldSourceVerifier
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceCatalogGuardianObservation:
+    """Polling work composed for, but still owned by, the ASGI lifespan."""
+
+    store: Any
+    observer: Any
+    operation_id: str
+    logger: Any
+
+    async def observe_terminal_receipt(self) -> None:
+        try:
+            for _attempt in range(240):
+                receipt = await asyncio.to_thread(
+                    self.store.terminal_receipt,
+                    self.operation_id,
+                )
+                if receipt is not None:
+                    self.observer.observe_operation(self.operation_id)
+                    return
+                await asyncio.sleep(0.25)
+            self.logger.error(
+                "HOST_SERVICE_CATALOG_TERMINAL_RECEIPT_TIMEOUT",
+                extra={"operation_id": self.operation_id},
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger.error(
+                "HOST_SERVICE_CATALOG_GUARDIAN_OBSERVE_FAILED",
+                extra={"operation_id": self.operation_id},
+                exc_info=True,
+            )
+
+
+def compose_service_catalog_guardian_observation(
+    *,
+    canonical_db_path: str,
+    guardian: Any,
+    operation_id: str,
+    logger: Any,
+) -> ServiceCatalogGuardianObservation:
+    """Bind one staged Catalog operation to the app-local Guardian authority."""
+
+    from host_brain.persistence.service_catalog_rollout_repository import (  # noqa: PLC0415
+        SQLiteServiceCatalogRolloutRepository,
+    )
+    from host_brain.service_catalog.rollout_authority import (  # noqa: PLC0415
+        ServiceCatalogRolloutGuardianObserver,
+    )
+
+    store = SQLiteServiceCatalogRolloutRepository(canonical_db_path)
+    return ServiceCatalogGuardianObservation(
+        store=store,
+        observer=ServiceCatalogRolloutGuardianObserver(
+            store=store,
+            guardian=guardian,
+        ),
+        operation_id=str(operation_id),
+        logger=logger,
+    )
 
 
 def compose_host_runtime_context(
@@ -73,6 +142,55 @@ def compose_host_runtime_context(
         environment_observation_provider=environment_observation_provider,
     )
     return RuntimeContextApplicationService(composition)
+
+
+def compose_action_preview_service(
+    *,
+    task_runtime: ProcessTaskRuntimeContainer,
+    ledger: Any,
+    runtime_context_application: RuntimeContextApplicationService,
+) -> ActionPreviewService:
+    """Bind Preview validation to the same durable Runtime Context authority."""
+
+    composition = runtime_context_application.composition
+    authority_resolver = ProductionActionPreviewAuthorityResolver(
+        command_repository=task_runtime.command_repository,
+        task_store=task_runtime.task_store,
+        node_grant_verifier=DurableNodeGrantVerifier(
+            ledger=ledger,
+            review_store=task_runtime.review_continuation_store,
+        ),
+        runtime_context_application=runtime_context_application,
+    )
+    return ActionPreviewService(
+        runtime_event_store=composition.event_store,
+        guardian=composition.guardian,
+        authority_resolver=authority_resolver,
+    )
+
+
+def observe_runtime_startup(
+    *,
+    runtime_context_application: RuntimeContextApplicationService,
+    startup_probe_statuses: Mapping[str, Any],
+    observed_at_ms: int,
+) -> None:
+    """Append one deterministic startup observation to the Guardian journal."""
+
+    guardian = runtime_context_application.composition.guardian
+    guardian.observe_startup_batch(
+        startup_probe_statuses,
+        source_ref=(
+            "startup-probe://host/"
+            + hashlib.sha256(
+                (
+                    f"{guardian.snapshot().snapshot_digest}:"
+                    f"{int(observed_at_ms)}"
+                ).encode("utf-8")
+            ).hexdigest()
+        ),
+        observed_at_ms=int(observed_at_ms),
+    )
 
 
 def bind_host_hard_state_runtime(
@@ -149,7 +267,11 @@ def runtime_environment_observation_provider(
 
 
 __all__ = [
+    "ServiceCatalogGuardianObservation",
     "bind_host_hard_state_runtime",
+    "compose_action_preview_service",
     "compose_host_runtime_context",
+    "compose_service_catalog_guardian_observation",
+    "observe_runtime_startup",
     "runtime_environment_observation_provider",
 ]

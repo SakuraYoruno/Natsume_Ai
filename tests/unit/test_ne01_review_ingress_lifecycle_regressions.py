@@ -39,8 +39,15 @@ class _WaitingRuntime:
         self._command = command
         self._status = status
 
-    def existing_command(self, *, request_id: str) -> Mapping[str, Any]:
+    def existing_command(
+        self,
+        *,
+        request_id: str,
+        command_surface: str | None = None,
+    ) -> Mapping[str, Any]:
         assert request_id == self._command.request_id
+        if command_surface is not None:
+            assert command_surface == self._command.surface.value
         return {"command": self._command}
 
     async def execute_stream(self, **_: Any):

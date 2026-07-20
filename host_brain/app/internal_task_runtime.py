@@ -12,6 +12,19 @@ import re
 from typing import Any, Protocol
 
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
+from host_brain.agent_runtime.accepted_effect_runtime import (
+    InternalAcceptedEffectRuntime,
+)
+from host_brain.agent_runtime.internal_result_proposal import (
+    INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE,
+    InternalAgentProposalAcceptance,
+    InternalAgentProposalExecutor,
+    InternalAgentProposalVerifier,
+)
+from host_brain.agent_runtime.internal_artifact_terminal_reconciliation import (
+    InternalArtifactTerminalContinuationWorker,
+    InternalArtifactTerminalReconciler,
+)
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.task_graph import (
@@ -42,13 +55,13 @@ from host_brain.persistence.agent_execution_repository import (
 )
 from host_brain.task_runtime import GovernedTaskCoordinator
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
-from host_brain.task_runtime.worker_budget_usage import (
-    build_worker_budget_usage,
-    stable_worker_usage_id,
-)
+from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.worker_registry import (
     GovernedWorkerRegistryError,
     GovernedWorkerRoute,
+)
+from host_brain.app.internal_startup_checkpoint_continuation import (
+    InternalStartupCheckpointContinuation,
 )
 from natsume_contracts.task import HostCommand, HostCommandSurface, build_host_command
 
@@ -61,7 +74,10 @@ INTERNAL_RUNTIME_GOVERNOR_REJECTED = "INTERNAL_RUNTIME_GOVERNOR_REJECTED"
 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED = (
     "INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED"
 )
-INTERNAL_AGENT_WORKER_ROUTE = "internal_agent"
+INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED = (
+    "INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED"
+)
+INTERNAL_AGENT_WORKER_ROUTE = "delegate"
 _INTERNAL_TASK_NODE_ROUTE = "delegate:agent_runtime"
 
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
@@ -145,162 +161,11 @@ class IngressClaimResultStore(Protocol):
     ) -> None: ...
 
 
-class _AgentWorker:
-    def __init__(
-        self,
-        *,
-        executor: AgentRuntimeExecutor,
-        result_repository: AgentExecutionResultRepository,
-        executor_name: str,
-        node_grant_verifier: Any,
-    ) -> None:
-        if not callable(getattr(node_grant_verifier, "verify", None)):
-            raise TypeError("node_grant_verifier must expose verify")
-        self._executor = executor
-        self._results = result_repository
-        self._executor_name = str(executor_name)
-        self._node_grants = node_grant_verifier
-
-    async def execute_stream(
-        self,
-        *,
-        command: HostCommand,
-        work_order: WorkOrderV3,
-        execution_context: Mapping[str, Any],
-    ) -> AsyncIterator[dict[str, Any]]:
-        if not isinstance(work_order, WorkOrderV3):
-            raise GovernedInternalRuntimeError(
-                INTERNAL_RUNTIME_AUTHORITY_INVALID,
-                "internal worker requires the admitted WorkOrderV3",
-            )
-        route = _internal_delegate_route(execution_context.get("worker_route"))
-        if route.target_id != str(command.target_id or "").strip():
-            raise GovernedInternalRuntimeError(
-                INTERNAL_RUNTIME_AUTHORITY_INVALID,
-                "internal TaskNode delegate target differs from HostCommand target",
-            )
-        verified_grant = self._node_grants.verify(
-            grant_ref=str(execution_context.get("node_grant_ref") or "").strip(),
-            request_id=str(command.request_id or "").strip(),
-            session_id=str(command.session_id or "").strip(),
-            principal_id=str(command.principal_id or "").strip(),
-            graph_id=str(execution_context.get("graph_id") or "").strip(),
-            root_work_order_id=str(
-                execution_context.get("work_order_id") or ""
-            ).strip(),
-            graph_revision=execution_context.get("graph_revision"),
-            node_id=str(execution_context.get("node_id") or "").strip(),
-            route=route.kind,
-            target_id=str(route.target_id or "").strip(),
-            parent_grant_ref=str(
-                execution_context.get("parent_grant_ref") or ""
-            ).strip(),
-            attempt_id=str(execution_context.get("attempt_id") or "").strip(),
-            lease_id=str(execution_context.get("lease_id") or "").strip(),
-            lease_owner_id=str(
-                execution_context.get("lease_owner_id") or ""
-            ).strip(),
-            fencing_token=execution_context.get("fencing_token"),
-        )
-        verified_payload = (
-            verified_grant.to_dict()
-            if callable(getattr(verified_grant, "to_dict", None))
-            else dict(verified_grant)
-            if isinstance(verified_grant, Mapping)
-            else {}
-        )
-        if not verified_payload:
-            raise GovernedInternalRuntimeError(
-                INTERNAL_RUNTIME_AUTHORITY_INVALID,
-                "internal node grant verifier returned no durable projection",
-            )
-        legacy_order = work_order.to_agent_work_order()
-        if legacy_order.requires_write:
-            workspace_execution_authority = {
-                "command_id": str(command.command_id or "").strip(),
-                "principal_id": str(command.principal_id or "").strip(),
-                "root_work_order_id": str(
-                    execution_context.get("work_order_id") or ""
-                ).strip(),
-                "graph_id": str(execution_context.get("graph_id") or "").strip(),
-                "graph_revision": execution_context.get("graph_revision"),
-                "node_id": str(execution_context.get("node_id") or "").strip(),
-                "attempt_id": str(execution_context.get("attempt_id") or "").strip(),
-                "lease_id": str(execution_context.get("lease_id") or "").strip(),
-                "lease_owner_id": str(
-                    execution_context.get("lease_owner_id") or ""
-                ).strip(),
-                "fencing_token": execution_context.get("fencing_token"),
-            }
-            result = await asyncio.to_thread(
-                self._executor.execute,
-                legacy_order,
-                workspace_execution_authority=workspace_execution_authority,
-            )
-        else:
-            result = await asyncio.to_thread(self._executor.execute, legacy_order)
-        if not isinstance(result, Mapping):
-            raise GovernedInternalRuntimeError(
-                INTERNAL_RUNTIME_AUTHORITY_INVALID,
-                "Agent executor returned a non-mapping result",
-            )
-        durable = self._results.append(
-            command_id=command.command_id,
-            work_order_id=work_order.work_order_id,
-            result=dict(result),
-        )
-        status = str(durable["result_status"] or "").strip().upper()
-        payload = dict(durable["result"])
-        narrative = str(
-            payload.get("result_text")
-            or payload.get("summary")
-            or payload.get("detail")
-            or status
-        ).strip()
-        commit = {
-            "phase": "COMMIT",
-            "done": True,
-            "decision": "APPROVE" if status == "EXECUTED" else "REJECT",
-            "reason_code": None
-            if status == "EXECUTED"
-            else str(payload.get("reason_code") or f"AGENT_RESULT_{status}"),
-            "request_id": command.request_id,
-            "narrative": narrative,
-            "route_type": INTERNAL_AGENT_WORKER_ROUTE,
-            "target_id": command.target_id,
-            "receipt_ref": durable["receipt_ref"],
-            "result": payload,
-            "audit_refs": {
-                "path": "governed_task_runtime:internal_agent",
-                "executor": self._executor_name,
-                "command_id": command.command_id,
-                "attempt_id": str(execution_context.get("attempt_id") or ""),
-                "node_grant_ref": verified_payload["grant_ref"],
-                "result_receipt_ref": durable["receipt_ref"],
-            },
-        }
-        worker_budget = build_worker_budget_usage(
-            usage_id=stable_worker_usage_id(
-                graph_id=str(execution_context.get("graph_id") or ""),
-                graph_revision=int(execution_context.get("graph_revision") or 0),
-                node_id=str(execution_context.get("node_id") or ""),
-                attempt_id=str(execution_context.get("attempt_id") or ""),
-                route="delegate",
-            ),
-            observations=_trusted_agent_budget_observations(payload),
-            include_agent_tool_calls=True,
-            evidence_refs=(str(durable["receipt_ref"]),),
-        )
-        if worker_budget is not None:
-            commit["budget_usage"] = worker_budget.to_payload()
-        yield commit
-
-
 class _AgentWorkerResolver:
-    def __init__(self, *, canonical: _AgentWorker) -> None:
+    def __init__(self, *, canonical: Any) -> None:
         self._canonical = canonical
 
-    def resolve(self, *, executor: str, worker_route: str) -> _AgentWorker:
+    def resolve(self, *, executor: str, worker_route: str) -> Any:
         route = _internal_delegate_route(worker_route)
         if route.canonical != _INTERNAL_TASK_NODE_ROUTE:
             raise GovernedInternalRuntimeError(
@@ -314,141 +179,6 @@ class _AgentWorkerResolver:
             INTERNAL_RUNTIME_AUTHORITY_INVALID,
             f"unsupported internal executor: {executor}",
         )
-
-
-class _AgentProjectionReader:
-    def __init__(self, repository: AgentExecutionResultRepository) -> None:
-        self._repository = repository
-
-    def load(self, receipt_ref: str) -> Mapping[str, Any] | None:
-        durable = self._repository.get(receipt_ref)
-        if durable is None:
-            return None
-        return _public_projection(durable)
-
-
-class _AgentResultVerifier:
-    def __init__(self, repository: AgentExecutionResultRepository) -> None:
-        self._repository = repository
-
-    def verify(
-        self,
-        *,
-        command: HostCommand,
-        work_order: WorkOrderV3,
-        execution_context: Mapping[str, Any],
-        worker_commit: Mapping[str, Any],
-        evidence_refs: tuple[str, ...] | list[str],
-        **_: Any,
-    ) -> dict[str, Any]:
-        receipt_ref = str(worker_commit.get("receipt_ref") or "").strip()
-        durable = self._repository.get(receipt_ref) if receipt_ref else None
-        durable_result = dict(durable.get("result") or {}) if durable else {}
-        commit_result = dict(worker_commit.get("result") or {})
-        passed = bool(
-            durable
-            and durable["command_id"] == command.command_id
-            and durable["work_order_id"] == work_order.work_order_id
-            and durable_result == commit_result
-            and str(durable["result_status"]).upper() == "EXECUTED"
-            and str(worker_commit.get("decision") or "").strip().upper() == "APPROVE"
-        )
-        reason = None if passed else "INTERNAL_AGENT_DURABLE_RESULT_INVALID"
-        refs = list(evidence_refs)
-        return {
-            "schema_version": "Natsume.agent.verification_result.v1",
-            "verification_id": _stable_id("verify", command.command_id),
-            "work_order_id": work_order.work_order_id,
-            "task_graph_id": execution_context["graph_id"],
-            "task_node_id": execution_context["node_id"],
-            "attempt_id": execution_context["attempt_id"],
-            "required": True,
-            "status": "PASS" if passed else "FAIL",
-            "reason_code": reason,
-            "evidence_refs": refs,
-            "checks": [
-                {
-                    "check_id": "durable-agent-result",
-                    "status": "PASS" if passed else "FAIL",
-                    "reason_code": reason,
-                }
-            ],
-            "started_at_ms": command.created_at_ms,
-            "finished_at_ms": command.created_at_ms,
-        }
-
-
-class _AgentResultAcceptance:
-    def judge(
-        self,
-        *,
-        command: HostCommand,
-        work_order: WorkOrderV3,
-        execution_context: Mapping[str, Any],
-        worker_commit: Mapping[str, Any],
-        evidence_refs: tuple[str, ...] | list[str],
-        **_: Any,
-    ) -> dict[str, Any]:
-        result = dict(worker_commit.get("result") or {})
-        inner_acceptance = (
-            dict(result.get("acceptance") or {})
-            if isinstance(result.get("acceptance"), Mapping)
-            else {}
-        )
-        inner_decision = str(inner_acceptance.get("decision") or "").strip().upper()
-        review_required = bool(result.get("review_required")) or inner_decision in {
-            "REVIEW",
-            "RETRY",
-            "SPLIT",
-        }
-        inner_accepted = inner_decision in {"", "NOT_RUN", "ACCEPT"}
-        accepted = (
-            str(worker_commit.get("decision") or "").strip().upper() == "APPROVE"
-            and str(result.get("status") or "").strip().upper() == "EXECUTED"
-            and inner_accepted
-            and not review_required
-        )
-        if accepted:
-            reason = None
-        elif review_required:
-            reason = "INTERNAL_AGENT_REVIEW_REQUIRED"
-        elif inner_decision and not inner_accepted:
-            reason = f"INTERNAL_AGENT_ACCEPTANCE_{inner_decision}"
-        else:
-            reason = "INTERNAL_AGENT_ACCEPTANCE_FAILED"
-        refs = list(evidence_refs)
-        criteria_text = tuple(work_order.acceptance_criteria or ("result executed",))
-        return {
-            "schema_version": "Natsume.agent.acceptance_judgement.v1",
-            "judgement_id": _stable_id("accept", command.command_id),
-            "work_order_id": work_order.work_order_id,
-            "task_graph_id": execution_context["graph_id"],
-            "task_node_id": execution_context["node_id"],
-            "attempt_id": execution_context["attempt_id"],
-            "decision": "ACCEPT" if accepted else "REVIEW",
-            "reason_code": reason,
-            "evidence_refs": refs,
-            "criteria": [
-                {
-                    "criterion_id": _stable_id(
-                        "criterion",
-                        f"{command.command_id}:{index}:{criterion}",
-                    ),
-                    "criterion_text": criterion,
-                    "verdict": "PASS" if accepted else "FAIL",
-                    "evidence_refs": refs,
-                    "deterministic": True,
-                    "reason_code": reason,
-                    "critic_verdict": None,
-                }
-                for index, criterion in enumerate(criteria_text, start=1)
-            ],
-            "critic_candidate": None,
-            "started_at_ms": command.created_at_ms,
-            "finished_at_ms": command.created_at_ms,
-        }
-
-
 class GovernedInternalRuntime:
     """Lifecycle-owned application facade; HTTP routes receive it by closure."""
 
@@ -459,12 +189,49 @@ class GovernedInternalRuntime:
         runtime_router: CanonicalRuntimeRouter,
         command_repository: Any,
         governor_grants: DurableGovernorGrantResolver,
+        runtime_context_application: Any,
+        accepted_effect_runtime: InternalAcceptedEffectRuntime,
+        terminal_continuation_worker: Any | None = None,
+        startup_task_store: Any | None = None,
+        startup_artifact_store: Any | None = None,
+        startup_claim_result_store: Any | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
         self._runtime_router = runtime_router
         self._commands = command_repository
         self._governor_grants = governor_grants
+        if not callable(getattr(runtime_context_application, "freeze_request", None)) or (
+            not callable(getattr(runtime_context_application, "require_frozen", None))
+        ):
+            raise TypeError("Internal Runtime Context authority is required")
+        if not isinstance(accepted_effect_runtime, InternalAcceptedEffectRuntime):
+            raise TypeError(
+                "accepted_effect_runtime must be InternalAcceptedEffectRuntime"
+            )
+        self._runtime_context_application = runtime_context_application
+        self._accepted_effect_runtime = accepted_effect_runtime
+        if terminal_continuation_worker is not None:
+            for method_name in ("run_once", "start", "wake", "stop", "join"):
+                if not callable(getattr(terminal_continuation_worker, method_name, None)):
+                    raise TypeError(
+                        f"Internal artifact terminal worker lacks {method_name}"
+                    )
+        self._terminal_continuation_worker = terminal_continuation_worker
+        self._terminal_worker_quiesced = terminal_continuation_worker is None
+        self._startup_checkpoint_continuation = InternalStartupCheckpointContinuation(
+            task_store=startup_task_store,
+            artifact_store=startup_artifact_store,
+            claim_result_store=startup_claim_result_store,
+            command_repository=command_repository,
+            application=application,
+            accepted_effect_runtime=accepted_effect_runtime,
+            expected_node_route=_INTERNAL_TASK_NODE_ROUTE,
+            authority_invalid_code=INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            ingress_completion_failed_code=INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
+            deferred_code=INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED,
+            error_factory=GovernedInternalRuntimeError,
+        )
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
         self._condition = asyncio.Condition()
         self._active = False
@@ -472,6 +239,14 @@ class GovernedInternalRuntime:
         self._in_flight = 0
 
     async def activate(self) -> None:
+        worker = self._terminal_continuation_worker
+        if worker is not None:
+            await asyncio.to_thread(worker.run_once)
+        await self._recover_startup_sealed_checkpoints()
+        if worker is not None:
+            await asyncio.to_thread(worker.run_once)
+            worker.start()
+            self._terminal_worker_quiesced = False
         async with self._condition:
             self._active = True
             self._accepting = True
@@ -492,6 +267,12 @@ class GovernedInternalRuntime:
                 INTERNAL_RUNTIME_DRAIN_TIMEOUT,
                 f"internal runtime still has {self._in_flight} in-flight command(s)",
             ) from exc
+        worker = self._terminal_continuation_worker
+        if worker is not None and not self._terminal_worker_quiesced:
+            worker.stop()
+            await asyncio.to_thread(worker.join)
+            await asyncio.to_thread(worker.run_once)
+            self._terminal_worker_quiesced = True
 
     async def aclose(self) -> None:
         await self.close_admission()
@@ -528,6 +309,26 @@ class GovernedInternalRuntime:
                     exc.detail,
                 ) from exc
             legacy_order = _sanitize_work_order(work_order)
+            existing = self._commands.get_by_request(
+                surface=HostCommandSurface.INTERNAL.value,
+                request_id=str(request_id or "").strip(),
+            )
+            if existing is None:
+                frozen_runtime_context = self._freeze_runtime_context(
+                    work_order=legacy_order,
+                    ts_ms=int(ts_ms),
+                    command_authority=command_authority,
+                )
+            else:
+                existing_order = existing.get("work_order")
+                if not isinstance(existing_order, WorkOrderV3):
+                    raise GovernedInternalRuntimeError(
+                        INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                        "durable Internal replay lacks a typed WorkOrderV3",
+                    )
+                frozen_runtime_context = self._require_runtime_context(
+                    existing_order.input_pack
+                )
             candidate_command, candidate_order, candidate_graph = _build_contracts(
                 work_order=legacy_order,
                 request_id=request_id,
@@ -535,10 +336,7 @@ class GovernedInternalRuntime:
                 ts_ms=ts_ms,
                 governor_grant_ref=governor_grant_ref,
                 command_authority=command_authority,
-            )
-            existing = self._commands.get_by_request(
-                surface=candidate_command.surface.value,
-                request_id=candidate_command.request_id,
+                frozen_runtime_context=frozen_runtime_context,
             )
             if existing is None:
                 command = candidate_command
@@ -570,12 +368,79 @@ class GovernedInternalRuntime:
                 assignment=assignment,
                 graph=graph,
             ):
-                yield event
+                if bool(event.get("done")):
+                    yield await self._accepted_effect_runtime.dispatch(
+                        event,
+                        command=command,
+                    )
+                else:
+                    yield event
         finally:
+            self._wake_terminal_continuation()
             async with self._condition:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._condition.notify_all()
+
+    def _freeze_runtime_context(
+        self,
+        *,
+        work_order: AgentWorkOrder,
+        ts_ms: int,
+        command_authority: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        authority = dict(command_authority or {})
+        principal_id = _required_identifier(
+            authority.get("principal_id"),
+            field_name="principal_id",
+        )
+        try:
+            frozen = self._runtime_context_application.freeze_request(
+                request_body=None,
+                person_id=principal_id,
+                ts_ms=int(ts_ms),
+                intent_draft={
+                    "route": "delegate",
+                    "target_id": "agent_runtime",
+                    "task_kind": "INTERNAL",
+                    "task": work_order.objective,
+                },
+                governor_result={
+                    "risk_level": max(
+                        1,
+                        min(
+                            5,
+                            int(dict(work_order.metadata or {}).get("risk_level") or 1),
+                        ),
+                    )
+                },
+                command_authority=authority,
+                emotion_context=None,
+                emotion_snapshot=None,
+                bond_summary=None,
+            )
+            return self._require_runtime_context(frozen.to_dict())
+        except GovernedInternalRuntimeError:
+            raise
+        except Exception as exc:
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                "Internal Runtime Context could not be frozen",
+            ) from exc
+
+    def _require_runtime_context(
+        self,
+        value: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            frozen = self._runtime_context_application.require_frozen(value)
+            payload = frozen.to_dict()
+        except Exception as exc:
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                "durable Internal Runtime Context is missing or drifted",
+            ) from exc
+        return dict(payload)
 
     async def continue_review_admission(
         self,
@@ -615,8 +480,13 @@ class GovernedInternalRuntime:
                 graph=graph,
                 continuation_claim=dict(claim or {}),
             )
-            return await _review_continuation_result(operation)
+            result = await _review_continuation_result(operation)
+            return await self._accepted_effect_runtime.dispatch(
+                result,
+                command=command,
+            )
         finally:
+            self._wake_terminal_continuation()
             async with self._condition:
                 self._in_flight -= 1
                 if self._in_flight == 0:
@@ -658,6 +528,7 @@ class GovernedInternalRuntime:
                 reason_code=reason_code,
             )
         finally:
+            self._wake_terminal_continuation()
             async with self._condition:
                 self._in_flight -= 1
                 if self._in_flight == 0:
@@ -667,6 +538,37 @@ class GovernedInternalRuntime:
         return self._commands.get_by_request(
             surface=HostCommandSurface.INTERNAL.value,
             request_id=str(request_id or "").strip(),
+        )
+
+    @property
+    def startup_checkpoint_report(self) -> tuple[dict[str, Any], ...]:
+        return self._startup_checkpoint_continuation.report
+
+    def _wake_terminal_continuation(self) -> None:
+        worker = self._terminal_continuation_worker
+        if worker is not None:
+            worker.wake()
+
+    async def _recover_startup_sealed_checkpoints(
+        self,
+        *,
+        page_limit: int = 100,
+        scan_limit: int = 1_000,
+    ) -> tuple[dict[str, Any], ...]:
+        return await self._startup_checkpoint_continuation.recover(
+            page_limit=page_limit,
+            scan_limit=scan_limit,
+        )
+
+    async def exact_accepted_result_receipt(
+        self,
+        *,
+        command_id: str,
+        expected_receipt_ref: str,
+    ) -> str | None:
+        return await self._accepted_effect_runtime.exact_result_receipt(
+            command_id=command_id,
+            expected_receipt_ref=expected_receipt_ref,
         )
 
 
@@ -793,9 +695,6 @@ class InternalAgentCommandService:
             # receipt.  It is still not the terminal command result, so leave
             # the ingress claim open for the fenced Review continuation.
             return terminal
-        result_ref = str(
-            receipt.get("receipt_ref") or terminal.get("receipt_ref") or ""
-        ).strip()
         durable = self._runtime.existing_command(request_id=request_ref)
         durable_command = durable.get("command") if durable is not None else None
         if not isinstance(durable_command, HostCommand):
@@ -809,15 +708,31 @@ class InternalAgentCommandService:
                 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
                 "terminal internal command has no durable claim reference",
             )
-        if not result_ref:
-            raise GovernedInternalRuntimeError(
-                INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
-                "terminal internal command has no durable result reference",
-            )
+        effect_status = str(
+            terminal.get("internal_agent_effect_status") or ""
+        ).strip().upper()
+        result_ref = str(
+            terminal.get("internal_agent_result_receipt_ref") or ""
+        ).strip()
+        # ACCEPTED is the Task decision, not proof that its post-Acceptance
+        # result promotion committed.  PENDING/FAILED/NO_EFFECTS and missing
+        # attribution must leave Secure Ingress open for exact recovery.
+        if effect_status != "COMMITTED" or not result_ref:
+            return terminal
+        exact_result_ref = await self._runtime.exact_accepted_result_receipt(
+            command_id=durable_command.command_id,
+            expected_receipt_ref=result_ref,
+        )
+        if exact_result_ref != result_ref:
+            return {
+                **terminal,
+                "internal_agent_effect_status": "RECOVERY_REQUIRED",
+                "reason_code": "INTERNAL_AGENT_RESULT_ATTRIBUTION_MISSING",
+            }
         try:
             self._claim_results.complete_claim(
                 claim_ref=claim_ref,
-                result_ref=result_ref,
+                result_ref=exact_result_ref,
                 at_ms=int(ts_ms),
             )
         except Exception as exc:
@@ -838,6 +753,12 @@ def build_governed_internal_runtime(
     owner_id: str,
     canonical_executor: AgentRuntimeExecutor | None = None,
     cancellation_authority_verifier: Any | None = None,
+    runtime_context_application: Any | None = None,
+    action_preview_service: Any | None = None,
+    acceptance_effect_dispatcher: Any | None = None,
+    artifact_store: Any | None = None,
+    workspace_runtime: DurableWorkspaceRuntime | None = None,
+    claim_result_store: Any | None = None,
 ) -> GovernedInternalRuntime:
     review_store = getattr(task_runtime_container, "review_store", None)
     continuation_store = getattr(
@@ -858,22 +779,49 @@ def build_governed_internal_runtime(
         ledger=ledger,
         review_store=continuation_store,
     )
-    canonical_worker = _AgentWorker(
-        executor=canonical_executor or AgentRuntimeExecutor(),
-        result_repository=result_repository,
-        executor_name="canonical",
-        node_grant_verifier=node_grant_verifier,
+    projection_store = getattr(task_runtime_container, "worker_projection_store", None)
+    if projection_store is None:
+        raise TypeError("Internal Task Runtime worker projection store is required")
+    if not callable(getattr(runtime_context_application, "freeze_request", None)) or (
+        not callable(getattr(runtime_context_application, "require_frozen", None))
+    ):
+        raise TypeError("Internal Runtime Context authority is required")
+    if not callable(getattr(action_preview_service, "issue_receipt", None)) or (
+        not callable(getattr(action_preview_service, "require_execution", None))
+    ):
+        raise TypeError("Internal Action Preview authority is required")
+    canonical_worker = GovernedFrozenNodeWorker(
+        route_kind="delegate",
+        executor=InternalAgentProposalExecutor(
+            command_repository=task_runtime_container.command_repository,
+            executor=canonical_executor or AgentRuntimeExecutor(),
+        ),
+        node_grants=node_grant_verifier,
+        projections=projection_store,
+        action_preview_service=action_preview_service,
+        allowed_acceptance_effect_types=frozenset(
+            {INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE}
+        ),
+        preview_purpose="delegate.dispatch",
     )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
+        internal_agent_checkpoint_uow=(
+            task_runtime_container.internal_agent_checkpoint_uow
+        ),
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
         worker_resolver=_AgentWorkerResolver(canonical=canonical_worker),
-        verifier=_AgentResultVerifier(result_repository),
-        acceptance=_AgentResultAcceptance(),
-        projection_reader=_AgentProjectionReader(result_repository),
+        verifier=InternalAgentProposalVerifier(
+            projection_store=projection_store,
+        ),
+        acceptance=InternalAgentProposalAcceptance(
+            projection_store=projection_store,
+        ),
+        projection_reader=projection_store,
         review_runtime=TaskNodeReviewRuntime(review_store),
         node_grant_verifier=node_grant_verifier,
+        acceptance_effects_enabled=True,
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",
@@ -887,11 +835,38 @@ def build_governed_internal_runtime(
         node_grant_service=node_grant_service,
         cancellation_authority_verifier=cancellation_authority_verifier,
     )
+    accepted_effect_runtime = InternalAcceptedEffectRuntime(
+        dispatcher=acceptance_effect_dispatcher,
+        result_repository=result_repository,
+    )
+    terminal_worker: InternalArtifactTerminalContinuationWorker | None = None
+    if artifact_store is not None or workspace_runtime is not None:
+        if artifact_store is None or workspace_runtime is None:
+            raise TypeError(
+                "Internal artifact terminal continuation requires both store and Workspace"
+            )
+        terminal_worker = InternalArtifactTerminalContinuationWorker(
+            reconciler=InternalArtifactTerminalReconciler(
+                artifact_store=artifact_store,
+                workspace_runtime=workspace_runtime,
+                task_store=task_runtime_container.task_store,
+                command_repository=task_runtime_container.command_repository,
+                projection_store=projection_store,
+            )
+        )
     return GovernedInternalRuntime(
         application=application,
         runtime_router=runtime_router,
         command_repository=task_runtime_container.command_repository,
         governor_grants=DurableGovernorGrantResolver(ledger),
+        runtime_context_application=runtime_context_application,
+        accepted_effect_runtime=accepted_effect_runtime,
+        terminal_continuation_worker=terminal_worker,
+        startup_task_store=(
+            task_runtime_container.task_store if artifact_store is not None else None
+        ),
+        startup_artifact_store=artifact_store,
+        startup_claim_result_store=claim_result_store,
     )
 
 
@@ -903,6 +878,7 @@ def _build_contracts(
     ts_ms: int,
     governor_grant_ref: str,
     command_authority: Mapping[str, Any],
+    frozen_runtime_context: Mapping[str, Any],
 ) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
     authority = dict(command_authority or {})
     principal_id = _required_identifier(
@@ -953,8 +929,8 @@ def _build_contracts(
         }
     )
     output_contract = {
-        "type": "durable_agent_result",
-        "required": ["decision", "result", "receipt_ref"],
+        "type": "internal_agent_result_proposal",
+        "required": ["acceptance_effect_intents", "receipt_ref"],
     }
     review_policy, review_ref = _canonical_review_policy(
         work_order,
@@ -979,6 +955,14 @@ def _build_contracts(
         },
     )
     budget_policy.validate()
+    context_payload = dict(frozen_runtime_context or {})
+    overlap = sorted(set(work_order.input_pack).intersection(context_payload))
+    if overlap:
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            "caller Internal input overlaps frozen Runtime Context: "
+            + ",".join(overlap),
+        )
     canonical_order = WorkOrderV3(
         work_order_id=work_order.work_order_id,
         domain=work_order.domain,
@@ -995,7 +979,10 @@ def _build_contracts(
             if work_order.requires_write
             else deepcopy(dict(work_order.workspace or {}))
         ),
-        input_pack=deepcopy(dict(work_order.input_pack or {})),
+        input_pack={
+            **deepcopy(dict(work_order.input_pack or {})),
+            **deepcopy(context_payload),
+        },
         allowed_actions=tuple(work_order.allowed_actions or ()),
         forbidden_actions=tuple(work_order.forbidden_actions or ()),
         acceptance_criteria=tuple(
@@ -1199,23 +1186,6 @@ def _internal_delegate_route(value: object) -> GovernedWorkerRoute:
     return route
 
 
-def _trusted_agent_budget_observations(value: Any) -> Mapping[str, Any]:
-    result = value if isinstance(value, Mapping) else {}
-    metadata = result.get("metadata") if isinstance(result, Mapping) else None
-    if not isinstance(metadata, Mapping):
-        return {}
-    if str(metadata.get("execution_authority") or "").strip() != (
-        "canonical_agent_executor"
-    ):
-        return {}
-    return {
-        "model_attempts": list(metadata.get("model_attempts") or []),
-        "trace": dict(metadata.get("trace") or {})
-        if isinstance(metadata.get("trace"), Mapping)
-        else {},
-    }
-
-
 def _safe_value(value: Any, *, path: str) -> Any:
     if isinstance(value, Mapping):
         safe: dict[str, Any] = {}
@@ -1279,33 +1249,6 @@ async def _review_continuation_result(operation: Any) -> dict[str, Any]:
             "Review continuation emitted no durable Internal terminal result",
         )
     return terminal
-
-
-def _public_projection(durable: Mapping[str, Any]) -> dict[str, Any]:
-    result = dict(durable.get("result") or {})
-    status = str(durable.get("result_status") or "").strip().upper()
-    return {
-        "phase": "COMMIT",
-        "done": True,
-        "decision": "APPROVE" if status == "EXECUTED" else "REJECT",
-        "reason_code": None
-        if status == "EXECUTED"
-        else str(result.get("reason_code") or f"AGENT_RESULT_{status}"),
-        "narrative": str(
-            result.get("result_text")
-            or result.get("summary")
-            or result.get("detail")
-            or status
-        ).strip(),
-        "route_type": INTERNAL_AGENT_WORKER_ROUTE,
-        "target_id": "agent_runtime",
-        "receipt_ref": str(durable.get("receipt_ref") or ""),
-        "result": result,
-        "audit_refs": {
-            "path": "governed_task_runtime:durable_agent_projection",
-            "result_receipt_ref": str(durable.get("receipt_ref") or ""),
-        },
-    }
 
 
 def _required_identifier(value: Any, *, field_name: str) -> str:

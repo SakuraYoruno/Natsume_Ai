@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
 from typing import Any
 
+from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
 from natsume_contracts.task.v1 import HostCommand
 
 from .admission import AdmittedExecution
@@ -20,6 +22,7 @@ class WorkerBudgetUsageCheckpointState(str, Enum):
     """Classification of the one worker settlement bound to a checkpoint."""
 
     EXACT_ACCEPTED = "EXACT_ACCEPTED"
+    EXACT_REJECTED = "EXACT_REJECTED"
     MISSING = "MISSING"
     CONFLICT = "CONFLICT"
 
@@ -63,18 +66,27 @@ def classify_worker_budget_usage(
             "",
         )
     payload = worker_commit.get("budget_usage")
-    if not isinstance(payload, Mapping):
-        _blocked("committed checkpoint projection lacks worker BudgetUsage identity")
-    try:
-        typed_usage = WorkerBudgetUsage.from_payload(payload)
-    except WorkerBudgetUsageError as exc:
-        raise GovernedRuntimeError(
-            GOVERNED_OPERATION_RECOVERY_REQUIRED,
-            "committed checkpoint projection has invalid worker BudgetUsage",
-        ) from exc
-    expected_usage_id = typed_usage.usage_id
-    expected_kind = _typed_worker_charge_kind(typed_usage)
-    expected_delta = typed_usage.to_budget_amount(elapsed_ms=0).to_dict()
+    if payload is None:
+        expected_usage_id = _worker_elapsed_usage_id(
+            budget_id=budget_id,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        )
+        expected_kind = "WORKER_ELAPSED"
+        expected_delta = BudgetAmount().to_dict()
+    else:
+        if not isinstance(payload, Mapping):
+            _blocked("committed checkpoint projection has malformed worker BudgetUsage")
+        try:
+            typed_usage = WorkerBudgetUsage.from_payload(payload)
+        except WorkerBudgetUsageError as exc:
+            raise GovernedRuntimeError(
+                GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                "committed checkpoint projection has invalid worker BudgetUsage",
+            ) from exc
+        expected_usage_id = typed_usage.usage_id
+        expected_kind = _typed_worker_charge_kind(typed_usage)
+        expected_delta = typed_usage.to_budget_amount(elapsed_ms=0).to_dict()
 
     worker_rows: list[dict[str, Any]] = []
     expected_id_rows: list[dict[str, Any]] = []
@@ -120,10 +132,30 @@ def classify_worker_budget_usage(
             WorkerBudgetUsageCheckpointState.CONFLICT,
             expected_usage_id,
         )
+    if candidate.get("accepted") is True:
+        return WorkerBudgetUsageCheckpoint(
+            WorkerBudgetUsageCheckpointState.EXACT_ACCEPTED,
+            expected_usage_id,
+            candidate,
+        )
+    if (
+        candidate.get("accepted") is False
+        and _text(candidate.get("reason_code")) == "TASK_STORE_BUDGET_EXCEEDED"
+        and isinstance(candidate.get("exceeded_dimensions"), list)
+        and bool(candidate.get("exceeded_dimensions"))
+        and type(candidate.get("reservation_version_before")) is int
+        and type(candidate.get("reservation_version_after")) is int
+        and int(candidate["reservation_version_after"])
+        == int(candidate["reservation_version_before"]) + 1
+    ):
+        return WorkerBudgetUsageCheckpoint(
+            WorkerBudgetUsageCheckpointState.EXACT_REJECTED,
+            expected_usage_id,
+            candidate,
+        )
     return WorkerBudgetUsageCheckpoint(
-        WorkerBudgetUsageCheckpointState.EXACT_ACCEPTED,
+        WorkerBudgetUsageCheckpointState.CONFLICT,
         expected_usage_id,
-        candidate,
     )
 
 
@@ -133,6 +165,7 @@ def assert_active_checkpoint_budget(
     graph_id: str,
     graph_revision: int,
     budget_id: str,
+    allowed_statuses: frozenset[str] = frozenset({"ACTIVE"}),
 ) -> dict[str, Any]:
     """Require one ACTIVE graph-scoped BudgetReservation in the snapshot."""
 
@@ -150,11 +183,11 @@ def assert_active_checkpoint_budget(
         or not _exact_int(record.get("graph_revision"), graph_revision)
         or record.get("node_id") is not None
         or record.get("attempt_id") is not None
-        or _status(record) != "ACTIVE"
+        or _status(record) not in allowed_statuses
         or type(version) is not int
         or version < 1
     ):
-        _blocked("committed checkpoint graph BudgetReservation is not exact and ACTIVE")
+        _blocked("committed checkpoint graph BudgetReservation is not exact or continuable")
     return record
 
 
@@ -189,6 +222,21 @@ def _typed_worker_charge_kind(usage: WorkerBudgetUsage) -> str:
     )
 
 
+def _worker_elapsed_usage_id(
+    *,
+    budget_id: str,
+    node_id: str | None,
+    attempt_id: str,
+) -> str:
+    node_ref = _text(node_id)
+    if not node_ref:
+        _blocked("committed checkpoint lacks node identity for worker elapsed usage")
+    digest = hashlib.sha256(
+        f"{budget_id}\n{node_ref}\n{attempt_id}\nworker-elapsed".encode("utf-8")
+    ).hexdigest()
+    return f"budget-usage://{digest}"
+
+
 def _exact_worker_usage_record(
     record: Mapping[str, Any],
     *,
@@ -220,7 +268,7 @@ def _exact_worker_usage_record(
         or _text(record.get("budget_id")) != budget_id
         or _text(record.get("attempt_id")) != attempt_id
         or _text(record.get("charge_kind")).upper() != expected_kind
-        or record.get("accepted") is not True
+        or type(record.get("accepted")) is not bool
     ):
         return False
     if graph_id is not None and _text(record.get("graph_id")) != graph_id:

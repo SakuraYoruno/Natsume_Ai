@@ -18,6 +18,9 @@ from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
     WorkerProjectionStore,
 )
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
 from host_brain.task_runtime import GovernedRuntimeError, GovernedTaskCoordinator
 from host_brain.task_runtime.errors import (
     GOVERNED_ADMISSION_INVALID,
@@ -190,8 +193,13 @@ def _b5_runtime(
     task_store: DurableTaskStore | None = None,
     atomic_graph_success_enabled: bool = True,
 ) -> GovernedTaskCoordinator:
+    store = task_store or DurableTaskStore(db_path, clock=lambda: NOW)
     return GovernedTaskCoordinator(
-        task_store=task_store or DurableTaskStore(db_path, clock=lambda: NOW),
+        task_store=store,
+        internal_agent_checkpoint_uow=DurableInternalAgentCheckpointUnitOfWork(
+            task_store=store,
+            worker_projection_store=projection_store,
+        ),
         outbox_publisher=_Publisher(),
         outbox_factory=OutboxMessage,
         worker_resolver=worker_resolver,
@@ -324,6 +332,8 @@ def _assert_b5_terminal_assets(
     )
     assert {effect["effect_type"] for effect in effects} == {
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
     }
     decision = store.get_latest_parallel_success_decision("graph-gr03a", 1)
@@ -502,7 +512,7 @@ async def test_b5_store_response_loss_exactly_replays_outer_success(
         ).fetchone() == (1,)
         assert conn.execute(
             "SELECT COUNT(*) FROM task_runtime_acceptance_effect_intent"
-        ).fetchone() == (2,)
+        ).fetchone() == (4,)
         assert conn.execute(
             """
             SELECT COUNT(*) FROM task_runtime_outbox

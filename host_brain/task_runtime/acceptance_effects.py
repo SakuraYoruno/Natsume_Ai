@@ -19,7 +19,13 @@ from host_brain.persistence.task_repository import (
     AcceptanceEffectCommitScope,
     AcceptanceEffectIntentSpec,
 )
-from natsume_contracts.task import HostCommand
+from host_brain.contracts.conversation_acceptance_effects import (
+    LIFE_CONVERSATION_PROJECTION_SCHEMA_V1,
+    PREFERENCE_SIGNAL_SCHEMA_V1,
+    conversation_life_command_id,
+    preference_operation_id,
+)
+from natsume_contracts.task import HostCommand, HostCommandSurface
 from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
     context_pack_digest_from_work_order,
@@ -43,6 +49,20 @@ _SAFE_TOKEN_METADATA = re.compile(
     r"(?:first_token|time_to_first_token|stream_after_first_token)(?:_latency)?_ms"
     r")$",
     re.IGNORECASE,
+)
+_OPERATOR_SYS_MODE_TARGET = "operator_sys_mode_switch"
+_OPERATOR_SYS_MODE_EFFECT = "host.sys_mode_transition"
+_SCHEDULER_OPERATION_EFFECT = "scheduler.operation.execute"
+_SCHEDULER_PLAN_SCHEMA = "Natsume.scheduler.operation_plan.v1"
+_SCHEDULER_EFFECT_SCHEMA = "Natsume.scheduler.accepted_operation.v1"
+_INTERNAL_RESULT_COMMIT_EFFECT = "internal.agent.result_commit"
+_INTERNAL_PROPOSAL_SCHEMA = "Natsume.internal.agent_result_proposal.v1"
+_INTERNAL_EFFECT_SCHEMA = "Natsume.internal.accepted_agent_result.v1"
+_SYS_MODES = frozenset(
+    {"normal", "sleep", "gaming", "focus", "maintenance", "locked"}
+)
+_SYS_MODE_SOURCES = frozenset(
+    {"manual", "auto_gaming", "auto_idle", "auto_wakeup", "auto_schedule", "skill"}
 )
 
 
@@ -73,6 +93,36 @@ def compile_graph_acceptance_effects(
         raise AcceptanceEffectCompileError("worker projection request_id drifted")
 
     pack = _json_mapping(getattr(work_order, "input_pack", {}), field_name="work_order.input_pack")
+    if command.surface is HostCommandSurface.SCHEDULER or _proposes_scheduler_operation(
+        commit
+    ):
+        return _compile_scheduler_operation(
+            command=command,
+            work_order=work_order,
+            node_id=node_ref,
+            attempt_id=attempt_ref,
+            commit=commit,
+            pack=pack,
+        )
+    if command.surface is HostCommandSurface.INTERNAL or _proposes_internal_result_commit(
+        commit
+    ):
+        return _compile_internal_result_commit(
+            command=command,
+            work_order=work_order,
+            node_id=node_ref,
+            attempt_id=attempt_ref,
+            commit=commit,
+        )
+    if command.surface is HostCommandSurface.OPERATOR:
+        return _compile_operator_effects(
+            command=command,
+            work_order=work_order,
+            node_id=node_ref,
+            attempt_id=attempt_ref,
+            commit=commit,
+            pack=pack,
+        )
     surface_message = str(
         pack.get("surface_user_message")
         or pack.get("user_message")
@@ -127,6 +177,28 @@ def compile_graph_acceptance_effects(
     }
     payloads: list[tuple[str, Mapping[str, Any]]] = [
         ("conversation.user_turn", user_turn),
+        (
+            "conversation.preference_signal",
+            {
+                "schema_version": PREFERENCE_SIGNAL_SCHEMA_V1,
+                "operation_id": preference_operation_id(
+                    graph_id=command.graph_id,
+                    graph_revision=command.graph_revision,
+                    node_id=node_ref,
+                    attempt_id=attempt_ref,
+                    request_id=command.request_id,
+                ),
+                **user_turn,
+            },
+        ),
+        (
+            "life.conversation_turn_recorded",
+            {
+                "schema_version": LIFE_CONVERSATION_PROJECTION_SCHEMA_V1,
+                "command_id": conversation_life_command_id(command.request_id),
+                **user_turn,
+            },
+        ),
         ("life.foreground_completed", foreground),
     ]
     reply_channel = str(delivery_context.get("reply_channel") or "").strip()
@@ -177,6 +249,408 @@ def compile_graph_acceptance_effects(
             attempt_id=attempt_ref,
         )
         for effect_type, payload in payloads
+    )
+
+
+def _proposes_scheduler_operation(commit: Mapping[str, Any]) -> bool:
+    raw = commit.get("acceptance_effect_intents")
+    return bool(
+        isinstance(raw, Sequence)
+        and not isinstance(raw, (str, bytes, bytearray))
+        and any(
+            isinstance(item, Mapping)
+            and str(item.get("effect_type") or "").strip()
+            == _SCHEDULER_OPERATION_EFFECT
+            for item in raw
+        )
+    )
+
+
+def _proposes_internal_result_commit(commit: Mapping[str, Any]) -> bool:
+    raw = commit.get("acceptance_effect_intents")
+    return bool(
+        isinstance(raw, Sequence)
+        and not isinstance(raw, (str, bytes, bytearray))
+        and any(
+            isinstance(item, Mapping)
+            and str(item.get("effect_type") or "").strip()
+            == _INTERNAL_RESULT_COMMIT_EFFECT
+            for item in raw
+        )
+    )
+
+
+def _compile_internal_result_commit(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    attempt_id: str,
+    commit: Mapping[str, Any],
+) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    if command.surface is not HostCommandSurface.INTERNAL:
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result commit requires Internal ingress"
+        )
+    if command.route_type != "delegate" or command.target_id != "agent_runtime":
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result commit requires delegate:agent_runtime"
+        )
+    raw = commit.get("acceptance_effect_intents")
+    if (
+        not isinstance(raw, Sequence)
+        or isinstance(raw, (str, bytes, bytearray))
+        or len(raw) != 1
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent worker must propose exactly one result commit"
+        )
+    descriptor = _json_mapping(
+        raw[0],
+        field_name="Internal Agent result descriptor",
+    )
+    if set(descriptor) != {"effect_type", "commit_scope", "payload"} or (
+        descriptor.get("effect_type") != _INTERNAL_RESULT_COMMIT_EFFECT
+        or str(descriptor.get("commit_scope") or "").strip().upper() != "NODE"
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent worker proposed an unsupported result effect"
+        )
+    proposed = _json_mapping(
+        descriptor.get("payload"),
+        field_name="Internal Agent result proposal",
+    )
+    _reject_worker_authority(proposed)
+    required = {
+        "schema_version",
+        "work_order_id",
+        "target_id",
+        "operation_fingerprint",
+        "result_digest",
+        "result",
+    }
+    if set(proposed) != required or proposed.get("schema_version") != (
+        _INTERNAL_PROPOSAL_SCHEMA
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result proposal fields drifted"
+        )
+    result = _json_mapping(
+        proposed.get("result"),
+        field_name="Internal Agent proposed result",
+    )
+    result_digest = "sha256:" + hashlib.sha256(
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    work_order_id = _required(
+        getattr(work_order, "work_order_id", ""),
+        "work_order.work_order_id",
+    )
+    operation_fingerprint = _required(
+        getattr(work_order, "operation_fingerprint", ""),
+        "work_order.operation_fingerprint",
+    )
+    worker_projection_ref = _required(
+        commit.get("receipt_ref"),
+        "worker_commit.receipt_ref",
+    )
+    if (
+        not worker_projection_ref.startswith("worker-projection://")
+        or proposed.get("work_order_id") != work_order_id
+        or proposed.get("target_id") != "agent_runtime"
+        or proposed.get("operation_fingerprint") != operation_fingerprint
+        or operation_fingerprint != command.operation_fingerprint
+        or proposed.get("result_digest") != result_digest
+        or str(result.get("status") or "").strip().upper() != "EXECUTED"
+        or str(getattr(work_order, "task_graph_id", "") or "")
+        != command.graph_id
+        or int(getattr(work_order, "graph_revision", 0) or 0)
+        != command.graph_revision
+        or str(getattr(work_order, "task_node_id", "") or "") != node_id
+    ):
+        raise AcceptanceEffectCompileError(
+            "Internal Agent result proposal differs from canonical admission"
+        )
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_id,
+        worker_commit=commit,
+    )
+    if preview_context is None:
+        raise AcceptanceEffectCompileError(
+            "governed Internal Agent result has no Runtime Context preview binding"
+        )
+    payload = {
+        "schema_version": _INTERNAL_EFFECT_SCHEMA,
+        "command_id": command.command_id,
+        "request_id": command.request_id,
+        "work_order_id": work_order_id,
+        "graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "node_id": node_id,
+        "attempt_id": attempt_id,
+        "target_id": "agent_runtime",
+        "operation_fingerprint": operation_fingerprint,
+        "worker_projection_ref": worker_projection_ref,
+        "result_digest": result_digest,
+        "_action_preview_context": preview_context,
+    }
+    return (
+        _spec(
+            effect_type=_INTERNAL_RESULT_COMMIT_EFFECT,
+            payload=payload,
+            command=command,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        ),
+    )
+
+
+def _compile_scheduler_operation(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    attempt_id: str,
+    commit: Mapping[str, Any],
+    pack: Mapping[str, Any],
+) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    if command.surface not in {
+        HostCommandSurface.SCHEDULER,
+        HostCommandSurface.OPERATOR,
+    }:
+        raise AcceptanceEffectCompileError(
+            "Scheduler operation may only originate from Scheduler or Operator ingress"
+        )
+    if command.route_type != "delegate" or not str(command.target_id or "").strip():
+        raise AcceptanceEffectCompileError(
+            "Scheduler operation requires one frozen delegate target"
+        )
+    raw = commit.get("acceptance_effect_intents")
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        raise AcceptanceEffectCompileError(
+            "Scheduler worker must propose exactly one operation effect"
+        )
+    if len(raw) != 1:
+        raise AcceptanceEffectCompileError(
+            "Scheduler worker must propose exactly one operation effect"
+        )
+    descriptor = _json_mapping(
+        raw[0],
+        field_name="Scheduler worker effect descriptor",
+    )
+    if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
+        raise AcceptanceEffectCompileError(
+            "Scheduler descriptor may contain only effect_type, commit_scope and payload"
+        )
+    if (
+        descriptor.get("effect_type") != _SCHEDULER_OPERATION_EFFECT
+        or str(descriptor.get("commit_scope") or "").strip().upper() != "NODE"
+    ):
+        raise AcceptanceEffectCompileError(
+            "Scheduler worker proposed an unsupported operation effect"
+        )
+    proposed = _json_mapping(
+        descriptor.get("payload"),
+        field_name="Scheduler operation plan",
+    )
+    _reject_worker_authority(proposed)
+    required_plan_fields = {
+        "schema_version",
+        "occurrence_id",
+        "definition_ref",
+        "definition_revision",
+        "worker_key",
+        "operation_fingerprint",
+    }
+    if set(proposed) != required_plan_fields or proposed.get("schema_version") != (
+        _SCHEDULER_PLAN_SCHEMA
+    ):
+        raise AcceptanceEffectCompileError("Scheduler operation plan fields drifted")
+    occurrence_id = _required(pack.get("occurrence_id"), "input_pack.occurrence_id")
+    definition_ref = _required(pack.get("definition_ref"), "input_pack.definition_ref")
+    worker_key = _required(command.target_id, "command.target_id").lower()
+    metadata = _json_mapping(
+        getattr(work_order, "metadata", {}),
+        field_name="work_order.metadata",
+    )
+    try:
+        definition_revision = int(proposed.get("definition_revision"))
+    except (TypeError, ValueError) as exc:
+        raise AcceptanceEffectCompileError(
+            "Scheduler definition_revision must be a positive integer"
+        ) from exc
+    operation_fingerprint = _required(
+        proposed.get("operation_fingerprint"),
+        "Scheduler operation_fingerprint",
+    )
+    if (
+        proposed.get("occurrence_id") != occurrence_id
+        or proposed.get("definition_ref") != definition_ref
+        or definition_revision < 1
+        or str(proposed.get("worker_key") or "").strip().lower() != worker_key
+        or command.input_ref != occurrence_id
+        or str(metadata.get("worker_key") or "").strip().lower() != worker_key
+        or operation_fingerprint
+        != str(getattr(work_order, "operation_fingerprint", "") or "").strip()
+        or str(getattr(work_order, "task_graph_id", "") or "").strip()
+        != command.graph_id
+        or int(getattr(work_order, "graph_revision", 0) or 0)
+        != command.graph_revision
+    ):
+        raise AcceptanceEffectCompileError(
+            "Scheduler operation plan differs from canonical admission"
+        )
+    if command.surface is HostCommandSurface.OPERATOR and (
+        str(metadata.get("operator_command_id") or "").strip()
+        != "scheduler.task.trigger"
+        or str(metadata.get("command_surface") or "").strip()
+        != HostCommandSurface.OPERATOR.value
+    ):
+        raise AcceptanceEffectCompileError(
+            "Operator Scheduler effect lacks scheduler.task.trigger authority"
+        )
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_id,
+        worker_commit=commit,
+    )
+    if preview_context is None:
+        raise AcceptanceEffectCompileError(
+            "governed Scheduler effect has no Runtime Context preview binding"
+        )
+    payload = {
+        "schema_version": _SCHEDULER_EFFECT_SCHEMA,
+        "occurrence_id": occurrence_id,
+        "definition_ref": definition_ref,
+        "definition_revision": definition_revision,
+        "worker_key": worker_key,
+        "operation_fingerprint": operation_fingerprint,
+        "command_id": command.command_id,
+        "request_id": command.request_id,
+        "work_order_id": str(getattr(work_order, "work_order_id", "") or ""),
+        "graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "node_id": node_id,
+        "attempt_id": attempt_id,
+        "_action_preview_context": preview_context,
+    }
+    return (
+        _spec(
+            effect_type=_SCHEDULER_OPERATION_EFFECT,
+            payload=payload,
+            command=command,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        ),
+    )
+
+
+def _compile_operator_effects(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    attempt_id: str,
+    commit: Mapping[str, Any],
+    pack: Mapping[str, Any],
+) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    if command.route_type != "delegate" or command.target_id != _OPERATOR_SYS_MODE_TARGET:
+        raise AcceptanceEffectCompileError("unsupported governed Operator route")
+    raw = commit.get("acceptance_effect_intents")
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        raise AcceptanceEffectCompileError("Operator worker must propose one effect")
+    if len(raw) != 1:
+        raise AcceptanceEffectCompileError("Operator worker must propose exactly one effect")
+    descriptor = _json_mapping(raw[0], field_name="Operator worker effect descriptor")
+    if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
+        raise AcceptanceEffectCompileError(
+            "Operator descriptor may contain only effect_type, commit_scope and payload"
+        )
+    if (
+        descriptor.get("effect_type") != _OPERATOR_SYS_MODE_EFFECT
+        or str(descriptor.get("commit_scope") or "").strip().upper() != "NODE"
+    ):
+        raise AcceptanceEffectCompileError("Operator worker proposed an unsupported effect")
+    payload = _json_mapping(
+        descriptor.get("payload"),
+        field_name="Operator worker effect payload",
+    )
+    _reject_worker_authority(payload)
+    required_keys = {
+        "operator_command_id",
+        "request_id",
+        "target_mode",
+        "source",
+        "reason",
+        "event_id",
+        "runtime_scope_id",
+    }
+    if set(payload) != required_keys:
+        raise AcceptanceEffectCompileError("Operator effect payload fields drifted")
+    target_mode = str(payload.get("target_mode") or "").strip().lower()
+    source = str(payload.get("source") or "").strip().lower()
+    reason = str(payload.get("reason") or "").strip()
+    runtime_scope_id = str(payload.get("runtime_scope_id") or "").strip()
+    expected_event_id = (
+        "obs-sys-mode:"
+        + hashlib.sha256(command.request_id.encode("utf-8")).hexdigest()
+    )
+    if (
+        payload.get("operator_command_id") != "sys_mode.switch"
+        or payload.get("request_id") != command.request_id
+        or target_mode not in _SYS_MODES
+        or source not in _SYS_MODE_SOURCES
+        or not reason
+        or payload.get("event_id") != expected_event_id
+        or not runtime_scope_id
+        or len(runtime_scope_id.encode("utf-8")) > 512
+        or any(
+            ord(character) < 32 or ord(character) == 127
+            for character in runtime_scope_id
+        )
+    ):
+        raise AcceptanceEffectCompileError("Operator effect identity or value is invalid")
+    intent = _json_mapping(pack.get("intent_draft"), field_name="intent_draft")
+    args = _json_mapping(intent.get("args"), field_name="intent_draft.args")
+    if (
+        str(intent.get("action") or "").strip()
+        != "operator_sys_mode_transition"
+        or str(intent.get("target") or "").strip().lower() != "system"
+        or str(intent.get("route") or "").strip().lower() != "delegate"
+        or str(intent.get("target_id") or "").strip() != _OPERATOR_SYS_MODE_TARGET
+        or str(args.get("operator_command_id") or "").strip() != "sys_mode.switch"
+        or str(args.get("target_mode") or "").strip().lower() != target_mode
+        or str(args.get("source") or "").strip().lower() != source
+        or str(args.get("reason") or "").strip() != reason
+    ):
+        raise AcceptanceEffectCompileError("Operator effect differs from frozen intent")
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_id,
+        worker_commit=commit,
+    )
+    if preview_context is None:
+        raise AcceptanceEffectCompileError(
+            "governed Operator effect has no Runtime Context preview binding"
+        )
+    return (
+        _spec(
+            effect_type=_OPERATOR_SYS_MODE_EFFECT,
+            payload={**payload, "_action_preview_context": preview_context},
+            command=command,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        ),
     )
 
 

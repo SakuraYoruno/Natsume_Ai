@@ -25,7 +25,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from host_brain.contracts.host_hard_state import HOST_MODE_TRANSITIONS
+from host_brain.contracts.host_hard_state import (
+    HOST_MODE_TRANSITIONS,
+    HostHardStateCommitV1,
+)
 from host_brain.core.ids import now_ms, new_event_id
 from host_brain.core.metabolism import (
     ALLOWED_SYS_MODES,
@@ -129,6 +132,9 @@ class ModeTransitionService:
         get_hard_state: Callable[[], HardState],
         set_sys_mode: Callable[..., dict[str, Any]],
         history_provider: Callable[..., list[dict[str, Any]]] | None = None,
+        exact_history_provider: (
+            Callable[..., HostHardStateCommitV1 | None] | None
+        ) = None,
         ledger: Any | None = None,
         auto_rules: dict[str, bool] | None = None,
         idle_threshold_ms: int = DEFAULT_IDLE_THRESHOLD_MS,
@@ -137,6 +143,7 @@ class ModeTransitionService:
         self._set_sys_mode = set_sys_mode
         self._ledger = ledger
         self._history_provider = history_provider
+        self._exact_history_provider = exact_history_provider
         self._auto_rules = dict(DEFAULT_AUTO_RULES)
         if auto_rules:
             self._auto_rules.update(auto_rules)
@@ -426,6 +433,29 @@ class ModeTransitionService:
             key=lambda item: int(item.get("ts_ms") or 0),
             reverse=True,
         )[: max(0, int(limit))]
+
+    def reopen_transition_commit(
+        self,
+        *,
+        event_id: str,
+        target_mode: str,
+        source: str,
+        reason: str,
+    ) -> HostHardStateCommitV1 | None:
+        """Reopen an exact durable transition without executing it again."""
+
+        provider = self._exact_history_provider
+        if provider is None:
+            raise RuntimeError("HARD_STATE_EXACT_HISTORY_UNAVAILABLE")
+        commit = provider(
+            event_id=event_id,
+            target_mode=target_mode,
+            source=source,
+            reason=reason,
+        )
+        if commit is not None and not isinstance(commit, HostHardStateCommitV1):
+            raise RuntimeError("HARD_STATE_EXACT_HISTORY_INVALID")
+        return commit
 
     def update_auto_rules(self, rules: dict[str, bool]) -> dict[str, bool]:
         """更新自动切换规则开关。"""

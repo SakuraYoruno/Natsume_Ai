@@ -52,6 +52,9 @@ from host_brain.persistence.task_operation_reconciliation_store import (
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
 )
+from host_brain.persistence.task_internal_agent_checkpoint_store import (
+    TaskInternalAgentCheckpointStoreMixin,
+)
 from host_brain.persistence.task_effect_reconciliation_store import (
     TaskEffectReconciliationStoreMixin,
     build_effect_reconciliation_attestation_binding,
@@ -163,6 +166,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskRetryMutationStoreMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
+        TaskInternalAgentCheckpointStoreMixin,
         TaskOperationCheckpointStoreMixin,
         TaskOperationReconciliationStoreMixin,
         TaskEffectReconciliationStoreMixin,

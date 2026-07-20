@@ -62,6 +62,9 @@ _ACCEPTANCE_EFFECT_INTENT_REQUIRED_COLUMNS = frozenset(
 
 _EFFECT_RECONCILIATION_PROOF_TABLE = "task_runtime_effect_reconciliation_proof"
 _PENDING_CANCELLATION_RECONCILIATION_PURPOSE = "PENDING_CANCELLATION"
+_ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED = (
+    "ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED"
+)
 
 
 class TaskAcceptanceEffectDeliveryMixin:
@@ -225,6 +228,15 @@ class TaskAcceptanceEffectDeliveryMixin:
                         )
                     replay = _acceptance_effect_record(existing_claim)
                     replay["replayed"] = True
+                    # A claim response may have been lost after the durable
+                    # fence was acquired.  Callers must not infer that the
+                    # effect handler was never entered merely because the
+                    # same owner can reopen the still-live claim.
+                    replay["claim_reconciliation_required"] = True
+                    replay["claim_previous_status"] = (
+                        AcceptanceEffectStatus.CLAIMED.value
+                    )
+                    replay["claim_previous_reason_code"] = None
                     return replay
             selected_clause = " AND effect.effect_id = ?" if selected_effect is not None else ""
             artifact_schema = conn.execute(
@@ -336,9 +348,19 @@ class TaskAcceptanceEffectDeliveryMixin:
                     TASK_STORE_LEASE_CONFLICT,
                     f"acceptance effect claim lost its fence: {row['effect_id']}",
                 )
-            return _acceptance_effect_record(
+            claimed = _acceptance_effect_record(
                 self._require_acceptance_effect_intent(conn, str(row["effect_id"]))
             )
+            previous_status = str(row["status"])
+            previous_reason = str(row["reason_code"] or "").strip() or None
+            claimed["claim_previous_status"] = previous_status
+            claimed["claim_previous_reason_code"] = previous_reason
+            claimed["claim_reconciliation_required"] = bool(
+                previous_status == AcceptanceEffectStatus.CLAIMED.value
+                or previous_reason
+                == _ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+            )
+            return claimed
 
     def commit_acceptance_effect_intent(
         self,

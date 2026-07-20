@@ -2043,7 +2043,12 @@ class SQLiteGatewayTransportStore:
         finally:
             conn.close()
 
-    def get_outbox(self, *, outbox_id: str) -> dict[str, Any]:
+    def get_outbox(
+        self,
+        *,
+        outbox_id: str,
+        include_payload: bool = False,
+    ) -> dict[str, Any]:
         message_id = _required_text(outbox_id, "GATEWAY_TRANSPORT_OUTBOX_ID_REQUIRED")
         conn = self._connect()
         try:
@@ -2052,7 +2057,7 @@ class SQLiteGatewayTransportStore:
                 raise GatewayTransportStoreError(
                     "GATEWAY_TRANSPORT_PAYLOAD_DIGEST_MISMATCH"
                 )
-            return self._outbox_record(row)
+            return self._outbox_record(row, include_payload=bool(include_payload))
         finally:
             conn.close()
 

@@ -51,6 +51,7 @@ def test_recommendation_index_feedback_binds_item_and_traits() -> None:
             {"recommendation_rank": 2, "title": "校园恋爱日常", "series_key": "school-love"},
         ],
         ledger=ledger,
+        created_at_ms=1000,
     )
 
     result = record_user_preference_signal_if_present(
@@ -86,6 +87,7 @@ def test_ambiguous_this_book_feedback_does_not_bind_specific_item() -> None:
             {"recommendation_rank": 2, "title": "B", "series_key": "b"},
         ],
         ledger=ledger,
+        created_at_ms=1000,
     )
 
     record_user_preference_signal_if_present(

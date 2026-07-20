@@ -391,13 +391,30 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     embodiment_runtime = EmbodimentRuntime()
 
+    class ObsCommandComposition:
+        enabled = True
+        execution_enabled = True
+        ingress = obs_ingress
+        outcome_journal = SimpleNamespace(lookup=outcome_lookup)
+
+        def recover_deferred_review_admissions(self, **kwargs):  # noqa: ANN003
+            assert kwargs == {
+                "command_repository": canonical_command_repository,
+                "task_store": canonical_task_store,
+                "review_store": task_runtime_container.review_store,
+                "review_continuation_store": (
+                    task_runtime_container.review_continuation_store
+                ),
+            }
+            return ()
+
+        async def aclose(self) -> None:
+            assert application.state.task_runtime_container is task_runtime_container
+            assert captured["obs_command_ingress_provider"]() is obs_ingress
+            events.append("obs-command-admission-drained")
+
     class Container:
-        obs_command_composition = SimpleNamespace(
-            enabled=True,
-            execution_enabled=True,
-            ingress=obs_ingress,
-            outcome_journal=SimpleNamespace(lookup=outcome_lookup),
-        )
+        obs_command_composition = ObsCommandComposition()
         pentest_secure_run_composition = pentest_composition
         signed_skill_provider_intake_composition = SimpleNamespace(
             enabled=True,
@@ -405,14 +422,41 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         )
 
         async def aclose(self) -> None:
-            assert captured["obs_command_ingress_provider"]() is None
-            assert captured["pentest_secure_run_composition_provider"]() is None
-            assert captured["signed_skill_provider_intake_provider"]() is None
+            assert captured["obs_command_ingress_provider"]() is obs_ingress
+            assert (
+                captured["pentest_secure_run_composition_provider"]()
+                is pentest_composition
+            )
+            assert (
+                captured["signed_skill_provider_intake_provider"]()
+                is signed_ingress
+            )
             events.append("container-closed")
 
     container = Container()
 
     governed_runtime = object()
+    acceptance_effect_dispatcher = object()
+    acceptance_effect_runtime = object()
+    scheduler_worker_registry = object()
+    scheduler_operation_handler = object()
+    scheduler_definition_store = object()
+    scheduler_result_store = object()
+
+    class OperatorRuntime:
+        async def activate(self) -> None:
+            events.append("operator-runtime-activated")
+
+        async def close_admission(self) -> None:
+            events.append("operator-runtime-admission-closed")
+
+        async def drain(self) -> None:
+            events.append("operator-runtime-drained")
+
+        async def aclose(self) -> None:
+            events.append("operator-runtime-closed")
+
+    operator_runtime = OperatorRuntime()
     internal_runtime = object()
     scheduler_runtime = object()
     intent_admission_verifier = object()
@@ -454,6 +498,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             events.append("workspace-started")
 
         def close(self) -> None:
+            assert "task-runtime-closed" in events
             events.append("workspace-closed")
 
     workspace_container = WorkspaceContainer()
@@ -515,6 +560,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         )
         review_continuation_store = object()
         command_repository = canonical_command_repository
+        scheduler_definition_repository = scheduler_definition_store
+        scheduler_result_repository = scheduler_result_store
         task_store = canonical_task_store
         recovery_id = "test-recovery"
         operation_reconciliation_service = object()
@@ -534,8 +581,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             events.append("governed-runtime-activated")
 
         async def aclose(self) -> None:
-            assert application.state.task_runtime_container is None
-            assert application.state.task_runtime_container_provider() is None
+            assert application.state.task_runtime_container is self
+            assert application.state.task_runtime_container_provider() is self
+            assert events[-2:] == [
+                "obs-command-admission-drained",
+                "scheduler-clock-stopped",
+            ]
             events.append("task-runtime-closed")
 
     task_runtime_container = TaskRuntimeContainer()
@@ -615,6 +666,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "ledger": ledger,
             "canonical_db_path": ledger.canonical_db_path,
             "token_service": token_service,
+            "defer_obs_review_recovery": True,
         }
         events.append("container-built")
         return container
@@ -629,6 +681,21 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         }
         events.append("task-runtime-built")
         return task_runtime_container
+
+    def fake_build_acceptance_effect_dispatcher(**kwargs):
+        assert kwargs["task_store"] is canonical_task_store
+        assert kwargs["owner_id"] == (
+            "test-canonical-owner::runtime::test-boot::acceptance-effects"
+        )
+        assert "host.sys_mode_transition" in kwargs["handlers"]
+        assert (
+            kwargs["handlers"]["scheduler.operation.execute"]
+            is scheduler_operation_handler
+        )
+        captured["effect_action_preview_service"] = kwargs[
+            "action_preview_service"
+        ]
+        return acceptance_effect_dispatcher
 
     def fake_build_canon(**kwargs):
         assert kwargs["ledger"] is ledger
@@ -651,6 +718,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         captured["cancellation_authority_verifier"] = kwargs[
             "cancellation_authority_verifier"
         ]
+        captured["action_preview_service"] = kwargs["action_preview_service"]
+        assert captured["effect_action_preview_service"] is kwargs[
+            "action_preview_service"
+        ]
+        assert kwargs["acceptance_effect_dispatcher"] is (
+            acceptance_effect_dispatcher
+        )
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
         assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
         assert kwargs["runtime_context_application"] is runtime_context_application
@@ -670,8 +744,112 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["cancellation_authority_verifier"] is captured[
             "cancellation_authority_verifier"
         ]
+        assert kwargs["runtime_context_application"] is runtime_context_application
+        assert kwargs["action_preview_service"] is captured[
+            "action_preview_service"
+        ]
+        assert kwargs["acceptance_effect_dispatcher"] is (
+            acceptance_effect_dispatcher
+        )
         events.append("internal-runtime-built")
         return internal_runtime
+
+    def fake_build_operator_runtime(**kwargs):
+        assert kwargs["task_runtime_container"] is task_runtime_container
+        assert kwargs["ledger"] is ledger
+        assert kwargs["token_service"] is token_service
+        assert kwargs["intent_engine"] is intent_engine
+        assert kwargs["runtime_context_application"] is runtime_context_application
+        assert kwargs["action_preview_service"] is captured[
+            "action_preview_service"
+        ]
+        assert kwargs["acceptance_effect_dispatcher"] is (
+            acceptance_effect_dispatcher
+        )
+        assert kwargs["mode_transition_service_provider"] is (
+            host_lifecycle.get_mode_transition_service
+        )
+        assert kwargs["cancellation_authority_verifier"] is captured[
+            "cancellation_authority_verifier"
+        ]
+        assert kwargs["secure_ingress_authority_resolver"] is command_store
+        assert kwargs["owner_id"] == (
+            "test-canonical-owner::runtime::test-boot::operator"
+        )
+        events.append("operator-runtime-built")
+        return operator_runtime
+
+    def fake_build_operator_composition(**kwargs):
+        captured["action_preview_service"] = kwargs["action_preview_service"]
+        captured["cancellation_authority_verifier"] = kwargs[
+            "cancellation_authority_verifier"
+        ]
+        assert isinstance(
+            kwargs["internal_agent_artifact_store"],
+            asgi.AgentArtifactStore,
+        )
+        captured["internal_agent_artifact_store"] = kwargs[
+            "internal_agent_artifact_store"
+        ]
+        assert kwargs["internal_agent_workspace_runtime"] is workspace_runtime
+        assert callable(kwargs["life_receipt_reader_provider"])
+        assert kwargs == {
+            "task_runtime_container": task_runtime_container,
+            "ledger": ledger,
+            "token_service": token_service,
+            "intent_engine": intent_engine,
+            "runtime_context_application": runtime_context_application,
+            "action_preview_service": captured["action_preview_service"],
+            "mode_transition_service_provider": (
+                host_lifecycle.get_mode_transition_service
+            ),
+            "cancellation_authority_verifier": captured[
+                "cancellation_authority_verifier"
+            ],
+            "secure_ingress_authority_resolver": command_store,
+            "runtime_owner_id": "test-canonical-owner::runtime::test-boot",
+            "scheduler_operation_handler": scheduler_operation_handler,
+            "internal_agent_artifact_store": kwargs[
+                "internal_agent_artifact_store"
+            ],
+            "internal_agent_workspace_runtime": workspace_runtime,
+            "life_receipt_reader_provider": kwargs[
+                "life_receipt_reader_provider"
+            ],
+        }
+        fake_build_acceptance_effect_dispatcher(
+            task_store=canonical_task_store,
+            handlers={
+                "host.sys_mode_transition": object(),
+                "scheduler.operation.execute": scheduler_operation_handler,
+            },
+            owner_id=(
+                "test-canonical-owner::runtime::test-boot::acceptance-effects"
+            ),
+            action_preview_service=captured["action_preview_service"],
+        )
+        fake_build_operator_runtime(
+            task_runtime_container=task_runtime_container,
+            ledger=ledger,
+            token_service=token_service,
+            intent_engine=intent_engine,
+            runtime_context_application=runtime_context_application,
+            action_preview_service=captured["action_preview_service"],
+            acceptance_effect_dispatcher=acceptance_effect_dispatcher,
+            mode_transition_service_provider=(
+                host_lifecycle.get_mode_transition_service
+            ),
+            cancellation_authority_verifier=captured[
+                "cancellation_authority_verifier"
+            ],
+            secure_ingress_authority_resolver=command_store,
+            owner_id="test-canonical-owner::runtime::test-boot::operator",
+        )
+        return SimpleNamespace(
+            runtime=operator_runtime,
+            acceptance_effect_dispatcher=acceptance_effect_dispatcher,
+            acceptance_effect_runtime=acceptance_effect_runtime,
+        )
 
     def fake_build_command_ingress(**kwargs):
         assert kwargs["canonical_db_path"] == ledger.canonical_db_path
@@ -712,17 +890,20 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "host": governed_runtime,
             "internal_agent": internal_runtime,
             "scheduler": scheduler_runtime,
+            "operator": operator_runtime,
         }
         assert kwargs == {
             "review_store": task_runtime_container.review_continuation_store,
             "review_decision_store": task_runtime_container.review_store,
             "command_repository": task_runtime_container.command_repository,
             "claim_result_store": command_store,
+            "operator_outcome_finalizer": obs_ingress,
             "review_continuation_worker_id": (
                 "test-recovery::review-continuation"
             ),
             "graph_cancellation_operator_enabled": False,
             "graph_cancellation_state_reader": task_runtime_container.task_store,
+            "acceptance_effect_runtime": acceptance_effect_runtime,
         }
         return runtime_group
 
@@ -736,6 +917,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "cancellation_authority_verifier"
         ]
         assert kwargs["runtime_context_application"] is runtime_context_application
+        assert kwargs["worker_registry"] is scheduler_worker_registry
+        assert kwargs["acceptance_effect_dispatcher"] is (
+            acceptance_effect_dispatcher
+        )
         assert kwargs["current_mode"]() == "gaming"
         gate_result = kwargs["resource_gate"](
             SimpleNamespace(
@@ -870,6 +1055,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "model_attempt_service": model_attempt_service,
             "prompt_registry": prompt_registry,
             "workspace_runtime": workspace_runtime,
+            "artifact_store": captured["internal_agent_artifact_store"],
         }
         else pytest.fail("wrong canonical agent executor ports"),
     )
@@ -939,6 +1125,25 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(asgi, "_scheduler_seed_configs", lambda: [])
     monkeypatch.setattr(
         asgi,
+        "SchedulerWorkerRegistry",
+        lambda: scheduler_worker_registry,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "SchedulerAcceptedOperationHandler",
+        lambda **kwargs: scheduler_operation_handler
+        if kwargs
+        == {
+            "worker_registry": scheduler_worker_registry,
+            "definition_repository": scheduler_definition_store,
+            "occurrence_repository": scheduler_definition_store,
+            "command_repository": canonical_command_repository,
+            "result_repository": scheduler_result_store,
+        }
+        else pytest.fail("wrong Scheduler accepted-operation authority ports"),
+    )
+    monkeypatch.setattr(
+        asgi,
         "build_process_security_service_container",
         fake_build_container,
     )
@@ -968,6 +1173,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         asgi,
         "build_governed_internal_runtime",
         fake_build_internal_runtime,
+    )
+    monkeypatch.setattr(
+        asgi,
+        "build_governed_operator_composition",
+        fake_build_operator_composition,
     )
     monkeypatch.setattr(asgi, "GovernedRuntimeGroup", fake_runtime_group)
     monkeypatch.setattr(
@@ -1014,6 +1224,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert application.state.governed_host_runtime is governed_runtime
             assert application.state.governed_internal_runtime is internal_runtime
             assert application.state.governed_scheduler_runtime is scheduler_runtime
+            assert application.state.governed_operator_runtime is operator_runtime
             assert application.state.memory_service_container is memory_container
             assert application.state.agent_workspace_container is workspace_container
             assert application.state.canon_container is canon_container
@@ -1062,6 +1273,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert application.state.governed_host_runtime is None
         assert application.state.governed_internal_runtime is None
         assert application.state.governed_scheduler_runtime is None
+        assert application.state.governed_operator_runtime is None
         assert application.state.runtime_context_composition is None
         assert application.state.agent_workspace_container is None
         assert application.state.task_operation_reconciliation_command_service is None
@@ -1098,6 +1310,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "memory-published",
         "workspace-built",
         "workspace-started",
+        "operator-runtime-built",
         "governed-runtime-built",
         "internal-runtime-built",
         "scheduler-runtime-built",
@@ -1105,11 +1318,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "governed-runtime-activated",
         "scheduler-clock-activated",
         "serving",
-        "activity-monitor-stopped",
         "guardian-heartbeat-stopped",
+        "obs-command-admission-drained",
         "scheduler-clock-stopped",
-        "workspace-closed",
         "task-runtime-closed",
+        "workspace-closed",
+        "activity-monitor-stopped",
         "embodiment-heartbeat-stopped",
         "embodiment-runtime-closed",
         "memory-unpublished",

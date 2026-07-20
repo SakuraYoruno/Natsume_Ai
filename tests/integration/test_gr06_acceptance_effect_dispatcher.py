@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -22,6 +23,7 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNode,
     TaskNodeStatus,
 )
+from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.persistence.task_repository import (
     AcceptanceEffectStatus,
     DurableTaskStore,
@@ -33,7 +35,12 @@ from host_brain.persistence.task_repository import (
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     ACCEPTANCE_EFFECT_HANDLER_FAILED,
     ACCEPTANCE_EFFECT_HANDLER_MISSING,
+    ACCEPTANCE_EFFECT_RECOVERY_PENDING,
+    ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED,
+    AcceptanceEffectDispatchError,
     AcceptanceEffectDispatcher,
+    AcceptanceEffectOutcomeUnknown,
+    AcceptanceEffectRuntime,
 )
 from tests.task_runtime_authority_fixtures import (
     seed_raw_task_graph_for_test,
@@ -61,6 +68,18 @@ class _TestActionPreviewAuthority:
 
     def require_execution(self, **_kwargs: Any) -> None:
         return None
+
+
+def _typed_test_action_preview_authority() -> ActionPreviewService:
+    service = ActionPreviewService(
+        runtime_event_store=object(),
+        guardian=SimpleNamespace(evaluate_capability=lambda **_kwargs: {}),
+        authority_resolver=SimpleNamespace(resolve=lambda **_kwargs: None),
+    )
+    delegate = _TestActionPreviewAuthority()
+    service.issue_receipt = delegate.issue_receipt  # type: ignore[method-assign]
+    service.require_execution = delegate.require_execution  # type: ignore[method-assign]
+    return service
 
 
 def _store(tmp_path: Path, clock: MutableClock) -> DurableTaskStore:
@@ -235,10 +254,14 @@ def _stage_effect(
     attempt_id: str,
     effect_type: str,
     opaque_order: str,
+    business_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
-        "effect_type": effect_type,
-        "graph_id": graph_id,
+        **(
+            dict(business_payload)
+            if business_payload is not None
+            else {"effect_type": effect_type, "graph_id": graph_id}
+        ),
         "_action_preview_context": {
             "schema_version": "Natsume.acceptance_effect.action_preview_context.v1",
             "context_pack_digest": "sha256:" + ("1" * 64),
@@ -286,6 +309,8 @@ def _stage_semantic_chain(
         ("surface.reply_delivery", "a-delivery"),
         *([("unknown.audit", "b-unknown")] if include_unknown else []),
         ("life.foreground_completed", "m-life"),
+        ("life.conversation_turn_recorded", "n-life-conversation"),
+        ("conversation.preference_signal", "y-preference"),
         ("conversation.user_turn", "z-conversation"),
     ]
     return {
@@ -314,6 +339,8 @@ def _handlers(calls: list[tuple[str, str]]) -> dict[str, Any]:
         effect_type: build(effect_type)
         for effect_type in (
             "conversation.user_turn",
+            "conversation.preference_signal",
+            "life.conversation_turn_recorded",
             "life.foreground_completed",
             "surface.reply_delivery",
         )
@@ -342,16 +369,22 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
 
     assert [row[1] for row in calls] == [
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
     ]
     assert [row["effect_type"] for row in results] == [
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
         "unknown.audit",
     ]
     assert [row["status"] for row in results] == [
+        AcceptanceEffectStatus.COMMITTED.value,
+        AcceptanceEffectStatus.COMMITTED.value,
         AcceptanceEffectStatus.COMMITTED.value,
         AcceptanceEffectStatus.COMMITTED.value,
         AcceptanceEffectStatus.COMMITTED.value,
@@ -363,8 +396,10 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
         graph_id="graph-dispatch-order",
         graph_revision=1,
     )
-    assert len(calls) == 3
+    assert len(calls) == 5
     assert [row["status"] for row in replay] == [
+        "COMMITTED",
+        "COMMITTED",
         "COMMITTED",
         "COMMITTED",
         "COMMITTED",
@@ -373,7 +408,7 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
     assert await dispatcher.dispatch_effect(
         str(effects["conversation.user_turn"]["effect_id"])
     ) is None
-    assert len(calls) == 3
+    assert len(calls) == 5
 
 
 @pytest.mark.asyncio
@@ -397,6 +432,8 @@ async def test_handler_exception_fails_closed_before_life_and_delivery(
         task_store=store,
         handlers={
             "conversation.user_turn": fail_conversation,
+            "conversation.preference_signal": forbidden_later,
+            "life.conversation_turn_recorded": forbidden_later,
             "life.foreground_completed": forbidden_later,
             "surface.reply_delivery": forbidden_later,
         },
@@ -414,7 +451,9 @@ async def test_handler_exception_fails_closed_before_life_and_delivery(
     assert len(results) == 1
     assert results[0]["status"] == AcceptanceEffectStatus.FAILED.value
     assert results[0]["reason_code"] == ACCEPTANCE_EFFECT_HANDLER_FAILED
-    assert "conversation persistence unavailable" in results[0]["last_error"]
+    assert "conversation persistence unavailable" not in results[0]["last_error"]
+    assert "error_type=builtins.RuntimeError" in results[0]["last_error"]
+    assert "incident=sha256:" in results[0]["last_error"]
     assert store.get_acceptance_effect_intent(
         str(effects["life.foreground_completed"]["effect_id"])
     )["status"] == AcceptanceEffectStatus.PENDING.value
@@ -447,6 +486,8 @@ async def test_transient_handler_failure_is_rescheduled_then_commits_chain(
         task_store=store,
         handlers={
             "conversation.user_turn": flaky_conversation,
+            "conversation.preference_signal": committed_later,
+            "life.conversation_turn_recorded": committed_later,
             "life.foreground_completed": committed_later,
             "surface.reply_delivery": committed_later,
         },
@@ -475,10 +516,14 @@ async def test_transient_handler_failure_is_rescheduled_then_commits_chain(
         "COMMITTED",
         "COMMITTED",
         "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
     ]
     assert calls == [
         "conversation.user_turn",
         "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
     ]
@@ -487,6 +532,131 @@ async def test_transient_handler_failure_is_rescheduled_then_commits_chain(
     )
     assert conversation["attempt_count"] == 2
     assert conversation["fencing_token"] == 2
+
+
+@pytest.mark.asyncio
+async def test_unknown_handler_outcome_survives_retry_limit_and_restart_reconciles(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    graph_id = "graph-sys-mode-unknown-outcome"
+    node_id, attempt_id = _seed_completed_graph(store, graph_id)
+    event_id = "obs-sys-mode:" + "7" * 64
+    frozen_business_payload = {
+        "operator_command_id": "sys_mode.switch",
+        "request_id": "request-sys-mode-unknown-outcome",
+        "target_mode": "focus",
+        "source": "manual",
+        "reason": "reconcile response loss",
+        "event_id": event_id,
+        "runtime_scope_id": "runtime-scope-unknown-outcome",
+    }
+    effect = _stage_effect(
+        store,
+        graph_id=graph_id,
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="host.sys_mode_transition",
+        opaque_order="sys-mode",
+        business_payload=frozen_business_payload,
+    )
+    durable_hard_state_events: dict[str, dict[str, Any]] = {}
+    calls: list[tuple[str, str]] = []
+
+    class ExactEventHandler:
+        @staticmethod
+        def _exact(payload: dict[str, Any]) -> dict[str, Any]:
+            return {key: payload[key] for key in frozen_business_payload}
+
+        def __call__(self, payload: dict[str, Any]) -> str:
+            exact_payload = self._exact(payload)
+            exact_event_id = str(exact_payload["event_id"])
+            calls.append(("invoke", exact_event_id))
+            # Simulate HardState committing before its caller loses the
+            # response/reopen attribution boundary.
+            durable_hard_state_events[exact_event_id] = exact_payload
+            raise AcceptanceEffectOutcomeUnknown(
+                f"HardState commit {exact_event_id} requires exact reopen"
+            )
+
+        def reconcile(self, payload: dict[str, Any]) -> str:
+            exact_payload = self._exact(payload)
+            exact_event_id = str(exact_payload["event_id"])
+            calls.append(("reconcile", exact_event_id))
+            assert durable_hard_state_events.get(exact_event_id) == exact_payload
+            return "host-sys-mode-replayed://sha256/" + "8" * 64
+
+    handler = ExactEventHandler()
+
+    first_dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"host.sys_mode_transition": handler},
+        owner_id="dispatcher-sys-mode-before-restart",
+        max_attempts=1,
+        retry_base_ms=10,
+        retry_max_ms=10,
+        action_preview_service=_typed_test_action_preview_authority(),
+    )
+
+    first = await first_dispatcher.dispatch_effect(str(effect["effect_id"]))
+
+    assert first is not None
+    assert first["status"] == AcceptanceEffectStatus.PENDING.value, json.dumps(
+        first, sort_keys=True, default=str
+    )
+    assert first["reason_code"] == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+    assert first["side_effect_state"] == "UNKNOWN"
+    assert first["dispatch_state"] == "RECOVERY_PENDING"
+    assert first["reconciliation_state"] == "RECONCILIATION_REQUIRED"
+    assert first["reconciliation_required"] is True
+    durable_pending = store.get_acceptance_effect_intent(str(effect["effect_id"]))
+    assert durable_pending["status"] == AcceptanceEffectStatus.PENDING.value
+    assert (
+        durable_pending["reason_code"]
+        == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+    )
+    assert durable_pending["attempt_count"] == 1
+    assert durable_hard_state_events[event_id] == frozen_business_payload
+
+    # Before the durable retry time, startup must not admit new governed work.
+    blocked_runtime = AcceptanceEffectRuntime(dispatcher=first_dispatcher)
+    with pytest.raises(AcceptanceEffectDispatchError) as blocked:
+        await blocked_runtime.activate()
+    assert blocked.value.reason_code == ACCEPTANCE_EFFECT_RECOVERY_PENDING
+    assert blocked_runtime.active is False
+
+    clock.advance(10)
+    restarted_store = DurableTaskStore(store.db_path, clock=clock)
+    restarted_dispatcher = AcceptanceEffectDispatcher(
+        task_store=restarted_store,
+        handlers={"host.sys_mode_transition": handler},
+        owner_id="dispatcher-sys-mode-after-restart",
+        max_attempts=1,
+        retry_base_ms=10,
+        retry_max_ms=10,
+        action_preview_service=_typed_test_action_preview_authority(),
+    )
+    restarted_runtime = AcceptanceEffectRuntime(
+        dispatcher=restarted_dispatcher,
+        poll_seconds=0.01,
+    )
+
+    await restarted_runtime.activate()
+    try:
+        assert restarted_runtime.active is True
+        committed = restarted_store.get_acceptance_effect_intent(
+            str(effect["effect_id"])
+        )
+        assert committed["status"] == AcceptanceEffectStatus.COMMITTED.value
+        assert committed["receipt_ref"] == (
+            "host-sys-mode-replayed://sha256/" + "8" * 64
+        )
+        assert committed["attempt_count"] == 2
+        assert calls == [("invoke", event_id), ("reconcile", event_id)]
+        assert len(durable_hard_state_events) == 1
+    finally:
+        await restarted_runtime.aclose()
 
 
 @pytest.mark.asyncio
@@ -526,13 +696,18 @@ async def test_expired_lease_cannot_commit_and_recovery_uses_new_fence(
     assert claimed["fencing_token"] == 1
     assert claimed["reason_code"] is None
 
-    def recover(_payload: dict[str, Any]) -> str:
-        calls.append("recovery-owner")
-        return "conversation-receipt://dispatcher/recovered"
+    class Recover:
+        def __call__(self, _payload: dict[str, Any]) -> str:
+            calls.append("forbidden-ordinary-replay")
+            raise AssertionError("reclaimed effect must not invoke ordinary handler")
+
+        def reconcile(self, _payload: dict[str, Any]) -> str:
+            calls.append("recovery-reconcile")
+            return "conversation-receipt://dispatcher/recovered"
 
     restarted = AcceptanceEffectDispatcher(
         task_store=DurableTaskStore(store.db_path, clock=clock),
-        handlers={"conversation.user_turn": recover},
+        handlers={"conversation.user_turn": Recover()},
         owner_id="dispatcher-restarted",
         lease_ms=100,
         action_preview_service=_TestActionPreviewAuthority(),
@@ -542,10 +717,112 @@ async def test_expired_lease_cannot_commit_and_recovery_uses_new_fence(
     assert committed["status"] == AcceptanceEffectStatus.COMMITTED.value
     assert committed["fencing_token"] == 2
     assert committed["attempt_count"] == 2
-    assert calls == ["stale-owner", "recovery-owner"]
+    assert calls == ["stale-owner", "recovery-reconcile"]
 
     assert await restarted.dispatch_effect(str(effect["effect_id"])) is None
-    assert calls == ["stale-owner", "recovery-owner"]
+    assert calls == ["stale-owner", "recovery-reconcile"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registered_handler", [True, False])
+async def test_reclaimed_generic_effect_without_reconciler_stays_unknown(
+    tmp_path: Path,
+    registered_handler: bool,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    node_id, attempt_id = _seed_completed_graph(store, "graph-generic-no-reconciler")
+    effect = _stage_effect(
+        store,
+        graph_id="graph-generic-no-reconciler",
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="conversation.user_turn",
+        opaque_order="only",
+    )
+    calls: list[str] = []
+
+    def expire_after_effect(_payload: dict[str, Any]) -> str:
+        calls.append("initial-invocation")
+        clock.advance(11)
+        return "conversation-receipt://dispatcher/unknown-boundary"
+
+    stale = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"conversation.user_turn": expire_after_effect},
+        owner_id="dispatcher-generic-stale",
+        lease_ms=10,
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+    with pytest.raises(TaskStoreError):
+        await stale.dispatch_effect(str(effect["effect_id"]))
+
+    def forbidden_replay(_payload: dict[str, Any]) -> str:
+        calls.append("forbidden-replay")
+        return "conversation-receipt://dispatcher/duplicate"
+
+    restarted = AcceptanceEffectDispatcher(
+        task_store=DurableTaskStore(store.db_path, clock=clock),
+        handlers=(
+            {"conversation.user_turn": forbidden_replay}
+            if registered_handler
+            else {"unrelated.effect": forbidden_replay}
+        ),
+        owner_id="dispatcher-generic-restarted",
+        lease_ms=100,
+        retry_base_ms=10,
+        retry_max_ms=10,
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+
+    pending = await restarted.dispatch_effect(str(effect["effect_id"]))
+
+    assert pending is not None
+    assert pending["status"] == AcceptanceEffectStatus.PENDING.value
+    assert pending["reason_code"] == ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
+    assert pending["side_effect_state"] == "UNKNOWN"
+    assert pending["reconciliation_state"] == "RECONCILIATION_REQUIRED"
+    assert calls == ["initial-invocation"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler_outcome",
+    [None, {}, {"event_id": "event://not-a-receipt"}, {"command_id": "command://not-a-receipt"}],
+)
+async def test_handler_without_explicit_durable_receipt_fails_closed(
+    tmp_path: Path,
+    handler_outcome: Any,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    node_id, attempt_id = _seed_completed_graph(store, "graph-missing-receipt")
+    effect = _stage_effect(
+        store,
+        graph_id="graph-missing-receipt",
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="conversation.user_turn",
+        opaque_order="only",
+    )
+    dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"conversation.user_turn": lambda _payload: handler_outcome},
+        owner_id="dispatcher-missing-receipt",
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+
+    failed = await dispatcher.dispatch_effect(str(effect["effect_id"]))
+
+    assert failed is not None
+    assert failed["status"] == AcceptanceEffectStatus.FAILED.value
+    assert failed["reason_code"] == ACCEPTANCE_EFFECT_HANDLER_FAILED
+    assert failed["receipt_ref"] is None
+    assert failed["last_error"].startswith(
+        "error_type=host_brain.task_runtime.acceptance_effect_dispatcher."
+        "AcceptanceEffectDispatchError incident=sha256:"
+    )
+    assert "authoritative durable receipt_ref" not in failed["last_error"]
 
 
 @pytest.mark.asyncio
@@ -569,16 +846,25 @@ async def test_drain_ready_preserves_each_graph_chain_and_limit(
     assert len(first) == 4
     assert calls == [
         ("graph-drain-a", "conversation.user_turn"),
+        ("graph-drain-a", "conversation.preference_signal"),
+        ("graph-drain-a", "life.conversation_turn_recorded"),
         ("graph-drain-a", "life.foreground_completed"),
-        ("graph-drain-a", "surface.reply_delivery"),
-        ("graph-drain-b", "conversation.user_turn"),
     ]
 
     second = await dispatcher.drain_ready(limit=4)
-    assert len(second) == 2
+    assert len(second) == 4
+    assert calls[-4:] == [
+        ("graph-drain-a", "surface.reply_delivery"),
+        ("graph-drain-b", "conversation.user_turn"),
+        ("graph-drain-b", "conversation.preference_signal"),
+        ("graph-drain-b", "life.conversation_turn_recorded"),
+    ]
+
+    third = await dispatcher.drain_ready(limit=4)
+    assert len(third) == 2
     assert calls[-2:] == [
         ("graph-drain-b", "life.foreground_completed"),
         ("graph-drain-b", "surface.reply_delivery"),
     ]
     assert await dispatcher.drain_ready(limit=4) == ()
-    assert len(calls) == 6
+    assert len(calls) == 10

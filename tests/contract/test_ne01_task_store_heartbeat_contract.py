@@ -90,10 +90,35 @@ def _event_rows(store: DurableTaskStore, event_type: str) -> list[sqlite3.Row]:
 
 def test_ne01_task_store_port_exposes_heartbeat_authority() -> None:
     assert {
+        "get_lease",
         "get_active_lease",
         "heartbeat_lease",
         "renew_operation_reservation",
     } <= set(TaskStorePort.__dict__)
+
+
+def test_ne01_get_lease_reopens_exact_terminal_row(tmp_path: Path) -> None:
+    store, lease = _leased_store(tmp_path)
+    with pytest.raises(TaskStoreError):
+        store.get_lease("lease-does-not-exist")
+
+    released = store.release_lease(
+        str(lease["lease_id"]),
+        owner_id="worker-a",
+        fencing_token=int(lease["fencing_token"]),
+        expected_lease_version=0,
+        outbox=_event(
+            "TASK_LEASE",
+            str(lease["lease_id"]),
+            1,
+            "TASK_LEASE_RELEASED",
+            attempt_id="attempt-1",
+        ),
+    )
+
+    assert released["status"] == "RELEASED"
+    assert store.get_lease(str(lease["lease_id"])) == released
+    assert store.get_active_lease("attempt-1") is None
 
 
 def test_ne01_heartbeat_extends_lease_version_and_attempt_bound_outbox(tmp_path: Path) -> None:

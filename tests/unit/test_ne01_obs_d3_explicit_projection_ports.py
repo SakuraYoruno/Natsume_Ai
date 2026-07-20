@@ -749,6 +749,7 @@ def test_sessions_source_builder_never_rediscovers_process_projection_store(
         process_services,
         "get_query_projection_store",
         _forbidden_locator,
+        raising=False,
     )
 
     response = sessions._build_sessions_response(

@@ -8,7 +8,12 @@ from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from natsume_contracts.task import HostCommandSurface, build_host_command
 
 
-def _command(surface: HostCommandSurface, *, with_claim: bool = True):
+def _command(
+    surface: HostCommandSurface,
+    *,
+    with_claim: bool = True,
+    target_id: str = "review-group-target",
+):
     request_id = f"review-group-{surface.value}"
     return build_host_command(
         surface=surface,
@@ -21,7 +26,7 @@ def _command(surface: HostCommandSurface, *, with_claim: bool = True):
         graph_id=f"review-group-graph-{surface.value}",
         graph_revision=2,
         route_type="delegate",
-        target_id="review-group-target",
+        target_id=target_id,
         business_scope="review-group-scope",
         operation_fingerprint="sha256:" + "b" * 64,
         created_at_ms=1_000,
@@ -95,6 +100,39 @@ class _Claims:
 
     def complete_claim(self, **kwargs: Any) -> None:
         self.completed.append(dict(kwargs))
+
+
+class _OperatorOutcomeFinalizer:
+    def __init__(self) -> None:
+        self.completed: list[dict[str, Any]] = []
+
+    def finalize_review_outcome(self, **kwargs: Any) -> None:
+        self.completed.append(dict(kwargs))
+
+
+class _ReviewDecisions:
+    def __init__(self) -> None:
+        self.record: dict[str, Any] | None = None
+
+    def get_review(self, review_id: str) -> dict[str, Any]:
+        assert self.record is not None
+        assert self.record["review"]["review_id"] == review_id
+        return dict(self.record)
+
+
+class _CancellationStateReader:
+    def __init__(self) -> None:
+        self.record: dict[str, Any] | None = None
+
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        graph_revision: int,
+    ) -> dict[str, Any] | None:
+        if self.record is not None:
+            assert self.record["graph_id"] == graph_id
+            assert self.record["graph_revision"] == graph_revision
+        return self.record
 
 
 class _Worker:
@@ -212,3 +250,358 @@ def test_group_requires_both_review_authorities() -> None:
             command_repository=object(),
             review_continuation_worker_id="review-group-worker",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "review_status",
+        "historical_side_effects",
+        "expected_state",
+        "expected_reason",
+        "expected_side_effects",
+    ),
+    [
+        ("CONSUMED", True, "SUCCEEDED", "OBS_COMMAND_COMPLETED", True),
+        ("CONSUMED", False, "SUCCEEDED", "OBS_COMMAND_COMPLETED", False),
+        ("REJECTED", False, "REJECTED", "OBS_COMMAND_REVIEW_REJECTED", False),
+        ("EXPIRED", False, "REJECTED", "OBS_COMMAND_REVIEW_EXPIRED", False),
+    ],
+    ids=("applied", "no-change", "rejected", "expired"),
+)
+async def test_operator_review_continuation_finalizes_outer_outcome_only(
+    review_status: str,
+    historical_side_effects: bool,
+    expected_state: str,
+    expected_reason: str,
+    expected_side_effects: bool,
+) -> None:
+    log: list[str] = []
+    runtimes = {
+        "host": _Runtime("host", log),
+        "internal_agent": _Runtime("internal_agent", log),
+        "scheduler": _Runtime("scheduler", log),
+        "operator": _Runtime("operator", log),
+    }
+    command = _command(
+        HostCommandSurface.OPERATOR,
+        target_id="operator_sys_mode_switch",
+    )
+    operator = runtimes["operator"]
+    operator.result = (
+        {
+            "execution_receipt": {
+                "status": "ACCEPTED",
+                "receipt_ref": "task-receipt://operator/accepted",
+                "accepted": True,
+            },
+            "audit_refs": {
+                "acceptance_effects": {
+                    "count": 1,
+                    "committed": 1,
+                    "failed": 0,
+                    "pending": 0,
+                    "recovery_pending": 0,
+                    "dispatch_status": "COMMITTED",
+                }
+            },
+            "historical_side_effects_executed": historical_side_effects,
+        }
+        if review_status == "CONSUMED"
+        else {"execution_receipt": {"status": "REVIEW_DENIED"}}
+    )
+    finalizer = _OperatorOutcomeFinalizer()
+    central_claims = _Claims()
+    review_decisions = _ReviewDecisions()
+    group = GovernedRuntimeGroup(
+        runtimes,
+        review_store=object(),
+        review_decision_store=review_decisions,
+        command_repository=_Commands(command),
+        claim_result_store=central_claims,
+        operator_outcome_finalizer=finalizer,
+        review_continuation_worker_factory=(
+            lambda **kwargs: _Worker(log, **kwargs)
+        ),
+        review_continuation_worker_id="review-group-operator-worker",
+    )
+    await group.activate()
+    review = {
+        "review_id": "review-group-operator",
+        "status": review_status,
+        "subject_ref": (
+            f"task-node://{command.graph_id}/{command.graph_revision}/"
+            "review-group-node"
+        ),
+        "subject_version": 1,
+        "resume_phase": "PRE_EXECUTION",
+        "checkpoint_id": "review-group-operator-checkpoint",
+    }
+    review_decisions.record = {
+        "review": review,
+        "status_version": 2,
+        "task_graph_id": command.graph_id,
+        "task_node_id": "review-group-node",
+    }
+    claim = {
+        "review_id": review["review_id"],
+        "review_status": review_status,
+        "review_status_version": 2,
+        "subject_version": review["subject_version"],
+        "resume_phase": review["resume_phase"],
+        "graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "node_id": "review-group-node",
+        "review": {"review": review},
+    }
+
+    await group.continue_review_continuation(claim)
+
+    assert central_claims.completed == []
+    assert len(finalizer.completed) == 1
+    finalized = finalizer.completed[0]
+    assert finalized["claim_ref"] == command.ingress_claim_ref
+    assert finalized["state"] == expected_state
+    assert finalized["reason_code"] == expected_reason
+    assert finalized["side_effects_executed"] is expected_side_effects
+    assert finalized["continuation_ref"].startswith(
+        f"governed-review://{command.graph_id}/{command.graph_revision}/"
+        "review-group-operator?binding=sha256:"
+    )
+    assert finalized["terminal_result_ref"].startswith(
+        "task-receipt://" if review_status == "CONSUMED" else "review-decision://"
+    )
+    await group.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pending_result",
+    [
+        {
+            "execution_receipt": {
+                "status": "ACCEPTED",
+                "receipt_ref": "task-receipt://operator/accepted",
+                "accepted": True,
+            },
+            "audit_refs": {
+                "acceptance_effects": {
+                    "count": 1,
+                    "committed": 0,
+                    "failed": 0,
+                    "pending": 1,
+                    "recovery_pending": 1,
+                    "dispatch_status": "RECOVERY_PENDING",
+                }
+            },
+        },
+        {
+            "execution_receipt": {
+                "status": "RECOVERY_REQUIRED",
+                "receipt_ref": "task-receipt://operator/recovery",
+                "accepted": False,
+            }
+        },
+    ],
+    ids=("other-owner-effect-claim", "non-terminal-task-receipt"),
+)
+async def test_operator_review_recovery_defers_before_later_effect_commit(
+    pending_result: dict[str, Any],
+) -> None:
+    log: list[str] = []
+    runtimes = {
+        "operator": _Runtime("operator", log),
+    }
+    command = _command(
+        HostCommandSurface.OPERATOR,
+        target_id="operator_sys_mode_switch",
+    )
+    operator = runtimes["operator"]
+    operator.result = pending_result
+    finalizer = _OperatorOutcomeFinalizer()
+    central_claims = _Claims()
+    review_decisions = _ReviewDecisions()
+    group = GovernedRuntimeGroup(
+        runtimes,
+        review_store=object(),
+        review_decision_store=review_decisions,
+        command_repository=_Commands(command),
+        claim_result_store=central_claims,
+        operator_outcome_finalizer=finalizer,
+        review_continuation_worker_factory=(
+            lambda **kwargs: _Worker(log, **kwargs)
+        ),
+        review_continuation_worker_id="review-group-operator-recovery-worker",
+    )
+    await group.activate()
+    review = {
+        "review_id": "review-group-operator-recovery",
+        "status": "CONSUMED",
+        "subject_ref": (
+            f"task-node://{command.graph_id}/{command.graph_revision}/"
+            "review-group-node"
+        ),
+        "subject_version": 1,
+        "resume_phase": "PRE_EXECUTION",
+        "checkpoint_id": "review-group-operator-recovery-checkpoint",
+    }
+    review_decisions.record = {
+        "review": review,
+        "status_version": 2,
+        "task_graph_id": command.graph_id,
+        "task_node_id": "review-group-node",
+    }
+    claim = {
+        "review_id": review["review_id"],
+        "review_status": "CONSUMED",
+        "review_status_version": 2,
+        "subject_version": review["subject_version"],
+        "resume_phase": review["resume_phase"],
+        "graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "node_id": "review-group-node",
+        "review": {"review": review},
+    }
+
+    with pytest.raises(RuntimeError) as pending:
+        await group.continue_review_continuation(claim)
+    assert getattr(pending.value, "reason_code", None) == (
+        "OPERATOR_REVIEW_RECOVERY_PENDING"
+    )
+    assert finalizer.completed == []
+    assert central_claims.completed == []
+
+    operator.result = {
+        "execution_receipt": {
+            "status": "ACCEPTED",
+            "receipt_ref": "task-receipt://operator/accepted",
+            "accepted": True,
+        },
+        "audit_refs": {
+            "acceptance_effects": {
+                "count": 1,
+                "committed": 1,
+                "failed": 0,
+                "pending": 0,
+                "recovery_pending": 0,
+                "dispatch_status": "COMMITTED",
+            }
+        },
+        "historical_side_effects_executed": True,
+    }
+    await group.continue_review_continuation(claim)
+
+    assert central_claims.completed == []
+    assert len(finalizer.completed) == 1
+    assert finalizer.completed[0]["state"] == "SUCCEEDED"
+    assert finalizer.completed[0]["reason_code"] == "OBS_COMMAND_COMPLETED"
+    await group.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("subject_query", "before_status"),
+    [
+        ("", "WAITING_APPROVAL"),
+        (
+            "?attempt=not-started&authority=intent-admission&initial_status=BLOCKED",
+            "BLOCKED",
+        ),
+    ],
+    ids=("ordinary-review", "intent-admission-review"),
+)
+async def test_operator_cancelled_review_requires_exact_durable_cancellation_receipt(
+    subject_query: str,
+    before_status: str,
+) -> None:
+    log: list[str] = []
+    operator = _Runtime("operator", log)
+    operator.result = {"execution_receipt": {"status": "REVIEW_DENIED"}}
+    command = _command(
+        HostCommandSurface.OPERATOR,
+        target_id="operator_sys_mode_switch",
+    )
+    finalizer = _OperatorOutcomeFinalizer()
+    review_decisions = _ReviewDecisions()
+    cancellation_reader = _CancellationStateReader()
+    group = GovernedRuntimeGroup(
+        {"operator": operator},
+        review_store=object(),
+        review_decision_store=review_decisions,
+        command_repository=_Commands(command),
+        claim_result_store=_Claims(),
+        operator_outcome_finalizer=finalizer,
+        review_continuation_worker_factory=(
+            lambda **kwargs: _Worker(log, **kwargs)
+        ),
+        review_continuation_worker_id="review-group-operator-cancel-worker",
+        graph_cancellation_state_reader=cancellation_reader,
+    )
+    await group.activate()
+    review = {
+        "review_id": "review-group-operator-cancelled",
+        "status": "CANCELLED",
+        "subject_ref": (
+            f"task-node://{command.graph_id}/{command.graph_revision}/"
+            f"review-group-node{subject_query}"
+        ),
+        "subject_version": 1,
+        "resume_phase": "PRE_EXECUTION",
+        "checkpoint_id": "review-group-operator-cancelled-checkpoint",
+    }
+    review_decisions.record = {
+        "review": review,
+        "status_version": 2,
+        "task_graph_id": command.graph_id,
+        "task_node_id": "review-group-node",
+    }
+    claim = {
+        "review_id": review["review_id"],
+        "review_status": "CANCELLED",
+        "review_status_version": 2,
+        "subject_version": 1,
+        "resume_phase": "PRE_EXECUTION",
+        "graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "node_id": "review-group-node",
+        "review": {"review": review},
+    }
+
+    with pytest.raises(RuntimeError) as pending:
+        await group.continue_review_continuation(claim)
+    assert getattr(pending.value, "reason_code", None) == (
+        "OPERATOR_REVIEW_CANCELLATION_RECOVERY_PENDING"
+    )
+    assert finalizer.completed == []
+
+    intent_ref = "taskcancel-intent://sha256/" + "c" * 64
+    cancellation_reader.record = {
+        "intent_ref": intent_ref,
+        "status": "REQUESTED",
+        "graph_id": command.graph_id,
+        "graph_revision": command.graph_revision,
+        "payload": {
+            "graph_id": command.graph_id,
+            "graph_revision": command.graph_revision,
+            "node_states_before": {
+                "review-group-node": {
+                    "status": before_status,
+                    "status_version": 1,
+                }
+            },
+            "node_states_after": {
+                "review-group-node": {
+                    "status": "CANCELLED",
+                    "status_version": 2,
+                }
+            },
+        },
+    }
+    await group.continue_review_continuation(claim)
+
+    assert len(finalizer.completed) == 1
+    assert finalizer.completed[0]["state"] == "REJECTED"
+    assert finalizer.completed[0]["reason_code"] == "OBS_COMMAND_REVIEW_CANCELLED"
+    assert finalizer.completed[0]["side_effects_executed"] is False
+    assert finalizer.completed[0]["terminal_result_ref"] == intent_ref
+    await group.aclose()

@@ -351,11 +351,13 @@ def test_all_bio_ops_get_routes_read_only_the_app_local_projection_store(
         process_services,
         "get_query_projection_store",
         forbidden_process_locator,
+        raising=False,
     )
     monkeypatch.setattr(
         process_services,
         "peek_query_projection_store",
         forbidden_process_locator,
+        raising=False,
     )
     client = TestClient(_app_with_projection_store(store))
 

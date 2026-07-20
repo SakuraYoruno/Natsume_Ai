@@ -178,6 +178,11 @@ class ActionPreviewService:
     def require_execution(self, **kwargs: Any) -> Any:
         return self._durable_authority().require_execution(**kwargs)
 
+    def reopen_receipt(self, *, event_id: str) -> dict[str, Any]:
+        """Return one validated historical receipt without execution authority."""
+
+        return self._durable_authority().reopen_receipt(event_id=event_id)
+
     def now_ms(self) -> int:
         """Return the same clock used by issue/reopen expiry checks."""
 

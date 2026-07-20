@@ -1,0 +1,10 @@
+{
+  "schema_version": "natsume.universal-runtime-route-acceptance.v2",
+  "commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
+  "migration_head": "0118_conversation_acceptance_effects.sql",
+  "route_acceptance": {
+    "chat": {
+      "status": "PASS"
+    }
+  }
+}

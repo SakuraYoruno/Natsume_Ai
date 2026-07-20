@@ -170,6 +170,9 @@ from host_brain.persistence.task_operation_reconciliation_store import (
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
 )
+from host_brain.persistence.task_internal_agent_checkpoint_store import (
+    TaskInternalAgentCheckpointStoreMixin,
+)
 from host_brain.persistence.task_effect_reconciliation_store import (
     TaskEffectReconciliationStoreMixin,
 )
@@ -421,6 +424,7 @@ class DurableTaskStore(
     TaskRetryMutationStoreMixin,
     TaskRetryReplayStoreMixin,
     TaskAtomicFailureStoreMixin,
+    TaskInternalAgentCheckpointStoreMixin,
     TaskOperationCheckpointStoreMixin,
     TaskOperationReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,
@@ -1526,6 +1530,16 @@ class DurableTaskStore(
         conn = self._connect()
         try:
             row = self._require_attempt(conn, attempt_id)
+            return dict(row)
+        finally:
+            conn.close()
+
+    def get_lease(self, lease_id: str) -> dict[str, Any]:
+        """Return one exact lease row, including terminal RELEASED evidence."""
+
+        conn = self._connect()
+        try:
+            row = self._require_lease(conn, str(lease_id))
             return dict(row)
         finally:
             conn.close()

@@ -38,6 +38,8 @@ ACTION_PREVIEW_AUTHORITY_BINDING_SCHEMA = (
     "Natsume.action_preview.authority_binding.v1"
 )
 EFFECT_DESCRIPTOR_SCHEMA = "Natsume.action_preview.effect_descriptor.v1"
+SCHEDULER_OPERATION_EFFECT_TYPE = "scheduler.operation.execute"
+INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE = "internal.agent.result_commit"
 _SCENE_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _ACTION_PREVIEW_SCENE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -270,9 +272,43 @@ def _scheduler_effect_descriptors(target: str) -> tuple[dict[str, Any], ...]:
     return (ui, *life, *embodiment)
 
 
-def _effect_descriptor(effect_type: str) -> tuple[str, int, str]:
+def _effect_descriptor(
+    effect_type: str,
+    *,
+    scheduler_risk_level: int | None = None,
+) -> tuple[str, int, str]:
+    if effect_type in {
+        SCHEDULER_OPERATION_EFFECT_TYPE,
+        INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE,
+    }:
+        if scheduler_risk_level is None:
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_BLOCKED,
+                "operation Acceptance Effect has no canonical TaskNode risk",
+            )
+        risk = _integer(
+            scheduler_risk_level,
+            "operation TaskNode.risk_level",
+        )
+        if risk > 5:
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_INVALID,
+                "operation TaskNode.risk_level is outside [1, 5]",
+            )
+        return (
+            f"acceptance-effect.{effect_type}",
+            risk,
+            (
+                "acceptance_effect_scheduler_operation_execute"
+                if effect_type == SCHEDULER_OPERATION_EFFECT_TYPE
+                else "acceptance_effect_internal_agent_result_commit"
+            ),
+        )
     risk = {
         "conversation.user_turn": 1,
+        "conversation.preference_signal": 1,
+        "host.sys_mode_transition": 4,
+        "life.conversation_turn_recorded": 2,
         "life.foreground_completed": 2,
         "surface.reply_delivery": 3,
     }.get(effect_type)
@@ -771,7 +807,7 @@ class ProductionActionPreviewAuthorityResolver:
         graph_id = str(effect.get("graph_id") or "")
         revision = int(effect.get("graph_revision") or 0)
         node_id = str(effect.get("node_id") or "")
-        record, work_order, graph, node, _route, _target = self._command_context(
+        record, work_order, graph, node, route, target = self._command_context(
             graph_id=graph_id,
             graph_revision=revision,
             node_id=node_id,
@@ -786,7 +822,86 @@ class ProductionActionPreviewAuthorityResolver:
         if context != required_context:
             raise ActionPreviewAuthorityError(ACTION_PREVIEW_DRIFT, "Acceptance Effect authority request drifted")
         effect_type = str(effect.get("effect_type") or "")
-        action, canonical_risk, capability = _effect_descriptor(effect_type)
+        descriptors: tuple[Mapping[str, Any], ...] = ()
+        if effect_type == SCHEDULER_OPERATION_EFFECT_TYPE:
+            command_surface = str(
+                getattr(getattr(command, "surface", ""), "value", None)
+                or getattr(command, "surface", "")
+            ).strip().lower()
+            command_route = str(getattr(command, "route_type", "") or "").strip().lower()
+            command_target = str(getattr(command, "target_id", "") or "").strip()
+            work_order_metadata = getattr(work_order, "metadata", None)
+            metadata = (
+                dict(work_order_metadata)
+                if isinstance(work_order_metadata, Mapping)
+                else {}
+            )
+            operator_scheduler_trigger = (
+                command_surface == "operator"
+                and str(metadata.get("operator_command_id") or "").strip()
+                == "scheduler.task.trigger"
+                and str(metadata.get("command_surface") or "").strip().lower()
+                == "operator"
+            )
+            if (
+                command_surface != "scheduler"
+                and not operator_scheduler_trigger
+            ) or (
+                command_surface not in {"scheduler", "operator"}
+                or route != "delegate"
+                or command_route != "delegate"
+                or not target
+                or command_target != target
+            ):
+                raise ActionPreviewAuthorityError(
+                    ACTION_PREVIEW_BLOCKED,
+                    "Scheduler Acceptance Effect is outside its canonical Scheduler route",
+                )
+            node_payload = _mapping(node.get("node"), "TaskNode")
+            action, canonical_risk, capability = _effect_descriptor(
+                effect_type,
+                scheduler_risk_level=_integer(
+                    node_payload.get("risk_level"),
+                    "TaskNode.risk_level",
+                ),
+            )
+            # Deliberately stays narrow: only the existing life_command target
+            # has downstream UI/Gateway/Edge/embodiment descriptors.  Generic
+            # scheduler_production and every other Scheduler target receive no
+            # derived authority.
+            descriptors = _scheduler_effect_descriptors(target)
+        elif effect_type == INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE:
+            command_surface = str(
+                getattr(getattr(command, "surface", ""), "value", None)
+                or getattr(command, "surface", "")
+            ).strip().lower()
+            command_route = str(
+                getattr(command, "route_type", "") or ""
+            ).strip().lower()
+            command_target = str(
+                getattr(command, "target_id", "") or ""
+            ).strip()
+            if (
+                command_surface != "internal"
+                or route != "delegate"
+                or command_route != "delegate"
+                or target != "agent_runtime"
+                or command_target != "agent_runtime"
+            ):
+                raise ActionPreviewAuthorityError(
+                    ACTION_PREVIEW_BLOCKED,
+                    "Internal Agent result commit is outside its canonical route",
+                )
+            node_payload = _mapping(node.get("node"), "TaskNode")
+            action, canonical_risk, capability = _effect_descriptor(
+                effect_type,
+                scheduler_risk_level=_integer(
+                    node_payload.get("risk_level"),
+                    "TaskNode.risk_level",
+                ),
+            )
+        else:
+            action, canonical_risk, capability = _effect_descriptor(effect_type)
         if (
             str(effect.get("status") or "") != "CLAIMED"
             or str(effect.get("lease_owner") or "") != required_context["lease_owner_id"]
@@ -877,6 +992,23 @@ class ProductionActionPreviewAuthorityResolver:
             "lease_expires_at_ms": int(effect.get("lease_expires_ts_ms") or 0),
             "node_grant_lineage_digest": lineage_grant_digest,
         }
+        if effect_type == SCHEDULER_OPERATION_EFFECT_TYPE:
+            binding.update(
+                {
+                    "scheduler_route": route,
+                    "scheduler_target": target,
+                    "effect_descriptors_digest": _digest(
+                        [dict(item) for item in descriptors]
+                    ),
+                }
+            )
+        elif effect_type == INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE:
+            binding.update(
+                {
+                    "internal_route": route,
+                    "internal_target": target,
+                }
+            )
         return ResolvedActionPreviewAuthority(
             authority_kind="ACCEPTANCE_EFFECT",
             action_kind=action,
@@ -893,6 +1025,7 @@ class ProductionActionPreviewAuthorityResolver:
             node_grant=supplied_grant,
             expires_at_ms=int(effect.get("lease_expires_ts_ms") or 0),
             binding=binding,
+            effect_descriptors=descriptors,
         )
 
     def _resolve_derived(self, **values: Any) -> ResolvedActionPreviewAuthority:
@@ -940,10 +1073,22 @@ class ProductionActionPreviewAuthorityResolver:
         }
         if context != required:
             raise ActionPreviewAuthorityError(ACTION_PREVIEW_DRIFT, "derived action authority request drifted")
-        if str(origin.get("authority_kind") or "").upper() != "TASK_NODE":
+        origin_authority_kind = str(
+            origin.get("authority_kind") or ""
+        ).strip().upper()
+        if origin_authority_kind not in {"TASK_NODE", "ACCEPTANCE_EFFECT"}:
             raise ActionPreviewAuthorityError(
                 ACTION_PREVIEW_BLOCKED,
-                "Scheduler-derived action origin is not a TaskNode receipt",
+                "Scheduler-derived action origin is not an allowed authority receipt",
+            )
+        origin_args = _mapping(
+            origin_boundary.get("action_args"),
+            "origin action_args",
+        )
+        if _digest(origin_args) != str(origin.get("action_args_digest") or ""):
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_DRIFT,
+                "derived action origin args differ from the exact origin receipt",
             )
         try:
             reopened_origin = self.resolve(
@@ -1020,7 +1165,9 @@ class ProductionActionPreviewAuthorityResolver:
             str(reopened_origin.node_grant_ref),
         )
         if (
-            actual_origin != expected_origin
+            str(reopened_origin.authority_kind).strip().upper()
+            != origin_authority_kind
+            or actual_origin != expected_origin
             or _digest(dict(reopened_origin.binding))
             != str(origin.get("authority_binding_digest") or "")
             or _node_grant_binding_digest(reopened_origin.node_grant)
@@ -1095,8 +1242,12 @@ class ProductionActionPreviewAuthorityResolver:
         binding = {
             "schema_version": ACTION_PREVIEW_AUTHORITY_BINDING_SCHEMA,
             "authority_kind": "DERIVED_EFFECT",
+            "origin_authority_kind": origin_authority_kind,
             "origin_receipt_ref": origin_ref,
             "origin_receipt_digest": str(origin.get("receipt_digest") or ""),
+            "origin_authority_binding_digest": str(
+                origin.get("authority_binding_digest") or ""
+            ),
             "effect_descriptor": descriptor,
             "derived_scope_digest": _digest(scope),
             "derived_args_digest": _digest(args),
@@ -1146,7 +1297,9 @@ __all__ = [
     "ACTION_PREVIEW_AUTHORITY_BINDING_SCHEMA",
     "DERIVED_EFFECT_AUTHORITY_SCHEMA",
     "EFFECT_DESCRIPTOR_SCHEMA",
+    "INTERNAL_AGENT_RESULT_COMMIT_EFFECT_TYPE",
     "NODE_AUTHORITY_SCHEMA",
+    "SCHEDULER_OPERATION_EFFECT_TYPE",
     "ProductionActionPreviewAuthorityResolver",
     "ResolvedActionPreviewAuthority",
     "action_preview_scene_identity",

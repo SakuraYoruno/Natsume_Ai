@@ -24,7 +24,6 @@ from host_brain.bond.neo4j_client import InMemoryNeo4jBondClient, SqliteBondClie
 from host_brain.integrations.graph_runtime import GraphRuntimeContract
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.memory.life_memory.store import LifeMemoryStore
-from host_brain.observability.metrics import MetricsCollector
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.channels.multimodal_processor import MultimodalProcessor
 from host_brain.channels.tts_context_router import TtsContextRouter
@@ -175,38 +174,6 @@ def reset_capability_runtime_composition(
         _container().capability_runtime_composition = replacement
     if current is not None and current is not replacement:
         current.broker.close()
-
-
-def get_query_projection_store():
-    """Return the generic AW07 durable query projection repository.
-
-    The canonical ledger startup applies migration 0082 before this accessor
-    is constructed, so every production projection kind shares one governed
-    durable database and schema contract.
-    """
-    ledger = get_ledger()
-    canonical_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
-    if not canonical_path or canonical_path == ":memory:":
-        raise RuntimeError("OPERATOR_PROJECTION_DURABLE_DB_REQUIRED")
-    if (
-        _container().query_projection_store is None
-        or str(getattr(_container().query_projection_store, "db_path", "")) != canonical_path
-    ):
-        from host_brain.observability.projection_store import QueryProjectionStore  # noqa: PLC0415
-
-        _container().query_projection_store = QueryProjectionStore(canonical_path)
-    return _container().query_projection_store
-
-
-def peek_query_projection_store():
-    """Return the initialized query store without constructing runtime state.
-
-    Operator GET handlers use this non-owning accessor so a read request can
-    never open the ledger, assert migrations or initialize a repository.
-    Projection workers remain the owners of ``get_query_projection_store``.
-    """
-
-    return _container().query_projection_store
 
 
 def get_model_runtime_composition() -> "ModelRuntimeComposition":
@@ -440,7 +407,6 @@ from host_brain.composition.process_runtime_services import (
     get_milestone_tracker,
     get_multimodal_observer,
     get_multimodal_processor,
-    get_obs_metrics_collector,
     get_planning_agent,
     get_policy_cache,
     get_predictive_state_engine,

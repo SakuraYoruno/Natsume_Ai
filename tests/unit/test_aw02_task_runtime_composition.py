@@ -215,6 +215,12 @@ def _build_fake_container(
         events.append("worker-projection-store:build")
         return _Closeable("worker-projection-store", events)
 
+    def build_checkpoint_uow(**kwargs: Any) -> object:
+        assert kwargs["task_store"] is not None
+        assert kwargs["worker_projection_store"] is not None
+        events.append("checkpoint-uow:build")
+        return object()
+
     def build_agent_result_repository(db_path: str) -> _Closeable:
         assert db_path == str(path.resolve())
         events.append("agent-result:build")
@@ -248,6 +254,7 @@ def _build_fake_container(
         review_store_builder=build_review_store,
         review_continuation_store_builder=build_review_continuation_store,
         worker_projection_store_builder=build_worker_projection_store,
+        internal_agent_checkpoint_uow_builder=build_checkpoint_uow,
         command_repository_builder=build_repository,
         agent_result_repository_builder=build_agent_result_repository,
         scheduler_definition_repository_builder=build_scheduler_definition_repository,
@@ -279,6 +286,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "review-store:build",
         "review-continuation-store:build",
         "worker-projection-store:build",
+        "checkpoint-uow:build",
         "repository:build",
         "agent-result:build",
         "scheduler-definition:build",
@@ -452,6 +460,10 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         events.append("worker-projection-store:build")
         return _Closeable("worker-projection-store", events)
 
+    def build_checkpoint_uow(**_kwargs: Any) -> object:
+        events.append("checkpoint-uow:build")
+        return object()
+
     def build_review_continuation_store(_path: str) -> _Closeable:
         events.append("review-continuation-store:build")
         return _Closeable("review-continuation-store", events)
@@ -465,6 +477,7 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
             review_store_builder=build_review_store,
             review_continuation_store_builder=build_review_continuation_store,
             worker_projection_store_builder=build_worker_projection_store,
+            internal_agent_checkpoint_uow_builder=build_checkpoint_uow,
             command_repository_builder=fail_repository,
         )
 
@@ -486,6 +499,7 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         "review-store:build",
         "review-continuation-store:build",
         "worker-projection-store:build",
+        "checkpoint-uow:build",
         "repository:build",
         "worker-projection-store:close",
         "review-continuation-store:close",

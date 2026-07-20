@@ -25,6 +25,7 @@ from host_brain.agent_runtime.workspace_allocator import (
 )
 from host_brain.agent_runtime.workspace_policy import WorkspaceResolution
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.workspace_lifecycle import WorkspaceLifecycleState
 from host_brain.persistence.workspace_repository import (
     WORKSPACE_AUTHORITY_CONFLICT,
     WORKSPACE_AUTHORITY_INVALID,
@@ -48,6 +49,25 @@ class WorkspaceCleanupReceipt:
     workspace_id: str
     receipt_ref: str
     digest: str
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceArtifactPromotionReceipt:
+    workspace_id: str
+    accepted_event_id: str
+    promotion_event_id: str
+    artifact_ref: str
+    no_change_receipt_ref: str
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceArtifactAbandonmentReceipt:
+    workspace_id: str
+    abandonment_event_id: str
+    tombstone_ref: str
+    reason_code: str
     replayed: bool
 
 
@@ -608,6 +628,432 @@ class DurableWorkspaceRuntime:
                 )
             return authority
 
+    def promote_no_change_artifact(
+        self,
+        *,
+        workspace_id: str,
+        execution_authority: dict[str, Any],
+        verification_ref: str,
+        acceptance_ref: str,
+        effect_ref: str,
+        artifact_promoter: Callable[[], str],
+        allow_start: bool = True,
+    ) -> WorkspaceArtifactPromotionReceipt:
+        """Promote one sealed read-only result through the 0116 lifecycle."""
+
+        if not callable(artifact_promoter):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "artifact_promoter must be callable",
+            )
+        authority = self._promotion_authority(
+            workspace_id=workspace_id,
+            value=execution_authority,
+        )
+        verification = self._durable_ref(verification_ref, "verification_ref")
+        acceptance = self._durable_ref(acceptance_ref, "acceptance_ref")
+        effect = self._durable_ref(effect_ref, "effect_ref")
+        identity_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "workspace_id": workspace_id,
+                    "execution_authority": authority,
+                    "verification_ref": verification,
+                    "acceptance_ref": acceptance,
+                    "effect_ref": effect,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        accepted_event_id = f"workspace-accepted-{identity_digest}"
+        promotion_event_id = f"workspace-promoted-{identity_digest}"
+
+        snapshot = self.repository.get_lifecycle(workspace_id)
+        if snapshot.state is WorkspaceLifecycleState.ACTIVE and not allow_start:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "reconciliation cannot initiate an unstarted Workspace promotion",
+            )
+        replayed = snapshot.state is not WorkspaceLifecycleState.ACTIVE
+        no_change_ref = ""
+        if snapshot.state is WorkspaceLifecycleState.ACTIVE:
+            lease = self._continuation_lease(
+                workspace_id,
+                purpose=f"accept:{identity_digest}",
+            )
+            no_change = self.allocator.capture_no_change_head(lease)
+            no_change_ref = no_change.receipt_ref
+            mutation = self.repository.accept_workspace(
+                workspace_id,
+                event_id=accepted_event_id,
+                expected_transition_revision=0,
+                node_id=authority["node_id"],
+                attempt_id=authority["attempt_id"],
+                task_lease_id=authority["lease_id"],
+                task_lease_fencing_token=authority["fencing_token"],
+                lease_owner=lease.lease_owner,
+                lease_token=lease.lease_token,
+                lease_fencing_token=lease.lease_fencing_token,
+                base_commit=no_change.base_commit,
+                accepted_head=no_change.accepted_head,
+                tree_digest=no_change.tree_digest,
+                diff_digest=no_change.diff_digest,
+                verification_ref=verification,
+                acceptance_ref=acceptance,
+            )
+            if mutation.event.event_id != accepted_event_id:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_RUNTIME_BINDING_INVALID,
+                    "workspace acceptance returned a different event",
+                )
+            snapshot = self.repository.get_lifecycle(workspace_id)
+
+        accepted_event = snapshot.accepted_event
+        if (
+            accepted_event is None
+            or accepted_event.event_id != accepted_event_id
+            or accepted_event.graph_id != authority["graph_id"]
+            or accepted_event.graph_revision != authority["graph_revision"]
+            or accepted_event.node_id != authority["node_id"]
+            or accepted_event.attempt_id != authority["attempt_id"]
+            or accepted_event.task_lease_id != authority["lease_id"]
+            or accepted_event.task_lease_fencing_token != authority["fencing_token"]
+            or accepted_event.verification_ref != verification
+            or accepted_event.acceptance_ref != acceptance
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace accepted receipt differs from the exact effect authority",
+            )
+        if not no_change_ref:
+            no_change_ref = "workspace-no-change://sha256/" + hashlib.sha256(
+                (
+                    f"{workspace_id}\n{accepted_event.base_commit}\n"
+                    f"{accepted_event.accepted_head}\n{accepted_event.tree_digest}\n"
+                    f"{accepted_event.diff_digest}"
+                ).encode("utf-8")
+            ).hexdigest()
+
+        artifact_ref = self._durable_ref(artifact_promoter(), "artifact_ref")
+        snapshot = self.repository.get_lifecycle(workspace_id)
+        if snapshot.state is WorkspaceLifecycleState.ACCEPTED:
+            lease = self._continuation_lease(
+                workspace_id,
+                purpose=f"promote:{identity_digest}",
+            )
+            mutation = self.repository.promote_workspace(
+                workspace_id,
+                event_id=promotion_event_id,
+                expected_transition_revision=1,
+                acceptance_event_id=accepted_event_id,
+                promotion_ref=artifact_ref,
+                lease_owner=lease.lease_owner,
+                lease_token=lease.lease_token,
+                lease_fencing_token=lease.lease_fencing_token,
+            )
+            if mutation.event.event_id != promotion_event_id:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_RUNTIME_BINDING_INVALID,
+                    "workspace promotion returned a different event",
+                )
+            snapshot = self.repository.get_lifecycle(workspace_id)
+        terminal = snapshot.latest_event
+        if (
+            snapshot.state is not WorkspaceLifecycleState.PROMOTED
+            or terminal is None
+            or terminal.event_id != promotion_event_id
+            or terminal.acceptance_event_id != accepted_event_id
+            or terminal.terminal_ref != artifact_ref
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace promotion is absent or belongs to another artifact",
+            )
+        return WorkspaceArtifactPromotionReceipt(
+            workspace_id=workspace_id,
+            accepted_event_id=accepted_event_id,
+            promotion_event_id=promotion_event_id,
+            artifact_ref=artifact_ref,
+            no_change_receipt_ref=no_change_ref,
+            replayed=replayed,
+        )
+
+    def abandon_terminal_artifact(
+        self,
+        *,
+        workspace_id: str,
+        execution_authority: dict[str, Any],
+        stage_ref: str,
+        seal_digest: str,
+        reason_code: str,
+        artifact_planner: Callable[[], str],
+        artifact_abandoner: Callable[[], str],
+    ) -> WorkspaceArtifactAbandonmentReceipt:
+        """Persist ACTIVE→ABANDONED before deleting one sealed stage.
+
+        Both callbacks must be exact-replay operations owned by the artifact
+        store.  The planner is read-only, so the 0116 lifecycle CAS always wins
+        before a tombstone is written or stage bytes are removed.
+        """
+
+        if not callable(artifact_planner) or not callable(artifact_abandoner):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "artifact abandonment requires planner and abandoner callbacks",
+            )
+        authority = self._promotion_authority(
+            workspace_id=workspace_id,
+            value=execution_authority,
+        )
+        stage = self._durable_ref(stage_ref, "stage_ref")
+        seal = str(seal_digest or "").strip().lower()
+        if (
+            len(seal) != 71
+            or not seal.startswith("sha256:")
+            or any(character not in "0123456789abcdef" for character in seal[7:])
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "seal_digest is not canonical",
+            )
+        reason = self._required(reason_code, "reason_code", 128).upper()
+        if (
+            reason != str(reason_code).strip()
+            or not reason[0].isalpha()
+            or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for character in reason)
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "reason_code is not canonical",
+            )
+        tombstone_ref = self._durable_ref(
+            artifact_planner(),
+            "tombstone_ref",
+        )
+        identity_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "workspace_id": workspace_id,
+                    "execution_authority": authority,
+                    "stage_ref": stage,
+                    "seal_digest": seal,
+                    "tombstone_ref": tombstone_ref,
+                    "reason_code": reason,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        event_id = f"workspace-abandoned-{identity_digest}"
+        snapshot = self.repository.get_lifecycle(workspace_id)
+        replayed = snapshot.state is WorkspaceLifecycleState.ABANDONED
+        if snapshot.state is WorkspaceLifecycleState.ACTIVE:
+            lease = self._continuation_lease(
+                workspace_id,
+                purpose=f"abandon:{identity_digest}",
+            )
+            mutation = self.repository.abandon_workspace(
+                workspace_id,
+                event_id=event_id,
+                expected_transition_revision=0,
+                node_id=authority["node_id"],
+                attempt_id=authority["attempt_id"],
+                task_lease_id=authority["lease_id"],
+                task_lease_fencing_token=authority["fencing_token"],
+                abandonment_ref=tombstone_ref,
+                reason_code=reason,
+                lease_owner=lease.lease_owner,
+                lease_token=lease.lease_token,
+                lease_fencing_token=lease.lease_fencing_token,
+            )
+            if mutation.event.event_id != event_id:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_RUNTIME_BINDING_INVALID,
+                    "workspace abandonment returned a different event",
+                )
+            snapshot = self.repository.get_lifecycle(workspace_id)
+        terminal = snapshot.latest_event
+        if (
+            snapshot.state is not WorkspaceLifecycleState.ABANDONED
+            or snapshot.revision != 1
+            or terminal is None
+            or terminal.event_id != event_id
+            or terminal.from_state is not WorkspaceLifecycleState.ACTIVE
+            or terminal.graph_id != authority["graph_id"]
+            or terminal.graph_revision != authority["graph_revision"]
+            or terminal.node_id != authority["node_id"]
+            or terminal.attempt_id != authority["attempt_id"]
+            or terminal.task_lease_id != authority["lease_id"]
+            or terminal.task_lease_fencing_token != authority["fencing_token"]
+            or terminal.terminal_ref != tombstone_ref
+            or terminal.reason_code != reason
+            or terminal.acceptance_event_id is not None
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "workspace abandonment differs from the sealed terminal artifact",
+            )
+        actual_ref = self._durable_ref(
+            artifact_abandoner(),
+            "tombstone_ref",
+        )
+        if actual_ref != tombstone_ref:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "artifact tombstone differs from the durable lifecycle event",
+            )
+        return WorkspaceArtifactAbandonmentReceipt(
+            workspace_id=workspace_id,
+            abandonment_event_id=event_id,
+            tombstone_ref=tombstone_ref,
+            reason_code=reason,
+            replayed=replayed,
+        )
+
+    def cleanup_terminal_workspace(
+        self,
+        *,
+        workspace_id: str,
+        expected_state: WorkspaceLifecycleState,
+        expected_terminal_ref: str,
+    ) -> WorkspaceCleanupReceipt:
+        """Start 0101 cleanup only after reopening exact 0116 terminal truth."""
+
+        state = WorkspaceLifecycleState(str(expected_state))
+        if state not in {
+            WorkspaceLifecycleState.PROMOTED,
+            WorkspaceLifecycleState.ABANDONED,
+        }:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_CLEANUP_UNAVAILABLE,
+                "workspace cleanup requires a terminal lifecycle state",
+            )
+        terminal_ref = self._durable_ref(
+            expected_terminal_ref,
+            "expected_terminal_ref",
+        )
+        snapshot = self.repository.get_lifecycle(workspace_id)
+        if (
+            snapshot.state is not state
+            or snapshot.latest_event is None
+            or snapshot.latest_event.terminal_ref != terminal_ref
+        ):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_CLEANUP_UNAVAILABLE,
+                "workspace cleanup lifecycle identity is missing or drifted",
+            )
+        return self.cleanup(workspace_id)
+
+    def _continuation_lease(
+        self,
+        workspace_id: str,
+        *,
+        purpose: str,
+    ) -> DurableWorkspaceLease:
+        self._ensure_process_instance()
+        reference = self._required(workspace_id, "workspace_id", 120)
+        with self._lock:
+            cached = self._leases.get(reference)
+        if cached is not None:
+            try:
+                self.repository.authorize_lease(
+                    reference,
+                    lease_owner=cached.lease_owner,
+                    lease_token=cached.lease_token,
+                    lease_fencing_token=cached.lease_fencing_token,
+                )
+                return cached
+            except WorkspaceRepositoryError as exc:
+                if exc.reason_code != WORKSPACE_STALE_FENCE:
+                    raise
+        durable = self.repository.get(reference)
+        owner_digest = hashlib.sha256(
+            f"{purpose}\n{self._runtime_instance_id}".encode("utf-8")
+        ).hexdigest()[:40]
+        instance_digest = self._runtime_instance_digest()
+        owner = (
+            f"{self.runtime_owner_id}::workspace-effect::{instance_digest}::"
+            f"{owner_digest}"
+        )
+        if len(owner) > 240:
+            owner = f"runtime-effect::{instance_digest}::{owner_digest}"
+        token = self._lease_token(
+            workspace_id=reference,
+            lease_owner=owner,
+            graph_id=durable.graph_id,
+            graph_revision=durable.graph_revision,
+        )
+        acquired = self.repository.acquire_lease(
+            reference,
+            lease_owner=owner,
+            lease_token=token,
+            lease_ms=self.lease_ms,
+            expected_status_version=durable.status_version,
+        ).authority
+        lease = DurableWorkspaceLease(
+            workspace_id=reference,
+            lease_owner=owner,
+            lease_token=token,
+            lease_fencing_token=acquired.lease_fencing_token,
+        )
+        with self._lock:
+            self._leases[reference] = lease
+        return lease
+
+    def _promotion_authority(
+        self,
+        *,
+        workspace_id: str,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        authority = dict(value or {})
+        required = {
+            "root_work_order_id",
+            "graph_id",
+            "graph_revision",
+            "node_id",
+            "attempt_id",
+            "lease_id",
+            "command_id",
+            "principal_id",
+            "lease_owner_id",
+            "fencing_token",
+        }
+        if set(authority) != required:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "artifact promotion authority fields drifted",
+            )
+        for field in required - {"graph_revision", "fencing_token"}:
+            authority[field] = self._required(authority[field], field, 240)
+        for field in ("graph_revision", "fencing_token"):
+            raw = authority[field]
+            if isinstance(raw, bool) or type(raw) is not int or raw < 1:
+                raise DurableWorkspaceRuntimeError(
+                    WORKSPACE_RUNTIME_BINDING_INVALID,
+                    f"artifact promotion {field} is invalid",
+                )
+        expected_workspace = self.workspace_id_for(
+            graph_id=authority["graph_id"],
+            graph_revision=authority["graph_revision"],
+        )
+        if workspace_id != expected_workspace:
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "artifact promotion workspace differs from graph epoch",
+            )
+        return authority
+
+    def _durable_ref(self, value: Any, field: str) -> str:
+        reference = self._required(value, field, 512)
+        if "://" not in reference or any(ch.isspace() for ch in reference):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                f"{field} is not a durable reference",
+            )
+        return reference
+
     def cleanup(self, workspace_id: str) -> WorkspaceCleanupReceipt:
         """Execute or continue an explicitly durable cleanup transition."""
 
@@ -978,5 +1424,7 @@ __all__ = [
     "WORKSPACE_CLEANUP_UNAVAILABLE",
     "WORKSPACE_HEARTBEAT_LOST",
     "WORKSPACE_RUNTIME_BINDING_INVALID",
+    "WorkspaceArtifactPromotionReceipt",
+    "WorkspaceArtifactAbandonmentReceipt",
     "WorkspaceCleanupReceipt",
 ]

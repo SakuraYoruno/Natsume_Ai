@@ -26,6 +26,15 @@ from host_brain.persistence.workspace_operation_fencing import (
     WorkspaceOperationContext,
     WorkspaceOperationFencingMixin,
 )
+from host_brain.persistence.workspace_lifecycle_repository import (
+    WORKSPACE_LIFECYCLE_CONFLICT,
+    WORKSPACE_LIFECYCLE_DATA_INVALID,
+    WORKSPACE_LIFECYCLE_MIGRATION_ASSET_KEY,
+    WORKSPACE_LIFECYCLE_MIGRATION_SHA256,
+    WORKSPACE_LIFECYCLE_REPLAY_DRIFT,
+    WORKSPACE_LIFECYCLE_SCHEMA_NOT_READY,
+    WorkspaceLifecycleRepositoryMixin,
+)
 
 
 WORKSPACE_AUTHORITY_NOT_FOUND = "WORKSPACE_AUTHORITY_NOT_FOUND"
@@ -366,7 +375,10 @@ def _canonical_allowed_paths(values: Iterable[str]) -> tuple[tuple[str, ...], st
     return ordered, encoded, _digest(encoded)
 
 
-class WorkspaceRepository(WorkspaceOperationFencingMixin):
+class WorkspaceRepository(
+    WorkspaceLifecycleRepositoryMixin,
+    WorkspaceOperationFencingMixin,
+):
     """Canonical W1 authority with lease-fenced external-operation guards."""
 
     def __init__(
@@ -376,6 +388,7 @@ class WorkspaceRepository(WorkspaceOperationFencingMixin):
         clock: Callable[[], int] = now_ms,
         timeout_ms: int = 5_000,
         verify_schema: bool = True,
+        lifecycle_fault_injector: Callable[[str], None] | None = None,
     ) -> None:
         raw_path = str(db_path or "").strip()
         if not raw_path or raw_path == ":memory:" or raw_path.lower().startswith("file:"):
@@ -391,6 +404,15 @@ class WorkspaceRepository(WorkspaceOperationFencingMixin):
         self.db_path = Path(raw_path).expanduser().resolve()
         self._clock = clock
         self._timeout_ms = max(1, int(timeout_ms))
+        if lifecycle_fault_injector is not None and not callable(
+            lifecycle_fault_injector
+        ):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "lifecycle_fault_injector must be callable",
+            )
+        self._workspace_lifecycle_fault_injector = lifecycle_fault_injector
+        self._workspace_lifecycle_schema_verified = False
         self._operation_lock_root = (
             self.db_path.parent
             / f".{self.db_path.name}.workspace-operation-locks"
@@ -1374,6 +1396,12 @@ __all__ = [
     "WORKSPACE_AUTHORITY_SCHEMA_VERSION",
     "WORKSPACE_DURABLE_DATA_INVALID",
     "WORKSPACE_LEASE_CONFLICT",
+    "WORKSPACE_LIFECYCLE_CONFLICT",
+    "WORKSPACE_LIFECYCLE_DATA_INVALID",
+    "WORKSPACE_LIFECYCLE_MIGRATION_ASSET_KEY",
+    "WORKSPACE_LIFECYCLE_MIGRATION_SHA256",
+    "WORKSPACE_LIFECYCLE_REPLAY_DRIFT",
+    "WORKSPACE_LIFECYCLE_SCHEMA_NOT_READY",
     "WORKSPACE_OWNERSHIP_CONFLICT",
     "WORKSPACE_OPERATION_TIMEOUT",
     "WORKSPACE_SCHEMA_NOT_READY",

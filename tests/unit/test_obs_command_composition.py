@@ -28,6 +28,9 @@ class _FakeStore:
     def append(self, _event) -> str:  # noqa: ANN001
         return "secure-ingress-audit://fake"
 
+    def resolve_committed_authority_by_audit(self, *, audit_ref):  # noqa: ANN001
+        return {"audit_ref": audit_ref}
+
 
 class _FakeShadowStateStore:
     instances: list["_FakeShadowStateStore"] = []
@@ -45,12 +48,14 @@ class _FakeOutcomeJournal:
     def __init__(self, path) -> None:  # noqa: ANN001
         self.path = Path(path).resolve()
         self.recover_count = 0
+        self.recover_kwargs: list[dict] = []
         self.__class__.instances.append(self)
         if self.__class__.init_error is not None:
             raise RuntimeError(self.__class__.init_error)
 
-    def recover_incomplete(self) -> tuple[()]:
+    def recover_incomplete(self, **kwargs) -> tuple[()]:  # noqa: ANN003
         self.recover_count += 1
+        self.recover_kwargs.append(dict(kwargs))
         if self.__class__.recovery_error is not None:
             raise RuntimeError(self.__class__.recovery_error)
         return ()
@@ -108,6 +113,7 @@ class _FakeIngress:
         self.in_flight = 0
         self.admission_closed = False
         self.drain_count = 0
+        self.open_count = 0
 
     def close_admission(self) -> None:
         self.admission_closed = True
@@ -116,6 +122,10 @@ class _FakeIngress:
         self.admission_closed = True
         self.drain_count += 1
         self.in_flight = 0
+
+    def open_admission_after_recovery(self) -> None:
+        self.open_count += 1
+        self.admission_closed = False
 
 
 def _install_fakes(monkeypatch):  # noqa: ANN001
@@ -314,6 +324,43 @@ def test_outcome_recovery_requires_exclusive_lifetime_owner(
     assert third.enabled is True
     assert _FakeOutcomeJournal.instances[2].recover_count == 1
     third.close()
+
+
+def test_deferred_review_recovery_keeps_admission_closed_until_canonical_gate(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _install_fakes(monkeypatch)
+    composition = composition_module.build_obs_command_composition(
+        env=_env("QUERY_ONLY", "ENFORCE"),
+        db_path=tmp_path / "audit.sqlite3",
+        defer_review_recovery=True,
+    )
+
+    first_kwargs = _FakeOutcomeJournal.instances[0].recover_kwargs[0]
+    assert first_kwargs["defer_review_command_ids"] == (
+        composition_module.GOVERNED_OPERATOR_COMMAND_IDS
+    )
+    assert composition.ingress.kwargs["admission_open"] is False
+
+    recovered = composition.recover_deferred_review_admissions(
+        command_repository=SimpleNamespace(
+            get_by_ingress_claim=lambda _claim: None
+        ),
+        task_store=SimpleNamespace(get_node=lambda *_args: {}),
+        review_store=SimpleNamespace(list_reviews=lambda **_kwargs: []),
+        review_continuation_store=SimpleNamespace(
+            get_review_continuation=lambda _review_id: None
+        ),
+    )
+
+    assert recovered == ()
+    assert _FakeOutcomeJournal.instances[0].recover_count == 2
+    assert "review_wait_resolver" in (
+        _FakeOutcomeJournal.instances[0].recover_kwargs[1]
+    )
+    assert composition.ingress.open_count == 1
+    composition.close()
 
 
 def test_sync_close_keeps_owner_until_in_flight_commands_are_drained(

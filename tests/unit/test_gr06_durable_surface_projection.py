@@ -7,6 +7,7 @@ import pytest
 from host_brain.agent_runtime.postprocess import _async_post_process
 from host_brain.app import acceptance_effect_handlers
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER
+from natsume_contracts.life import LifeCommand
 
 
 class _ExperienceStore:
@@ -145,6 +146,16 @@ def test_life_acceptance_handler_requires_applied_receipt(monkeypatch) -> None:
 
 
 def test_life_acceptance_handler_accepts_applied_replay(monkeypatch) -> None:
+    command = LifeCommand(
+        command_id="life::foreground_completed::request-gr06",
+        person_id="person-gr06-durable-projection",
+        command_type="foreground_completed",
+        payload={},
+        expected_version=0,
+        created_at_ms=100,
+        correlation_id="request-gr06",
+        metadata={},
+    )
     monkeypatch.setattr(
         PROCESS_LIFE_PROVIDER,
         "require",
@@ -153,7 +164,19 @@ def test_life_acceptance_handler_accepts_applied_replay(monkeypatch) -> None:
     monkeypatch.setattr(
         acceptance_effect_handlers,
         "submit_life_command",
-        lambda **_kwargs: {"status": "APPLIED", "replayed": True},
+        lambda **_kwargs: {
+            "command_id": command.command_id,
+            "command_hash": command.command_hash,
+            "person_id": command.person_id,
+            "status": "APPLIED",
+            "reason_code": None,
+            "event_id": "life_evt_gr06_durable_projection",
+            "state_version": 1,
+            "state_digest": "sha256:" + "a" * 64,
+            "outbox_count": 0,
+            "created_at_ms": 100,
+            "replayed": True,
+        },
     )
 
     receipt = acceptance_effect_handlers._submit_accepted_life_foreground(
@@ -170,4 +193,7 @@ def test_life_acceptance_handler_accepts_applied_replay(monkeypatch) -> None:
 
     assert receipt["status"] == "APPLIED"
     assert receipt["replayed"] is True
-    assert receipt["receipt_ref"].startswith("life-foreground://sha256/")
+    assert (
+        receipt["receipt_ref"]
+        == "life-event://id/life_evt_gr06_durable_projection"
+    )

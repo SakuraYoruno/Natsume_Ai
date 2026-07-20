@@ -56,6 +56,9 @@ from host_brain.persistence.review_continuation_codec import (
     _row_dict,
     _waiting_status,
 )
+from host_brain.persistence.task_record_codec import (
+    _graph_cancellation_intent_record,
+)
 
 
 def continuation_table_exists(conn: sqlite3.Connection) -> bool:
@@ -147,6 +150,74 @@ def enqueue_task_review_continuation_in_transaction(
     return _row_dict(inserted)
 
 
+def _validate_cancelled_task_review_checkpoint(
+    conn: sqlite3.Connection,
+    *,
+    review: ReviewItem,
+    binding: TaskReviewSubjectBinding,
+    node: sqlite3.Row,
+) -> None:
+    """Bind a crossed Review checkpoint to its exact cancellation intent."""
+
+    intent_row = conn.execute(
+        """
+        SELECT * FROM task_runtime_graph_cancellation_intent
+        WHERE graph_id = ? AND graph_revision = ?
+        """,
+        (binding.graph_id, binding.graph_revision),
+    ).fetchone()
+    if intent_row is None:
+        raise ReviewContinuationStoreError(
+            REVIEW_CONTINUATION_CONFLICT,
+            "cancelled Review has no durable Graph cancellation intent",
+        )
+    try:
+        cancellation = _graph_cancellation_intent_record(intent_row)
+    except Exception as exc:
+        raise ReviewContinuationStoreError(
+            REVIEW_CONTINUATION_CONFLICT,
+            "cancelled Review Graph cancellation intent is invalid",
+        ) from exc
+    payload = dict(cancellation.get("payload") or {})
+    before_states = dict(payload.get("node_states_before") or {})
+    after_states = dict(payload.get("node_states_after") or {})
+    before = dict(before_states.get(binding.node_id) or {})
+    after = dict(after_states.get(binding.node_id) or {})
+    intent_initial = _intent_admission_initial_status(review.subject_ref)
+    expected_waiting = intent_initial or _waiting_status(review.resume_phase.value)
+    expected_before = {
+        "status": expected_waiting,
+        "status_version": int(review.subject_version),
+    }
+    expected_after = {
+        "status": "CANCELLED",
+        "status_version": int(review.subject_version) + 1,
+    }
+    if (
+        str(cancellation.get("status") or "") not in {"REQUESTED", "FINALIZED"}
+        or before != expected_before
+        or after != expected_after
+        or str(node["status"]) != "CANCELLED"
+        or int(node["status_version"]) != expected_after["status_version"]
+    ):
+        raise ReviewContinuationStoreError(
+            REVIEW_CONTINUATION_CONFLICT,
+            "cancelled Review is not bound to the exact crossed checkpoint",
+        )
+    if intent_initial is not None:
+        _require_intent_admission_receipt_in_transaction(
+            conn,
+            review=review,
+            binding=binding,
+        )
+    _assert_phase_attempt(
+        conn,
+        binding=binding,
+        resume_phase=review.resume_phase.value,
+        checkpoint_crossed=True,
+    )
+
+
 def validate_task_review_admission_in_transaction(
     conn: sqlite3.Connection,
     *,
@@ -185,6 +256,14 @@ def validate_task_review_admission_in_transaction(
             REVIEW_CONTINUATION_CONFLICT,
             "TaskNode Review binding has no exact durable TaskNode",
         )
+    if review.status is ReviewStatus.CANCELLED:
+        _validate_cancelled_task_review_checkpoint(
+            conn,
+            review=review,
+            binding=binding,
+            node=node,
+        )
+        return binding
     intent_initial = _intent_admission_initial_status(review.subject_ref)
     if intent_initial is not None:
         _require_intent_admission_receipt_in_transaction(
@@ -528,7 +607,7 @@ class ReviewContinuationStore:
             rows = conn.execute(
                 """
                 SELECT review_id FROM agent_runtime_review
-                WHERE status IN ('CONSUMED', 'REJECTED', 'EXPIRED')
+                WHERE status IN ('CONSUMED', 'REJECTED', 'EXPIRED', 'CANCELLED')
                   AND task_graph_id IS NOT NULL
                   AND task_node_id IS NOT NULL
                 ORDER BY created_ts_ms, review_id
@@ -548,6 +627,7 @@ class ReviewContinuationStore:
                         "CONSUMED",
                         "REJECTED",
                         "EXPIRED",
+                        "CANCELLED",
                     }:
                         continue
                     review = _review_item_from_row(row)
@@ -574,20 +654,21 @@ class ReviewContinuationStore:
                         if intent_initial is not None
                         else _waiting_status(review.resume_phase.value)
                     )
-                    if (
+                    if review.status is not ReviewStatus.CANCELLED and (
                         str(node["status"]) != checkpoint_status
                         or int(node["status_version"])
                         != int(review.subject_version)
                     ):
                         already_crossed += 1
                         continue
-                    validate_task_review_admission_in_transaction(
-                        conn,
-                        review=review,
-                        task_graph_id=row["task_graph_id"],
-                        task_node_id=row["task_node_id"],
-                        require_schema=True,
-                    )
+                    if review.status is not ReviewStatus.CANCELLED:
+                        validate_task_review_admission_in_transaction(
+                            conn,
+                            review=review,
+                            task_graph_id=row["task_graph_id"],
+                            task_node_id=row["task_node_id"],
+                            require_schema=True,
+                        )
                     existed = conn.execute(
                         f"SELECT 1 FROM {REVIEW_CONTINUATION_TABLE} WHERE review_id = ?",
                         (review.review_id,),

@@ -205,6 +205,40 @@ class _RejectedPort(_RecordingPort):
         )
 
 
+class _WaitingReviewPort(_RecordingPort):
+    def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
+        self.envelopes.append(envelope)
+        return ObsCommandExecutionResult(
+            success=True,
+            result_ref="obs-command-result://unit/waiting-review",
+            result={
+                "schema_version": "natsume.obs-command-domain-result.v1",
+                "command_id": envelope.command_id,
+                "principal_id": envelope.authority.principal_id,
+                "output": {
+                    "success": True,
+                    "status": "WAITING_REVIEW",
+                    "graph_id": "graph-operator-review",
+                    "graph_revision": 1,
+                    "reviews": [
+                        {
+                            "review_id": "review-operator-mode",
+                            "status": "PENDING",
+                            "subject_ref": (
+                                "task-node://graph-operator-review/1/"
+                                "node-operator-mode"
+                            ),
+                            "subject_version": 1,
+                            "resume_phase": "PRE_EXECUTION",
+                            "checkpoint_id": "checkpoint-operator-mode",
+                        }
+                    ],
+                },
+            },
+            side_effects_executed=False,
+        )
+
+
 class _ExplodingPort(_RecordingPort):
     def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
         self.envelopes.append(envelope)
@@ -647,6 +681,109 @@ def test_duplicate_returns_completed_result_without_second_execution() -> None:
     assert duplicate.terminal_state == ObsCommandOutcomeState.SUCCEEDED.value
     assert duplicate.result is None
     assert len(system.port.envelopes) == 1
+
+
+def test_waiting_review_is_durable_pending_and_duplicate_does_not_complete_claim() -> None:
+    system = _system(port=_WaitingReviewPort())
+    first = _execute(system, _signed_request(system))
+    duplicate = _execute(
+        system,
+        _signed_request(system, nonce="obs.nonce.waiting-review.duplicate"),
+    )
+
+    assert first.allowed is True
+    assert first.executed is False
+    assert first.duplicate is False
+    assert first.reason_code == "OBS_COMMAND_WAITING_REVIEW"
+    assert first.terminal_state == ObsCommandOutcomeState.WAITING_REVIEW.value
+    assert first.result is not None
+    continuation_ref = str(first.result["continuation_ref"])
+    assert continuation_ref.startswith(
+        "governed-review://graph-operator-review/1/review-operator-mode"
+        "?binding=sha256:"
+    )
+    assert duplicate.duplicate is True
+    assert duplicate.executed is False
+    assert duplicate.result_ref == first.result_ref
+    assert duplicate.result == first.result
+    assert system.state.completed == []
+    assert len(system.port.envelopes) == 1
+    assert system.journal is not None
+    assert [record.state for record in system.journal.records()] == [
+        ObsCommandOutcomeState.EXECUTING,
+        ObsCommandOutcomeState.WAITING_REVIEW,
+    ]
+
+
+def test_review_continuation_binds_central_claim_to_outer_outcome_receipt() -> None:
+    system = _system(port=_WaitingReviewPort())
+    waiting = _execute(system, _signed_request(system))
+    assert waiting.claim_ref is not None
+    assert waiting.result is not None
+
+    completed = system.ingress.finalize_review_outcome(
+        claim_ref=waiting.claim_ref,
+        state="SUCCEEDED",
+        reason_code="OBS_COMMAND_COMPLETED",
+        side_effects_executed=True,
+        terminal_result_ref="task-execution-receipt://operator/accepted",
+        continuation_ref=str(waiting.result["continuation_ref"]),
+    )
+
+    assert completed.allowed is True
+    assert completed.terminal_state == ObsCommandOutcomeState.SUCCEEDED.value
+    assert completed.result_ref == waiting.result_ref
+    assert system.state.completed == [
+        (waiting.claim_ref, waiting.result_ref, NOW + 1)
+    ]
+    assert system.state.claims[waiting.claim_ref]["result_ref"] == waiting.result_ref
+    assert (
+        system.state.claims[waiting.claim_ref]["result_ref"]
+        != "task-execution-receipt://operator/accepted"
+    )
+
+    replay = _execute(
+        system,
+        _signed_request(system, nonce="obs.nonce.review-complete-replay"),
+    )
+    assert replay.allowed is True
+    assert replay.duplicate is True
+    assert replay.result_ref == waiting.result_ref
+    assert len(system.port.envelopes) == 1
+
+
+@pytest.mark.parametrize("review_status", ["REJECTED", "EXPIRED", "CANCELLED"])
+def test_denied_review_appends_outer_rejection(
+    review_status: str,
+) -> None:
+    system = _system(port=_WaitingReviewPort())
+    waiting = _execute(system, _signed_request(system))
+    assert waiting.claim_ref is not None
+    assert waiting.result is not None
+
+    rejected = system.ingress.finalize_review_outcome(
+        claim_ref=waiting.claim_ref,
+        state="REJECTED",
+        reason_code=f"OBS_COMMAND_REVIEW_{review_status}",
+        side_effects_executed=False,
+        terminal_result_ref=(
+            "taskcancel-intent://sha256/" + "c" * 64
+            if review_status == "CANCELLED"
+            else (
+                "review-decision://review-operator-mode/"
+                f"{review_status.lower()}/2"
+            )
+        ),
+        continuation_ref=str(waiting.result["continuation_ref"]),
+    )
+
+    assert rejected.allowed is False
+    assert rejected.executed is False
+    assert rejected.terminal_state == ObsCommandOutcomeState.REJECTED.value
+    assert rejected.result_ref == waiting.result_ref
+    assert system.state.completed == [
+        (waiting.claim_ref, waiting.result_ref, NOW + 1)
+    ]
 
 
 def test_new_central_claim_state_replays_durable_success_without_execution() -> None:

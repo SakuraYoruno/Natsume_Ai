@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -39,6 +38,7 @@ from host_brain.app.lifecycle_runtime_composition import (
 from host_brain.app.host_lifecycle_composition import (
     build_host_lifecycle_container,
 )
+from host_brain.app import host_life_scheduler_wiring as _scheduler_result_wiring
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.host_life_scheduler_wiring import (
@@ -47,14 +47,20 @@ from host_brain.app.host_life_scheduler_wiring import (
     compose_life_command_authority,
     compose_life_dispatchers as _compose_life_dispatchers,
     reset_life_command_authority,
-    scheduler_handler_result as _scheduler_handler_result,
     scheduler_seed_configs,
     submit_life_tick_command,
 )
 from host_brain.app.host_runtime_context_wiring import (
     bind_host_hard_state_runtime as _bind_host_hard_state_runtime,
+    compose_action_preview_service as _compose_action_preview_service,
     compose_host_runtime_context as _compose_host_runtime_context,
+    compose_service_catalog_guardian_observation as _compose_service_catalog_guardian_observation,
+    observe_runtime_startup as _observe_runtime_startup,
     runtime_environment_observation_provider as _runtime_environment_observation_provider,
+)
+from host_brain.app.internal_runtime_composition import (
+    activate_internal_runtime as _activate_internal_runtime,
+    compose_internal_runtime as _compose_internal_runtime,
 )
 from host_brain.app.host_runtime_startup_guards import (
     assert_graph_cancellation_operator_startup as _assert_graph_cancellation_operator_startup,
@@ -63,6 +69,10 @@ from host_brain.app.host_runtime_startup_guards import (
     assert_task_operation_reconciliation_operator_startup as _assert_task_operation_reconciliation_operator_startup,
     assert_task_terminal_reconciliation_operator_startup as _assert_task_terminal_reconciliation_operator_startup,
     command_ingress_hmac_secrets,
+)
+from host_brain.app.host_runtime_shutdown import (
+    shutdown_host_runtime_authority,
+    withdraw_published_runtime_state,
 )
 from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_source_composition import (
@@ -86,6 +96,10 @@ from host_brain.app.internal_task_runtime import (
     InternalAgentCommandService,
     build_governed_internal_runtime,
 )
+from host_brain.app.governed_operator_runtime import (
+    GovernedOperatorRuntime,
+    build_governed_operator_composition,
+)
 from host_brain.app.memory_policy_adapter import ExistingMemoryGuardAdapter
 from host_brain.app.settings import (
     get_core_settings,
@@ -94,12 +108,12 @@ from host_brain.app.settings import (
 )
 from host_brain.app.settings.input import get_input_settings
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.core.ids import now_ms
 from host_brain.observability.projection_store import QueryProjectionStore
 from host_brain.app.security_services_composition import (
     ProcessSecurityServiceContainer,
-    SecurityServiceContainerCloseError,
     build_process_security_service_container,
 )
 from host_brain.composition.command_ingress import (
@@ -122,9 +136,12 @@ from host_brain.composition.scheduler import (
     SchedulerClockIdentityConfig,
     build_process_scheduler_container,
 )
+from host_brain.scheduler.accepted_operation import (
+    SchedulerAcceptedOperationHandler,
+)
+from host_brain.scheduler.worker_registry import SchedulerWorkerRegistry
 from host_brain.composition.task_runtime import (
     ProcessTaskRuntimeContainer,
-    TaskRuntimeContainerCloseError,
     build_process_task_runtime_container,
 )
 from host_brain.task_runtime.review_command_service import TaskReviewCommandService
@@ -283,6 +300,7 @@ def create_app() -> FastAPI:
         )
     )
     governed_internal_runtime: GovernedInternalRuntime | None = None
+    governed_operator_runtime: GovernedOperatorRuntime | None = None
     internal_agent_command_service: InternalAgentCommandService | None = None
     task_review_command_service: TaskReviewCommandService | None = None
     internal_agent_ingress: InternalAgentIngress | None = None
@@ -469,21 +487,16 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def app_lifespan(application: FastAPI):
-        nonlocal security_container, command_ingress_container
-        nonlocal memory_container
-        nonlocal task_runtime_container
-        nonlocal agent_workspace_container
-        nonlocal governed_internal_runtime, internal_agent_command_service
-        nonlocal task_review_command_service
+        nonlocal security_container, command_ingress_container, memory_container
+        nonlocal task_runtime_container, agent_workspace_container
+        nonlocal governed_internal_runtime, governed_operator_runtime
+        nonlocal internal_agent_command_service, task_review_command_service
         nonlocal internal_agent_ingress, scheduler_container
         nonlocal host_obs_ledger, host_query_projection_store
-        nonlocal host_obs_capability_gap_telemetry
-        nonlocal host_obs_capability_forge, host_obs_semantic_recaller
-        nonlocal host_obs_capability_scorecards
-        nonlocal host_obs_degradation_state_provider
-        nonlocal host_obs_pentest_environment, host_obs_tribe_state_reader
-        nonlocal host_obs_source_epoch
-        nonlocal canon_container
+        nonlocal host_obs_capability_gap_telemetry, host_obs_capability_forge
+        nonlocal host_obs_semantic_recaller, host_obs_capability_scorecards
+        nonlocal host_obs_degradation_state_provider, host_obs_pentest_environment
+        nonlocal host_obs_tribe_state_reader, host_obs_source_epoch, canon_container
         nonlocal life_command_authority, life_dispatchers
         nonlocal embodiment_runtime, embodiment_authority_task
         nonlocal runtime_context_composition, runtime_context_application
@@ -512,6 +525,39 @@ def create_app() -> FastAPI:
             task_runtime: ProcessTaskRuntimeContainer | None = None
             scheduler: ProcessSchedulerContainer | None = None
             canon: ProcessCanonContainer | None = None
+
+            def withdraw_closed_process_references() -> None:
+                nonlocal security_container, command_ingress_container
+                nonlocal memory_container, task_runtime_container
+                nonlocal agent_workspace_container, scheduler_container
+                nonlocal governed_internal_runtime, governed_operator_runtime
+                nonlocal internal_agent_ingress, internal_agent_command_service
+                nonlocal task_review_command_service, canon_container
+                nonlocal host_obs_source_epoch, host_obs_tribe_state_reader
+                nonlocal host_obs_capability_forge, host_obs_capability_gap_telemetry
+                nonlocal host_obs_semantic_recaller, host_obs_capability_scorecards
+                nonlocal host_obs_degradation_state_provider
+                nonlocal host_obs_pentest_environment, host_obs_ledger
+                nonlocal host_query_projection_store, life_command_authority
+                nonlocal life_dispatchers, embodiment_runtime
+                nonlocal embodiment_authority_task, runtime_context_application
+                nonlocal runtime_context_composition
+                security_container = command_ingress_container = None
+                memory_container = task_runtime_container = None
+                agent_workspace_container = scheduler_container = None
+                governed_internal_runtime = governed_operator_runtime = None
+                internal_agent_ingress = internal_agent_command_service = None
+                task_review_command_service = canon_container = None
+                host_obs_source_epoch = host_obs_tribe_state_reader = None
+                host_obs_capability_forge = host_obs_capability_gap_telemetry = None
+                host_obs_semantic_recaller = host_obs_capability_scorecards = None
+                host_obs_degradation_state_provider = lambda: None
+                host_obs_pentest_environment = {}
+                host_obs_ledger = host_query_projection_store = None
+                life_command_authority = life_dispatchers = None
+                embodiment_runtime = embodiment_authority_task = None
+                runtime_context_application = runtime_context_composition = None
+
             try:
                 ledger = get_ledger()
                 security = build_process_security_service_container(
@@ -524,6 +570,7 @@ def create_app() -> FastAPI:
                     degradation_capability_port_provider=(
                         degradation_capability_port_provider
                     ),
+                    defer_obs_review_recovery=True,
                 )
             except Exception:
                 logger.error(
@@ -611,6 +658,20 @@ def create_app() -> FastAPI:
                     ),
                     authenticated_outcome_lookup=authenticated_outcome_lookup,
                 )
+                obs_composition = (
+                    security.obs_command_composition
+                    if security is not None
+                    else None
+                )
+                if obs_composition is not None:
+                    obs_composition.recover_deferred_review_admissions(
+                        command_repository=task_runtime.command_repository,
+                        task_store=task_runtime.task_store,
+                        review_store=task_runtime.review_store,
+                        review_continuation_store=(
+                            task_runtime.review_continuation_store
+                        ),
+                    )
                 # Digital Life repositories are migration-gated.  The task
                 # runtime owns canonical migration application, so Life must
                 # be composed only after that startup gate has completed.
@@ -702,45 +763,15 @@ def create_app() -> FastAPI:
                     ),
                 )
                 runtime_context_composition = runtime_context_application.composition
-                from host_brain.governor.action_preview import (  # noqa: PLC0415
-                    ActionPreviewService,
-                )
-                from host_brain.orchestration.node_grants import (  # noqa: PLC0415
-                    DurableNodeGrantVerifier,
-                )
-                from host_brain.runtime.action_preview_resolver import (  # noqa: PLC0415
-                    ProductionActionPreviewAuthorityResolver,
-                )
-
-                action_preview_authority_resolver = (
-                    ProductionActionPreviewAuthorityResolver(
-                        command_repository=task_runtime.command_repository,
-                        task_store=task_runtime.task_store,
-                        node_grant_verifier=DurableNodeGrantVerifier(
-                            ledger=ledger,
-                            review_store=task_runtime.review_continuation_store,
-                        ),
-                        runtime_context_application=runtime_context_application,
-                    )
-                )
-
-                action_preview_service = ActionPreviewService(
-                    runtime_event_store=runtime_context_composition.event_store,
-                    guardian=runtime_context_composition.guardian,
-                    authority_resolver=action_preview_authority_resolver,
+                action_preview_service = _compose_action_preview_service(
+                    task_runtime=task_runtime,
+                    ledger=ledger,
+                    runtime_context_application=runtime_context_application,
                 )
                 startup_observed_at_ms = now_ms()
-                runtime_context_composition.guardian.observe_startup_batch(
-                    startup_probe_statuses,
-                    source_ref=(
-                        "startup-probe://host/"
-                        + hashlib.sha256(
-                            (
-                                f"{runtime_context_composition.guardian.snapshot().snapshot_digest}:"
-                                f"{startup_observed_at_ms}"
-                            ).encode("utf-8")
-                        ).hexdigest()
-                    ),
+                _observe_runtime_startup(
+                    runtime_context_application=runtime_context_application,
+                    startup_probe_statuses=startup_probe_statuses,
                     observed_at_ms=startup_observed_at_ms,
                 )
                 host_obs_degradation_state_provider = (
@@ -766,58 +797,22 @@ def create_app() -> FastAPI:
                     os.environ.get("HOST_SERVICE_CATALOG_OPERATION_ID") or ""
                 ).strip()
                 if catalog_operation_id:
-                    from host_brain.persistence.service_catalog_rollout_repository import (  # noqa: PLC0415
-                        SQLiteServiceCatalogRolloutRepository,
-                    )
-                    from host_brain.service_catalog.rollout_authority import (  # noqa: PLC0415
-                        ServiceCatalogRolloutGuardianObserver,
-                    )
-
-                    catalog_guardian = runtime_context_composition.guardian
-                    catalog_rollout_store = SQLiteServiceCatalogRolloutRepository(
-                        task_runtime.canonical_db_path
-                    )
-                    catalog_rollout_observer = (
-                        ServiceCatalogRolloutGuardianObserver(
-                            store=catalog_rollout_store,
-                            guardian=catalog_guardian,
+                    catalog_observation = (
+                        _compose_service_catalog_guardian_observation(
+                            canonical_db_path=task_runtime.canonical_db_path,
+                            guardian=runtime_context_composition.guardian,
+                            operation_id=catalog_operation_id,
+                            logger=logger,
                         )
                     )
                     application.state.service_catalog_rollout_store = (
-                        catalog_rollout_store
+                        catalog_observation.store
                     )
                     application.state.service_catalog_rollout_observer = (
-                        catalog_rollout_observer
+                        catalog_observation.observer
                     )
-
-                    async def observe_catalog_rollout_receipt() -> None:
-                        try:
-                            for _attempt in range(240):
-                                receipt = await asyncio.to_thread(
-                                    catalog_rollout_store.terminal_receipt,
-                                    catalog_operation_id,
-                                )
-                                if receipt is not None:
-                                    catalog_rollout_observer.observe_operation(
-                                        catalog_operation_id
-                                    )
-                                    return
-                                await asyncio.sleep(0.25)
-                            logger.error(
-                                "HOST_SERVICE_CATALOG_TERMINAL_RECEIPT_TIMEOUT",
-                                extra={"operation_id": catalog_operation_id},
-                            )
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception:
-                            logger.error(
-                                "HOST_SERVICE_CATALOG_GUARDIAN_OBSERVE_FAILED",
-                                extra={"operation_id": catalog_operation_id},
-                                exc_info=True,
-                            )
-
                     catalog_rollout_guardian_task = asyncio.create_task(
-                        observe_catalog_rollout_receipt(),
+                        catalog_observation.observe_terminal_receipt(),
                         name="host-service-catalog-rollout-guardian-observer",
                     )
                 await asyncio.sleep(0)
@@ -933,38 +928,40 @@ def create_app() -> FastAPI:
                     episodic_projection_store=episodic_projection_store,
                 )
                 set_memory_service_container(memory)
-                logical_canonical_owner = runtime_settings.task_runtime_canonical_owner or "host-task-runtime"
-                canonical_owner = task_runtime.execution_owner_id(logical_canonical_owner)
-                agent_workspace_container = workspace.compose_agent_workspace_application_scope(
-                    application, task_runtime, runtime_settings, canonical_owner
-                )
-                governed_runtime = tool_composition.activate(
+                internal_composition = _compose_internal_runtime(
+                    application=application,
                     task_runtime=task_runtime,
+                    runtime_settings=runtime_settings,
                     ledger=ledger,
                     command_ingress=command_ingress,
-                    owner_id=canonical_owner,
-                    runtime_settings=runtime_settings,
+                    tool_composition=tool_composition,
                     runtime_context_application=runtime_context_application,
-                    cancellation_authority_verifier=cancellation_authority_verifier,
                     action_preview_service=action_preview_service,
-                    episodic_store=episodic_projection_store,
-                    semantic_recaller=host_obs_semantic_recaller,
-                )
-                canonical_agent_executor_kwargs: dict[str, Any] = {
-                    "model_attempt_service": host_services.model_attempt_service(),
-                    "prompt_registry": get_prompt_registry(),
-                }
-                if agent_workspace_container is not None:
-                    canonical_agent_executor_kwargs["workspace_runtime"] = agent_workspace_container.runtime
-                internal_runtime = build_governed_internal_runtime(
-                    task_runtime_container=task_runtime,
-                    ledger=ledger,
-                    token_service=get_token_service(),
-                    result_repository=task_runtime.agent_result_repository,
-                    runtime_router=CanonicalRuntimeRouter(),
-                    owner_id=canonical_owner,
-                    canonical_executor=AgentRuntimeExecutor(**canonical_agent_executor_kwargs),
                     cancellation_authority_verifier=cancellation_authority_verifier,
+                    episodic_projection_store=episodic_projection_store,
+                    semantic_recaller=host_obs_semantic_recaller,
+                    mode_transition_service_provider=host_lifecycle.get_mode_transition_service,
+                    life_receipt_reader_provider=(
+                        lambda: life_command_authority_provider(ledger)[1]
+                    ),
+                    token_service_provider=get_token_service,
+                    intent_engine_provider=get_intent_engine,
+                    model_attempt_service_provider=host_services.model_attempt_service,
+                    prompt_registry_provider=get_prompt_registry,
+                    workspace_composer=workspace.compose_agent_workspace_application_scope,
+                    artifact_store_factory=AgentArtifactStore,
+                    scheduler_worker_registry_factory=SchedulerWorkerRegistry,
+                    scheduler_operation_handler_factory=SchedulerAcceptedOperationHandler,
+                    operator_composition_factory=build_governed_operator_composition,
+                    runtime_router_factory=CanonicalRuntimeRouter,
+                    agent_executor_factory=AgentRuntimeExecutor,
+                    internal_runtime_factory=build_governed_internal_runtime,
+                )
+                canonical_owner = internal_composition.canonical_owner
+                agent_workspace_container = internal_composition.workspace_container
+                scheduler_workers = internal_composition.scheduler_workers
+                acceptance_effect_dispatcher = (
+                    internal_composition.acceptance_effect_dispatcher
                 )
 
                 try:
@@ -1023,17 +1020,17 @@ def create_app() -> FastAPI:
                         runtime_context_application=runtime_context_application,
                         action_preview_service=action_preview_service,
                     )
-                    return _scheduler_handler_result(result)
+                    return _scheduler_result_wiring.proactive_scheduler_handler_result(result)
 
                 async def distillation_scheduler_handler(**_: Any) -> dict[str, Any]:
                     report = await host_services.distillation_engine().run_batch()
-                    return _scheduler_handler_result(report)
+                    return _scheduler_result_wiring.distillation_scheduler_handler_result(report)
 
                 async def security_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
                     result = await get_security_immune_agent().run_once(
                         reason="scheduled"
                     )
-                    return _scheduler_handler_result(result)
+                    return _scheduler_result_wiring.security_immune_scheduler_handler_result(result)
 
                 async def agent_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
                     from host_brain.agent_runtime.immune import (  # noqa: PLC0415
@@ -1228,193 +1225,95 @@ def create_app() -> FastAPI:
                     ),
                     runtime_context_application=runtime_context_application,
                     action_preview_service=action_preview_service,
-                )
-                runtime_group = GovernedRuntimeGroup(
-                    {
-                        "host": governed_runtime,
-                        "internal_agent": internal_runtime,
-                        "scheduler": scheduler.runtime,
-                    },
-                    review_store=task_runtime.review_continuation_store,
-                    review_decision_store=task_runtime.review_store,
-                    command_repository=task_runtime.command_repository,
-                    claim_result_store=command_ingress.store,
-                    review_continuation_worker_id=(
-                        f"{task_runtime.recovery_id}::review-continuation"
+                    worker_registry=scheduler_workers,
+                    acceptance_effect_dispatcher=(
+                        acceptance_effect_dispatcher
                     ),
-                    graph_cancellation_operator_enabled=(
-                        cancellation_operator_enabled
+                )
+                activated_internal = await _activate_internal_runtime(
+                    application=application,
+                    task_runtime=task_runtime,
+                    command_ingress=command_ingress,
+                    security=security,
+                    scheduler=scheduler,
+                    composition=internal_composition,
+                    cancellation_operator_enabled=cancellation_operator_enabled,
+                    operation_reconciliation_operator_enabled=(
+                        operation_reconciliation_operator_enabled
                     ),
-                    graph_cancellation_state_reader=task_runtime.task_store,
+                    effect_reconciliation_operator_enabled=(
+                        effect_reconciliation_operator_enabled
+                    ),
+                    terminal_reconciliation_operator_enabled=(
+                        terminal_reconciliation_operator_enabled
+                    ),
+                    terminal_reconciliation_read_authority=(
+                        terminal_reconciliation_read_authority
+                    ),
+                    memory=memory,
+                    intent_engine_provider=get_intent_engine,
+                    runtime_group_factory=GovernedRuntimeGroup,
+                    review_command_service_factory=TaskReviewCommandService,
+                    internal_command_service_factory=InternalAgentCommandService,
                 )
-                review_commands = TaskReviewCommandService(
-                    review_store=task_runtime.review_store,
-                    wake_continuation=runtime_group.wake_review_continuation,
-                )
-                task_runtime.bind_runtime(runtime_group)
-                await task_runtime.activate_runtime()
-                await scheduler.activate_clock()
                 task_runtime_container = task_runtime
-                governed_internal_runtime = internal_runtime
-                internal_agent_command_service = InternalAgentCommandService(
-                    runtime=internal_runtime,
-                    intent_engine=get_intent_engine(),
-                    claim_result_store=command_ingress.store,
+                governed_internal_runtime = internal_composition.internal_runtime
+                governed_operator_runtime = internal_composition.operator_runtime
+                internal_agent_command_service = (
+                    activated_internal.internal_command_service
                 )
-                task_review_command_service = review_commands
+                task_review_command_service = activated_internal.review_commands
                 command_ingress_container = command_ingress
                 memory_container = memory
                 internal_agent_ingress = internal_ingress
                 scheduler_container = scheduler
-                application.state.task_runtime_container = task_runtime
-                application.state.governed_host_runtime = governed_runtime
-                application.state.governed_internal_runtime = internal_runtime
-                application.state.governed_scheduler_runtime = scheduler.runtime
-                application.state.scheduler_container = scheduler
-                application.state.task_review_command_service = review_commands
-                application.state.task_graph_cancellation_command_service = (
-                    runtime_group
-                )
-                application.state.task_operation_reconciliation_command_service = (
-                    task_runtime.operation_reconciliation_service
-                    if operation_reconciliation_operator_enabled
-                    else None
-                )
-                application.state.task_effect_reconciliation_command_service = (
-                    task_runtime.effect_reconciliation_service
-                    if effect_reconciliation_operator_enabled
-                    else None
-                )
-                application.state.task_terminal_reconciliation_command_service = (
-                    task_runtime.terminal_reconciliation_service
-                    if terminal_reconciliation_operator_enabled
-                    else None
-                )
-                application.state.task_terminal_reconciliation_read_authority = (
-                    terminal_reconciliation_read_authority
-                )
-                application.state.command_ingress_container = command_ingress
-                application.state.memory_service_container = memory
                 yield
             finally:
-                host_lifecycle.stop_activity_monitor(logger=logger)
-                scheduler_container = None
-                host_obs_source_epoch = None
-                host_obs_tribe_state_reader = None
-                host_obs_capability_forge = None
-                host_obs_capability_gap_telemetry = None
-                host_obs_semantic_recaller = None
-                host_obs_capability_scorecards = None
-                host_obs_degradation_state_provider = lambda: None
-                host_obs_pentest_environment = {}
-                host_obs_ledger = None
-                host_query_projection_store = None
-                internal_agent_ingress = None
-                internal_agent_command_service = None
-                task_review_command_service = None
-                governed_internal_runtime = None
-                tool_composition.clear()
-                task_runtime_container = None
-                memory_container = None
-                command_ingress_container = None
-                application.state.command_ingress_container = None
-                application.state.memory_service_container = None
-                application.state.governed_internal_runtime = None
-                application.state.governed_scheduler_runtime = None
-                application.state.scheduler_container = None
-                application.state.task_review_command_service = None
-                application.state.task_graph_cancellation_command_service = None
-                application.state.task_operation_reconciliation_command_service = None
-                application.state.task_effect_reconciliation_command_service = None
-                application.state.task_terminal_reconciliation_command_service = None
-                application.state.task_terminal_reconciliation_read_authority = None
-                application.state.governed_host_runtime = None
-                application.state.task_runtime_container = None
-                application.state.service_catalog_rollout_store = None
-                application.state.service_catalog_rollout_observer = None
-                application.state.runtime_context_composition = None
-                runtime_context_application = None
-                runtime_context_composition = None
-                try:
-                    if catalog_rollout_guardian_task is not None:
-                        catalog_rollout_guardian_task.cancel()
-                        try:
-                            await catalog_rollout_guardian_task
-                        except asyncio.CancelledError:
-                            pass
-                        catalog_rollout_guardian_task = None
-                    if guardian_heartbeat_task is not None:
-                        guardian_heartbeat_task.cancel()
-                        try:
-                            await guardian_heartbeat_task
-                        except asyncio.CancelledError:
-                            pass
-                        guardian_heartbeat_task = None
-                    if scheduler is not None:
-                        try:
-                            # Producers stop before runtime admission closes.
-                            await scheduler.stop_clock()
-                        except Exception:
-                            logger.error(
-                                "HOST_SCHEDULER_CLOCK_CLOSE_FAILED",
-                                exc_info=True,
-                            )
-                    workspace.quiesce_agent_workspace_application_scope(
-                        application, agent_workspace_container, task_runtime
-                    )
-                    agent_workspace_container = None
-                    if task_runtime is not None:
-                        try:
-                            await task_runtime.aclose()
-                        except TaskRuntimeContainerCloseError as exc:
-                            logger.error(
-                                "HOST_TASK_RUNTIME_CONTAINER_CLOSE_FAILED:%s",
-                                ",".join(
-                                    failure.component
-                                    for failure in exc.failures
-                                ),
-                            )
-                finally:
+                for owned_task, task_name in (
+                    (catalog_rollout_guardian_task, "catalog-rollout-guardian"),
+                    (guardian_heartbeat_task, "runtime-guardian-heartbeat"),
+                ):
+                    if owned_task is None:
+                        continue
+                    owned_task.cancel()
                     try:
-                        if embodiment_authority_task is not None:
-                            embodiment_authority_task.cancel()
-                            try:
-                                await embodiment_authority_task
-                            except asyncio.CancelledError:
-                                pass
-                            embodiment_authority_task = None
-                        _reset_life_command_authority()
-                        life_command_authority = None
-                        life_dispatchers = None
-                        if embodiment_runtime is not None:
-                            embodiment_runtime.close()
-                        embodiment_runtime = None
-                        application.state.embodiment_runtime = None
-                        set_memory_service_container(None)
-                        if memory is not None:
-                            memory.close()
-                    finally:
-                        try:
-                            if command_ingress is not None:
-                                await command_ingress.aclose()
-                        finally:
-                            # Security was constructed first, so it is always
-                            # released last, including partial startup failure.
-                            canon_container = None
-                            application.state.canon_container = None
-                            security_container = None
-                            application.state.security_service_container = None
-                            if security is not None:
-                                try:
-                                    await security.aclose()
-                                except SecurityServiceContainerCloseError as exc:
-                                    logger.error(
-                                        "HOST_SECURITY_SERVICE_CONTAINER_CLOSE_FAILED:%s",
-                                        ",".join(
-                                            failure.service.value
-                                            for failure in exc.failures
-                                        ),
-                                    )
+                        await owned_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        logger.error(
+                            "HOST_OWNED_TASK_CLOSE_FAILED:%s",
+                            task_name,
+                            exc_info=True,
+                        )
+                catalog_rollout_guardian_task = guardian_heartbeat_task = None
+                await shutdown_host_runtime_authority(
+                    application=application,
+                    security=security,
+                    scheduler=scheduler,
+                    task_runtime=task_runtime,
+                    agent_workspace_container=(
+                        agent_workspace_container
+                        or getattr(
+                            application.state,
+                            "agent_workspace_container",
+                            None,
+                        )
+                    ),
+                    workspace_quiesce=(
+                        workspace.quiesce_agent_workspace_application_scope
+                    ),
+                    host_lifecycle=host_lifecycle,
+                    logger=logger,
+                    embodiment_authority_task=embodiment_authority_task,
+                    reset_life_command_authority=_reset_life_command_authority,
+                    embodiment_runtime=embodiment_runtime,
+                    set_memory_service_container=set_memory_service_container,
+                    memory=memory,
+                    command_ingress=command_ingress,
+                    tool_composition=tool_composition,
+                    on_dependencies_released=withdraw_closed_process_references,
+                )
 
     application = create_host_fastapi_app(
         lifespan=app_lifespan,
@@ -1454,23 +1353,10 @@ def create_app() -> FastAPI:
         obs_route_ports=host_obs_route_ports,
         input_runtime_ports=input_runtime_ports,
     )
+    withdraw_published_runtime_state(application)
+    application.state.host_runtime_shutdown_error = None
     application.state.security_service_container = None
-    application.state.command_ingress_container = None
-    application.state.memory_service_container = None
-    application.state.task_runtime_container = None
-    application.state.service_catalog_rollout_store = None
-    application.state.service_catalog_rollout_observer = None
     application.state.agent_workspace_container = None
-    application.state.task_effect_reconciliation_command_service = None
-    application.state.task_terminal_reconciliation_command_service = None
-    application.state.task_terminal_reconciliation_read_authority = None
-    application.state.governed_host_runtime = None
-    application.state.governed_internal_runtime = None
-    application.state.governed_scheduler_runtime = None
-    application.state.scheduler_container = None
-    application.state.task_review_command_service = None
-    application.state.task_graph_cancellation_command_service = None
-    application.state.task_operation_reconciliation_command_service = None
     application.state.canon_container = None
     application.state.embodiment_runtime = None
     application.state.runtime_context_composition = None

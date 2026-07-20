@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -16,6 +17,10 @@ PREFERENCE_CONFLICT = "PREFERENCE_CONFLICT"
 PREFERENCE_MIGRATION_ASSET_KEY = "0070#context_persistence"
 PREFERENCE_MIGRATION_SHA256 = (
     "faf991332cffab3f9f7307b2101e9c88d6443b5b32972b08a3be946d97a43e67"
+)
+PREFERENCE_EFFECT_MIGRATION_ASSET_KEY = "0118#conversation_acceptance_effects"
+PREFERENCE_EFFECT_MIGRATION_SHA256 = (
+    "f9cacf633ce0611ac5d567919fc8f0273e9237f46a209dfabdeb1700ca5094e2"
 )
 _ALLOWED_DISPOSITIONS = frozenset(
     {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
@@ -78,6 +83,24 @@ def _loads(value: Any) -> Any:
         return json.loads(str(value or ""))
     except (TypeError, json.JSONDecodeError):
         return None
+
+
+def _digest_ref(value: bytes) -> str:
+    return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def _sha256_ref(value: Any, field_name: str) -> str:
+    text = str(value or "")
+    if (
+        len(text) != 71
+        or not text.startswith("sha256:")
+        or any(character not in "0123456789abcdef" for character in text[7:])
+    ):
+        raise PreferenceRepositoryError(
+            PREFERENCE_INVALID,
+            f"{field_name} must be a canonical sha256 reference",
+        )
+    return text
 
 
 class PreferenceRepository:
@@ -285,6 +308,524 @@ class PreferenceRepository:
                 )
         return records
 
+    def assert_signal_effect_schema_ready(self, *, require_catalog: bool = True) -> None:
+        """Require the immutable post-Acceptance preference receipt authority."""
+
+        try:
+            with self._scope(write=False) as conn:
+                columns = {
+                    table: {
+                        str(row[1])
+                        for row in conn.execute(
+                            f'PRAGMA table_info("{table}")'
+                        ).fetchall()
+                    }
+                    for table in (
+                        "conversation_preference_effect_receipt",
+                        "conversation_preference_profile_version",
+                    )
+                }
+                indexes = {
+                    str(row[0])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'index'"
+                    ).fetchall()
+                }
+                triggers = {
+                    str(row[0])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+                    ).fetchall()
+                }
+                asset = None if not require_catalog else conn.execute(
+                    """
+                    SELECT checksum, disposition FROM schema_migration_assets
+                    WHERE asset_key = ?
+                    """,
+                    (PREFERENCE_EFFECT_MIGRATION_ASSET_KEY,),
+                ).fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise PreferenceRepositoryError(
+                PREFERENCE_SCHEMA_NOT_READY,
+                "conversation preference effect schema cannot be verified",
+            ) from exc
+        required = {
+            "conversation_preference_effect_receipt": {
+                "operation_id",
+                "payload_sha256",
+                "disposition",
+                "event_bindings_json",
+                "profile_receipts_json",
+                "completed_at_ms",
+                "receipt_digest",
+            },
+            "conversation_preference_profile_version": {
+                "operation_id",
+                "person_id",
+                "domain",
+                "version",
+                "profile_json",
+                "profile_sha256",
+                "updated_at_ms",
+            },
+        }
+        bad_catalog = require_catalog and (
+            asset is None
+            or str(asset["checksum"]) != PREFERENCE_EFFECT_MIGRATION_SHA256
+            or str(asset["disposition"]) not in _ALLOWED_DISPOSITIONS
+        )
+        if (
+            any(
+                not expected <= columns.get(table, set())
+                for table, expected in required.items()
+            )
+            or not {
+                "idx_conversation_preference_effect_completed",
+                "idx_conversation_preference_profile_operation",
+            } <= indexes
+            or not {
+                "conversation_preference_effect_receipt_no_update",
+                "conversation_preference_effect_receipt_no_delete",
+                "conversation_preference_profile_version_no_update",
+                "conversation_preference_profile_version_no_delete",
+                "conversation_preference_profile_version_parent_sealed",
+            } <= triggers
+            or bad_catalog
+        ):
+            raise PreferenceRepositoryError(
+                PREFERENCE_SCHEMA_NOT_READY,
+                "conversation preference effect migration is missing or drifted",
+            )
+
+    def commit_signal_effect(
+        self,
+        *,
+        operation_id: str,
+        payload_sha256: str,
+        events: Sequence[Mapping[str, Any]],
+        profile_builder: Callable[..., Mapping[str, Any]],
+        completed_at_ms: int,
+        evaluation_disposition: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically write deterministic events, profiles and one receipt."""
+
+        operation = _required(operation_id, "operation_id")
+        payload_digest = _sha256_ref(payload_sha256, "payload_sha256")
+        completed = int(completed_at_ms)
+        if completed < 0:
+            raise PreferenceRepositoryError(
+                PREFERENCE_INVALID,
+                "completed_at_ms must be non-negative",
+            )
+        items = [dict(event) for event in events]
+        requested_disposition = str(evaluation_disposition or "").strip().upper()
+        if requested_disposition not in {"", "NO_SIGNAL", "DISABLED"}:
+            raise PreferenceRepositoryError(
+                PREFERENCE_INVALID,
+                "evaluation_disposition is invalid",
+            )
+        if requested_disposition and items:
+            raise PreferenceRepositoryError(
+                PREFERENCE_INVALID,
+                "non-applied evaluation cannot contain preference events",
+            )
+        with self._scope(write=True) as conn:
+            existing = self._signal_effect_receipt_row(conn, operation)
+            if existing is not None:
+                receipt = self._decode_signal_effect_receipt(conn, existing)
+                if receipt["payload_sha256"] != payload_digest:
+                    raise PreferenceRepositoryError(
+                        PREFERENCE_CONFLICT,
+                        "preference effect operation replay payload drifted",
+                    )
+                return {**receipt, "replayed": True}
+
+            records: list[dict[str, Any]] = []
+            changed: set[tuple[str, str]] = set()
+            for item in items:
+                values = self._event_values(item)
+                cursor = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO user_preference_event(
+                        event_id, person_id, session_id, domain, source_kind,
+                        polarity, target_kind, target_id, target_label,
+                        attributes_json, evidence_refs_json, confidence,
+                        created_at_ms, active
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    values,
+                )
+                row = conn.execute(
+                    f"SELECT {', '.join(_EVENT_COLUMNS)} FROM user_preference_event WHERE event_id = ?",
+                    (values[0],),
+                ).fetchone()
+                if row is None:
+                    raise PreferenceRepositoryError(
+                        PREFERENCE_CONFLICT,
+                        "preference event disappeared before effect receipt",
+                    )
+                record = dict(row)
+                self._assert_event_replay(record, item)
+                normalized = self._event_record(record)
+                records.append(normalized)
+                if cursor.rowcount == 1:
+                    changed.add((str(record["person_id"]), str(record["domain"])))
+
+            profile_receipts: list[dict[str, Any]] = []
+            for person_id, domain in sorted(changed):
+                rows = conn.execute(
+                    f"""
+                    SELECT {', '.join(_EVENT_COLUMNS)} FROM user_preference_event
+                    WHERE person_id = ? AND domain = ? AND active = 1
+                    ORDER BY created_at_ms ASC, id ASC
+                    """,
+                    (person_id, domain),
+                ).fetchall()
+                profile = dict(
+                    profile_builder(
+                        person_id=person_id,
+                        domain=domain,
+                        events=[self._event_record(row) for row in rows],
+                    )
+                )
+                current = conn.execute(
+                    "SELECT version FROM user_preference_profile WHERE person_id = ? AND domain = ?",
+                    (person_id, domain),
+                ).fetchone()
+                version = int(current["version"] or 0) + 1 if current else 1
+                profile.update(version=version, updated_at_ms=completed)
+                profile_json = _dumps(profile)
+                profile_digest = _digest_ref(profile_json.encode("utf-8"))
+                conn.execute(
+                    """
+                    INSERT INTO conversation_preference_profile_version(
+                        operation_id, person_id, domain, version,
+                        profile_json, profile_sha256, updated_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        operation,
+                        person_id,
+                        domain,
+                        version,
+                        profile_json,
+                        profile_digest,
+                        completed,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO user_preference_profile(
+                        person_id, domain, version, profile_json, updated_at_ms
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(person_id, domain) DO UPDATE SET
+                        version = excluded.version,
+                        profile_json = excluded.profile_json,
+                        updated_at_ms = excluded.updated_at_ms
+                    """,
+                    (person_id, domain, version, profile_json, completed),
+                )
+                profile_receipts.append(
+                    {
+                        "person_id": person_id,
+                        "domain": domain,
+                        "version": version,
+                        "profile_sha256": profile_digest,
+                        "updated_at_ms": completed,
+                    }
+                )
+
+            event_bindings = [
+                {
+                    "event_id": str(record["event_id"]),
+                    "event_sha256": _digest_ref(
+                        _dumps(record).encode("utf-8")
+                    ),
+                }
+                for record in records
+            ]
+            disposition = (
+                "APPLIED"
+                if event_bindings
+                else requested_disposition or "NO_SIGNAL"
+            )
+            receipt_material = {
+                "operation_id": operation,
+                "payload_sha256": payload_digest,
+                "disposition": disposition,
+                "event_bindings": event_bindings,
+                "profile_receipts": profile_receipts,
+                "completed_at_ms": completed,
+            }
+            receipt_digest = _digest_ref(
+                _dumps(receipt_material).encode("utf-8")
+            )
+            conn.execute(
+                """
+                INSERT INTO conversation_preference_effect_receipt(
+                    operation_id, payload_sha256, disposition,
+                    event_bindings_json, profile_receipts_json,
+                    completed_at_ms, receipt_digest
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    operation,
+                    payload_digest,
+                    disposition,
+                    _dumps(event_bindings),
+                    _dumps(profile_receipts),
+                    completed,
+                    receipt_digest,
+                ),
+            )
+            row = self._signal_effect_receipt_row(conn, operation)
+            if row is None:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference effect receipt disappeared",
+                )
+            return {
+                **self._decode_signal_effect_receipt(conn, row),
+                "replayed": False,
+            }
+
+    def get_signal_effect_receipt(self, operation_id: str) -> dict[str, Any] | None:
+        operation = _required(operation_id, "operation_id")
+        with self._scope(write=False) as conn:
+            row = self._signal_effect_receipt_row(conn, operation)
+            return (
+                self._decode_signal_effect_receipt(conn, row)
+                if row is not None
+                else None
+            )
+
+    @staticmethod
+    def _signal_effect_receipt_row(
+        conn: sqlite3.Connection,
+        operation_id: str,
+    ) -> sqlite3.Row | None:
+        return conn.execute(
+            """
+            SELECT operation_id, payload_sha256, disposition,
+                   event_bindings_json, profile_receipts_json,
+                   completed_at_ms, receipt_digest
+            FROM conversation_preference_effect_receipt
+            WHERE operation_id = ?
+            """,
+            (operation_id,),
+        ).fetchone()
+
+    def _decode_signal_effect_receipt(
+        self,
+        conn: sqlite3.Connection,
+        row: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        event_bindings = _loads(row["event_bindings_json"])
+        profile_receipts = _loads(row["profile_receipts_json"])
+        if not isinstance(event_bindings, list) or not isinstance(
+            profile_receipts,
+            list,
+        ):
+            raise PreferenceRepositoryError(
+                PREFERENCE_CONFLICT,
+                "preference effect receipt JSON is invalid",
+            )
+        _sha256_ref(row["payload_sha256"], "receipt payload_sha256")
+        _sha256_ref(row["receipt_digest"], "receipt receipt_digest")
+        disposition = str(row["disposition"])
+        if disposition not in {"APPLIED", "NO_SIGNAL", "DISABLED"} or (
+            (disposition == "APPLIED") != bool(event_bindings)
+        ):
+            raise PreferenceRepositoryError(
+                PREFERENCE_CONFLICT,
+                "preference effect disposition conflicts with event bindings",
+            )
+        event_ids: set[str] = set()
+        affected_profiles: set[tuple[str, str]] = set()
+        for binding in event_bindings:
+            if not isinstance(binding, Mapping) or set(binding) != {
+                "event_id",
+                "event_sha256",
+            }:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference event binding is invalid",
+                )
+            event_id = _required(binding.get("event_id"), "event binding event_id")
+            if event_id in event_ids:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference effect repeats an event binding",
+                )
+            event_ids.add(event_id)
+            _sha256_ref(binding.get("event_sha256"), "event binding digest")
+            event_row = conn.execute(
+                f"SELECT {', '.join(_EVENT_COLUMNS)} FROM user_preference_event WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if event_row is None:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference effect event is absent",
+                )
+            actual_digest = _digest_ref(
+                _dumps(self._event_record(event_row)).encode("utf-8")
+            )
+            if actual_digest != binding.get("event_sha256"):
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference effect event digest drifted",
+                )
+            affected_profiles.add(
+                (str(event_row["person_id"]), str(event_row["domain"]))
+            )
+        profile_pairs: set[tuple[str, str]] = set()
+        for profile_receipt in profile_receipts:
+            if not isinstance(profile_receipt, Mapping) or set(profile_receipt) != {
+                "person_id",
+                "domain",
+                "version",
+                "profile_sha256",
+                "updated_at_ms",
+            }:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference profile receipt is invalid",
+                )
+            person_id = _required(
+                profile_receipt.get("person_id"),
+                "profile receipt person_id",
+            )
+            domain = _required(
+                profile_receipt.get("domain"),
+                "profile receipt domain",
+            )
+            pair = (person_id, domain)
+            if pair in profile_pairs:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference effect repeats a profile receipt",
+                )
+            profile_pairs.add(pair)
+            _sha256_ref(
+                profile_receipt.get("profile_sha256"),
+                "profile receipt digest",
+            )
+            try:
+                expected_version = int(profile_receipt.get("version"))
+                expected_updated = int(profile_receipt.get("updated_at_ms"))
+            except (TypeError, ValueError) as exc:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference profile receipt version is invalid",
+                ) from exc
+            if expected_version < 1 or expected_updated < 0:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference profile receipt version is invalid",
+                )
+            profile_version_row = conn.execute(
+                """
+                SELECT operation_id, version, profile_json,
+                       profile_sha256, updated_at_ms
+                FROM conversation_preference_profile_version
+                WHERE operation_id = ? AND person_id = ? AND domain = ?
+                """,
+                (str(row["operation_id"]), *pair),
+            ).fetchone()
+            if (
+                profile_version_row is None
+                or int(profile_version_row["version"]) != expected_version
+                or int(profile_version_row["updated_at_ms"]) != expected_updated
+                or str(profile_version_row["profile_sha256"])
+                != profile_receipt["profile_sha256"]
+                or _digest_ref(
+                    str(profile_version_row["profile_json"]).encode("utf-8")
+                )
+                != profile_receipt["profile_sha256"]
+            ):
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference profile version receipt does not resolve exactly",
+                )
+            profile_payload = _loads(profile_version_row["profile_json"])
+            if (
+                not isinstance(profile_payload, Mapping)
+                or profile_payload.get("person_id") != person_id
+                or profile_payload.get("domain") != domain
+                or int(profile_payload.get("version") or 0) != expected_version
+                or int(profile_payload.get("updated_at_ms") or -1)
+                != expected_updated
+            ):
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "preference profile version payload identity drifted",
+                )
+            active_profile = conn.execute(
+                """
+                SELECT version FROM user_preference_profile
+                WHERE person_id = ? AND domain = ?
+                """,
+                pair,
+            ).fetchone()
+            if active_profile is None or int(active_profile["version"]) < expected_version:
+                raise PreferenceRepositoryError(
+                    PREFERENCE_CONFLICT,
+                    "active preference profile regressed behind effect receipt",
+                )
+        if profile_pairs != affected_profiles:
+            raise PreferenceRepositoryError(
+                PREFERENCE_CONFLICT,
+                "preference effect profile set differs from event set",
+            )
+        operation_profile_rows = conn.execute(
+            """
+            SELECT person_id, domain, version, profile_sha256, updated_at_ms
+            FROM conversation_preference_profile_version
+            WHERE operation_id = ?
+            """,
+            (str(row["operation_id"]),),
+        ).fetchall()
+        operation_profile_set = {
+            (
+                str(version_row["person_id"]),
+                str(version_row["domain"]),
+                int(version_row["version"]),
+                str(version_row["profile_sha256"]),
+                int(version_row["updated_at_ms"]),
+            )
+            for version_row in operation_profile_rows
+        }
+        receipt_profile_set = {
+            (
+                str(item["person_id"]),
+                str(item["domain"]),
+                int(item["version"]),
+                str(item["profile_sha256"]),
+                int(item["updated_at_ms"]),
+            )
+            for item in profile_receipts
+        }
+        if operation_profile_set != receipt_profile_set:
+            raise PreferenceRepositoryError(
+                PREFERENCE_CONFLICT,
+                "preference effect profile version set differs from receipt",
+            )
+        material = {
+            "operation_id": str(row["operation_id"]),
+            "payload_sha256": str(row["payload_sha256"]),
+            "disposition": disposition,
+            "event_bindings": event_bindings,
+            "profile_receipts": profile_receipts,
+            "completed_at_ms": int(row["completed_at_ms"]),
+        }
+        if _digest_ref(_dumps(material).encode("utf-8")) != row["receipt_digest"]:
+            raise PreferenceRepositoryError(
+                PREFERENCE_CONFLICT,
+                "preference effect receipt digest drifted",
+            )
+        return {**material, "receipt_digest": str(row["receipt_digest"])}
+
     @staticmethod
     def _event_values(item: Mapping[str, Any]) -> tuple[Any, ...]:
         return (
@@ -435,6 +976,57 @@ class PreferenceRepository:
             ).fetchone()
         return self._delivery_record(row) if row is not None else None
 
+    def get_feedback_delivery(
+        self,
+        *,
+        person_id: str,
+        session_id: str = "",
+        conversation_id: str = "",
+        domain: str,
+        admitted_at_ms: int,
+    ) -> dict[str, Any] | None:
+        """Return only a pre-admission delivery in the exact conversation scope."""
+
+        person = _required(person_id, "person_id")
+        normalized_domain = _required(domain, "domain")
+        session = str(session_id or "").strip()
+        conversation = str(conversation_id or "").strip()
+        if not conversation and not session:
+            return None
+        admitted = int(admitted_at_ms)
+        if admitted < 0:
+            raise PreferenceRepositoryError(
+                PREFERENCE_INVALID,
+                "admitted_at_ms must be non-negative",
+            )
+        where = [
+            "active = 1",
+            "domain = ?",
+            "person_id = ?",
+            "created_at_ms <= ?",
+        ]
+        params: list[Any] = [normalized_domain, person, admitted]
+        if conversation:
+            where.append("conversation_id = ?")
+            params.append(conversation)
+            if session:
+                where.append("session_id = ?")
+                params.append(session)
+        else:
+            where.append("session_id = ?")
+            params.append(session)
+        with self._scope(write=False) as conn:
+            row = conn.execute(
+                f"""
+                SELECT {', '.join(_DELIVERY_COLUMNS)}
+                FROM recommendation_delivery_log
+                WHERE {' AND '.join(where)}
+                ORDER BY created_at_ms DESC, id DESC LIMIT 1
+                """,
+                tuple(params),
+            ).fetchone()
+        return self._delivery_record(row) if row is not None else None
+
     @staticmethod
     def _delivery_record(row: Mapping[str, Any]) -> dict[str, Any]:
         record = dict(row)
@@ -458,5 +1050,6 @@ class PreferenceRepository:
 __all__ = [
     "PREFERENCE_CONFLICT", "PREFERENCE_INVALID", "PREFERENCE_MIGRATION_ASSET_KEY",
     "PREFERENCE_MIGRATION_SHA256", "PREFERENCE_SCHEMA_NOT_READY",
+    "PREFERENCE_EFFECT_MIGRATION_ASSET_KEY", "PREFERENCE_EFFECT_MIGRATION_SHA256",
     "PreferenceRepository", "PreferenceRepositoryError",
 ]

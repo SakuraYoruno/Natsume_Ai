@@ -146,6 +146,8 @@ def _resolve_host_command_surface(
     source = str(raw_source or "").strip().upper()
     if source == "TOOL":
         return HostCommandSurface.TOOL
+    if source == "OPERATOR":
+        return HostCommandSurface.OPERATOR
     return (
         HostCommandSurface.GATEWAY
         if source == "GATEWAY"

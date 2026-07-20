@@ -58,14 +58,16 @@ DomainHandler = Callable[[Mapping[str, Any], str], Any]
 # directly instead of admitting an immutable TaskGraph.  Secure Ingress proves
 # who asked; it is not an exact node-bound Preview Receipt.  Keep them visibly
 # fail-closed until NE-01 gives each command a Governed Operator route.
-GOVERNED_OPERATOR_COMMAND_IDS = frozenset({"scheduler.task.trigger"})
+GOVERNED_OPERATOR_COMMAND_IDS = frozenset(
+    {"scheduler.task.trigger", "sys_mode.switch"}
+)
 BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     spec.command_id
     for spec in DEFAULT_OBS_COMMAND_SPECS
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 36
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 35
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -85,14 +87,7 @@ def _optional_text(payload: Mapping[str, Any], field: str) -> str | None:
     return value or None
 
 
-def _command_request_id(command_id: str, claim_ref: str) -> str:
-    digest = hashlib.sha256(
-        f"{command_id}\n{claim_ref}".encode("utf-8")
-    ).hexdigest()
-    return f"obs-command-{digest[:32]}"
-
-
-def _result_ref(command_id: str, claim_ref: str) -> str:
+def build_obs_domain_result_ref(command_id: str, claim_ref: str) -> str:
     digest = hashlib.sha256(
         f"{command_id}\n{claim_ref}".encode("utf-8")
     ).hexdigest()
@@ -134,6 +129,9 @@ class _DomainCommandPort:
                 side_effects_may_have_run=False,
             )
         payload = dict(envelope.payload)
+        canonical_request_id = str(envelope.authority.request_id or "").strip()
+        if not canonical_request_id:
+            raise ObsDomainCommandError("OBS_DOMAIN_AUTHORITY_INVALID")
         payload["_operator_authority"] = {
             "allowed": True,
             "audit_ref": envelope.audit_ref,
@@ -146,13 +144,16 @@ class _DomainCommandPort:
             "action": envelope.action,
             "required_scopes": tuple(envelope.required_scopes),
             "ingress_surface": "obs.command",
+            "method": "POST",
+            "normalized_path": (
+                f"/v1/host/obs-commands/{self.command_id}"
+            ),
             "operator_command_id": self.command_id,
         }
         # This value was injected by bind_server_authority.  Do not read
         # envelope.authority here: the payload is the command/domain boundary.
         principal_id = _required_text(payload, "principal_id")
-        request_id = _command_request_id(self.command_id, envelope.claim_ref)
-        output = self.handler(payload, request_id)
+        output = self.handler(payload, canonical_request_id)
         if inspect.isawaitable(output):
             output = await output
         normalized = _result_mapping(output)
@@ -166,7 +167,10 @@ class _DomainCommandPort:
         )
         return ObsCommandExecutionResult(
             success=success,
-            result_ref=_result_ref(self.command_id, envelope.claim_ref),
+            result_ref=build_obs_domain_result_ref(
+                self.command_id,
+                envelope.claim_ref,
+            ),
             result={
                 "schema_version": OBS_DOMAIN_RESULT_SCHEMA,
                 "command_id": self.command_id,
@@ -357,30 +361,18 @@ def _sysmode_service(route_ports: HostRoutePorts, *methods: str) -> Any:
     return service
 
 
-def _sysmode_switch(
+async def _sysmode_switch(
     payload: Mapping[str, Any],
     request_id: str,
     *,
     route_ports: HostRoutePorts,
 ) -> Any:
-    service = _sysmode_service(route_ports, "switch_mode")
-    source: Any = None
-    try:
-        from host_brain.core.mode_transition import TransitionSource
-
-        source = TransitionSource(str(payload.get("source") or "manual"))
-    except (ImportError, ValueError):
-        source = None
-    kwargs: dict[str, Any] = {
-        "reason": str(payload.get("reason") or ""),
-        "event_id": (
-            "obs-sys-mode:"
-            + hashlib.sha256(str(request_id).encode("utf-8")).hexdigest()
-        ),
-    }
-    if source is not None:
-        kwargs["source"] = source
-    return service.switch_mode(_required_text(payload, "target_mode"), **kwargs)
+    del route_ports
+    runtime = operator_runtime_value("governed_operator_runtime")
+    execute = getattr(runtime, "execute_sys_mode_switch", None)
+    if not callable(execute):
+        raise ObsDomainCommandError("OBS_GOVERNED_OPERATOR_RUNTIME_UNAVAILABLE")
+    return await execute(payload, request_id)
 
 
 def _sysmode_auto_rules(
@@ -568,14 +560,17 @@ async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> An
         "CANCELLED",
     }:
         raise ObsDomainCommandError("OBS_SCHEDULER_RESULT_INVALID")
-    # The outer OBS outcome records admission as success.  It records an
-    # actual side effect only when the Task Runtime has durably accepted the
-    # node; a Review pause is an admitted, explicitly non-executed outcome.
+    effect_status = str(result.get("scheduler_effect_status") or "").strip().upper()
+    effect_committed = status == "ACCEPTED" and effect_status == "COMMITTED"
+    # The outer OBS outcome records admission as success.  A TaskNode being
+    # accepted is not proof that its post-Acceptance Scheduler operation ran;
+    # only the committed Effect receipt may assert an executed side effect.
     return {
         **result,
         "success": status
-        in {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW", "ACCEPTED"},
-        "side_effects_executed": status == "ACCEPTED",
+        in {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW"}
+        or effect_committed,
+        "side_effects_executed": effect_committed,
     }
 
 
@@ -1011,6 +1006,7 @@ __all__ = [
     "GOVERNED_OPERATOR_COMMAND_IDS",
     "OBS_DOMAIN_RESULT_SCHEMA",
     "ObsDomainCommandError",
+    "build_obs_domain_result_ref",
     "build_default_obs_domain_command_registry",
     "build_default_obs_domain_port_registry",
 ]

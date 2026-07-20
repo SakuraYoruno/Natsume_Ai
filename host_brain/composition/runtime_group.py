@@ -5,11 +5,18 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 import inspect
+import re
 import time
 from typing import Any
 from urllib.parse import quote
 
 from natsume_contracts.task import HostCommand, HostCommandSurface
+from host_brain.observability.command_ports import (
+    build_governed_review_continuation_ref,
+)
+from host_brain.persistence.review_continuation_binding import (
+    intent_admission_initial_status,
+)
 
 
 _SURFACE_RUNTIME = {
@@ -19,10 +26,12 @@ _SURFACE_RUNTIME = {
     HostCommandSurface.GATEWAY.value: "host",
     HostCommandSurface.INTERNAL.value: "internal_agent",
     HostCommandSurface.SCHEDULER.value: "scheduler",
-    # Governed Operator commands reuse the owning domain runtime.  The first
-    # production slice is scheduler.task.trigger, whose frozen node is still
-    # executed by the canonical Scheduler worker/coordinator.
+    # Operator commands are selected by their immutable target below.  The
+    # default remains Scheduler for scheduler.task.trigger.
     HostCommandSurface.OPERATOR.value: "scheduler",
+}
+_OPERATOR_RUNTIME_TARGETS = {
+    "operator_sys_mode_switch": "operator",
 }
 _CLAIM_COMPLETION_SURFACES = frozenset(
     {
@@ -35,6 +44,14 @@ _WAITING_REVIEW_STATUSES = frozenset(
     {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW"}
 )
 _DENIED_REVIEW_STATUSES = frozenset({"REJECTED", "EXPIRED", "CANCELLED"})
+_TASK_CANCEL_INTENT_REF = re.compile(r"^taskcancel-intent://sha256/[0-9a-f]{64}$")
+
+
+def _runtime_name_for_command(command: HostCommand) -> str | None:
+    if command.surface is HostCommandSurface.OPERATOR:
+        target = str(command.target_id or "").strip()
+        return _OPERATOR_RUNTIME_TARGETS.get(target, "scheduler")
+    return _SURFACE_RUNTIME.get(command.surface.value)
 
 
 class GraphCancellationOperatorError(RuntimeError):
@@ -49,6 +66,34 @@ class GraphCancellationOperatorError(RuntimeError):
         super().__init__(self.reason_code)
 
 
+class _OperatorReviewRecoveryPending(RuntimeError):
+    reason_code = "OPERATOR_REVIEW_RECOVERY_PENDING"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason_code)
+
+
+class _OperatorReviewCancellationRecoveryPending(RuntimeError):
+    reason_code = "OPERATOR_REVIEW_CANCELLATION_RECOVERY_PENDING"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason_code)
+
+
+class GovernedRuntimeGroupCloseError(RuntimeError):
+    """Stable aggregate emitted after every owned runtime got a close attempt."""
+
+    reason_code = "GOVERNED_RUNTIME_GROUP_CLOSE_FAILED"
+
+    def __init__(
+        self,
+        failures: tuple[tuple[str, BaseException], ...],
+    ) -> None:
+        self.failures = failures
+        components = ",".join(component for component, _exc in failures)
+        super().__init__(f"{self.reason_code}:{components}")
+
+
 class GovernedRuntimeGroup:
     def __init__(
         self,
@@ -58,10 +103,12 @@ class GovernedRuntimeGroup:
         review_decision_store: Any | None = None,
         command_repository: Any | None = None,
         claim_result_store: Any | None = None,
+        operator_outcome_finalizer: Any | None = None,
         review_continuation_worker_factory: Callable[..., Any] | None = None,
         review_continuation_worker_id: str | None = None,
         graph_cancellation_operator_enabled: bool = False,
         graph_cancellation_state_reader: Any | None = None,
+        acceptance_effect_runtime: Any | None = None,
     ) -> None:
         normalized = {
             str(name).strip(): runtime
@@ -78,6 +125,14 @@ class GovernedRuntimeGroup:
         self._active_names: list[str] = []
         self._command_repository = command_repository
         self._claim_result_store = claim_result_store
+        self._review_decision_store = review_decision_store
+        self._operator_outcome_finalizer = operator_outcome_finalizer
+        if operator_outcome_finalizer is not None and not callable(
+            getattr(operator_outcome_finalizer, "finalize_review_outcome", None)
+        ):
+            raise TypeError(
+                "operator_outcome_finalizer must expose finalize_review_outcome"
+            )
         self._review_worker: Any | None = None
         self._review_worker_started = False
         self._continuation_open = False
@@ -85,6 +140,14 @@ class GovernedRuntimeGroup:
             graph_cancellation_operator_enabled
         )
         self._graph_cancellation_state_reader = graph_cancellation_state_reader
+        self._acceptance_effect_runtime = acceptance_effect_runtime
+        self._acceptance_effect_runtime_active = False
+        if acceptance_effect_runtime is not None:
+            for method_name in ("activate", "drain", "aclose"):
+                if not callable(getattr(acceptance_effect_runtime, method_name, None)):
+                    raise TypeError(
+                        f"Acceptance Effect runtime lacks {method_name}"
+                    )
         if self._graph_cancellation_operator_enabled and not callable(
             getattr(
                 graph_cancellation_state_reader,
@@ -148,9 +211,12 @@ class GovernedRuntimeGroup:
         return self._runtimes[str(name)]
 
     async def activate(self) -> None:
-        if self._active_names:
+        if self._active_names or self._acceptance_effect_runtime_active:
             return
         try:
+            if self._acceptance_effect_runtime is not None:
+                await _await_call(self._acceptance_effect_runtime.activate())
+                self._acceptance_effect_runtime_active = True
             for name, runtime in self._runtimes.items():
                 await _await_call(runtime.activate())
                 self._active_names.append(name)
@@ -172,19 +238,35 @@ class GovernedRuntimeGroup:
     async def drain(self) -> None:
         for name in tuple(self._active_names):
             await _await_call(self._runtimes[name].drain())
+        if self._acceptance_effect_runtime_active:
+            await _await_call(self._acceptance_effect_runtime.drain())
 
     async def aclose(self) -> None:
-        await self._stop_review_worker()
-        failures: list[BaseException] = []
+        failures: list[tuple[str, BaseException]] = []
+        try:
+            await self._stop_review_worker()
+        except BaseException as exc:
+            # A failed Review-worker stop is not permission to leave the
+            # surface runtimes or the shared Acceptance Effect owner live.
+            # Keep the worker-started flag for a later retry, but attempt all
+            # remaining children before reporting one aggregate failure.
+            failures.append(("review_continuation_worker", exc))
         for name in reversed(tuple(self._active_names)):
             try:
                 await _await_call(self._runtimes[name].aclose())
             except BaseException as exc:
-                failures.append(exc)
+                failures.append((f"surface:{name}", exc))
             else:
                 self._active_names.remove(name)
+        if self._acceptance_effect_runtime_active:
+            try:
+                await _await_call(self._acceptance_effect_runtime.aclose())
+            except BaseException as exc:
+                failures.append(("acceptance_effect_runtime", exc))
+            else:
+                self._acceptance_effect_runtime_active = False
         if failures:
-            raise RuntimeError("GOVERNED_RUNTIME_GROUP_CLOSE_FAILED") from failures[0]
+            raise GovernedRuntimeGroupCloseError(tuple(failures)) from failures[0][1]
 
     def wake_review_continuation(self) -> None:
         worker = self._review_worker
@@ -221,7 +303,7 @@ class GovernedRuntimeGroup:
         if claimed_command_id and claimed_command_id != command.command_id:
             raise RuntimeError("REVIEW_CONTINUATION_COMMAND_BINDING_DRIFT")
         surface = command.surface.value
-        runtime_name = _SURFACE_RUNTIME.get(surface)
+        runtime_name = _runtime_name_for_command(command)
         runtime = self._runtimes.get(str(runtime_name or ""))
         continuation = getattr(runtime, "continue_review_admission", None)
         if runtime is None or not callable(continuation):
@@ -312,7 +394,7 @@ class GovernedRuntimeGroup:
                 "GRAPH_CANCELLATION_COMMAND_BINDING_DRIFT",
                 side_effects_may_have_run=False,
             )
-        runtime_name = _SURFACE_RUNTIME.get(command.surface.value)
+        runtime_name = _runtime_name_for_command(command)
         runtime = self._runtimes.get(str(runtime_name or ""))
         cancellation = getattr(runtime, "request_graph_cancellation", None)
         if runtime is None or not callable(cancellation):
@@ -411,6 +493,16 @@ class GovernedRuntimeGroup:
     ) -> None:
         surface = command.surface.value
         claim_ref = str(command.ingress_claim_ref or "").strip()
+        if surface == HostCommandSurface.OPERATOR.value:
+            if not claim_ref:
+                raise RuntimeError("OPERATOR_REVIEW_INGRESS_CLAIM_REF_REQUIRED")
+            await self._finalize_operator_review_outcome(
+                claim_ref=claim_ref,
+                continuation_result=continuation_result,
+                claim=claim,
+                command=command,
+            )
+            return
         if surface not in _CLAIM_COMPLETION_SURFACES or not claim_ref:
             return
         result_ref = _continuation_result_ref(
@@ -482,6 +574,202 @@ class GovernedRuntimeGroup:
         )
         await _await_call(completed)
 
+    async def _finalize_operator_review_outcome(
+        self,
+        *,
+        claim_ref: str,
+        continuation_result: Mapping[str, Any],
+        claim: Mapping[str, Any],
+        command: HostCommand,
+    ) -> None:
+        finalizer = self._operator_outcome_finalizer
+        finalize = getattr(finalizer, "finalize_review_outcome", None)
+        if not callable(finalize):
+            raise RuntimeError("OPERATOR_REVIEW_OUTCOME_FINALIZER_UNAVAILABLE")
+        review_id = str(claim.get("review_id") or "").strip()
+        get_review = getattr(self._review_decision_store, "get_review", None)
+        if not review_id or not callable(get_review):
+            raise RuntimeError("OPERATOR_REVIEW_AUTHORITY_UNAVAILABLE")
+        durable_raw = get_review(review_id)
+        durable_record = _mapping(
+            await _await_call(durable_raw),
+            field_name="durable Review authority",
+        )
+        review_item = _mapping(
+            durable_record.get("review"),
+            field_name="durable ReviewItem",
+        )
+        review_status = str(review_item.get("status") or "").strip().upper()
+        claim_status = str(claim.get("review_status") or "").strip().upper()
+        try:
+            review_status_version = int(durable_record.get("status_version"))
+            claim_status_version = int(claim.get("review_status_version"))
+            subject_version = int(review_item.get("subject_version"))
+            claim_subject_version = int(claim.get("subject_version"))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("OPERATOR_REVIEW_AUTHORITY_BINDING_DRIFT") from exc
+        node_id = str(claim.get("node_id") or "").strip()
+        if any(
+            (
+                str(review_item.get("review_id") or "").strip() != review_id,
+                str(durable_record.get("task_graph_id") or "").strip()
+                != command.graph_id,
+                str(durable_record.get("task_node_id") or "").strip()
+                != node_id,
+                review_status != claim_status,
+                review_status_version != claim_status_version,
+                subject_version != claim_subject_version,
+                str(review_item.get("resume_phase") or "").strip().upper()
+                != str(claim.get("resume_phase") or "").strip().upper(),
+                _subject_graph_revision(
+                    review_item.get("subject_ref"),
+                    command.graph_id,
+                )
+                != command.graph_revision,
+            )
+        ):
+            raise RuntimeError("OPERATOR_REVIEW_AUTHORITY_BINDING_DRIFT")
+        continuation_ref = build_governed_review_continuation_ref(
+            graph_id=command.graph_id,
+            graph_revision=command.graph_revision,
+            review=review_item,
+        )
+        terminal_result_ref = (
+            await self._operator_cancelled_review_result_ref(
+                command=command,
+                node_id=node_id,
+                subject_version=subject_version,
+                resume_phase=str(review_item.get("resume_phase") or ""),
+                subject_ref=str(review_item.get("subject_ref") or ""),
+            )
+            if review_status == "CANCELLED"
+            else _continuation_result_ref(
+                continuation_result,
+                claim=claim,
+                command=command,
+            )
+        )
+        # Returning normally authorizes ReviewContinuationWorker to complete
+        # its one-shot claim.  A non-terminal Task receipt must therefore be
+        # raised as a stable retry condition, not silently returned.
+        if terminal_result_ref is None:
+            raise _OperatorReviewRecoveryPending()
+        receipt_raw = continuation_result.get("execution_receipt")
+        receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}
+        audit_raw = continuation_result.get("audit_refs")
+        audit = dict(audit_raw) if isinstance(audit_raw, Mapping) else {}
+        effect_raw = audit.get("acceptance_effects")
+        effects = dict(effect_raw) if isinstance(effect_raw, Mapping) else {}
+        if review_status in {"REJECTED", "EXPIRED", "CANCELLED"}:
+            state = "REJECTED"
+            reason_code = f"OBS_COMMAND_REVIEW_{review_status}"
+            side_effects_executed = False
+        else:
+            state, reason_code, side_effects_executed = (
+                _operator_effect_terminal_disposition(
+                    receipt=receipt,
+                    effects=effects,
+                    historical_side_effects_executed=(
+                        continuation_result.get(
+                            "historical_side_effects_executed"
+                        )
+                    ),
+                )
+            )
+        completed = finalize(
+            claim_ref=claim_ref,
+            state=state,
+            reason_code=reason_code,
+            side_effects_executed=side_effects_executed,
+            terminal_result_ref=terminal_result_ref,
+            continuation_ref=continuation_ref,
+        )
+        await _await_call(completed)
+
+    async def _operator_cancelled_review_result_ref(
+        self,
+        *,
+        command: HostCommand,
+        node_id: str,
+        subject_version: int,
+        resume_phase: str,
+        subject_ref: str,
+    ) -> str:
+        getter = getattr(
+            self._graph_cancellation_state_reader,
+            "get_graph_cancellation_for_graph",
+            None,
+        )
+        if not callable(getter):
+            raise _OperatorReviewCancellationRecoveryPending()
+        try:
+            raw = getter(command.graph_id, command.graph_revision)
+            record = _mapping(
+                await _await_call(raw),
+                field_name="durable Graph cancellation",
+            )
+            payload = _mapping(
+                record.get("payload"),
+                field_name="durable Graph cancellation payload",
+            )
+            before_states = _mapping(
+                payload.get("node_states_before"),
+                field_name="Graph cancellation node_states_before",
+            )
+            after_states = _mapping(
+                payload.get("node_states_after"),
+                field_name="Graph cancellation node_states_after",
+            )
+            before = _mapping(
+                before_states.get(node_id),
+                field_name="cancelled Review node state before",
+            )
+            after = _mapping(
+                after_states.get(node_id),
+                field_name="cancelled Review node state after",
+            )
+            intent_ref = str(record.get("intent_ref") or "").strip().lower()
+            expected_waiting = (
+                intent_admission_initial_status(subject_ref)
+                or (
+                    "WAITING_APPROVAL"
+                    if str(resume_phase or "").strip().upper()
+                    == "PRE_EXECUTION"
+                    else "WAITING_ACCEPTANCE_REVIEW"
+                )
+            )
+            if any(
+                (
+                    _TASK_CANCEL_INTENT_REF.fullmatch(intent_ref) is None,
+                    str(record.get("status") or "").strip().upper()
+                    not in {"REQUESTED", "FINALIZED"},
+                    str(record.get("graph_id") or "").strip()
+                    != command.graph_id,
+                    int(record.get("graph_revision") or 0)
+                    != command.graph_revision,
+                    str(payload.get("graph_id") or "").strip()
+                    != command.graph_id,
+                    int(payload.get("graph_revision") or 0)
+                    != command.graph_revision,
+                    str(before.get("status") or "").strip().upper()
+                    != expected_waiting,
+                    int(before.get("status_version") or -1)
+                    != subject_version,
+                    str(after.get("status") or "").strip().upper()
+                    != "CANCELLED",
+                    int(after.get("status_version") or -1)
+                    != subject_version + 1,
+                )
+            ):
+                raise _OperatorReviewCancellationRecoveryPending()
+            return intent_ref
+        except asyncio.CancelledError:
+            raise
+        except _OperatorReviewCancellationRecoveryPending:
+            raise
+        except Exception as exc:
+            raise _OperatorReviewCancellationRecoveryPending() from exc
+
 
 async def _await_call(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
@@ -491,6 +779,69 @@ def _mapping(value: Any, *, field_name: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise RuntimeError(f"{field_name} must be a mapping")
     return dict(value)
+
+
+def _operator_effect_terminal_disposition(
+    *,
+    receipt: Mapping[str, Any],
+    effects: Mapping[str, Any],
+    historical_side_effects_executed: Any,
+) -> tuple[str, str, bool]:
+    receipt_status = str(receipt.get("status") or "").strip().upper()
+    if receipt_status != "ACCEPTED" or receipt.get("accepted") is not True:
+        raise _OperatorReviewRecoveryPending()
+
+    count = _effect_summary_count(effects, "count")
+    committed = _effect_summary_count(effects, "committed")
+    failed = _effect_summary_count(effects, "failed")
+    pending = _effect_summary_count(effects, "pending")
+    recovery_pending = _effect_summary_count(effects, "recovery_pending")
+    dispatch_status = str(effects.get("dispatch_status") or "").strip().upper()
+
+    # recovery_pending is a subset of pending.  The remaining three counters
+    # must exactly account for the durable queue projection before an outer
+    # command may become terminal.
+    reconciled = count > 0 and count == committed + failed + pending
+    if (
+        not reconciled
+        or pending > 0
+        or recovery_pending > 0
+        or dispatch_status == "RECOVERY_PENDING"
+    ):
+        raise _OperatorReviewRecoveryPending()
+    if dispatch_status == "COMMITTED" and committed == count and failed == 0:
+        if type(historical_side_effects_executed) is not bool:
+            raise RuntimeError("OPERATOR_HISTORICAL_EFFECT_ATTRIBUTION_INVALID")
+        return (
+            "SUCCEEDED",
+            "OBS_COMMAND_COMPLETED",
+            historical_side_effects_executed,
+        )
+    if dispatch_status == "FAILED" and failed > 0 and committed + failed == count:
+        if type(historical_side_effects_executed) is not bool:
+            raise RuntimeError("OPERATOR_HISTORICAL_EFFECT_ATTRIBUTION_INVALID")
+        return (
+            "REJECTED",
+            "OBS_COMMAND_ACCEPTANCE_EFFECT_FAILED",
+            historical_side_effects_executed,
+        )
+    # NO_EFFECTS, missing/unknown status, and contradictory terminal counters
+    # are not proof of rejection.  Keep the outer command open for durable
+    # reconciliation instead of creating a rejected-then-later-effect split.
+    raise _OperatorReviewRecoveryPending()
+
+
+def _effect_summary_count(effects: Mapping[str, Any], field_name: str) -> int:
+    raw = effects.get(field_name)
+    if isinstance(raw, bool):
+        raise RuntimeError("OPERATOR_ACCEPTANCE_EFFECT_SUMMARY_INVALID")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("OPERATOR_ACCEPTANCE_EFFECT_SUMMARY_INVALID") from exc
+    if value < 0:
+        raise RuntimeError("OPERATOR_ACCEPTANCE_EFFECT_SUMMARY_INVALID")
+    return value
 
 
 def _claim_graph_identity(claim: Mapping[str, Any]) -> tuple[str, int]:
@@ -595,4 +946,8 @@ def _continuation_result_ref(
     return receipt_ref or None
 
 
-__all__ = ["GovernedRuntimeGroup", "GraphCancellationOperatorError"]
+__all__ = [
+    "GovernedRuntimeGroup",
+    "GovernedRuntimeGroupCloseError",
+    "GraphCancellationOperatorError",
+]

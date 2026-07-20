@@ -61,21 +61,26 @@ from host_brain.scheduler.command_service import (
     _require_scheduler_command_surface,
     _scheduler_session_id,
 )
+from host_brain.scheduler.accepted_effect_runtime import (
+    SchedulerAcceptedEffectRuntime,
+)
 from host_brain.scheduler.contracts import (
-    SCHEDULER_WORKER_ROUTE,
     SchedulerDefinitionSnapshot,
     SchedulerOccurrence,
     occurrence_work_order_id,
 )
+from host_brain.scheduler.operation_plan import (
+    SCHEDULER_OPERATION_EFFECT_TYPE,
+    SchedulerOperationPlanAcceptance,
+    SchedulerOperationPlanExecutor,
+    SchedulerOperationPlanVerifier,
+)
 from host_brain.scheduler.worker_registry import (
-    GovernedSchedulerWorker,
-    SchedulerProjectionReader,
-    SchedulerResultAcceptance,
-    SchedulerResultVerifier,
     SchedulerWorkerRegistry,
     SchedulerWorkerResolver,
 )
 from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
@@ -191,6 +196,7 @@ class GovernedSchedulerRuntime:
         command_repository: Any,
         governor_grants: DurableGovernorGrantResolver,
         runtime_context_application: Any | None = None,
+        accepted_effect_runtime: SchedulerAcceptedEffectRuntime,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
@@ -198,6 +204,9 @@ class GovernedSchedulerRuntime:
         self._commands = command_repository
         self._governor_grants = governor_grants
         self._runtime_context_application = runtime_context_application
+        if not isinstance(accepted_effect_runtime, SchedulerAcceptedEffectRuntime):
+            raise TypeError("accepted_effect_runtime must be SchedulerAcceptedEffectRuntime")
+        self._accepted_effect_runtime = accepted_effect_runtime
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
         self._condition = asyncio.Condition()
         self._active = False
@@ -324,7 +333,13 @@ class GovernedSchedulerRuntime:
                 assignment=assignment,
                 graph=graph,
             ):
-                yield event
+                if bool(event.get("done")):
+                    yield await self._accepted_effect_runtime.dispatch(
+                        event,
+                        command=command,
+                    )
+                else:
+                    yield event
         finally:
             async with self._condition:
                 self._in_flight -= 1
@@ -342,10 +357,10 @@ class GovernedSchedulerRuntime:
         service = self._runtime_context_application
         freeze = getattr(service, "freeze_request", None)
         if not callable(freeze):
-            # Non-proactive scheduler handlers remain available during the
-            # migration window.  Proactive execution itself fails closed in
-            # its handler unless this exact frozen context is present.
-            return {}
+            raise GovernedSchedulerRuntimeError(
+                SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+                "Scheduler Runtime Context authority is unavailable",
+            )
         template = definition.intent_template
         template_args = (
             dict(template.get("args") or {})
@@ -440,7 +455,11 @@ class GovernedSchedulerRuntime:
                 graph=graph,
                 continuation_claim=dict(claim or {}),
             )
-            return await _review_continuation_result(operation)
+            result = await _review_continuation_result(operation)
+            return await self._accepted_effect_runtime.dispatch(
+                result,
+                command=command,
+            )
         finally:
             async with self._condition:
                 self._in_flight -= 1
@@ -524,6 +543,7 @@ def build_governed_scheduler_runtime(
     cancellation_authority_verifier: Any | None = None,
     runtime_context_application: Any | None = None,
     action_preview_service: Any | None = None,
+    acceptance_effect_dispatcher: Any | None = None,
 ) -> GovernedSchedulerRuntime:
     definitions = definition_repository or getattr(
         task_runtime_container,
@@ -532,6 +552,16 @@ def build_governed_scheduler_runtime(
     )
     if definitions is None:
         raise TypeError("scheduler definition repository is required")
+    if not isinstance(worker_registry, SchedulerWorkerRegistry):
+        raise TypeError("scheduler worker registry is required")
+    if not callable(getattr(runtime_context_application, "freeze_request", None)) or (
+        not callable(getattr(runtime_context_application, "require_frozen", None))
+    ):
+        raise TypeError("scheduler Runtime Context authority is required")
+    if not callable(getattr(action_preview_service, "issue_receipt", None)) or (
+        not callable(getattr(action_preview_service, "require_execution", None))
+    ):
+        raise TypeError("scheduler Action Preview authority is required")
     review_store = getattr(task_runtime_container, "review_store", None)
     continuation_store = getattr(
         task_runtime_container,
@@ -549,29 +579,52 @@ def build_governed_scheduler_runtime(
         ledger=ledger,
         review_store=continuation_store,
     )
-    canonical_worker = GovernedSchedulerWorker(
-        handlers=worker_registry,
-        definition_repository=definitions,
-        occurrence_repository=definitions,
-        result_repository=result_repository,
-        node_grant_verifier=node_grant_verifier,
+    projection_store = getattr(
+        task_runtime_container,
+        "worker_projection_store",
+        None,
+    )
+    if projection_store is None:
+        raise TypeError("scheduler Task Runtime worker projection store is required")
+    canonical_worker = GovernedFrozenNodeWorker(
+        route_kind="delegate",
+        executor=SchedulerOperationPlanExecutor(
+            occurrence_repository=definitions,
+            definition_repository=definitions,
+        ),
+        node_grants=node_grant_verifier,
+        projections=projection_store,
         action_preview_service=action_preview_service,
+        allowed_acceptance_effect_types=frozenset(
+            {SCHEDULER_OPERATION_EFFECT_TYPE}
+        ),
+        preview_purpose="scheduler.execute",
+    )
+    verifier = SchedulerOperationPlanVerifier(
+        projection_store=projection_store,
+        occurrence_repository=definitions,
+        definition_repository=definitions,
+    )
+    acceptance = SchedulerOperationPlanAcceptance(
+        projection_store=projection_store,
+        occurrence_repository=definitions,
+        definition_repository=definitions,
     )
     command_repository = task_runtime_container.command_repository
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
+        internal_agent_checkpoint_uow=(
+            task_runtime_container.internal_agent_checkpoint_uow
+        ),
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
         worker_resolver=SchedulerWorkerResolver(canonical_worker=canonical_worker),
-        verifier=SchedulerResultVerifier(result_repository),
-        acceptance=SchedulerResultAcceptance(),
-        projection_reader=SchedulerProjectionReader(
-            result_repository,
-            occurrence_repository=definitions,
-            command_repository=command_repository,
-        ),
+        verifier=verifier,
+        acceptance=acceptance,
+        projection_reader=projection_store,
         review_runtime=TaskNodeReviewRuntime(review_store),
         node_grant_verifier=node_grant_verifier,
+        acceptance_effects_enabled=True,
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",
@@ -585,12 +638,18 @@ def build_governed_scheduler_runtime(
         node_grant_service=node_grant_service,
         cancellation_authority_verifier=cancellation_authority_verifier,
     )
+    accepted_effect_runtime = SchedulerAcceptedEffectRuntime(
+        dispatcher=acceptance_effect_dispatcher,
+        result_repository=result_repository,
+        occurrence_repository=definitions,
+    )
     return GovernedSchedulerRuntime(
         application=application,
         runtime_router=runtime_router,
         command_repository=command_repository,
         governor_grants=DurableGovernorGrantResolver(ledger),
         runtime_context_application=runtime_context_application,
+        accepted_effect_runtime=accepted_effect_runtime,
     )
 
 def _build_contracts(
@@ -639,8 +698,8 @@ def _build_contracts(
         fingerprint_material["operator_command_id"] = "scheduler.task.trigger"
     operation_fingerprint = _sha256_json(fingerprint_material)
     output_contract = {
-        "type": "durable_scheduler_result",
-        "required": ["occurrence_id", "result", "receipt_ref"],
+        "type": "scheduler_operation_plan",
+        "required": ["acceptance_effect_intents", "receipt_ref"],
     }
     operator_surface = surface is HostCommandSurface.OPERATOR
     review_ref = (
@@ -665,7 +724,7 @@ def _build_contracts(
         work_order_id=work_order_id,
         domain="organ_ops",
         run_mode="worker",
-        objective=f"Execute durable scheduled task {occurrence.task_id}",
+        objective=f"Prepare durable scheduled operation {occurrence.task_id}",
         input_pack={
             "occurrence_id": occurrence.occurrence_id,
             "definition_ref": definition_ref,
@@ -679,8 +738,8 @@ def _build_contracts(
             "replan",
             "cross_executor_resume",
         ),
-        acceptance_criteria=("scheduler handler result persisted",),
-        verification_plan={"required": True, "type": "durable_scheduler_result"},
+        acceptance_criteria=("scheduler operation plan is canonical",),
+        verification_plan={"required": True, "type": "scheduler_operation_plan"},
         approval_policy={
             "required": True,
             "governor_grant_ref": governor_grant,
@@ -734,7 +793,7 @@ def _build_contracts(
                     {
                         "node_id": node_id,
                         "objective": (
-                            f"Execute durable scheduled task {occurrence.task_id}"
+                            f"Prepare durable scheduled operation {occurrence.task_id}"
                         ),
                         "worker_route": "delegate",
                         "target_id": definition.worker_key,
@@ -768,7 +827,7 @@ def _build_contracts(
         output_contract=output_contract,
         retry_policy=retry_policy,
         risk_level=risk_level,
-        acceptance_criteria=("scheduler handler result persisted",),
+        acceptance_criteria=("scheduler operation plan is canonical",),
         status=TaskNodeStatus.READY,
         status_version=0,
     )
@@ -795,7 +854,7 @@ def _build_contracts(
         root_work_order_id=work_order_id,
         graph_id=graph_id,
         graph_revision=1,
-        route_type=SCHEDULER_WORKER_ROUTE,
+        route_type="delegate",
         target_id=definition.worker_key,
         business_scope=business_scope,
         operation_fingerprint=operation_fingerprint,

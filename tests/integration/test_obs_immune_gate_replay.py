@@ -154,6 +154,7 @@ def test_projection_fixture_keeps_two_obs_apps_and_sources_isolated(
         monkeypatch.setattr(
             f"host_brain.composition.process_services.{name}",
             _forbidden_global_locator,
+            raising=False,
         )
 
     with compose_durable_obs_projection_runtime(

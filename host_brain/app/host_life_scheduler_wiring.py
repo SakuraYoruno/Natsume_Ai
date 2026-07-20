@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Callable, Mapping, Protocol
 
 from host_brain.runtime.context_application import RuntimeContextApplicationService
@@ -24,6 +26,18 @@ class LifeSnapshotReaderPort(Protocol):
     def get_snapshot(self, person_id: str) -> Any: ...
 
     def get_receipt(self, command_id: str) -> Any | None: ...
+
+
+SCHEDULER_HANDLER_RESULT_INVALID = "SCHEDULER_HANDLER_RESULT_INVALID"
+
+
+class SchedulerHandlerResultError(RuntimeError):
+    """A real Scheduler handler returned no trustworthy terminal meaning."""
+
+    def __init__(self, detail: str) -> None:
+        self.reason_code = SCHEDULER_HANDLER_RESULT_INVALID
+        self.detail = str(detail or "Scheduler handler result is invalid")
+        super().__init__(f"{self.reason_code}: {self.detail}")
 
 
 def compose_life_command_authority(
@@ -112,7 +126,6 @@ def submit_life_tick_command(
         as_replayed = getattr(existing_receipt, "as_replayed", None)
         replayed_receipt = as_replayed() if callable(as_replayed) else existing_receipt
         result = scheduler_handler_result(replayed_receipt)
-        result["status"] = "SUCCEEDED"
         result["replayed"] = True
         return result
     from host_brain.digital_life.policy import build_life_tick_payload  # noqa: PLC0415
@@ -345,21 +358,32 @@ def scheduler_seed_configs(
 
 
 def scheduler_handler_result(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
+    """Normalize only an explicit, canonical Scheduler terminal result.
+
+    A handler may already have crossed an external-effect boundary before its
+    return value is inspected.  Missing or ambiguous output is consequently
+    an unknown outcome, not evidence of success (or of definite failure).
+    """
+
+    if isinstance(value, Mapping):
         result = dict(value)
     else:
-        result = {}
+        result: dict[str, Any] | None = None
         for method_name in ("as_dict", "to_dict", "model_dump"):
             method = getattr(value, method_name, None)
             if callable(method):
                 candidate = method()
-                if isinstance(candidate, dict):
+                if isinstance(candidate, Mapping):
                     result = dict(candidate)
                     break
     if not result:
-        result = {"detail": str(value or "")[:500]}
-    raw = str(result.get("status") or "SUCCEEDED").strip().upper()
-    result["status"] = {
+        raise SchedulerHandlerResultError(
+            "handler must return a non-empty mapping or serializable object"
+        )
+    if "status" not in result:
+        raise SchedulerHandlerResultError("handler result requires explicit status")
+    raw = str(result.get("status") or "").strip().upper()
+    normalized = {
         "OK": "SUCCEEDED",
         "SUCCESS": "SUCCEEDED",
         "DONE": "SUCCEEDED",
@@ -372,7 +396,7 @@ def scheduler_handler_result(value: Any) -> dict[str, Any]:
         "CONFLICT": "BLOCKED",
         "DEFERRED": "DEGRADED",
     }.get(raw, raw)
-    if result["status"] not in {
+    if normalized not in {
         "EXECUTED",
         "SUCCEEDED",
         "FAILED",
@@ -380,18 +404,271 @@ def scheduler_handler_result(value: Any) -> dict[str, Any]:
         "DEGRADED",
         "SKIPPED",
     }:
-        result["status"] = "DEGRADED"
-        result.setdefault("reason_code", f"SCHEDULER_HANDLER_STATUS_{raw or 'UNKNOWN'}")
+        raise SchedulerHandlerResultError(
+            f"handler result status is invalid: {raw or '<empty>'}"
+        )
+    result["status"] = normalized
+    if normalized == "SKIPPED":
+        reason_code = str(result.get("reason_code") or "").strip().upper()
+        if not reason_code:
+            raise SchedulerHandlerResultError(
+                "SKIPPED handler result requires explicit reason_code"
+            )
+        result["reason_code"] = reason_code
+    _assert_canonical_scheduler_result(result)
     return result
+
+
+def proactive_scheduler_handler_result(value: Any) -> dict[str, Any]:
+    """Preserve the explicit terminal meaning returned by proactive dispatch."""
+
+    result = scheduler_handler_result(value)
+    if result["status"] in {"EXECUTED", "SUCCEEDED"} and result.get("success") is False:
+        raise SchedulerHandlerResultError(
+            "proactive result reports success status with success=false"
+        )
+    return result
+
+
+def distillation_scheduler_handler_result(report: Any) -> dict[str, Any]:
+    """Project ``BatchDistillationReport`` counters into one real outcome."""
+
+    total = _non_negative_result_int(report, "total_candidates")
+    distilled = _non_negative_result_int(report, "distilled_count")
+    skipped = _non_negative_result_int(report, "skipped_count")
+    failed = _non_negative_result_int(report, "failed_count")
+    duration_ms = _non_negative_result_int(report, "duration_ms")
+    if distilled + skipped + failed != total:
+        raise SchedulerHandlerResultError(
+            "distillation counters do not account for every candidate"
+        )
+    payload: dict[str, Any] = {
+        "total_candidates": total,
+        "distilled_count": distilled,
+        "skipped_count": skipped,
+        "failed_count": failed,
+        "duration_ms": duration_ms,
+    }
+    raw_ts = _result_field(report, "ts_ms")
+    if raw_ts is not None:
+        payload["ts_ms"] = _non_negative_exact_int(raw_ts, "distillation.ts_ms")
+    if total == 0:
+        payload.update(
+            {
+                "status": "SKIPPED",
+                "reason_code": "DISTILLATION_NO_CANDIDATES",
+                "summary": "No episodic-memory candidates were due",
+            }
+        )
+    elif failed == total:
+        payload.update(
+            {
+                "status": "FAILED",
+                "reason_code": "DISTILLATION_BATCH_FAILED",
+                "summary": f"All {total} distillation candidates failed",
+            }
+        )
+    elif failed > 0:
+        payload.update(
+            {
+                "status": "DEGRADED",
+                "reason_code": "DISTILLATION_PARTIAL_FAILURE",
+                "summary": f"Distilled {distilled} of {total}; {failed} failed",
+            }
+        )
+    elif distilled == 0:
+        payload.update(
+            {
+                "status": "SKIPPED",
+                "reason_code": "DISTILLATION_NO_ELIGIBLE_CANDIDATES",
+                "summary": f"All {total} candidates were skipped",
+            }
+        )
+    else:
+        payload.update(
+            {
+                "status": "SUCCEEDED",
+                "reason_code": None,
+                "summary": f"Distilled {distilled} of {total} candidates",
+            }
+        )
+    return scheduler_handler_result(payload)
+
+
+def security_immune_scheduler_handler_result(value: Any) -> dict[str, Any]:
+    """Project the real SecurityImmune snapshot without inventing success."""
+
+    snapshot = _result_mapping(value, field_name="security immune snapshot")
+    enabled = snapshot.get("enabled")
+    if type(enabled) is not bool:
+        raise SchedulerHandlerResultError(
+            "security immune snapshot requires boolean enabled"
+        )
+    run_count = _non_negative_exact_int(
+        snapshot.get("run_count"),
+        "security_immune.run_count",
+    )
+    asset_count = _non_negative_exact_int(
+        snapshot.get("asset_count"),
+        "security_immune.asset_count",
+    )
+    incident_count = _non_negative_exact_int(
+        snapshot.get("incident_count"),
+        "security_immune.incident_count",
+    )
+    last_run = snapshot.get("last_run_ts_ms")
+    if last_run is not None:
+        last_run = _non_negative_exact_int(
+            last_run,
+            "security_immune.last_run_ts_ms",
+        )
+    provider_rows = snapshot.get("provider_statuses", [])
+    if not isinstance(provider_rows, list) or any(
+        not isinstance(row, Mapping) for row in provider_rows
+    ):
+        raise SchedulerHandlerResultError(
+            "security immune provider_statuses must be an array of objects"
+        )
+    allowed_provider_statuses = {"ok", "skipped", "degraded"}
+    provider_statuses: list[dict[str, str]] = []
+    for row in provider_rows:
+        provider_id = str(row.get("provider_id") or "").strip()
+        status = str(row.get("status") or "").strip().lower()
+        if not provider_id or status not in allowed_provider_statuses:
+            raise SchedulerHandlerResultError(
+                "security immune provider status is missing or unknown"
+            )
+        provider_statuses.append({"provider_id": provider_id, "status": status})
+
+    last_error = str(snapshot.get("last_error") or "").strip()
+    degraded_providers = sorted(
+        row["provider_id"] for row in provider_statuses if row["status"] == "degraded"
+    )
+    skipped_providers = sorted(
+        row["provider_id"] for row in provider_statuses if row["status"] == "skipped"
+    )
+    result: dict[str, Any] = {
+        "enabled": enabled,
+        "run_count": run_count,
+        "last_run_ts_ms": last_run,
+        "asset_count": asset_count,
+        "incident_count": incident_count,
+        "provider_statuses": provider_statuses,
+        "degraded_provider_ids": degraded_providers,
+        "skipped_provider_ids": skipped_providers,
+    }
+    if not enabled:
+        result.update(
+            {
+                "status": "SKIPPED",
+                "reason_code": "SECURITY_IMMUNE_DISABLED",
+                "summary": "Security immune scan is disabled",
+            }
+        )
+    elif last_error:
+        result.update(
+            {
+                "status": "FAILED",
+                "reason_code": "SECURITY_IMMUNE_SCAN_FAILED",
+                "error_digest": "sha256:"
+                + hashlib.sha256(last_error.encode("utf-8")).hexdigest(),
+                "summary": "Security immune scan failed",
+            }
+        )
+    elif last_run is None or run_count < 1:
+        raise SchedulerHandlerResultError(
+            "enabled security immune scan has no completed run identity"
+        )
+    elif degraded_providers:
+        result.update(
+            {
+                "status": "DEGRADED",
+                "reason_code": "SECURITY_IMMUNE_PROVIDER_DEGRADED",
+                "summary": (
+                    "Security immune scan completed with degraded providers: "
+                    + ", ".join(degraded_providers)
+                ),
+            }
+        )
+    else:
+        result.update(
+            {
+                "status": "SUCCEEDED",
+                "reason_code": None,
+                "summary": (
+                    f"Security immune scan completed: {asset_count} assets, "
+                    f"{incident_count} incidents"
+                ),
+            }
+        )
+    return scheduler_handler_result(result)
+
+
+def _result_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        result = dict(value)
+    else:
+        result = None
+        for method_name in ("as_dict", "to_dict", "model_dump"):
+            method = getattr(value, method_name, None)
+            if callable(method):
+                candidate = method()
+                if isinstance(candidate, Mapping):
+                    result = dict(candidate)
+                    break
+    if not result:
+        raise SchedulerHandlerResultError(f"{field_name} is empty or not serializable")
+    return result
+
+
+def _result_field(value: Any, field_name: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(field_name)
+    return getattr(value, field_name, None)
+
+
+def _non_negative_result_int(value: Any, field_name: str) -> int:
+    return _non_negative_exact_int(
+        _result_field(value, field_name),
+        f"distillation.{field_name}",
+    )
+
+
+def _non_negative_exact_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SchedulerHandlerResultError(
+            f"{field_name} must be a non-negative integer"
+        )
+    return value
+
+
+def _assert_canonical_scheduler_result(value: Mapping[str, Any]) -> None:
+    try:
+        json.dumps(
+            dict(value),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise SchedulerHandlerResultError(
+            "handler result must be finite canonical JSON"
+        ) from exc
 
 
 __all__ = [
     "LifeCommandServicePort",
     "LifeSnapshotReaderPort",
+    "SCHEDULER_HANDLER_RESULT_INVALID",
+    "SchedulerHandlerResultError",
     "compose_life_command_authority",
     "compose_life_dispatchers",
+    "distillation_scheduler_handler_result",
+    "proactive_scheduler_handler_result",
     "reset_life_command_authority",
     "scheduler_handler_result",
     "scheduler_seed_configs",
+    "security_immune_scheduler_handler_result",
     "submit_life_tick_command",
 ]

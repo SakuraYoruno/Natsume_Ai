@@ -187,7 +187,12 @@ def test_remaining_gets_return_empty_projection_metadata_without_source_access(
         raise AssertionError("GET touched a source")
 
     empty_store = EmptyStore()
-    monkeypatch.setattr(dependencies, "peek_query_projection_store", lambda: empty_store)
+    monkeypatch.setattr(
+        dependencies,
+        "peek_query_projection_store",
+        lambda: empty_store,
+        raising=False,
+    )
     monkeypatch.setattr(dependencies, "get_ledger", forbidden)
 
     stats = agent_routes.get_agent_loop_stats(

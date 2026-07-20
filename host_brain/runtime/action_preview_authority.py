@@ -38,6 +38,12 @@ ACTION_PREVIEW_BLOCKED = "ACTION_PREVIEW_BLOCKED"
 ACTION_PREVIEW_EXPIRED = "ACTION_PREVIEW_EXPIRED"
 ACTION_PREVIEW_DRIFT = "ACTION_PREVIEW_DRIFT"
 ACTION_PREVIEW_MAX_TTL_MS = 30_000
+SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V1 = (
+    "Natsume.scheduler.action_preview_context.v1"
+)
+SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V2 = (
+    "Natsume.scheduler.action_preview_context.v2"
+)
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _REF = re.compile(r"^[a-z][a-z0-9+.-]{1,31}://\S+$")
@@ -788,6 +794,37 @@ class DurableActionPreviewAuthority:
             )
         return receipt
 
+    def reopen_receipt(self, *, event_id: str) -> dict[str, Any]:
+        """Reopen one immutable issuance receipt without granting execution.
+
+        Terminal checkpoint recovery uses this read-only proof to establish
+        that a seal-bound Preview really exists in the append-only RuntimeEvent
+        journal.  It deliberately does not renew expiry, re-evaluate policy, or
+        return an execution proof.
+        """
+
+        event_ref = _ref(event_id, "event_id")
+        record = self._store.get_event_by_id(event_id=event_ref)
+        if not isinstance(record, Mapping):
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_INVALID,
+                "preview receipt is missing",
+            )
+        raw_payload = record.get("payload")
+        if not isinstance(raw_payload, Mapping):
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_INVALID,
+                "preview receipt payload is missing",
+            )
+        receipt = ActionPreviewReceiptV1.from_mapping(raw_payload)
+        expected_event = self._event(receipt)
+        return self._validate_record(
+            record,
+            receipt=receipt,
+            expected_event=expected_event,
+            replayed=True,
+        )
+
     def _origin_receipt(
         self,
         authority_context: Mapping[str, Any] | None,
@@ -996,18 +1033,40 @@ def require_scheduler_derived_action(
     guardian_capability_id: str,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
-    """Reopen a Scheduler node receipt and bind one exact downstream action.
+    """Reopen a Scheduler authority and bind one exact downstream action.
 
-    The Scheduler receipt remains restrict-only: this helper first reopens its
-    exact node boundary, then issues a separate receipt for the concrete
-    message/actuator call. It never invents a parent or child grant.
+    V1 reopens the live TaskNode used by the legacy in-worker Scheduler
+    boundary.  V2 reopens the live, claimed ``scheduler.operation.execute``
+    Acceptance Effect after node Acceptance.  Both receipts remain
+    restrict-only: this helper first reopens the exact origin boundary, then
+    issues a separate receipt for the concrete message/actuator call.  It
+    never invents a parent or child grant.
     """
 
     context = dict(preview_context or {})
-    if context.get("schema_version") != "Natsume.scheduler.action_preview_context.v1":
+    context_schema = str(context.get("schema_version") or "")
+    if context_schema not in {
+        SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V1,
+        SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V2,
+    }:
         raise ActionPreviewAuthorityError(
             ACTION_PREVIEW_INVALID,
             "Scheduler-derived action lacks a typed Preview context",
+        )
+    required_context_fields = {
+        "schema_version",
+        "origin_event_id",
+        "origin_receipt_ref",
+        "origin_boundary",
+    }
+    if context_schema == SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V1:
+        required_context_fields.add("node_grant_expires_at_ms")
+    else:
+        required_context_fields.add("origin_authority_kind")
+    if frozenset(context) != required_context_fields:
+        raise ActionPreviewAuthorityError(
+            ACTION_PREVIEW_INVALID,
+            "Scheduler-derived Preview context field set drifted",
         )
     origin_event_id = _ref(context.get("origin_event_id"), "origin_event_id")
     origin_receipt_ref = _ref(
@@ -1048,6 +1107,37 @@ def require_scheduler_derived_action(
             "Scheduler origin receipt reference differs from its event",
         )
 
+    receipt_payload = getattr(origin_receipt, "payload", None)
+    if (
+        not isinstance(receipt_payload, Mapping)
+        and context_schema == SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V2
+    ):
+        raise ActionPreviewAuthorityError(
+            ACTION_PREVIEW_INVALID,
+            "Scheduler origin receipt has no canonical payload",
+        )
+    origin_authority_kind = str(
+        receipt_payload.get("authority_kind") or ""
+        if isinstance(receipt_payload, Mapping)
+        else "TASK_NODE"
+    ).strip().upper()
+    if context_schema == SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V1:
+        expected_origin_kind = "TASK_NODE"
+    else:
+        expected_origin_kind = str(
+            context.get("origin_authority_kind") or ""
+        ).strip().upper()
+        if expected_origin_kind != "ACCEPTANCE_EFFECT":
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_INVALID,
+                "Scheduler v2 origin must declare Acceptance Effect authority",
+            )
+    if origin_authority_kind != expected_origin_kind:
+        raise ActionPreviewAuthorityError(
+            ACTION_PREVIEW_DRIFT,
+            "Scheduler origin authority kind differs from its typed context",
+        )
+
     service_clock = getattr(service, "now_ms", None)
     current_ms = (
         now_ms
@@ -1056,15 +1146,16 @@ def require_scheduler_derived_action(
         if callable(service_clock)
         else time.time() * 1_000
     )
-    node_expiry = _positive(
-        context.get("node_grant_expires_at_ms"),
-        "node_grant_expires_at_ms",
-    )
-    if node_expiry <= int(current_ms):
-        raise ActionPreviewAuthorityError(
-            ACTION_PREVIEW_EXPIRED,
-            "Scheduler node authority expired before the downstream action",
+    if context_schema == SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V1:
+        node_expiry = _positive(
+            context.get("node_grant_expires_at_ms"),
+            "node_grant_expires_at_ms",
         )
+        if node_expiry <= int(current_ms):
+            raise ActionPreviewAuthorityError(
+                ACTION_PREVIEW_EXPIRED,
+                "Scheduler node authority expired before the downstream action",
+            )
     kwargs = {
         "action_kind": _text(action_kind, "action_kind"),
         "action_scope": _text(action_scope, "action_scope"),
@@ -1123,6 +1214,8 @@ __all__ = [
     "ActionPreviewAuthorityError",
     "ActionPreviewReceiptV1",
     "DurableActionPreviewAuthority",
+    "SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V1",
+    "SCHEDULER_ACTION_PREVIEW_CONTEXT_SCHEMA_V2",
     "context_pack_digest_from_work_order",
     "require_scheduler_derived_action",
 ]

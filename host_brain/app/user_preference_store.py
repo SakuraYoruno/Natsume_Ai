@@ -37,7 +37,12 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _enabled(name: str, *, default: bool = True) -> bool:
+def _enabled(
+    name: str,
+    *,
+    default: bool = True,
+    invalid: bool | None = None,
+) -> bool:
     raw = str(os.environ.get(name) or "").strip().lower()
     if not raw:
         return bool(default)
@@ -45,7 +50,17 @@ def _enabled(name: str, *, default: bool = True) -> bool:
         return True
     if raw in {"0", "false", "no", "off"}:
         return False
-    return bool(default)
+    return bool(default if invalid is None else invalid)
+
+
+def _preference_enabled() -> bool:
+    """Treat malformed privacy configuration as disabled, never as consent."""
+
+    return _enabled(
+        "HOST_USER_PREFERENCE_ENABLED",
+        default=True,
+        invalid=False,
+    )
 
 
 def _clean_text(value: Any, *, limit: int = 240) -> str:
@@ -127,7 +142,10 @@ class UserPreferenceEvent:
             attributes=dict(self.attributes or {}),
             evidence_refs=[_clean_text(item, limit=300) for item in list(self.evidence_refs or []) if _clean_text(item)],
             confidence=confidence,
-            created_at_ms=int(self.created_at_ms or _now_ms()),
+            # A post-Acceptance effect binds the admitted timestamp exactly;
+            # zero is a valid epoch value and must not become a replay-time
+            # clock read.
+            created_at_ms=max(0, int(self.created_at_ms)),
             active=bool(self.active),
         )
 
@@ -160,13 +178,19 @@ class UserPreferenceStore:
     def available(self) -> bool:
         return True
 
+    @property
+    def signal_writes_enabled(self) -> bool:
+        """Expose the production privacy gate used by Acceptance effects."""
+
+        return _preference_enabled()
+
     def ensure_schema(self) -> None:
         self.repository.assert_schema_ready(
             require_catalog=self.repository.db_path != ":memory:"
         )
 
     def append_events(self, events: Sequence[UserPreferenceEvent]) -> list[dict[str, Any]]:
-        if not _enabled("HOST_USER_PREFERENCE_ENABLED", default=True) or not self.available:
+        if not _preference_enabled() or not self.available:
             return []
         normalized = [event.normalized() for event in list(events or [])]
         if not normalized:
@@ -206,6 +230,25 @@ class UserPreferenceStore:
             session_id=_clean_text(session_id, limit=180),
             conversation_id=_clean_text(conversation_id, limit=180),
             created_before_ms=created_before_ms,
+        )
+
+    def get_feedback_delivery(
+        self,
+        *,
+        person_id: str | None,
+        session_id: str | None,
+        conversation_id: str | None,
+        domain: str,
+        admitted_at_ms: int,
+    ) -> dict[str, Any] | None:
+        if not self.available:
+            return None
+        return self.repository.get_feedback_delivery(
+            person_id=_clean_text(person_id, limit=120) or "unknown",
+            session_id=_clean_text(session_id, limit=180),
+            conversation_id=_clean_text(conversation_id, limit=180),
+            domain=_normalize_domain(domain),
+            admitted_at_ms=int(admitted_at_ms),
         )
 
     def record_delivery(
@@ -277,6 +320,13 @@ class UserPreferenceStore:
             "created_at_ms": item.created_at_ms,
             "active": item.active,
         }
+
+    def event_to_dict(self, event: UserPreferenceEvent) -> dict[str, Any]:
+        """Return the canonical repository payload for a typed event."""
+
+        if not isinstance(event, UserPreferenceEvent):
+            raise TypeError("event must be UserPreferenceEvent")
+        return self._event_to_dict(event)
 
 def build_profile_from_events(*, person_id: str, domain: str, events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     likes: dict[str, dict[str, Any]] = {}
@@ -543,6 +593,7 @@ def record_recommendation_delivery(
     items: Sequence[Mapping[str, Any]],
     message_payload: Mapping[str, Any] | None = None,
     ledger: Any | None = None,
+    created_at_ms: int | None = None,
 ) -> dict[str, Any] | None:
     return UserPreferenceStore(ledger=ledger).record_delivery(
         person_id=person_id,
@@ -556,6 +607,7 @@ def record_recommendation_delivery(
         ranked_recommendations_ref=ranked_recommendations_ref,
         items=items,
         message_payload=message_payload,
+        created_at_ms=created_at_ms,
     )
 
 
@@ -567,7 +619,7 @@ def build_user_preference_pack(
     conversation_id: str | None = None,
     ledger: Any | None = None,
 ) -> dict[str, Any]:
-    if not _enabled("HOST_USER_PREFERENCE_ENABLED", default=True):
+    if not _preference_enabled():
         return {}
     clean_person = _clean_text(person_id, limit=120) or "default"
     query = _clean_text(query_text, limit=500)
@@ -621,7 +673,7 @@ def build_lightnovel_dynamic_taste_profile(
     ledger: Any | None = None,
 ) -> dict[str, Any]:
     profile = dict(base_profile or {})
-    if not _enabled("HOST_USER_PREFERENCE_ENABLED", default=True):
+    if not _preference_enabled():
         return profile
     clean_person = _clean_text(person_id, limit=120)
     if not clean_person:

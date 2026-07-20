@@ -568,10 +568,19 @@ class IntentDecisionEngine:
 
 def _resolve_intent_risk_level(registry: Any, action: str) -> int:
     """Read static risk from the authoritative registry; unknown stays highest risk."""
+    action_name = str(action or "").strip()
+    # Built-in governance actions are not executable Skills and therefore do
+    # not belong in SkillRegistry.  Their risk is frozen here by the Governor
+    # authority instead of being nominated by an ingress caller.
+    builtin_risk = {
+        "operator_sys_mode_transition": 4,
+    }.get(action_name)
+    if builtin_risk is not None:
+        return builtin_risk
     if registry is None:
         return 5
     try:
-        meta = registry.get(str(action or "").strip())
+        meta = registry.get(action_name)
         return max(1, min(5, int(getattr(meta, "risk_level", 5)))) if meta is not None else 5
     except (AttributeError, TypeError, ValueError):
         return 5

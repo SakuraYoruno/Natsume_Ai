@@ -48,6 +48,7 @@ from .ports import (
     AcceptancePort,
     ExecutionProjectionReaderPort,
     GovernedWorkerResolverPort,
+    InternalAgentCheckpointUnitOfWorkPort,
     RuntimeOutboxPublisherPort,
     TaskOutboxFactoryPort,
     TaskStorePort,
@@ -62,6 +63,7 @@ class GovernedTaskCoordinator:
         self,
         *,
         task_store: TaskStorePort,
+        internal_agent_checkpoint_uow: InternalAgentCheckpointUnitOfWorkPort,
         outbox_publisher: RuntimeOutboxPublisherPort,
         outbox_factory: TaskOutboxFactoryPort,
         worker_resolver: GovernedWorkerResolverPort,
@@ -133,6 +135,7 @@ class GovernedTaskCoordinator:
         )
         self._node_execution = DurableNodeExecutionRuntime(
             task_store=task_store,
+            checkpoint_uow=internal_agent_checkpoint_uow,
             runtime_outbox=self._runtime_outbox,
             budget_runtime=self._budgets,
             node_lifecycle=self._node_lifecycle,

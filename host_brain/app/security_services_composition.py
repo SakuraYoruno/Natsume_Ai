@@ -299,6 +299,7 @@ def build_process_security_service_container(
     degradation_capability_port_provider: (
         Callable[[], DegradationCapabilityPort | None] | None
     ) = None,
+    defer_obs_review_recovery: bool = False,
 ) -> ProcessSecurityServiceContainer:
     """Build independent service slots from explicit process dependencies.
 
@@ -352,6 +353,11 @@ def build_process_security_service_container(
             env=source,
             db_path=resolved_path,
             **({"route_ports": route_ports} if route_ports is not None else {}),
+            **(
+                {"defer_review_recovery": True}
+                if defer_obs_review_recovery
+                else {}
+            ),
             **(
                 {
                     "degradation_capability_port_provider": (

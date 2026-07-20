@@ -16,12 +16,16 @@ from typing import Any, Protocol
 from urllib.parse import unquote
 
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.projection_recovery import (
+    ProjectionRecoveryContractError,
+    validate_worker_timing,
+)
 from host_brain.contracts.agent_runtime.node_artifact import (
     artifact_digest,
     is_task_result_artifact_ref,
 )
 from host_brain.task_runtime.worker_registry import GovernedWorkerRoute
-from host_brain.task_runtime.worker_budget_usage import (
+from host_brain.contracts.agent_runtime.worker_budget_usage import (
     WorkerBudgetUsage,
     WorkerBudgetUsageError,
 )
@@ -171,6 +175,8 @@ class GovernedFrozenNodeWorker:
         node_grants: NodeGrantVerifierPort,
         projections: WorkerProjectionWriterPort,
         action_preview_service: Any | None = None,
+        allowed_acceptance_effect_types: frozenset[str] | None = None,
+        preview_purpose: str | None = None,
     ) -> None:
         kind = str(route_kind or "").strip().lower()
         if kind not in {"chat", "delegate", "tool"}:
@@ -186,6 +192,24 @@ class GovernedFrozenNodeWorker:
         self._node_grants = node_grants
         self._projections = projections
         self._action_preview_service = action_preview_service
+        purpose = str(preview_purpose or "").strip().lower()
+        if purpose and purpose not in {"delegate.dispatch", "scheduler.execute"}:
+            raise ValueError("preview_purpose must be delegate.dispatch or scheduler.execute")
+        if purpose == "scheduler.execute" and kind != "delegate":
+            raise ValueError("scheduler.execute Preview requires a delegate route")
+        self._preview_purpose = purpose or None
+        allowed_effects = (
+            frozenset({"life.foreground_completed"})
+            if allowed_acceptance_effect_types is None
+            else frozenset(
+                str(value or "").strip()
+                for value in allowed_acceptance_effect_types
+                if str(value or "").strip()
+            )
+        )
+        if not allowed_effects:
+            raise ValueError("allowed_acceptance_effect_types must not be empty")
+        self._allowed_acceptance_effect_types = allowed_effects
 
     async def execute_stream(
         self,
@@ -228,7 +252,28 @@ class GovernedFrozenNodeWorker:
         terminal: dict[str, Any] | None = None
         terminal_count = 0
         buffered_event_count = 0
-        async for raw in self._executor.execute_stream(frozen):
+        execute_with_recovery = getattr(
+            self._executor,
+            "execute_stream_with_recovery",
+            None,
+        )
+        stream = (
+            execute_with_recovery(
+                frozen,
+                recovery_context={
+                    "schema_version": "Natsume.internal.projection_recovery.v1",
+                    "frozen_node_input": frozen.to_dict(),
+                    "verified_node_grant": _projection(verified),
+                    "action_preview": (
+                        dict(preview) if preview is not None else None
+                    ),
+                    "buffered_pre_acceptance_events": 0,
+                },
+            )
+            if callable(execute_with_recovery)
+            else self._executor.execute_stream(frozen)
+        )
+        async for raw in stream:
             event = dict(raw) if isinstance(raw, Mapping) else {}
             if bool(event.get("done")) or str(event.get("phase") or "").strip().upper() == "COMMIT":
                 terminal_count += 1
@@ -244,6 +289,177 @@ class GovernedFrozenNodeWorker:
                 GOVERNED_NODE_COMMIT_INVALID,
                 f"frozen executor must emit exactly one terminal event, got {terminal_count}",
             )
+        yield self._stage_terminal_projection(
+            frozen=frozen,
+            verified_grant=_projection(verified),
+            preview=preview,
+            terminal=terminal,
+            buffered_event_count=buffered_event_count,
+        )
+
+    def recover_sealed_checkpoint(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        execution_context: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Rebuild one projection from a protected seal without rerunning work."""
+
+        recover = getattr(self._executor, "recover_terminal_projection", None)
+        if not callable(recover):
+            return None
+        frozen = _freeze_node_input(
+            command=command,
+            work_order=work_order,
+            execution_context=execution_context,
+            expected_route_kind=self._route_kind,
+        )
+        raw = recover(frozen)
+        material = dict(raw) if isinstance(raw, Mapping) else {}
+        terminal = material.get("terminal")
+        verified = material.get("verified_node_grant")
+        preview = material.get("action_preview")
+        buffered = material.get("buffered_pre_acceptance_events")
+        worker_timing = material.get("worker_timing")
+        try:
+            worker_timing = validate_worker_timing(worker_timing)
+        except ProjectionRecoveryContractError as exc:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "sealed projection recovery worker timing is invalid",
+            ) from exc
+        if (
+            not isinstance(terminal, Mapping)
+            or not isinstance(verified, Mapping)
+            or (preview is not None and not isinstance(preview, Mapping))
+            or type(buffered) is not int
+            or buffered < 0
+        ):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "sealed projection recovery material is incomplete",
+            )
+        _assert_verified_grant(verified, frozen=frozen)
+        self._reopen_recovery_preview(
+            frozen=frozen,
+            verified_grant=dict(verified),
+            preview=(dict(preview) if isinstance(preview, Mapping) else None),
+        )
+        projection, worker_commit = self._build_terminal_projection(
+            frozen=frozen,
+            verified_grant=dict(verified),
+            preview=(dict(preview) if isinstance(preview, Mapping) else None),
+            terminal=dict(terminal),
+            buffered_event_count=buffered,
+        )
+        return {
+            "projection": projection,
+            "worker_commit": worker_commit,
+            "stage_ref": str(material.get("stage_ref") or ""),
+            "seal_digest": str(material.get("seal_digest") or ""),
+            "worker_timing": dict(worker_timing),
+        }
+
+    def _reopen_recovery_preview(
+        self,
+        *,
+        frozen: FrozenNodeInput,
+        verified_grant: Mapping[str, Any],
+        preview: Mapping[str, Any] | None,
+    ) -> None:
+        """Reopen the immutable Preview receipt without renewing authority."""
+
+        if self._route_kind != "delegate":
+            if preview is not None:
+                raise GovernedNodeWorkerError(
+                    GOVERNED_NODE_GRANT_INVALID,
+                    "sealed recovery contains an unexpected ActionPreview",
+                )
+            return
+        if preview is None or self._action_preview_service is None:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_GRANT_INVALID,
+                "sealed Delegate recovery has no durable ActionPreview authority",
+            )
+        reopen = getattr(self._action_preview_service, "reopen_receipt", None)
+        if not callable(reopen):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_GRANT_INVALID,
+                "ActionPreview authority cannot reopen historical receipts",
+            )
+        event_id = str(preview.get("event_id") or "").strip()
+        reopened_raw = reopen(event_id=event_id)
+        reopened = dict(reopened_raw) if isinstance(reopened_raw, Mapping) else {}
+        durable_identity = dict(reopened)
+        sealed_identity = dict(preview)
+        durable_replayed = durable_identity.pop("replayed", None)
+        sealed_identity.pop("replayed", None)
+        if durable_replayed is not True or durable_identity != sealed_identity:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_GRANT_INVALID,
+                "sealed ActionPreview differs from its durable RuntimeEvent",
+            )
+        receipt = reopened.get("receipt")
+        expected_grant_digest = "sha256:" + _sha256_json(
+            dict(verified_grant)
+        )
+        if (
+            not isinstance(receipt, Mapping)
+            or str(reopened.get("receipt_ref") or "").strip()
+            != str(preview.get("receipt_ref") or "").strip()
+            or str(receipt.get("node_grant_ref") or "")
+            != frozen.node_grant_ref
+            or str(receipt.get("node_grant_digest") or "").lower()
+            != expected_grant_digest
+        ):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_GRANT_INVALID,
+                "sealed ActionPreview does not bind the verified node grant",
+            )
+
+    def _stage_terminal_projection(
+        self,
+        *,
+        frozen: FrozenNodeInput,
+        verified_grant: Mapping[str, Any],
+        preview: Mapping[str, Any] | None,
+        terminal: Mapping[str, Any],
+        buffered_event_count: int,
+    ) -> dict[str, Any]:
+        projection, worker_commit = self._build_terminal_projection(
+            frozen=frozen,
+            verified_grant=verified_grant,
+            preview=preview,
+            terminal=terminal,
+            buffered_event_count=buffered_event_count,
+        )
+        projection_id = str(projection["projection_id"])
+        payload_digest = str(projection["payload_digest"])
+        record = self._projections.stage(
+            projection_id=projection_id,
+            projection=projection,
+        )
+        durable = dict(record) if isinstance(record, Mapping) else {}
+        if (
+            str(durable.get("projection_id") or "") != projection_id
+            or str(durable.get("payload_digest") or "") != payload_digest
+        ):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "projection writer did not return the exact durable projection",
+            )
+        return worker_commit
+
+    def _build_terminal_projection(
+        self,
+        *,
+        frozen: FrozenNodeInput,
+        verified_grant: Mapping[str, Any],
+        preview: Mapping[str, Any] | None,
+        terminal: Mapping[str, Any],
+        buffered_event_count: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         _assert_terminal(terminal, frozen=frozen)
         normalized = {
             "phase": "COMMIT",
@@ -263,7 +479,8 @@ class GovernedFrozenNodeWorker:
             "audit_refs": _safe_audit_refs(terminal.get("audit_refs")),
         }
         acceptance_effect_intents = _safe_acceptance_effect_intents(
-            terminal.get("acceptance_effect_intents")
+            terminal.get("acceptance_effect_intents"),
+            allowed_effect_types=self._allowed_acceptance_effect_types,
         )
         if acceptance_effect_intents:
             normalized["acceptance_effect_intents"] = acceptance_effect_intents
@@ -279,11 +496,14 @@ class GovernedFrozenNodeWorker:
                     f"frozen executor returned invalid budget usage: {exc}",
                 ) from exc
             normalized["budget_usage"] = budget_usage.to_payload()
-        normalized["audit_refs"]["buffered_pre_acceptance_events"] = buffered_event_count
+        normalized["audit_refs"]["buffered_pre_acceptance_events"] = int(
+            buffered_event_count
+        )
         normalized["audit_refs"].update(
             {
                 "node_grant_ref": frozen.node_grant_ref,
-                "node_grant_digest": "sha256:" + _sha256_json(_projection(verified)),
+                "node_grant_digest": "sha256:"
+                + _sha256_json(dict(verified_grant)),
             }
         )
         if preview is not None:
@@ -298,25 +518,13 @@ class GovernedFrozenNodeWorker:
             f"worker-projection://{_ref(frozen.graph_id)}/{frozen.graph_revision}/"
             f"{_ref(frozen.node_id)}/{_ref(frozen.attempt_id)}/{payload_digest}"
         )
-        record = self._projections.stage(
-            projection_id=projection_id,
-            projection={
-                **normalized,
-                "projection_id": projection_id,
-                "payload_digest": f"sha256:{payload_digest}",
-                "schema_version": "Natsume.task_runtime.worker_projection.v1",
-            },
-        )
-        durable = dict(record) if isinstance(record, Mapping) else {}
-        if (
-            str(durable.get("projection_id") or "") != projection_id
-            or str(durable.get("payload_digest") or "") != f"sha256:{payload_digest}"
-        ):
-            raise GovernedNodeWorkerError(
-                GOVERNED_NODE_PROJECTION_FAILED,
-                "projection writer did not return the exact durable projection",
-            )
-        yield {
+        projection = {
+            **normalized,
+            "projection_id": projection_id,
+            "payload_digest": f"sha256:{payload_digest}",
+            "schema_version": "Natsume.task_runtime.worker_projection.v1",
+        }
+        worker_commit = {
             **normalized,
             "receipt_ref": projection_id,
             "audit_refs": {
@@ -326,6 +534,7 @@ class GovernedFrozenNodeWorker:
                 "node_grant_ref": frozen.node_grant_ref,
             },
         }
+        return projection, worker_commit
 
     def _preview_action(
         self,
@@ -354,11 +563,25 @@ class GovernedFrozenNodeWorker:
                 "governed Delegate has no app-local ActionPreview authority",
             )
         try:
+            scheduler_preview = self._preview_purpose == "scheduler.execute"
             action_args = {
                 "objective_digest": "sha256:"
                 + hashlib.sha256(frozen.objective.encode("utf-8")).hexdigest(),
                 "input_refs": list(frozen.input_refs),
             }
+            if scheduler_preview:
+                occurrence_id = str(pack.get("occurrence_id") or "").strip()
+                definition_ref = str(pack.get("definition_ref") or "").strip()
+                if not occurrence_id or not definition_ref:
+                    raise GovernedNodeWorkerError(
+                        GOVERNED_NODE_GRANT_INVALID,
+                        "governed Scheduler Preview requires frozen occurrence and definition refs",
+                    )
+                action_args = {
+                    "occurrence_id": occurrence_id,
+                    "definition_ref": definition_ref,
+                    "objective_digest": action_args["objective_digest"],
+                }
             if self._route_kind == "tool":
                 intent = pack.get("intent_draft")
                 if not isinstance(intent, Mapping):
@@ -390,7 +613,9 @@ class GovernedFrozenNodeWorker:
                 }
             kwargs = {
                 "action_kind": (
-                    "delegate.dispatch"
+                    f"scheduler.{frozen.target_id}"
+                    if scheduler_preview
+                    else "delegate.dispatch"
                     if self._route_kind == "delegate"
                     else "tool.execute"
                 ),
@@ -410,7 +635,9 @@ class GovernedFrozenNodeWorker:
                 "node_grant_ref": frozen.node_grant_ref,
                 "node_grant": dict(verified_grant),
                 "guardian_capability_id": (
-                    f"delegate_{frozen.target_id}"
+                    f"scheduler_{frozen.target_id}"
+                    if scheduler_preview
+                    else f"delegate_{frozen.target_id}"
                     if self._route_kind == "delegate"
                     else frozen.target_id
                 ).lower(),
@@ -423,7 +650,9 @@ class GovernedFrozenNodeWorker:
                         "fencing_token": frozen.fencing_token,
                     },
                     purpose=(
-                        "delegate.dispatch"
+                        "scheduler.execute"
+                        if scheduler_preview
+                        else "delegate.dispatch"
                         if self._route_kind == "delegate"
                         else "tool.execute"
                     ),
@@ -763,7 +992,11 @@ def _safe_audit_refs(value: Any) -> dict[str, Any]:
     return public
 
 
-def _safe_acceptance_effect_intents(value: Any) -> list[dict[str, Any]]:
+def _safe_acceptance_effect_intents(
+    value: Any,
+    *,
+    allowed_effect_types: frozenset[str],
+) -> list[dict[str, Any]]:
     if value in (None, (), []):
         return []
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
@@ -782,7 +1015,7 @@ def _safe_acceptance_effect_intents(value: Any) -> list[dict[str, Any]]:
         commit_scope = str(raw.get("commit_scope") or "").strip().upper()
         payload = raw.get("payload")
         if (
-            effect_type != "life.foreground_completed"
+            effect_type not in allowed_effect_types
             or commit_scope != "NODE"
             or not isinstance(payload, Mapping)
         ):

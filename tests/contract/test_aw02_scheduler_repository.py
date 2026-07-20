@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -23,6 +24,9 @@ from host_brain.persistence.host_command_repository import (
 )
 from host_brain.persistence.scheduler_repository import (
     SCHEDULER_DEFINITION_CONFLICT,
+    SCHEDULER_CLOCK_RETRY_CONFLICT,
+    SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY,
+    SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256,
     SCHEDULER_EXECUTION_RESULT_CONFLICT,
     SCHEDULER_EXECUTION_RESULT_INVALID,
     SCHEDULER_MIGRATION_ASSET_KEY,
@@ -37,9 +41,11 @@ from host_brain.persistence.secure_ingress_repository import (
     SQLiteSecureIngressStore,
     SecureIngressStoreError,
 )
+from host_brain.scheduler.clock import SchedulerClock
 from host_brain.secure_ingress import (
     ClaimStatus,
     IngressAuditEvent,
+    SecureIngressAuthority,
 )
 from natsume_contracts.task import (
     ExecutorAssignment,
@@ -87,6 +93,226 @@ def _publish(repository: SchedulerDefinitionRepository) -> dict:
         expected_head_version=0,
         next_scheduled_at_ms=NOW + 1_000,
     )
+
+
+def _claim_due(
+    repository: SchedulerDefinitionRepository,
+    *,
+    task_id: str,
+    definition_revision: int,
+    scheduled_at_ms: int,
+    owner_id: str = "contract-clock-owner",
+    at_ms: int = NOW,
+    lease_duration_ms: int = 120_000,
+) -> dict[str, object]:
+    return repository.claim_clock_retry(
+        retry_key=f"due:{task_id}:{definition_revision}:{scheduled_at_ms}",
+        retry_kind="DUE",
+        task_id=task_id,
+        occurrence_id=None,
+        owner_id=owner_id,
+        at_ms=at_ms,
+        lease_duration_ms=lease_duration_ms,
+    )
+
+
+def _admission_lease(claim: dict[str, object]) -> dict[str, object]:
+    return {
+        "due_retry_key": str(claim["retry_key"]),
+        "lease_owner_id": str(claim["lease_owner_id"]),
+        "lease_fencing_token": int(claim["lease_fencing_token"]),
+        "lease_duration_ms": 120_000,
+    }
+
+
+def test_clock_retry_backoff_survives_restart_and_fences_two_owners(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    repository = SchedulerDefinitionRepository(db_path, clock=lambda: NOW)
+    key = "due:scheduler.test.task:1:1800000001000"
+
+    first = repository.claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="clock-owner-a",
+        at_ms=NOW,
+        lease_duration_ms=10_000,
+    )
+    assert first["claimed"] is True
+    assert first["lease_fencing_token"] == 1
+
+    competing = SchedulerDefinitionRepository(
+        db_path,
+        clock=lambda: NOW + 1,
+    ).claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="clock-owner-b",
+        at_ms=NOW + 1,
+        lease_duration_ms=10_000,
+    )
+    assert competing["claimed"] is False
+    assert competing["lease_owner_id"] == "clock-owner-a"
+
+    deferred = repository.defer_clock_retry(
+        retry_key=key,
+        owner_id="clock-owner-a",
+        fencing_token=1,
+        at_ms=NOW + 2,
+        next_retry_at_ms=NOW + 5_000,
+        reason_code="SCHEDULER_CLOCK_OCCURRENCE_FAILED",
+    )
+    assert deferred["failure_count"] == 1
+
+    restarted = SchedulerDefinitionRepository(db_path, clock=lambda: NOW + 2)
+    too_early = restarted.claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="clock-owner-b",
+        at_ms=NOW + 4_999,
+        lease_duration_ms=10_000,
+    )
+    assert too_early["claimed"] is False
+
+    reclaimed = restarted.claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="clock-owner-b",
+        at_ms=NOW + 5_000,
+        lease_duration_ms=10_000,
+    )
+    assert reclaimed["claimed"] is True
+    assert reclaimed["lease_fencing_token"] == 2
+    with pytest.raises(SchedulerRepositoryError) as stale:
+        repository.clear_clock_retry(
+            retry_key=key,
+            owner_id="clock-owner-a",
+            fencing_token=1,
+            at_ms=NOW + 5_000,
+        )
+    assert stale.value.reason_code == SCHEDULER_CLOCK_RETRY_CONFLICT
+    assert restarted.clear_clock_retry(
+        retry_key=key,
+        owner_id="clock-owner-b",
+        fencing_token=2,
+        at_ms=NOW + 5_000,
+    )
+    assert restarted.clock_retry_summary() == {
+        "retry_count": 0,
+        "next_retry_at_ms": None,
+    }
+    next_generation = restarted.claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="clock-owner-a",
+        at_ms=NOW + 5_001,
+        lease_duration_ms=10_000,
+    )
+    assert next_generation["claimed"] is True
+    assert next_generation["lease_fencing_token"] == 3
+    with pytest.raises(SchedulerRepositoryError) as aba:
+        restarted.clear_clock_retry(
+            retry_key=key,
+            owner_id="clock-owner-b",
+            fencing_token=2,
+            at_ms=NOW + 5_001,
+        )
+    assert aba.value.reason_code == SCHEDULER_CLOCK_RETRY_CONFLICT
+    assert restarted.clear_clock_retry(
+        retry_key=key,
+        owner_id="clock-owner-a",
+        fencing_token=3,
+        at_ms=NOW + 5_001,
+    )
+
+
+def test_0117_scheduler_clock_retry_asset_is_checksum_bound(tmp_path: Path) -> None:
+    db_path = _migrated_db(tmp_path)
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT checksum, disposition FROM schema_migration_assets WHERE asset_key = ?",
+            (SCHEDULER_CLOCK_RETRY_MIGRATION_ASSET_KEY,),
+        ).fetchone()
+    assert row == (SCHEDULER_CLOCK_RETRY_MIGRATION_SHA256, "APPLIED")
+
+
+def test_clock_retry_renewal_blocks_takeover_and_expired_fence_fails_closed(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    first = SchedulerDefinitionRepository(db_path, clock=lambda: NOW)
+    key = "due:scheduler.test.task:1:1800000000000"
+    claim = first.claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="renew-owner-a",
+        at_ms=NOW,
+        lease_duration_ms=1_000,
+    )
+    renewed = first.renew_clock_retry(
+        retry_key=key,
+        owner_id="renew-owner-a",
+        fencing_token=int(claim["lease_fencing_token"]),
+        at_ms=NOW + 900,
+        lease_duration_ms=1_000,
+    )
+    assert renewed["lease_expires_at_ms"] == NOW + 1_900
+
+    second = SchedulerDefinitionRepository(db_path, clock=lambda: NOW + 1_001)
+    blocked = second.claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="renew-owner-b",
+        at_ms=NOW + 1_001,
+        lease_duration_ms=1_000,
+    )
+    assert blocked["claimed"] is False
+    assert blocked["lease_owner_id"] == "renew-owner-a"
+
+    with pytest.raises(SchedulerRepositoryError) as expired:
+        first.clear_clock_retry(
+            retry_key=key,
+            owner_id="renew-owner-a",
+            fencing_token=int(claim["lease_fencing_token"]),
+            at_ms=NOW + 1_900,
+        )
+    assert expired.value.reason_code == SCHEDULER_CLOCK_RETRY_CONFLICT
+    takeover = second.claim_clock_retry(
+        retry_key=key,
+        retry_kind="DUE",
+        task_id="scheduler.test.task",
+        occurrence_id=None,
+        owner_id="renew-owner-b",
+        at_ms=NOW + 1_900,
+        lease_duration_ms=1_000,
+    )
+    assert takeover["claimed"] is True
+    assert takeover["lease_fencing_token"] == 2
+    with pytest.raises(SchedulerRepositoryError) as stale:
+        first.defer_clock_retry(
+            retry_key=key,
+            owner_id="renew-owner-a",
+            fencing_token=int(claim["lease_fencing_token"]),
+            at_ms=NOW + 1_901,
+            next_retry_at_ms=NOW + 5_000,
+            reason_code="STALE_OWNER",
+        )
+    assert stale.value.reason_code == SCHEDULER_CLOCK_RETRY_CONFLICT
 
 
 def _scheduler_claim(
@@ -199,11 +425,11 @@ def _admit_command(
         work_order_id="work-order-scheduler-result",
         domain="organ_ops",
         run_mode="worker",
-        objective="execute one governed scheduler occurrence",
+        objective="prepare one governed scheduler operation",
         input_pack={"input_ref": occurrence_id},
         allowed_actions=(),
         forbidden_actions=("bypass_task_runtime",),
-        acceptance_criteria=("result persisted before commit",),
+        acceptance_criteria=("operation plan accepted before effect dispatch",),
         root_work_order_id="work-order-scheduler-result",
         task_graph_id="graph-scheduler-result",
         task_node_id="node-scheduler-result",
@@ -225,12 +451,12 @@ def _admit_command(
     node = TaskNode(
         node_id="node-scheduler-result",
         dependencies=(),
-        route="scheduler_production",
+        route="delegate:scheduler_production",
         input_refs=(occurrence_id,),
-        output_contract={"type": "scheduler_result"},
+        output_contract={"type": "scheduler_operation_plan"},
         retry_policy={"max_attempts": 1},
         risk_level=1,
-        acceptance_criteria=("result persisted before commit",),
+        acceptance_criteria=("operation plan accepted before effect dispatch",),
         status=TaskNodeStatus.READY,
         status_version=0,
     )
@@ -263,7 +489,7 @@ def _admit_command(
         root_work_order_id=work_order.work_order_id,
         graph_id=graph.graph_id,
         graph_revision=1,
-        route_type="scheduler_production",
+        route_type="delegate",
         target_id="scheduler.test.task",
         business_scope="scheduler:production",
         operation_fingerprint=_sha256("scheduler-result-operation"),
@@ -383,6 +609,14 @@ def test_due_occurrence_and_reschedule_are_atomic_replayable_and_drift_safe(
         suffix="due-1",
         body_material="clock-occurrence-1",
     )
+    due_claim = _claim_due(
+        base,
+        task_id="scheduler.test.task",
+        definition_revision=1,
+        scheduled_at_ms=NOW + 1_000,
+    )
+    assert due_claim["claimed"] is True
+    admission_lease = _admission_lease(due_claim)
 
     def crash(stage: str) -> None:
         if stage == "after_occurrence":
@@ -402,6 +636,7 @@ def test_due_occurrence_and_reschedule_are_atomic_replayable_and_drift_safe(
             next_scheduled_at_ms=NOW + 61_000,
             payload={"trigger": "clock"},
             authority=authority,
+            **admission_lease,
         )
     assert base.get("scheduler.test.task")["head_version"] == 1
     with sqlite3.connect(db_path) as conn:
@@ -431,8 +666,44 @@ def test_due_occurrence_and_reschedule_are_atomic_replayable_and_drift_safe(
         next_scheduled_at_ms=NOW + 61_000,
         payload={"trigger": "clock"},
         authority=authority,
+        **admission_lease,
     )
-    replay = SchedulerDefinitionRepository(db_path).admit_due_occurrence(
+    with sqlite3.connect(db_path) as conn:
+        retry_rows = conn.execute(
+            """
+            SELECT retry_key, retry_kind, task_id, occurrence_id,
+                   lease_owner_id, lease_fencing_token
+            FROM scheduler_clock_retry_state
+            """
+        ).fetchall()
+    assert retry_rows == [
+        (
+            first["occurrence_id"],
+            "OCCURRENCE",
+            "scheduler.test.task",
+            first["occurrence_id"],
+            "contract-clock-owner",
+            1,
+        )
+    ]
+    competing_occurrence = SchedulerDefinitionRepository(
+        db_path,
+        clock=lambda: NOW + 11,
+    ).claim_clock_retry(
+        retry_key=str(first["occurrence_id"]),
+        retry_kind="OCCURRENCE",
+        task_id="scheduler.test.task",
+        occurrence_id=str(first["occurrence_id"]),
+        owner_id="contract-clock-owner-b",
+        at_ms=NOW + 11,
+        lease_duration_ms=120_000,
+    )
+    assert competing_occurrence["claimed"] is False
+    assert competing_occurrence["lease_owner_id"] == "contract-clock-owner"
+    replay = SchedulerDefinitionRepository(
+        db_path,
+        clock=lambda: NOW + 11,
+    ).admit_due_occurrence(
         task_id="scheduler.test.task",
         definition_revision=1,
         expected_head_version=1,
@@ -440,6 +711,7 @@ def test_due_occurrence_and_reschedule_are_atomic_replayable_and_drift_safe(
         next_scheduled_at_ms=NOW + 61_000,
         payload={"trigger": "clock"},
         authority=authority,
+        **admission_lease,
     )
 
     assert first["head_version"] == 2
@@ -467,8 +739,94 @@ def test_due_occurrence_and_reschedule_are_atomic_replayable_and_drift_safe(
             next_scheduled_at_ms=NOW + 61_000,
             payload={"trigger": "drifted"},
             authority=authority,
+            **admission_lease,
         )
     assert drift.value.reason_code == SCHEDULER_OCCURRENCE_CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_two_clock_instances_do_not_dispatch_across_a_slow_lease_duration(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    loop = asyncio.get_running_loop()
+    epoch_started = loop.time()
+
+    def live_clock() -> int:
+        return NOW + int((loop.time() - epoch_started) * 1_000)
+
+    first_repository = SchedulerDefinitionRepository(db_path, clock=live_clock)
+    first_repository.publish_definition(
+        task_id="scheduler.test.task",
+        definition=_definition(seconds=60),
+        expected_head_version=0,
+        next_scheduled_at_ms=NOW,
+    )
+    request_id = _clock_request_id("scheduler.test.task", 1, NOW)
+    authority_raw = _durable_authority(
+        db_path,
+        request_id=request_id,
+        suffix="slow-dual-owner",
+        body_material="slow-dual-owner",
+    )
+    authority = SecureIngressAuthority(**authority_raw)
+    dispatches: list[str] = []
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Ingress:
+        def evaluate_clock_occurrence(self, **kwargs):
+            assert kwargs["scheduled_at_epoch_ms"] == NOW
+            return authority
+
+    class Service:
+        def __init__(self, owner: str) -> None:
+            self.owner = owner
+
+        def preflight_definition(self, definition):
+            return "normal"
+
+        async def execute_occurrence(self, **kwargs):
+            dispatches.append(self.owner)
+            started.set()
+            await release.wait()
+
+    first_clock = SchedulerClock(
+        definition_repository=first_repository,
+        command_ingress=Ingress(),
+        command_service=Service("owner-a"),
+        owner_id="slow-clock-owner-a",
+        now_ms=live_clock,
+        retry_lease_duration_s=1,
+        poll_interval_s=60,
+        limit=10,
+    )
+    second_clock = SchedulerClock(
+        definition_repository=SchedulerDefinitionRepository(
+            db_path,
+            clock=live_clock,
+        ),
+        command_ingress=Ingress(),
+        command_service=Service("owner-b"),
+        owner_id="slow-clock-owner-b",
+        now_ms=live_clock,
+        retry_lease_duration_s=1,
+        poll_interval_s=60,
+        limit=10,
+    )
+
+    first_run = asyncio.create_task(first_clock.run_once())
+    await asyncio.wait_for(started.wait(), timeout=2)
+    await asyncio.sleep(1.2)
+    second_result = await second_clock.run_once()
+
+    assert dispatches == ["owner-a"]
+    assert second_result["executed"] == 0
+    assert second_result["deferred"] == 1
+    release.set()
+    first_result = await asyncio.wait_for(first_run, timeout=2)
+    assert first_result["executed"] == 1
+    assert dispatches == ["owner-a"]
 
 
 def test_manual_occurrence_is_idempotent_and_never_reschedules_clock(

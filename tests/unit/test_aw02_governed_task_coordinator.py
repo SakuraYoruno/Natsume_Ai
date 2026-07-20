@@ -606,6 +606,7 @@ def _application(
     )
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -639,6 +640,7 @@ async def test_intent_admission_runs_after_durable_admit_and_before_worker() -> 
     store = _FakeTaskStore(graph, calls)
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -677,6 +679,7 @@ async def test_intent_block_fails_closed_before_worker_or_budget_mutation() -> N
     store = _FakeTaskStore(graph, calls)
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -726,6 +729,7 @@ async def test_exact_intent_receipt_replay_skips_expired_parent_preflight() -> N
     store = _FakeTaskStore(graph, calls)
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -789,6 +793,7 @@ async def test_matching_command_without_prepared_intent_set_cannot_skip_prefligh
     store = _FakeTaskStore(graph, calls)
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -850,6 +855,7 @@ async def test_coordinator_durable_identity_rejects_result_authority_drift() -> 
     store = _FakeTaskStore(graph, calls)
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -894,6 +900,7 @@ async def test_dag_schema_is_checked_before_budget_mutation() -> None:
     store.assert_dag_scheduling_ready = _reject_stale_schema  # type: ignore[method-assign]
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -936,6 +943,7 @@ async def test_parallel_decision_schema_is_checked_before_budget_or_worker() -> 
     store.assert_parallel_settlement_decision_ready = _reject_stale_schema  # type: ignore[method-assign]
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_Resolver(calls),
@@ -979,6 +987,7 @@ async def test_resolver_cancellation_is_not_converted_to_terminal_failure() -> N
 
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_CancelledResolver(),
@@ -1032,6 +1041,7 @@ async def test_worker_self_cancellation_enters_durable_recovery_without_graph_in
 
     coordinator = GovernedTaskCoordinator(
         task_store=store,
+        internal_agent_checkpoint_uow=object(),
         outbox_publisher=_Publisher(calls),
         outbox_factory=_OutboxFactory(),
         worker_resolver=_SelfCancellingResolver(),

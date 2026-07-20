@@ -127,7 +127,11 @@ def append_visible_conversation_turn(
     token_count: int | None = None,
     corrupted: bool = False,
 ) -> dict[str, Any]:
-    """Atomically admit the canonical memory event/turn, then project Life."""
+    """Atomically admit only the canonical visible MemoryEvent/turn.
+
+    Preference extraction and Digital Life projection are independent durable
+    post-Acceptance effects.  This writer must never cross either boundary.
+    """
 
     session = _text(session_id, limit=180)
     clean_role = str(role or "").strip().lower()
@@ -192,34 +196,14 @@ def append_visible_conversation_turn(
             "reason_code": "DUPLICATE_VISIBLE_TURN",
         }
     turn = dict(admitted.get("turn") or {})
-    life = record_conversation_turn_memory_spine(
-        ledger=ledger,
-        life_service=life_service,
-        life_reader=life_reader,
-        request_id=request_id,
-        session_id=session,
-        person_id=resolved_person,
-        role=clean_role,
-        content=clean_content,
-        ts_ms=timestamp,
-        lang=lang,
-        metadata=meta,
-        turn_id=str(turn.get("turn_id") or turn_id),
-        turn_index=int(turn.get("turn_index") or 0),
-    )
     repository.merge_refs(
         event_id=memory_event_id,
         refs={
             "turn_id": turn.get("turn_id"),
-            "life_experience_event_id": life.get("event_id"),
         },
     )
     projection_status = {
         "conversation_turn": {"status": "OK", "turn_id": turn.get("turn_id")},
-        "life_experience": {
-            "status": life.get("status", "OK"),
-            "event_id": life.get("event_id"),
-        },
     }
     repository.merge_projection_status(
         event_id=memory_event_id,
@@ -229,7 +213,6 @@ def append_visible_conversation_turn(
         "status": "OK",
         "memory_event_id": memory_event_id,
         "turn": turn,
-        "life_experience_event_id": life.get("event_id"),
         "projection_status": projection_status,
     }
 

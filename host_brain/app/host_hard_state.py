@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from host_brain.contracts.host_hard_state import (
+    HostHardStateCommitV1,
     HostHardStateJournalPort,
     HostHardStateSnapshotV1,
 )
@@ -310,6 +311,30 @@ class HostHardStateOwner:
             for event in journal.history(limit=limit + 1)
             if event.event_kind == "MODE_CHANGED"
         ][:limit]
+
+    def reopen_sys_mode_transition(
+        self,
+        *,
+        event_id: str,
+        target_mode: str,
+        source: str,
+        reason: str,
+    ) -> HostHardStateCommitV1 | None:
+        """Reopen one exact canonical commit without mutating the live head."""
+
+        with self._lock:
+            journal = self._journal
+            required = self._require_durable
+        if journal is None:
+            if required:
+                raise RuntimeError("HOST_HARD_STATE_DURABLE_AUTHORITY_NOT_BOUND")
+            return None
+        return journal.replay_transition(
+            event_id=event_id,
+            target_mode=target_mode,
+            source=source,
+            reason=reason,
+        )
 
     def durability_status(self) -> dict[str, object]:
         with self._lock:

@@ -62,7 +62,55 @@ class SchedulerClockRepositoryPort(Protocol):
         next_scheduled_at_ms: int | None,
         payload: Mapping[str, Any],
         authority: Mapping[str, Any],
+        due_retry_key: str,
+        lease_owner_id: str,
+        lease_fencing_token: int,
+        lease_duration_ms: int,
     ) -> Mapping[str, Any]: ...
+
+    def claim_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        retry_kind: str,
+        task_id: str,
+        occurrence_id: str | None,
+        owner_id: str,
+        at_ms: int,
+        lease_duration_ms: int,
+    ) -> Mapping[str, Any]: ...
+
+    def defer_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        owner_id: str,
+        fencing_token: int,
+        at_ms: int,
+        next_retry_at_ms: int,
+        reason_code: str,
+    ) -> Mapping[str, Any]: ...
+
+    def renew_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        owner_id: str,
+        fencing_token: int,
+        at_ms: int,
+        lease_duration_ms: int,
+    ) -> Mapping[str, Any]: ...
+
+    def clear_clock_retry(
+        self,
+        *,
+        retry_key: str,
+        owner_id: str,
+        fencing_token: int,
+        at_ms: int,
+    ) -> bool: ...
+
+    def clock_retry_summary(self) -> Mapping[str, Any]: ...
 
 
 class SchedulerClock:
@@ -74,18 +122,23 @@ class SchedulerClock:
         definition_repository: SchedulerClockRepositoryPort,
         command_ingress: SchedulerCommandIngress,
         command_service: SchedulerCommandService,
+        owner_id: str,
         now_ms: Callable[[], int] = default_now_ms,
         poll_interval_s: float = 1.0,
         limit: int = 100,
         failure_backoff_initial_s: float = 5.0,
         failure_backoff_max_s: float = 300.0,
         shutdown_timeout_s: float = 5.0,
+        retry_lease_duration_s: float = 60.0,
     ) -> None:
         if not callable(now_ms):
             raise TypeError("now_ms must be callable")
         self._definitions = definition_repository
         self._ingress = command_ingress
         self._commands = command_service
+        self._owner_id = str(owner_id or "").strip()
+        if not self._owner_id:
+            raise ValueError("owner_id is required")
         self._now_ms = now_ms
         self._poll_interval_s = max(0.05, float(poll_interval_s))
         self._limit = max(1, min(1_000, int(limit)))
@@ -98,13 +151,16 @@ class SchedulerClock:
             int(float(failure_backoff_max_s) * 1_000),
         )
         self._shutdown_timeout_s = max(0.05, float(shutdown_timeout_s))
+        self._retry_lease_duration_ms = max(
+            1_000,
+            int(float(retry_lease_duration_s) * 1_000),
+        )
         self._run_lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
         self._loop_task: asyncio.Task[None] | None = None
         self._active = False
         self._last_tick_ms: int | None = None
         self._last_error: str | None = None
-        self._retry_state: dict[str, tuple[int, int]] = {}
         self._dispatch_tasks: set[asyncio.Future[Any]] = set()
 
     async def activate(self) -> None:
@@ -156,29 +212,43 @@ class SchedulerClock:
 
             pending_rows = self._definitions.list_pending_occurrences(limit=self._limit)
             for raw in pending_rows:
+                claim: Mapping[str, Any] | None = None
+                dispatch_owned = False
                 try:
                     occurrence = SchedulerOccurrence.from_mapping(raw)
                     if occurrence.source is not SchedulerOccurrenceSource.CLOCK:
                         continue
                     seen.add(occurrence.occurrence_id)
-                    if not self._retry_ready(
-                        occurrence.occurrence_id,
+                    claim = self._claim_retry(
+                        retry_key=occurrence.occurrence_id,
+                        retry_kind="OCCURRENCE",
+                        task_id=occurrence.task_id,
+                        occurrence_id=occurrence.occurrence_id,
                         at_ms=received_at_ms,
-                    ):
+                    )
+                    if not bool(claim.get("claimed")):
                         deferred += 1
                         continue
                     recovered += 1
+                    dispatch_owned = True
                     await self._execute_occurrence(
                         occurrence,
+                        claim=claim,
                         received_at_ms=received_at_ms,
                         authority=occurrence.authority_dict(),
                     )
-                    self._retry_state.pop(occurrence.occurrence_id, None)
                     executed += 1
                 except Exception as exc:
-                    occurrence_id = str(dict(raw).get("occurrence_id") or "")
-                    if occurrence_id:
-                        self._record_retry(occurrence_id, at_ms=received_at_ms)
+                    if (
+                        claim is not None
+                        and bool(claim.get("claimed"))
+                        and not dispatch_owned
+                    ):
+                        self._record_retry(
+                            claim,
+                            at_ms=_non_negative_now(self._now_ms),
+                            exc=exc,
+                        )
                     failures.append(_failure(raw, exc))
 
             remaining = max(0, self._limit - len(seen))
@@ -189,12 +259,21 @@ class SchedulerClock:
                 )
                 for raw in due_rows:
                     due_key = _due_retry_key(raw)
-                    if not self._retry_ready(due_key, at_ms=received_at_ms):
-                        deferred += 1
-                        continue
+                    claim: Mapping[str, Any] | None = None
                     occurrence: SchedulerOccurrence | None = None
+                    dispatch_owned = False
                     try:
                         definition = SchedulerDefinitionSnapshot.from_mapping(raw)
+                        claim = self._claim_retry(
+                            retry_key=due_key,
+                            retry_kind="DUE",
+                            task_id=definition.task_id,
+                            occurrence_id=None,
+                            at_ms=received_at_ms,
+                        )
+                        if not bool(claim.get("claimed")):
+                            deferred += 1
+                            continue
                         self._commands.preflight_definition(definition)
                         scheduled_at_ms = definition.next_scheduled_at_ms
                         if scheduled_at_ms is None:
@@ -210,6 +289,10 @@ class SchedulerClock:
                             payload=payload,
                             received_at_ms=received_at_ms,
                         )
+                        claim = self._renew_retry(
+                            claim,
+                            at_ms=_non_negative_now(self._now_ms),
+                        )
                         occurrence_raw = self._definitions.admit_due_occurrence(
                             task_id=definition.task_id,
                             definition_revision=definition.definition_revision,
@@ -221,24 +304,46 @@ class SchedulerClock:
                             ),
                             payload=payload,
                             authority=authority.to_dict(),
+                            due_retry_key=str(claim["retry_key"]),
+                            lease_owner_id=self._owner_id,
+                            lease_fencing_token=int(claim["lease_fencing_token"]),
+                            lease_duration_ms=self._retry_lease_duration_ms,
                         )
                         occurrence = SchedulerOccurrence.from_mapping(occurrence_raw)
-                        self._retry_state.pop(due_key, None)
+                        claim = _transferred_occurrence_claim(
+                            occurrence_raw,
+                            occurrence=occurrence,
+                            owner_id=self._owner_id,
+                            expected_fencing_token=int(claim["lease_fencing_token"]),
+                        )
                         if occurrence.occurrence_id in seen:
+                            self._clear_retry(
+                                claim,
+                                at_ms=_non_negative_now(self._now_ms),
+                            )
                             continue
                         seen.add(occurrence.occurrence_id)
                         admitted_count += 1
+                        dispatch_owned = True
                         await self._execute_occurrence(
                             occurrence,
+                            claim=claim,
                             received_at_ms=received_at_ms,
                             authority=authority,
                         )
-                        self._retry_state.pop(occurrence.occurrence_id, None)
                         executed += 1
                     except Exception as exc:
                         failure_raw: object = occurrence.to_dict() if occurrence else raw
-                        retry_key = occurrence.occurrence_id if occurrence else due_key
-                        self._record_retry(retry_key, at_ms=received_at_ms)
+                        if (
+                            claim is not None
+                            and bool(claim.get("claimed"))
+                            and not dispatch_owned
+                        ):
+                            self._record_retry(
+                                claim,
+                                at_ms=_non_negative_now(self._now_ms),
+                                exc=exc,
+                            )
                         failures.append(_failure(failure_raw, exc))
 
             self._last_error = failures[-1]["reason_code"] if failures else None
@@ -253,40 +358,180 @@ class SchedulerClock:
             }
 
     def health(self) -> dict[str, Any]:
+        retry_summary = dict(self._definitions.clock_retry_summary())
         return {
             "active": self._active,
             "last_tick_ms": self._last_tick_ms,
             "last_error": self._last_error,
             "poll_interval_s": self._poll_interval_s,
-            "backoff_count": len(self._retry_state),
-            "next_retry_at_ms": min(
-                (next_at for _attempts, next_at in self._retry_state.values()),
-                default=None,
-            ),
+            "backoff_count": int(retry_summary.get("retry_count") or 0),
+            "next_retry_at_ms": retry_summary.get("next_retry_at_ms"),
             "dispatch_in_flight": len(self._dispatch_tasks),
         }
 
-    def _retry_ready(self, key: str, *, at_ms: int) -> bool:
-        state = self._retry_state.get(str(key or ""))
-        return state is None or at_ms >= state[1]
+    def _claim_retry(
+        self,
+        *,
+        retry_key: str,
+        retry_kind: str,
+        task_id: str,
+        occurrence_id: str | None,
+        at_ms: int,
+    ) -> Mapping[str, Any]:
+        return self._definitions.claim_clock_retry(
+            retry_key=retry_key,
+            retry_kind=retry_kind,
+            task_id=task_id,
+            occurrence_id=occurrence_id,
+            owner_id=self._owner_id,
+            at_ms=at_ms,
+            lease_duration_ms=self._retry_lease_duration_ms,
+        )
 
-    def _record_retry(self, key: str, *, at_ms: int) -> None:
-        retry_key = str(key or "").strip()
-        if not retry_key:
-            return
-        attempts = self._retry_state.get(retry_key, (0, 0))[0] + 1
+    def _record_retry(
+        self,
+        claim: Mapping[str, Any],
+        *,
+        at_ms: int,
+        exc: Exception,
+    ) -> None:
+        claim = self._renew_retry(claim, at_ms=at_ms)
+        attempts = int(claim.get("failure_count") or 0) + 1
         delay = min(
             self._failure_backoff_max_ms,
             self._failure_backoff_initial_ms * (2 ** min(attempts - 1, 20)),
         )
-        self._retry_state[retry_key] = (attempts, at_ms + delay)
+        self._definitions.defer_clock_retry(
+            retry_key=str(claim["retry_key"]),
+            owner_id=self._owner_id,
+            fencing_token=int(claim["lease_fencing_token"]),
+            at_ms=at_ms,
+            next_retry_at_ms=at_ms + delay,
+            reason_code=str(
+                getattr(exc, "reason_code", None)
+                or SCHEDULER_CLOCK_OCCURRENCE_FAILED
+            ),
+        )
+
+    def _renew_retry(
+        self,
+        claim: Mapping[str, Any],
+        *,
+        at_ms: int,
+    ) -> Mapping[str, Any]:
+        renewed = self._definitions.renew_clock_retry(
+            retry_key=str(claim["retry_key"]),
+            owner_id=self._owner_id,
+            fencing_token=int(claim["lease_fencing_token"]),
+            at_ms=at_ms,
+            lease_duration_ms=self._retry_lease_duration_ms,
+        )
+        return {**dict(renewed), "claimed": True}
+
+    def _clear_retry(self, claim: Mapping[str, Any], *, at_ms: int) -> None:
+        claim = self._renew_retry(claim, at_ms=at_ms)
+        self._definitions.clear_clock_retry(
+            retry_key=str(claim["retry_key"]),
+            owner_id=self._owner_id,
+            fencing_token=int(claim["lease_fencing_token"]),
+            at_ms=at_ms,
+        )
 
     async def _execute_occurrence(
         self,
         occurrence: SchedulerOccurrence,
         *,
+        claim: Mapping[str, Any],
         received_at_ms: int,
         authority: Any,
+    ) -> None:
+        dispatch = asyncio.create_task(
+            self._execute_claimed_occurrence(
+                occurrence,
+                claim=claim,
+                received_at_ms=received_at_ms,
+                authority=authority,
+            ),
+            name=f"scheduler-occurrence-{occurrence.occurrence_id[-16:]}",
+        )
+        self._dispatch_tasks.add(dispatch)
+        dispatch.add_done_callback(self._finish_dispatch)
+        await asyncio.shield(dispatch)
+
+    async def _execute_claimed_occurrence(
+        self,
+        occurrence: SchedulerOccurrence,
+        *,
+        claim: Mapping[str, Any],
+        received_at_ms: int,
+        authority: Any,
+    ) -> None:
+        claim = _require_occurrence_claim(
+            claim,
+            occurrence=occurrence,
+            owner_id=self._owner_id,
+        )
+        claim = self._renew_retry(
+            claim,
+            at_ms=_non_negative_now(self._now_ms),
+        )
+        stop_heartbeat = asyncio.Event()
+        heartbeat = asyncio.create_task(
+            self._maintain_retry_lease(claim, stop_event=stop_heartbeat),
+            name=f"scheduler-lease-{occurrence.occurrence_id[-16:]}",
+        )
+        command = asyncio.create_task(
+            self._invoke_occurrence(
+                occurrence,
+                authority=authority,
+                received_at_ms=received_at_ms,
+            ),
+            name=f"scheduler-command-{occurrence.occurrence_id[-16:]}",
+        )
+        try:
+            done, _ = await asyncio.wait(
+                {command, heartbeat},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if heartbeat in done:
+                heartbeat_error = heartbeat.exception()
+                if heartbeat_error is not None:
+                    command.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await command
+                    raise heartbeat_error
+            await command
+        except asyncio.CancelledError:
+            command.cancel()
+            with suppress(asyncio.CancelledError):
+                await command
+            raise
+        except Exception as exc:
+            stop_heartbeat.set()
+            await self._finish_heartbeat(heartbeat)
+            failed_at_ms = _non_negative_now(self._now_ms)
+            self._record_retry(claim, at_ms=failed_at_ms, exc=exc)
+            raise
+        else:
+            stop_heartbeat.set()
+            await self._finish_heartbeat(heartbeat)
+            self._clear_retry(
+                claim,
+                at_ms=_non_negative_now(self._now_ms),
+            )
+        finally:
+            stop_heartbeat.set()
+            if not heartbeat.done():
+                heartbeat.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat
+
+    async def _invoke_occurrence(
+        self,
+        occurrence: SchedulerOccurrence,
+        *,
+        authority: Any,
+        received_at_ms: int,
     ) -> None:
         authority_request_id = (
             str(authority.get("request_id") or "")
@@ -304,10 +549,31 @@ class SchedulerClock:
             received_at_ms=received_at_ms,
         )
         if inspect.isawaitable(result):
-            dispatch = asyncio.ensure_future(result)
-            self._dispatch_tasks.add(dispatch)
-            dispatch.add_done_callback(self._finish_dispatch)
-            await asyncio.shield(dispatch)
+            await result
+
+    async def _maintain_retry_lease(
+        self,
+        claim: Mapping[str, Any],
+        *,
+        stop_event: asyncio.Event,
+    ) -> None:
+        interval_s = max(0.05, self._retry_lease_duration_ms / 3_000.0)
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
+                return
+            except TimeoutError:
+                self._renew_retry(
+                    claim,
+                    at_ms=_non_negative_now(self._now_ms),
+                )
+
+    @staticmethod
+    async def _finish_heartbeat(heartbeat: asyncio.Task[None]) -> None:
+        if not heartbeat.done():
+            await heartbeat
+        else:
+            heartbeat.result()
 
     def _finish_dispatch(self, task: asyncio.Future[Any]) -> None:
         self._dispatch_tasks.discard(task)
@@ -440,6 +706,56 @@ def _failure(raw: object, exc: Exception) -> dict[str, str]:
             getattr(exc, "reason_code", None) or SCHEDULER_CLOCK_OCCURRENCE_FAILED
         ),
     }
+
+
+def _transferred_occurrence_claim(
+    raw: Mapping[str, Any],
+    *,
+    occurrence: SchedulerOccurrence,
+    owner_id: str,
+    expected_fencing_token: int,
+) -> Mapping[str, Any]:
+    claim = raw.get("clock_retry_claim")
+    if not isinstance(claim, Mapping):
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_OCCURRENCE_FAILED,
+            "clock admission did not return its atomically transferred occurrence claim",
+        )
+    validated = _require_occurrence_claim(
+        claim,
+        occurrence=occurrence,
+        owner_id=owner_id,
+    )
+    if int(validated["lease_fencing_token"]) != expected_fencing_token:
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_OCCURRENCE_FAILED,
+            "clock admission changed the DUE fencing token during transfer",
+        )
+    return validated
+
+
+def _require_occurrence_claim(
+    claim: Mapping[str, Any],
+    *,
+    occurrence: SchedulerOccurrence,
+    owner_id: str,
+) -> Mapping[str, Any]:
+    value = dict(claim)
+    if (
+        not bool(value.get("claimed"))
+        or str(value.get("retry_kind") or "").upper() != "OCCURRENCE"
+        or str(value.get("retry_key") or "") != occurrence.occurrence_id
+        or str(value.get("occurrence_id") or "") != occurrence.occurrence_id
+        or str(value.get("task_id") or "") != occurrence.task_id
+        or str(value.get("lease_owner_id") or "") != owner_id
+        or type(value.get("lease_fencing_token")) is not int
+        or int(value["lease_fencing_token"]) < 1
+    ):
+        raise SchedulerClockError(
+            SCHEDULER_CLOCK_OCCURRENCE_FAILED,
+            "scheduler dispatch requires an exact occurrence-bound owner fence",
+        )
+    return value
 
 
 def _due_retry_key(raw: object) -> str:

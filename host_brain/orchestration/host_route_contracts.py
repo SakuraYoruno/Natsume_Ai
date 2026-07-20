@@ -128,6 +128,7 @@ def build_direct_host_route_contracts(
     input_sha256: str | None = None,
     ingress_claim_ref: str | None = None,
     ingress_audit_ref: str | None = None,
+    operator_command_id: str | None = None,
     frozen_context: Mapping[str, Any] | None = None,
 ) -> HostRouteContracts:
     if not isinstance(surface, HostCommandSurface):
@@ -160,6 +161,29 @@ def build_direct_host_route_contracts(
         raise HostRouteContractError(
             HOST_ROUTE_AUTHORITY_INVALID,
             "Tool contracts require the TOOL surface and exact Secure Ingress claim/audit",
+        )
+    operator_command = _text(operator_command_id)
+    if surface is HostCommandSurface.OPERATOR:
+        intent_command = _text(
+            dict(intent_draft.get("args") or {}).get("operator_command_id")
+        )
+        if (
+            route != "delegate"
+            or not operator_command
+            or operator_command != intent_command
+        ):
+            raise HostRouteContractError(
+                HOST_ROUTE_AUTHORITY_INVALID,
+                "Operator contracts require one exact authenticated command ID",
+            )
+        operator_command = _identifier(
+            operator_command,
+            "operator_command_id",
+        )
+    elif operator_command:
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            "operator_command_id is restricted to the OPERATOR surface",
         )
     target_id = (
         "surface_reply"
@@ -379,6 +403,11 @@ def build_direct_host_route_contracts(
         metadata={
             "surface": surface.value,
             "direct_route": True,
+            **(
+                {"operator_command_id": operator_command}
+                if operator_command
+                else {}
+            ),
             "planning_lineage": {
                 "graph_id": graph_id,
                 "root_work_order_id": root_id,
