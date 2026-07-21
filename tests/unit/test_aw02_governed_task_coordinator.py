@@ -1081,7 +1081,7 @@ async def test_worker_self_cancellation_enters_durable_recovery_without_graph_in
 
 
 @pytest.mark.asyncio
-async def test_operation_collision_closes_attempt_lease_budget_and_blocks_graph() -> None:
+async def test_operation_collision_preserves_authority_for_reconciliation() -> None:
     command, work_order, assignment, graph = _contracts(executor=TaskExecutor.CANONICAL)
     calls: list[str] = []
     app = _application(
@@ -1107,9 +1107,10 @@ async def test_operation_collision_closes_attempt_lease_budget_and_blocks_graph(
     assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
     assert receipt["accepted"] is False
     assert "worker:canonical" not in calls
-    assert "attempt:FAILED" in calls
-    assert "node:FAILED" in calls
-    assert "graph:BLOCKED" in calls
+    assert "attempt:FAILED" not in calls
+    assert "node:FAILED" not in calls
+    assert "graph:BLOCKED" not in calls
+    assert "budget:RELEASED" not in calls
     assert calls[-1] == "publish:200"
 
 

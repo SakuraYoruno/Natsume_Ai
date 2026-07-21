@@ -29,6 +29,7 @@ from .coordinator_records import (
     _version,
 )
 from .errors import (
+    GOVERNED_BUDGET_EXCEEDED,
     GOVERNED_DURABLE_STATE_CONFLICT,
     GovernedRuntimeError,
 )
@@ -178,6 +179,156 @@ class NodeExecutionProjection:
         attempt_id = _text(latest.get("attempt_id")) or _attempt_id(admitted, attempt_no=1)
         reservation_status = _status(reservation or {})
         receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
+        checkpoint_budget_terminal: dict[str, Any] | None = None
+        if graph_status == "BLOCKED" and node_status == "FAILED":
+            raw_terminal = await _maybe_await(
+                self._store.try_resolve_checkpoint_budget_rejection_terminal(
+                    attempt_id,
+                )
+            )
+            if raw_terminal is not None:
+                checkpoint_budget_terminal = _mapping(
+                    raw_terminal,
+                    field_name="checkpoint budget rejection terminal",
+                )
+                terminal_graph = _mapping(
+                    checkpoint_budget_terminal.get("graph"),
+                    field_name="checkpoint budget rejection Graph",
+                )
+                terminal_node = _mapping(
+                    checkpoint_budget_terminal.get("node"),
+                    field_name="checkpoint budget rejection Node",
+                )
+                terminal_attempt = _mapping(
+                    checkpoint_budget_terminal.get("attempt"),
+                    field_name="checkpoint budget rejection Attempt",
+                )
+                terminal_budget = _mapping(
+                    checkpoint_budget_terminal.get("budget"),
+                    field_name="checkpoint budget rejection Budget",
+                )
+                terminal_reservation = _mapping(
+                    checkpoint_budget_terminal.get("reservation"),
+                    field_name="checkpoint budget rejection Operation",
+                )
+                terminal_usage = _mapping(
+                    checkpoint_budget_terminal.get("usage"),
+                    field_name="checkpoint budget rejection Usage",
+                )
+                terminal_error_ref = _required_record_text(
+                    terminal_attempt,
+                    "error_ref",
+                )
+                terminal_usage_id = _required_record_text(
+                    terminal_usage,
+                    "usage_id",
+                )
+                authority_kind = _required_record_text(
+                    checkpoint_budget_terminal,
+                    "authority_kind",
+                )
+                if (
+                    authority_kind
+                    not in {
+                        "INTERNAL_AGENT_BUDGET_REJECTED",
+                        "CANONICAL_CHECKPOINT_BUDGET_REJECTED",
+                    }
+                    or _required_record_text(latest, "error_ref")
+                    != terminal_error_ref
+                    or _required_record_text(terminal_graph, "graph_id")
+                    != admitted.graph_id
+                    or int(terminal_graph.get("revision") or 0)
+                    != admitted.graph_revision
+                    or _status(terminal_graph) != "BLOCKED"
+                    or _version(terminal_graph) != _version(graph)
+                    or _required_record_text(terminal_node, "graph_id")
+                    != admitted.graph_id
+                    or int(terminal_node.get("graph_revision") or 0)
+                    != admitted.graph_revision
+                    or _required_record_text(terminal_node, "node_id")
+                    != admitted.node_id
+                    or _status(terminal_node) != "FAILED"
+                    or _version(terminal_node) != _version(node)
+                    or _required_record_text(terminal_attempt, "graph_id")
+                    != admitted.graph_id
+                    or int(terminal_attempt.get("graph_revision") or 0)
+                    != admitted.graph_revision
+                    or _required_record_text(terminal_attempt, "node_id")
+                    != admitted.node_id
+                    or _required_record_text(terminal_attempt, "attempt_id")
+                    != attempt_id
+                    or _status(terminal_attempt) != "FAILED"
+                    or _version(terminal_attempt) != _version(latest)
+                    or _required_record_text(terminal_budget, "graph_id")
+                    != admitted.graph_id
+                    or int(terminal_budget.get("graph_revision") or 0)
+                    != admitted.graph_revision
+                    or terminal_budget.get("node_id") is not None
+                    or terminal_budget.get("attempt_id") is not None
+                    or _status(terminal_budget) != "RELEASED"
+                    or _required_record_text(
+                        terminal_reservation,
+                        "reservation_id",
+                    )
+                    != admitted.reservation_id
+                    or _status(terminal_reservation) != "COMMITTED"
+                    or _text(terminal_reservation.get("receipt_ref"))
+                    != (receipt_ref or "")
+                    or _required_record_text(terminal_usage, "budget_id")
+                    != _required_record_text(terminal_budget, "budget_id")
+                    or _required_record_text(terminal_usage, "graph_id")
+                    != admitted.graph_id
+                    or int(terminal_usage.get("graph_revision") or 0)
+                    != admitted.graph_revision
+                    or _required_record_text(terminal_usage, "node_id")
+                    != admitted.node_id
+                    or _required_record_text(terminal_usage, "attempt_id")
+                    != attempt_id
+                    or terminal_usage.get("accepted") is not False
+                    or _text(terminal_usage.get("reason_code"))
+                    != "TASK_STORE_BUDGET_EXCEEDED"
+                ):
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "checkpoint budget rejection replay identity drifted",
+                    )
+                return build_execution_receipt(
+                    admitted,
+                    attempt_id=attempt_id,
+                    receipt_ref=receipt_ref,
+                    payload_digest=_digest_from_receipt_ref(receipt_ref),
+                    status="BUDGET_BLOCKED",
+                    verification_status="NOT_RUN",
+                    accepted=False,
+                    replayed=True,
+                    reason_code=GOVERNED_BUDGET_EXCEEDED,
+                    evidence_refs=tuple(
+                        dict.fromkeys(
+                            reference
+                            for reference in (
+                                *_record_evidence_refs(node),
+                                *_record_evidence_refs(terminal_node),
+                                *_record_evidence_refs(latest),
+                                *_record_evidence_refs(terminal_attempt),
+                                terminal_error_ref,
+                                terminal_usage_id,
+                                _text(terminal_usage.get("outbox_id")),
+                                receipt_ref,
+                            )
+                            if reference
+                        )
+                    ),
+                    projection={
+                        "budget": terminal_budget,
+                        "budget_usage": terminal_usage,
+                        "error_ref": terminal_error_ref,
+                        "checkpoint_budget_rejection": {
+                            "authority_kind": authority_kind,
+                            "reservation_id": admitted.reservation_id,
+                            "usage_id": terminal_usage_id,
+                        },
+                    },
+                )
         accepted = node_status == "ACCEPTED" and graph_status in {"ACTIVE", "COMPLETED"}
         if accepted and (reservation_status != "COMMITTED" or not receipt_ref):
             raise GovernedRuntimeError(

@@ -74,6 +74,11 @@ class TaskStorePort(Protocol):
         attempt_id: str,
     ) -> Mapping[str, Any]: ...
 
+    def try_resolve_checkpoint_budget_rejection_terminal(
+        self,
+        attempt_id: str,
+    ) -> Mapping[str, Any] | None: ...
+
     def resolve_internal_agent_completion_lineage(
         self,
         *,
@@ -406,6 +411,8 @@ class TaskStorePort(Protocol):
         ttl_ms: int,
         expected_attempt_version: int,
         outbox: Any,
+        absent_operation_reservation_id: str | None = None,
+        existing_operation_reservation_id: str | None = None,
     ) -> Mapping[str, Any]: ...
 
     def heartbeat_lease(
@@ -565,7 +572,7 @@ class TaskStorePort(Protocol):
 
 
 class InternalAgentCheckpointUnitOfWorkPort(Protocol):
-    """Explicit mutation authority for sealed checkpoint continuation."""
+    """Explicit UoW authority for exact committed checkpoint continuation."""
 
     def commit_internal_agent_recovered_checkpoint(
         self,
@@ -601,7 +608,45 @@ class InternalAgentCheckpointUnitOfWorkPort(Protocol):
         attempt_outbox: Any,
     ) -> Mapping[str, Any]: ...
 
+    def reject_committed_checkpoint_budget_bundle(
+        self,
+        attempt_id: str,
+        *,
+        reservation_id: str,
+        budget_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_lease_version: int,
+        error_ref: str,
+        usage_id: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
     def reopen_internal_agent_budget_rejection_terminal(
+        self,
+        attempt_id: str,
+        *,
+        reservation_id: str,
+        budget_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_attempt_version: int,
+        expected_node_version: int,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_lease_version: int,
+        error_ref: str,
+        usage_id: str,
+        attempt_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def reopen_committed_checkpoint_budget_rejection_terminal(
         self,
         attempt_id: str,
         *,

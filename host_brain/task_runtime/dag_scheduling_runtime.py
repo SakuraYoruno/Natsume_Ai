@@ -71,6 +71,9 @@ from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
 from .parallel_settlement_runtime import ParallelSettlementRuntime
 from .parallel_success_runtime import ParallelSuccessRuntime
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
+from .preoperation_attempt_recovery import (
+    classify_preoperation_recovery_candidates,
+)
 from .review_runtime import TaskNodeReviewRuntime
 from .runtime_outbox import RuntimeOutbox
 
@@ -221,6 +224,118 @@ class DurableDagSchedulingRuntime:
                 admitted.result_node_id or admitted.nodes[-1].node_id
             )
 
+            # Detect an active Operation checkpoint before any aggregate
+            # Budget or parallel-settlement shortcut.  A worker usage may
+            # already have atomically moved the shared Budget to EXCEEDED
+            # while its response was lost; node-bound recovery must retain
+            # precedence in both single-node and multi-node graphs.
+            recovery_bindings: list[
+                tuple[AdmittedTaskNode, dict[str, Any]]
+            ] = []
+            operation_free_node_ids: set[str] = set()
+            for binding in admitted.nodes:
+                if statuses[binding.node_id] not in {
+                    "LEASED",
+                    "RUNNING",
+                    "EXECUTED",
+                    "VERIFYING",
+                    "VERIFIED",
+                }:
+                    continue
+                candidate = admitted.for_node(binding.node_id)
+                reservation = await self._node_execution_projection.try_operation(
+                    candidate.reservation_id
+                )
+                if reservation is not None:
+                    recovery_bindings.append(
+                        (
+                            binding,
+                            _mapping(
+                                reservation,
+                                field_name="active Operation reservation",
+                            ),
+                        )
+                    )
+                else:
+                    operation_free_node_ids.add(binding.node_id)
+
+            # Freeze the Attempt/Lease view immediately after the exact
+            # Operation checkpoint scan.  A pre-Operation crash must be
+            # classified before shared Budget or parallel terminal shortcuts
+            # can close the Graph, and the later bounded scheduler must reuse
+            # this same consistency boundary rather than perform a second read.
+            # Every Operation-free active node blocks aggregate closeout;
+            # only the expired/unowned classifier subset becomes READY below.
+            scheduler_snapshot = await _maybe_await(
+                self._store.read_scheduler_snapshot(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                )
+            )
+            if not isinstance(scheduler_snapshot, Mapping):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "durable scheduler snapshot is invalid",
+                )
+            preoperation_recovery_candidates = (
+                classify_preoperation_recovery_candidates(
+                    scheduler_snapshot,
+                    graph_id=admitted.graph_id,
+                    graph_revision=admitted.graph_revision,
+                    operation_free_node_ids=operation_free_node_ids,
+                )
+            )
+            preoperation_recovery_node_ids = frozenset(
+                candidate.node_id
+                for candidate in preoperation_recovery_candidates
+            )
+            if operation_free_node_ids - preoperation_recovery_node_ids:
+                raise GovernedRuntimeError(
+                    GOVERNED_EXECUTION_IN_PROGRESS,
+                    "Operation-free active TaskNode still has a live execution owner",
+                )
+            if recovery_bindings:
+                observed_ts_ms = _record_non_negative_int(
+                    scheduler_snapshot,
+                    "observed_ts_ms",
+                )
+                raw_active_leases = scheduler_snapshot.get("active_leases")
+                if not isinstance(raw_active_leases, Sequence) or isinstance(
+                    raw_active_leases,
+                    (str, bytes, bytearray),
+                ):
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "durable scheduler Lease snapshot is invalid",
+                    )
+                reservation_attempt_ids = {
+                    _required_record_text(reservation, "attempt_id")
+                    for _, reservation in recovery_bindings
+                }
+                if any(
+                    isinstance(lease, Mapping)
+                    and _status(lease) == "ACTIVE"
+                    and _text(lease.get("attempt_id")) in reservation_attempt_ids
+                    and _record_non_negative_int(lease, "expires_ts_ms")
+                    > observed_ts_ms
+                    for lease in raw_active_leases
+                ):
+                    raise GovernedRuntimeError(
+                        GOVERNED_EXECUTION_IN_PROGRESS,
+                        "Operation reservation still has a live execution owner",
+                    )
+                binding, _ = recovery_bindings[0]
+                recovery_admission = admitted.for_node(binding.node_id)
+                async for event in self._node_execution.execute_stream(
+                    admitted=recovery_admission,
+                    command=command,
+                    work_order=work_order,
+                    budget=budget,
+                    node_grant_ref=grant_refs.get(recovery_admission.node_id),
+                ):
+                    yield event
+                return
+
             unresolved_failure: tuple[AdmittedExecution, dict[str, Any]] | None = None
             for binding in admitted.nodes:
                 if statuses[binding.node_id] not in {
@@ -271,6 +386,7 @@ class DurableDagSchedulingRuntime:
             if (
                 graph_status == "ACTIVE"
                 and len(admitted.nodes) > 1
+                and not operation_free_node_ids
                 and (
                     budget.status == "EXCEEDED"
                     or set(statuses.values()).intersection(reentry_terminal_statuses)
@@ -313,11 +429,11 @@ class DurableDagSchedulingRuntime:
                 ),
                 None,
             )
-            if pre_review_node_id is not None and graph_status in {
-                "CREATED",
-                "ACTIVE",
-                "BLOCKED",
-            }:
+            if (
+                pre_review_node_id is not None
+                and not preoperation_recovery_node_ids
+                and graph_status in {"CREATED", "ACTIVE", "BLOCKED"}
+            ):
                 if self._reviews is None:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
@@ -416,6 +532,7 @@ class DurableDagSchedulingRuntime:
             )
             if (
                 post_review_node_id is not None
+                and not preoperation_recovery_node_ids
                 and self._reviews is not None
                 and graph_status in {"ACTIVE", "BLOCKED"}
             ):
@@ -567,7 +684,7 @@ class DurableDagSchedulingRuntime:
                 yield terminal_event(receipt)
                 return
 
-            if budget.status == "EXCEEDED":
+            if budget.status == "EXCEEDED" and not operation_free_node_ids:
                 if graph_status in {"CREATED", "ACTIVE"}:
                     graph = await self._node_lifecycle.transition_graph(final_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
@@ -580,7 +697,7 @@ class DurableDagSchedulingRuntime:
                         "terminal TaskGraph has an unsettled exceeded Budget; "
                         "terminal reconciliation is required",
                     )
-            if budget.status == "RELEASED":
+            if budget.status == "RELEASED" and not operation_free_node_ids:
                 if graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}:
                     raise GovernedRuntimeError(
                         GOVERNED_BUDGET_STATE_CONFLICT,
@@ -663,7 +780,11 @@ class DurableDagSchedulingRuntime:
                     yield terminal_event(receipt)
                     return
 
-            if statuses and all(status == "ACCEPTED" for status in statuses.values()):
+            if (
+                statuses
+                and not preoperation_recovery_node_ids
+                and all(status == "ACCEPTED" for status in statuses.values())
+            ):
                 if parallel_success_enabled:
                     budget, graph_terminal = await self._parallel_success.complete(
                         admitted=admitted,
@@ -726,7 +847,10 @@ class DurableDagSchedulingRuntime:
                 ),
                 None,
             )
-            if blocked_node_id is not None or failed_node_id is not None:
+            if (
+                not preoperation_recovery_node_ids
+                and (blocked_node_id is not None or failed_node_id is not None)
+            ):
                 terminal_node_id = failed_node_id or blocked_node_id
                 decision = await self._node_execution_projection.matching_parallel_decision(
                     admitted,
@@ -766,7 +890,10 @@ class DurableDagSchedulingRuntime:
                     yield event
                 return
 
-            if graph_status in {"FAILED", "CANCELLED", "COMPLETED"}:
+            if (
+                not preoperation_recovery_node_ids
+                and graph_status in {"FAILED", "CANCELLED", "COMPLETED"}
+            ):
                 if budget.status in {"ACTIVE", "EXCEEDED"}:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
@@ -800,7 +927,7 @@ class DurableDagSchedulingRuntime:
                 ):
                     yield event
                 return
-            if graph_status == "BLOCKED":
+            if not preoperation_recovery_node_ids and graph_status == "BLOCKED":
                 raise GovernedRuntimeError(
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     "TaskGraph is BLOCKED without a durable acceptance-review node",
@@ -811,46 +938,6 @@ class DurableDagSchedulingRuntime:
                     f"TaskGraph is not schedulable: {graph_status}",
                 )
 
-            recovery_binding = None
-            for binding in admitted.nodes:
-                if statuses[binding.node_id] not in {
-                    "LEASED",
-                    "RUNNING",
-                    "EXECUTED",
-                    "VERIFYING",
-                    "VERIFIED",
-                }:
-                    continue
-                candidate = admitted.for_node(binding.node_id)
-                reservation = await self._node_execution_projection.try_operation(
-                    candidate.reservation_id
-                )
-                if reservation is not None:
-                    recovery_binding = binding
-                    break
-            if recovery_binding is not None:
-                recovery_admission = admitted.for_node(recovery_binding.node_id)
-                async for event in self._node_execution.execute_stream(
-                    admitted=recovery_admission,
-                    command=command,
-                    work_order=work_order,
-                    budget=budget,
-                    node_grant_ref=grant_refs.get(recovery_admission.node_id),
-                ):
-                    yield event
-                return
-
-            scheduler_snapshot = await _maybe_await(
-                self._store.read_scheduler_snapshot(
-                    admitted.graph_id,
-                    admitted.graph_revision,
-                )
-            )
-            if not isinstance(scheduler_snapshot, Mapping):
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    "durable scheduler snapshot is invalid",
-                )
             observed_ts_ms = _record_non_negative_int(
                 scheduler_snapshot,
                 "observed_ts_ms",
@@ -873,7 +960,12 @@ class DurableDagSchedulingRuntime:
                         DagNodeScheduleCandidate(
                             node_id=binding.node_id,
                             dependencies=binding.dependencies,
-                            status=TaskNodeStatus(statuses[binding.node_id]),
+                            status=(
+                                TaskNodeStatus.READY
+                                if binding.node_id
+                                in preoperation_recovery_node_ids
+                                else TaskNodeStatus(statuses[binding.node_id])
+                            ),
                             retry_not_before_ms=_optional_record_non_negative_int(
                                 durable_nodes[binding.node_id],
                                 "retry_not_before_ms",
@@ -967,13 +1059,18 @@ class DurableDagSchedulingRuntime:
 
             review_required = TaskNodeReviewRuntime.pre_execution_required(work_order)
             review_binding = None
-            if review_required:
+            review_candidates = [
+                candidate
+                for candidate in claimable
+                if candidate.node_id not in preoperation_recovery_node_ids
+            ]
+            if review_required and review_candidates:
                 if self._reviews is None:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "WorkOrder requires durable review but no Review runtime is wired",
                     )
-                for candidate in claimable:
+                for candidate in review_candidates:
                     candidate_node = durable_nodes[candidate.node_id]
                     prior_gate = None
                     if _version(candidate_node) > 0:

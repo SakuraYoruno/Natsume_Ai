@@ -30,6 +30,7 @@ from host_brain.persistence.task_record_codec import (
 )
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
+    TASK_STORE_CAS_CONFLICT,
     TASK_STORE_INVALID,
     TASK_STORE_NOT_FOUND,
     TaskStoreError,
@@ -38,6 +39,133 @@ from host_brain.persistence.task_store_types import (
 
 class TaskDagStateStoreMixin:
     """Persist and read DAG state without owning concrete store state."""
+
+    @staticmethod
+    def _assert_graph_accepts_execution_authority(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        """Fence new Attempt/Lease/Operation authority after Graph closeout."""
+
+        graph = conn.execute(
+            "SELECT status FROM task_runtime_graph WHERE graph_id = ? AND revision = ?",
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if graph is None:
+            raise TaskStoreError(
+                TASK_STORE_NOT_FOUND,
+                f"TaskGraph not found: {graph_id}@{graph_revision}",
+            )
+        status = str(graph["status"] or "").strip().upper()
+        if status not in {TaskGraphStatus.CREATED.value, TaskGraphStatus.ACTIVE.value}:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                f"TaskGraph {graph_id}@{graph_revision} in {status or 'UNKNOWN'} "
+                f"cannot grant {str(action or 'execution authority')}",
+            )
+        graph_budgets = conn.execute(
+            """
+            SELECT budget_id, status
+            FROM task_runtime_budget_reservation
+            WHERE graph_id = ? AND graph_revision = ?
+              AND node_id IS NULL AND attempt_id IS NULL
+            ORDER BY budget_id
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchall()
+        if (
+            len(graph_budgets) != 1
+            or str(graph_budgets[0]["status"]) != "ACTIVE"
+        ):
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                f"TaskGraph {graph_id}@{graph_revision} cannot grant "
+                f"{str(action or 'execution authority')} without exactly one "
+                "ACTIVE graph-scoped BudgetReservation",
+            )
+
+    @staticmethod
+    def _assert_graph_execution_authority_quiescent(
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        action: str,
+    ) -> None:
+        """Fence aggregate terminal writes while node execution can still act.
+
+        The caller owns a ``BEGIN IMMEDIATE`` transaction.  Consequently this
+        check and the Graph CAS form the opposite half of the execution-start
+        fence: either an Attempt/Lease/Operation wins first and terminalization
+        is rejected, or the terminal Graph wins and subsequent authority
+        creation observes a non-executable Graph.
+        """
+
+        unsettled_node = conn.execute(
+            """
+            SELECT node_id, status
+            FROM task_runtime_node
+            WHERE graph_id = ? AND graph_revision = ?
+              AND status IN (
+                'LEASED', 'RUNNING', 'EXECUTED', 'VERIFYING', 'VERIFIED',
+                'CANCEL_REQUESTED'
+              )
+            ORDER BY node_id
+            LIMIT 1
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if unsettled_node is not None:
+            raise TaskStoreError(
+                TASK_STORE_CAS_CONFLICT,
+                f"unsettled TaskNode execution fences "
+                f"{str(action or 'Graph terminalization')}: "
+                f"{unsettled_node['node_id']}:{unsettled_node['status']}",
+            )
+
+        unsettled = conn.execute(
+            """
+            SELECT attempt.attempt_id,
+                   attempt.status AS attempt_status,
+                   lease.lease_id,
+                   operation.reservation_id,
+                   operation.status AS operation_status
+            FROM task_runtime_attempt AS attempt
+            LEFT JOIN task_runtime_lease AS lease
+              ON lease.attempt_id = attempt.attempt_id
+             AND lease.status = 'ACTIVE'
+            LEFT JOIN task_runtime_idempotency_reservation AS operation
+              ON operation.attempt_id = attempt.attempt_id
+             AND operation.status IN ('RESERVED', 'RECOVERY_REQUIRED')
+            WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+              AND (
+                attempt.status IN (
+                  'CREATED', 'LEASED', 'RUNNING', 'RECOVERABLE',
+                  'CANCEL_REQUESTED'
+                )
+                OR lease.lease_id IS NOT NULL
+                OR operation.reservation_id IS NOT NULL
+              )
+            ORDER BY attempt.attempt_id, lease.lease_id, operation.reservation_id
+            LIMIT 1
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchone()
+        if unsettled is None:
+            return
+        identity = (
+            str(unsettled["reservation_id"] or "")
+            or str(unsettled["lease_id"] or "")
+            or str(unsettled["attempt_id"])
+        )
+        raise TaskStoreError(
+            TASK_STORE_CAS_CONFLICT,
+            f"unsettled execution authority fences {str(action or 'Graph terminalization')}: "
+            f"{identity}",
+        )
 
     def _insert_graph_from_host_command_in_transaction(
         self,
@@ -331,6 +459,21 @@ class TaskDagStateStoreMixin:
                 graph_id=graph_id,
                 graph_revision=revision,
             )
+            target_value = str(
+                getattr(target_status, "value", target_status) or ""
+            ).strip().upper()
+            if target_value in {
+                TaskGraphStatus.BLOCKED.value,
+                TaskGraphStatus.COMPLETED.value,
+                TaskGraphStatus.FAILED.value,
+                TaskGraphStatus.CANCELLED.value,
+            }:
+                self._assert_graph_execution_authority_quiescent(
+                    conn,
+                    graph_id=graph_id,
+                    graph_revision=revision,
+                    action=f"TaskGraph {target_value} transition",
+                )
             return self._transition_graph_in_transaction(
                 conn,
                 graph_id=graph_id,

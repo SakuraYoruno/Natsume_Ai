@@ -318,7 +318,10 @@ def _create_attempt(
     attempt_id: str = "attempt-1",
     operation_scope: str = "repo:task-0467",
     operation_fingerprint: str = "sha256:operation-1",
+    ensure_budget: bool = True,
 ) -> None:
+    if ensure_budget:
+        _ensure_active_graph_budget(store)
     store.create_attempt(
         attempt_id=attempt_id,
         graph_id="graph-1",
@@ -329,6 +332,46 @@ def _create_attempt(
         operation_scope=operation_scope,
         operation_fingerprint=operation_fingerprint,
         outbox=_event("TASK_ATTEMPT", attempt_id, 0, "TASK_ATTEMPT_CREATED", attempt_id=attempt_id),
+    )
+
+
+def _ensure_active_graph_budget(
+    store: DurableTaskStore,
+    *,
+    graph_id: str = "graph-1",
+    graph_revision: int = 1,
+) -> None:
+    budget_id = f"budget::test::{graph_id}@{graph_revision}"
+    with sqlite3.connect(str(store.db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT budget_id, status
+            FROM task_runtime_budget_reservation
+            WHERE graph_id = ? AND graph_revision = ?
+              AND node_id IS NULL AND attempt_id IS NULL
+            ORDER BY budget_id
+            """,
+            (graph_id, int(graph_revision)),
+        ).fetchall()
+    if rows:
+        assert rows == [(budget_id, "ACTIVE")]
+        return
+    store.create_budget_reservation(
+        BudgetReservation(
+            budget_id=budget_id,
+            scope=f"graph:{graph_id}@{graph_revision}:test",
+            limits=BudgetAmount(token_count=1_000_000),
+            reserved=BudgetAmount(token_count=1_000_000),
+            status=BudgetReservationStatus.ACTIVE,
+        ),
+        graph_id=graph_id,
+        graph_revision=graph_revision,
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            budget_id,
+            0,
+            "BUDGET_RESERVATION_CREATED",
+        ),
     )
 
 
@@ -369,6 +412,7 @@ def test_gr03a_attempt_claim_requires_every_dependency_to_be_accepted(tmp_path: 
         graph,
         outbox=_event("TASK_GRAPH", graph.graph_id, 0, "TASK_GRAPH_CREATED"),
     )
+    _ensure_active_graph_budget(store, graph_id=graph.graph_id)
 
     with pytest.raises(TaskStoreError) as error:
         store.create_attempt(
@@ -972,6 +1016,7 @@ def test_t_nle_06_wrong_event_rolls_back_node_attempt_lease_operation_recovery_a
     private_key, verifier = _proof_authority()
     store = _migrated_store(tmp_path, verifier=verifier)
     _seed_raw_graph(store)
+    _ensure_active_graph_budget(store)
 
     with pytest.raises(TaskStoreError) as node_event:
         store.transition_node(
@@ -1229,7 +1274,7 @@ def test_t_nle_06_wrong_event_rolls_back_node_attempt_lease_operation_recovery_a
     with sqlite3.connect(str(store.db_path)) as conn:
         assert conn.execute(
             "SELECT COUNT(*) FROM task_runtime_budget_reservation"
-        ).fetchone() == (0,)
+        ).fetchone() == (1,)
     store.create_budget_reservation(
         budget,
         outbox=_event(

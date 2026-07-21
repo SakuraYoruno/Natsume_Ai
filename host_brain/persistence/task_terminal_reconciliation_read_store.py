@@ -893,7 +893,7 @@ class TaskTerminalReconciliationReadMixin:
                 ):
                     if (
                         budget["status"] == "RELEASED"
-                        and self._exact_internal_agent_budget_rejection_terminal(
+                        and self._exact_checkpoint_budget_rejection_terminal(
                             conn,
                             observation=observation,
                             selected_node=selected_node,
@@ -1110,7 +1110,7 @@ class TaskTerminalReconciliationReadMixin:
             }
         return None
 
-    def _exact_internal_agent_budget_rejection_terminal(
+    def _exact_checkpoint_budget_rejection_terminal(
         self,
         conn: sqlite3.Connection,
         *,
@@ -1119,17 +1119,19 @@ class TaskTerminalReconciliationReadMixin:
         selected_attempt: Mapping[str, Any],
         selected_budget: Mapping[str, Any],
     ) -> bool:
-        """Delegate recognition to the sole TaskStore terminal authority."""
+        """Recognize any exact atomic checkpoint Budget terminal authority."""
         try:
-            resolved = self._resolve_internal_agent_budget_rejection_terminal_uow(
+            resolved = self._try_resolve_checkpoint_budget_rejection_terminal_uow(
                 conn,
                 str(selected_attempt["attempt_id"]),
             )
+            if resolved is None:
+                return False
             graph = resolved["graph"]
             node = resolved["node"]
             attempt = resolved["attempt"]
             budget = resolved["budget"]
-            return (
+            exact = (
                 str(graph["graph_id"]) == str(observation["graph"]["graph_id"])
                 and int(graph["revision"])
                 == int(observation["graph"]["revision"])
@@ -1143,8 +1145,19 @@ class TaskTerminalReconciliationReadMixin:
                 and int(budget["status_version"])
                 == int(selected_budget["status_version"])
             )
-        except (KeyError, TypeError, ValueError, TaskStoreError):
-            return False
+        except TaskStoreError:
+            raise
+        except (KeyError, TypeError, ValueError) as exc:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "checkpoint budget terminal projection is invalid",
+            ) from exc
+        if not exact:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "checkpoint budget terminal reconciliation identity drifted",
+            )
+        return True
 
     @staticmethod
     def _parallel_terminal_snapshot_matches(

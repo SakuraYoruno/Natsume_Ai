@@ -24,7 +24,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "f379d6dbe34f9ef5946bb812c430467d36c6f86d"
+    assert report.evaluated_commit_sha == "913312d80917a21cad524aaf46841461ab7c1da8"
     assert report.migration_head == "0118_conversation_acceptance_effects.sql"
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
@@ -189,6 +189,13 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     tmp_path: Path,
 ) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    receipt = json.loads(
+        (
+            ROOT
+            / "tests/fixtures/release/universal_runtime_acceptance_v2.json"
+        ).read_text(encoding="utf-8")
+    )
+    payload["evidence_binding"]["evaluated_commit_sha"] = receipt["commit_sha"]
     payload["routes"]["chat"]["controls"]["budget_enforcement"] = "PASS"
     payload["routes"]["chat"]["controls"]["transactional_side_effects"] = "PASS"
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"

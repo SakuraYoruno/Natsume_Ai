@@ -9,6 +9,7 @@ from collections import Counter
 from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import internal_agent_sealed_checkpoint_recovery
 from host_brain.task_runtime import node_execution_projection
+from host_brain.task_runtime import node_execution_preparation
 from host_brain.task_runtime import node_execution_records
 from host_brain.task_runtime import node_execution_runtime
 from host_brain.task_runtime import node_worker_stream
@@ -16,6 +17,7 @@ from host_brain.task_runtime import operation_checkpoint_budget_recovery
 from host_brain.task_runtime import operation_checkpoint_continuation
 from host_brain.task_runtime import operation_recovery_checkpoint_loader
 from host_brain.task_runtime import operation_recovery_runtime
+from host_brain.task_runtime import preoperation_attempt_recovery
 from host_brain.task_runtime.node_execution_projection import NodeExecutionProjection
 from host_brain.task_runtime.node_execution_runtime import DurableNodeExecutionRuntime
 from host_brain.task_runtime.operation_recovery_runtime import (
@@ -50,12 +52,12 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "eec38b20a7c70c951faed8de776f9ed56ab761cb67d1c4c1852bd3b9bfa9e3fd"
+    "2a72f0a733082b44740d5ab8a09061c66676754fa28ac11b83c708918671ec46"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "57abfa566ae8b8546838b9fc0001beecd8cd59da10f526bed5c9ef245a5cfa94",
     "selected_parallel_decision_outcome": "f601f3cc6506170720737b6e739492328d6707d8b53890500762da1ce038b453",
-    "terminal_replay": "cb8f08e075f09a0293e2448e331262cd07298abe91abb7c8e8059bddc6d30c4b",
+    "terminal_replay": "145d9eff75428d109a7aad33f000d5cc6ccde5b6052334d077c4a4ef0d20b9ef",
     "attempts_for_node": "003bb661287f2e0b56314f00adffcb4af68cd79a8e85329cbc443ee8ac3fab00",
     "try_operation": "6896d47dd8bef7b3ac99547aabe3be258af6f74ab434b3dfd68f250f368714e6",
 }
@@ -223,8 +225,9 @@ def test_projection_and_record_helpers_are_narrow_boundaries() -> None:
         {
             "get_latest_parallel_settlement_decision": 1,
             "read_scheduler_snapshot": 1,
-                "get_operation_reservation": 1,
-                "get_node_artifact": 1,
+            "get_operation_reservation": 1,
+            "get_node_artifact": 1,
+            "try_resolve_checkpoint_budget_rejection_terminal": 1,
         }
     )
     assert Counter(
@@ -405,15 +408,14 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
     expected_matrices = {
         "_store": {
             "get_graph": 2,
-            "get_node": 2,
+            "get_node": 3,
             "claim_ready_node": 1,
             "get_attempt": 1,
             "reserve_operation": 1,
             "get_active_lease": 1,
-                "commit_operation": 1,
-                "resolve_node_input_artifacts": 1,
+            "commit_operation": 1,
         },
-        "_runtime_outbox": {"build": 6, "publish_pending": 14},
+        "_runtime_outbox": {"build": 6, "publish_pending": 16},
         "_budgets": {
             "ensure_active": 1,
             "precharge": 1,
@@ -423,12 +425,11 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         },
         "_node_lifecycle": {
             "transition_graph": 4,
-                "transition_node": 6,
-                "accept_node_output": 1,
+            "transition_node": 6,
+            "accept_node_output": 1,
             "transition_attempt": 2,
-            "finalize_node_budget": 8,
-            "reject_budget_charge": 3,
-            "mark_worker_failure": 3,
+            "finalize_node_budget": 5,
+            "reject_budget_charge": 2,
             "mark_pre_reservation_failure": 4,
         },
         "_workers": {"resolve": 1},
@@ -438,7 +439,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         "_projection": {
             "terminal_replay": 1,
             "attempts_for_node": 1,
-            "try_operation": 1,
+            "try_operation": 2,
         },
         "_operation_recovery": {
             "assert_existing_lineage": 1,
@@ -469,6 +470,202 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         and node.func.attr in {"Lock", "RLock", "Semaphore", "create_task"}
         for node in ast.walk(tree)
     )
+
+
+def test_preparation_and_preoperation_helpers_preserve_authority_boundaries() -> None:
+    preparation_tree = _tree(node_execution_preparation)
+    assert not [node for node in preparation_tree.body if isinstance(node, ast.ClassDef)]
+    preparation_functions = {
+        node.name: node
+        for node in preparation_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert set(preparation_functions) == {
+        "resolve_node_input_artifacts",
+        "preverify_node_claim_authority",
+        "load_preoperation_recovery_candidate",
+        "bind_preoperation_recovery_attempt",
+    }
+    assert Counter(
+        call.func.attr
+        for call in _named_dependency_calls(preparation_tree, "task_store")
+    ) == Counter(
+        {
+            "resolve_node_input_artifacts": 1,
+            "read_scheduler_snapshot": 1,
+        }
+    )
+    worker_execution_names = {
+        "execute",
+        "execute_stream",
+        "worker_event_stream",
+    }
+    assert not any(
+        isinstance(node, ast.Call)
+        and (
+            (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in worker_execution_names
+            )
+            or (
+                isinstance(node.func, ast.Name)
+                and node.func.id in worker_execution_names
+            )
+        )
+        for node in ast.walk(preparation_tree)
+    )
+
+    grant_boundary = preparation_functions["preverify_node_claim_authority"]
+    assert tuple(
+        inspect.signature(
+            node_execution_preparation.preverify_node_claim_authority
+        ).parameters
+    ) == ("verifier", "admitted", "command", "work_order", "node_grant_ref")
+    verifier_lookups = [
+        call.args[1].value
+        for call in ast.walk(grant_boundary)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "getattr"
+        and len(call.args) >= 2
+        and isinstance(call.args[0], ast.Name)
+        and call.args[0].id == "verifier"
+        and isinstance(call.args[1], ast.Constant)
+        and isinstance(call.args[1].value, str)
+    ]
+    assert Counter(verifier_lookups) == Counter({"verify_for_claim": 1, "verify": 1})
+    verifier_calls = [
+        call
+        for call in ast.walk(grant_boundary)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "verify_for_claim"
+    ]
+    assert len(verifier_calls) == 1
+    assert {item.arg for item in verifier_calls[0].keywords} == {
+        "grant_ref",
+        "request_id",
+        "session_id",
+        "principal_id",
+        "graph_id",
+        "root_work_order_id",
+        "graph_revision",
+        "node_id",
+        "route",
+        "target_id",
+        "parent_grant_ref",
+    }
+
+    recovery_tree = _tree(preoperation_attempt_recovery)
+    recovery_classes = [
+        node for node in recovery_tree.body if isinstance(node, ast.ClassDef)
+    ]
+    assert [node.name for node in recovery_classes] == [
+        "PreOperationRecoveryCandidate"
+    ]
+    recovery_functions = {
+        node.name: node
+        for node in recovery_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert {
+        "classify_preoperation_recovery_candidates",
+        "acquire_preoperation_takeover_lease",
+    } <= set(recovery_functions)
+    assert not any(
+        isinstance(node, ast.Call)
+        and (
+            (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in worker_execution_names | {"resolve"}
+            )
+            or (
+                isinstance(node.func, ast.Name)
+                and node.func.id in worker_execution_names
+            )
+        )
+        for node in ast.walk(recovery_tree)
+    )
+    recovery_imports = {
+        (node.module or "").split(".")[-1]
+        for node in recovery_tree.body
+        if isinstance(node, ast.ImportFrom)
+    }
+    assert not {"worker_registry", "node_worker_stream"} & recovery_imports
+
+    takeover = recovery_functions["acquire_preoperation_takeover_lease"]
+    assert Counter(
+        call.func.attr for call in _named_dependency_calls(takeover, "task_store")
+    ) == Counter({"get_active_lease": 1, "acquire_lease": 1, "get_attempt": 1})
+    acquire_calls = [
+        call
+        for call in _named_dependency_calls(takeover, "task_store")
+        if call.func.attr == "acquire_lease"
+    ]
+    assert len(acquire_calls) == 1
+    acquire_keywords = {item.arg: item.value for item in acquire_calls[0].keywords}
+    absence_binding = acquire_keywords["absent_operation_reservation_id"]
+    assert isinstance(absence_binding, ast.Attribute)
+    assert isinstance(absence_binding.value, ast.Name)
+    assert absence_binding.value.id == "admitted"
+    assert absence_binding.attr == "reservation_id"
+
+    runtime_method = _method(
+        _class(node_execution_runtime, "DurableNodeExecutionRuntime"),
+        "execute_stream",
+    )
+    boundary_call_list = [
+        call
+        for call in ast.walk(runtime_method)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id
+        in {
+            "resolve_node_input_artifacts",
+            "preverify_node_claim_authority",
+            "load_preoperation_recovery_candidate",
+            "bind_preoperation_recovery_attempt",
+            "acquire_preoperation_takeover_lease",
+        }
+    ]
+    assert Counter(call.func.id for call in boundary_call_list) == Counter(
+        {
+            "resolve_node_input_artifacts": 1,
+            "preverify_node_claim_authority": 1,
+            "load_preoperation_recovery_candidate": 1,
+            "bind_preoperation_recovery_attempt": 1,
+            "acquire_preoperation_takeover_lease": 1,
+        }
+    )
+    boundary_calls = {call.func.id: call for call in boundary_call_list}
+    grant_call = boundary_calls["preverify_node_claim_authority"]
+    grant_keywords = {item.arg: item.value for item in grant_call.keywords}
+    verifier_binding = grant_keywords["verifier"]
+    assert isinstance(verifier_binding, ast.Attribute)
+    assert isinstance(verifier_binding.value, ast.Name)
+    assert verifier_binding.value.id == "self"
+    assert verifier_binding.attr == "_node_grant_verifier"
+    grant_ref_binding = grant_keywords["node_grant_ref"]
+    assert isinstance(grant_ref_binding, ast.Name)
+    assert grant_ref_binding.id == "node_grant_ref"
+
+    mutation_lines = [
+        call.lineno
+        for call in ast.walk(runtime_method)
+        if isinstance(call, ast.Call)
+        and (
+            (
+                isinstance(call.func, ast.Name)
+                and call.func.id == "acquire_preoperation_takeover_lease"
+            )
+            or (
+                isinstance(call.func, ast.Attribute)
+                and call.func.attr == "claim_ready_node"
+            )
+        )
+    ]
+    assert len(mutation_lines) == 2
+    assert grant_call.lineno < min(mutation_lines)
 
 
 def test_online_recovery_is_split_into_focused_non_worker_boundaries() -> None:

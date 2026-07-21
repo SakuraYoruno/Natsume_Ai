@@ -39,6 +39,7 @@ from host_brain.persistence.task_repository import (
     build_outbox_payload_ref,
 )
 from tests.task_runtime_authority_fixtures import (
+    seed_active_graph_budget_for_test,
     seed_raw_acceptance_effect_for_test,
     seed_raw_task_graph_for_test,
 )
@@ -244,6 +245,19 @@ def _seed_attempt(store: DurableTaskStore) -> None:
         expected_version=0,
         target_status=TaskGraphStatus.ACTIVE,
         outbox=_event("TASK_GRAPH", graph.graph_id, 1, "TASK_GRAPH_ACTIVE"),
+    )
+    seed_active_graph_budget_for_test(
+        store,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        budget_id="budget-gr06",
+        scope="graph:graph-gr06@1:acceptance-effect",
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            "budget-gr06",
+            0,
+            "BUDGET_RESERVATION_CREATED",
+        ),
     )
     store.create_attempt(
         attempt_id="attempt-gr06",
