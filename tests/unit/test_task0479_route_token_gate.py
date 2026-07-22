@@ -114,6 +114,7 @@ def test_governor_and_app_local_tool_boundary_share_injected_token_service() -> 
                 ledger=lambda: ledger,
                 tool_catalog=lambda: catalog,
                 intent_engine=lambda: engine,
+                model_attempt_service=lambda: object(),
             )
         )
 

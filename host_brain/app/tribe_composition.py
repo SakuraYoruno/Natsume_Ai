@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.tribe.application_ports import TribeApplicationPorts
 
 
 def build_tribe_application_ports(
     *,
+    host_services: HostLifecycleApplicationPorts | None = None,
     activity_monitor_provider: Callable[..., Any] | None = None,
     hard_state_provider: Callable[[], Any] | None = None,
     mode_transition_service_provider: Callable[[], Any | None] | None = None,
@@ -27,7 +29,6 @@ def build_tribe_application_ports(
     )
     from host_brain.app.intent_seq import allocate_intent_seq
     from host_brain.app.user_preference_store import build_user_preference_pack
-    from host_brain.composition import process_services
     from host_brain.composition.tribe_runtime import compose_process_tribe_runtime
     from host_brain.tribe.registry import get_host_tribe_registry
     from host_brain.tribe.tribe_state import get_global_registry
@@ -38,10 +39,10 @@ def build_tribe_application_ports(
     )
 
     resolved_activity_monitor_provider = (
-        activity_monitor_provider or process_services.get_activity_monitor
+        activity_monitor_provider or _missing_app_local_provider
     )
     resolved_resource_manager_provider = (
-        resource_manager_provider or process_services.get_resource_manager
+        resource_manager_provider or _missing_app_local_provider
     )
 
     def resolve_process_mode_transition_service():
@@ -53,19 +54,19 @@ def build_tribe_application_ports(
     return TribeApplicationPorts(
         activity_monitor=resolved_activity_monitor_provider,
         mode_transition_service=resolve_process_mode_transition_service,
-        bond_update_queue=process_services.get_bond_update_queue,
-        ledger=process_services.get_ledger,
-        life_snapshot_reader=process_services.get_life_snapshot_reader,
-        silence_engine=process_services.get_silence_engine,
-        state_write_arbiter=process_services.get_state_write_arbiter,
-        emotion_timeline=process_services.get_emotion_timeline,
+        bond_update_queue=_host_provider(host_services, "bond_update_queue"),
+        ledger=_host_provider(host_services, "ledger"),
+        life_snapshot_reader=_host_provider(host_services, "life_snapshot_reader"),
+        silence_engine=_host_provider(host_services, "silence_engine"),
+        state_write_arbiter=_host_provider(host_services, "state_write_arbiter"),
+        emotion_timeline=_host_provider(host_services, "emotion_timeline"),
         hard_state=hard_state_provider or _missing_host_hard_state_owner,
         resource_manager=resolved_resource_manager_provider,
-        bond_stage_engine=process_services.get_bond_stage_engine,
-        shared_memory_index=process_services.get_shared_memory_index,
-        milestone_tracker=process_services.get_milestone_tracker,
-        model_attempt_service=process_services.get_model_attempt_service,
-        prompt_registry=process_services.get_prompt_registry,
+        bond_stage_engine=_host_provider(host_services, "bond_stage_engine"),
+        shared_memory_index=_host_provider(host_services, "shared_memory_index"),
+        milestone_tracker=_host_provider(host_services, "milestone_tracker"),
+        model_attempt_service=_host_provider(host_services, "model_attempt_service"),
+        prompt_registry=_host_provider(host_services, "prompt_registry"),
         resolve_chat_emotion_context=resolve_chat_emotion_context,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_user_preference_pack=build_user_preference_pack,
@@ -73,6 +74,19 @@ def build_tribe_application_ports(
         build_conversation_understanding_pack=build_conversation_understanding_pack,
         allocate_intent_seq=allocate_intent_seq,
     )
+
+
+def _host_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+    field_name: str,
+) -> Callable[..., Any]:
+    if host_services is None:
+        return _missing_app_local_provider
+    return host_services.require_provider(field_name)
+
+
+def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
+    raise RuntimeError("HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED")
 
 
 def _missing_host_hard_state_owner(*_args: Any, **_kwargs: Any) -> Any:

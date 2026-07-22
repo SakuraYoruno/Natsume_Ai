@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -16,6 +18,11 @@ from host_brain.integrations.llm_helpers import (
 )
 
 
+def _missing_model_attempt_service() -> Any:
+    raise RuntimeError("HOST_APP_LOCAL_MODEL_ATTEMPT_PROVIDER_NOT_INJECTED")
+
+
+@dataclass(frozen=True, slots=True)
 class ApplicationModelAttemptServicePort:
     """Non-owning adapter to the process model composition.
 
@@ -24,22 +31,17 @@ class ApplicationModelAttemptServicePort:
     this explicitly injected port.
     """
 
-    async def complete(self, request: object):  # noqa: ANN201
-        from host_brain.composition.process_services import get_model_attempt_service
+    service_provider: Callable[[], Any] = _missing_model_attempt_service
 
-        return await get_model_attempt_service().complete(request)
+    async def complete(self, request: object):  # noqa: ANN201
+        return await self.service_provider().complete(request)
 
     def complete_sync(self, request: object):  # noqa: ANN201
-        from host_brain.composition.process_services import get_model_attempt_service
-
-        return get_model_attempt_service().complete_sync(request)
+        return self.service_provider().complete_sync(request)
 
     @property
     def prompt_registry(self):  # noqa: ANN201
-        from host_brain.composition.process_services import get_model_attempt_service
-
-        return get_model_attempt_service().prompt_registry
-
+        return self.service_provider().prompt_registry
 
 def resolve_model_provider_credential(provider: str) -> str | None:
     """Resolve one provider credential without caching or mutating the environment."""

@@ -272,5 +272,15 @@ def test_input_runtime_uses_one_typed_explicit_application_boundary() -> None:
 
     asgi_source = (ROOT / "host_brain/app/asgi.py").read_text(encoding="utf-8-sig")
     assert "input_runtime_ports = build_input_runtime_application_ports(" in asgi_source
+    assert "host_services=host_services" in asgi_source
     assert "notify_user_interaction_callback=(" in asgi_source
     assert "application.state.input_runtime_ports = input_runtime_ports" in asgi_source
+    input_composition_source = (
+        ROOT / "host_brain/app/input_runtime_composition.py"
+    ).read_text(encoding="utf-8")
+    assert "host_brain.composition.process_services" not in input_composition_source
+    model_provider_source = (
+        ROOT / "host_brain/app/model_provider_composition.py"
+    ).read_text(encoding="utf-8")
+    assert "host_brain.composition.process_services" not in model_provider_source
+    assert "model_attempt_service=host_services.model_attempt_service" in asgi_source

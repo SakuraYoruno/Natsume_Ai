@@ -308,6 +308,28 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-OPERATOR-SYS-MODE-05：关停顺序必须为 OBS ingress drain→Scheduler producer stop→Task Runtime/Effect owner close→Workspace quiesce→ModeTransition依赖→command/security stores→app refs。Review worker stop失败仍须穷尽关闭Surface和Effect owner；live OBS/Scheduler/Task close失败必须保留依赖与发布引用并抛稳定可重试错误；未形成live runtime的部分启动失败须穷尽释放已构造资源。
 - 最终受影响集中回归为单一批次 `265 passed in 179.82s`，包含真实 SQLite 的 Review→outer WAL append fault、六种 Review 状态、0/1/>1 authority、进程重启、`WAITING_REVIEW` 恢复、一次性 continuation、post-HardState response loss/`success=False`/unknown effect、`max_attempts=1` 与 exact event replay。首轮集中批次为 `264 passed + 1 failed`，唯一失败是 ASGI 测试桩尚未接收新增的 `review_continuation_store` 参数；修正后该用例单独通过，再运行同一完整集合得到上述265项，首轮与终轮不得相加，也不得与既有 HardState `84`、外围 `67` 或其他历史批次相加。该结果只证明 Operator 2/37 的第二条 vertical slice；commit-bound acceptance、NE-01 wave integration 和 production canary 仍未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
+### NE-01 Lifecycle/Tribe 显式 Host service bundle
+
+- T-NE01-COMPOSITION-BUNDLE-01：生产 `create_app()` 必须把同一 `HostLifecycleApplicationPorts` 显式传给 Lifecycle Runtime 与 Tribe composition；两个业务模块不得 import、调用或在运行期回读 `process_services`。测试无参数构造可保留失败关闭 provider，但不得恢复隐式全局 fallback。
+- T-NE01-COMPOSITION-BUNDLE-02：ledger、LifeMemory、ModelAttempt、Emotion timeline、Bond、Milestone、Prompt 等 provider 必须由 Host composition root 一次解析并通过 frozen/slotted typed bundle 传递。缺失 provider 在首次使用时稳定报 `HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED`；HardState 缺失继续使用专用 `HOST_HARD_STATE_OWNER_NOT_INJECTED`。
+- T-NE01-COMPOSITION-BUNDLE-03：locator inventory 必须由 AST 重新计算为 named 40 modules/116 names、all-form 44 modules、Container 50 fields/3 locks/46 mutable refs；Lifecycle Runtime 与 Tribe 两个模块必须不在 all-form 集合中。named 值不变是因为旧实现为 module import，不得伪写成20个 named import 被删除。typed bundle 的 provider identity 与完全省略 bundle 时的失败关闭均须有运行时测试，不能只靠词法扫描。
+- 本 Gate 只证明依赖解析点收敛，不证明 bundle 背后的 Tribe/Endocrine/Memory 等服务实例已 app-local，也不证明 Service Locator 清零。首轮为 `46 passed + 4 fixture/contract failures`；更新旧库存、显式 ModelAttempt fixture 和 Tribe 结构合同后，同一集合为 `50 passed in 7.33s`。加入 typed bundle identity 与省略 bundle fail-closed 运行时证据后，最终同一集合为 `52 passed in 9.05s`；各轮禁止相加。NE-01 波次集成和 production canary 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### NE-01 Input Runtime 显式 Host service bundle
+
+- T-NE01-COMPOSITION-INPUT-01：生产 `create_app()` 必须把同一个 `HostLifecycleApplicationPorts` 传给 Input Runtime composition；Intent、Ledger、Life snapshot、Multimodal Observer/Processor 只能从该 bundle 解析，Input composition 对 `process_services` 的 import/回读必须为0。
+- T-NE01-COMPOSITION-INPUT-02：完全省略 bundle 时，Input provider 与 user-interaction callback 必须在首次使用时以 `HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED` 失败关闭；测试不得继续 patch 全局 accessor 冒充显式依赖。
+- T-NE01-COMPOSITION-INPUT-03：无 exact Task-bound Action Preview 的 Gateway voice 必须保持 Effect=0；auto reply disabled、force-dual、legacy force env 和 primary delivery failure 均不得成为绕过理由。
+- T-NE01-COMPOSITION-INPUT-04：fresh locator inventory 必须为 named39 modules/110 names、all-form43 modules、Container50 fields/3 locks/46 mutable refs；Input Runtime composition 不得出现在 all-form 集合。Lifecycle/Tribe 的40/116/all-form44只作前一提交历史。
+- 首轮受影响集合为 `114 passed + 9 failures`：5项是旧测试仍依赖全局Multimodal fixture，4项错误期待无Preview语音直发；显式fixture后为`121 passed + 4 failures`；修正高风险合同后最终同一集合为`125 passed in 11.80s`。另对6个ASGI/Host source/Guardian/platform/Gateway调用点文件补充复跑`43 passed in 10.96s`；两批按文件不重叠但仍分别记录，不合并成宣传总数。该结果仍不是NE-01波次integration或production canary；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### NE-01 ModelAttempt 应用端口显式 provider
+
+- T-NE01-COMPOSITION-MODEL-01：`ApplicationModelAttemptServicePort`必须是frozen/slotted非所有权adapter，并在构造时接收`ModelAttemptService` provider；`complete`、`complete_sync`与`prompt_registry`不得导入或回读`process_services`。
+- T-NE01-COMPOSITION-MODEL-02：Tool runtime必须从ASGI typed Host bundle传入provider；中断Domain Pack恢复必须从同一lifecycle bundle传入。无provider构造仅为兼容测试，首次使用必须稳定报`HOST_APP_LOCAL_MODEL_ATTEMPT_PROVIDER_NOT_INJECTED`。
+- T-NE01-COMPOSITION-MODEL-03：fresh locator inventory必须为named38 modules/107 names、all-form42 modules、Container50 fields/3 locks/46 refs；Input的39/110/all-form43只作前一提交历史。
+- 宽集合首轮为`103 passed + 4 failures`；4项来自两份既有Task Runtime集成fixture缺少`internal_agent_checkpoint_uow`，失败发生在Coordinator构造、早于模型端口调用，不计模型回归PASS，也不在本切片夹带修复。移除两份无关失真fixture后的精确集合为`99 passed in 24.03s`。NE-01 wave integration与production canary仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ### NE-01 Scheduler post-Acceptance handler 切流
 
 - T-NE01-SCHEDULER-EFFECT-01：Scheduler Task worker 只能从 immutable `FrozenNodeInput` 和 durable occurrence/definition authority 生成唯一 `scheduler.operation.execute` plan；不得调用 `SchedulerWorkerRegistry` handler，不得写实际 Scheduler result。canonical WorkerProjection 是 Acceptance 前 checkpoint，调用方伪造 definition revision、worker key、fingerprint、graph/node/Attempt 或 Operator command authority 必须失败关闭。

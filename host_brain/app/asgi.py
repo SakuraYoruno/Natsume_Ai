@@ -260,6 +260,7 @@ def create_app() -> FastAPI:
     host_lifecycle = build_host_lifecycle_container()
     host_services = host_lifecycle.ports
     tribe_application_ports = build_tribe_application_ports(
+        host_services=host_services,
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
         hard_state_provider=host_lifecycle.get_hard_state,
         mode_transition_service_provider=(
@@ -268,6 +269,7 @@ def create_app() -> FastAPI:
         resource_manager_provider=host_lifecycle.get_resource_manager,
     )
     lifecycle_runtime_ports = build_lifecycle_runtime_application_ports(
+        host_services=host_services,
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
         endocrine_state_provider=host_lifecycle.get_endocrine_state,
         episodic_store_provider=host_services.episodic_store,
@@ -275,6 +277,7 @@ def create_app() -> FastAPI:
         model_attempt_service_provider=host_services.model_attempt_service,
     )
     input_runtime_ports = build_input_runtime_application_ports(
+        host_services=host_services,
         embodiment_runtime_provider=lambda: embodiment_runtime,
         notify_user_interaction_callback=(
             host_lifecycle.notify_user_interaction
@@ -297,6 +300,7 @@ def create_app() -> FastAPI:
             ledger=get_ledger,
             tool_catalog=host_services.tool_catalog,
             intent_engine=get_intent_engine,
+            model_attempt_service=host_services.model_attempt_service,
         )
     )
     governed_internal_runtime: GovernedInternalRuntime | None = None

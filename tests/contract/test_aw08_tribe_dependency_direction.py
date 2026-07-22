@@ -35,10 +35,11 @@ def test_tribe_runtime_services_are_explicitly_composed() -> None:
     ).read_text(encoding="utf-8")
     assert "TribeApplicationPorts(" in adapter_source
     assert "agent.application_ports = ports" in runtime_source
-    assert (
-        "model_attempt_service=process_services.get_model_attempt_service"
-        in adapter_source
-    )
+    assert 'model_attempt_service=_host_provider(host_services, "model_attempt_service")' in adapter_source
+    assert "host_brain.composition import process_services" not in adapter_source
+    assert "host_services=host_services" in (
+        ROOT / "host_brain" / "app" / "asgi.py"
+    ).read_text(encoding="utf-8")
     assert "compose_process_tribe_runtime(" in adapter_source
     assert "state_registry=get_global_registry()" in adapter_source
     assert "tribe_registry=get_host_tribe_registry()" in adapter_source
