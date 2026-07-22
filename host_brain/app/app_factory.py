@@ -15,6 +15,7 @@ from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_read_routes import HostObsReadPorts
 from host_brain.app.health_routes import DegradationStateProvider
+from host_brain.app.startup import collect_dependency_probes
 from host_brain.app.pentest_secure_run_routes import PentestSecureRunCompositionProvider
 from host_brain.app.router_registry import register_host_routers
 from host_brain.app.runtime_metrics import RuntimeMetrics, build_metrics_response
@@ -59,7 +60,6 @@ def create_host_fastapi_app(
     obs_route_ports: ObsRoutePorts,
     input_runtime_ports: InputRuntimeApplicationPorts,
 ) -> FastAPI:
-    del get_ledger  # Route adapters no longer resolve the process ledger.
     effective_route_ports = route_ports or HostRoutePorts(
         canon_service_provider=canon_service_provider,
         tool_broker_provider=get_tool_broker,
@@ -78,6 +78,9 @@ def create_host_fastapi_app(
     if not isinstance(obs_route_ports, ObsRoutePorts):
         raise TypeError("obs_route_ports must be ObsRoutePorts")
     app.state.obs_route_ports = obs_route_ports
+    app.state.health_ledger_provider = get_ledger
+    app.state.health_dependency_probe_provider = collect_dependency_probes
+    app.state.health_degradation_state_provider = degradation_state_provider
     register_host_routers(
         app,
         input_runtime_ports=input_runtime_ports,
@@ -100,6 +103,8 @@ def create_host_fastapi_app(
         scheduler_command_service_provider=scheduler_command_service_provider,
         host_obs_read_ports=host_obs_read_ports,
         degradation_state_provider=degradation_state_provider,
+        health_ledger_provider=get_ledger,
+        health_dependency_probe_provider=collect_dependency_probes,
         degradation_capability_port_provider=(
             degradation_capability_port_provider
         ),

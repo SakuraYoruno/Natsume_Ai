@@ -625,25 +625,54 @@ async def stream_runtime_events_sse(
     )
 
 
-async def _live_report(source: str) -> dict[str, Any]:
+async def _live_report(*, request: Request, source: str) -> dict[str, Any]:
     source_key = "readiness" if str(source or "").strip().lower() in {"ready", "readiness"} else "health"
-    if source_key == "readiness":
-        from host_brain.app.health_routes import build_live_readiness_report  # noqa: PLC0415
+    from host_brain.app.health_routes import (  # noqa: PLC0415
+        DegradationStateUnavailable,
+        HealthRuntimeDependencyUnavailable,
+    )
 
-        return await build_live_readiness_report()
-    from host_brain.app.health_routes import build_live_health_report  # noqa: PLC0415
+    ledger_provider = getattr(request.app.state, "health_ledger_provider", None)
+    dependency_probe_provider = getattr(
+        request.app.state,
+        "health_dependency_probe_provider",
+        None,
+    )
+    degradation_state_provider = getattr(
+        request.app.state,
+        "health_degradation_state_provider",
+        None,
+    )
+    try:
+        if source_key == "readiness":
+            from host_brain.app.health_routes import (  # noqa: PLC0415
+                build_live_readiness_report,
+            )
 
-    return await build_live_health_report()
+            return await build_live_readiness_report(
+                ledger_provider=ledger_provider,
+                dependency_probe_provider=dependency_probe_provider,
+            )
+        from host_brain.app.health_routes import build_live_health_report  # noqa: PLC0415
+
+        return await build_live_health_report(
+            degradation_state_provider=degradation_state_provider,
+            ledger_provider=ledger_provider,
+            dependency_probe_provider=dependency_probe_provider,
+        )
+    except (DegradationStateUnavailable, HealthRuntimeDependencyUnavailable) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/immune/proposal")
 async def build_immune_proposal(
+    request: Request,
     payload: dict[str, Any] | None = Body(default=None),
     source: str = Query("health"),
 ) -> dict[str, Any]:
     report = dict((payload or {}).get("report") or {})
     if not report:
-        report = await _live_report(source)
+        report = await _live_report(request=request, source=source)
     return build_immune_proposal_from_report(report, source=source)
 
 
@@ -655,7 +684,11 @@ async def dispatch_immune_work_order(
     background: bool = Query(True),
     confirmed: bool = Query(True),
 ) -> dict[str, Any]:
-    proposal = await build_immune_proposal(payload or {}, source=source)
+    proposal = await build_immune_proposal(
+        request=request,
+        payload=payload or {},
+        source=source,
+    )
     work_order = proposal.get("work_order")
     if not proposal.get("triggered") or not isinstance(work_order, dict):
         return {

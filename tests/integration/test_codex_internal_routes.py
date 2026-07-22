@@ -23,6 +23,29 @@ ROOT = Path(__file__).resolve().parents[2]
 REVIEW_STORE_MIGRATION = ROOT / "host_brain" / "audit" / "migrations" / "0055_agent_runtime_review_store.sql"
 
 
+class _TestRuntimeGuardianPort:
+    """Explicit app-local Guardian substitute for direct route integration tests."""
+
+    def evaluate_capability(self, **kwargs: object) -> dict[str, object]:
+        return {
+            "schema_version": "Natsume.degradation.capability_decision.v1",
+            "capability_id": str(kwargs["capability_id"]),
+            "decision": "UNCHANGED",
+            "allowed": True,
+            "allowed_by_degradation": True,
+            "reason_code": "NO_ADDITIONAL_DEGRADATION_RESTRICTION",
+            "durability_status": "READY",
+            "guardian_authority": {
+                "authority": "RUNTIME_GUARDIAN",
+                "authority_status": "ACTIVE",
+                "durable": True,
+                "aggregate_ref": "runtime-guardian://sha256/" + "a" * 64,
+                "guardian_revision": 1,
+                "fencing_token": 1,
+            },
+        }
+
+
 def _migrate_runtime_event_db(db_path: Path) -> None:
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id=f"codex-runtime-event-fixture::{db_path.name}",
@@ -49,6 +72,7 @@ def _client(
 
     @app.middleware("http")
     async def _bind_test_authority(request, call_next):
+        request.state.degradation_capability_port = _TestRuntimeGuardianPort()
         request.state.internal_agent_authority = SimpleNamespace(
             admissible=True,
             request_id="request-codex-route-test",
@@ -135,6 +159,31 @@ def test_codex_internal_immune_routes_expose_proposal_and_auto_state() -> None:
     assert proposal_response.json()["work_order"]["run_mode"] == "self_heal"
     assert state_response.status_code == 200
     assert "last_job_id" in state_response.json()
+
+
+def test_codex_internal_immune_live_report_requires_explicit_health_ports() -> None:
+    response = _client().post("/internal/codex/immune/proposal")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "HOST_HEALTH_LEDGER_PROVIDER_UNAVAILABLE"
+
+
+def test_codex_internal_immune_live_report_translates_missing_guardian_port(
+    monkeypatch,
+) -> None:
+    from host_brain.app import health_routes
+
+    async def unavailable_guardian(**_kwargs: object) -> dict[str, object]:
+        raise health_routes.DegradationStateUnavailable(
+            "DEGRADATION_STATE_PROVIDER_UNAVAILABLE"
+        )
+
+    monkeypatch.setattr(health_routes, "build_live_health_report", unavailable_guardian)
+
+    response = _client().post("/internal/codex/immune/proposal")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "DEGRADATION_STATE_PROVIDER_UNAVAILABLE"
 
 
 def test_codex_internal_owner_directive_route_persists_life_memory(monkeypatch) -> None:

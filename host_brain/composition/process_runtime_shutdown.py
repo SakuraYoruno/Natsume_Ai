@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,7 +12,6 @@ class ProcessRuntimeShutdownDependencies:
     """Teardown capabilities resolved once by the application adapter."""
 
     stop_bond_queue: Callable[[Any], None]
-    stop_heartbeat: Callable[[], Awaitable[None]]
     get_tribe_event_bus: Callable[[], Any | None]
 
 
@@ -41,10 +40,6 @@ async def shutdown_process_runtime(
         dependencies.stop_bond_queue(logger)
     except Exception as bond_queue_exc:
         logger.warning("BondUpdateQueue 关闭失败: %s", bond_queue_exc)
-    try:
-        await dependencies.stop_heartbeat()
-    except Exception:
-        pass
     try:
         shutdown_bus = dependencies.get_tribe_event_bus()
         if shutdown_bus is not None:

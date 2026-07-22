@@ -1388,7 +1388,7 @@
     "production_enablement_changed": true
   },
   "completed_ne03_local_validation": {
-    "status": "LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES",
+    "status": "HISTORICAL_SCOPE_BOUND_NOT_CURRENT_NE03_CLOSEOUT",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_FINAL_HEAD_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "test_batches": {
@@ -1428,6 +1428,7 @@
       "production multi-instance deployment canary"
     ],
     "known_boundaries": [
+      "HISTORICAL_NE03_RECEIPTS_DO_NOT_COVER_CURRENT_HEARTBEAT_LIFESPAN_CORRECTIVE_SLICE",
       "WINDOWS_BACKGROUND_GRACEFUL_STOP_NOT_IMPLEMENTED_P1_CRASH_FENCE_FALLBACK_ONLY",
       "LONG_TERM_GOAL_DURABLE_OWNER_MISSING",
       "GOVERNED_OPERATOR_AND_BLOCKED_EMBODIMENT_POSITIVE_MIGRATION_DEFERRED_TO_NE01"
@@ -2983,11 +2984,21 @@
       ]
     },
     "runtime_guardian": {
-      "status": "PARTIAL_NE03_HOST_LIFESPAN_AND_TYPED_FRONT_DOORS_WIRED_LOCAL_ACCEPTANCE_PASSED",
+      "status": "PARTIAL_NE03_APP_LOCAL_PROBE_STATE_AND_TYPED_FRONT_DOORS_WIRED",
+      "post_merge_corrective_slice": {
+        "status": "SCOPED_LOCAL_GATE_PASSED_NE03_STILL_INCOMPLETE",
+        "scope": "ServiceHealthHeartbeat owns the creating Host ASGI lifespan task, optional keepalive, Guardian observer, probe cache, and HTTP transport; it cannot rebind, cancel, read, or close another Host scope. A compatibility probe without that observer cannot write the global degradation reducer, and the dedicated Obs read model does not consume any process cache.",
+        "local_validation": "TARGETED_50_PASSED_APP_LOCAL_PROBE_STATE_GUARDIAN_STARTUP_HEALTH_DEVICE_AND_INTERNAL_ROUTE_BATCH_IN_7_96_SECONDS",
+        "static_validation": "COMPILEALL_JSON_DIFF_CHECK_AND_DOCUMENT_AUTHORITY_FRESHNESS_GATES_PASS",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "remaining_boundary": "Real multi-instance deployment and NE-07 service-stack acceptance are not complete."
+      },
       "implemented": [
         "injected RuntimeGuardian without module-global singleton",
         "single Host ASGI lifespan composition bound to runtime scope owner lease and fence",
-        "health and heartbeat consume the app-local Guardian",
+        "health reconciliation consumes the app-local Guardian; ServiceHealthHeartbeat owns task, observer, probe cache, and HTTP transport per Host lifespan and closes only that scope's transport",
+        "heartbeat compatibility calls without an injected observer are cache-only and cannot mutate the global degradation reducer",
+        "dedicated Obs health projection and core probe registry read durable ledger/projection rather than the Host process heartbeat cache",
         "audited high-risk front doors consume an injected degradation capability port",
         "Host lifespan no longer constructs, binds, or unbinds the shared MCP broker",
         "0112 same-transaction Host runtime lease validation",
@@ -3023,6 +3034,7 @@
         "host_brain/runtime/production_composition.py",
         "host_brain/runtime/degradation_authority.py",
         "host_brain/app/asgi.py",
+        "host_brain/app/observability_runtime/service_health_heartbeat.py",
         "host_brain/audit/migrations/0112_runtime_context_authority.sql",
         "host_brain/audit/migrations/0113_service_catalog_rollout_authority.sql",
         "host_brain/service_catalog/host_startup.py",
@@ -3031,6 +3043,7 @@
         "tests/unit/test_ne03_runtime_guardian.py",
         "tests/unit/test_ne03_service_catalog_rollout_authority.py",
         "tests/unit/test_ne03_health_guardian_cutover.py",
+        "tests/unit/test_service_health_heartbeat.py",
         "tests/integration/test_ne03_runtime_context_durability.py",
         "tests/integration/test_ne03_service_catalog_host_socket_rollout.py"
       ]

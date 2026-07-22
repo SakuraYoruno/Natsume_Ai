@@ -35,7 +35,6 @@ def _patch_health_report_dependencies(monkeypatch) -> None:  # noqa: ANN001
         "load_host_config",
         lambda: SimpleNamespace(success=False, config=None),
     )
-    monkeypatch.setattr(health_routes, "get_ledger", lambda: None)
     monkeypatch.setattr(
         health_routes,
         "build_service_health_report",
@@ -47,6 +46,10 @@ def _patch_health_report_dependencies(monkeypatch) -> None:  # noqa: ANN001
             },
         },
     )
+
+
+def _ledger_provider():  # noqa: ANN201
+    return None
 
 
 def test_production_health_router_reads_only_its_explicit_guardian_provider(
@@ -67,6 +70,7 @@ def test_production_health_router_reads_only_its_explicit_guardian_provider(
     app.include_router(
         health_routes.create_health_router(
             degradation_state_provider=read_guardian,
+            ledger_provider=_ledger_provider,
         )
     )
 
@@ -92,7 +96,7 @@ def test_production_health_router_fails_closed_without_guardian_provider(
 ) -> None:
     _patch_health_report_dependencies(monkeypatch)
     app = FastAPI()
-    app.include_router(health_routes.create_health_router())
+    app.include_router(health_routes.create_health_router(ledger_provider=_ledger_provider))
 
     with TestClient(app, raise_server_exceptions=False) as client:
         health = client.get("/health?skip_dependency_probes=true")
@@ -125,6 +129,7 @@ def test_production_health_router_does_not_fallback_when_guardian_read_fails(
     app.include_router(
         health_routes.create_health_router(
             degradation_state_provider=failed_guardian_read,
+            ledger_provider=_ledger_provider,
         )
     )
 
@@ -143,6 +148,7 @@ def test_production_health_router_does_not_fallback_when_guardian_read_fails(
 def test_app_factory_forwards_app_local_degradation_provider(monkeypatch) -> None:
     captured: dict[str, object] = {}
     provider = lambda: _guardian_state("runtime-scope-factory")  # noqa: E731
+    ledger_provider = lambda: None  # noqa: E731
 
     def register(_app, **kwargs) -> None:  # noqa: ANN001
         captured.update(kwargs)
@@ -154,7 +160,7 @@ def test_app_factory_forwards_app_local_degradation_provider(monkeypatch) -> Non
         lifespan=None,
         metrics=RuntimeMetrics(),
         logger=logging.getLogger("test.ne03.health-provider"),
-        get_ledger=lambda: None,
+        get_ledger=ledger_provider,
         get_tool_broker=lambda: None,
         get_tool_catalog=lambda: None,
         get_bond_engine=lambda: None,
@@ -171,6 +177,8 @@ def test_app_factory_forwards_app_local_degradation_provider(monkeypatch) -> Non
     )
 
     assert captured["degradation_state_provider"] is provider
+    assert captured["health_ledger_provider"] is ledger_provider
+    assert callable(captured["health_dependency_probe_provider"])
 
 
 def test_two_production_health_routers_keep_guardian_authority_app_local(
@@ -181,12 +189,14 @@ def test_two_production_health_routers_keep_guardian_authority_app_local(
     app_a.include_router(
         health_routes.create_health_router(
             degradation_state_provider=lambda: _guardian_state("scope-a"),
+            ledger_provider=_ledger_provider,
         )
     )
     app_b = FastAPI()
     app_b.include_router(
         health_routes.create_health_router(
             degradation_state_provider=lambda: _guardian_state("scope-b"),
+            ledger_provider=_ledger_provider,
         )
     )
 
@@ -220,3 +230,76 @@ def test_resource_manager_without_guardian_provider_fails_closed(monkeypatch) ->
     assert state["status"] == "UNAVAILABLE"
     assert state["durability_status"] == "FAILED"
     assert legacy_reads == []
+
+
+def test_production_health_router_requires_explicit_ledger_provider(monkeypatch) -> None:
+    _patch_health_report_dependencies(monkeypatch)
+    app = FastAPI()
+    app.include_router(
+        health_routes.create_health_router(
+            degradation_state_provider=lambda: _guardian_state("scope-ledger"),
+        )
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/health?skip_dependency_probes=true")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "HOST_HEALTH_LEDGER_PROVIDER_UNAVAILABLE"
+
+
+def test_production_ready_router_requires_explicit_dependency_probe_provider(
+    monkeypatch,
+) -> None:
+    _patch_health_report_dependencies(monkeypatch)
+    app = FastAPI()
+    app.include_router(
+        health_routes.create_health_router(
+            degradation_state_provider=lambda: _guardian_state("scope-ready-port"),
+            ledger_provider=_ledger_provider,
+        )
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "HOST_HEALTH_DEPENDENCY_PROBE_PROVIDER_UNAVAILABLE"
+    )
+
+
+def test_ready_route_uses_explicit_ledger_and_probe_ports(monkeypatch) -> None:
+    _patch_health_report_dependencies(monkeypatch)
+    monkeypatch.setattr(
+        health_routes,
+        "build_env_readiness_report",
+        lambda **kwargs: {
+            "readiness_status": "READY",
+            "reason_code": None,
+            "ledger": kwargs["ledger"],
+            "dependency_probes": kwargs["dependency_probes"],
+        },
+    )
+    ledger = {"owner": "app-local"}
+
+    async def read_probes() -> dict[str, object]:
+        return {"edge.rpc.gateway": {"available": True}}
+
+    app = FastAPI()
+    app.include_router(
+        health_routes.create_health_router(
+            degradation_state_provider=lambda: _guardian_state("scope-ready"),
+            ledger_provider=lambda: ledger,
+            dependency_probe_provider=read_probes,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["ledger"] == {"owner": "app-local"}
+    assert response.json()["summary"]["dependency_probes"] == {
+        "edge.rpc.gateway": {"available": True}
+    }

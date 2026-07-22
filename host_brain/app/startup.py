@@ -722,6 +722,7 @@ def warmup_all(
     *,
     eager: bool = False,
     thalamus_agent_provider: Callable[[], Any] | None = None,
+    startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, str]:
     """执行所有启动预热，返回各模块状态字典。
 
@@ -755,10 +756,13 @@ def warmup_all(
         "startup.warmup_all 完成: %s",
         {k: v for k, v in statuses.items()},
     )
-    reconcile_startup_degradation(
-        statuses,
-        source_ref=f"startup-warmup://runtime/{int(time.time() * 1000)}",
-    )
+    if startup_probe_sink is None:
+        _logger.warning(
+            "startup.warmup_all has no app-local RuntimeGuardian sink; "
+            "skipping degradation projection"
+        )
+    else:
+        startup_probe_sink(dict(statuses))
     return statuses
 
 

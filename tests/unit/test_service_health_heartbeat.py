@@ -301,6 +301,48 @@ def test_run_once_uses_explicit_degradation_observer_without_global_machine(
     }
 
 
+def test_run_once_without_observer_never_falls_back_to_global_degradation_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+    from host_brain.observability import degradation_state
+
+    def forbidden_global(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("heartbeat must not recover a process-global observer")
+
+    monkeypatch.setattr(
+        degradation_state,
+        "reconcile_service_observations",
+        forbidden_global,
+    )
+    monkeypatch.setattr(
+        heartbeat,
+        "_resource_gate_llm_probe_decision",
+        lambda **_kwargs: {"allowed": False, "reason_code": "TEST"},
+    )
+    with (
+        patch.object(
+            heartbeat,
+            "_probe_edge",
+            new=AsyncMock(
+                return_value={"status": "UP", "latency_ms": 1, "sub_services": {}}
+            ),
+        ),
+        patch.object(
+            heartbeat,
+            "_probe_host",
+            new=AsyncMock(
+                return_value={
+                    "overall_status": "UP",
+                    "latency_ms": 1,
+                    "sub_services": {},
+                }
+            ),
+        ),
+    ):
+        asyncio.run(heartbeat.run_once())
+
+
 def test_heartbeat_loop_forwards_explicit_degradation_observer(monkeypatch) -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
@@ -333,6 +375,111 @@ def test_heartbeat_loop_forwards_explicit_degradation_observer(monkeypatch) -> N
     assert captured == [marker]
 
 
+@pytest.mark.asyncio
+async def test_service_health_heartbeat_scope_does_not_rebind_or_cancel_another_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+
+    started: list[tuple[object, object, object]] = []
+    stopped: list[object] = []
+    shared_transport_close_calls: list[str] = []
+
+    class ScopeTransport:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+
+    def first_observer(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        return ()
+
+    def second_observer(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        return ()
+
+    def first_resource_manager() -> object:
+        return object()
+
+    def second_resource_manager() -> object:
+        return object()
+
+    async def wait_for_scope_close(  # type: ignore[no-untyped-def]
+        _interval_sec: float,
+        *,
+        degradation_observer,
+        resource_manager_provider,
+        probe_state,
+    ) -> None:
+        started.append(
+            (degradation_observer, resource_manager_provider, probe_state)
+        )
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            stopped.append(degradation_observer)
+            raise
+
+    async def close_no_shared_transport() -> None:
+        shared_transport_close_calls.append("close")
+
+    monkeypatch.setattr(heartbeat, "heartbeat_loop", wait_for_scope_close)
+    monkeypatch.setattr(heartbeat, "close_http_client", close_no_shared_transport)
+    monkeypatch.setattr(
+        heartbeat,
+        "_is_local_ollama_keepalive_enabled",
+        lambda: False,
+    )
+
+    first_transport = ScopeTransport()
+    second_transport = ScopeTransport()
+    first = heartbeat.ServiceHealthHeartbeat(
+        degradation_observer=first_observer,
+        resource_manager_provider=first_resource_manager,
+        http_client_factory=lambda: first_transport,
+    )
+    second = heartbeat.ServiceHealthHeartbeat(
+        degradation_observer=second_observer,
+        resource_manager_provider=second_resource_manager,
+        http_client_factory=lambda: second_transport,
+    )
+    first_task = first.start(interval_sec=1.0)
+    second_task = second.start(interval_sec=1.0)
+    assert first.start(interval_sec=1.0) is first_task
+    assert first._probe_state.get_http_client() is first_transport  # noqa: SLF001
+    assert second._probe_state.get_http_client() is second_transport  # noqa: SLF001
+    with first._probe_state._cache_lock:  # noqa: SLF001
+        first._probe_state._cache["scope-first"] = {  # noqa: SLF001
+            "last_check_ts": int(time.time() * 1000),
+        }
+    await asyncio.sleep(0)
+
+    await first.aclose()
+
+    assert first_task.cancelled()
+    assert second.running is True
+    assert second_task.done() is False
+    assert [item[:2] for item in started] == [
+        (first_observer, first_resource_manager),
+        (second_observer, second_resource_manager),
+    ]
+    assert started[0][2] is not started[1][2]
+    assert stopped == [first_observer]
+    assert not hasattr(heartbeat, "_heartbeat_task")
+    assert not hasattr(heartbeat, "_heartbeat_degradation_observer")
+    assert shared_transport_close_calls == []
+    assert first_transport.close_calls == 1
+    assert second_transport.close_calls == 0
+    assert first.get_cached("scope-first") is None
+
+    await second.aclose()
+
+    assert second_task.cancelled()
+    assert stopped == [first_observer, second_observer]
+    assert shared_transport_close_calls == []
+    assert second_transport.close_calls == 1
+
+
 def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signal() -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
@@ -360,6 +507,41 @@ def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signa
     vts = heartbeat.get_cached("vts")
     assert vts is not None
     assert vts["status"] == "UNKNOWN"
+
+
+def test_app_local_probe_states_do_not_share_cache_entries() -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+
+    now_ts = int(time.time() * 1000)
+    first = heartbeat.ServiceHealthProbeState()
+    second = heartbeat.ServiceHealthProbeState()
+    edge_result = {
+        "status": "UP",
+        "latency_ms": 7,
+        "sub_services": {"vts": {"status": "UP", "detail": "ready"}},
+    }
+    host_result = {
+        "overall_status": "UP",
+        "latency_ms": 5,
+        "sub_services": {},
+    }
+
+    heartbeat._write_core_service_cache(
+        now_ts=now_ts,
+        edge_result=edge_result,
+        host_result=host_result,
+        probe_state=first,
+    )
+
+    assert heartbeat.get_cached("vts", probe_state=first) == {
+        "status": "UP",
+        "latency_ms": 7,
+        "last_check_ts": now_ts,
+        "name": "VTS / Live2D",
+        "side": "edge",
+        "detail": "ready",
+    }
+    assert heartbeat.get_cached("vts", probe_state=second) is None
 
 
 def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:

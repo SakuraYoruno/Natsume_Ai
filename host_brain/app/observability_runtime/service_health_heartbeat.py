@@ -72,11 +72,11 @@ _EDGE_RPC_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
 _EDGE_VTS_SERVICE_KEYS = ("edge.rpc.vts",)
 _EDGE_VTS_COMPONENT_KEYS = ("vts", "live2d", "vts_live2d")
 
-# 模块级 httpx.AsyncClient 单例（复用 TCP 连接，避免每次探测都创建/销毁）
+# Compatibility-only probe helpers retain this module transport.  Production
+# Host lifespans own a separate ``ServiceHealthProbeState`` below, so cache and
+# transport state cannot cross app scopes.
 _http_client: Optional[Any] = None
 _http_client_lock = threading.Lock()
-_keepalive_task: Optional[asyncio.Task] = None
-_heartbeat_degradation_observer: DegradationObserver | None = None
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -121,7 +121,7 @@ def _get_host_health_probe_timeout_sec() -> float:
 
 
 def _get_http_client():
-    """获取或创建模块级 httpx.AsyncClient 单例。"""
+    """获取或创建 compatibility-only 模块级 httpx.AsyncClient 单例。"""
     global _http_client
     with _http_client_lock:
         if _http_client is None:
@@ -131,7 +131,7 @@ def _get_http_client():
 
 
 async def close_http_client() -> None:
-    """关闭 httpx 客户端（shutdown 时调用）。"""
+    """Explicitly close the compatibility module transport at process teardown."""
     global _http_client
     with _http_client_lock:
         if _http_client is not None:
@@ -140,6 +140,105 @@ async def close_http_client() -> None:
             except Exception:
                 pass
             _http_client = None
+
+
+class ServiceHealthProbeState:
+    """App-local mutable probe cache and HTTP transport for one Host scope.
+
+    The compatibility helpers in this module deliberately remain callable for
+    embedded tools and focused tests.  Production ``ServiceHealthHeartbeat``
+    never uses their module-global cache or HTTP client: each Host lifespan
+    receives a fresh state object and closes only its own transport.
+    """
+
+    def __init__(
+        self,
+        *,
+        http_client_factory: Callable[[], Any] | None = None,
+    ) -> None:
+        if http_client_factory is not None and not callable(http_client_factory):
+            raise TypeError("http_client_factory must be callable or None")
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_lock = threading.Lock()
+        self._http_client: Any | None = None
+        self._http_client_lock = threading.Lock()
+        self._http_client_factory = http_client_factory
+        self._closed = False
+
+    def get_http_client(self) -> Any:
+        with self._http_client_lock:
+            if self._closed:
+                raise RuntimeError("SERVICE_HEALTH_PROBE_STATE_CLOSED")
+            if self._http_client is None:
+                factory = self._http_client_factory
+                if factory is None:
+                    import httpx
+
+                    self._http_client = httpx.AsyncClient(timeout=5.0)
+                else:
+                    self._http_client = factory()
+            return self._http_client
+
+    async def aclose(self) -> None:
+        """Close only the transport created by this exact probe state."""
+
+        with self._http_client_lock:
+            self._closed = True
+            client = self._http_client
+            self._http_client = None
+        with self._cache_lock:
+            self._cache.clear()
+        if client is None:
+            return
+        close = getattr(client, "aclose", None)
+        if not callable(close):
+            return
+        try:
+            await close()
+        except Exception:
+            logger.debug("App-local heartbeat transport close failed", exc_info=True)
+
+    def get_cached(self, service_id: str) -> Optional[Dict[str, Any]]:
+        with self._cache_lock:
+            entry = self._cache.get(service_id)
+        if not entry:
+            return None
+        last_ts = entry.get("last_check_ts") or 0
+        if (time.time() * 1000 - last_ts) / 1000.0 > CACHE_TTL_SEC:
+            return None
+        return dict(entry)
+
+    def has_fresh_core_service_cache(self) -> bool:
+        required_ids = [*_HOST_SERVICE_IDS, *EDGE_SERVICE_IDS]
+        now_ts = int(time.time() * 1000)
+        with self._cache_lock:
+            entries = {
+                service_id: self._cache.get(service_id)
+                for service_id in required_ids
+            }
+        for service_id in required_ids:
+            entry = entries.get(service_id)
+            if not entry:
+                return False
+            last_ts = entry.get("last_check_ts") or 0
+            if (now_ts - int(last_ts)) / 1000.0 > CACHE_TTL_SEC:
+                return False
+        return True
+
+
+def _resolve_http_client(*, probe_state: ServiceHealthProbeState | None) -> Any:
+    if probe_state is not None:
+        return probe_state.get_http_client()
+    return _get_http_client()
+
+
+def _resolve_cache_storage(
+    *,
+    probe_state: ServiceHealthProbeState | None,
+) -> tuple[Dict[str, Dict[str, Any]], threading.Lock]:
+    if probe_state is not None:
+        return probe_state._cache, probe_state._cache_lock  # noqa: SLF001
+    return _cache, _cache_lock
 
 
 def _get_host_health_url() -> str:
@@ -240,10 +339,14 @@ def _get_gemini_api_key() -> str | None:
 # LLM 节点独立探活
 # ---------------------------------------------------------------------------
 
-async def _probe_ollama_local(model_id: str) -> Dict[str, Any]:
+async def _probe_ollama_local(
+    model_id: str,
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Dict[str, Any]:
     """探测本地 Ollama 推理服务，区分“已安装”与“已驻留内存”状态。"""
     base_url = _get_ollama_base_url()
-    client = _get_http_client()
+    client = _resolve_http_client(probe_state=probe_state)
     t0 = time.monotonic()
     try:
         loaded_resp = await client.get(f"{base_url}/api/ps", timeout=5.0)
@@ -297,10 +400,14 @@ async def _probe_ollama_local(model_id: str) -> Dict[str, Any]:
         return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": str(exc)}
 
 
-async def _keepalive_ollama_local_model(model_id: str) -> Dict[str, Any]:
+async def _keepalive_ollama_local_model(
+    model_id: str,
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Dict[str, Any]:
     """使用 Ollama native API 发起 keep_alive 保活，不走 OpenAI 兼容层。"""
     base_url = _get_ollama_base_url()
-    client = _get_http_client()
+    client = _resolve_http_client(probe_state=probe_state)
     keep_alive = _get_local_ollama_keepalive_ttl()
     timeout_ms = _get_local_ollama_keepalive_timeout_ms()
     payload = {
@@ -338,7 +445,10 @@ async def _keepalive_ollama_local_model(model_id: str) -> Dict[str, Any]:
         }
 
 
-async def keep_local_ollama_models_alive_once() -> Dict[str, Dict[str, Any]]:
+async def keep_local_ollama_models_alive_once(
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Dict[str, Dict[str, Any]]:
     """对本地 Ollama 模型执行一轮 keepalive。"""
     if not _is_local_ollama_keepalive_enabled():
         return {}
@@ -351,13 +461,19 @@ async def keep_local_ollama_models_alive_once() -> Dict[str, Dict[str, Any]]:
         model_id = str(meta.get("model_id") or "").strip()
         if not model_id:
             continue
-        result = await _keepalive_ollama_local_model(model_id)
+        result = await _keepalive_ollama_local_model(
+            model_id,
+            probe_state=probe_state,
+        )
         result["model_id"] = model_id
         results[nid] = result
     return results
 
 
-async def _probe_gemini_cloud() -> Dict[str, Any]:
+async def _probe_gemini_cloud(
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Dict[str, Any]:
     """探测 Gemini 云端 API：GET /v1beta/models 验证 API Key 有效性和端点可达性。
 
     使用 models.list 端点（不消耗 token，仅验证认证和网络连通性）。
@@ -366,7 +482,7 @@ async def _probe_gemini_cloud() -> Dict[str, Any]:
     api_key = _get_gemini_api_key()
     if not api_key:
         return {"status": "DEGRADED", "latency_ms": None, "detail": "GEMINI_API_KEY not configured"}
-    client = _get_http_client()
+    client = _resolve_http_client(probe_state=probe_state)
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=1"
     t0 = time.monotonic()
     try:
@@ -386,7 +502,10 @@ async def _probe_gemini_cloud() -> Dict[str, Any]:
         return {"status": "DOWN", "latency_ms": elapsed_ms, "detail": str(exc)}
 
 
-async def _probe_llm_nodes() -> Dict[str, Dict[str, Any]]:
+async def _probe_llm_nodes(
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Dict[str, Dict[str, Any]]:
     """并发探测所有 LLM 节点，返回 { node_id: { status, latency_ms, detail } }。
 
     - 云端节点（Gemini）：共享一次 models.list 探活结果（同一 provider 只探一次）
@@ -409,7 +528,12 @@ async def _probe_llm_nodes() -> Dict[str, Dict[str, Any]]:
             }
             continue
         meta = LLM_NODE_REGISTRY[nid]
-        local_tasks[nid] = asyncio.create_task(_probe_ollama_local(meta["model_id"]))
+        local_tasks[nid] = asyncio.create_task(
+            _probe_ollama_local(
+                meta["model_id"],
+                probe_state=probe_state,
+            )
+        )
 
     # 云端模型：按 provider 分组，每个 provider 只探一次
     for nid in LLM_CLOUD_NODE_IDS:
@@ -417,7 +541,9 @@ async def _probe_llm_nodes() -> Dict[str, Dict[str, Any]]:
         provider = meta["provider"]
         if provider not in cloud_probe_cache:
             if provider == "gemini":
-                cloud_probe_cache[provider] = await _probe_gemini_cloud()
+                cloud_probe_cache[provider] = await _probe_gemini_cloud(
+                    probe_state=probe_state,
+                )
             else:
                 # 未知云端 provider，标记为 UNKNOWN
                 cloud_probe_cache[provider] = {"status": "UNKNOWN", "latency_ms": None, "detail": f"unsupported provider: {provider}"}
@@ -543,7 +669,10 @@ async def _probe_edge() -> Dict[str, Any]:
         return {"status": "DOWN", "latency_ms": None, "sub_services": {}}
 
 
-async def _probe_host() -> Dict[str, Any]:
+async def _probe_host(
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Dict[str, Any]:
     """探测 Host 进程：GET /health，解析返回的 details.services 获取各子服务独立状态。
 
     返回结构：
@@ -558,7 +687,7 @@ async def _probe_host() -> Dict[str, Any]:
     }
     """
     url = _get_host_health_url()
-    client = _get_http_client()
+    client = _resolve_http_client(probe_state=probe_state)
     timeout_sec = _get_host_health_probe_timeout_sec()
     for attempt in (0, 1):
         t0 = time.monotonic()
@@ -609,6 +738,7 @@ def _write_core_service_cache(
     now_ts: int,
     edge_result: Dict[str, Any],
     host_result: Dict[str, Any],
+    probe_state: ServiceHealthProbeState | None = None,
 ) -> None:
     """写入 host/edge 核心服务缓存，不包含 LLM 节点。"""
     host_overall = host_result.get("overall_status", "DOWN")
@@ -616,7 +746,8 @@ def _write_core_service_cache(
     sub_services = host_result.get("sub_services") or {}
     edge_sub_services = edge_result.get("sub_services") or {}
 
-    with _cache_lock:
+    cache, cache_lock = _resolve_cache_storage(probe_state=probe_state)
+    with cache_lock:
         for sid in EDGE_SERVICE_IDS:
             sub = sub_services.get(sid) or edge_sub_services.get(sid)
             if sub:
@@ -637,12 +768,12 @@ def _write_core_service_cache(
             }
             if detail:
                 row["detail"] = detail
-            _cache[sid] = row
+            cache[sid] = row
 
         for sid in _HOST_SERVICE_IDS:
             sub = sub_services.get(sid)
             status = sub["status"] if sub else host_overall
-            _cache[sid] = {
+            cache[sid] = {
                 "status": status,
                 "latency_ms": host_latency,
                 "last_check_ts": now_ts,
@@ -651,8 +782,13 @@ def _write_core_service_cache(
             }
 
 
-def has_fresh_core_service_cache() -> bool:
+def has_fresh_core_service_cache(
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> bool:
     """核心 host/edge 服务缓存是否完整且未过期。"""
+    if probe_state is not None:
+        return probe_state.has_fresh_core_service_cache()
     required_ids = [*_HOST_SERVICE_IDS, *EDGE_SERVICE_IDS]
     now_ts = int(time.time() * 1000)
 
@@ -669,8 +805,16 @@ def has_fresh_core_service_cache() -> bool:
     return True
 
 
-async def prime_core_service_cache_once() -> None:
-    """按需执行一轮 host/edge 核心服务探测并写入缓存。"""
+async def prime_core_service_cache_once(
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> None:
+    """按需执行一轮 host/edge 核心服务探测并写入缓存。
+
+    This compatibility helper owns no RuntimeGuardian authority.  Production
+    callers must use ``ServiceHealthHeartbeat`` so every degradation mutation
+    carries the creating Host lifespan's explicit observer.
+    """
     now_ts = int(time.time() * 1000)
     try:
         edge_result = await _probe_edge()
@@ -678,12 +822,17 @@ async def prime_core_service_cache_once() -> None:
         logger.debug("Prime core cache edge probe failed: %s", exc)
         edge_result = {"status": "DOWN", "latency_ms": None, "sub_services": {}}
     try:
-        host_result = await _probe_host()
+        host_result = await _probe_host(probe_state=probe_state)
     except Exception as exc:
         logger.debug("Prime core cache host probe failed: %s", exc)
         host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
 
-    _write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
+    _write_core_service_cache(
+        now_ts=now_ts,
+        edge_result=edge_result,
+        host_result=host_result,
+        probe_state=probe_state,
+    )
     try:
         _reconcile_degradation_observations(
             now_ts=now_ts,
@@ -703,7 +852,7 @@ def _reconcile_degradation_observations(
     llm_results: Mapping[str, Mapping[str, Any]],
     degradation_observer: DegradationObserver | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    """Project heartbeat signals through an explicit observer when provided."""
+    """Project heartbeat signals only through an explicit Guardian observer."""
     rows: list[dict[str, Any]] = []
     edge_sub_services = edge_result.get("sub_services")
     if isinstance(edge_sub_services, Mapping):
@@ -758,25 +907,17 @@ def _reconcile_degradation_observations(
         )
 
     source_ref = f"service-heartbeat://runtime/{int(now_ts)}"
-    if degradation_observer is not None:
-        result = degradation_observer(
-            rows,
-            source_ref=source_ref,
-            observed_at_ms=int(now_ts),
+    if degradation_observer is None:
+        logger.debug(
+            "Heartbeat degradation projection skipped: no app-local observer"
         )
-        return tuple(result or ())
-
-    # Compatibility path until ASGI owns the RuntimeGuardian lifecycle.  An
-    # explicitly injected observer must never fall through to this singleton.
-    from host_brain.observability.degradation_state import (  # noqa: PLC0415
-        reconcile_service_observations,
-    )
-
-    return reconcile_service_observations(
+        return ()
+    result = degradation_observer(
         rows,
         source_ref=source_ref,
-        now_ms=int(now_ts),
+        observed_at_ms=int(now_ts),
     )
+    return tuple(result or ())
 
 
 def _resource_gate_llm_probe_decision(
@@ -813,6 +954,7 @@ async def run_once(
     *,
     degradation_observer: DegradationObserver | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
+    probe_state: ServiceHealthProbeState | None = None,
 ) -> None:
     """执行一轮心跳探测并更新缓存。
 
@@ -828,7 +970,7 @@ async def run_once(
         logger.debug("Heartbeat Edge probe failed (will cache DOWN): %s", exc)
         edge_result = {"status": "DOWN", "latency_ms": None, "sub_services": {}}
     try:
-        host_result = await _probe_host()
+        host_result = await _probe_host(probe_state=probe_state)
     except Exception as exc:
         logger.debug("Heartbeat Host probe failed (will cache DOWN): %s", exc)
         host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
@@ -839,7 +981,7 @@ async def run_once(
     )
     if bool(llm_gate.get("allowed", True)):
         try:
-            llm_results = await _probe_llm_nodes()
+            llm_results = await _probe_llm_nodes(probe_state=probe_state)
         except Exception as exc:
             logger.debug("Heartbeat LLM probe failed (will cache DOWN): %s", exc)
             llm_results = {}
@@ -853,10 +995,16 @@ async def run_once(
             for sid in LLM_NODE_IDS
         }
 
-    _write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
+    _write_core_service_cache(
+        now_ts=now_ts,
+        edge_result=edge_result,
+        host_result=host_result,
+        probe_state=probe_state,
+    )
     host_overall = host_result.get("overall_status", "DOWN")
 
-    with _cache_lock:
+    cache, cache_lock = _resolve_cache_storage(probe_state=probe_state)
+    with cache_lock:
         # LLM 节点：使用独立探活结果，Host 进程 DOWN 时所有 LLM 节点也标记为 DOWN
         for sid in LLM_NODE_IDS:
             if host_overall == "DOWN":
@@ -873,7 +1021,7 @@ async def run_once(
                 status = "UNKNOWN"
                 latency = None
                 detail = "no probe result"
-            _cache[sid] = {
+            cache[sid] = {
                 "status": status,
                 "latency_ms": latency,
                 "last_check_ts": now_ts,
@@ -894,8 +1042,14 @@ async def run_once(
         logger.warning("Heartbeat degradation projection skipped: %s", exc)
 
 
-def get_cached(service_id: str) -> Optional[Dict[str, Any]]:
+def get_cached(
+    service_id: str,
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Optional[Dict[str, Any]]:
     """若缓存存在且未过期，返回该服务的缓存条目，否则返回 None。"""
+    if probe_state is not None:
+        return probe_state.get_cached(service_id)
     with _cache_lock:
         entry = _cache.get(service_id)
     if not entry:
@@ -914,15 +1068,21 @@ async def heartbeat_loop(
     *,
     degradation_observer: DegradationObserver | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
+    probe_state: ServiceHealthProbeState | None = None,
 ) -> None:
     """后台循环：每 interval_sec 执行一次 run_once()，直到任务被取消。"""
     logger.info("Service health heartbeat started (interval=%.0fs, initial_delay=%.0fs)", interval_sec, HEARTBEAT_INITIAL_DELAY_SEC)
     await asyncio.sleep(HEARTBEAT_INITIAL_DELAY_SEC)
     while True:
         try:
+            kwargs: dict[str, Any] = {
+                "degradation_observer": degradation_observer,
+                "resource_manager_provider": resource_manager_provider,
+            }
+            if probe_state is not None:
+                kwargs["probe_state"] = probe_state
             await run_once(
-                degradation_observer=degradation_observer,
-                resource_manager_provider=resource_manager_provider,
+                **kwargs,
             )
         except asyncio.CancelledError:
             logger.info("Service health heartbeat stopped")
@@ -932,10 +1092,11 @@ async def heartbeat_loop(
         await asyncio.sleep(interval_sec)
 
 
-_heartbeat_task: Optional[asyncio.Task] = None
-
-
-async def local_ollama_keepalive_loop(interval_sec: float | None = None) -> None:
+async def local_ollama_keepalive_loop(
+    interval_sec: float | None = None,
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> None:
     """后台保活本地 Ollama 14B 模型，避免默认 5 分钟自动卸载。"""
     resolved_interval = (
         float(interval_sec)
@@ -951,7 +1112,7 @@ async def local_ollama_keepalive_loop(interval_sec: float | None = None) -> None
     await asyncio.sleep(LOCAL_OLLAMA_KEEPALIVE_INITIAL_DELAY_SEC)
     while True:
         try:
-            await keep_local_ollama_models_alive_once()
+            await keep_local_ollama_models_alive_once(probe_state=probe_state)
         except asyncio.CancelledError:
             logger.info("Local Ollama keepalive stopped")
             raise
@@ -960,47 +1121,100 @@ async def local_ollama_keepalive_loop(interval_sec: float | None = None) -> None
         await asyncio.sleep(resolved_interval)
 
 
-def start_heartbeat(
-    interval_sec: float = 30.0,
-    *,
-    degradation_observer: DegradationObserver | None = None,
-) -> asyncio.Task:
-    """启动观测心跳，并按需附带本地 Ollama 保活任务。"""
-    global _heartbeat_degradation_observer, _heartbeat_task, _keepalive_task
-    if _heartbeat_task is not None and not _heartbeat_task.done():
-        if degradation_observer is not _heartbeat_degradation_observer:
-            raise RuntimeError("HEARTBEAT_DEGRADATION_OBSERVER_REBIND_FORBIDDEN")
-        if _is_local_ollama_keepalive_enabled() and (_keepalive_task is None or _keepalive_task.done()):
-            _keepalive_task = asyncio.create_task(local_ollama_keepalive_loop())
-        return _heartbeat_task
-    _heartbeat_degradation_observer = degradation_observer
-    _heartbeat_task = asyncio.create_task(
-        heartbeat_loop(
-            interval_sec,
-            degradation_observer=degradation_observer,
+class ServiceHealthHeartbeat:
+    """One Host-lifespan-owned health heartbeat and Guardian observer binding.
+
+    The process may host more than one ASGI app in tests, reloaders, or a
+    rolling hand-off.  A module-global task, cache or transport would let one
+    scope cancel, rebind, read stale state from, or close another scope.  This
+    owner keeps every mutable probe resource inside the lifespan that created
+    it.
+    """
+
+    def __init__(
+        self,
+        *,
+        degradation_observer: DegradationObserver,
+        resource_manager_provider: Callable[..., Any] | None = None,
+        http_client_factory: Callable[[], Any] | None = None,
+    ) -> None:
+        if not callable(degradation_observer):
+            raise TypeError("degradation_observer must be an app-local callable")
+        if resource_manager_provider is not None and not callable(
+            resource_manager_provider
+        ):
+            raise TypeError("resource_manager_provider must be callable or None")
+        self._degradation_observer = degradation_observer
+        self._resource_manager_provider = resource_manager_provider
+        self._probe_state = ServiceHealthProbeState(
+            http_client_factory=http_client_factory,
         )
-    )
-    if _is_local_ollama_keepalive_enabled():
-        _keepalive_task = asyncio.create_task(local_ollama_keepalive_loop())
-    return _heartbeat_task
+        self._heartbeat_task: asyncio.Task[Any] | None = None
+        self._keepalive_task: asyncio.Task[Any] | None = None
+        self._closed = False
 
+    @property
+    def running(self) -> bool:
+        task = self._heartbeat_task
+        return task is not None and not task.done()
 
-async def stop_heartbeat() -> None:
-    """停止心跳任务并关闭 HTTP 客户端（shutdown 时调用）。"""
-    global _heartbeat_degradation_observer, _heartbeat_task, _keepalive_task
-    if _keepalive_task is not None:
-        _keepalive_task.cancel()
-        try:
-            await _keepalive_task
-        except asyncio.CancelledError:
-            pass
-        _keepalive_task = None
-    if _heartbeat_task is not None:
-        _heartbeat_task.cancel()
-        try:
-            await _heartbeat_task
-        except asyncio.CancelledError:
-            pass
-        _heartbeat_task = None
-    _heartbeat_degradation_observer = None
-    await close_http_client()
+    def get_cached(self, service_id: str) -> Optional[Dict[str, Any]]:
+        """Read only this Host lifespan's probe result."""
+
+        return self._probe_state.get_cached(service_id)
+
+    def has_fresh_core_service_cache(self) -> bool:
+        """Check only this Host lifespan's probe cache."""
+
+        return self._probe_state.has_fresh_core_service_cache()
+
+    def start(self, *, interval_sec: float = 30.0) -> asyncio.Task[Any]:
+        """Start this scope once without permitting observer rebinding."""
+
+        if self._closed:
+            raise RuntimeError("SERVICE_HEALTH_HEARTBEAT_SCOPE_CLOSED")
+        task = self._heartbeat_task
+        if task is not None and not task.done():
+            return task
+        self._heartbeat_task = asyncio.create_task(
+            heartbeat_loop(
+                interval_sec,
+                degradation_observer=self._degradation_observer,
+                resource_manager_provider=self._resource_manager_provider,
+                probe_state=self._probe_state,
+            ),
+            name="host-service-health-heartbeat",
+        )
+        keepalive_task = self._keepalive_task
+        if _is_local_ollama_keepalive_enabled() and (
+            keepalive_task is None or keepalive_task.done()
+        ):
+            self._keepalive_task = asyncio.create_task(
+                local_ollama_keepalive_loop(probe_state=self._probe_state),
+                name="host-local-ollama-keepalive",
+            )
+        return self._heartbeat_task
+
+    async def aclose(self) -> None:
+        """Cancel and close only resources owned by this Host lifespan."""
+
+        self._closed = True
+        task_failure: Exception | None = None
+        for attribute in ("_keepalive_task", "_heartbeat_task"):
+            task = getattr(self, attribute)
+            if task is None:
+                continue
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                if task_failure is None:
+                    task_failure = exc
+            finally:
+                setattr(self, attribute, None)
+        await self._probe_state.aclose()
+        if task_failure is not None:
+            raise task_failure

@@ -149,17 +149,17 @@ def load_health_projection_sources(
     *,
     now_ms: int | None = None,
     window_minutes: int = 60,
-    include_process_cache: bool = True,
+    include_process_cache: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], int]:
-    """Read only heartbeat cache and audit rows; never launch a probe."""
+    """Rebuild health only from durable audit rows; never launch a probe.
 
-    heartbeat_cache_reader: Callable[[str], Mapping[str, Any] | None] | None = None
-    if include_process_cache:
-        from host_brain.app.observability_runtime import (
-            service_health_heartbeat as heartbeat,
-        )
+    ``include_process_cache`` remains source-compatible for callers compiled
+    before the Guardian corrective slice.  A module cache cannot cross a Host
+    restart or the dedicated Obs process boundary, so it deliberately has no
+    effect on this production read model.
+    """
 
-        heartbeat_cache_reader = heartbeat.get_cached
+    del include_process_cache
 
     now = max(0, int(now_ms if now_ms is not None else _now_ms()))
     since = now - max(1, int(window_minutes)) * 60_000
@@ -197,20 +197,7 @@ def load_health_projection_sources(
     services: list[dict[str, Any]] = []
     for service in ALL_SERVICES:
         service_id = service["service_id"]
-        cached = (
-            heartbeat_cache_reader(service_id)
-            if heartbeat_cache_reader is not None
-            else None
-        )
-        if cached is not None:
-            health = {
-                "status": str(cached.get("status") or "UNKNOWN").upper(),
-                "success_rate": None,
-                "p95_ms": cached.get("latency_ms"),
-                "last_call_ts": cached.get("last_check_ts"),
-                "call_count": 0,
-            }
-        elif service_id in EDGE_SERVICE_EVENT_PREFIXES:
+        if service_id in EDGE_SERVICE_EVENT_PREFIXES:
             prefixes = EDGE_SERVICE_EVENT_PREFIXES[service_id]
             health = _compute_health(
                 [
@@ -245,26 +232,12 @@ def load_health_projection_sources(
 
     nodes: list[dict[str, Any]] = []
     for node_id, meta in LLM_NODE_REGISTRY.items():
-        cached = (
-            heartbeat_cache_reader(node_id)
-            if heartbeat_cache_reader is not None
-            else None
-        )
-        if cached is not None:
-            health = {
-                "status": str(cached.get("status") or "UNKNOWN").upper(),
-                "success_rate": None,
-                "p95_ms": cached.get("latency_ms"),
-                "last_call_ts": cached.get("last_check_ts"),
-                "call_count": 0,
-            }
-        else:
-            matching = [
-                row
-                for row in model_attempt_rows
-                if model_attempt_node_id(row) == node_id
-            ]
-            health = _compute_health(matching)
+        matching = [
+            row
+            for row in model_attempt_rows
+            if model_attempt_node_id(row) == node_id
+        ]
+        health = _compute_health(matching)
         nodes.append({"node_id": node_id, **meta, **health})
 
     counts = {key: 0 for key in ("UP", "DEGRADED", "DOWN", "UNKNOWN")}

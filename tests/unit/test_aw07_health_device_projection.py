@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from types import SimpleNamespace
 
@@ -57,7 +58,7 @@ def test_device_projection_rebuilds_only_from_durable_receipt_facts() -> None:
     }
 
 
-def test_health_source_is_passive_cache_and_ledger_only(monkeypatch) -> None:
+def test_health_source_is_passive_durable_ledger_only(monkeypatch) -> None:
     from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
     from host_brain.app.observability_runtime.health_device_projection import (
         load_health_projection_sources,
@@ -70,14 +71,8 @@ def test_health_source_is_passive_cache_and_ledger_only(monkeypatch) -> None:
     monkeypatch.setattr(
         heartbeat,
         "get_cached",
-        lambda service_id: (
-            {
-                "status": "UP",
-                "latency_ms": 3,
-                "last_check_ts": 900,
-            }
-            if service_id == "edge_rpc"
-            else None
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("projection must not read a process heartbeat cache")
         ),
     )
 
@@ -109,18 +104,49 @@ def test_health_source_is_passive_cache_and_ledger_only(monkeypatch) -> None:
                 return []
             return []
 
-    services, nodes, cursor = load_health_projection_sources(Ledger(), now_ms=1_000)
+    services, nodes, cursor = load_health_projection_sources(
+        Ledger(),
+        now_ms=1_000,
+        include_process_cache=True,
+    )
 
     edge_rpc = next(row for row in services["services"] if row["service_id"] == "edge_rpc")
+    tts = next(row for row in services["services"] if row["service_id"] == "tts")
     chat = next(row for row in nodes["nodes"] if row["node_id"] == "chat_direct_ja")
     same_model_other_node = next(
         row for row in nodes["nodes"] if row["node_id"] == "core_reasoner_secondary"
     )
-    assert edge_rpc["status"] == "UP"
+    assert edge_rpc["status"] == "UNKNOWN"
+    assert tts["status"] == "UP"
     assert chat["status"] == "UP"
     assert chat["call_count"] == 1
     assert same_model_other_node["status"] == "UNKNOWN"
     assert cursor == 1_000
+
+
+def test_obs_probe_registry_does_not_read_process_heartbeat_cache(
+    monkeypatch,
+) -> None:
+    from host_brain.app import obs_routes_core
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+
+    monkeypatch.setattr(
+        heartbeat,
+        "get_cached",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("dedicated Obs must not read Host process cache")
+        ),
+    )
+
+    class Ledger:
+        def fetch_by_time_range(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return []
+
+    registry, _extra = obs_routes_core._build_probe_registry(Ledger(), since_ms=0)
+
+    edge_rpc = asyncio.run(registry["edge_rpc"]())
+
+    assert edge_rpc.status == "UNKNOWN"
 
 
 def test_llm_gateway_health_merges_sources_by_event_time_before_windowing() -> None:

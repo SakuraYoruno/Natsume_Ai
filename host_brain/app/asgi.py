@@ -25,6 +25,7 @@ from host_brain.app.asgi_runtime_helpers import (
     dispatch_edge_events,
 )
 from host_brain.app.http_hooks import runtime_lifespan
+from host_brain.app.startup import collect_dependency_probes
 from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
 )
@@ -65,6 +66,9 @@ from host_brain.app.host_runtime_startup_guards import (
 from host_brain.app.host_runtime_shutdown import (
     shutdown_host_runtime_authority,
     withdraw_published_runtime_state,
+)
+from host_brain.app.observability_runtime.service_health_heartbeat import (
+    ServiceHealthHeartbeat,
 )
 from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_source_composition import (
@@ -307,7 +311,7 @@ def create_app(
     embodiment_authority_task: asyncio.Task[None] | None = None
     runtime_context_composition: RuntimeContextComposition | None = None
     runtime_context_application: RuntimeContextApplicationService | None = None
-    guardian_heartbeat_task: asyncio.Task[None] | None = None
+    service_health_heartbeat: ServiceHealthHeartbeat | None = None
     catalog_rollout_guardian_task: asyncio.Task[None] | None = None
     startup_probe_statuses: dict[str, Any] = {}
 
@@ -495,7 +499,7 @@ def create_app(
         nonlocal life_command_authority, life_dispatchers
         nonlocal embodiment_runtime, embodiment_authority_task
         nonlocal runtime_context_composition, runtime_context_application
-        nonlocal guardian_heartbeat_task, catalog_rollout_guardian_task
+        nonlocal service_health_heartbeat, catalog_rollout_guardian_task
         nonlocal startup_probe_statuses
         async with runtime_lifespan(
             get_ledger=ledger_provider,
@@ -513,7 +517,6 @@ def create_app(
             tool_broker_provider=tool_composition.provide_tool_broker,
             tool_catalog_provider=host_services.tool_catalog,
             skill_registry_provider=host_services.skill_registry,
-            start_service_heartbeat=False,
             defer_activity_monitor=True,
         ):
             security: ProcessSecurityServiceContainer | None = None
@@ -539,6 +542,7 @@ def create_app(
                 nonlocal life_dispatchers, embodiment_runtime
                 nonlocal embodiment_authority_task, runtime_context_application
                 nonlocal runtime_context_composition
+                nonlocal service_health_heartbeat
                 security_container = command_ingress_container = None
                 memory_container = task_runtime_container = None
                 agent_workspace_container = scheduler_container = None
@@ -556,6 +560,7 @@ def create_app(
                 application.state.agent_runtime_application_ports = None
                 embodiment_runtime = embodiment_authority_task = None
                 runtime_context_application = runtime_context_composition = None
+                service_health_heartbeat = None
 
             try:
                 ledger = ledger_provider()
@@ -789,22 +794,14 @@ def create_app(
                 host_obs_degradation_state_provider = (
                     runtime_context_composition.guardian.read_degradation_state
                 )
-                from host_brain.app.observability_runtime.service_health_heartbeat import (  # noqa: PLC0415
-                    heartbeat_loop,
-                )
-
-                guardian_heartbeat_task = asyncio.create_task(
-                    heartbeat_loop(
-                        30.0,
-                        degradation_observer=(
-                            runtime_context_composition.guardian.observe_service_batch
-                        ),
-                        resource_manager_provider=(
-                            host_lifecycle.get_resource_manager
-                        ),
+                service_health_heartbeat = ServiceHealthHeartbeat(
+                    degradation_observer=(
+                        runtime_context_composition.guardian.observe_service_batch
                     ),
-                    name="host-runtime-guardian-health-heartbeat",
+                    resource_manager_provider=host_lifecycle.get_resource_manager,
                 )
+                service_health_heartbeat.start(interval_sec=30.0)
+                application.state.service_health_heartbeat = service_health_heartbeat
                 catalog_operation_id = str(
                     os.environ.get("HOST_SERVICE_CATALOG_OPERATION_ID") or ""
                 ).strip()
@@ -1066,7 +1063,9 @@ def create_app(
                                 runtime_context_composition.guardian.read_degradation_state
                                 if runtime_context_composition is not None
                                 else None
-                            )
+                            ),
+                            ledger_provider=lambda: ledger,
+                            dependency_probe_provider=collect_dependency_probes,
                         ),
                         source="health",
                     )
@@ -1295,9 +1294,18 @@ def create_app(
                 scheduler_container = scheduler
                 yield
             finally:
+                if service_health_heartbeat is not None:
+                    try:
+                        await service_health_heartbeat.aclose()
+                    except Exception:
+                        logger.error(
+                            "HOST_OWNED_TASK_CLOSE_FAILED:runtime-guardian-heartbeat",
+                            exc_info=True,
+                        )
+                service_health_heartbeat = None
+                application.state.service_health_heartbeat = None
                 for owned_task, task_name in (
                     (catalog_rollout_guardian_task, "catalog-rollout-guardian"),
-                    (guardian_heartbeat_task, "runtime-guardian-heartbeat"),
                 ):
                     if owned_task is None:
                         continue
@@ -1312,7 +1320,7 @@ def create_app(
                             task_name,
                             exc_info=True,
                         )
-                catalog_rollout_guardian_task = guardian_heartbeat_task = None
+                catalog_rollout_guardian_task = None
                 await shutdown_host_runtime_authority(
                     application=application,
                     security=security,
@@ -1389,6 +1397,7 @@ def create_app(
     application.state.embodiment_runtime = None
     application.state.runtime_context_composition = None
     application.state.agent_runtime_application_ports = None
+    application.state.service_health_heartbeat = None
     application.state.host_lifecycle_container = host_lifecycle
     application.state.tribe_application_ports = tribe_application_ports
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports

@@ -16,13 +16,6 @@ def _dependencies() -> ProcessRuntimeShutdownDependencies:
 
         get_cortex_agent().shutdown_bond_update_queue(logger=logger, timeout_s=3.0)
 
-    async def stop_heartbeat() -> None:
-        from host_brain.app.observability_runtime.service_health_heartbeat import (  # noqa: PLC0415
-            stop_heartbeat as stop,
-        )
-
-        await stop()
-
     def get_tribe_event_bus() -> Any | None:
         from host_brain.app.internal_tribe_routes import (  # noqa: PLC0415
             get_tribe_event_bus as get_bus,
@@ -32,7 +25,6 @@ def _dependencies() -> ProcessRuntimeShutdownDependencies:
 
     return ProcessRuntimeShutdownDependencies(
         stop_bond_queue=stop_bond_queue,
-        stop_heartbeat=stop_heartbeat,
         get_tribe_event_bus=get_tribe_event_bus,
     )
 
