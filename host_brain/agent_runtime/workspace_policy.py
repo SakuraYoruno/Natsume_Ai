@@ -10,7 +10,11 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 from host_brain.agent_runtime.artifact_store import DEFAULT_CODEX_RUNS_ROOT, REPO_ROOT, sanitize_segment
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import (
+    AgentWorkOrder,
+    WorkOrderV3,
+    canonicalize_work_order,
+)
 
 if TYPE_CHECKING:
     from host_brain.agent_runtime.workspace_allocator import (
@@ -96,7 +100,7 @@ class WorkspacePolicy:
         *,
         workspace_allocator: "WorkspaceAllocator | None" = None,
         workspace_lease_provider: Callable[
-            [AgentWorkOrder, str], "DurableWorkspaceLease"
+            [AgentWorkOrder | WorkOrderV3, str], "DurableWorkspaceLease"
         ]
         | None = None,
     ) -> None:
@@ -107,7 +111,8 @@ class WorkspacePolicy:
         self._workspace_allocator = workspace_allocator
         self._workspace_lease_provider = workspace_lease_provider
 
-    def resolve(self, work_order: AgentWorkOrder) -> WorkspaceResolution:
+    def resolve(self, work_order: AgentWorkOrder | WorkOrderV3) -> WorkspaceResolution:
+        work_order = self._prepare_work_order(work_order)
         workspace = dict(work_order.workspace or {})
         strategy = str(workspace.get("strategy") or "").strip().lower()
         if strategy == "durable_workspace":
@@ -142,7 +147,7 @@ class WorkspacePolicy:
 
     def _resolve_durable(
         self,
-        work_order: AgentWorkOrder,
+        work_order: AgentWorkOrder | WorkOrderV3,
         *,
         workspace: dict[str, Any],
     ) -> WorkspaceResolution:
@@ -169,30 +174,15 @@ class WorkspacePolicy:
                 WORKSPACE_WRITE_GRANT_REQUIRED,
                 "durable workspace_id is required",
             )
-        expected_root_work_order_id = str(
-            work_order.metadata.get("root_work_order_id")
-            or work_order.work_order_id
-        ).strip()
-        expected_graph_id = str(
-            work_order.metadata.get("task_graph_id") or ""
-        ).strip()
-        raw_graph_revision = work_order.metadata.get("graph_revision")
-        if isinstance(raw_graph_revision, bool):
-            raise WorkspacePolicyViolation(
-                WORKSPACE_WRITE_GRANT_REQUIRED,
-                "durable workspace requires canonical graph metadata",
-            )
-        try:
-            expected_graph_revision = int(raw_graph_revision)
-        except (TypeError, ValueError) as exc:
-            raise WorkspacePolicyViolation(
-                WORKSPACE_WRITE_GRANT_REQUIRED,
-                "durable workspace requires canonical graph metadata",
-            ) from exc
+        (
+            expected_root_work_order_id,
+            expected_graph_id,
+            expected_graph_revision,
+        ) = self._durable_graph_identity(work_order)
         if not expected_graph_id or expected_graph_revision < 1:
             raise WorkspacePolicyViolation(
                 WORKSPACE_WRITE_GRANT_REQUIRED,
-                "durable workspace requires canonical graph metadata",
+                "durable workspace requires canonical WorkOrder graph fields",
             )
         try:
             lease = self._workspace_lease_provider(work_order, workspace_id)
@@ -229,7 +219,7 @@ class WorkspacePolicy:
 
     @staticmethod
     def _enforce_w0_workspace_source(
-        work_order: AgentWorkOrder,
+        work_order: AgentWorkOrder | WorkOrderV3,
         *,
         workspace: dict[str, Any],
         strategy: str,
@@ -261,7 +251,7 @@ class WorkspacePolicy:
             )
 
     @staticmethod
-    def _requires_workspace_write(work_order: AgentWorkOrder) -> bool:
+    def _requires_workspace_write(work_order: AgentWorkOrder | WorkOrderV3) -> bool:
         actions = {
             str(action).strip().lower()
             for action in work_order.allowed_actions
@@ -271,7 +261,12 @@ class WorkspacePolicy:
             actions & _WORKSPACE_WRITE_ACTIONS
         )
 
-    def enforce_write_policy(self, work_order: AgentWorkOrder, resolution: WorkspaceResolution) -> tuple[bool, str | None]:
+    def enforce_write_policy(
+        self,
+        work_order: AgentWorkOrder | WorkOrderV3,
+        resolution: WorkspaceResolution,
+    ) -> tuple[bool, str | None]:
+        work_order = self._prepare_work_order(work_order)
         if not self._requires_workspace_write(work_order):
             return True, None
         allowed_actions = {
@@ -302,6 +297,55 @@ class WorkspacePolicy:
         if work_order.approval_policy.get("require_confirm") and not work_order.approval_policy.get("confirmed"):
             return False, "approval_policy.confirmed=true is required"
         return True, None
+
+    @staticmethod
+    def _prepare_work_order(
+        work_order: AgentWorkOrder | WorkOrderV3,
+    ) -> AgentWorkOrder | WorkOrderV3:
+        """Keep v2 only at this public compatibility boundary.
+
+        Host-admitted workers already arrive as v3.  The standalone policy
+        still accepts v2 so existing external callers can resolve legacy W1
+        workspaces while they migrate; v3 always validates its top-level graph
+        identity and rejects conflicting metadata.
+        """
+
+        if isinstance(work_order, WorkOrderV3):
+            return canonicalize_work_order(work_order)
+        if isinstance(work_order, AgentWorkOrder):
+            work_order.validate()
+            return work_order
+        raise TypeError("workspace policy requires AgentWorkOrder or WorkOrderV3")
+
+    @staticmethod
+    def _durable_graph_identity(
+        work_order: AgentWorkOrder | WorkOrderV3,
+    ) -> tuple[str, str, int]:
+        if isinstance(work_order, WorkOrderV3):
+            return (
+                work_order.root_work_order_id,
+                str(work_order.task_graph_id or "").strip(),
+                work_order.graph_revision,
+            )
+        metadata = dict(work_order.metadata or {})
+        root_work_order_id = str(
+            metadata.get("root_work_order_id") or work_order.work_order_id
+        ).strip()
+        graph_id = str(metadata.get("task_graph_id") or "").strip()
+        raw_graph_revision = metadata.get("graph_revision")
+        if isinstance(raw_graph_revision, bool):
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable workspace requires canonical graph metadata",
+            )
+        try:
+            graph_revision = int(raw_graph_revision)
+        except (TypeError, ValueError) as exc:
+            raise WorkspacePolicyViolation(
+                WORKSPACE_WRITE_GRANT_REQUIRED,
+                "durable workspace requires canonical graph metadata",
+            ) from exc
+        return root_work_order_id, graph_id, graph_revision
 
     @staticmethod
     def _git_branch(workspace: Path) -> str | None:

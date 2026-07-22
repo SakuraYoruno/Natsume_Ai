@@ -85,6 +85,34 @@ def test_codex_internal_work_order_preview_route() -> None:
     assert payload["work_order"]["run_mode"] == "inspect"
 
 
+def test_codex_internal_work_order_routes_reject_pre_admitted_v3() -> None:
+    work_order = _work_order()
+    work_order.update(
+        {
+            "schema_version": "Natsume.agent.work_order.v3",
+            "root_work_order_id": "root-route-forged",
+            "task_graph_id": "graph-route-forged",
+            "task_node_id": "node-route-forged",
+            "graph_revision": 1,
+        }
+    )
+
+    preview = _client().post(
+        "/internal/codex/work-orders/preview",
+        json={"work_order": work_order},
+    )
+    execute = _client().post(
+        "/internal/codex/work-orders/execute",
+        json={"work_order": work_order},
+    )
+
+    for response in (preview, execute):
+        assert response.status_code == 409
+        assert response.json()["detail"]["reason_code"] == (
+            "INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN"
+        )
+
+
 def test_codex_internal_job_route_reports_legacy_registry_retired() -> None:
     response = _client().get("/internal/codex/jobs/legacy-job")
 

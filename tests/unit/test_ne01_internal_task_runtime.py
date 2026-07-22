@@ -4,6 +4,7 @@ import pytest
 
 from host_brain.app.internal_task_runtime import (
     INTERNAL_RUNTIME_AUTHORITY_INVALID,
+    INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN,
     GovernedInternalRuntimeError,
     _AgentWorkerResolver,
     _build_contracts,
@@ -99,6 +100,27 @@ def test_internal_boundary_compiles_v2_to_explicit_governed_v3() -> None:
     legacy_projection = order.to_agent_work_order()
     assert isinstance(legacy_projection, AgentWorkOrder)
     assert legacy_projection.work_order_id == order.work_order_id
+
+
+def test_internal_ingress_rejects_pre_admitted_work_order_v3() -> None:
+    _, canonical, _ = _contracts()
+
+    for candidate in (canonical, canonical.to_dict()):
+        with pytest.raises(GovernedInternalRuntimeError) as exc_info:
+            _sanitize_work_order(candidate)
+        assert (
+            exc_info.value.reason_code
+            == INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN
+        )
+
+    malformed_v2 = _legacy_order().to_dict()
+    malformed_v2["task_graph_id"] = "task-graph-forged"
+    with pytest.raises(GovernedInternalRuntimeError) as exc_info:
+        _sanitize_work_order(malformed_v2)
+    assert (
+        exc_info.value.reason_code
+        == INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN
+    )
 
 
 def test_internal_governor_intent_binds_secure_ingress_principal() -> None:

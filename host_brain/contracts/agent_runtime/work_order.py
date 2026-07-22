@@ -474,6 +474,78 @@ class WorkOrderV3:
         return AgentWorkOrder.from_mapping(self.to_v2_mapping())
 
 
+def _validate_legacy_graph_metadata(order: WorkOrderV3) -> None:
+    """Reject a v3 order whose legacy metadata disagrees with its fields.
+
+    ``metadata`` is intentionally extensible, but the graph identity fields
+    stopped being metadata once WorkOrder v3 became canonical.  Accepting both
+    representations with different values would let a downstream compatibility
+    adapter choose a different graph epoch from the one admitted by the Host.
+    Empty legacy values remain harmless so a caller can omit them while moving
+    to v3.
+    """
+
+    metadata = dict(order.metadata or {})
+    expected_text = {
+        "root_work_order_id": order.root_work_order_id,
+        "task_graph_id": order.task_graph_id or "",
+        "task_node_id": order.task_node_id or "",
+    }
+    for field_name, expected in expected_text.items():
+        if field_name not in metadata or metadata[field_name] in (None, ""):
+            continue
+        actual = str(metadata[field_name]).strip()
+        if actual != expected:
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID,
+                f"metadata.{field_name} conflicts with canonical WorkOrder v3 field",
+            )
+
+    if "graph_revision" not in metadata or metadata["graph_revision"] in (None, ""):
+        return
+    raw_revision = metadata["graph_revision"]
+    if isinstance(raw_revision, bool):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "metadata.graph_revision conflicts with canonical WorkOrder v3 field",
+        )
+    try:
+        legacy_revision = int(raw_revision)
+    except (TypeError, ValueError) as exc:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "metadata.graph_revision conflicts with canonical WorkOrder v3 field",
+        ) from exc
+    if legacy_revision != order.graph_revision:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "metadata.graph_revision conflicts with canonical WorkOrder v3 field",
+        )
+
+
+def canonicalize_work_order(
+    value: AgentWorkOrder | WorkOrderV3 | Mapping[str, Any],
+) -> WorkOrderV3:
+    """Return the one WorkOrder representation used after runtime admission.
+
+    The public v2 payload remains an ingress compatibility format.  Once the
+    runtime begins execution it is normalized to v3 and must never be projected
+    back to v2 just because an older worker helper is still present.
+    """
+
+    if isinstance(value, WorkOrderV3):
+        order = value
+    elif isinstance(value, AgentWorkOrder):
+        order = WorkOrderV3.from_mapping(value.to_dict())
+    elif isinstance(value, Mapping):
+        order = WorkOrderV3.from_mapping(value)
+    else:
+        raise TypeError("WorkOrder must be AgentWorkOrder, WorkOrderV3, or a mapping")
+    order.validate()
+    _validate_legacy_graph_metadata(order)
+    return order
+
+
 WorkOrder = WorkOrderV3
 
 
@@ -491,4 +563,5 @@ __all__ = [
     "WorkOrder",
     "WorkOrderV3",
     "build_work_order_id",
+    "canonicalize_work_order",
 ]

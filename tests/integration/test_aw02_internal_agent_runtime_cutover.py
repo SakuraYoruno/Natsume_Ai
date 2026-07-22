@@ -629,7 +629,12 @@ async def test_internal_proposal_supplies_exact_durable_workspace_authority(
             workspace,
             cancelled=None,
         ):  # noqa: ANN001, ANN202
+            assert isinstance(candidate, WorkOrderV3)
             assert candidate.work_order_id == work_order.work_order_id
+            assert candidate.root_work_order_id == work_order.root_work_order_id
+            assert candidate.task_graph_id == graph.graph_id
+            assert candidate.task_node_id == node.node_id
+            assert candidate.graph_revision == graph.revision
             assert workspace == (managed / workspace_id).resolve()
             assert cancelled is not None and cancelled() is False
             return AgentResult(

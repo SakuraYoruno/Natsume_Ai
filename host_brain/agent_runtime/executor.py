@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import nullcontext
 import logging
 from pathlib import Path
@@ -31,7 +32,11 @@ from host_brain.agent_runtime.verification_policy import (
     VerificationGate,
     VerificationPolicy,
 )
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import (
+    AgentWorkOrder,
+    WorkOrderV3,
+    canonicalize_work_order,
+)
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.agent_runtime.workspace_runtime import (
     DurableWorkspaceRuntime,
@@ -118,7 +123,7 @@ def _current_git_branch(workspace: Path) -> str:
     return str(completed.stdout or "").strip()
 
 
-def _apply_required_verification_gate(result: AgentResult, order: AgentWorkOrder) -> AgentResult:
+def _apply_required_verification_gate(result: AgentResult, order: WorkOrderV3) -> AgentResult:
     if not VerificationGate.required_plan_not_passed(order.verification_plan, result.verification):
         return result
     verification = dict(result.verification or {})
@@ -140,7 +145,7 @@ def _apply_required_verification_gate(result: AgentResult, order: AgentWorkOrder
     return result
 
 
-def _apply_acceptance_judge(result: AgentResult, order: AgentWorkOrder) -> AgentResult:
+def _apply_acceptance_judge(result: AgentResult, order: WorkOrderV3) -> AgentResult:
     if not order.acceptance_criteria:
         return result
     critic_candidate = None
@@ -151,8 +156,8 @@ def _apply_acceptance_judge(result: AgentResult, order: AgentWorkOrder) -> Agent
         work_order_id=order.work_order_id,
         acceptance_criteria=tuple(order.acceptance_criteria),
         critic_candidate=critic_candidate,
-        task_graph_id=str(order.metadata.get("task_graph_id") or "").strip() or None,
-        task_node_id=str(order.metadata.get("task_node_id") or "").strip() or None,
+        task_graph_id=str(order.task_graph_id or "").strip() or None,
+        task_node_id=str(order.task_node_id or "").strip() or None,
         attempt_id=str(order.metadata.get("attempt_id") or "").strip() or None,
         started_at_ms=None,
         finished_at_ms=now_ms(),
@@ -198,12 +203,29 @@ class AgentRuntimeExecutor:
 
     def execute(
         self,
-        work_order: AgentWorkOrder | dict[str, Any],
+        work_order: AgentWorkOrder | WorkOrderV3 | Mapping[str, Any],
         *,
         workspace_execution_authority: dict[str, Any] | None = None,
         projection_recovery_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        order = work_order if isinstance(work_order, AgentWorkOrder) else AgentWorkOrder.from_mapping(work_order)
+        try:
+            order = canonicalize_work_order(work_order)
+        except Exception as exc:
+            raw_work_order_id = (
+                str(getattr(work_order, "work_order_id", "") or "").strip()
+                if not isinstance(work_order, Mapping)
+                else str(work_order.get("work_order_id") or "").strip()
+            )
+            result = blocked_result(
+                work_order_id=raw_work_order_id or f"invalid_{new_event_id()}",
+                summary="Agent WorkOrder could not be parsed as canonical v3.",
+                artifacts_dir="",
+                detail=_opaque_executor_failure(exc),
+                risk_flags=["work_order_invalid"],
+                review_required=True,
+                reason_code=str(getattr(exc, "reason_code", "") or "WORK_ORDER_INVALID"),
+            )
+            return result.to_dict()
         event_id = new_event_id()
         ts = now_ms()
         run_dir: Path | None = None
@@ -465,6 +487,7 @@ class AgentRuntimeExecutor:
         metadata.update(
             {
                 "execution_authority": "canonical_agent_executor",
+                "work_order_schema_version": order.schema_version,
                 "workspace": str(resolution.path),
                 "workspace_source": resolution.source,
                 "workspace_id": resolution.workspace_id,
@@ -514,7 +537,7 @@ class AgentRuntimeExecutor:
             payload["_protected_stage"] = seal.protected_payload()
         return payload
 
-    def _persist_result(self, run_dir: Path, result: AgentResult, *, order: AgentWorkOrder, event_id: str, ts_ms: int) -> None:
+    def _persist_result(self, run_dir: Path, result: AgentResult, *, order: WorkOrderV3, event_id: str, ts_ms: int) -> None:
         metadata = sanitize_public_payload({
             "event_id": event_id,
             "ts_ms": ts_ms,
@@ -584,7 +607,7 @@ def execute_agent_runtime_payload(
     return AgentRuntimeExecutor(
         model_attempt_service=model_attempt_service,
         prompt_registry=prompt_registry,
-    ).execute(AgentWorkOrder.from_mapping(raw_order))
+    ).execute(raw_order)
 
 
 __all__ = ["AgentRuntimeExecutor", "execute_agent_runtime_payload"]

@@ -13,7 +13,7 @@ from host_brain.contracts.agent_runtime.contract_errors import (
     ContractViolation,
     require_version,
 )
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 
 
 REVIEW_ITEM_SCHEMA_VERSION = "Natsume.agent.review_item.v1"
@@ -213,7 +213,7 @@ class ReviewItem:
 
 
 class ReviewPolicy:
-    def durable_review_required(self, work_order: AgentWorkOrder) -> bool:
+    def durable_review_required(self, work_order: AgentWorkOrder | WorkOrderV3) -> bool:
         if bool(work_order.review_policy.get("durable_review_required")):
             return True
         if bool(work_order.review_policy.get("require_durable_review")):
@@ -224,7 +224,7 @@ class ReviewPolicy:
             return True
         return False
 
-    def review_required(self, work_order: AgentWorkOrder) -> bool:
+    def review_required(self, work_order: AgentWorkOrder | WorkOrderV3) -> bool:
         if "review_required" in work_order.review_policy:
             return bool(work_order.review_policy.get("review_required"))
         if self.durable_review_required(work_order):

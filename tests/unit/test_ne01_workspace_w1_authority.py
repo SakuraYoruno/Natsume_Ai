@@ -16,7 +16,7 @@ from host_brain.agent_runtime.workspace_allocator import (
 )
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.persistence.workspace_repository import (
     WORKSPACE_AUTHORITY_CONFLICT,
     WORKSPACE_AUTHORITY_INVALID,
@@ -572,6 +572,53 @@ def test_workspace_policy_needs_injected_allocator_and_only_logical_lease_payloa
 
     order.workspace = {**payload, "lease": {"token": TOKEN_ONE}}
     with pytest.raises(ValueError, match="cannot be serialized"):
+        policy.resolve(order)
+
+
+def test_workspace_policy_uses_v3_graph_fields_and_rejects_metadata_drift(
+    tmp_path: Path,
+) -> None:
+    repository, _ = _repository(tmp_path)
+    allocator = _allocator(repository, tmp_path / "managed-v3")
+    allocator.allocate(**_allocation_values())
+    active = repository.acquire_lease(
+        "workspace-w1",
+        lease_owner="worker-v3",
+        lease_token=TOKEN_ONE,
+        lease_ms=100,
+    ).authority
+    order = WorkOrderV3(
+        work_order_id="work-order-w1",
+        root_work_order_id="work-order-w1",
+        domain="code",
+        run_mode="worker",
+        objective="exercise canonical workspace graph binding",
+        workspace={
+            "strategy": "durable_workspace",
+            "workspace_id": "workspace-w1",
+        },
+        allowed_actions=("write_files",),
+        forbidden_actions=("modify_secret_files",),
+        task_graph_id="graph-w1",
+        task_node_id="node-w1",
+        graph_revision=1,
+    )
+    server_lease = DurableWorkspaceLease(
+        workspace_id="workspace-w1",
+        lease_owner="worker-v3",
+        lease_token=TOKEN_ONE,
+        lease_fencing_token=active.lease_fencing_token,
+    )
+    policy = WorkspacePolicy(
+        workspace_allocator=allocator,
+        workspace_lease_provider=lambda _order, _workspace_id: server_lease,
+    )
+
+    resolution = policy.resolve(order)
+
+    assert resolution.workspace_id == "workspace-w1"
+    order.metadata["task_graph_id"] = "graph-drift"
+    with pytest.raises(ValueError, match="conflicts with canonical WorkOrder v3 field"):
         policy.resolve(order)
 
 

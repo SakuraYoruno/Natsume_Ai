@@ -40,7 +40,11 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetPolicy,
 )
 from host_brain.persistence.task_repository import OutboxMessage
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
+from host_brain.contracts.agent_runtime.work_order import (
+    AgentWorkOrder,
+    WORK_ORDER_V3_SCHEMA_VERSION,
+    WorkOrderV3,
+)
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernedCommandApplication,
@@ -74,6 +78,9 @@ INTERNAL_RUNTIME_DRAIN_TIMEOUT = "INTERNAL_RUNTIME_DRAIN_TIMEOUT"
 INTERNAL_RUNTIME_GOVERNOR_REJECTED = "INTERNAL_RUNTIME_GOVERNOR_REJECTED"
 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED = (
     "INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED"
+)
+INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN = (
+    "INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN"
 )
 INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED = (
     "INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED"
@@ -122,6 +129,25 @@ _CALLER_APPROVAL_AUTHORITY_KEYS = frozenset(
         "governor_grant_ref",
         "review_ref",
         "review_resume_token_ref",
+    }
+)
+_PRE_ADMITTED_WORK_ORDER_FIELDS = frozenset(
+    {
+        "root_work_order_id",
+        "parent_work_order_id",
+        "task_graph_id",
+        "task_node_id",
+        "graph_revision",
+        "attempt",
+        "capability_requirements",
+        "input_refs",
+        "output_contract",
+        "budget_policy",
+        "business_idempotency_scope",
+        "operation_fingerprint",
+        "status_version",
+        "approval_ref",
+        "review_ref",
     }
 )
 _STABLE_COMMAND_FIELDS = (
@@ -1110,8 +1136,49 @@ def _build_governor_intent(
     }
 
 
-def _sanitize_work_order(value: AgentWorkOrder | Mapping[str, Any]) -> AgentWorkOrder:
-    order = value if isinstance(value, AgentWorkOrder) else AgentWorkOrder.from_mapping(value)
+def parse_external_v2_work_order(value: Any) -> AgentWorkOrder:
+    """Accept only a pre-admission V2 description at the Internal ingress.
+
+    A durable ``WorkOrderV3`` already names a root, graph, node and revision.
+    Re-projecting it through this ingress would discard those bindings and build
+    a second graph.  The compatibility boundary therefore accepts V2 only;
+    canonical V3 work orders must re-enter through their persisted command.
+    """
+
+    if isinstance(value, WorkOrderV3):
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN,
+            "Internal ingress cannot re-admit a WorkOrderV3 object",
+        )
+    if isinstance(value, AgentWorkOrder):
+        return value
+    if not isinstance(value, Mapping):
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_AUTHORITY_INVALID,
+            "Internal ingress work_order must be a V2 mapping",
+        )
+    payload = dict(value)
+    schema_version = str(payload.get("schema_version") or "").strip()
+    forbidden_fields = sorted(
+        field_name
+        for field_name in _PRE_ADMITTED_WORK_ORDER_FIELDS
+        if field_name in payload
+    )
+    if schema_version == WORK_ORDER_V3_SCHEMA_VERSION or forbidden_fields:
+        detail = "Internal ingress cannot re-admit a pre-bound WorkOrder"
+        if schema_version == WORK_ORDER_V3_SCHEMA_VERSION:
+            detail += " with WorkOrderV3 schema"
+        if forbidden_fields:
+            detail += ": " + ", ".join(forbidden_fields)
+        raise GovernedInternalRuntimeError(
+            INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN,
+            detail,
+        )
+    return AgentWorkOrder.from_mapping(payload)
+
+
+def _sanitize_work_order(value: Any) -> AgentWorkOrder:
+    order = parse_external_v2_work_order(value)
     payload = order.to_dict()
     metadata = dict(payload.get("metadata") or {})
     for key in _CALLER_AUTHORITY_KEYS:
@@ -1309,9 +1376,11 @@ __all__ = [
     "INTERNAL_RUNTIME_GOVERNOR_REJECTED",
     "INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED",
     "INTERNAL_RUNTIME_INACTIVE",
+    "INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN",
     "GovernedInternalRuntime",
     "GovernedInternalRuntimeError",
     "IngressClaimResultStore",
     "InternalAgentCommandService",
     "build_governed_internal_runtime",
+    "parse_external_v2_work_order",
 ]
