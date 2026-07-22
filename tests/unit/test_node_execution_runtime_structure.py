@@ -52,7 +52,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "c880db150ad581dd4e018124136850bc07a882524a6b8136566aac8e3d16c9ce"
+    "80fb1f51b03b5091de702afd2e5d0b1fed218b6871730f93f2d74e5ab833edf1"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
@@ -400,10 +400,16 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         "_acceptance",
         "_reviews",
         "_projection",
+        "_scheduler_checkpoint_continuation_authority",
         "_owner_id",
         "_lease_ttl_ms",
         "_operation_ttl_ms",
     }
+    execute_parameters = inspect.signature(
+        DurableNodeExecutionRuntime.execute_stream
+    ).parameters
+    assert "allow_multinode_checkpoint_continuation" not in execute_parameters
+    assert "scheduler_checkpoint_continuation_authority" in execute_parameters
     owner = classes[0]
     expected_matrices = {
         "_store": {

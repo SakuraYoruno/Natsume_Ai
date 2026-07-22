@@ -117,6 +117,7 @@ class DurableNodeExecutionRuntime:
         "_projection",
         "_reviews",
         "_runtime_outbox",
+        "_scheduler_checkpoint_continuation_authority",
         "_store",
         "_verifier",
         "_workers",
@@ -145,6 +146,10 @@ class DurableNodeExecutionRuntime:
         self._store = task_store
         self._checkpoint_uow = checkpoint_uow
         self._runtime_outbox = runtime_outbox
+        # The outer durable DAG scheduler receives this opaque identity during
+        # composition.  A direct node caller cannot opt into multi-node
+        # checkpoint continuation with a boolean switch.
+        self._scheduler_checkpoint_continuation_authority = object()
         self._budgets = budget_runtime
         self._node_lifecycle = node_lifecycle
         self._node_grant_verifier = node_grant_verifier
@@ -183,6 +188,12 @@ class DurableNodeExecutionRuntime:
         self._owner_id = owner_id
         self._lease_ttl_ms = int(lease_ttl_ms)
         self._operation_ttl_ms = int(operation_ttl_ms)
+
+    def _scheduler_owned_checkpoint_continuation_authority(self) -> object:
+        """Return the composition-only capability for outer-DAG recovery."""
+
+        return self._scheduler_checkpoint_continuation_authority
+
     async def execute_stream(
         self,
         *,
@@ -192,6 +203,7 @@ class DurableNodeExecutionRuntime:
         budget: BudgetRuntimeContext | None = None,
         node_grant_ref: str | None = None,
         defer_shared_terminal: bool = False,
+        scheduler_checkpoint_continuation_authority: object | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         admitted.validate()
         if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
@@ -331,6 +343,10 @@ class DurableNodeExecutionRuntime:
                     node_grant_ref=node_grant_ref,
                     budget_id=budget.budget_id,
                     durable_elapsed_ms_override=sealed_worker_elapsed_ms,
+                    allow_multinode_checkpoint_continuation=(
+                        scheduler_checkpoint_continuation_authority
+                        is self._scheduler_checkpoint_continuation_authority
+                    ),
                 )
             except GovernedRuntimeError as exc:
                 _logger.warning(

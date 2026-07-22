@@ -97,6 +97,7 @@ class DurableDagSchedulingRuntime:
         "_acceptance_effects_enabled",
         "_accepted_graph_finalization",
         "_projection_reader",
+        "_scheduler_checkpoint_continuation_authority",
         "_fanout_event_buffer_size",
     )
 
@@ -126,6 +127,14 @@ class DurableDagSchedulingRuntime:
         self._node_lifecycle = node_lifecycle
         self._node_execution_projection = node_execution_projection
         self._node_execution = node_execution
+        authority_factory = getattr(
+            node_execution,
+            "_scheduler_owned_checkpoint_continuation_authority",
+            None,
+        )
+        self._scheduler_checkpoint_continuation_authority = (
+            authority_factory() if callable(authority_factory) else None
+        )
         self._parallel_settlement = parallel_settlement
         self._parallel_success = parallel_success
         self._graph_cancellations = graph_cancellations
@@ -326,15 +335,56 @@ class DurableDagSchedulingRuntime:
                     )
                 binding, _ = recovery_bindings[0]
                 recovery_admission = admitted.for_node(binding.node_id)
+                recovery_terminal: Mapping[str, Any] | None = None
+                recovery_execution_kwargs: dict[str, Any] = {
+                    "admitted": recovery_admission,
+                    "command": command,
+                    "work_order": work_order,
+                    "budget": budget,
+                    "node_grant_ref": grant_refs.get(recovery_admission.node_id),
+                    "defer_shared_terminal": len(admitted.nodes) > 1,
+                }
+                if (
+                    len(admitted.nodes) > 1
+                    and self._scheduler_checkpoint_continuation_authority is not None
+                ):
+                    recovery_execution_kwargs[
+                        "scheduler_checkpoint_continuation_authority"
+                    ] = self._scheduler_checkpoint_continuation_authority
                 async for event in self._node_execution.execute_stream(
-                    admitted=recovery_admission,
-                    command=command,
-                    work_order=work_order,
-                    budget=budget,
-                    node_grant_ref=grant_refs.get(recovery_admission.node_id),
+                    **recovery_execution_kwargs,
                 ):
                     yield event
-                return
+                    if bool(event.get("done")):
+                        recovery_terminal = event
+                if recovery_terminal is None:
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "committed checkpoint recovery produced no terminal receipt",
+                    )
+                recovery_receipt = recovery_terminal.get("execution_receipt")
+                if not isinstance(recovery_receipt, Mapping):
+                    raise GovernedRuntimeError(
+                        GOVERNED_DURABLE_STATE_CONFLICT,
+                        "committed checkpoint recovery terminal has no receipt",
+                    )
+                if (
+                    _text(recovery_receipt.get("status")).upper()
+                    == "RECOVERY_REQUIRED"
+                ):
+                    return
+                if len(admitted.nodes) == 1:
+                    return
+                latest_graph = await _maybe_await(
+                    self._store.get_graph(
+                        admitted.graph_id,
+                        admitted.graph_revision,
+                    )
+                )
+                if _status(latest_graph) == "COMPLETED":
+                    return
+                budget = await self._budgets.refresh(budget)
+                continue
 
             unresolved_failure: tuple[AdmittedExecution, dict[str, Any]] | None = None
             for binding in admitted.nodes:

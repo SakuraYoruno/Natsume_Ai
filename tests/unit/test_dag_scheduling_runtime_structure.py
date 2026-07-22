@@ -14,11 +14,10 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 )
 
 
-# Frozen after every live owner gained precedence over both Operation recovery
-# and pre-Operation takeover, while recoverable candidates still entered the
-# same bounded schedule as in-memory READY candidates.
+# Frozen after the scheduler became the only composition owner that can resume
+# an exact multi-node COMMITTED checkpoint after every live owner fence clears.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "56e92fd3f46fa0e4de48e74dd99d988376be649c5ec8be2d1a1a1cdc5b158a97"
+    "79056e448031f79185b506092a1e866b7d25c6e93f94989792b1434e96184258"
 )
 _REENTERED_OUTCOMES_BASELINE_SHA256 = (
     "29c3e28bf46b666d694d026a2e7bd7711ed832199027f12d1eb100fcb885ea8a"
@@ -66,6 +65,7 @@ _DEPENDENCY_SLOTS = {
     "_acceptance_effects_enabled",
     "_accepted_graph_finalization",
     "_projection_reader",
+    "_scheduler_checkpoint_continuation_authority",
     "_fanout_event_buffer_size",
 }
 
@@ -208,13 +208,13 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "assert_parallel_settlement_decision_ready": 1,
             "assert_graph_cancellation_ready": 1,
             "assert_parallel_success_decision_ready": 1,
-            "get_graph": 2,
+            "get_graph": 3,
             "read_scheduler_snapshot": 1,
             "get_node": 1,
             "resolve_node_input_artifacts": 1,
             "promote_retry_due": 1,
         },
-        "_budgets": {"ensure_active": 1, "refresh": 2, "finalize": 5},
+        "_budgets": {"ensure_active": 1, "refresh": 3, "finalize": 5},
         "_node_lifecycle": {
             "transition_graph": 11,
             "transition_node": 4,

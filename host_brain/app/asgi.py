@@ -650,6 +650,9 @@ def create_app() -> FastAPI:
                     reconciliation_public_keys=(
                         runtime_settings.task_reconciliation_public_keys()
                     ),
+                    feature_canary_public_keys=(
+                        runtime_settings.task_runtime_canary_public_keys()
+                    ),
                     terminal_reconciliation_auto_enabled=bool(
                         getattr(
                             runtime_settings,

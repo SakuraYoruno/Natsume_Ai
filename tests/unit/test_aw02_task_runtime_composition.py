@@ -47,6 +47,9 @@ from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
 )
+from host_brain.persistence.task_runtime_feature_canary_repository import (
+    SQLiteTaskRuntimeFeatureCanaryReceiptStore,
+)
 
 
 class _Ledger:
@@ -61,6 +64,14 @@ class _Closeable:
 
     def close(self) -> None:
         self.events.append(f"{self.name}:close")
+
+
+class _FeatureCanaryStore:
+    """Composition-only stand-in; enabled feature paths are tested elsewhere."""
+
+    @staticmethod
+    def require_active(**_kwargs: Any) -> Any:
+        pytest.fail("feature canary resolution is outside this fake container")
 
 
 class _MigrationRunner(_Closeable):
@@ -264,6 +275,7 @@ def _build_fake_container(
         terminal_operator_command_store_builder=(
             lambda _db_path: SimpleNamespace(read=lambda _ref: {})
         ),
+        feature_canary_store_builder=lambda _db_path: _FeatureCanaryStore(),
         authenticated_outcome_lookup=authenticated_outcome_lookup,
     )
 
@@ -405,6 +417,7 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
             terminal_operator_command_store_builder=(
                 lambda _path: SimpleNamespace(read=lambda _ref: {})
             ),
+            feature_canary_store_builder=lambda _path: _FeatureCanaryStore(),
             review_store_builder=lambda _path: pytest.fail(
                 "review construction must not run after recovery failure"
             ),
@@ -483,6 +496,7 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
             terminal_operator_command_store_builder=(
                 lambda _path: SimpleNamespace(read=lambda _ref: {})
             ),
+            feature_canary_store_builder=lambda _path: _FeatureCanaryStore(),
             review_store_builder=build_review_store,
             review_continuation_store_builder=build_review_continuation_store,
             worker_projection_store_builder=build_worker_projection_store,
@@ -888,6 +902,10 @@ def test_real_sqlite_adapters_share_the_migrated_canonical_ledger(
         )
 
         assert type(container.migration_runner) is SQLiteMigrationRunner
+        assert type(container.feature_canary_store) is (
+            SQLiteTaskRuntimeFeatureCanaryReceiptStore
+        )
+        assert container.feature_canary_signature_verifier is None
         assert type(container.task_store) is DurableTaskStore
         assert type(container.review_store) is ReviewStore
         assert type(container.worker_projection_store) is WorkerProjectionStore

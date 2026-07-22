@@ -250,7 +250,7 @@ Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯�
 
 1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
-3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 到 0099 terminal reconciliation 均有分范围证据。0099 只允许带唯一 graph-scope Budget 的 exact FAILED bundle 显式 auto；child/missing/multi Budget 与完整终态漂移必须 quarantine，不代表 general/multi-node/pre-budget recovery。部署 inventory/remediation、凭据/key lifecycle 与真实 canary仍未完成。
+3. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 到 0099 terminal reconciliation 均有分范围证据；另有 scheduler-owned 多节点 exact COMMITTED checkpoint continuation，但只覆盖 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING`，不重放 worker。0099 只允许带唯一 graph-scope Budget 的 exact FAILED bundle 显式 auto；child/missing/multi Budget 与完整终态漂移必须 quarantine，不代表 general/multi-node/pre-budget recovery。部署 inventory/remediation、凭据/key lifecycle 与真实 canary仍未完成。
 4. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 5. 启动按 migration/readiness（含0099）→ `recover_startup` → 0099 单次最多 10,000 个 terminal Graph inventory → 可选 default-off exact auto → recovery outbox publish → outbox worker → surface runtime activation → cancellation/Review workers 排序，异常 fail closed。0099 不扫描并重做 worker；它只处理已终态 Graph 的显式 case/proof/supersession。
 
