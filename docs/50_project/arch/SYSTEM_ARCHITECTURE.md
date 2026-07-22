@@ -220,7 +220,7 @@ pre-reservation 的普通或重试耗尽 resolver failure 仍由 `fail_running_a
 
 Node 已 ACCEPTED、Graph ACTIVE、Effect 尚未落盘的崩溃窗由共享 `AcceptedGraphFinalizationRuntime` 处理：重启重验同一 Operation checkpoint/canonical projection后，通过既有 Graph+Effect UoW 原子补写；篡改投影时零 Effect且 Graph不完成，重复重放保持 Effect identity/idempotency。
 
-`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` 在 B4 之上保留 B5A/B5B 的持久可选 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1`、显式 sink `result_node_id` 和 0091 atomic success；atomic/bounded 两个能力开关独立且默认 `false`，Host、Scheduler、Internal 三处生产 composition 均 OFF。
+`PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS` 在 B4 之上使用持久 `completion_policy=ATOMIC_GRAPH_SUCCESS_V1`、显式 sink `result_node_id` 和 0091 atomic success。新 Chat、Skill、Plan、Delegate、Tool、Scheduler、Internal 与 Operator Graph 均声明 atomic policy；Host 默认启用，Scheduler/Internal/Operator composition 显式启用。bounded fan-out 仍独立默认 `false`，所以多节点可按 durable topology 串行推进，但 ready sibling 的实际有界并发仍未生产启用。历史无 policy Graph 保持 legacy compatibility，不会被重规划静默升级。
 
 运行入口先验证 `0090` settlement 与 `0092` cancellation schema；atomic policy 还验证 `0091`，再允许 Budget activation 或 worker resolution。0090 的 active re-entry、rejected Budget outcome 与 outcome snapshot read/validation 由 ParallelSettlementProjection 完成，resolution 与 settlement orchestration 由 ParallelSettlementRuntime 完成；`ACTIVE` 多节点重入的 B4 ownership/CAS 语义不变。
 
@@ -493,7 +493,7 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 | Governed Host/Scheduler/Internal routes + durable read projections | Operator/领域兼容入口尚未完成最终 route matrix 验收 |
 | Durable TaskStore | 无第二 task registry；0094/0096 coordination、single-node canonical COMMITTED checkpoint、exact operation-free persisted Attempt takeover 与 0099 窄终态 reconciliation 已有；该窄窗之外的 general 与 multi-node/batch settlement recovery仍缺，外部 deployment inventory/remediation 未知 |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
-| TaskGraph revision + `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0091～0099 authority、Budget unique-winner contention、single-node canonical COMMITTED takeover、exact operation-free Attempt takeover、ACCEPTED→Effect restart 与窄 terminal reconciliation已有证据；一般终态/成功原子 UoW、该窄窗之外的 general 与 multi-node/batch recovery、现实 resolver、外部 inventory/凭据/key lifecycle/canary未完成，atomic/bounded/cancellation仍 OFF |
+| TaskGraph revision + `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS` | 新生产 Graph 的成功/失败已分别切到 0091/0090 原子终态；公开 accepted replay 要求 Graph COMPLETED 与 graph Budget CONSUMED。历史 legacy Graph 继续只读兼容。bounded fan-out/cancellation 仍 OFF；general、unknown-effect 与 multi-node/batch recovery、现实 resolver、外部 inventory/凭据/key lifecycle/canary未完成 |
 | Typed task composition；0112 readiness 与 Catalog SQLite 已归 repository，Gate 10 `PASS`；Obs daemon 由 ports claim + 唯一 lifespan 启停，Gate 6 `PASS`；Gate 1 分层与 Gate 11 app-local ToolBroker 构造均已 `PASS`，full static=`PASS` | 全局 ProcessServiceContainer 仍有其他 accessor；`host_startup.py`/ASGI concrete Catalog wiring、真实 workspace-bound governed executor、daemon 异常退出的 health/continuous-SLO supervision 仍缺 |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | ASGI app-local Runtime Context、0111 World observation/resolver、0112 Scene/Guardian、三消费者 Scene identity、durable Intent admission、Action Preview authority、0113 Host Catalog 五阶段及 commit-bound 本地 Gate | 长周期目标 owner、Bond 上游原始证据、Windows graceful stop、Governed Operator 功能迁移、legacy compatibility adapter 清理与部署多实例 canary 尚未收口 |

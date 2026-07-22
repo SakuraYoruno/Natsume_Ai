@@ -23,6 +23,7 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 )
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
@@ -451,6 +452,7 @@ def build_direct_host_route_contracts(
         status=TaskGraphStatus.CREATED,
         created_at=int(ts_ms),
         result_node_id=node_id,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
         nodes=(node,),
     )
     command = build_host_command(

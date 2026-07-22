@@ -539,7 +539,11 @@ class PlanningGraphCompiler:
                     str(getattr(completion_policy, "value", completion_policy)).strip()
                 )
                 if completion_policy is not None
-                else None
+                else (
+                    previous_graph.completion_policy
+                    if previous_graph is not None
+                    else TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+                )
             )
         except ValueError as exc:
             raise ContractViolation(
@@ -639,11 +643,6 @@ class PlanningGraphCompiler:
                     "previous_graph must be a canonical TaskGraph",
                 )
             previous_graph.validate()
-            if (
-                resolved_completion_policy is None
-                and previous_graph.completion_policy is not None
-            ):
-                resolved_completion_policy = previous_graph.completion_policy
             if previous_graph.status not in {
                 TaskGraphStatus.FAILED,
                 TaskGraphStatus.BLOCKED,

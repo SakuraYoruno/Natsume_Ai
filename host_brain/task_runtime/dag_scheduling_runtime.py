@@ -1383,6 +1383,7 @@ class DurableDagSchedulingRuntime:
                 node_admission,
                 graph=graph,
                 node=node,
+                allow_incomplete_atomic_graph_outcome=True,
             )
             if receipt is None:
                 raise GovernedRuntimeError(

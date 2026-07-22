@@ -850,7 +850,7 @@ def build_governed_host_runtime(
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
     bounded_fanout_enabled: bool = False,
-    atomic_graph_success_enabled: bool = False,
+    atomic_graph_success_enabled: bool = True,
     allow_uncomposed_acceptance_effects: bool = False,
     acceptance_effect_dispatcher: AcceptanceEffectDispatcher | None = None,
     runtime_context_application: RuntimeContextApplicationService | None = None,

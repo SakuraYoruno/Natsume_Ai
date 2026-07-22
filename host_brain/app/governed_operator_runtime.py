@@ -595,6 +595,7 @@ def build_governed_operator_runtime(
         review_runtime=TaskNodeReviewRuntime(review_store),
         node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
+        atomic_graph_success_enabled=True,
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",

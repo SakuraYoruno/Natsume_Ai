@@ -22,6 +22,9 @@ from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
@@ -54,6 +57,10 @@ from host_brain.scheduler.worker_registry import (
 )
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
+)
+from host_brain.task_runtime.errors import (
+    GOVERNED_EXECUTION_IN_PROGRESS,
+    GovernedRuntimeError,
 )
 
 
@@ -319,8 +326,16 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
     runtime = None
     try:
         task_store = DurableTaskStore(db_path)
+        worker_projection_store = WorkerProjectionStore(
+            db_path,
+            clock=lambda: NOW,
+        )
         infrastructure = SimpleNamespace(
             task_store=task_store,
+            internal_agent_checkpoint_uow=DurableInternalAgentCheckpointUnitOfWork(
+                task_store=task_store,
+                worker_projection_store=worker_projection_store,
+            ),
             review_store=ReviewStore(db_path, clock=lambda: NOW),
             review_continuation_store=ReviewContinuationStore(
                 db_path,
@@ -332,10 +347,7 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
                 RuntimeEventStore(db_path),
             ),
             scheduler_definition_repository=definitions,
-            worker_projection_store=WorkerProjectionStore(
-                db_path,
-                clock=lambda: NOW,
-            ),
+            worker_projection_store=worker_projection_store,
         )
         handler_calls: list[tuple[str, int, str]] = []
         handler_contexts: list[dict] = []
@@ -428,7 +440,7 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
         assert first["execution_receipt"]["verification_status"] == "PASS"
         assert first["execution_receipt"]["accepted"] is True
         assert first["result"] == {"status": "SUCCEEDED", "summary": "real governed handler ran"}
-        assert replay["replayed"] is True
+        assert replay["execution_receipt"]["replayed"] is True
         for key in ("occurrence_id", "task_id", "result", "receipt_ref", "narrative"):
             assert replay[key] == first[key]
         assert handler_calls == [(occurrence["occurrence_id"], 1, "revision-one")]
@@ -522,20 +534,21 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
             authority=failed_authority,
             received_at_ms=NOW + 1,
         )
-        failed_replay = await service.execute_occurrence(
-            occurrence=failed_occurrence,
-            authority={
-                **failed_authority,
-                "allowed": False,
-                "duplicate": True,
-                "existing_result_ref": None,
-            },
-            received_at_ms=NOW + 2,
-        )
+        with pytest.raises(GovernedRuntimeError) as replay_exc:
+            await service.execute_occurrence(
+                occurrence=failed_occurrence,
+                authority={
+                    **failed_authority,
+                    "allowed": False,
+                    "duplicate": True,
+                    "existing_result_ref": None,
+                },
+                received_at_ms=NOW + 2,
+            )
         assert failed["execution_receipt"]["accepted"] is False
-        assert failed["execution_receipt"]["status"] == "FAILED"
+        assert failed["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
         assert "scheduler_effect_status" not in failed
-        assert failed_replay["execution_receipt"]["replayed"] is True
+        assert replay_exc.value.reason_code == GOVERNED_EXECUTION_IN_PROGRESS
         assert len(handler_calls) == 1
         with sqlite3.connect(str(db_path)) as conn:
             failed_claim_result = conn.execute(
