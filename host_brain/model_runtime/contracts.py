@@ -625,6 +625,18 @@ class AttemptAuditRepository(Protocol):
 
 
 @runtime_checkable
+class AttemptAuditLookup(Protocol):
+    """Read canonical attempt lifecycle records for one logical request.
+
+    Evidence consumers use this narrow port to reopen the audit trail after a
+    model call.  It intentionally exposes immutable records rather than raw
+    ledger rows, prompts, responses or provider credentials.
+    """
+
+    def records_for_request(self, request_id: str) -> tuple[ModelAttemptRecord, ...]: ...
+
+
+@runtime_checkable
 class RoutePolicy(Protocol):
     async def resolve(
         self,
@@ -635,6 +647,7 @@ class RoutePolicy(Protocol):
 
 __all__ = [
     "AttemptAuditRepository",
+    "AttemptAuditLookup",
     "AttemptStatus",
     "CachePolicy",
     "CacheScope",

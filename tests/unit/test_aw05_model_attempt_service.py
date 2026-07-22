@@ -492,6 +492,7 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
                 "model_cost_micros": 31,
                 "untrusted_estimate": 999,
             },
+            metadata={"provider_latency_ms": 13, "untrusted_latency_estimate": 99},
         )
 
     audit = InMemoryAttemptAuditRepository()
@@ -533,6 +534,7 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
             "token_count": 12,
             "model_cost_micros": 31,
         },
+        "provider_transport_measurements": {"provider_latency_ms": 13},
     }
     assert "private_context" not in terminal.metadata
     assert "untrusted_estimate" not in terminal.metadata[

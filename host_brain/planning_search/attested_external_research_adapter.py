@@ -19,7 +19,9 @@ from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ResearchModelExecutionReceiptV1,
 )
 from host_brain.model_runtime.contracts import (
+    AttemptAuditLookup,
     AttemptStatus,
+    ModelAttemptRecord,
     ModelAttemptRequest,
     ModelAttemptResult,
     PromptRef,
@@ -55,10 +57,18 @@ class AttestedExternalResearchRun:
 class AttestedExternalResearchAdapter:
     """Run one fresh Research arm through canonical model-attempt authority."""
 
-    def __init__(self, *, model_attempt_service: ModelAttemptService) -> None:
+    def __init__(
+        self,
+        *,
+        model_attempt_service: ModelAttemptService,
+        attempt_audit_lookup: AttemptAuditLookup,
+    ) -> None:
         if not callable(getattr(model_attempt_service, "complete", None)):
             raise TypeError("model_attempt_service must implement complete()")
+        if not callable(getattr(attempt_audit_lookup, "records_for_request", None)):
+            raise TypeError("attempt_audit_lookup must implement records_for_request()")
         self._model_attempt_service = model_attempt_service
+        self._attempt_audit_lookup = attempt_audit_lookup
 
     async def execute(
         self,
@@ -113,6 +123,7 @@ class AttestedExternalResearchAdapter:
             execution_id=normalized_execution_id,
             arm_id=normalized_arm_id,
             result=result,
+            attempt_audit_lookup=self._attempt_audit_lookup,
         )
 
 
@@ -121,6 +132,7 @@ def _attest_result(
     execution_id: str,
     arm_id: str,
     result: ModelAttemptResult,
+    attempt_audit_lookup: AttemptAuditLookup,
 ) -> AttestedExternalResearchRun:
     if not isinstance(result, ModelAttemptResult):
         raise AttestedExternalResearchError("canonical model service returned an invalid result")
@@ -161,6 +173,12 @@ def _attest_result(
         field="provider_latency_ms",
     )
     total_latency_ms = _non_negative_int(attempt.latency_ms, field="total_latency_ms")
+    _assert_durable_attempt_audit(
+        execution_id=execution_id,
+        attempt=attempt,
+        provider_latency_ms=provider_latency_ms,
+        lookup=attempt_audit_lookup,
+    )
     route_digest = sha256_digest(
         {
             "schema": "natsume.research.external-provider-route.v1",
@@ -215,6 +233,60 @@ def _non_negative_int(value: Any, *, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise AttestedExternalResearchError(f"external model result is missing {field}")
     return value
+
+
+def _assert_durable_attempt_audit(
+    *,
+    execution_id: str,
+    attempt: ModelAttemptRecord,
+    provider_latency_ms: int,
+    lookup: AttemptAuditLookup,
+) -> None:
+    """Reopen canonical audit rows before certifying external-model evidence."""
+
+    try:
+        records = tuple(lookup.records_for_request(execution_id))
+    except Exception as exc:
+        raise AttestedExternalResearchError("canonical model attempt audit lookup failed") from exc
+    if len(records) != 2:
+        raise AttestedExternalResearchError(
+            "external evidence requires exactly one durable started/terminal attempt pair"
+        )
+    if not all(isinstance(record, ModelAttemptRecord) for record in records):
+        raise AttestedExternalResearchError("canonical model attempt audit returned an invalid record")
+    started = [record for record in records if record.status is AttemptStatus.STARTED]
+    terminal = [record for record in records if record.status is AttemptStatus.SUCCEEDED]
+    if len(started) != 1 or len(terminal) != 1:
+        raise AttestedExternalResearchError(
+            "external evidence requires one durable started and succeeded attempt"
+        )
+    durable_started = started[0]
+    durable_terminal = terminal[0]
+    if durable_terminal != attempt:
+        raise AttestedExternalResearchError("canonical model attempt audit does not match result")
+    if (
+        durable_started.attempt_id != attempt.attempt_id
+        or durable_started.request_id != execution_id
+        or durable_started.route_decision_id != attempt.route_decision_id
+        or durable_started.attempt_index != attempt.attempt_index
+        or durable_started.retry_reason != attempt.retry_reason
+        or durable_started.adapter_id != attempt.adapter_id
+        or durable_started.provider != attempt.provider
+        or durable_started.model_id != attempt.model_id
+        or durable_started.prompt_id != attempt.prompt_id
+        or durable_started.prompt_version != attempt.prompt_version
+        or durable_started.prompt_digest != attempt.prompt_digest
+        or durable_started.started_at_ms != attempt.started_at_ms
+        or durable_started.ended_at_ms is not None
+        or durable_started.latency_ms is not None
+        or durable_started.output_digest is not None
+    ):
+        raise AttestedExternalResearchError("durable started attempt does not bind result")
+    transport = durable_terminal.metadata.get("provider_transport_measurements")
+    if not isinstance(transport, Mapping) or transport.get("provider_latency_ms") != provider_latency_ms:
+        raise AttestedExternalResearchError(
+            "canonical model attempt audit is missing provider latency"
+        )
 
 
 __all__ = [

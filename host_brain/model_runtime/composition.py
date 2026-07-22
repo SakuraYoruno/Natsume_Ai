@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import threading
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from host_brain.core.trace_redaction import sanitize_public_payload
 
 from host_brain.model_runtime.contracts import (
+    AttemptAuditLookup,
     AttemptAuditRepository,
+    AttemptStatus,
     ModelAttemptRecord,
     ProviderAdapter,
     RoutePolicy,
@@ -36,6 +38,15 @@ class InMemoryAttemptAuditRepository:
         with self._lock:
             return tuple(self._records)
 
+    def records_for_request(self, request_id: str) -> tuple[ModelAttemptRecord, ...]:
+        """Return the test/development audit trail for one request identity."""
+
+        normalized = str(request_id or "").strip()
+        if not normalized:
+            return ()
+        with self._lock:
+            return tuple(record for record in self._records if record.request_id == normalized)
+
 
 class LedgerAttemptAuditRepository:
     """Durable adapter to the canonical model-attempt audit journal."""
@@ -50,6 +61,73 @@ class LedgerAttemptAuditRepository:
         payload = record.as_dict()
         payload["metadata"] = sanitize_public_payload(payload.get("metadata") or {})
         self._writer(payload)
+
+
+class LedgerAttemptAuditLookup:
+    """Reopen immutable model-attempt rows from the canonical audit ledger."""
+
+    def __init__(self, ledger: Any) -> None:
+        reader = getattr(ledger, "fetch_by_request_id", None)
+        if not callable(reader):
+            raise TypeError("ledger must expose fetch_by_request_id(table, request_id)")
+        self._reader = reader
+
+    def records_for_request(self, request_id: str) -> tuple[ModelAttemptRecord, ...]:
+        normalized = str(request_id or "").strip()
+        if not normalized:
+            raise ValueError("request_id must be non-empty")
+        rows = self._reader("model_attempt_log", normalized)
+        if not isinstance(rows, Iterable):
+            raise TypeError("model attempt audit reader returned a non-iterable result")
+        records: list[ModelAttemptRecord] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise ValueError("model attempt audit row must be a mapping")
+            if str(row.get("request_id") or "").strip() != normalized:
+                raise ValueError("model attempt audit lookup returned a request identity drift")
+            try:
+                records.append(
+                    ModelAttemptRecord(
+                        attempt_id=str(row.get("attempt_id") or ""),
+                        request_id=normalized,
+                        route_decision_id=str(row.get("route_decision_id") or ""),
+                        attempt_index=int(row.get("attempt_index") or 0),
+                        status=AttemptStatus(str(row.get("status") or "")),
+                        retry_reason=str(row.get("retry_reason") or ""),
+                        adapter_id=str(row.get("adapter_id") or ""),
+                        provider=str(row.get("provider") or ""),
+                        model_id=str(row.get("model_id") or ""),
+                        prompt_id=str(row.get("prompt_id") or ""),
+                        prompt_version=str(row.get("prompt_version") or ""),
+                        prompt_digest=str(row.get("prompt_digest") or ""),
+                        started_at_ms=int(row.get("started_at_ms") or 0),
+                        ended_at_ms=(
+                            None
+                            if row.get("ended_at_ms") is None
+                            else int(row.get("ended_at_ms"))
+                        ),
+                        latency_ms=(
+                            None if row.get("latency_ms") is None else int(row.get("latency_ms"))
+                        ),
+                        output_digest=(
+                            None
+                            if row.get("output_digest") is None
+                            else str(row.get("output_digest"))
+                        ),
+                        error_code=(
+                            None if row.get("error_code") is None else str(row.get("error_code"))
+                        ),
+                        error_message=(
+                            None
+                            if row.get("error_message") is None
+                            else str(row.get("error_message"))
+                        ),
+                        metadata=dict(row.get("metadata") or {}),
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("model attempt audit row is invalid") from exc
+        return tuple(records)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +187,7 @@ def build_model_runtime_composition(
 __all__ = [
     "InMemoryAttemptAuditRepository",
     "LedgerAttemptAuditRepository",
+    "LedgerAttemptAuditLookup",
     "ModelRuntimeComposition",
     "build_model_runtime_composition",
 ]
