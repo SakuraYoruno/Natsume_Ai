@@ -315,6 +315,14 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-COMPOSITION-BUNDLE-03：locator inventory 必须由 AST 重新计算为 named 40 modules/116 names、all-form 44 modules、Container 50 fields/3 locks/46 mutable refs；Lifecycle Runtime 与 Tribe 两个模块必须不在 all-form 集合中。named 值不变是因为旧实现为 module import，不得伪写成20个 named import 被删除。typed bundle 的 provider identity 与完全省略 bundle 时的失败关闭均须有运行时测试，不能只靠词法扫描。
 - 本 Gate 只证明依赖解析点收敛，不证明 bundle 背后的 Tribe/Endocrine/Memory 等服务实例已 app-local，也不证明 Service Locator 清零。首轮为 `46 passed + 4 fixture/contract failures`；更新旧库存、显式 ModelAttempt fixture 和 Tribe 结构合同后，同一集合为 `50 passed in 7.33s`。加入 typed bundle identity 与省略 bundle fail-closed 运行时证据后，最终同一集合为 `52 passed in 9.05s`；各轮禁止相加。NE-01 波次集成和 production canary 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+### NE-01 Input Runtime 显式 Host service bundle
+
+- T-NE01-COMPOSITION-INPUT-01：生产 `create_app()` 必须把同一个 `HostLifecycleApplicationPorts` 传给 Input Runtime composition；Intent、Ledger、Life snapshot、Multimodal Observer/Processor 只能从该 bundle 解析，Input composition 对 `process_services` 的 import/回读必须为0。
+- T-NE01-COMPOSITION-INPUT-02：完全省略 bundle 时，Input provider 与 user-interaction callback 必须在首次使用时以 `HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED` 失败关闭；测试不得继续 patch 全局 accessor 冒充显式依赖。
+- T-NE01-COMPOSITION-INPUT-03：无 exact Task-bound Action Preview 的 Gateway voice 必须保持 Effect=0；auto reply disabled、force-dual、legacy force env 和 primary delivery failure 均不得成为绕过理由。
+- T-NE01-COMPOSITION-INPUT-04：fresh locator inventory 必须为 named39 modules/110 names、all-form43 modules、Container50 fields/3 locks/46 mutable refs；Input Runtime composition 不得出现在 all-form 集合。Lifecycle/Tribe 的40/116/all-form44只作前一提交历史。
+- 首轮受影响集合为 `114 passed + 9 failures`：5项是旧测试仍依赖全局Multimodal fixture，4项错误期待无Preview语音直发；显式fixture后为`121 passed + 4 failures`；修正高风险合同后最终同一集合为`125 passed in 11.80s`。另对6个ASGI/Host source/Guardian/platform/Gateway调用点文件补充复跑`43 passed in 10.96s`；两批按文件不重叠但仍分别记录，不合并成宣传总数。该结果仍不是NE-01波次integration或production canary；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ### NE-01 Scheduler post-Acceptance handler 切流
 
 - T-NE01-SCHEDULER-EFFECT-01：Scheduler Task worker 只能从 immutable `FrozenNodeInput` 和 durable occurrence/definition authority 生成唯一 `scheduler.operation.execute` plan；不得调用 `SchedulerWorkerRegistry` handler，不得写实际 Scheduler result。canonical WorkerProjection 是 Acceptance 前 checkpoint，调用方伪造 definition revision、worker key、fingerprint、graph/node/Attempt 或 Operator command authority 必须失败关闭。

@@ -20,24 +20,24 @@ from host_brain.app.surface_reply_preprocessor import (
     render_quick_gateway_progress_text,
     render_quick_gateway_realign_text,
 )
-from host_brain.composition.process_services import (
-    get_intent_engine,
-    get_ledger,
-    get_life_snapshot_reader,
-    get_multimodal_observer,
-    get_multimodal_processor,
-    notify_user_interaction,
-)
+from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
 
 
 def build_input_runtime_application_ports(
     *,
+    host_services: HostLifecycleApplicationPorts | None = None,
     embodiment_runtime_provider: Callable[[], Any | None] | None = None,
     notify_user_interaction_callback: Callable[[], None] | None = None,
 ) -> InputRuntimeApplicationPorts:
     """Build one immutable dependency graph for one Host application."""
+
+    get_intent_engine = _host_provider(host_services, "intent_engine")
+    get_ledger = _host_provider(host_services, "ledger")
+    get_life_snapshot_reader = _host_provider(host_services, "life_snapshot_reader")
+    get_multimodal_observer = _host_provider(host_services, "multimodal_observer")
+    get_multimodal_processor = _host_provider(host_services, "multimodal_processor")
 
     def get_task_status_projection():
         return build_durable_task_status_projection(ledger=get_ledger())
@@ -61,7 +61,7 @@ def build_input_runtime_application_ports(
         get_multimodal_processor=get_multimodal_processor,
         get_task_status_projection=get_task_status_projection,
         notify_user_interaction=(
-            notify_user_interaction_callback or notify_user_interaction
+            notify_user_interaction_callback or _missing_app_local_provider
         ),
         evaluate_governor_with_timing=_evaluate_governor_with_timing,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
@@ -79,6 +79,19 @@ def build_input_runtime_application_ports(
         render_quick_gateway_realign_text=render_quick_gateway_realign_text,
         get_embodiment_runtime=embodiment_runtime_provider,
     )
+
+
+def _host_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+    field_name: str,
+) -> Callable[..., Any]:
+    if host_services is None:
+        return _missing_app_local_provider
+    return host_services.require_provider(field_name)
+
+
+def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
+    raise RuntimeError("HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED")
 
 
 __all__ = ["build_input_runtime_application_ports"]

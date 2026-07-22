@@ -277,6 +277,7 @@ def create_app() -> FastAPI:
         model_attempt_service_provider=host_services.model_attempt_service,
     )
     input_runtime_ports = build_input_runtime_application_ports(
+        host_services=host_services,
         embodiment_runtime_provider=lambda: embodiment_runtime,
         notify_user_interaction_callback=(
             host_lifecycle.notify_user_interaction

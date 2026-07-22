@@ -56,6 +56,9 @@ class HostLifecycleApplicationPorts:
     milestone_tracker: ServiceProvider | None = None
     prompt_registry: ServiceProvider | None = None
     user_emotion_profile: ServiceProvider | None = None
+    intent_engine: ServiceProvider | None = None
+    multimodal_observer: ServiceProvider | None = None
+    multimodal_processor: ServiceProvider | None = None
 
     def require_provider(self, field_name: str) -> ServiceProvider:
         provider = getattr(self, str(field_name or ""), None)
@@ -373,6 +376,9 @@ def build_host_lifecycle_container() -> HostLifecycleContainer:
             milestone_tracker=process_services.get_milestone_tracker,
             prompt_registry=process_services.get_prompt_registry,
             user_emotion_profile=emotion_context.get_user_emotion_profile,
+            intent_engine=process_services.get_intent_engine,
+            multimodal_observer=process_services.get_multimodal_observer,
+            multimodal_processor=process_services.get_multimodal_processor,
             mode_transition_service_factory=ModeTransitionService,
             activity_monitor_factory=ActivityMonitor,
             resource_manager_factory=SystemResourceManager,

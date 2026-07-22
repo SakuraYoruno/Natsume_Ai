@@ -61,6 +61,12 @@ async def _noop_reply_performance(**_kwargs):  # noqa: ANN003
 
 def _ports(**overrides):  # noqa: ANN003
     overrides.setdefault("get_intent_engine", lambda: object())
+    overrides.setdefault(
+        "get_multimodal_processor",
+        lambda: SimpleNamespace(
+            enhance_output=lambda **_: SimpleNamespace(suggested_sticker=""),
+        ),
+    )
     overrides.setdefault("evaluate_governor_with_timing", _approve_governor)
     overrides.setdefault("trigger_reply_performance", _noop_reply_performance)
     return replace(build_input_runtime_application_ports(), **overrides)
@@ -1258,7 +1264,7 @@ def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkey
     assert call["raw_extra"]["reply_envelope"]["reaction_id"] == "awkward-1"
 
 
-def test_deliver_gateway_reply_durably_queues_voice_when_auto_reply_disabled(monkeypatch) -> None:
+def test_deliver_gateway_reply_blocks_voice_without_task_preview_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     result = _run(
@@ -1282,24 +1288,23 @@ def test_deliver_gateway_reply_durably_queues_voice_when_auto_reply_disabled(mon
         )
     )
 
-    assert len(embodiment_runtime.commands) == 1
-    voiced_text = embodiment_runtime.commands[0].payload["text"]
-    assert voiced_text == "我先直接在你这边把结果念出来。"
+    assert embodiment_runtime.commands == []
     assert result["success"] is True
     assert result["status"] == "SKIPPED"
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
-    assert result["voice_sent"] is True
+    assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "PENDING"
-    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
-    assert result["voice_durable_admitted"] is True
-    assert result["voice_success"] is None
+    assert result["voice_status"] == "FAILED"
+    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_durable_admitted"] is False
+    assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_vts_expression_success"] is False
 
 
-def test_deliver_gateway_reply_force_dual_voice_keeps_text_and_durably_queues_voice(monkeypatch) -> None:
+def test_deliver_gateway_reply_force_dual_voice_keeps_text_but_blocks_unpreviewed_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock(
@@ -1339,26 +1344,24 @@ def test_deliver_gateway_reply_force_dual_voice_keeps_text_and_durably_queues_vo
 
     assert post_gateway_reply_mock.await_count == 1
     assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
-    assert len(embodiment_runtime.commands) == 1
-    command = embodiment_runtime.commands[0]
-    assert command.payload["text"] == "今天我会直接把结果说给你听。"
-    assert command.payload["export_audio"] is True
+    assert embodiment_runtime.commands == []
     assert result["success"] is True
     assert result["reply_form_reason"] == "force_dual_voice_reply"
-    assert result["voice_sent"] is True
+    assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "PENDING"
-    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
-    assert result["voice_success"] is None
+    assert result["voice_status"] == "FAILED"
+    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_vts_expression_success"] is False
     assert result["voice_audio_path"] == ""
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] == "WAITING_RECEIPT"
+    assert result["voice_gateway_status"] is None
 
 
-def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy_force_env(monkeypatch) -> None:
+def test_deliver_gateway_reply_smart_mode_blocks_unpreviewed_legacy_force_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     monkeypatch.setenv("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", "true")
     monkeypatch.setenv("HOST_GATEWAY_VOICE_SELECTION_MODE", "smart")
@@ -1400,23 +1403,22 @@ def test_deliver_gateway_reply_smart_mode_keeps_short_presence_voice_with_legacy
 
     assert post_gateway_reply_mock.await_count == 1
     assert post_gateway_reply_mock.await_args.kwargs["msg_type"] == "text"
-    assert len(embodiment_runtime.commands) == 1
-    assert embodiment_runtime.commands[0].payload["text"] == "哈？"
-    assert embodiment_runtime.commands[0].payload["export_audio"] is False
+    assert embodiment_runtime.commands == []
     assert result["success"] is True
     assert result["reply_form_reason"] == "embodied_presence_voice"
-    assert result["voice_sent"] is True
+    assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "PENDING"
-    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
-    assert result["voice_success"] is None
+    assert result["voice_status"] == "FAILED"
+    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_gateway_sent"] is False
-    assert "disabled" in result["voice_gateway_detail"].lower()
+    assert result["voice_gateway_detail"] is None
 
 
-def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delivery_fails(monkeypatch) -> None:
+def test_deliver_gateway_reply_primary_failure_does_not_bypass_voice_preview(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     with patch(
@@ -1453,14 +1455,14 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
             )
         )
 
-    assert len(embodiment_runtime.commands) == 1
-    assert embodiment_runtime.commands[0].payload["text"] == "就算文字发不出去，我也先把声音链路跑起来。"
+    assert embodiment_runtime.commands == []
     assert result["success"] is False
     assert result["reason_code"] == "WECHAT_SEND_FAILED"
-    assert result["voice_sent"] is True
-    assert result["voice_status"] == "PENDING"
-    assert result["voice_delivery_state"] == "DURABLY_QUEUED"
-    assert result["voice_success"] is None
+    assert result["voice_sent"] is False
+    assert result["voice_status"] == "FAILED"
+    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
 

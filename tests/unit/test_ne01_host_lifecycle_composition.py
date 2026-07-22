@@ -15,6 +15,9 @@ from host_brain.app.host_lifecycle_composition import (
     HostLifecycleContainer,
     HostLifecycleScopeError,
 )
+from host_brain.app.input_runtime_composition import (
+    build_input_runtime_application_ports,
+)
 from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
 )
@@ -173,6 +176,53 @@ def test_missing_typed_host_bundle_fails_closed_without_locator_fallback() -> No
         match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
     ):
         tribe.ledger()
+
+
+def test_typed_host_bundle_supplies_input_runtime_without_locator() -> None:
+    sentinel = object()
+    provider = lambda: sentinel
+    notify_calls: list[str] = []
+    host_services = replace(
+        _ports([]),
+        ledger=provider,
+        life_snapshot_reader=provider,
+        intent_engine=provider,
+        multimodal_observer=provider,
+        multimodal_processor=provider,
+    )
+
+    input_ports = build_input_runtime_application_ports(
+        host_services=host_services,
+        notify_user_interaction_callback=lambda: notify_calls.append("notify"),
+    )
+
+    assert input_ports.get_intent_engine is provider
+    assert input_ports.get_ledger is provider
+    assert input_ports.get_life_snapshot_reader is provider
+    assert input_ports.get_multimodal_observer is provider
+    assert input_ports.get_multimodal_processor is provider
+    input_ports.notify_user_interaction()
+    assert notify_calls == ["notify"]
+
+
+def test_missing_input_host_bundle_fails_closed_without_locator_fallback() -> None:
+    input_ports = build_input_runtime_application_ports()
+
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        input_ports.get_intent_engine()
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        input_ports.get_ledger()
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        input_ports.notify_user_interaction()
 
 
 def test_hard_state_is_app_local_and_never_writes_bootstrap_environment(
@@ -614,14 +664,17 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 40
-    assert sum(named_import_modules.values()) == 116
-    assert len(all_import_modules) == 44
+    assert len(named_import_modules) == 39
+    assert sum(named_import_modules.values()) == 110
+    assert len(all_import_modules) == 43
     assert (
         ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
     ) not in all_import_modules
     assert (
         ROOT / "host_brain" / "app" / "tribe_composition.py"
+    ) not in all_import_modules
+    assert (
+        ROOT / "host_brain" / "app" / "input_runtime_composition.py"
     ) not in all_import_modules
     assert ROOT / "host_brain" / "app" / "http_hooks.py" not in all_import_modules
     asgi_imports = named_import_modules[ROOT / "host_brain" / "app" / "asgi.py"]
