@@ -8,7 +8,46 @@ import pytest
 from fastapi import FastAPI
 
 from host_brain.app import asgi, tool_runtime_composition
+from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.host_route_ports import HostRoutePorts
+
+
+def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
+    """Build the same typed Host bundle that the ASGI composition consumes."""
+
+    provider = lambda: object()
+    factory = lambda **_kwargs: object()
+    values: dict[str, object] = {
+        "memory_guard": provider,
+        "state_arbiter": provider,
+        "distillation_engine": provider,
+        "semantic_recaller": provider,
+        "episodic_store": provider,
+        "skill_registry": provider,
+        "tool_catalog": provider,
+        "capability_broker": provider,
+        "model_attempt_service": provider,
+        "mode_transition_service_factory": factory,
+        "activity_monitor_factory": factory,
+        "resource_manager_factory": factory,
+        "ledger": provider,
+        "life_memory_store": provider,
+        "bond_update_queue": provider,
+        "life_snapshot_reader": provider,
+        "silence_engine": provider,
+        "state_write_arbiter": provider,
+        "emotion_timeline": provider,
+        "bond_stage_engine": provider,
+        "shared_memory_index": provider,
+        "milestone_tracker": provider,
+        "prompt_registry": provider,
+        "user_emotion_profile": provider,
+        "intent_engine": provider,
+        "multimodal_observer": provider,
+        "multimodal_processor": provider,
+    }
+    values.update(overrides)
+    return HostLifecycleApplicationPorts(**values)
 
 
 @pytest.mark.parametrize(
@@ -371,7 +410,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     )
     activity_monitor = SimpleNamespace(_gaming_interval=30, _idle_interval=60)
     host_lifecycle = SimpleNamespace(
-        ports=SimpleNamespace(
+        ports=_host_lifecycle_ports(
             memory_guard=lambda: object(),
             state_arbiter=lambda: object(),
             distillation_engine=lambda: object(),
@@ -1065,7 +1104,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(
         tool_runtime_composition,
         "ApplicationModelAttemptServicePort",
-        lambda: model_attempt_service,
+        lambda provider: (
+            model_attempt_service
+            if provider is host_lifecycle.ports.model_attempt_service
+            else pytest.fail("wrong model-attempt provider")
+        ),
     )
     monkeypatch.setattr(asgi, "get_prompt_registry", lambda: prompt_registry)
     monkeypatch.setattr(
@@ -1479,7 +1522,7 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
 
     provider = lambda: object()
     host_lifecycle = SimpleNamespace(
-        ports=SimpleNamespace(
+        ports=_host_lifecycle_ports(
             memory_guard=provider,
             state_arbiter=provider,
             distillation_engine=provider,
