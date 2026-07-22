@@ -14,7 +14,6 @@ from host_brain.app.host_route_ports import HostRoutePorts
 
 def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
     """Build the same typed Host bundle that the ASGI composition consumes."""
-
     provider = lambda: object()
     factory = lambda **_kwargs: object()
     values: dict[str, object] = {
@@ -45,9 +44,11 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "intent_engine": provider,
         "multimodal_observer": provider,
         "multimodal_processor": provider,
+        "conversation_history": provider,
+        "life_memory_service": provider,
     }
     values.update(overrides)
-    return HostLifecycleApplicationPorts(**values)
+    return HostLifecycleApplicationPorts(**values)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -420,6 +421,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             tool_catalog=lambda: tool_catalog,
             capability_broker=lambda: capability_broker,
             model_attempt_service=lambda: model_attempt_service,
+            ledger=lambda: ledger,
         ),
         get_hard_state=lambda: SimpleNamespace(sys_mode="gaming"),
         get_endocrine_state=lambda **_kwargs: {},
@@ -844,6 +846,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         captured["cancellation_authority_verifier"] = kwargs[
             "cancellation_authority_verifier"
         ]
+        captured["agent_runtime_ports"] = kwargs.pop("agent_runtime_ports")
+        assert captured["agent_runtime_ports"] is (
+            application.state.agent_runtime_application_ports
+        )
         assert isinstance(
             kwargs["internal_agent_artifact_store"],
             asgi.AgentArtifactStore,
@@ -1044,11 +1050,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(
         asgi,
         "_compose_life_dispatchers",
-        lambda current, *, embodiment_runtime, action_preview_service: (object(), object())
+        lambda current, *, embodiment_runtime, action_preview_service, agent_runtime_ports: (object(), object())
         if (
             current is ledger
             and embodiment_runtime is not None
             and action_preview_service is not None
+            and agent_runtime_ports is not None
         )
         else pytest.fail("wrong Life dispatcher ledger"),
     )
@@ -1104,11 +1111,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(
         tool_runtime_composition,
         "ApplicationModelAttemptServicePort",
-        lambda provider: (
-            model_attempt_service
-            if provider is host_lifecycle.ports.model_attempt_service
-            else pytest.fail("wrong model-attempt provider")
-        ),
+        lambda provider: model_attempt_service
+        if provider is host_lifecycle.ports.model_attempt_service
+        else pytest.fail("wrong app-local model attempt provider"),
     )
     monkeypatch.setattr(asgi, "get_prompt_registry", lambda: prompt_registry)
     monkeypatch.setattr(
@@ -1450,7 +1455,7 @@ def test_asgi_task_runtime_startup_failure_is_fail_closed_and_releases_security(
     monkeypatch.setattr(
         asgi,
         "_compose_life_dispatchers",
-        lambda current: (object(), object())
+        lambda current, **_kwargs: (object(), object())
         if current is ledger
         else pytest.fail("wrong Life dispatcher ledger"),
     )

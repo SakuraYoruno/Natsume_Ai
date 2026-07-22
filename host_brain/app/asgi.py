@@ -9,10 +9,14 @@ from contextlib import asynccontextmanager
 from functools import partial
 from typing import Any, Callable, Mapping
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from host_brain.app.app_factory import create_host_fastapi_app, docs_redirect_response
+from host_brain.app.app_factory import create_host_fastapi_app
+from host_brain.app.asgi_endpoint_helpers import root_endpoint
+from host_brain.app.agent_runtime_composition import (
+    AgentRuntimeApplicationScope,
+)
 from host_brain.app.chat_handler import handle_chat
 from host_brain.app.chat_immune_gate import evaluate_immune_gate_for_chat, schedule_chat_immune_gate_event
 from host_brain.app.chat_routes import handle_v1_chat_route
@@ -206,21 +210,6 @@ def resolve_bond_engine():
     return get_bond_stage_engine()
 
 
-def schedule_immune_gate_audit(
-    *,
-    request_id: str,
-    request_body: ChatRequest,
-    immune_result: dict,
-) -> None:
-    schedule_chat_immune_gate_event(
-        request_id=request_id,
-        request_body=request_body,
-        immune_result=immune_result,
-        get_ledger=get_ledger,
-        logger=logger,
-    )
-
-
 async def edge_events_endpoint(
     request_body: EdgeEventsRequest,
     *,
@@ -232,10 +221,6 @@ async def edge_events_endpoint(
         logger=logger,
         input_dispatcher=partial(_dispatch_to_graph, ports=input_runtime_ports),
     )
-
-
-async def root_endpoint() -> Response:
-    return docs_redirect_response()
 
 
 def _command_ingress_hmac_secrets() -> dict[str, str]:
@@ -259,6 +244,8 @@ def create_app() -> FastAPI:
     configure_process_service_ports()
     host_lifecycle = build_host_lifecycle_container()
     host_services = host_lifecycle.ports
+    agent_runtime_scope = AgentRuntimeApplicationScope(host_services=host_services)
+
     tribe_application_ports = build_tribe_application_ports(
         host_services=host_services,
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
@@ -282,6 +269,7 @@ def create_app() -> FastAPI:
         notify_user_interaction_callback=(
             host_lifecycle.notify_user_interaction
         ),
+        agent_runtime_ports_provider=agent_runtime_scope.provider,
     )
     # This slot belongs to one FastAPI application factory invocation.  Route
     # providers close over it explicitly; there is no module-global service
@@ -432,6 +420,9 @@ def create_app() -> FastAPI:
             metrics,
             governed_command_application=tool_composition.provide_runtime(),
             hard_state_provider=host_lifecycle.get_hard_state,
+            cortex_orchestrator_sse_generator=(
+                input_runtime_ports.cortex_orchestrator_sse_generator
+            ),
         )
 
     async def chat_endpoint_with_runtime(
@@ -444,7 +435,11 @@ def create_app() -> FastAPI:
             metrics=runtime_metrics,
             logger=logger,
             evaluate_immune_gate_fn=evaluate_immune_gate_for_chat,
-            schedule_immune_gate_fn=schedule_immune_gate_audit,
+            schedule_immune_gate_fn=partial(
+                schedule_chat_immune_gate_event,
+                get_ledger=get_ledger,
+                logger=logger,
+            ),
             handle_chat_fn=handle_chat_with_runtime,
             notify_user_interaction_fn=(
                 host_lifecycle.notify_user_interaction
@@ -559,6 +554,8 @@ def create_app() -> FastAPI:
                 host_obs_pentest_environment = {}
                 host_obs_ledger = host_query_projection_store = None
                 life_command_authority = life_dispatchers = None
+                agent_runtime_scope.clear()
+                application.state.agent_runtime_application_ports = None
                 embodiment_runtime = embodiment_authority_task = None
                 runtime_context_application = runtime_context_composition = None
 
@@ -680,6 +677,14 @@ def create_app() -> FastAPI:
                 # runtime owns canonical migration application, so Life must
                 # be composed only after that startup gate has completed.
                 life_command_authority = _compose_life_command_authority(ledger)
+                agent_runtime_ports = agent_runtime_scope.initialize(
+                    life_authority_provider=(
+                        lambda: life_command_authority_provider(ledger)
+                    ),
+                )
+                application.state.agent_runtime_application_ports = (
+                    agent_runtime_ports
+                )
                 # ``QueryProjectionStore`` requires migration 0082.  The task
                 # runtime is the startup migration authority, so constructing
                 # this read model before the runtime above would make a fresh
@@ -827,6 +832,7 @@ def create_app() -> FastAPI:
                     ledger,
                     embodiment_runtime=embodiment_runtime,
                     action_preview_service=action_preview_service,
+                    agent_runtime_ports=agent_runtime_ports,
                 )
                 application.state.embodiment_runtime = embodiment_runtime
                 canon = build_process_canon_container(
@@ -951,6 +957,7 @@ def create_app() -> FastAPI:
                     life_receipt_reader_provider=(
                         lambda: life_command_authority_provider(ledger)[1]
                     ),
+                    agent_runtime_ports=agent_runtime_ports,
                     token_service_provider=get_token_service,
                     intent_engine_provider=get_intent_engine,
                     model_attempt_service_provider=host_services.model_attempt_service,
@@ -1367,6 +1374,7 @@ def create_app() -> FastAPI:
     application.state.canon_container = None
     application.state.embodiment_runtime = None
     application.state.runtime_context_composition = None
+    application.state.agent_runtime_application_ports = None
     application.state.host_lifecycle_container = host_lifecycle
     application.state.tribe_application_ports = tribe_application_ports
     application.state.lifecycle_runtime_ports = lifecycle_runtime_ports

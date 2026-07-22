@@ -13,6 +13,7 @@ import hashlib
 import hmac
 from typing import Any
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.accepted_result import InternalAcceptedResultHandler
 from host_brain.app.acceptance_effect_handlers import (
@@ -707,6 +708,7 @@ def build_governed_operator_composition(
     gateway_reply_query_port: Any | None = None,
     internal_agent_artifact_store: Any | None = None,
     internal_agent_workspace_runtime: Any | None = None,
+    agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
@@ -737,6 +739,7 @@ def build_governed_operator_composition(
             gateway_reply_query_port=(
                 gateway_reply_query_port or query_gateway_reply_delivery
             ),
+            agent_runtime_ports=agent_runtime_ports,
         ),
         owner_id=f"{runtime_owner_id}::acceptance-effects",
         action_preview_service=action_preview_service,

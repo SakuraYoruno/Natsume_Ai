@@ -540,6 +540,7 @@ async def handle_chat(
     metrics: Any,
     governed_command_application: Any | None = None,
     hard_state_provider: Callable[[], Any] | None = None,
+    cortex_orchestrator_sse_generator: Callable[..., Any] | None = None,
 ) -> StreamingResponse:
     """POST /v1/chat 统一入口。
 
@@ -599,6 +600,9 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             metrics=metrics,
             governed_command_application=governed_command_application,
             embodiment_runtime=_request_embodiment_runtime(request),
+            cortex_orchestrator_sse_generator=(
+                cortex_orchestrator_sse_generator
+            ),
         ),
         media_type="text/event-stream",
         headers={
@@ -619,6 +623,7 @@ async def _unified_chat_sse_generator(
     metrics: Any,
     governed_command_application: Any | None = None,
     embodiment_runtime: Any | None = None,
+    cortex_orchestrator_sse_generator: Callable[..., Any] | None = None,
     _pre_recall_evidence: list[dict] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -864,7 +869,8 @@ async def _unified_chat_sse_generator(
         # 旧角色本人，统一处理所有场景。
         # 闲聊路径：Airlock → LLM → 反思链 → Airlock → 异步后处理
         # 执行路径：Cortex Orchestrator 调度 Executive Router / 子 Agent
-        from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator  # noqa: PLC0415
+        if not callable(cortex_orchestrator_sse_generator):
+            raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
         _chat_committed = False
         _mateengine_bubbled = False
         async for event in cortex_orchestrator_sse_generator(

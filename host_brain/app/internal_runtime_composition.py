@@ -50,6 +50,7 @@ def compose_internal_runtime(
     semantic_recaller: Any,
     mode_transition_service_provider: Callable[[], Any],
     life_receipt_reader_provider: Callable[[], Any],
+    agent_runtime_ports: Any,
     token_service_provider: Callable[[], Any],
     intent_engine_provider: Callable[[], Any],
     model_attempt_service_provider: Callable[[], Any],
@@ -98,6 +99,7 @@ def compose_internal_runtime(
         runtime_owner_id=canonical_owner,
         scheduler_operation_handler=scheduler_operation_handler,
         life_receipt_reader_provider=life_receipt_reader_provider,
+        agent_runtime_ports=agent_runtime_ports,
         internal_agent_artifact_store=artifact_store,
         internal_agent_workspace_runtime=workspace_runtime,
     )

@@ -159,6 +159,9 @@ Host lifecycle 的当前数据流为：
 ```mermaid
 flowchart LR
     ASGI["Host create_app"] --> Container["HostLifecycleContainer"]
+    ASGI --> AgentScope["AgentRuntimeApplicationScope\nLife authority ready 后才发布"]
+    AgentScope --> AgentPorts["immutable AgentRuntimeApplicationPorts"]
+    AgentPorts --> AgentConsumers["Input → Cortex · Life projection\nconversation Acceptance effect"]
     Container --> Start["factory/start success\nthen publish"]
     Start --> Services["ActivityMonitor + ResourceManager + ModeTransition"]
     Container --> Bootstrap["CoreSettings.sys_mode\nbootstrap only"]
@@ -180,7 +183,7 @@ flowchart LR
     Container --> Close["closing fence → unpublish\nblock begin → exact-once close"]
 ```
 
-Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 把同一个 typed Host service bundle 显式传给 Lifecycle Runtime、Tribe 与 Input Runtime；模型端口从Tool runtime或恢复调用点接收显式 provider，四者缺依赖均失败关闭。HardState 快照为 named40/116、all-form46、Container52/3/48；Lifecycle/Tribe为40/116/all-form44，Input为39/110/all-form43，当前库存为 named38/107、all-form42、Container50/3/46。底层实例仍可能 process-global；无Task-bound Preview的Gateway voice Effect为0；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
+Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 把同一个 typed Host service bundle 显式传给 Lifecycle Runtime、Tribe 与 Input Runtime；模型端口从Tool runtime或恢复调用点接收显式 provider，四者缺依赖均失败关闭。Life command authority 建立后，`AgentRuntimeApplicationScope` 才发布同一 immutable `AgentRuntimeApplicationPorts`；Chat 只能经 Input→Cortex closure 使用它，Life projection 与 conversation Acceptance effect 也接收同一 bundle。关停会先撤销这个 publication，再释放其依赖；retired `agent_runtime_shared` 不再是全局 authority。HardState 快照为 named40/116、all-form46、Container52/3/48；Lifecycle/Tribe为40/116/all-form44，Input为39/110/all-form43，当前库存为 named36/100、all-form40、Container50/3/46。底层实例仍可能 process-global；generic delegate 的 legacy Executive path 仍未获得这条正向 production wiring；无Task-bound Preview的Gateway voice Effect为0；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
 
 ```mermaid
 flowchart LR
@@ -191,6 +194,10 @@ flowchart LR
     LIFE --> JOBS["Scheduler / Life jobs / snapshot"]
     TRIBE --> AGENTS["process-fenced Tribe agents"]
     INPUT --> INGRESS["Host Input / Gateway ingress"]
+    ROOT --> AGENT_SCOPE["AgentRuntimeApplicationScope\nLife-bound publish / close"]
+    AGENT_SCOPE --> AGENT_PORTS["AgentRuntimeApplicationPorts"]
+    AGENT_PORTS --> CORTEX["Input → Cortex"]
+    AGENT_PORTS --> EFFECTS["Life projection / conversation Acceptance"]
     BUNDLE --> MODEL["ApplicationModelAttemptServicePort provider"]
     LOCATOR["ProcessServiceContainer"] -. "仅 composition root 解析；仍待继续删除" .-> ROOT
 ```

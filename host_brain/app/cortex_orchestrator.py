@@ -4,15 +4,21 @@ from __future__ import annotations
 
 from typing import Any, AsyncGenerator
 
-from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.agent_runtime.cortex_runtime import (
     _cortex_orchestrator_sse_generator_impl,
 )
 
 
-async def cortex_orchestrator_sse_generator(**kwargs: Any) -> AsyncGenerator[str, None]:
+async def cortex_orchestrator_sse_generator(
+    *,
+    application_ports: AgentRuntimeApplicationPorts | None = None,
+    **kwargs: Any,
+) -> AsyncGenerator[str, None]:
+    if not isinstance(application_ports, AgentRuntimeApplicationPorts):
+        raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
     async for event in _cortex_orchestrator_sse_generator_impl(
-        application_ports=AGENT_RUNTIME_PORTS,
+        application_ports=application_ports,
         **kwargs,
     ):
         yield event

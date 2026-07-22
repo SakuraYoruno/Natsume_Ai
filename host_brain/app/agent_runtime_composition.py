@@ -1,0 +1,178 @@
+"""App-local composition for canonical Agent Runtime application ports."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from functools import partial
+from typing import Any
+
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
+from host_brain.app.chat_retrieval_helpers import (
+    _run_retrieval,
+    filter_retrieval_evidence_items_for_prompt,
+)
+from host_brain.app.context.conversation_experience_store import (
+    get_conversation_experience_store,
+)
+from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
+from host_brain.app.durable_task_status import build_durable_task_status_projection
+from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
+from host_brain.app.intelligent_runtime import resolve_tts_route
+from host_brain.app.route_catalog_runtime import resolve_host_llm_runtime_async
+from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact
+from host_brain.app.surface_emotion_bond_flow import apply_surface_emotion_bond_flow
+from host_brain.app.user_preference_store import build_user_preference_pack
+from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion
+from host_brain.observability.runtime_audit import _persist_post_process_audit
+
+
+class AgentRuntimeCompositionError(RuntimeError):
+    """Raised when a Host tries to use Agent Runtime outside its app scope."""
+
+
+LifeAuthorityProvider = Callable[[], tuple[Any, Any]]
+
+
+@dataclass(slots=True)
+class AgentRuntimeApplicationScope:
+    """Own the Agent Runtime port bundle for one Host ASGI lifespan."""
+
+    host_services: HostLifecycleApplicationPorts
+    _ports: AgentRuntimeApplicationPorts | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+
+    def provider(self) -> AgentRuntimeApplicationPorts | None:
+        """Expose only the currently published app-local bundle."""
+
+        return self._ports
+
+    def initialize(
+        self,
+        *,
+        life_authority_provider: LifeAuthorityProvider,
+    ) -> AgentRuntimeApplicationPorts:
+        """Create and publish the bundle once after Life authority is ready."""
+
+        if self._ports is not None:
+            raise AgentRuntimeCompositionError("HOST_AGENT_RUNTIME_PORTS_ALREADY_INITIALIZED")
+        self._ports = build_agent_runtime_application_ports(
+            host_services=self.host_services,
+            life_authority_provider=life_authority_provider,
+        )
+        return self._ports
+
+    def clear(self) -> None:
+        """Withdraw the bundle before its owning collaborators are closed."""
+
+        self._ports = None
+
+
+def build_agent_runtime_application_ports(
+    *,
+    host_services: HostLifecycleApplicationPorts,
+    life_authority_provider: LifeAuthorityProvider,
+) -> AgentRuntimeApplicationPorts:
+    """Bind the Agent Runtime to one Host application's explicit services."""
+
+    if not callable(life_authority_provider):
+        raise AgentRuntimeCompositionError("HOST_AGENT_RUNTIME_LIFE_AUTHORITY_MISSING")
+
+    ledger = host_services.require_provider("ledger")
+    life_memory_store = host_services.require_provider("life_memory_store")
+    life_memory_service = host_services.require_provider("life_memory_service")
+    conversation_history = host_services.require_provider("conversation_history")
+    prompt_registry = host_services.require_provider("prompt_registry")
+    model_attempt_service = host_services.require_provider("model_attempt_service")
+    bond_update_queue = host_services.require_provider("bond_update_queue")
+
+    def resolve_life_authority() -> tuple[Any, Any]:
+        try:
+            service, reader = life_authority_provider()
+        except Exception as exc:
+            raise AgentRuntimeCompositionError(
+                "HOST_AGENT_RUNTIME_LIFE_AUTHORITY_UNAVAILABLE"
+            ) from exc
+        if service is None or reader is None:
+            raise AgentRuntimeCompositionError(
+                "HOST_AGENT_RUNTIME_LIFE_AUTHORITY_UNAVAILABLE"
+            )
+        return service, reader
+
+    async def run_retrieval_with_life_authority(**kwargs: Any) -> Any:
+        _, reader = resolve_life_authority()
+        return await _run_retrieval(
+            life_snapshot_reader=reader,
+            life_memory_store=life_memory_store(),
+            **kwargs,
+        )
+
+    def record_user_turn_with_life_authority(**kwargs: Any) -> Any:
+        service, reader = resolve_life_authority()
+        return record_user_turn(
+            ledger=ledger(),
+            life_service=service,
+            life_reader=reader,
+            **kwargs,
+        )
+
+    def record_assistant_turn_with_life_authority(**kwargs: Any) -> Any:
+        service, reader = resolve_life_authority()
+        return record_assistant_turn(
+            ledger=ledger(),
+            life_service=service,
+            life_reader=reader,
+            **kwargs,
+        )
+
+    def build_user_preference_pack_with_ledger(**kwargs: Any) -> dict[str, Any]:
+        return build_user_preference_pack(ledger=ledger(), **kwargs)
+
+    def apply_surface_emotion_bond_flow_with_queue(**kwargs: Any) -> dict[str, Any]:
+        return apply_surface_emotion_bond_flow(
+            queue=bond_update_queue(),
+            **kwargs,
+        )
+
+    def task_status_projection() -> Any:
+        return build_durable_task_status_projection(ledger=ledger())
+
+    def conversation_experience_store() -> Any:
+        return get_conversation_experience_store(ledger=ledger())
+
+    return AgentRuntimeApplicationPorts(
+        record_user_turn=record_user_turn_with_life_authority,
+        record_assistant_turn=record_assistant_turn_with_life_authority,
+        run_retrieval=run_retrieval_with_life_authority,
+        filter_retrieval_evidence_items_for_prompt=(
+            filter_retrieval_evidence_items_for_prompt
+        ),
+        build_user_preference_pack=build_user_preference_pack_with_ledger,
+        resolve_host_llm_runtime_async=resolve_host_llm_runtime_async,
+        resolve_state_arbiter_bond_fact=_resolve_state_arbiter_bond_fact,
+        apply_surface_emotion_bond_flow=apply_surface_emotion_bond_flow_with_queue,
+        get_conversation_experience_store=conversation_experience_store,
+        drive_stream_vts_emotion=_drive_stream_vts_emotion,
+        resolve_tts_route=resolve_tts_route,
+        conversation_history=conversation_history,
+        life_memory_service=life_memory_service,
+        audit_ledger=ledger,
+        prompt_registry=prompt_registry,
+        model_attempt_service=model_attempt_service,
+        task_status_projection=task_status_projection,
+        persist_post_process_audit=partial(
+            _persist_post_process_audit,
+            audit_ledger=ledger,
+        ),
+    )
+
+
+__all__ = [
+    "AgentRuntimeApplicationScope",
+    "AgentRuntimeCompositionError",
+    "LifeAuthorityProvider",
+    "build_agent_runtime_application_ports",
+]

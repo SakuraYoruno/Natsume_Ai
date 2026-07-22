@@ -8,6 +8,7 @@ import json
 import re
 from typing import Any
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.app.acceptance_effect_handler_common import (
     _canonical_id_ref,
     _is_exact_effect_identity,
@@ -48,11 +49,17 @@ def build_production_acceptance_effect_handlers(
     terminal_reconciliation_service: Any | None = None,
     terminal_reconciliation_store: Any | None = None,
     terminal_operator_command_store: Any | None = None,
+    agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
         "conversation.user_turn": _AcceptedConversationUserTurnHandler(
             turn_reader=conversation_turn_reader,
             event_reader=conversation_event_reader,
+            record_user_turn=(
+                agent_runtime_ports.record_user_turn
+                if isinstance(agent_runtime_ports, AgentRuntimeApplicationPorts)
+                else None
+            ),
         ),
         "conversation.preference_signal": _AcceptedPreferenceSignalHandler(
             preference_store=preference_store,
@@ -93,15 +100,25 @@ def build_production_acceptance_effect_handlers(
 class _AcceptedConversationUserTurnHandler:
     """Commit one visible turn and reconcile only from canonical SQLite rows."""
 
-    def __init__(self, *, turn_reader: Any | None, event_reader: Any | None) -> None:
+    def __init__(
+        self,
+        *,
+        turn_reader: Any | None,
+        event_reader: Any | None,
+        record_user_turn: Callable[..., Any] | None = None,
+    ) -> None:
         self._turn_reader = turn_reader
         self._event_reader = event_reader
+        self._record_user_turn = record_user_turn
 
     def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         # Validate the immutable identity before crossing the writer boundary.
         _accepted_conversation_request(payload)
         try:
-            invoked = _record_accepted_user_turn(payload)
+            invoked = _record_accepted_user_turn(
+                payload,
+                record_user_turn=self._record_user_turn,
+            )
             reopened = self.reconcile(payload)
             return {**reopened, "status": str(invoked["status"])}
         except Exception as exc:
@@ -740,11 +757,15 @@ def _accepted_conversation_request(payload: Mapping[str, Any]) -> dict[str, Any]
     }
 
 
-def _record_accepted_user_turn(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
-
+def _record_accepted_user_turn(
+    payload: Mapping[str, Any],
+    *,
+    record_user_turn: Callable[..., Any] | None,
+) -> Mapping[str, Any]:
+    if not callable(record_user_turn):
+        raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
     value = _accepted_conversation_request(payload)
-    result = AGENT_RUNTIME_PORTS.record_user_turn(
+    result = record_user_turn(
         request_id=str(value.get("request_id") or ""),
         session_id=str(value.get("session_id") or ""),
         person_id=str(value.get("person_id") or ""),

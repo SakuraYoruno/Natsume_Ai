@@ -9,6 +9,7 @@ from host_brain.app import acceptance_effect_handlers
 from host_brain.app.acceptance_effect_handlers import (
     build_production_acceptance_effect_handlers,
 )
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.life import (
@@ -27,6 +28,34 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
     _receipt_ref,
 )
 from natsume_contracts.edge.transport_v1 import EdgeTransportResult
+
+
+def _agent_runtime_ports(
+    record_user_turn,
+) -> AgentRuntimeApplicationPorts:  # noqa: ANN001
+    async def _empty_async(**_kwargs):  # noqa: ANN003, ANN202
+        return None
+
+    return AgentRuntimeApplicationPorts(
+        record_user_turn=record_user_turn,
+        record_assistant_turn=lambda **_kwargs: {},
+        run_retrieval=_empty_async,
+        filter_retrieval_evidence_items_for_prompt=lambda **_kwargs: [],
+        build_user_preference_pack=lambda **_kwargs: {},
+        resolve_host_llm_runtime_async=_empty_async,
+        resolve_state_arbiter_bond_fact=_empty_async,
+        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
+        get_conversation_experience_store=lambda: None,
+        drive_stream_vts_emotion=_empty_async,
+        resolve_tts_route=lambda **_kwargs: None,
+        conversation_history=lambda: None,
+        life_memory_service=lambda: None,
+        audit_ledger=lambda: None,
+        prompt_registry=lambda: None,
+        model_attempt_service=lambda: None,
+        task_status_projection=lambda: None,
+        persist_post_process_audit=_empty_async,
+    )
 
 def _conversation_payload() -> dict[str, Any]:
     return {
@@ -142,7 +171,6 @@ def _migrated_ledger(db_path) -> SQLiteLedger:  # noqa: ANN001
 
 def test_conversation_response_loss_reopens_exact_sqlite_rows_after_restart(
     tmp_path,
-    monkeypatch,
 ) -> None:
     db_path = tmp_path / "conversation-response-loss.sqlite3"
     ledger = _migrated_ledger(db_path)
@@ -173,13 +201,10 @@ def test_conversation_response_loss_reopens_exact_sqlite_rows_after_restart(
         # safe ordinary retry.
         raise ValueError("simulated response loss after SQLite commit")
 
-    monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared.AGENT_RUNTIME_PORTS",
-        SimpleNamespace(record_user_turn=write_then_lose_response),
-    )
     handler = build_production_acceptance_effect_handlers(
         conversation_turn_reader=turn_reader,
         conversation_event_reader=event_reader,
+        agent_runtime_ports=_agent_runtime_ports(write_then_lose_response),
     )["conversation.user_turn"]
 
     recovered = handler(payload)
@@ -212,7 +237,6 @@ def test_conversation_response_loss_reopens_exact_sqlite_rows_after_restart(
 
 def test_conversation_success_reopens_authority_and_preserves_exact_payload(
     tmp_path,
-    monkeypatch,
 ) -> None:
     db_path = tmp_path / "conversation-read-after-write.sqlite3"
     ledger = _migrated_ledger(db_path)
@@ -246,14 +270,11 @@ def test_conversation_success_reopens_authority_and_preserves_exact_payload(
             "turn": {"turn_id": "turn-untrusted"},
         }
 
-    monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared.AGENT_RUNTIME_PORTS",
-        SimpleNamespace(record_user_turn=write_with_untrusted_projection),
-    )
     turn_reader = ContextRepository.from_ledger(ledger)
     handler = build_production_acceptance_effect_handlers(
         conversation_turn_reader=turn_reader,
         conversation_event_reader=MemoryEventRepository.from_ledger(ledger),
+        agent_runtime_ports=_agent_runtime_ports(write_with_untrusted_projection),
     )["conversation.user_turn"]
 
     result = handler(payload)
@@ -281,7 +302,7 @@ def test_conversation_success_reopens_authority_and_preserves_exact_payload(
         {"content": "  noncanonical\ncontent  "},
     ],
 )
-def test_conversation_invalid_payload_fails_before_writer(monkeypatch, drift) -> None:
+def test_conversation_invalid_payload_fails_before_writer(drift) -> None:
     calls = 0
 
     def forbidden_writer(**_kwargs):  # noqa: ANN003, ANN202
@@ -289,11 +310,9 @@ def test_conversation_invalid_payload_fails_before_writer(monkeypatch, drift) ->
         calls += 1
         raise AssertionError("writer must not be invoked")
 
-    monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared.AGENT_RUNTIME_PORTS",
-        SimpleNamespace(record_user_turn=forbidden_writer),
-    )
-    handler = build_production_acceptance_effect_handlers()["conversation.user_turn"]
+    handler = build_production_acceptance_effect_handlers(
+        agent_runtime_ports=_agent_runtime_ports(forbidden_writer),
+    )["conversation.user_turn"]
 
     with pytest.raises(ValueError):
         handler({**_conversation_payload(), **drift})
@@ -499,19 +518,15 @@ def test_conversation_reconciliation_rejects_payload_drift_without_writer(
     ledger.close()
 
 
-def test_unknown_detail_persists_only_opaque_failure_digest(monkeypatch) -> None:
+def test_unknown_detail_persists_only_opaque_failure_digest() -> None:
     secret = "provider-secret=do-not-persist"
 
     def fail_with_sensitive_detail(**_kwargs):  # noqa: ANN003, ANN202
         raise OSError(secret)
 
-    monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared.AGENT_RUNTIME_PORTS",
-        SimpleNamespace(record_user_turn=fail_with_sensitive_detail),
-    )
-    handler = build_production_acceptance_effect_handlers()[
-        "conversation.user_turn"
-    ]
+    handler = build_production_acceptance_effect_handlers(
+        agent_runtime_ports=_agent_runtime_ports(fail_with_sensitive_detail),
+    )["conversation.user_turn"]
 
     with pytest.raises(AcceptanceEffectOutcomeUnknown) as uncertain:
         handler(_conversation_payload())

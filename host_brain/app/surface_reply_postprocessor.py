@@ -15,6 +15,8 @@ import logging
 import time
 from typing import Any, Dict
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
+
 _logger = logging.getLogger("Natsume.surface_reply")
 
 
@@ -117,6 +119,7 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
 
 def schedule_async_post_process(
     *,
+    application_ports: AgentRuntimeApplicationPorts | None = None,
     request_id: str,
     person_id: str,
     session_id: str,
@@ -143,11 +146,12 @@ def schedule_async_post_process(
 ) -> None:
     """调度异步后处理任务（fire-and-forget）。"""
     try:
-        from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS
         from host_brain.agent_runtime.postprocess import _async_post_process
+        if not isinstance(application_ports, AgentRuntimeApplicationPorts):
+            raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
         asyncio.create_task(
             _async_post_process(
-                application_ports=AGENT_RUNTIME_PORTS,
+                application_ports=application_ports,
                 request_id=request_id,
                 person_id=person_id,
                 session_id=session_id,
