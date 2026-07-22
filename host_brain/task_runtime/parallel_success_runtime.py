@@ -159,6 +159,7 @@ class ParallelSuccessRuntime:
         accepted_outcomes: list[dict[str, Any]] = []
         projections: dict[str, dict[str, Any]] = {}
         receipt_refs: dict[str, str] = {}
+        graph_status = _status(graph)
         for binding in admitted.nodes:
             attempt = latest_attempt_by_node.get(binding.node_id)
             if attempt is None or _status(attempt) != "SUCCEEDED":
@@ -197,28 +198,50 @@ class ParallelSuccessRuntime:
                 work_order=work_order,
                 command=command,
             )
-            expected_node_grant_ref = _text(
-                node_grant_refs.get(binding.node_id)
+            # A Review continuation executes with a one-time renewed child
+            # grant.  Once the graph is COMPLETED, exact replay must reopen
+            # that frozen projection authority instead of comparing it with
+            # the original pre-Review grant batch supplied by admission.
+            expected_node_grant_ref = (
+                _text(projection.get("node_grant_ref"))
+                if graph_status == "COMPLETED"
+                else _text(node_grant_refs.get(binding.node_id))
             )
             payload_digest = _text(projection.get("payload_digest"))
-            if (
-                not expected_node_grant_ref
-                or _text(projection.get("command_id")) != admitted.command_id
-                or _text(projection.get("request_id")) != command.request_id
-                or _text(projection.get("graph_id")) != admitted.graph_id
-                or int(projection.get("graph_revision") or 0)
-                != admitted.graph_revision
-                or _text(projection.get("node_id")) != binding.node_id
-                or _text(projection.get("attempt_id")) != attempt_id
-                or _text(projection.get("route_type")).lower() != expected_route
-                or _text(projection.get("target_id")) != expected_target
-                or _text(projection.get("node_grant_ref"))
-                != expected_node_grant_ref
-                or _text(projection.get("decision")).upper() != "APPROVE"
-            ):
+            expected_projection_authority = {
+                "command_id": admitted.command_id,
+                "request_id": command.request_id,
+                "graph_id": admitted.graph_id,
+                "graph_revision": admitted.graph_revision,
+                "node_id": binding.node_id,
+                "attempt_id": attempt_id,
+                "route_type": expected_route,
+                "target_id": expected_target,
+                "node_grant_ref": expected_node_grant_ref,
+                "decision": "APPROVE",
+            }
+            actual_projection_authority = {
+                "command_id": _text(projection.get("command_id")),
+                "request_id": _text(projection.get("request_id")),
+                "graph_id": _text(projection.get("graph_id")),
+                "graph_revision": int(projection.get("graph_revision") or 0),
+                "node_id": _text(projection.get("node_id")),
+                "attempt_id": _text(projection.get("attempt_id")),
+                "route_type": _text(projection.get("route_type")).lower(),
+                "target_id": _text(projection.get("target_id")),
+                "node_grant_ref": _text(projection.get("node_grant_ref")),
+                "decision": _text(projection.get("decision")).upper(),
+            }
+            drifted_fields = sorted(
+                key
+                for key, expected in expected_projection_authority.items()
+                if actual_projection_authority.get(key) != expected
+            )
+            if not expected_node_grant_ref or drifted_fields:
                 raise GovernedRuntimeError(
                     GOVERNED_DURABLE_STATE_CONFLICT,
-                    f"parallel success projection authority drifted: {binding.node_id}",
+                    "parallel success projection authority drifted: "
+                    f"{binding.node_id}; fields={','.join(drifted_fields)}",
                 )
             projections[binding.node_id] = projection
             receipt_refs[binding.node_id] = receipt_ref
@@ -238,7 +261,6 @@ class ParallelSuccessRuntime:
         result_receipt_ref = receipt_refs[result_node_id]
         result_projection = projections[result_node_id]
         budget = await self._budgets.refresh(budget)
-        graph_status = _status(graph)
         if graph_status == "COMPLETED":
             raw_decision = await _maybe_await(
                 self._store.get_latest_parallel_success_decision(

@@ -47,6 +47,9 @@ from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
 )
+from host_brain.persistence.terminal_operator_command_store import (
+    TerminalOperatorCommandStore,
+)
 from host_brain.task_runtime.graph_cancellation_continuation_worker import (
     GraphCancellationContinuationWorker,
 )
@@ -135,6 +138,7 @@ SchedulerDefinitionRepositoryBuilder = Callable[..., SchedulerDefinitionReposito
 SchedulerResultRepositoryBuilder = Callable[..., SchedulerExecutionResultRepository]
 RuntimeEventStoreBuilder = Callable[..., RuntimeEventStore]
 RuntimeOutboxPublisherBuilder = Callable[..., RuntimeOutboxPublisher]
+TerminalOperatorCommandStoreBuilder = Callable[..., TerminalOperatorCommandStore]
 
 
 _PROCESS_BOOT_ID = uuid.uuid4().hex
@@ -185,6 +189,7 @@ class ProcessTaskRuntimeContainer:
     operation_reconciliation_service: GraphCancellationOperationReconciliationService
     effect_reconciliation_service: GraphCancellationEffectReconciliationService
     terminal_reconciliation_service: TerminalStateReconciliationService
+    terminal_operator_command_store: TerminalOperatorCommandStore
     terminal_reconciliation_inventory: Mapping[str, Any]
     terminal_reconciliation_auto_result: Mapping[str, Any]
     startup_publish_result: Mapping[str, Any]
@@ -729,6 +734,9 @@ def build_process_task_runtime_container(
     ),
     event_store_builder: RuntimeEventStoreBuilder = RuntimeEventStore,
     outbox_publisher_builder: RuntimeOutboxPublisherBuilder = RuntimeOutboxPublisher,
+    terminal_operator_command_store_builder: TerminalOperatorCommandStoreBuilder = (
+        TerminalOperatorCommandStore
+    ),
     reconciliation_public_keys: Mapping[str, bytes] | None = None,
     terminal_reconciliation_auto_enabled: bool = False,
     authenticated_outcome_lookup: Callable[[str], Any | None] | None = None,
@@ -778,6 +786,9 @@ def build_process_task_runtime_container(
         task_store.assert_effect_reconciliation_ready()
         task_store.assert_terminal_reconciliation_ready()
         task_store.assert_node_artifact_ready()
+        terminal_operator_command_store = terminal_operator_command_store_builder(
+            canonical
+        )
         recovery_id = _next_startup_recovery_id(canonical_db_path=canonical)
         recovery_report = task_store.recover_startup(recovery_id=recovery_id)
         terminal_reconciliation_inventory = (
@@ -915,6 +926,7 @@ def build_process_task_runtime_container(
         operation_reconciliation_service=operation_reconciliation_service,
         effect_reconciliation_service=effect_reconciliation_service,
         terminal_reconciliation_service=terminal_reconciliation_service,
+        terminal_operator_command_store=terminal_operator_command_store,
         terminal_reconciliation_inventory=dict(terminal_reconciliation_inventory),
         terminal_reconciliation_auto_result=dict(
             terminal_reconciliation_auto_result

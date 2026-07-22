@@ -52,6 +52,8 @@ _SAFE_TOKEN_METADATA = re.compile(
 )
 _OPERATOR_SYS_MODE_TARGET = "operator_sys_mode_switch"
 _OPERATOR_SYS_MODE_EFFECT = "host.sys_mode_transition"
+_OPERATOR_TERMINAL_TARGET = "operator_task_terminal_reconcile"
+_OPERATOR_TERMINAL_EFFECT = "task.terminal_reconciliation"
 _SCHEDULER_OPERATION_EFFECT = "scheduler.operation.execute"
 _SCHEDULER_PLAN_SCHEMA = "Natsume.scheduler.operation_plan.v1"
 _SCHEDULER_EFFECT_SCHEMA = "Natsume.scheduler.accepted_operation.v1"
@@ -563,7 +565,18 @@ def _compile_operator_effects(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
-    if command.route_type != "delegate" or command.target_id != _OPERATOR_SYS_MODE_TARGET:
+    if command.route_type != "delegate":
+        raise AcceptanceEffectCompileError("unsupported governed Operator route")
+    if command.target_id == _OPERATOR_TERMINAL_TARGET:
+        return _compile_operator_terminal_effect(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            commit=commit,
+            pack=pack,
+        )
+    if command.target_id != _OPERATOR_SYS_MODE_TARGET:
         raise AcceptanceEffectCompileError("unsupported governed Operator route")
     raw = commit.get("acceptance_effect_intents")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
@@ -646,6 +659,105 @@ def _compile_operator_effects(
     return (
         _spec(
             effect_type=_OPERATOR_SYS_MODE_EFFECT,
+            payload={**payload, "_action_preview_context": preview_context},
+            command=command,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        ),
+    )
+
+
+def _compile_operator_terminal_effect(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    attempt_id: str,
+    commit: Mapping[str, Any],
+    pack: Mapping[str, Any],
+) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    raw = commit.get("acceptance_effect_intents")
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
+        raise AcceptanceEffectCompileError("terminal Operator must propose one effect")
+    if len(raw) != 1:
+        raise AcceptanceEffectCompileError(
+            "terminal Operator must propose exactly one effect"
+        )
+    descriptor = _json_mapping(
+        raw[0], field_name="terminal Operator effect descriptor"
+    )
+    if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
+        raise AcceptanceEffectCompileError(
+            "terminal Operator descriptor fields drifted"
+        )
+    if (
+        descriptor.get("effect_type") != _OPERATOR_TERMINAL_EFFECT
+        or str(descriptor.get("commit_scope") or "").strip().upper() != "NODE"
+    ):
+        raise AcceptanceEffectCompileError(
+            "terminal Operator proposed an unsupported effect"
+        )
+    payload = _json_mapping(
+        descriptor.get("payload"),
+        field_name="terminal Operator effect payload",
+    )
+    _reject_worker_authority(payload)
+    required_keys = {
+        "operator_command_id",
+        "request_id",
+        "case_id",
+        "signed_command_ref",
+        "signed_command_sha256",
+    }
+    if set(payload) != required_keys:
+        raise AcceptanceEffectCompileError(
+            "terminal Operator effect payload fields drifted"
+        )
+    intent = _json_mapping(pack.get("intent_draft"), field_name="intent_draft")
+    args = _json_mapping(intent.get("args"), field_name="intent_draft.args")
+    expected = {
+        "operator_command_id": "task_terminal.reconcile",
+        "case_id": str(args.get("case_id") or "").strip(),
+        "signed_command_ref": str(args.get("signed_command_ref") or "").strip(),
+        "signed_command_sha256": str(
+            args.get("signed_command_sha256") or ""
+        ).strip(),
+    }
+    if (
+        payload.get("request_id") != command.request_id
+        or {key: payload.get(key) for key in expected} != expected
+        or not expected["case_id"]
+        or not re.fullmatch(
+            r"terminal-command://sha256/[0-9a-f]{64}",
+            expected["signed_command_ref"],
+        )
+        or not re.fullmatch(
+            r"sha256:[0-9a-f]{64}",
+            expected["signed_command_sha256"],
+        )
+        or str(intent.get("action") or "").strip()
+        != "operator_task_terminal_reconciliation"
+        or str(intent.get("target") or "").strip().lower() != "system"
+        or str(intent.get("route") or "").strip().lower() != "delegate"
+        or str(intent.get("target_id") or "").strip()
+        != _OPERATOR_TERMINAL_TARGET
+    ):
+        raise AcceptanceEffectCompileError(
+            "terminal Operator effect differs from frozen intent"
+        )
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_id,
+        worker_commit=commit,
+    )
+    if preview_context is None:
+        raise AcceptanceEffectCompileError(
+            "terminal Operator effect has no Runtime Context preview binding"
+        )
+    return (
+        _spec(
+            effect_type=_OPERATOR_TERMINAL_EFFECT,
             payload={**payload, "_action_preview_context": preview_context},
             command=command,
             node_id=node_id,

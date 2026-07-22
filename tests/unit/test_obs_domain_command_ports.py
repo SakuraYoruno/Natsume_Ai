@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -93,9 +94,13 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
     assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset(
-        {"scheduler.task.trigger", "sys_mode.switch"}
+        {
+            "scheduler.task.trigger",
+            "sys_mode.switch",
+            "task_terminal.reconcile",
+        }
     )
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 35
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 34
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
         expected
     )
@@ -124,6 +129,16 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
             asyncio.run(port.execute(envelope))
         assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
         assert blocked.value.side_effects_may_have_run is False
+
+
+def test_blocked_canon_commands_retain_no_dormant_route_writer() -> None:
+    from host_brain.app.observability_runtime import domain_command_ports
+
+    source = inspect.getsource(domain_command_ports)
+    assert "canon_routes.submit_proposal" not in source
+    assert "canon_routes.approve_proposal" not in source
+    assert "canon_routes.reject_proposal" not in source
+    assert "canon_routes.rollback_proposal" not in source
 
 
 def test_scheduler_trigger_enters_operator_surface_and_reports_review_pause() -> None:
@@ -619,14 +634,15 @@ def test_task_effect_reconcile_preserves_unknown_write_certainty() -> None:
 def test_task_terminal_reconcile_binds_actor_and_forwards_signed_targets() -> None:
     captured: dict[str, object] = {}
 
-    class _ReconciliationService:
+    class _GovernedRuntime:
         @staticmethod
-        async def reconcile_terminal_state(**kwargs):  # noqa: ANN003
-            captured.update(kwargs)
+        async def execute_terminal_reconciliation(payload, request_id):  # noqa: ANN001
+            captured.update(payload)
+            captured["request_id"] = request_id
             return {
+                "success": True,
                 "status": "RECONCILED",
-                "case": {"case_id": kwargs["case_id"]},
-                "replayed": False,
+                "side_effects_executed": True,
             }
 
     registry = build_default_obs_domain_command_registry()
@@ -651,29 +667,27 @@ def test_task_terminal_reconcile_binds_actor_and_forwards_signed_targets() -> No
         principal_id="reconciler.authenticated",
     )
     state = SimpleNamespace(
-        task_terminal_reconciliation_command_service=_ReconciliationService(),
+        task_terminal_reconciliation_operator_enabled=True,
+        governed_operator_runtime=_GovernedRuntime(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-terminal-proof"):
-        with pytest.raises(ObsCommandPortExecutionError) as blocked:
-            asyncio.run(registry.resolve_port("task_terminal.reconcile").execute(envelope))
+        result = asyncio.run(
+            registry.resolve_port("task_terminal.reconcile").execute(envelope)
+        )
 
     assert envelope.payload["reconciler_actor_id"] == "reconciler.authenticated"
     assert str(envelope.payload["target_graph_status"]).upper() == "FAILED"
     assert str(envelope.payload["target_budget_status"]).upper() == "RELEASED"
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-    assert captured == {}
+    assert captured["reconciler_actor_id"] == "reconciler.authenticated"
+    assert captured["request_id"] == "request-task_terminal.reconcile"
+    assert result.side_effects_executed is True
 
 
 def test_task_terminal_reconcile_preserves_unknown_write_certainty() -> None:
-    class _ReconciliationService:
+    class _GovernedRuntime:
         @staticmethod
-        def reconcile_terminal_state(**_kwargs):  # noqa: ANN003
-            raise TerminalStateReconciliationError(
-                "TERMINAL_RECONCILIATION_UNCERTAIN",
-                "response lost",
-                side_effects_may_have_run=True,
-            )
+        async def execute_terminal_reconciliation(_payload, _request_id):  # noqa: ANN001
+            raise RuntimeError("response lost")
 
     registry = build_default_obs_domain_command_registry()
     envelope = _envelope(
@@ -691,7 +705,8 @@ def test_task_terminal_reconcile_preserves_unknown_write_certainty() -> None:
         },
     )
     state = SimpleNamespace(
-        task_terminal_reconciliation_command_service=_ReconciliationService(),
+        task_terminal_reconciliation_operator_enabled=True,
+        governed_operator_runtime=_GovernedRuntime(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-terminal-proof"):
         with pytest.raises(ObsCommandRoutingError) as raised:
@@ -699,5 +714,5 @@ def test_task_terminal_reconcile_preserves_unknown_write_certainty() -> None:
                 ObsCommandRouter(registry).route(envelope)
             )
 
-    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert raised.value.side_effects_may_have_run is False
+    assert raised.value.reason_code == "OBS_COMMAND_EXECUTION_UNCERTAIN"
+    assert raised.value.side_effects_may_have_run is True

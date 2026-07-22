@@ -22,6 +22,9 @@ from host_brain.app.acceptance_surface_effect_handler import (
     _surface_delivery_id,
     _surface_gateway_payload_digest,
 )
+from host_brain.app.accepted_terminal_reconciliation_handler import (
+    AcceptedTerminalReconciliationHandler,
+)
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedLifeConversationProjectionV1,
     AcceptedPreferenceSignalV1,
@@ -42,6 +45,9 @@ def build_production_acceptance_effect_handlers(
     preference_store: Any | None = None,
     life_receipt_reader_provider: Callable[[], Any] | None = None,
     gateway_reply_query_port: Callable[..., Any] | None = None,
+    terminal_reconciliation_service: Any | None = None,
+    terminal_reconciliation_store: Any | None = None,
+    terminal_operator_command_store: Any | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
         "conversation.user_turn": _AcceptedConversationUserTurnHandler(
@@ -73,6 +79,14 @@ def build_production_acceptance_effect_handlers(
         if not callable(internal_result_commit_handler):
             raise TypeError("internal_result_commit_handler must be callable")
         handlers["internal.agent.result_commit"] = internal_result_commit_handler
+    if terminal_reconciliation_service is not None:
+        handlers["task.terminal_reconciliation"] = (
+            AcceptedTerminalReconciliationHandler(
+                service=terminal_reconciliation_service,
+                task_store=terminal_reconciliation_store,
+                command_store=terminal_operator_command_store,
+            )
+        )
     return handlers
 
 

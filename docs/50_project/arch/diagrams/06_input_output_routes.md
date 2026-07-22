@@ -124,5 +124,5 @@ Edge event 不是用户对话输入；平台 inbox 也不是设备 receipt。把
 - Gateway 是否启用由 `EDGE_GATEWAY_ENABLED` 和 `EDGE_GATEWAY_PLATFORMS` 决定。
 - Edge RPC 监听地址来自 `EDGE_RPC_HOST/EDGE_RPC_PORT`。
 - 生产鉴权需要独立的 Gateway/Host/Edge secret profile；不同边界不得复用一把通用密钥。
-- `task_terminal.reconcile` 使用独立默认关闭的 Secure Ingress Operator 权限和 verification-only Ed25519 公钥环；不得复用 Gateway/Edge transport secret 充当签名 authority。
+- `task_terminal.reconcile` 使用独立默认关闭的 Secure Ingress Operator 权限和 verification-only Ed25519 公钥环；完整签名命令只进入 0119 专用 append-only 表，通用 TaskGraph 仅携带 ref/digest，并经 durable Review、Action Preview 与 Acceptance Effect 后重开执行。不得复用 Gateway/Edge transport secret 充当签名 authority。
 - 没有真实平台账号或设备时，只能标 `NOT_TESTED/DEGRADED`，mock receipt 不能证明真实投递或硬件动作。

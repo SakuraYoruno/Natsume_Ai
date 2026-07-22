@@ -377,6 +377,7 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
         outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
         scheduler_definition_repository=definitions,
         worker_projection_store=WorkerProjectionStore(db_path),
+        internal_agent_checkpoint_uow=None,
         graph_execution_registry=None,
     )
     handler_calls: list[dict[str, Any]] = []
@@ -610,7 +611,7 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
         assert receipt["status"] == "ACCEPTED"
         assert receipt["verification_status"] == "PASS"
         assert receipt["accepted"] is True
-        assert replay["replayed"] is True
+        assert receipt["replayed"] is True
         assert len(handler_calls) == 1
         replayed_result = results.get_by_command(command.command_id)
         assert replayed_result is not None
@@ -687,8 +688,9 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
     assert GOVERNED_OPERATOR_COMMAND_IDS == {
         COMMAND_ID,
         "sys_mode.switch",
+        "task_terminal.reconcile",
     }
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 35
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 34
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == manifest
 
 

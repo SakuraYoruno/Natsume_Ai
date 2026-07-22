@@ -26,6 +26,18 @@ from host_brain.app.governed_frozen_skill_runtime import (
     _WorkerCommitAcceptance,
     _WorkerCommitVerifier,
 )
+from host_brain.app.governed_operator_contracts import (
+    GOVERNED_OPERATOR_GOVERNOR_REJECTED,
+    GOVERNED_OPERATOR_RUNTIME_INVALID,
+    GovernedOperatorRuntimeError,
+)
+from host_brain.app.governed_terminal_reconciliation_runtime import (
+    GovernedTerminalReconciliationMixin,
+    TERMINAL_EFFECT_TYPE,
+    TERMINAL_TARGET_ID,
+    require_durable_terminal_outcome,
+    terminal_reconciliation_commit_event,
+)
 from host_brain.app.governed_task_adapter import GovernedHostRuntime
 from host_brain.app.user_preference_store import UserPreferenceStore
 from host_brain.channels.edge_transport import query_gateway_reply_delivery
@@ -62,21 +74,12 @@ from host_brain.task_runtime.worker_registry import GovernedWorkerRegistry
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
-GOVERNED_OPERATOR_RUNTIME_INVALID = "GOVERNED_OPERATOR_RUNTIME_INVALID"
-GOVERNED_OPERATOR_GOVERNOR_REJECTED = "GOVERNED_OPERATOR_GOVERNOR_REJECTED"
 _TARGET_ID = "operator_sys_mode_switch"
 _EFFECT_TYPE = "host.sys_mode_transition"
 _ACTION_KIND = "operator_sys_mode_transition"
 _INGRESS_ACTION = "obs:command:sys_mode.switch"
 _INGRESS_PATH = "/v1/host/obs-commands/sys_mode.switch"
 _INGRESS_REQUIRED_SCOPES = ("obs:sys-mode:write", "obs:write")
-
-
-class GovernedOperatorRuntimeError(RuntimeError):
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or GOVERNED_OPERATOR_RUNTIME_INVALID)
-        self.detail = str(detail or "governed Operator command is invalid")
-        super().__init__(f"{self.reason_code}: {self.detail}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +99,9 @@ class FrozenSysModeSwitchExecutor:
         self,
         frozen: FrozenNodeInput,
     ) -> AsyncIterator[Mapping[str, Any]]:
+        if frozen.route == "delegate" and frozen.target_id == TERMINAL_TARGET_ID:
+            yield terminal_reconciliation_commit_event(frozen)
+            return
         if frozen.route != "delegate" or frozen.target_id != _TARGET_ID:
             raise GovernedOperatorRuntimeError(
                 GOVERNED_OPERATOR_RUNTIME_INVALID,
@@ -173,7 +179,7 @@ class FrozenSysModeSwitchExecutor:
         }
 
 
-class GovernedOperatorRuntime:
+class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
     """Evaluate, admit and execute the sys_mode.switch Operator vertical slice."""
 
     def __init__(
@@ -185,6 +191,7 @@ class GovernedOperatorRuntime:
         governor_grants: DurableGovernorGrantResolver,
         review_store: Any,
         task_store: Any,
+        terminal_operator_command_store: Any,
         mode_transition_service_provider: Any,
         secure_ingress_authority_resolver: Any,
         runtime_scope_id: str,
@@ -205,10 +212,26 @@ class GovernedOperatorRuntime:
         self._governor_grants = governor_grants
         self._review_store = review_store
         self._task_store = task_store
+        self._terminal_operator_command_store = terminal_operator_command_store
         self._mode_transition_service_provider = mode_transition_service_provider
         self._runtime_scope_id = _runtime_scope_id(runtime_scope_id)
         self._secure_ingress_authority_resolver = (
             secure_ingress_authority_resolver
+        )
+
+    @staticmethod
+    def _require_operator_authority(payload: Mapping[str, Any]) -> dict[str, Any]:
+        return _require_operator_authority(payload)
+
+    def _verify_operator_authority(
+        self,
+        authority: Mapping[str, Any],
+        **requirements: Any,
+    ) -> dict[str, Any]:
+        return _verify_durable_operator_authority(
+            authority,
+            resolver=self._secure_ingress_authority_resolver,
+            **requirements,
         )
 
     async def activate(self) -> None:
@@ -252,6 +275,19 @@ class GovernedOperatorRuntime:
         intent = dict(intent_raw) if isinstance(intent_raw, Mapping) else {}
         args_raw = intent.get("args")
         args = dict(args_raw) if isinstance(args_raw, Mapping) else {}
+        operator_command_id = str(
+            dict(work_order.metadata or {}).get("operator_command_id") or ""
+        ).strip()
+        if operator_command_id == "task_terminal.reconcile":
+            outcome = require_durable_terminal_outcome(
+                task_store=self._task_store,
+                command_store=self._terminal_operator_command_store,
+                execution_receipt=receipt,
+                args=args,
+            )
+            bound["acceptance_effect_receipt"] = outcome
+            bound["historical_side_effects_executed"] = True
+            return bound
         target_mode = str(args.get("target_mode") or "").strip().lower()
         reason = str(args.get("reason") or "").strip()
         source = str(args.get("source") or "").strip().lower()
@@ -321,6 +357,10 @@ class GovernedOperatorRuntime:
             resolver=self._secure_ingress_authority_resolver,
             request_id=request_ref,
             allow_settled_replay=isinstance(existing, Mapping),
+            operator_command_id="sys_mode.switch",
+            ingress_action=_INGRESS_ACTION,
+            ingress_path=_INGRESS_PATH,
+            required_scopes=_INGRESS_REQUIRED_SCOPES,
         )
         target_mode = str(value.get("target_mode") or "").strip().lower()
         reason = str(value.get("reason") or "").strip() or "操作员请求切换系统模式"
@@ -579,7 +619,9 @@ def build_governed_operator_runtime(
         node_grants=node_grant_verifier,
         projections=projection_store,
         action_preview_service=action_preview_service,
-        allowed_acceptance_effect_types=frozenset({_EFFECT_TYPE}),
+        allowed_acceptance_effect_types=frozenset(
+            {_EFFECT_TYPE, TERMINAL_EFFECT_TYPE}
+        ),
     )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
@@ -627,7 +669,7 @@ def build_governed_operator_runtime(
         supported_routes=frozenset({"delegate"}),
         planning_enabled=False,
         acceptance_effect_dispatcher=acceptance_effect_dispatcher,
-        delegate_target_validator=_require_sys_mode_target,
+        delegate_target_validator=_require_operator_target,
         runtime_context_application=runtime_context_application,
     )
     return GovernedOperatorRuntime(
@@ -637,6 +679,9 @@ def build_governed_operator_runtime(
         governor_grants=DurableGovernorGrantResolver(ledger),
         review_store=review_store,
         task_store=task_runtime_container.task_store,
+        terminal_operator_command_store=(
+            task_runtime_container.terminal_operator_command_store
+        ),
         mode_transition_service_provider=mode_transition_service_provider,
         secure_ingress_authority_resolver=(
             secure_ingress_authority_resolver
@@ -669,6 +714,13 @@ def build_governed_operator_composition(
         task_store=task_runtime_container.task_store,
         handlers=build_production_acceptance_effect_handlers(
             mode_transition_service_provider=mode_transition_service_provider,
+            terminal_reconciliation_service=(
+                task_runtime_container.terminal_reconciliation_service
+            ),
+            terminal_reconciliation_store=task_runtime_container.task_store,
+            terminal_operator_command_store=(
+                task_runtime_container.terminal_operator_command_store
+            ),
             scheduler_operation_handler=scheduler_operation_handler,
             internal_result_commit_handler=InternalAcceptedResultHandler(
                 command_repository=task_runtime_container.command_repository,
@@ -715,9 +767,9 @@ def build_governed_operator_composition(
     )
 
 
-def _require_sys_mode_target(target_id: str) -> str:
+def _require_operator_target(target_id: str) -> str:
     target = str(target_id or "").strip()
-    if target != _TARGET_ID:
+    if target not in {_TARGET_ID, TERMINAL_TARGET_ID}:
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,
             "unsupported governed Operator target",
@@ -770,6 +822,10 @@ def _verify_durable_operator_authority(
     resolver: Any,
     request_id: str,
     allow_settled_replay: bool,
+    operator_command_id: str,
+    ingress_action: str,
+    ingress_path: str,
+    required_scopes: tuple[str, ...],
 ) -> dict[str, Any]:
     supplied = dict(authority or {})
     audit_ref = _authority_text(supplied, "audit_ref")
@@ -782,7 +838,7 @@ def _verify_durable_operator_authority(
             "Operator Secure Ingress claim/audit is not durably committed",
         )
     durable = dict(durable_raw)
-    expected_scopes = tuple(sorted(_INGRESS_REQUIRED_SCOPES))
+    expected_scopes = tuple(sorted(required_scopes))
     supplied_scopes = _authority_scopes(supplied.get("required_scopes"))
     durable_scopes = _authority_scopes(durable.get("required_scopes"))
     requested_scopes = _authority_scopes(durable.get("requested_scopes"))
@@ -803,16 +859,16 @@ def _verify_durable_operator_authority(
             == _authority_text(durable, "principal_id"),
             _authority_text(supplied, "tenant_id")
             == _authority_text(durable, "tenant_id"),
-            _authority_text(supplied, "action") == _INGRESS_ACTION,
-            _authority_text(durable, "action") == _INGRESS_ACTION,
+            _authority_text(supplied, "action") == ingress_action,
+            _authority_text(durable, "action") == ingress_action,
             _authority_text(supplied, "ingress_surface") == "obs.command",
             _authority_text(durable, "surface") == "obs.command",
             _authority_text(supplied, "method").upper() == "POST",
             _authority_text(durable, "method").upper() == "POST",
-            _authority_text(supplied, "normalized_path") == _INGRESS_PATH,
-            _authority_text(durable, "normalized_path") == _INGRESS_PATH,
+            _authority_text(supplied, "normalized_path") == ingress_path,
+            _authority_text(durable, "normalized_path") == ingress_path,
             _authority_text(supplied, "operator_command_id")
-            == "sys_mode.switch",
+            == operator_command_id,
             supplied_scopes == expected_scopes,
             durable_scopes == expected_scopes,
             set(expected_scopes).issubset(requested_scopes),
@@ -839,12 +895,12 @@ def _verify_durable_operator_authority(
         "claim_ref": _authority_text(durable, "claim_ref"),
         "audit_ref": _authority_text(durable, "audit_ref"),
         "body_sha256": durable_body,
-        "action": _INGRESS_ACTION,
+        "action": ingress_action,
         "required_scopes": expected_scopes,
         "ingress_surface": "obs.command",
         "method": "POST",
-        "normalized_path": _INGRESS_PATH,
-        "operator_command_id": "sys_mode.switch",
+        "normalized_path": ingress_path,
+        "operator_command_id": operator_command_id,
         "ingress_claim_ref": _authority_text(durable, "claim_ref"),
         "ingress_audit_ref": _authority_text(durable, "audit_ref"),
     }

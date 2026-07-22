@@ -115,7 +115,7 @@ sequenceDiagram
     B-->>U: refresh durable TaskGraph detail
 ```
 
-取消命令要求 `obs:write + task-runtime:cancel`；Operation/Effect/terminal 对账命令使用各自受控 action/scope，认证 actor 必须由服务端绑定。四个 Operator 开关默认关闭，启用 cancellation 必须三类 reconciliation 全开；0099 exact auto 默认开启且只消费 `EXACT_REPAIRABLE`。`task_terminal.reconcile` 还要求 Secure Ingress=`ENFORCE`、可执行 Gateway 与 verification-only Ed25519 公钥环。Operator 仍未完成真实 canary。
+取消命令要求 `obs:write + task-runtime:cancel`；Operation/Effect/terminal 对账命令使用各自受控 action/scope，认证 actor 必须由服务端绑定。四个 Operator 开关默认关闭，启用 cancellation 必须三类 reconciliation 全开；0099 exact auto 默认开启且只消费 `EXACT_REPAIRABLE`。`task_terminal.reconcile` 还要求 Secure Ingress=`ENFORCE`、可执行 Gateway 与 verification-only Ed25519 公钥环；完整命令写入 0119，TaskGraph 只携带 ref/digest，并经 Review、Action Preview、Acceptance 后执行。Operator 本地 governed SQLite integration 已通过，HTTP/network canary 仍未运行。
 
 业务对账口径必须保守：一般 Effect `FAILED` 仍可能已产生副作用。0099 将历史 terminal 半状态分为 exact auto/signed/quarantine：仅唯一 graph-scope exact FAILED bundle 可由默认开启的 auto 精确处理，结构漂移 quarantine。隔离真实 SQLite restart canary 已验证 exact FAILED proof/预算释放与 signed-required CANCELLED 围栏同时成立；后者会阻断 production readiness。外部 inventory、key lifecycle、签名 Operator HTTP 与 Operation/Effect canary 未知，状态保持 `AUTO_EXACT_ON / LOCAL_SQLITE_CANARY_PASS / OPERATOR_OFF / HTTP_CANARY_NOT_RUN`。
 
@@ -128,7 +128,9 @@ sequenceDiagram
     participant Q as Terminal Query Repository
     participant B as Exact Challenge Builder
     participant C as Secure Operator Command Gateway
-    participant S as DurableTaskStore
+    participant J as 0119 Signed Command Store
+    participant T as Governed Task Runtime
+    participant S as DurableTaskStore / 0099 Authority
 
     U->>O: GET challenge(case_id, attestation_ref, key_id, issued_ts_ms)
     O->>O: principal_id from OperatorQueryGateway context
@@ -139,11 +141,15 @@ sequenceDiagram
     U->>U: Ed25519 sign exact bytes
     U->>C: task_terminal.reconcile + signature
     C->>C: Secure Ingress ENFORCE + server-bound actor
-    C->>S: append proof + CAS Graph/Budget + Outbox in one transaction
+    C->>J: append exact signed command
+    C->>T: HostCommand + immutable TaskGraph (ref/digest only)
+    T->>T: durable Review + Action Preview + Acceptance
+    T->>J: reopen exact signed command
+    T->>S: append proof + CAS Graph/Budget + Outbox in one transaction
     S-->>U: durable reconciliation receipt
 ```
 
-三条 GET 精确要求 `obs:task-runtime:read`。主 Host 与独立 Obs 都只从同 canonical SQLite 的 `mode=ro + PRAGMA query_only=ON` repository 读取，禁止 fallback 到完整 `DurableTaskStore`；case snapshot 与 proof signature 不进入普通摘要。Challenge 从 request context 绑定认证 principal，接收 `attestation_ref/key_id/issued_ts_ms`；若认证 authority 自带 key ID则拒绝不一致请求。它复用 runtime builder，直接返回 service/store 使用的 exact Ed25519 bytes、deterministic Graph/Budget Outbox identity 与 `command_request`。HTTP challenge → 真实 Ed25519 → Store round-trip 已通过；外部 deployment credential、key rotation/revocation 与 canary仍未知。
+三条 GET 精确要求 `obs:task-runtime:read`。主 Host 与独立 Obs 都只从同 canonical SQLite 的 `mode=ro + PRAGMA query_only=ON` repository 读取，禁止 fallback 到完整 `DurableTaskStore`；case snapshot 与 proof signature 不进入普通摘要。Challenge 从 request context 绑定认证 principal，接收 `attestation_ref/key_id/issued_ts_ms`；若认证 authority 自带 key ID则拒绝不一致请求。它复用 runtime builder，返回 0099 authority 使用的 exact Ed25519 bytes、deterministic Graph/Budget Outbox identity 与 `command_request`。命令 POST 经 Secure Ingress 后先进入 0119，再以 ref/digest 进入 governed runtime；本地真实 SQLite 链路已覆盖 Review 到 Effect exact replay。HTTP/network canary、外部 deployment credential 与 key rotation/revocation仍未知。
 
 ## Task/Review 观测
 
@@ -196,6 +202,8 @@ Observability 的降级不应被误报为 Host 业务完成；同样，Host 健�
 - Health/device projection：`host_brain/app/observability_runtime/health_device_projection.py`
 - Durable query repositories：`host_brain/persistence/*_query_repository.py`
 - 0099 terminal service/store：`host_brain/task_runtime/terminal_state_reconciliation.py`、`host_brain/persistence/task_terminal_reconciliation_*`
+- 0119 signed command/store：`host_brain/audit/migrations/0119_terminal_operator_signed_command.sql`、`host_brain/persistence/terminal_operator_command_store.py`
+- Governed terminal runtime/handler：`host_brain/app/governed_terminal_reconciliation_runtime.py`、`host_brain/app/accepted_terminal_reconciliation_handler.py`
 - Monitor UI：`host_brain/app/monitor_ui/`
 
 ## 不变量

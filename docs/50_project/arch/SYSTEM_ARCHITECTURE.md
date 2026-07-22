@@ -112,7 +112,7 @@ flowchart TB
 - `host_brain/scheduler/accepted_effect_runtime.py`：投递已提交的 Scheduler Effect，并在向调用方暴露领域结果前独立重开 actual-result 与 occurrence authority；缺失或读取不确定时保持 `RECOVERY_REQUIRED`。
 - `host_brain/scheduler/clock.py` + `persistence/scheduler_repository.py` + 0117：在一个 SQLite UoW 内把 live DUE retry authority 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前续租并在运行中 heartbeat，实际 failure time 决定退避，过期 lease 和 stale fence 均失败关闭。
 - `host_brain/app/governed_task_authority.py`：无状态的 HostCommand/WorkOrder/planning lineage、route-aware exact replay 与 fail-closed authority 校验；不写 Store、不执行 TaskGraph。
-- `host_brain/app/governed_operator_runtime.py`：当前只为 `sys_mode.switch` 冻结 typed Operator action、server-reopened Secure Ingress authority、HostCommand/TaskGraph 与 HardState effect replay；加上已有 `scheduler.task.trigger` 后 Operator 进度为 2/37，其余 35 条命令不进入 handler。
+- `host_brain/app/governed_operator_runtime.py` 与 `governed_terminal_reconciliation_runtime.py`：为 `sys_mode.switch` 和 `task_terminal.reconcile` 冻结 typed Operator action、server-reopened Secure Ingress authority 与 HostCommand/TaskGraph；前者提交 HardState effect，后者经 0119 signed-command ref、Review、Action Preview 和 Acceptance Effect 执行。加上 `scheduler.task.trigger` 后 Operator 进度为 3/37，其余 34 条命令不进入 handler。
 - `host_brain/task_runtime/acceptance_effect_dispatcher.py::AcceptanceEffectRuntime`：Host、Operator、Scheduler 与 Internal result 共用的 app-local Effect 投递/恢复 owner；`RECOVERY_PENDING` 只允许 durable defer，不得先 terminalize outer claim。handler/transport 异常只保存 opaque incident，不把异常正文写入持久状态。
 - `host_brain/app/acceptance_effect_handler_common.py` + `acceptance_surface_effect_handler.py`：前者只提供 JSON、effect identity、opaque failure 和 receipt 纯 helper；后者只提供 Gateway Surface reply Acceptance Effect handler 与只读 reconciler；写 authority 仍由原 Acceptance runtime 所有。
 - `host_brain/app/internal_runtime_composition.py` + `host_runtime_context_wiring.py`：前者只组合并激活 Internal/Workspace/Operator/runtime group，后者只接 Runtime Context、Action Preview、Guardian 与 Service Catalog terminal observation；ASGI 继续唯一拥有 lifespan、task 创建/取消和关停顺序。
@@ -274,7 +274,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0118_conversation_acceptance_effects.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118 只封闭 Conversation Preference evaluation/profile history 的 append-only authority，不代表 Chat、Universal Runtime 或 NE-01 完成。
+当前连续 SQLite migration head 为 `0119_terminal_operator_signed_command.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118 封闭 Conversation Preference evaluation/profile history，0119 隔离 signed Operator command 与通用 TaskGraph 输入；二者都不代表 Chat、Universal Runtime 或 NE-01 完成。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -408,7 +408,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0118_conversation_acceptance_effects.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0118 只定义 Conversation Preference evaluation/profile history authority，不改变七路线总体 `INCOMPLETE`。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0119_terminal_operator_signed_command.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119 只定义签名 Operator 入站 authority，不改变七路线总体 `INCOMPLETE`。
 
 ## 7. 数字生命状态模型
 
