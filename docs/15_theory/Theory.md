@@ -703,6 +703,8 @@ Lease 不是“某个逻辑 worker 名称曾经拥有任务”，而是“某次
 
 worker 只能返回 authority-free result 与有限 effect descriptor。可信 Acceptance compiler 从冻结的 HostCommand/WorkOrder 重建 person、session、graph、attempt、destination 和授权字段，再原子写 durable effect intents。
 
+确定性修复应自动收敛，歧义修复必须人工签名：从 canonical ledger 可完整重算且唯一的 terminal half-state 应在启动期执行 exact replay；涉及未知副作用、结构漂移或 competing authority 时必须保持 fence，并要求受认证 Operator proof，不能以“默认关闭”长期积累可确定修复项。
+
 这让系统具备以下性质：
 
 - admission 失败不会提前留下成功记忆；

@@ -42,6 +42,7 @@ def assert_graph_cancellation_operator_startup(
     enabled: bool,
     operation_reconciliation_enabled: bool,
     effect_reconciliation_enabled: bool,
+    terminal_reconciliation_enabled: bool,
     command_ingress: Any,
     security: Any,
 ) -> None:
@@ -56,6 +57,10 @@ def assert_graph_cancellation_operator_startup(
     if not effect_reconciliation_enabled:
         raise RuntimeError(
             "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_EFFECT_RECONCILIATION"
+        )
+    if not terminal_reconciliation_enabled:
+        raise RuntimeError(
+            "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_TERMINAL_RECONCILIATION"
         )
     _assert_operator_gateway(
         command_ingress=command_ingress,

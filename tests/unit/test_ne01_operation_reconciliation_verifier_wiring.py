@@ -45,7 +45,7 @@ def test_empty_keyring_is_valid_only_while_reconciliation_operators_are_off() ->
     assert settings.task_operation_reconciliation_operator_enabled is False
     assert settings.task_effect_reconciliation_operator_enabled is False
     assert settings.task_terminal_reconciliation_operator_enabled is False
-    assert settings.task_terminal_reconciliation_auto_enabled is False
+    assert settings.task_terminal_reconciliation_auto_enabled is True
 
     for enabled_flag in (
         "HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED",
@@ -64,6 +64,11 @@ def test_empty_keyring_is_valid_only_while_reconciliation_operators_are_off() ->
     )
     assert automatic.task_terminal_reconciliation_auto_enabled is True
     assert automatic.task_reconciliation_public_keys() == {}
+
+    rollback = CoreSettings.model_validate(
+        {"HOST_TASK_TERMINAL_RECONCILIATION_AUTO_ENABLED": False}
+    )
+    assert rollback.task_terminal_reconciliation_auto_enabled is False
 
 
 def test_cancellation_operator_requires_operation_reconciliation_before_startup() -> None:
@@ -97,7 +102,24 @@ def test_cancellation_operator_requires_effect_reconciliation_before_startup() -
         )
 
 
-def test_cancellation_operator_accepts_both_reconciliation_dependencies() -> None:
+def test_cancellation_operator_requires_terminal_reconciliation_before_startup() -> None:
+    raw_keyring, _ = _public_key_config("reconciler-v1")
+
+    with pytest.raises(
+        ValueError,
+        match="TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_TERMINAL_RECONCILIATION",
+    ):
+        CoreSettings.model_validate(
+            {
+                "HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED": True,
+                "HOST_TASK_OPERATION_RECONCILIATION_OPERATOR_ENABLED": True,
+                "HOST_TASK_EFFECT_RECONCILIATION_OPERATOR_ENABLED": True,
+                "HOST_TASK_RECONCILIATION_ED25519_PUBLIC_KEYS_JSON": raw_keyring,
+            }
+        )
+
+
+def test_cancellation_operator_accepts_complete_reconciliation_bundle() -> None:
     raw_keyring, _ = _public_key_config("reconciler-v1")
 
     settings = CoreSettings.model_validate(
@@ -105,6 +127,7 @@ def test_cancellation_operator_accepts_both_reconciliation_dependencies() -> Non
             "HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED": True,
             "HOST_TASK_OPERATION_RECONCILIATION_OPERATOR_ENABLED": True,
             "HOST_TASK_EFFECT_RECONCILIATION_OPERATOR_ENABLED": True,
+            "HOST_TASK_TERMINAL_RECONCILIATION_OPERATOR_ENABLED": True,
             "HOST_TASK_RECONCILIATION_ED25519_PUBLIC_KEYS_JSON": raw_keyring,
         }
     )
@@ -112,6 +135,7 @@ def test_cancellation_operator_accepts_both_reconciliation_dependencies() -> Non
     assert settings.task_graph_cancellation_operator_enabled is True
     assert settings.task_operation_reconciliation_operator_enabled is True
     assert settings.task_effect_reconciliation_operator_enabled is True
+    assert settings.task_terminal_reconciliation_operator_enabled is True
 
 
 def test_terminal_reconciliation_operator_accepts_shared_ed25519_keyring() -> None:

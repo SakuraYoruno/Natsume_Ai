@@ -4,7 +4,7 @@
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
   "evaluated_source": "PRE_COMMIT_WORKTREE_OVER_REVISED_BASELINE",
   "evidence_binding": {
-    "evaluated_commit_sha": "9c73c5ebf4cd05b6eb03ec8becd72228ffc5e709",
+    "evaluated_commit_sha": "a5c4fb86cc23f0713bbaae2f03138cc8b4b2b87b",
     "migration_head": "0118_conversation_acceptance_effects.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
@@ -18,8 +18,8 @@
     "generic_acceptance_effect_reconciliation": "PARTIAL_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_NON_BOOLEAN_FAIL_CLOSED_ZERO_WRITE_FALSE_OR_MALFORMED_ENV_BOOLEAN_FALSE_DISABLED_ZERO_EVENT_PROFILE_0118_SEALED_CHILD_FULL_SET_TAMPER_CHECK_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_DELIVERY_DIGEST_AUTHENTICATED_GATEWAY_SAME_SQLITE_PAYLOAD_EFFECT_ID_QUERY_NOT_FOUND_ALWAYS_UNKNOWN",
     "internal_protected_artifact_promotion": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION_STARTUP_ACTIVATION_ONLY_EXPLICIT_CHECKPOINT_UOW_SINGLE_WORKER_PROJECTION_INSERT_OWNER_ABC_SEPARATE_ATOMIC_BOUNDARIES_RESPONSE_LOSS_SINGLE_MUTATION_READ_ONLY_REOPEN_TERMINAL_SEALED_ARTIFACT_ABANDON_CLEANUP_SINGLE_NODE_POST_COMMIT_BUDGET_SETTLEMENT_DOUBLE_LOSS_NO_ADDITIONAL_LIFECYCLE_FINALIZATION_MUTATION_HOLD_HIGHER_FENCE_EXACT_ACCEPTED_EXACT_REJECTED_MISSING_CONFLICT_FAIL_CLOSED_PERIODIC_SURVIVOR_CONTINUATION_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_FAILURE_CANCEL_BUDGET_SECURE_INGRESS_CLAIM_CLOSEOUT_MULTI_NODE_BATCH_SAFE_HOLD_SETTLEMENT_RECOVERY_HANDLE_LEVEL_TOCTOU_GENERAL_WRITE_OS_CONTAINER_ISOLATION_LEGACY_BRIDGE_INCOMPLETE",
     "acceptance_effect_recovery_guardian": "WIRED_APP_LOCAL_DURABLE_SLO_OPAQUE_INCIDENT_ONLY",
-    "terminal_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
-    "terminal_reconciliation_auto": "DEFAULT_OFF",
+    "terminal_reconciliation": "AUTO_EXACT_ON_OPERATOR_OFF_CANARY_NOT_RUN",
+    "terminal_reconciliation_auto": "ENABLED_EXACT_REPAIRABLE_ONLY",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
     "budget": "PARTIAL_CONTENTION_PROVEN",
     "preoperation_attempt_takeover": "CANONICAL_OPERATION_FREE_PERSISTED_ATTEMPT_SAME_ATTEMPT_HIGHER_FENCE_PROVEN_POST_RESERVATION_RECOVERY_HOLD_PROVEN_GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE",

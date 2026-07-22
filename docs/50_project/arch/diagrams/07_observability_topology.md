@@ -115,9 +115,9 @@ sequenceDiagram
     B-->>U: refresh durable TaskGraph detail
 ```
 
-取消命令要求 `obs:write + task-runtime:cancel`；Operation/Effect/terminal 对账命令使用各自受控 action/scope，认证 actor 必须由服务端绑定。相关开关默认关闭；`task_terminal.reconcile` 还要求 Secure Ingress=`ENFORCE`、可执行 Gateway 与 verification-only Ed25519 公钥环。这里证明的是 `WIRED_DEFAULT_OFF`，不是 production enablement。
+取消命令要求 `obs:write + task-runtime:cancel`；Operation/Effect/terminal 对账命令使用各自受控 action/scope，认证 actor 必须由服务端绑定。四个 Operator 开关默认关闭，启用 cancellation 必须三类 reconciliation 全开；0099 exact auto 默认开启且只消费 `EXACT_REPAIRABLE`。`task_terminal.reconcile` 还要求 Secure Ingress=`ENFORCE`、可执行 Gateway 与 verification-only Ed25519 公钥环。Operator 仍未完成真实 canary。
 
-业务对账口径必须保守：一般 Effect `FAILED` 仍可能已产生副作用。0099 将历史 terminal 半状态分为 exact auto/signed/quarantine：仅唯一 graph-scope exact FAILED bundle 可 default-off auto，结构漂移 quarantine。Readiness 比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec；0090 必须唯一，0091/0092 必须完整验证，exact failure Outbox refs 必须精确。未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；历史链最终必须 proof。System proof 以 case 时间跨进程收敛；healthy closure 仅 signed `NONE` 零业务写。外部 inventory/key lifecycle/canary 未知，状态保持 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN / PRODUCTION_OFF`。
+业务对账口径必须保守：一般 Effect `FAILED` 仍可能已产生副作用。0099 将历史 terminal 半状态分为 exact auto/signed/quarantine：仅唯一 graph-scope exact FAILED bundle 可由默认开启的 auto 精确处理，结构漂移 quarantine。Readiness 比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec；0090 必须唯一，0091/0092 必须完整验证，exact failure Outbox refs 必须精确。未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；历史链最终必须 proof。System proof 以 case 时间跨进程收敛；healthy closure 仅 signed `NONE` 零业务写。外部 inventory/key lifecycle/canary 未知，状态保持 `AUTO_EXACT_ON / OPERATOR_OFF / CANARY_NOT_RUN`。
 
 ## 0099 Terminal reconciliation 查询与签名
 
