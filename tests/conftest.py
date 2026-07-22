@@ -49,7 +49,6 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_expression_adapter_helpers.py",
     "test_fallback_emotion.py",
     "test_input_routes_worker.py",
-    "test_intelligent_runtime.py",
     "test_interaction_pattern_analyzer.py",
     "test_language_system_agent.py",
     "test_long_absent_behavior_matrix.py",

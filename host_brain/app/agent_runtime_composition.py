@@ -18,12 +18,12 @@ from host_brain.app.context.conversation_experience_store import (
 from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
 from host_brain.app.durable_task_status import build_durable_task_status_projection
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
-from host_brain.app.intelligent_runtime import resolve_tts_route
 from host_brain.app.route_catalog_runtime import (
     resolve_host_llm_runtime_async_from_catalog,
 )
 from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact
 from host_brain.app.surface_emotion_bond_flow import apply_surface_emotion_bond_flow
+from host_brain.app.tts_route import resolve_tts_route
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion
 from host_brain.observability.runtime_audit import _persist_post_process_audit

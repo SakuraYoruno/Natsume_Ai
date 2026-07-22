@@ -327,7 +327,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 
 - T-NE01-COMPOSITION-MODEL-01：`ApplicationModelAttemptServicePort`必须是frozen/slotted非所有权adapter，并在构造时接收`ModelAttemptService` provider；`complete`、`complete_sync`与`prompt_registry`不得导入或回读`process_services`。
 - T-NE01-COMPOSITION-MODEL-02：Tool runtime必须从ASGI typed Host bundle传入provider；中断Domain Pack恢复必须从同一lifecycle bundle传入。无provider构造仅为兼容测试，首次使用必须稳定报`HOST_APP_LOCAL_MODEL_ATTEMPT_PROVIDER_NOT_INJECTED`。
-- T-NE01-COMPOSITION-MODEL-03：模型端口切片末的 locator inventory 为 named38 modules/107 names、all-form42 modules、Container50 fields/3 locks/46 refs；Input的39/110/all-form43只作前一提交历史。后续 AgentRuntime 生命周期端口及其嵌套 Host provider 切片收敛为 named34 modules/97 names、all-form38 modules，但不把该结果倒写成模型端口自身的完成证据。
+- T-NE01-COMPOSITION-MODEL-03：模型端口切片末的 locator inventory 为 named38 modules/107 names、all-form42 modules、Container50 fields/3 locks/46 refs；Input的39/110/all-form43只作前一提交历史。后续 AgentRuntime 生命周期端口及其嵌套 Host provider 切片，以及删除无生产调用者的 `intelligent_runtime` 二次规划/直接执行路径并将 TTS 路由限制为 scope 显式依赖后，当前库存收敛为 named33 modules/83 names、all-form37 modules；不把该结果倒写成模型端口自身的完成证据。
 - T-NE01-COMPOSITION-MODEL-04：ASGI composition 集成夹具必须构造真实 `HostLifecycleApplicationPorts`，覆盖所有已消费 provider；不得再用缺少 `require_provider()` 的 `SimpleNamespace` 冒充 Host bundle。Tool runtime 构造模型尝试端口时，夹具必须断言传入精确的 `host_lifecycle.ports.model_attempt_service` provider。该项只修复测试接线，不改变生产能力或 NE-01 状态。
 - 宽集合首轮为`103 passed + 4 failures`；4项来自两份既有Task Runtime集成fixture缺少`internal_agent_checkpoint_uow`，失败发生在Coordinator构造、早于模型端口调用，不计模型回归PASS，也不在本切片夹带修复。移除两份无关失真fixture后的精确集合为`99 passed in 24.03s`。NE-01 wave integration与production canary仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
