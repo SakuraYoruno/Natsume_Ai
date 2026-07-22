@@ -1395,5 +1395,19 @@ __all__ = [
     "PlanIntentSearchError",
     "PlanVirtualTransition",
     "build_plan_intent_search",
+    "require_governed_plan_authority",
+    "resolve_governed_plan_budget_policy",
+    "resolve_governed_plan_business_scope",
+    "resolve_governed_plan_review_ref",
     "search_approved_plan_intent",
 ]
+
+
+# These helpers are deliberately public aliases rather than a second authority
+# implementation.  Registry-derived Capability Planning uses the exact same
+# Governor binding, budget, scope and Review rules as legacy approved-plan
+# projection, while it supplies its candidates from a different L1 catalog.
+require_governed_plan_authority = _require_governor_authority
+resolve_governed_plan_budget_policy = _resolve_budget_policy
+resolve_governed_plan_business_scope = _resolve_business_scope
+resolve_governed_plan_review_ref = _resolve_review_ref

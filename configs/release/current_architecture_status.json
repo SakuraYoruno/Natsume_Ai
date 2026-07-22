@@ -1,8 +1,8 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-22",
+  "as_of_date": "2026-07-23",
   "source_baseline": {
-    "dev_commit": "a5c4fb86cc23f0713bbaae2f03138cc8b4b2b87b",
+    "dev_commit": "adedf1f8c8c54b15e7d1456c2d6301386d087426",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
     "evaluated_source": "PRE_COMMIT_WORKTREE_OVER_REVISED_BASELINE"
@@ -1182,7 +1182,7 @@
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler stages immutable operation effects after Acceptance; migration 0117 atomically transfers a live DUE retry claim to an occurrence-bound owner/fence and execution renews that fence. Conversation visible turn, Preference and Life projection are independent post-Acceptance effects; migration 0118 adds append-only Preference evaluation/profile authority including a real NO_SIGNAL receipt. Surface response loss can reopen the exact Gateway outbox through the existing internal_reply HMAC/timestamp/nonce read-only query, while NOT_FOUND always remains UNKNOWN. Internal canonical results write through an Acceptance Effect. Definition/admin direct authority, mutable batch freezing, general unknown-effect attribution, current-commit integrated acceptance, wave integration and production canary remain missing; Host candidate-plan generation is still MISSING.",
+      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler stages immutable operation effects after Acceptance; migration 0117 atomically transfers a live DUE retry claim to an occurrence-bound owner/fence and execution renews that fence. Conversation visible turn, Preference and Life projection are independent post-Acceptance effects; migration 0118 adds append-only Preference evaluation/profile authority including a real NO_SIGNAL receipt. Surface response loss can reopen the exact Gateway outbox through the existing internal_reply HMAC/timestamp/nonce read-only query, while NOT_FOUND always remains UNKNOWN. Internal canonical results write through an Acceptance Effect. Definition/admin direct authority, mutable batch freezing, general unknown-effect attribution, current-commit integrated acceptance, wave integration and production canary remain missing. Host has only an explicit registry-derived capability Plan slice; it does not complete the general Plan route or its node-level governance.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -1873,8 +1873,8 @@
       ]
     },
     "planning_search_kernel": {
-      "status": "PARTIAL_D20A_RESEARCH_FROZEN_CORPUS_PURE_CATALOG",
-      "scope": "Pure public PlanningSearch contracts, immutable compile binding, one Code dynamic catalog, a trusted-process private-bare paired-worktree experiment adapter, a preregistered cleanup-gated durable experiment ledger, an opt-in frozen-argv pytest subprocess verifier, and D20a Research public-metadata dynamic planning plus a trusted-input readonly corpus loader. D20a has no snapshot-manifest-document exact handshake, recorded Research workload, webpage capture, model attempt, independent verifier, paired cohort, benefit result or production route; no production domain cutover, general hard execution authority, isolation claim or benefit claim exists.",
+      "status": "PARTIAL_D20A_PLUS_EXPLICIT_HOST_CAPABILITY_SEARCH",
+      "scope": "Pure public PlanningSearch contracts, immutable compile binding, one Code dynamic catalog, a trusted-process private-bare paired-worktree experiment adapter, a preregistered cleanup-gated durable experiment ledger, an opt-in frozen-argv pytest subprocess verifier, D20a Research public-metadata dynamic planning plus a trusted-input readonly corpus loader, and one explicit Host registry-derived capability search call point. The Host slice accepts only CAPABILITY_SEARCH_V1, freezes non-executable metadata from at least two eligible app-composed SkillRegistry entries, searches a virtual skill-to-chat path, then binds selected-only inputs before immutable compilation. D20a has no snapshot-manifest-document exact handshake, recorded Research workload, webpage capture, model attempt, independent verifier, paired cohort, benefit result or production route; no general Host plan cutover, production domain cutover, general hard execution authority, isolation claim or benefit claim exists.",
       "evidence_refs": [
         "host_brain/planning_search/",
         "host_brain/planning_search/code_domain.py",
@@ -1888,6 +1888,9 @@
         "host_brain/planning_search/research_domain_models.py",
         "host_brain/planning_search/research_domain.py",
         "host_brain/planning_search/research_benchmark_corpus.py",
+        "host_brain/contracts/planning_search/capability_domain_models.py",
+        "host_brain/planning_search/capability_domain.py",
+        "host_brain/orchestration/capability_plan_search.py",
         "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/audit/migrations/0106_code_historical_benchmark_ledger.sql",
         "host_brain/audit/migrations/0107_research_shadow_ledger.sql",
@@ -1906,15 +1909,16 @@
         "tests/unit/test_d19_code_benchmark_verifier.py",
         "tests/integration/test_d19_code_benchmark_controlled_experiment.py",
         "tests/unit/test_d20_research_planning_domain.py",
+        "tests/unit/test_ne02_capability_plan_search.py",
         "tests/unit/test_d20_research_benchmark_corpus.py"
       ]
     },
     "planning_search_goal_foundation": {
-      "status": "PARTIAL_D20A_RESEARCH_FROZEN_CORPUS_PURE_CATALOG",
-      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner. D18 adds a server-owned 0106 append-only ledger: registration and frozen paired RunSpec are independently preregistered, then one terminal-evidence transaction writes both arm evidence/outcomes, VERIFIED_CLEAN receipt and terminal experiment receipt; replay/schema validation is identity-bound. D19 optionally preregisters a frozen Python pytest argv plan, invokes it in each detached worktree through a restricted subprocess policy, and persists path-free command/exit/output-digest/duration evidence. D20a adds ResearchTaskSnapshot, whose pure catalog derives competing query/quick-answer/primary/independent/cross-check/conflict/stop paths only from public source ids/refs/digests and bounded hints. Its FrozenResearchCorpusLoader separately maps only manifest-listed repository-relative regular files under a trusted experiment root, detects stable-input file state/size drift before and after read, verifies digest after the read, and emits no host path or body in public receipts. A controlled D19 receipt binds exact run/arm/plan/budget, PASS equals exit code zero, its frozen command set is reserved before a child starts so timeout/error cannot retry the arm, and durable replay requires two successful controlled arms within the aggregate test/wall bound before any terminal receipt exists.",
+      "status": "PARTIAL_D20A_PLUS_EXPLICIT_HOST_CAPABILITY_SEARCH",
+      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. The explicit Host CAPABILITY_SEARCH_V1 adapter freezes eligible Registry metadata, requires genuine competition, uses the same Governor/budget/review binding as approved Plan projection, then revalidates the selected virtual path and rebuilds selected-only node inputs after search and before compiler/admission. It rejects legacy planned_steps, pre-approved candidate inputs, forged successors and capability replan. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner. D18 adds a server-owned 0106 append-only ledger: registration and frozen paired RunSpec are independently preregistered, then one terminal-evidence transaction writes both arm evidence/outcomes, VERIFIED_CLEAN receipt and terminal experiment receipt; replay/schema validation is identity-bound. D19 optionally preregisters a frozen Python pytest argv plan, invokes it in each detached worktree through a restricted subprocess policy, and persists path-free command/exit/output-digest/duration evidence. D20a adds ResearchTaskSnapshot, whose pure catalog derives competing query/quick-answer/primary/independent/cross-check/conflict/stop paths only from public source ids/refs/digests and bounded hints. Its FrozenResearchCorpusLoader separately maps only manifest-listed repository-relative regular files under a trusted experiment root, detects stable-input file state/size drift before and after read, verifies digest after the read, and emits no host path or body in public receipts. A controlled D19 receipt binds exact run/arm/plan/budget, PASS equals exit code zero, its frozen command set is reserved before a child starts so timeout/error cannot retry the arm, and durable replay requires two successful controlled arms within the aggregate test/wall bound before any terminal receipt exists.",
       "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome structurally force SHADOW_ONLY and production_influence_enabled=false. D18 records cleanup-gated trusted-process experiment evidence: a terminal receipt requires a preregistration, both exact arms, verifier-bound outcome/diff evidence and a VERIFIED_CLEAN source/private-artifact receipt. D19 enforces only the preregistered paired max_test_commands and max_wall_time_ms through its own frozen pytest-command adapter; ModelAttempt, provider, tool, token and model-cost fields remain unconsumed declarations, not runtime authority. D20a's loader is an experiment input guard, not a source capture, BrowserWorker, model executor or verifier: root and manifest are trusted inputs, it is not a hostile concurrent-TOCTOU barrier, and it has no snapshot-manifest-document exact handshake, durable pair receipt or benefit conclusion. The child is a same-host trusted-workspace subprocess with shell-free argv, sanitized environment and plugin autoload disabled; APPDATA/user-site remains a trusted host input because PYTHONNOUSERSITE is not set. None of these assets is a hidden oracle, container/OS/tenant/filesystem/network sandbox or benefit result.",
       "not_completed": [
-        "Host chat or plan production cutover to GoalPlanningService",
+        "Host chat or generic Plan production cutover to GoalPlanningService beyond the explicit CAPABILITY_SEARCH_V1 slice",
         "Research snapshot-manifest-document exact handshake and source-identity uniqueness, paired real readonly workload, WorkOrder/Browser or model execution, independently checked citations/claims, source capture, cost/latency receipt and benefit cohort",
         "actual historical cohort selection/statistical comparison, independent-trust-domain verifier, controlled model/tool/token/cost execution budget and WorkspaceGrant-bound write path",
         "Pentest capability/fact-driven successor catalog",
@@ -2003,8 +2007,31 @@
       ]
     },
     "host_candidate_plan_generation": {
-      "status": "MISSING",
-      "reason": "Host plan search only validates and orders approved planned_steps."
+      "status": "PARTIAL_CAPABILITY_SEARCH_V1_ONLY",
+      "implemented": "Only route=plan with args.planning_mode=CAPABILITY_SEARCH_V1 enters the app-composed SkillRegistry adapter. It freezes at least two eligible host-scope, require_confirm=false, Governor-bound tag/risk candidates; L1 expands capability choices, L2 ranks frozen relevance/risk/cost, conditional L3 MCTS evaluates virtual complete paths, and the selected skill-to-chat path alone is rebound into approved_candidate_inputs before immutable TaskGraph compilation.",
+      "enforced": [
+        "legacy planned_steps or steps are rejected instead of relabeled as search",
+        "registry handlers, credentials and mutable registry state stay outside the snapshot",
+        "fewer than two eligible candidates, confirmation-required candidates, risk/tag mismatches and forged successors fail closed",
+        "selected context resolver runs after side-effect-free SearchResult creation and before compiler/admission",
+        "selected capability replan is explicitly rejected rather than silently creating a new execution authority"
+      ],
+      "not_completed": [
+        "generic Plan and chat objective decomposition",
+        "Research, Code or Pentest production cutover",
+        "dynamic execution-time replan",
+        "real provider/model execution, independent verification, paired cohort, benefit result or promotion authority"
+      ],
+      "local_validation": "24_TARGETED_HOST_AND_PLANNING_TESTS_PASSED_IN_1_07_SECONDS; 88_EXISTING_PLANNING_AND_GRAPH_COMPILER_REGRESSION_TESTS_PASSED_IN_2_79_SECONDS; COMPILEALL_DIFF_CHECK_AND_JSON_VALIDATION_PASSED; REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA",
+      "evidence_refs": [
+        "host_brain/app/governed_task_adapter.py",
+        "host_brain/orchestration/capability_plan_search.py",
+        "host_brain/planning_search/capability_domain.py",
+        "host_brain/orchestration/planning_execution.py",
+        "tests/unit/test_ne02_capability_plan_search.py",
+        "tests/unit/test_aw02_governed_host_runtime.py",
+        "tests/unit/test_gr04_planning_execution.py"
+      ]
     },
     "pentest_conditional_mcts": {
       "status": "SHADOW_ONLY_DURABLE_INJECTION_PARTIAL",

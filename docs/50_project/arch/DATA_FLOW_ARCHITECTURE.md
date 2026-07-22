@@ -335,12 +335,14 @@ Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_disp
 
 ### 4.6 Plan
 
-[plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py) 只接受 `route=plan`，从 Governor 已批准的 `planned_steps/steps` 构造候选，检查 `skill` / `delegate` / `chat` 节点与依赖，选出完整合法的拓扑顺序。[planning_execution.py](../../../host_brain/orchestration/planning_execution.py) 把 search result 交给 [planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py)，编译成不可变 TaskGraph。
+[plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py) 的遗留模式只接受 `route=plan`，从 Governor 已批准的 `planned_steps/steps` 构造候选，检查 `skill` / `delegate` / `chat` 节点与依赖，选出完整合法的拓扑顺序。[planning_execution.py](../../../host_brain/orchestration/planning_execution.py) 把 search result 交给 [planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py)，编译成不可变 TaskGraph。
+
+显式 `route=plan + args.planning_mode=CAPABILITY_SEARCH_V1` 不接受 `planned_steps/steps`。它经 [capability_plan_search.py](../../../host_brain/orchestration/capability_plan_search.py) 从 app-composed `SkillRegistry` 冻结至少两项 `scope=host`、`require_confirm=false`、风险不高于 Governor-bound 上限且标签匹配的能力元数据；[capability_domain.py](../../../host_brain/planning_search/capability_domain.py) 用公共 L1/L2/条件 L3 选择一条 `skill → chat` 的纯虚拟路径。只有搜索选中后，`compilation_context_resolver` 才重建 selected-only `approved_candidate_inputs`，再进入 compiler/admission；Registry handler、未选候选和 worker 都不进入搜索。
 
 当前 Plan **不会**：
 
-- 从目标生成多个实质不同的候选方案；
-- 根据虚拟状态动态生成 successor；
+- 在旧 `planned_steps` 或普通 Plan 输入中从目标生成多个实质不同的候选方案；
+- 在通用普通 Plan 输入中根据虚拟状态动态生成领域 successor（当前仅 capability mode 的受限 catalog 可以）；
 - 在真实 Code/Research 场景中证明 Graph Search 或 MCTS 收益；
 - 在 worker 失败时自动生成 revision + 1 并继续调度。
 

@@ -3,8 +3,8 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.5
-核对日期：2026-07-20
+版本：v2.6
+核对日期：2026-07-23
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
@@ -127,7 +127,7 @@ flowchart TB
 
 `host_brain/planning_search/` 提供无副作用搜索内核；领域 adapter 提供 candidate expander、ranker、virtual transition 和 reward。选中路径必须经过 `host_brain/orchestration/planning_graph_compiler.py` 编译为不可变 TaskGraph 才能进入执行。D16 将 Code 的冻结证据边界放在 `planning_search/code_domain_models.py`，将动态 catalog/ranker/compile binding 放在 `planning_search/code_domain.py`：它只消费冻结 opaque ref/digest，动态生成虚拟 `inspect → registered patch → unit/rollback`；其 selected inputs 必须由 catalog 重建后才能进入 compiler context。D17 的 `planning_search/code_benchmark_models.py` / `code_benchmark_sandbox.py` 则处在实验 I/O 边界：它对清洁、受保护且拥有非共享 `.git` 的 source 建立无 remote、private-hooks 的 private bare clone，再创建同 frozen commit 的 baseline/search detached worktree；只允许仓库自有 trusted in-process adapter 使用 lower-case repository-relative file API。D18 的 `code_benchmark_ledger.py` / 0106 SQLite owner 将 preregistered workload、paired RunSpec、两臂 evidence/outcome 和 `VERIFIED_CLEAN` 回执封成 append-only terminal experiment receipt。D19 的 `code_benchmark_verification_contracts.py` / `code_benchmark_verifier.py` 只在预注册 plan 下运行冻结 `python -m pytest -q <repo-relative-test>` argv，并把 shell-free child 的无路径命令回执写回 arm evidence；`code_benchmark_experiment.py` 只在两 arm PASS 与 clean receipt 时登记 terminal evidence。这都是可重放实验事实，不是 execution/promotion authority。D20a 的 `research_domain_models.py` / `research_domain.py` 则以 `ResearchTaskSnapshot` 的公开 metadata（`source_id`、governed ref、digest 和有限排序 hints）按当前虚拟状态构造 `query`、`quick-answer`、`primary-source`、`independent-source`、`cross-check`、`resolve-conflict` 与 `stop` 的纯 L1/L2/L3 catalog；只有冻结 `virtual_transition_ready` 才暴露 L3 虚拟 ports，且其中没有 dedicated 本机 locator/source-body/answer-key/verifier-decision 字段，constraints 拒绝这些命名 key，任务文字不是内容级 DLP。`research_benchmark_corpus.py` 的 `FrozenResearchCorpusLoader` 仅从可信实验根目录下 manifest 列出的 repository-relative 普通文件读取，在稳定受信输入中读前/读后核对状态、大小并在读完后核对 digest，拒绝绝对/遍历/ADS colon/case alias/link/reparse/未列来源；public receipt 不含路径或正文。Research 这条边界没有 snapshot-manifest-document exact handshake，也没有接入 production route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立 verifier、paired cohort、收益/promotion 或 OS/tenant/sandbox，故 benefit 仍为 `UNPROVEN`。该 adapter/ledger 没有进入 production composition；窄 API、Git hardening、同主机 subprocess 与账本都不是 OS/container/filesystem/network sandbox，`network_isolation=NOT_ENFORCED`；只有测试命令数/验证总时限在 D19 adapter 内受控，model、plugin/skill、hidden-oracle、provider/tool/token/cost 和一般 runtime budget 均不在其 authority 内。
 
-当前 Host `plan` 的搜索材料来自已经批准的 `planned_steps/steps`，主要作用是校验和拓扑选择，而不是从目标发明新步骤。Code adapter 仍是 pure shadow：`virtual_model_ready=false` 时不暴露 L3 simulation ports，且它不读工作区、不调用模型/工具/测试、不 admission 图或写 workspace；`allowed_path_refs` 不是 live ACL。Pentest 是目前更完整的领域 adapter，但 Conditional MCTS 仍不能影响生产选择。
+Host 现有两条 Plan 入口：遗留 `planned_steps/steps` 只校验并拓扑选择；显式 `route=plan + args.planning_mode=CAPABILITY_SEARCH_V1` 经 `orchestration/capability_plan_search.py` 从 app-composed `SkillRegistry` 冻结至少两项 host scope、免确认、风险和标签均满足 Governor 约束的能力元数据。公共 L1/L2/条件 L3 只在虚拟态选择一条 `skill → chat` 路径，`GovernedPlanningExecutionService` 在搜索后、compiler/admission 前调用 selected-context resolver 重建 selected-only 输入；它不读取 handler、不把未选能力带入执行、也不在 worker 中二次规划。这只是窄 Host capability-search 调用点，不覆盖普通 Plan、动态 replan、Research/Code/Pentest 生产切流、真实 provider/cohort、收益或 promotion。Code adapter 仍是 pure shadow：`virtual_model_ready=false` 时不暴露 L3 simulation ports，且它不读工作区、不调用模型/工具/测试、不 admission 图或写 workspace；`allowed_path_refs` 不是 live ACL。Pentest 是目前更完整的领域 adapter，但 Conditional MCTS 仍不能影响生产选择。
 
 ### 3.4 Durable 执行层
 

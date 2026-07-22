@@ -3,8 +3,8 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.23
-核对日期：2026-07-20
+版本：v5.24
+核对日期：2026-07-23
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
@@ -21,8 +21,8 @@
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_SEALED_CHECKPOINT_CONTINUATION` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`internal_startup_checkpoint_continuation.py` 负责 activation 扫描，`internal_agent_sealed_checkpoint_recovery.py` 以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 只做精确 sealed abandon/cleanup。周期 survivor continuation、crash-left unsealed partial cleanup、failure/cancel/budget claim closeout、general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、一般write、OS/container isolation、canary与七路线验收也未完成 |
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW。TaskStore 的 public graph/effect staging 写入 API 已删除；生产 Graph 只能从 HostCommand admission 同一 UoW 进入，Effect 只能从 canonical Acceptance UoW 进入。应用 Python 写 authority 定级为 `APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED`，但 SQLite 无新 migration/trigger，raw/orphan SQL 仍可绕过，因此同时保留 `SQL_DIRECT_BYPASS_PRESENT`。general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
-| 通用 PlanningSearch | `PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService、shadow benchmark 合同与 context-owned compiler 已存在；D16 落下 Code 动态纯 shadow catalog，D17/D18 增加实验专用 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 双 worktree、`VERIFIED_CLEAN` 和 0106 preregistered durable ledger；D19 只增加预注册冻结 pytest argv 的受控子进程证据，尚无生产 domain cutover 或收益结论 |
-| Host 智能候选规划 | `NOT_IMPLEMENTED` | Host Plan 只对已批准 `planned_steps` 做拓扑合法化，不生成竞争方案 |
+| 通用 PlanningSearch | `PARTIAL_EXPLICIT_HOST_CAPABILITY_SEARCH / BENEFIT_UNPROVEN` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService 与 context-owned compiler 已存在；显式 Host capability mode 已从冻结 Registry 元数据生成竞争候选并在选中后绑定执行输入。D16～D20a 仍是 Code/Research shadow 基础资产，尚无跨领域真实收益、独立 verifier 或 promotion 结论 |
+| Host 智能候选规划 | `PARTIAL_CAPABILITY_SEARCH_V1_ONLY` | 仅 `route=plan + args.planning_mode=CAPABILITY_SEARCH_V1` 走 app-composed `SkillRegistry`：需要至少两项 host scope、免确认、风险不高于上限且标签匹配的冻结能力；L1/L2/条件 L3 只选择 `skill → chat` 虚拟路径，选中后才重建 node 输入并编译 immutable TaskGraph。旧 `planned_steps` 仍是遗留拓扑投影；没有通用目标分解、动态 replan、真实 provider/cohort 或收益证明 |
 | Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
 | Code/Research 收益 | `UNPROVEN` | Code 已有冻结 ref/digest 驱动的动态 pure catalog、trusted-process private-bare 双 worktree、`VERIFIED_CLEAN`/0106 restart replay，以及 D19 受控 pytest 子进程回执；没有 durable historical cohort、受控模型/工具、OS/container sandbox、独立信任域 verifier 或成对收益结论 |
 | Budget | `CORE_INGRESS_WIRED / CONTENTION_PROVEN / PROGRAM_PARTIAL` | 8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；charge CAS attempt 至少为 `concurrency + 1`，concurrency=8 的第 9 次成功已验证。concurrency 计量与 DEGRADE/REVIEW 未完整执行 |

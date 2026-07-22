@@ -139,6 +139,9 @@ class GovernedPlanningExecutionService:
         admission: GovernedPlanningAdmissionService,
         command_application: Any,
         delegate_target_validator: Callable[[str], Any] | None = None,
+        compilation_context_resolver: (
+            Callable[[SearchResult], PlanningCompilationContext] | None
+        ) = None,
     ) -> None:
         if not callable(getattr(command_application, "execute_stream", None)):
             raise ValueError("command_application.execute_stream is required")
@@ -153,6 +156,12 @@ class GovernedPlanningExecutionService:
         self._admission = admission
         self._application = command_application
         self._delegate_target_validator = delegate_target_validator
+        if (
+            compilation_context_resolver is not None
+            and not callable(compilation_context_resolver)
+        ):
+            raise ValueError("compilation_context_resolver must be callable")
+        self._compilation_context_resolver = compilation_context_resolver
 
     async def prepare_initial(
         self,
@@ -163,15 +172,19 @@ class GovernedPlanningExecutionService:
         compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
+        result = self._run_search(request)
+        resolved_context = self._resolve_compilation_context(
+            result,
+            compilation_context=compilation_context,
+        )
         self._validate_compilation_context_authority(
-            compilation_context,
+            resolved_context,
             authority=authority,
         )
-        result = self._run_search(request)
         compiled = self._compiler.compile(
             result,
             created_at=int(created_at),
-            compilation_context=compilation_context,
+            compilation_context=resolved_context,
         )
         if compiled.task_graph.revision != 1:
             raise PlanningExecutionError(
@@ -195,10 +208,6 @@ class GovernedPlanningExecutionService:
         compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
-        self._validate_compilation_context_authority(
-            compilation_context,
-            authority=authority,
-        )
         if not isinstance(previous_graph, TaskGraph):
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_REVISION_CONFLICT,
@@ -214,12 +223,20 @@ class GovernedPlanningExecutionService:
                 "replan requires durable failure evidence",
             )
         result = self._run_search(request)
+        resolved_context = self._resolve_compilation_context(
+            result,
+            compilation_context=compilation_context,
+        )
+        self._validate_compilation_context_authority(
+            resolved_context,
+            authority=authority,
+        )
         compiled = self._compiler.replan(
             result,
             previous_graph=previous_graph,
             failure_evidence_refs=evidence_refs,
             created_at=int(created_at),
-            compilation_context=compilation_context,
+            compilation_context=resolved_context,
         )
         if previous_graph.to_dict() != previous_snapshot:
             raise PlanningExecutionError(
@@ -285,6 +302,44 @@ class GovernedPlanningExecutionService:
                 f"planning search did not select a side-effect-free path: {status}/{reason}",
             )
         return result
+
+    def _resolve_compilation_context(
+        self,
+        result: SearchResult,
+        *,
+        compilation_context: PlanningCompilationContext | None,
+    ) -> PlanningCompilationContext | None:
+        """Bind selected candidates only after side-effect-free search.
+
+        Some domains must reconstruct per-node execution input from the exact
+        selected path.  The resolver runs after search and before compiler or
+        admission, so it cannot observe a live worker or bypass immutable
+        TaskGraph construction.
+        """
+
+        resolver = self._compilation_context_resolver
+        if resolver is None:
+            return compilation_context
+        if compilation_context is not None:
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compilation context cannot be supplied with a resolver",
+            )
+        try:
+            resolved = resolver(result)
+        except PlanningExecutionError:
+            raise
+        except Exception as exc:
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "selected planning context could not be reconstructed",
+            ) from exc
+        if not isinstance(resolved, PlanningCompilationContext):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compilation context resolver returned an invalid context",
+            )
+        return resolved
 
     @staticmethod
     def _validate_compilation_context_authority(
