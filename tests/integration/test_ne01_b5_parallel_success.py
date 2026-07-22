@@ -163,6 +163,11 @@ class _NodeGrantService:
         )
 
 
+class _NodeGrantVerifier:
+    def verify_for_claim(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+
 class _TamperedProjectionReader:
     def __init__(
         self,
@@ -207,6 +212,7 @@ def _b5_runtime(
         acceptance=_Acceptance(),
         projection_reader=projection_store,
         acceptance_effects_enabled=True,
+        node_grant_verifier=_NodeGrantVerifier(),
         bounded_fanout_enabled=True,
         atomic_graph_success_enabled=atomic_graph_success_enabled,
         owner_id="gr03a-b5-worker",
@@ -632,6 +638,41 @@ async def test_b5_completed_restart_replays_frozen_decision_without_recompiling_
         terminal=replay[-1],
     )
     assert replay_decision["decision_ref"] == first_decision["decision_ref"]
+
+
+@pytest.mark.asyncio
+async def test_b5_effect_compilation_cancellation_propagates_without_terminal_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _b5_fixture(
+        tmp_path,
+        delays={},
+        specs=(("only", ()),),
+        concurrency=1,
+    )
+    db_path, contracts, _, store, runtime, _, calls, _ = fixture
+
+    def cancel_effect_compilation(**_: Any) -> Any:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        "host_brain.task_runtime.parallel_success_runtime.compile_graph_acceptance_effects",
+        cancel_effect_compilation,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await _execute(db_path, contracts, runtime)
+
+    assert calls == ["only"]
+    assert store.get_graph("graph-gr03a", 1)["status"] == "ACTIVE"
+    snapshot = store.read_scheduler_snapshot("graph-gr03a", 1)
+    assert snapshot["budgets"][0]["status"] == "ACTIVE"
+    assert store.get_latest_parallel_success_decision("graph-gr03a", 1) is None
+    assert store.list_acceptance_effect_intents(
+        graph_id="graph-gr03a",
+        graph_revision=1,
+    ) == []
 
 
 @pytest.mark.parametrize(

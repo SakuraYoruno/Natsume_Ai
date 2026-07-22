@@ -52,12 +52,12 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "2a72f0a733082b44740d5ab8a09061c66676754fa28ac11b83c708918671ec46"
+    "c880db150ad581dd4e018124136850bc07a882524a6b8136566aac8e3d16c9ce"
 )
 _PROJECTION_BASELINE_SHA256 = {
-    "matching_parallel_decision": "57abfa566ae8b8546838b9fc0001beecd8cd59da10f526bed5c9ef245a5cfa94",
+    "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
     "selected_parallel_decision_outcome": "f601f3cc6506170720737b6e739492328d6707d8b53890500762da1ce038b453",
-    "terminal_replay": "145d9eff75428d109a7aad33f000d5cc6ccde5b6052334d077c4a4ef0d20b9ef",
+    "terminal_replay": "bc06a51a2ea908f588fb32d0a7c42cb6cc176224cf722f6fe756b2a08a677e29",
     "attempts_for_node": "003bb661287f2e0b56314f00adffcb4af68cd79a8e85329cbc443ee8ac3fab00",
     "try_operation": "6896d47dd8bef7b3ac99547aabe3be258af6f74ab434b3dfd68f250f368714e6",
 }
@@ -224,7 +224,7 @@ def test_projection_and_record_helpers_are_narrow_boundaries() -> None:
     ) == Counter(
         {
             "get_latest_parallel_settlement_decision": 1,
-            "read_scheduler_snapshot": 1,
+                "read_scheduler_snapshot": 2,
             "get_operation_reservation": 1,
             "get_node_artifact": 1,
             "try_resolve_checkpoint_budget_rejection_terminal": 1,
@@ -424,7 +424,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "refresh": 1,
         },
         "_node_lifecycle": {
-            "transition_graph": 4,
+                "transition_graph": 3,
             "transition_node": 6,
             "accept_node_output": 1,
             "transition_attempt": 2,

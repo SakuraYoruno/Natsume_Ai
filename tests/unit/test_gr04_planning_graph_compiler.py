@@ -225,7 +225,7 @@ def test_gr04_parallel_terminal_candidates_use_selected_path_result_authority() 
     )
 
 
-def test_gr04_parallel_terminal_candidates_default_to_safe_legacy_without_result() -> None:
+def test_gr04_parallel_terminal_candidates_default_to_atomic_result_authority() -> None:
     compiled = PlanningGraphCompiler().compile(
         _result(
             _candidate("left", depends_on_candidate_ids=[]),
@@ -234,8 +234,11 @@ def test_gr04_parallel_terminal_candidates_default_to_safe_legacy_without_result
         created_at=123,
     )
 
-    assert compiled.task_graph.completion_policy is None
-    assert compiled.task_graph.result_node_id is None
+    assert (
+        compiled.task_graph.completion_policy
+        is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+    )
+    assert compiled.task_graph.result_node_id == compiled.task_graph.nodes[-1].node_id
 
 
 @pytest.mark.parametrize(

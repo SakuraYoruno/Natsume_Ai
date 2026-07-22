@@ -29,6 +29,7 @@ from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
+    TaskGraphCompletionPolicy,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
@@ -822,6 +823,7 @@ def build_governed_internal_runtime(
         review_runtime=TaskNodeReviewRuntime(review_store),
         node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
+        atomic_graph_success_enabled=True,
         execution_registry=getattr(
             task_runtime_container,
             "graph_execution_registry",
@@ -1049,6 +1051,7 @@ def _build_contracts(
         status=TaskGraphStatus.CREATED,
         created_at=int(ts_ms),
         result_node_id=node_id,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
         nodes=(node,),
     )
     command = build_host_command(

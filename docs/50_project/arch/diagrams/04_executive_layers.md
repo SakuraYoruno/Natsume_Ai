@@ -21,7 +21,7 @@ flowchart TD
         GATE["atomic capability + grant\npre-admission gate"]
         AD["Durable admission"]
         TR["GovernedTaskCoordinator"]
-        SHADOW["atomic success + bounded fan-out shadow\nindependent default OFF / production disabled"]
+        SHADOW["atomic success production default\nbounded fan-out independent default OFF"]
         WK["Frozen worker"]
         AC["Verification / Acceptance"]
         HS --> GC --> GATE --> AD --> TR --> WK --> AC
@@ -126,4 +126,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 success、0092 verified cancellation、0093 delivery、0094 cancellation continuation、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness 已有证据。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`：共享 Secure Ingress verifier、Gateway/BFF/UI、三 surface exact 路由与异常后 durable-intent 判定已接通；启用前置不满足时启动 fail closed。0096 已让 task-bound Review 自动回到原 surface，但不替代 0092 取消业务 reconciliation。完整业务对账、历史修复、Budget 高竞争、部署凭据与真实 canary仍缺；atomic/bounded/cancellation 均 OFF。不能宣称 Lane B 或完整架构完成。
+Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS`：新生产 Graph 已以 0090/0091 原子收口失败/成功；0092 verified cancellation、0093 delivery、0094 cancellation continuation、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness已有证据。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`；bounded fan-out与cancellation仍 OFF。完整业务对账、历史修复、general/multi-node recovery、部署凭据与真实 canary仍缺，不能宣称 Lane B 或完整架构完成。

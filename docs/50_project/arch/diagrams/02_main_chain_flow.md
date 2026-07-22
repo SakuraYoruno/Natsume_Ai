@@ -101,7 +101,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    POLICY["TaskGraph completion_policy\nlegacy 或显式 ATOMIC_GRAPH_SUCCESS_V1"] --> GATE["atomic capability + node-grant service\n+ parent grant：admission 前校验"]
+    POLICY["新生产 TaskGraph 默认 ATOMIC_GRAPH_SUCCESS_V1\n历史 legacy 只读兼容"] --> GATE["atomic capability + node-grant service\n+ parent grant：admission 前校验"]
     GATE --> SCHEMA["0090 + 0092；atomic 时 0091 schema ready?\nBudget / worker 前 fail-fast"]
     SCHEMA --> S["compute_dag_schedule"]
     S --> Q{"selected > 1 且\n有后继/剩余节点或 atomic policy?"}
@@ -142,7 +142,7 @@ flowchart TD
     TAKEOVER["后台 worker 按 revisioned aggregate-head wake 自动续投\nexpired claim 可 takeover\n同 revision 严禁越过 predecessor"] -.-> PUB
     TAKEOVER --> DRAIN["canonical total_pending=0 才 DRAINED\nclaim/backoff/blocked backlog 为 DEFERRED"]
     ORDER --> FANIN["依赖均 ACCEPTED 后推进 fan-in"]
-    OFF["atomic_graph_success_enabled 与 bounded_fanout_enabled\n独立默认 OFF；三处生产 composition OFF"] -.-> GATE
+    OFF["atomic_graph_success_enabled 生产默认 ON\nbounded_fanout_enabled 独立默认 OFF"] -.-> GATE
     CANCEL_UI["Task Runtime UI\nexact Graph revision"] -.-> CANCEL_BFF["同源 Operator BFF\ntask_graph.cancel"]
     CANCEL_BFF -.-> CANCEL_GATE["Operator Command Gateway\nobs:write + task-runtime:cancel"]
     CANCEL_OFF["feature flag 默认 OFF\n非 ENFORCE / Gateway 不可用\n启动 fail closed"] -.-> CANCEL_GATE

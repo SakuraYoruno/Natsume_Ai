@@ -20,7 +20,7 @@ from host_brain.persistence.task_store_types import (
 ATTEMPT_ID = "attempt-checkpoint-budget-1"
 
 
-def _admitted() -> AdmittedExecution:
+def _admitted(*, completion_policy: str | None = None) -> AdmittedExecution:
     return AdmittedExecution(
         command_id="command-checkpoint-budget-1",
         work_order_id="work-order-checkpoint-budget-1",
@@ -39,6 +39,7 @@ def _admitted() -> AdmittedExecution:
             ),
         ),
         business_scope="scope-checkpoint-budget-1",
+        completion_policy=completion_policy,
     )
 
 
@@ -139,6 +140,55 @@ class _ProjectionStore:
 
     def get_latest_parallel_settlement_decision(self, *_: Any) -> None:
         raise AssertionError("single-node checkpoint replay cannot use parallel authority")
+
+
+class _AcceptedProjectionStore:
+    def __init__(self, *, budget_status: str) -> None:
+        self.budget_status = budget_status
+
+    def get_operation_reservation(self, reservation_id: str) -> dict[str, Any]:
+        return {
+            "reservation_id": reservation_id,
+            "status": "COMMITTED",
+            "receipt_ref": "worker-projection://atomic-success",
+        }
+
+    def read_scheduler_snapshot(self, graph_id: str, revision: int) -> dict[str, Any]:
+        return {
+            "attempts": [
+                {
+                    "graph_id": graph_id,
+                    "graph_revision": revision,
+                    "node_id": "node-checkpoint-budget-1",
+                    "attempt_id": ATTEMPT_ID,
+                    "attempt_no": 1,
+                    "status": "SUCCEEDED",
+                    "status_version": 5,
+                }
+            ],
+            "budgets": [
+                {
+                    "budget_id": "budget-atomic-success",
+                    "graph_id": graph_id,
+                    "graph_revision": revision,
+                    "node_id": None,
+                    "attempt_id": None,
+                    "status": self.budget_status,
+                    "status_version": 4,
+                }
+            ],
+        }
+
+    def get_latest_parallel_settlement_decision(self, *_: Any) -> None:
+        return None
+
+
+class _AcceptedProjectionReader:
+    def load(self, receipt_ref: str) -> dict[str, Any]:
+        return {
+            "projection_id": receipt_ref,
+            "payload_digest": "sha256:" + "a" * 64,
+        }
 
 
 @pytest.mark.asyncio
@@ -261,3 +311,63 @@ async def test_extra_release_outbox_conflict_fails_closed_in_node_replay() -> No
         )
 
     assert exc_info.value is corruption
+
+
+@pytest.mark.asyncio
+async def test_atomic_accepted_node_is_not_public_before_graph_commit() -> None:
+    projection = NodeExecutionProjection(
+        task_store=_AcceptedProjectionStore(budget_status="ACTIVE"),
+        projection_reader=_AcceptedProjectionReader(),
+    )
+    admitted = _admitted(completion_policy="ATOMIC_GRAPH_SUCCESS_V1")
+    graph = {**_graph(), "status": "ACTIVE"}
+    node = {**_node(), "status": "ACCEPTED"}
+
+    with pytest.raises(GovernedRuntimeError) as exc_info:
+        await projection.terminal_replay(admitted, graph=graph, node=node)
+
+    assert exc_info.value.reason_code == GOVERNED_DURABLE_STATE_CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_atomic_internal_reconstruction_can_read_accepted_child_outcome() -> None:
+    projection = NodeExecutionProjection(
+        task_store=_AcceptedProjectionStore(budget_status="ACTIVE"),
+        projection_reader=_AcceptedProjectionReader(),
+    )
+    admitted = _admitted(completion_policy="ATOMIC_GRAPH_SUCCESS_V1")
+
+    receipt = await projection.terminal_replay(
+        admitted,
+        graph={**_graph(), "status": "ACTIVE"},
+        node={**_node(), "status": "ACCEPTED"},
+        allow_incomplete_atomic_graph_outcome=True,
+    )
+
+    assert receipt is not None
+    assert receipt.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_completed_atomic_graph_requires_consumed_budget_for_public_replay() -> None:
+    admitted = _admitted(completion_policy="ATOMIC_GRAPH_SUCCESS_V1")
+    graph = {**_graph(), "status": "COMPLETED"}
+    node = {**_node(), "status": "ACCEPTED"}
+    invalid = NodeExecutionProjection(
+        task_store=_AcceptedProjectionStore(budget_status="ACTIVE"),
+        projection_reader=_AcceptedProjectionReader(),
+    )
+
+    with pytest.raises(GovernedRuntimeError) as exc_info:
+        await invalid.terminal_replay(admitted, graph=graph, node=node)
+    assert exc_info.value.reason_code == GOVERNED_DURABLE_STATE_CONFLICT
+
+    valid = NodeExecutionProjection(
+        task_store=_AcceptedProjectionStore(budget_status="CONSUMED"),
+        projection_reader=_AcceptedProjectionReader(),
+    )
+    receipt = await valid.terminal_replay(admitted, graph=graph, node=node)
+
+    assert receipt is not None
+    assert receipt.accepted is True
+    assert receipt.projection["budget"]["status"] == "CONSUMED"

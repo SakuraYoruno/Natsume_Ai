@@ -410,7 +410,7 @@ def _planner_result_node_id(
 def _planner_completion_policy(value: Any) -> TaskGraphCompletionPolicy | None:
     normalized = _text(getattr(value, "value", value)).upper()
     if not normalized:
-        return None
+        return TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
     try:
         return TaskGraphCompletionPolicy(normalized)
     except ValueError as exc:

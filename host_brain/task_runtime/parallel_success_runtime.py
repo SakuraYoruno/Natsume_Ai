@@ -338,7 +338,7 @@ class ParallelSuccessRuntime:
                 attempt_id=result_attempt_id,
                 worker_commit=result_projection,
             )
-        except BaseException as exc:
+        except Exception as exc:
             raise GovernedRuntimeError(
                 _exception_reason(exc, "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"),
                 "parallel success effects could not be compiled from the durable result projection",

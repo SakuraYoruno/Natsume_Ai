@@ -502,20 +502,19 @@ class CommittedCheckpointContinuation:
                         worker_commit=worker_commit,
                         attempt_id=attempt_id,
                     )
-                except BaseException as exc:
-                    graph = await self._node_lifecycle.transition_graph(
-                        admitted,
-                        graph,
-                        "FAILED",
-                    )
-                    await self._runtime_outbox.publish_pending()
+                except Exception as exc:
+                    # Preserve the legacy ACTIVE/CONSUMED checkpoint for exact
+                    # re-entry.  Marking Graph FAILED after Budget was consumed
+                    # would create an unrecoverable false terminal.  New
+                    # production Graphs never use this split boundary.
+                    await self._runtime_outbox.publish_pending(best_effort=True)
                     yield terminal_event(
                         build_execution_receipt(
                             admitted,
                             attempt_id=attempt_id,
                             receipt_ref=receipt_ref,
                             payload_digest=payload_digest,
-                            status="ACCEPTANCE_EFFECT_FAILED",
+                            status="RECOVERY_REQUIRED",
                             verification_status="PASS",
                             accepted=False,
                             reason_code=_exception_reason(

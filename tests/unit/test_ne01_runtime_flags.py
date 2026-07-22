@@ -3,7 +3,7 @@ from __future__ import annotations
 from host_brain.app.settings.core import get_core_settings
 
 
-def test_ne01_runtime_graph_flags_default_closed(monkeypatch) -> None:
+def test_ne01_atomic_graph_success_defaults_on_while_fanout_stays_closed(monkeypatch) -> None:
     monkeypatch.delenv("HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED", raising=False)
     monkeypatch.delenv("HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED", raising=False)
     get_core_settings.cache_clear()
@@ -11,7 +11,7 @@ def test_ne01_runtime_graph_flags_default_closed(monkeypatch) -> None:
     settings = get_core_settings()
 
     assert settings.task_runtime_bounded_fanout_enabled is False
-    assert settings.task_runtime_atomic_graph_success_enabled is False
+    assert settings.task_runtime_atomic_graph_success_enabled is True
 
 
 def test_ne01_runtime_graph_flags_are_explicitly_composed_from_environment(monkeypatch) -> None:

@@ -182,9 +182,17 @@ def test_t_nle_05_ready_siblings_parallel_unless_source_explicitly_disables_it()
     )
 
     assert parallel.execution_batches == (("a",), ("b", "c"))
-    assert parallel.task_graph.result_node_id is None
+    assert parallel.task_graph.result_node_id == "c"
+    assert (
+        parallel.task_graph.completion_policy
+        is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+    )
     assert serial.execution_batches == (("a",), ("b",), ("c",))
-    assert serial.task_graph.result_node_id is None
+    assert serial.task_graph.result_node_id == "c"
+    assert (
+        serial.task_graph.completion_policy
+        is TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1
+    )
 
     atomic_plan = _dag(
         _node("a"),

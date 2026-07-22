@@ -10,6 +10,7 @@ from host_brain.contracts.agent_runtime.parallel_settlement import (
     ParallelSettlementContractError,
     normalize_parallel_settlement_decision,
 )
+from host_brain.contracts.agent_runtime.task_graph import TaskGraphCompletionPolicy
 
 from .admission import AdmittedExecution
 from .coordinator_receipts import (
@@ -57,9 +58,12 @@ class NodeExecutionProjection:
         graph: Mapping[str, Any],
     ) -> dict[str, Any] | None:
         graph_status = _status(graph)
+        if graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}:
+            return None
         if (
             len(admitted.nodes) <= 1
-            or graph_status not in {"BLOCKED", "FAILED", "CANCELLED"}
+            and admitted.completion_policy
+            != TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1.value
         ):
             return None
         raw = await _maybe_await(
@@ -153,6 +157,7 @@ class NodeExecutionProjection:
         *,
         graph: Mapping[str, Any],
         node: Mapping[str, Any],
+        allow_incomplete_atomic_graph_outcome: bool = False,
     ) -> GovernedExecutionReceipt | None:
         graph_status = _status(graph)
         node_status = _status(node)
@@ -329,7 +334,45 @@ class NodeExecutionProjection:
                         },
                     },
                 )
+        atomic_graph_success = (
+            admitted.completion_policy
+            == TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1.value
+        )
+        if (
+            atomic_graph_success
+            and node_status == "ACCEPTED"
+            and graph_status == "ACTIVE"
+            and not allow_incomplete_atomic_graph_outcome
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "atomic-success TaskNode is only an internal outcome until Graph and Budget commit",
+            )
         accepted = node_status == "ACCEPTED" and graph_status in {"ACTIVE", "COMPLETED"}
+        terminal_budget: dict[str, Any] | None = None
+        if accepted and atomic_graph_success and graph_status == "COMPLETED":
+            snapshot = await _maybe_await(
+                self._store.read_scheduler_snapshot(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                )
+            )
+            raw_budgets = snapshot.get("budgets") if isinstance(snapshot, Mapping) else None
+            graph_budgets = [
+                dict(item)
+                for item in raw_budgets or ()
+                if isinstance(item, Mapping)
+                and _text(item.get("graph_id")) == admitted.graph_id
+                and int(item.get("graph_revision") or 0) == admitted.graph_revision
+                and item.get("node_id") is None
+                and item.get("attempt_id") is None
+            ]
+            if len(graph_budgets) != 1 or _status(graph_budgets[0]) != "CONSUMED":
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "completed atomic-success TaskGraph lacks its consumed graph Budget",
+                )
+            terminal_budget = graph_budgets[0]
         if accepted and (reservation_status != "COMMITTED" or not receipt_ref):
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
@@ -406,6 +449,10 @@ class NodeExecutionProjection:
                 "graph_status": graph_status,
                 "decision_ref": decision_ref,
             }
+            projection = projected
+        if terminal_budget is not None:
+            projected = dict(projection or {})
+            projected["budget"] = terminal_budget
             projection = projected
         return build_execution_receipt(
             admitted,

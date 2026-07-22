@@ -174,7 +174,7 @@ class CoreSettings(BaseSettings):
         alias="HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED",
     )
     task_runtime_atomic_graph_success_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED",
     )
     task_runtime_canary_receipt: str = Field(
@@ -282,8 +282,8 @@ class CoreSettings(BaseSettings):
             )
         if (
             self.task_runtime_bounded_fanout_enabled
-            or self.task_runtime_atomic_graph_success_enabled
-        ) and not self.task_runtime_canary_receipt.strip():
+            and not self.task_runtime_canary_receipt.strip()
+        ):
             raise ValueError("TASK_RUNTIME_GRAPH_ENABLEMENT_REQUIRES_CANARY_RECEIPT")
         return self
 
@@ -350,7 +350,7 @@ class CoreSettings(BaseSettings):
                 domain=domain,
                 field_name="task_runtime_atomic_graph_success_enabled",
                 env_key="HOST_TASK_RUNTIME_ATOMIC_GRAPH_SUCCESS_ENABLED",
-                default_value=False,
+                default_value=True,
                 current_value=s.task_runtime_atomic_graph_success_enabled,
                 is_required=False,
             ),
@@ -360,10 +360,7 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_TASK_RUNTIME_CANARY_RECEIPT",
                 default_value="",
                 current_value=("configured" if s.task_runtime_canary_receipt else ""),
-                is_required=(
-                    s.task_runtime_bounded_fanout_enabled
-                    or s.task_runtime_atomic_graph_success_enabled
-                ),
+                is_required=s.task_runtime_bounded_fanout_enabled,
             ),
             inspect_setting(
                 domain=domain,

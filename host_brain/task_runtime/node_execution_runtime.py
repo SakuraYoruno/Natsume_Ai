@@ -1408,15 +1408,21 @@ class DurableNodeExecutionRuntime:
                         worker_commit=worker_commit,
                         attempt_id=attempt_id,
                     )
-                except BaseException as exc:
-                    graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
-                    await self._runtime_outbox.publish_pending()
+                except Exception as exc:
+                    # Legacy Graphs may still exist in durable storage.  Their
+                    # historical closeout consumed Budget before staging Graph
+                    # effects.  A finalizer error must not convert that
+                    # recoverable ACTIVE/CONSUMED checkpoint into the corrupt
+                    # FAILED/CONSUMED terminal matrix.  New production Graphs
+                    # use the 0091 whole-Graph transaction; legacy re-entry
+                    # remains held until the exact finalizer can succeed.
+                    await self._runtime_outbox.publish_pending(best_effort=True)
                     receipt = build_execution_receipt(
                         admitted,
                         attempt_id=attempt_id,
                         receipt_ref=receipt_ref,
                         payload_digest=payload_digest,
-                        status="ACCEPTANCE_EFFECT_FAILED",
+                        status="RECOVERY_REQUIRED",
                         verification_status="PASS",
                         accepted=False,
                         reason_code=_exception_reason(

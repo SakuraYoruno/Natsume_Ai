@@ -818,6 +818,7 @@ Evolution Lab 只能读取脱敏快照与可重放 trace，不能持有生产写
 | World 推断不冒充事实 | fact 带 source、epistemic type、TTL、conflict | [world projection](../../host_brain/runtime/world_model.py) |
 | 权限单调收紧 | child grant scope/target/expiry 不扩大 | [node grants](../../host_brain/orchestration/node_grants.py) |
 | 图不可变 | admission 后相同 graph/revision digest 不漂移 | [TaskGraph contract](../../host_brain/contracts/agent_runtime/task_graph.py) |
+| 成功不可提前暴露 | atomic 图的 Node `ACCEPTED` 只是内部 outcome；只有 Graph、graph-scope Budget、Effect 与 decision 同事务收口后才能公开成功 | [parallel success runtime](../../host_brain/task_runtime/parallel_success_runtime.py)、[node projection](../../host_brain/task_runtime/node_execution_projection.py) |
 | worker 无二次规划 | worker 输入只包含冻结 node 与授权，不持有 planner writer | [governed workers](../../host_brain/task_runtime/governed_workers.py) |
 | 验收后副作用 | effect intent 只由 accepted graph/node 产生 | [acceptance effects](../../host_brain/task_runtime/acceptance_effects.py) |
 | 模拟无副作用 | planning ports 不暴露真实执行/写入接口 | [planning ports](../../host_brain/planning_search/ports.py) |
