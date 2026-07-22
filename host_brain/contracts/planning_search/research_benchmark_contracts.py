@@ -335,6 +335,7 @@ class ResearchModelExecutionReceiptV1:
     total_tokens: int | None = None
     cost_micros: int | None = None
     attestation_ref: str | None = None
+    attestation: "ExternalProviderRunAttestationV1 | None" = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "execution_id", _text(self.execution_id, "execution_id", 160))
@@ -349,22 +350,49 @@ class ResearchModelExecutionReceiptV1:
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                 raise ResearchBenchmarkContractError(f"{name} must be a non-negative integer")
         attestation = None if self.attestation_ref is None else _text(self.attestation_ref, "attestation_ref", 1_024)
+        external_attestation = self.attestation
+        if external_attestation is not None and not isinstance(
+            external_attestation,
+            ExternalProviderRunAttestationV1,
+        ):
+            raise ResearchBenchmarkContractError(
+                "attestation must be an ExternalProviderRunAttestationV1"
+            )
         if evidence_class == "ATTESTED_EXTERNAL" and not attestation:
             raise ResearchBenchmarkContractError("attested external evidence requires attestation_ref")
         if evidence_class == "ATTESTED_EXTERNAL" and (self.total_tokens is None or self.cost_micros is None):
             raise ResearchBenchmarkContractError(
                 "attested external evidence requires token and cost usage"
             )
+        if evidence_class == "ATTESTED_EXTERNAL" and external_attestation is None:
+            raise ResearchBenchmarkContractError(
+                "attested external evidence requires an exact provider attestation"
+            )
+        if evidence_class == "ATTESTED_EXTERNAL" and external_attestation is not None:
+            if (
+                external_attestation.execution_id != self.execution_id
+                or external_attestation.attestation_ref != attestation
+                or external_attestation.total_tokens != self.total_tokens
+                or external_attestation.cost_micros != self.cost_micros
+            ):
+                raise ResearchBenchmarkContractError(
+                    "provider attestation does not bind the Research model receipt"
+                )
         if evidence_class != "ATTESTED_EXTERNAL" and attestation:
             raise ResearchBenchmarkContractError("non-attested evidence cannot carry attestation_ref")
+        if evidence_class != "ATTESTED_EXTERNAL" and external_attestation is not None:
+            raise ResearchBenchmarkContractError(
+                "non-attested evidence cannot carry a provider attestation"
+            )
         object.__setattr__(self, "attestation_ref", attestation)
+        object.__setattr__(self, "attestation", external_attestation)
 
     @property
     def benefit_eligible(self) -> bool:
         return self.evidence_class == "ATTESTED_EXTERNAL" and bool(self.attempt_ids) and self.attestation_ref is not None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "execution_id": self.execution_id,
             "arm_id": self.arm_id,
             "evidence_class": self.evidence_class,
@@ -374,6 +402,9 @@ class ResearchModelExecutionReceiptV1:
             "attestation_ref": self.attestation_ref,
             "benefit_eligible": self.benefit_eligible,
         }
+        if self.attestation is not None:
+            result["attestation"] = self.attestation.to_dict()
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -426,6 +457,18 @@ class ExternalProviderRunAttestationV1:
             "total_latency_ms": self.total_latency_ms,
             "fresh_request": True,
         }
+
+    @property
+    def attestation_digest(self) -> str:
+        """Return the canonical digest that a model receipt must reference."""
+
+        return _json_digest(self.to_dict())
+
+    @property
+    def attestation_ref(self) -> str:
+        """Return the opaque durable reference for this exact provider call."""
+
+        return f"research-provider-attestation://sha256/{self.attestation_digest}"
 
 
 @dataclass(frozen=True, slots=True)

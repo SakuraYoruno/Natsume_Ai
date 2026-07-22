@@ -60,6 +60,12 @@ from .research_benchmark_verifier import (
     ResearchCitationVerificationError,
     ResearchCitationVerifier,
 )
+from .attested_external_research_adapter import (
+    ATTESTED_EXTERNAL_RESEARCH_ADAPTER_ID,
+    AttestedExternalResearchAdapter,
+    AttestedExternalResearchError,
+    AttestedExternalResearchRun,
+)
 from .research_domain import (
     ResearchCognitiveRanker,
     ResearchMCTSCondition,
@@ -110,6 +116,7 @@ __all__ = [
     "CODE_BENCHMARK_RECEIPT_STATUS",
     "RESEARCH_BENCHMARK_CORPUS_MODE",
     "RESEARCH_CITATION_VERIFIER_ID",
+    "ATTESTED_EXTERNAL_RESEARCH_ADAPTER_ID",
     "RESEARCH_BENCHMARK_SCHEMA",
     "RESEARCH_EVIDENCE_CLASSES",
     "RESEARCH_DOMAIN",
@@ -149,6 +156,9 @@ __all__ = [
     "ResearchCitationSpanV1",
     "ResearchCitationVerificationError",
     "ResearchCitationVerifier",
+    "AttestedExternalResearchAdapter",
+    "AttestedExternalResearchError",
+    "AttestedExternalResearchRun",
     "ResearchCorpusBindingV1",
     "ResearchExecutionBudgetV1",
     "ResearchExecutionProfileV1",

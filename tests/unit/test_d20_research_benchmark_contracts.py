@@ -145,3 +145,41 @@ def test_d20c_external_attestation_requires_fresh_real_usage() -> None:
             provider_latency_ms=1,
             total_latency_ms=1,
         )
+
+
+def test_d20c_attested_model_receipt_requires_exact_provider_attestation() -> None:
+    attestation = ExternalProviderRunAttestationV1(
+        execution_id="external-run",
+        provider="openai",
+        model="research-model",
+        route_digest="a" * 64,
+        response_digest="b" * 64,
+        total_tokens=321,
+        cost_micros=42,
+        provider_latency_ms=120,
+        total_latency_ms=180,
+    )
+    receipt = ResearchModelExecutionReceiptV1(
+        execution_id="external-run",
+        arm_id="baseline",
+        evidence_class="ATTESTED_EXTERNAL",
+        attempt_ids=("attempt::external-run",),
+        total_tokens=321,
+        cost_micros=42,
+        attestation_ref=attestation.attestation_ref,
+        attestation=attestation,
+    )
+
+    assert receipt.benefit_eligible is True
+    assert receipt.to_dict()["attestation"]["execution_id"] == "external-run"
+    with pytest.raises(ResearchBenchmarkContractError, match="does not bind"):
+        ResearchModelExecutionReceiptV1(
+            execution_id="external-run",
+            arm_id="baseline",
+            evidence_class="ATTESTED_EXTERNAL",
+            attempt_ids=("attempt::external-run",),
+            total_tokens=320,
+            cost_micros=42,
+            attestation_ref=attestation.attestation_ref,
+            attestation=attestation,
+        )

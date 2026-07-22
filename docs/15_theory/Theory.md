@@ -599,7 +599,7 @@ Transition 必须：
 - 对相同 state/candidate/seed 可重放；
 - 明确哪些效果是预测，哪些前置条件已由事实支持。
 
-对涉及代码或外部工件的领域，虚拟状态只能持有 opaque ref、digest、受限标识和预注册候选，不能夹带源码、路径、worktree handle、凭据、模型/工具 callback 或 live ACL。L3 的可用性也应是冻结 state 的一部分，而不是调用方把 `always` 标志当作越权开关；未满足领域条件时，不应暴露 transition/reward simulation port。D20a 的 `FrozenResearchCorpusLoader` 把“可见元数据”和“实验私有输入”再分开：只有可信实验根目录和 manifest 共同指定的 repository-relative 普通文件可被读取，读前/读后都会核对文件状态、大小和内容 digest；在稳定受信输入中，绝对路径、遍历、ADS colon component、case alias、link/reparse point 与未列来源会拒绝。公开 receipt 只输出 source id/ref/digest、大小和 authority tier，不输出路径或正文；这不是 hostile concurrent replacement 的原子 TOCTOU 防线，也尚未把 planner snapshot 与 manifest 精确绑定或证明独立来源，更不是浏览器抓取器、生产 source resolver 或 OS/tenant/sandbox。
+对涉及代码或外部工件的领域，虚拟状态只能持有 opaque ref、digest、受限标识和预注册候选，不能夹带源码、路径、worktree handle、凭据、模型/工具 callback 或 live ACL。L3 的可用性也应是冻结 state 的一部分，而不是调用方把 `always` 标志当作越权开关；未满足领域条件时，不应暴露 transition/reward simulation port。D20a 的 `FrozenResearchCorpusLoader` 把“可见元数据”和“实验私有输入”再分开：只有可信实验根目录和 manifest 共同指定的 repository-relative 普通文件可被读取，读前/读后都会核对文件状态、大小和内容 digest；在稳定受信输入中，绝对路径、遍历、ADS colon component、case alias、link/reparse point 与未列来源会拒绝。D20b 的独立 verifier 再对 planner snapshot、manifest 与每个 source 的 id/ref/digest/tier 做 exact handshake，并从重新打开的 bytes 核验 UTF-8 span；公开 receipt 只输出 source id/ref/digest、大小和 authority tier，不输出路径或正文。这不是 hostile concurrent replacement 的原子 TOCTOU 防线，也不证明独立来源、事实真值，更不是浏览器抓取器、生产 source resolver 或 OS/tenant/sandbox。
 
 ### 10.4 规划收益必须以真实 shadow 证明
 
@@ -615,7 +615,7 @@ Transition 必须：
   → promotion proposal
 ```
 
-未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。D20a 的纯 catalog 与 manifest 安全读取只建立后续实验的输入边界；没有真实模型、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research benefit 仍为 `UNPROVEN`。
+未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。模型证据还必须由唯一模型 authority 生成：D20c 只能接受一个 canonical `ModelAttemptService` request 的非缓存、单成功 attempt，且将 target/输出摘要、provider 与总延迟、token、成本一起封入不可分离的 attestation；cache、多 attempt 或缺测量都不能转换为外部收益证据。单纯的 URI、fixture 或调用者自报字段永远不是批准证据；请求参数也不能覆盖路由自己的 retry authority。D20a～D20c 只建立后续实验的输入和结构化证据边界，尚无真实 credential/provider execution、production prompt/workload、durable audit lookup、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research 是 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
 
 ### 10.5 编译是规划与执行之间的防火墙
 

@@ -378,7 +378,7 @@ frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
 
 该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
-### 4.9 D20a/D20b Research 冻结语料与机械 citation verifier 流
+### 4.9 D20a～D20c Research 冻结语料、citation 与外部模型证据流
 
 ```text
 ResearchTaskSnapshot
@@ -405,9 +405,18 @@ ResearchTaskSnapshot + manifest + ResearchCorpusBindingV1
   → path/body-free ResearchVerifierReceiptV1
   → 0107 reopen registration + RunSpec + two persisted arms
   → exact terminal receipt/replay only when plan/model/verifier/evidence digest all match
+
+one arm execution identity + registered prompt/messages
+  → AttestedExternalResearchAdapter
+  → canonical ModelAttemptService foreground request
+  → accept only one non-cached SUCCEEDED attempt with exact route/output identity
+  → require canonical token/cost + provider/total latency
+  → embedded ExternalProviderRunAttestationV1
+  → ResearchModelExecutionReceiptV1
+  → still shadow ledger only; no promotion authority
 ```
 
-`FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes。D20b 的 verifier 在构造和验证两阶段分别精确比较 snapshot、manifest、binding 及新打开 document 的 corpus/source id/ref/digest/tier；调用方不能交入 executor loader 或未经核验的有效率。它也不是 hostile concurrent replacement 的原子 TOCTOU 防线、事实正确性或来源独立性证明。D20a/D20b 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立信任域 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research benefit 仍为 `UNPROVEN`。
+`FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes。D20b 的 verifier 在构造和验证两阶段分别精确比较 snapshot、manifest、binding 及新打开 document 的 corpus/source id/ref/digest/tier；调用方不能交入 executor loader 或未经核验的有效率。D20c 不能从 caller 获得 provider/model/base URL/cache 控制；它只向已 composition 的模型 authority 发出一个 request，并拒绝 cache、多 attempt、route/output 漂移、缺 token/成本或 provider/总延迟的结果。普通 request 仍不能自行压低 route-owned retry ceiling，且当前没有 durable audit lookup，因此这里不是已经验收的真实 provider 调用。D20a～D20c 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实 credential/provider execution、独立信任域 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research 为 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
 
 ### 4.10 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
 
