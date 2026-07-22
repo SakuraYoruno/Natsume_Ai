@@ -8,6 +8,8 @@ from host_brain.app.conversation_writer import record_assistant_turn, record_use
 from host_brain.composition.life import ProcessLifeContainer, build_process_life_container
 from host_brain.composition.process_service_container import get_process_service_container
 from host_brain.persistence.context_repository import ContextRepository
+from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
+from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
 
 
 def _install_ledger(monkeypatch, tmp_path) -> tuple[SQLiteLedger, ContextRepository, ProcessLifeContainer]:
@@ -43,6 +45,8 @@ def test_record_turn_writers_persist_through_canonical_repositories(monkeypatch,
         ledger=ledger,
         life_service=life.command_service,
         life_reader=life.snapshot_reader,
+        session_topic_ledger_store=SessionTopicLedgerStore(ledger),
+        session_tactic_ledger_store=SessionTacticLedgerStore(ledger),
         request_id="req-assistant",
         session_id="sess",
         person_id="p1",

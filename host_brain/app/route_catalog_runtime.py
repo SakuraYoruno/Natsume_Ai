@@ -33,9 +33,27 @@ def resolve_host_llm_runtime(
     rollout_key: str | None = None,
     scene_type: str | None = None,
 ) -> dict[str, Any]:
+    """Resolve the legacy compatibility projection through the process catalog."""
+
+    return resolve_host_llm_runtime_from_catalog(
+        catalog=_catalog(),
+        rollout_key=rollout_key,
+        scene_type=scene_type,
+    )
+
+
+def resolve_host_llm_runtime_from_catalog(
+    *,
+    catalog: Any,
+    rollout_key: str | None = None,
+    scene_type: str | None = None,
+) -> dict[str, Any]:
+    """Project one explicitly owned RouteCatalog into the Host LLM shape."""
+
     del rollout_key
     scene = str(scene_type or "CHAT").strip().upper() or "CHAT"
-    catalog = _catalog()
+    if not callable(getattr(catalog, "resolve", None)):
+        raise RuntimeError("HOST_MODEL_ROUTE_CATALOG_UNAVAILABLE")
     route = catalog.resolve(scene_type=scene, cognitive_tier="B", prompt_id="")
     cloud = catalog.resolve(scene_type="MULTIMODAL", cognitive_tier="B", prompt_id="")
     return _project(route, cloud=cloud)
@@ -47,6 +65,21 @@ async def resolve_host_llm_runtime_async(
     scene_type: str | None = None,
 ) -> dict[str, Any]:
     return resolve_host_llm_runtime(rollout_key=rollout_key, scene_type=scene_type)
+
+
+async def resolve_host_llm_runtime_async_from_catalog(
+    *,
+    catalog: Any,
+    rollout_key: str | None = None,
+    scene_type: str | None = None,
+) -> dict[str, Any]:
+    """Async adapter for an app-local RouteCatalog provider."""
+
+    return resolve_host_llm_runtime_from_catalog(
+        catalog=catalog,
+        rollout_key=rollout_key,
+        scene_type=scene_type,
+    )
 
 
 def resolve_surface_reply_llm_runtime(*, base_runtime: dict) -> dict[str, Any]:
@@ -83,6 +116,8 @@ __all__ = [
     "resolve_executive_router_llm_runtime",
     "resolve_host_llm_runtime",
     "resolve_host_llm_runtime_async",
+    "resolve_host_llm_runtime_async_from_catalog",
+    "resolve_host_llm_runtime_from_catalog",
     "resolve_subagent_llm_runtime",
     "resolve_surface_reply_llm_runtime",
 ]

@@ -505,9 +505,9 @@
     },
     "locator_consumer_inventory": {
       "combined_current_inventory": {
-        "named_modules": 40,
-        "named_imported_names": 116,
-        "all_import_form_consumer_modules": 46,
+        "named_modules": 34,
+        "named_imported_names": 97,
+        "all_import_form_consumer_modules": 38,
         "process_service_container_fields": 50,
         "process_service_container_lock_fields": 3,
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 46
@@ -563,7 +563,7 @@
       "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state", "obs_metrics_collector", "query_projection_store"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
       "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state", "get_obs_metrics_collector", "get_query_projection_store", "peek_query_projection_store"],
-      "boundary": "COMBINED_CURRENT_IS_36_MODULES_100_NAMES_40_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_HOST_LIFESPAN_AGENT_RUNTIME_SCOPE_RETIRES_THE_GLOBAL_BUNDLE_FOR_INPUT_CORTEX_LIFE_PROJECTION_AND_CONVERSATION_ACCEPTANCE_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
+      "boundary": "COMBINED_CURRENT_IS_34_MODULES_97_NAMES_38_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_HOST_LIFESPAN_AGENT_RUNTIME_SCOPE_INJECTS_MODEL_ROUTE_CATALOG_BOND_STAGE_ENGINE_SESSION_TOPIC_TACTIC_STORES_VTS_LEDGER_AND_TTS_META_PORTS_FOR_INPUT_CORTEX_LIFE_PROJECTION_AND_CONVERSATION_ACCEPTANCE_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_DURABLE_RUNTIME_FENCED_HARD_STATE_AND_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
@@ -2215,7 +2215,7 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI; ApplicationModelAttemptServicePort also requires an injected provider in Tool runtime and interrupted-job recovery. After Life authority is available, AgentRuntimeApplicationScope publishes one immutable bundle to Input→Cortex, Life projection and conversation Acceptance, then clears it during shutdown; the retired shared module contains no global bundle. These business adapters no longer import process_services and missing providers fail closed. Current inventory is 36 named-import modules / 100 imported names / 40 all-form consumer modules, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal, app-local proof for every backing service, generic Delegate cutover, or seven-route TaskGraph coverage. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI; ApplicationModelAttemptServicePort also requires an injected provider in Tool runtime and interrupted-job recovery. After Life authority is available, AgentRuntimeApplicationScope publishes one immutable bundle to Input→Cortex, Life projection and conversation Acceptance, then clears it during shutdown. The active scope resolves its model RouteCatalog, Bond stage engine, session topic/tactic ledgers, VTS ledger and TTS router/meta-learning collaborators from that same bundle; conversation_writer and vts_emotion_driver no longer directly import process_services. Missing providers fail closed. Current inventory is 34 named-import modules / 97 imported names / 38 all-form consumer modules, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal, app-local proof for every backing service, generic Delegate cutover, or seven-route TaskGraph coverage. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
       "typed_host_service_bundle_local_regression": {
         "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
         "initial_result": "46_PASSED_4_STALE_FIXTURE_OR_CONTRACT_FAILURES",
@@ -2260,10 +2260,11 @@
         "scope": "HOST_LIFESPAN_POST_LIFE_AUTHORITY_INPUT_CORTEX_LIFE_PROJECTION_CONVERSATION_ACCEPTANCE",
         "global_port_bundle": "REMOVED",
         "generic_legacy_executive_delegate": "NOT_MIGRATED_NOT_PROVEN",
-        "current_locator_inventory": "36_MODULES_100_NAMES_40_ALL_FORM_CONSUMERS",
-        "final_targeted_validation": "231_PASSED_IN_31_11_SECONDS",
-        "validation_scope": "ASGI_LIFECYCLE_INPUT_CORTEX_LIFE_PROJECTION_CONVERSATION_ACCEPTANCE_SUBAGENT_PORTS_STRUCTURE_AND_AFFECTED_INTEGRATION",
-        "validation_overlap_boundary": "THIS_231_TEST_BATCH_IS_SCOPE_BOUND_AND_MUST_NOT_BE_ADDED_TO_HISTORICAL_NE01_BATCHES",
+        "current_locator_inventory": "34_MODULES_97_NAMES_38_ALL_FORM_CONSUMERS",
+        "nested_host_dependencies": "MODEL_ROUTE_CATALOG_BOND_STAGE_ENGINE_SESSION_TOPIC_TACTIC_STORES_VTS_LEDGER_TTS_CONTEXT_ROUTER_META_LEARNING_LOOP",
+        "final_targeted_validation": "257_PASSED_IN_49_51_SECONDS",
+        "validation_scope": "ASGI_LIFECYCLE_INPUT_CORTEX_LIFE_PROJECTION_CONVERSATION_ACCEPTANCE_SUBAGENT_PORTS_NESTED_HOST_PROVIDERS_STRUCTURE_AND_AFFECTED_INTEGRATION",
+        "validation_overlap_boundary": "THIS_257_TEST_BATCH_SUPERSEDES_THE_SCOPE_LOCAL_231_BATCH_AND_MUST_NOT_BE_ADDED_TO_HISTORICAL_NE01_BATCHES",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "production_canary": "NOT_RUN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"

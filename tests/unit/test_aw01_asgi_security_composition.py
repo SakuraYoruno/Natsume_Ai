@@ -46,6 +46,11 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "multimodal_processor": provider,
         "conversation_history": provider,
         "life_memory_service": provider,
+        "model_route_catalog": provider,
+        "session_topic_ledger_store": provider,
+        "session_tactic_ledger_store": provider,
+        "tts_context_router": provider,
+        "meta_learning_loop": provider,
     }
     values.update(overrides)
     return HostLifecycleApplicationPorts(**values)  # type: ignore[arg-type]

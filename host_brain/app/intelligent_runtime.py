@@ -463,23 +463,38 @@ def resolve_tts_route(
     text: str,
     emotion_context: Mapping[str, Any] | None,
     bond_summary: Mapping[str, Any] | None,
+    tts_context_router: Any | None = None,
+    meta_learning_loop: Any | None = None,
 ) -> dict[str, Any]:
-    from host_brain.composition.process_services import get_meta_learning_loop, get_tts_context_router
+    """Resolve TTS parameters from explicit Host services when supplied.
+
+    The lazy process-service branch is retained for retired compatibility
+    callers only.  Canonical Agent Runtime post-processing passes both
+    collaborators from its Host-lifespan bundle.
+    """
+
+    if tts_context_router is None or meta_learning_loop is None:
+        from host_brain.composition.process_services import (  # noqa: PLC0415
+            get_meta_learning_loop,
+            get_tts_context_router,
+        )
+
+        tts_context_router = tts_context_router or get_tts_context_router()
+        meta_learning_loop = meta_learning_loop or get_meta_learning_loop()
 
     emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip().upper()
     bond_stage = str((bond_summary or {}).get("stage") or "FRIEND").strip().upper() or "FRIEND"
     vad = dict((emotion_context or {}).get("vad_vector") or {})
     valence = _coerce_optional_float(vad.get("valence"))
     arousal = _coerce_optional_float(vad.get("arousal"))
-    router = get_tts_context_router()
-    routed = router.route(
+    routed = tts_context_router.route(
         text=text,
         emotion_tag=_normalize_emotion_tag(emotion_tag),
         bond_stage=bond_stage,
         valence=valence,
         arousal=arousal,
     )
-    get_meta_learning_loop().record(
+    meta_learning_loop.record(
         "tts_context_router",
         success=True,
         latency_ms=0.0,
