@@ -1063,3 +1063,17 @@ Full Architecture                           INCOMPLETE
 ```
 
 因此，当前不应使用“全入口统一”、“通用智能规划已完成”、“所有副作用全局原子提交”或“人格已可安全长期自主演化”作为封板结论。
+
+### 终态对账 canary 数据流
+
+```mermaid
+flowchart LR
+    HC["Canonical HostCommand admission"] --> DB["隔离真实 SQLite"]
+    DB --> R["Runtime restart + bounded inventory"]
+    R --> E["EXACT_REPAIRABLE"]
+    R --> S["SIGNED_REPAIR_REQUIRED"]
+    E --> P["System proof + Budget RELEASED"]
+    S --> F["保持原状态 + readiness fail closed"]
+```
+
+本切片只证明本地 exact-auto 的机械恢复和非 exact 围栏；它没有执行签名 Operator HTTP、外部 Effect reconciliation、真实 Gateway/Edge 或 Docker 服务栈。

@@ -47,36 +47,42 @@ from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 
 
 def _active_budget(store, *, budget_id: str = "budget-terminal-reconciliation") -> str:
-    store.create_budget_reservation(
-        BudgetReservation(
-            budget_id=budget_id,
-            scope=f"graph:{GRAPH_ID}@1",
-            limits=BudgetAmount(token_count=100, tool_call_count=10),
-            reserved=BudgetAmount(token_count=100, tool_call_count=10),
-            status=BudgetReservationStatus.PENDING,
-        ),
-        graph_id=GRAPH_ID,
-        graph_revision=1,
-        node_id=None,
-        attempt_id=None,
-        outbox=_event(
-            "BUDGET_RESERVATION",
+    try:
+        current = store.reconcile_budget(budget_id)
+    except TaskStoreError as exc:
+        assert exc.reason_code == "TASK_STORE_NOT_FOUND"
+        store.create_budget_reservation(
+            BudgetReservation(
+                budget_id=budget_id,
+                scope=f"graph:{GRAPH_ID}@1",
+                limits=BudgetAmount(token_count=100, tool_call_count=10),
+                reserved=BudgetAmount(token_count=100, tool_call_count=10),
+                status=BudgetReservationStatus.PENDING,
+            ),
+            graph_id=GRAPH_ID,
+            graph_revision=1,
+            node_id=None,
+            attempt_id=None,
+            outbox=_event(
+                "BUDGET_RESERVATION",
+                budget_id,
+                0,
+                "BUDGET_RESERVATION_CREATED",
+            ),
+        )
+        store.transition_budget(
             budget_id,
-            0,
-            "BUDGET_RESERVATION_CREATED",
-        ),
-    )
-    store.transition_budget(
-        budget_id,
-        expected_version=0,
-        target_status=BudgetReservationStatus.ACTIVE,
-        outbox=_event(
-            "BUDGET_RESERVATION",
-            budget_id,
-            1,
-            "BUDGET_RESERVATION_ACTIVE",
-        ),
-    )
+            expected_version=0,
+            target_status=BudgetReservationStatus.ACTIVE,
+            outbox=_event(
+                "BUDGET_RESERVATION",
+                budget_id,
+                1,
+                "BUDGET_RESERVATION_ACTIVE",
+            ),
+        )
+        current = store.reconcile_budget(budget_id)
+    assert current["status"] == "ACTIVE"
     return budget_id
 
 

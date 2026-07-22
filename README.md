@@ -99,6 +99,8 @@ ModelAttempt 的非流式生产路径会保留 provider 显式回报的 prompt�
 - [下一代正式执行合同](docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)
 - [机器可读状态](configs/release/current_architecture_status.json)
 
+终态对账现已增加可重复执行的真实 SQLite restart canary。脚本通过 canonical `HostCommandRepository.admit()` 建立两条隔离任务：唯一 `FAILED + ACTIVE Budget` 由默认开启的 exact-auto 以 `SYSTEM_DURABLE_EVIDENCE` 精确释放预算；`CANCELLED + ACTIVE Budget` 保持 `SIGNED_REPAIR_REQUIRED`、无 proof、零状态改写，并阻断 production readiness。完整 cancellation 依赖束使用进程内临时 verification-only 公钥通过启动 preflight，私钥不落盘。定向合同/单元/集成为 `95 passed`，CLI canary 为 `PASS`；这不等于已完成签名 Operator HTTP canary、部署存量清理、Operation/Effect canary、NE-01 波次集成或 NE-07 全栈实测，远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
+
 ## 系统全景
 
 ```mermaid

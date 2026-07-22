@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any
 import uuid
@@ -8,12 +9,20 @@ import uuid
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetPolicy,
+    BudgetReservation,
+    BudgetReservationStatus,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphStatus,
     TaskNode,
     TaskNodeStatus,
 )
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.task_repository import (
     AttemptStatus,
     DurableTaskStore,
@@ -26,9 +35,11 @@ from host_brain.persistence.task_repository import (
     build_operation_fingerprint,
     build_outbox_payload_ref,
 )
-from tests.task_runtime_authority_fixtures import (
-    seed_active_graph_budget_for_test,
-    seed_raw_task_graph_for_test,
+from natsume_contracts.task.v1 import (
+    ExecutorAssignment,
+    HostCommandSurface,
+    TaskExecutor,
+    build_host_command,
 )
 
 
@@ -39,6 +50,7 @@ ATTEMPT_ID = "attempt-ne01-atomic-failure"
 OWNER_ID = "runtime-ne01/boot-1"
 BUSINESS_SCOPE = "host-command:ne01-atomic-failure"
 FAILURE_REF = "resolver-error://worker-registry/permanent-unavailable"
+OUTPUT_CONTRACT = {"type": "ne01_atomic_failure_receipt"}
 
 
 @dataclass
@@ -93,7 +105,7 @@ def _graph() -> TaskGraph:
                 dependencies=(),
                 route="worker:resolver-test",
                 input_refs=(),
-                output_contract={},
+                output_contract=OUTPUT_CONTRACT,
                 retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=(),
@@ -113,11 +125,70 @@ def _running_store(tmp_path: Path) -> tuple[DurableTaskStore, dict[str, Any]]:
     assert migration.success is True, migration.as_dict()
     store = DurableTaskStore(db_path, clock=MutableClock())
     graph = _graph()
-    seed_raw_task_graph_for_test(
-        store,
-        graph,
-        outbox=_event("TASK_GRAPH", GRAPH_ID, 0, "TASK_GRAPH_CREATED"),
+    input_ref = "canary-input://ne01/atomic-failure"
+    fingerprint = build_operation_fingerprint(
+        business_scope=BUSINESS_SCOPE,
+        operation="resolve-worker",
+        parameters={"node_id": NODE_ID},
     )
+    work_order = WorkOrderV3(
+        work_order_id=graph.root_work_order_id,
+        domain="code",
+        run_mode="inspect",
+        objective="exercise one canonical atomic failure",
+        input_pack={"input_ref": input_ref},
+        forbidden_actions=("external_effect",),
+        acceptance_criteria=("failure authority remains canonical",),
+        root_work_order_id=graph.root_work_order_id,
+        task_graph_id=graph.graph_id,
+        task_node_id=NODE_ID,
+        graph_revision=1,
+        input_refs=(input_ref,),
+        output_contract=OUTPUT_CONTRACT,
+        budget_policy=BudgetPolicy(
+            scope=f"graph:{GRAPH_ID}@1",
+            limits=BudgetAmount(token_count=1_000_000),
+        ),
+        business_idempotency_scope=BUSINESS_SCOPE,
+        operation_fingerprint=fingerprint,
+    )
+    assignment = ExecutorAssignment(
+        work_order_id=graph.root_work_order_id,
+        executor=TaskExecutor.CANONICAL,
+        assignment_id=(
+            "runtime-assignment://work-order-ne01-atomic-failure/canonical"
+        ),
+        assigned_at_ms=NOW,
+        is_new_task=True,
+        reason_code="RUNTIME_NEW_TASK_CANONICAL",
+    )
+    command = build_host_command(
+        surface=HostCommandSurface.INTERNAL,
+        request_id="request-ne01-atomic-failure",
+        session_id="session-ne01-atomic-failure",
+        principal_id="service.ne01-atomic-failure",
+        governor_grant_ref="governor-grant://ne01-atomic-failure/1",
+        input_ref=input_ref,
+        input_sha256=(
+            "sha256:"
+            + hashlib.sha256(b"ne01-atomic-failure-input").hexdigest()
+        ),
+        root_work_order_id=graph.root_work_order_id,
+        graph_id=graph.graph_id,
+        graph_revision=1,
+        route_type="internal",
+        target_id=NODE_ID,
+        business_scope=BUSINESS_SCOPE,
+        operation_fingerprint=fingerprint,
+        created_at_ms=NOW,
+    )
+    admitted = HostCommandRepository(db_path, clock=MutableClock()).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    assert admitted["created"] is True
     store.transition_graph(
         GRAPH_ID,
         1,
@@ -125,22 +196,34 @@ def _running_store(tmp_path: Path) -> tuple[DurableTaskStore, dict[str, Any]]:
         target_status=TaskGraphStatus.ACTIVE,
         outbox=_event("TASK_GRAPH", GRAPH_ID, 1, "TASK_GRAPH_ACTIVE"),
     )
-    fingerprint = build_operation_fingerprint(
-        business_scope=BUSINESS_SCOPE,
-        operation="resolve-worker",
-        parameters={"node_id": NODE_ID},
-    )
-    seed_active_graph_budget_for_test(
-        store,
+    store.create_budget_reservation(
+        BudgetReservation(
+            budget_id="budget-terminal-reconciliation",
+            scope=f"graph:{GRAPH_ID}@1",
+            limits=BudgetAmount(token_count=100, tool_call_count=10),
+            reserved=BudgetAmount(token_count=100, tool_call_count=10),
+            status=BudgetReservationStatus.PENDING,
+        ),
         graph_id=GRAPH_ID,
         graph_revision=1,
-        budget_id="budget-ne01-atomic-failure",
-        scope=f"graph:{GRAPH_ID}@1:atomic-failure",
+        node_id=None,
+        attempt_id=None,
         outbox=_event(
             "BUDGET_RESERVATION",
-            "budget-ne01-atomic-failure",
+            "budget-terminal-reconciliation",
             0,
             "BUDGET_RESERVATION_CREATED",
+        ),
+    )
+    store.transition_budget(
+        "budget-terminal-reconciliation",
+        expected_version=0,
+        target_status="ACTIVE",
+        outbox=_event(
+            "BUDGET_RESERVATION",
+            "budget-terminal-reconciliation",
+            1,
+            "BUDGET_RESERVATION_ACTIVE",
         ),
     )
     store.create_attempt(

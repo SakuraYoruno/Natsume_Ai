@@ -395,3 +395,5 @@ Composition Root 只负责把两侧构造并连接
 | Shared Foundation | `core`、`contracts`、`natsume_contracts` |
 
 目标不是保留所有当前包，而是在不破坏生产 vertical slice 的前提下，把平行 authority、兼容执行内核、全局 service locator 和双向包依赖逐步删掉。
+
+`scripts/runtime/run_task_terminal_reconciliation_canary.py` 是 NE-01 的隔离验收入口，不是第二套 Runtime。它调用真实 migration、`HostCommandRepository`、`DurableTaskStore` 和 `ProcessTaskRuntimeContainer`，验证 restart inventory、exact-auto 修复、signed-required 围栏及启动依赖束；测试 fixture 不再用 raw Graph 冒充 canonical admission。

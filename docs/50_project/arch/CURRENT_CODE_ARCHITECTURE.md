@@ -257,7 +257,7 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 - B5C durable cancellation 仍是 production-off shadow；0092、两阶段 fence/final decision、共享生产 verifier、Operator Gateway/BFF/UI 与三 surface 路由已实现，但开关默认 OFF，部署凭据/真实 canary 未完成；
 - 历史 `BLOCKED + failure Node` 或 `FAILED + ACTIVE/EXCEEDED Budget` 已进入 0099 exact/signed/quarantine 窄 reconciliation，但外部部署 inventory/remediation 仍未知；0096 已把 `WAITING_APPROVAL` 作为无 Attempt 的合法统一 outcome observation；
 - 0095 已补齐 stable-ID Graph revision/payload、deterministic 历史回填、多 revision marker、source-fenced Runtime Event/Review/Operator exact read；仍需持续守护不可解析 producer 整事务失败、legacy payload/event replay、零重复投影、receipt-loss、trigger/index readiness 与多 revision 回归矩阵；
-- 0094 scanner/worker 已跨进程 claim、heartbeat、defer、expired takeover 并重入既有 cancellation runtime；Operation/Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`，未部署 proof 的 Effect 仍会持续 defer；
+- 0094 scanner/worker 已跨进程 claim、heartbeat、defer、expired takeover 并重入既有 cancellation runtime；Operation/Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`，未部署 proof 的 Effect 仍会持续 defer；terminal exact-auto 已完成隔离真实 SQLite restart canary，signed-required case 仍被围栏，Operator HTTP canary 未运行；
 - 0093 已以 durable claim/CAS 和可关闭后台 worker 收口跨进程 Outbox drain，仍需保持 expiry 自动 takeover、stale fence、同 aggregate 顺序、非空 backlog 不得误报 DRAINED 和 append/complete 响应丢失故障矩阵；
 - 生产 resolver 尚未把现实瞬态准备故障映射到显式 marker；promotion 与 claim 也不是同一决策事务；
 - Budget 高竞争唯一 winner/`ALREADY_EXCEEDED` 已收口；仍缺 concurrency 维度计量与完整 `DEGRADE/REVIEW` 策略；

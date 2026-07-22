@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "MIGRATION_HEAD_0118_GATE_1_TO_14_STATIC_PASS_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_DEFAULT_ON_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_AND_CANARY_REMAIN_INCOMPLETE",
+  "active_wave_detail": "MIGRATION_HEAD_0118_GATE_1_TO_14_STATIC_PASS_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,7 +26,7 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "CURRENT_TERMINAL_EXACT_AUTO_ENABLEMENT_TARGETED_VALIDATION_IN_PROGRESS_COMMIT_BOUND_EVIDENCE_PENDING_PROGRAM_INCOMPLETE",
+    "status": "TERMINAL_RECONCILIATION_ISOLATED_REAL_SQLITE_CANARY_PASS_OPERATOR_BUNDLE_PREFLIGHT_PASS_OPERATOR_HTTP_CANARY_PENDING_PROGRAM_INCOMPLETE",
     "commit_binding": "ARTIFACTS_LOCAL_GATES_COMMIT_SHA_PATH_GENERATED_AFTER_COMMIT",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "slice": "NE01_ATOMIC_DEFAULT_PLUS_TERMINAL_EXACT_AUTO_AND_COMPLETE_RECONCILIATION_BUNDLE_GATE",
@@ -1076,14 +1076,14 @@
     "durable_cancellation": "OFF",
     "operation_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
     "effect_reconciliation": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN",
-    "terminal_reconciliation": "AUTO_EXACT_ON_OPERATOR_OFF_CANARY_NOT_RUN",
+    "terminal_reconciliation": "AUTO_EXACT_ON_LOCAL_SQLITE_CANARY_PASS_OPERATOR_OFF_HTTP_CANARY_NOT_RUN",
     "terminal_reconciliation_auto": "ENABLED_EXACT_REPAIRABLE_ONLY",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
     "failure_replan": "PARTIAL_DURABLE_SUPERSESSION_SAFE_SUBSET",
     "workspace_write": "PARTIAL_W2_CLEAN_NO_CHANGE_PROMOTION_WIRED_GENERAL_WRITE_INCOMPLETE_EXPLICIT_SECRET_REQUIRED_DEFAULT_FAIL_CLOSED_CANARY_NOT_RUN",
     "budget": "PARTIAL_CONTENTION_PROVEN",
     "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_SYS_MODE_OPERATOR_VERTICAL_SLICE_PARTIAL_COMMIT_BOUND_ACCEPTANCE_MISSING_CANARY_NOT_RUN",
-    "production_canary": "NOT_RUN"
+    "production_canary": "TERMINAL_EXACT_LOCAL_SQLITE_PASS_FULL_RUNTIME_NOT_RUN"
   },
   "capabilities": {
     "host_canonical_routes": {
@@ -1391,8 +1391,8 @@
       ]
     },
     "terminal_state_reconciliation": {
-      "status": "AUTO_EXACT_ON_OPERATOR_OFF",
-      "production_enablement": "AUTO_EXACT_ON_OPERATOR_OFF_CANARY_NOT_RUN",
+      "status": "AUTO_EXACT_ON_LOCAL_SQLITE_CANARY_PASS_OPERATOR_OFF",
+      "production_enablement": "AUTO_EXACT_ON_LOCAL_SQLITE_CANARY_PASS_OPERATOR_OFF_HTTP_CANARY_NOT_RUN",
       "auto_reconciliation": "ENABLED_EXACT_REPAIRABLE_ONLY",
       "operator_feature_flag": "HOST_TASK_TERMINAL_RECONCILIATION_OPERATOR_ENABLED",
       "auto_feature_flag": "HOST_TASK_TERMINAL_RECONCILIATION_AUTO_ENABLED",
@@ -1407,11 +1407,11 @@
       "operator_challenge_boundary": "The HTTP signing challenge returns the final Store-verifiable Ed25519 binding bytes, not a UI-only projection. It binds the authenticated query principal as reconciler_actor_id, the authority-bound attestation key when present, attestation ref and issued time, exact case/subject digests, action and targets, and deterministic Graph/Budget Outbox identities. The returned command_request is the same request later verified by the Store; HTTP -> Ed25519 signature -> service -> SQLite proof round-trip is proven.",
       "no_silent_reentry_boundary": "A proof may mutate only the exact bound terminal Graph and/or unique graph-scope Budget plus deterministic Outboxes in one Store UoW. Classification and proof application revalidate the full Graph/Node codec, Review binding, terminal Attempt and released Lease lineage, canonical parallel terminal decision, exact Budget after-state, and exact failure Outbox payload refs. Any unresolved inventoried current case is a graph-wide fence for ordinary TaskGraph transitions, cancellation requests, Budget transitions/consumption, BudgetUsage journals, and retry Budget mutations. The 0099 proof UoW is the only explicit terminal_reconciliation_bypass. Reconciliation never re-enters a worker, creates a new Attempt or Lease, changes 0090/0092 decision authority, or resumes general execution. Response-loss replay returns the same proof, and concurrent writers converge on one immutable proof.",
       "automatic_reconciliation_boundary": "The default-off automatic path queries EXACT_REPAIRABLE candidates only and repeats bounded batches until no exact candidate remains. SYSTEM_DURABLE_EVIDENCE uses immutable case created_ts_ms rather than a process clock, producing a stable request/proof identity and cross-process convergence. Reaching its explicit limit returns TRUNCATED plus remaining_exact_cases instead of claiming completion; signed-required and quarantined cases are never auto-repaired. If a later batch step fails after prior commits, the error explicitly reports side_effects_may_have_run=true and the committed prefix.",
-      "cancellation_production_gate": "Durable cancellation remains OFF. Enabling cancellation calls assert_terminal_reconciliation_production_ready in addition to the Effect gate: every historical immutable case must follow zero or more validated supersession links and terminate at a trusted proof; superseded cases cannot be proved directly. Any current repairable, signed-required, or QUARANTINED_STRUCTURAL anomaly, invalid proof/supersession link, or historical chain without a trusted proof blocks startup. Enabling the remediation Operator alone does not run or block this cancellation-production gate; it is the controlled path used to clear signed-required inventory and has its own Secure Ingress/Gateway/key prerequisites. The terminal Operator and automatic exact-case path remain independently default OFF; no production canary has run.",
+      "cancellation_production_gate": "Durable cancellation remains OFF. Enabling cancellation calls assert_terminal_reconciliation_production_ready in addition to Operation and Effect gates: every historical immutable case must follow zero or more validated supersession links and terminate at a trusted proof. The default-on automatic exact path passed an isolated real SQLite restart canary: one exact FAILED case was repaired with SYSTEM_DURABLE_EVIDENCE, while one CANCELLED signed-required case remained fenced and blocked readiness. This is not the signed Operator HTTP canary, deployed inventory remediation, or cancellation production enablement.",
       "missing": [
         "external deployment terminal inventory and remediation status are UNKNOWN",
         "deployed reconciliation public keys, credential custody, rotation, retirement, and revocation lifecycle are UNKNOWN",
-        "terminal reconciliation production canary is NOT_RUN",
+        "signed Operator HTTP terminal reconciliation canary is NOT_RUN; isolated real SQLite exact-auto restart canary is PASS",
         "general, multi-node, pre-budget, Scheduler/Internal public-projection, and unknown-side-effect recovery remain INCOMPLETE"
       ],
       "evidence_refs": [
@@ -1425,6 +1425,8 @@
         "host_brain/persistence/task_terminal_reconciliation_schema.py",
         "host_brain/persistence/task_terminal_reconciliation_store.py",
         "host_brain/persistence/terminal_reconciliation_query_repository.py",
+        "scripts/runtime/run_task_terminal_reconciliation_canary.py",
+        "tests/integration/test_ne01_terminal_reconciliation_canary.py",
         "host_brain/task_runtime/terminal_state_reconciliation.py",
         "host_brain/composition/task_runtime.py",
         "host_brain/app/obs_routes_task_runtime.py",

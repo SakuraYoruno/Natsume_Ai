@@ -422,3 +422,12 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-ARCH-28：Evolution Lab 的 candidate/feedback/counterfactual/scenario/benchmark 默认隔离且无生产副作用；Skill 或 Identity migration/promotion 必须具备版本化 schema、可重复 regression/replay、风险证据、owner review、canary、rollback target 和自动回滚阈值。
 - T-ARCH-29：所有 compatibility facade、旧 writer、重复 planner/runtime 和手工 UI contract 均有 usage=0 与删除证据；全部 production `>1500` 行混合职责巨石已拆分或具备批准 ADR，新增 `>800` 行混合职责文件为 0；源码树不跟踪易漂移 hashed build output，发布 artifact 可由锁定输入确定性重建。
 - T-ARCH-30：ReleaseManifest v2 包含 commit、packages、schema、protocol、model/prompt/avatar assets、config digest、SBOM、gates 和 rollback compatibility；组件矩阵 CI、security/chaos/performance、backup/restore、升级/降级及最终 rollback drill 全部生成 Seal 证据。
+
+### NE-01 终态对账真实 SQLite canary
+
+- 入口：`python scripts/runtime/run_task_terminal_reconciliation_canary.py`。
+- 数据：临时目录中的真实 SQLite，执行当前 migration head；退出后删除，不读取用户数据。
+- 正例：canonical FAILED Graph、FAILED Attempt、released Lease、ACTIVE graph Budget；重启后 exact-auto 只写 system proof、释放预算，worker/effect 调用为 0。
+- 围栏例：CANCELLED Graph 与 ACTIVE Budget 必须分类为 `SIGNED_REPAIR_REQUIRED`，不得自动生成 proof 或改变状态，并应以 `TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED` 阻断 readiness。
+- 启动束：临时 verification-only Ed25519 公钥只验证 cancellation 对 Operation/Effect/Terminal 三类对账依赖，不落盘私钥。
+- 当前证据：终态分类、atomic failure、service、ASGI 与 canary 定向批次 `95 passed`；CLI canary `PASS`；签名 Operator HTTP canary 和 NE-01 波次 integration 尚未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
