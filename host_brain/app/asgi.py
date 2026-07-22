@@ -260,6 +260,7 @@ def create_app() -> FastAPI:
     host_lifecycle = build_host_lifecycle_container()
     host_services = host_lifecycle.ports
     tribe_application_ports = build_tribe_application_ports(
+        host_services=host_services,
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
         hard_state_provider=host_lifecycle.get_hard_state,
         mode_transition_service_provider=(
@@ -268,6 +269,7 @@ def create_app() -> FastAPI:
         resource_manager_provider=host_lifecycle.get_resource_manager,
     )
     lifecycle_runtime_ports = build_lifecycle_runtime_application_ports(
+        host_services=host_services,
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
         endocrine_state_provider=host_lifecycle.get_endocrine_state,
         episodic_store_provider=host_services.episodic_store,

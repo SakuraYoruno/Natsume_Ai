@@ -254,7 +254,11 @@ def test_scheduler_narrative_generator_uses_canonical_model_attempt() -> None:
     route = _install_model_runtime(_complete)
     try:
         generator = _build_scheduler_narrative_llm_generator(
-            ports=build_lifecycle_runtime_application_ports(),
+            ports=build_lifecycle_runtime_application_ports(
+                model_attempt_service_provider=(
+                    dependencies.get_model_attempt_service
+                ),
+            ),
             logger=logging.getLogger("tests.scheduler_narrative_attempt"),
         )
         result = generator(
@@ -286,7 +290,11 @@ def test_proactive_scheduler_generator_uses_canonical_model_attempt() -> None:
     route = _install_model_runtime(_complete)
     try:
         generator = _build_llm_generator(
-            ports=build_lifecycle_runtime_application_ports(),
+            ports=build_lifecycle_runtime_application_ports(
+                model_attempt_service_provider=(
+                    dependencies.get_model_attempt_service
+                ),
+            ),
             logger=logging.getLogger("tests.proactive_attempt"),
             recent_topics=["记忆系统"],
             diary_snippet="写了日记",

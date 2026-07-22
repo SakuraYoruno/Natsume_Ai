@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import logging
 from pathlib import Path
 import threading
@@ -15,6 +15,10 @@ from host_brain.app.host_lifecycle_composition import (
     HostLifecycleContainer,
     HostLifecycleScopeError,
 )
+from host_brain.app.lifecycle_runtime_composition import (
+    build_lifecycle_runtime_application_ports,
+)
+from host_brain.app.tribe_composition import build_tribe_application_ports
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.lifecycle_runtime.runtime_snapshot import (
     build_digital_life_runtime_snapshot,
@@ -103,6 +107,72 @@ def test_host_lifecycle_ports_are_frozen_and_slotted() -> None:
     with pytest.raises(FrozenInstanceError):
         ports.memory_guard = object  # type: ignore[misc]
     assert not hasattr(ports, "__dict__")
+
+
+def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator() -> None:
+    sentinel = object()
+
+    class Timeline:
+        def rebuild_summary(self, *, window_ms: int):
+            del window_ms
+            return {}
+
+        def build_daily_diary(self, *, window_ms: int):
+            del window_ms
+            return {}
+
+    timeline = Timeline()
+    provider = lambda: sentinel
+    host_services = replace(
+        _ports([]),
+        ledger=provider,
+        life_memory_store=provider,
+        bond_update_queue=provider,
+        life_snapshot_reader=provider,
+        silence_engine=provider,
+        state_write_arbiter=provider,
+        emotion_timeline=lambda: timeline,
+        bond_stage_engine=provider,
+        shared_memory_index=provider,
+        milestone_tracker=provider,
+        prompt_registry=provider,
+        user_emotion_profile=lambda: {"source": "typed-bundle"},
+    )
+
+    lifecycle = build_lifecycle_runtime_application_ports(
+        host_services=host_services,
+    )
+    tribe = build_tribe_application_ports(host_services=host_services)
+
+    assert lifecycle.get_ledger is provider
+    assert lifecycle.get_life_memory_store is provider
+    assert lifecycle.get_model_attempt_service is host_services.model_attempt_service
+    assert lifecycle.emotion_timeline is timeline
+    assert lifecycle.get_user_emotion_profile() == {"source": "typed-bundle"}
+    assert tribe.ledger is provider
+    assert tribe.model_attempt_service is host_services.model_attempt_service
+    assert tribe.emotion_timeline() is timeline
+
+
+def test_missing_typed_host_bundle_fails_closed_without_locator_fallback() -> None:
+    lifecycle = build_lifecycle_runtime_application_ports()
+    tribe = build_tribe_application_ports()
+
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        lifecycle.get_ledger()
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        lifecycle.emotion_timeline.rebuild_summary(window_ms=1)
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        tribe.ledger()
 
 
 def test_hard_state_is_app_local_and_never_writes_bootstrap_environment(
@@ -546,7 +616,13 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
 
     assert len(named_import_modules) == 40
     assert sum(named_import_modules.values()) == 116
-    assert len(all_import_modules) == 46
+    assert len(all_import_modules) == 44
+    assert (
+        ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
+    ) not in all_import_modules
+    assert (
+        ROOT / "host_brain" / "app" / "tribe_composition.py"
+    ) not in all_import_modules
     assert ROOT / "host_brain" / "app" / "http_hooks.py" not in all_import_modules
     asgi_imports = named_import_modules[ROOT / "host_brain" / "app" / "asgi.py"]
     assert asgi_imports == 13

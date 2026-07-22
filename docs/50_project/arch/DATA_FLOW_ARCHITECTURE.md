@@ -180,7 +180,17 @@ flowchart LR
     Container --> Close["closing fence → unpublish\nblock begin → exact-once close"]
 ```
 
-Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。Tribe 的 bind/unbind 围栏仍不提供并发 multi-app 隔离，Endocrine agent 仍 process-global。HardState 快照为 named40/116、all-form46、Container52/3/48；当前 Container 已降为50/3/46。auto-rules/last-interaction、helper 正向生产 mode 传播、process-wide locator、heartbeat、Tribe bus、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
+Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 现在把同一个 typed Host service bundle 显式传给 Lifecycle Runtime 与 Tribe；两者不再回读 locator，缺依赖时稳定失败关闭。HardState 快照为 named40/116、all-form46、Container52/3/48；当前库存为 named40/116、all-form44、Container50/3/46。Tribe 的 bind/unbind 围栏仍不提供并发 multi-app 隔离，Endocrine/Tribe agent 与多项 bundle 背后的实例仍 process-global；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
+
+```mermaid
+flowchart LR
+    ROOT["Host create_app composition root"] --> BUNDLE["typed HostLifecycleApplicationPorts"]
+    BUNDLE --> LIFE["LifecycleRuntimeApplicationPorts"]
+    BUNDLE --> TRIBE["TribeApplicationPorts"]
+    LIFE --> JOBS["Scheduler / Life jobs / snapshot"]
+    TRIBE --> AGENTS["process-fenced Tribe agents"]
+    LOCATOR["ProcessServiceContainer"] -. "仅 composition root 解析；仍待继续删除" .-> ROOT
+```
 
 ## 3. 入口与路由分流
 

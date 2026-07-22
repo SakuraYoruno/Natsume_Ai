@@ -44,6 +44,26 @@ class HostLifecycleApplicationPorts:
     mode_transition_service_factory: KeywordFactory
     activity_monitor_factory: KeywordFactory
     resource_manager_factory: KeywordFactory
+    ledger: ServiceProvider | None = None
+    life_memory_store: ServiceProvider | None = None
+    bond_update_queue: ServiceProvider | None = None
+    life_snapshot_reader: ServiceProvider | None = None
+    silence_engine: ServiceProvider | None = None
+    state_write_arbiter: ServiceProvider | None = None
+    emotion_timeline: ServiceProvider | None = None
+    bond_stage_engine: ServiceProvider | None = None
+    shared_memory_index: ServiceProvider | None = None
+    milestone_tracker: ServiceProvider | None = None
+    prompt_registry: ServiceProvider | None = None
+    user_emotion_profile: ServiceProvider | None = None
+
+    def require_provider(self, field_name: str) -> ServiceProvider:
+        provider = getattr(self, str(field_name or ""), None)
+        if not callable(provider):
+            raise HostLifecycleScopeError(
+                f"HOST_SERVICE_PROVIDER_NOT_INJECTED:{field_name}"
+            )
+        return provider
 
 
 @dataclass(slots=True)
@@ -322,6 +342,7 @@ def build_host_lifecycle_container() -> HostLifecycleContainer:
     """Resolve the production Host lifecycle graph once per ``create_app``."""
 
     from host_brain.composition import process_services
+    from host_brain.app import emotion_context
     from host_brain.app.settings.core import get_core_settings
     from host_brain.core.activity_monitor import ActivityMonitor
     from host_brain.core.mode_transition import ModeTransitionService
@@ -340,6 +361,18 @@ def build_host_lifecycle_container() -> HostLifecycleContainer:
             tool_catalog=process_services.get_tool_catalog,
             capability_broker=process_services.get_capability_broker,
             model_attempt_service=process_services.get_model_attempt_service,
+            ledger=process_services.get_ledger,
+            life_memory_store=process_services.get_life_memory_store,
+            bond_update_queue=process_services.get_bond_update_queue,
+            life_snapshot_reader=process_services.get_life_snapshot_reader,
+            silence_engine=process_services.get_silence_engine,
+            state_write_arbiter=process_services.get_state_write_arbiter,
+            emotion_timeline=process_services.get_emotion_timeline,
+            bond_stage_engine=process_services.get_bond_stage_engine,
+            shared_memory_index=process_services.get_shared_memory_index,
+            milestone_tracker=process_services.get_milestone_tracker,
+            prompt_registry=process_services.get_prompt_registry,
+            user_emotion_profile=emotion_context.get_user_emotion_profile,
             mode_transition_service_factory=ModeTransitionService,
             activity_monitor_factory=ActivityMonitor,
             resource_manager_factory=SystemResourceManager,
