@@ -317,6 +317,7 @@ class DurableNodeLifecycleRuntime:
                 graph_target=(None if defer_shared_terminal else "BLOCKED"),
                 evidence_refs=(charge.evidence_ref, charge.usage_id),
                 defer_graph_terminal=defer_shared_terminal,
+                budget=charge.context,
             )
         else:
             await self.mark_worker_failure(
@@ -407,6 +408,7 @@ class DurableNodeLifecycleRuntime:
         graph_target: str | None = "FAILED",
         evidence_refs: Sequence[str] = (),
         defer_graph_terminal: bool = False,
+        budget: BudgetRuntimeContext | None = None,
     ) -> str:
         """Close the execution authority atomically before reservation.
 
@@ -444,8 +446,17 @@ class DurableNodeLifecycleRuntime:
                 raise GovernedRuntimeError(
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     "inline failure requires a Graph terminal target",
-                )
+            )
             arguments["graph_target_status"] = graph_target
+            if budget is not None:
+                arguments.update(
+                    budget_id=budget.budget_id,
+                    expected_budget_version=budget.version,
+                    budget_outbox=self._budgets.build_finalization_outbox(
+                        budget,
+                        target_status=BudgetReservationStatus.RELEASED,
+                    ),
+                )
             fail_attempt = self._store.fail_running_attempt_bundle
         try:
             result_raw = await _maybe_await(fail_attempt(attempt_id, **arguments))
@@ -492,6 +503,19 @@ class DurableNodeLifecycleRuntime:
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "atomic terminal failure returned an incomplete durable state",
             )
+        if budget is not None and not defer_graph_terminal:
+            released_budget = _mapping(
+                result.get("budget"),
+                field_name="atomic terminal failure BudgetReservation",
+            )
+            if (
+                _status(released_budget) != BudgetReservationStatus.RELEASED.value
+                or _version(released_budget) != budget.version + 1
+            ):
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "atomic terminal failure did not release the bound BudgetReservation",
+                )
         await self._runtime_outbox.publish_pending()
         return error_ref
 

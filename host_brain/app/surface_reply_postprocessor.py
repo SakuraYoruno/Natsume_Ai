@@ -1,21 +1,18 @@
-"""surface_reply_postprocessor.py — Surface reply 后处理（净化、PII、COMMIT、异步后处理）。
+"""surface_reply_postprocessor.py — Surface reply 后处理（净化、PII、COMMIT、TTS）。
 
 拆分自 surface_reply.py（P2-12）：
   - PII 出口检查
   - INPUT_COMPLETED 同步写入
-  - 异步后处理（fire-and-forget）
+  - durable projection 已提交后的 TTS
   - TTS 分句推送
   - G1: trigger_tts_after_commit — 对话完成后兜底触发 TTS
   - G2: broca_to_tts_params — Broca 参数映射到 TTS emotion_tag/intensity
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from typing import Any, Dict
-
-from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
+from typing import Any
 
 _logger = logging.getLogger("Natsume.surface_reply")
 
@@ -115,72 +112,6 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     if len(normalized) <= int(limit):
         return normalized
     return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
-
-
-def schedule_async_post_process(
-    *,
-    application_ports: AgentRuntimeApplicationPorts | None = None,
-    request_id: str,
-    person_id: str,
-    session_id: str,
-    user_message: str,
-    narrative: str,
-    emotion_context: Dict[str, Any],
-    bond_summary: Dict[str, Any],
-    ts_ms: int,
-    render_target_lang: str,
-    total_latency_ms: int,
-    llm_latency_ms: int,
-    first_token_ms: int | None,
-    provider_name: str,
-    model_id: str,
-    buffer_stream: bool,
-    delegated_agents: list,
-    retrieval_summary: Dict[str, Any],
-    pii_egress_stats: dict,
-    retrieval_evidence_items: list,
-    motive_state: Any,
-    reply_plan: Dict[str, Any],
-    trace_stage_meta: Dict[str, Any],
-    llm_input_digest: str | None = None,
-) -> None:
-    """调度异步后处理任务（fire-and-forget）。"""
-    try:
-        from host_brain.agent_runtime.postprocess import _async_post_process
-        if not isinstance(application_ports, AgentRuntimeApplicationPorts):
-            raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
-        asyncio.create_task(
-            _async_post_process(
-                application_ports=application_ports,
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=user_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary=bond_summary,
-                ts_ms=ts_ms,
-                render_target_lang=render_target_lang,
-                total_latency_ms=total_latency_ms,
-                llm_latency_ms=llm_latency_ms,
-                first_token_ms=first_token_ms,
-                provider_name=provider_name,
-                model_id=model_id,
-                buffer_stream=buffer_stream,
-                delegated_agents=delegated_agents,
-                retrieval_summary=retrieval_summary,
-                gov_decision={"decision": "APPROVE"},
-                pii_ingress_stats={},
-                pii_egress_stats=pii_egress_stats,
-                llm_input_digest=llm_input_digest,
-                retrieval_evidence_items=list(retrieval_evidence_items or []),
-                motive_state=motive_state,
-                reply_plan=reply_plan,
-                trace_stage_meta=trace_stage_meta,
-            )
-        )
-    except Exception as _pp_exc:
-        _logger.debug("[%s] SurfaceReply post_process task failed: %s", request_id, _pp_exc)
 
 
 # ---------------------------------------------------------------------------

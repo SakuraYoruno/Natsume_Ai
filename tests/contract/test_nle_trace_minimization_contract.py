@@ -11,7 +11,11 @@ from host_brain.agent_runtime.agent_executor import AgentExecutor, AgentStep
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.app.agents.react_loop import ReactResult, ReactStep, astream_react_loop
-from host_brain.app.sub_agent_protocol import SubAgentDispatcher, SubAgentRequest, SubAgentResponse
+from host_brain.app.sub_agent_protocol import (
+    LEGACY_SUB_AGENT_DISPATCH_RETIRED,
+    SubAgentDispatcher,
+    SubAgentRequest,
+)
 from host_brain.core.trace_redaction import (
     TRACE_PUBLIC_FIELDS,
     TRACE_SCHEMA_VERSION,
@@ -312,24 +316,8 @@ def test_t_nle_12_stream_never_yields_ephemeral_react_objects(monkeypatch) -> No
     assert set(items[-1]) == TRACE_PUBLIC_FIELDS
 
 
-def test_t_nle_12_dispatcher_preserves_long_safe_output_without_using_trace() -> None:
-    long_output = "safe translation paragraph " * 80
+def test_t_nle_12_legacy_dispatcher_rejects_without_publishing_output() -> None:
     dispatcher = SubAgentDispatcher()
-
-    def _handler(_payload, _context):  # noqa: ANN001
-        return {
-            "agent_output": build_public_agent_output(long_output),
-            "react_scratchpad": {
-                "schema_version": TRACE_SCHEMA_VERSION,
-                "decision_summary": "short trace summary",
-            },
-        }
-
-    async def _no_gateway(**_kwargs) -> None:  # noqa: ANN003
-        return None
-
-    dispatcher._handler_map["translate_agent"] = _handler
-    dispatcher._ensure_runtime_gateway = _no_gateway  # type: ignore[method-assign]
     response = asyncio.run(
         dispatcher.dispatch(
             SubAgentRequest(
@@ -340,34 +328,16 @@ def test_t_nle_12_dispatcher_preserves_long_safe_output_without_using_trace() ->
         )
     )
 
-    assert response.success is True
-    assert response.result == long_output.strip()
-    assert len(response.result) > 280
+    assert response.success is False
+    assert response.error == LEGACY_SUB_AGENT_DISPATCH_RETIRED
+    assert response.result == ""
+    assert response.audit_refs["side_effects_executed"] is False
 
 
-def test_t_nle_12_dispatch_audit_persists_summary_and_output_ref_only(monkeypatch) -> None:
-    writes: list[dict[str, object]] = []
-
-    class _Ledger:
-        def log_skill_exec(self, payload):  # noqa: ANN001
-            writes.append(dict(payload))
-
-    monkeypatch.setattr("host_brain.composition.process_services.get_ledger", lambda: _Ledger())
+def test_t_nle_12_legacy_dispatch_has_no_independent_audit_writer() -> None:
     dispatcher = SubAgentDispatcher()
-    dispatcher._log_dispatch(
-        SubAgentRequest(agent_id="translate_agent", task="translate", request_id="req-audit"),
-        SubAgentResponse(
-            success=True,
-            agent_id="translate_agent",
-            result="api_key=sk-TNLE12-AUDIT-SECRET",
-        ),
-    )
 
-    assert len(writes) == 1
-    serialized = json.dumps(writes[0], ensure_ascii=False)
-    assert "sk-TNLE12-AUDIT-SECRET" not in serialized
-    assert writes[0]["result_digest"].startswith("Sensitive trace content withheld")
-    assert str(writes[0]["evidence_ref"]).startswith("sub-agent-output://sha256/")
+    assert not hasattr(dispatcher, "_log_dispatch")
 
 
 @pytest.mark.parametrize("fixture", _fixtures(), ids=lambda row: f"output-{row['case_id']}")

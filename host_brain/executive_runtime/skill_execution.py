@@ -1,7 +1,11 @@
-"""Executive runtime responsibility extracted from the HTTP application adapter."""
+"""Legacy low-level Skill execution helpers retained behind governed ports.
+
+The historical direct Delegate/SubAgent branch is intentionally absent.  A
+real delegate must use the independent governed route executor and its frozen
+TaskGraph node authority.
+"""
 
 from ._shared import *  # noqa: F403
-from .ports import ExecutiveRuntimeApplicationPorts
 from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.runtime.scene_consumer_projection import (
     SCENE_PROJECTION_BLOCK,
@@ -10,52 +14,21 @@ from host_brain.runtime.scene_consumer_projection import (
     project_scene_decision_v2,
 )
 
-def _format_elapsed(elapsed_ms: int) -> str:
-    seconds = max(0, int(elapsed_ms // 1000))
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes, seconds = divmod(seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m {seconds}s"
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h {minutes}m"
 
+def _action_arbiter_execution_enabled() -> bool:
+    """Read the legacy low-level guard without rebuilding an Executive graph.
 
-def _build_task_progress_sub_context(
-    *,
-    ports: ExecutiveRuntimeApplicationPorts,
-    request_id: str,
-    session_id: str,
-    person_id: str,
-) -> SimpleNamespace:
-    projection = ports.get_task_status_projection()
-    summary = projection.summarize_for_chat(
-        person_id=person_id,
-        session_id=session_id,
-        exclude_request_id=request_id,
+    The remaining helper is reachable only through the frozen governed Skill
+    port or diagnostic compatibility utilities.  It may enforce a legacy
+    token/scene check for those utilities, but it cannot choose a route,
+    replan, or obtain a runtime-capability override.
+    """
+
+    from host_brain.core.orchestration_settings import (  # noqa: PLC0415
+        get_orchestration_settings,
     )
-    if not summary:
-        return SimpleNamespace(
-            success=False,
-            result_text="当前没有可汇报的执行进度。",
-            payload={},
-        )
 
-    status = _normalize_text(summary.get("status")) or "UNKNOWN"
-    target_id = _normalize_text(summary.get("target_id")) or "task"
-    progress = _normalize_text(summary.get("progress_message") or summary.get("detail"))
-    elapsed = _format_elapsed(int(summary.get("elapsed_ms") or 0))
-    result_text = f"当前任务 {target_id} 状态为 {status}，已运行 {elapsed}。"
-    if progress:
-        result_text += f" 当前进展：{progress}"
-    result_value = _normalize_text(summary.get("result_text"))
-    if result_value and status in {"COMPLETED", "FAILED"}:
-        result_text += f" 结果摘要：{result_value}"
-    return SimpleNamespace(
-        success=True,
-        result_text=result_text,
-        payload=summary,
-    )
+    return bool(get_orchestration_settings().action_arbiter_enabled)
 
 
 def _extract_skill_args(intent_draft: dict[str, Any], request_body: Any, user_message: str) -> dict[str, Any]:
@@ -125,40 +98,6 @@ def _governed_node_grant_error(
     return None
 
 
-def _merge_plan_node_args(
-    *,
-    base_intent_draft: dict[str, Any],
-    node: SkillDagNode,
-    task_text: str,
-) -> dict[str, Any]:
-    merged_args = dict(dict(base_intent_draft or {}).get("args") or {})
-    node_args = dict(getattr(node, "args_payload", {}) or {})
-    merged_args.update(node_args)
-    normalized_target = _normalize_text(node.target_id, lower=True)
-    if not _normalize_text(merged_args.get("query")):
-        merged_args["query"] = task_text
-    if not _normalize_text(merged_args.get("text")):
-        merged_args["text"] = task_text
-    if not _normalize_text(merged_args.get("user_message")):
-        merged_args["user_message"] = task_text
-    if normalized_target == "memory_store" and not _normalize_text(merged_args.get("content")):
-        merged_args["content"] = task_text
-    if is_agent_runtime_skill(normalized_target):
-        if not _normalize_text(merged_args.get("task")):
-            merged_args["task"] = _normalize_text(merged_args.get("problem_statement")) or task_text
-        if not _normalize_text(merged_args.get("problem_statement")):
-            merged_args["problem_statement"] = _normalize_text(merged_args.get("task")) or task_text
-        if not _normalize_text(merged_args.get("run_mode"), lower=True):
-            merged_args["run_mode"] = AGENT_RUN_MODE_BY_SKILL_ID.get(normalized_target, "worker")
-        if (
-            _normalize_text(merged_args.get("run_mode"), lower=True) != "inspect"
-            and not _normalize_text(merged_args.get("workspace_strategy"), lower=True)
-            and not isinstance(merged_args.get("workspace"), dict)
-        ):
-            merged_args["workspace_strategy"] = "runtime_repo"
-    return merged_args
-
-
 def _flatten_result_text(payload: Any) -> str:
     if payload is None:
         return ""
@@ -202,47 +141,6 @@ def _is_effective_skill_success(
     if any(marker in digest for marker in _SKILL_EXEC_NO_EFFECT_MARKERS):
         return False
     return True
-
-
-async def _dispatch_to_sub_agent(
-    *,
-    ports: ExecutiveRuntimeApplicationPorts,
-    request_id: str,
-    session_id: str,
-    person_id: str,
-    target_id: str,
-    task_text: str,
-    user_message: str,
-    context: dict[str, Any] | None = None,
-) -> _ExecutionOutcome:
-    started = time.time()
-    dispatcher = ports.get_sub_agent_dispatcher()
-    timeout_ms = get_orchestration_settings().subagent_dispatch_timeout_ms
-    response = await dispatcher.dispatch(
-        ports.sub_agent_request_factory(
-            agent_id=target_id,
-            task=task_text,
-            user_message=user_message,
-            request_id=request_id,
-            session_id=session_id,
-            context=dict(context or {}),
-            timeout_ms=timeout_ms,
-        )
-    )
-    latency_ms = int((time.time() - started) * 1000)
-    return _ExecutionOutcome(
-        route_type="delegate",
-        target_id=target_id,
-        skill_family=str(dict(context or {}).get("skill_family") or "general"),
-        success=bool(response.success),
-        result_text=_normalize_text(response.result),
-        error_text=_normalize_text(response.error),
-        latency_ms=max(latency_ms, int(response.latency_ms or 0)),
-        payload={
-            "audit_refs": dict(response.audit_refs or {}),
-            "agent_id": response.agent_id,
-        },
-    )
 
 
 def _log_skill_exec_row(
@@ -293,7 +191,7 @@ def _skill_receipt_ref(request_id: str, skill_name: str) -> str:
 
 def _execute_skill(
     *,
-    ports: ExecutiveRuntimeApplicationPorts,
+    ports: Any,
     request_body: Any,
     request_id: str,
     session_id: str,
@@ -316,6 +214,7 @@ def _execute_skill(
     governed_execution_context: Mapping[str, Any] | None = None,
     execution_args_override: Mapping[str, Any] | None = None,
     verified_node_grant: Mapping[str, Any] | None = None,
+    frozen_executor_payload: Mapping[str, Any] | None = None,
     degradation_capability_port: Any | None = None,
 ) -> _ExecutionOutcome:
     started = time.time()
@@ -604,15 +503,21 @@ def _execute_skill(
             )
             if not token_result.valid:
                 raise PermissionError(str(token_result.reason_code or "TOKEN_INVALID"))
-        handler_payload = skill_meta.handler(args, exec_context)
-        if isinstance(handler_payload, dict):
-            payload = dict(handler_payload)
+        if frozen_executor_payload is not None:
+            if governed_execution_context is None:
+                raise PermissionError("FROZEN_EXECUTOR_PAYLOAD_REQUIRES_GOVERNED_CONTEXT")
+            payload = dict(frozen_executor_payload)
+        else:
+            handler_payload = skill_meta.handler(args, exec_context)
+            if isinstance(handler_payload, dict):
+                payload = dict(handler_payload)
+            else:
+                payload = handler_payload
+        if isinstance(payload, dict):
             if governed_execution_context is not None:
                 payload["_context"] = exec_context
             else:
                 payload.setdefault("_context", exec_context)
-        else:
-            payload = handler_payload
         if not isinstance(payload, dict):
             raise PermissionError("SKILL_EXECUTOR_PAYLOAD_INVALID")
         if not str(payload.get("tool") or "").strip():
@@ -753,131 +658,3 @@ def _execute_skill(
                 "receipt_ref": skill_receipt_ref,
             },
         )
-
-
-def _family_default_delegate(skill_family: str) -> str:
-    normalized = _normalize_text(skill_family, lower=True)
-    if normalized == "code":
-        return "intent_agent"
-    if normalized == "translation":
-        return "translate_agent"
-    if normalized in {"perception", "vision"}:
-        return "vision_agent"
-    if normalized == "system":
-        return "repair_agent"
-    return "intent_agent"
-
-
-def _maybe_synthesize_runtime_capability(
-    *,
-    ports: ExecutiveRuntimeApplicationPorts,
-    request_id: str,
-    session_id: str,
-    user_message: str,
-    route_type: str,
-    target_id: str,
-    reason_code: str,
-    llm_route_used: bool,
-) -> dict[str, Any] | None:
-    gap = detect_capability_gap(
-        user_message=user_message,
-        route_type=route_type,
-        target_id=target_id,
-        reason_code=reason_code,
-        llm_route_used=llm_route_used,
-    )
-    if not gap.detected:
-        return None
-
-    forge_service = ports.get_capability_forge_service()
-    override = forge_service.get_runtime_route_override(
-        request_id=request_id,
-        suggested_family=str(gap.suggested_family or "reasoning"),
-        missing_capability_tags=list(gap.missing_capability_tags),
-        reason_code=gap.reason_code,
-    )
-    runtime_spec = synthesize_runtime_capability(
-        request_id=request_id,
-        session_id=session_id,
-        user_message=user_message,
-        gap_decision=gap,
-        registry=ports.get_runtime_capability_registry(),
-    )
-
-    override_target = _normalize_text(override.get("executor_target")) if isinstance(override, dict) else ""
-    executor_route = runtime_spec.route_type
-    executor_target = override_target or runtime_spec.target_id
-    if override_target:
-        executor_route = "delegate"
-
-    ports.get_capability_gap_telemetry().record_detected(
-        request_id=request_id,
-        session_id=session_id,
-        runtime_capability_id=runtime_spec.runtime_capability_id,
-        reason_code=gap.reason_code,
-        suggested_family=gap.suggested_family,
-        missing_capability_tags=gap.missing_capability_tags,
-        confidence=gap.confidence,
-        executor_route=executor_route,
-        executor_target=executor_target,
-    )
-
-    auto_plan_result: dict[str, Any] = {}
-    try:
-        auto_plan_result = forge_service.maybe_auto_plan_for_gap(
-            request_id=request_id,
-            session_id=session_id,
-            reason_code=gap.reason_code,
-            suggested_family=str(gap.suggested_family or "reasoning"),
-            missing_capability_tags=list(gap.missing_capability_tags),
-            proposer="executive_runtime",
-        )
-    except Exception as exc:
-        _logger.debug("[%s] capability forge auto-plan skipped: %s", request_id, exc)
-        auto_plan_result = {
-            "triggered": False,
-            "reason": "AUTO_PLAN_EXCEPTION",
-        }
-
-    capability_forge_payload = dict(override or {})
-    if auto_plan_result:
-        capability_forge_payload["auto_plan"] = dict(auto_plan_result)
-
-    return {
-        "capability_gap": gap.as_dict(),
-        "runtime_capability": runtime_spec.as_dict(),
-        "capability_forge": capability_forge_payload,
-        "executor_route": executor_route,
-        "executor_target": executor_target,
-        "task_text": runtime_spec.task,
-    }
-
-
-def _build_failure_recovery_plan(
-    *,
-    route_type: str,
-    target_id: str,
-    skill_family: str,
-    payload: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    details = dict(payload or {})
-    if route_type == "skill":
-        fallback_policy = _normalize_text(details.get("fallback_policy"), lower=True) or "chat_fallback"
-        if fallback_policy in {"same_family", "retry_once"}:
-            return {
-                "route_type": "delegate",
-                "target_id": _family_default_delegate(skill_family),
-                "reason_code": f"skill_recovery:{fallback_policy}",
-            }
-        return {
-            "route_type": "chat",
-            "target_id": "",
-            "reason_code": "skill_recovery:chat_fallback",
-        }
-    if route_type == "delegate" and target_id != "intent_agent":
-        return {
-            "route_type": "delegate",
-            "target_id": "intent_agent",
-            "reason_code": "delegate_recovery:intent_agent",
-        }
-    return None

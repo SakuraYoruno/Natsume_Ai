@@ -1,8 +1,10 @@
 """Atomic running-attempt failure mutations for durable TaskStore.
 
 The failure bundle and exact replay borrow the concrete store's connection,
-transaction, clock, and validation authorities.  No budget mutation belongs to
-this failure-only write boundary.
+transaction, clock, and validation authorities.  A direct, graph-terminal
+pre-reservation failure may additionally release its already-bound graph
+BudgetReservation in the same transaction; node-only parallel children never
+receive that authority.
 """
 
 from __future__ import annotations
@@ -10,6 +12,9 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, NoReturn
 
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetReservationStatus,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphStatus,
     TaskNodeStatus,
@@ -22,6 +27,10 @@ from host_brain.persistence.task_record_codec import (
     _node_record,
     _validate_attempt_transition,
     _validated_node_payload,
+)
+from host_brain.persistence.task_atomic_failure_budget import (
+    assert_terminal_failure_budget_binding,
+    validated_terminal_failure_budget_request,
 )
 from host_brain.persistence.task_store_types import (
     AttemptStatus,
@@ -51,6 +60,9 @@ class TaskAtomicFailureStoreMixin:
         error_ref: str,
         graph_target_status: TaskGraphStatus | str,
         attempt_outbox: OutboxMessage,
+        budget_id: str | None = None,
+        expected_budget_version: int | None = None,
+        budget_outbox: OutboxMessage | None = None,
     ) -> dict[str, Any]:
         """Close one pre-reservation failure and terminalize its graph.
 
@@ -70,6 +82,9 @@ class TaskAtomicFailureStoreMixin:
             error_ref=error_ref,
             graph_target_status=graph_target_status,
             attempt_outbox=attempt_outbox,
+            budget_id=budget_id,
+            expected_budget_version=expected_budget_version,
+            budget_outbox=budget_outbox,
         )
 
     def fail_running_attempt_node_bundle(
@@ -101,6 +116,9 @@ class TaskAtomicFailureStoreMixin:
             error_ref=error_ref,
             graph_target_status=None,
             attempt_outbox=attempt_outbox,
+            budget_id=None,
+            expected_budget_version=None,
+            budget_outbox=None,
         )
 
     def _fail_running_attempt_bundle(
@@ -115,6 +133,9 @@ class TaskAtomicFailureStoreMixin:
         error_ref: str,
         graph_target_status: TaskGraphStatus | str | None,
         attempt_outbox: OutboxMessage,
+        budget_id: str | None,
+        expected_budget_version: int | None,
+        budget_outbox: OutboxMessage | None,
     ) -> dict[str, Any]:
         """Atomically close one pre-reservation RUNNING attempt as failed.
 
@@ -122,8 +143,10 @@ class TaskAtomicFailureStoreMixin:
         transitions.  It is valid only before *any* operation reservation has
         existed for the attempt, and commits the Attempt, TaskNode, TaskGraph,
         active Lease, and their state outboxes in one ``BEGIN IMMEDIATE``.
-        The graph mutation is optional for the node-only parallel-child entry
-        point.  Budget finalization is deliberately outside this bundle.
+        A direct graph-terminal caller may additionally bind one graph-scoped
+        BudgetReservation release to that same unit of work.  The graph
+        mutation is optional for the node-only parallel-child entry point,
+        which must never mutate a graph-scoped budget.
 
         Repeating the exact call after a committed response was lost returns
         the already-durable outcome.  Any state, authority, evidence, version,
@@ -182,6 +205,16 @@ class TaskAtomicFailureStoreMixin:
                 TASK_STORE_INVALID,
                 "terminal failure Attempt outbox does not bind the requested version",
             )
+        budget_request = validated_terminal_failure_budget_request(
+            budget_id=budget_id,
+            expected_budget_version=expected_budget_version,
+            budget_outbox=budget_outbox,
+        )
+        if graph_target is None and budget_request is not None:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "node-only terminal failure cannot release a graph BudgetReservation",
+            )
 
         ts_ms = self._now()
         with self._transaction() as conn:
@@ -222,6 +255,7 @@ class TaskAtomicFailureStoreMixin:
                     graph_target_status=graph_target,
                     attempt_outbox=attempt_outbox,
                     evidence_refs=evidence_refs,
+                    budget_request=budget_request,
                 )
 
             self._require_version(
@@ -260,6 +294,28 @@ class TaskAtomicFailureStoreMixin:
                     TASK_STORE_INVALID,
                     f"terminal failure requires an ACTIVE TaskGraph, got {graph['status']}",
                 )
+            if budget_request is not None:
+                budget_ref, budget_version, _ = budget_request
+                budget_record = self._require_budget(conn, budget_ref)
+                assert_terminal_failure_budget_binding(
+                    budget_record,
+                    budget_id=budget_ref,
+                    graph_id=graph_id,
+                    graph_revision=graph_revision,
+                )
+                self._require_version(
+                    budget_record,
+                    budget_version,
+                    subject=f"BudgetReservation {budget_ref}",
+                )
+                if str(budget_record["status"]) not in {
+                    BudgetReservationStatus.ACTIVE.value,
+                    BudgetReservationStatus.EXCEEDED.value,
+                }:
+                    raise TaskStoreError(
+                        TASK_STORE_INVALID,
+                        "terminal failure BudgetReservation must be ACTIVE or EXCEEDED",
+                    )
             lease = self._active_lease(conn, attempt_ref)
             if lease is None:
                 raise TaskStoreError(
@@ -401,6 +457,41 @@ class TaskAtomicFailureStoreMixin:
                 expected_attempt_id=attempt_ref,
             )
 
+            if budget_request is not None:
+                budget_ref, budget_version, release_outbox = budget_request
+                self._assert_graph_execution_authority_quiescent(
+                    conn,
+                    graph_id=graph_id,
+                    graph_revision=graph_revision,
+                    action="direct terminal BudgetReservation release",
+                )
+                budget_cursor = conn.execute(
+                    """
+                    UPDATE task_runtime_budget_reservation
+                    SET status = 'RELEASED', status_version = status_version + 1,
+                        updated_ts_ms = ?
+                    WHERE budget_id = ? AND status IN ('ACTIVE', 'EXCEEDED')
+                      AND status_version = ?
+                    """,
+                    (ts_ms, budget_ref, budget_version),
+                )
+                self._require_cas(
+                    budget_cursor,
+                    subject=f"BudgetReservation {budget_ref}",
+                )
+                self._insert_outbox(
+                    conn,
+                    release_outbox,
+                    ts_ms=ts_ms,
+                    expected_aggregate=(
+                        "BUDGET_RESERVATION",
+                        budget_ref,
+                        budget_version + 1,
+                    ),
+                    expected_event_type="BUDGET_RESERVATION_RELEASED",
+                    expected_attempt_id=None,
+                )
+
             final_node = self._require_node(conn, graph_id, graph_revision, node_id)
             final_graph = self._require_graph(conn, graph_id, graph_revision)
             graph_nodes = conn.execute(
@@ -410,13 +501,18 @@ class TaskAtomicFailureStoreMixin:
                 """,
                 (graph_id, graph_revision),
             ).fetchall()
-            return {
+            result = {
                 "attempt": dict(self._require_attempt(conn, attempt_ref)),
                 "node": _node_record(final_node),
                 "graph": _graph_record(final_graph, graph_nodes),
                 "lease": dict(self._require_lease(conn, str(lease["lease_id"]))),
                 "replayed": False,
             }
+            if budget_request is not None:
+                result["budget"] = self._budget_record(
+                    self._require_budget(conn, budget_request[0])
+                )
+            return result
 
     @staticmethod
     def _terminal_failure_bundle_outbox(
@@ -467,6 +563,7 @@ class TaskAtomicFailureStoreMixin:
         graph_target_status: TaskGraphStatus | None,
         attempt_outbox: OutboxMessage,
         evidence_refs: tuple[str, ...],
+        budget_request: tuple[str, int, OutboxMessage] | None,
     ) -> dict[str, Any]:
         """Return an already committed terminal failure only on exact replay."""
 
@@ -501,6 +598,35 @@ class TaskAtomicFailureStoreMixin:
         graph_id = str(attempt["graph_id"])
         graph_revision = int(attempt["graph_revision"])
         node_id = str(attempt["node_id"])
+        budget_record: dict[str, Any] | None = None
+        if budget_request is not None:
+            budget_ref, budget_version, release_outbox = budget_request
+            budget = self._require_budget(conn, budget_ref)
+            assert_terminal_failure_budget_binding(
+                budget,
+                budget_id=budget_ref,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+            )
+            if (
+                str(budget["status"]) != BudgetReservationStatus.RELEASED.value
+                or int(budget["status_version"]) != budget_version + 1
+                or int(budget["updated_ts_ms"]) != terminal_ts_ms
+            ):
+                reject("BudgetReservation state, timestamp, or version differs")
+            self._assert_mutation_outbox_replay(
+                conn,
+                release_outbox,
+                expected_aggregate=(
+                    "BUDGET_RESERVATION",
+                    budget_ref,
+                    budget_version + 1,
+                ),
+                expected_event_type="BUDGET_RESERVATION_RELEASED",
+                expected_attempt_id=None,
+            )
+            budget_record = self._budget_record(budget)
+
         node = self._require_node(conn, graph_id, graph_revision, node_id)
         if (
             str(node["status"]) != TaskNodeStatus.FAILED.value
@@ -632,10 +758,13 @@ class TaskAtomicFailureStoreMixin:
             """,
             (graph_id, graph_revision),
         ).fetchall()
-        return {
+        result = {
             "attempt": dict(attempt),
             "node": node_record,
             "graph": _graph_record(graph, graph_nodes),
             "lease": dict(lease),
             "replayed": True,
         }
+        if budget_record is not None:
+            result["budget"] = budget_record
+        return result

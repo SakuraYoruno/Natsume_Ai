@@ -46,6 +46,7 @@ from .errors import (
     GOVERNED_OPERATION_RECOVERY_REQUIRED,
     GOVERNED_RECEIPT_COMMIT_FAILED,
     GOVERNED_REVIEW_REQUIRED,
+    GOVERNED_TIME_BUDGET_EXCEEDED,
     GOVERNED_VERIFICATION_EVIDENCE_MISSING,
     GOVERNED_VERIFICATION_FAILED,
     GOVERNED_WORKER_COMMIT_INVALID,
@@ -78,7 +79,12 @@ from .node_execution_records import (
     build_review_context,
 )
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
-from .node_worker_stream import _maybe_await, stop_heartbeat_after_interruption, worker_event_stream
+from .node_worker_stream import (
+    _maybe_await,
+    _worker_elapsed_ms,
+    bounded_worker_event_stream,
+    stop_heartbeat_after_interruption,
+)
 from .operation_checkpoint_continuation import CommittedCheckpointContinuation
 from .operation_recovery_runtime import DurableOperationRecoveryRuntime
 from .ports import (
@@ -97,8 +103,9 @@ from .review_runtime import TaskNodeReviewGate, TaskNodeReviewRuntime
 from .runtime_outbox import RuntimeOutbox
 from .worker_registry import GovernedWorkerRoute
 
-
 _logger = logging.getLogger("Natsume.task_runtime.node_execution_runtime")
+
+
 class DurableNodeExecutionRuntime:
     """Run one admitted node while preserving all durable execution fences."""
     __slots__ = (
@@ -203,6 +210,7 @@ class DurableNodeExecutionRuntime:
         budget: BudgetRuntimeContext | None = None,
         node_grant_ref: str | None = None,
         defer_shared_terminal: bool = False,
+        retry_due_claim: bool = False,
         scheduler_checkpoint_continuation_authority: object | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         admitted.validate()
@@ -213,19 +221,18 @@ class DurableNodeExecutionRuntime:
             )
         if budget is None:
             budget = await self._budgets.ensure_active(admitted=admitted, work_order=work_order)
-
         graph = await _maybe_await(self._store.get_graph(admitted.graph_id, admitted.graph_revision))
         node = await _maybe_await(
             self._store.get_node(admitted.graph_id, admitted.graph_revision, admitted.node_id)
         )
         _assert_durable_identity(admitted, graph=graph, node=node)
-
-        replay_receipt = await self._projection.terminal_replay(admitted, graph=graph, node=node)
+        replay_receipt = None if retry_due_claim else await self._projection.terminal_replay(
+            admitted, graph=graph, node=node
+        )
         if replay_receipt is not None:
             await self._runtime_outbox.publish_pending()
             yield terminal_event(replay_receipt)
             return
-
         graph_status = _status(graph)
         node_status = _status(node)
         attempts = await self._projection.attempts_for_node(admitted)
@@ -403,10 +410,12 @@ class DurableNodeExecutionRuntime:
                     GOVERNED_EXECUTION_IN_PROGRESS,
                     "TaskNode still has a live pre-operation execution owner",
                 )
-        elif graph_status not in {"CREATED", "ACTIVE"} or node_status != "READY":
+        elif (graph_status not in {"CREATED", "ACTIVE"} or node_status != (
+            "RETRY_PENDING" if retry_due_claim else "READY"
+        )):
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
-                f"admission must expose CREATED/ACTIVE graph and READY node, got {graph_status}/{node_status}",
+                f"admission must expose CREATED/ACTIVE graph and claimable node, got {graph_status}/{node_status}",
             )
         node_input_refs, input_artifacts = await resolve_node_input_artifacts(
             task_store=self._store,
@@ -505,6 +514,11 @@ class DurableNodeExecutionRuntime:
                     event_type="TASK_ATTEMPT_LEASED",
                     attempt_id=attempt_id,
                 ),
+                retry_ready_outbox=(self._runtime_outbox.build(
+                    command_id=admitted.command_id, aggregate_type="TASK_NODE",
+                    aggregate_id=f"{admitted.graph_id}@{admitted.graph_revision}/{admitted.node_id}",
+                    aggregate_version=_version(node) + 1, event_type="TASK_NODE_READY",
+                ) if retry_due_claim else None),
                 review_continuation_authority=review_continuation_authority,
             ))
             claimed = _mapping(claimed_raw, field_name="atomic READY claim")
@@ -576,6 +590,26 @@ class DurableNodeExecutionRuntime:
             )
             yield terminal_event(receipt)
             return
+        time_guard = await self._budgets.guard_execution_time(
+            budget,
+            node_id=admitted.node_id,
+            attempt_id=attempt_id,
+        )
+        if time_guard is not None:
+            budget = time_guard.context
+            receipt = await self._node_lifecycle.reject_budget_charge(
+                admitted,
+                time_guard,
+                attempt_id=attempt_id,
+                fencing_token=fencing_token,
+                pre_reservation_graph=graph,
+                pre_reservation_node=node,
+                pre_reservation_attempt=attempt,
+                defer_shared_terminal=defer_shared_terminal,
+            )
+            yield terminal_event(receipt)
+            return
+        worker_time_budget_ms = budget.remaining_execution_time_ms()
 
         # This is the only automatic retry boundary.  Worker resolution is a
         # side-effect-free preparation step and no operation reservation exists
@@ -597,7 +631,7 @@ class DurableNodeExecutionRuntime:
                     attempt_id=attempt_id,
                     fencing_token=fencing_token,
                     reason_code=reason_code,
-                    defer_graph_terminal=defer_shared_terminal,
+                    defer_graph_terminal=defer_shared_terminal, budget=budget,
                 )
                 budget = await self._node_lifecycle.finalize_node_budget(
                     budget,
@@ -680,7 +714,7 @@ class DurableNodeExecutionRuntime:
                         fencing_token=fencing_token,
                         reason_code=GOVERNED_DURABLE_STATE_CONFLICT,
                         evidence_refs=(error_ref,),
-                        defer_graph_terminal=defer_shared_terminal,
+                        defer_graph_terminal=defer_shared_terminal, budget=budget,
                     )
                     budget = await self._node_lifecycle.finalize_node_budget(
                         budget,
@@ -809,7 +843,7 @@ class DurableNodeExecutionRuntime:
                 attempt_id=attempt_id,
                 fencing_token=fencing_token,
                 reason_code=reason_code,
-                defer_graph_terminal=defer_shared_terminal,
+                defer_graph_terminal=defer_shared_terminal, budget=budget,
             )
             budget = await self._node_lifecycle.finalize_node_budget(
                 budget,
@@ -962,11 +996,12 @@ class DurableNodeExecutionRuntime:
         heartbeat_error: BaseException | None = None
         try:
             commit_count = 0
-            async for raw_event in worker_event_stream(
+            async for raw_event in bounded_worker_event_stream(
                 worker,
                 command=command,
                 work_order=work_order,
                 execution_context=execution_context,
+                time_budget_ms=worker_time_budget_ms,
             ):
                 await heartbeat.checkpoint()
                 event = _mapping(raw_event, field_name="worker event")
@@ -1061,16 +1096,13 @@ class DurableNodeExecutionRuntime:
             settlement_reason: str | None = None
             evidence_refs: tuple[str, ...] = ()
             try:
-                charge = await self._budgets.settle_worker(
+                charge = await self._budgets.settle_interrupted_worker(
                     budget,
                     node_id=admitted.node_id,
                     attempt_id=attempt_id,
-                    worker_commit=None,
-                    elapsed_ms=max(
-                        0,
-                        (time.monotonic_ns() - worker_started_ns + 999_999)
-                        // 1_000_000,
-                    ),
+                    worker_started_ns=worker_started_ns,
+                    worker_failure_reason=worker_failure_reason,
+                    time_budget_ms=worker_time_budget_ms,
                 )
                 budget = charge.context
                 evidence_refs = (charge.evidence_ref,)
@@ -1091,6 +1123,8 @@ class DurableNodeExecutionRuntime:
                 "reservation_status": "RESERVED",
                 "budget": budget.execution_payload(),
             }
+            if worker_failure_reason == GOVERNED_TIME_BUDGET_EXCEEDED:
+                projection["time_budget_ms"] = worker_time_budget_ms
             if settlement_reason is not None:
                 projection["budget_settlement_reason_code"] = settlement_reason
             receipt = build_execution_receipt(
@@ -1168,9 +1202,7 @@ class DurableNodeExecutionRuntime:
                 node_id=admitted.node_id,
                 attempt_id=attempt_id,
                 worker_commit=worker_commit,
-                elapsed_ms=max(
-                    0, (time.monotonic_ns() - worker_started_ns + 999_999) // 1_000_000
-                ),
+                elapsed_ms=_worker_elapsed_ms(worker_started_ns),
             )
         except Exception:
             # Operation COMMITTED proves the worker boundary was crossed.  A
@@ -1463,6 +1495,5 @@ class DurableNodeExecutionRuntime:
             projection=worker_commit,
         )
         yield approved_commit_event(worker_commit, receipt)
-
 
 __all__ = ["DurableNodeExecutionRuntime"]

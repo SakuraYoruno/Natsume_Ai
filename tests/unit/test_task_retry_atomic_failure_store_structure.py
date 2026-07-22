@@ -57,12 +57,13 @@ def _transaction_blocks(method: ast.FunctionDef) -> list[ast.With]:
         for node in ast.walk(method)
         if isinstance(node, ast.With)
         and any(
-            isinstance(item.context_expr, ast.Call)
-            and isinstance(item.context_expr.func, ast.Attribute)
-            and item.context_expr.func.attr == "_transaction"
-            and isinstance(item.context_expr.func.value, ast.Name)
-            and item.context_expr.func.value.id == "self"
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "_transaction"
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
             for item in node.items
+            for call in ast.walk(item.context_expr)
         )
     ]
 
@@ -256,9 +257,11 @@ def test_atomic_failure_owns_one_transaction_and_replays_on_same_connection() ->
         core,
         {
             "_active_lease",
+            "_assert_graph_execution_authority_quiescent",
             "_insert_outbox",
             "_replay_running_attempt_failure_bundle",
             "_require_attempt",
+            "_require_budget",
             "_require_graph",
             "_require_node",
             "_transition_graph_in_transaction",
@@ -284,6 +287,7 @@ def test_atomic_failure_owns_one_transaction_and_replays_on_same_connection() ->
         replay,
         {
             "_assert_mutation_outbox_replay",
+            "_require_budget",
             "_require_graph",
             "_require_node",
         },
@@ -305,16 +309,21 @@ def test_atomic_failure_owns_one_transaction_and_replays_on_same_connection() ->
     assert "TASK_STORE_IDEMPOTENCY_RECOVERY_REQUIRED" in core_source
 
 
-def test_atomic_failure_bundle_has_no_budget_mutation_authority() -> None:
+def test_atomic_failure_budget_release_is_explicit_and_excludes_parallel_children() -> None:
     tree = _module_tree(TaskAtomicFailureStoreMixin)
-    assert not {
-        node.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and node.id.startswith("Budget")
+    direct = _method_ast(TaskAtomicFailureStoreMixin, "fail_running_attempt_bundle")
+    assert {argument.arg for argument in direct.args.kwonlyargs} >= {
+        "budget_id",
+        "expected_budget_version",
+        "budget_outbox",
     }
-    assert not any(
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and "task_runtime_budget" in node.value
-        for node in ast.walk(tree)
+    node_only = inspect.getsource(
+        TaskAtomicFailureStoreMixin.fail_running_attempt_node_bundle
     )
+    assert "budget_id=None" in node_only
+    assert "expected_budget_version=None" in node_only
+    assert "budget_outbox=None" in node_only
+    core_source = inspect.getsource(TaskAtomicFailureStoreMixin._fail_running_attempt_bundle)
+    assert "validated_terminal_failure_budget_request" in core_source
+    assert "_assert_graph_execution_authority_quiescent" in core_source
+    assert "BUDGET_RESERVATION_RELEASED" in core_source

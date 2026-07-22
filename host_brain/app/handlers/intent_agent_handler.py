@@ -1,9 +1,9 @@
 """Intent plan projection and governed-execution handoff.
 
 The application Agent may describe an execution request, but it cannot run a
-skill or dispatch another Agent.  Effects enter the composed Executive Runtime
-where durable principal, Governor grant, CapabilityBroker and receipt checks
-are available.
+skill, invoke a model, or dispatch another Agent.  A caller must re-admit the
+proposal through ``HostCommand -> immutable TaskGraph`` before a governed
+worker can consume it.
 """
 
 from __future__ import annotations
@@ -12,14 +12,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.agent_runtime.agent_registry import AGENT_ID_INTENT
-from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_text
 
 from .agent_boundary import finalize_agent_boundary, first_public_text, nested_payload, request_id_for
 
 
 INTENT_HANDOFF_SCHEMA = "Natsume.intent.execution-handoff.v1"
 INTENT_GOVERNED_EXECUTION_REQUIRED = "INTENT_GOVERNED_EXECUTION_REQUIRED"
-INTENT_AGENT_MODEL_GATEWAY_REQUIRED = "INTENT_AGENT_MODEL_GATEWAY_REQUIRED"
 
 
 def intent_agent_handler(
@@ -34,44 +32,6 @@ def intent_agent_handler(
     reasoner_raw = out.get("core_reasoner_primary")
     planner = nested_payload(planner_raw)
     reasoner = nested_payload(reasoner_raw)
-    model_attempt: dict[str, Any] = {}
-    model_backed = False
-    if not planner and not reasoner and str(ctx.get("source") or "").strip() == "executive_router_dispatch":
-        gateway = ctx.get("gateway") or out.get("_gateway")
-        if gateway is None or not callable(getattr(gateway, "complete", None)):
-            raise RuntimeError(INTENT_AGENT_MODEL_GATEWAY_REQUIRED)
-        user_input = str(out.get("user_input") or out.get("query") or "").strip()
-        if not user_input:
-            raise RuntimeError("INTENT_AGENT_INPUT_REQUIRED")
-        response = gateway.complete(
-            [
-                {
-                    "role": "system",
-                    "content": resolve_prompt_contract_text(
-                        "intent_agent_handler.governed_delegate_prompt"
-                    ),
-                },
-                {"role": "user", "content": user_input},
-            ]
-        )
-        if not isinstance(response, Mapping):
-            raise RuntimeError("INTENT_AGENT_MODEL_RESPONSE_INVALID")
-        model_text = str(
-            response.get("content")
-            or response.get("text")
-            or response.get("response_text")
-            or ""
-        ).strip()
-        if not model_text:
-            raise RuntimeError("INTENT_AGENT_MODEL_RESPONSE_EMPTY")
-        reasoner_raw = {"payload": {"summary": model_text}, "gateway_status": "OK"}
-        reasoner = nested_payload(reasoner_raw)
-        model_attempt = (
-            dict(response.get("model_attempt") or {})
-            if isinstance(response.get("model_attempt"), Mapping)
-            else {}
-        )
-        model_backed = True
     summary = (
         first_public_text(planner_raw)
         or first_public_text(reasoner_raw)
@@ -107,19 +67,15 @@ def intent_agent_handler(
         trace_key="intent_agent_trace",
         request_id=request_id,
         summary=summary,
-        mode=(
-            "model_backed_governed_execution_handoff"
-            if model_backed
-            else "governed_execution_handoff"
-        ),
+        mode="governed_execution_handoff",
         reason_code=INTENT_GOVERNED_EXECUTION_REQUIRED,
         confidence=confidence,
         risk_flags=risk_flags,
         trace_fields={
             "gateway_status": gateway_status,
             "safety_risk": safety_risk,
-            "execution_surface": "executive_runtime",
-            "model_attempt": model_attempt,
+            "execution_surface": "governed_runtime_admission_required",
+            "model_attempt": {},
         },
         artifact_suffix="handoff",
     )
@@ -154,8 +110,8 @@ def _build_execution_handoff(
     return {
         "schema_version": INTENT_HANDOFF_SCHEMA,
         "request_id": request_id,
-        "execution_surface": "executive_runtime",
-        "authority_path": "SecureIngress -> Governor -> CapabilityBroker -> Receipt",
+        "execution_surface": "governed_runtime_admission_required",
+        "authority_path": "HostCommand -> immutable TaskGraph -> Governor -> CapabilityBroker -> Receipt",
         "request_material": {
             "plan_summary": plan_summary,
             "requested_tools": list(requested_tools),
@@ -175,7 +131,6 @@ def _build_execution_handoff(
 
 __all__ = [
     "INTENT_GOVERNED_EXECUTION_REQUIRED",
-    "INTENT_AGENT_MODEL_GATEWAY_REQUIRED",
     "INTENT_HANDOFF_SCHEMA",
     "intent_agent_handler",
 ]

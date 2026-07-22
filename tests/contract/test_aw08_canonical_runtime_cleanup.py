@@ -6,8 +6,6 @@ from pathlib import Path
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter, RuntimeExecutor
 from host_brain.app.settings.core import CoreSettings
-from host_brain.executive_runtime import conversation_execution
-from host_brain.executive_runtime.ports import ExecutiveRuntimeApplicationPorts
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.persistence.task_repository import DurableTaskStore
@@ -82,8 +80,7 @@ def test_legacy_plan_graph_runtime_flag_and_resolver_are_deleted() -> None:
                 violations.append(f"{path.relative_to(ROOT)}:{marker}")
     assert violations == []
 
-    assert not hasattr(conversation_execution, "_execute_skill_dag")
-    assert not hasattr(conversation_execution, "_execute_explicit_skill_dag")
+    assert not (ROOT / "host_brain/executive_runtime/conversation_execution.py").exists()
 
 
 def test_retired_plan_graph_adapter_and_prompt_contract_are_deleted() -> None:
@@ -98,10 +95,11 @@ def test_retired_plan_graph_adapter_and_prompt_contract_are_deleted() -> None:
     assert "plan_graph.synthesize.prompt_templates" not in prompt_source
 
 
-def test_executive_runtime_uses_typed_explicit_application_ports() -> None:
+def test_retired_executive_runtime_has_no_application_port_graph() -> None:
     runtime_root = ROOT / "host_brain/executive_runtime"
     violations: list[str] = []
-    ports_source = (runtime_root / "ports.py").read_text(encoding="utf-8-sig")
+    assert not (runtime_root / "ports.py").exists()
+    assert not (ROOT / "host_brain/app/runtime_port_wiring.py").exists()
 
     for path in sorted(runtime_root.glob("*.py")):
         source = path.read_text(encoding="utf-8-sig")
@@ -123,15 +121,6 @@ def test_executive_runtime_uses_typed_explicit_application_ports() -> None:
             if module.startswith(("host_brain.app", "host_brain.composition")):
                 violations.append(f"{path.name}:{module}")
 
-    assert ExecutiveRuntimeApplicationPorts.__dataclass_params__.frozen is True
-    for marker in (
-        "_dependency_resolver",
-        "_symbol_resolver",
-        "def configure(",
-        "def dependency(",
-        "def resolve(",
-    ):
-        assert marker not in ports_source
     assert violations == []
 
 

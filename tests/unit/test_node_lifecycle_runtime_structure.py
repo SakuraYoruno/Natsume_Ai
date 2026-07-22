@@ -30,26 +30,24 @@ _MIGRATED_METHODS = (
 )
 
 _COORDINATOR_CALL_MATRIX = {
-    "transition_graph": 16,
+    "transition_graph": 15,
     "transition_node": 10,
     "accept_node_output": 2,
     "transition_graph_with_acceptance_effects": 1,
     "cancel_waiting_review_node": 1,
     "transition_attempt": 2,
-    "finalize_node_budget": 8,
+    "finalize_node_budget": 5,
     "reject_budget_charge": 3,
-    "mark_worker_failure": 3,
     "mark_pre_reservation_failure": 4,
 }
 
 _NODE_EXECUTION_CALL_MATRIX = {
-    "transition_graph": 4,
+    "transition_graph": 3,
     "transition_node": 6,
     "accept_node_output": 1,
     "transition_attempt": 2,
-    "finalize_node_budget": 8,
+    "finalize_node_budget": 5,
     "reject_budget_charge": 3,
-    "mark_worker_failure": 3,
     "mark_pre_reservation_failure": 4,
 }
 
@@ -73,9 +71,9 @@ _MIGRATED_AST_DIGESTS = {
     "cancel_waiting_review_node": "92af122b371ccd0c827d23782c7d19a6c5319d78b5ad2200d1d439ff1f38db73",
     "transition_attempt": "c3f562d32a665baaad442255a70d3531cb6d3c73efb39f6afaa18e03ea69c683",
     "finalize_node_budget": "b5145090ef7d0c82c5ceac5093ba16803167155d0230c836a3f5108166713e58",
-    "reject_budget_charge": "86afa2bcc95586d6f518db42013bd01206e50a116bfd42c2ffe9322abc1d3c73",
+    "reject_budget_charge": "6e05d32a1d31a6f295657195f0927c008e0b7cfc983d4ce4f6eb960cc8b22b38",
     "mark_worker_failure": "4c8ed4f26ec5b281db0ef7f1dab06a6cabcaa7fe4fdc67ce48bb679b740011dd",
-    "mark_pre_reservation_failure": "37f220a8b83ee4188e47653f1ec4ab759cd60b9fd9634c359bfcfa5eb9f82791",
+    "mark_pre_reservation_failure": "69967518f5a1eb06ec9a8a592a0ba2da677901bab904898498d37a4721a183e6",
 }
 
 
@@ -351,7 +349,7 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
     assert dag_matrix + node_execution_matrix + finalizer_matrix == Counter(
         _COORDINATOR_CALL_MATRIX
     )
-    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 50
+    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 43
 
 
 def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:

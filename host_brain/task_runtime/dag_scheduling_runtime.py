@@ -1033,7 +1033,7 @@ class DurableDagSchedulingRuntime:
                     f"durable DAG scheduling snapshot is invalid: {exc}",
                 ) from exc
 
-            if decision.dependency_ready_node_ids or decision.retry_due_node_ids:
+            if decision.dependency_ready_node_ids:
                 for node_id in decision.dependency_ready_node_ids:
                     dependency_node = durable_nodes[node_id]
                     if any(
@@ -1060,30 +1060,13 @@ class DurableDagSchedulingRuntime:
                         dependency_node,
                         "READY",
                     )
-                for node_id in decision.retry_due_node_ids:
-                    node_admission = admitted.for_node(node_id)
-                    node = durable_nodes[node_id]
-                    await _maybe_await(
-                        self._store.promote_retry_due(
-                            admitted.graph_id,
-                            admitted.graph_revision,
-                            node_id,
-                            expected_version=_version(node),
-                            outbox=self._runtime_outbox.build(
-                                command_id=node_admission.command_id,
-                                aggregate_type="TASK_NODE",
-                                aggregate_id=(
-                                    f"{admitted.graph_id}@{admitted.graph_revision}/{node_id}"
-                                ),
-                                aggregate_version=_version(node) + 1,
-                                event_type="TASK_NODE_READY",
-                            ),
-                        )
-                    )
                 await self._runtime_outbox.publish_pending()
                 continue
 
             selected_node_ids = set(decision.selected_node_ids)
+            retry_due_claim_node_ids = (
+                set(decision.retry_due_node_ids) & selected_node_ids
+            )
             claimable = [
                 binding for binding in admitted.nodes if binding.node_id in selected_node_ids
             ]
@@ -1108,6 +1091,29 @@ class DurableDagSchedulingRuntime:
                 )
 
             review_required = TaskNodeReviewRuntime.pre_execution_required(work_order)
+            if review_required and retry_due_claim_node_ids:
+                for node_id in sorted(retry_due_claim_node_ids):
+                    node_admission = admitted.for_node(node_id)
+                    node = durable_nodes[node_id]
+                    await _maybe_await(
+                        self._store.promote_retry_due(
+                            admitted.graph_id,
+                            admitted.graph_revision,
+                            node_id,
+                            expected_version=_version(node),
+                            outbox=self._runtime_outbox.build(
+                                command_id=node_admission.command_id,
+                                aggregate_type="TASK_NODE",
+                                aggregate_id=(
+                                    f"{admitted.graph_id}@{admitted.graph_revision}/{node_id}"
+                                ),
+                                aggregate_version=_version(node) + 1,
+                                event_type="TASK_NODE_READY",
+                            ),
+                        )
+                    )
+                await self._runtime_outbox.publish_pending()
+                continue
             review_binding = None
             review_candidates = [
                 candidate
@@ -1246,6 +1252,9 @@ class DurableDagSchedulingRuntime:
                             budget=budget,
                             node_grant_ref=grant_refs.get(node_admission.node_id),
                             defer_shared_terminal=True,
+                            retry_due_claim=(
+                                node_admission.node_id in retry_due_claim_node_ids
+                            ),
                         ):
                             if bool(event.get("done")):
                                 terminal_event = dict(event)
@@ -1370,6 +1379,9 @@ class DurableDagSchedulingRuntime:
                     budget=budget,
                     node_grant_ref=grant_refs.get(node_admission.node_id),
                     defer_shared_terminal=parallel_success_enabled,
+                    retry_due_claim=(
+                        node_admission.node_id in retry_due_claim_node_ids
+                    ),
                 ):
                     if bool(event.get("done")):
                         node_terminal = dict(event)

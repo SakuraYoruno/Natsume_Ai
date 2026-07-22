@@ -9,8 +9,12 @@ from typing import Any
 
 from host_brain.app.governed_host_contracts import (
     _ACCEPTANCE_CRITERION,
-    _sha256_json,
     _stable_id,
+)
+from host_brain.agent_runtime.governed_production_payload import (
+    FROZEN_NODE_EXECUTOR_PAYLOADS_KEY as _FROZEN_NODE_EXECUTOR_PAYLOADS_KEY,
+    GOVERNED_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA as _FROZEN_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA,
+    sha256_json as _sha256_json,
 )
 from host_brain.app.governed_skill_execution_ports import (
     GovernedSkillExecutionPorts,
@@ -27,6 +31,7 @@ from host_brain.app.governed_task_authority import (
     require_fail_closed_governed_work_order as _require_fail_closed_governed_work_order,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.agent_runtime.production_studio import AGENT_PRODUCTION_SKILL_IDS
 from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
@@ -82,6 +87,68 @@ _MEMORY_LINE_SEMANTIC_TAGS = frozenset(
 _MEMORY_LONG_TERM_TAGS = frozenset(
     {"fact", "preference", "bond", "emotion"}
 )
+
+
+def _frozen_node_executor_payload(
+    *,
+    command: HostCommand,
+    work_order: WorkOrderV3,
+    node_id: str,
+    target_id: str,
+) -> dict[str, Any] | None:
+    """Return one admission-frozen production payload or reject its drift."""
+
+    all_payloads = _mapping(
+        dict(work_order.input_pack or {}).get(_FROZEN_NODE_EXECUTOR_PAYLOADS_KEY)
+    )
+    payload = _mapping(all_payloads.get(node_id))
+    if target_id not in AGENT_PRODUCTION_SKILL_IDS:
+        if payload:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "non-production Skill has an unexpected frozen executor payload",
+            )
+        return None
+    if not payload:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "production Skill has no admission-frozen executor payload",
+        )
+    supplied_digest = str(payload.get("payload_sha256") or "").strip()
+    digest_subject = {
+        key: value for key, value in payload.items() if key != "payload_sha256"
+    }
+    adapter_order = _mapping(payload.get("work_order"))
+    metadata = _mapping(adapter_order.get("metadata"))
+    expected_lineage = {
+        "root_work_order_id": work_order.root_work_order_id,
+        "task_graph_id": work_order.task_graph_id,
+        "task_node_id": node_id,
+        "graph_revision": work_order.graph_revision,
+        "business_scope": work_order.business_idempotency_scope,
+        "operation_fingerprint": work_order.operation_fingerprint,
+        "approval_ref": work_order.approval_ref,
+        "review_ref": work_order.review_ref,
+    }
+    if (
+        payload.get("schema_version")
+        != _FROZEN_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA
+        or payload.get("target_id") != target_id
+        or payload.get("tool") != "codex_production"
+        or payload.get("action") != "enqueue"
+        or payload.get("start_background") is not False
+        or supplied_digest != _sha256_json(digest_subject)
+        or str(adapter_order.get("work_order_id") or "").strip()
+        != work_order.work_order_id
+        or str(metadata.get("skill_id") or "").strip() != target_id
+        or str(metadata.get("request_id") or "").strip() != command.request_id
+        or _mapping(metadata.get("governed_lineage")) != expected_lineage
+    ):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "frozen production executor payload differs from the admitted TaskGraph",
+        )
+    return payload
 
 
 class _FrozenSkillWorker:
@@ -213,6 +280,12 @@ class _FrozenSkillWorker:
             target=target,
             args=execution_args,
         )
+        frozen_executor_payload = _frozen_node_executor_payload(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+            target_id=target,
+        )
         outcome = await asyncio.to_thread(
             execute_frozen_governed_skill,
             ports=self._execution_ports,
@@ -232,6 +305,7 @@ class _FrozenSkillWorker:
             governed_execution_context=execution_context,
             execution_args_override=execution_args,
             verified_node_grant=verified_grant.to_dict(),
+            frozen_executor_payload=frozen_executor_payload,
         )
         payload = _mapping(getattr(outcome, "payload", None))
         receipt_ref = str(payload.get("receipt_ref") or "").strip()

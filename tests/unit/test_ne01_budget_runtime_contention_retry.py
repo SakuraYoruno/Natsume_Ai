@@ -8,6 +8,7 @@ import pytest
 from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
     BudgetPolicy,
+    BudgetReservationStatus,
 )
 from host_brain.persistence.task_repository import (
     TASK_STORE_CAS_CONFLICT,
@@ -99,3 +100,62 @@ async def test_budget_charge_cas_attempts_scale_with_admitted_concurrency() -> N
     assert charge.accepted is True
     assert charge.context.version == 8
     assert store.calls == 9
+
+
+@pytest.mark.asyncio
+async def test_finalization_outbox_uses_the_refreshed_budget_version() -> None:
+    class _FinalizeStore:
+        def __init__(self) -> None:
+            self.record = {
+                "budget_id": "budget-1",
+                "scope": "test",
+                "graph_id": "graph-1",
+                "graph_revision": 1,
+                "status": "ACTIVE",
+                "status_version": 8,
+                "limits": BudgetAmount(token_count=100).to_dict(),
+                "reserved": BudgetAmount(token_count=100).to_dict(),
+                "consumed": BudgetAmount().to_dict(),
+                "remaining": BudgetAmount(token_count=100).to_dict(),
+            }
+
+        def reconcile_budget(self, budget_id: str) -> dict[str, Any]:
+            assert budget_id == "budget-1"
+            return dict(self.record)
+
+        def transition_budget(self, budget_id: str, **kwargs: Any) -> dict[str, Any]:
+            assert budget_id == "budget-1"
+            assert kwargs["expected_version"] == 8
+            assert kwargs["outbox"]["aggregate_version"] == 9
+            self.record = {
+                **self.record,
+                "status": kwargs["target_status"],
+                "status_version": 9,
+            }
+            return dict(self.record)
+
+    policy = BudgetPolicy(scope="test", limits=BudgetAmount(token_count=100))
+    context = BudgetRuntimeContext(
+        budget_id="budget-1",
+        command_id="command-1",
+        graph_id="graph-1",
+        graph_revision=1,
+        policy=policy,
+        record={
+            "budget_id": "budget-1",
+            "status": "ACTIVE",
+            "status_version": 7,
+        },
+    )
+    runtime = DurableBudgetRuntime(
+        task_store=_FinalizeStore(),
+        outbox_factory=_OutboxFactory(),
+    )
+
+    finalized = await runtime.finalize(
+        context,
+        target_status=BudgetReservationStatus.RELEASED,
+    )
+
+    assert finalized.status == BudgetReservationStatus.RELEASED.value
+    assert finalized.version == 9

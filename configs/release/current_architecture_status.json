@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "MIGRATION_HEAD_0120_GATE_1_TO_14_STATIC_PASS_INTERNAL_POST_ADMISSION_NATIVE_WORKORDERV3_SLICE_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "MIGRATION_HEAD_0120_GATE_1_TO_14_STATIC_PASS_DIRECT_AND_APPROVED_PLAN_PRODUCTION_SKILL_ADMISSION_FROZEN_PAYLOAD_SLICE_INTERNAL_POST_ADMISSION_NATIVE_WORKORDERV3_SLICE_DIRECT_PRE_RESERVATION_TERMINAL_BUDGET_FIVE_AGGREGATE_UOW_LOCAL_SQLITE_PASS_PROMPT_INTELLIGENCE_PROPOSAL_ONLY_NO_LEGACY_PLAN_OR_SKILL_EXECUTION_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -30,6 +30,56 @@
     "commit_binding": "ARTIFACTS_LOCAL_GATES_COMMIT_SHA_PATH_GENERATED_AFTER_COMMIT",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "slice": "NE01_ATOMIC_DEFAULT_PLUS_TERMINAL_EXACT_AUTO_AND_COMPLETE_RECONCILIATION_BUNDLE_GATE",
+    "direct_production_skill_boundary": "PARTIAL_DIRECT_AND_APPROVED_PLAN_NODE_ADMISSION_FREEZES_PROFILE_DEFAULT_EXPANDED_CODEX_PRODUCTION_ADAPTER_PAYLOAD_BY_NODE_AND_BINDS_DIGEST_WORKORDER_GRAPH_REVISION_SCOPE_FINGERPRINT_REVIEW_APPROVAL_START_BACKGROUND_FALSE_PLAN_REQUIRES_APPROVED_CANDIDATE_INPUT_AND_IMMUTABLE_NODE_BINDING_CALLER_PAYLOAD_REJECTED_REPLAN_REGENERATES_REVISION_BOUND_PAYLOAD_FROZEN_WORKER_REVALIDATES_BEFORE_BROKER_DISPATCH_REPLAY_NORMALIZES_ONLY_NESTED_ROTATING_AUTHORITY_REFS_AND_DERIVED_DIGEST_RUNTIME_CONSUMES_DURABLE_FIRST_ADMISSION_PAYLOAD_GENERAL_RECOVERY_BUDGET_RECEIPT_WAVE_INTEGRATION_AND_NE07_REMAIN_INCOMPLETE",
+    "direct_production_skill_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PRE_COMMIT_PROGRAM_INCOMPLETE",
+      "unit_contract": "16_PASSED_FROZEN_PAYLOAD_AND_REPLAY_AUTHORITY_BOUNDARY",
+      "real_sqlite_cutover": "2_PASSED_DIRECT_PRODUCTION_EXECUTION_AND_REPLAY_SAFE",
+      "plan_node_freeze_contract": "13_PASSED_INITIAL_REPLAN_CALLER_PAYLOAD_REJECTION_AND_GENERIC_PLAN_EXECUTION_SCOPED_BATCH",
+      "plan_real_sqlite_cutover": "1_PASSED_CHAT_DELEGATE_THREE_NODE_PLAN_REPLAY_WITH_PRODUCTION_SKILL_NODE",
+      "combined_targeted_batch": "35_PASSED_DIRECT_AND_PLAN_FROZEN_PAYLOAD_AUTHORITY_SCOPED_BATCH",
+      "terminal_event_contract": "TOP_LEVEL_REPLAYED_EQUALS_EXECUTION_RECEIPT_REPLAYED",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "docker_full_stack": "NOT_RUN_NE07"
+    },
+    "due_retry_atomic_claim_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PRE_COMMIT_PROGRAM_INCOMPLETE",
+      "focused_batch": "33_PASSED_READY_CLAIM_RETRY_MUTATION_NODE_EXECUTION_DAG_SCHEDULER_STRUCTURE_AND_DURABLE_DAG_RETRY_BOUNDARY",
+      "no_pre_review_due_retry": "ONE_SQLITE_WRITER_UOW_PROMOTES_RETRY_PENDING_TO_READY_AND_CREATES_ATTEMPT_LEASE_HEARTBEAT_AND_CLAIM_OUTBOXES",
+      "injected_attempt_outbox_drift": "ROLLS_BACK_READY_PROMOTION_WITHOUT_SECOND_ATTEMPT_OR_TASK_NODE_READY_OUTBOX",
+      "exact_replay": "RETURNS_THE_SAME_COMMITTED_ATTEMPT_AND_LEASE",
+      "review_required_due_retry": "PROMOTES_ONLY_TO_CREATE_DURABLE_REVIEW_THEN_CLAIMS_ON_A_LATER_ITERATION_WITHOUT_WORKER_REPLAY",
+      "compileall": "SUCCEEDED",
+      "documentation_authority_gate": "7_PASSED",
+      "coverage_contract": "12_PASSED",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+    },
+    "direct_terminal_budget_atomic_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PRE_COMMIT_PROGRAM_INCOMPLETE",
+      "combined_targeted_batch": "84_PASSED_DIRECT_TERMINAL_BUDGET_PROMPT_RETIREMENT_RUNTIME_CONTRACT_INTEGRATION_STRUCTURE_DOCUMENTATION_AND_COVERAGE",
+      "real_sqlite_contract": "DIRECT_GRAPH_SCOPE_BUDGET_RELEASE_EXACT_REPLAY_AND_INJECTED_BUDGET_OUTBOX_FAULT_FULL_ROLLBACK",
+      "host_execution_integration": "DIRECT_PRE_RESERVATION_FAILURE_WRITES_FIFTH_BUDGET_RELEASE_OUTBOX_WITH_THE_SAME_UOW_TIMESTAMP",
+      "finalization_version_guard": "NORMAL_FINALIZATION_OUTBOX_BINDS_THE_REFRESHED_BUDGET_RECORD_VERSION",
+      "compileall": "SUCCEEDED",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "DIRECT_NON_DEFERRED_NO_OPERATION_RESERVATION_ONLY_DEFERRED_PARALLEL_AND_OTHER_TERMINAL_BUDGET_PATHS_REMAIN_INCOMPLETE"
+    },
+    "prompt_intelligence_execution_retirement_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PRE_COMMIT_PROGRAM_INCOMPLETE",
+      "focused_batch": "15_PASSED_INTELLIGENT_RUNTIME_AND_PROMPT_EXECUTION_RETIREMENT",
+      "combined_targeted_batch": "84_PASSED_DIRECT_TERMINAL_BUDGET_PROMPT_RETIREMENT_RUNTIME_CONTRACT_INTEGRATION_STRUCTURE_DOCUMENTATION_AND_COVERAGE",
+      "runtime_guard": "MONKEYPATCHED_PLANNING_AGENT_EXECUTE_PLAN_ZERO_CALLS_AND_SKILL_COMPOSER_HAS_NO_EXECUTE_METHOD",
+      "static_guard": "AST_REJECTS_EXECUTE_PLAN_OR_EXECUTE_CALLS_AND_SOURCE_REJECTS_SKILL_REGISTRY_OR_HANDLER_HELPERS",
+      "boundary": "PROMPT_OUTLINE_AND_SKILLDAG_HINT_ONLY_NOT_A_PLANNINGSEARCH_OR_TASKGRAPH_EXECUTION_PROOF",
+      "compileall": "SUCCEEDED",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+    },
     "reclaimed_acceptance_effect_policy": "READ_ONLY_RECONCILE_REQUIRED_MISSING_RECONCILER_STAYS_RECONCILIATION_REQUIRED_NO_ORDINARY_HANDLER_REPLAY",
     "scheduler_handler_result_policy": "EXPLICIT_CANONICAL_STATUS_AND_AUTHORITATIVE_DURABLE_RECEIPT_REQUIRED_NO_SYNTHETIC_SUCCESS_OR_RECEIPT",
     "sys_mode_reconciliation": "EXACT_HARD_STATE_REOPEN_ONLY_SWITCH_MODE_NOT_REINVOKED",
@@ -197,7 +247,8 @@
       "continuation_semantics": "THE_OUTER_DAG_SCHEDULER_ALONE_MAY_AUTHORIZE_A_MULTI_NODE_CHECKPOINT_TAKEOVER_WITH_A_COMPOSITION_ONLY_OPAQUE_CAPABILITY; IT_REUSES_THE_SAME_ATTEMPT_WITH_A_HIGHER_FENCE_AND_NEVER_REPLAYS_THE_COMMITTED_WORKER. ACCEPTED_CONTINUATION_RESUMES_REMAINING_READY_NODES; REJECTED_USAGE_ENTERS_THE_EXISTING_PARALLEL_BUDGET_BLOCKED_SETTLEMENT.",
       "fail_closed_boundary": "A_DIRECT_NODE_ROUTE_DOES_NOT_POSSESS_THE_SCHEDULER_CAPABILITY_AND_REMAINS_REJECTED; RESERVED_OR_UNKNOWN_SIDE_EFFECTS_REMAIN_RECOVERY_REQUIRED; CONFLICT_AND_GENERAL_MULTI_NODE_BATCH_RECOVERY_REMAIN_INCOMPLETE.",
       "focused_validation": {
-        "combined_checkpoint_regression": "26_PASSED_IN_69_38_SECONDS",
+        "combined_checkpoint_regression": "26_PASSED_IN_69_45_SECONDS_AFTER_POST_CHECKPOINT_REJECTED_USAGE_RESPONSE_LOSS_REOPEN_CORRECTION",
+        "rejected_usage_reopen_correction": "THE_GENERIC_FAILURE_BUNDLE_DOES_NOT_RELEASE_A_GRAPH_BUDGET_FOR_POST_CHECKPOINT_EXACT_REJECTED_CLOSEOUT; THE_DEDICATED_NODE_ATTEMPT_BOUND_REJECTION_AUTHORITY_VALIDATES_ITS_OWN_BUDGET_AND_OUTBOX_LINEAGE",
         "direct_node_authority_rejection": "COVERED_IN_THE_MULTI_NODE_EXACT_CHECKPOINT_REGRESSION",
         "selected_parallel_dag_regression": "4_PASSED_IN_12_09_SECONDS",
         "count_boundary": "THE_26_AND_4_TEST_BATCHES_ARE_TARGETED_LOCAL_EVIDENCE_ONLY_AND_MUST_NOT_BE_REPORTED_AS_NE01_WAVE_INTEGRATION"
@@ -481,7 +532,7 @@
       "host_brain/persistence/task_checkpoint_budget_route_authority.py": 93,
       "host_brain/agent_runtime/artifact_store.py": 1359,
       "host_brain/app/internal_task_runtime.py": 1311,
-      "host_brain/task_runtime/node_execution_runtime.py": 1498,
+      "host_brain/task_runtime/node_execution_runtime.py": 1499,
       "host_brain/task_runtime/node_execution_projection.py": 477,
       "host_brain/task_runtime/operation_recovery_runtime.py": 205,
       "host_brain/agent_runtime/artifact_store_read_model.py": 412,
@@ -923,6 +974,21 @@
       "positive_tool_execution": "PRODUCTION_OFF",
       "missing": "NEW_IMMUTABLE_TASK_GRAPH_REVISION_WITH_INDEPENDENT_SKILL_OR_DELEGATE_NODE_AUTHORITY",
       "boundary": "ONLY_RUN_SKILL_AND_DISPATCH_SUB_AGENT_ARE_COVERED_THIS_DOES_NOT_RETIRE_GENERAL_GRAPH_AGENT_FILE_WEB_BROWSER_MEMORY_EMOTION_OR_OTHER_TOOL_AUTHORITIES"
+    },
+    "legacy_sub_agent_dispatch_cutoff": {
+      "status": "PARTIAL_RETIRED_FAIL_CLOSED_PRODUCTION_OFF",
+      "direct_dispatch_reason_code": "LEGACY_SUB_AGENT_DISPATCH_RETIRED",
+      "module_global_dispatcher": "REMOVED",
+      "handler_map": "REMOVED",
+      "runtime_gateway_builder": "REMOVED",
+      "independent_skill_exec_log_writer": "REMOVED",
+      "executive_compatibility_delegate_port_fields": "REMOVED",
+      "legacy_dispatch_service_accessor": "REMOVED",
+      "legacy_execute_dispatch_to_sub_agent": "REMOVED",
+      "intent_legacy_gateway_model_call": "REMOVED",
+      "positive_delegate_scope": "PENTEST_AGENT_READONLY_GOVERNED_ADAPTER_ONLY",
+      "local_targeted_validation": "144_PASSED_SUB_AGENT_CONTEXT_NLE_CONTEXT_NLE_TRACE_INTENT_HANDLER_REACT_PENTEST_PLANNER_CODEC_PROMPT_SPEC_EXECUTIVE_COMPATIBILITY_DOC_AUTHORITY_AND_RUNTIME_COVERAGE_REGRESSION",
+      "boundary": "COMPATIBILITY_REQUEST_RESPONSE_CODEC_AND_READ_ONLY_REGISTRY_VIEW_REMAIN_NON_EXECUTABLE_GENERAL_DELEGATE_MODEL_BUDGET_AND_SEVEN_ROUTE_ACCEPTANCE_INCOMPLETE"
     },
     "visual_agent_direct_entry_cutoff": {
       "surface": "/v1/agent/run",
@@ -1500,7 +1566,7 @@
         "retry budget exhaustion fail-closed and reservation-after-failure non-retry integration evidence",
         "exact committed schedule_retry replay after response loss with strict Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outbox validation and no duplicate retry charge",
         "resolver cancellation propagates without conversion into an ordinary terminal worker failure",
-        "atomic pre-reservation terminal failure bundle for Attempt FAILED, Node FAILED, Graph FAILED or BLOCKED, Lease RELEASED, and four attempt/evidence-bound Outboxes",
+        "atomic direct non-deferred pre-reservation terminal failure bundle for Attempt FAILED, Node FAILED, Graph FAILED or BLOCKED, Lease RELEASED, exact graph-scope Budget RELEASED, four attempt/evidence-bound Outboxes, and one no-attempt BUDGET_RESERVATION_RELEASED Outbox",
         "exact pre-reservation terminal failure replay with reservation, fence, version, evidence, and Outbox drift rejection",
         "periodic Lease then Operation Reservation renewal with versioned Outboxes",
         "exact Lease and Operation Reservation renewal replay after committed response loss",
@@ -1609,7 +1675,8 @@
       ],
       "contract_progress": [
         "deterministic ready/retry/fan-in scheduling decision",
-        "canonical max_attempts and retry_backoff_ms validation"
+        "canonical max_attempts and retry_backoff_ms validation",
+        "no-pre-review due retry promotion plus READY claim in one canonical writer transaction"
       ],
       "missing": [
         "production-enabled parallel DAG execution",
@@ -1617,18 +1684,17 @@
         "production canary and enablement for atomic success and terminal-leaf fan-out",
         "production enablement of the default-off cancellation Operator route after deployed credential validation and a real canary",
         "production enablement of the default-off signed Operation, Effect, and terminal reconciliation paths after deployed-key, external-inventory, and real-canary validation; migration 0094 coordinates cancellation scanning, replay, defer, and expired takeover but does not manufacture evidence or business completion",
-        "single transaction for promotion plus claim",
         "real production resolver sources that classify proven side-effect-free transient preparation failures",
-        "Budget finalization inside the pre-reservation terminal failure transaction or an explicit compensation contract",
+        "atomic Budget finalization for retry-budget-exhaustion scheduling, deferred/parallel child settlement, cancellation/review and other non-direct terminal paths",
         "general multi-node/batch, Scheduler/Internal public-projection, and unknown-side-effect recovery beyond the scheduler-owned exact COMMITTED checkpoint continuation and exact operation-free Attempt windows; only exact ACCEPTED/REJECTED/MISSING checkpoint continuation is proven, while general batch recovery remains incomplete",
         "production activation and external-deployment remediation for 0099 terminal inventory; exact FAILED budget release is wired default off, BLOCKED/CANCELLED repair requires a signed Operator, and COMPLETED or structural cases remain permanently quarantined",
         "Review continuation poison rows are isolated but have no durable DLQ or alert; a 500-candidate scan cap can delay healthy rows behind an extreme poison prefix",
         "Review wake is process-local; cross-process low-latency depends on bounded polling, leases, and takeover",
         "execution persistence and orchestration remain modularized behind focused Store/runtime boundaries, but DurableDagSchedulingRuntime is still a temporary outer orchestrator. New production Graphs use 0090/0091 atomic terminal authority, while historical legacy Graphs remain compatible. Canonical Store Budget contention, a scheduler-owned exact multi-node COMMITTED checkpoint continuation for ACCEPTED/REJECTED/MISSING usage, exact operation-free persisted Attempt takeover, post-reservation recovery hold, and the ACCEPTED-to-Effect restart window are proven in narrow scopes. General multi-node/batch settlement recovery, unknown effects, Scheduler/Internal public projections, external-deployment terminal inventory, full attestation-key lifecycle, deployed credentials, wave integration, and real canaries remain UNKNOWN or unproven. Bounded fan-out and cancellation remain OFF; the overall stage remains PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS"
       ],
-      "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
+      "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. For a due RETRY_PENDING node that does not require a new Review, the scheduler passes TASK_NODE_READY into claim_ready_node and the canonical writer transaction promotes READY, creates Attempt/Lease/Heartbeat and writes the related claim Outboxes together; injected Attempt Outbox identity drift rolls all of it back, and exact replay does not create a second Attempt. A due retry that requires a new Review is intentionally promoted only to create the durable Review, then claimed on a later iteration; it cannot bypass approval. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "failure_replan_boundary": "PARTIAL_DURABLE_SUPERSESSION_SAFE_SUBSET. Migration 0100 adds immutable append-only predecessor-to-replacement authority. HostCommandRepository admits revision+1 only in the same BEGIN IMMEDIATE transaction that revalidates one same-root FAILED predecessor, exact Graph terminal evidence, quiescent execution/review/budget/effect/cancellation/reconciliation facts, and then writes the deterministic supersession. Response-loss replay requires the exact row and injected post-insert failure rolls everything back. Shared TaskStore mutation guards fence old READY claim, retry, Budget, node/graph execution and Review continuation. BLOCKED remains denied; all historical Review continuation rows and all Acceptance Effect rows are conservatively rejected, automatic failure-triggered replan and a production/cross-process canary remain incomplete. SQL owns Graph/root/status/version checks and FK existence; repository transaction owns exact HostCommand lineage to preserve 0088 rebuild compatibility.",
-      "terminal_failure_boundary": "DurableNodeLifecycleRuntime owns ordinary and exhausted pre-reservation failure orchestration but not persistence authority. It atomically closes Attempt, Node, Graph, Lease and four attempt/evidence-bound Outboxes through the same DurableTaskStore bundle, retries only that identical bundle once after an ordinary response exception, and never falls back to sequential transitions. Any existing operation reservation rejects this path, CancelledError remains unswallowed, and Budget finalization remains outside the bundle.",
+      "terminal_failure_boundary": "DurableNodeLifecycleRuntime owns ordinary and exhausted pre-reservation failure orchestration but not persistence authority. For direct, non-deferred calls with no Operation reservation, it atomically closes Attempt, Node, Graph, Lease and the exact unique graph-scope ACTIVE/EXCEEDED Budget through the same DurableTaskStore bundle, writes four attempt/evidence-bound Outboxes plus one no-attempt BUDGET_RESERVATION_RELEASED Outbox, and response-loss replay revalidates Budget/outbox/version/timestamp. An injected Budget Outbox fault rolls back every aggregate. It retries only that identical bundle once after an ordinary response exception and never falls back to sequential transitions. Node-only deferred children explicitly receive no shared Budget authority and outer settlement remains responsible; retry-budget-exhaustion scheduling, cancellation/review and other terminal paths remain incomplete. CancelledError remains unswallowed.",
       "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker events, and joins before COMMIT. COMMITTED takeover validates the exact Outbox, Attempt, historical Lease, receipt, canonical WorkerProjection and graph Budget; EXACT_ACCEPTED/EXACT_REJECTED reopen read-only, MISSING settles idempotently, CONFLICT fails closed, and worker replay is forbidden. The outer DurableDagSchedulingRuntime may authorize that exact continuation for a multi-node graph only after every live owner fence is clear; it resumes one checkpoint at a time, lets accepted work continue through remaining READY nodes, and routes rejected usage to existing parallel settlement. Before reservation, an independent recovery path accepts only an exact operation-free latest Attempt with expired Lease, unique ACTIVE/EXCEEDED graph Budget and canonical PRECHARGE. TaskStore revalidates deterministic reservation id and same scope/fingerprint absence in one write transaction before issuing a same-Attempt higher fence; worker runs for the first time only afterward. Any live owner returns GOVERNED_EXECUTION_IN_PROGRESS; an Operation race returns RECOVERY_REQUIRED. Post-reservation errors retain recovery authority without ordinary failure or release. Invalid lineage, public projection and unknown side effects fail closed. General multi-node/batch settlement recovery remains incomplete.",
       "bounded_fanout_boundary": "PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS. TaskGraph.completion_policy is durable and optional for compatibility, but every new production builder emits ATOMIC_GRAPH_SUCCESS_V1 with an explicit sink result_node_id. Host atomic capability defaults on and Scheduler, Internal, and Operator enable it explicitly. Application capability and grant checks run before repository admission; Coordinator direct entry requires exact all-node grants. Migration 0091 atomically commits whole-Graph success and migration 0090 atomically commits failure, Budget, or Review outcomes. Public accepted replay requires Graph COMPLETED and one CONSUMED graph Budget. Historical legacy Graphs remain compatible. Migration 0120 adds an append-only Ed25519 feature-canary receipt; bounded fan-out can be requested only when the receipt is durable, signature-verified and exactly matches the running build SHA, migration version, atomic policy and fan-out buffer. No such production receipt exists yet, so bounded fan-out and cancellation remain independently default off; general recovery, real wave canary and NE-07 full-stack evidence remain outstanding.",
       "cancellation_boundary": "B5C durable two-phase cancellation, exact-revision Operator authority, first-writer-wins 0091/0092 terminal decisions, signed Operation/Effect reconciliation, and the 0099 terminal reconciliation production gate are wired, but cancellation remains OFF. 0099 inventory never silently re-enters workers: exact proofs mutate only bound terminal Graph/Budget state plus deterministic Outboxes in one UoW; signed-required BLOCKED/CANCELLED cases require valid Operator attestation, while COMPLETED and structural anomalies remain QUARANTINED_STRUCTURAL with action NONE. Secure Ingress authority, graph/revision, request identity, side-effect fences, Review state, Outboxes, and proof bindings remain fail-closed. Deployed Operator/attestation credentials, full key lifecycle, external-database inventory remediation, general/multi-node/pre-budget recovery, and real canaries remain UNKNOWN or outstanding.",
@@ -1767,6 +1833,8 @@
         "tests/integration/test_gr04_planning_replan_sqlite.py",
         "tests/unit/test_ne01_graph_revision_supersession_migration.py",
         "tests/integration/test_gr03a_governed_durable_dag.py",
+        "tests/unit/test_task_dag_state_ready_claim_store_structure.py",
+        "tests/unit/test_task_retry_atomic_failure_store_structure.py",
         "tests/integration/test_ne01_b5_parallel_success.py",
         "tests/integration/test_ne01_budget_contention_store.py",
         "tests/integration/test_ne01_operation_online_takeover.py",
@@ -1778,15 +1846,30 @@
       ]
     },
     "executive_authority_removal": {
-      "status": "WIRED",
+      "status": "RETIRED_FAIL_CLOSED_PRODUCTION_OFF",
       "production_entry": "REMOVED",
+      "route_planning": "REMOVED",
+      "legacy_skill_routing": "REMOVED",
+      "conversation_execution": "REMOVED",
+      "executive_application_composition": "REMOVED",
+      "stale_app_port_rebuild": "REMOVED_FAIL_CLOSED",
       "legacy_skill_dag_execution": "REMOVED",
+      "cortex_direct_reply_postprocess_compatibility": "REMOVED",
+      "surface_direct_async_post_process": "REMOVED",
+      "executive_runtime_capability_forge_route_override_call": "REMOVED",
+      "independent_capability_forge_runtime_match": "REMAINS_NE05_GAP",
+      "legacy_diagnostic_direct_skill_matrix": "REMOVED",
+      "pure_skill_dag_compatibility_adapter": "ZERO_PRODUCTION_CALLERS_NOT_EXECUTION_AUTHORITY",
       "legacy_runtime_task_registry": "REMOVED",
       "read_routes": "DURABLE_PROJECTION",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/agent_runtime/read_routes.py",
-        "tests/contract/test_gr05_runtime_task_truth_boundary.py"
+        "host_brain/executive_runtime/runtime.py",
+        "host_brain/app/executive_runtime.py",
+        "tests/contract/test_gr05_runtime_task_truth_boundary.py",
+        "tests/unit/test_ne01_legacy_executive_planning_retirement.py",
+        "tests/unit/test_gr05_cortex_governed_cutover.py"
       ]
     },
     "planning_search_kernel": {
@@ -1947,15 +2030,19 @@
       "status": "PARTIAL",
       "scope": "HOST_CANONICAL_ROUTES",
       "contention_status": "PROVEN_8_16_32_THREADS_AND_CROSS_PROCESS",
+      "single_node_time_guard": "POSITIVE_TIME_MS_READS_CANONICAL_DURABLE_REMAINING_ZERO_PRE_DISPATCH_WRITES_TIME_GUARD_REJECTION_TIMEOUT_PRESERVES_OPERATION_AND_RETURNS_RECOVERY_REQUIRED",
       "terminal_semantics": "Exactly one BUDGET_EXCEEDED winner advances the reservation and owns the sole Outbox. Refreshed siblings persist ALREADY_EXCEEDED at the terminal version and reference that winner; they cannot become settlement authority. Parallel Budget decision write/read/replay uses one read snapshot and revalidates the terminal Reservation version, sole winner Outbox, Attempt/Graph lineage, and every passive sibling. Runtime CAS attempts scale to at least admitted concurrency plus one instead of a fixed four-attempt ceiling.",
       "evidence_refs": [
         "host_brain/persistence/task_budget_usage_store.py",
         "host_brain/task_runtime/budget_runtime.py",
+        "host_brain/task_runtime/node_execution_runtime.py",
+        "host_brain/task_runtime/node_worker_stream.py",
         "tests/integration/test_ne01_budget_contention_store.py",
         "tests/unit/test_ne01_budget_runtime_contention_retry.py",
+        "tests/unit/test_aw02_governed_task_coordinator.py",
         "tests/unit/test_parallel_settlement_budget_winner_selection.py"
       ],
-      "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "program-wide coverage"]
+      "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "general multi-node time budget enforcement", "unknown-effect recovery", "program-wide coverage"]
     },
     "review_resume": {
       "status": "WIRED",
@@ -2236,7 +2323,7 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI; ApplicationModelAttemptServicePort also requires an injected provider in Tool runtime and interrupted-job recovery. After Life authority is available, AgentRuntimeApplicationScope publishes one immutable bundle to Input→Cortex, Life projection and conversation Acceptance, then clears it during shutdown. The active scope resolves its model RouteCatalog, Bond stage engine, session topic/tactic ledgers, VTS ledger and TTS router/meta-learning collaborators from that same bundle; conversation_writer and vts_emotion_driver no longer directly import process_services. The unused intelligent_runtime PlanningAgent/SkillComposer/direct-execution authority is deleted, and its retained TTS routing accepts only scope-injected collaborators. Missing providers fail closed. Current inventory is 33 named-import modules / 83 imported names / 37 all-form consumer modules, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal, app-local proof for every backing service, generic Delegate cutover, or seven-route TaskGraph coverage. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI; ApplicationModelAttemptServicePort also requires an injected provider in Tool runtime and interrupted-job recovery. After Life authority is available, AgentRuntimeApplicationScope publishes one immutable bundle to Input→Cortex, Life projection and conversation Acceptance, then clears it during shutdown. The active scope resolves its model RouteCatalog, Bond stage engine, session topic/tactic ledgers, VTS ledger and TTS router/meta-learning collaborators from that same bundle; conversation_writer and vts_emotion_driver no longer directly import process_services. The unused app/intelligent_runtime.py PlanningAgent/SkillComposer/direct-execution authority is physically deleted; the separate tts_route accepts only scope-injected collaborators. Missing providers fail closed. Current inventory is 33 named-import modules / 83 imported names / 37 all-form consumer modules, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal, app-local proof for every backing service, generic Delegate cutover, or seven-route TaskGraph coverage. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
       "typed_host_service_bundle_local_regression": {
         "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
         "initial_result": "46_PASSED_4_STALE_FIXTURE_OR_CONTRACT_FAILURES",

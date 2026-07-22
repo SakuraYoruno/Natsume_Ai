@@ -6,7 +6,9 @@ the concrete store.  It must not create an independent persistence boundary.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import hashlib
+import sqlite3
 from typing import Any
 
 from host_brain.contracts.agent_runtime.budget_policy import (
@@ -52,12 +54,34 @@ class TaskRetryMutationStoreMixin:
         *,
         expected_version: int,
         outbox: OutboxMessage,
+        _connection: sqlite3.Connection | None = None,
+        _observed_ts_ms: int | None = None,
     ) -> dict[str, Any]:
-        """Atomically promote one due RETRY_PENDING node back to READY."""
+        """Promote one due retry node, optionally inside a caller-owned UoW.
+
+        ``_connection`` is deliberately private composition plumbing used by
+        the canonical READY-claim writer.  It is never an externally exposed
+        transaction API: callers without that writer capability still receive
+        the normal single writer transaction here.
+        """
 
         self.assert_dag_scheduling_ready()
-        ts_ms = self._now()
-        with self._transaction() as conn:
+        if _connection is not None and not _connection.in_transaction:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "retry promotion requires an active caller transaction",
+            )
+        if _observed_ts_ms is not None and int(_observed_ts_ms) < 0:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "retry promotion observed timestamp must be non-negative",
+            )
+        with (
+            nullcontext(_connection)
+            if _connection is not None
+            else self._transaction()
+        ) as conn:
+            ts_ms = self._now() if _observed_ts_ms is None else int(_observed_ts_ms)
             self._assert_graph_not_cancelling(
                 conn,
                 graph_id=graph_id,

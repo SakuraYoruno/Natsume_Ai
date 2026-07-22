@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
@@ -218,6 +219,10 @@ def test_low_level_skill_executor_receives_only_explicit_governed_collaborators(
         governed_execution_context={"execution_mode": "governed_task_runtime"},
         execution_args_override={"content": "admitted"},
         verified_node_grant={"grant_ref": "grant://node/gr05"},
+        frozen_executor_payload={
+            "schema_version": "Natsume.governed.production_executor_payload.v1",
+            "tool": "codex_production",
+        },
     )
 
     assert result is expected
@@ -228,4 +233,95 @@ def test_low_level_skill_executor_receives_only_explicit_governed_collaborators(
     assert captured["production_authority_verifier"] is ports.production_authority_verifier
     assert captured["durable_authority_ledger"] is ledger
     assert captured["ledger"] is False
+    assert captured["frozen_executor_payload"] == {
+        "schema_version": "Natsume.governed.production_executor_payload.v1",
+        "tool": "codex_production",
+    }
     assert "token_service_override" not in captured
+
+
+def test_frozen_executor_payload_skips_post_admission_skill_normalization(
+    monkeypatch,
+) -> None:
+    """A governed worker must dispatch the payload frozen with its TaskGraph."""
+
+    from host_brain.executive_runtime import skill_execution
+
+    dispatched: dict = {}
+
+    def forbidden_handler(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN201
+        pytest.fail("production Skill handler rebuilt a payload after admission")
+
+    registry = SimpleNamespace(
+        require=lambda _skill_id: SimpleNamespace(
+            require_confirm=False,
+            family="code",
+            scope="host",
+            risk_level=2,
+            fallback_policy="strict_fail",
+            handler=forbidden_handler,
+        )
+    )
+    monkeypatch.setattr(
+        skill_execution,
+        "_governed_node_grant_error",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        skill_execution,
+        "bind_validated_skill_authority",
+        lambda **_kwargs: {"authority_id": "authority://frozen-payload"},
+    )
+    monkeypatch.setattr(
+        skill_execution,
+        "dispatch_executor_payload",
+        lambda payload, **_kwargs: (
+            dispatched.update(payload) or {
+                "status": "EXECUTED",
+                "result_text": "frozen payload dispatched",
+            }
+        ),
+    )
+    monkeypatch.setattr(skill_execution, "_log_skill_exec_row", lambda **_kwargs: None)
+
+    result = skill_execution._execute_skill(
+        ports=SimpleNamespace(),
+        request_body={"args": {"task": "must not be normalized"}},
+        request_id="request-frozen-payload",
+        session_id="session-frozen-payload",
+        person_id="person-frozen-payload",
+        intent_id="intent-frozen-payload",
+        skill_id="agent_memory_curator",
+        task_text="frozen task",
+        user_message="frozen task",
+        governor_result={"decision": "APPROVE", "tokens": {}},
+        intent_draft={"route": "skill", "target_id": "agent_memory_curator"},
+        emotion_context={},
+        render_target_lang="zh",
+        skill_registry=registry,
+        ledger=False,
+        durable_authority_ledger=object(),
+        capability_broker_override=object(),
+        model_attempt_service_override=object(),
+        production_authority_verifier=lambda *_args: None,
+        governed_execution_context={
+            "execution_mode": "governed_task_runtime",
+            "target_id": "agent_memory_curator",
+        },
+        execution_args_override={"task": "must not be normalized"},
+        verified_node_grant={"grant_ref": "grant://node/frozen-payload"},
+        frozen_executor_payload={
+            "schema_version": "Natsume.governed.production_executor_payload.v1",
+            "tool": "codex_production",
+            "action": "enqueue",
+            "start_background": False,
+            "work_order": {"work_order_id": "wo-frozen-payload"},
+        },
+    )
+
+    assert result.success is True
+    assert dispatched["tool"] == "codex_production"
+    assert dispatched["work_order"] == {"work_order_id": "wo-frozen-payload"}
+    assert dispatched["_context"]["_governed_execution_context"]["target_id"] == (
+        "agent_memory_curator"
+    )

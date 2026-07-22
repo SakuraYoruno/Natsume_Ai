@@ -17,7 +17,7 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 # Frozen after the scheduler became the only composition owner that can resume
 # an exact multi-node COMMITTED checkpoint after every live owner fence clears.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "79056e448031f79185b506092a1e866b7d25c6e93f94989792b1434e96184258"
+    "1ee98f2fafbf8e6482f0402e827ea6388621126d0eb6303c8ea3e850d30b72e3"
 )
 _REENTERED_OUTCOMES_BASELINE_SHA256 = (
     "29c3e28bf46b666d694d026a2e7bd7711ed832199027f12d1eb100fcb885ea8a"
@@ -26,7 +26,7 @@ _SUPPORTS_POLICY_BASELINE_SHA256 = (
     "0d8633080b6b026804024b9064f572a554f41eeadea6ebf8fd73ff87cf17ef00"
 )
 _RUN_CLAIMED_NODE_BASELINE_SHA256 = (
-    "caaa5a08eaca9d053cf8c6870ad99c827675e0653d4b2ce542a123962dc241b3"
+    "f925b2430acd70334a073a11536b34929344cc75c00bec21b7b71426b6fedbe1"
 )
 _GRANT_REFS_BASELINE_SHA256 = (
     "672bcdb9a7048c3ecc59e229b45a2b7d802921b883cf8025f0ec58615f98f2b7"
@@ -240,7 +240,7 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "lookup_pre_execution_gate": 1,
         },
         "_graph_cancellations": {"continue_requested_graph_cancellation": 1},
-        "_runtime_outbox": {"build": 1, "publish_pending": 6},
+        "_runtime_outbox": {"build": 1, "publish_pending": 7},
     }
     for dependency, matrix in expected.items():
         assert Counter(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 from collections.abc import Mapping
 from functools import partial
 from host_brain.core.runtime_helpers import (  # noqa: F401
@@ -33,30 +33,20 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _summarize_persona_resident_memory_for_trace,
 )
 import asyncio
-from host_brain.core.orchestration_settings import get_orchestration_settings
 from host_brain.bond.user_identity import resolve_person_id
 from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch B：业务路径统一降级
 import time
 
 from host_brain.agent_runtime.contextual_answers import (
     _is_short_assistant_reply_followup,
-    _load_continuity_turns,
-    _maybe_build_contextual_memory_answer,
-    _maybe_build_contextual_session_answer,
-    _maybe_build_contextual_style_answer,
     _memory_recall_plan_should_bypass_direct_status_fastlane,
 )
 from host_brain.agent_runtime.fastpaths import (
     _is_low_risk_short_chat_route_reason,
-    _maybe_build_previous_meaning_answer,
     _needs_selection_followup_retrieval_budget,
     _prefetch_retrieval_persona_inputs,
 )
-from host_brain.agent_runtime.postprocess import (
-    _async_post_process,
-)
 from host_brain.agent_runtime.runtime_texts import (
-    _load_runtime_text_value,
     _logger,
     _resolve_text_render_target_lang,
 )
@@ -84,11 +74,6 @@ async def _cortex_orchestrator_sse_generator_impl(
     sse_fn: Callable[[dict[str, Any]], str] | None = None,
     airlock_sanitize_input_fn: Callable[[str], tuple[str, bool]] | None = None,
     airlock_sanitize_output_fn: Callable[[str], str] | None = None,
-    maybe_build_contextual_memory_answer_fn: Callable[..., str | None] | None = None,
-    maybe_build_contextual_style_answer_fn: Callable[..., str | None] | None = None,
-    maybe_build_contextual_session_answer_fn: Callable[..., str | None] | None = None,
-    maybe_build_previous_meaning_answer_fn: Callable[..., str | None] | None = None,
-    async_post_process_fn: Callable[..., Any] | None = None,
     resolve_retrieval_timeout_seconds_fn: Callable[[], float] | None = None,
     prefetch_retrieval_persona_inputs_fn: Callable[..., Any] | None = None,
     resolve_person_id_fn: Callable[..., str] | None = None,
@@ -99,20 +84,6 @@ async def _cortex_orchestrator_sse_generator_impl(
     _emit_sse = sse_fn or _sse
     _sanitize_input = airlock_sanitize_input_fn or _airlock_sanitize_input
     _sanitize_output = airlock_sanitize_output_fn or _airlock_sanitize_output
-    _contextual_memory_answer = maybe_build_contextual_memory_answer_fn or partial(
-        _maybe_build_contextual_memory_answer,
-        load_continuity_turns=partial(
-            _load_continuity_turns,
-            application_ports=application_ports,
-        ),
-    )
-    _contextual_style_answer = maybe_build_contextual_style_answer_fn or _maybe_build_contextual_style_answer
-    _contextual_session_answer = maybe_build_contextual_session_answer_fn or _maybe_build_contextual_session_answer
-    _previous_meaning_answer = maybe_build_previous_meaning_answer_fn or _maybe_build_previous_meaning_answer
-    _post_process = async_post_process_fn or partial(
-        _async_post_process,
-        application_ports=application_ports,
-    )
     _resolve_timeout = resolve_retrieval_timeout_seconds_fn or _resolve_retrieval_timeout_seconds
     _prefetch_persona_inputs = prefetch_retrieval_persona_inputs_fn or partial(
         _prefetch_retrieval_persona_inputs,
@@ -364,194 +335,11 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
+    # Canonical routes have already been rejected above unless the app-local
+    # Governed Runtime supports them.  Cortex may enrich a frozen command, but
+    # it must never short-circuit with a conversational reply or post-process
+    # write outside TaskGraph Acceptance.
     bond_summary: dict[str, Any] = {}
-
-    if not governed_supported:
-        with soft_fail("agent_runtime_shared.cortex_conversation_started", fallback=None):
-            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
-
-            get_cortex_agent().emit_conversation_started(
-                user_id=str(person_id or ""),
-                session_id=str(session_id or ""),
-                request_id=str(request_id or ""),
-            )
-
-    contextual_session_answer = _contextual_session_answer(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
-    )
-    if contextual_session_answer and not governed_supported:
-        narrative = _sanitize_output(str(contextual_session_answer).strip())
-        total_latency_ms = int(time.time() * 1000) - ts_ms
-        yield _emit_sse(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "narrative": narrative,
-                "request_id": request_id,
-                "audit_refs": {
-                    "request_id": request_id,
-                    "path": "cortex_orchestrator:contextual_session_direct",
-                    "latency_ms": total_latency_ms,
-                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-                },
-            }
-        )
-        asyncio.create_task(
-            _post_process(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=sanitized_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary={},
-                ts_ms=ts_ms,
-                render_target_lang=render_target_lang,
-                total_latency_ms=total_latency_ms,
-                llm_latency_ms=0,
-                first_token_ms=None,
-                provider_name="",
-                model_id="",
-                buffer_stream=False,
-                delegated_agents=[],
-                retrieval_summary={"status": "SKIPPED", "reason_code": "CONTEXTUAL_SESSION_DIRECT"},
-                gov_decision=governor_result,
-                pii_ingress_stats=_pii_ingress_stats,
-                pii_egress_stats={},
-                trace_stage_meta={
-                    "cortex_orchestrator_used": True,
-                    "executive_router_used": False,
-                    "surface_reply_used": False,
-                    "cortex_orchestrator_mode": "contextual_session_direct",
-                    "reply_source": "contextual_session_direct",
-                },
-            )
-        )
-        return
-
-    contextual_style_answer = _contextual_style_answer(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
-    )
-    if contextual_style_answer and not governed_supported:
-        narrative = _sanitize_output(str(contextual_style_answer).strip())
-        total_latency_ms = int(time.time() * 1000) - ts_ms
-        yield _emit_sse(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "narrative": narrative,
-                "request_id": request_id,
-                "audit_refs": {
-                    "request_id": request_id,
-                    "path": "cortex_orchestrator:contextual_style_direct",
-                    "latency_ms": total_latency_ms,
-                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-                },
-            }
-        )
-        asyncio.create_task(
-            _post_process(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=sanitized_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary={},
-                ts_ms=ts_ms,
-                render_target_lang=render_target_lang,
-                total_latency_ms=total_latency_ms,
-                llm_latency_ms=0,
-                first_token_ms=None,
-                provider_name="",
-                model_id="",
-                buffer_stream=False,
-                delegated_agents=[],
-                retrieval_summary={"status": "SKIPPED", "reason_code": "CONTEXTUAL_STYLE_DIRECT"},
-                gov_decision=governor_result,
-                pii_ingress_stats=_pii_ingress_stats,
-                pii_egress_stats={},
-                trace_stage_meta={
-                    "cortex_orchestrator_used": True,
-                    "executive_router_used": False,
-                    "surface_reply_used": False,
-                    "cortex_orchestrator_mode": "contextual_style_direct",
-                    "reply_source": "contextual_style_direct",
-                },
-            )
-        )
-        return
-
-    clarification_direct_answer = (
-        _previous_meaning_answer(
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            user_message=sanitized_message,
-            render_target_lang=render_target_lang,
-        )
-        if get_orchestration_settings().clarification_direct_enabled
-        else None
-    )
-    if clarification_direct_answer and not governed_supported:
-        narrative = _sanitize_output(str(clarification_direct_answer).strip())
-        total_latency_ms = int(time.time() * 1000) - ts_ms
-        yield _emit_sse(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "APPROVE",
-                "narrative": narrative,
-                "request_id": request_id,
-                "audit_refs": {
-                    "request_id": request_id,
-                    "path": "cortex_orchestrator:clarification_direct",
-                    "latency_ms": total_latency_ms,
-                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
-                },
-            }
-        )
-        asyncio.create_task(
-            _post_process(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=sanitized_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary={},
-                ts_ms=ts_ms,
-                render_target_lang=render_target_lang,
-                total_latency_ms=total_latency_ms,
-                llm_latency_ms=0,
-                first_token_ms=None,
-                provider_name="",
-                model_id="",
-                buffer_stream=False,
-                delegated_agents=[],
-                retrieval_summary={"status": "SKIPPED", "reason_code": "CLARIFICATION_DIRECT"},
-                gov_decision=governor_result,
-                pii_ingress_stats=_pii_ingress_stats,
-                pii_egress_stats={},
-                trace_stage_meta={
-                    "cortex_orchestrator_used": True,
-                    "executive_router_used": False,
-                    "surface_reply_used": False,
-                    "cortex_orchestrator_mode": "clarification_direct",
-                },
-            )
-        )
-        return
 
     has_multimodal_input = bool(getattr(request_body, "attachments", None)) or bool(
         getattr(request_body, "multimodal_observations", None)
@@ -760,80 +548,26 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
     llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
 
-    if governed_supported:
-        async for governed_event in governed_command_application.execute_stream(
-            request_body=request_body,
-            request_id=request_id,
-            session_id=session_id,
-            ts_ms=ts_ms,
-            intent_draft=intent_draft,
-            governor_result=gov,
-            person_id=person_id,
-            sanitized_message=sanitized_message,
-            emotion_context=emotion_context,
-            emotion_snapshot=emotion_snapshot,
-            bond_summary=bond_summary,
-            retrieval_evidence_items=retrieval_evidence_items,
-            retrieval_summary=retrieval_summary,
-            llm_runtime=llm_runtime,
-            pii_ingress_stats=_pii_ingress_stats,
-            motive_state=retrieval_motive_state,
-            render_target_lang=render_target_lang,
-            command_authority=dict(command_authority or {}),
-        ):
-            yield _emit_sse(dict(governed_event))
-        return
-
-    if llm_runtime is not None and not llm_runtime.get("available"):
-        fallback_narrative = _load_runtime_text_value(
-            "llm_unavailable_fallback",
-            render_target_lang=render_target_lang,
-        )
-        total_latency_ms = int(time.time() * 1000) - ts_ms
-        try:
-            asyncio.create_task(
-                _post_process(
-                    request_id=request_id,
-                    person_id=person_id,
-                    session_id=session_id,
-                    user_message=sanitized_message,
-                    narrative=fallback_narrative,
-                    emotion_context=emotion_context,
-                    bond_summary=bond_summary,
-                    ts_ms=ts_ms,
-                    render_target_lang=render_target_lang,
-                    total_latency_ms=total_latency_ms,
-                    llm_latency_ms=0,
-                    first_token_ms=None,
-                    provider_name=str(llm_runtime.get("provider_name") or "fallback"),
-                    model_id=str(llm_runtime.get("model_id") or "llm-unavailable-fallback"),
-                    buffer_stream=False,
-                    delegated_agents=[],
-                    retrieval_summary=(retrieval_summary or {"status": "SKIPPED", "reason_code": "LLM_UNAVAILABLE"}),
-                    gov_decision=governor_result,
-                    pii_ingress_stats=_pii_ingress_stats,
-                    pii_egress_stats={},
-                    retrieval_evidence_items=list(retrieval_evidence_items or []),
-                    trace_stage_meta={
-                        "cortex_orchestrator_used": True,
-                        "executive_router_used": False,
-                        "surface_reply_used": False,
-                        "cortex_orchestrator_mode": "llm_unavailable",
-                    },
-                )
-            )
-        except Exception as post_process_exc:
-            _logger.debug("[%s] cortex_orchestrator llm unavailable post_process failed: %s", request_id, post_process_exc)
-        yield _emit_sse(
-            {
-                "phase": "COMMIT",
-                "done": True,
-                "decision": "REJECT",
-                "reason_code": "LLM_UNAVAILABLE",
-                "request_id": request_id,
-                "narrative": fallback_narrative,
-            }
-        )
-        return
-
-    raise RuntimeError("CORTEX_RUNTIME_ROUTE_NOT_TERMINATED")
+    if governed_command_application is None:
+        raise RuntimeError("GOVERNED_RUNTIME_INVARIANT_BROKEN")
+    async for governed_event in governed_command_application.execute_stream(
+        request_body=request_body,
+        request_id=request_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        intent_draft=intent_draft,
+        governor_result=gov,
+        person_id=person_id,
+        sanitized_message=sanitized_message,
+        emotion_context=emotion_context,
+        emotion_snapshot=emotion_snapshot,
+        bond_summary=bond_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+        retrieval_summary=retrieval_summary,
+        llm_runtime=llm_runtime,
+        pii_ingress_stats=_pii_ingress_stats,
+        motive_state=retrieval_motive_state,
+        render_target_lang=render_target_lang,
+        command_authority=dict(command_authority or {}),
+    ):
+        yield _emit_sse(dict(governed_event))

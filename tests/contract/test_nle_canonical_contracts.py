@@ -486,9 +486,11 @@ def test_t_nle_04_schema_snapshot_matches_frozen_fixture() -> None:
     assert expected["contracts"]["SubAgentSpec"]["schema_version"] == SUB_AGENT_SPEC_SCHEMA_VERSION
 
 
-def test_t_nle_04_skill_dag_planner_uses_precise_canonical_modules() -> None:
-    from host_brain.executive_runtime.skill_dag import SkillDagPlan
+def test_t_nle_04_planning_compiler_uses_precise_canonical_modules() -> None:
+    from host_brain.orchestration.planning_graph_compiler import PlanningGraphCompiler
+    from host_brain.planning_search.service import PlanningSearchService
 
     assert TaskGraph.__module__ == "host_brain.contracts.agent_runtime.task_graph"
     assert TaskNode.__module__ == "host_brain.contracts.agent_runtime.task_graph"
-    assert SkillDagPlan(plan_id="legacy").plan_id == "legacy"
+    assert PlanningGraphCompiler.__module__ == "host_brain.orchestration.planning_graph_compiler"
+    assert PlanningSearchService.__module__ == "host_brain.planning_search.service"

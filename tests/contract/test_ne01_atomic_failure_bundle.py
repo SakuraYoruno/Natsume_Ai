@@ -298,6 +298,16 @@ def _failure_event() -> OutboxMessage:
     )
 
 
+def _budget_release_event() -> OutboxMessage:
+    return _event(
+        "BUDGET_RESERVATION",
+        "budget-terminal-reconciliation",
+        2,
+        "BUDGET_RESERVATION_RELEASED",
+        identity="terminal-budget-release-stable",
+    )
+
+
 def _fail(
     store: DurableTaskStore,
     lease: dict[str, Any],
@@ -305,6 +315,9 @@ def _fail(
     graph_target_status: TaskGraphStatus = TaskGraphStatus.FAILED,
     attempt_outbox: OutboxMessage | None = None,
     fencing_token: int | None = None,
+    budget_id: str | None = None,
+    expected_budget_version: int | None = None,
+    budget_outbox: OutboxMessage | None = None,
 ) -> dict[str, Any]:
     return store.fail_running_attempt_bundle(
         ATTEMPT_ID,
@@ -320,6 +333,9 @@ def _fail(
         error_ref=FAILURE_REF,
         graph_target_status=graph_target_status,
         attempt_outbox=attempt_outbox or _failure_event(),
+        budget_id=budget_id,
+        expected_budget_version=expected_budget_version,
+        budget_outbox=budget_outbox,
     )
 
 
@@ -394,6 +410,89 @@ def test_terminal_failure_bundle_commits_all_aggregates_and_evidence(
         tuple(row["evidence_refs"]) == (FAILURE_REF,)
         for row in terminal_events.values()
     )
+
+
+def test_terminal_failure_bundle_releases_bound_graph_budget_in_same_uow_and_replays(
+    tmp_path: Path,
+) -> None:
+    store, context = _running_store(tmp_path)
+    attempt_outbox = _failure_event()
+    budget_outbox = _budget_release_event()
+
+    committed = _fail(
+        store,
+        context["lease"],
+        attempt_outbox=attempt_outbox,
+        budget_id="budget-terminal-reconciliation",
+        expected_budget_version=1,
+        budget_outbox=budget_outbox,
+    )
+    replayed = _fail(
+        DurableTaskStore(store.db_path, clock=MutableClock()),
+        context["lease"],
+        attempt_outbox=attempt_outbox,
+        budget_id="budget-terminal-reconciliation",
+        expected_budget_version=1,
+        budget_outbox=budget_outbox,
+    )
+
+    assert committed["replayed"] is False
+    assert replayed["replayed"] is True
+    assert committed["graph"]["status"] == TaskGraphStatus.FAILED.value
+    assert committed["budget"]["status"] == BudgetReservationStatus.RELEASED.value
+    assert committed["budget"]["status_version"] == 2
+    assert replayed["budget"] == committed["budget"]
+    terminal_ts = committed["attempt"]["completed_ts_ms"]
+    assert committed["budget"]["updated_ts_ms"] == terminal_ts
+    assert [
+        row["event_type"]
+        for row in store.list_pending_outbox(limit=100)
+        if row["event_type"] == "BUDGET_RESERVATION_RELEASED"
+    ] == ["BUDGET_RESERVATION_RELEASED"]
+
+
+def test_terminal_failure_budget_outbox_fault_rolls_back_every_aggregate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store, context = _running_store(tmp_path)
+    budget_outbox = _budget_release_event()
+    insert_outbox = store._insert_outbox
+
+    def reject_budget_outbox(conn, message, **kwargs):  # noqa: ANN001, ANN202
+        if message.outbox_id == budget_outbox.outbox_id:
+            raise RuntimeError("injected budget terminal outbox failure")
+        return insert_outbox(conn, message, **kwargs)
+
+    monkeypatch.setattr(store, "_insert_outbox", reject_budget_outbox)
+    with pytest.raises(RuntimeError, match="budget terminal outbox"):
+        _fail(
+            store,
+            context["lease"],
+            budget_id="budget-terminal-reconciliation",
+            expected_budget_version=1,
+            budget_outbox=budget_outbox,
+        )
+
+    assert store.get_attempt(ATTEMPT_ID)["status"] == AttemptStatus.RUNNING.value
+    assert store.get_node(GRAPH_ID, 1, NODE_ID)["status"] == TaskNodeStatus.RUNNING.value
+    assert store.get_graph(GRAPH_ID, 1)["status"] == TaskGraphStatus.ACTIVE.value
+    assert store.reconcile_budget("budget-terminal-reconciliation")["status"] == (
+        BudgetReservationStatus.ACTIVE.value
+    )
+    assert store.list_pending_outbox(limit=100)
+    assert not [
+        row
+        for row in store.list_pending_outbox(limit=100)
+        if row["event_type"]
+        in {
+            "TASK_ATTEMPT_FAILED",
+            "TASK_NODE_FAILED",
+            "TASK_GRAPH_FAILED",
+            "TASK_LEASE_RELEASED_TERMINAL",
+            "BUDGET_RESERVATION_RELEASED",
+        }
+    ]
 
 
 def test_terminal_failure_bundle_exactly_replays_after_response_loss(

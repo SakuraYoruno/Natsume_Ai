@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
@@ -23,6 +24,7 @@ from .admission import AdmittedExecution
 from .errors import (
     GOVERNED_BUDGET_POLICY_REQUIRED,
     GOVERNED_BUDGET_STATE_CONFLICT,
+    GOVERNED_TIME_BUDGET_EXCEEDED,
     GOVERNED_BUDGET_USAGE_INVALID,
     GovernedRuntimeError,
 )
@@ -70,6 +72,38 @@ class BudgetRuntimeContext:
             "consumed": dict(self.record.get("consumed") or {}),
             "remaining": dict(self.record.get("remaining") or {}),
         }
+
+    def remaining_execution_time_ms(self) -> int | None:
+        """Return the durable worker deadline, if this graph budgets wall time.
+
+        A zero configured limit is legacy-compatible "not bounded" rather
+        than an implicit zero-millisecond deadline.  A positive configured
+        limit must always be accompanied by the canonical reconciliation
+        projection; silently falling back to a policy value would let a worker
+        exceed time already consumed by a sibling or a previous attempt.
+        """
+
+        configured_limit = int(self.policy.limits.time_ms)
+        if configured_limit <= 0:
+            return None
+        remaining = self.record.get("remaining")
+        if not isinstance(remaining, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "positive time budget has no durable remaining projection",
+            )
+        value = remaining.get("time_ms")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "durable remaining time budget is not an integer",
+            )
+        if value < 0 or value > configured_limit:
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "durable remaining time budget is outside its configured limit",
+            )
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +274,41 @@ class DurableBudgetRuntime:
             delta=BudgetAmount(tool_call_count=tool_call_count),
         )
 
+    async def guard_execution_time(
+        self,
+        context: BudgetRuntimeContext,
+        *,
+        node_id: str,
+        attempt_id: str,
+    ) -> BudgetCharge | None:
+        """Fail before dispatch when a bounded graph has no time left.
+
+        The denied one-millisecond usage is intentional: it is the durable
+        proof that this exact Attempt was blocked by ``time_ms`` before an
+        Operation reservation or worker could cross an external-effect
+        boundary.  Positive remaining time is not pre-reserved here; a worker
+        is charged for its measured elapsed time at its normal terminal edge.
+        """
+
+        remaining = context.remaining_execution_time_ms()
+        if remaining is None or remaining > 0:
+            return None
+        usage_id = _internal_usage_id(context, node_id, attempt_id, "time-guard")
+        charge = await self._charge(
+            context,
+            usage_id=usage_id,
+            charge_kind="TIME_GUARD",
+            node_id=node_id,
+            attempt_id=attempt_id,
+            delta=BudgetAmount(time_ms=1),
+        )
+        if charge.accepted or "time_ms" not in charge.exceeded_dimensions:
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "zero remaining time budget did not produce a durable time rejection",
+            )
+        return charge
+
     async def settle_worker(
         self,
         context: BudgetRuntimeContext,
@@ -264,6 +333,41 @@ class DurableBudgetRuntime:
             node_id=node_id,
             attempt_id=attempt_id,
             delta=delta,
+        )
+
+    async def settle_interrupted_worker(
+        self,
+        context: BudgetRuntimeContext,
+        *,
+        node_id: str,
+        attempt_id: str,
+        worker_started_ns: int,
+        worker_failure_reason: str,
+        time_budget_ms: int | None,
+    ) -> BudgetCharge:
+        """Settle an interrupted worker without weakening timeout evidence.
+
+        A local time guard may fire exactly at its configured boundary.  Its
+        elapsed measurement is therefore lifted one millisecond above the
+        remaining allowance, ensuring the durable ledger records a rejected
+        ``time_ms`` charge rather than an ambiguous active reservation.
+        """
+
+        elapsed_ms = max(
+            0,
+            (time.monotonic_ns() - int(worker_started_ns) + 999_999) // 1_000_000,
+        )
+        if (
+            worker_failure_reason == GOVERNED_TIME_BUDGET_EXCEEDED
+            and time_budget_ms is not None
+        ):
+            elapsed_ms = max(elapsed_ms, int(time_budget_ms) + 1)
+        return await self.settle_worker(
+            context,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            worker_commit=None,
+            elapsed_ms=elapsed_ms,
         )
 
     async def settle_worker_checkpoint(
@@ -436,11 +540,10 @@ class DurableBudgetRuntime:
                     context.budget_id,
                     expected_version=_version(record),
                     target_status=target_status.value,
-                    outbox=self._outbox(
-                        budget_id=context.budget_id,
-                        aggregate_version=_version(record) + 1,
-                        event_type=f"BUDGET_RESERVATION_{target_status.value}",
-                        discriminator=f"finalize:{target_status.value}",
+                    outbox=self.build_finalization_outbox(
+                        context,
+                        target_status=target_status,
+                        expected_version=_version(record),
                     ),
                 )
             )
@@ -456,6 +559,36 @@ class DurableBudgetRuntime:
 
     async def refresh(self, context: BudgetRuntimeContext) -> BudgetRuntimeContext:
         return context.refreshed(await self._required_reconcile(context.budget_id))
+
+    def build_finalization_outbox(
+        self,
+        context: BudgetRuntimeContext,
+        *,
+        target_status: BudgetReservationStatus,
+        expected_version: int | None = None,
+    ) -> Any:
+        """Build the exact graph-budget finalization event without mutating it.
+
+        A direct pre-reservation terminal UoW uses this immutable event while
+        it closes Attempt/Node/Graph/Lease.  Ordinary callers still pass the
+        same event through :meth:`finalize`, so response replay keeps one
+        idempotency identity across both persistence boundaries.
+        """
+
+        if target_status not in {
+            BudgetReservationStatus.CONSUMED,
+            BudgetReservationStatus.RELEASED,
+        }:
+            raise ValueError("budget final status must be CONSUMED or RELEASED")
+        version = context.version if expected_version is None else int(expected_version)
+        if version < 0:
+            raise ValueError("budget finalization version must be non-negative")
+        return self._outbox(
+            budget_id=context.budget_id,
+            aggregate_version=version + 1,
+            event_type=f"BUDGET_RESERVATION_{target_status.value}",
+            discriminator=f"finalize:{target_status.value}",
+        )
 
     async def _charge(
         self,

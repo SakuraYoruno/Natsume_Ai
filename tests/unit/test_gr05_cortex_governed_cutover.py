@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -92,8 +93,6 @@ async def test_canonical_routes_freeze_context_and_skip_all_legacy_paths(
     route: str,
 ) -> None:
     governed = _GovernedRuntime()
-    postprocess_calls: list[dict[str, Any]] = []
-
     events = [
         event
         async for event in _cortex_orchestrator_sse_generator_impl(
@@ -110,10 +109,6 @@ async def test_canonical_routes_freeze_context_and_skip_all_legacy_paths(
             metrics=object(),
             sse_fn=lambda value: dict(value),
             airlock_sanitize_input_fn=lambda value: (value, True),
-            maybe_build_contextual_session_answer_fn=lambda **_kwargs: "legacy session bypass",
-            maybe_build_contextual_style_answer_fn=lambda **_kwargs: "legacy style bypass",
-            maybe_build_previous_meaning_answer_fn=lambda **_kwargs: "legacy clarification bypass",
-            async_post_process_fn=lambda **kwargs: postprocess_calls.append(dict(kwargs)),
             prefetch_retrieval_persona_inputs_fn=lambda **_kwargs: _async_value(
                 ({"stage": "trusted"}, None, {"dominant_motive": "help"})
             ),
@@ -133,7 +128,6 @@ async def test_canonical_routes_freeze_context_and_skip_all_legacy_paths(
     ]
     assert call["llm_runtime"]["available"] is False
     assert call["motive_state"] == {"dominant_motive": "help"}
-    assert postprocess_calls == []
     assert all(
         event.get("audit_refs", {}).get("path")
         not in {
@@ -172,6 +166,37 @@ async def test_canonical_route_fails_closed_when_governed_runtime_cannot_support
     assert events[-1]["decision"] == "REJECT"
     assert events[-1]["reason_code"] == "GOVERNED_ROUTE_UNSUPPORTED"
     assert governed.calls == []
+
+
+def test_cortex_runtime_has_no_direct_chat_or_postprocess_compatibility_hooks() -> None:
+    cortex_source = (
+        Path(__file__).resolve().parents[2]
+        / "host_brain"
+        / "agent_runtime"
+        / "cortex_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    for forbidden in (
+        "maybe_build_contextual_memory_answer_fn",
+        "maybe_build_contextual_session_answer_fn",
+        "maybe_build_contextual_style_answer_fn",
+        "maybe_build_previous_meaning_answer_fn",
+        "async_post_process_fn",
+        "cortex_orchestrator:contextual_session_direct",
+        "cortex_orchestrator:contextual_style_direct",
+        "cortex_orchestrator:clarification_direct",
+        "CORTEX_RUNTIME_ROUTE_NOT_TERMINATED",
+    ):
+        assert forbidden not in cortex_source
+
+    surface_source = (
+        Path(__file__).resolve().parents[2]
+        / "host_brain"
+        / "app"
+        / "surface_reply_postprocessor.py"
+    ).read_text(encoding="utf-8")
+    assert "schedule_async_post_process" not in surface_source
+    assert "asyncio.create_task" not in surface_source
 
 
 async def _async_value(value):  # noqa: ANN001

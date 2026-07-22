@@ -34,6 +34,7 @@ from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry
 from host_brain.skills.executor_registry import (
     _verify_durable_governed_authority,
@@ -124,6 +125,8 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             command_repository=HostCommandRepository(db_path),
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
             review_continuation_store=None,
+            worker_projection_store=WorkerProjectionStore(db_path),
+            internal_agent_checkpoint_uow=None,
         )
         PROCESS_LIFE_PROVIDER.clear()
         with pytest.raises(GovernedHostAdapterError) as unavailable:

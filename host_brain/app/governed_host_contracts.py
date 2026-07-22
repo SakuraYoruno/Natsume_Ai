@@ -27,6 +27,14 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNodeStatus,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.agent_runtime.production_studio import (
+    AGENT_PRODUCTION_SKILL_IDS,
+)
+from host_brain.agent_runtime.governed_production_payload import (
+    FROZEN_NODE_EXECUTOR_PAYLOADS_KEY as _FROZEN_NODE_EXECUTOR_PAYLOADS_KEY,
+    GOVERNED_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA as _FROZEN_PRODUCTION_EXECUTOR_PAYLOAD_SCHEMA,
+    build_governed_production_executor_payload,
+)
 from host_brain.orchestration import governor_grant_ref
 from host_brain.app.governed_task_authority import (
     GOVERNED_HOST_AUTHORITY_INVALID,
@@ -54,8 +62,6 @@ _DIRECT_SKILL_BUDGET_LIMITS = BudgetAmount(
     retry_count=1,
     model_cost_micros=500_000,
 )
-
-
 def _build_frozen_context(
     *,
     request_body: Any,
@@ -343,22 +349,46 @@ def _build_contracts(
             GOVERNED_HOST_AUTHORITY_INVALID,
             "frozen_context is not a durable mapping",
         )
+    input_pack: dict[str, Any] = {
+        **safe_frozen_context,
+        "input_ref": input_ref,
+        "user_message": objective,
+        "task_text": str(intent_draft.get("task") or objective)[:_MAX_DURABLE_TEXT],
+        "person_id": str(person_id or principal_id)[:255],
+        "intent_id": str(governor_result.get("intent_id") or intent_draft.get("id") or "")[:255],
+        "intent_draft": safe_intent,
+        "emotion_context": _safe_durable_value(dict(emotion_context or {}), path="emotion_context"),
+        "render_target_lang": str(render_target_lang or "zh")[:16],
+    }
+    if target_ref in AGENT_PRODUCTION_SKILL_IDS:
+        input_pack[_FROZEN_NODE_EXECUTOR_PAYLOADS_KEY] = {
+            node_id: build_governed_production_executor_payload(
+                target_id=target_ref,
+                intent_args=(
+                    dict(safe_intent.get("args") or {})
+                    if isinstance(safe_intent.get("args"), Mapping)
+                    else {}
+                ),
+                request_id=request_ref,
+                session_id=session_ref,
+                person_id=str(person_id or principal_id)[:255],
+                user_message=objective,
+                work_order_id=work_order_id,
+                graph_id=graph_id,
+                node_id=node_id,
+                graph_revision=1,
+                business_scope=business_scope,
+                operation_fingerprint=operation_fingerprint,
+                approval_ref=grant_ref,
+                review_ref=review_ref,
+            )
+        }
     work_order = WorkOrderV3(
         work_order_id=work_order_id,
         domain="skill",
         run_mode="worker",
         objective=objective,
-        input_pack={
-            **safe_frozen_context,
-            "input_ref": input_ref,
-            "user_message": objective,
-            "task_text": str(intent_draft.get("task") or objective)[:_MAX_DURABLE_TEXT],
-            "person_id": str(person_id or principal_id)[:255],
-            "intent_id": str(governor_result.get("intent_id") or intent_draft.get("id") or "")[:255],
-            "intent_draft": safe_intent,
-            "emotion_context": _safe_durable_value(dict(emotion_context or {}), path="emotion_context"),
-            "render_target_lang": str(render_target_lang or "zh")[:16],
-        },
+        input_pack=input_pack,
         allowed_actions=(target_ref,),
         forbidden_actions=("reroute", "replan", "cross_executor_resume"),
         acceptance_criteria=(_ACCEPTANCE_CRITERION,),

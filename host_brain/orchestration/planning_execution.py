@@ -10,10 +10,15 @@ lineage.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import inspect
 from typing import Any
 
+from host_brain.agent_runtime.governed_production_payload import (
+    FROZEN_NODE_EXECUTOR_PAYLOADS_KEY,
+    build_governed_production_executor_payload,
+)
+from host_brain.agent_runtime.production_studio import AGENT_PRODUCTION_SKILL_IDS
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.orchestration.planning_admission import (
     GovernedPlanningAdmissionService,
@@ -173,6 +178,10 @@ class GovernedPlanningExecutionService:
                 PLANNING_EXECUTION_REVISION_CONFLICT,
                 "initial planning execution must compile revision 1",
             )
+        compiled = self._freeze_selected_production_skill_payloads(
+            compiled,
+            authority=authority,
+        )
         return await self._admit(result, compiled=compiled, authority=authority)
 
     async def prepare_replan(
@@ -226,6 +235,10 @@ class GovernedPlanningExecutionService:
                 PLANNING_EXECUTION_REVISION_CONFLICT,
                 "replan did not preserve lineage with exact revision + 1",
             )
+        compiled = self._freeze_selected_production_skill_payloads(
+            compiled,
+            authority=authority,
+        )
         return await self._admit(result, compiled=compiled, authority=authority)
 
     async def execute_stream(
@@ -299,6 +312,146 @@ class GovernedPlanningExecutionService:
                 PLANNING_EXECUTION_INVALID,
                 "compilation context approval_ref differs from governor grant",
             )
+
+    @staticmethod
+    def _freeze_selected_production_skill_payloads(
+        compiled: CompiledPlanningGraph,
+        *,
+        authority: PlanningExecutionAuthority,
+    ) -> CompiledPlanningGraph:
+        """Bind Plan production Skills to node-specific adapter payloads at admission.
+
+        Search and graph compilation remain domain-neutral.  Once the selected
+        path is a canonical WorkOrderV3, this Host-bound step resolves the
+        compatibility adapter for each registered production Skill and freezes
+        it into the immutable revision.  Workers may only consume this payload;
+        they never re-expand a profile or user-supplied plan step at execution
+        time.
+        """
+
+        compiled.validate()
+        graph = compiled.task_graph
+        order = compiled.work_order
+        input_pack = dict(order.input_pack or {})
+        if FROZEN_NODE_EXECUTOR_PAYLOADS_KEY in input_pack:
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "planning input may not supply frozen production executor payloads",
+            )
+        metadata = dict(order.metadata or {})
+        planning_lineage = metadata.get("planning_lineage")
+        if not isinstance(planning_lineage, Mapping):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled planning WorkOrder has no planning lineage",
+            )
+        raw_bindings = planning_lineage.get("node_bindings")
+        if not isinstance(raw_bindings, list):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled planning WorkOrder has no node binding list",
+            )
+        approved_inputs = input_pack.get("approved_candidate_inputs")
+
+        expected_node_ids = {node.node_id for node in graph.nodes}
+        seen_node_ids: set[str] = set()
+        frozen_payloads: dict[str, dict[str, Any]] = {}
+        request_id = authority.command_request_id(graph.revision)
+        for raw_binding in raw_bindings:
+            if not isinstance(raw_binding, Mapping):
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "compiled planning node binding is not a mapping",
+                )
+            node_id = str(raw_binding.get("node_id") or "").strip()
+            candidate_id = str(raw_binding.get("candidate_id") or "").strip()
+            route = str(raw_binding.get("worker_route") or "").strip().lower()
+            target_id = str(raw_binding.get("target_id") or "").strip()
+            objective = str(raw_binding.get("objective") or "").strip()
+            if not node_id or node_id not in expected_node_ids or node_id in seen_node_ids:
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "compiled planning node binding has an invalid or duplicate node_id",
+                )
+            seen_node_ids.add(node_id)
+            if route != "skill" or target_id not in AGENT_PRODUCTION_SKILL_IDS:
+                continue
+            if not isinstance(approved_inputs, Mapping):
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "compiled planning WorkOrder has no approved candidate inputs",
+                )
+            if not candidate_id or not objective:
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "production Skill binding requires candidate and objective lineage",
+                )
+            candidate_input = approved_inputs.get(candidate_id)
+            if not isinstance(candidate_input, Mapping):
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "production Skill binding has no approved candidate input",
+                )
+            candidate_route = str(candidate_input.get("route") or "").strip().lower()
+            candidate_target = str(candidate_input.get("target_id") or "").strip()
+            candidate_objective = str(candidate_input.get("objective") or "").strip()
+            intent_args = candidate_input.get("args")
+            if (
+                candidate_route != "skill"
+                or candidate_target != target_id
+                or candidate_objective != objective
+                or not isinstance(intent_args, Mapping)
+            ):
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "approved candidate input differs from the selected production Skill binding",
+                )
+            try:
+                frozen_payloads[node_id] = build_governed_production_executor_payload(
+                    target_id=target_id,
+                    intent_args=intent_args,
+                    request_id=request_id,
+                    session_id=authority.session_id,
+                    person_id=authority.principal_id,
+                    user_message=objective,
+                    work_order_id=order.root_work_order_id,
+                    graph_id=graph.graph_id,
+                    node_id=node_id,
+                    graph_revision=graph.revision,
+                    business_scope=order.business_idempotency_scope,
+                    operation_fingerprint=order.operation_fingerprint,
+                    approval_ref=str(order.approval_ref or ""),
+                    review_ref=str(order.review_ref or ""),
+                )
+            except (TypeError, ValueError) as exc:
+                raise PlanningExecutionError(
+                    PLANNING_EXECUTION_INVALID,
+                    "could not freeze the selected production Skill payload",
+                ) from exc
+        if seen_node_ids != expected_node_ids:
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled planning node bindings do not cover the immutable TaskGraph",
+            )
+        if not frozen_payloads:
+            return compiled
+
+        frozen_input_pack = {
+            **input_pack,
+            FROZEN_NODE_EXECUTOR_PAYLOADS_KEY: frozen_payloads,
+        }
+        frozen_order = replace(order, input_pack=frozen_input_pack)
+        frozen_order.validate()
+        return CompiledPlanningGraph.freeze(
+            work_order=frozen_order,
+            task_graph=graph,
+            trace_digest=compiled.trace_digest,
+            selected_candidate_ids=compiled.selected_candidate_ids,
+            virtual_state_schema=compiled.virtual_state_schema,
+            virtual_state_digest=compiled.virtual_state_digest,
+            previous_revision=compiled.previous_revision,
+            failure_evidence_refs=compiled.failure_evidence_refs,
+        )
 
     async def _admit(
         self,

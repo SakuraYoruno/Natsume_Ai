@@ -66,15 +66,13 @@ def test_run_skill_request_is_handoff_not_direct_execution() -> None:
     assert "react_scratchpad" not in result
 
 
-def test_sub_agent_request_does_not_resolve_dispatcher() -> None:
-    with patch("host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher") as get_dispatcher:
-        result = intent_agent_handler(_planned_payload(tool_id="dispatch_sub_agent"))
+def test_sub_agent_request_only_projects_governed_handoff() -> None:
+    result = intent_agent_handler(_planned_payload(tool_id="dispatch_sub_agent"))
 
-    get_dispatcher.assert_not_called()
     assert result["intent_execution_handoff"]["request_material"]["requested_tools"] == [
         "dispatch_sub_agent"
     ]
-    assert result["intent_agent_trace"]["execution_surface"] == "executive_runtime"
+    assert result["intent_agent_trace"]["execution_surface"] == "governed_runtime_admission_required"
 
 
 def test_high_safety_risk_is_preserved_for_governed_execution() -> None:
@@ -89,21 +87,19 @@ def test_high_safety_risk_is_preserved_for_governed_execution() -> None:
     assert result["intent_execution_handoff"]["request_material"]["trusted_authority"] is False
 
 
-def test_governed_direct_delegate_uses_bound_model_gateway() -> None:
+def test_legacy_direct_delegate_context_cannot_invoke_model_gateway() -> None:
     gateway = _Gateway()
 
     result = intent_agent_handler(
         {"request_id": "delegate-parent", "user_input": "2+2 等于多少？"},
         {
             "request_id": "delegate-parent",
-            "source": "executive_router_dispatch",
+            "source": "legacy_direct_dispatch",
             "gateway": gateway,
         },
     )
 
-    assert gateway.messages[0][-1]["content"] == "2+2 等于多少？"
-    assert result["agent_output"]["text"] == "2+2 等于 4。"
-    assert result["intent_agent_trace"]["mode"] == "model_backed_governed_execution_handoff"
-    assert result["intent_agent_trace"]["model_attempt"]["request_id"].startswith(
-        "delegate-parent:"
-    )
+    assert gateway.messages == []
+    assert result["intent_execution_handoff"]["side_effects_executed"] is False
+    assert result["intent_agent_trace"]["mode"] == "governed_execution_handoff"
+    assert result["intent_agent_trace"]["model_attempt"] == {}

@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
-from host_brain.executive_runtime.conversation_execution import _build_chat_input
-from host_brain.orchestration.governor_grant import governor_grant_ref
+from host_brain.app.route_execution_ports import _build_chat_input
+
+
+def _ports(*, runtime_resolver=None):
+    return SimpleNamespace(
+        resolve_surface_reply_llm_runtime=(
+            runtime_resolver or (lambda *, base_runtime: dict(base_runtime or {}))
+        ),
+        surface_reply_input_factory=lambda **kwargs: SimpleNamespace(**kwargs),
+    )
 
 
 def test_build_chat_input_preserves_gateway_voice_delivery_flags() -> None:
@@ -17,7 +24,7 @@ def test_build_chat_input_preserves_gateway_voice_delivery_flags() -> None:
     )
 
     chat_input = _build_chat_input(
-        ports=build_executive_runtime_application_ports(),
+        ports=_ports(),
         request_body=request_body,
         request_id="req-test",
         session_id="sess-test",
@@ -63,7 +70,7 @@ def test_build_chat_input_upgrades_base_runtime_to_surface_reply_runtime(monkeyp
     )
 
     chat_input = _build_chat_input(
-        ports=build_executive_runtime_application_ports(),
+        ports=_ports(runtime_resolver=_fake_resolve_surface_reply_llm_runtime),
         request_body=request_body,
         request_id="req-test",
         session_id="sess-test",
@@ -87,10 +94,9 @@ def test_build_chat_input_upgrades_base_runtime_to_surface_reply_runtime(monkeyp
     assert chat_input.llm_runtime["model_id"] == "gemini-2.5-pro"
 
 
-def test_build_chat_input_carries_only_official_approved_surface_grant() -> None:
-    governor = {"decision": "APPROVE", "intent_id": "intent-1", "ts_ms": 123}
+def test_build_chat_input_carries_no_governor_or_delivery_authority() -> None:
     chat_input = _build_chat_input(
-        ports=build_executive_runtime_application_ports(),
+        ports=_ports(),
         request_body=SimpleNamespace(),
         request_id="req-grant",
         session_id="sess-test",
@@ -107,17 +113,8 @@ def test_build_chat_input_carries_only_official_approved_surface_grant() -> None
         intent_draft={},
         trace_stage_meta={},
         sub_agent_context=None,
-        governor_result=governor,
     )
 
-    assert chat_input.governor_result == governor
-    assert chat_input.delivery_authorization == {
-        "request_id": "req-grant",
-        "governor_grant_ref": governor_grant_ref("req-grant", governor),
-        "authority_kind": "surface_governor",
-        "authority_principal_id": "person-test",
-    }
-    assert (
-        chat_input.trace_stage_meta["delivery_authorization"]
-        == chat_input.delivery_authorization
-    )
+    assert chat_input.governor_result == {}
+    assert chat_input.delivery_authorization == {}
+    assert "delivery_authorization" not in chat_input.trace_stage_meta

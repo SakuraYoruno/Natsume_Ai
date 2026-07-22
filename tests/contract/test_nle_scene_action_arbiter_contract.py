@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
-from host_brain.app.runtime_port_wiring import build_executive_runtime_application_ports
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
 from host_brain.capability_plane.production_composition import (
@@ -73,6 +73,26 @@ def _execute_skill(**kwargs):  # type: ignore[no-untyped-def]
         _LEGACY_DEGRADATION_PORT,
     )
     return _execute_skill_impl(**kwargs)
+
+
+def _skill_execution_test_ports(
+    *,
+    registry,
+    ledger,
+    token_service,
+    capability_broker,
+):  # type: ignore[no-untyped-def]
+    """Inject the low-level worker collaborators without reviving app wiring."""
+
+    return SimpleNamespace(
+        get_skill_registry=lambda: registry,
+        get_ledger=lambda: ledger,
+        get_token_service=lambda: token_service,
+        get_resource_manager=lambda *args, **kwargs: None,
+        get_episodic_store=lambda: None,
+        get_semantic_recaller=lambda: None,
+        get_capability_broker=lambda: capability_broker,
+    )
 
 
 NOW = 1_800_100_000_000
@@ -504,7 +524,12 @@ def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(
     ledger.log_governor(governor)
 
     kwargs = {
-        "ports": build_executive_runtime_application_ports(),
+        "ports": _skill_execution_test_ports(
+            registry=registry,
+            ledger=ledger,
+            token_service=token_service,
+            capability_broker=capability_broker,
+        ),
         "request_body": {},
         "request_id": "req_exec_bound_1",
         "session_id": envelope["session_id"],
