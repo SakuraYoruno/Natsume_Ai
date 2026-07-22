@@ -353,6 +353,8 @@ D19 只在 registration 显式绑定同一 `CodeBenchmarkVerificationPlan` 时�
 
 `research_benchmark_verifier.py` 实现 D20b 的机械闭合：构造时将 `ResearchTaskSnapshot`、`FrozenResearchCorpusManifest` 与 `ResearchCorpusBindingV1` 的 corpus/source id/ref/digest/tier 做精确比对；每次 `verify()` 都重新构造 `FrozenResearchCorpusLoader`，不会接收 executor 的 loader、document 或 source map。它从新读取的 bytes 校验每个 `ResearchCitationSpanV1` 的 source membership、UTF-8 byte boundary 与 SHA-256 span digest，并只输出无路径/无正文的 verifier receipt digest。语料漂移、manifest/snapshot drift、未列 source、半个 UTF-8 字符、重复 span 或错误 digest 都失败关闭。
 
+0107 `SQLiteResearchShadowLedger` 也不再只依赖“两个 arm 行已经存在”的 SQL trigger：普通 repository path 在 append 时只接受完全相同的 arm replay；terminal insert/replay 会重开 canonical registration、RunSpec 和两个 arm row，交叉核验 registration digest、随机 arm、baseline/selected plan、model/verifier JSON 与 evidence digest。任一漂移失败关闭，完全相同的 terminal replay 才返回原 receipt ref。这仍是 owner-side shadow evidence 防线；旧 schema 的 append-only 触发器没有因此变成生产 promotion authority。
+
 这不是生产 Research route、TaskGraph、Host、BrowserWorker 或网页抓取接线；没有真实模型、独立信任域 verifier、paired cohort、成本/延迟对照、收益统计、winner/promotion authority，也没有 OS/tenant/sandbox。loader 的根目录和 manifest 都是受信实验输入，其 before/open/after 检查不是 hostile concurrent replacement 的原子 TOCTOU 防线；byte-span validity 也不能据此推导事实正确性或来源独立性。因此 Research benefit 仍为 `UNPROVEN`。
 
 ### 5.2 Host Plan

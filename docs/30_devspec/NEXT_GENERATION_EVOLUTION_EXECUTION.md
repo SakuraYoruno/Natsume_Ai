@@ -254,7 +254,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - verifier 计算 claim coverage、引用有效率、主来源比例、冲突消解、成本和真实延迟；
 - 同预算比较当前 baseline 与 PlanningSearch，先 shadow，不影响用户答案。
 
-当前进度：D20a/D20b 已完成纯规划、受信 readonly-input 机械边界，以及 snapshot/manifest/source id/ref/digest/authority tier 的精确握手；citation verifier 会用新建 loader 重开每个被引用 document，并验证 UTF-8 byte offsets 与 span digest。loader 仍只检测稳定受信输入中的普通文件/摘要漂移，不是 hostile concurrent replacement 的原子 TOCTOU 防线；citation validity 也不证明事实正确性或来源独立性。它不满足本节任一“真实”验收项，`research_production_planning_benefit=UNPROVEN`。后续 D20b/D20c 必须预注册同一 workload/profile/budget 的 baseline/search 双臂，独立运行、独立验证并保存不可篡改的 source/model/output/verifier/cost/latency 证据；无真实非缓存 provider receipt 时不得把 scripted test 计入收益。
+当前进度：D20a/D20b 已完成纯规划、受信 readonly-input 机械边界，以及 snapshot/manifest/source id/ref/digest/authority tier 的精确握手；citation verifier 会用新建 loader 重开每个被引用 document，并验证 UTF-8 byte offsets 与 span digest。0107 owner 对 terminal receipt/replay 还会重开 registration、RunSpec 和两条 arm evidence，严格对齐 binding/profile/budget、plan、model、verifier 与 evidence digest；这关闭的是 shadow evidence 的语义漂移，不是收益结论。loader 仍只检测稳定受信输入中的普通文件/摘要漂移，不是 hostile concurrent replacement 的原子 TOCTOU 防线；citation validity 也不证明事实正确性或来源独立性。它不满足本节任一“真实”验收项，`research_production_planning_benefit=UNPROVEN`。后续 D20b/D20c 必须预注册同一 workload/profile/budget 的 baseline/search 双臂，独立运行、独立验证并保存不可篡改的 source/model/output/verifier/cost/latency 证据；无真实非缓存 provider receipt 时不得把 scripted test 计入收益。
 
 #### Code 第二真实领域
 

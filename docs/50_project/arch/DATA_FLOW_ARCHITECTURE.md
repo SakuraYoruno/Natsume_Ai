@@ -403,6 +403,8 @@ ResearchTaskSnapshot + manifest + ResearchCorpusBindingV1
   → fresh FrozenResearchCorpusLoader per verify()
   → reopen cited source; verify UTF-8 byte boundary + span SHA-256
   → path/body-free ResearchVerifierReceiptV1
+  → 0107 reopen registration + RunSpec + two persisted arms
+  → exact terminal receipt/replay only when plan/model/verifier/evidence digest all match
 ```
 
 `FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes。D20b 的 verifier 在构造和验证两阶段分别精确比较 snapshot、manifest、binding 及新打开 document 的 corpus/source id/ref/digest/tier；调用方不能交入 executor loader 或未经核验的有效率。它也不是 hostile concurrent replacement 的原子 TOCTOU 防线、事实正确性或来源独立性证明。D20a/D20b 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立信任域 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research benefit 仍为 `UNPROVEN`。

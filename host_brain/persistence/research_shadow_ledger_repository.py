@@ -169,7 +169,27 @@ class SQLiteResearchShadowLedger:
             raise ResearchShadowLedgerError("Research arm receipts are not bound")
         evidence = {"plan": plan.to_dict(), "model": model.to_dict(), "verifier": verifier.to_dict()}
         evidence_digest = _digest(evidence)
+        model_json = _canonical(model.to_dict())
+        verifier_json = _canonical(verifier.to_dict())
         with self._transaction() as conn:
+            existing = conn.execute(
+                """
+                SELECT arm_id, evidence_digest, model_receipt_json, verifier_receipt_json
+                FROM planning_search_research_arm_execution
+                WHERE run_id = ? AND arm_role = ?
+                """,
+                (run_id, role),
+            ).fetchone()
+            if existing is not None:
+                replay = (
+                    str(existing["arm_id"]) == plan.arm_id
+                    and str(existing["evidence_digest"]) == evidence_digest
+                    and str(existing["model_receipt_json"]) == model_json
+                    and str(existing["verifier_receipt_json"]) == verifier_json
+                )
+                if not replay:
+                    raise ResearchShadowLedgerError("Research arm execution replay drift")
+                return
             conn.execute(
                 """
                 INSERT INTO planning_search_research_arm_execution
@@ -177,7 +197,7 @@ class SQLiteResearchShadowLedger:
                  verifier_receipt_json, created_at_ms)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, role, plan.arm_id, evidence_digest, _canonical(model.to_dict()), _canonical(verifier.to_dict()), self._clock()),
+                (run_id, role, plan.arm_id, evidence_digest, model_json, verifier_json, self._clock()),
             )
 
     def complete(self, *, run_id: str, receipt: PairedResearchRunReceiptV1) -> str:
@@ -186,15 +206,155 @@ class SQLiteResearchShadowLedger:
         payload = receipt.to_dict()
         digest = _digest(payload)
         with self._transaction() as conn:
+            self._assert_terminal_receipt_bindings(conn=conn, run_id=run_id, receipt=receipt)
+            encoded = _canonical(payload)
+            existing = conn.execute(
+                """
+                SELECT receipt_digest, receipt_json
+                FROM planning_search_research_terminal_receipt
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["receipt_digest"]) != digest
+                    or str(existing["receipt_json"]) != encoded
+                ):
+                    raise ResearchShadowLedgerError("Research terminal receipt replay drift")
+                return f"research-receipt://sha256/{digest}"
             conn.execute(
                 """
                 INSERT INTO planning_search_research_terminal_receipt
                 (run_id, receipt_digest, receipt_json, production_influence_enabled, created_at_ms)
                 VALUES (?, ?, ?, 0, ?)
                 """,
-                (run_id, digest, _canonical(payload), self._clock()),
+                (run_id, digest, encoded, self._clock()),
             )
         return f"research-receipt://sha256/{digest}"
+
+    def _assert_terminal_receipt_bindings(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        run_id: str,
+        receipt: PairedResearchRunReceiptV1,
+    ) -> None:
+        """Fail closed unless a terminal receipt exactly reopens its arm evidence.
+
+        The 0107 trigger proves that two arm rows exist, but a terminal receipt
+        must also bind the same registration, RunSpec, plan identity, model
+        receipt and verifier receipt.  This owner-side check closes that
+        semantic gap without assigning the shadow ledger any promotion power.
+        """
+
+        row = conn.execute(
+            """
+            SELECT
+                run.registration_id,
+                run.baseline_arm_id,
+                run.selected_arm_id,
+                run.spec_json,
+                run.randomized_arm_order AS run_randomized_arm_order,
+                registration.binding_digest,
+                registration.profile_digest,
+                registration.budget_digest,
+                registration.registration_json
+            FROM planning_search_research_run_spec AS run
+            JOIN planning_search_research_registration AS registration
+              ON registration.registration_id = run.registration_id
+            WHERE run.run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise ResearchShadowLedgerError("Research terminal receipt run is not preregistered")
+        registration = _canonical_object(
+            row["registration_json"],
+            label="Research registration",
+        )
+        run_spec = _canonical_object(row["spec_json"], label="Research RunSpec")
+        registration_id = str(row["registration_id"])
+        if (
+            registration.get("registration_id") != registration_id
+            or run_spec.get("registration_id") != registration_id
+        ):
+            raise ResearchShadowLedgerError("Research registration and RunSpec binding drift")
+        profile = registration.get("profile")
+        if (
+            _digest(registration.get("binding")) != str(row["binding_digest"])
+            or not isinstance(profile, dict)
+            or str(profile.get("profile_digest") or "") != str(row["profile_digest"])
+            or _digest(registration.get("budget")) != str(row["budget_digest"])
+        ):
+            raise ResearchShadowLedgerError("Research registration digest binding drift")
+        if (
+            receipt.corpus_binding_digest != str(row["binding_digest"])
+            or receipt.profile_digest != str(row["profile_digest"])
+            or receipt.budget_digest != str(row["budget_digest"])
+        ):
+            raise ResearchShadowLedgerError("Research terminal receipt does not bind its registration")
+        if not bool(row["run_randomized_arm_order"]) or not receipt.randomized_arm_order:
+            raise ResearchShadowLedgerError("Research terminal receipt requires randomized paired arms")
+
+        arm_rows = {
+            str(arm["arm_role"]): arm
+            for arm in conn.execute(
+                """
+                SELECT arm_role, arm_id, evidence_digest, model_receipt_json, verifier_receipt_json
+                FROM planning_search_research_arm_execution
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchall()
+        }
+        if set(arm_rows) != {"BASELINE", "SELECTED"}:
+            raise ResearchShadowLedgerError("Research terminal receipt requires exactly two paired arms")
+        self._assert_terminal_arm_binding(
+            row=arm_rows["BASELINE"],
+            plan=_run_spec_plan(run_spec, key="baseline"),
+            expected_arm_id=str(row["baseline_arm_id"]),
+            receipt_model=receipt.baseline_model.to_dict(),
+            receipt_verifier=receipt.baseline_verifier.to_dict(),
+        )
+        self._assert_terminal_arm_binding(
+            row=arm_rows["SELECTED"],
+            plan=_run_spec_plan(run_spec, key="selected"),
+            expected_arm_id=str(row["selected_arm_id"]),
+            receipt_model=receipt.selected_model.to_dict(),
+            receipt_verifier=receipt.selected_verifier.to_dict(),
+        )
+
+    @staticmethod
+    def _assert_terminal_arm_binding(
+        *,
+        row: sqlite3.Row,
+        plan: dict[str, Any],
+        expected_arm_id: str,
+        receipt_model: dict[str, Any],
+        receipt_verifier: dict[str, Any],
+    ) -> None:
+        arm_id = str(plan.get("arm_id") or "")
+        if not arm_id or arm_id != expected_arm_id or str(row["arm_id"]) != arm_id:
+            raise ResearchShadowLedgerError("Research arm does not bind its preregistered plan")
+        model = _canonical_object(row["model_receipt_json"], label="Research model receipt")
+        verifier = _canonical_object(row["verifier_receipt_json"], label="Research verifier receipt")
+        if (
+            _digest({"plan": plan, "model": model, "verifier": verifier})
+            != str(row["evidence_digest"])
+        ):
+            raise ResearchShadowLedgerError("Research arm evidence digest drift")
+        if (
+            _canonical(receipt_model) != _canonical(model)
+            or _canonical(receipt_verifier) != _canonical(verifier)
+        ):
+            raise ResearchShadowLedgerError("Research terminal receipt does not match persisted arm evidence")
+        if (
+            str(model.get("arm_id") or "") != arm_id
+            or str(verifier.get("execution_id") or "")
+            != str(model.get("execution_id") or "")
+        ):
+            raise ResearchShadowLedgerError("Research persisted arm receipts are internally unbound")
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -220,6 +380,23 @@ class SQLiteResearchShadowLedger:
 
 def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _canonical_object(raw: Any, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(str(raw))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ResearchShadowLedgerError(f"{label} JSON is unreadable") from exc
+    if not isinstance(value, dict) or _canonical(value) != str(raw):
+        raise ResearchShadowLedgerError(f"{label} JSON is not canonical")
+    return value
+
+
+def _run_spec_plan(run_spec: dict[str, Any], *, key: str) -> dict[str, Any]:
+    value = run_spec.get(key)
+    if not isinstance(value, dict):
+        raise ResearchShadowLedgerError("Research RunSpec is missing a paired arm plan")
+    return value
 
 
 __all__ = ["RESEARCH_SHADOW_MIGRATION_ASSET_KEY", "ResearchShadowLedgerError", "SQLiteResearchShadowLedger"]

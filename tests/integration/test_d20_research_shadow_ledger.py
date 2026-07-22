@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.persistence.research_shadow_ledger_repository import SQLiteResearchShadowLedger
+from host_brain.persistence.research_shadow_ledger_repository import (
+    ResearchShadowLedgerError,
+    SQLiteResearchShadowLedger,
+)
 from host_brain.planning_search.research_benchmark_contracts import (
     PairedResearchRunReceiptV1,
     ResearchArmPlanV1,
@@ -80,6 +85,21 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
     )
     ledger.append_arm_execution(
         run_id=run_id,
+        role="BASELINE",
+        plan=baseline,
+        model=_model("baseline-execution", baseline.arm_id),
+        verifier=_verifier("baseline-execution"),
+    )
+    with pytest.raises(ResearchShadowLedgerError, match="arm execution replay drift"):
+        ledger.append_arm_execution(
+            run_id=run_id,
+            role="BASELINE",
+            plan=baseline,
+            model=_model("baseline-execution-drift", baseline.arm_id),
+            verifier=_verifier("baseline-execution-drift"),
+        )
+    ledger.append_arm_execution(
+        run_id=run_id,
         role="SELECTED",
         plan=selected,
         model=_model("selected-execution", selected.arm_id),
@@ -100,3 +120,34 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
     receipt_ref = ledger.complete(run_id=run_id, receipt=receipt)
 
     assert receipt_ref.startswith("research-receipt://sha256/")
+    assert ledger.complete(run_id=run_id, receipt=receipt) == receipt_ref
+
+    wrong_budget_receipt = PairedResearchRunReceiptV1(
+        corpus_binding_digest=binding.binding_digest,
+        profile_digest=profile.profile_digest,
+        budget_digest="f" * 64,
+        baseline_execution_id="baseline-execution",
+        selected_execution_id="selected-execution",
+        baseline_model=_model("baseline-execution", baseline.arm_id),
+        selected_model=_model("selected-execution", selected.arm_id),
+        baseline_verifier=_verifier("baseline-execution"),
+        selected_verifier=_verifier("selected-execution"),
+        randomized_arm_order=True,
+    )
+    with pytest.raises(ResearchShadowLedgerError, match="does not bind its registration"):
+        ledger.complete(run_id=run_id, receipt=wrong_budget_receipt)
+
+    drifted_receipt = PairedResearchRunReceiptV1(
+        corpus_binding_digest=binding.binding_digest,
+        profile_digest=profile.profile_digest,
+        budget_digest=budget.budget_digest,
+        baseline_execution_id="baseline-execution-drift",
+        selected_execution_id="selected-execution",
+        baseline_model=_model("baseline-execution-drift", baseline.arm_id),
+        selected_model=_model("selected-execution", selected.arm_id),
+        baseline_verifier=_verifier("baseline-execution-drift"),
+        selected_verifier=_verifier("selected-execution"),
+        randomized_arm_order=True,
+    )
+    with pytest.raises(ResearchShadowLedgerError, match="does not match persisted arm evidence"):
+        ledger.complete(run_id=run_id, receipt=drifted_receipt)
