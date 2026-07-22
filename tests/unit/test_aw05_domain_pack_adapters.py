@@ -52,11 +52,16 @@ def _governed(order: AgentWorkOrder) -> AgentWorkOrder:
 
 
 def _execute_composed(order: AgentWorkOrder, *, store: AgentArtifactStore, run_dir: Path):  # noqa: ANN201
-    from host_brain.composition.process_services import get_capability_broker
+    from host_brain.composition.process_services import (
+        get_capability_broker,
+        get_model_attempt_service,
+    )
 
     broker, runtime = _compose_production_capabilities(
         capability_broker=get_capability_broker(),
-        model_attempt_service=ApplicationModelAttemptServicePort(),
+        model_attempt_service=ApplicationModelAttemptServicePort(
+            get_model_attempt_service,
+        ),
         authority_verifier=lambda _authority, _order: None,
     )
     return _execute_worker(

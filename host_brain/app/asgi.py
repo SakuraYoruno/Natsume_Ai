@@ -300,6 +300,7 @@ def create_app() -> FastAPI:
             ledger=get_ledger,
             tool_catalog=host_services.tool_catalog,
             intent_engine=get_intent_engine,
+            model_attempt_service=host_services.model_attempt_service,
         )
     )
     governed_internal_runtime: GovernedInternalRuntime | None = None

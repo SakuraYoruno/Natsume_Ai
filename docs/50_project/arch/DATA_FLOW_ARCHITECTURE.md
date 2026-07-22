@@ -180,7 +180,7 @@ flowchart LR
     Container --> Close["closing fence → unpublish\nblock begin → exact-once close"]
 ```
 
-Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 现在把同一个 typed Host service bundle 显式传给 Lifecycle Runtime、Tribe 与 Input Runtime；三者不再回读 locator，缺依赖时稳定失败关闭。HardState 快照为 named40/116、all-form46、Container52/3/48；Lifecycle/Tribe typed bundle 快照为40/116/all-form44，当前库存为 named39/110、all-form43、Container50/3/46。Tribe 的 bind/unbind 围栏仍不提供并发 multi-app 隔离，Endocrine/Tribe/Intent/Multimodal 与多项 bundle 背后的实例仍 process-global；无Task-bound Preview的Gateway voice Effect为0；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
+Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 把同一个 typed Host service bundle 显式传给 Lifecycle Runtime、Tribe 与 Input Runtime；模型端口从Tool runtime或恢复调用点接收显式 provider，四者缺依赖均失败关闭。HardState 快照为 named40/116、all-form46、Container52/3/48；Lifecycle/Tribe为40/116/all-form44，Input为39/110/all-form43，当前库存为 named38/107、all-form42、Container50/3/46。底层实例仍可能 process-global；无Task-bound Preview的Gateway voice Effect为0；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
 
 ```mermaid
 flowchart LR
@@ -191,6 +191,7 @@ flowchart LR
     LIFE --> JOBS["Scheduler / Life jobs / snapshot"]
     TRIBE --> AGENTS["process-fenced Tribe agents"]
     INPUT --> INGRESS["Host Input / Gateway ingress"]
+    BUNDLE --> MODEL["ApplicationModelAttemptServicePort provider"]
     LOCATOR["ProcessServiceContainer"] -. "仅 composition root 解析；仍待继续删除" .-> ROOT
 ```
 

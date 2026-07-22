@@ -434,7 +434,9 @@ def runtime_lifespan(
                         push_deliveries=True,
                         skill_ids={"agent_lightnovel_recommender"},
                         capability_broker=lifecycle_services.capability_broker(),
-                        model_attempt_service=ApplicationModelAttemptServicePort(),
+                        model_attempt_service=ApplicationModelAttemptServicePort(
+                            lifecycle_services.model_attempt_service,
+                        ),
                         authority_verifier=verify_durable_production_authority,
                     )
                 )

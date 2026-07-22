@@ -21,6 +21,9 @@ from host_brain.app.input_runtime_composition import (
 from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
 )
+from host_brain.app.model_provider_composition import (
+    ApplicationModelAttemptServicePort,
+)
 from host_brain.app.tribe_composition import build_tribe_application_ports
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.lifecycle_runtime.runtime_snapshot import (
@@ -223,6 +226,18 @@ def test_missing_input_host_bundle_fails_closed_without_locator_fallback() -> No
         match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
     ):
         input_ports.notify_user_interaction()
+
+
+def test_model_attempt_port_uses_injected_provider_and_fails_closed_without_it() -> None:
+    service = SimpleNamespace(prompt_registry=object())
+    port = ApplicationModelAttemptServicePort(lambda: service)
+
+    assert port.prompt_registry is service.prompt_registry
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_MODEL_ATTEMPT_PROVIDER_NOT_INJECTED",
+    ):
+        ApplicationModelAttemptServicePort().prompt_registry
 
 
 def test_hard_state_is_app_local_and_never_writes_bootstrap_environment(
@@ -664,9 +679,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 39
-    assert sum(named_import_modules.values()) == 110
-    assert len(all_import_modules) == 43
+    assert len(named_import_modules) == 38
+    assert sum(named_import_modules.values()) == 107
+    assert len(all_import_modules) == 42
     assert (
         ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
     ) not in all_import_modules
@@ -675,6 +690,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
     ) not in all_import_modules
     assert (
         ROOT / "host_brain" / "app" / "input_runtime_composition.py"
+    ) not in all_import_modules
+    assert (
+        ROOT / "host_brain" / "app" / "model_provider_composition.py"
     ) not in all_import_modules
     assert ROOT / "host_brain" / "app" / "http_hooks.py" not in all_import_modules
     asgi_imports = named_import_modules[ROOT / "host_brain" / "app" / "asgi.py"]

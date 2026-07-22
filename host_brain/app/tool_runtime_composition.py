@@ -50,6 +50,7 @@ class GovernedHostToolRuntimeDependencies:
     ledger: Callable[[], Any]
     tool_catalog: Callable[[], ToolCatalog]
     intent_engine: Callable[[], IntentDecisionEngine]
+    model_attempt_service: Callable[[], Any]
 
 
 @dataclass(slots=True)
@@ -118,7 +119,9 @@ class GovernedHostToolRuntimeComposition:
             skill_registry=dependencies.skill_registry(),
             token_service=dependencies.token_service(),
             capability_broker=dependencies.capability_broker(),
-            model_attempt_service=ApplicationModelAttemptServicePort(),
+            model_attempt_service=ApplicationModelAttemptServicePort(
+                dependencies.model_attempt_service,
+            ),
             production_authority_verifier=verify_durable_production_authority,
             resource_manager=dependencies.resource_manager(create_if_missing=False),
             episodic_store=episodic_store,

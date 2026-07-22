@@ -563,7 +563,7 @@
       "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state", "obs_metrics_collector", "query_projection_store"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
       "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state", "get_obs_metrics_collector", "get_query_projection_store", "peek_query_projection_store"],
-      "boundary": "COMBINED_CURRENT_IS_39_MODULES_110_NAMES_43_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_REMAINS"
+      "boundary": "COMBINED_CURRENT_IS_38_MODULES_107_NAMES_42_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_REMAINS"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_DURABLE_RUNTIME_FENCED_HARD_STATE_AND_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
@@ -2213,7 +2213,7 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition now consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI and no longer import process_services; missing providers fail closed instead of falling back globally. Current inventory is 39 named-import modules / 110 imported names / 43 all-form consumer modules, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal or proof that bundle-backed Tribe, Endocrine, Memory, Intent or Multimodal services are app-local. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI; ApplicationModelAttemptServicePort now also requires an injected provider in Tool runtime and interrupted-job recovery. These business adapters no longer import process_services and missing providers fail closed. Current inventory is 38 named-import modules / 107 imported names / 42 all-form consumer modules, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal or proof that bundle-backed services are app-local. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
       "typed_host_service_bundle_local_regression": {
         "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
         "initial_result": "46_PASSED_4_STALE_FIXTURE_OR_CONTRACT_FAILURES",
@@ -2238,6 +2238,17 @@
         "provider_identity_runtime_tested": true,
         "missing_bundle_fail_closed_runtime_tested": true,
         "unpreviewed_voice_effects": 0,
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_canary": "NOT_RUN",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+      },
+      "model_attempt_port_injection_local_regression": {
+        "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
+        "broad_result": "103_PASSED_4_UNRELATED_STALE_TASK_RUNTIME_FIXTURE_FAILURES_BEFORE_MODEL_PORT_INVOCATION",
+        "final_passed": 99,
+        "final_duration_seconds": 24.03,
+        "provider_identity_runtime_tested": true,
+        "missing_provider_fail_closed_runtime_tested": true,
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "production_canary": "NOT_RUN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
