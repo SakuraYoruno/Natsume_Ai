@@ -298,7 +298,21 @@ class ResearchVerifierReceiptV1:
 
     @property
     def structurally_eligible(self) -> bool:
-        return self.citation_coverage >= 0.0 and self.citation_validity >= 0.0
+        """Whether this receipt clears the minimum D20 citation evidence floor.
+
+        A structurally well-formed zero-citation receipt is still useful as a
+        failed experiment record, but it must never make an external paired
+        run benefit-eligible.  The frozen Research acceptance protocol
+        requires non-empty, fully accounted citations with at least 0.95
+        coverage and validity before later cohort statistics can consider it.
+        """
+
+        return (
+            self.citation_count > 0
+            and self.cited_span_count == self.citation_count
+            and self.citation_coverage >= 0.95
+            and self.citation_validity >= 0.95
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

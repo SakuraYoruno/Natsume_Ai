@@ -81,6 +81,28 @@ def test_d20b_scripted_pair_is_structural_only_and_never_benefit_eligible() -> N
     assert pair.to_dict()["production_influence_enabled"] is False
 
 
+def test_d20b_zero_or_low_validity_citations_are_not_benefit_eligible() -> None:
+    empty = ResearchVerifierReceiptV1(
+        execution_id="empty-citations",
+        citation_count=0,
+        cited_span_count=0,
+        citation_coverage=0.0,
+        citation_validity=0.0,
+        evidence_digest="d" * 64,
+    )
+    low_validity = ResearchVerifierReceiptV1(
+        execution_id="low-validity",
+        citation_count=2,
+        cited_span_count=2,
+        citation_coverage=1.0,
+        citation_validity=0.94,
+        evidence_digest="e" * 64,
+    )
+
+    assert empty.structurally_eligible is False
+    assert low_validity.structurally_eligible is False
+
+
 def test_d20b_rejects_cache_and_forged_external_attestation() -> None:
     with pytest.raises(ResearchBenchmarkContractError):
         ResearchExecutionProfileV1(

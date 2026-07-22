@@ -378,7 +378,7 @@ frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
 
 该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
-### 4.9 D20a Research 冻结语料 pure-shadow 流
+### 4.9 D20a/D20b Research 冻结语料与机械 citation verifier 流
 
 ```text
 ResearchTaskSnapshot
@@ -397,9 +397,15 @@ trusted experiment root + FrozenResearchCorpusManifest
   → 读取前后 file identity + byte-count + digest checks
   → trusted private experiment consumer
   → public receipt: source_id/ref/digest/size/authority only
+
+ResearchTaskSnapshot + manifest + ResearchCorpusBindingV1
+  → exact corpus/source id/ref/digest/tier handshake
+  → fresh FrozenResearchCorpusLoader per verify()
+  → reopen cited source; verify UTF-8 byte boundary + span SHA-256
+  → path/body-free ResearchVerifierReceiptV1
 ```
 
-`FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes；但 D20a 尚未把 planner snapshot 与 manifest/document 的 corpus/source id/ref/digest/tier 精确绑定，也不是 hostile concurrent replacement 的原子 TOCTOU 防线或来源独立性证明。D20a 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research benefit 仍为 `UNPROVEN`。
+`FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes。D20b 的 verifier 在构造和验证两阶段分别精确比较 snapshot、manifest、binding 及新打开 document 的 corpus/source id/ref/digest/tier；调用方不能交入 executor loader 或未经核验的有效率。它也不是 hostile concurrent replacement 的原子 TOCTOU 防线、事实正确性或来源独立性证明。D20a/D20b 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立信任域 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research benefit 仍为 `UNPROVEN`。
 
 ### 4.10 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
 

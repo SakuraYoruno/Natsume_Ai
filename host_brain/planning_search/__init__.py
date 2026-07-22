@@ -55,6 +55,11 @@ from .research_benchmark_corpus import (
     ResearchCorpusDocument,
     ResearchCorpusManifestEntry,
 )
+from .research_benchmark_verifier import (
+    RESEARCH_CITATION_VERIFIER_ID,
+    ResearchCitationVerificationError,
+    ResearchCitationVerifier,
+)
 from .research_domain import (
     ResearchCognitiveRanker,
     ResearchMCTSCondition,
@@ -104,6 +109,7 @@ __all__ = [
     "CODE_BENCHMARK_LEDGER_SCHEMA",
     "CODE_BENCHMARK_RECEIPT_STATUS",
     "RESEARCH_BENCHMARK_CORPUS_MODE",
+    "RESEARCH_CITATION_VERIFIER_ID",
     "RESEARCH_BENCHMARK_SCHEMA",
     "RESEARCH_EVIDENCE_CLASSES",
     "RESEARCH_DOMAIN",
@@ -141,6 +147,8 @@ __all__ = [
     "ResearchBenchmarkContractError",
     "ResearchArmPlanV1",
     "ResearchCitationSpanV1",
+    "ResearchCitationVerificationError",
+    "ResearchCitationVerifier",
     "ResearchCorpusBindingV1",
     "ResearchExecutionBudgetV1",
     "ResearchExecutionProfileV1",
