@@ -224,7 +224,7 @@ class CoreSettings(BaseSettings):
         alias="HOST_TASK_TERMINAL_RECONCILIATION_OPERATOR_ENABLED",
     )
     task_terminal_reconciliation_auto_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="HOST_TASK_TERMINAL_RECONCILIATION_AUTO_ENABLED",
     )
     task_reconciliation_ed25519_public_keys_json: str = Field(
@@ -279,6 +279,13 @@ class CoreSettings(BaseSettings):
         ):
             raise ValueError(
                 "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_EFFECT_RECONCILIATION"
+            )
+        if (
+            self.task_graph_cancellation_operator_enabled
+            and not self.task_terminal_reconciliation_operator_enabled
+        ):
+            raise ValueError(
+                "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_TERMINAL_RECONCILIATION"
             )
         if (
             self.task_runtime_bounded_fanout_enabled
@@ -442,7 +449,7 @@ class CoreSettings(BaseSettings):
                 domain=domain,
                 field_name="task_terminal_reconciliation_auto_enabled",
                 env_key="HOST_TASK_TERMINAL_RECONCILIATION_AUTO_ENABLED",
-                default_value=False,
+                default_value=True,
                 current_value=s.task_terminal_reconciliation_auto_enabled,
                 is_required=False,
             ),

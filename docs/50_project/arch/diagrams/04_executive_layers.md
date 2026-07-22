@@ -126,4 +126,4 @@ stateDiagram-v2
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS`：新生产 Graph 已以 0090/0091 原子收口失败/成功；0092 verified cancellation、0093 delivery、0094 cancellation continuation、0095 revisioned identity、0096 Review continuation 与 0097 grant uniqueness已有证据。Cancellation Operator authority/入口为 `WIRED_DEFAULT_OFF`；bounded fan-out与cancellation仍 OFF。完整业务对账、历史修复、general/multi-node recovery、部署凭据与真实 canary仍缺，不能宣称 Lane B 或完整架构完成。
+Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_ATOMIC_DEFAULT_B5C / NE01_IN_PROGRESS`：新生产 Graph 已以 0090/0091 原子收口失败/成功；0092～0097 的 cancellation、delivery、continuation、revision、Review 与 grant authority 已有证据。0099 exact auto 默认开启且只处理 `EXACT_REPAIRABLE`；Cancellation Operator 仍为 `WIRED_DEFAULT_OFF`，启用时强制 Operation/Effect/Terminal reconciliation 全开，并要求共享 Secure Ingress verifier、Gateway/BFF/UI 与 verification-only keyring。bounded fan-out、部署凭据、真实 canary、general/multi-node recovery 和完整 Workspace/Composition 仍缺，不能宣称 Lane B 或完整架构完成。

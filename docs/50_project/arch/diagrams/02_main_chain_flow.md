@@ -224,7 +224,7 @@ flowchart TD
     style INPROGRESS fill:#fff3cd,stroke:#a87500
 ```
 
-0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；0098 只处理 Effect 不确定性。0099 另行冻结 append-only case/proof/supersession，readiness 比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec。Classifier 要求唯一 0090、完整 0091/0092 validator 与 exact failure Outbox refs。已 inventoried 未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；旧 case 只能经 replacement/supersession 最终落到可信 proof。System proof 以 case 时间跨进程收敛；healthy closure 仅在历史未决 + current healthy 时生成 signed `NONE` 且零业务写。这不是通用恢复器；两个入口默认 OFF，外部 deployment inventory/key lifecycle/canary未知，整体保持 `PRODUCTION_OFF / CANARY_NOT_RUN`。
+0090/B4 与 0091/B5 的既有语义保持不变。0092 intent/decision 仍是取消业务 authority；0098 只处理 Effect 不确定性。0099 另行冻结 append-only case/proof/supersession，readiness 比较 3 table/4 index/10 trigger canonical SQL 并复核 Python codec。已 inventoried 未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget writer，仅 0099 UoW bypass。隔离真实 SQLite restart canary 已证明默认 exact-auto 修复唯一 FAILED 半状态，同时 signed-required CANCELLED 不被自动改写并阻断 readiness。这不是通用恢复器；Operator HTTP、Operation/Effect、部署 inventory/key lifecycle canary 未运行，取消整体仍保持 `PRODUCTION_OFF`。
 
 ## Plan 分支的真实边界
 

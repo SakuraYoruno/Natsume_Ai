@@ -884,6 +884,9 @@ def create_app() -> FastAPI:
                     effect_reconciliation_enabled=(
                         effect_reconciliation_operator_enabled
                     ),
+                    terminal_reconciliation_enabled=(
+                        terminal_reconciliation_operator_enabled
+                    ),
                     command_ingress=command_ingress,
                     security=security,
                 )

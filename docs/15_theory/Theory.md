@@ -703,6 +703,8 @@ Lease 不是“某个逻辑 worker 名称曾经拥有任务”，而是“某次
 
 worker 只能返回 authority-free result 与有限 effect descriptor。可信 Acceptance compiler 从冻结的 HostCommand/WorkOrder 重建 person、session、graph、attempt、destination 和授权字段，再原子写 durable effect intents。
 
+确定性修复应自动收敛，歧义修复必须人工签名：从 canonical ledger 可完整重算且唯一的 terminal half-state 应在启动期执行 exact replay；涉及未知副作用、结构漂移或 competing authority 时必须保持 fence，并要求受认证 Operator proof，不能以“默认关闭”长期积累可确定修复项。
+
 这让系统具备以下性质：
 
 - admission 失败不会提前留下成功记忆；
@@ -911,3 +913,5 @@ Natsume 的“生命感”不应建立在模型更会表演上，而应建立在
 ```
 
 任何一层脱离其它层独自膨胀，都会产生结构性风险：情感越权、记忆污染、人格漂移、规划空转或执行伪完成。下一代架构的核心不是继续堆模块，而是让这些层通过明确 authority、证据和单向数据流形成一个可长期运行的整体。
+
+终态恢复同样遵守“证据先于动作”。只有可由 canonical Graph、Attempt、Lease、Budget 和 Outbox 唯一重建的失败半状态，才允许系统证据自动修复；需要人类归因的取消或未知副作用必须继续围栏，不能因为重启而猜测成功或盲目重放。当前真实 SQLite canary 已验证这两类状态在同一次恢复中分流，但签名 Operator 与外部 Effect 仍须独立验收。

@@ -77,6 +77,7 @@ def test_disabled_graph_cancellation_operator_has_no_startup_dependency() -> Non
         enabled=False,
         operation_reconciliation_enabled=False,
         effect_reconciliation_enabled=False,
+        terminal_reconciliation_enabled=False,
         command_ingress=None,
         security=None,
     )
@@ -92,6 +93,7 @@ def test_graph_cancellation_operator_requires_enforced_ingress(mode) -> None:
             enabled=True,
             operation_reconciliation_enabled=True,
             effect_reconciliation_enabled=True,
+            terminal_reconciliation_enabled=True,
             command_ingress=SimpleNamespace(mode=mode),
             security=None,
         )
@@ -121,6 +123,7 @@ def test_graph_cancellation_operator_requires_executable_gateway(
             enabled=True,
             operation_reconciliation_enabled=True,
             effect_reconciliation_enabled=True,
+            terminal_reconciliation_enabled=True,
             command_ingress=SimpleNamespace(mode="ENFORCE"),
             security=SimpleNamespace(obs_command_composition=composition),
         )
@@ -131,6 +134,7 @@ def test_graph_cancellation_operator_accepts_complete_startup_authority() -> Non
         enabled=True,
         operation_reconciliation_enabled=True,
         effect_reconciliation_enabled=True,
+        terminal_reconciliation_enabled=True,
         command_ingress=SimpleNamespace(mode=SimpleNamespace(value="ENFORCE")),
         security=SimpleNamespace(
             obs_command_composition=SimpleNamespace(
@@ -151,6 +155,7 @@ def test_graph_cancellation_operator_requires_operation_reconciliation() -> None
             enabled=True,
             operation_reconciliation_enabled=False,
             effect_reconciliation_enabled=True,
+            terminal_reconciliation_enabled=True,
             command_ingress=None,
             security=None,
         )
@@ -165,6 +170,22 @@ def test_graph_cancellation_operator_requires_effect_reconciliation() -> None:
             enabled=True,
             operation_reconciliation_enabled=True,
             effect_reconciliation_enabled=False,
+            terminal_reconciliation_enabled=True,
+            command_ingress=None,
+            security=None,
+        )
+
+
+def test_graph_cancellation_operator_requires_terminal_reconciliation() -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_TERMINAL_RECONCILIATION",
+    ):
+        asgi._assert_graph_cancellation_operator_startup(
+            enabled=True,
+            operation_reconciliation_enabled=True,
+            effect_reconciliation_enabled=True,
+            terminal_reconciliation_enabled=False,
             command_ingress=None,
             security=None,
         )
