@@ -308,6 +308,7 @@ def _effect_descriptor(
         "conversation.user_turn": 1,
         "conversation.preference_signal": 1,
         "host.sys_mode_transition": 4,
+        "task.terminal_reconciliation": 4,
         "life.conversation_turn_recorded": 2,
         "life.foreground_completed": 2,
         "surface.reply_delivery": 3,

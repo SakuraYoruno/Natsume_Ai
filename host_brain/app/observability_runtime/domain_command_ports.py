@@ -29,9 +29,6 @@ from host_brain.task_runtime.graph_cancellation_operation_reconciliation import 
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationError,
 )
-from host_brain.task_runtime.terminal_state_reconciliation import (
-    TerminalStateReconciliationError,
-)
 from host_brain.observability.operator_command_gateway import operator_runtime_value
 from host_brain.runtime.degradation_authority import (
     DegradationCapabilityPort,
@@ -58,16 +55,18 @@ DomainHandler = Callable[[Mapping[str, Any], str], Any]
 # directly instead of admitting an immutable TaskGraph.  Secure Ingress proves
 # who asked; it is not an exact node-bound Preview Receipt.  Keep them visibly
 # fail-closed until NE-01 gives each command a Governed Operator route.
-GOVERNED_OPERATOR_COMMAND_IDS = frozenset(
-    {"scheduler.task.trigger", "sys_mode.switch"}
-)
+GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
+    "scheduler.task.trigger",
+    "sys_mode.switch",
+    "task_terminal.reconcile",
+})
 BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     spec.command_id
     for spec in DEFAULT_OBS_COMMAND_SPECS
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 35
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 34
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -412,83 +411,15 @@ def _forge_runtime_match(payload: Mapping[str, Any], request_id: str) -> Any:
     )
 
 
-def _canon_payload(payload: Mapping[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
-    return {field: payload[field] for field in fields if field in payload}
-
-
-def _canon_submit(
-    payload: Mapping[str, Any],
+def _blocked_legacy_operator_handler(
+    _payload: Mapping[str, Any],
     _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
 ) -> Any:
-    from host_brain.app import canon_routes
+    """Keep manifest coverage without retaining a dormant domain writer."""
 
-    body = canon_routes.CanonProposalSubmitRequest(**_canon_payload(payload, (
-        "proposal_id", "target_doc_id", "proposed_title", "proposed_tags",
-        "proposed_body", "proposer_node_id", "summary",
-    )))
-    return canon_routes.submit_proposal(body, _route_ports=route_ports)
-
-
-def _canon_approve(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    from host_brain.app import canon_routes
-
-    proposal_id = _required_text(payload, "proposal_id")
-    body = canon_routes.CanonProposalApproveRequest(**_canon_payload(payload, (
-        "apply_id", "subject_version", "subject_hash", "target_doc_id",
-        "base_version", "approval_token_ref", "actor_id", "session_id",
-        "trace_id", "evidence_refs",
-    )))
-    return canon_routes.approve_proposal(
-        proposal_id,
-        body,
-        _route_ports=route_ports,
-    )
-
-
-def _canon_reject(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    from host_brain.app import canon_routes
-
-    proposal_id = _required_text(payload, "proposal_id")
-    body = canon_routes.CanonProposalRejectRequest(**_canon_payload(payload, (
-        "reason", "rejector_node_id",
-    )))
-    return canon_routes.reject_proposal(
-        proposal_id,
-        body,
-        _route_ports=route_ports,
-    )
-
-
-def _canon_rollback(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    from host_brain.app import canon_routes
-
-    proposal_id = _required_text(payload, "proposal_id")
-    body = canon_routes.CanonProposalRollbackRequest(**_canon_payload(payload, (
-        "apply_id", "subject_version", "subject_hash", "target_doc_id",
-        "base_version", "approval_token_ref", "actor_id", "session_id",
-        "trace_id", "evidence_refs",
-    )))
-    return canon_routes.rollback_proposal(
-        proposal_id,
-        body,
-        _route_ports=route_ports,
+    raise ObsCommandPortExecutionError(
+        "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+        side_effects_may_have_run=False,
     )
 
 
@@ -781,57 +712,17 @@ async def _task_effect_reconcile(
 
 async def _task_terminal_reconcile(
     payload: Mapping[str, Any],
-    _request_id: str,
+    request_id: str,
 ) -> Any:
-    del _request_id
-    service = operator_runtime_value("task_terminal_reconciliation_command_service")
-    reconcile = getattr(service, "reconcile_terminal_state", None)
+    if operator_runtime_value(
+        "task_terminal_reconciliation_operator_enabled"
+    ) is not True:
+        raise ObsDomainCommandError("OBS_TASK_TERMINAL_RECONCILIATION_DISABLED")
+    runtime = operator_runtime_value("governed_operator_runtime")
+    reconcile = getattr(runtime, "execute_terminal_reconciliation", None)
     if not callable(reconcile):
         raise ObsDomainCommandError("OBS_TASK_TERMINAL_RECONCILIATION_UNAVAILABLE")
-    target_graph_status = _optional_text(payload, "target_graph_status")
-    target_budget_status = _optional_text(payload, "target_budget_status")
-    try:
-        result = reconcile(
-            case_id=_required_text(payload, "case_id"),
-            expected_case_snapshot_sha256=_required_text(
-                payload,
-                "expected_case_snapshot_sha256",
-            ),
-            expected_subject_snapshot_sha256=_required_text(
-                payload,
-                "expected_subject_snapshot_sha256",
-            ),
-            action=_required_text(payload, "action").upper(),
-            target_graph_status=(
-                target_graph_status.upper()
-                if target_graph_status is not None
-                else None
-            ),
-            target_budget_status=(
-                target_budget_status.upper()
-                if target_budget_status is not None
-                else None
-            ),
-            reconciler_actor_id=_required_text(payload, "reconciler_actor_id"),
-            issued_ts_ms=int(payload["issued_ts_ms"]),
-            attestation_ref=_required_text(payload, "attestation_ref"),
-            attestation_key_id=_required_text(payload, "attestation_key_id"),
-            attestation_signature=_required_text(payload, "attestation_signature"),
-        )
-        if inspect.isawaitable(result):
-            result = await result
-    except TerminalStateReconciliationError as exc:
-        raise ObsCommandPortExecutionError(
-            exc.reason_code,
-            side_effects_may_have_run=exc.side_effects_may_have_run,
-        ) from exc
-    if not isinstance(result, Mapping):
-        raise ObsDomainCommandError("OBS_TASK_TERMINAL_RECONCILIATION_RESULT_INVALID")
-    return {
-        "success": True,
-        "side_effects_executed": True,
-        "reconciliation": dict(result),
-    }
+    return await reconcile(payload, request_id)
 
 
 def _task_review_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
@@ -929,10 +820,10 @@ _HANDLERS: Mapping[str, DomainHandler] = {
     "sys_mode.auto_rules.update": _sysmode_auto_rules,
     "sys_mode.event.submit": _sysmode_event,
     "capability_forge.runtime.match": _forge_runtime_match,
-    "canon.proposal.submit": _canon_submit,
-    "canon.proposal.approve": _canon_approve,
-    "canon.proposal.reject": _canon_reject,
-    "canon.proposal.rollback": _canon_rollback,
+    "canon.proposal.submit": _blocked_legacy_operator_handler,
+    "canon.proposal.approve": _blocked_legacy_operator_handler,
+    "canon.proposal.reject": _blocked_legacy_operator_handler,
+    "canon.proposal.rollback": _blocked_legacy_operator_handler,
     "scheduler.task.enable": _scheduler_enable,
     "scheduler.task.disable": _scheduler_disable,
     "scheduler.task.trigger": _scheduler_trigger,
@@ -953,10 +844,6 @@ _HANDLERS: Mapping[str, DomainHandler] = {
 
 
 _ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
-    "canon.proposal.submit": _canon_submit,
-    "canon.proposal.approve": _canon_approve,
-    "canon.proposal.reject": _canon_reject,
-    "canon.proposal.rollback": _canon_rollback,
     "tool.execute": _tool_execute,
     "bond.event.submit": _bond_event,
     "sys_mode.switch": _sysmode_switch,

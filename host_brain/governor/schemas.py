@@ -31,6 +31,7 @@ ACTION_ALLOWLIST = {
     # Server-owned Operator control intent.  It is not a discoverable Skill;
     # the action exists only so Governor can bind an exact typed payload.
     "operator_sys_mode_transition",
+    "operator_task_terminal_reconciliation",
     "work_code",
     "work_translate",
 }
@@ -90,6 +91,18 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "target_mode": str,
             "source": str,
             "reason": str,
+        },
+        "optional": {},
+    },
+    "operator_task_terminal_reconciliation": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "case_id": str,
+            "signed_command_ref": str,
+            "signed_command_sha256": str,
         },
         "optional": {},
     },

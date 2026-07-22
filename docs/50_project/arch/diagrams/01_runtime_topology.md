@@ -61,7 +61,7 @@ flowchart LR
     TERMQUERY -->|"mode=ro + query_only"| TERMINAL
     OP --> MON --> OBS
     MON -.->|"Operator BFF: task_graph.cancel\nexact revision；默认 OFF"| HOST
-    MON -.->|"task_terminal.reconcile\nENFORCE + Gateway + public key；默认 OFF"| HOST
+    MON -.->|"task_terminal.reconcile\nSecure Ingress → 0119 ref → TaskGraph/Review/Acceptance；默认 OFF"| HOST
     EDGE --> PET
     HOST -."static/compat hosting".-> MON
 ```

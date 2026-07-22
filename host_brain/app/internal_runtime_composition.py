@@ -228,10 +228,8 @@ async def activate_internal_runtime(
         if effect_reconciliation_operator_enabled
         else None
     )
-    application.state.task_terminal_reconciliation_command_service = (
-        task_runtime.terminal_reconciliation_service
-        if terminal_reconciliation_operator_enabled
-        else None
+    application.state.task_terminal_reconciliation_operator_enabled = bool(
+        terminal_reconciliation_operator_enabled
     )
     application.state.task_terminal_reconciliation_read_authority = (
         terminal_reconciliation_read_authority

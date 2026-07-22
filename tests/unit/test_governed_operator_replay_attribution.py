@@ -231,6 +231,7 @@ async def test_replay_a_uses_committed_effect_after_newer_request_b_changed_mode
         governor_grants=SimpleNamespace(require=lambda **_kwargs: governor),
         review_store=SimpleNamespace(),
         task_store=task_store,
+        terminal_operator_command_store=SimpleNamespace(read=lambda _ref: {}),
         mode_transition_service_provider=lambda: mode_service,
         secure_ingress_authority_resolver=SimpleNamespace(
             resolve_committed_authority_by_audit=(

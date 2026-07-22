@@ -574,6 +574,10 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
     # authority instead of being nominated by an ingress caller.
     builtin_risk = {
         "operator_sys_mode_transition": 4,
+        # Risk 5 is a non-overridable Intent block.  Signed terminal repair is
+        # high risk but deliberately reviewable; the eventual Acceptance
+        # Effect remains risk 5 and requires an exact Action Preview.
+        "operator_task_terminal_reconciliation": 4,
     }.get(action_name)
     if builtin_risk is not None:
         return builtin_risk

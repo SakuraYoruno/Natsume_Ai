@@ -261,6 +261,9 @@ def _build_fake_container(
         scheduler_result_repository_builder=build_scheduler_result_repository,
         event_store_builder=build_event_store,
         outbox_publisher_builder=build_publisher,
+        terminal_operator_command_store_builder=(
+            lambda _db_path: SimpleNamespace(read=lambda _ref: {})
+        ),
         authenticated_outcome_lookup=authenticated_outcome_lookup,
     )
 
@@ -399,6 +402,9 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
             canonical_db_path=path,
             migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
             task_store_builder=build_store,
+            terminal_operator_command_store_builder=(
+                lambda _path: SimpleNamespace(read=lambda _ref: {})
+            ),
             review_store_builder=lambda _path: pytest.fail(
                 "review construction must not run after recovery failure"
             ),
@@ -474,6 +480,9 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
             canonical_db_path=path,
             migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
             task_store_builder=build_store,
+            terminal_operator_command_store_builder=(
+                lambda _path: SimpleNamespace(read=lambda _ref: {})
+            ),
             review_store_builder=build_review_store,
             review_continuation_store_builder=build_review_continuation_store,
             worker_projection_store_builder=build_worker_projection_store,
