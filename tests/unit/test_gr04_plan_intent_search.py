@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import pytest
 
+from host_brain.contracts.agent_runtime.contract_errors import PLAN_CYCLE
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.orchestration.plan_intent_search import (
     PLAN_INTENT_GRAPH_INVALID,
@@ -231,38 +232,40 @@ def test_plan_compiler_freezes_context_in_root_work_order_without_mutating_inten
     assert compiled.work_order.input_pack["emotion_snapshot"] == {"mood_state": "focused"}
 
 
-@pytest.mark.parametrize(
-    "steps",
-    [
-        (
-            _step(
-                "a",
-                route="skill",
-                target_id="browser_research",
-                step_index=1,
-                dependencies=["b"],
-            ),
-            _step(
-                "b",
-                route="delegate",
-                target_id="intent_agent",
-                step_index=2,
-                dependencies=["a"],
-            ),
+def test_cycle_fails_closed_with_canonical_plan_cycle_reason() -> None:
+    intent, governor = _approved_plan(
+        _step(
+            "a",
+            route="skill",
+            target_id="browser_research",
+            step_index=1,
+            dependencies=["b"],
         ),
-        (
-            _step(
-                "a",
-                route="skill",
-                target_id="browser_research",
-                step_index=1,
-                dependencies=["missing"],
-            ),
+        _step(
+            "b",
+            route="delegate",
+            target_id="intent_agent",
+            step_index=2,
+            dependencies=["a"],
         ),
-    ],
-)
-def test_cycle_and_unknown_dependencies_fail_closed(steps: tuple[dict, ...]) -> None:
-    intent, governor = _approved_plan(*steps)
+    )
+
+    with pytest.raises(PlanIntentSearchError) as caught:
+        build_plan_intent_search(intent, governor_result=governor)
+
+    assert caught.value.reason_code == PLAN_CYCLE
+
+
+def test_unknown_dependency_fails_closed_as_graph_invalid() -> None:
+    intent, governor = _approved_plan(
+        _step(
+            "a",
+            route="skill",
+            target_id="browser_research",
+            step_index=1,
+            dependencies=["missing"],
+        ),
+    )
 
     with pytest.raises(PlanIntentSearchError) as caught:
         build_plan_intent_search(intent, governor_result=governor)

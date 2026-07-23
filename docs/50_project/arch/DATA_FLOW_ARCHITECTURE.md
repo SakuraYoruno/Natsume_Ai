@@ -249,7 +249,7 @@ Host 内的 Canon/Tool/Bond HTTP 与对应 OBS command adapter 现在从同一�
 | Scheduler | governed scheduler adapter | 是 | `WIRED` | Clock/Manual occurrence，完整 child grant/Review/Verification/Acceptance/Receipt |
 | Internal Agent | internal task adapter | 是 | `WIRED` | 入口只接受未准入 v2 描述；V3/顶层图身份拒绝，清除 caller authority 后才编译 V3；`delegate:agent_runtime` child grant 验证后才调用 executor |
 | Read projection | `task_progress` / `recent_turn` | 否 | `WIRED_READ_ONLY` | 读取 durable projection，不拥有任务状态 |
-| Executive | partially retired fail-closed guard | 否 | `PARTIAL_RETIRED_FAIL_CLOSED / PRODUCTION_OFF` | 无 Executive 生产调用、无 `route_planning`/`conversation_execution`/application `composition`/application port wiring、无 legacy diagnostic direct-skill matrix、无 SkillDag worker 执行、无内存 registry；Executive 内 Forge override call 已删除，纯 SkillDag adapter 仅兼容合同。独立 Forge `runtime-match` 仍是待退役边界 |
+| Executive | partially retired fail-closed guard | 否 | `PARTIAL_RETIRED_FAIL_CLOSED / PRODUCTION_OFF` | 无 Executive 生产调用、无 `route_planning`/`conversation_execution`/application `composition`/application port wiring、无 legacy diagnostic direct-skill matrix、无 SkillDag worker 执行、无内存 registry；Executive 内 Forge override call 已删除，纯 SkillDag adapter 仅兼容合同，cycle 只能投影为空 batch 并以 `PLAN_CYCLE` 拒绝。独立 Forge `runtime-match` 仍是待退役边界 |
 
 ## 4. Host 四路 Governed Runtime
 
@@ -280,7 +280,7 @@ frozen chat execution
 
 Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加载授权，再执行 frozen governed skill。之后它记录 governed skill execution，校验 durable receipt projection，并返回 worker commit 和可计量 budget usage。
 
-这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。Executive legacy SkillDag 生产执行、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 和进程内 registry 已删除；Executive 内 Forge route override call 也已删除，留下的纯 SkillDag adapter 不拥有 worker 或 production caller。独立 Forge `runtime-match` 仍须在 NE-05 退役。后续约束重点是把 Internal 与领域兼容入口全部迁入同一 lineage。
+这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。Executive legacy SkillDag 生产执行、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 和进程内 registry 已删除；Executive 内 Forge route override call 也已删除，留下的纯 SkillDag adapter 不拥有 worker 或 production caller。它检测到 dependency cycle 时只保留空 batch，admission 返回 `PLAN_CYCLE`，绝不改写为串行执行。独立 Forge `runtime-match` 仍须在 NE-05 退役。后续约束重点是把 Internal 与领域兼容入口全部迁入同一 lineage。
 
 ### 4.3 外部 Skill 生命周期（NE-05）
 

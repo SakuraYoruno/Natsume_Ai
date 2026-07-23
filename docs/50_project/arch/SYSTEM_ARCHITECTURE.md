@@ -488,7 +488,7 @@ flowchart LR
 
 NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedback、Knowledge 和 Identity 只能先写 proposal/plan，再由独立 Lab/Review evidence 产生 append-only apply/activation/rollback event。active Knowledge 通过 workspace-scoped read projection 提供，任何旧 Memory、Persona 或 Identity writer 都不能绕过该 ledger；当前仍处于 partial/canary 前阶段。
 
-系统仍处于迁移期，但 Executive 执行兼容层中的 `route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 与内存任务真相已经退役；其内部的 Forge route override call 也已移除，残留的 runtime/app guard 只能 fail-closed 拒绝，纯 SkillDag adapter 无生产调用。独立 Forge `runtime-match` 仍是待退役边界。prompt intelligence 也只能产生不带执行结果的计划提示：
+系统仍处于迁移期，但 Executive 执行兼容层中的 `route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 与内存任务真相已经退役；其内部的 Forge route override call 也已移除，残留的 runtime/app guard 只能 fail-closed 拒绝，纯 SkillDag adapter 无生产调用。cycle 只能输出空 batch 并在适配层归一为 `PLAN_CYCLE`，不能被重排成串行执行。独立 Forge `runtime-match` 仍是待退役边界。prompt intelligence 也只能产生不带执行结果的计划提示：
 
 | 新主干 | 待退役/修复 |
 |---|---|
