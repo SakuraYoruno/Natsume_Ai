@@ -10,7 +10,7 @@
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 
-Gate 1/3/6/10/11 当前 fresh 全量静态检查均为 `PASS`、`issues=[]`。Gate 3 的三项旧债已按 owner 拆分：Acceptance 1798→1262、ASGI 1527→1376、Scheduler 3537→2942；`new_mixed_over_800=[]`，且没有新增或放宽白名单。连续 migration head 已推进为 `0120_task_runtime_feature_canary_receipt.sql`。0120 只让 bounded fan-out 在签名 durable receipt 与运行 build/migration/config 精确匹配时才可能打开，尚无真实服务栈 canary。静态 PASS 只证明当前责任与依赖扫描通过，不代表整个 Composition 或 Universal Runtime 完成；自动模式规则、last-interaction、process-wide locator、真实 executor、七路线 commit-bound 验收与波次集成仍未完成，NE-01 保持 `PARTIAL / IN_PROGRESS`。
+Gate 1/3/6/10/11 当前 fresh 全量静态检查均为 `PASS`、`issues=[]`。Gate 3 的三项旧债已按 owner 拆分：Acceptance 1798→1262、ASGI 1527→1376、Scheduler 3537→2942；`new_mixed_over_800=[]`，且没有新增或放宽白名单。连续 migration head 已推进为 `0121_research_shadow_arm_operation.sql`：0120 只让 bounded fan-out 在签名 durable receipt 与运行 build/migration/config 精确匹配时才可能打开，0121 只扩展 NE-02 Research shadow 的外部调用恢复账本。静态 PASS 只证明当前责任与依赖扫描通过，不代表整个 Composition 或 Universal Runtime 完成；自动模式规则、last-interaction、process-wide locator、真实 executor、七路线 commit-bound 验收与波次集成仍未完成，NE-01 保持 `PARTIAL / IN_PROGRESS`。
 
 ## 1. 状态定义
 

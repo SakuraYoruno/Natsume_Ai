@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
+from enum import Enum
 import hashlib
 import json
 from pathlib import Path
@@ -21,10 +23,46 @@ from host_brain.contracts.planning_search.research_benchmark_contracts import (
 )
 
 RESEARCH_SHADOW_MIGRATION_ASSET_KEY = "0107#research_shadow_ledger"
+RESEARCH_SHADOW_ARM_OPERATION_MIGRATION_ASSET_KEY = "0121#research_shadow_arm_operation"
 
 
 class ResearchShadowLedgerError(RuntimeError):
     """Durable Research evidence failed closed."""
+
+
+class ResearchArmOperationState(str, Enum):
+    """Durable recovery state for one external Research arm identity."""
+
+    RESERVED = "RESERVED"
+    CALL_CLAIMED = "CALL_CLAIMED"
+    EXTERNAL_CALL_STARTED = "EXTERNAL_CALL_STARTED"
+    RETRY_AUTHORIZED_NO_AUDIT = "RETRY_AUTHORIZED_NO_AUDIT"
+    EVIDENCE_PERSISTED = "EVIDENCE_PERSISTED"
+    RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchArmOperationSnapshot:
+    """One immutable-operation projection reconstructed from its event chain.
+
+    The snapshot contains no prompt body, model response or source body.  It
+    exists only to decide whether a caller may issue an external request,
+    resume after durable evidence, or must reconcile an ambiguous effect.
+    """
+
+    operation_id: str
+    operation_digest: str
+    run_id: str
+    arm_role: str
+    arm_id: str
+    execution_id: str
+    state: ResearchArmOperationState
+    event_sequence: int
+    claim_id: str | None = None
+    claim_owner_id: str | None = None
+    claim_fencing_token: int | None = None
+    claim_expires_at_ms: int | None = None
+    reconciliation_reason: str | None = None
 
 
 def _digest(value: Any) -> str:
@@ -233,6 +271,379 @@ class SQLiteResearchShadowLedger:
             )
         return f"research-receipt://sha256/{digest}"
 
+    def reserve_arm_operation(
+        self,
+        *,
+        run_id: str,
+        role: str,
+        plan: ResearchArmPlanV1,
+        execution_id: str,
+    ) -> ResearchArmOperationSnapshot:
+        """Reserve one deterministic external-arm identity before any call.
+
+        Reservation is append-only and replay-safe.  It is intentionally
+        separate from the 0107 evidence row: a process crash after a model
+        request cannot be mistaken for a never-started arm merely because no
+        public response/evidence row exists yet.
+        """
+
+        normalized_run_id = _operation_text(run_id, field="run_id", limit=255)
+        normalized_role = _operation_role(role)
+        if not isinstance(plan, ResearchArmPlanV1):
+            raise ResearchShadowLedgerError("Research arm operation requires ResearchArmPlanV1")
+        normalized_execution_id = _operation_text(
+            execution_id,
+            field="execution_id",
+            limit=160,
+        )
+        payload = {
+            "schema": "natsume.research-shadow.arm-operation.v1",
+            "run_id": normalized_run_id,
+            "arm_role": normalized_role,
+            "arm_id": plan.arm_id,
+            "execution_id": normalized_execution_id,
+            "plan": plan.to_dict(),
+            "production_influence_enabled": False,
+        }
+        operation_digest = _digest(payload)
+        operation_id = f"researchop_{operation_digest[:32]}"
+        encoded = _canonical(payload)
+        with self._transaction() as conn:
+            self._assert_operation_schema_ready(conn)
+            self._assert_operation_plan_binding(
+                conn=conn,
+                run_id=normalized_run_id,
+                role=normalized_role,
+                plan=plan,
+            )
+            existing = conn.execute(
+                """
+                SELECT operation_id, operation_digest, run_id, arm_role, arm_id,
+                       execution_id, operation_json
+                FROM planning_search_research_arm_operation
+                WHERE run_id = ? AND arm_role = ?
+                """,
+                (normalized_run_id, normalized_role),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    str(existing["operation_id"]) != operation_id
+                    or str(existing["operation_digest"]) != operation_digest
+                    or str(existing["run_id"]) != normalized_run_id
+                    or str(existing["arm_role"]) != normalized_role
+                    or str(existing["arm_id"]) != plan.arm_id
+                    or str(existing["execution_id"]) != normalized_execution_id
+                    or str(existing["operation_json"]) != encoded
+                ):
+                    raise ResearchShadowLedgerError("Research arm operation replay drift")
+                return self._read_operation_snapshot(conn=conn, operation_id=operation_id)
+            conn.execute(
+                """
+                INSERT INTO planning_search_research_arm_operation
+                (operation_id, operation_digest, run_id, arm_role, arm_id,
+                 execution_id, operation_json, production_influence_enabled, created_at_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    operation_id,
+                    operation_digest,
+                    normalized_run_id,
+                    normalized_role,
+                    plan.arm_id,
+                    normalized_execution_id,
+                    encoded,
+                    self._clock(),
+                ),
+            )
+            self._append_operation_event(
+                conn=conn,
+                operation_id=operation_id,
+                event_kind="RESERVED",
+                event_id=f"{operation_id}:reserved",
+                detail={"state": "RESERVED"},
+                at_ms=self._clock(),
+            )
+            return self._read_operation_snapshot(conn=conn, operation_id=operation_id)
+
+    def get_arm_operation(
+        self,
+        *,
+        run_id: str,
+        role: str,
+    ) -> ResearchArmOperationSnapshot | None:
+        """Reopen a durable arm-operation projection without mutating it."""
+
+        normalized_run_id = _operation_text(run_id, field="run_id", limit=255)
+        normalized_role = _operation_role(role)
+        with self._connection() as conn:
+            self._assert_operation_schema_ready(conn)
+            row = conn.execute(
+                """
+                SELECT operation_id
+                FROM planning_search_research_arm_operation
+                WHERE run_id = ? AND arm_role = ?
+                """,
+                (normalized_run_id, normalized_role),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._read_operation_snapshot(conn=conn, operation_id=str(row["operation_id"]))
+
+    def claim_arm_operation(
+        self,
+        *,
+        operation_id: str,
+        owner_id: str,
+        lease_duration_ms: int,
+        at_ms: int | None = None,
+    ) -> ResearchArmOperationSnapshot:
+        """Fence one caller before it may record an external-call start."""
+
+        normalized_operation_id = _operation_text(
+            operation_id,
+            field="operation_id",
+            limit=255,
+        )
+        normalized_owner_id = _operation_text(owner_id, field="owner_id", limit=255)
+        duration = _bounded_positive_int(
+            lease_duration_ms,
+            field="lease_duration_ms",
+            maximum=86_400_000,
+        )
+        now_value = self._operation_time(at_ms)
+        with self._transaction() as conn:
+            self._assert_operation_schema_ready(conn)
+            snapshot = self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+            if snapshot.state is ResearchArmOperationState.CALL_CLAIMED:
+                if snapshot.claim_expires_at_ms is None or snapshot.claim_fencing_token is None:
+                    raise ResearchShadowLedgerError("Research arm claim projection is incomplete")
+                if snapshot.claim_expires_at_ms > now_value:
+                    if snapshot.claim_owner_id == normalized_owner_id:
+                        return snapshot
+                    raise ResearchShadowLedgerError("Research arm operation is claimed by another owner")
+            elif snapshot.state not in {
+                ResearchArmOperationState.RESERVED,
+                ResearchArmOperationState.RETRY_AUTHORIZED_NO_AUDIT,
+            }:
+                raise ResearchShadowLedgerError("Research arm operation is not claimable")
+
+            next_fence = int(snapshot.claim_fencing_token or 0) + 1
+            claim_identity = {
+                "operation_id": normalized_operation_id,
+                "owner_id": normalized_owner_id,
+                "fencing_token": next_fence,
+            }
+            claim_id = f"researchclaim_{_digest(claim_identity)[:32]}"
+            expires_at_ms = now_value + duration
+            self._append_operation_event(
+                conn=conn,
+                operation_id=normalized_operation_id,
+                event_kind="CALL_CLAIMED",
+                event_id=f"{normalized_operation_id}:claim:{next_fence}",
+                detail={
+                    "claim_id": claim_id,
+                    "owner_id": normalized_owner_id,
+                    "fencing_token": next_fence,
+                    "claimed_at_ms": now_value,
+                    "expires_at_ms": expires_at_ms,
+                },
+                at_ms=now_value,
+            )
+            return self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+
+    def begin_external_call(
+        self,
+        *,
+        operation_id: str,
+        claim_id: str,
+        at_ms: int | None = None,
+    ) -> ResearchArmOperationSnapshot:
+        """Persist the point after which a restart must inspect model audit."""
+
+        normalized_operation_id = _operation_text(
+            operation_id,
+            field="operation_id",
+            limit=255,
+        )
+        normalized_claim_id = _operation_text(claim_id, field="claim_id", limit=255)
+        now_value = self._operation_time(at_ms)
+        with self._transaction() as conn:
+            self._assert_operation_schema_ready(conn)
+            snapshot = self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+            if snapshot.state is ResearchArmOperationState.EXTERNAL_CALL_STARTED:
+                if snapshot.claim_id == normalized_claim_id:
+                    return snapshot
+                raise ResearchShadowLedgerError("Research arm external call is owned by another claim")
+            if snapshot.state is not ResearchArmOperationState.CALL_CLAIMED:
+                raise ResearchShadowLedgerError("Research arm external call is not claimable")
+            if (
+                snapshot.claim_id != normalized_claim_id
+                or snapshot.claim_fencing_token is None
+                or snapshot.claim_expires_at_ms is None
+                or snapshot.claim_expires_at_ms <= now_value
+            ):
+                raise ResearchShadowLedgerError("Research arm claim is stale or mismatched")
+            self._append_operation_event(
+                conn=conn,
+                operation_id=normalized_operation_id,
+                event_kind="EXTERNAL_CALL_STARTED",
+                event_id=(
+                    f"{normalized_operation_id}:external-started:"
+                    f"{snapshot.claim_fencing_token}"
+                ),
+                detail={
+                    "claim_id": normalized_claim_id,
+                    "owner_id": snapshot.claim_owner_id,
+                    "fencing_token": snapshot.claim_fencing_token,
+                    "expires_at_ms": snapshot.claim_expires_at_ms,
+                },
+                at_ms=now_value,
+            )
+            return self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+
+    def authorize_retry_without_audit(
+        self,
+        *,
+        operation_id: str,
+        reason_code: str = "CANONICAL_AUDIT_EMPTY",
+        at_ms: int | None = None,
+    ) -> ResearchArmOperationSnapshot:
+        """Record the only automatic retry case: canonical audit is empty.
+
+        The caller must perform the fresh audit lookup before invoking this
+        method.  The operation event preserves that recovery disposition; the
+        next external request still needs a new fenced claim and the adapter's
+        own empty-audit preflight.
+        """
+
+        normalized_operation_id = _operation_text(
+            operation_id,
+            field="operation_id",
+            limit=255,
+        )
+        normalized_reason = _operation_text(reason_code, field="reason_code", limit=128)
+        now_value = self._operation_time(at_ms)
+        with self._transaction() as conn:
+            self._assert_operation_schema_ready(conn)
+            snapshot = self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+            if snapshot.state is ResearchArmOperationState.RETRY_AUTHORIZED_NO_AUDIT:
+                return snapshot
+            if snapshot.state is not ResearchArmOperationState.EXTERNAL_CALL_STARTED:
+                raise ResearchShadowLedgerError("Research arm retry authorization is invalid")
+            if snapshot.claim_fencing_token is None:
+                raise ResearchShadowLedgerError("Research arm retry authorization lacks claim fence")
+            self._append_operation_event(
+                conn=conn,
+                operation_id=normalized_operation_id,
+                event_kind="RETRY_AUTHORIZED_NO_AUDIT",
+                event_id=(
+                    f"{normalized_operation_id}:retry-no-audit:"
+                    f"{snapshot.claim_fencing_token}"
+                ),
+                detail={
+                    "reason_code": normalized_reason,
+                    "prior_claim_id": snapshot.claim_id,
+                    "prior_fencing_token": snapshot.claim_fencing_token,
+                },
+                at_ms=now_value,
+            )
+            return self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+
+    def mark_arm_evidence_persisted(
+        self,
+        *,
+        operation_id: str,
+        at_ms: int | None = None,
+    ) -> ResearchArmOperationSnapshot:
+        """Advance an external arm only after exact 0107 evidence exists."""
+
+        normalized_operation_id = _operation_text(
+            operation_id,
+            field="operation_id",
+            limit=255,
+        )
+        now_value = self._operation_time(at_ms)
+        with self._transaction() as conn:
+            self._assert_operation_schema_ready(conn)
+            snapshot = self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+            if snapshot.state is ResearchArmOperationState.EVIDENCE_PERSISTED:
+                return snapshot
+            if snapshot.state is not ResearchArmOperationState.EXTERNAL_CALL_STARTED:
+                raise ResearchShadowLedgerError("Research arm evidence state is invalid")
+            evidence_row = conn.execute(
+                """
+                SELECT evidence_digest, model_receipt_json
+                FROM planning_search_research_arm_execution
+                WHERE run_id = ? AND arm_role = ? AND arm_id = ?
+                """,
+                (snapshot.run_id, snapshot.arm_role, snapshot.arm_id),
+            ).fetchone()
+            if evidence_row is None:
+                raise ResearchShadowLedgerError("Research arm evidence row is absent")
+            model = _canonical_object(
+                evidence_row["model_receipt_json"],
+                label="Research arm operation model receipt",
+            )
+            if str(model.get("execution_id") or "") != snapshot.execution_id:
+                raise ResearchShadowLedgerError("Research arm evidence execution identity drift")
+            evidence_digest = str(evidence_row["evidence_digest"])
+            self._append_operation_event(
+                conn=conn,
+                operation_id=normalized_operation_id,
+                event_kind="EVIDENCE_PERSISTED",
+                event_id=f"{normalized_operation_id}:evidence-persisted",
+                detail={"evidence_digest": evidence_digest},
+                at_ms=now_value,
+            )
+            return self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+
+    def mark_reconciliation_required(
+        self,
+        *,
+        operation_id: str,
+        reason_code: str,
+        at_ms: int | None = None,
+    ) -> ResearchArmOperationSnapshot:
+        """Freeze an ambiguous external arm until explicit reconciliation."""
+
+        normalized_operation_id = _operation_text(
+            operation_id,
+            field="operation_id",
+            limit=255,
+        )
+        normalized_reason = _operation_text(reason_code, field="reason_code", limit=128)
+        now_value = self._operation_time(at_ms)
+        with self._transaction() as conn:
+            self._assert_operation_schema_ready(conn)
+            snapshot = self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+            if snapshot.state is ResearchArmOperationState.RECONCILIATION_REQUIRED:
+                if snapshot.reconciliation_reason == normalized_reason:
+                    return snapshot
+                raise ResearchShadowLedgerError("Research arm reconciliation replay drift")
+            if snapshot.state is not ResearchArmOperationState.EXTERNAL_CALL_STARTED:
+                raise ResearchShadowLedgerError("Research arm reconciliation state is invalid")
+            evidence = conn.execute(
+                """
+                SELECT 1
+                FROM planning_search_research_arm_execution
+                WHERE run_id = ? AND arm_role = ?
+                """,
+                (snapshot.run_id, snapshot.arm_role),
+            ).fetchone()
+            if evidence is not None:
+                raise ResearchShadowLedgerError(
+                    "Research arm with persisted evidence cannot require unknown-effect reconciliation"
+                )
+            self._append_operation_event(
+                conn=conn,
+                operation_id=normalized_operation_id,
+                event_kind="RECONCILIATION_REQUIRED",
+                event_id=f"{normalized_operation_id}:reconciliation-required",
+                detail={"reason_code": normalized_reason},
+                at_ms=now_value,
+            )
+            return self._read_operation_snapshot(conn=conn, operation_id=normalized_operation_id)
+
     def _assert_terminal_receipt_bindings(
         self,
         *,
@@ -356,6 +767,319 @@ class SQLiteResearchShadowLedger:
         ):
             raise ResearchShadowLedgerError("Research persisted arm receipts are internally unbound")
 
+    @staticmethod
+    def _assert_operation_schema_ready(conn: sqlite3.Connection) -> None:
+        names = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','trigger')"
+            )
+        }
+        required = {
+            "planning_search_research_arm_operation",
+            "planning_search_research_arm_operation_event",
+            "research_arm_operation_run_bound",
+            "research_arm_operation_event_chain",
+        }
+        if not required.issubset(names):
+            raise ResearchShadowLedgerError(
+                "migration 0120 Research arm operation schema is not ready"
+            )
+
+    @staticmethod
+    def _assert_operation_plan_binding(
+        *,
+        conn: sqlite3.Connection,
+        run_id: str,
+        role: str,
+        plan: ResearchArmPlanV1,
+    ) -> None:
+        row = conn.execute(
+            "SELECT spec_json FROM planning_search_research_run_spec WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise ResearchShadowLedgerError("Research arm operation run is not preregistered")
+        spec = _canonical_object(row["spec_json"], label="Research RunSpec")
+        key = "baseline" if role == "BASELINE" else "selected"
+        expected_plan = _run_spec_plan(spec, key=key)
+        if _canonical(expected_plan) != _canonical(plan.to_dict()):
+            raise ResearchShadowLedgerError(
+                "Research arm operation does not bind its preregistered plan"
+            )
+
+    def _append_operation_event(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        operation_id: str,
+        event_kind: str,
+        event_id: str,
+        detail: dict[str, Any],
+        at_ms: int,
+    ) -> None:
+        allowed = {
+            "RESERVED",
+            "CALL_CLAIMED",
+            "EXTERNAL_CALL_STARTED",
+            "RETRY_AUTHORIZED_NO_AUDIT",
+            "EVIDENCE_PERSISTED",
+            "RECONCILIATION_REQUIRED",
+        }
+        if event_kind not in allowed:
+            raise ResearchShadowLedgerError("Research arm operation event is unsupported")
+        if not isinstance(detail, dict):
+            raise ResearchShadowLedgerError("Research arm operation event detail is invalid")
+        protected = {"schema", "operation_id", "event_kind"}
+        if protected.intersection(detail):
+            raise ResearchShadowLedgerError("Research arm operation event detail overrides identity")
+        payload = {
+            "schema": "natsume.research-shadow.arm-operation-event.v1",
+            "operation_id": operation_id,
+            "event_kind": event_kind,
+            **detail,
+        }
+        encoded = _canonical(payload)
+        digest = _digest(payload)
+        existing = conn.execute(
+            """
+            SELECT event_digest, detail_json
+            FROM planning_search_research_arm_operation_event
+            WHERE event_id = ?
+            """,
+            (event_id,),
+        ).fetchone()
+        if existing is not None:
+            if str(existing["event_digest"]) != digest or str(existing["detail_json"]) != encoded:
+                raise ResearchShadowLedgerError("Research arm operation event replay drift")
+            return
+        conn.execute(
+            """
+            INSERT INTO planning_search_research_arm_operation_event
+            (event_id, operation_id, event_kind, event_digest, detail_json, created_at_ms)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (event_id, operation_id, event_kind, digest, encoded, at_ms),
+        )
+
+    def _read_operation_snapshot(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        operation_id: str,
+    ) -> ResearchArmOperationSnapshot:
+        row = conn.execute(
+            """
+            SELECT operation_id, operation_digest, run_id, arm_role, arm_id,
+                   execution_id, operation_json
+            FROM planning_search_research_arm_operation
+            WHERE operation_id = ?
+            """,
+            (operation_id,),
+        ).fetchone()
+        if row is None:
+            raise ResearchShadowLedgerError("Research arm operation is not reserved")
+        operation = _canonical_object(
+            row["operation_json"],
+            label="Research arm operation",
+        )
+        if (
+            _digest(operation) != str(row["operation_digest"])
+            or operation.get("schema") != "natsume.research-shadow.arm-operation.v1"
+            or "operation_id" in operation
+            or operation.get("run_id") != str(row["run_id"])
+            or operation.get("arm_role") != str(row["arm_role"])
+            or operation.get("arm_id") != str(row["arm_id"])
+            or operation.get("execution_id") != str(row["execution_id"])
+            or operation.get("production_influence_enabled") is not False
+            or not isinstance(operation.get("plan"), dict)
+        ):
+            raise ResearchShadowLedgerError("Research arm operation payload drift")
+        raw_plan = operation["plan"]
+        if (
+            not isinstance(raw_plan.get("candidate_ids"), list)
+            or not isinstance(raw_plan.get("source_ids"), list)
+        ):
+            raise ResearchShadowLedgerError("Research arm operation plan payload is invalid")
+        try:
+            plan = ResearchArmPlanV1(
+                arm_id=str(raw_plan.get("arm_id") or ""),
+                candidate_ids=tuple(raw_plan["candidate_ids"]),
+                source_ids=tuple(raw_plan["source_ids"]),
+                graph_digest=str(raw_plan.get("graph_digest") or ""),
+                path_digest=str(raw_plan.get("path_digest") or ""),
+                generated_by=str(raw_plan.get("generated_by") or ""),
+            )
+        except (TypeError, ValueError) as exc:
+            raise ResearchShadowLedgerError("Research arm operation plan payload is invalid") from exc
+        if (
+            plan.arm_id != str(row["arm_id"])
+            or _canonical(plan.to_dict()) != _canonical(raw_plan)
+        ):
+            raise ResearchShadowLedgerError("Research arm operation plan payload drift")
+        self._assert_operation_plan_binding(
+            conn=conn,
+            run_id=str(row["run_id"]),
+            role=str(row["arm_role"]),
+            plan=plan,
+        )
+        events = conn.execute(
+            """
+            SELECT event_sequence, event_id, event_kind, event_digest, detail_json, created_at_ms
+            FROM planning_search_research_arm_operation_event
+            WHERE operation_id = ?
+            ORDER BY event_sequence ASC
+            """,
+            (operation_id,),
+        ).fetchall()
+        if not events:
+            raise ResearchShadowLedgerError("Research arm operation lacks reservation event")
+
+        state: ResearchArmOperationState | None = None
+        claim_id: str | None = None
+        claim_owner_id: str | None = None
+        claim_fence: int | None = None
+        claim_expires_at_ms: int | None = None
+        reconciliation_reason: str | None = None
+        last_sequence = 0
+        for index, event in enumerate(events):
+            sequence = int(event["event_sequence"])
+            if sequence <= last_sequence:
+                raise ResearchShadowLedgerError("Research arm operation event sequence drift")
+            last_sequence = sequence
+            kind = str(event["event_kind"])
+            detail = _canonical_object(
+                event["detail_json"],
+                label="Research arm operation event",
+            )
+            if (
+                _digest(detail) != str(event["event_digest"])
+                or detail.get("schema") != "natsume.research-shadow.arm-operation-event.v1"
+                or detail.get("operation_id") != operation_id
+                or detail.get("event_kind") != kind
+            ):
+                raise ResearchShadowLedgerError("Research arm operation event payload drift")
+            if kind == "RESERVED":
+                if index != 0 or state is not None:
+                    raise ResearchShadowLedgerError("Research arm operation reservation order drift")
+                state = ResearchArmOperationState.RESERVED
+                continue
+            if kind == "CALL_CLAIMED":
+                if state not in {
+                    ResearchArmOperationState.RESERVED,
+                    ResearchArmOperationState.CALL_CLAIMED,
+                    ResearchArmOperationState.RETRY_AUTHORIZED_NO_AUDIT,
+                }:
+                    raise ResearchShadowLedgerError("Research arm operation claim order drift")
+                next_claim_id = _operation_text(
+                    detail.get("claim_id"),
+                    field="claim_id",
+                    limit=255,
+                )
+                next_owner_id = _operation_text(
+                    detail.get("owner_id"),
+                    field="owner_id",
+                    limit=255,
+                )
+                next_fence = _bounded_positive_int(
+                    detail.get("fencing_token"),
+                    field="fencing_token",
+                    maximum=2_147_483_647,
+                )
+                claimed_at_ms = _non_negative_operation_int(
+                    detail.get("claimed_at_ms"),
+                    field="claimed_at_ms",
+                )
+                next_expires_at_ms = _non_negative_operation_int(
+                    detail.get("expires_at_ms"),
+                    field="expires_at_ms",
+                )
+                if (
+                    claimed_at_ms != int(event["created_at_ms"])
+                    or next_expires_at_ms <= claimed_at_ms
+                    or (claim_fence is not None and next_fence <= claim_fence)
+                ):
+                    raise ResearchShadowLedgerError("Research arm operation claim payload drift")
+                claim_id = next_claim_id
+                claim_owner_id = next_owner_id
+                claim_fence = next_fence
+                claim_expires_at_ms = next_expires_at_ms
+                state = ResearchArmOperationState.CALL_CLAIMED
+                continue
+            if kind == "EXTERNAL_CALL_STARTED":
+                if state is not ResearchArmOperationState.CALL_CLAIMED:
+                    raise ResearchShadowLedgerError("Research arm external call order drift")
+                if (
+                    detail.get("claim_id") != claim_id
+                    or detail.get("owner_id") != claim_owner_id
+                    or detail.get("fencing_token") != claim_fence
+                    or detail.get("expires_at_ms") != claim_expires_at_ms
+                ):
+                    raise ResearchShadowLedgerError("Research arm external call claim drift")
+                state = ResearchArmOperationState.EXTERNAL_CALL_STARTED
+                continue
+            if kind == "RETRY_AUTHORIZED_NO_AUDIT":
+                if state is not ResearchArmOperationState.EXTERNAL_CALL_STARTED:
+                    raise ResearchShadowLedgerError("Research arm retry authorization order drift")
+                if (
+                    detail.get("prior_claim_id") != claim_id
+                    or detail.get("prior_fencing_token") != claim_fence
+                ):
+                    raise ResearchShadowLedgerError("Research arm retry authorization claim drift")
+                _operation_text(detail.get("reason_code"), field="reason_code", limit=128)
+                state = ResearchArmOperationState.RETRY_AUTHORIZED_NO_AUDIT
+                continue
+            if kind == "EVIDENCE_PERSISTED":
+                if state is not ResearchArmOperationState.EXTERNAL_CALL_STARTED:
+                    raise ResearchShadowLedgerError("Research arm evidence event order drift")
+                evidence_digest = _operation_digest(detail.get("evidence_digest"), field="evidence_digest")
+                persisted = conn.execute(
+                    """
+                    SELECT evidence_digest
+                    FROM planning_search_research_arm_execution
+                    WHERE run_id = ? AND arm_role = ? AND arm_id = ?
+                    """,
+                    (str(row["run_id"]), str(row["arm_role"]), str(row["arm_id"])),
+                ).fetchone()
+                if persisted is None or str(persisted["evidence_digest"]) != evidence_digest:
+                    raise ResearchShadowLedgerError("Research arm evidence event does not bind evidence row")
+                state = ResearchArmOperationState.EVIDENCE_PERSISTED
+                continue
+            if kind == "RECONCILIATION_REQUIRED":
+                if state is not ResearchArmOperationState.EXTERNAL_CALL_STARTED:
+                    raise ResearchShadowLedgerError("Research arm reconciliation order drift")
+                reconciliation_reason = _operation_text(
+                    detail.get("reason_code"),
+                    field="reason_code",
+                    limit=128,
+                )
+                state = ResearchArmOperationState.RECONCILIATION_REQUIRED
+                continue
+            raise ResearchShadowLedgerError("Research arm operation contains an unknown event")
+        if state is None:
+            raise ResearchShadowLedgerError("Research arm operation state is absent")
+        return ResearchArmOperationSnapshot(
+            operation_id=str(row["operation_id"]),
+            operation_digest=str(row["operation_digest"]),
+            run_id=str(row["run_id"]),
+            arm_role=str(row["arm_role"]),
+            arm_id=str(row["arm_id"]),
+            execution_id=str(row["execution_id"]),
+            state=state,
+            event_sequence=last_sequence,
+            claim_id=claim_id,
+            claim_owner_id=claim_owner_id,
+            claim_fencing_token=claim_fence,
+            claim_expires_at_ms=claim_expires_at_ms,
+            reconciliation_reason=reconciliation_reason,
+        )
+
+    def _operation_time(self, value: int | None) -> int:
+        return _non_negative_operation_int(
+            self._clock() if value is None else value,
+            field="operation_time_ms",
+        )
+
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path, timeout=5.0)
@@ -399,4 +1123,44 @@ def _run_spec_plan(run_spec: dict[str, Any], *, key: str) -> dict[str, Any]:
     return value
 
 
-__all__ = ["RESEARCH_SHADOW_MIGRATION_ASSET_KEY", "ResearchShadowLedgerError", "SQLiteResearchShadowLedger"]
+def _operation_text(value: Any, *, field: str, limit: int) -> str:
+    result = str(value or "").strip()
+    if not result or len(result) > limit:
+        raise ResearchShadowLedgerError(f"{field} must be non-empty and bounded")
+    return result
+
+
+def _operation_role(value: Any) -> str:
+    result = _operation_text(value, field="arm_role", limit=32).upper()
+    if result not in {"BASELINE", "SELECTED"}:
+        raise ResearchShadowLedgerError("Research arm role is invalid")
+    return result
+
+
+def _bounded_positive_int(value: Any, *, field: str, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= maximum:
+        raise ResearchShadowLedgerError(f"{field} must be a positive bounded integer")
+    return value
+
+
+def _non_negative_operation_int(value: Any, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ResearchShadowLedgerError(f"{field} must be a non-negative integer")
+    return value
+
+
+def _operation_digest(value: Any, *, field: str) -> str:
+    result = _operation_text(value, field=field, limit=64).lower()
+    if len(result) != 64 or any(char not in "0123456789abcdef" for char in result):
+        raise ResearchShadowLedgerError(f"{field} must be a SHA-256 digest")
+    return result
+
+
+__all__ = [
+    "RESEARCH_SHADOW_ARM_OPERATION_MIGRATION_ASSET_KEY",
+    "RESEARCH_SHADOW_MIGRATION_ASSET_KEY",
+    "ResearchArmOperationSnapshot",
+    "ResearchArmOperationState",
+    "ResearchShadowLedgerError",
+    "SQLiteResearchShadowLedger",
+]

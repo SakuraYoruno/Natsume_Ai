@@ -407,11 +407,15 @@ ResearchTaskSnapshot + manifest + ResearchCorpusBindingV1
   → exact terminal receipt/replay only when plan/model/verifier/evidence digest all match
 
 one arm execution identity + registered prompt/messages
+  → 0120 reservation → fenced call claim → EXTERNAL_CALL_STARTED
+  → restart: empty canonical audit only → explicit retry authorization;
+             audit without 0107 arm evidence → RECONCILIATION_REQUIRED
   → AttestedExternalResearchAdapter
   → canonical ModelAttemptService foreground request
   → accept only one non-cached SUCCEEDED attempt with exact route/output identity
   → require canonical token/cost + provider/total latency
   → embedded ExternalProviderRunAttestationV1
+  → 0107 arm evidence → 0120 EVIDENCE_PERSISTED
   → ResearchModelExecutionReceiptV1
   → still shadow ledger only; no promotion authority
 ```

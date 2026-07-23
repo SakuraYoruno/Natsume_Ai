@@ -254,7 +254,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - verifier 计算 claim coverage、引用有效率、主来源比例、冲突消解、成本和真实延迟；
 - 同预算比较当前 baseline 与 PlanningSearch，先 shadow，不影响用户答案。
 
-当前进度：D20a/D20b 已完成纯规划、受信 readonly-input 机械边界，以及 snapshot/manifest/source id/ref/digest/authority tier 的精确握手；citation verifier 会用新建 loader 重开每个被引用 document，并验证 UTF-8 byte offsets 与 span digest。0107 owner 对 terminal receipt/replay 还会重开 registration、RunSpec 和两条 arm evidence，严格对齐 binding/profile/budget、plan、model、verifier 与 evidence digest；这关闭的是 shadow evidence 的语义漂移，不是收益结论。D20c 的 adapter 只把 canonical `ModelAttemptService` 的单个前台、非缓存成功 attempt 变为完整 attestation；在发出 request 前会重开该 execution ID 的 audit，任何已有记录或读取错误均成为 `RECONCILIATION_REQUIRED`，不会自动重放未知外部调用；多 attempt、route/output drift、无 token/cost/provider latency 均会失败关闭，并且签发前必须重开同一 request 的 canonical audit started/terminal pair。它尚无 production prompt/workload、外部凭据或 paired cohort，状态为 `ACCEPTANCE_PENDING_EXTERNAL`。loader 仍只检测稳定受信输入中的普通文件/摘要漂移，不是 hostile concurrent replacement 的原子 TOCTOU 防线；citation validity 也不证明事实正确性或来源独立性。它不满足本节任一“真实”验收项，`research_production_planning_benefit=UNPROVEN`。后续必须预注册同一 workload/profile/budget 的 baseline/search 双臂，独立运行、独立验证并保存不可篡改的 source/model/output/verifier/cost/latency 证据；无真实非缓存 provider receipt 时不得把 scripted test 计入收益。
+当前进度：D20a/D20b 已完成纯规划、受信 readonly-input 机械边界，以及 snapshot/manifest/source id/ref/digest/authority tier 的精确握手；citation verifier 会用新建 loader 重开每个被引用 document，并验证 UTF-8 byte offsets 与 span digest。0107 owner 对 terminal receipt/replay 还会重开 registration、RunSpec 和两条 arm evidence，严格对齐 binding/profile/budget、plan、model、verifier 与 evidence digest；这关闭的是 shadow evidence 的语义漂移，不是收益结论。0120 使每个 arm 在模型调用前都有 durable reservation 和 fenced claim，`EXTERNAL_CALL_STARTED` 后的重启只允许在 canonical audit 确认为空时记录一次 explicit retry authorization；任何 audit 记录而缺少 0107 evidence 都固定为 `RECONCILIATION_REQUIRED`，不得盲目重放。D20c 的 adapter 只把 canonical `ModelAttemptService` 的单个前台、非缓存成功 attempt 变为完整 attestation；在发出 request 前会重开该 execution ID 的 audit，任何已有记录或读取错误均成为 `RECONCILIATION_REQUIRED`，不会自动重放未知外部调用；多 attempt、route/output drift、无 token/cost/provider latency 均会失败关闭，并且签发前必须重开同一 request 的 canonical audit started/terminal pair。它尚无 production prompt/workload、外部凭据或 paired cohort，状态为 `ACCEPTANCE_PENDING_EXTERNAL`。loader 仍只检测稳定受信输入中的普通文件/摘要漂移，不是 hostile concurrent replacement 的原子 TOCTOU 防线；citation validity 也不证明事实正确性或来源独立性。它不满足本节任一“真实”验收项，`research_production_planning_benefit=UNPROVEN`。后续必须预注册同一 workload/profile/budget 的 baseline/search 双臂，独立运行、独立验证并保存不可篡改的 source/model/output/verifier/cost/latency 证据；无真实非缓存 provider receipt 时不得把 scripted test 计入收益。
 
 #### Code 第二真实领域
 
@@ -451,7 +451,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0120_task_runtime_feature_canary_receipt.sql`（0115～0119 保留为连续历史资产），后续 NE 波次继续使用 next-free 编号，不得把旧的 0104/0110/0114/0115/0117/0118 固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0121_research_shadow_arm_operation.sql`：0115～0119 保留为连续历史资产，0120 是 bounded fan-out feature-canary 门禁，0121 只扩展 Research shadow operation journal。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 
