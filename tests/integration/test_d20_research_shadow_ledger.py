@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 
 import pytest
@@ -51,7 +53,10 @@ def _verifier(execution_id: str) -> ResearchVerifierReceiptV1:
     )
 
 
-def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(tmp_path) -> None:
+def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(
+    tmp_path,
+    monkeypatch,
+) -> None:
     db_path = tmp_path / "research-shadow.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="d20b-ledger")
     assert result.success is True
@@ -73,12 +78,15 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
 
     baseline = _plan("baseline", "research.query.scope")
     selected = _plan("selected", "research.primary.primary")
-    run_id = ledger.preregister_run(
+    monkeypatch.setattr(
+        "host_brain.persistence.research_shadow_ledger_repository.secrets.randbelow",
+        lambda upper: 0,
+    )
+    run_id = ledger.preregister_randomized_run(
         registration_id=registration_id,
         baseline=baseline,
         selected=selected,
-        arm_order=("BASELINE", "SELECTED"),
-        randomized_arm_order=True,
+        cohort_run_key="d20b-ledger-replay",
     )
     ledger.append_arm_execution(
         run_id=run_id,
@@ -160,7 +168,188 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
         ledger.complete(run_id=run_id, receipt=drifted_receipt)
 
 
-def test_d20c_arm_operation_fences_external_calls_and_preserves_unknown_effects(tmp_path) -> None:
+def test_d20c_owner_randomizes_arm_order_once_and_never_persists_cohort_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "research-owner-randomization.sqlite3"
+    assert SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="d20c-owner-randomization"
+    ).success is True
+    ledger = SQLiteResearchShadowLedger(db_path)
+    registration_id = ledger.register(
+        ResearchCorpusBindingV1(
+            snapshot_digest="1" * 64,
+            corpus_ref="artifact://research/corpus/d20c-randomization",
+            manifest_digest="2" * 64,
+            source_ids=("primary",),
+            source_refs=("artifact://research/primary",),
+            source_digests=("3" * 64,),
+            authority_tiers=("primary",),
+        ),
+        ResearchExecutionProfileV1("4" * 64, "5" * 64, "6" * 64),
+        ResearchExecutionBudgetV1(1000, 2, 10000, 2000, 20000),
+    )
+    baseline = _plan("baseline", "research.query.scope")
+    selected = _plan("selected", "research.primary.primary")
+    draws: list[int] = []
+
+    def _draw(upper: int) -> int:
+        draws.append(upper)
+        return 1
+
+    monkeypatch.setattr(
+        "host_brain.persistence.research_shadow_ledger_repository.secrets.randbelow",
+        _draw,
+    )
+    run_id = ledger.preregister_randomized_run(
+        registration_id=registration_id,
+        baseline=baseline,
+        selected=selected,
+        cohort_run_key="private-cohort-run-key",
+    )
+    spec = ledger.get_paired_run_spec(run_id=run_id)
+    assert spec.owner_randomized is True
+    assert spec.arm_order == ("SELECTED", "BASELINE")
+    assert spec.randomization_algorithm == "PYTHON_SECRETS_RANDBELOW_V1"
+    assert spec.randomization_draw == 1
+    assert spec.cohort_run_key_digest is not None
+    with ledger._connection() as conn:  # noqa: SLF001 - verifies public-safe persistence.
+        stored = str(
+            conn.execute(
+                "SELECT spec_json FROM planning_search_research_run_spec WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()[0]
+        )
+    assert "private-cohort-run-key" not in stored
+    assert (
+        ledger.preregister_randomized_run(
+            registration_id=registration_id,
+            baseline=baseline,
+            selected=selected,
+            cohort_run_key="private-cohort-run-key",
+        )
+        == run_id
+    )
+    assert draws == [2]
+    assert (
+        ledger.preregister_randomized_run(
+            registration_id=registration_id,
+            baseline=baseline,
+            selected=selected,
+            cohort_run_key="private-cohort-run-key-next",
+        )
+        != run_id
+    )
+    assert draws == [2, 2]
+    assert not hasattr(ledger, "preregister_run")
+
+
+def test_d20c_legacy_run_specs_are_read_only_but_historic_receipts_reopen(tmp_path) -> None:
+    db_path = tmp_path / "research-legacy-run-spec.sqlite3"
+    assert SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="d20c-legacy-run-spec"
+    ).success is True
+    ledger = SQLiteResearchShadowLedger(db_path)
+    binding = ResearchCorpusBindingV1(
+        snapshot_digest="1" * 64,
+        corpus_ref="artifact://research/corpus/d20c-legacy",
+        manifest_digest="2" * 64,
+        source_ids=("primary",),
+        source_refs=("artifact://research/primary",),
+        source_digests=("3" * 64,),
+        authority_tiers=("primary",),
+    )
+    profile = ResearchExecutionProfileV1("4" * 64, "5" * 64, "6" * 64)
+    budget = ResearchExecutionBudgetV1(1000, 2, 10000, 2000, 20000)
+    registration_id = ledger.register(binding, profile, budget)
+    baseline = _plan("legacy-baseline", "research.query.scope")
+    selected = _plan("legacy-selected", "research.primary.primary")
+    legacy_spec = {
+        "registration_id": registration_id,
+        "baseline": baseline.to_dict(),
+        "selected": selected.to_dict(),
+        "arm_order": ["BASELINE", "SELECTED"],
+        "randomized_arm_order": True,
+        "production_influence_enabled": False,
+    }
+    encoded_spec = json.dumps(legacy_spec, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    spec_digest = hashlib.sha256(encoded_spec.encode("utf-8")).hexdigest()
+    run_id = f"researchrun_{spec_digest[:32]}"
+    with ledger._connection() as conn:  # noqa: SLF001 - creates an immutable historical fixture.
+        conn.execute(
+            """
+            INSERT INTO planning_search_research_run_spec
+            (run_id, spec_digest, registration_id, baseline_arm_id, selected_arm_id,
+             spec_json, randomized_arm_order, production_influence_enabled, created_at_ms)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0)
+            """,
+            (run_id, spec_digest, registration_id, baseline.arm_id, selected.arm_id, encoded_spec),
+        )
+        conn.commit()
+    assert ledger.get_paired_run_spec(run_id=run_id).owner_randomized is False
+
+    baseline_model = _model("legacy-baseline-execution", baseline.arm_id)
+    selected_model = _model("legacy-selected-execution", selected.arm_id)
+    baseline_verifier = _verifier("legacy-baseline-execution")
+    selected_verifier = _verifier("legacy-selected-execution")
+    ledger.append_arm_execution(
+        run_id=run_id,
+        role="BASELINE",
+        plan=baseline,
+        model=baseline_model,
+        verifier=baseline_verifier,
+    )
+    ledger.append_arm_execution(
+        run_id=run_id,
+        role="SELECTED",
+        plan=selected,
+        model=selected_model,
+        verifier=selected_verifier,
+    )
+    receipt = PairedResearchRunReceiptV1(
+        corpus_binding_digest=binding.binding_digest,
+        profile_digest=profile.profile_digest,
+        budget_digest=budget.budget_digest,
+        baseline_execution_id=baseline_model.execution_id,
+        selected_execution_id=selected_model.execution_id,
+        baseline_model=baseline_model,
+        selected_model=selected_model,
+        baseline_verifier=baseline_verifier,
+        selected_verifier=selected_verifier,
+        arm_order=("BASELINE", "SELECTED"),
+        randomized_arm_order=True,
+    )
+    with pytest.raises(ResearchShadowLedgerError, match="owner-generated arm randomization"):
+        ledger.complete(run_id=run_id, receipt=receipt)
+    assert ledger.get_terminal_receipt(run_id=run_id) is None
+
+    encoded_receipt = json.dumps(
+        receipt.to_dict(),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    receipt_digest = hashlib.sha256(encoded_receipt.encode("utf-8")).hexdigest()
+    with ledger._connection() as conn:  # noqa: SLF001 - emulates an immutable pre-upgrade receipt.
+        conn.execute(
+            """
+            INSERT INTO planning_search_research_terminal_receipt
+            (run_id, receipt_digest, receipt_json, production_influence_enabled, created_at_ms)
+            VALUES (?, ?, ?, 0, 0)
+            """,
+            (run_id, receipt_digest, encoded_receipt),
+        )
+        conn.commit()
+    reopened = ledger.get_terminal_receipt(run_id=run_id)
+    assert reopened is not None
+    assert reopened.receipt == receipt
+
+
+def test_d20c_arm_operation_fences_external_calls_and_preserves_unknown_effects(
+    tmp_path,
+    monkeypatch,
+) -> None:
     db_path = tmp_path / "research-arm-operation.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="d20c-operation")
     assert result.success is True
@@ -180,12 +369,15 @@ def test_d20c_arm_operation_fences_external_calls_and_preserves_unknown_effects(
     registration_id = ledger.register(binding, profile, budget)
     baseline = _plan("baseline", "research.query.scope")
     selected = _plan("selected", "research.primary.primary")
-    run_id = ledger.preregister_run(
+    monkeypatch.setattr(
+        "host_brain.persistence.research_shadow_ledger_repository.secrets.randbelow",
+        lambda upper: 1,
+    )
+    run_id = ledger.preregister_randomized_run(
         registration_id=registration_id,
         baseline=baseline,
         selected=selected,
-        arm_order=("SELECTED", "BASELINE"),
-        randomized_arm_order=True,
+        cohort_run_key="d20c-arm-operation",
     )
 
     reserved = ledger.reserve_arm_operation(

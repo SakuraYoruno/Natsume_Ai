@@ -8,6 +8,7 @@ from enum import Enum
 import hashlib
 import json
 from pathlib import Path
+import secrets
 import sqlite3
 from typing import Any, Callable, Iterator
 
@@ -25,6 +26,8 @@ from host_brain.contracts.planning_search.research_benchmark_contracts import (
 
 RESEARCH_SHADOW_MIGRATION_ASSET_KEY = "0107#research_shadow_ledger"
 RESEARCH_SHADOW_ARM_OPERATION_MIGRATION_ASSET_KEY = "0121#research_shadow_arm_operation"
+_OWNER_RANDOMIZED_RUN_SPEC_SCHEMA = "natsume.research-run-spec.owner-randomized.v1"
+_OWNER_RANDOMIZATION_ALGORITHM = "PYTHON_SECRETS_RANDBELOW_V1"
 
 
 class ResearchShadowLedgerError(RuntimeError):
@@ -78,6 +81,10 @@ class ResearchPairedRunSpecSnapshot:
     baseline: ResearchArmPlanV1
     selected: ResearchArmPlanV1
     arm_order: tuple[str, str]
+    owner_randomized: bool
+    randomization_algorithm: str | None
+    randomization_draw: int | None
+    cohort_run_key_digest: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,40 +196,83 @@ class SQLiteResearchShadowLedger:
             )
         return registration_id
 
-    def preregister_run(
+    def preregister_randomized_run(
         self,
         *,
         registration_id: str,
         baseline: ResearchArmPlanV1,
         selected: ResearchArmPlanV1,
-        arm_order: tuple[str, str],
-        randomized_arm_order: bool,
+        cohort_run_key: str,
     ) -> str:
-        if not randomized_arm_order:
-            raise ResearchShadowLedgerError("Research paired run requires randomized arm order")
+        """Create or reopen a pair whose order is chosen by this ledger owner.
+
+        The caller supplies only a cohort identity.  Its raw value is never
+        persisted; the stable run identity binds its digest while the actual
+        order is chosen under the same SQLite write transaction.  Exact
+        replays reopen the existing spec before entropy is requested again.
+        """
+
+        if not isinstance(baseline, ResearchArmPlanV1) or not isinstance(
+            selected,
+            ResearchArmPlanV1,
+        ):
+            raise ResearchShadowLedgerError("Research paired run requires ResearchArmPlanV1 arms")
         if baseline.arm_id == selected.arm_id:
             raise ResearchShadowLedgerError("Research paired arms require different ids")
-        normalized_arm_order = _paired_arm_order(arm_order)
-        run_payload = {
-            "registration_id": registration_id,
-            "baseline": baseline.to_dict(),
-            "selected": selected.to_dict(),
-            "arm_order": list(normalized_arm_order),
-            "randomized_arm_order": True,
-            "production_influence_enabled": False,
-        }
-        run_id = f"researchrun_{_digest(run_payload)[:32]}"
-        spec_digest = _digest(run_payload)
+        normalized_registration_id = _operation_text(
+            registration_id,
+            field="registration_id",
+            limit=255,
+        )
+        cohort_run_key_digest = _digest(
+            {
+                "cohort_run_key": _operation_text(
+                    cohort_run_key,
+                    field="cohort_run_key",
+                    limit=512,
+                )
+            }
+        )
+        identity = _owner_randomized_run_identity(
+            registration_id=normalized_registration_id,
+            baseline=baseline,
+            selected=selected,
+            cohort_run_key_digest=cohort_run_key_digest,
+        )
+        run_id = f"researchrun_{_digest(identity)[:32]}"
         with self._transaction() as conn:
             existing = conn.execute(
-                "SELECT spec_json FROM planning_search_research_run_spec WHERE run_id = ?",
+                """
+                SELECT spec_json, spec_digest, registration_id, baseline_arm_id, selected_arm_id,
+                       randomized_arm_order, production_influence_enabled
+                FROM planning_search_research_run_spec
+                WHERE run_id = ?
+                """,
                 (run_id,),
             ).fetchone()
-            encoded = _canonical(run_payload)
             if existing is not None:
-                if str(existing[0]) != encoded:
+                expected = _assert_owner_randomized_run_replay(
+                    raw=_canonical_object(existing[0], label="Research RunSpec"),
+                    identity=identity,
+                )
+                if (
+                    str(existing["spec_digest"]) != _digest(expected)
+                    or str(existing["registration_id"]) != normalized_registration_id
+                    or str(existing["baseline_arm_id"]) != baseline.arm_id
+                    or str(existing["selected_arm_id"]) != selected.arm_id
+                    or int(existing["randomized_arm_order"]) != 1
+                    or int(existing["production_influence_enabled"]) != 0
+                ):
                     raise ResearchShadowLedgerError("Research RunSpec replay drift")
                 return run_id
+
+            randomization_draw = secrets.randbelow(2)
+            arm_order = _owner_randomized_arm_order(randomization_draw)
+            run_payload = _owner_randomized_run_payload(
+                identity=identity,
+                arm_order=arm_order,
+                randomization_draw=randomization_draw,
+            )
             conn.execute(
                 """
                 INSERT INTO planning_search_research_run_spec
@@ -230,7 +280,15 @@ class SQLiteResearchShadowLedger:
                  spec_json, randomized_arm_order, production_influence_enabled, created_at_ms)
                 VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)
                 """,
-                (run_id, spec_digest, registration_id, baseline.arm_id, selected.arm_id, encoded, self._clock()),
+                (
+                    run_id,
+                    _digest(run_payload),
+                    normalized_registration_id,
+                    baseline.arm_id,
+                    selected.arm_id,
+                    _canonical(run_payload),
+                    self._clock(),
+                ),
             )
         return run_id
 
@@ -389,7 +447,12 @@ class SQLiteResearchShadowLedger:
         payload = receipt.to_dict()
         digest = _digest(payload)
         with self._transaction() as conn:
-            self._assert_terminal_receipt_bindings(conn=conn, run_id=run_id, receipt=receipt)
+            self._assert_terminal_receipt_bindings(
+                conn=conn,
+                run_id=run_id,
+                receipt=receipt,
+                require_owner_randomization=True,
+            )
             encoded = _canonical(payload)
             existing = conn.execute(
                 """
@@ -795,6 +858,7 @@ class SQLiteResearchShadowLedger:
         conn: sqlite3.Connection,
         run_id: str,
         receipt: PairedResearchRunReceiptV1,
+        require_owner_randomization: bool = False,
     ) -> None:
         """Fail closed unless a terminal receipt exactly reopens its arm evidence.
 
@@ -807,15 +871,20 @@ class SQLiteResearchShadowLedger:
         row = conn.execute(
             """
             SELECT
+                run.run_id,
+                run.spec_digest,
                 run.registration_id,
                 run.baseline_arm_id,
                 run.selected_arm_id,
                 run.spec_json,
                 run.randomized_arm_order AS run_randomized_arm_order,
+                run.production_influence_enabled AS run_production_influence_enabled,
                 registration.binding_digest,
                 registration.profile_digest,
                 registration.budget_digest,
-                registration.registration_json
+                registration.registration_json,
+                registration.production_influence_enabled
+                  AS registration_production_influence_enabled
             FROM planning_search_research_run_spec AS run
             JOIN planning_search_research_registration AS registration
               ON registration.registration_id = run.registration_id
@@ -825,6 +894,11 @@ class SQLiteResearchShadowLedger:
         ).fetchone()
         if row is None:
             raise ResearchShadowLedgerError("Research terminal receipt run is not preregistered")
+        spec = _paired_run_spec_from_row(row)
+        if require_owner_randomization and not spec.owner_randomized:
+            raise ResearchShadowLedgerError(
+                "Research terminal receipt requires owner-generated arm randomization"
+            )
         registration = _canonical_object(
             row["registration_json"],
             label="Research registration",
@@ -852,8 +926,7 @@ class SQLiteResearchShadowLedger:
             raise ResearchShadowLedgerError("Research terminal receipt does not bind its registration")
         if not bool(row["run_randomized_arm_order"]) or not receipt.randomized_arm_order:
             raise ResearchShadowLedgerError("Research terminal receipt requires randomized paired arms")
-        run_arm_order = _paired_arm_order(run_spec.get("arm_order"))
-        if receipt.arm_order != run_arm_order:
+        if receipt.arm_order != spec.arm_order:
             raise ResearchShadowLedgerError(
                 "Research terminal receipt does not bind the preregistered arm order"
             )
@@ -873,15 +946,15 @@ class SQLiteResearchShadowLedger:
             raise ResearchShadowLedgerError("Research terminal receipt requires exactly two paired arms")
         self._assert_terminal_arm_binding(
             row=arm_rows["BASELINE"],
-            plan=_run_spec_plan(run_spec, key="baseline"),
-            expected_arm_id=str(row["baseline_arm_id"]),
+            plan=spec.baseline.to_dict(),
+            expected_arm_id=spec.baseline.arm_id,
             receipt_model=receipt.baseline_model.to_dict(),
             receipt_verifier=receipt.baseline_verifier.to_dict(),
         )
         self._assert_terminal_arm_binding(
             row=arm_rows["SELECTED"],
-            plan=_run_spec_plan(run_spec, key="selected"),
-            expected_arm_id=str(row["selected_arm_id"]),
+            plan=spec.selected.to_dict(),
+            expected_arm_id=spec.selected.arm_id,
             receipt_model=receipt.selected_model.to_dict(),
             receipt_verifier=receipt.selected_verifier.to_dict(),
         )
@@ -933,7 +1006,7 @@ class SQLiteResearchShadowLedger:
         }
         if not required.issubset(names):
             raise ResearchShadowLedgerError(
-                "migration 0120 Research arm operation schema is not ready"
+                "migration 0121 Research arm operation schema is not ready"
             )
 
     @staticmethod
@@ -1256,6 +1329,76 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _owner_randomized_run_identity(
+    *,
+    registration_id: str,
+    baseline: ResearchArmPlanV1,
+    selected: ResearchArmPlanV1,
+    cohort_run_key_digest: str,
+) -> dict[str, Any]:
+    return {
+        "schema": _OWNER_RANDOMIZED_RUN_SPEC_SCHEMA,
+        "registration_id": registration_id,
+        "baseline": baseline.to_dict(),
+        "selected": selected.to_dict(),
+        "cohort_run_key_digest": _operation_digest(
+            cohort_run_key_digest,
+            field="cohort_run_key_digest",
+        ),
+        "production_influence_enabled": False,
+    }
+
+
+def _owner_randomized_arm_order(randomization_draw: Any) -> tuple[str, str]:
+    if (
+        isinstance(randomization_draw, bool)
+        or not isinstance(randomization_draw, int)
+        or randomization_draw not in {0, 1}
+    ):
+        raise ResearchShadowLedgerError("Research randomization draw must be 0 or 1")
+    return (
+        ("BASELINE", "SELECTED")
+        if randomization_draw == 0
+        else ("SELECTED", "BASELINE")
+    )
+
+
+def _owner_randomized_run_payload(
+    *,
+    identity: dict[str, Any],
+    arm_order: tuple[str, str],
+    randomization_draw: int,
+) -> dict[str, Any]:
+    expected_arm_order = _owner_randomized_arm_order(randomization_draw)
+    if _paired_arm_order(arm_order) != expected_arm_order:
+        raise ResearchShadowLedgerError("Research randomization draw and arm order drift")
+    return {
+        **identity,
+        "randomization_algorithm": _OWNER_RANDOMIZATION_ALGORITHM,
+        "randomization_draw": randomization_draw,
+        "arm_order": list(expected_arm_order),
+        "randomized_arm_order": True,
+        "owner_randomized": True,
+    }
+
+
+def _assert_owner_randomized_run_replay(
+    *,
+    raw: dict[str, Any],
+    identity: dict[str, Any],
+) -> dict[str, Any]:
+    randomization_draw = raw.get("randomization_draw")
+    arm_order = _paired_arm_order(raw.get("arm_order"))
+    expected = _owner_randomized_run_payload(
+        identity=identity,
+        arm_order=arm_order,
+        randomization_draw=randomization_draw,
+    )
+    if _canonical(raw) != _canonical(expected):
+        raise ResearchShadowLedgerError("Research RunSpec replay drift")
+    return expected
+
+
 def _paired_run_spec_from_row(row: sqlite3.Row) -> ResearchPairedRunSpecSnapshot:
     registration_id = _operation_text(
         row["registration_id"],
@@ -1290,18 +1433,50 @@ def _paired_run_spec_from_row(row: sqlite3.Row) -> ResearchPairedRunSpecSnapshot
     baseline = _research_arm_plan_from_dict(run_spec.get("baseline"))
     selected = _research_arm_plan_from_dict(run_spec.get("selected"))
     arm_order = _paired_arm_order(run_spec.get("arm_order"))
-    expected_run_spec = {
-        "registration_id": registration_id,
-        "baseline": baseline.to_dict(),
-        "selected": selected.to_dict(),
-        "arm_order": list(arm_order),
-        "randomized_arm_order": True,
-        "production_influence_enabled": False,
-    }
+    owner_randomized = False
+    randomization_algorithm: str | None = None
+    randomization_draw: int | None = None
+    cohort_run_key_digest: str | None = None
+    if "schema" not in run_spec:
+        expected_run_spec = {
+            "registration_id": registration_id,
+            "baseline": baseline.to_dict(),
+            "selected": selected.to_dict(),
+            "arm_order": list(arm_order),
+            "randomized_arm_order": True,
+            "production_influence_enabled": False,
+        }
+        expected_run_id = f"researchrun_{_digest(expected_run_spec)[:32]}"
+    else:
+        cohort_run_key_digest = _operation_digest(
+            run_spec.get("cohort_run_key_digest"),
+            field="cohort_run_key_digest",
+        )
+        randomization_algorithm = _operation_text(
+            run_spec.get("randomization_algorithm"),
+            field="randomization_algorithm",
+            limit=128,
+        )
+        if randomization_algorithm != _OWNER_RANDOMIZATION_ALGORITHM:
+            raise ResearchShadowLedgerError("Research randomization algorithm drift")
+        randomization_draw = run_spec.get("randomization_draw")
+        identity = _owner_randomized_run_identity(
+            registration_id=registration_id,
+            baseline=baseline,
+            selected=selected,
+            cohort_run_key_digest=cohort_run_key_digest,
+        )
+        expected_run_spec = _owner_randomized_run_payload(
+            identity=identity,
+            arm_order=arm_order,
+            randomization_draw=randomization_draw,
+        )
+        expected_run_id = f"researchrun_{_digest(identity)[:32]}"
+        owner_randomized = True
     if (
         _canonical(run_spec) != _canonical(expected_run_spec)
         or str(row["spec_digest"]) != _digest(expected_run_spec)
-        or run_id != f"researchrun_{_digest(expected_run_spec)[:32]}"
+        or run_id != expected_run_id
         or str(row["baseline_arm_id"]) != baseline.arm_id
         or str(row["selected_arm_id"]) != selected.arm_id
         or int(row["run_randomized_arm_order"]) != 1
@@ -1317,6 +1492,10 @@ def _paired_run_spec_from_row(row: sqlite3.Row) -> ResearchPairedRunSpecSnapshot
         baseline=baseline,
         selected=selected,
         arm_order=arm_order,
+        owner_randomized=owner_randomized,
+        randomization_algorithm=randomization_algorithm,
+        randomization_draw=randomization_draw,
+        cohort_run_key_digest=cohort_run_key_digest,
     )
 
 
