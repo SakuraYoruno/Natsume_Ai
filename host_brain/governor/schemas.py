@@ -65,11 +65,18 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
     "noop": {"required": {}, "optional": {}},
     # M45：场景路由 action — args 只要包含 text 字段即可；
     # 允许计划路由把显式步骤和路由提示作为扩展参数透传给下游执行层。
+    # CAPABILITY_SEARCH_V1 uses the same Governor-bound envelope: the Host
+    # later re-derives candidates from its composed registry and never trusts
+    # a caller-supplied candidate list.
     "exec_intent": {
         "required": {"text": str},
         "optional": {
             "planned_steps": list,
             "steps": list,
+            "task": str,
+            "planning_mode": str,
+            "planning_capability_tags": list,
+            "planning_max_risk_level": int,
             "route": str,
             "target_id": str,
             "target": str,

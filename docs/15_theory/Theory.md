@@ -637,6 +637,8 @@ Transition 必须：
 - worker 看不到搜索器的可变内部状态；
 - 失败重规划生成 `revision + 1`，不覆盖旧图。
 
+当前 Host capability-search 已允许显式、Governor-bound 的 `failure_replan` 经过 canonical TaskStore 的 `FAILED` predecessor 与 failure evidence 校验后走这条替换链；它不监听 worker 失败自动触发，也不会把一次失败伪装成已经证明更优的替代候选。
+
 依赖图没有拓扑序时，正确语义是 `PLAN_CYCLE` 阻断 admission；不得为了“继续执行”丢弃边、把 cycle 改写成串行批次，或让兼容 planner 伪造可执行投影。
 
 若 compiler 将 selected path 转成 worker 输入，输入必须由已冻结 catalog 再生成，而不是复用早期 intent 草稿；图级 budget、review、workspace、approval 和 parent grant 仍属于 compiler/admission authority。尚未具备 durable predecessor lineage 的中间虚拟状态，不得伪装成可直接编译的重规划起点。

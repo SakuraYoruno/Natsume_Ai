@@ -172,6 +172,13 @@ class GovernedPlanningExecutionService:
         compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
+        # A caller-supplied root context has authority-bearing fields.  Reject
+        # a parent-grant mismatch before invoking even the pure search kernel;
+        # otherwise an unauthorized request can consume search budget/trace.
+        self._validate_compilation_context_authority(
+            compilation_context,
+            authority=authority,
+        )
         result = self._run_search(request)
         resolved_context = self._resolve_compilation_context(
             result,
@@ -208,6 +215,10 @@ class GovernedPlanningExecutionService:
         compilation_context: PlanningCompilationContext | None = None,
     ) -> PreparedPlanningExecution:
         authority.validate()
+        self._validate_compilation_context_authority(
+            compilation_context,
+            authority=authority,
+        )
         if not isinstance(previous_graph, TaskGraph):
             raise PlanningExecutionError(
                 PLANNING_EXECUTION_REVISION_CONFLICT,

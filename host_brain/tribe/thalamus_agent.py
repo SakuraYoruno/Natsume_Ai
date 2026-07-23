@@ -6,6 +6,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from host_brain.contracts.planning_search.capability_domain_models import (
+    CAPABILITY_PLANNING_MODE,
+    CAPABILITY_PLANNING_TARGET_ID,
+)
 from host_brain.model_runtime.prompt_builder_utils import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
@@ -500,6 +504,36 @@ _TASK_PLAN_REQUEST_RE = re.compile(
     r"((给我|帮我|请|请你|麻烦|制定|出|写|整理|规划).{0,12}(方案|路线图|计划|plan|roadmap)"
     r"|有没有.{0,12}(前端|后端|系统|仓库|项目|主链|路由|意图识别|优化).{0,12}(方案|路线图|计划|plan|roadmap))",
     re.IGNORECASE,
+)
+# A capability-search plan is an execution request, not a new advice route.
+# Keep the classifier deliberately narrow until the Research/Code/Pentest
+# domain-specific production adapters and benefit gates exist.  In particular,
+# a user who asks for advice only (or explicitly prohibits execution) must stay
+# on the existing intent-agent path.
+_CAPABILITY_PLAN_NO_EXECUTION_RE = re.compile(
+    r"((?:不要|不需要|无需).{0,10}(?:改代码|修改代码|执行|运行|调用|使用).{0,10}(?:工具|技能|skill|浏览器|检索|搜索|代码)?"
+    r"|(?:只|仅).{0,10}(?:给|要).{0,10}(?:建议|方案|路线图))",
+    re.IGNORECASE,
+)
+_CAPABILITY_PLAN_RESEARCH_RE = re.compile(
+    r"(调研|研究|资料收集|证据|信息检索|research|evidence)",
+    re.IGNORECASE,
+)
+_CAPABILITY_PLAN_FRONTEND_RE = re.compile(
+    r"(前端|界面|页面|组件|可用性|用户体验|frontend|\bui\b|\bux\b)",
+    re.IGNORECASE,
+)
+_CAPABILITY_PLAN_ROUTE_POLICIES: tuple[tuple[re.Pattern[str], tuple[str, ...], str], ...] = (
+    (
+        _CAPABILITY_PLAN_RESEARCH_RE,
+        ("research",),
+        "THALAMUS_RULE_CAPABILITY_PLAN_RESEARCH",
+    ),
+    (
+        _CAPABILITY_PLAN_FRONTEND_RE,
+        ("frontend",),
+        "THALAMUS_RULE_CAPABILITY_PLAN_FRONTEND",
+    ),
 )
 _TASK_CONTEXT_CONTINUATION_RE = re.compile(
     r"^\s*(开始吧|开始|继续|继续吧|接着|接着做|继续做|接下来呢|接下来|然后呢|后面呢|开工|go ahead|start|continue|proceed)\s*[。.!！?？]*\s*$",
@@ -2181,6 +2215,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if not cleaned:
         return None
 
+    capability_plan_seed = _build_capability_plan_route_seed(cleaned)
+    if capability_plan_seed is not None:
+        return capability_plan_seed
+
     codex_production_seed = _build_codex_production_route_seed(cleaned)
     if codex_production_seed is not None:
         return codex_production_seed
@@ -2433,6 +2471,43 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "reason_code": "THALAMUS_RULE_MEMORY_RECALL",
             "confidence": 0.94,
             "route_source": "thalamus.rule",
+        }
+    return None
+
+
+def _build_capability_plan_route_seed(text: str) -> dict[str, Any] | None:
+    """Project a narrow, server-owned objective into capability PlanningSearch.
+
+    The projection deliberately carries only a static domain tag policy.  It
+    does not inspect the mutable SkillRegistry, nominate a skill, or carry a
+    grant.  The governed Host later freezes the current registry, requires
+    genuine competition, and binds the selected path to the Governor result.
+    """
+
+    normalized = _normalize_text(text)
+    if (
+        not normalized
+        or _TASK_PLAN_REQUEST_RE.search(normalized) is None
+        or _CAPABILITY_PLAN_NO_EXECUTION_RE.search(normalized) is not None
+    ):
+        return None
+    for pattern, tags, reason_code in _CAPABILITY_PLAN_ROUTE_POLICIES:
+        if pattern.search(normalized) is None:
+            continue
+        return {
+            "route": "plan",
+            "target_id": CAPABILITY_PLANNING_TARGET_ID,
+            "task": normalized,
+            "reason_code": reason_code,
+            "confidence": 0.95,
+            "route_source": "thalamus.rule",
+            "args": {
+                "text": normalized,
+                "task": normalized,
+                "planning_mode": CAPABILITY_PLANNING_MODE,
+                "planning_capability_tags": list(tags),
+                "planning_max_risk_level": 2,
+            },
         }
     return None
 
@@ -2768,6 +2843,10 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
 
     if _looks_like_contextual_chat_followup(normalized):
         return _build_contextual_chat_followup_seed(normalized, route_source="rule.fastpath")
+
+    capability_plan_seed = _build_capability_plan_route_seed(normalized)
+    if capability_plan_seed is not None:
+        return capability_plan_seed
 
     memory_steward_seed = _build_memory_steward_route_seed(normalized)
     if memory_steward_seed is not None:
@@ -3210,6 +3289,32 @@ def _backfill_canonical_args(
         if not _normalize_text(merged.get("text")):
             merged["text"] = fallback_text
         return merged
+
+    if normalized_route == "plan":
+        # The former generic fallback discarded all plan arguments.  That
+        # severed the server-owned CAPABILITY_SEARCH_V1 seed before Governor
+        # could bind it.  Preserve only the narrow declared capability-plan
+        # contract; legacy free-form plan arguments remain discarded.
+        canonical = {"text": _normalize_text(merged.get("text")) or fallback_text}
+        if (
+            normalized_target == CAPABILITY_PLANNING_TARGET_ID
+            and _normalize_text(merged.get("planning_mode"))
+            == CAPABILITY_PLANNING_MODE
+        ):
+            canonical["task"] = _normalize_text(merged.get("task")) or fallback_text
+            canonical["planning_mode"] = CAPABILITY_PLANNING_MODE
+            canonical["planning_capability_tags"] = list(
+                merged.get("planning_capability_tags")
+                if isinstance(merged.get("planning_capability_tags"), list)
+                else []
+            )
+            if isinstance(merged.get("planning_max_risk_level"), int) and not isinstance(
+                merged.get("planning_max_risk_level"), bool
+            ):
+                canonical["planning_max_risk_level"] = int(
+                    merged["planning_max_risk_level"]
+                )
+        return canonical
 
     return {
         "text": _normalize_text(merged.get("text")) or fallback_text,

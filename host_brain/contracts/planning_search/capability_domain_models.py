@@ -21,9 +21,15 @@ from host_brain.contracts.planning_search.contracts import VirtualStateSnapshot
 
 CAPABILITY_PLANNING_DOMAIN = "skill"
 CAPABILITY_PLANNING_MODE = "CAPABILITY_SEARCH_V1"
+CAPABILITY_PLANNING_TARGET_ID = "planning_search"
 CAPABILITY_PLANNING_SCHEMA = "natsume.capability-planning.snapshot.v1"
 CAPABILITY_PLANNING_STATE_SCHEMA = "natsume.capability-planning.state.v1"
 CAPABILITY_PLANNING_NODE_OUTPUT_SCHEMA = "natsume.capability-planning.node-output.v1"
+# This first production-shaped capability slice deliberately keeps graph
+# breadth bounded.  The value is server-owned and frozen into every snapshot;
+# an incoming intent can constrain tags/risk but cannot ask the Host to create
+# an arbitrary number of Skill nodes.
+CAPABILITY_PLANNING_EXECUTION_STEPS = 2
 
 _IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,119}$")
 _TAG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -155,6 +161,7 @@ class CapabilityPlanningSnapshot:
             "objective": self.objective,
             "requested_tags": list(self.requested_tags),
             "max_risk_level": self.max_risk_level,
+            "execution_steps": CAPABILITY_PLANNING_EXECUTION_STEPS,
             "capabilities": [item.to_state_dict() for item in self.capabilities],
             "source_refs": list(self.source_refs),
         }
@@ -173,12 +180,14 @@ class CapabilityPlanningSnapshot:
                 "phase": "root",
                 "catalog_digest": self.catalog_digest,
                 "capabilities": [item.to_state_dict() for item in self.capabilities],
+                "selected_capability_ids": [],
             },
             constraints={
                 "mode": CAPABILITY_PLANNING_MODE,
                 "requested_tags": list(self.requested_tags),
                 "max_risk_level": self.max_risk_level,
                 "candidate_count": len(self.capabilities),
+                "execution_steps": CAPABILITY_PLANNING_EXECUTION_STEPS,
             },
             source_refs=(self.task_ref, self.catalog_ref, *self.source_refs),
         )
@@ -190,6 +199,7 @@ class CapabilityPlanningSnapshot:
             "objective": self.objective,
             "requested_tags": list(self.requested_tags),
             "max_risk_level": self.max_risk_level,
+            "execution_steps": CAPABILITY_PLANNING_EXECUTION_STEPS,
             "capabilities": [item.to_state_dict() for item in self.capabilities],
             "source_refs": list(self.source_refs),
             "catalog_digest": self.catalog_digest,
@@ -284,6 +294,8 @@ def _rounded(value: float) -> float:
 __all__ = [
     "CAPABILITY_PLANNING_DOMAIN",
     "CAPABILITY_PLANNING_MODE",
+    "CAPABILITY_PLANNING_TARGET_ID",
+    "CAPABILITY_PLANNING_EXECUTION_STEPS",
     "CAPABILITY_PLANNING_NODE_OUTPUT_SCHEMA",
     "CAPABILITY_PLANNING_SCHEMA",
     "CAPABILITY_PLANNING_STATE_SCHEMA",

@@ -31,7 +31,6 @@ from host_brain.orchestration.failure_replan_intent import (
     failure_replan_reference_from_intent,
 )
 from host_brain.orchestration.capability_plan_search import (
-    CAPABILITY_PLAN_SEARCH_REPLAN_UNSUPPORTED,
     build_capability_plan_search,
     is_capability_plan_intent,
 )
@@ -753,11 +752,6 @@ class GovernedHostRuntime:
             compilation_context_resolver=compilation_context_resolver,
         )
         replan = failure_replan_reference_from_intent(intent_draft)
-        if capability_plan and replan is not None:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_AUTHORITY_INVALID,
-                CAPABILITY_PLAN_SEARCH_REPLAN_UNSUPPORTED,
-            )
         if replan is None:
             prepared = await service.prepare_initial(
                 adapter.request,
@@ -765,6 +759,9 @@ class GovernedHostRuntime:
                 created_at=int(ts_ms),
             )
         else:
+            # Both legacy and registry-derived plans use the same durable
+            # recovery gate.  The incoming reference selects only a stored
+            # revision; failure evidence and quiescence come from TaskStore.
             if self._task_store is None:
                 raise GovernedHostAdapterError(
                     GOVERNED_HOST_AUTHORITY_INVALID,

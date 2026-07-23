@@ -6,6 +6,7 @@ import pytest
 
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.orchestration.capability_plan_search import (
+    CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID,
     CAPABILITY_PLAN_SEARCH_INVALID,
     CAPABILITY_PLAN_SEARCH_NO_COMPETITION,
     CapabilityPlanSearchError,
@@ -28,7 +29,11 @@ def _handler(_payload, _context):  # noqa: ANN001, ANN201
     return {"status": "ok"}
 
 
-def _registry(*, include_second: bool = True) -> SkillRegistry:
+def _registry(
+    *,
+    include_second: bool = True,
+    include_low_risk_alternative: bool = False,
+) -> SkillRegistry:
     registry = SkillRegistry()
     registry.register(
         SkillMeta(
@@ -55,6 +60,21 @@ def _registry(*, include_second: bool = True) -> SkillRegistry:
                 handler=_handler,
                 family="research",
                 capability_tags=("research", "evidence", "crosscheck"),
+                fallback_policy="strict_fail",
+            )
+        )
+    if include_low_risk_alternative:
+        registry.register(
+            SkillMeta(
+                skill_name="research_safe_crosscheck",
+                clearance="LOW",
+                risk_level=1,
+                scope="host",
+                reversible=True,
+                handler=_handler,
+                family="research",
+                capability_tags=("research", "evidence", "crosscheck"),
+                parallelizable=True,
                 fallback_policy="strict_fail",
             )
         )
@@ -137,20 +157,31 @@ def test_registry_capability_search_generates_competing_paths_without_planned_st
     assert intent == before
     assert result.mcts_used is True
     assert result.side_effects_executed is False
-    assert len(result.selected_path) == 2
-    selected_capability_id = result.selected_path[0].payload["capability_id"]
-    assert result.selected_path[0].candidate_id == (
-        f"capability.execute.{selected_capability_id}"
+    assert len(result.selected_path) == 3
+    execution_path = result.selected_path[:-1]
+    selected_capability_ids = tuple(
+        item.payload["capability_id"] for item in execution_path
     )
-    assert result.selected_path[1].candidate_id == (
-        f"capability.synthesize.{selected_capability_id}"
+    assert len(set(selected_capability_ids)) == 2
+    assert [item.candidate_id for item in execution_path] == [
+        f"capability.execute.{capability_id}"
+        for capability_id in selected_capability_ids
+    ]
+    assert result.selected_path[-1].candidate_id.startswith("capability.synthesize.")
+    assert tuple(result.selected_path[-1].payload["capability_ids"]) == (
+        selected_capability_ids
     )
     assert [node.route.split(":", 1)[0] for node in compiled.task_graph.nodes] == [
+        "skill",
         "skill",
         "chat",
     ]
     assert compiled.task_graph.nodes[1].dependencies == (
         compiled.task_graph.nodes[0].node_id,
+    )
+    assert compiled.task_graph.nodes[2].dependencies == (
+        compiled.task_graph.nodes[0].node_id,
+        compiled.task_graph.nodes[1].node_id,
     )
     assert compiled.work_order.input_pack["capability_planning"]["catalog_ref"] == (
         adapter.snapshot.catalog_ref
@@ -160,9 +191,25 @@ def test_registry_capability_search_generates_competing_paths_without_planned_st
         item.candidate_id for item in result.selected_path
     }
     assert compiled.work_order.allowed_actions == (
-        f"skill:{selected_capability_id}",
+        *(f"skill:{capability_id}" for capability_id in selected_capability_ids),
         "render_reply",
     )
+
+
+def test_capability_plan_rejects_a_noncanonical_target_before_search() -> None:
+    intent, governor = _intent()
+    intent["target_id"] = "arbitrary_target"
+
+    assert is_capability_plan_intent(intent) is False
+    with pytest.raises(CapabilityPlanSearchError) as caught:
+        build_capability_plan_search(
+            intent,
+            governor_result=governor,
+            skill_registry=_registry(),
+            input_refs=("input://sha256/" + "a" * 64,),
+        )
+
+    assert caught.value.reason_code == CAPABILITY_PLAN_SEARCH_INVALID
 
 
 def test_capability_mode_is_explicit_and_refuses_legacy_preplanned_graphs() -> None:
@@ -194,6 +241,60 @@ def test_registry_requires_two_non_confirming_eligible_capabilities() -> None:
         )
 
     assert caught.value.reason_code == CAPABILITY_PLAN_SEARCH_NO_COMPETITION
+
+
+def test_governor_risk_ceiling_tightens_the_frozen_candidate_catalog() -> None:
+    intent, governor = _intent()
+    intent["args"]["planning_max_risk_level"] = 3
+    governor["approved_action_binding"] = build_governed_action_binding(
+        intent_envelope=intent,
+        approval_token_ref="approval-risk-ceiling",
+        risk_level=1,
+        issued_at_ms=1_000,
+        expires_at_ms=61_000,
+    )
+
+    adapter = build_capability_plan_search(
+        intent,
+        governor_result=governor,
+        skill_registry=_registry(include_low_risk_alternative=True),
+        input_refs=("input://sha256/" + "f" * 64,),
+    )
+
+    assert adapter.snapshot.max_risk_level == 1
+    assert len(adapter.snapshot.source_refs) == 1
+    assert adapter.snapshot.source_refs[0].startswith("governor-decision://sha256/")
+    assert adapter.snapshot.source_refs[0] in adapter.snapshot.to_virtual_state().source_refs
+    assert {item.capability_id for item in adapter.snapshot.capabilities} == {
+        "research_fast",
+        "research_safe_crosscheck",
+    }
+    assert all(item.risk_level <= 1 for item in adapter.snapshot.capabilities)
+    assert dict(adapter.base_context.input_pack["capability_plan_request"]) == {
+        "route": "plan",
+        "planning_mode": CAPABILITY_PLANNING_MODE,
+        "task": intent["task"],
+        "requested_tags": ("research",),
+        "requested_max_risk_level": 3,
+        "governor_max_risk_level": 1,
+        "effective_max_risk_level": 1,
+        "execution_steps": 2,
+    }
+
+
+def test_capability_plan_rejects_a_missing_or_invalid_governor_risk_ceiling() -> None:
+    intent, governor = _intent()
+    governor["approved_action_binding"]["risk_level"] = 0
+
+    with pytest.raises(CapabilityPlanSearchError) as caught:
+        build_capability_plan_search(
+            intent,
+            governor_result=governor,
+            skill_registry=_registry(),
+            input_refs=("input://sha256/" + "1" * 64,),
+        )
+
+    assert caught.value.reason_code == CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID
 
 
 def test_capability_mode_rejects_non_ascii_requested_tags() -> None:
