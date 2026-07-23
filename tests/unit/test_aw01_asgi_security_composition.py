@@ -806,9 +806,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["capability_broker"] is capability_broker
         assert kwargs["resource_manager"] is resource_manager
         assert kwargs["model_attempt_service"] is model_attempt_service
-        assert kwargs["production_authority_verifier"] is (
-            tool_runtime_composition.verify_durable_production_authority
-        )
+        assert callable(kwargs["production_authority_verifier"])
+        captured["production_authority_verifier"] = kwargs[
+            "production_authority_verifier"
+        ]
         captured["cancellation_authority_verifier"] = kwargs[
             "cancellation_authority_verifier"
         ]

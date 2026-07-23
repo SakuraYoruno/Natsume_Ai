@@ -424,7 +424,7 @@ def runtime_lifespan(
                     ApplicationModelAttemptServicePort,
                 )
                 from host_brain.app.production_authority import (  # noqa: PLC0415
-                    verify_durable_production_authority,
+                    build_durable_production_authority_verifier,
                 )
 
                 asyncio.create_task(
@@ -442,7 +442,11 @@ def runtime_lifespan(
                         model_attempt_service=ApplicationModelAttemptServicePort(
                             lifecycle_services.model_attempt_service,
                         ),
-                        authority_verifier=verify_durable_production_authority,
+                        authority_verifier=(
+                            build_durable_production_authority_verifier(
+                                ledger_provider=get_ledger,
+                            )
+                        ),
                     )
                 )
                 new_module_statuses["lightnovel_recommender_recovery"] = "OK (scheduled)"

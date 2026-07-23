@@ -3,7 +3,7 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-> 当前库存纠偏：本文件早期切片中出现的 `named27/53、all-form30、Container50/3/46` 均为对应提交的历史快照；当前工作树以 `named21/47、all-form24、Container48/2/45` 为准。Tribe runtime 已改由 ASGI-owned `TribeRuntimeScope` 管理，但兼容 agents/bus 仍 process-global，只保证单活 Host。
+> 当前库存纠偏：本文件早期切片中出现的 `named27/53、all-form30、Container50/3/46` 均为对应提交的历史快照；当前工作树以 `named20/46、all-form23、Container48/2/45` 为准。Tribe runtime 已改由 ASGI-owned `TribeRuntimeScope` 管理，production authority verifier 已改为由 Tool/恢复 composition 注入 ledger provider；兼容 agents/bus 仍 process-global，只保证单活 Host。
 
 版本：v3.1
 日期：2026-07-23

@@ -27,7 +27,9 @@ def build_governed_host_runtime(**kwargs):  # type: ignore[no-untyped-def]
     return _build_governed_host_runtime(**kwargs)
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
-from host_brain.app.production_authority import verify_durable_production_authority
+from host_brain.app.production_authority import (
+    build_durable_production_authority_verifier,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.decision import IntentDecisionEngine
@@ -61,6 +63,9 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
     monkeypatch.setattr(dependencies.get_process_service_container(), "capability_runtime_composition", None)
     runtime = None
     try:
+        authority_verifier = build_durable_production_authority_verifier(
+            ledger_provider=lambda: ledger,
+        )
         request_id = "request-aw0203-cutover"
         session_id = "session-aw0203-cutover"
         ts_ms = int(time.time() * 1000)
@@ -137,7 +142,7 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
                 token_service=token_service,
                 capability_broker=dependencies.get_capability_broker(),
                 model_attempt_service=ApplicationModelAttemptServicePort(),
-                production_authority_verifier=verify_durable_production_authority,
+                production_authority_verifier=authority_verifier,
                 resource_manager=None,
                 episodic_store=None,
                 semantic_recaller=None,
@@ -152,7 +157,7 @@ async def test_real_sqlite_direct_skill_cutover_is_durable_and_replay_safe(
             token_service=token_service,
             capability_broker=dependencies.get_capability_broker(),
             model_attempt_service=ApplicationModelAttemptServicePort(),
-            production_authority_verifier=verify_durable_production_authority,
+            production_authority_verifier=authority_verifier,
             resource_manager=None,
             episodic_store=None,
             semantic_recaller=None,
