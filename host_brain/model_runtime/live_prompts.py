@@ -18,7 +18,6 @@ from host_brain.model_runtime.prompt_registry import PromptRegistry, PromptSchem
 SURFACE_MAIN_TEXT_PROMPT_ID = "surface.main_chain.live.text"
 SURFACE_MAIN_JSON_PROMPT_ID = "surface.main_chain.live.json"
 SURFACE_MEMORY_REPAIR_PROMPT_ID = "surface.memory_guard.repair.json"
-VISION_UI_ANALYSIS_PROMPT_ID = "vision.ui.analysis.text"
 VISION_ACTION_PLANNER_PROMPT_ID = "vision.action_planner.json"
 PERSONA_INNER_ACTIVITY_PROMPT_ID = "persona.inner_activity.json"
 AGENT_REACT_STEP_PROMPT_ID = "agent.react.step.json"
@@ -133,12 +132,6 @@ def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
         SURFACE_MEMORY_REPAIR_PROMPT_ID,
         _compiled_messages,
         output_contract=OutputContract(kind="json_object"),
-        **shared,
-    )
-    registry.register_renderer(
-        VISION_UI_ANALYSIS_PROMPT_ID,
-        _compiled_messages,
-        output_contract=OutputContract(kind="text"),
         **shared,
     )
     registry.register_renderer(
@@ -268,7 +261,6 @@ __all__ = [
     "PENTEST_REACT_PROPOSE_PROMPT_ID",
     "PENTEST_REACT_REFLECT_PROMPT_ID",
     "VISION_ACTION_PLANNER_PROMPT_ID",
-    "VISION_UI_ANALYSIS_PROMPT_ID",
     "build_live_production_prompt_registry",
     "register_live_prompt_bindings",
 ]

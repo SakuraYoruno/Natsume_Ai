@@ -6,9 +6,15 @@ from typing import Any
 import pytest
 from starlette.requests import Request
 
+from host_brain.app.emotion_context import (
+    build_chat_emotion_snapshot,
+    build_chat_governance_snapshot,
+    resolve_chat_emotion_context,
+)
 from host_brain.app.chat_handler import handle_chat
 import host_brain.app.chat_handler as chat_handler_module
 from host_brain.app.schemas import ChatRequest
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 
 
 class _DummyMetrics:
@@ -72,6 +78,37 @@ class _FakeThalamusAgent:
         }
 
 
+def _input_runtime_ports(intent_engine: Any) -> InputRuntimeApplicationPorts:
+    def _unused(*_args: Any, **_kwargs: Any) -> Any:
+        return None
+
+    return InputRuntimeApplicationPorts(
+        get_intent_engine=lambda: intent_engine,
+        get_ledger=lambda: object(),
+        get_life_snapshot_reader=lambda: object(),
+        get_multimodal_observer=lambda: object(),
+        get_multimodal_processor=lambda: object(),
+        get_task_status_projection=lambda: object(),
+        notify_user_interaction=lambda: None,
+        evaluate_governor_with_timing=(
+            chat_handler_module._evaluate_governor_with_timing
+        ),
+        build_chat_emotion_snapshot=build_chat_emotion_snapshot,
+        build_chat_governance_snapshot=build_chat_governance_snapshot,
+        resolve_chat_emotion_context=resolve_chat_emotion_context,
+        chat_request_factory=ChatRequest,
+        cortex_orchestrator_sse_generator=_unused,
+        create_multimodal_job=_unused,
+        update_multimodal_job=_unused,
+        reply_form_decision_type=object,
+        get_reply_form_decider=lambda: object(),
+        message_type=object,
+        trigger_reply_performance=_unused,
+        render_quick_gateway_progress_text=lambda **_kwargs: "",
+        render_quick_gateway_realign_text=lambda **_kwargs: "",
+    )
+
+
 def _build_request() -> Request:
     return Request(
         {
@@ -93,6 +130,17 @@ def _parse_sse_chunk(chunk: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_handle_chat_requires_typed_input_runtime_ports_after_mode_gate() -> None:
+    with pytest.raises(RuntimeError, match="HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED"):
+        await handle_chat(
+            request_body=ChatRequest(message="普通聊天必须使用显式准入端口。"),
+            request=_build_request(),
+            metrics=_DummyMetrics(),
+            hard_state_provider=lambda: {"sys_mode": "normal"},
+        )
+
+
+@pytest.mark.asyncio
 async def test_handle_chat_streams_presence_before_thalamus_classification(monkeypatch) -> None:
     fake_thalamus = _FakeThalamusAgent()
     governed_command_application = object()
@@ -104,7 +152,6 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
     metrics = _DummyMetrics()
     response = await handle_chat(
         request_body=ChatRequest(message="我想和你认真聊聊今天的心情。"),
@@ -112,6 +159,7 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         metrics=metrics,
         governed_command_application=governed_command_application,
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(_FakeIntentEngine()),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),
@@ -153,7 +201,6 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
     response = await handle_chat(
         request_body=ChatRequest(
             message="这是什么",
@@ -167,6 +214,7 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(_FakeIntentEngine()),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),
@@ -217,7 +265,6 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
     response = await handle_chat(
         request_body=ChatRequest(
             message="我刚才让你记了什么？",
@@ -229,6 +276,7 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(intent_engine),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),
@@ -283,12 +331,12 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
-    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
     response = await handle_chat(
         request_body=ChatRequest(message="还记得我说推荐格式要怎样吗？"),
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(intent_engine),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),

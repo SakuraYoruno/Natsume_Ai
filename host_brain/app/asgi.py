@@ -403,6 +403,7 @@ def create_app(
             metrics,
             governed_command_application=tool_composition.provide_runtime(),
             hard_state_provider=host_lifecycle.get_hard_state,
+            input_runtime_ports=input_runtime_ports,
             cortex_orchestrator_sse_generator=(
                 input_runtime_ports.cortex_orchestrator_sse_generator
             ),
@@ -946,6 +947,9 @@ def create_app(
                     mode_transition_service_provider=host_lifecycle.get_mode_transition_service,
                     life_receipt_reader_provider=(
                         lambda: life_command_authority_provider(ledger)[1]
+                    ),
+                    life_authority_provider=(
+                        lambda: life_command_authority_provider(ledger)
                     ),
                     agent_runtime_ports=agent_runtime_ports,
                     token_service_provider=application_ports.token_service,

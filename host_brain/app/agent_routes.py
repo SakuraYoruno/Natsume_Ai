@@ -67,7 +67,7 @@ class AgentRunRequest(BaseModel):
         description=f"兼容字段；默认 {DEFAULT_TOTAL_TIMEOUT_SEC}s，执行关闭期间忽略。",
     )
 
-    # 图片上传授权（与 chat_handler_vision 保持一致）
+    # 图片上传授权（与 /v1/chat 的非 text 门禁保持一致）
     image_upload_consent: bool = Field(
         False,
         description="兼容字段；执行关闭期间不会截图或上传。",

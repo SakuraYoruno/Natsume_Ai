@@ -108,7 +108,6 @@ from host_brain.model_runtime.live_prompts import (
     SURFACE_MAIN_TEXT_PROMPT_ID,
     SURFACE_MEMORY_REPAIR_PROMPT_ID,
     VISION_ACTION_PLANNER_PROMPT_ID,
-    VISION_UI_ANALYSIS_PROMPT_ID,
     build_live_production_prompt_registry,
     register_live_prompt_bindings,
 )
@@ -239,7 +238,6 @@ __all__ = [
     "SURFACE_MAIN_TEXT_PROMPT_ID",
     "SURFACE_MEMORY_REPAIR_PROMPT_ID",
     "VISION_ACTION_PLANNER_PROMPT_ID",
-    "VISION_UI_ANALYSIS_PROMPT_ID",
     "ProviderAdapter",
     "ProviderAdapterError",
     "ProviderAdapterRegistry",

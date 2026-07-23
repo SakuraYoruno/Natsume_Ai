@@ -739,9 +739,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 31
-    assert sum(named_import_modules.values()) == 68
-    assert len(all_import_modules) == 34
+    assert len(named_import_modules) == 29
+    assert sum(named_import_modules.values()) == 59
+    assert len(all_import_modules) == 32
     assert (
         ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
     ) not in all_import_modules

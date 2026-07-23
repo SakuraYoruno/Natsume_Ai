@@ -10,7 +10,6 @@ from host_brain.model_runtime import (
     SURFACE_MAIN_TEXT_PROMPT_ID,
     SURFACE_MEMORY_REPAIR_PROMPT_ID,
     VISION_ACTION_PLANNER_PROMPT_ID,
-    VISION_UI_ANALYSIS_PROMPT_ID,
     CallableRoutePolicy,
     build_default_production_model_runtime,
 )
@@ -37,7 +36,6 @@ def test_default_composition_installs_live_prompts_dynamic_route_and_one_attempt
         SURFACE_MAIN_TEXT_PROMPT_ID: "text",
         SURFACE_MEMORY_REPAIR_PROMPT_ID: "json_object",
         VISION_ACTION_PLANNER_PROMPT_ID: "json_object",
-        VISION_UI_ANALYSIS_PROMPT_ID: "text",
     }
     assert {
         prompt_id: composition.prompt_registry.definition(prompt_id).output_contract.kind.value
@@ -68,6 +66,8 @@ def test_surface_and_thalamus_have_no_legacy_pool_or_private_fallback_authority(
         assert "complete_llm_with_pool" not in source
     assert "_surface_gemini_fallback_runtime" not in surface
     assert 'trace_stage_meta["surface_llm_pool"]' not in surface
-    assert "get_model_attempt_service" in surface
+    assert "ports.model_attempt_service()" in surface
+    assert "get_model_attempt_service" not in surface
+    assert "host_brain.composition.process_services" not in surface
     assert 'require("model_attempt_service")' in thalamus
     assert "host_brain.app" not in thalamus

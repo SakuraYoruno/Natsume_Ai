@@ -58,7 +58,6 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_repair_agent_handler.py",
     "test_self_model_helpers_extra.py",
     "test_self_reflection_helpers.py",
-    "test_vision_ui_handler.py",
 }
 
 _CI_UNSTABLE_TEST_FILES = {

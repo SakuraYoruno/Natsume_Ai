@@ -51,46 +51,6 @@ from host_brain.surface_runtime.subagent_context import (
 from host_brain.surface_runtime.ports import (
     SurfaceRuntimePorts,
 )
-from host_brain.app.context.conversation_belief_tracker import (
-    build_conversation_understanding_pack,
-)
-from host_brain.app.context.conversation_experience_store import (
-    get_conversation_experience_store,
-)
-from host_brain.app.context.memory_context_orchestrator import build_memory_context_debug
-from host_brain.composition.process_services import (
-    get_conversation_history,
-    get_ledger,
-    get_life_command_service,
-    get_life_snapshot_reader,
-)
-from host_brain.app.settings import get_persistence_settings
-from host_brain.app.surface_context_packet import build_surface_context_packet
-from host_brain.app.user_preference_store import build_user_preference_pack
-
-
-def _build_surface_context_packet_with_life_ports(**kwargs):  # noqa: ANN003
-    return build_surface_context_packet(
-        life_snapshot_reader=get_life_snapshot_reader(),
-        **kwargs,
-    )
-
-
-def _compose_surface_runtime_ports() -> SurfaceRuntimePorts:
-    """Compose one immutable Surface dependency set for a request."""
-
-    return SurfaceRuntimePorts(
-        get_ledger=get_ledger,
-        get_life_command_service=get_life_command_service,
-        get_life_snapshot_reader=get_life_snapshot_reader,
-        get_persistence_settings=get_persistence_settings,
-        build_surface_context_packet=_build_surface_context_packet_with_life_ports,
-        build_user_preference_pack=build_user_preference_pack,
-        get_conversation_history=get_conversation_history,
-        get_conversation_experience_store=get_conversation_experience_store,
-        build_conversation_understanding_pack=build_conversation_understanding_pack,
-        build_memory_context_debug=build_memory_context_debug,
-    )
 
 
 def _surface_main_chain_response_format() -> dict[str, str] | None:
@@ -123,7 +83,6 @@ async def run_surface_main_chain_for_surface_reply_input(
             trace_stage_meta["surface_memory_recall_packet"] = guard_packet
 
     async def _generate(messages: list[dict[str, str]]) -> str:
-        from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
         from host_brain.model_runtime.contracts import (  # noqa: PLC0415
             ModelAttemptRequest,
             PromptRef,
@@ -182,7 +141,7 @@ async def run_surface_main_chain_for_surface_reply_input(
         )
         if governed_model_budget is not None and model_deadline_ms <= 0:
             raise RuntimeError("MODEL_BUDGET_DEADLINE_EXHAUSTED")
-        result = await get_model_attempt_service().complete(
+        result = await ports.model_attempt_service().complete(
             ModelAttemptRequest(
                 request_id=request_id or "surface-main-chain",
                 scene_type="CHAT_SURFACE",
@@ -228,9 +187,9 @@ async def run_surface_main_chain_for_surface_reply_input(
 async def surface_main_chain_sse_generator(
     agent_input: Any,
     *,
+    ports: SurfaceRuntimePorts,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
-    ports = _compose_surface_runtime_ports()
     started_ms = int(time.time() * 1000)
     trace = {
         **_safe_mapping(getattr(agent_input, "trace_stage_meta", None)),

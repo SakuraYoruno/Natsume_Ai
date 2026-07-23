@@ -22,6 +22,7 @@ from host_brain.app.governed_delegate_dispatch import (
     GovernedDelegateInvocation,
     GovernedDelegateOutcome,
 )
+from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
@@ -60,8 +61,15 @@ class RouteExecutionBoundaryError(RuntimeError):
 def build_governed_route_execution_ports(
     *,
     governed_delegate_dispatcher: Any,
+    surface_runtime_ports: SurfaceRuntimePorts | None = None,
 ) -> GovernedRouteExecutionPorts:
-    """Compose only collaborators needed to execute an already-frozen node."""
+    """Compose only collaborators needed to execute an already-frozen node.
+
+    The low-level builder has no hidden process-service fallback.  Production
+    Host composition must inject the lifespan-owned Surface ports.  Focused
+    non-Chat tests may build a registry without them, but a real Chat node then
+    fails closed before the legacy Surface path can be reached.
+    """
 
     if not callable(getattr(governed_delegate_dispatcher, "dispatch", None)):
         raise RouteExecutionBoundaryError(
@@ -74,9 +82,26 @@ def build_governed_route_execution_ports(
     from host_brain.app.surface_reply_preprocessor import (  # noqa: PLC0415
         SurfaceReplyInput,
     )
-    from host_brain.app.surface_reply_runtime import (  # noqa: PLC0415
-        surface_reply_sse_generator,
-    )
+    if surface_runtime_ports is None:
+
+        async def surface_reply_sse_generator(_value: Any) -> AsyncIterator[str]:
+            if False:  # pragma: no cover - makes the fail-closed path an async iterator.
+                yield ""
+            raise RouteExecutionBoundaryError(
+                "governed Chat requires lifespan-owned SurfaceRuntimePorts"
+            )
+
+    else:
+        from host_brain.app.surface_reply_runtime import (  # noqa: PLC0415
+            surface_reply_sse_generator as _surface_reply_sse_generator,
+        )
+
+        def surface_reply_sse_generator(value: Any) -> AsyncIterator[str]:
+            return _surface_reply_sse_generator(
+                value,
+                ports=surface_runtime_ports,
+            )
+
     return GovernedRouteExecutionPorts(
         surface_reply_input_factory=SurfaceReplyInput,
         resolve_surface_reply_llm_runtime=resolve_surface_reply_llm_runtime,

@@ -3,15 +3,17 @@ from __future__ import annotations
 import json
 import inspect
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from host_brain.app.surface_main_chain_adapter import (
     run_surface_main_chain_for_surface_reply_input,
-    surface_main_chain_sse_generator,
+    surface_main_chain_sse_generator as _surface_main_chain_sse_generator,
 )
 from host_brain.surface_runtime.eligibility import surface_main_chain_enabled
 from host_brain.surface_runtime.input_compiler import build_surface_main_chain_input_from_surface_reply_input
+from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 from host_brain.surface_runtime.life_context import _surface_life_context_task_facts
 from host_brain.surface_runtime.memory_context import (
     _surface_apply_memory_context_reply_plan_override,
@@ -33,6 +35,16 @@ from host_brain.model_runtime import (
 
 
 SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬，但帮忙时先给能执行的一步。"
+_TEST_SURFACE_PORTS: SurfaceRuntimePorts | None = None
+
+
+def _surface_stream(agent_input: Any, **kwargs: Any):  # noqa: ANN003
+    assert _TEST_SURFACE_PORTS is not None
+    return _surface_main_chain_sse_generator(
+        agent_input,
+        ports=_TEST_SURFACE_PORTS,
+        **kwargs,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +52,7 @@ def _disable_surface_quote_guidance(
     monkeypatch,
     surface_runtime_ports_factory,
 ):  # noqa: ANN001
+    global _TEST_SURFACE_PORTS
     monkeypatch.setattr("host_brain.persona.surface_runtime.render_surface_original_quote_guidance", lambda *_args, **_kwargs: "")
     empty_snapshot = {
         "person_id": "user-1",
@@ -59,11 +72,10 @@ def _disable_surface_quote_guidance(
             target,
             lambda *_args, **_kwargs: dict(empty_snapshot),
         )
-    ports = surface_runtime_ports_factory()
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter._compose_surface_runtime_ports",
-        lambda: ports,
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=dependencies.get_model_attempt_service,
     )
+    _TEST_SURFACE_PORTS = ports
     monkeypatch.setattr(
         "host_brain.surface_runtime.delivery_audit.submit_life_command",
         lambda **kwargs: {
@@ -132,6 +144,7 @@ def _disable_surface_quote_guidance(
     )
     dependencies.reset_model_runtime_composition(composition)
     yield
+    _TEST_SURFACE_PORTS = None
     dependencies.reset_model_runtime_composition()
 
 
@@ -885,7 +898,7 @@ async def test_surface_main_chain_blocks_visual_claims_without_evidence(monkeypa
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="你觉得这几本书怎么样", attachments=[], multimodal_observations={})
         )
     ]
@@ -948,7 +961,7 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
     monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fake_submit)
 
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(_agent_input())]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(_agent_input())]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert calls
@@ -993,7 +1006,7 @@ async def test_surface_durability_failure_is_controlled_fail_closed(monkeypatch)
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_complete)
     monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _fail_submit)
 
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(_agent_input())]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(_agent_input())]
 
     assert [event["phase"] for event in events] == ["COMMIT"]
     commit = events[0]
@@ -1034,7 +1047,7 @@ async def test_recommendation_followup_uses_surface_main_chain_not_template(monk
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(
                 user_message="这三本书，你喜欢哪本",
                 retrieval_summary={
@@ -1072,7 +1085,7 @@ async def test_surface_main_chain_allows_missing_detail_selection_when_scoped_to
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(
                 user_message="这三本书，你喜欢哪本？",
                 retrieval_summary={
@@ -1124,7 +1137,7 @@ async def test_surface_main_chain_failure_returns_sendable_non_persistent_fallba
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="继续，短一句。")
         )
     ]
@@ -1152,7 +1165,7 @@ async def test_governed_surface_model_failure_rejects_without_approval_fallback(
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(
                 trace_stage_meta={
                     "governed_model_budget": _governed_model_budget_payload(),
@@ -1188,7 +1201,7 @@ async def test_governed_surface_skips_codex_spark_secondary_model_call(monkeypat
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(
                 trace_stage_meta={
                     "governed_model_budget": _governed_model_budget_payload(),
@@ -1217,7 +1230,7 @@ async def test_surface_main_chain_failure_returns_contextual_fallback_for_substa
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="你觉得把后台任务迁到本机 Codex 以后，最需要继续观察的风险是什么？用两句说。")
         )
     ]
@@ -1253,7 +1266,7 @@ async def test_surface_main_chain_low_info_uses_surface_chain(monkeypatch) -> No
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="继续")
         )
     ]
@@ -1282,7 +1295,7 @@ async def test_surface_main_chain_audit_uses_canonical_route_target(monkeypatch)
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="听得到吗")
         )
     ]
@@ -1335,7 +1348,7 @@ async def test_surface_main_chain_rewrites_account_credential_request(monkeypatc
             payload={},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert commit["decision"] == "APPROVE"
@@ -1414,7 +1427,7 @@ async def test_surface_main_chain_sse_reports_sub_agent_result(monkeypatch) -> N
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
     trace = commit["audit_refs"]["trace_stage_meta"]
 
@@ -1452,7 +1465,7 @@ async def test_surface_main_chain_sse_replaces_refusal_with_sub_agent_result(mon
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
     trace = commit["audit_refs"]["trace_stage_meta"]
 
@@ -1492,7 +1505,7 @@ async def test_surface_main_chain_sse_replaces_generic_completion_with_sub_agent
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
     trace = commit["audit_refs"]["trace_stage_meta"]
 
@@ -1531,7 +1544,7 @@ async def test_surface_main_chain_failure_falls_back_to_sub_agent_result(monkeyp
             payload={"audit_refs": {"skill_exec": "skill_exec::req::pentest_agent"}},
         ),
     )
-    events = [_parse_sse(chunk) async for chunk in surface_main_chain_sse_generator(agent_input)]
+    events = [_parse_sse(chunk) async for chunk in _surface_stream(agent_input)]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert commit["decision"] == "APPROVE"
@@ -1722,7 +1735,7 @@ async def test_surface_main_chain_audit_marks_model_path(monkeypatch) -> None:
 
     events = [
         _parse_sse(chunk)
-        async for chunk in surface_main_chain_sse_generator(
+        async for chunk in _surface_stream(
             _agent_input(user_message="项目启动报错，端口18080被占用了，我该怎么排查？")
         )
     ]

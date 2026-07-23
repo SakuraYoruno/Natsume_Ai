@@ -5,6 +5,11 @@ from typing import Any
 
 import pytest
 
+from host_brain.app.emotion_context import (
+    build_chat_emotion_snapshot,
+    build_chat_governance_snapshot,
+    resolve_chat_emotion_context,
+)
 from host_brain.governor.route_token import (
     ROUTE_TOKEN_REF_DETAIL_MISMATCH,
     ROUTE_TOKEN_REF_MISSING,
@@ -12,6 +17,7 @@ from host_brain.governor.route_token import (
     RouteTokenDisposition,
     validate_committed_route_token,
 )
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 
 
 def _route_detail(token: str) -> dict[str, Any]:
@@ -142,6 +148,35 @@ class _Metrics:
         self.errors += 1
 
 
+def _input_runtime_ports() -> InputRuntimeApplicationPorts:
+    def _unused(*_args: Any, **_kwargs: Any) -> Any:
+        return None
+
+    return InputRuntimeApplicationPorts(
+        get_intent_engine=lambda: object(),
+        get_ledger=lambda: object(),
+        get_life_snapshot_reader=lambda: object(),
+        get_multimodal_observer=lambda: object(),
+        get_multimodal_processor=lambda: object(),
+        get_task_status_projection=lambda: object(),
+        notify_user_interaction=lambda: None,
+        evaluate_governor_with_timing=_unused,
+        build_chat_emotion_snapshot=build_chat_emotion_snapshot,
+        build_chat_governance_snapshot=build_chat_governance_snapshot,
+        resolve_chat_emotion_context=resolve_chat_emotion_context,
+        chat_request_factory=object,
+        cortex_orchestrator_sse_generator=_unused,
+        create_multimodal_job=_unused,
+        update_multimodal_job=_unused,
+        reply_form_decision_type=object,
+        get_reply_form_decider=lambda: object(),
+        message_type=object,
+        trigger_reply_performance=_unused,
+        render_quick_gateway_progress_text=lambda **_kwargs: "",
+        render_quick_gateway_realign_text=lambda **_kwargs: "",
+    )
+
+
 def _parse_sse(chunk: str) -> dict[str, Any]:
     for line in str(chunk).splitlines():
         if line.startswith("data: "):
@@ -163,10 +198,6 @@ async def _run_preapproved_chat(
         cortex_calls.append(dict(kwargs))
         yield 'data: {"phase":"COMMIT","done":true,"decision":"APPROVE"}\n\n'
 
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex,
-    )
     monkeypatch.setattr(chat_handler, "_mateengine_state_cues_enabled", lambda: False)
     metrics = _Metrics()
     chunks = []
@@ -185,6 +216,8 @@ async def _run_preapproved_chat(
             "action": "narrative_only",
         },
         metrics=metrics,
+        input_runtime_ports=_input_runtime_ports(),
+        cortex_orchestrator_sse_generator=_fake_cortex,
         _pre_approved_governor_result=governor_result,
     ):
         chunks.append(_parse_sse(chunk))

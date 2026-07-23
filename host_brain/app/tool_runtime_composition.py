@@ -110,6 +110,7 @@ class GovernedHostToolRuntimeComposition:
         acceptance_effect_dispatcher: AcceptanceEffectDispatcher,
         episodic_store: Any | None,
         semantic_recaller: Any | None,
+        surface_runtime_ports: Any | None = None,
     ) -> GovernedHostRuntime:
         context = runtime_context_application.composition
         dependencies = self.dependencies
@@ -198,6 +199,7 @@ class GovernedHostToolRuntimeComposition:
             degradation_capability_port=context.guardian,
             action_preview_service=action_preview_service,
             acceptance_effect_dispatcher=acceptance_effect_dispatcher,
+            surface_runtime_ports=surface_runtime_ports,
         )
         application = GovernedToolHttpApplication(
             catalog=catalog,

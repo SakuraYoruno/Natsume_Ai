@@ -14,6 +14,13 @@ from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 def surface_runtime_ports_factory():
     """Build explicit, side-effect-free Surface ports for unit tests."""
 
+    def _model_attempt_service() -> Any:
+        from host_brain.composition.process_services import (  # noqa: PLC0415
+            get_model_attempt_service,
+        )
+
+        return get_model_attempt_service()
+
     def _build(**overrides: Any) -> SurfaceRuntimePorts:
         values: dict[str, Any] = {
             "get_ledger": lambda: SimpleNamespace(canonical_db_path=":memory:"),
@@ -31,6 +38,7 @@ def surface_runtime_ports_factory():
             ),
             "build_conversation_understanding_pack": lambda **_kwargs: {},
             "build_memory_context_debug": lambda **_kwargs: {},
+            "model_attempt_service": _model_attempt_service,
         }
         values.update(overrides)
         return SurfaceRuntimePorts(**values)
