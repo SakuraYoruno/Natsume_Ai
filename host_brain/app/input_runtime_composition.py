@@ -22,6 +22,7 @@ from host_brain.app.surface_reply_preprocessor import (
     render_quick_gateway_realign_text,
 )
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
+from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
 
@@ -34,6 +35,7 @@ def build_input_runtime_application_ports(
     agent_runtime_ports_provider: (
         Callable[[], AgentRuntimeApplicationPorts | None] | None
     ) = None,
+    tribe_runtime_agent_ports: TribeRuntimeAgentPorts | None = None,
 ) -> InputRuntimeApplicationPorts:
     """Build one immutable dependency graph for one Host application."""
 
@@ -42,6 +44,18 @@ def build_input_runtime_application_ports(
     get_life_snapshot_reader = _host_provider(host_services, "life_snapshot_reader")
     get_multimodal_observer = _host_provider(host_services, "multimodal_observer")
     get_multimodal_processor = _host_provider(host_services, "multimodal_processor")
+    get_thalamus_agent = _tribe_agent_provider(
+        tribe_runtime_agent_ports,
+        "get_thalamus_agent",
+    )
+    get_ans_agent = _tribe_agent_provider(
+        tribe_runtime_agent_ports,
+        "get_ans_agent",
+    )
+    get_immune_agent = _tribe_agent_provider(
+        tribe_runtime_agent_ports,
+        "get_immune_agent",
+    )
 
     def get_task_status_projection():
         return build_durable_task_status_projection(ledger=get_ledger())
@@ -96,6 +110,9 @@ def build_input_runtime_application_ports(
         render_quick_gateway_progress_text=render_quick_gateway_progress_text,
         render_quick_gateway_realign_text=render_quick_gateway_realign_text,
         get_embodiment_runtime=embodiment_runtime_provider,
+        get_thalamus_agent=get_thalamus_agent,
+        get_ans_agent=get_ans_agent,
+        get_immune_agent=get_immune_agent,
     )
 
 
@@ -110,6 +127,19 @@ def _host_provider(
 
 def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
     raise RuntimeError("HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED")
+
+
+def _tribe_agent_provider(
+    ports: TribeRuntimeAgentPorts | None,
+    field_name: str,
+) -> Callable[[], Any]:
+    if isinstance(ports, TribeRuntimeAgentPorts):
+        return getattr(ports, field_name)
+    return _missing_tribe_agent_provider
+
+
+def _missing_tribe_agent_provider(*_args: Any, **_kwargs: Any) -> Any:
+    raise RuntimeError("HOST_INPUT_TRIBE_RUNTIME_PORTS_NOT_INJECTED")
 
 
 __all__ = ["build_input_runtime_application_ports"]

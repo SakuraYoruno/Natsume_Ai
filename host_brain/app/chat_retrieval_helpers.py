@@ -11,7 +11,7 @@ import os
 import re
 import time
 from functools import partial
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 _CONTEXTUAL_FOLLOWUP_RE = re.compile(
     r"^\s*(?:"
@@ -227,6 +227,9 @@ async def _run_retrieval(
     *,
     life_snapshot_reader: Any,
     life_memory_store: Any,
+    conversation_history: Any | None = None,
+    build_user_preference_pack: Callable[..., Any] | None = None,
+    recall_service_factory: Callable[[], Any] | None = None,
     request_id: str,
     message: str,
     person_id: str,
@@ -275,6 +278,7 @@ async def _run_retrieval(
             message=message,
             session_id=session_id,
             request_id=request_id,
+            conversation_history=conversation_history,
         )
         if plan.should_recall and short_term_memory_facts:
             packet = SurfaceMemoryRecallPacket(
@@ -314,7 +318,9 @@ async def _run_retrieval(
             )
             if packet is None:
                 query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
-                recall_service = _build_surface_memory_recall_service()
+                recall_service = (
+                    recall_service_factory or _build_surface_memory_recall_service
+                )()
                 packet = recall_surface_memory_packet(
                     recall_service=recall_service,
                     request_id=request_id,
@@ -383,6 +389,7 @@ async def _run_retrieval(
             session_id=session_id,
             ts_ms=ts_ms,
             life_memory_store=life_memory_store,
+            build_user_preference_pack=build_user_preference_pack,
         )
         packet = await _maybe_apply_generic_evidence_review(
             packet=packet,
@@ -505,11 +512,9 @@ def _recent_lightnovel_delivery_packet_payload(
     message: str,
     person_id: str,
     session_id: str,
+    build_user_preference_pack: Callable[..., Any] | None,
 ) -> dict[str, Any]:
-    try:
-        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
-        from host_brain.app.user_preference_store import build_user_preference_pack  # noqa: PLC0415
-    except Exception:
+    if not callable(build_user_preference_pack):
         return dict(packet_payload or {})
 
     try:
@@ -518,7 +523,6 @@ def _recent_lightnovel_delivery_packet_payload(
             query_text=str(message or ""),
             session_id=str(session_id or "").strip() or None,
             conversation_id=str(session_id or "").strip() or None,
-            ledger=get_ledger(),
         )
     except Exception:
         return dict(packet_payload or {})
@@ -765,6 +769,7 @@ async def _maybe_apply_lightnovel_deep_review(
     session_id: str,
     ts_ms: int,
     life_memory_store: Any,
+    build_user_preference_pack: Callable[..., Any] | None,
 ) -> Any:
     try:
         from dataclasses import replace  # noqa: PLC0415
@@ -785,6 +790,7 @@ async def _maybe_apply_lightnovel_deep_review(
         message=message,
         person_id=person_id,
         session_id=session_id,
+        build_user_preference_pack=build_user_preference_pack,
     )
     if not should_deep_review_lightnovel_selection(user_message=message, packet=packet_payload):
         return packet
@@ -824,6 +830,7 @@ async def _maybe_apply_lightnovel_deep_review(
         message=message,
         person_id=person_id,
         session_id=session_id,
+        build_user_preference_pack=build_user_preference_pack,
     )
     previous_facts = list(getattr(packet, "facts", ()) or [])
     anchor_fact = _lightnovel_recommendation_anchor_fact(packet_payload)
@@ -1305,16 +1312,22 @@ def _surface_memory_query_facts(
     return facts[:3]
 
 
-def _recent_explicit_memory_facts(*, message: str, session_id: str, request_id: str) -> list[str]:
+def _recent_explicit_memory_facts(
+    *,
+    message: str,
+    session_id: str,
+    request_id: str,
+    conversation_history: Any | None,
+) -> list[str]:
     if not _looks_like_explicit_memory_content_query(message):
         return []
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return []
+    if conversation_history is None:
+        return []
     try:
-        from host_brain.composition.process_services import get_conversation_history  # noqa: PLC0415
-
-        turns = get_conversation_history().fetch_recent_turns(
+        turns = conversation_history.fetch_recent_turns(
             session_id=normalized_session_id,
             max_turns=8,
             exclude_request_id=str(request_id or "").strip() or None,
@@ -1378,13 +1391,17 @@ def _embed_surface_memory_query(query: str) -> tuple[list[float], str]:
     return list(values or []), str(model_id or "")
 
 
-def _build_surface_memory_recall_service() -> Any:
-    from host_brain.composition.process_services import (  # noqa: PLC0415
-        get_ledger,
-        get_life_memory_store,
-    )
+def _build_surface_memory_recall_service(
+    *,
+    ledger: Any | None = None,
+    life_memory_store: Any | None = None,
+    bond_neo4j_client: Any | None = None,
+) -> Any:
     from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
     from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig  # noqa: PLC0415
+
+    if ledger is None or life_memory_store is None:
+        raise RuntimeError("HOST_CHAT_RETRIEVAL_AUTHORITY_NOT_INJECTED")
 
     node_id = "surface_main_chain_memory_recall"
     routes = {
@@ -1437,16 +1454,10 @@ def _build_surface_memory_recall_service() -> Any:
             node_selector=node_id,
         ),
     }
-    try:
-        from host_brain.composition.process_services import get_bond_neo4j_client  # noqa: PLC0415
-
-        neo4j_client = get_bond_neo4j_client()
-    except Exception:
-        neo4j_client = None
     return RecallFusionServiceContract(
-        ledger=get_ledger(),
-        life_memory_store=get_life_memory_store(),
-        neo4j_client=neo4j_client,
+        ledger=ledger,
+        life_memory_store=life_memory_store,
+        neo4j_client=bond_neo4j_client,
         runtime_config=RecallRuntimeConfig(
             enabled=True,
             default_route="surface_episodic",

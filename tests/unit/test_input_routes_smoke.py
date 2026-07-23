@@ -15,7 +15,13 @@ from host_brain.app.settings.input import input_settings_from_mapping
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 
 
+class _AllowImmuneAgent:
+    def inspect_text(self, **_kwargs):  # noqa: ANN003, ANN201
+        return {"decision": "ALLOW", "reason_codes": []}
+
+
 def _ports(**overrides):  # noqa: ANN003
+    overrides.setdefault("get_immune_agent", lambda: _AllowImmuneAgent())
     return replace(build_input_runtime_application_ports(), **overrides)
 
 

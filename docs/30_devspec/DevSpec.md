@@ -107,6 +107,7 @@ POST      COMMIT 后的只读投影或 durable effect 进度
 - Edge playback、resource、device 等事件进入独立 Event ingress。
 - Scheduler/Internal Agent 使用服务身份和最小 scope。
 - 查询类 `recent_turn/task_progress` 应走 projection/read service，不借执行 Runtime 维护第二任务状态。
+- projection/read service 只能返回暂态读取结果；未形成 TaskGraph Acceptance 时不得写 visible conversation、Memory、Life、Preference、Outbox 或 Delivery。
 
 ## 3. Governed Execution 合同
 

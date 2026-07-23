@@ -9,10 +9,15 @@ from typing import Any
 from host_brain.app.schemas import ChatRequest
 
 
-def evaluate_immune_gate_for_chat(request_body: ChatRequest) -> dict[str, Any]:
-    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+def evaluate_immune_gate_for_chat(
+    request_body: ChatRequest,
+    *,
+    immune_agent_provider: Callable[[], Any],
+) -> dict[str, Any]:
+    """Evaluate chat ingress through the Host-composed ImmuneAgent port."""
 
-    return get_immune_agent().inspect_text(
+    immune_agent = immune_agent_provider()
+    return immune_agent.inspect_text(
         text=str(request_body.message or ""),
         source="http.v1.chat",
         metadata={

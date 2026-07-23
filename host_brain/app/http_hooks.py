@@ -20,6 +20,7 @@ from host_brain.lifecycle_runtime._shared import (
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.app.host_lifecycle_composition import HostLifecycleContainer
 from host_brain.app.tribe_composition import (
+    TribeRuntimeAgentPorts,
     bind_tribe_application_ports,
     unbind_tribe_application_ports,
 )
@@ -162,6 +163,7 @@ def runtime_lifespan(
     lifecycle_ports: LifecycleRuntimeApplicationPorts,
     host_lifecycle: HostLifecycleContainer,
     tribe_application_ports: TribeApplicationPorts,
+    tribe_runtime_agent_ports: TribeRuntimeAgentPorts,
     canon_service_provider: Callable[[], Any | None] | None = None,
     mode_transition_service_sink: Callable[[Any | None], None] | None = None,
     startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
@@ -276,6 +278,9 @@ def runtime_lifespan(
 
                 new_module_statuses["chat_runtime_warmup"] = warmup_chat_runtime_basics(
                     eager_persona=True,
+                    thalamus_agent_provider=(
+                        tribe_runtime_agent_ports.get_thalamus_agent
+                    ),
                 )
                 new_module_statuses["chat_llm_runtime_warmup"] = warmup_chat_llm_runtime_profiles()
                 new_module_statuses["surface_quote_runtime_warmup"] = warmup_surface_quote_runtime()
@@ -517,9 +522,9 @@ def runtime_lifespan(
             # [ANSAgent] 注册主事件循环到 ANSAgent，使 Timer 线程可跨线程发布 Tribe 事件
             # Phase 1：ANSAgent.emit_from_thread() 依赖此循环引用
             try:
-                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
-
-                get_ans_agent().set_event_loop(asyncio.get_running_loop())
+                tribe_runtime_agent_ports.require_ans_agent().set_event_loop(
+                    asyncio.get_running_loop()
+                )
                 logger.info("ANSAgent 主事件循环已注册")
             except Exception as _ans_loop_exc:
                 logger.warning("ANSAgent 主事件循环注册失败（降级）: %s", _ans_loop_exc)

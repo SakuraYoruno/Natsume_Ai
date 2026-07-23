@@ -38,7 +38,7 @@ def _agent_runtime_ports() -> AgentRuntimeApplicationPorts:
         resolve_host_llm_runtime_async=_async_value,
         resolve_state_arbiter_bond_fact=_async_value,
         apply_surface_emotion_bond_flow=lambda **_kwargs: {},
-        get_conversation_experience_store=lambda: object(),
+        build_conversation_experience_read_pack=lambda **_kwargs: {},
         drive_stream_vts_emotion=_async_value,
         resolve_tts_route=lambda **_kwargs: {},
         conversation_history=lambda: object(),

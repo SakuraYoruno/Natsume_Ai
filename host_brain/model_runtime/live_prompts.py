@@ -86,7 +86,6 @@ PENTEST_FAILURE_CLASSIFY_PROMPT_ID = "pentest.failure.classify.json"
 PENTEST_KNOWLEDGE_EXTRACT_PROMPT_ID = "pentest.knowledge.extract.json"
 PENTEST_COGNITIVE_HYPOTHESES_PROMPT_ID = "pentest.cognitive.hypotheses.json"
 PENTEST_PACK_PLAN_PROMPT_ID = "pentest.pack.plan.json"
-SURFACE_REPLY_JUDGE_PROMPT_ID = "surface.reply_judge.json"
 STARTUP_MODEL_WARMUP_PROMPT_ID = "startup.model_warmup.text"
 
 
@@ -196,7 +195,6 @@ def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
         (PENTEST_KNOWLEDGE_EXTRACT_PROMPT_ID, "json_object"),
         (PENTEST_COGNITIVE_HYPOTHESES_PROMPT_ID, "json_object"),
         (PENTEST_PACK_PLAN_PROMPT_ID, "json_object"),
-        (SURFACE_REPLY_JUDGE_PROMPT_ID, "json_object"),
         (STARTUP_MODEL_WARMUP_PROMPT_ID, "text"),
     ):
         registry.register_renderer(
@@ -245,7 +243,6 @@ __all__ = [
     "SELF_REFLECTION_MOOD_PROMPT_ID",
     "SELF_REFLECTION_STYLE_TREND_PROMPT_ID",
     "STARTUP_MODEL_WARMUP_PROMPT_ID",
-    "SURFACE_REPLY_JUDGE_PROMPT_ID",
     "EMOTION_REACTIVITY_PROMPT_ID",
     "SURFACE_MAIN_JSON_PROMPT_ID",
     "SURFACE_MAIN_TEXT_PROMPT_ID",

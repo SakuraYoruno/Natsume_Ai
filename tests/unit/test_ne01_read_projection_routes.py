@@ -88,18 +88,13 @@ def _request(message: str) -> SimpleNamespace:
     )
 
 
-def _ports(*, writes: list[tuple[str, dict]]) -> SimpleNamespace:
-    def record_user_turn(**kwargs):  # noqa: ANN003
-        writes.append(("user", dict(kwargs)))
-        return {"status": "OK"}
-
-    def record_assistant_turn(**kwargs):  # noqa: ANN003
-        writes.append(("assistant", dict(kwargs)))
-        return {"status": "OK"}
+def _ports() -> SimpleNamespace:
+    def forbidden_writer(**_kwargs):  # noqa: ANN003
+        raise AssertionError("read projections must not write conversation state")
 
     return SimpleNamespace(
-        record_user_turn=record_user_turn,
-        record_assistant_turn=record_assistant_turn,
+        record_user_turn=forbidden_writer,
+        record_assistant_turn=forbidden_writer,
         task_status_projection=lambda: _TaskProjection(),
         conversation_history=lambda: _History(),
     )
@@ -113,16 +108,15 @@ def _ports(*, writes: list[tuple[str, dict]]) -> SimpleNamespace:
         ("recent_turn", "你刚刚说了什么", "RECENT_TURN_PROJECTED"),
     ],
 )
-async def test_cortex_read_routes_commit_projection_without_executive(
+async def test_cortex_read_routes_project_without_task_or_persistent_turns(
     route: str,
     message: str,
     reason_code: str,
 ) -> None:
-    writes: list[tuple[str, dict]] = []
     events = [
         event
         async for event in _cortex_orchestrator_sse_generator_impl(
-            application_ports=_ports(writes=writes),
+            application_ports=_ports(),
             request_body=_request(message),
             request_id=f"request-{route}",
             session_id="session-read",
@@ -142,17 +136,14 @@ async def test_cortex_read_routes_commit_projection_without_executive(
 
     assert events[-1]["decision"] == "APPROVE"
     assert events[-1]["reason_code"] == reason_code
-    assert [role for role, _payload in writes] == ["user", "assistant"]
-    assert writes[-1][1]["metadata"]["reply_source"] == "durable_read_projection"
 
 
 @pytest.mark.asyncio
 async def test_unknown_legacy_route_fails_closed_without_conversation_write() -> None:
-    writes: list[tuple[str, dict]] = []
     events = [
         event
         async for event in _cortex_orchestrator_sse_generator_impl(
-            application_ports=_ports(writes=writes),
+            application_ports=_ports(),
             request_body=_request("执行未知路线"),
             request_id="request-unknown-route",
             session_id="session-read",
@@ -171,7 +162,6 @@ async def test_unknown_legacy_route_fails_closed_without_conversation_write() ->
     ]
 
     assert events[-1]["reason_code"] == "RUNTIME_ROUTE_UNSUPPORTED"
-    assert writes == []
 
 
 def test_agent_runtime_ports_have_no_executive_fallback() -> None:

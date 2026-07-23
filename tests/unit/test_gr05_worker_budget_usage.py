@@ -8,6 +8,7 @@ import pytest
 from host_brain.app.governed_route_executors import (
     FrozenChatRouteExecutor,
     FrozenDelegateRouteExecutor,
+    GovernedRouteExecutorError,
 )
 from host_brain.app import model_provider_composition
 from host_brain.model_runtime import (
@@ -307,7 +308,7 @@ async def test_frozen_chat_budget_projection_ignores_large_memory_and_injected_m
 
 
 @pytest.mark.asyncio
-async def test_frozen_chat_budget_projection_aggregates_surface_and_spark_measurements() -> None:
+async def test_frozen_chat_rejects_retired_secondary_model_measurement() -> None:
     surface = {
         "schema_version": MODEL_BUDGET_MEASUREMENT_SCHEMA_VERSION,
         "measurement_ref": "model-budget://surface",
@@ -346,23 +347,16 @@ async def test_frozen_chat_budget_projection_aggregates_surface_and_spark_measur
         ports=SimpleNamespace(),
         stream_chat_with_context=stream_chat_with_context,
     )
-    events = [
-        event
-        async for event in executor.execute_stream(
-            _budget_frozen(route="chat", target_id="surface_reply")
-        )
-    ]
-
-    usage = WorkerBudgetUsage.from_payload(events[0]["budget_usage"])
-    assert usage.measurements == {
-        "retry_count": 1,
-        "token_count": 26,
-        "model_cost_micros": 10,
-    }
-    assert usage.evidence_refs == (
-        "model-budget://spark",
-        "model-budget://surface",
-    )
+    with pytest.raises(
+        GovernedRouteExecutorError,
+        match="retired secondary model",
+    ):
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _budget_frozen(route="chat", target_id="surface_reply")
+            )
+        ]
 
 
 @pytest.mark.asyncio

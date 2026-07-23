@@ -243,16 +243,12 @@ async def _async_post_process(
             )
             if durable_projection_mode:
                 _require_durable_assistant_turn_result(assistant_turn_result)
-            try:
-                application_ports.get_conversation_experience_store().update_assistant_reply(
-                    request_id=request_id,
-                    session_id=session_id,
-                    person_id=person_id,
-                    assistant_reply=narrative,
-                    outcome_signal="replied",
-                )
-            except Exception as exp_exc:
-                _logger.debug("[%s] cortex_orchestrator conversation experience reply update failed: %s", request_id, exp_exc)
+            # Conversation Experience is intentionally read-only in the
+            # governed Surface path.  The old mutable store accepted reply
+            # updates with no Task-bound proposal/activation receipt and even
+            # swallowed its own persistence failures.  Accepted turns and
+            # LifeMemory remain durable projections here; any new experience
+            # evolution must enter the later proposal/activation owner.
     except Exception as exc:
         if durable_projection_mode:
             raise

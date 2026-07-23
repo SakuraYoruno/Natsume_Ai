@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -78,9 +80,17 @@ class _FakeThalamusAgent:
         }
 
 
-def _input_runtime_ports(intent_engine: Any) -> InputRuntimeApplicationPorts:
+def _input_runtime_ports(
+    intent_engine: Any,
+    *,
+    thalamus_agent: Any | None = None,
+    ans_agent: Any | None = None,
+) -> InputRuntimeApplicationPorts:
     def _unused(*_args: Any, **_kwargs: Any) -> Any:
         return None
+
+    resolved_thalamus = thalamus_agent or _FakeThalamusAgent()
+    resolved_ans = ans_agent or SimpleNamespace(emit_task_success=_unused)
 
     return InputRuntimeApplicationPorts(
         get_intent_engine=lambda: intent_engine,
@@ -106,6 +116,8 @@ def _input_runtime_ports(intent_engine: Any) -> InputRuntimeApplicationPorts:
         trigger_reply_performance=_unused,
         render_quick_gateway_progress_text=lambda **_kwargs: "",
         render_quick_gateway_realign_text=lambda **_kwargs: "",
+        get_thalamus_agent=lambda: resolved_thalamus,
+        get_ans_agent=lambda: resolved_ans,
     )
 
 
@@ -141,6 +153,33 @@ async def test_handle_chat_requires_typed_input_runtime_ports_after_mode_gate() 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "expected_code"),
+    [
+        ("get_thalamus_agent", "HOST_INPUT_THALAMUS_AGENT_NOT_INJECTED"),
+        ("get_ans_agent", "HOST_INPUT_ANS_AGENT_NOT_INJECTED"),
+    ],
+)
+async def test_handle_chat_fails_closed_when_typed_tribe_agent_is_missing(
+    field_name: str,
+    expected_code: str,
+) -> None:
+    input_ports = replace(
+        _input_runtime_ports(_FakeIntentEngine()),
+        **{field_name: None},
+    )
+
+    with pytest.raises(RuntimeError, match=expected_code):
+        await handle_chat(
+            request_body=ChatRequest(message="聊天入口必须拒绝缺失的 Tribe 运行时端口。"),
+            request=_build_request(),
+            metrics=_DummyMetrics(),
+            hard_state_provider=lambda: {"sys_mode": "normal"},
+            input_runtime_ports=input_ports,
+        )
+
+
+@pytest.mark.asyncio
 async def test_handle_chat_streams_presence_before_thalamus_classification(monkeypatch) -> None:
     fake_thalamus = _FakeThalamusAgent()
     governed_command_application = object()
@@ -151,7 +190,6 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     metrics = _DummyMetrics()
     response = await handle_chat(
         request_body=ChatRequest(message="我想和你认真聊聊今天的心情。"),
@@ -159,7 +197,10 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         metrics=metrics,
         governed_command_application=governed_command_application,
         hard_state_provider=lambda: {"sys_mode": "normal"},
-        input_runtime_ports=_input_runtime_ports(_FakeIntentEngine()),
+        input_runtime_ports=_input_runtime_ports(
+            _FakeIntentEngine(),
+            thalamus_agent=fake_thalamus,
+        ),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),
@@ -200,7 +241,6 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     response = await handle_chat(
         request_body=ChatRequest(
             message="这是什么",
@@ -214,7 +254,10 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
-        input_runtime_ports=_input_runtime_ports(_FakeIntentEngine()),
+        input_runtime_ports=_input_runtime_ports(
+            _FakeIntentEngine(),
+            thalamus_agent=fake_thalamus,
+        ),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),
@@ -264,7 +307,6 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     response = await handle_chat(
         request_body=ChatRequest(
             message="我刚才让你记了什么？",
@@ -276,7 +318,10 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
-        input_runtime_ports=_input_runtime_ports(intent_engine),
+        input_runtime_ports=_input_runtime_ports(
+            intent_engine,
+            thalamus_agent=fake_thalamus,
+        ),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),
@@ -330,13 +375,15 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
         request_id = str(kwargs.get("request_id") or "req-test")
         yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
 
-    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     response = await handle_chat(
         request_body=ChatRequest(message="还记得我说推荐格式要怎样吗？"),
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
-        input_runtime_ports=_input_runtime_ports(intent_engine),
+        input_runtime_ports=_input_runtime_ports(
+            intent_engine,
+            thalamus_agent=fake_thalamus,
+        ),
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),

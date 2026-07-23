@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -509,11 +511,11 @@ async def test_run_retrieval_prefers_recent_explicit_memory_write(monkeypatch) -
 
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", _unexpected_embed)
     monkeypatch.setattr(helpers, "_build_surface_memory_recall_service", _unexpected_service)
-    monkeypatch.setattr("host_brain.composition.process_services.get_conversation_history", lambda: _History())
 
     summary, evidence_items = await helpers._run_retrieval(
         life_snapshot_reader=_LIFE_SNAPSHOT_READER,
         life_memory_store=_LIFE_MEMORY_STORE,
+        conversation_history=_History(),
         request_id="req-current",
         message="我刚才让你记了什么？",
         person_id="person-1",
@@ -532,6 +534,20 @@ async def test_run_retrieval_prefers_recent_explicit_memory_write(monkeypatch) -
     assert packet["confidence"] == 1.0
     assert packet["trace"]["short_term_explicit_memory"] is True
     assert "昨晚" not in str(packet["facts"])
+
+
+def test_chat_retrieval_helpers_do_not_import_process_service_locator() -> None:
+    source = Path(helpers.__file__).read_text(encoding="utf-8-sig")
+    tree = ast.parse(source)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert node.module != "host_brain.composition.process_services"
+        if isinstance(node, ast.Import):
+            assert all(
+                alias.name != "host_brain.composition.process_services"
+                for alias in node.names
+            )
 
 
 @pytest.mark.asyncio

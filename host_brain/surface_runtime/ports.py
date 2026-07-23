@@ -19,7 +19,7 @@ class SurfaceRuntimePorts:
     build_surface_context_packet: Callable[..., dict[str, Any]]
     build_user_preference_pack: Callable[..., dict[str, Any]]
     get_conversation_history: Callable[[], Any]
-    get_conversation_experience_store: Callable[[], Any]
+    build_conversation_experience_read_pack: Callable[..., dict[str, Any]]
     build_conversation_understanding_pack: Callable[..., dict[str, Any]]
     build_memory_context_debug: Callable[..., dict[str, Any]]
     model_attempt_service: Callable[[], Any]

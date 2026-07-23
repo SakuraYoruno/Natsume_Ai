@@ -56,7 +56,6 @@ from host_brain.input_runtime.ingress_policy import (
     looks_like_execution_intent as _looks_like_execution_intent_for_ack,
     normalize_route_confidence as _normalize_route_confidence,
 )
-from host_brain.tribe.thalamus_agent import get_thalamus_agent
 from host_brain.input_runtime.progress import (
     resolve_bond_stage_for_ack as _resolve_bond_stage_for_ack,
     resolve_emotion_tag_for_ack as _resolve_emotion_tag_for_ack,
@@ -394,10 +393,12 @@ def _evaluate_immune_gate_for_input(
     text: str,
     source: str,
     session_id: str,
+    ports: InputRuntimeApplicationPorts,
     person_id: str | None = None,
 ) -> dict[str, Any]:
-    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
-    return get_immune_agent().inspect_text(
+    """Evaluate ingress through the explicit Host-composed ImmuneAgent port."""
+
+    return ports.require_immune_agent().inspect_text(
         text=text,
         source=f"http.v1.host.input.{str(source or '').lower()}",
         metadata={
@@ -434,6 +435,7 @@ async def _build_input_thalamus_intent_draft(
     text: str,
     payload: dict[str, Any],
     ts_ms: int,
+    ports: InputRuntimeApplicationPorts,
     person_id: str | None = None,
 ) -> dict[str, Any]:
     from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
@@ -447,7 +449,7 @@ async def _build_input_thalamus_intent_draft(
         from_id=str(payload.get("from_id") or "").strip() or None,
         conversation_id=reply_target,
     )
-    return await get_thalamus_agent().classify_and_compile_intent_draft(
+    return await ports.require_thalamus_agent().classify_and_compile_intent_draft(
         request_id=request_id,
         session_id=session_id,
         user_message=text,

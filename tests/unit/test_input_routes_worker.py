@@ -35,7 +35,7 @@ from host_brain.input_runtime.multimodal_progress import (
 from host_brain.app.schemas import ChatRequest
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.input_runtime.settings import get_input_settings, input_settings_from_mapping
-from host_brain.tribe.thalamus_agent import classify_task_intent
+from host_brain.tribe.thalamus_agent import ThalamusAgent, classify_task_intent
 from tests.text_quality_assertions import assert_natsume_style
 
 
@@ -69,6 +69,7 @@ def _ports(**overrides):  # noqa: ANN003
     )
     overrides.setdefault("evaluate_governor_with_timing", _approve_governor)
     overrides.setdefault("trigger_reply_performance", _noop_reply_performance)
+    overrides.setdefault("get_thalamus_agent", ThalamusAgent)
     return replace(build_input_runtime_application_ports(), **overrides)
 
 
@@ -845,8 +846,7 @@ def test_run_cortex_orchestrator_pipeline_preserves_gateway_multimodal_fields() 
     assert request_body.attachment_summary == "用户发来一张轻轻撒娇的图片。"
 
 
-def test_run_cortex_orchestrator_pipeline_builds_canonical_thalamus_draft_for_gateway(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "false")
+def test_run_cortex_orchestrator_pipeline_builds_canonical_thalamus_draft_for_gateway() -> None:
     captured_intent_drafts: list[dict[str, object]] = []
 
     async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
@@ -885,8 +885,7 @@ def test_run_cortex_orchestrator_pipeline_builds_canonical_thalamus_draft_for_ga
     assert result["route_decision"]["target_id"] == "agent_inspect"
 
 
-def test_run_cortex_orchestrator_pipeline_routes_gateway_samples_through_thalamus(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "false")
+def test_run_cortex_orchestrator_pipeline_routes_gateway_samples_through_thalamus() -> None:
     captured_intent_drafts: list[dict[str, object]] = []
 
     async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
@@ -944,9 +943,6 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
 
     try:
         with patch(
-            "host_brain.input_runtime.contracts_and_normalization.get_thalamus_agent",
-            return_value=fake_agent,
-        ), patch(
             "host_brain.input_runtime.worker_dispatch._run_cortex_orchestrator_pipeline",
             new=AsyncMock(
                 return_value={
@@ -978,7 +974,7 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
                     ledger=ledger,
                         dispatch_mode="fire_and_forget.inline",
                         run_in_thread=False,
-                        ports=_ports(),
+                        ports=_ports(get_thalamus_agent=lambda: fake_agent),
                 )
             )
 
@@ -990,37 +986,6 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
         assert route_ack_mock.call_args.kwargs["target_id"] == "agent_worker"
     finally:
         ledger.close()
-
-
-def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
-    with patch(
-        "host_brain.tribe.thalamus_agent.classify_task_intent_by_rules",
-        return_value=None,
-    ), patch(
-        "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-        new=AsyncMock(
-            return_value={
-                "route": "skill",
-                "target_id": "agent_worker",
-                "task": "请修复这个报错",
-                "reason_code": "LLM_ROUTE_agent_worker",
-                "confidence": 0.93,
-                "route_source": "llm",
-            }
-        ),
-    ):
-        decision = _run(
-            classify_task_intent(
-                request_id="req_llm_route_001",
-                session_id="qq_dm_llm_001",
-                text="请修复这个报错",
-            )
-        )
-
-    assert decision["route"] == "skill"
-    assert decision["target_id"] == "agent_worker"
-    assert decision["route_source"] == "llm"
-    assert float(decision["confidence"]) == 0.93
 
 
 def test_classify_task_intent_uses_rule_for_action_prefix() -> None:

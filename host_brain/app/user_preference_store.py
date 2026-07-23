@@ -99,14 +99,6 @@ def _normalize_domain(domain: Any) -> str:
     return value or GENERAL_DOMAIN
 
 
-def _get_ledger(ledger: Any | None = None) -> Any:
-    if ledger is not None:
-        return ledger
-    from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
-
-    return get_ledger()
-
-
 @dataclass(slots=True)
 class UserPreferenceEvent:
     person_id: str
@@ -171,7 +163,9 @@ class UserPreferenceEvent:
 
 class UserPreferenceStore:
     def __init__(self, *, ledger: Any | None = None) -> None:
-        self.ledger = _get_ledger(ledger)
+        if ledger is None:
+            raise RuntimeError("USER_PREFERENCE_LEDGER_NOT_INJECTED")
+        self.ledger = ledger
         self.repository = PreferenceRepository.from_ledger(self.ledger)
 
     @property

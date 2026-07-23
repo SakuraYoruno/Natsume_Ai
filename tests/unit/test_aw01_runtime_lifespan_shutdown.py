@@ -12,6 +12,7 @@ from host_brain.app.host_lifecycle_composition import (
     HostLifecycleApplicationPorts,
     build_host_lifecycle_container,
 )
+from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
 from host_brain.tribe.application_ports import TribeApplicationPorts
 
 
@@ -79,6 +80,10 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
             ),
             host_lifecycle=host_lifecycle,
             tribe_application_ports=TribeApplicationPorts(),
+            tribe_runtime_agent_ports=TribeRuntimeAgentPorts(
+                get_thalamus_agent=object,
+                get_ans_agent=object,
+            ),
         ):
             events.append("body")
             raise RuntimeError("lifespan body failed")

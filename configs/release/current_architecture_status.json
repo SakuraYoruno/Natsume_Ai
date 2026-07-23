@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "MIGRATION_HEAD_0121_GATE_1_TO_14_STATIC_PASS_DIRECT_AND_APPROVED_PLAN_PRODUCTION_SKILL_ADMISSION_FROZEN_PAYLOAD_SLICE_INTERNAL_POST_ADMISSION_NATIVE_WORKORDERV3_SLICE_DIRECT_PRE_RESERVATION_TERMINAL_BUDGET_FIVE_AGGREGATE_UOW_LOCAL_SQLITE_PASS_PROMPT_INTELLIGENCE_PROPOSAL_ONLY_NO_LEGACY_PLAN_OR_SKILL_EXECUTION_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "MIGRATION_HEAD_0121_GATE_1_TO_14_STATIC_PASS_DIRECT_AND_APPROVED_PLAN_PRODUCTION_SKILL_ADMISSION_FROZEN_PAYLOAD_SLICE_INTERNAL_POST_ADMISSION_NATIVE_WORKORDERV3_SLICE_DIRECT_PRE_RESERVATION_TERMINAL_BUDGET_FIVE_AGGREGATE_UOW_LOCAL_SQLITE_PASS_PROMPT_INTELLIGENCE_PROPOSAL_ONLY_NO_LEGACY_PLAN_OR_SKILL_EXECUTION_ZERO_CALL_CHAT_GENERATION_PAYLOAD_RETIRED_THALAMUS_PRE_ADMISSION_INTENT_MODEL_CALLS_RETIRED_CONVERSATION_EXPERIENCE_WRITERS_RETIRED_TO_READ_PACK_ONLY_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -88,6 +88,40 @@
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
     },
+    "zero_call_chat_generation_payload_retirement_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "NO_PRODUCTION_CALLERS_DIRECT_PROCESS_SERVICE_LOCATOR_REMOVED_WITH_DEAD_CHAT_GENERATION_PAYLOAD",
+      "retirement_guard": "SOURCE_PATH_MUST_REMAIN_ABSENT_AND_NO_RUNTIME_IMPORT_OR_CALLER_MAY_RETURN",
+      "retirement_commit_locator_inventory": "NAMED28_IMPORTS58_ALL_FORMS31_PROCESS_SERVICE_CONSUMER_MODULES",
+      "direct_locator_inventory": "NAMED27_IMPORTS53_ALL_FORMS30_PROCESS_SERVICE_CONSUMER_MODULES",
+      "focused_batch": "168_PASSED_CHAT_INPUT_RUNTIME_METADATA_AND_DOCUMENTATION_GATES",
+      "final_retirement_and_documentation_recheck": "28_PASSED_IN_8_69_SECONDS",
+      "static_reference_check": "NO_RUNTIME_CHAT_GENERATION_PAYLOAD_IMPORT_OR_CALLER_REMAINS",
+      "compileall": "SUCCEEDED",
+      "json_validation": "SUCCEEDED",
+      "scoped_diff_check": "SUCCEEDED",
+      "boundary": "DOES_NOT_PROMOTE_CHAT_TASKGRAPH_ACCEPTANCE_OR_UNIVERSAL_RUNTIME_CLOSURE",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+    },
+    "chat_retrieval_host_scope_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "ACTIVE_CHAT_RETRIEVAL_DIRECT_PROCESS_SERVICE_LOCATOR_REMOVED_BY_HOST_SCOPED_PORTS",
+      "production_wiring": "AGENT_RUNTIME_RUN_RETRIEVAL_RECEIVES_CONVERSATION_HISTORY_PREFERENCE_PACK_BUILDER_AND_LEDGER_LIFE_MEMORY_BOND_NEO4J_RECALL_FACTORY",
+      "static_guard": "CHAT_RETRIEVAL_HELPERS_PROCESS_SERVICES_IMPORTS_ZERO_AND_AST_INVENTORY_IS_EXACT",
+      "direct_locator_inventory": "NAMED27_IMPORTS53_ALL_FORMS30_PROCESS_SERVICE_CONSUMER_MODULES",
+      "focused_port_helper_lifecycle_batch": "48_PASSED_IN_5_55_SECONDS",
+      "adjacent_surface_read_route_unit_batch": "17_PASSED_IN_1_17_SECONDS",
+      "final_unit_contract_documentation_gate": "75_PASSED_IN_9_12_SECONDS",
+      "test_count_boundary": "BATCHES_MAY_OVERLAP_AND_MUST_NOT_BE_ADDED",
+      "compileall": "SUCCEEDED",
+      "scoped_diff_check": "SUCCEEDED",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "RETRIEVAL_DEPENDENCY_RESOLUTION_ONLY_NOT_CHAT_ACCEPTANCE_EFFECT_DELIVERY_OR_UNIVERSAL_RUNTIME_CLOSURE"
+    },
     "reclaimed_acceptance_effect_policy": "READ_ONLY_RECONCILE_REQUIRED_MISSING_RECONCILER_STAYS_RECONCILIATION_REQUIRED_NO_ORDINARY_HANDLER_REPLAY",
     "scheduler_handler_result_policy": "EXPLICIT_CANONICAL_STATUS_AND_AUTHORITATIVE_DURABLE_RECEIPT_REQUIRED_NO_SYNTHETIC_SUCCESS_OR_RECEIPT",
     "sys_mode_reconciliation": "EXACT_HARD_STATE_REOPEN_ONLY_SWITCH_MODE_NOT_REINVOKED",
@@ -126,6 +160,137 @@
       "real_model": "NOT_RUN",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+    },
+    "chat_tribe_state_scope_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "TRIBE_PREFERENCE_AND_CONVERSATION_EXPERIENCE_READ_HELPERS_REQUIRE_HOST_LIFESPAN_LEDGER_INJECTION",
+      "production_wiring": "TRIBE_APPLICATION_PORTS_BINDS_THE_SAME_HOST_LIFECYCLE_LEDGER_TO_PREFERENCE_PACK_AND_A_NARROW_CONVERSATION_EXPERIENCE_READ_PACK",
+      "retired_paths": "USER_PREFERENCE_STORE_AND_CONVERSATION_EXPERIENCE_STORE_HAVE_NO_PROCESS_SERVICES_LEDGER_FALLBACK_AND_THALAMUS_NO_LONGER_RECEIVES_A_WRITE_CAPABLE_EXPERIENCE_STORE",
+      "fail_closed": "MISSING_LEDGER_REJECTS_THE_UNDERLYING_STATE_HELPERS_WITH_USER_PREFERENCE_LEDGER_NOT_INJECTED_OR_CONVERSATION_EXPERIENCE_LEDGER_NOT_INJECTED",
+      "direct_locator_inventory": "NAMED25_IMPORTS51_ALL_FORMS28_PROCESS_SERVICE_CONSUMER_MODULES",
+      "targeted_regression": "42_PASSED_IN_6_87_SECONDS",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "THALAMUS_READ_PACK_FAILURE_DEGRADES_TO_EMPTY_CONTEXT_AND_THE_POST_ACCEPTANCE_CONVERSATION_INFERENCE_AND_FEEDBACK_PROPOSAL_OWNER_IS_NOT_WIRED_THIS_SLICE_DOES_NOT_PROVE_CHAT_ACCEPTANCE_OR_FULL_APP_LOCAL_INSTANCE_ISOLATION"
+    },
+    "input_log_dead_locator_accessor_retirement": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "UNUSED_INPUT_SERVICE_LOG_LEDGER_ACCESSOR_REMOVED_WITHOUT_CHANGING_THE_EXPLICIT_INPUT_RUNTIME_AUDIT_PORT",
+      "retired_path": "HOST_BRAIN_APP_INPUT_SERVICE_LOG_GET_LEDGER_SAFE",
+      "static_guard": "INPUT_SERVICE_LOG_PROCESS_SERVICES_IMPORTS_ZERO_AND_NO_GET_LEDGER_SAFE_SYMBOL",
+      "direct_locator_inventory": "NAMED24_IMPORTS50_ALL_FORMS27_PROCESS_SERVICE_CONSUMER_MODULES",
+      "targeted_regression": "45_PASSED_IN_5_92_SECONDS",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "THE_ACTIVE_INPUT_RUNTIME_AUDIT_PORT_ALREADY_RECEIVES_LEDGER_EXPLICITLY_THIS_RETIREMENT_DOES_NOT_PROVE_INPUT_ACCEPTANCE_OR_GLOBAL_SERVICE_LOCATOR_REMOVAL"
+    },
+    "tribe_intent_sequence_scope_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "INTENT_SEQUENCE_ALLOCATOR_IS_OWNED_BY_EACH_HOST_LIFESPAN_TRIBE_PORT_BUNDLE",
+      "production_wiring": "TRIBE_COMPOSITION_CONSTRUCTS_INTENT_SEQUENCE_ALLOCATOR_WITH_THE_EXPLICIT_HOST_LEDGER_PROVIDER_AND_EXPOSES_ITS_ALLOCATE_PORT",
+      "retired_paths": "PROCESS_GLOBAL_INTENT_SEQUENCE_CACHE_AND_PROCESS_SERVICES_LEDGER_DISCOVERY",
+      "fail_closed": "MISSING_HOST_LEDGER_PROVIDER_REJECTS_THE_DIRECT_PORT_WITH_HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+      "direct_locator_inventory": "NAMED23_IMPORTS49_ALL_FORMS26_PROCESS_SERVICE_CONSUMER_MODULES",
+      "targeted_regression": "128_PASSED_IN_6_48_SECONDS",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "THALAMUS_STILL_CONSUMES_PROCESS_BOUND_TRIBE_PORTS_AND_FALLS_BACK_TO_ITS_EXISTING_ZERO_SEQUENCE_DEGRADATION_ON_PORT_FAILURE_THIS_DOES_NOT_PROVE_TRIBE_APP_LOCALIZATION_OR_CHAT_ACCEPTANCE"
+    },
+    "dead_surface_reply_postprocessor_retirement": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "NO_CALLER_LEGACY_SURFACE_REPLY_POSTPROCESSOR_REMOVED",
+      "retired_path": "HOST_BRAIN_APP_SURFACE_REPLY_POSTPROCESSOR_PY",
+      "retired_authority": "DEAD_PRE_COMMIT_LEDGER_LOOKUP_AND_DIRECT_TTS_HELPER_PATH",
+      "static_guard": "SOURCE_PATH_MUST_REMAIN_ABSENT_AND_SCOPED_EMBODIMENT_INVENTORY_EXCLUDES_THE_RETIRED_FILE",
+      "direct_locator_inventory": "NAMED22_IMPORTS48_ALL_FORMS25_PROCESS_SERVICE_CONSUMER_MODULES",
+      "targeted_regression": "45_PASSED_IN_6_29_SECONDS",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "DURABLE_SURFACE_POST_PROCESSING_REMAINS_OWNED_BY_ACCEPTANCE_EFFECT_AND_AGENT_RUNTIME_PORTS_THIS_RETIREMENT_DOES_NOT_PROVE_CHAT_ACCEPTANCE_OR_EMBODIMENT_HARDWARE_EFFECTS"
+    },
+    "unbudgeted_surface_reply_judge_retirement": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "RETIRED_SECONDARY_SURFACE_REPLY_MODEL_CALL_AND_PREWARM_ROUTE",
+      "retired_paths": [
+        "HOST_BRAIN_APP_CODEX_SPARK_REPLY_JUDGE_PY",
+        "HOST_BRAIN_APP_SETTINGS_CODEX_SPARK_PY",
+        "SURFACE_REPLY_JUDGE_PROMPT_BINDING",
+        "SURFACE_SPARK_REPLY_JUDGE_CODEX_PROFILE_AND_PREWARM_KEY"
+      ],
+      "production_wiring": "FROZEN_CHAT_NODE_ALLOWS_ONLY_THE_PRIMARY_SURFACE_MODEL_ATTEMPT_BOUND_TO_ITS_MODEL_BUDGET_GUARD",
+      "fail_closed": "A_TERMINAL_TRACE_CONTAINING_THE_RETIRED_CODEX_SPARK_REPLY_JUDGE_SLOT_IS_REJECTED_BEFORE_BUDGET_SETTLEMENT",
+      "direct_locator_inventory": "NAMED21_IMPORTS47_ALL_FORMS24_PROCESS_SERVICE_CONSUMER_MODULES",
+      "targeted_regression": "100_PASSED_IN_9_16_SECONDS",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "THE_PRIMARY_SURFACE_MODEL_IS_ONLY_ONE_GUARDED_CHAT_NODE_PATH_THIS_RETIREMENT_DOES_NOT_PROVE_CHAT_ACCEPTANCE_FULL_MODEL_BUDGET_COVERAGE_OR_GLOBAL_SERVICE_LOCATOR_REMOVAL"
+    },
+    "pre_admission_thalamus_intent_model_retirement": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "THALAMUS_INGRESS_ROUTE_CLASSIFICATION_ONLY",
+      "production_wiring": "CLASSIFY_TASK_INTENT_NOW_PRODUCES_ONLY_DETERMINISTIC_RULE_OR_DEFAULT_CHAT_SEEDS_BEFORE_HOSTCOMMAND_ADMISSION",
+      "retired_paths": [
+        "THALAMUS_NORMAL_INTENT_MODELATTEMPT_CLASSIFIER",
+        "THALAMUS_PENTEST_GOAL_LLM_CLASSIFIER",
+        "THALAMUS_INTENT_CLASSIFICATION_PROMPT_SPEC",
+        "HOST_CORTEX_AND_HOST_THALAMUS_INTENT_LLM_CONFIGURATION"
+      ],
+      "fail_closed": "INGRESS_CLASSIFICATION_CANNOT_RESOLVE_MODEL_ATTEMPT_SERVICE_CREATE_A_PLAN_OR_DERIVE_EXECUTION_AUTHORITY_BEFORE_AN_ACCEPTED_TASKGRAPH_NODE",
+      "targeted_regression": "162_PASSED_IN_2_28_SECONDS",
+      "static_guard": "NO_PRODUCTION_REFERENCE_TO_THE_RETIRED_THALAMUS_INTENT_MODEL_CLASSIFIER_OR_PROMPT_SPEC",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "CORTEX_PRE_ADMISSION_MODEL_WORK_CONVERSATION_EXPERIENCE_WRITES_DELEGATE_SUB_AGENT_MODEL_CALLS_CHAT_ACCEPTANCE_AND_GLOBAL_BUDGET_ENFORCEMENT_REMAIN_OUTSIDE_THIS_RETIREMENT"
+    },
+    "pre_admission_conversation_experience_writer_retirement": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "THALAMUS_INTENT_COMPILATION_ONLY",
+      "production_wiring": "TRIBE_APPLICATION_PORTS_EXPOSES_BUILD_CONVERSATION_EXPERIENCE_READ_PACK_WITH_PREVIOUS_BELIEF_AND_LESSONS_ONLY",
+      "retired_paths": [
+        "THALAMUS_CONVERSATION_EXPERIENCE_STORE_PORT",
+        "THALAMUS_RECORD_INFERENCE_BEFORE_ADMISSION",
+        "THALAMUS_RECORD_OUTCOME_FEEDBACK_BEFORE_ADMISSION"
+      ],
+      "authority_boundary": "THE_READ_PACK_DOES_NOT_EXPOSE_A_WRITE_CAPABLE_STORE_AND_CANNOT_APPEND_INFERENCE_OR_FEEDBACK_BEFORE_HOSTCOMMAND_ADMISSION",
+      "targeted_regression": "191_PASSED_IN_6_87_SECONDS",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "THIS_PREVENTS_PRE_ADMISSION_MUTATION_ONLY_THE_DURABLE_POST_ACCEPTANCE_PROPOSAL_AND_ACTIVATION_OWNER_FOR_CONVERSATION_INFERENCE_AND_FEEDBACK_IS_NOT_WIRED"
+    },
+    "runtime_conversation_experience_writer_retirement": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "scope": "AGENT_RUNTIME_AND_FROZEN_SURFACE_EXECUTION_PORTS",
+      "production_wiring": "AGENT_RUNTIME_APPLICATION_PORTS_AND_SURFACE_RUNTIME_PORTS_EXPOSE_BUILD_CONVERSATION_EXPERIENCE_READ_PACK_ONLY",
+      "retired_paths": [
+        "AGENT_RUNTIME_FULL_CONVERSATION_EXPERIENCE_STORE_PORT",
+        "SURFACE_RUNTIME_FULL_CONVERSATION_EXPERIENCE_STORE_PORT",
+        "ASYNC_POST_PROCESS_UPDATE_ASSISTANT_REPLY"
+      ],
+      "authority_boundary": "FROZEN_CHAT_CAN_READ_EXISTING_BELIEF_AND_LESSONS_BUT_CANNOT_ACQUIRE_A_MUTABLE_EXPERIENCE_STORE_OR_SILENTLY_MUTATE_IT_FROM_AN_ACCEPTANCE_PROJECTION",
+      "targeted_regression": {
+        "combined_targeted_batch": "118_PASSED_IN_15_74_SECONDS",
+        "scope": "COMPOSITION_LIFE_PROJECTION_DURABLE_SURFACE_PROJECTION_REAL_SQLITE_EFFECT_RECONCILIATION_LIFECYCLE_ROUTE_EXECUTION_AND_SURFACE_ADAPTER"
+      },
+      "static_guard": "NO_PRODUCTION_GET_CONVERSATION_EXPERIENCE_STORE_CALLER_OUTSIDE_THE_STORE_MODULE_AND_POSTPROCESS_HAS_NO_UPDATE_ASSISTANT_REPLY_CALL",
+      "wave_integration": "NOT_RUN_PER_SMALL_SLICE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "THIS_RETIRES_THE_LEGACY_MUTABLE_EXPERIENCE_PATH_ONLY_NEW_CONVERSATION_FEEDBACK_OR_PERSONA_EVOLUTION_REQUIRES_THE_FUTURE_NE06_PROPOSAL_REVIEW_AND_ACTIVATION_OWNER"
     },
     "internal_protected_artifact_current_validation": {
       "status": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION",
@@ -580,9 +745,9 @@
     },
     "locator_consumer_inventory": {
       "combined_current_inventory": {
-        "named_modules": 29,
-        "named_imported_names": 59,
-        "all_import_form_consumer_modules": 32,
+        "named_modules": 21,
+        "named_imported_names": 47,
+        "all_import_form_consumer_modules": 24,
         "process_service_container_fields": 50,
         "process_service_container_lock_fields": 3,
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 46
@@ -638,7 +803,7 @@
       "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state", "obs_metrics_collector", "query_projection_store"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
       "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state", "get_obs_metrics_collector", "get_query_projection_store", "peek_query_projection_store"],
-      "boundary": "FRESH_AST_CURRENT_IS_29_MODULES_59_NAMES_32_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_GOVERNED_CHAT_SURFACE_AND_ADMISSION_PORTS_ARE_LIFESPAN_INJECTED_THE_SINGLE_PRODUCTION_LEGACY_FACADE_MAPPING_IS_A_TRANSITIONAL_COMPOSITION_ROOT_NOT_APP_LOCAL_INSTANCE_PROOF_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
+      "boundary": "FRESH_AST_CURRENT_IS_21_MODULES_47_NAMES_24_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_TRIBE_PREFERENCE_CONVERSATION_EXPERIENCE_AND_INTENT_SEQUENCE_ALLOCATOR_NOW_REQUIRE_HOST_LIFESPAN_LEDGER_INJECTION_INPUT_SERVICE_LOG_HAS_NO_DEAD_LEDGER_ACCESSOR_THE_NO_CALLER_SURFACE_REPLY_POSTPROCESSOR_IS_DELETED_AND_THE_UNBUDGETED_SECONDARY_SURFACE_REPLY_JUDGE_IS_RETIRED_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_GOVERNED_CHAT_SURFACE_AND_ADMISSION_PORTS_ARE_LIFESPAN_INJECTED_THE_SINGLE_PRODUCTION_LEGACY_FACADE_MAPPING_IS_A_TRANSITIONAL_COMPOSITION_ROOT_NOT_APP_LOCAL_INSTANCE_PROOF_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
     },
     "host_application_port_root_current_validation": {
       "status": "LOCAL_TARGETED_PASS_PROGRAM_PARTIAL",
@@ -658,16 +823,18 @@
     },
     "governed_chat_explicit_ports_rebase_validation": {
       "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
-      "production_wiring": "HOST_LIFESPAN_AGENT_RUNTIME_AND_LIFE_AUTHORITY_TO_SURFACE_RUNTIME_PORTS_TO_INTERNAL_TOOL_RUNTIME_TO_FROZEN_CHAT_AND_HOST_ASGI_INPUT_RUNTIME_PORTS_TO_CHAT_HANDLER_TO_CORTEX",
-      "fail_closed": "SURFACE_OR_NORMAL_CHAT_MISSING_REQUIRED_TYPED_PORTS_REJECTS_WITHOUT_LOCATOR_FALLBACK",
-      "retired_paths": "SURFACE_MAIN_CHAIN_AND_CHAT_HANDLER_HAVE_NO_PROCESS_SERVICES_IMPORT_CHAT_HANDLER_HAS_NO_DIRECT_EMOTION_CONTEXT_IMPORT",
+      "production_wiring": "HOST_LIFESPAN_AGENT_RUNTIME_AND_LIFE_AUTHORITY_TO_SURFACE_RUNTIME_PORTS_TO_INTERNAL_TOOL_RUNTIME_TO_FROZEN_CHAT_AND_HOST_ASGI_TRIBE_RUNTIME_AGENT_PORTS_TO_INPUT_RUNTIME_PORTS_TO_NORMAL_CHAT_GATEWAY_ASR_CORTEX_AND_LIFESPAN_WARMUP_CHAT_IMMUNE_USES_TRIBE_PORT_INPUT_IMMUNE_USES_INPUT_PORT",
+      "fail_closed": "SURFACE_OR_NORMAL_CHAT_OR_HOST_INPUT_MISSING_REQUIRED_TYPED_OR_TRIBE_AGENT_PORTS_REJECTS_WITHOUT_LOCATOR_FALLBACK_CHAT_IMMUNE_HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED_AND_INPUT_IMMUNE_HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED_BLOCK",
+      "retired_paths": "SURFACE_MAIN_CHAIN_AND_CHAT_HANDLER_HAVE_NO_PROCESS_SERVICES_IMPORT_CHAT_HANDLER_INPUT_NORMALIZATION_STARTUP_AND_HTTP_HOOKS_HAVE_NO_DIRECT_THALAMUS_ANS_OR_IMMUNE_SINGLETON_GETTER",
       "fresh_locator_inventory": "29_NAMED_MODULES_59_NAMES_32_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
       "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
+      "chat_tribe_runtime_ports_targeted_regression": "131_PASSED_IN_7_25_SECONDS_OVERLAPS_REBASE_HISTORY_DO_NOT_SUM",
+      "input_immune_port_targeted_regression": "141_PASSED_IN_9_66_SECONDS_OVERLAPS_EXISTING_CHAT_INPUT_AND_IMMUNE_BATCHES_DO_NOT_SUM",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "production_canary": "NOT_RUN",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-      "boundary": "EXPLICIT_DEPENDENCY_WIRING_ONLY_THALAMUS_ANS_GLOBAL_PROVIDERS_LEGACY_EXECUTIVE_GENERIC_DELEGATE_COMMIT_BOUND_CHAT_ACCEPTANCE_AND_SEVEN_ROUTE_EVIDENCE_REMAIN_INCOMPLETE"
+      "boundary": "EXPLICIT_DEPENDENCY_WIRING_ONLY_TRIBE_RUNTIME_AGENT_PORTS_REMAINS_A_PROCESS_BOUND_TRANSITION_BRIDGE_LEGACY_EXECUTIVE_GENERIC_DELEGATE_COMMIT_BOUND_CHAT_ACCEPTANCE_AND_SEVEN_ROUTE_EVIDENCE_REMAIN_INCOMPLETE"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_DURABLE_RUNTIME_FENCED_HARD_STATE_AND_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
@@ -1235,16 +1402,29 @@
         "configs/release/universal_governed_runtime_coverage.json"
       ]
     },
+    "read_projection_persistence_boundary": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "scope": "TASK_PROGRESS_AND_RECENT_TURN_TRANSIENT_DURABLE_READ_PROJECTIONS",
+      "implemented": "Cortex permits task_progress and recent_turn to read their durable Task/conversation projections after Governor approval, but their non-Task path is strictly side-effect free: it does not call user/assistant conversation writers or create Memory, Life, Preference, Outbox, Delivery, Attempt, Effect or Receipt state. Persisting a future read response requires a new immutable TaskGraph and Acceptance; the old direct writer boundary is not a compatibility fallback.",
+      "local_targeted_regression": "tests/unit/test_ne01_read_projection_routes.py plus Cortex governed-cutover regressions",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "This closes only the no-Acceptance direct conversation write. It does not make read projections governed Tasks, does not provide ingress receipts for those reads, and does not complete NE-01 or the seven canonical-route coverage gate.",
+      "evidence_refs": [
+        "host_brain/agent_runtime/cortex_runtime.py",
+        "host_brain/agent_runtime/read_routes.py",
+        "tests/unit/test_ne01_read_projection_routes.py"
+      ]
+    },
     "governed_chat_surface_model_budget": {
       "status": "PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD",
       "scope": [
         "already-admitted governed Host chat TaskNode",
         "FrozenNodeInput to Surface main-chain ModelAttempt"
       ],
-      "implemented": "The frozen active Budget remaining values derive an immutable node-bound ModelBudgetGuard. The Surface main-chain call uses a fresh complete attempt only; it is capped by the frozen deadline, provider-attempt count, total tokens, output tokens, and model-cost micros. Canonical provider token_count/completion_tokens/model_cost_micros are mandatory. Missing or malformed measurement, provider failure, timeout, streaming, or any cap excess rejects the guarded attempt without retry/fallback; a guarded Surface model failure becomes a terminal REJECT and the secondary Spark judge is skipped.",
+      "implemented": "The frozen active Budget remaining values derive an immutable node-bound ModelBudgetGuard. The Surface main-chain call uses a fresh complete attempt only; it is capped by the frozen deadline, provider-attempt count, total tokens, output tokens, and model-cost micros. Canonical provider token_count/completion_tokens/model_cost_micros are mandatory. Missing or malformed measurement, provider failure, timeout, streaming, or any cap excess rejects the guarded attempt without retry/fallback; a guarded Surface model failure becomes a terminal REJECT. The formerly optional secondary Spark judge, its setting, prompt binding and prewarm/profile route are retired; a legacy secondary-model trace is rejected before settlement.",
       "settlement_boundary": "A successful guarded Surface trace is projected as worker budget observation for the admitted chat node. This is not a universal model-cost reservation, global pre-charge, provider-price catalog, or proof that every model/tool call in the process is budget-settled.",
       "not_covered": [
-        "Thalamus or Cortex model work before Task admission",
+        "Cortex model work before Task admission",
         "Delegate or sub-agent model calls",
         "generic external tools and non-chat model callers",
         "cross-route cumulative model cost authority",
@@ -2417,7 +2597,7 @@
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
       "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI; ApplicationModelAttemptServicePort also requires an injected provider in Tool runtime and interrupted-job recovery. After Life authority is available, AgentRuntimeApplicationScope publishes one immutable bundle to Input→Cortex, Life projection and conversation Acceptance, then clears it during shutdown. The active scope resolves its model RouteCatalog, Bond stage engine, session topic/tactic ledgers, VTS ledger and TTS router/meta-learning collaborators from that same bundle; conversation_writer and vts_emotion_driver no longer directly import process_services. The unused app/intelligent_runtime.py PlanningAgent/SkillComposer/direct-execution authority is physically deleted; the separate tts_route accepts only scope-injected collaborators. Missing providers fail closed. Current inventory is 33 named-import modules / 83 imported names / 37 all-form consumer modules, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal, app-local proof for every backing service, generic Delegate cutover, or seven-route TaskGraph coverage. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
+      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle Runtime, Tribe composition and Input Runtime composition consume one frozen/slotted HostLifecycleApplicationPorts bundle passed explicitly by ASGI; ApplicationModelAttemptServicePort also requires an injected provider in Tool runtime and interrupted-job recovery. After Life authority is available, AgentRuntimeApplicationScope publishes one immutable bundle to Input→Cortex, Life projection and conversation Acceptance, then clears it during shutdown. The active scope resolves its model RouteCatalog, Bond stage engine, session topic/tactic ledgers, VTS ledger and TTS router/meta-learning collaborators from that same bundle; conversation_writer and vts_emotion_driver no longer directly import process_services. The unused app/intelligent_runtime.py PlanningAgent/SkillComposer/direct-execution authority is physically deleted; the separate tts_route accepts only scope-injected collaborators. Missing providers fail closed. Current inventory is 27 named-import modules / 53 imported names / 30 all-form consumer modules after the Chat retrieval helper stopped resolving its own dependencies, with ProcessServiceContainer still at 50 fields, 3 locks and 46 mutable references. This is dependency-resolution debt reduction, not Service Locator removal, app-local proof for every backing service, generic Delegate cutover, or seven-route TaskGraph coverage. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
       "typed_host_service_bundle_local_regression": {
         "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
         "initial_result": "46_PASSED_4_STALE_FIXTURE_OR_CONTRACT_FAILURES",
@@ -2442,6 +2622,18 @@
         "provider_identity_runtime_tested": true,
         "missing_bundle_fail_closed_runtime_tested": true,
         "unpreviewed_voice_effects": 0,
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_canary": "NOT_RUN",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+      },
+      "chat_immune_agent_port_local_regression": {
+        "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
+        "composition_boundary": "ASGI_COMPOSITION_ROOT_PASSES_TRIBE_RUNTIME_AGENT_PORTS_REQUIRE_IMMUNE_AGENT_TO_CHAT_IMMUNE_GATE_AND_INPUT_RUNTIME_PORTS_REQUIRE_IMMUNE_AGENT_TO_GATEWAY_ASR_NORMALIZATION",
+        "request_time_singleton_get_immune_agent": "REMOVED_FROM_CHAT_IMMUNE_GATE_AND_INPUT_NORMALIZATION",
+        "missing_provider": "HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED_FOR_CHAT_AND_HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED_FOR_INPUT_FAIL_CLOSED",
+        "final_targeted_validation": "141_PASSED_IN_9_66_SECONDS",
+        "validation_scope": "EXPLICIT_CHAT_AND_INPUT_IMMUNE_PORT_PAYLOAD_FAIL_CLOSED_AST_BOUNDARY_INPUT_DISPATCH_BLOCK_CHAT_HTTP_ROUTE_HOST_COMPOSITION_AND_LIFESPAN",
+        "validation_overlap_boundary": "OVERLAPS_EXISTING_CHAT_INPUT_AND_43_PASSED_IMMUNE_BATCHES_AND_MUST_NOT_BE_ADDED_TO_PRIOR_HISTORY",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "production_canary": "NOT_RUN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"

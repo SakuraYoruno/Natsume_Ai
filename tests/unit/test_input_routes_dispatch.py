@@ -24,7 +24,13 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+class _AllowImmuneAgent:
+    def inspect_text(self, **_kwargs):  # noqa: ANN003, ANN201
+        return {"decision": "ALLOW", "reason_codes": []}
+
+
 def _ports(**overrides):  # noqa: ANN003
+    overrides.setdefault("get_immune_agent", lambda: _AllowImmuneAgent())
     return replace(build_input_runtime_application_ports(), **overrides)
 
 
@@ -130,6 +136,29 @@ def test_receive_input_rejects_when_immune_gate_blocks() -> None:
 
     assert response.status == "REJECTED"
     assert "immune gate blocked" in response.detail
+    assert dispatch_mock.await_count == 0
+
+
+def test_receive_input_fails_closed_when_immune_port_is_not_injected() -> None:
+    body = InputPayload(
+        source="ASR",
+        session_id="session-immune-unavailable",
+        text="please inspect this speech input",
+        is_final=True,
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock):
+        response = _run(
+            receive_input(
+                body,
+                SimpleNamespace(),
+                ports=_ports(get_immune_agent=None),
+            )
+        )
+
+    assert response.status == "REJECTED"
+    assert response.detail == "immune gate authority unavailable"
     assert dispatch_mock.await_count == 0
 
 

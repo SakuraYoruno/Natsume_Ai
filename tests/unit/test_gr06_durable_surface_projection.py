@@ -10,11 +10,6 @@ from host_brain.composition.life import PROCESS_LIFE_PROVIDER
 from natsume_contracts.life import LifeCommand
 
 
-class _ExperienceStore:
-    def update_assistant_reply(self, **_kwargs):  # noqa: ANN003
-        return {"status": "OK"}
-
-
 class _MemoryService:
     def __init__(self, receipt: dict) -> None:
         self.receipt = dict(receipt)
@@ -35,7 +30,6 @@ def _ports(*, assistant_result: dict, memory_receipt: dict) -> SimpleNamespace:
         record_assistant_turn=lambda **_kwargs: dict(assistant_result),
         apply_surface_emotion_bond_flow=lambda **_kwargs: {"status": "QUEUED"},
         persist_post_process_audit=persist_post_process_audit,
-        get_conversation_experience_store=lambda: _ExperienceStore(),
         life_memory_service=lambda: memory,
         memory=memory,
     )
@@ -114,6 +108,16 @@ async def test_durable_projection_rejects_missing_memory_receipt() -> None:
         await _run(ports)
 
     assert ports.memory.calls == 1
+
+
+def test_durable_projection_has_no_legacy_conversation_experience_writer() -> None:
+    import inspect
+
+    from host_brain.agent_runtime import postprocess
+
+    source = inspect.getsource(postprocess._async_post_process)
+    assert "get_conversation_experience_store" not in source
+    assert "update_assistant_reply" not in source
 
 
 def test_life_acceptance_handler_requires_applied_receipt(monkeypatch) -> None:

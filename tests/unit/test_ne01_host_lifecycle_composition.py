@@ -29,7 +29,10 @@ from host_brain.app.lifecycle_runtime_composition import (
 from host_brain.app.model_provider_composition import (
     ApplicationModelAttemptServicePort,
 )
-from host_brain.app.tribe_composition import build_tribe_application_ports
+from host_brain.app.tribe_composition import (
+    TribeRuntimeAgentPorts,
+    build_tribe_application_ports,
+)
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.lifecycle_runtime.runtime_snapshot import (
     build_digital_life_runtime_snapshot,
@@ -175,8 +178,41 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     assert not hasattr(ports, "__dict__")
 
 
-def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator() -> None:
-    sentinel = object()
+def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Ledger:
+        def get_session_seq(self, *, session_id: str) -> int | None:
+            assert session_id == "session-1"
+            return 7
+
+    sentinel = Ledger()
+    preference_calls: list[dict[str, object]] = []
+    experience_calls: list[object] = []
+
+    from host_brain.app.context import conversation_experience_store
+    from host_brain.app import user_preference_store
+
+    def fake_build_user_preference_pack(**kwargs: object) -> dict[str, object]:
+        preference_calls.append(dict(kwargs))
+        return {"source": "app-local-ledger"}
+
+    def fake_build_conversation_experience_read_pack(
+        *, ledger: object, **_kwargs: object
+    ) -> dict[str, object]:
+        experience_calls.append(ledger)
+        return {"source": "app-local-experience-read"}
+
+    monkeypatch.setattr(
+        user_preference_store,
+        "build_user_preference_pack",
+        fake_build_user_preference_pack,
+    )
+    monkeypatch.setattr(
+        conversation_experience_store,
+        "build_conversation_experience_read_pack",
+        fake_build_conversation_experience_read_pack,
+    )
 
     class Timeline:
         def rebuild_summary(self, *, window_ms: int):
@@ -218,6 +254,22 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator() -> Non
     assert tribe.ledger is provider
     assert tribe.model_attempt_service is host_services.model_attempt_service
     assert tribe.emotion_timeline() is timeline
+    assert tribe.build_user_preference_pack(person_id="person-1", query_text="偏好") == {
+        "source": "app-local-ledger"
+    }
+    assert preference_calls == [
+        {"ledger": sentinel, "person_id": "person-1", "query_text": "偏好"}
+    ]
+    assert tribe.build_conversation_experience_read_pack(
+        session_id="session-1",
+        person_id="person-1",
+        query_text="偏好",
+    ) == {"source": "app-local-experience-read"}
+    assert experience_calls == [sentinel]
+    assert tribe.allocate_intent_seq(session_id="session-1") == 8
+    assert tribe.allocate_intent_seq(session_id="session-1") == 9
+    second_tribe = build_tribe_application_ports(host_services=host_services)
+    assert second_tribe.allocate_intent_seq(session_id="session-1") == 8
 
 
 def test_missing_typed_host_bundle_fails_closed_without_locator_fallback() -> None:
@@ -239,10 +291,141 @@ def test_missing_typed_host_bundle_fails_closed_without_locator_fallback() -> No
         match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
     ):
         tribe.ledger()
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        tribe.build_user_preference_pack(person_id="person-1", query_text="偏好")
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        tribe.build_conversation_experience_read_pack(
+            session_id="session-1",
+            query_text="偏好",
+        )
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
+    ):
+        tribe.allocate_intent_seq(session_id="session-1")
+
+
+def test_stateful_tribe_helpers_require_explicit_ledger_authority() -> None:
+    from host_brain.app.context.conversation_experience_store import (
+        ConversationExperienceStore,
+    )
+    from host_brain.app.user_preference_store import UserPreferenceStore
+
+    with pytest.raises(
+        RuntimeError,
+        match="USER_PREFERENCE_LEDGER_NOT_INJECTED",
+    ):
+        UserPreferenceStore()
+    with pytest.raises(
+        RuntimeError,
+        match="CONVERSATION_EXPERIENCE_LEDGER_NOT_INJECTED",
+    ):
+        ConversationExperienceStore()
+
+
+def test_conversation_experience_read_pack_exposes_no_writer_to_tribe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from host_brain.app.context import conversation_experience_store
+
+    read_operations: list[tuple[str, object]] = []
+
+    class ReadProjection:
+        def get_belief(self, **kwargs: object) -> dict[str, object]:
+            read_operations.append(("belief", dict(kwargs)))
+            return {"selected_intent": "support"}
+
+        def recall_lessons(self, **kwargs: object) -> list[dict[str, object]]:
+            read_operations.append(("lessons", dict(kwargs)))
+            return [{"lesson_id": "lesson-1"}]
+
+        def record_inference(self, **_kwargs: object) -> None:
+            raise AssertionError("read pack must not expose inference persistence")
+
+        def record_outcome_feedback(self, **_kwargs: object) -> None:
+            raise AssertionError("read pack must not expose feedback persistence")
+
+    projection = ReadProjection()
+    monkeypatch.setattr(
+        conversation_experience_store,
+        "get_conversation_experience_store",
+        lambda **_kwargs: projection,
+    )
+
+    pack = conversation_experience_store.build_conversation_experience_read_pack(
+        ledger=object(),
+        session_id="session-1",
+        person_id="person-1",
+        domain="general",
+        query_text="最近的状态",
+        lesson_limit=5,
+    )
+
+    assert pack == {
+        "previous_belief": {"selected_intent": "support"},
+        "experience_lessons": [{"lesson_id": "lesson-1"}],
+    }
+    assert read_operations == [
+        ("belief", {"session_id": "session-1", "person_id": "person-1"}),
+        (
+            "lessons",
+            {
+                "person_id": "person-1",
+                "domain": "general",
+                "query_text": "最近的状态",
+                "limit": 5,
+            },
+        ),
+    ]
+
+
+def test_tribe_state_helpers_do_not_import_the_process_service_locator() -> None:
+    for relative_path in (
+        "host_brain/app/user_preference_store.py",
+        "host_brain/app/context/conversation_experience_store.py",
+        "host_brain/app/tribe_composition.py",
+        "host_brain/app/intent_seq.py",
+    ):
+        source = (ROOT / relative_path).read_text(encoding="utf-8-sig")
+        assert "host_brain.composition.process_services" not in source
+
+
+def test_input_service_log_has_no_dead_process_ledger_accessor() -> None:
+    source = (ROOT / "host_brain" / "app" / "input_service_log.py").read_text(
+        encoding="utf-8-sig"
+    )
+
+    assert "host_brain.composition.process_services" not in source
+    assert "get_ledger_safe" not in source
+
+
+def test_dead_surface_reply_postprocessor_is_deleted() -> None:
+    assert not (
+        ROOT / "host_brain" / "app" / "surface_reply_postprocessor.py"
+    ).exists()
+
+
+def test_retired_unbudgeted_surface_reply_judge_is_deleted() -> None:
+    assert not (
+        ROOT / "host_brain" / "app" / "codex_spark_reply_judge.py"
+    ).exists()
+    source = (ROOT / "host_brain" / "app" / "surface_main_chain_adapter.py").read_text(
+        encoding="utf-8-sig"
+    )
+    assert "codex_spark_reply_judge" not in source
 
 
 def test_typed_host_bundle_supplies_input_runtime_without_locator() -> None:
     sentinel = object()
+    thalamus = object()
+    ans = object()
+    immune = object()
     provider = lambda: sentinel
     notify_calls: list[str] = []
     host_services = replace(
@@ -257,6 +440,11 @@ def test_typed_host_bundle_supplies_input_runtime_without_locator() -> None:
     input_ports = build_input_runtime_application_ports(
         host_services=host_services,
         notify_user_interaction_callback=lambda: notify_calls.append("notify"),
+        tribe_runtime_agent_ports=TribeRuntimeAgentPorts(
+            get_thalamus_agent=lambda: thalamus,
+            get_ans_agent=lambda: ans,
+            get_immune_agent=lambda: immune,
+        ),
     )
 
     assert input_ports.get_intent_engine is provider
@@ -264,6 +452,9 @@ def test_typed_host_bundle_supplies_input_runtime_without_locator() -> None:
     assert input_ports.get_life_snapshot_reader is provider
     assert input_ports.get_multimodal_observer is provider
     assert input_ports.get_multimodal_processor is provider
+    assert input_ports.require_thalamus_agent() is thalamus
+    assert input_ports.require_ans_agent() is ans
+    assert input_ports.require_immune_agent() is immune
     input_ports.notify_user_interaction()
     assert notify_calls == ["notify"]
 
@@ -286,6 +477,16 @@ def test_missing_input_host_bundle_fails_closed_without_locator_fallback() -> No
         match="HOST_APP_LOCAL_SERVICE_PROVIDER_NOT_INJECTED",
     ):
         input_ports.notify_user_interaction()
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_INPUT_TRIBE_RUNTIME_PORTS_NOT_INJECTED",
+    ):
+        input_ports.require_thalamus_agent()
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED",
+    ):
+        input_ports.require_immune_agent()
 
 
 def test_model_attempt_port_uses_injected_provider_and_fails_closed_without_it() -> None:
@@ -739,9 +940,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 29
-    assert sum(named_import_modules.values()) == 59
-    assert len(all_import_modules) == 32
+    assert len(named_import_modules) == 21
+    assert sum(named_import_modules.values()) == 47
+    assert len(all_import_modules) == 24
     assert (
         ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
     ) not in all_import_modules
@@ -759,6 +960,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         ROOT / "host_brain" / "app" / "host_lifecycle_composition.py"
     ) not in all_import_modules
     assert ROOT / "host_brain" / "app" / "asgi.py" not in all_import_modules
+    assert (
+        ROOT / "host_brain" / "app" / "chat_retrieval_helpers.py"
+    ) not in all_import_modules
     assert (
         ROOT / "host_brain" / "composition" / "host_application.py"
     ) in all_import_modules

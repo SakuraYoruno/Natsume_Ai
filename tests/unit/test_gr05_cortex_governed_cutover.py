@@ -189,14 +189,12 @@ def test_cortex_runtime_has_no_direct_chat_or_postprocess_compatibility_hooks() 
     ):
         assert forbidden not in cortex_source
 
-    surface_source = (
+    assert not (
         Path(__file__).resolve().parents[2]
         / "host_brain"
         / "app"
         / "surface_reply_postprocessor.py"
-    ).read_text(encoding="utf-8")
-    assert "schedule_async_post_process" not in surface_source
-    assert "asyncio.create_task" not in surface_source
+    ).exists()
 
 
 async def _async_value(value):  # noqa: ANN001

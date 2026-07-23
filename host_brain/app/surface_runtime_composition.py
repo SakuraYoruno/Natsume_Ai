@@ -89,8 +89,8 @@ def build_surface_runtime_ports(
         ),
         build_user_preference_pack=build_user_preference_pack,
         get_conversation_history=agent_runtime_ports.conversation_history,
-        get_conversation_experience_store=(
-            agent_runtime_ports.get_conversation_experience_store
+        build_conversation_experience_read_pack=(
+            agent_runtime_ports.build_conversation_experience_read_pack
         ),
         build_conversation_understanding_pack=(
             build_conversation_understanding_pack

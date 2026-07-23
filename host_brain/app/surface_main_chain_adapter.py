@@ -381,27 +381,13 @@ async def surface_main_chain_sse_generator(
         narrative,
         agent_input=agent_input,
     )
-    if _has_governed_model_budget(trace):
-        trace["codex_spark_reply_judge"] = {
-            "status": "SKIPPED",
-            "reason_code": "GOVERNED_MODEL_BUDGET_BOUNDARY",
-        }
-    else:
-        try:
-            from host_brain.app.codex_spark_reply_judge import judge_surface_reply_with_codex_spark  # noqa: PLC0415
-
-            narrative, spark_judge = await judge_surface_reply_with_codex_spark(
-                agent_input=agent_input,
-                candidate_text=narrative,
-                trace_stage_meta=trace,
-            )
-            if spark_judge:
-                trace["codex_spark_reply_judge"] = spark_judge
-        except Exception as spark_exc:
-            trace["codex_spark_reply_judge"] = {
-                "status": "DEGRADED",
-                "error": type(spark_exc).__name__,
-            }
+    # A reply node owns exactly the primary Surface model attempt frozen into
+    # its TaskGraph budget.  The former optional Spark "judge" made a second,
+    # unbound model call after the candidate had already been produced.  It is
+    # retired instead of being skipped only for governed inputs: otherwise a
+    # future non-governed caller could silently recreate a second model
+    # authority outside Attempt/Budget/Acceptance.  Retire the route globally
+    # rather than merely skipping it for governed inputs.
     narrative, sub_agent_result_guard = _apply_surface_sub_agent_result_guard(
         narrative,
         agent_input=agent_input,

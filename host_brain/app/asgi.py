@@ -204,7 +204,10 @@ def create_app(
     *,
     host_application_ports: HostApplicationPorts | None = None,
 ) -> FastAPI:
-    from host_brain.app.tribe_composition import build_tribe_application_ports
+    from host_brain.app.tribe_composition import (
+        build_production_tribe_runtime_agent_ports,
+        build_tribe_application_ports,
+    )
 
     configure_process_service_ports()
     application_ports = (
@@ -238,6 +241,7 @@ def create_app(
         ),
         resource_manager_provider=host_lifecycle.get_resource_manager,
     )
+    tribe_runtime_agent_ports = build_production_tribe_runtime_agent_ports()
     lifecycle_runtime_ports = build_lifecycle_runtime_application_ports(
         host_services=host_services,
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
@@ -253,6 +257,7 @@ def create_app(
             host_lifecycle.notify_user_interaction
         ),
         agent_runtime_ports_provider=agent_runtime_scope.provider,
+        tribe_runtime_agent_ports=tribe_runtime_agent_ports,
     )
     # This slot belongs to one FastAPI application factory invocation.  Route
     # providers close over it explicitly; there is no module-global service
@@ -418,7 +423,10 @@ def create_app(
             request=request,
             metrics=runtime_metrics,
             logger=logger,
-            evaluate_immune_gate_fn=evaluate_immune_gate_for_chat,
+            evaluate_immune_gate_fn=partial(
+                evaluate_immune_gate_for_chat,
+                immune_agent_provider=tribe_runtime_agent_ports.require_immune_agent,
+            ),
             schedule_immune_gate_fn=partial(
                 schedule_chat_immune_gate_event,
                 get_ledger=ledger_provider,
@@ -493,6 +501,7 @@ def create_app(
             lifecycle_ports=lifecycle_runtime_ports,
             host_lifecycle=host_lifecycle,
             tribe_application_ports=tribe_application_ports,
+            tribe_runtime_agent_ports=tribe_runtime_agent_ports,
             canon_service_provider=canon_service_provider,
             startup_probe_sink=capture_startup_probe_statuses,
             degradation_state_provider=(

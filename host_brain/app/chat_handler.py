@@ -35,7 +35,6 @@ from host_brain.governor.route_token import (
 )
 from host_brain.tribe.thalamus_agent import (
     THALAMUS_SCENE_TYPE_SOURCE,
-    get_thalamus_agent,
     resolve_scene_type_from_intent_decision,
 )
 from host_brain.app.schemas import ChatRequest
@@ -585,6 +584,8 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
         )
     if not isinstance(input_runtime_ports, InputRuntimeApplicationPorts):
         raise RuntimeError("HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED")
+    input_runtime_ports.require_thalamus_agent()
+    input_runtime_ports.require_ans_agent()
 
     return StreamingResponse(
         _unified_chat_sse_generator(
@@ -676,7 +677,8 @@ async def _unified_chat_sse_generator(
     try:
         if intent_draft is None:
             classify_started_ms = int(time.time() * 1000)
-            intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
+            thalamus_agent = input_runtime_ports.require_thalamus_agent()
+            intent_draft = await thalamus_agent.classify_and_compile_intent_draft(
                 request_id=request_id,
                 session_id=session_id,
                 user_message=request_body.message,
@@ -928,8 +930,7 @@ async def _unified_chat_sse_generator(
                             embodiment_runtime=embodiment_runtime,
                         )
                     try:
-                        from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
-                        get_ans_agent().emit_task_success(
+                        input_runtime_ports.require_ans_agent().emit_task_success(
                             session_id=session_id,
                             task_type="chat",
                             intensity=0.35,

@@ -390,10 +390,15 @@ def _assert_guarded_chat_terminal(
 ) -> None:
     """Prevent fallback or synthetic approvals from bypassing model accounting."""
 
+    trace = _mapping_child(audit_refs, "trace_stage_meta")
+    if "codex_spark_reply_judge" in trace:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "chat terminal contains a retired secondary model trace",
+        )
     expected_guard = _governed_model_budget(frozen)
     if expected_guard is None or decision != "APPROVE":
         return
-    trace = _mapping_child(audit_refs, "trace_stage_meta")
     if _mapping_child(trace, "governed_model_budget") != expected_guard:
         raise GovernedRouteExecutorError(
             GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
@@ -560,8 +565,8 @@ def _chat_budget_observations(terminal: Mapping[str, Any]) -> dict[str, Any]:
 
     The terminal also carries memory, evidence and user-authored content.  A
     recursive scan of that payload is both unbounded and lets content imitate a
-    canonical budget measurement.  The surface runtime has two explicit model
-    trace slots; only measurements from those slots cross this boundary.
+    canonical budget measurement.  The Surface primary model attempt is the
+    only model authority admitted for a frozen Chat node.
     """
 
     audit_refs = _mapping_child(terminal, "audit_refs")
@@ -570,11 +575,6 @@ def _chat_budget_observations(terminal: Mapping[str, Any]) -> dict[str, Any]:
     _append_model_budget_measurement(
         measurements,
         _mapping_child(trace_stage_meta, "surface_model_attempt"),
-    )
-    spark_judge = _mapping_child(trace_stage_meta, "codex_spark_reply_judge")
-    _append_model_budget_measurement(
-        measurements,
-        _mapping_child(spark_judge, "model_attempt"),
     )
     return {"model_budget_measurements": measurements}
 

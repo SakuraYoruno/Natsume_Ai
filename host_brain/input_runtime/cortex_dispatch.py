@@ -85,6 +85,7 @@ async def _run_cortex_orchestrator_pipeline(
             payload=payload,
             person_id=person_id,
             ts_ms=ts_ms,
+            ports=ports,
         )
 
     # A governed Host Input is owned by the authenticated ingress principal,
