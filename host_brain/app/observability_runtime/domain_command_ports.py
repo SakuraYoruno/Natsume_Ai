@@ -576,12 +576,34 @@ def _edge_command_push(payload: Mapping[str, Any], _request_id: str) -> Any:
     )
 
 
-def _security_hunt(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import internal_security_immune_routes
+async def _security_hunt(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    """Use the same Host-bound Security Immune provider as the HTTP adapter."""
 
-    return internal_security_immune_routes.run_security_immune_once({
-        "reason": _optional_text(payload, "reason") or "operator_command",
-    })
+    provider = route_ports.security_immune_agent_provider
+    if not callable(provider):
+        raise ObsDomainCommandError("OBS_SECURITY_IMMUNE_AGENT_UNAVAILABLE")
+    try:
+        agent = provider()
+        run_once = getattr(agent, "run_once", None)
+        if agent is None or not callable(run_once):
+            raise TypeError("security immune agent is unavailable")
+        result = run_once(
+            reason=_optional_text(payload, "reason") or "operator_command",
+        )
+        if inspect.isawaitable(result):
+            result = await result
+    except ObsDomainCommandError:
+        raise
+    except Exception as exc:
+        raise ObsDomainCommandError("OBS_SECURITY_IMMUNE_AGENT_UNAVAILABLE") from exc
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_SECURITY_IMMUNE_AGENT_RESULT_INVALID")
+    return dict(result)
 
 
 async def _task_graph_cancel(payload: Mapping[str, Any], _request_id: str) -> Any:
@@ -849,6 +871,7 @@ _ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
     "sys_mode.switch": _sysmode_switch,
     "sys_mode.auto_rules.update": _sysmode_auto_rules,
     "sys_mode.event.submit": _sysmode_event,
+    "security.hunt.run_once": _security_hunt,
 }
 
 

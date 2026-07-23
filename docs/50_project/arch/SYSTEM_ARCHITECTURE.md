@@ -4,14 +4,14 @@
 # Natsume AI 系统架构总览
 
 版本：v2.6
-核对日期：2026-07-23
+核对日期：2026-07-24
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
 
 当前结构边界：Acceptance、ASGI、Scheduler 三个 owner 为1262/1389/2942行，focused helper/wiring/store不转移原writer、lifespan/task owner或repository UoW owner。967行 Budget rejection Store只拥有受约束的 C mutation；444行只读 terminal resolver统一响应丢失、duplicate replay和reconciliation，93行纯 route helper绑定HostCommand/TaskNode/WorkerProjection且拒绝Internal降级。独立 Gate 1–14=`PASS`、`failed_gates=[]`，Gate 3=`new_mixed_over_800=[]`，没有扩allowlist；上一结构提交36文件265项只作历史。静态PASS不等于NE-01或完整架构完成，NE-01仍`PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
-Tribe runtime 边界已从 Process Container 收敛到 `TribeRuntimeScope`：ASGI root 选定兼容 registry/state 和固定 agent provider catalog，scope 在 lifespan 内绑定/解绑 application ports、注册订阅、构造 handoff 并提供 Obs reader。生产 authority verifier 则由 Tool runtime activation 与恢复启动路径捕获同一 Host ledger provider，再重开 durable command/attempt/node/lease/grant。全局 agent/bus 尚未迁移，跨 scope fence 因而只允许一个 live Host，第二 scope 失败关闭；当前 locator inventory 为 named20/46、all-form23、Container48/2/45。这个数据不代表多 app 隔离、全局 locator 删除或 NE-01 完成。
+Tribe runtime 边界已从 Process Container 收敛到 `TribeRuntimeScope`：ASGI root 选定兼容 registry/state 和固定 agent provider catalog，scope 在 lifespan 内绑定/解绑 application ports、注册订阅、构造 handoff 并提供 Obs reader。生产 authority verifier 则由 Tool runtime activation 与恢复启动路径捕获同一 Host ledger provider，再重开 durable command/attempt/node/lease/grant。内部 Security Immune router 由同一 ASGI root 以 `HostRoutePorts.security_immune_agent_provider` 构造，provider 不可用固定 `503`，没有 request-time locator；其 Obs 手工 hunt route 仍被 Operator admission 阻断。全局 agent/bus 尚未迁移，跨 scope fence 因而只允许一个 live Host，第二 scope 失败关闭；当前 locator inventory 为 named19/45、all-form22、Container48/2/45。这个数据不代表多 app 隔离、全局 locator 删除或 NE-01 完成。
 
 ## 1. 系统边界
 

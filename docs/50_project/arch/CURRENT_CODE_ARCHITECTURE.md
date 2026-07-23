@@ -4,7 +4,7 @@
 # Natsume AI 当前代码架构事实
 
 版本：v5.24
-核对日期：2026-07-23
+核对日期：2026-07-24
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
@@ -14,7 +14,7 @@
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
 
-> 当前库存纠偏：早期切片中记录的 `named27/53、all-form30、Container50/3/46` 是 commit-bound 历史，不能当作当前工作树。现值为 `named20/46、all-form23、Container48/2/45`。`TribeRuntimeScope` 已取代 Process Container 中的 Tribe runtime，production authority verifier 由 Host Tool/恢复 composition 接收显式 ledger provider；兼容 agents/bus 仍 process-global，单活 binding fence 不代表多 app 隔离。
+> 当前库存纠偏：早期切片中记录的 `named27/53、all-form30、Container50/3/46` 是 commit-bound 历史，不能当作当前工作树。现值为 `named19/45、all-form22、Container48/2/45`。`TribeRuntimeScope` 已取代 Process Container 中的 Tribe runtime，production authority verifier 由 Host Tool/恢复 composition 接收显式 ledger provider；内部 Security Immune router 由 ASGI `HostRoutePorts` 接收 agent provider，缺失固定 `503`，route module 不再读取 `process_services` 或全局 agent factory。compatibility agents/bus 仍 process-global，单活 binding fence 不代表多 app 隔离；Obs 手工 hunt 仍处于阻断状态。
 
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|

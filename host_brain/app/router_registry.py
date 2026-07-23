@@ -23,7 +23,9 @@ from host_brain.input_runtime.contracts_and_normalization import GovernedCommand
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.worker_dispatch import create_input_router
 from host_brain.app.internal_agent_routes import router as internal_codex_router
-from host_brain.app.internal_security_immune_routes import router as internal_security_immune_router
+from host_brain.app.internal_security_immune_routes import (
+    create_internal_security_immune_router,
+)
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
 from host_brain.app.digital_life_routes import router as digital_life_router
 from host_brain.app.memory_routes import router as memory_router
@@ -183,7 +185,7 @@ def register_host_routers(
             Depends(bind_degradation_capability_port),
         ],
     )
-    app.include_router(internal_security_immune_router)
+    app.include_router(create_internal_security_immune_router(route_ports))
     app.include_router(digital_life_router)
     app.include_router(memory_router)
     app.include_router(create_mateengine_router(route_ports))

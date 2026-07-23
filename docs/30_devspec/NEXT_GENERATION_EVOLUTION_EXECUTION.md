@@ -3,10 +3,10 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-> 当前库存纠偏：本文件早期切片中出现的 `named27/53、all-form30、Container50/3/46` 均为对应提交的历史快照；当前工作树以 `named20/46、all-form23、Container48/2/45` 为准。Tribe runtime 已改由 ASGI-owned `TribeRuntimeScope` 管理，production authority verifier 已改为由 Tool/恢复 composition 注入 ledger provider；兼容 agents/bus 仍 process-global，只保证单活 Host。
+> 当前库存纠偏：本文件早期切片中出现的 `named27/53、all-form30、Container50/3/46` 均为对应提交的历史快照；当前工作树以 `named19/45、all-form22、Container48/2/45` 为准。Tribe runtime 已改由 ASGI-owned `TribeRuntimeScope` 管理，production authority verifier 已改为由 Tool/恢复 composition 注入 ledger provider；内部 Security Immune router 已由 ASGI route port 注入 agent provider，缺失固定 `503`，Obs 手工 hunt 仍阻断。兼容 agents/bus 仍 process-global，只保证单活 Host。
 
 版本：v3.1
-日期：2026-07-23
+日期：2026-07-24
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 修订执行基线：`origin/dev@1b7823130`；既有 NE-03 证据保留为已完成波次证据；当前连续 migration head 为 0121 Research Shadow Arm Operation，0115 durable HardState、0116 Workspace lifecycle、0117 Scheduler Clock authority 与 0118 Conversation Acceptance Effects 保留为连续历史地基；0120 只封住 bounded fan-out 的签名 durable canary 启用门禁，0121 只记录 Research shadow 外呼的 reservation/claim/recovery journal，两者均不代表 canary、NE-01 或 D20c 外部收益已完成；NE-01 继续收紧通用 Acceptance Effect 与 Internal protected result 边界
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)

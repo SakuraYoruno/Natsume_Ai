@@ -4,13 +4,13 @@
 # Natsume AI 功能模块与责任边界
 
 版本：v2.5
-核对日期：2026-07-20
+核对日期：2026-07-24
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-Tribe runtime 的当前模块边界为 `app/tribe_runtime_scope.py`：它是 ASGI-lifespan-owned application scope，负责 handoff coordinator、ports binding、subscription catalog 和 Obs state reader。`app/tribe_composition.py` 仅在 composition root 把兼容 registry/state/agent providers 显式注入；`composition/tribe_runtime.py` 已退役。`app/production_authority.py` 现在只提供显式 ledger-provider verifier factory，Tool runtime activation 与恢复启动路径必须构造并捕获它，不能在执行期回读 process locator。由于 agent/bus 自身仍 process-global，scope 的 binding fence 只提供单活 Host，不能作为 Tribe per-app isolation 或完整 Composition 的证据。当前库存为 `named20/46、all-form23、Container48/2/45`；文内较早 `named27/53、all-form30、Container50/3/46` 仅是历史切片快照。
+Tribe runtime 的当前模块边界为 `app/tribe_runtime_scope.py`：它是 ASGI-lifespan-owned application scope，负责 handoff coordinator、ports binding、subscription catalog 和 Obs state reader。`app/tribe_composition.py` 仅在 composition root 把兼容 registry/state/agent providers 显式注入；`composition/tribe_runtime.py` 已退役。`app/production_authority.py` 现在只提供显式 ledger-provider verifier factory，Tool runtime activation 与恢复启动路径必须构造并捕获它，不能在执行期回读 process locator。`app/internal_security_immune_routes.py` 现在只提供接收 `HostRoutePorts` 的 router factory；它由 ASGI 组合根传入 agent provider，缺失返回 `503`，不得导入 `process_services` 或 global agent factory。由于 agent/bus 自身仍 process-global，scope 的 binding fence 只提供单活 Host，不能作为 Tribe per-app isolation 或完整 Composition 的证据。当前库存为 `named19/45、all-form22、Container48/2/45`；文内较早 `named27/53、all-form30、Container50/3/46` 仅是历史切片快照。
 
 权威分工：
 

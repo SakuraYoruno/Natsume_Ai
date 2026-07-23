@@ -4,11 +4,11 @@
 # Natsume AI 当前架构差距矩阵
 
 版本：v2.6
-核对日期：2026-07-20
+核对日期：2026-07-24
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
-最新 locator inventory（2026-07-23）为具名 `20` consumer 模块、`46` 个具名 import、`23` 个全部 import-form consumer，Container 为 `48/2/45`。`TribeRuntimeScope` 已从 process Container 接管 Tribe port bind/unbind、订阅、handoff 与 Obs reader；生产 Skill 的 durable authority verifier 也已在 Tool runtime activation 与恢复启动阶段显式捕获 Host ledger provider，`production_authority.py` 不再在 worker 执行期读取 `process_services`。compatibility state/registry/agents/bus 仍是 process-global 注入依赖，因此 binding fence 只支持单活 Host、第二 scope 失败关闭，并不提供并发 multi-app 隔离。这是 `MISSING_WITH_CLEANUP_PROGRESS` 中的局部减法：旧 writer/slot 已收回，但 NE-06 proposal/activation writer、完整 Composition、Chat、通用 Delegate 和 NE-01 仍未完成。
+最新 locator inventory（2026-07-24）为具名 `19` consumer 模块、`45` 个具名 import、`22` 个全部 import-form consumer，Container 为 `48/2/45`。`TribeRuntimeScope` 已从 process Container 接管 Tribe port bind/unbind、订阅、handoff 与 Obs reader；生产 Skill 的 durable authority verifier 已在 Tool runtime activation 与恢复启动阶段显式捕获 Host ledger provider，内部 Security Immune HTTP router 也只由 ASGI `HostRoutePorts.security_immune_agent_provider` 构造，缺失时 `503`，两者都不在执行/请求期读取 `process_services`。Obs `security.hunt.run_once` 仍属于阻断命令，尚未获得 Operator 执行 authority。compatibility state/registry/agents/bus 仍是 process-global 注入依赖，因此 binding fence 只支持单活 Host、第二 scope 失败关闭，并不提供并发 multi-app 隔离。这是 `MISSING_WITH_CLEANUP_PROGRESS` 中的局部减法：旧 writer/slot 已收回，但 NE-06 proposal/activation writer、完整 Composition、Chat、通用 Delegate 和 NE-01 仍未完成。
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 

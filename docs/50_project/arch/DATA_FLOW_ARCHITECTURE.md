@@ -5,7 +5,7 @@
 
 版本：v2.8
 
-核对日期：2026-07-20
+核对日期：2026-07-24
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -13,7 +13,7 @@
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
-当前 Tribe 生命周期数据流为：`ASGI composition root → TribeRuntimeScope(state/registry/fixed agent providers) → lifespan bind ports → subscriptions/handoff/Obs reader → exact-owner unbind`。该流不再经过 `ProcessServiceContainer`；production authority 数据流同时为：`Tool runtime activation / recovery startup → captured ledger provider → durable command/attempt/node/lease/grant re-open`，执行期不得回读 locator。compatibility agents/bus 仍是 process-global，所以专用 fence 只保证同一进程一个 live Host，foreign binding 失败关闭，不能将它视为独立 app Tribe state 或全局 locator 清零。当前库存为 `named20/46、all-form23、Container48/2/45`；本文随后出现的 `named27/53、all-form30、Container50/3/46` 仅是此前切片的历史快照。
+当前 Tribe 生命周期数据流为：`ASGI composition root → TribeRuntimeScope(state/registry/fixed agent providers) → lifespan bind ports → subscriptions/handoff/Obs reader → exact-owner unbind`。该流不再经过 `ProcessServiceContainer`；production authority 数据流同时为：`Tool runtime activation / recovery startup → captured ledger provider → durable command/attempt/node/lease/grant re-open`，执行期不得回读 locator。内部 Security Immune 数据流为：`ASGI composition root → HostRoutePorts.security_immune_agent_provider → create_internal_security_immune_router → runtime/hunt/probe endpoint`；provider 缺失、异常或非法返回以 `503` 收口，不回退全局 agent factory。Obs `security.hunt.run_once` 仍在 admission 前阻断，不能把这一 HTTP port 注入写成 Operator 正向动作。compatibility agents/bus 仍是 process-global，所以专用 fence 只保证同一进程一个 live Host，foreign binding 失败关闭，不能将它视为独立 app Tribe state 或全局 locator 清零。当前库存为 `named19/45、all-form22、Container48/2/45`；本文随后出现的 `named27/53、all-form30、Container50/3/46` 仅是此前切片的历史快照。
 
 ## 1. 如何读本文
 

@@ -6,7 +6,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from host_brain.app.internal_security_immune_routes import router as internal_security_router
+from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.internal_security_immune_routes import (
+    create_internal_security_immune_router,
+)
 from host_brain.app.obs_routes_core import router as obs_router
 import host_brain.app.obs_routes_security_immune as obs_security_routes
 from host_brain.security_immune.actions import SecurityResponseExecutor
@@ -634,14 +637,14 @@ def test_security_immune_obs_routes_filter_incidents(monkeypatch) -> None:
     assert payload["incidents"][0]["incident_id"] == "high-1"
 
 
-def test_internal_security_probe_heartbeat_ingests_snapshot(monkeypatch, tmp_path: Path) -> None:
+def test_internal_security_probe_heartbeat_ingests_snapshot(tmp_path: Path) -> None:
     agent = SecurityImmuneAgent(policy=_policy(tmp_path))
-    monkeypatch.setattr(
-        "host_brain.app.internal_security_immune_routes.get_security_immune_agent",
-        lambda **_kwargs: agent,
-    )
     app = FastAPI()
-    app.include_router(internal_security_router)
+    app.include_router(
+        create_internal_security_immune_router(
+            HostRoutePorts(security_immune_agent_provider=lambda: agent),
+        )
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -669,6 +672,29 @@ def test_internal_security_probe_heartbeat_ingests_snapshot(monkeypatch, tmp_pat
     assert payload["asset_count"] == 1
     assert payload["incident_count"] == 1
     assert payload["incidents"][0]["asset_id"] == "endpoint-1"
+
+
+def test_internal_security_routes_fail_closed_without_app_owned_agent() -> None:
+    app = FastAPI()
+    app.include_router(create_internal_security_immune_router(HostRoutePorts()))
+    client = TestClient(app)
+
+    response = client.get("/internal/security/runtime")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "SECURITY_IMMUNE_AGENT_UNAVAILABLE"
+
+
+def test_internal_security_route_module_has_no_process_locator_or_agent_factory() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "host_brain"
+        / "app"
+        / "internal_security_immune_routes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "host_brain.composition.process_services" not in source
+    assert "get_security_immune_agent" not in source
 
 
 def test_probe_ingest_writes_ledger_event(tmp_path: Path) -> None:

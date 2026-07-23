@@ -360,6 +360,7 @@ def create_app(
             host_lifecycle.get_mode_transition_service
         ),
         embodiment_runtime_provider=embodiment_runtime_provider,
+        security_immune_agent_provider=application_ports.security_immune_agent,
     )
     host_obs_route_ports = ObsRoutePorts(
         query_projection_store_provider=lambda: host_query_projection_store,
