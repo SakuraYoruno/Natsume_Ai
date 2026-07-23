@@ -947,6 +947,9 @@ def create_app(
                     life_receipt_reader_provider=(
                         lambda: life_command_authority_provider(ledger)[1]
                     ),
+                    life_authority_provider=(
+                        lambda: life_command_authority_provider(ledger)
+                    ),
                     agent_runtime_ports=agent_runtime_ports,
                     token_service_provider=application_ports.token_service,
                     intent_engine_provider=intent_engine_provider,

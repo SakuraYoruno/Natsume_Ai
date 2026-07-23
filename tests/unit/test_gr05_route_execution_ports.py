@@ -10,6 +10,7 @@ import pytest
 from host_brain.app.route_execution_ports import (
     GovernedRouteExecutionPorts,
     RouteExecutionBoundaryError,
+    build_governed_route_execution_ports,
     dispatch_governed_delegate,
     stream_governed_chat_with_context,
 )
@@ -149,6 +150,49 @@ async def test_governed_chat_port_rejects_smuggled_authority(field: str, value: 
 
     with pytest.raises(RouteExecutionBoundaryError):
         _ = [event async for event in stream_governed_chat_with_context(**kwargs)]
+
+
+@pytest.mark.asyncio
+async def test_unbound_governed_chat_port_fails_closed_without_surface_authority() -> None:
+    ports = build_governed_route_execution_ports(
+        governed_delegate_dispatcher=SimpleNamespace(dispatch=lambda _value: None),
+    )
+
+    with pytest.raises(
+        RouteExecutionBoundaryError,
+        match="requires lifespan-owned SurfaceRuntimePorts",
+    ):
+        _ = [event async for event in ports.surface_reply_sse_generator(object())]
+
+
+@pytest.mark.asyncio
+async def test_bound_governed_chat_port_forwards_the_injected_surface_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    surface_runtime_ports_factory,
+) -> None:  # noqa: ANN001
+    surface_ports = surface_runtime_ports_factory()
+    captured: list[object] = []
+
+    async def fake_surface_reply(value, *, ports):  # noqa: ANN001
+        captured.extend((value, ports))
+        yield "data: explicit-surface-ports\n\n"
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_reply_runtime.surface_reply_sse_generator",
+        fake_surface_reply,
+    )
+    route_ports = build_governed_route_execution_ports(
+        governed_delegate_dispatcher=SimpleNamespace(dispatch=lambda _value: None),
+        surface_runtime_ports=surface_ports,
+    )
+
+    events = [
+        event
+        async for event in route_ports.surface_reply_sse_generator("frozen-input")
+    ]
+
+    assert events == ["data: explicit-surface-ports\n\n"]
+    assert captured == ["frozen-input", surface_ports]
 
 
 @pytest.mark.asyncio

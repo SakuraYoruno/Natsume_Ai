@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
+
 
 @dataclass(frozen=True, slots=True)
 class InternalRuntimeComposition:
@@ -50,6 +52,7 @@ def compose_internal_runtime(
     semantic_recaller: Any,
     mode_transition_service_provider: Callable[[], Any],
     life_receipt_reader_provider: Callable[[], Any],
+    life_authority_provider: Callable[[], tuple[Any, Any]],
     agent_runtime_ports: Any,
     token_service_provider: Callable[[], Any],
     intent_engine_provider: Callable[[], Any],
@@ -82,6 +85,10 @@ def compose_internal_runtime(
         occurrence_repository=task_runtime.scheduler_definition_repository,
         command_repository=task_runtime.command_repository,
         result_repository=task_runtime.scheduler_result_repository,
+    )
+    surface_runtime_ports = build_surface_runtime_ports(
+        agent_runtime_ports=agent_runtime_ports,
+        life_authority_provider=life_authority_provider,
     )
     workspace_runtime = (
         workspace_container.runtime if workspace_container is not None else None
@@ -116,6 +123,7 @@ def compose_internal_runtime(
         acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         episodic_store=episodic_projection_store,
         semantic_recaller=semantic_recaller,
+        surface_runtime_ports=surface_runtime_ports,
     )
     executor_kwargs: dict[str, Any] = {
         "model_attempt_service": model_attempt_service_provider(),

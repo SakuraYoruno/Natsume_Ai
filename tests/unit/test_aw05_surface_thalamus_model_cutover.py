@@ -68,6 +68,8 @@ def test_surface_and_thalamus_have_no_legacy_pool_or_private_fallback_authority(
         assert "complete_llm_with_pool" not in source
     assert "_surface_gemini_fallback_runtime" not in surface
     assert 'trace_stage_meta["surface_llm_pool"]' not in surface
-    assert "get_model_attempt_service" in surface
+    assert "ports.model_attempt_service()" in surface
+    assert "get_model_attempt_service" not in surface
+    assert "host_brain.composition.process_services" not in surface
     assert 'require("model_attempt_service")' in thalamus
     assert "host_brain.app" not in thalamus

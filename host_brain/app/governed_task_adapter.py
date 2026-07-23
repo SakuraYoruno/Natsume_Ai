@@ -891,6 +891,7 @@ def build_governed_host_runtime(
     intent_admission_verifier: Any | None = None,
     degradation_capability_port: Any | None = None,
     action_preview_service: Any | None = None,
+    surface_runtime_ports: Any | None = None,
 ) -> GovernedHostRuntime:
     from host_brain.app.route_execution_ports import (  # noqa: PLC0415
         build_governed_route_execution_ports,
@@ -956,6 +957,7 @@ def build_governed_host_runtime(
     if projection_store is not None:
         route_execution_ports = build_governed_route_execution_ports(
             governed_delegate_dispatcher=delegate_dispatcher,
+            surface_runtime_ports=surface_runtime_ports,
         )
         chat_worker = GovernedFrozenNodeWorker(
             route_kind="chat",

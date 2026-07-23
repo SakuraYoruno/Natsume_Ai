@@ -32,7 +32,12 @@ async def _fake_llm_runtime_async(*args, **kwargs) -> dict[str, Any]:  # noqa: A
     }
 
 
-async def _fake_surface_reply_sse_generator(chat_input):  # noqa: ANN001
+async def _fake_surface_reply_sse_generator(  # noqa: ANN001
+    chat_input,
+    *,
+    ports,
+):
+    assert ports is not None
     sub_ctx = getattr(chat_input, "sub_agent_context", None)
     result_text = getattr(sub_ctx, "result_text", "") if sub_ctx is not None else ""
     payload = {
