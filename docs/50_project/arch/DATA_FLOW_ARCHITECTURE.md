@@ -335,12 +335,14 @@ Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_disp
 
 ### 4.6 Plan
 
-[plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py) 只接受 `route=plan`，从 Governor 已批准的 `planned_steps/steps` 构造候选，检查 `skill` / `delegate` / `chat` 节点与依赖，选出完整合法的拓扑顺序。[planning_execution.py](../../../host_brain/orchestration/planning_execution.py) 把 search result 交给 [planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py)，编译成不可变 TaskGraph。
+[plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py) 的遗留模式只接受 `route=plan`，从 Governor 已批准的 `planned_steps/steps` 构造候选，检查 `skill` / `delegate` / `chat` 节点与依赖，选出完整合法的拓扑顺序。[planning_execution.py](../../../host_brain/orchestration/planning_execution.py) 把 search result 交给 [planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py)，编译成不可变 TaskGraph。
+
+显式 `route=plan + args.planning_mode=CAPABILITY_SEARCH_V1` 不接受 `planned_steps/steps`。它经 [capability_plan_search.py](../../../host_brain/orchestration/capability_plan_search.py) 从 app-composed `SkillRegistry` 冻结至少两项 `scope=host`、`require_confirm=false`、风险不高于 Governor-bound 上限且标签匹配的能力元数据；[capability_domain.py](../../../host_brain/planning_search/capability_domain.py) 用公共 L1/L2/条件 L3 选择一条 `skill → chat` 的纯虚拟路径。只有搜索选中后，`compilation_context_resolver` 才重建 selected-only `approved_candidate_inputs`，再进入 compiler/admission；Registry handler、未选候选和 worker 都不进入搜索。
 
 当前 Plan **不会**：
 
-- 从目标生成多个实质不同的候选方案；
-- 根据虚拟状态动态生成 successor；
+- 在旧 `planned_steps` 或普通 Plan 输入中从目标生成多个实质不同的候选方案；
+- 在通用普通 Plan 输入中根据虚拟状态动态生成领域 successor（当前仅 capability mode 的受限 catalog 可以）；
 - 在真实 Code/Research 场景中证明 Graph Search 或 MCTS 收益；
 - 在 worker 失败时自动生成 revision + 1 并继续调度。
 
@@ -376,7 +378,7 @@ frozen CodeTaskSnapshot (opaque refs + digest + registered patch catalog)
 
 该流在 D16 结束于纯编译准备：snapshot 不包含 source text、worktree handle、凭据或 executor；候选不携带 budget、review、workspace 或 approval authority；`intent_draft` 被拒绝，避免覆盖 catalog-derived args。context 的 `approval_ref` 必须与 parent Governor grant 一致，state/goal/objective 也必须对齐。这里没有真实 workspace ACL、模型/工具/测试调用、Task admission、receipt 或生产 side effect；中间虚拟 state 也不能直接编译为 replan 图，直到 durable predecessor lineage 被另行设计。
 
-### 4.9 D20a Research 冻结语料 pure-shadow 流
+### 4.9 D20a～D20c Research 冻结语料、citation 与外部模型证据流
 
 ```text
 ResearchTaskSnapshot
@@ -395,9 +397,34 @@ trusted experiment root + FrozenResearchCorpusManifest
   → 读取前后 file identity + byte-count + digest checks
   → trusted private experiment consumer
   → public receipt: source_id/ref/digest/size/authority only
+
+ResearchTaskSnapshot + manifest + ResearchCorpusBindingV1
+  → exact corpus/source id/ref/digest/tier handshake
+  → fresh FrozenResearchCorpusLoader per verify()
+  → reopen cited source; verify UTF-8 byte boundary + span SHA-256
+  → path/body-free ResearchVerifierReceiptV1
+  → 0107 reopen registration + RunSpec + two persisted arms
+  → exact terminal receipt/replay only when plan/model/verifier/evidence digest all match
+
+persisted 0107 RunSpec (actual BASELINE/SELECTED order only)
+  + private prompt/messages (never written to 0107)
+  → ResearchPairedExecutionRunner derives deterministic execution identity
+  → 0120 reservation → fenced call claim → EXTERNAL_CALL_STARTED
+  → restart: empty canonical audit only → explicit retry authorization;
+             audit without 0107 arm evidence → RECONCILIATION_REQUIRED
+  → AttestedExternalResearchAdapter
+  → canonical ModelAttemptService foreground request
+  → accept only one non-cached SUCCEEDED attempt with exact route/output identity
+  → require rendered prompt digest + canonical tool/token/cost + provider/total latency
+  → embedded ExternalProviderRunAttestationV1
+  → profile-bound strict JSON citation-output parser (discard answer body)
+  → fresh citation verifier → 0107 arm evidence → 0120 EVIDENCE_PERSISTED
+  → both persisted arms: pair token/latency bound → exact terminal receipt
+  → ResearchModelExecutionReceiptV1
+  → still shadow ledger only; no promotion authority
 ```
 
-`FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes；但 D20a 尚未把 planner snapshot 与 manifest/document 的 corpus/source id/ref/digest/tier 精确绑定，也不是 hostile concurrent replacement 的原子 TOCTOU 防线或来源独立性证明。D20a 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实模型、独立 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research benefit 仍为 `UNPROVEN`。
+`FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes。D20b 的 verifier 在构造和验证两阶段分别精确比较 snapshot、manifest、binding 及新打开 document 的 corpus/source id/ref/digest/tier；调用方不能交入 executor loader 或未经核验的有效率。D20c 的 paired runner 不接收可替换的 plan、budget 或 arm order，而是重开 0107 RunSpec；raw prompt 和 response 只在进程内交给 adapter/parser/verifier，账本只保留 digest、用量和 receipt。profile 的 output-schema digest 必须在任何模型调用前等于 `ResearchCitationOutputParserV1` 的固定 JSON envelope digest；parser 严格拒绝额外字段、非 JSON、越界或重复 span，并丢弃 answer 正文后只交出 citation span。它要求每个新 arm 使用 fresh verifier，且 profile prompt digest、工具调用数、单臂/成对 token 与时延超过预算均失败关闭。已有 evidence 只重开，`EXTERNAL_CALL_STARTED` 后只有空 canonical audit 才会落 retry authorization；有 audit 而无 evidence 必须冻结 reconciliation。adapter 不能从 caller 获得 provider/model/base URL/cache 控制；它在调用前先经 `AttemptAuditLookup` 确认该 execution ID 不存在 canonical audit row，任何已有行或 lookup 故障均阻断外呼并要求 reconciliation。随后只向已 composition 的模型 authority 发出一个 request，并拒绝 cache、多 attempt、route/output 漂移、缺 prompt digest/工具/token/成本或 provider/总延迟的结果。签发前它还必须重开同一 request 的 canonical audit started/terminal rows，要求 terminal record 和 provider latency 精确一致。普通 request 仍不能自行压低 route-owned retry ceiling；本地 SQLite audit reopen 与 in-process model double 都不等于已经验收的真实 provider 调用。D20a～D20c 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实 credential/provider execution、独立信任域 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research 为 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
 
 ### 4.10 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
 

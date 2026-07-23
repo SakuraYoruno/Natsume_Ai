@@ -3,11 +3,13 @@
 from host_brain.model_runtime.composition import (
     InMemoryAttemptAuditRepository,
     LedgerAttemptAuditRepository,
+    LedgerAttemptAuditLookup,
     ModelRuntimeComposition,
     build_model_runtime_composition,
 )
 from host_brain.model_runtime.contracts import (
     AttemptAuditRepository,
+    AttemptAuditLookup,
     AttemptStatus,
     CachePolicy,
     CacheScope,
@@ -197,6 +199,7 @@ __all__ = [
     "UnknownGraphModelSemanticError",
     "AttemptAuditError",
     "AttemptAuditRepository",
+    "AttemptAuditLookup",
     "AttemptStatus",
     "CachePolicy",
     "CacheScope",
@@ -206,6 +209,7 @@ __all__ = [
     "DuplicateProviderAdapterError",
     "InMemoryAttemptAuditRepository",
     "LedgerAttemptAuditRepository",
+    "LedgerAttemptAuditLookup",
     "ModelAttemptRecord",
     "ModelAttemptRequest",
     "ModelAttemptResult",

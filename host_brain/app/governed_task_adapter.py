@@ -30,6 +30,11 @@ from host_brain.orchestration.host_route_contracts import (
 from host_brain.orchestration.failure_replan_intent import (
     failure_replan_reference_from_intent,
 )
+from host_brain.orchestration.capability_plan_search import (
+    CAPABILITY_PLAN_SEARCH_REPLAN_UNSUPPORTED,
+    build_capability_plan_search,
+    is_capability_plan_intent,
+)
 from host_brain.orchestration.plan_intent_search import build_plan_intent_search
 from host_brain.orchestration.planning_admission import GovernedPlanningAdmissionService
 from host_brain.orchestration.planning_execution import (
@@ -117,6 +122,7 @@ class GovernedHostRuntime:
         planning_enabled: bool = False,
         acceptance_effect_dispatcher: AcceptanceEffectDispatcher | None = None,
         delegate_target_validator: Callable[[str], Any] | None = None,
+        planning_skill_registry: Any | None = None,
         runtime_context_application: RuntimeContextApplicationService | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
@@ -130,6 +136,7 @@ class GovernedHostRuntime:
         self._planning_enabled = bool(planning_enabled)
         self._acceptance_effect_dispatcher = acceptance_effect_dispatcher
         self._delegate_target_validator = delegate_target_validator
+        self._planning_skill_registry = planning_skill_registry
         if runtime_context_application is not None and not isinstance(
             runtime_context_application,
             RuntimeContextApplicationService,
@@ -176,6 +183,8 @@ class GovernedHostRuntime:
         draft = dict(intent_draft or {})
         route = str(draft.get("route") or "").strip().lower()
         if route == "plan":
+            if is_capability_plan_intent(draft):
+                return self._planning_enabled and self._planning_skill_registry is not None
             steps = draft.get("planned_steps")
             if not isinstance(steps, list):
                 steps = draft.get("steps")
@@ -688,13 +697,31 @@ class GovernedHostRuntime:
             authority=ingress,
         )
         input_ref = f"input://sha256/{input_sha256.removeprefix('sha256:')}"
-        adapter = build_plan_intent_search(
-            intent_draft,
-            governor_result=governor_result,
-            request_id=request_id,
-            input_refs=(input_ref,),
-            frozen_context=frozen_context,
-        )
+        capability_plan = is_capability_plan_intent(intent_draft)
+        if capability_plan:
+            if self._planning_skill_registry is None:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "capability planning requires the app-composed SkillRegistry",
+                )
+            adapter = build_capability_plan_search(
+                intent_draft,
+                governor_result=governor_result,
+                skill_registry=self._planning_skill_registry,
+                request_id=request_id,
+                input_refs=(input_ref,),
+                frozen_context=frozen_context,
+            )
+            compilation_context_resolver = adapter.compilation_context_for
+        else:
+            adapter = build_plan_intent_search(
+                intent_draft,
+                governor_result=governor_result,
+                request_id=request_id,
+                input_refs=(input_ref,),
+                frozen_context=frozen_context,
+            )
+            compilation_context_resolver = None
         ingress_claim_ref, ingress_audit_ref = _ingress_references(ingress)
         authority = PlanningExecutionAuthority(
             surface=_resolve_host_command_surface(
@@ -723,8 +750,14 @@ class GovernedHostRuntime:
             ),
             command_application=self._application,
             delegate_target_validator=self._delegate_target_validator,
+            compilation_context_resolver=compilation_context_resolver,
         )
         replan = failure_replan_reference_from_intent(intent_draft)
+        if capability_plan and replan is not None:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                CAPABILITY_PLAN_SEARCH_REPLAN_UNSUPPORTED,
+            )
         if replan is None:
             prepared = await service.prepare_initial(
                 adapter.request,
@@ -1035,6 +1068,7 @@ def build_governed_host_runtime(
         planning_enabled=projection_store is not None,
         acceptance_effect_dispatcher=effect_dispatcher,
         delegate_target_validator=delegate_dispatcher.require_target,
+        planning_skill_registry=skill_registry,
         runtime_context_application=runtime_context_application,
     )
 

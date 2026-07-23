@@ -15,7 +15,10 @@ from host_brain.orchestration.planning_execution import (
     PlanningExecutionAuthority,
     PlanningExecutionError,
 )
-from host_brain.orchestration.planning_graph_compiler import PlanningGraphCompiler
+from host_brain.orchestration.planning_graph_compiler import (
+    PlanningCompilationContext,
+    PlanningGraphCompiler,
+)
 from host_brain.planning_search.contracts import (
     SearchCandidate,
     SearchCounters,
@@ -345,3 +348,82 @@ async def test_non_selected_search_never_compiles_or_admits() -> None:
 
     assert raised.value.reason_code == PLANNING_EXECUTION_SEARCH_FAILED
     assert admission.calls == []
+
+
+@pytest.mark.asyncio
+async def test_selected_context_resolver_runs_after_search_before_compilation() -> None:
+    candidate = SearchCandidate(
+        "resolver-node",
+        payload={
+            "worker_route": "skill",
+            "target_id": "worker-resolver-node",
+            "objective": "execute resolver-bound node",
+            "acceptance_criteria": ["return a receipt"],
+            "input_refs": ["artifact://input/resolver-node"],
+            "output_contract": {"type": "result", "required": ["receipt_ref"]},
+            "retry_policy": {"max_attempts": 1, "retry_backoff_ms": 0},
+            "risk_level": 1,
+            "capability_requirements": ["capability-resolver-node"],
+        },
+    )
+    result = SearchResult(
+        request_id="search-context-resolver",
+        status=SearchStatus.SELECTED,
+        stop_reason="selected",
+        selected_candidate=candidate,
+        selected_path=(candidate,),
+        ranked=(),
+        trace=(),
+        counters=SearchCounters(),
+    )
+    calls: list[SearchResult] = []
+
+    def resolve_context(selected: SearchResult) -> PlanningCompilationContext:
+        calls.append(selected)
+        return PlanningCompilationContext(
+            domain="code",
+            run_mode="worker",
+            plan_objective="execute resolver-bound node",
+            allowed_actions=("skill:worker-resolver-node",),
+            forbidden_actions=("reroute",),
+            verification_plan={"required": True},
+            approval_policy={"required": True},
+            review_policy={"review_required": False},
+            budget_policy={
+                "schema_version": BUDGET_POLICY_SCHEMA_VERSION,
+                "scope": "planning-context-resolver-test",
+                "limits": {
+                    "token_count": 1000,
+                    "tool_call_count": 4,
+                    "time_ms": 1000,
+                    "concurrency": 1,
+                    "retry_count": 1,
+                    "model_cost_micros": 1000,
+                },
+                "on_exceeded": "BLOCK",
+            },
+            business_idempotency_scope="planning-context-resolver-test",
+            approval_ref="approval://planning/root",
+            review_ref="review-waiver://planning/root",
+        )
+
+    admission = _Admission()
+    service = GovernedPlanningExecutionService(
+        search=_Search(result),  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=admission,  # type: ignore[arg-type]
+        command_application=_Application(),
+        compilation_context_resolver=resolve_context,
+    )
+
+    prepared = await service.prepare_initial(
+        SearchRequest("search-context-resolver", initial_state={}),
+        authority=_authority(),
+        created_at=100,
+    )
+
+    assert calls == [result]
+    assert prepared.compiled.work_order.allowed_actions == (
+        "skill:worker-resolver-node",
+    )
+    assert admission.calls[0]["compiled"] == prepared.compiled

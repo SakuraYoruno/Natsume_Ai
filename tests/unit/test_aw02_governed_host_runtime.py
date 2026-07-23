@@ -402,5 +402,115 @@ async def test_secure_ingress_plan_preserves_surface_principal_and_digest(
         await runtime.aclose()
 
 
+@pytest.mark.asyncio
+async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _PlanService:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured["resolver"] = kwargs.get("compilation_context_resolver")
+
+        async def prepare_initial(self, _request, *, authority, created_at):  # noqa: ANN001
+            captured["authority"] = authority
+            captured["created_at"] = created_at
+            return object()
+
+        async def execute_stream(self, _prepared):  # noqa: ANN001
+            yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
+
+    capability_adapter = SimpleNamespace(
+        request=object(),
+        compilation_context_for=lambda _result: object(),
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "build_capability_plan_search",
+        lambda *_args, **_kwargs: capability_adapter,
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "build_plan_intent_search",
+        lambda *_args, **_kwargs: pytest.fail("legacy plan adapter must not run"),
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "GovernedPlanningExecutionService",
+        _PlanService,
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "GovernedPlanningAdmissionService",
+        lambda **_kwargs: object(),
+    )
+    runtime = GovernedHostRuntime(
+        application=_BlockingApplication(),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=_EmptyCommandRepository(),
+        planning_enabled=True,
+        planning_skill_registry=object(),
+    )
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": "intent-capability-plan-route",
+        "session_id": "session-capability-plan-route",
+        "seq": 1,
+        "nonce": "nonce-capability-plan-route",
+        "route": "plan",
+        "target_id": "planning_search",
+        "task": "search registered research capabilities",
+        "args": {
+            "planning_mode": "CAPABILITY_SEARCH_V1",
+            "planning_capability_tags": ["research"],
+        },
+    }
+    governor = {
+        "request_id": "request-capability-plan-route",
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "tokens": {},
+        "ts_ms": 1_800_000_000_000,
+    }
+
+    assert runtime.supports(intent) is True
+    await runtime.activate()
+    try:
+        events = await _collect(
+            runtime.execute_stream(
+                request_body=SimpleNamespace(input_source="GATEWAY"),
+                request_id=governor["request_id"],
+                session_id=intent["session_id"],
+                ts_ms=governor["ts_ms"],
+                intent_draft=intent,
+                governor_result=governor,
+                person_id="person-capability-plan-route",
+                sanitized_message=intent["task"],
+                command_authority={"body_sha256": "e" * 64},
+            )
+        )
+        assert events[-1]["decision"] == "APPROVE"
+        assert captured["resolver"] is capability_adapter.compilation_context_for
+        authority = captured["authority"]
+        assert authority.target_id == "planning_search"
+    finally:
+        await runtime.aclose()
+
+
+def test_capability_plan_requires_app_composed_skill_registry() -> None:
+    intent = {
+        "route": "plan",
+        "args": {"planning_mode": "CAPABILITY_SEARCH_V1"},
+    }
+    runtime = GovernedHostRuntime(
+        application=SimpleNamespace(),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=SimpleNamespace(),
+        planning_enabled=True,
+    )
+
+    assert runtime.supports(intent) is False
+
+
 async def _collect(stream):
     return [event async for event in stream]

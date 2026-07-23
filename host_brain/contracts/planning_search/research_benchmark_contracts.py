@@ -298,7 +298,21 @@ class ResearchVerifierReceiptV1:
 
     @property
     def structurally_eligible(self) -> bool:
-        return self.citation_coverage >= 0.0 and self.citation_validity >= 0.0
+        """Whether this receipt clears the minimum D20 citation evidence floor.
+
+        A structurally well-formed zero-citation receipt is still useful as a
+        failed experiment record, but it must never make an external paired
+        run benefit-eligible.  The frozen Research acceptance protocol
+        requires non-empty, fully accounted citations with at least 0.95
+        coverage and validity before later cohort statistics can consider it.
+        """
+
+        return (
+            self.citation_count > 0
+            and self.cited_span_count == self.citation_count
+            and self.citation_coverage >= 0.95
+            and self.citation_validity >= 0.95
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -318,9 +332,12 @@ class ResearchModelExecutionReceiptV1:
     arm_id: str
     evidence_class: str
     attempt_ids: tuple[str, ...]
+    prompt_digest: str | None = None
+    tool_call_count: int | None = None
     total_tokens: int | None = None
     cost_micros: int | None = None
     attestation_ref: str | None = None
+    attestation: "ExternalProviderRunAttestationV1 | None" = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "execution_id", _text(self.execution_id, "execution_id", 160))
@@ -330,36 +347,88 @@ class ResearchModelExecutionReceiptV1:
             raise ResearchBenchmarkContractError("unsupported Research evidence_class")
         object.__setattr__(self, "evidence_class", evidence_class)
         object.__setattr__(self, "attempt_ids", _refs(self.attempt_ids, "attempt_ids"))
-        for name in ("total_tokens", "cost_micros"):
+        prompt_digest = (
+            None
+            if self.prompt_digest is None
+            else _digest(self.prompt_digest, "prompt_digest")
+        )
+        for name in ("tool_call_count", "total_tokens", "cost_micros"):
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                 raise ResearchBenchmarkContractError(f"{name} must be a non-negative integer")
         attestation = None if self.attestation_ref is None else _text(self.attestation_ref, "attestation_ref", 1_024)
+        external_attestation = self.attestation
+        if external_attestation is not None and not isinstance(
+            external_attestation,
+            ExternalProviderRunAttestationV1,
+        ):
+            raise ResearchBenchmarkContractError(
+                "attestation must be an ExternalProviderRunAttestationV1"
+            )
         if evidence_class == "ATTESTED_EXTERNAL" and not attestation:
             raise ResearchBenchmarkContractError("attested external evidence requires attestation_ref")
         if evidence_class == "ATTESTED_EXTERNAL" and (self.total_tokens is None or self.cost_micros is None):
             raise ResearchBenchmarkContractError(
                 "attested external evidence requires token and cost usage"
             )
+        if evidence_class == "ATTESTED_EXTERNAL" and prompt_digest is None:
+            raise ResearchBenchmarkContractError(
+                "attested external evidence requires the rendered prompt digest"
+            )
+        if evidence_class == "ATTESTED_EXTERNAL" and self.tool_call_count is None:
+            raise ResearchBenchmarkContractError(
+                "attested external evidence requires tool-call usage"
+            )
+        if evidence_class == "ATTESTED_EXTERNAL" and external_attestation is None:
+            raise ResearchBenchmarkContractError(
+                "attested external evidence requires an exact provider attestation"
+            )
+        if evidence_class == "ATTESTED_EXTERNAL" and external_attestation is not None:
+            if (
+                external_attestation.execution_id != self.execution_id
+                or external_attestation.attestation_ref != attestation
+                or external_attestation.total_tokens != self.total_tokens
+                or external_attestation.cost_micros != self.cost_micros
+            ):
+                raise ResearchBenchmarkContractError(
+                    "provider attestation does not bind the Research model receipt"
+                )
         if evidence_class != "ATTESTED_EXTERNAL" and attestation:
             raise ResearchBenchmarkContractError("non-attested evidence cannot carry attestation_ref")
+        if evidence_class != "ATTESTED_EXTERNAL" and external_attestation is not None:
+            raise ResearchBenchmarkContractError(
+                "non-attested evidence cannot carry a provider attestation"
+            )
         object.__setattr__(self, "attestation_ref", attestation)
+        object.__setattr__(self, "attestation", external_attestation)
+        object.__setattr__(self, "prompt_digest", prompt_digest)
 
     @property
     def benefit_eligible(self) -> bool:
-        return self.evidence_class == "ATTESTED_EXTERNAL" and bool(self.attempt_ids) and self.attestation_ref is not None
+        return (
+            self.evidence_class == "ATTESTED_EXTERNAL"
+            and bool(self.attempt_ids)
+            and self.attestation_ref is not None
+            and self.prompt_digest is not None
+            and self.tool_call_count is not None
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "execution_id": self.execution_id,
             "arm_id": self.arm_id,
             "evidence_class": self.evidence_class,
             "attempt_ids": list(self.attempt_ids),
+            "prompt_digest": self.prompt_digest,
+            "tool_call_count": self.tool_call_count,
             "total_tokens": self.total_tokens,
             "cost_micros": self.cost_micros,
             "attestation_ref": self.attestation_ref,
             "benefit_eligible": self.benefit_eligible,
         }
+        if self.attestation is not None:
+            result["attestation"] = self.attestation.to_dict()
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +482,18 @@ class ExternalProviderRunAttestationV1:
             "fresh_request": True,
         }
 
+    @property
+    def attestation_digest(self) -> str:
+        """Return the canonical digest that a model receipt must reference."""
+
+        return _json_digest(self.to_dict())
+
+    @property
+    def attestation_ref(self) -> str:
+        """Return the opaque durable reference for this exact provider call."""
+
+        return f"research-provider-attestation://sha256/{self.attestation_digest}"
+
 
 @dataclass(frozen=True, slots=True)
 class PairedResearchRunReceiptV1:
@@ -425,6 +506,7 @@ class PairedResearchRunReceiptV1:
     selected_model: ResearchModelExecutionReceiptV1
     baseline_verifier: ResearchVerifierReceiptV1
     selected_verifier: ResearchVerifierReceiptV1
+    arm_order: tuple[str, str]
     randomized_arm_order: bool
     production_influence_enabled: bool = False
 
@@ -439,10 +521,21 @@ class PairedResearchRunReceiptV1:
             raise ResearchBenchmarkContractError("model receipts do not bind paired execution ids")
         if self.baseline_verifier.execution_id != baseline_id or self.selected_verifier.execution_id != selected_id:
             raise ResearchBenchmarkContractError("verifier receipts do not bind paired execution ids")
+        if isinstance(self.arm_order, (str, bytes, bytearray)):
+            raise ResearchBenchmarkContractError("paired Research arm_order must be an explicit sequence")
+        arm_order = tuple(str(value or "").strip().upper() for value in self.arm_order)
+        if len(arm_order) != 2 or set(arm_order) != {"BASELINE", "SELECTED"}:
+            raise ResearchBenchmarkContractError(
+                "paired Research arm_order must contain BASELINE and SELECTED exactly once"
+            )
+        if not self.randomized_arm_order:
+            raise ResearchBenchmarkContractError("paired Research receipt requires a randomized arm order")
         if self.production_influence_enabled:
             raise ResearchBenchmarkContractError("Research shadow receipt cannot enable production influence")
         object.__setattr__(self, "baseline_execution_id", baseline_id)
         object.__setattr__(self, "selected_execution_id", selected_id)
+        object.__setattr__(self, "arm_order", arm_order)
+        object.__setattr__(self, "randomized_arm_order", True)
         object.__setattr__(self, "production_influence_enabled", False)
 
     @property
@@ -467,6 +560,7 @@ class PairedResearchRunReceiptV1:
             "selected_model": self.selected_model.to_dict(),
             "baseline_verifier": self.baseline_verifier.to_dict(),
             "selected_verifier": self.selected_verifier.to_dict(),
+            "arm_order": list(self.arm_order),
             "randomized_arm_order": self.randomized_arm_order,
             "benefit_eligible": self.benefit_eligible,
             "production_influence_enabled": False,

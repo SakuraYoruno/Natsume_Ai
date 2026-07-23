@@ -55,6 +55,31 @@ from .research_benchmark_corpus import (
     ResearchCorpusDocument,
     ResearchCorpusManifestEntry,
 )
+from .research_benchmark_verifier import (
+    RESEARCH_CITATION_VERIFIER_ID,
+    ResearchCitationVerificationError,
+    ResearchCitationVerifier,
+)
+from .research_citation_output_parser import (
+    RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1,
+    RESEARCH_CITATION_OUTPUT_SCHEMA_V1,
+    ResearchCitationOutputParseError,
+    ResearchCitationOutputParserV1,
+)
+from .attested_external_research_adapter import (
+    ATTESTED_EXTERNAL_RESEARCH_ADAPTER_ID,
+    AttestedExternalResearchAdapter,
+    AttestedExternalResearchError,
+    AttestedExternalResearchRun,
+)
+from .research_paired_execution import (
+    ResearchArmRuntimeInputV1,
+    ResearchCitationExtractor,
+    ResearchCitationVerifierPort,
+    ResearchPairedExecutionError,
+    ResearchPairedExecutionResult,
+    ResearchPairedExecutionRunner,
+)
 from .research_domain import (
     ResearchCognitiveRanker,
     ResearchMCTSCondition,
@@ -104,6 +129,10 @@ __all__ = [
     "CODE_BENCHMARK_LEDGER_SCHEMA",
     "CODE_BENCHMARK_RECEIPT_STATUS",
     "RESEARCH_BENCHMARK_CORPUS_MODE",
+    "RESEARCH_CITATION_VERIFIER_ID",
+    "RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1",
+    "RESEARCH_CITATION_OUTPUT_SCHEMA_V1",
+    "ATTESTED_EXTERNAL_RESEARCH_ADAPTER_ID",
     "RESEARCH_BENCHMARK_SCHEMA",
     "RESEARCH_EVIDENCE_CLASSES",
     "RESEARCH_DOMAIN",
@@ -141,6 +170,19 @@ __all__ = [
     "ResearchBenchmarkContractError",
     "ResearchArmPlanV1",
     "ResearchCitationSpanV1",
+    "ResearchCitationOutputParseError",
+    "ResearchCitationOutputParserV1",
+    "ResearchCitationVerificationError",
+    "ResearchCitationVerifier",
+    "AttestedExternalResearchAdapter",
+    "AttestedExternalResearchError",
+    "AttestedExternalResearchRun",
+    "ResearchArmRuntimeInputV1",
+    "ResearchCitationExtractor",
+    "ResearchCitationVerifierPort",
+    "ResearchPairedExecutionError",
+    "ResearchPairedExecutionResult",
+    "ResearchPairedExecutionRunner",
     "ResearchCorpusBindingV1",
     "ResearchExecutionBudgetV1",
     "ResearchExecutionProfileV1",

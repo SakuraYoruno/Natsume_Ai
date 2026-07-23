@@ -1,8 +1,8 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-22",
+  "as_of_date": "2026-07-23",
   "source_baseline": {
-    "dev_commit": "a5c4fb86cc23f0713bbaae2f03138cc8b4b2b87b",
+    "dev_commit": "adedf1f8c8c54b15e7d1456c2d6301386d087426",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
     "evaluated_source": "PRE_COMMIT_WORKTREE_OVER_REVISED_BASELINE"
@@ -1176,13 +1176,13 @@
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
         "evaluated_commit_sha": "913312d80917a21cad524aaf46841461ab7c1da8",
-        "migration_head": "0120_task_runtime_feature_canary_receipt.sql",
+        "migration_head": "0121_research_shadow_arm_operation.sql",
         "route_status": "ALL_SEVEN_INCOMPLETE",
         "commit_bound_acceptance": "MISSING_ALL_SEVEN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler stages immutable operation effects after Acceptance; migration 0117 atomically transfers a live DUE retry claim to an occurrence-bound owner/fence and execution renews that fence. Conversation visible turn, Preference and Life projection are independent post-Acceptance effects; migration 0118 adds append-only Preference evaluation/profile authority including a real NO_SIGNAL receipt. Surface response loss can reopen the exact Gateway outbox through the existing internal_reply HMAC/timestamp/nonce read-only query, while NOT_FOUND always remains UNKNOWN. Internal canonical results write through an Acceptance Effect. Definition/admin direct authority, mutable batch freezing, general unknown-effect attribution, current-commit integrated acceptance, wave integration and production canary remain missing; Host candidate-plan generation is still MISSING.",
+      "end_to_end_boundary": "The v2 Gate covers chat/skill/plan/delegate/scheduler/internal/operator and derives every route as INCOMPLETE. Chat/Skill lack a receipt bound to the evaluated commit and current migration head. D10 replaces the Host Delegate inner global dispatcher only for pentest_agent; it is not a general delegate platform. Plan retains node-level governance gaps. Scheduler stages immutable operation effects after Acceptance; migration 0117 atomically transfers a live DUE retry claim to an occurrence-bound owner/fence and execution renews that fence. Conversation visible turn, Preference and Life projection are independent post-Acceptance effects; migration 0118 adds append-only Preference evaluation/profile authority including a real NO_SIGNAL receipt. Surface response loss can reopen the exact Gateway outbox through the existing internal_reply HMAC/timestamp/nonce read-only query, while NOT_FOUND always remains UNKNOWN. Internal canonical results write through an Acceptance Effect. Definition/admin direct authority, mutable batch freezing, general unknown-effect attribution, current-commit integrated acceptance, wave integration and production canary remain missing. Host has only an explicit registry-derived capability Plan slice; it does not complete the general Plan route or its node-level governance.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -1236,7 +1236,7 @@
       "not_completed": [
         "ReAct run_skill and dispatch_sub_agent are fail-closed until compiled as new immutable TaskGraph revision nodes; general AgentExecutor tool authority remains separately audited",
         "AgentExecutor ReAct ModelAttempt calls do not yet consume ModelBudgetGuard or settle a universal budget ledger",
-        "Code has a pure dynamic catalog, D17 trusted-in-process private-bare paired worktrees, D18 0106 cleanup-gated durable experiment evidence, and D19 allowlisted pytest child receipts. D20a adds a Research public-metadata catalog and a trusted-input readonly corpus loader, but it has no snapshot-manifest-document exact handshake, actual Research cohort, model, verifier, paired comparison or production influence. Controlled model/tool execution, general budget authority, OS/container/network isolation and production influence remain unimplemented",
+        "Code has a pure dynamic catalog, D17 trusted-in-process private-bare paired worktrees, D18 0106 cleanup-gated durable experiment evidence, and D19 allowlisted pytest child receipts. D20a/D20b add a Research public-metadata catalog, trusted-input readonly corpus loader, exact snapshot/manifest/source handshake and a fresh-loader UTF-8 citation-span verifier, but no actual Research cohort, model execution, independent trust-domain verifier, paired outcome comparison or production influence. Controlled model/tool execution, general budget authority, OS/container/network isolation and production influence remain unimplemented",
         "generic chat/delegate/runtime cutover remains incomplete"
       ],
       "evidence_refs": [
@@ -1873,8 +1873,8 @@
       ]
     },
     "planning_search_kernel": {
-      "status": "PARTIAL_D20A_RESEARCH_FROZEN_CORPUS_PURE_CATALOG",
-      "scope": "Pure public PlanningSearch contracts, immutable compile binding, one Code dynamic catalog, a trusted-process private-bare paired-worktree experiment adapter, a preregistered cleanup-gated durable experiment ledger, an opt-in frozen-argv pytest subprocess verifier, and D20a Research public-metadata dynamic planning plus a trusted-input readonly corpus loader. D20a has no snapshot-manifest-document exact handshake, recorded Research workload, webpage capture, model attempt, independent verifier, paired cohort, benefit result or production route; no production domain cutover, general hard execution authority, isolation claim or benefit claim exists.",
+      "status": "PARTIAL_D20C_CODE_COMPLETE_EXTERNAL_ACCEPTANCE_PENDING",
+      "scope": "Pure public PlanningSearch contracts, immutable compile binding, one Code dynamic catalog, a trusted-process private-bare paired-worktree experiment adapter, a preregistered cleanup-gated durable experiment ledger, an opt-in frozen-argv pytest subprocess verifier, D20a Research public-metadata dynamic planning plus a trusted-input readonly corpus loader, D20b's exact snapshot/manifest/source handshake with a fresh-loader UTF-8 citation-span verifier and registration/RunSpec/two-arm exact terminal-receipt reopening, and D20c's canonical ModelAttemptService adapter that rejects cache, retry/multi-attempt, missing usage, missing provider latency and route/output drift. Migration 0120 adds an append-only arm-operation chain: a deterministic execution identity is reserved, an unexpired fenced claim must precede EXTERNAL_CALL_STARTED, empty-audit recovery is explicit, and audit-without-0107-evidence is reconciliation-required. ResearchPairedExecutionRunner now reopens only the stored RunSpec, preserves its exact BASELINE/SELECTED order, derives deterministic execution ids, keeps prompt/output private, requires a fresh verifier per executed arm, and rejects prompt-digest, tool/token/latency or pair-budget drift before durable terminal receipt. Its versioned citation-output parser schema must match the preregistered profile before any model call and discards answer text before the verifier boundary. Existing evidence reopens without a new provider call; started-with-audit-and-without-evidence freezes reconciliation. Before any external request the adapter also requires an empty canonical model_attempt_log for the exact execution ID; existing rows or lookup failure require reconciliation rather than replay. It then reopens the matching started/terminal pair before generating a structurally bound provider attestation. The Host slice accepts only CAPABILITY_SEARCH_V1, freezes non-executable metadata from at least two eligible app-composed SkillRegistry entries, searches a virtual skill-to-chat path, then binds selected-only inputs before immutable compilation. D20c has no composed production prompt/workload, real credential/provider execution, independent trust-domain verifier, paired cohort, benefit result or production route; no general Host plan cutover, production domain cutover, general hard execution authority, isolation claim or benefit claim exists.",
       "evidence_refs": [
         "host_brain/planning_search/",
         "host_brain/planning_search/code_domain.py",
@@ -1888,6 +1888,17 @@
         "host_brain/planning_search/research_domain_models.py",
         "host_brain/planning_search/research_domain.py",
         "host_brain/planning_search/research_benchmark_corpus.py",
+        "host_brain/planning_search/research_benchmark_verifier.py",
+        "host_brain/planning_search/research_citation_output_parser.py",
+        "host_brain/planning_search/attested_external_research_adapter.py",
+        "host_brain/planning_search/research_paired_execution.py",
+        "host_brain/persistence/research_shadow_ledger_repository.py",
+        "host_brain/audit/migrations/0121_research_shadow_arm_operation.sql",
+        "host_brain/model_runtime/composition.py",
+        "host_brain/model_runtime/model_attempt_service.py",
+        "host_brain/contracts/planning_search/capability_domain_models.py",
+        "host_brain/planning_search/capability_domain.py",
+        "host_brain/orchestration/capability_plan_search.py",
         "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/audit/migrations/0106_code_historical_benchmark_ledger.sql",
         "host_brain/audit/migrations/0107_research_shadow_ledger.sql",
@@ -1906,16 +1917,24 @@
         "tests/unit/test_d19_code_benchmark_verifier.py",
         "tests/integration/test_d19_code_benchmark_controlled_experiment.py",
         "tests/unit/test_d20_research_planning_domain.py",
-        "tests/unit/test_d20_research_benchmark_corpus.py"
+        "tests/unit/test_ne02_capability_plan_search.py",
+        "tests/unit/test_d20_research_benchmark_corpus.py",
+        "tests/unit/test_d20_research_benchmark_verifier.py",
+        "tests/unit/test_d20_research_citation_output_parser.py",
+        "tests/unit/test_d20_attested_external_research_adapter.py",
+        "tests/unit/test_aw05_model_attempt_service.py",
+        "tests/integration/test_d20_attested_external_audit_lookup.py",
+        "tests/integration/test_d20_research_shadow_ledger.py",
+        "tests/integration/test_d20_research_paired_execution.py"
       ]
     },
     "planning_search_goal_foundation": {
-      "status": "PARTIAL_D20A_RESEARCH_FROZEN_CORPUS_PURE_CATALOG",
-      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner. D18 adds a server-owned 0106 append-only ledger: registration and frozen paired RunSpec are independently preregistered, then one terminal-evidence transaction writes both arm evidence/outcomes, VERIFIED_CLEAN receipt and terminal experiment receipt; replay/schema validation is identity-bound. D19 optionally preregisters a frozen Python pytest argv plan, invokes it in each detached worktree through a restricted subprocess policy, and persists path-free command/exit/output-digest/duration evidence. D20a adds ResearchTaskSnapshot, whose pure catalog derives competing query/quick-answer/primary/independent/cross-check/conflict/stop paths only from public source ids/refs/digests and bounded hints. Its FrozenResearchCorpusLoader separately maps only manifest-listed repository-relative regular files under a trusted experiment root, detects stable-input file state/size drift before and after read, verifies digest after the read, and emits no host path or body in public receipts. A controlled D19 receipt binds exact run/arm/plan/budget, PASS equals exit code zero, its frozen command set is reserved before a child starts so timeout/error cannot retry the arm, and durable replay requires two successful controlled arms within the aggregate test/wall bound before any terminal receipt exists.",
-      "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome structurally force SHADOW_ONLY and production_influence_enabled=false. D18 records cleanup-gated trusted-process experiment evidence: a terminal receipt requires a preregistration, both exact arms, verifier-bound outcome/diff evidence and a VERIFIED_CLEAN source/private-artifact receipt. D19 enforces only the preregistered paired max_test_commands and max_wall_time_ms through its own frozen pytest-command adapter; ModelAttempt, provider, tool, token and model-cost fields remain unconsumed declarations, not runtime authority. D20a's loader is an experiment input guard, not a source capture, BrowserWorker, model executor or verifier: root and manifest are trusted inputs, it is not a hostile concurrent-TOCTOU barrier, and it has no snapshot-manifest-document exact handshake, durable pair receipt or benefit conclusion. The child is a same-host trusted-workspace subprocess with shell-free argv, sanitized environment and plugin autoload disabled; APPDATA/user-site remains a trusted host input because PYTHONNOUSERSITE is not set. None of these assets is a hidden oracle, container/OS/tenant/filesystem/network sandbox or benefit result.",
+      "status": "PARTIAL_D20C_CODE_COMPLETE_EXTERNAL_ACCEPTANCE_PENDING",
+      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. The explicit Host CAPABILITY_SEARCH_V1 adapter freezes eligible Registry metadata, requires genuine competition, uses the same Governor/budget/review binding as approved Plan projection, then revalidates the selected virtual path and rebuilds selected-only node inputs after search and before compiler/admission. It rejects legacy planned_steps, pre-approved candidate inputs, forged successors and capability replan. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner. D18 adds a server-owned 0106 append-only ledger: registration and frozen paired RunSpec are independently preregistered, then one terminal-evidence transaction writes both arm evidence/outcomes, VERIFIED_CLEAN receipt and terminal experiment receipt; replay/schema validation is identity-bound. D19 optionally preregisters a frozen Python pytest argv plan, invokes it in each detached worktree through a restricted subprocess policy, and persists path-free command/exit/output-digest/duration evidence. D20a adds ResearchTaskSnapshot, whose pure catalog derives competing query/quick-answer/primary/independent/cross-check/conflict/stop paths only from public source ids/refs/digests and bounded hints. D20b independently constructs a frozen loader for each citation verification, recomputes the snapshot/manifest/source id/ref/digest/tier handshake, and accepts only UTF-8 boundary-aligned span digests from freshly reopened documents. Before 0107 terminal receipt insert or exact replay, the repository reopens the registration, RunSpec and both arm rows, then rejects any drift in binding/profile/budget, preregistered plan, model or verifier JSON/evidence digest. D20c's AttestedExternalResearchAdapter first reopens the exact execution ID and refuses a provider call if the canonical audit already has any row or cannot be read; only a fresh ID calls canonical ModelAttemptService. It turns exactly one foreground, non-cached successful attempt into an attestation after validating final target identity, output digest, rendered prompt digest, tool/token/cost measurements and provider/total latency; it must then reopen the same request's canonical started/terminal audit pair and bind terminal row plus provider latency before ModelReceipt can embed the exact attestation instead of an arbitrary ref. ResearchPairedExecutionRunner consumes only that preregistered RunSpec's actual arm order, operation identity and evidence; it keeps raw prompts/responses outside 0107, uses one fresh verifier per new arm, and enforces arm/pair budget before exact terminal replay. A controlled D19 receipt binds exact run/arm/plan/budget, PASS equals exit code zero, its frozen command set is reserved before a child starts so timeout/error cannot retry the arm, and durable replay requires two successful controlled arms within the aggregate test/wall bound before any terminal receipt exists.",
+      "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome structurally force SHADOW_ONLY and production_influence_enabled=false. D18 records cleanup-gated trusted-process experiment evidence: a terminal receipt requires a preregistration, both exact arms, verifier-bound outcome/diff evidence and a VERIFIED_CLEAN source/private-artifact receipt. D19 enforces only the preregistered paired max_test_commands and max_wall_time_ms through its own frozen pytest-command adapter; ModelAttempt, provider, tool, token and model-cost fields remain unconsumed declarations, not runtime authority. D20b's loader/verifier pair is an experiment input guard and mechanical citation validator, not a source capture, BrowserWorker, model executor or independent trust-domain verifier: root and manifest are trusted inputs, it is not a hostile concurrent-TOCTOU barrier, and it has no real paired outcome or benefit conclusion. The child is a same-host trusted-workspace subprocess with shell-free argv, sanitized environment and plugin autoload disabled; APPDATA/user-site remains a trusted host input because PYTHONNOUSERSITE is not set. None of these assets is a hidden oracle, container/OS/tenant/filesystem/network sandbox or benefit result.",
       "not_completed": [
-        "Host chat or plan production cutover to GoalPlanningService",
-        "Research snapshot-manifest-document exact handshake and source-identity uniqueness, paired real readonly workload, WorkOrder/Browser or model execution, independently checked citations/claims, source capture, cost/latency receipt and benefit cohort",
+        "Host chat or generic Plan production cutover to GoalPlanningService beyond the explicit CAPABILITY_SEARCH_V1 slice",
+        "composed production Research prompt/workload, real credential/provider execution, paired real readonly workload, WorkOrder/Browser, independent trust-domain claim verification, source capture and benefit cohort",
         "actual historical cohort selection/statistical comparison, independent-trust-domain verifier, controlled model/tool/token/cost execution budget and WorkspaceGrant-bound write path",
         "Pentest capability/fact-driven successor catalog",
         "receipt-bound baseline-versus-search comparison and promotion gate",
@@ -1936,15 +1955,30 @@
       ]
     },
     "research_shadow_planning_domain": {
-      "status": "PARTIAL_D20A_FROZEN_CORPUS_PURE_CATALOG",
-      "implemented": "ResearchTaskSnapshot freezes only task/corpus governed refs and public source id/ref/content-digest/authority/relevance/read-cost metadata; it has no dedicated local-locator/source-body/answer-key/verifier-decision field, constraints reject those named keys, and task text is not content-level DLP. ResearchSuccessorCatalog dynamically derives query, secondary quick-answer, primary source, independent source, cross-check, conflict resolution and stop candidates from virtual state. L2 reads only public authority/relevance/cost hints. ResearchPlanningDomain exposes transition/reward ports only when the snapshot's virtual_transition_ready is true, so standard domain wiring keeps L3 unavailable otherwise. FrozenResearchCorpusLoader separately permits only manifest-listed canonical repository-relative regular files below a trusted experiment root and detects stable-input root/components/descriptor/size drift before and after reading, then verifies digest after reading; public receipts exclude root, relative paths and source body.",
-      "boundary": "This is a pure shadow catalog plus a trusted experiment input loader. It is not a production Research route, TaskGraph or Host integration, BrowserWorker, webpage capture, model call, answer generator, independent verifier, paired benchmark receipt, calibration/promotion authority or OS/tenant sandbox. The loader's root and manifest are trusted experiment inputs, it is not a hostile concurrent-TOCTOU barrier, and D20a has no snapshot-manifest-document exact handshake or independent-source proof. No Research benefit claim is eligible from D20a.",
+      "status": "PARTIAL_D20C_CODE_COMPLETE_EXTERNAL_ACCEPTANCE_PENDING",
+      "implemented": "ResearchTaskSnapshot freezes only task/corpus governed refs and public source id/ref/content-digest/authority/relevance/read-cost metadata; it has no dedicated local-locator/source-body/answer-key/verifier-decision field, constraints reject those named keys, and task text is not content-level DLP. ResearchSuccessorCatalog dynamically derives query, secondary quick-answer, primary source, independent source, cross-check, conflict resolution and stop candidates from virtual state. L2 reads only public authority/relevance/cost hints. ResearchPlanningDomain exposes transition/reward ports only when the snapshot's virtual_transition_ready is true, so standard domain wiring keeps L3 unavailable otherwise. FrozenResearchCorpusLoader separately permits only manifest-listed canonical repository-relative regular files below a trusted experiment root and detects stable-input root/components/descriptor/size drift before and after reading, then verifies digest after reading; public receipts exclude root, relative paths and source body. D20b ResearchCitationVerifier recomputes the snapshot/manifest/source id/ref/digest/tier binding, creates a fresh loader per verification, and validates only UTF-8 byte-boundary spans whose digest equals freshly reopened source bytes. The 0107 owner permits only exact arm replay and reopens registration/RunSpec/two arm receipts before terminal insertion or replay; binding/profile/budget, plan, model, verifier and evidence-digest drift fail closed. The 0120 operation/event chain reserves an exact execution identity, fences competing callers, records external-call start, only permits a new claim after explicit empty-audit authorization, and freezes audit-without-evidence as reconciliation-required. ResearchPairedExecutionRunner reopens only the persisted RunSpec and exact arm order, derives deterministic execution ids, keeps raw prompts/outputs out of 0107, uses a fresh verifier for every executed arm, and closes only evidence matching the profile prompt digest plus tool/token/latency and pair budget. Its strict citation-output parser requires a profile-bound envelope schema and returns only citation spans, discarding answer text before verification. Existing evidence replays; a started arm with audit but no evidence freezes reconciliation. D20c AttestedExternalResearchAdapter first verifies that the exact execution ID has no canonical audit row; an existing row or lookup failure requires reconciliation and prevents a duplicate provider call. It then accepts only one foreground non-cached canonical ModelAttempt result with exact route/output identity, rendered prompt digest, tool/token/cost measurements and provider latency; it reopens the same request's canonical audit started/terminal pair and embeds the exact provider attestation in the model receipt only on full match.",
+      "boundary": "This is a pure shadow catalog plus a trusted experiment input loader, mechanical citation verifier and code-complete canonical-model adapter. The adapter is not yet composed with a production Research prompt/workload or actual provider credential, and test fixtures do not constitute external evidence. It is not a production Research route, TaskGraph or Host integration, BrowserWorker, webpage capture, independent trust-domain verifier, paired benchmark outcome, calibration/promotion authority or OS/tenant sandbox. The loader's root and manifest are trusted experiment inputs, it is not a hostile concurrent-TOCTOU barrier, and byte-span validity is not factual truth or source-independence proof. Research remains ACCEPTANCE_PENDING_EXTERNAL and no benefit claim is eligible from D20c code alone.",
       "evidence_refs": [
         "host_brain/planning_search/research_domain_models.py",
         "host_brain/planning_search/research_domain.py",
         "host_brain/planning_search/research_benchmark_corpus.py",
+        "host_brain/planning_search/research_benchmark_verifier.py",
+        "host_brain/planning_search/research_citation_output_parser.py",
+        "host_brain/planning_search/attested_external_research_adapter.py",
+        "host_brain/planning_search/research_paired_execution.py",
+        "host_brain/persistence/research_shadow_ledger_repository.py",
+        "host_brain/audit/migrations/0121_research_shadow_arm_operation.sql",
+        "host_brain/model_runtime/composition.py",
+        "host_brain/model_runtime/model_attempt_service.py",
         "tests/unit/test_d20_research_planning_domain.py",
-        "tests/unit/test_d20_research_benchmark_corpus.py"
+        "tests/unit/test_d20_research_benchmark_corpus.py",
+        "tests/unit/test_d20_research_benchmark_verifier.py",
+        "tests/unit/test_d20_research_citation_output_parser.py",
+        "tests/unit/test_d20_attested_external_research_adapter.py",
+        "tests/unit/test_aw05_model_attempt_service.py",
+        "tests/integration/test_d20_attested_external_audit_lookup.py",
+        "tests/integration/test_d20_research_shadow_ledger.py",
+        "tests/integration/test_d20_research_paired_execution.py"
       ]
     },
     "code_historical_benchmark_sandbox": {
@@ -2003,8 +2037,31 @@
       ]
     },
     "host_candidate_plan_generation": {
-      "status": "MISSING",
-      "reason": "Host plan search only validates and orders approved planned_steps."
+      "status": "PARTIAL_CAPABILITY_SEARCH_V1_ONLY",
+      "implemented": "Only route=plan with args.planning_mode=CAPABILITY_SEARCH_V1 enters the app-composed SkillRegistry adapter. It freezes at least two eligible host-scope, require_confirm=false, Governor-bound tag/risk candidates; L1 expands capability choices, L2 ranks frozen relevance/risk/cost, conditional L3 MCTS evaluates virtual complete paths, and the selected skill-to-chat path alone is rebound into approved_candidate_inputs before immutable TaskGraph compilation.",
+      "enforced": [
+        "legacy planned_steps or steps are rejected instead of relabeled as search",
+        "registry handlers, credentials and mutable registry state stay outside the snapshot",
+        "fewer than two eligible candidates, confirmation-required candidates, risk/tag mismatches and forged successors fail closed",
+        "selected context resolver runs after side-effect-free SearchResult creation and before compiler/admission",
+        "selected capability replan is explicitly rejected rather than silently creating a new execution authority"
+      ],
+      "not_completed": [
+        "generic Plan and chat objective decomposition",
+        "Research, Code or Pentest production cutover",
+        "dynamic execution-time replan",
+        "real provider/model execution, independent verification, paired cohort, benefit result or promotion authority"
+      ],
+      "local_validation": "24_TARGETED_HOST_AND_PLANNING_TESTS_PASSED_IN_1_07_SECONDS; 88_EXISTING_PLANNING_AND_GRAPH_COMPILER_REGRESSION_TESTS_PASSED_IN_2_79_SECONDS; COMPILEALL_DIFF_CHECK_AND_JSON_VALIDATION_PASSED; REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA",
+      "evidence_refs": [
+        "host_brain/app/governed_task_adapter.py",
+        "host_brain/orchestration/capability_plan_search.py",
+        "host_brain/planning_search/capability_domain.py",
+        "host_brain/orchestration/planning_execution.py",
+        "tests/unit/test_ne02_capability_plan_search.py",
+        "tests/unit/test_aw02_governed_host_runtime.py",
+        "tests/unit/test_gr04_planning_execution.py"
+      ]
     },
     "pentest_conditional_mcts": {
       "status": "SHADOW_ONLY_DURABLE_INJECTION_PARTIAL",

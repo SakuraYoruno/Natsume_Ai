@@ -189,6 +189,17 @@ def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, 
     return measured
 
 
+def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict[str, int]:
+    """Keep only one provider-reported transport measurement in the audit trail."""
+
+    if not isinstance(metadata, Mapping):
+        return {}
+    value = metadata.get("provider_latency_ms")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return {}
+    return {"provider_latency_ms": int(value)}
+
+
 class ModelAttemptService:
     """Resolve once, then own every provider and semantic retry attempt."""
 
@@ -791,6 +802,11 @@ class ModelAttemptService:
         )
         if provider_budget:
             merged_metadata["provider_budget_measurements"] = provider_budget
+        provider_transport = _provider_transport_measurements(
+            response.metadata if response is not None else None
+        )
+        if provider_transport:
+            merged_metadata["provider_transport_measurements"] = provider_transport
         return replace(
             started,
             status=status,

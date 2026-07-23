@@ -74,11 +74,34 @@ def test_d20b_scripted_pair_is_structural_only_and_never_benefit_eligible() -> N
         selected_model=_model("selected-run", "selected"),
         baseline_verifier=_verifier("baseline-run"),
         selected_verifier=_verifier("selected-run"),
+        arm_order=("SELECTED", "BASELINE"),
         randomized_arm_order=True,
     )
 
     assert pair.benefit_eligible is False
     assert pair.to_dict()["production_influence_enabled"] is False
+
+
+def test_d20b_zero_or_low_validity_citations_are_not_benefit_eligible() -> None:
+    empty = ResearchVerifierReceiptV1(
+        execution_id="empty-citations",
+        citation_count=0,
+        cited_span_count=0,
+        citation_coverage=0.0,
+        citation_validity=0.0,
+        evidence_digest="d" * 64,
+    )
+    low_validity = ResearchVerifierReceiptV1(
+        execution_id="low-validity",
+        citation_count=2,
+        cited_span_count=2,
+        citation_coverage=1.0,
+        citation_validity=0.94,
+        evidence_digest="e" * 64,
+    )
+
+    assert empty.structurally_eligible is False
+    assert low_validity.structurally_eligible is False
 
 
 def test_d20b_rejects_cache_and_forged_external_attestation() -> None:
@@ -122,4 +145,46 @@ def test_d20c_external_attestation_requires_fresh_real_usage() -> None:
             cost_micros=1,
             provider_latency_ms=1,
             total_latency_ms=1,
+        )
+
+
+def test_d20c_attested_model_receipt_requires_exact_provider_attestation() -> None:
+    attestation = ExternalProviderRunAttestationV1(
+        execution_id="external-run",
+        provider="openai",
+        model="research-model",
+        route_digest="a" * 64,
+        response_digest="b" * 64,
+        total_tokens=321,
+        cost_micros=42,
+        provider_latency_ms=120,
+        total_latency_ms=180,
+    )
+    receipt = ResearchModelExecutionReceiptV1(
+        execution_id="external-run",
+        arm_id="baseline",
+        evidence_class="ATTESTED_EXTERNAL",
+        attempt_ids=("attempt::external-run",),
+        total_tokens=321,
+        cost_micros=42,
+        prompt_digest="c" * 64,
+        tool_call_count=0,
+        attestation_ref=attestation.attestation_ref,
+        attestation=attestation,
+    )
+
+    assert receipt.benefit_eligible is True
+    assert receipt.to_dict()["attestation"]["execution_id"] == "external-run"
+    with pytest.raises(ResearchBenchmarkContractError, match="does not bind"):
+        ResearchModelExecutionReceiptV1(
+            execution_id="external-run",
+            arm_id="baseline",
+            evidence_class="ATTESTED_EXTERNAL",
+            attempt_ids=("attempt::external-run",),
+            total_tokens=320,
+            cost_micros=42,
+            prompt_digest="c" * 64,
+            tool_call_count=0,
+            attestation_ref=attestation.attestation_ref,
+            attestation=attestation,
         )

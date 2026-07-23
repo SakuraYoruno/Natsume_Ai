@@ -5,7 +5,7 @@
   "evaluated_source": "PRE_COMMIT_WORKTREE_OVER_REVISED_BASELINE",
   "evidence_binding": {
     "evaluated_commit_sha": "a5c4fb86cc23f0713bbaae2f03138cc8b4b2b87b",
-    "migration_head": "0120_task_runtime_feature_canary_receipt.sql"
+    "migration_head": "0121_research_shadow_arm_operation.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
@@ -310,7 +310,7 @@
   "architecture_controls": {
     "generic_three_layer_planning_search": {
       "status": "PARTIAL",
-      "host_boundary": "The domain-neutral kernel exists; D16 adds a Code pure-shadow dynamic catalog over frozen opaque refs/digests, D17 adds an experiment-only PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY adapter with a lower-case repository-relative file API, D18 adds cleanup-gated 0106 preregistration and terminal experiment evidence, and D19 adds an opt-in frozen pytest child receipt. D20a adds a Research pure-shadow dynamic catalog over public source id/ref/digest and bounded authority/relevance/cost metadata, plus a trusted-input readonly regular-file loader. D20a has no snapshot-manifest-document exact handshake and is not a Research route, BrowserWorker, source capture, model call, independent verifier, paired cohort or benefit result. D19 binds each receipt to run/arm/plan/budget and rechecks paired test/wall limits on durable replay, but it still does not enforce OS/container/filesystem/network isolation or a hermetic Python dependency environment (APPDATA/user-site remains trusted). Host still only validates and orders Governor-approved planned_steps. Neither path performs production rollout selection or proves a second-domain benefit.",
+      "host_boundary": "The domain-neutral kernel exists; D16 adds a Code pure-shadow dynamic catalog over frozen opaque refs/digests, D17 adds an experiment-only PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY adapter with a lower-case repository-relative file API, D18 adds cleanup-gated 0106 preregistration and terminal experiment evidence, and D19 adds an opt-in frozen pytest child receipt. D20a adds a Research pure-shadow dynamic catalog over public source id/ref/digest and bounded authority/relevance/cost metadata, plus a trusted-input readonly regular-file loader. D20b adds exact snapshot/manifest/source binding and a fresh-loader UTF-8 citation verifier. D20c now has a preregistered paired runner that uses only the stored arm order and deterministic ids, preserves raw prompts/outputs outside the ledger, requires profile prompt-digest and tool/token/latency budget matches, and recovers each external arm through 0120 reservation/fence/audit/evidence states. It remains an uncomposed shadow experiment: local doubles are not provider evidence, and no real provider/cohort/benefit or production route exists. D19 binds each receipt to run/arm/plan/budget and rechecks paired test/wall limits on durable replay, but it still does not enforce OS/container/filesystem/network isolation or a hermetic Python dependency environment (APPDATA/user-site remains trusted). Host still only validates and orders Governor-approved planned_steps. Neither path performs production rollout selection or proves a second-domain benefit.",
       "evidence_refs": [
         "host_brain/planning_search/service.py",
         "host_brain/planning_search/code_domain.py",
@@ -324,6 +324,10 @@
         "host_brain/planning_search/research_domain_models.py",
         "host_brain/planning_search/research_domain.py",
         "host_brain/planning_search/research_benchmark_corpus.py",
+        "host_brain/planning_search/research_benchmark_verifier.py",
+        "host_brain/planning_search/attested_external_research_adapter.py",
+        "host_brain/planning_search/research_paired_execution.py",
+        "host_brain/persistence/research_shadow_ledger_repository.py",
         "host_brain/persistence/code_benchmark_ledger_repository.py",
         "host_brain/orchestration/planning_execution.py",
         "host_brain/orchestration/planning_recovery.py",
@@ -338,6 +342,7 @@
         "tests/integration/test_d19_code_benchmark_controlled_experiment.py",
         "tests/unit/test_d20_research_planning_domain.py",
         "tests/unit/test_d20_research_benchmark_corpus.py",
+        "tests/integration/test_d20_research_paired_execution.py",
         "docs/45_testing/test_reports/gr02a_planning_search_shadow_benchmark_v1.json"
       ]
     },
