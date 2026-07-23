@@ -369,14 +369,6 @@ def get_life_command_service() -> Any:
     return PROCESS_LIFE_PROVIDER.require().command_service
 
 
-def get_tribe_handoff_coordinator() -> Any:
-    """Return the handoff writer from the explicitly composed Tribe authority."""
-
-    from host_brain.composition.tribe_runtime import require_process_tribe_runtime
-
-    return require_process_tribe_runtime().handoff_coordinator
-
-
 def get_silence_engine() -> Any:
     """Return the sole process-owned emotional silence engine."""
 

@@ -54,16 +54,18 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
         stop_startup_after_initialization,
     )
     monkeypatch.setattr(http_hooks, "_shutdown_runtime", record_shutdown)
-    monkeypatch.setattr(
-        http_hooks,
-        "bind_tribe_application_ports",
-        lambda **_kwargs: events.append("tribe-bind"),
-    )
-    monkeypatch.setattr(
-        http_hooks,
-        "unbind_tribe_application_ports",
-        lambda **_kwargs: events.append("tribe-unbind"),
-    )
+
+    class _TribeRuntime:
+        def bind_application_ports(self, **_kwargs) -> None:
+            events.append("tribe-bind")
+
+        def unbind_application_ports(self, **_kwargs) -> bool:
+            events.append("tribe-unbind")
+            return True
+
+        def register_subscriptions(self, **_kwargs) -> list[str]:
+            return []
+
     host_lifecycle = build_host_lifecycle_container(
         initial_sys_mode="normal",
         ports=_host_lifecycle_ports(),
@@ -84,6 +86,7 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
                 get_thalamus_agent=object,
                 get_ans_agent=object,
             ),
+            tribe_runtime=_TribeRuntime(),
         ):
             events.append("body")
             raise RuntimeError("lifespan body failed")

@@ -10,6 +10,8 @@
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
+Tribe runtime 的当前模块边界为 `app/tribe_runtime_scope.py`：它是 ASGI-lifespan-owned application scope，负责 handoff coordinator、ports binding、subscription catalog 和 Obs state reader。`app/tribe_composition.py` 仅在 composition root 把兼容 registry/state/agent providers 显式注入；`composition/tribe_runtime.py` 已退役。由于 agent/bus 自身仍 process-global，scope 的 binding fence 只提供单活 Host，不能作为 Tribe per-app isolation 或完整 Composition 的证据。当前库存为 `named21/47、all-form24、Container48/2/45`；文内较早 `named27/53、all-form30、Container50/3/46` 仅是历史切片快照。
+
 权威分工：
 
 - 当前架构完成度看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)。

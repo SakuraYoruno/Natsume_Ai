@@ -52,6 +52,7 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "session_tactic_ledger_store": provider,
         "tts_context_router": provider,
         "meta_learning_loop": provider,
+        "bond_neo4j_client": provider,
     }
     values.update(overrides)
     return HostLifecycleApplicationPorts(**values)  # type: ignore[arg-type]
@@ -1654,9 +1655,11 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
         "build_process_security_service_container",
         lambda **_kwargs: None,
     )
+    from host_brain.app import tribe_composition
+
     monkeypatch.setattr(
-        asgi,
-        "require_process_tribe_runtime",
+        tribe_composition,
+        "build_production_tribe_runtime_scope",
         lambda: SimpleNamespace(
             state_registry=SimpleNamespace(snapshot=lambda: {}),
         ),
