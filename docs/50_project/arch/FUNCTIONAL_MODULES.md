@@ -237,7 +237,7 @@ HTTP Chat / ASR / Gateway
   → Conversation/Life/Memory/Gateway/Edge projection or delivery
 ```
 
-关键边界：Input Runtime 不执行工具，Cortex 不写 Task 第二真相，worker 不修改冻结图，外部副作用必须发生在 Acceptance 之后。
+关键边界：Input Runtime 不执行工具，Cortex 不写 Task 第二真相，worker 不修改冻结图，外部副作用必须发生在 Acceptance 之后。`task_progress` 与 `recent_turn` 虽可读取 durable projection，但在未创建 TaskGraph 的暂态 read route 内不写 visible conversation、Memory、Life、Preference、Outbox 或 Delivery；需要持久会话语义时必须由后续 governed Task 承担。
 
 本批对“发生在 Acceptance 之后”增加了可核验边界：visible turn、Preference evaluation 和 Life projection 由三个独立 Effect 提交并重开 exact authority。Preference store gate不可用/非bool时失败关闭零写；配置false或malformed env保守解析为disabled，只写`DISABLED` receipt且零event/profile。启用时event、append-only child profile、evaluation receipt同一SQLite UoW，sealed-child trigger与full-set reconcile共同防篡改，`NO_SIGNAL`也有真实receipt。推荐反馈只能绑定admitted-time以前的exact conversation/session delivery与canonical digest。Surface response loss必须通过authenticated read-only query；Gateway从同一SQLite outbox payload复验`effect_id`，`NOT_FOUND`保持`UNKNOWN`。这不改变各Effect最终一致语义，也不构成NE-01波次验收。
 

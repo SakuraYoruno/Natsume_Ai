@@ -154,7 +154,7 @@ Internal executor 的 raw work order、prompt、metadata、result、changed-file
 
 ### 3.2 Read route 与退役边界
 
-`task_progress` 直接读取 `DurableTaskStatusProjection`，`recent_turn` 直接读取 durable conversation window；两者只产生已持久化的可见对话结果，不创建 Task、Attempt 或第二套执行 authority。未知 legacy route 在 Cortex 以 `RUNTIME_ROUTE_UNSUPPORTED` fail closed。
+`task_progress` 直接读取 `DurableTaskStatusProjection`，`recent_turn` 直接读取 durable conversation window；两者只返回暂态 projection，不创建 Task、Attempt 或第二套执行 authority，也不在 Cortex 写入 user/assistant visible turn、Memory、Life、Preference、Outbox 或 Delivery。未知 legacy route 在 Cortex 以 `RUNTIME_ROUTE_UNSUPPORTED` fail closed。若未来需要将查询结果纳入对话历史，必须先经 TaskGraph Acceptance，不能恢复 read-route 直写。
 
 Executive 已从生产 Cortex application ports 删除。旧 `_execute_explicit_skill_dag`、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、进程内任务 registry、factory、accessor 和相关生产写入均已删除；Executive 内对 Runtime Capability Forge 自动 gap synthesis/replan/route override 的调用也已移除。Cortex 内 contextual-session/style、clarification、LLM unavailable 与异步 post-process 的直答 compatibility branch，及 Surface 的 `schedule_async_post_process()` fire-and-forget 入口同样已物理删除：canonical route 必须先通过 Governed Runtime `supports()`，否则在可见对话写入前拒绝；通过后只能把冻结上下文交给 TaskGraph，提交后的投影经 durable `surface.post_process` outbox 处理。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只保留 fail-closed 拒绝边界，也不再是生产路由器。纯 `SkillDag` 类型及 adapter 仅保留为零生产调用者的兼容合同，不能调度 worker。独立 Forge `runtime-match` 端点仍待 NE-05 退役，因此不能将本切片称为旧 authority 清零。`app/intelligent_runtime.py` 已物理删除，不能成为隐藏的规划或执行入口；`SkillComposer` 也不再暴露 `execute()`。这是旧 authority 的部分负向退役，不证明 PlanningSearch、全路线 receipt 或 NE-01 完成。
 

@@ -1402,6 +1402,19 @@
         "configs/release/universal_governed_runtime_coverage.json"
       ]
     },
+    "read_projection_persistence_boundary": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "scope": "TASK_PROGRESS_AND_RECENT_TURN_TRANSIENT_DURABLE_READ_PROJECTIONS",
+      "implemented": "Cortex permits task_progress and recent_turn to read their durable Task/conversation projections after Governor approval, but their non-Task path is strictly side-effect free: it does not call user/assistant conversation writers or create Memory, Life, Preference, Outbox, Delivery, Attempt, Effect or Receipt state. Persisting a future read response requires a new immutable TaskGraph and Acceptance; the old direct writer boundary is not a compatibility fallback.",
+      "local_targeted_regression": "tests/unit/test_ne01_read_projection_routes.py plus Cortex governed-cutover regressions",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "This closes only the no-Acceptance direct conversation write. It does not make read projections governed Tasks, does not provide ingress receipts for those reads, and does not complete NE-01 or the seven canonical-route coverage gate.",
+      "evidence_refs": [
+        "host_brain/agent_runtime/cortex_runtime.py",
+        "host_brain/agent_runtime/read_routes.py",
+        "tests/unit/test_ne01_read_projection_routes.py"
+      ]
+    },
     "governed_chat_surface_model_budget": {
       "status": "PARTIAL_D11_GOVERNED_CHAT_SURFACE_MODEL_GUARD",
       "scope": [

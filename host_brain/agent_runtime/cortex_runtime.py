@@ -108,8 +108,6 @@ async def _cortex_orchestrator_sse_generator_impl(
         and governed_command_application.supports(intent_draft)
     )
 
-    read_user_turn_result: Mapping[str, Any] = {}
-
     sanitized_message, airlock_passed = _sanitize_input(user_message)
     if not airlock_passed:
         yield _emit_sse(
@@ -188,53 +186,9 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
 
     if canonical_read_route:
-        # Governed requests stage their user turn only after graph Acceptance.
-        # Projection routes have no Task, so they persist visible turns after
-        # Airlock and Governor approval and before exposing a reply.
-        try:
-            read_user_turn_result = application_ports.record_user_turn(
-                request_id=request_id,
-                session_id=session_id,
-                person_id=person_id,
-                content=sanitized_message,
-                ts_ms=int(time.time() * 1000),
-                lang=render_target_lang,
-                metadata={
-                    "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
-                    "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
-                    "platform": str(getattr(request_body, "reply_channel", None) or "").strip(),
-                    "reply_target": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
-                    "conversation_id": str(getattr(request_body, "reply_target", None) or getattr(request_body, "conversation_id", None) or "").strip(),
-                    "from_id": str(getattr(request_body, "from_id", None) or "").strip(),
-                    "msg_id": str(getattr(request_body, "msg_id", None) or "").strip(),
-                    "reply_to_msg_id": str(getattr(request_body, "reply_to_msg_id", None) or "").strip(),
-                    "attachments": list(getattr(request_body, "attachments", []) or []),
-                    "multimodal_observations": dict(getattr(request_body, "multimodal_observations", {}) or {}),
-                    "attachment_summary": str(getattr(request_body, "attachment_summary", "") or "").strip(),
-                    "route": canonical_route,
-                },
-            )
-        except Exception as exc:
-            read_user_turn_result = {
-                "status": "DEGRADED",
-                "reason_code": type(exc).__name__,
-            }
-        user_turn_status = str(read_user_turn_result.get("status") or "").strip().upper()
-        user_turn_reason = str(read_user_turn_result.get("reason_code") or "").strip().upper()
-        if user_turn_status != "OK" and not (
-            user_turn_status == "SKIPPED"
-            and user_turn_reason in {"DUPLICATE_CONVERSATION_TURN", "DUPLICATE_COMMAND"}
-        ):
-            yield _emit_sse(
-                {
-                    "phase": "COMMIT",
-                    "done": True,
-                    "decision": "REJECT",
-                    "reason_code": "READ_ROUTE_USER_TURN_NOT_DURABLE",
-                    "request_id": request_id,
-                }
-            )
-            return
+        # Read projections do not create a TaskGraph.  They must therefore be
+        # strictly side-effect free: visible turns, Memory/Life projections and
+        # delivery remain Acceptance-owned effects of governed Tasks only.
         try:
             task_projection = (
                 application_ports.task_status_projection()
@@ -281,42 +235,6 @@ async def _cortex_orchestrator_sse_generator_impl(
             )
             return
         narrative = _sanitize_output(read_result.narrative)
-        try:
-            assistant_turn_result = application_ports.record_assistant_turn(
-                request_id=request_id,
-                session_id=session_id,
-                person_id=person_id,
-                content=narrative,
-                ts_ms=int(time.time() * 1000),
-                lang=render_target_lang,
-                metadata={
-                    "message_kind": "final_reply",
-                    "reply_source": "durable_read_projection",
-                    "route": canonical_route,
-                    "reason_code": read_result.reason_code,
-                },
-            )
-        except Exception as exc:
-            assistant_turn_result = {
-                "status": "DEGRADED",
-                "reason_code": type(exc).__name__,
-            }
-        assistant_status = str(assistant_turn_result.get("status") or "").strip().upper()
-        assistant_reason = str(assistant_turn_result.get("reason_code") or "").strip().upper()
-        if assistant_status != "OK" and not (
-            assistant_status == "SKIPPED"
-            and assistant_reason in {"DUPLICATE_CONVERSATION_TURN", "DUPLICATE_COMMAND"}
-        ):
-            yield _emit_sse(
-                {
-                    "phase": "COMMIT",
-                    "done": True,
-                    "decision": "REJECT",
-                    "reason_code": "READ_ROUTE_ASSISTANT_TURN_NOT_DURABLE",
-                    "request_id": request_id,
-                }
-            )
-            return
         yield _emit_sse(
             {
                 "phase": "COMMIT",

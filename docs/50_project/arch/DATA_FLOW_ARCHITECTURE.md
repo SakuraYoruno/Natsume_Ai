@@ -250,7 +250,7 @@ normalized request
 1. Governor 未批准不进入 worker。
 2. Governed Runtime 不可用或不支持 route 时，返回 `GOVERNED_RUNTIME_UNAVAILABLE` / `GOVERNED_ROUTE_UNSUPPORTED`，不回退 Executive。
 
-canonical route 不会在 graph Acceptance 之前写入 user turn。`task_progress` 和 `recent_turn` 是独立的 durable projection/read route：Governor 批准后持久化可见对话轮次，直接读取 Task 或 conversation projection，不创建 Task/Attempt，也不进入 Executive。
+canonical route 不会在 graph Acceptance 之前写入 user turn。`task_progress` 和 `recent_turn` 是独立的 durable projection/read route：Governor 批准后仅返回暂态 Task 或 conversation projection，不创建 Task/Attempt，也不写入 visible conversation、Memory、Life、Preference、Outbox 或 Delivery，更不进入 Executive。若要把查询结果写入历史，必须先重新准入 immutable TaskGraph。
 
 ### 3.2 Gateway / Host Input 入口
 

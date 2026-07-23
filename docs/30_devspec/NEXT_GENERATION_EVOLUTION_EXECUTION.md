@@ -217,7 +217,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 - 在 `PersonaEngine.apply_growth_delta()` authority 边界中央 fail closed 所有非迁移调用，并对 stage、milestone、interaction、emergent weekly 及后续新增调用点建立静态/运行时门禁；NE-01 只阻断旧写入，不在此波偷偷建立第二套演化系统；
 - 删除 Executive `_execute_explicit_skill_dag`、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 以及其内部的 Runtime Capability Forge 路由覆盖调用；保留的纯 `SkillDag` compatibility adapter 不得拥有 production caller 或 worker dispatch。独立 Forge `runtime-match` 必须在 NE-05 另行退役，不能以本条宣称旧 authority 归零；
 - 删除 `LegacyRuntimeTaskRegistry` 写入和全局 accessor；
-- `task_progress/recent_turn` 改为 projection/read route，不再借 Executive 执行；
+- `task_progress/recent_turn` 改为严格无副作用的 projection/read route，不再借 Executive 执行，也不在 Cortex 直写 visible conversation；需要纳入对话历史时必须先进入 TaskGraph Acceptance；
 - `SubAgentDispatcher` 必须删除全局 handler/gateway/独立日志写 authority，direct dispatch 只可返回稳定的 `LEGACY_SUB_AGENT_DISPATCH_RETIRED`；`intent_agent_handler` 只生成无副作用 handoff，不能以 legacy context 直调模型。恢复正向 Delegate 前，必须重新 admission 为 immutable TaskGraph，当前仅 `pentest_agent` 受治理只读交接可用；
 - 已删除 cycle→忽略依赖串行的兼容行为：`PlanIntentSearch` 对实际 cycle 使用 `PLAN_CYCLE`，兼容 `SkillDag` 仅保留空批次的不可执行投影；该安全围栏不替代原生多节点调度、恢复或动态 replan。
 

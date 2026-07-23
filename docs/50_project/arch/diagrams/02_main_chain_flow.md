@@ -248,7 +248,7 @@ Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯�
 
 ## 当前例外与缺口
 
-1. `task_progress`、`recent_turn` 已走 durable projection，不创建 Task；未知 route 直接拒绝。
+1. `task_progress`、`recent_turn` 已走严格无副作用的 durable projection，不创建 Task，也不写 visible conversation 或任何派生 Effect；未知 route 直接拒绝。
 2. Scheduler 与 Internal 已接入同一 canonical admission；Internal v2 只保留在授权验证后的 executor 兼容边界。
 3. Cortex 不再保留 contextual-session/style、clarification、LLM unavailable 或 async post-process 的 direct-reply branch。canonical route 必须由 Governed Runtime 支持，之后只传递冻结上下文给 TaskGraph。
 4. `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`：0091 atomic success 到 0099 terminal reconciliation 均有分范围证据；另有 scheduler-owned 多节点 exact COMMITTED checkpoint continuation，但只覆盖 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING`，不重放 worker。0099 只允许带唯一 graph-scope Budget 的 exact FAILED bundle 显式 auto；child/missing/multi Budget 与完整终态漂移必须 quarantine，不代表 general/multi-node/pre-budget recovery。部署 inventory/remediation、凭据/key lifecycle 与真实 canary仍未完成。
