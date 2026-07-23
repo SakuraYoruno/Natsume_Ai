@@ -18,6 +18,7 @@ from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.app.internal_task_runtime import (
     GovernedInternalRuntimeError,
     InternalAgentCommandService,
+    parse_external_v2_work_order,
 )
 from host_brain.app.settings.core import get_core_settings
 from host_brain.app.settings.internal_agent import get_internal_agent_settings
@@ -46,6 +47,18 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _parse_external_v2_work_order(payload: Mapping[str, Any]) -> AgentWorkOrder:
+    raw = payload.get("work_order")
+    candidate = raw if isinstance(raw, Mapping) else payload
+    try:
+        return parse_external_v2_work_order(candidate)
+    except GovernedInternalRuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"reason_code": exc.reason_code, "detail": exc.detail},
+        ) from exc
 
 
 def _bool_flag(value: Any, *, default: bool = False) -> bool:
@@ -341,7 +354,7 @@ def _persist_owner_directive_from_payload(
 
 @router.post("/work-orders/preview")
 async def preview_work_order(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    order = AgentWorkOrder.from_mapping(payload.get("work_order") if isinstance(payload.get("work_order"), dict) else payload)
+    order = _parse_external_v2_work_order(payload)
     order.validate()
     return {"ok": True, "work_order": order.to_dict()}
 
@@ -352,7 +365,7 @@ async def execute_work_order(
     payload: dict[str, Any] = Body(...),
     background: bool = Query(False),
 ) -> dict[str, Any]:
-    order = AgentWorkOrder.from_mapping(payload.get("work_order") if isinstance(payload.get("work_order"), dict) else payload)
+    order = _parse_external_v2_work_order(payload)
     order.validate()
     try:
         service = _internal_command_service(request)

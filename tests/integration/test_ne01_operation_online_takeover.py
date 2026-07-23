@@ -1736,7 +1736,7 @@ async def test_concurrent_prebudget_takeover_has_one_fenced_settlement(
 
 
 @pytest.mark.asyncio
-async def test_multi_node_committed_checkpoint_returns_batch_recovery_pending(
+async def test_multi_node_process_stop_without_budget_checkpoint_stays_recovery_pending(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)

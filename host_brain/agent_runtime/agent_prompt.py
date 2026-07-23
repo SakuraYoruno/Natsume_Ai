@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.model_runtime import (
     AGENT_REACT_STEP_PROMPT_ID,
     AGENT_SUBAGENT_GATEWAY_PROMPT_ID,
@@ -64,7 +64,7 @@ def build_agent_model_prompt_ref(
 
 
 def build_agent_system_prompt(
-    work_order: AgentWorkOrder,
+    work_order: AgentWorkOrder | WorkOrderV3,
     *,
     workspace: Path,
     tools_description: str,
@@ -196,7 +196,7 @@ def _build_domain_rules(domain: str, run_mode: str) -> str:
     return "\n\n".join(result_parts) if result_parts else ""
 
 
-def _build_action_rules(work_order: AgentWorkOrder) -> str:
+def _build_action_rules(work_order: AgentWorkOrder | WorkOrderV3) -> str:
     parts: list[str] = []
     if work_order.allowed_actions:
         parts.append("Allowed actions: " + ", ".join(work_order.allowed_actions))

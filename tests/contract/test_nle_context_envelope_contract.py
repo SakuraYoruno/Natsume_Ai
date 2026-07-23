@@ -13,7 +13,11 @@ from host_brain.app.sub_agent_context import (
     build_agent_context_envelope,
     build_context_runtime_event_payload,
 )
-from host_brain.app.sub_agent_protocol import SubAgentDispatcher, SubAgentRequest
+from host_brain.app.sub_agent_protocol import (
+    LEGACY_SUB_AGENT_DISPATCH_RETIRED,
+    SubAgentDispatcher,
+    SubAgentRequest,
+)
 
 
 def _authorized_context() -> dict[str, object]:
@@ -153,25 +157,8 @@ def test_t_nle_13_runtime_event_projection_contains_refs_and_counts_not_sensitiv
     assert "collect sensitive context" not in serialized
 
 
-def test_t_nle_13_dispatcher_audit_refs_include_safe_context_budget_and_authorization() -> None:
+def test_t_nle_13_legacy_dispatcher_rejects_before_context_or_handler_consumption() -> None:
     dispatcher = SubAgentDispatcher()
-    captured: dict[str, object] = {}
-
-    def _handler(payload, context):  # noqa: ANN001
-        captured["payload"] = dict(payload)
-        captured["context"] = dict(context)
-        return {
-            "agent_artifacts": {
-                "retrieval_agent": {
-                    "summary": "ok",
-                    "confidence": 0.8,
-                    "risk_flags": [],
-                }
-            },
-            "react_scratchpad": {"final_answer": "ok"},
-        }
-
-    dispatcher._handler_map = {"retrieval_agent": _handler}
     context = _authorized_context()
     context["api_key"] = "should-not-leak"
     req = SubAgentRequest(
@@ -184,19 +171,14 @@ def test_t_nle_13_dispatcher_audit_refs_include_safe_context_budget_and_authoriz
 
     result = asyncio.run(dispatcher.dispatch(req))
 
-    assert result.success is True
-    assert captured["context"]["api_key"] == "[REDACTED]"
-    audit = result.audit_refs["agent_context"]
-    assert audit["token_budget"]["actual_tokens"] > 0
-    assert audit["context_authorization"]["authorized_ref_count"] == 5
-    assert audit["runtime_event_summary"]["counts"]["evidence_items"] == 1
+    assert result.success is False
+    assert result.error == LEGACY_SUB_AGENT_DISPATCH_RETIRED
+    assert result.audit_refs["side_effects_executed"] is False
     assert "should-not-leak" not in str(result.audit_refs)
-    assert "authorized evidence" not in str(audit["runtime_event_summary"])
 
 
 def test_t_nle_13_dispatcher_returns_rejected_response_for_unauthorized_context() -> None:
     dispatcher = SubAgentDispatcher()
-    dispatcher._handler_map = {"retrieval_agent": lambda payload, context: {"react_scratchpad": {"final_answer": "ok"}}}
 
     response = asyncio.run(
         dispatcher.dispatch(
@@ -210,5 +192,5 @@ def test_t_nle_13_dispatcher_returns_rejected_response_for_unauthorized_context(
     )
 
     assert response.success is False
-    assert response.error == CONTEXT_REF_UNAUTHORIZED
-    assert response.audit_refs["agent_context"]["status"] == "REJECTED"
+    assert response.error == LEGACY_SUB_AGENT_DISPATCH_RETIRED
+    assert response.audit_refs["status"] == "REJECTED"

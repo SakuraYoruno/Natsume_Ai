@@ -36,6 +36,10 @@ _RECONCILIATION_KEY_ID_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 )
 _MAX_RECONCILIATION_PUBLIC_KEYS = 64
+_TASK_RUNTIME_BUILD_COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_TASK_RUNTIME_CANARY_RECEIPT_PATTERN = re.compile(
+    r"^task-runtime-canary://sha256/[0-9a-f]{64}$"
+)
 
 
 def _reject_duplicate_json_object_keys(
@@ -127,6 +131,20 @@ def parse_task_reconciliation_public_keys(raw: str) -> dict[str, bytes]:
     return public_keys
 
 
+def parse_task_runtime_canary_public_keys(raw: str) -> dict[str, bytes]:
+    """Parse a dedicated verification-only key ring for runtime feature gates."""
+
+    try:
+        return parse_task_reconciliation_public_keys(raw)
+    except ValueError as exc:
+        raise ValueError(
+            str(exc).replace(
+                "TASK_RECONCILIATION_PUBLIC_KEYS_INVALID",
+                "TASK_RUNTIME_CANARY_PUBLIC_KEYS_INVALID",
+            )
+        ) from exc
+
+
 class CoreSettings(BaseSettings):
     """最小必需的运行时配置。"""
 
@@ -180,6 +198,20 @@ class CoreSettings(BaseSettings):
     task_runtime_canary_receipt: str = Field(
         default="",
         alias="HOST_TASK_RUNTIME_CANARY_RECEIPT",
+    )
+    task_runtime_fanout_event_buffer_size: int = Field(
+        default=32,
+        ge=1,
+        le=4_096,
+        alias="HOST_TASK_RUNTIME_FANOUT_EVENT_BUFFER_SIZE",
+    )
+    task_runtime_build_commit_sha: str = Field(
+        default="",
+        alias="HOST_TASK_RUNTIME_BUILD_COMMIT_SHA",
+    )
+    task_runtime_canary_ed25519_public_keys_json: str = Field(
+        default="",
+        alias="HOST_TASK_RUNTIME_CANARY_ED25519_PUBLIC_KEYS_JSON",
     )
     agent_workspace_managed_root: Path = Field(
         default_factory=lambda: Path.home() / ".natsume" / "agent_worktrees",
@@ -257,6 +289,9 @@ class CoreSettings(BaseSettings):
         public_keys = parse_task_reconciliation_public_keys(
             self.task_reconciliation_ed25519_public_keys_json
         )
+        canary_public_keys = parse_task_runtime_canary_public_keys(
+            self.task_runtime_canary_ed25519_public_keys_json
+        )
         if (
             self.task_graph_cancellation_operator_enabled
             or self.task_operation_reconciliation_operator_enabled
@@ -287,11 +322,22 @@ class CoreSettings(BaseSettings):
             raise ValueError(
                 "TASK_GRAPH_CANCELLATION_OPERATOR_REQUIRES_TERMINAL_RECONCILIATION"
             )
-        if (
-            self.task_runtime_bounded_fanout_enabled
-            and not self.task_runtime_canary_receipt.strip()
-        ):
-            raise ValueError("TASK_RUNTIME_GRAPH_ENABLEMENT_REQUIRES_CANARY_RECEIPT")
+        if self.task_runtime_bounded_fanout_enabled:
+            receipt_ref = self.task_runtime_canary_receipt.strip()
+            if _TASK_RUNTIME_CANARY_RECEIPT_PATTERN.fullmatch(receipt_ref) is None:
+                raise ValueError(
+                    "TASK_RUNTIME_GRAPH_ENABLEMENT_REQUIRES_DURABLE_CANARY_RECEIPT"
+                )
+            if _TASK_RUNTIME_BUILD_COMMIT_SHA_PATTERN.fullmatch(
+                self.task_runtime_build_commit_sha.strip()
+            ) is None:
+                raise ValueError(
+                    "TASK_RUNTIME_GRAPH_ENABLEMENT_REQUIRES_BUILD_COMMIT_SHA"
+                )
+            if not canary_public_keys:
+                raise ValueError(
+                    "TASK_RUNTIME_GRAPH_ENABLEMENT_REQUIRES_CANARY_PUBLIC_KEYS"
+                )
         return self
 
     def task_reconciliation_public_keys(self) -> dict[str, bytes]:
@@ -299,6 +345,13 @@ class CoreSettings(BaseSettings):
 
         return parse_task_reconciliation_public_keys(
             self.task_reconciliation_ed25519_public_keys_json
+        )
+
+    def task_runtime_canary_public_keys(self) -> dict[str, bytes]:
+        """Return the dedicated verification-only key ring for feature gates."""
+
+        return parse_task_runtime_canary_public_keys(
+            self.task_runtime_canary_ed25519_public_keys_json
         )
 
     @classmethod
@@ -367,6 +420,36 @@ class CoreSettings(BaseSettings):
                 env_key="HOST_TASK_RUNTIME_CANARY_RECEIPT",
                 default_value="",
                 current_value=("configured" if s.task_runtime_canary_receipt else ""),
+                is_required=s.task_runtime_bounded_fanout_enabled,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_fanout_event_buffer_size",
+                env_key="HOST_TASK_RUNTIME_FANOUT_EVENT_BUFFER_SIZE",
+                default_value=32,
+                current_value=s.task_runtime_fanout_event_buffer_size,
+                is_required=False,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_build_commit_sha",
+                env_key="HOST_TASK_RUNTIME_BUILD_COMMIT_SHA",
+                default_value="",
+                current_value=(
+                    "configured" if s.task_runtime_build_commit_sha else ""
+                ),
+                is_required=s.task_runtime_bounded_fanout_enabled,
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="task_runtime_canary_ed25519_public_keys_json",
+                env_key="HOST_TASK_RUNTIME_CANARY_ED25519_PUBLIC_KEYS_JSON",
+                default_value="",
+                current_value=(
+                    "configured"
+                    if s.task_runtime_canary_ed25519_public_keys_json
+                    else ""
+                ),
                 is_required=s.task_runtime_bounded_fanout_enabled,
             ),
             inspect_setting(

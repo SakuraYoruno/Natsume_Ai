@@ -14,11 +14,10 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 )
 
 
-# Frozen after every live owner gained precedence over both Operation recovery
-# and pre-Operation takeover, while recoverable candidates still entered the
-# same bounded schedule as in-memory READY candidates.
+# Frozen after the scheduler became the only composition owner that can resume
+# an exact multi-node COMMITTED checkpoint after every live owner fence clears.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "56e92fd3f46fa0e4de48e74dd99d988376be649c5ec8be2d1a1a1cdc5b158a97"
+    "1ee98f2fafbf8e6482f0402e827ea6388621126d0eb6303c8ea3e850d30b72e3"
 )
 _REENTERED_OUTCOMES_BASELINE_SHA256 = (
     "29c3e28bf46b666d694d026a2e7bd7711ed832199027f12d1eb100fcb885ea8a"
@@ -27,7 +26,7 @@ _SUPPORTS_POLICY_BASELINE_SHA256 = (
     "0d8633080b6b026804024b9064f572a554f41eeadea6ebf8fd73ff87cf17ef00"
 )
 _RUN_CLAIMED_NODE_BASELINE_SHA256 = (
-    "caaa5a08eaca9d053cf8c6870ad99c827675e0653d4b2ce542a123962dc241b3"
+    "f925b2430acd70334a073a11536b34929344cc75c00bec21b7b71426b6fedbe1"
 )
 _GRANT_REFS_BASELINE_SHA256 = (
     "672bcdb9a7048c3ecc59e229b45a2b7d802921b883cf8025f0ec58615f98f2b7"
@@ -66,6 +65,7 @@ _DEPENDENCY_SLOTS = {
     "_acceptance_effects_enabled",
     "_accepted_graph_finalization",
     "_projection_reader",
+    "_scheduler_checkpoint_continuation_authority",
     "_fanout_event_buffer_size",
 }
 
@@ -208,13 +208,13 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "assert_parallel_settlement_decision_ready": 1,
             "assert_graph_cancellation_ready": 1,
             "assert_parallel_success_decision_ready": 1,
-            "get_graph": 2,
+            "get_graph": 3,
             "read_scheduler_snapshot": 1,
             "get_node": 1,
             "resolve_node_input_artifacts": 1,
             "promote_retry_due": 1,
         },
-        "_budgets": {"ensure_active": 1, "refresh": 2, "finalize": 5},
+        "_budgets": {"ensure_active": 1, "refresh": 3, "finalize": 5},
         "_node_lifecycle": {
             "transition_graph": 11,
             "transition_node": 4,
@@ -240,7 +240,7 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "lookup_pre_execution_gate": 1,
         },
         "_graph_cancellations": {"continue_requested_graph_cancellation": 1},
-        "_runtime_outbox": {"build": 1, "publish_pending": 6},
+        "_runtime_outbox": {"build": 1, "publish_pending": 7},
     }
     for dependency, matrix in expected.items():
         assert Counter(

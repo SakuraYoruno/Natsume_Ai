@@ -62,6 +62,7 @@ class TaskReadyClaimStoreMixin:
         operation_fingerprint: str | None,
         attempt_created_outbox: OutboxMessage,
         attempt_leased_outbox: OutboxMessage,
+        retry_ready_outbox: OutboxMessage | None = None,
         review_continuation_authority: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically create the next attempt and lease one bounded READY node.
@@ -151,8 +152,28 @@ class TaskReadyClaimStoreMixin:
                 "SELECT * FROM task_runtime_attempt WHERE attempt_id = ?",
                 (attempt_ref,),
             ).fetchone()
+            retry_ready_version: int | None = None
+            if retry_ready_outbox is not None:
+                retry_ready_version = int(expected_node_version) + 1
+                if existing_attempt is None:
+                    self.promote_retry_due(
+                        graph_id,
+                        graph_revision,
+                        node_id,
+                        expected_version=int(expected_node_version),
+                        outbox=retry_ready_outbox,
+                        _connection=conn,
+                        _observed_ts_ms=ts_ms,
+                    )
+                    node = self._require_node(
+                        conn,
+                        graph_id,
+                        graph_revision,
+                        node_id,
+                    )
+                expected_node_version = retry_ready_version
             if existing_attempt is not None:
-                return self._replay_ready_node_claim(
+                replayed = self._replay_ready_node_claim(
                     conn,
                     attempt=existing_attempt,
                     node=node,
@@ -169,6 +190,19 @@ class TaskReadyClaimStoreMixin:
                     attempt_leased_outbox=attempt_leased_outbox,
                     observed_ts_ms=ts_ms,
                 )
+                if retry_ready_outbox is not None:
+                    self._assert_mutation_outbox_replay(
+                        conn,
+                        retry_ready_outbox,
+                        expected_aggregate=(
+                            "TASK_NODE",
+                            f"{graph_id}@{int(graph_revision)}/{node_id}",
+                            retry_ready_version,
+                        ),
+                        expected_event_type="TASK_NODE_READY",
+                        expected_attempt_id=None,
+                    )
+                return replayed
             self._require_version(
                 node,
                 expected_node_version,
@@ -362,7 +396,7 @@ class TaskReadyClaimStoreMixin:
                 expected_event_type="TASK_ATTEMPT_LEASED",
                 expected_attempt_id=attempt_ref,
             )
-            return {
+            claimed = {
                 "attempt": dict(self._require_attempt(conn, attempt_ref)),
                 "lease": dict(self._require_lease(conn, lease_id)),
                 "node": _node_record(
@@ -370,6 +404,19 @@ class TaskReadyClaimStoreMixin:
                 ),
                 "replayed": False,
             }
+            if retry_ready_outbox is not None:
+                self._assert_mutation_outbox_replay(
+                    conn,
+                    retry_ready_outbox,
+                    expected_aggregate=(
+                        "TASK_NODE",
+                        f"{graph_id}@{int(graph_revision)}/{node_id}",
+                        retry_ready_version,
+                    ),
+                    expected_event_type="TASK_NODE_READY",
+                    expected_attempt_id=None,
+                )
+            return claimed
 
     def _replay_ready_node_claim(
         self,

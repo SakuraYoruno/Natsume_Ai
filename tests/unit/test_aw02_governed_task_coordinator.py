@@ -68,6 +68,7 @@ class _FakeTaskStore:
         calls: list[str],
         *,
         reservation_acquired: bool = True,
+        initial_time_consumed_ms: int = 0,
     ) -> None:
         node = graph.nodes[0]
         self.calls = calls
@@ -93,6 +94,7 @@ class _FakeTaskStore:
         self.budget: dict[str, Any] | None = None
         self.budget_usage: dict[str, _BudgetResult] = {}
         self.reservation_acquired = bool(reservation_acquired)
+        self.initial_time_consumed_ms = int(initial_time_consumed_ms)
 
     def assert_budget_usage_ready(self) -> None:
         return None
@@ -166,13 +168,16 @@ class _FakeTaskStore:
         }
 
     def create_budget_reservation(self, reservation: Any, **kwargs: Any) -> dict[str, Any]:
+        consumed = reservation.consumed.to_dict()
+        consumed["time_ms"] = self.initial_time_consumed_ms
         self.budget = {
             **reservation.to_dict(),
+            "consumed": consumed,
             "graph_id": kwargs["graph_id"],
             "graph_revision": kwargs["graph_revision"],
             "node_id": None,
             "attempt_id": None,
-            "attempted_consumed": reservation.consumed.to_dict(),
+            "attempted_consumed": dict(consumed),
             "exceeded_dimensions": [],
         }
         return dict(self.budget)
@@ -384,6 +389,46 @@ class _FakeTaskStore:
         attempt["status"] = target_status
         attempt["status_version"] += 1
         return dict(attempt)
+
+    def fail_running_attempt_bundle(self, attempt_id: str, **kwargs: Any) -> dict[str, Any]:
+        attempt = self.attempts[attempt_id]
+        assert kwargs["expected_attempt_version"] == attempt["status_version"]
+        assert kwargs["expected_node_version"] == self.node["status_version"]
+        assert kwargs["expected_graph_version"] == self.graph["status_version"]
+        self.calls.append("attempt:FAILED")
+        attempt["status"] = "FAILED"
+        attempt["status_version"] += 1
+        self.calls.append("node:FAILED")
+        self.node["status"] = "FAILED"
+        self.node["status_version"] += 1
+        self.node["node"]["status"] = "FAILED"
+        self.node["node"]["status_version"] = self.node["status_version"]
+        target_status = str(kwargs["graph_target_status"])
+        self.calls.append(f"graph:{target_status}")
+        self.graph["status"] = target_status
+        self.graph["status_version"] += 1
+        result = {
+            "attempt": dict(attempt),
+            "node": self.get_node(
+                self.graph["graph_id"],
+                self.graph["revision"],
+                self.node["node_id"],
+            ),
+            "graph": dict(self.graph),
+            "lease": {
+                "lease_id": "lease::one",
+                "status": "RELEASED",
+                "status_version": 1,
+            },
+        }
+        if "budget_id" in kwargs:
+            assert self.budget is not None
+            assert kwargs["budget_id"] == self.budget["budget_id"]
+            assert kwargs["expected_budget_version"] == self.budget["status_version"]
+            self.budget["status"] = "RELEASED"
+            self.budget["status_version"] += 1
+            result["budget"] = dict(self.budget)
+        return result
 
     def commit_operation(self, reservation_id: str, **kwargs: Any) -> dict[str, Any]:
         assert self.reservation is not None
@@ -1075,6 +1120,177 @@ async def test_worker_self_cancellation_enters_durable_recovery_without_graph_in
     assert store.reservation["status"] == "RESERVED"
     assert list(store.attempts.values())[-1]["status"] == "RUNNING"
     assert store.get_graph_cancellation_for_graph(graph.graph_id, graph.revision) is None
+    assert "attempt:FAILED" not in calls
+    assert "node:FAILED" not in calls
+    assert "graph:FAILED" not in calls
+
+
+@pytest.mark.asyncio
+async def test_zero_durable_time_budget_blocks_before_operation_or_worker() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    limits = replace(work_order.budget_policy.limits, time_ms=1)
+    work_order = replace(
+        work_order,
+        budget_policy=replace(work_order.budget_policy, limits=limits),
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(
+        graph,
+        calls,
+        initial_time_consumed_ms=1,
+    )
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        internal_agent_checkpoint_uow=object(),
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_Resolver(calls),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "BUDGET_BLOCKED"
+    assert receipt["reason_code"] == "GOVERNED_BUDGET_EXCEEDED"
+    assert store.reservation is None
+    assert store.budget is not None
+    assert store.budget["status"] == "RELEASED"
+    assert store.budget["exceeded_dimensions"] == ["time_ms"]
+    assert "worker:canonical" not in calls
+    assert not any(value.startswith("operation:") for value in calls)
+
+
+@pytest.mark.asyncio
+async def test_worker_timeout_error_is_not_misclassified_as_time_budget_timeout() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+
+    class _WorkerTimeout:
+        async def execute_stream(self, **kwargs: Any):
+            del kwargs
+            raise TimeoutError("worker-owned timeout")
+            if False:
+                yield {}
+
+    class _WorkerTimeoutResolver:
+        @staticmethod
+        def resolve(*, executor: str, worker_route: str) -> Any:
+            del executor, worker_route
+            return _WorkerTimeout()
+
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        internal_agent_checkpoint_uow=object(),
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_WorkerTimeoutResolver(),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["projection"]["worker_failure_reason_code"] != (
+        "GOVERNED_TIME_BUDGET_EXCEEDED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_time_budget_timeout_preserves_operation_for_reconciliation() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    limits = replace(work_order.budget_policy.limits, time_ms=1)
+    work_order = replace(
+        work_order,
+        budget_policy=replace(work_order.budget_policy, limits=limits),
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+
+    class _SlowWorker:
+        async def execute_stream(self, **kwargs: Any):
+            del kwargs
+            calls.append("worker:slow")
+            await asyncio.Event().wait()
+            yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
+
+    class _SlowResolver:
+        @staticmethod
+        def resolve(*, executor: str, worker_route: str) -> Any:
+            del executor, worker_route
+            return _SlowWorker()
+
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        internal_agent_checkpoint_uow=object(),
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_SlowResolver(),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
+    assert receipt["projection"]["worker_failure_reason_code"] == "GOVERNED_TIME_BUDGET_EXCEEDED"
+    assert receipt["projection"]["time_budget_ms"] == 1
+    assert store.reservation is not None
+    assert store.reservation["status"] == "RESERVED"
+    assert store.budget is not None
+    assert store.budget["status"] == "EXCEEDED"
+    assert store.budget["exceeded_dimensions"] == ["time_ms"]
     assert "attempt:FAILED" not in calls
     assert "node:FAILED" not in calls
     assert "graph:FAILED" not in calls

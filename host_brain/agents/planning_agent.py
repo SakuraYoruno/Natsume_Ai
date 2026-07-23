@@ -1,11 +1,11 @@
 ﻿"""任务规划代理（Phase XI 方案 4）。
 
-职责：对复杂请求做 ReAct 式任务分解——Reasoning + Acting 交替。
-设计：先规划步骤，再逐步执行，中间可追问用户。
+职责：对复杂请求生成受治理的任务分解建议。
+设计：先规划候选步骤；执行只能由 Host 将已批准结果编译为不可变 TaskGraph。
 
 第一层判断：RULE_ROUTE_MAP 规则映射表（精确匹配，无歧义词）
-第二层判断：LLM 节点（由 executive_runtime_core 调用）
-规划执行：由 Executive Runtime 消费上游 canonical SkillDagPlan
+第二层判断：LLM/兼容规划节点（只生成 proposal）
+规划执行：Governed Runtime 消费已批准的 immutable TaskGraph
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ _MULTI_PART_PATTERN_WORDS = frozenset({
 })
 
 # ---------------------------------------------------------------------------
-# 第一层规则路由映射表（供 executive_runtime_core 直接使用）
+# 第一层规则路由映射表（仅供 proposal 生成使用）
 # 格式：{关键词: (route_type, target_id_hint)}
 # 命中则直接路由，无需进入 LLM 判断
 # ---------------------------------------------------------------------------
@@ -209,12 +209,13 @@ class PlanningAgent:
     """ReAct 式任务规划代理。
 
     判断流程（两层）：
-    1. 第一层：RULE_ROUTE_MAP 精确规则匹配 → 命中则直接路由（由 executive_runtime_core 调用）
-    2. 第二层：needs_planning() 评分 + LLM 节点判断 → 产出上游 canonical SkillDagPlan
+    1. 第一层：RULE_ROUTE_MAP 精确规则匹配 → 生成 route proposal
+    2. 第二层：needs_planning() 评分 + LLM 节点判断 → 产出上游任务提案
 
     规划执行：
-    - Executive Runtime 按 SkillDagPlan.execution_batches 执行
-    - 计划身份、依赖和路由由同一个上游 SkillDagPlan 提供
+    - 本类不执行计划，也不调用工具或 Agent
+    - Host 必须通过 PlanningSearch 重新 admission 并编译 immutable TaskGraph
+    - worker 仅执行已批准图；动态重规划必须产生新 revision
     """
 
     def __init__(
@@ -492,9 +493,9 @@ class PlanningAgent:
         return None
 
     # ------------------------------------------------------------------
-    # execute_plan() 已废弃（Deprecated）
-    # 实际执行由 Executive Runtime canonical SkillDag 路径负责
-    # 保留此方法仅为向后兼容，不应在新代码中调用
+    # execute_plan() 已退役
+    # 保留稳定的无副作用兼容结果；实际执行必须从 Governed admission
+    # 编译 immutable TaskGraph，不存在 Executive 或本地计划回退。
     # ------------------------------------------------------------------
     def execute_plan(
         self,
@@ -505,12 +506,12 @@ class PlanningAgent:
     ) -> PlanExecutionResult:
         """[已废弃] 同步执行计划。
 
-        此方法已被 Executive Runtime canonical SkillDag 执行路径替代，
-        不应在新代码中调用。保留仅为向后兼容。
+        此方法不执行任何逻辑。新调用必须走 Governed admission；保留仅为
+        向后兼容，让旧调用者得到明确的无副作用结果。
         """
         _logger.warning(
-            "PlanningAgent.execute_plan() 已废弃，请使用 Executive Runtime "
-            "canonical SkillDag 执行路径。task_id=%s",
+            "PlanningAgent.execute_plan() 已退役，请通过 Governed admission "
+            "编译 immutable TaskGraph。task_id=%s",
             plan.task_id,
         )
         # 返回空结果，不执行任何逻辑

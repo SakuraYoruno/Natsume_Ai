@@ -73,12 +73,13 @@ def _transaction_blocks(method: ast.FunctionDef) -> list[ast.With]:
         for node in ast.walk(method)
         if isinstance(node, ast.With)
         and any(
-            isinstance(item.context_expr, ast.Call)
-            and isinstance(item.context_expr.func, ast.Attribute)
-            and item.context_expr.func.attr == "_transaction"
-            and isinstance(item.context_expr.func.value, ast.Name)
-            and item.context_expr.func.value.id == "self"
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "_transaction"
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
             for item in node.items
+            for call in ast.walk(item.context_expr)
         )
     ]
 
@@ -264,6 +265,7 @@ def test_ready_claim_rechecks_all_authorities_in_one_writer_transaction() -> Non
             "_assert_dependencies_accepted",
             "_assert_graph_not_cancelling",
             "_insert_outbox",
+            "_assert_mutation_outbox_replay",
             "_replay_ready_node_claim",
             "_require_attempt",
             "_require_graph",
@@ -278,6 +280,7 @@ def test_ready_claim_rechecks_all_authorities_in_one_writer_transaction() -> Non
             "_assert_dependencies_accepted",
             "_assert_graph_not_cancelling",
             "_insert_outbox",
+            "_assert_mutation_outbox_replay",
             "_replay_ready_node_claim",
             "_require_graph",
         )
@@ -291,12 +294,13 @@ def test_ready_claim_rechecks_all_authorities_in_one_writer_transaction() -> Non
     budget = source.index("FROM task_runtime_budget_reservation")
     node = source.index("node = self._require_node")
     existing = source.index("existing_attempt = conn.execute")
-    replay = source.index("return self._replay_ready_node_claim")
+    retry_promotion = source.index("self.promote_retry_due")
+    replay = source.index("replayed = self._replay_ready_node_claim")
     attempt_sequence = source.index("attempt_stats = conn.execute")
     dependencies = source.index("self._assert_dependencies_accepted")
     capacity = source.index("occupied = conn.execute")
     attempt_insert = source.index("INSERT INTO task_runtime_attempt")
-    assert cancellation < graph < budget < node < existing < replay
+    assert cancellation < graph < budget < node < existing < retry_promotion < replay
     assert replay < attempt_sequence < dependencies < capacity < attempt_insert
     assert "TASK_STORE_SCHEDULER_CAPACITY" in source
     assert "INSERT INTO task_runtime_lease" in source
@@ -329,15 +333,19 @@ def test_ready_claim_exact_replay_uses_same_connection_and_no_second_slot() -> N
     assert "TASK_STORE_SCHEDULER_CAPACITY" not in replay_source
 
     claim_source = inspect.getsource(TaskReadyClaimStoreMixin.claim_ready_node)
-    assert claim_source.index("return self._replay_ready_node_claim") < (
+    assert claim_source.index("replayed = self._replay_ready_node_claim") < (
         claim_source.index("occupied = conn.execute")
     )
 
 
-def test_retry_promotion_and_ready_claim_remain_separate_transactions() -> None:
+def test_due_retry_promotion_borrows_the_ready_claim_transaction() -> None:
     promotion = _method_ast(TaskRetryMutationStoreMixin, "promote_retry_due")
     claim = _method_ast(TaskReadyClaimStoreMixin, "claim_ready_node")
     assert len(_transaction_blocks(promotion)) == 1
     assert len(_transaction_blocks(claim)) == 1
     assert _named_calls(promotion, "claim_ready_node") == []
-    assert _named_calls(claim, "promote_retry_due") == []
+    assert len(_named_calls(claim, "promote_retry_due")) == 1
+    source = inspect.getsource(TaskReadyClaimStoreMixin.claim_ready_node)
+    assert "retry_ready_outbox" in source
+    assert "_connection=conn" in source
+    assert "_observed_ts_ms=ts_ms" in source

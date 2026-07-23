@@ -1,70 +1,13 @@
-"""Retired Executive execution boundary.
+"""Fail-closed compatibility boundary for the retired Executive Runtime."""
 
-The module keeps the historical streaming helper for isolated rendering tests,
-but production Cortex no longer imports or calls this runtime.  All execution
-routes use Governed Task Runtime; read routes use deterministic projections.
-"""
+from __future__ import annotations
 
-from ._shared import *  # noqa: F403
-from .ports import ExecutiveRuntimeApplicationPorts
-
-
-async def stream_chat_route(
-    *,
-    route: str,
-    request_id: str,
-    route_reason: str,
-    skill_family: str,
-    runtime_capability_handoff_extra: dict[str, Any],
-    record_dispatch_handoff_fn,
-    surface_reply_sse_generator_fn,
-    chat_input,
-):
-    if str(route or "").strip().lower() != "chat":
-        return
-
-    chat_route_started_ms = int(time.time() * 1000)
-    _logger.info("[%s] ExecutiveRuntime -> chat (reason=%s)", request_id, route_reason)
-    record_dispatch_handoff_fn(
-        handoff_route="chat",
-        handoff_target=None,
-        handoff_reason=route_reason,
-        extra={"skill_family": skill_family, **dict(runtime_capability_handoff_extra or {})},
-    )
-    first_event_logged = False
-    first_render_logged = False
-    async for event in surface_reply_sse_generator_fn(chat_input):
-        if not first_event_logged:
-            first_event_logged = True
-            _logger.info(
-                "[%s] ExecutiveRuntime chat_first_event_ms=%s",
-                request_id,
-                max(0, int(time.time() * 1000) - chat_route_started_ms),
-            )
-        if not first_render_logged and event.startswith("data: "):
-            try:
-                payload = json.loads(event[6:].strip())
-            except Exception:
-                payload = {}
-            if str(payload.get("phase") or "").strip().upper() == "RENDER":
-                first_render_logged = True
-                _logger.info(
-                    "[%s] ExecutiveRuntime chat_first_render_ms=%s",
-                    request_id,
-                    max(0, int(time.time() * 1000) - chat_route_started_ms),
-                )
-        yield event
-
-
-def _action_arbiter_execution_enabled() -> bool:
-    """Retained for isolated legacy helper tests only."""
-
-    return get_orchestration_settings().action_arbiter_enabled
+from typing import Any, AsyncGenerator
 
 
 async def _executive_runtime_core_impl(
     *,
-    ports: ExecutiveRuntimeApplicationPorts,
+    ports: Any,
     request_body: Any,
     request_id: str,
     session_id: str,
@@ -116,8 +59,4 @@ async def _executive_runtime_core_impl(
         yield ""
 
 
-__all__ = [
-    "_action_arbiter_execution_enabled",
-    "_executive_runtime_core_impl",
-    "stream_chat_route",
-]
+__all__ = ["_executive_runtime_core_impl"]

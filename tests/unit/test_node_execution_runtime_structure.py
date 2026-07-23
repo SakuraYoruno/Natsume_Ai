@@ -52,7 +52,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "c880db150ad581dd4e018124136850bc07a882524a6b8136566aac8e3d16c9ce"
+    "8ad4577183fa6080ed48b013eba7e8bd8f0877f94e0c4541574de260376311a8"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
@@ -400,10 +400,17 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         "_acceptance",
         "_reviews",
         "_projection",
+        "_scheduler_checkpoint_continuation_authority",
         "_owner_id",
         "_lease_ttl_ms",
         "_operation_ttl_ms",
     }
+    execute_parameters = inspect.signature(
+        DurableNodeExecutionRuntime.execute_stream
+    ).parameters
+    assert "allow_multinode_checkpoint_continuation" not in execute_parameters
+    assert "retry_due_claim" in execute_parameters
+    assert "scheduler_checkpoint_continuation_authority" in execute_parameters
     owner = classes[0]
     expected_matrices = {
         "_store": {
@@ -415,11 +422,13 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "get_active_lease": 1,
             "commit_operation": 1,
         },
-        "_runtime_outbox": {"build": 6, "publish_pending": 16},
+        "_runtime_outbox": {"build": 7, "publish_pending": 16},
         "_budgets": {
             "ensure_active": 1,
             "precharge": 1,
-            "settle_worker": 2,
+            "guard_execution_time": 1,
+            "settle_worker": 1,
+            "settle_interrupted_worker": 1,
             "finalize": 1,
             "refresh": 1,
         },
@@ -429,7 +438,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "accept_node_output": 1,
             "transition_attempt": 2,
             "finalize_node_budget": 5,
-            "reject_budget_charge": 2,
+            "reject_budget_charge": 3,
             "mark_pre_reservation_failure": 4,
         },
         "_workers": {"resolve": 1},
@@ -759,6 +768,8 @@ def test_extracted_recovery_helpers_keep_narrow_authority_boundaries() -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     } == {
         "worker_event_stream",
+        "bounded_worker_event_stream",
+        "_worker_elapsed_ms",
         "_maybe_await",
         "stop_heartbeat_after_interruption",
     }

@@ -430,6 +430,12 @@ class TaskInternalAgentBudgetRejectionStoreMixin(
             graph_target_status=TaskGraphStatus.BLOCKED,
             attempt_outbox=attempt_outbox,
             evidence_refs=evidence_refs,
+            # This is a post-checkpoint rejected-usage closeout, not the
+            # pre-reservation graph-budget release handled by the generic
+            # failure bundle.  Its BudgetReservation and outbox carry the
+            # node Attempt lineage and are validated immediately below by the
+            # dedicated checkpoint rejection authority.
+            budget_request=None,
         )
         self._validate_internal_agent_rejected_usage_uow(
             conn,

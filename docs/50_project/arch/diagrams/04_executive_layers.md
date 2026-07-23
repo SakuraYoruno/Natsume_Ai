@@ -3,10 +3,10 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.7
-核对日期：2026-07-18
+版本：v3.8
+核对日期：2026-07-22
 
-文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、SkillDag 执行和进程内任务 registry 已删除。
+文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag worker 执行和进程内任务 registry 已删除，且 Executive 内的 Forge route override call 已移除。纯 SkillDag adapter 仅作零生产调用的兼容合同；独立 Forge `runtime-match` 仍是待退役边界。
 
 ## 当前分界
 
@@ -42,7 +42,7 @@ flowchart TD
     style ReadOnly fill:#eefbf1,stroke:#22863a
 ```
 
-`agent_runtime/cortex_runtime.py` 不再持有 Executive application port。执行 route 只能进入 Governed Runtime，读取 route 只能进入 durable projection，未知 route fail closed。`executive_runtime/runtime.py` 只保留不可达的拒绝边界和孤立 helper。
+`agent_runtime/cortex_runtime.py` 不再持有 Executive application port。执行 route 只能进入 Governed Runtime，读取 route 只能进入 durable projection，未知 route fail closed。Cortex 的 contextual-session/style、clarification、LLM unavailable 与 async post-process direct-reply branch 已物理删除；它只把冻结上下文交给 TaskGraph。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只保留不可达的拒绝边界；任何 stale import 都不能重建 Executive application port。
 
 ## Planning Search 分层
 
@@ -120,10 +120,10 @@ stateDiagram-v2
 - Replan/recovery：`host_brain/orchestration/planning_recovery.py`、`failure_replan_intent.py`
 - Durable coordinator/decision：`host_brain/task_runtime/coordinator.py`、`dag_scheduler.py`
 - Read projections：`host_brain/agent_runtime/read_routes.py`
-- Retired Executive guard：`host_brain/executive_runtime/runtime.py`
+- Retired Executive guards：`host_brain/executive_runtime/runtime.py`、`host_brain/app/executive_runtime.py`
 - Scheduler contracts：`host_brain/scheduler/governed_runtime.py`
 - Internal contracts：`host_brain/app/internal_task_runtime.py`
 
 ## 已完成与剩余条件
 
-Executive 生产调用、legacy SkillDag 和进程内 registry 已归零。当前 DAG 定级为 `PARTIAL_ATOMIC_DEFAULT_B5C / NE01_IN_PROGRESS`：新生产 Graph 已以 0090/0091 原子收口失败/成功；0092～0097 的 cancellation、delivery、continuation、revision、Review 与 grant authority 已有证据。0099 exact auto 默认开启且只处理 `EXACT_REPAIRABLE`；Cancellation Operator 仍为 `WIRED_DEFAULT_OFF`，启用时强制 Operation/Effect/Terminal reconciliation 全开，并要求共享 Secure Ingress verifier、Gateway/BFF/UI 与 verification-only keyring。bounded fan-out、部署凭据、真实 canary、general/multi-node recovery 和完整 Workspace/Composition 仍缺，不能宣称 Lane B 或完整架构完成。
+Executive 生产调用、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag worker 执行和进程内 registry 已归零；Executive 内 Forge route override call 已移除，纯 SkillDag adapter 仍是无生产 caller 的 compatibility contract。独立 Forge `runtime-match` 仍未归零，因此这是部分负向收口。当前 DAG 定级为 `PARTIAL_ATOMIC_DEFAULT_B5C / NE01_IN_PROGRESS`：新生产 Graph 已以 0090/0091 原子收口失败/成功；0092～0097 的 cancellation、delivery、continuation、revision、Review 与 grant authority 已有证据。DAG scheduler 还可在 live owner fence 清除后续接多节点 exact canonical COMMITTED checkpoint 的 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING`，不重放 worker；这不覆盖 general batch 或 unknown-effect recovery。0099 exact auto 默认开启且只处理 `EXACT_REPAIRABLE`；Cancellation Operator 仍为 `WIRED_DEFAULT_OFF`，启用时强制 Operation/Effect/Terminal reconciliation 全开，并要求共享 Secure Ingress verifier、Gateway/BFF/UI 与 verification-only keyring。bounded fan-out、部署凭据、真实 canary、general/multi-node recovery 和完整 Workspace/Composition 仍缺，不能宣称 Lane B 或完整架构完成。

@@ -46,6 +46,7 @@ async def takeover_committed_checkpoint(
     node_grant_ref: str | None,
     budget_id: str,
     durable_elapsed_ms_override: int | None = None,
+    allow_multinode_checkpoint_continuation: bool = False,
 ) -> Any:
     """Fence the former owner and load, but never replay, its worker result."""
 
@@ -54,9 +55,12 @@ async def takeover_committed_checkpoint(
         reservation=reservation,
         latest_attempt=latest_attempt,
     )
-    if len(admitted.nodes) != 1:
+    if (
+        len(admitted.nodes) != 1
+        and not allow_multinode_checkpoint_continuation
+    ):
         _blocked(
-            "multi-node committed checkpoint requires batch recovery"
+            "multi-node committed checkpoint requires scheduler-owned batch recovery"
         )
     if _status(reservation) != "COMMITTED" or not _text(
         reservation.get("receipt_ref")

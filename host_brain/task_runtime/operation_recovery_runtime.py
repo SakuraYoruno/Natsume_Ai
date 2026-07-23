@@ -120,6 +120,7 @@ class DurableOperationRecoveryRuntime:
         node_grant_ref: str | None,
         budget_id: str,
         durable_elapsed_ms_override: int | None = None,
+        allow_multinode_checkpoint_continuation: bool = False,
     ) -> CommittedOperationCheckpoint:
         return await takeover_committed_checkpoint(
             task_store=self._store,
@@ -135,6 +136,9 @@ class DurableOperationRecoveryRuntime:
             node_grant_ref=node_grant_ref,
             budget_id=budget_id,
             durable_elapsed_ms_override=durable_elapsed_ms_override,
+            allow_multinode_checkpoint_continuation=(
+                allow_multinode_checkpoint_continuation
+            ),
         )
 
     async def reconcile_reservation_state(

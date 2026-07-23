@@ -315,11 +315,11 @@ _SUPERVISOR_DISPATCH_PROMPT_TEMPLATES = {
 }
 
 _SUB_AGENT_CAPABILITIES = {
-    "translate_agent": "翻译专家：处理中日英多语翻译，包含校对和润色",
-    "intent_agent": "执行专家：理解用户的执行意图，并调用工具完成实际操作（文件 / 网络 / 系统）",
-    "vision_agent": "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
-    "repair_agent": "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力",
-    "pentest_agent": "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；Agent 不执行网络或攻击工具",
+    "translate_agent": "历史翻译能力描述；旧直调已退役，未授予 Delegate 执行权限",
+    "intent_agent": "历史意图能力描述；旧直调已退役，未授予工具或 Delegate 执行权限",
+    "vision_agent": "历史视觉能力描述；旧直调已退役，未授予 Delegate 执行权限",
+    "repair_agent": "历史环境修复能力描述；旧直调已退役，未授予安装或执行权限",
+    "pentest_agent": "仅允许通过受治理 Delegate 进行只读 Domain Pack/SecureRun 交接；不执行网络或攻击工具",
 }
 
 _SUB_AGENT_RUNTIME_TEXTS = {

@@ -203,6 +203,7 @@ Observability 的降级不应被误报为 Host 业务完成；同样，Host 健�
 - Durable query repositories：`host_brain/persistence/*_query_repository.py`
 - 0099 terminal service/store：`host_brain/task_runtime/terminal_state_reconciliation.py`、`host_brain/persistence/task_terminal_reconciliation_*`
 - 0119 signed command/store：`host_brain/audit/migrations/0119_terminal_operator_signed_command.sql`、`host_brain/persistence/terminal_operator_command_store.py`
+- 0120 bounded fan-out feature canary：`host_brain/audit/migrations/0120_task_runtime_feature_canary_receipt.sql`、`host_brain/persistence/task_runtime_feature_canary_repository.py`
 - Governed terminal runtime/handler：`host_brain/app/governed_terminal_reconciliation_runtime.py`、`host_brain/app/accepted_terminal_reconciliation_handler.py`
 - Monitor UI：`host_brain/app/monitor_ui/`
 

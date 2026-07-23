@@ -111,6 +111,7 @@ def approved_commit_event(
             "decision": "APPROVE",
             "reason_code": None,
             "governed": True,
+            "replayed": receipt.replayed,
             "execution_receipt": receipt.to_dict(),
         }
     )

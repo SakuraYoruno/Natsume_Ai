@@ -744,6 +744,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "ledger": ledger,
             "canonical_db_path": ledger.canonical_db_path,
             "reconciliation_public_keys": {"reconciler-v1": b"k" * 32},
+            "feature_canary_public_keys": {},
             "terminal_reconciliation_auto_enabled": False,
         }
         events.append("task-runtime-built")
@@ -792,6 +793,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["acceptance_effect_dispatcher"] is (
             acceptance_effect_dispatcher
         )
+        assert kwargs["bounded_fanout_enabled"] is False
+        assert kwargs["fanout_event_buffer_size"] == 32
         assert isinstance(kwargs["runtime_router"], asgi.CanonicalRuntimeRouter)
         assert kwargs["owner_id"] == "test-canonical-owner::runtime::test-boot"
         assert kwargs["runtime_context_application"] is runtime_context_application
@@ -1143,8 +1146,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             task_effect_reconciliation_operator_enabled=True,
             task_terminal_reconciliation_operator_enabled=False,
             task_terminal_reconciliation_auto_enabled=False,
-            task_runtime_bounded_fanout_enabled=True,
+            task_runtime_bounded_fanout_enabled=False,
             task_runtime_atomic_graph_success_enabled=True,
+            task_runtime_fanout_event_buffer_size=32,
+            task_runtime_canary_public_keys=lambda: {},
             task_reconciliation_public_keys=lambda: {"reconciler-v1": b"k" * 32},
             agent_workspace_managed_root="D:/runtime/agent-workspaces",
             agent_workspace_lease_ms=120_000,

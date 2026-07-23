@@ -1,54 +1,29 @@
-"""Application composition adapter for the canonical Executive Runtime."""
+"""Fail-closed import boundary for the retired Executive Runtime.
+
+No production Host route may construct Executive ports, select a route, plan,
+or append a second dispatch history through this module.  Kept only so stale
+imports receive the same explicit rejection as the core compatibility guard.
+"""
 
 from __future__ import annotations
 
 from typing import Any, AsyncGenerator
 
-from host_brain.executive_runtime.conversation_execution import (
-    build_runtime_capability_handoff_extra,
-    record_executive_handoff as _record_executive_handoff,
-    record_runtime_capability_execution as _record_runtime_capability_execution,
-)
-from host_brain.executive_runtime.runtime import (
-    stream_chat_route,
-)
-
-from host_brain.executive_runtime.runtime import (
-    _executive_runtime_core_impl,
-)
-from host_brain.executive_runtime.ports import ExecutiveRuntimeApplicationPorts
-
-
-def _build_executive_ports() -> ExecutiveRuntimeApplicationPorts:
-    from host_brain.app.runtime_port_wiring import (  # noqa: PLC0415
-        build_executive_runtime_application_ports,
-    )
-
-    return build_executive_runtime_application_ports()
-
-
-def record_executive_handoff(**kwargs: Any) -> None:
-    _record_executive_handoff(ports=_build_executive_ports(), **kwargs)
-
-
-def record_runtime_capability_execution(**kwargs: Any) -> None:
-    _record_runtime_capability_execution(ports=_build_executive_ports(), **kwargs)
-
-
 async def executive_runtime_sse_generator(**kwargs: Any) -> AsyncGenerator[str, None]:
-    """Application-composed entry for the framework-independent runtime."""
+    """Reject a stale Executive entry without building any service graph."""
 
-    async for event in _executive_runtime_core_impl(
-        ports=_build_executive_ports(),
-        **kwargs,
-    ):
-        yield event
+    declared_route = str(
+        dict(kwargs.get("intent_draft") or {}).get("route") or ""
+    ).strip().lower()
+    if declared_route in {"chat", "skill", "delegate", "plan"}:
+        raise PermissionError("CANONICAL_ROUTE_REQUIRES_GOVERNED_TASK_RUNTIME")
+    if declared_route in {"task_progress", "recent_turn"}:
+        raise PermissionError("READ_ROUTE_REQUIRES_DURABLE_PROJECTION")
+    raise PermissionError("EXECUTIVE_RUNTIME_RETIRED")
+    if False:  # pragma: no cover - preserves the async-generator contract.
+        yield ""
 
 
 __all__ = [
     "executive_runtime_sse_generator",
-    "record_executive_handoff",
-    "build_runtime_capability_handoff_extra",
-    "record_runtime_capability_execution",
-    "stream_chat_route",
 ]

@@ -29,7 +29,11 @@ from host_brain.agent_runtime.agent_tools import (
     is_tool_allowed_for_run_mode,
 )
 from host_brain.agent_runtime.result_contract import AgentResult, blocked_result
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import (
+    AgentWorkOrder,
+    WorkOrderV3,
+    canonicalize_work_order,
+)
 from host_brain.core.trace_redaction import (
     build_redacted_trace,
     build_redacted_trace_step,
@@ -388,7 +392,7 @@ class AgentExecutor:
 
     def execute(
         self,
-        work_order: AgentWorkOrder,
+        work_order: AgentWorkOrder | WorkOrderV3,
         *,
         workspace: Path,
         cancelled: Callable[[], bool] | None = None,
@@ -404,6 +408,8 @@ class AgentExecutor:
         """
         if cancelled is not None and not callable(cancelled):
             raise TypeError("cancelled must be callable")
+
+        work_order = canonicalize_work_order(work_order)
 
         start_ts = time.time()
         run_mode = str(work_order.run_mode or "inspect").strip().lower()
@@ -484,7 +490,7 @@ class AgentExecutor:
             {
                 "request_id": request_id,
                 "work_order_id": work_order.work_order_id,
-                "input_refs": work_order.metadata.get("input_refs") or [],
+                "input_refs": list(work_order.input_refs),
             },
             raw_input=work_order.objective,
         )

@@ -1,38 +1,19 @@
-"""sub_agent_protocol.py — 子 Agent 调度协议（Phase XIV v4）。
+"""Retired direct sub-agent protocol compatibility contracts.
 
-定义 Cortex Orchestrator 与子 Agent 之间的通信协议：
-  - SubAgentRequest / SubAgentResponse：调度数据结构
-  - SubAgentDispatcher：统一调度器，根据 agent_id 路由到对应 handler
-  - 子 Agent 内部保留 LangGraph 图引擎（翻译→校对→润色等多节点）
+Only request/response codecs and a read-only registry view remain here.  The
+historical dispatcher used a module-global handler map, constructed model
+gateways, and emitted an independent execution log before Task Runtime
+verification.  That is no longer an executable authority: callers must enter
+``HostCommand -> immutable TaskGraph`` and, for the currently enabled
+``pentest_agent`` delegate, use ``GovernedDelegateDispatcher``.
 """
 
 from __future__ import annotations
 
-import asyncio
-import logging
-import os
-import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
-from host_brain.app.sub_agent_context import (
-    ContextEnvelopeError,
-    build_agent_context_envelope,
-    build_context_runtime_event_payload,
-    project_legacy_context_for_sub_agent,
-)
-from host_brain.core.trace_redaction import (
-    content_ref,
-    public_decision_summary,
-    public_output_text,
-    read_decision_summary,
-    read_public_agent_output,
-    sanitize_public_payload,
-)
-
-_logger = logging.getLogger("Natsume.sub_agent")
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +43,9 @@ class SubAgentResponse:
     latency_ms: int = 0
 
 
+LEGACY_SUB_AGENT_DISPATCH_RETIRED = "LEGACY_SUB_AGENT_DISPATCH_RETIRED"
+
+
 # ---------------------------------------------------------------------------
 # Agent ID 常量
 # ---------------------------------------------------------------------------
@@ -78,11 +62,11 @@ ALL_AGENT_IDS: frozenset[str] = frozenset({
 
 # 子 Agent 能力描述（注入 Cortex Orchestrator prompt，供 LLM 判断调度）
 AGENT_CAPABILITIES: dict[str, str] = {
-    AGENT_TRANSLATE: "翻译专家：中日英多语言翻译，含校对和润色（多步流程）",
-    AGENT_INTENT: "执行专家：理解用户的执行意图，调用工具完成实际操作（文件/网络/系统）",
-    AGENT_VISION: "视觉分析：分析图片/截图内容，提取 UI 元素信息",
-    AGENT_REPAIR: "环境修复专家：当缺少浏览器/依赖/运行环境时，尝试自动安装并恢复执行能力",
-    AGENT_PENTEST: "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；Agent 不执行网络或攻击工具",
+    AGENT_TRANSLATE: "历史翻译能力描述；旧直调已退役，未授予 Delegate 执行权限",
+    AGENT_INTENT: "历史意图能力描述；旧直调已退役，未授予工具或 Delegate 执行权限",
+    AGENT_VISION: "历史视觉能力描述；旧直调已退役，未授予 Delegate 执行权限",
+    AGENT_REPAIR: "历史环境修复能力描述；旧直调已退役，未授予安装或执行权限",
+    AGENT_PENTEST: "仅允许通过受治理 Delegate 进行只读 Domain Pack/SecureRun 交接；不执行网络或攻击工具",
 }
 
 
@@ -95,29 +79,7 @@ def _load_template_mapping(template_id: str) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
-
-_DEFAULT_AGENT_CAPABILITIES: dict[str, str] = {
-    AGENT_TRANSLATE: "翻译专家：处理中日英多语翻译，包含校对和润色",
-    AGENT_INTENT: "执行专家：理解用户的执行意图，并调用工具完成实际操作（文件 / 网络 / 系统）",
-    AGENT_VISION: "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
-    AGENT_REPAIR: "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力",
-    AGENT_PENTEST: "Pentest 需求澄清、只读规划与 Domain Pack/SecureRun 交接；Agent 不执行网络或攻击工具",
-}
+_DEFAULT_AGENT_CAPABILITIES = dict(AGENT_CAPABILITIES)
 
 
 def get_agent_capabilities() -> dict[str, str]:
@@ -128,11 +90,6 @@ def get_agent_capabilities() -> dict[str, str]:
         if resolved:
             capabilities[agent_id] = resolved
     return capabilities
-
-
-def _runtime_text(key: str, **kwargs: Any) -> str:
-    templates = _load_template_mapping("sub_agent_protocol.runtime_texts")
-    return _mapping_text(templates, key, **kwargs)
 
 
 AGENT_CAPABILITIES = get_agent_capabilities()
@@ -207,11 +164,11 @@ def build_sub_agent_request_from_child_work_order(
     timeout_ms: int | None = None,
     context: Mapping[str, Any] | None = None,
 ) -> SubAgentRequest:
-    """Bridge a validated child WorkOrder into the legacy dispatcher shape.
+    """Build a read-only legacy compatibility projection from a child WorkOrder.
 
-    This is the only constructor used by the canonical planner path.  Existing
-    direct ``SubAgentRequest`` construction remains available for legacy callers
-    until their parent WorkOrder lineage exists.
+    This codec preserves lineage for diagnostics and migration checks only.
+    It cannot authorize ``SubAgentDispatcher.dispatch``; executable delegates
+    must be admitted as governed TaskGraph nodes.
     """
 
     from host_brain.agent_runtime.sub_agent_contract import (  # noqa: PLC0415
@@ -289,351 +246,29 @@ def build_sub_agent_request_from_child_work_order(
 
 
 class SubAgentDispatcher:
-    """子 Agent 统一调度器。
+    """Fail-closed compatibility gate for the retired direct dispatcher.
 
-    根据 agent_id 路由到对应的 handler，在 asyncio.to_thread 中执行
-    （现有 handler 是同步函数），超时后返回降级结果。
+    ``dispatch`` deliberately does not load a handler, construct a gateway,
+    call a model, or write the old ``skill_exec_log``.  It owns no mutable
+    handler map, gateway, ledger, or private reactivation helper.
     """
 
-    def __init__(
-        self,
-        *,
-        application_ports: AgentRuntimeApplicationPorts | None = None,
-    ) -> None:
-        self._handler_map: dict[str, Any] = {}  # 延迟加载
-        self._application_ports = application_ports
-
-    def _ensure_handlers(self) -> None:
-        """延迟导入 handler，避免循环依赖。"""
-        if self._handler_map:
-            return
-        try:
-            from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
-            self._handler_map[AGENT_TRANSLATE] = translate_agent_handler
-        except ImportError:
-            pass
-        try:
-            from host_brain.app.handlers.intent_agent_handler import intent_agent_handler
-            self._handler_map[AGENT_INTENT] = intent_agent_handler
-        except ImportError:
-            pass
-        # TODO(P3-7): vision_agent 暂未实现独立 handler，当前临时复用 intent_agent。
-        # 独立 handler 需实现图片/截图内容分析、UI 元素提取等视觉能力。
-        # 跟踪：创建 host_brain/app/handlers/vision_agent_handler.py，
-        # 接入多模态 LLM（如 GPT-4V / Qwen-VL），替换此处的复用逻辑。
-        if AGENT_VISION not in self._handler_map and AGENT_INTENT in self._handler_map:
-            self._handler_map[AGENT_VISION] = self._handler_map[AGENT_INTENT]
-        try:
-            from host_brain.app.handlers.repair_agent_handler import repair_agent_handler
-            self._handler_map[AGENT_REPAIR] = repair_agent_handler
-        except ImportError:
-            pass
-        try:
-            from host_brain.app.handlers.pentest_agent_handler import pentest_agent_handler
-            self._handler_map[AGENT_PENTEST] = pentest_agent_handler
-        except ImportError:
-            pass
-
-    @staticmethod
-    def _extract_gateway(
-        *,
-        payload: Mapping[str, Any],
-        context: Mapping[str, Any],
-    ) -> Any | None:
-        candidate = (
-            context.get("gateway")
-            or context.get("_gateway")
-            or payload.get("gateway")
-            or payload.get("_gateway")
-        )
-        return candidate
-
-    async def _ensure_runtime_gateway(
-        self,
-        *,
-        req: SubAgentRequest,
-        payload: dict[str, Any],
-        context: dict[str, Any],
-    ) -> None:
-        # Reuse existing gateway first (propagated from parent route / tool context).
-        existing_gateway = self._extract_gateway(payload=payload, context=context)
-        if existing_gateway is not None:
-            context.setdefault("gateway", existing_gateway)
-            payload.setdefault("_gateway", existing_gateway)
-            return
-
-        # Build sub-agent gateway lazily from current runtime routing.
-        try:
-            from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-                resolve_subagent_llm_runtime,
-            )
-            from host_brain.agent_runtime.subagent_gateway import (  # noqa: PLC0415
-                _build_subagent_gateway_from_runtime,
-            )
-            application_ports = self._application_ports
-            if not isinstance(application_ports, AgentRuntimeApplicationPorts):
-                raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
-
-            base_runtime = await application_ports.resolve_host_llm_runtime_async(
-                rollout_key=str(req.session_id or req.request_id or req.agent_id),
-                scene_type="EXEC_INTENT",
-            )
-            subagent_runtime = resolve_subagent_llm_runtime(base_runtime=dict(base_runtime or {}))
-            gateway = _build_subagent_gateway_from_runtime(
-                subagent_runtime,
-                application_ports=application_ports,
-                request_id=req.request_id,
-            )
-            if gateway is None:
-                return
-            context["gateway"] = gateway
-            payload["_gateway"] = gateway
-        except Exception as exc:
-            _logger.debug(
-                "[%s] sub_agent runtime gateway build skipped agent=%s: %s",
-                req.request_id,
-                req.agent_id,
-                exc,
-            )
-            return
+    __slots__ = ()
 
     async def dispatch(self, req: SubAgentRequest) -> SubAgentResponse:
-        """调度子 Agent 执行任务。
-
-        在独立线程中运行同步 handler，带超时保护。
-        子 Agent 内部的 Governor + 审计在 handler 内完成。
-        执行结果写入 skill_exec_log 供链路追踪。
-        """
-        self._ensure_handlers()
-
-        handler = self._handler_map.get(req.agent_id)
-        if handler is None:
-            resp = SubAgentResponse(
-                success=False,
-                agent_id=req.agent_id,
-                error=_runtime_text(
-                    "unknown_agent",
-                    agent_id=req.agent_id,
+        """Reject the retired direct route before any handler can load."""
+        return SubAgentResponse(
+            success=False,
+            agent_id=str(getattr(req, "agent_id", "") or "").strip(),
+            error=LEGACY_SUB_AGENT_DISPATCH_RETIRED,
+            audit_refs={
+                "status": "REJECTED",
+                "reason_code": LEGACY_SUB_AGENT_DISPATCH_RETIRED,
+                "required_path": (
+                    "HostCommand -> immutable TaskGraph -> "
+                    "GovernedDelegateDispatcher"
                 ),
-            )
-            self._log_dispatch(req, resp)
-            return resp
-
-        started_ms = int(time.time() * 1000)
-
-        raw_context = dict(req.context or {})
-        try:
-            agent_context_envelope = build_agent_context_envelope(
-                agent_id=req.agent_id,
-                task=req.task,
-                user_message=req.user_message,
-                request_id=req.request_id,
-                session_id=req.session_id,
-                context=raw_context,
-                timeout_ms=req.timeout_ms,
-            ).as_dict()
-        except ContextEnvelopeError as exc:
-            latency_ms = int(time.time() * 1000) - started_ms
-            resp = SubAgentResponse(
-                success=False,
-                agent_id=req.agent_id,
-                error=exc.reason_code,
-                audit_refs={
-                    "agent_id": req.agent_id,
-                    "agent_context": {
-                        "status": "REJECTED",
-                        "reason_code": exc.reason_code,
-                        "detail": public_decision_summary(exc.detail),
-                    },
-                },
-                latency_ms=latency_ms,
-            )
-            self._log_dispatch(req, resp)
-            return resp
-        legacy_context = project_legacy_context_for_sub_agent(raw_context)
-
-        # 构建 handler 入参（兼容现有 handler 的 payload/context 接口）。
-        # 大块历史、召回行和证据只通过 agent_context_envelope 传递，避免
-        # 子 agent 各自把 raw context 塞进 prompt。
-        payload: dict[str, Any] = {
-            "user_input": req.task,
-            "query": req.task,
-            "request_id": req.request_id,
-            "agent_context_envelope": agent_context_envelope,
-        }
-        context: dict[str, Any] = {
-            "request_id": req.request_id,
-            "session_id": req.session_id,
-            "source": "executive_router_dispatch",
-            **legacy_context,
-            "agent_context_envelope": agent_context_envelope,
-        }
-        await self._ensure_runtime_gateway(req=req, payload=payload, context=context)
-
-        try:
-            timeout_sec = max(1.0, req.timeout_ms / 1000.0)
-            result = await asyncio.wait_for(
-                asyncio.to_thread(handler, payload, context),
-                timeout=timeout_sec,
-            )
-
-            latency_ms = int(time.time() * 1000) - started_ms
-
-            # 从 handler 返回的 state 中提取结果
-            result_payload = dict(result or {}) if isinstance(result, Mapping) else {}
-            artifacts = result_payload.get("agent_artifacts") or {}
-            agent_artifact = artifacts.get(req.agent_id) or {}
-            summary = str(agent_artifact.get("summary") or "").strip()
-
-            # The complete publishable result is independent from the trace.
-            # Legacy scratchpads remain readable, but are centrally sanitized.
-            output_envelope = result_payload.get("agent_output") or {}
-            final_answer = read_public_agent_output(output_envelope).strip()
-            scratchpad = result_payload.get("react_scratchpad") or {}
-            if not final_answer:
-                final_answer = read_public_agent_output(scratchpad).strip()
-            if not final_answer:
-                final_answer = read_decision_summary(scratchpad, fallback=summary).strip()
-
-            if not final_answer:
-                # 兜底：从 narrative 提取
-                narrative_raw = result_payload.get("narrative") or result_payload.get("output") or {}
-                if isinstance(narrative_raw, dict):
-                    final_answer = public_output_text(narrative_raw.get("text")).strip()
-                elif isinstance(narrative_raw, str):
-                    final_answer = public_output_text(narrative_raw).strip()
-
-            # repair_agent 的 success 语义特殊：
-            # 不能用 final_answer 是否非空来判断（修复失败时也会有 summary 文本），
-            # 必须读取 repair_agent_trace.can_retry 才能知道修复是否真正成功、是否允许重试。
-            if req.agent_id == AGENT_REPAIR:
-                repair_trace = result_payload.get("repair_agent_trace") or {}
-                repair_success = bool(repair_trace.get("can_retry", repair_trace.get("success", bool(final_answer))))
-            else:
-                repair_success = bool(final_answer)
-
-            subgraph_commit_summary = (
-                dict(result_payload.get("subgraph_commit_summary") or {})
-                if isinstance(result_payload.get("subgraph_commit_summary"), Mapping)
-                else {}
-            )
-            subgraph_trace_raw = result_payload.get("subgraph_trace")
-            subgraph_trace = (
-                [dict(entry) for entry in subgraph_trace_raw if isinstance(entry, Mapping)]
-                if isinstance(subgraph_trace_raw, list)
-                else []
-            )
-            if len(subgraph_trace) > 64:
-                subgraph_trace = subgraph_trace[-64:]
-            intent_agent_trace = (
-                dict(result_payload.get("intent_agent_trace") or {})
-                if isinstance(result_payload.get("intent_agent_trace"), Mapping)
-                else {}
-            )
-            audit_refs: dict[str, Any] = {
-                "agent_id": req.agent_id,
-                "confidence": agent_artifact.get("confidence"),
-                "risk_flags": agent_artifact.get("risk_flags"),
-                "agent_context": {
-                    "schema_version": agent_context_envelope.get("schema_version"),
-                    "runtime_event_summary": build_context_runtime_event_payload(agent_context_envelope),
-                    "conversation_turns": len(
-                        list(dict(agent_context_envelope.get("conversation_window") or {}).get("recent_turns") or [])
-                    ),
-                    "memory_fact_count": len(list(dict(agent_context_envelope.get("memory_packet") or {}).get("facts") or [])),
-                    "evidence_item_count": len(list(dict(agent_context_envelope.get("evidence_pack") or {}).get("items") or [])),
-                    "token_budget": dict(agent_context_envelope.get("token_budget") or {}),
-                    "context_authorization": dict(agent_context_envelope.get("authorization") or {}),
-                    "pollution_report": dict(agent_context_envelope.get("pollution_report") or {}),
-                    "trace": dict(agent_context_envelope.get("trace") or {}),
-                },
-            }
-            if subgraph_commit_summary:
-                audit_refs["subgraph_commit_summary"] = subgraph_commit_summary
-            if subgraph_trace:
-                audit_refs["subgraph_trace"] = subgraph_trace
-            if intent_agent_trace:
-                audit_refs["intent_agent_trace"] = intent_agent_trace
-
-            resp = SubAgentResponse(
-                success=repair_success,
-                agent_id=req.agent_id,
-                result=final_answer,
-                audit_refs=dict(sanitize_public_payload(audit_refs)),
-                latency_ms=latency_ms,
-            )
-            self._log_dispatch(req, resp)
-            return resp
-
-        except asyncio.TimeoutError:
-            latency_ms = int(time.time() * 1000) - started_ms
-            _logger.warning(
-                "[%s] sub_agent timeout agent=%s timeout_ms=%d",
-                req.request_id, req.agent_id, req.timeout_ms,
-            )
-            resp = SubAgentResponse(
-                success=False,
-                agent_id=req.agent_id,
-                error=_runtime_text(
-                    "timeout_after",
-                    timeout_ms=req.timeout_ms,
-                ),
-                latency_ms=latency_ms,
-            )
-            self._log_dispatch(req, resp)
-            return resp
-        except Exception as exc:
-            latency_ms = int(time.time() * 1000) - started_ms
-            _logger.warning(
-                "[%s] sub_agent failed agent=%s: %s",
-                req.request_id, req.agent_id, exc,
-            )
-            resp = SubAgentResponse(
-                success=False,
-                agent_id=req.agent_id,
-                error=public_output_text(str(exc))[:200],
-                latency_ms=latency_ms,
-            )
-            self._log_dispatch(req, resp)
-            return resp
-
-    def _log_dispatch(self, req: SubAgentRequest, resp: SubAgentResponse) -> None:
-        """将子 Agent 调度结果写入 skill_exec_log 供链路追踪。"""
-        try:
-            application_ports = self._application_ports
-            if not isinstance(application_ports, AgentRuntimeApplicationPorts):
-                return
-            ledger = application_ports.audit_ledger()
-            result_code = "SUB_AGENT_OK" if resp.success else "SUB_AGENT_FAILED"
-            raw_result = str(resp.result or resp.error or "").strip()
-            result_digest = public_decision_summary(
-                raw_result,
-                fallback=f"agent={resp.agent_id} success={str(bool(resp.success)).lower()}",
-            )
-            result_ref = content_ref("sub-agent-output", raw_result or result_digest)
-            ledger.log_skill_exec({
-                "request_id": req.request_id,
-                "intent_id": f"intent::{req.request_id}::{resp.agent_id}",
-                "event_id": f"evt::{req.request_id}::{resp.agent_id}",
-                "skill_name": f"sub_agent:{resp.agent_id}",
-                "approval_token_ref": None,
-                "confirm_token_ref": None,
-                "undo_token_ref": None,
-                "result_status": "OK" if resp.success else "FAILED",
-                "result_code": result_code,
-                "result_digest": result_digest,
-                "evidence_ref": result_ref,
-                "manifest_ref": None,
-                "ts_ms": int(time.time() * 1000),
-            })
-        except Exception:
-            pass  # 审计不影响主流程
-
-
-def get_sub_agent_dispatcher(
-    *,
-    application_ports: AgentRuntimeApplicationPorts | None = None,
-) -> SubAgentDispatcher:
-    """Return a fresh dispatcher; Host composition owns any app-local ports."""
-
-    return SubAgentDispatcher(application_ports=application_ports)
+                "side_effects_executed": False,
+            },
+            latency_ms=0,
+        )

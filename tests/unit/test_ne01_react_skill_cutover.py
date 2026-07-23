@@ -61,9 +61,6 @@ def test_injected_skill_proposal_stops_before_legacy_runtime() -> None:
         patch(
             "host_brain.executive_runtime.skill_execution._execute_skill"
         ) as execute_skill,
-        patch(
-            "host_brain.app.runtime_port_wiring.build_executive_runtime_application_ports"
-        ) as build_legacy_ports,
     ):
         result = run_react_loop(
             agent_id="intent_agent",
@@ -76,7 +73,6 @@ def test_injected_skill_proposal_stops_before_legacy_runtime() -> None:
         )
 
     execute_skill.assert_not_called()
-    build_legacy_ports.assert_not_called()
     assert gateway.calls == 1
     assert result.stopped_reason == "TOOL_GOVERNED_ADMISSION_REQUIRED"
     assert result.steps[0].observation == {
@@ -94,20 +90,16 @@ def test_injected_delegate_proposal_stops_before_nested_dispatch() -> None:
         args={"agent_id": "translate_agent", "task": "translate this"},
     )
 
-    with patch(
-        "host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher"
-    ) as get_dispatcher:
-        result = run_react_loop(
-            agent_id="intent_agent",
-            user_input="translate this",
-            tools=[_injected_spec("dispatch_sub_agent")],
-            gateway=gateway,
-            max_steps=2,
-            allow_side_effects=True,
-            context={"request_id": "req-ne01-react-delegate-cutover"},
-        )
+    result = run_react_loop(
+        agent_id="intent_agent",
+        user_input="translate this",
+        tools=[_injected_spec("dispatch_sub_agent")],
+        gateway=gateway,
+        max_steps=2,
+        allow_side_effects=True,
+        context={"request_id": "req-ne01-react-delegate-cutover"},
+    )
 
-    get_dispatcher.assert_not_called()
     assert gateway.calls == 1
     assert result.stopped_reason == "TOOL_GOVERNED_ADMISSION_REQUIRED"
     assert result.steps[0].observation["reason_code"] == (

@@ -850,6 +850,7 @@ def build_governed_host_runtime(
     runtime_router: CanonicalRuntimeRouter,
     owner_id: str,
     bounded_fanout_enabled: bool = False,
+    fanout_event_buffer_size: int = 32,
     atomic_graph_success_enabled: bool = True,
     allow_uncomposed_acceptance_effects: bool = False,
     acceptance_effect_dispatcher: AcceptanceEffectDispatcher | None = None,
@@ -990,6 +991,7 @@ def build_governed_host_runtime(
         node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
         bounded_fanout_enabled=bool(bounded_fanout_enabled),
+        fanout_event_buffer_size=int(fanout_event_buffer_size),
         atomic_graph_success_enabled=bool(atomic_graph_success_enabled),
         execution_registry=getattr(
             task_runtime_container,

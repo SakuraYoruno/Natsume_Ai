@@ -24,7 +24,11 @@ from host_brain.agent_runtime.workspace_allocator import (
     WorkspaceAllocator,
 )
 from host_brain.agent_runtime.workspace_policy import WorkspaceResolution
-from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
+from host_brain.contracts.agent_runtime.work_order import (
+    AgentWorkOrder,
+    WorkOrderV3,
+    canonicalize_work_order,
+)
 from host_brain.contracts.agent_runtime.workspace_lifecycle import WorkspaceLifecycleState
 from host_brain.persistence.workspace_repository import (
     WORKSPACE_AUTHORITY_CONFLICT,
@@ -301,7 +305,7 @@ class DurableWorkspaceRuntime:
 
     def lease_for_order(
         self,
-        order: AgentWorkOrder,
+        order: AgentWorkOrder | WorkOrderV3,
         workspace_id: str,
         *,
         execution_authority: dict[str, Any] | None = None,
@@ -309,6 +313,7 @@ class DurableWorkspaceRuntime:
         """Server-side WorkspacePolicy provider; never mutates the WorkOrder."""
 
         self._ensure_process_instance()
+        order = canonicalize_work_order(order)
         binding = self._order_binding(
             order,
             workspace_id=workspace_id,
@@ -1249,27 +1254,15 @@ class DurableWorkspaceRuntime:
 
     def _order_binding(
         self,
-        order: AgentWorkOrder,
+        order: WorkOrderV3,
         *,
         workspace_id: str,
         execution_authority: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        if not isinstance(order, AgentWorkOrder):
-            raise DurableWorkspaceRuntimeError(
-                WORKSPACE_RUNTIME_BINDING_INVALID,
-                "workspace lease requires an AgentWorkOrder",
-            )
-        metadata = dict(order.metadata or {})
         authority = dict(execution_authority or {})
-        root_work_order_id = str(metadata.get("root_work_order_id") or order.work_order_id).strip()
-        graph_id = str(metadata.get("task_graph_id") or "").strip()
-        raw_revision = metadata.get("graph_revision")
-        if isinstance(raw_revision, bool):
-            raw_revision = 0
-        try:
-            graph_revision = int(raw_revision)
-        except (TypeError, ValueError):
-            graph_revision = 0
+        root_work_order_id = order.root_work_order_id
+        graph_id = str(order.task_graph_id or "").strip()
+        graph_revision = order.graph_revision
         expected_workspace_id = self.workspace_id_for(
             graph_id=graph_id,
             graph_revision=graph_revision,
@@ -1322,7 +1315,7 @@ class DurableWorkspaceRuntime:
                 WORKSPACE_RUNTIME_BINDING_INVALID,
                 "execution authority integer fields are invalid",
             ) from exc
-        expected_node = str(metadata.get("task_node_id") or "").strip()
+        expected_node = str(order.task_node_id or "").strip()
         if (
             authority_graph != graph_id
             or authority_revision != graph_revision

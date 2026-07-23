@@ -123,7 +123,39 @@ def normalized_work_order_replay_payload(work_order: WorkOrderV3) -> dict[str, A
     planning_lineage["review_ref"] = "<durable-authority-ref>"
     metadata["planning_lineage"] = planning_lineage
     payload["metadata"] = metadata
+    _normalize_frozen_executor_payloads_for_replay(payload)
     return payload
+
+
+def _normalize_frozen_executor_payloads_for_replay(payload: dict[str, Any]) -> None:
+    """Mask rotating authority references nested in an admitted adapter payload."""
+
+    input_pack = mapping(payload.get("input_pack"))
+    raw_payloads = mapping(input_pack.get("frozen_node_executor_payloads"))
+    if not raw_payloads:
+        return
+    normalized_payloads: dict[str, Any] = {}
+    for node_id, raw_payload in raw_payloads.items():
+        frozen = mapping(raw_payload)
+        adapter_order = mapping(frozen.get("work_order"))
+        metadata = mapping(adapter_order.get("metadata"))
+        lineage = mapping(metadata.get("governed_lineage"))
+        if lineage:
+            # The durable WorkOrder stays authoritative on replay.  A renewed
+            # governor/review reference is not a semantic change to the frozen
+            # legacy adapter body, but changes its transport digest.
+            if "approval_ref" in lineage:
+                lineage["approval_ref"] = "<durable-authority-ref>"
+            if "review_ref" in lineage:
+                lineage["review_ref"] = "<durable-authority-ref>"
+            metadata["governed_lineage"] = lineage
+            adapter_order["metadata"] = metadata
+            frozen["work_order"] = adapter_order
+            if "payload_sha256" in frozen:
+                frozen["payload_sha256"] = "<frozen-payload-digest>"
+        normalized_payloads[str(node_id)] = frozen
+    input_pack["frozen_node_executor_payloads"] = normalized_payloads
+    payload["input_pack"] = input_pack
 
 
 def assert_work_order_command_binding(

@@ -5,6 +5,9 @@ from typing import Any
 
 import pytest
 
+from host_brain.agent_runtime.governed_production_payload import (
+    FROZEN_NODE_EXECUTOR_PAYLOADS_KEY,
+)
 from host_brain.contracts.agent_runtime.budget_policy import BUDGET_POLICY_SCHEMA_VERSION
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
@@ -83,6 +86,36 @@ def _result(request_id: str, state: VirtualStateSnapshot, candidate_id: str) -> 
     )
 
 
+def _production_result(
+    request_id: str,
+    state: VirtualStateSnapshot,
+    candidate_id: str,
+    *,
+    objective: str,
+) -> SearchResult:
+    base_candidate = _candidate(candidate_id)
+    candidate = replace(
+        base_candidate,
+        payload={
+            **base_candidate.payload,
+            "target_id": "agent_memory_curator",
+            "objective": objective,
+            "capability_requirements": ["agent_memory_curator"],
+        },
+    )
+    return SearchResult(
+        request_id=request_id,
+        status=SearchStatus.SELECTED,
+        stop_reason="selected",
+        selected_candidate=candidate,
+        selected_path=(candidate,),
+        ranked=(),
+        trace=(SearchTraceEvent(1, "service", "search_completed", {}),),
+        counters=SearchCounters(),
+        state_snapshot=state,
+    )
+
+
 def _authority() -> PlanningExecutionAuthority:
     return PlanningExecutionAuthority(
         surface=HostCommandSurface.CHAT,
@@ -100,6 +133,7 @@ def _context(
     state: VirtualStateSnapshot,
     *,
     approval_ref: str | None = None,
+    input_pack: dict[str, Any] | None = None,
 ) -> PlanningCompilationContext:
     return PlanningCompilationContext(
         domain="code",
@@ -127,8 +161,35 @@ def _context(
         approval_ref=approval_ref or _authority().governor_grant_ref,
         review_ref="review://planning/d16-context",
         workspace={"strategy": "temp_workspace"},
+        input_pack=dict(input_pack or {}),
         input_refs=("input://planning/d16-context",),
         virtual_state=state,
+    )
+
+
+def _production_context(
+    state: VirtualStateSnapshot,
+    *,
+    candidate_id: str,
+    objective: str,
+    caller_frozen_payloads: dict[str, Any] | None = None,
+) -> PlanningCompilationContext:
+    input_pack: dict[str, Any] = {
+        "approved_candidate_inputs": {
+            candidate_id: {
+                "route": "skill",
+                "target_id": "agent_memory_curator",
+                "objective": objective,
+                "args": {"artifacts_root": "runtime://planning/d16"},
+                "depends_on_candidate_ids": [],
+            }
+        }
+    }
+    if caller_frozen_payloads is not None:
+        input_pack[FROZEN_NODE_EXECUTOR_PAYLOADS_KEY] = dict(caller_frozen_payloads)
+    return _context(
+        state,
+        input_pack=input_pack,
     )
 
 
@@ -240,6 +301,132 @@ async def test_initial_execution_forwards_context_and_binds_state_to_admission()
     assert prepared.compiled.virtual_state_digest == state.state_digest
     assert prepared.admission.work_order.approval_ref == _authority().governor_grant_ref
     assert admission.calls and application.preflight_calls
+
+
+@pytest.mark.asyncio
+async def test_production_skill_plan_freezes_node_payload_for_initial_and_replan() -> None:
+    initial_state = _state("production-initial")
+    initial_objective = "curate the approved initial planning input"
+    search = _Search(
+        _production_result(
+            "search-d16-production-initial",
+            initial_state,
+            "curate-initial",
+            objective=initial_objective,
+        )
+    )
+    admission = _Admission()
+    application = _Application()
+    service = _service(search, PlanningGraphCompiler(), admission, application)
+    initial = await service.prepare_initial(
+        SearchRequest(
+            "search-d16-production-initial",
+            initial_state=initial_state,
+            state_snapshot=initial_state,
+        ),
+        authority=_authority(),
+        created_at=16,
+        compilation_context=_production_context(
+            initial_state,
+            candidate_id="curate-initial",
+            objective=initial_objective,
+        ),
+    )
+
+    initial_node_id = initial.admission.graph.nodes[0].node_id
+    initial_payload = initial.admission.work_order.input_pack[
+        FROZEN_NODE_EXECUTOR_PAYLOADS_KEY
+    ][initial_node_id]
+    assert initial_payload["target_id"] == "agent_memory_curator"
+    assert initial_payload["work_order"]["metadata"]["request_id"] == "request-d16-context"
+    assert initial_payload["work_order"]["metadata"]["governed_lineage"] == {
+        "root_work_order_id": initial.admission.work_order.root_work_order_id,
+        "task_graph_id": initial.admission.graph.graph_id,
+        "task_node_id": initial_node_id,
+        "graph_revision": 1,
+        "business_scope": initial.admission.work_order.business_idempotency_scope,
+        "operation_fingerprint": initial.admission.work_order.operation_fingerprint,
+        "approval_ref": initial.admission.work_order.approval_ref,
+        "review_ref": initial.admission.work_order.review_ref,
+    }
+
+    replan_state = _state("production-replan")
+    replan_objective = "curate the approved replanned input"
+    search.result = _production_result(
+        "search-d16-production-replan",
+        replan_state,
+        "curate-replan",
+        objective=replan_objective,
+    )
+    failed = replace(initial.admission.graph, status=TaskGraphStatus.FAILED)
+    replanned = await service.prepare_replan(
+        SearchRequest(
+            "search-d16-production-replan",
+            initial_state=replan_state,
+            state_snapshot=replan_state,
+        ),
+        authority=_authority(),
+        previous_graph=failed,
+        failure_evidence_refs=("evidence://planning/d16-production-failure",),
+        created_at=32,
+        compilation_context=_production_context(
+            replan_state,
+            candidate_id="curate-replan",
+            objective=replan_objective,
+        ),
+    )
+
+    replan_node_id = replanned.admission.graph.nodes[0].node_id
+    replan_payload = replanned.admission.work_order.input_pack[
+        FROZEN_NODE_EXECUTOR_PAYLOADS_KEY
+    ][replan_node_id]
+    assert replanned.admission.graph.revision == 2
+    assert replan_payload["work_order"]["metadata"]["request_id"] == (
+        "request-d16-context.graph-revision-2"
+    )
+    assert replan_payload["work_order"]["metadata"]["governed_lineage"][
+        "graph_revision"
+    ] == 2
+    assert initial_payload["work_order"]["metadata"]["governed_lineage"][
+        "graph_revision"
+    ] == 1
+
+
+@pytest.mark.asyncio
+async def test_production_skill_plan_rejects_caller_supplied_frozen_payloads() -> None:
+    state = _state("production-caller-payload")
+    objective = "reject a caller supplied production payload"
+    search = _Search(
+        _production_result(
+            "search-d16-production-caller-payload",
+            state,
+            "curate-caller-payload",
+            objective=objective,
+        )
+    )
+    admission = _Admission()
+    application = _Application()
+
+    with pytest.raises(PlanningExecutionError) as raised:
+        await _service(search, PlanningGraphCompiler(), admission, application).prepare_initial(
+            SearchRequest(
+                "search-d16-production-caller-payload",
+                initial_state=state,
+                state_snapshot=state,
+            ),
+            authority=_authority(),
+            created_at=16,
+            compilation_context=_production_context(
+                state,
+                candidate_id="curate-caller-payload",
+                objective=objective,
+                caller_frozen_payloads={"node-caller": {"target_id": "agent_memory_curator"}},
+            ),
+        )
+
+    assert raised.value.reason_code == PLANNING_EXECUTION_INVALID
+    assert admission.calls == []
+    assert application.preflight_calls == []
 
 
 @pytest.mark.asyncio

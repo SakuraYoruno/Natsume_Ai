@@ -14,26 +14,37 @@ from host_brain.app.governed_task_adapter import (
     _build_contracts,
     _require_fail_closed_direct_skill_work_order,
 )
+from host_brain.app.governed_task_authority import assert_stable_work_order_replay
+from host_brain.app.governed_frozen_skill_runtime import (
+    _frozen_node_executor_payload,
+)
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
+from host_brain.agent_runtime.production_studio import build_production_work_order
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
 
-def _contracts(*, request_id: str = "request-gr03d-direct-skill") -> tuple:
+def _contracts(
+    *,
+    request_id: str = "request-gr03d-direct-skill",
+    target_id: str = "echo_skill",
+    args: dict[str, Any] | None = None,
+    governor_ts_ms: int = 1_800_000_000_000,
+) -> tuple:
     intent = {
         "schema_version": "Natsume.intent.v1",
         "id": "intent-gr03d-direct-skill",
         "route": "skill",
-        "target_id": "echo_skill",
+        "target_id": target_id,
         "task": "execute the admitted direct skill",
-        "args": {"text": "preserve me", "nested": {"value": 7}},
+        "args": args or {"text": "preserve me", "nested": {"value": 7}},
     }
     governor = {
         "request_id": request_id,
         "intent_id": intent["id"],
         "decision": "APPROVE",
         "tokens": {},
-        "ts_ms": 1_800_000_000_000,
+        "ts_ms": governor_ts_ms,
     }
     return _build_contracts(
         request_body={},
@@ -137,6 +148,82 @@ def test_work_order_v3_roundtrip_preserves_existing_direct_skill_input_pack() ->
         "confidence": 0.8,
     }
     _require_fail_closed_direct_skill_work_order(restored)
+
+
+def test_direct_production_skill_freezes_its_executor_payload_at_admission() -> None:
+    command, order, graph = _contracts(
+        target_id="agent_memory_curator",
+        args={
+            "task": "整理已经准入的长期记忆候选",
+            "artifacts_root": "artifacts/codex_runs/test-frozen-production",
+        },
+    )
+
+    payload = _frozen_node_executor_payload(
+        command=command,
+        work_order=order,
+        node_id=graph.nodes[0].node_id,
+        target_id="agent_memory_curator",
+    )
+
+    assert payload is not None
+    assert payload["schema_version"] == "Natsume.governed.production_executor_payload.v1"
+    assert payload["start_background"] is False
+    assert payload["payload_sha256"].startswith("sha256:")
+    adapter_order = payload["work_order"]
+    assert adapter_order["work_order_id"] == order.work_order_id
+    assert adapter_order["metadata"]["skill_id"] == "agent_memory_curator"
+    assert adapter_order["metadata"]["request_id"] == command.request_id
+    assert adapter_order["metadata"]["governed_lineage"] == {
+        "root_work_order_id": order.root_work_order_id,
+        "task_graph_id": order.task_graph_id,
+        "task_node_id": graph.nodes[0].node_id,
+        "graph_revision": order.graph_revision,
+        "business_scope": order.business_idempotency_scope,
+        "operation_fingerprint": order.operation_fingerprint,
+        "approval_ref": order.approval_ref,
+        "review_ref": order.review_ref,
+    }
+    expected_adapter_order = build_production_work_order(
+        {
+            "task": "整理已经准入的长期记忆候选",
+            "artifacts_root": "artifacts/codex_runs/test-frozen-production",
+            "work_order_id": order.work_order_id,
+            "request_id": command.request_id,
+            "session_id": command.session_id,
+            "person_id": command.principal_id,
+            "user_message": order.objective,
+            "approval_confirmed": True,
+            "confirmed": True,
+        },
+        skill_id="agent_memory_curator",
+    )
+    expected_metadata = dict(expected_adapter_order["metadata"])
+    actual_without_lineage = dict(adapter_order)
+    actual_metadata = dict(adapter_order["metadata"])
+    actual_metadata.pop("governed_lineage")
+    actual_without_lineage["metadata"] = actual_metadata
+    expected_adapter_order["metadata"] = expected_metadata
+    assert actual_without_lineage == expected_adapter_order
+
+
+def test_direct_production_skill_replay_masks_only_rotating_nested_authority_refs() -> None:
+    first_command, first_order, _first_graph = _contracts(
+        target_id="agent_memory_curator",
+        governor_ts_ms=1_800_000_000_000,
+    )
+    replay_command, replay_order, _replay_graph = _contracts(
+        target_id="agent_memory_curator",
+        governor_ts_ms=1_800_000_005_000,
+    )
+
+    assert first_command.governor_grant_ref != replay_command.governor_grant_ref
+    assert_stable_work_order_replay(
+        replay_order,
+        first_order,
+        candidate_command=replay_command,
+        durable_command=first_command,
+    )
 
 
 def test_direct_skill_worker_is_typed_for_v3_and_rejects_missing_budget() -> None:

@@ -4792,6 +4792,243 @@ async def test_ne01_b2_coordinator_safe_retry_charges_budget_and_runs_attempt_tw
 
 
 @pytest.mark.asyncio
+async def test_ne01_b2_due_retry_promotion_and_claim_commit_or_rollback_together(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts((("root", ()),))
+    graph = replace(
+        graph,
+        nodes=(
+            replace(
+                graph.nodes[0],
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 0},
+            ),
+        ),
+    )
+    record = HostCommandRepository(db_path, clock=lambda: NOW).admit(
+        command,
+        work_order,
+        assignment,
+        graph,
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=record["command"],
+        assignment=record["assignment"],
+        graph=record["graph"],
+    )
+    calls: list[str] = []
+    first_events = [
+        event
+        async for event in _coordinator(
+            db_path,
+            calls,
+            worker_resolver=_RetryOnceResolver(calls),
+        ).execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+    assert first_events[-1]["execution_receipt"]["status"] == "RETRY_PENDING"
+
+    store = DurableTaskStore(db_path, clock=lambda: NOW)
+    node = store.get_node(graph.graph_id, graph.revision, "root")
+    budget = store.read_scheduler_snapshot(graph.graph_id, graph.revision)["budgets"][0]
+    attempt_id = _attempt_id(admitted.for_node("root"), attempt_no=2)
+    node_aggregate_id = f"{graph.graph_id}@{graph.revision}/root"
+    claim_args = {
+        "attempt_id": attempt_id,
+        "graph_id": graph.graph_id,
+        "graph_revision": graph.revision,
+        "node_id": "root",
+        "expected_node_version": node["status_version"],
+        "expected_attempt_count": 1,
+        "owner_id": "retry-atomic-owner",
+        "lease_ttl_ms": 10_000,
+        "budget_id": budget["budget_id"],
+        "operation_scope": admitted.business_scope,
+        "operation_fingerprint": admitted.operation_fingerprint,
+        "attempt_created_outbox": _runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            0,
+            "TASK_ATTEMPT_CREATED",
+            attempt_id=attempt_id,
+        ),
+        "attempt_leased_outbox": _runtime_outbox(
+            "TASK_ATTEMPT",
+            attempt_id,
+            1,
+            "TASK_ATTEMPT_LEASED",
+            attempt_id=attempt_id,
+        ),
+        "retry_ready_outbox": _runtime_outbox(
+            "TASK_NODE",
+            node_aggregate_id,
+            node["status_version"] + 1,
+            "TASK_NODE_READY",
+        ),
+    }
+    invalid_created = _runtime_outbox(
+        "TASK_ATTEMPT",
+        attempt_id,
+        0,
+        "TASK_ATTEMPT_LEASED",
+        attempt_id=attempt_id,
+    )
+    with pytest.raises(TaskStoreError):
+        store.claim_ready_node(
+            **{**claim_args, "attempt_created_outbox": invalid_created}
+        )
+
+    after_failed_claim = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert after_failed_claim["graph_record"]["nodes"][0]["status"] == "RETRY_PENDING"
+    assert after_failed_claim["graph_record"]["nodes"][0]["status_version"] == node[
+        "status_version"
+    ]
+    assert [(row["attempt_no"], row["status"]) for row in after_failed_claim["attempts"]] == [
+        (1, "FAILED")
+    ]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE aggregate_type = 'TASK_NODE' AND aggregate_id = ?
+              AND aggregate_version = ? AND event_type = 'TASK_NODE_READY'
+            """,
+            (node_aggregate_id, node["status_version"] + 1),
+        ).fetchone()[0] == 0
+
+    claimed = store.claim_ready_node(**claim_args)
+    replayed = store.claim_ready_node(**claim_args)
+    assert claimed["replayed"] is False
+    assert replayed["replayed"] is True
+    assert replayed["attempt"]["attempt_id"] == attempt_id
+    assert replayed["lease"]["lease_id"] == claimed["lease"]["lease_id"]
+    after_claim = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert [(row["attempt_no"], row["status"]) for row in after_claim["attempts"]] == [
+        (1, "FAILED"),
+        (2, "LEASED"),
+    ]
+    assert after_claim["graph_record"]["nodes"][0]["status"] == "LEASED"
+    with sqlite3.connect(db_path) as conn:
+        event_rows = conn.execute(
+            """
+            SELECT event_type FROM task_runtime_outbox
+            WHERE event_type IN (
+                'TASK_NODE_READY', 'TASK_NODE_LEASED',
+                'TASK_ATTEMPT_CREATED', 'TASK_ATTEMPT_LEASED'
+            ) AND (
+                attempt_id = ?
+                OR (
+                    aggregate_id = ?
+                    AND aggregate_version IN (?, ?)
+                )
+            )
+            ORDER BY event_type
+            """,
+            (
+                attempt_id,
+                node_aggregate_id,
+                node["status_version"] + 1,
+                node["status_version"] + 2,
+            ),
+        ).fetchall()
+    assert [row[0] for row in event_rows] == [
+        "TASK_ATTEMPT_CREATED",
+        "TASK_ATTEMPT_LEASED",
+        "TASK_NODE_LEASED",
+        "TASK_NODE_READY",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ne01_b2_retry_requiring_review_keeps_the_review_boundary(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("root", ()),),
+        review_required=True,
+    )
+    graph = replace(
+        graph,
+        nodes=(
+            replace(
+                graph.nodes[0],
+                retry_policy={"max_attempts": 2, "retry_backoff_ms": 0},
+            ),
+        ),
+    )
+    calls: list[str] = []
+    review_store = ReviewStore(db_path, clock=lambda: NOW)
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            review_runtime=TaskNodeReviewRuntime(review_store, clock=lambda: NOW),
+            worker_resolver=_RetryOnceResolver(calls),
+        ),
+    )
+    initial = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+    assert initial[-1]["execution_receipt"]["status"] == "WAITING_APPROVAL"
+    _consume_review(review_store, initial[-1]["execution_receipt"]["projection"]["review"])
+
+    retry = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+    assert retry[-1]["execution_receipt"]["status"] == "RETRY_PENDING"
+
+    retry_review = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+    assert retry_review[-1]["execution_receipt"]["status"] == "WAITING_APPROVAL"
+    assert len(
+        DurableTaskStore(db_path, clock=lambda: NOW).read_scheduler_snapshot(
+            graph.graph_id,
+            graph.revision,
+        )["attempts"]
+    ) == 1
+    _consume_review(
+        review_store,
+        retry_review[-1]["execution_receipt"]["projection"]["review"],
+    )
+    accepted = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+    assert accepted[-1]["execution_receipt"]["accepted"] is True
+    assert calls == ["root"]
+
+
+@pytest.mark.asyncio
 async def test_ne01_b2_retry_budget_exhaustion_fails_closed_before_reservation(
     tmp_path: Path,
 ) -> None:
@@ -4928,6 +5165,7 @@ async def test_ne01_pre_reservation_failure_closes_authority_atomically(
     assert snapshot["graph_record"]["nodes"][0]["status"] == "FAILED"
     assert snapshot["graph_record"]["status"] == "FAILED"
     assert snapshot["active_leases"] == []
+    assert snapshot["budgets"][0]["status"] == "RELEASED"
     with sqlite3.connect(db_path) as conn:
         lease_status = conn.execute(
             "SELECT status FROM task_runtime_lease WHERE attempt_id = ?",
@@ -4938,13 +5176,15 @@ async def test_ne01_pre_reservation_failure_closes_authority_atomically(
         ).fetchone()[0]
         failure_outboxes = conn.execute(
             """
-            SELECT aggregate_type, event_type, attempt_id, evidence_refs_json
+            SELECT aggregate_type, event_type, attempt_id, evidence_refs_json,
+                   created_ts_ms
             FROM task_runtime_outbox
             WHERE event_type IN (
                 'TASK_ATTEMPT_FAILED',
                 'TASK_NODE_FAILED',
                 'TASK_GRAPH_FAILED',
-                'TASK_LEASE_RELEASED_TERMINAL'
+                'TASK_LEASE_RELEASED_TERMINAL',
+                'BUDGET_RESERVATION_RELEASED'
             )
             ORDER BY aggregate_type
             """
@@ -4956,10 +5196,16 @@ async def test_ne01_pre_reservation_failure_closes_authority_atomically(
         "TASK_NODE_FAILED",
         "TASK_GRAPH_FAILED",
         "TASK_LEASE_RELEASED_TERMINAL",
+        "BUDGET_RESERVATION_RELEASED",
     }
-    assert len(failure_outboxes) == 4
-    assert all(row[2] == attempt["attempt_id"] for row in failure_outboxes)
-    assert all(attempt["error_ref"] in json.loads(row[3]) for row in failure_outboxes)
+    assert len(failure_outboxes) == 5
+    attempt_outboxes = [row for row in failure_outboxes if row[2] is not None]
+    budget_outboxes = [row for row in failure_outboxes if row[2] is None]
+    assert len(attempt_outboxes) == 4
+    assert len(budget_outboxes) == 1
+    assert all(row[2] == attempt["attempt_id"] for row in attempt_outboxes)
+    assert all(attempt["error_ref"] in json.loads(row[3]) for row in attempt_outboxes)
+    assert {row[4] for row in failure_outboxes} == {attempt["completed_ts_ms"]}
 
 
 @pytest.mark.asyncio

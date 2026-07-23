@@ -50,6 +50,9 @@ from host_brain.persistence.scheduler_repository import (
 from host_brain.persistence.terminal_operator_command_store import (
     TerminalOperatorCommandStore,
 )
+from host_brain.persistence.task_runtime_feature_canary_repository import (
+    SQLiteTaskRuntimeFeatureCanaryReceiptStore,
+)
 from host_brain.task_runtime.graph_cancellation_continuation_worker import (
     GraphCancellationContinuationWorker,
 )
@@ -139,6 +142,7 @@ SchedulerResultRepositoryBuilder = Callable[..., SchedulerExecutionResultReposit
 RuntimeEventStoreBuilder = Callable[..., RuntimeEventStore]
 RuntimeOutboxPublisherBuilder = Callable[..., RuntimeOutboxPublisher]
 TerminalOperatorCommandStoreBuilder = Callable[..., TerminalOperatorCommandStore]
+FeatureCanaryStoreBuilder = Callable[..., SQLiteTaskRuntimeFeatureCanaryReceiptStore]
 
 
 _PROCESS_BOOT_ID = uuid.uuid4().hex
@@ -148,6 +152,7 @@ _CONTAINER_CONSTRUCTION_SEQUENCE_LOCK = threading.Lock()
 
 _INFRASTRUCTURE_ORDER = (
     "migration_runner",
+    "feature_canary_store",
     "task_store",
     "review_store",
     "review_continuation_store",
@@ -171,6 +176,8 @@ class ProcessTaskRuntimeContainer:
     canonical_db_path: str
     migration_runner: SQLiteMigrationRunner
     migration_result: MigrationBatchResult
+    feature_canary_store: SQLiteTaskRuntimeFeatureCanaryReceiptStore
+    feature_canary_signature_verifier: Ed25519ReconciliationProofVerifier | None
     task_store: DurableTaskStore
     recovery_id: str
     recovery_report: RecoveryReport
@@ -737,7 +744,11 @@ def build_process_task_runtime_container(
     terminal_operator_command_store_builder: TerminalOperatorCommandStoreBuilder = (
         TerminalOperatorCommandStore
     ),
+    feature_canary_store_builder: FeatureCanaryStoreBuilder = (
+        SQLiteTaskRuntimeFeatureCanaryReceiptStore
+    ),
     reconciliation_public_keys: Mapping[str, bytes] | None = None,
+    feature_canary_public_keys: Mapping[str, bytes] | None = None,
     terminal_reconciliation_auto_enabled: bool = False,
     authenticated_outcome_lookup: Callable[[str], Any | None] | None = None,
 ) -> ProcessTaskRuntimeContainer:
@@ -775,6 +786,13 @@ def build_process_task_runtime_container(
                 f"canonical migration failed: {reason}",
             )
 
+        feature_canary_store = feature_canary_store_builder(canonical)
+        constructed.append(("feature_canary_store", feature_canary_store))
+        feature_canary_signature_verifier = (
+            Ed25519ReconciliationProofVerifier(feature_canary_public_keys)
+            if feature_canary_public_keys
+            else None
+        )
         task_store = _build_task_store_with_reconciliation_authority(
             canonical_db_path=canonical,
             task_store_builder=task_store_builder,
@@ -908,6 +926,8 @@ def build_process_task_runtime_container(
         canonical_db_path=canonical,
         migration_runner=migration_runner,
         migration_result=migration_result,
+        feature_canary_store=feature_canary_store,
+        feature_canary_signature_verifier=feature_canary_signature_verifier,
         task_store=task_store,
         recovery_id=recovery_id,
         recovery_report=recovery_report,

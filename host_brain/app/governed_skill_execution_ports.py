@@ -99,6 +99,7 @@ def execute_frozen_governed_skill(
     governed_execution_context: Mapping[str, Any],
     execution_args_override: Mapping[str, Any],
     verified_node_grant: Mapping[str, Any],
+    frozen_executor_payload: Mapping[str, Any] | None = None,
 ) -> Any:
     """Run one frozen Skill without constructing Executive application ports."""
 
@@ -129,6 +130,7 @@ def execute_frozen_governed_skill(
         governed_execution_context=governed_execution_context,
         execution_args_override=execution_args_override,
         verified_node_grant=verified_node_grant,
+        frozen_executor_payload=frozen_executor_payload,
         degradation_capability_port=ports.degradation_capability_port,
     )
 

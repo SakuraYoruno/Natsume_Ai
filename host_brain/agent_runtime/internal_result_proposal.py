@@ -122,10 +122,6 @@ class InternalAgentProposalExecutor:
             frozen=frozen,
             command_repository=self._commands,
         )
-        # This is the single compatibility edge while AgentRuntimeExecutor
-        # still accepts the v2 object.  It owns no grant, result ledger, graph
-        # mutation or publication authority.
-        legacy_order = work_order.to_agent_work_order()
         execute_kwargs: dict[str, Any] = {
             "workspace_execution_authority": _workspace_execution_authority(
                 frozen
@@ -138,7 +134,7 @@ class InternalAgentProposalExecutor:
             execute_kwargs["projection_recovery_context"] = recovery_context
         result = await asyncio.to_thread(
             self._executor.execute,
-            legacy_order,
+            work_order,
             **execute_kwargs,
         )
         if not isinstance(result, Mapping):
@@ -156,6 +152,7 @@ class InternalAgentProposalExecutor:
         yield _build_internal_terminal_event(
             frozen=frozen,
             command=command,
+            work_order=work_order,
             normalized=normalized,
         )
 
@@ -165,7 +162,7 @@ class InternalAgentProposalExecutor:
     ) -> dict[str, Any]:
         """Reopen a seal-bound terminal without invoking Agent/model code."""
 
-        command, _work_order, _, _ = _reopen_frozen_admission(
+        command, work_order, _, _ = _reopen_frozen_admission(
             frozen=frozen,
             command_repository=self._commands,
         )
@@ -210,6 +207,7 @@ class InternalAgentProposalExecutor:
         terminal = _build_internal_terminal_event(
             frozen=frozen,
             command=command,
+            work_order=work_order,
             normalized=normalized,
         )
         return {
@@ -231,6 +229,7 @@ def _build_internal_terminal_event(
     *,
     frozen: FrozenNodeInput,
     command: HostCommand,
+    work_order: WorkOrderV3,
     normalized: Mapping[str, Any],
 ) -> dict[str, Any]:
     normalized = _json_mapping(
@@ -295,7 +294,8 @@ def _build_internal_terminal_event(
         "audit_refs": {
             "path": "internal_agent:leased_result_proposal",
             "result_digest": result_digest,
-            "compatibility_adapter": "WorkOrderV3.to_agent_work_order",
+            "work_order_schema_version": work_order.schema_version,
+            "legacy_v2_reprojection": False,
         },
     }
     if usage is not None:

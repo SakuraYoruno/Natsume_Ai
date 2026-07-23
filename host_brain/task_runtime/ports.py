@@ -348,6 +348,7 @@ class TaskStorePort(Protocol):
         operation_fingerprint: str | None,
         attempt_created_outbox: Any,
         attempt_leased_outbox: Any,
+        retry_ready_outbox: Any | None = None,
         review_continuation_authority: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]: ...
 
@@ -388,6 +389,9 @@ class TaskStorePort(Protocol):
         error_ref: str,
         graph_target_status: str,
         attempt_outbox: Any,
+        budget_id: str | None = None,
+        expected_budget_version: int | None = None,
+        budget_outbox: Any | None = None,
     ) -> Mapping[str, Any]: ...
 
     def fail_running_attempt_node_bundle(
