@@ -42,6 +42,9 @@ class ResearchPairedExecutionError(RuntimeError):
 class ResearchCitationExtractor(Protocol):
     """Parse transient model output into independently verifiable spans."""
 
+    @property
+    def output_schema_digest(self) -> str: ...
+
     def __call__(self, output_text: str) -> Sequence[ResearchCitationSpanV1]: ...
 
 
@@ -127,6 +130,8 @@ class ResearchPairedExecutionRunner:
             raise TypeError("external_adapter must be AttestedExternalResearchAdapter")
         if not callable(citation_extractor):
             raise TypeError("citation_extractor must be callable")
+        if not _is_digest(getattr(citation_extractor, "output_schema_digest", None)):
+            raise TypeError("citation_extractor must expose a SHA-256 output_schema_digest")
         if not callable(verifier_factory):
             raise TypeError("verifier_factory must be callable")
         if (
@@ -173,6 +178,10 @@ class ResearchPairedExecutionRunner:
             )
 
         spec = self._ledger.get_paired_run_spec(run_id=normalized_run_id)
+        if self._citation_extractor.output_schema_digest != spec.profile.output_schema_digest:
+            raise ResearchPairedExecutionError(
+                "Research citation extractor schema does not bind the preregistered profile"
+            )
         inputs = _arm_inputs(arm_inputs)
         verifier_instances: list[ResearchCitationVerifierPort] = []
         for role in spec.arm_order:
@@ -617,6 +626,11 @@ def _text(value: Any, *, field: str, limit: int) -> str:
     if not result or len(result) > limit:
         raise ResearchPairedExecutionError(f"{field} must be non-empty and bounded")
     return result
+
+
+def _is_digest(value: Any) -> bool:
+    result = str(value or "").strip().lower()
+    return len(result) == 64 and all(char in "0123456789abcdef" for char in result)
 
 
 __all__ = [

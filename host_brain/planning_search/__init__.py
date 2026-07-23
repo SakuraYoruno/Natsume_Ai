@@ -60,6 +60,12 @@ from .research_benchmark_verifier import (
     ResearchCitationVerificationError,
     ResearchCitationVerifier,
 )
+from .research_citation_output_parser import (
+    RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1,
+    RESEARCH_CITATION_OUTPUT_SCHEMA_V1,
+    ResearchCitationOutputParseError,
+    ResearchCitationOutputParserV1,
+)
 from .attested_external_research_adapter import (
     ATTESTED_EXTERNAL_RESEARCH_ADAPTER_ID,
     AttestedExternalResearchAdapter,
@@ -124,6 +130,8 @@ __all__ = [
     "CODE_BENCHMARK_RECEIPT_STATUS",
     "RESEARCH_BENCHMARK_CORPUS_MODE",
     "RESEARCH_CITATION_VERIFIER_ID",
+    "RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1",
+    "RESEARCH_CITATION_OUTPUT_SCHEMA_V1",
     "ATTESTED_EXTERNAL_RESEARCH_ADAPTER_ID",
     "RESEARCH_BENCHMARK_SCHEMA",
     "RESEARCH_EVIDENCE_CLASSES",
@@ -162,6 +170,8 @@ __all__ = [
     "ResearchBenchmarkContractError",
     "ResearchArmPlanV1",
     "ResearchCitationSpanV1",
+    "ResearchCitationOutputParseError",
+    "ResearchCitationOutputParserV1",
     "ResearchCitationVerificationError",
     "ResearchCitationVerifier",
     "AttestedExternalResearchAdapter",

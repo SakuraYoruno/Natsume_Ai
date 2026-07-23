@@ -36,6 +36,9 @@ from host_brain.persistence.research_shadow_ledger_repository import (
 from host_brain.planning_search.attested_external_research_adapter import (
     AttestedExternalResearchAdapter,
 )
+from host_brain.planning_search.research_citation_output_parser import (
+    RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1,
+)
 from host_brain.planning_search.research_paired_execution import (
     ResearchArmRuntimeInputV1,
     ResearchPairedExecutionError,
@@ -206,7 +209,7 @@ def _ledger_and_run(
     profile = ResearchExecutionProfileV1(
         prompt_digest=PROMPT_DIGEST,
         profile_digest="6" * 64,
-        output_schema_digest="7" * 64,
+        output_schema_digest=RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1,
     )
     budget = ResearchExecutionBudgetV1(
         arm_max_tokens=100,
@@ -243,9 +246,14 @@ def _inputs() -> dict[str, ResearchArmRuntimeInputV1]:
     }
 
 
-def _citation_extractor(outputs: list[str]):
-    def extract(output: str) -> tuple[ResearchCitationSpanV1, ...]:
-        outputs.append(output)
+class _CitationExtractor:
+    output_schema_digest = RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1
+
+    def __init__(self, outputs: list[str]) -> None:
+        self._outputs = outputs
+
+    def __call__(self, output: str) -> tuple[ResearchCitationSpanV1, ...]:
+        self._outputs.append(output)
         return (
             ResearchCitationSpanV1(
                 source_id="primary",
@@ -255,7 +263,9 @@ def _citation_extractor(outputs: list[str]):
             ),
         )
 
-    return extract
+
+class _MismatchedCitationExtractor(_CitationExtractor):
+    output_schema_digest = "f" * 64
 
 
 def _runner(
@@ -272,7 +282,7 @@ def _runner(
             model_attempt_service=service,
             attempt_audit_lookup=audit,
         ),
-        citation_extractor=_citation_extractor(outputs),
+        citation_extractor=_CitationExtractor(outputs),
         verifier_factory=factory,
         lease_duration_ms=10_000,
     )
@@ -325,6 +335,31 @@ async def test_d20c_runner_executes_persisted_order_and_exact_terminal_replay(tm
     assert replay.replayed_terminal_receipt is True
     assert replay.receipt_ref == result.receipt_ref
     assert service.calls == ["selected", "baseline"]
+
+
+async def test_d20c_runner_rejects_mismatched_output_schema_before_model_call(tmp_path) -> None:
+    ledger, run_id = _ledger_and_run(tmp_path)
+    audit = _AuditLookup()
+    service = _CanonicalModelService(audit=audit)
+    runner = ResearchPairedExecutionRunner(
+        ledger=ledger,
+        external_adapter=AttestedExternalResearchAdapter(
+            model_attempt_service=service,
+            attempt_audit_lookup=audit,
+        ),
+        citation_extractor=_MismatchedCitationExtractor([]),
+        verifier_factory=_VerifierFactory(),
+        lease_duration_ms=10_000,
+    )
+
+    with pytest.raises(ResearchPairedExecutionError, match="schema does not bind"):
+        await runner.execute_preregistered(
+            run_id=run_id,
+            arm_inputs=_inputs(),
+            owner_id="worker-a",
+        )
+
+    assert service.calls == []
 
 
 async def test_d20c_runner_resumes_after_one_persisted_arm_without_recalling_it(tmp_path) -> None:
