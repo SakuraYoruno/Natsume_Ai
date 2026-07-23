@@ -23,17 +23,12 @@ from typing import Any, AsyncGenerator, Callable, Dict
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
-from host_brain.composition.process_services import get_intent_engine
 from host_brain.bond.user_identity import resolve_person_id
-from host_brain.app.emotion_context import (
-    build_chat_emotion_snapshot,
-    build_chat_governance_snapshot,
-    resolve_chat_emotion_context,
-)
 from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
 )
+from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.governor.route_token import (
     RouteTokenDisposition,
     validate_governor_route_token,
@@ -539,6 +534,7 @@ async def handle_chat(
     metrics: Any,
     governed_command_application: Any | None = None,
     hard_state_provider: Callable[[], Any] | None = None,
+    input_runtime_ports: InputRuntimeApplicationPorts | None = None,
     cortex_orchestrator_sse_generator: Callable[..., Any] | None = None,
 ) -> StreamingResponse:
     """POST /v1/chat 统一入口。
@@ -587,6 +583,8 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+    if not isinstance(input_runtime_ports, InputRuntimeApplicationPorts):
+        raise RuntimeError("HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED")
 
     return StreamingResponse(
         _unified_chat_sse_generator(
@@ -598,6 +596,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             intent_draft=None,
             metrics=metrics,
             governed_command_application=governed_command_application,
+            input_runtime_ports=input_runtime_ports,
             embodiment_runtime=_request_embodiment_runtime(request),
             cortex_orchestrator_sse_generator=(
                 cortex_orchestrator_sse_generator
@@ -621,6 +620,7 @@ async def _unified_chat_sse_generator(
     intent_draft: Dict[str, Any] | None,
     metrics: Any,
     governed_command_application: Any | None = None,
+    input_runtime_ports: InputRuntimeApplicationPorts | None = None,
     embodiment_runtime: Any | None = None,
     cortex_orchestrator_sse_generator: Callable[..., Any] | None = None,
     _pre_recall_evidence: list[dict] | None = None,
@@ -638,6 +638,9 @@ async def _unified_chat_sse_generator(
     """
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    if not isinstance(input_runtime_ports, InputRuntimeApplicationPorts):
+        raise RuntimeError("HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED")
 
     input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower() or "zh"
@@ -710,12 +713,14 @@ async def _unified_chat_sse_generator(
                 embodiment_runtime=embodiment_runtime,
             )
 
-        emotion_context = resolve_chat_emotion_context(request_body=request_body)
-        governance_snapshot = build_chat_governance_snapshot(
+        emotion_context = input_runtime_ports.resolve_chat_emotion_context(
+            request_body=request_body
+        )
+        governance_snapshot = input_runtime_ports.build_chat_governance_snapshot(
             emotion_context=emotion_context,
             ts_ms=ts_ms,
         )
-        emotion_snapshot = build_chat_emotion_snapshot(
+        emotion_snapshot = input_runtime_ports.build_chat_emotion_snapshot(
             emotion_context=emotion_context,
             source="chat_request",
             ts_ms=ts_ms,
@@ -730,16 +735,18 @@ async def _unified_chat_sse_generator(
                 extra={"request_id": request_id},
             )
         else:
-            engine = get_intent_engine()
+            engine = input_runtime_ports.get_intent_engine()
             use_inline_governor = _should_use_inline_governor(intent_draft)
             governor_started_ms = int(time.time() * 1000)
-            governor_result, governor_timing = await _evaluate_governor_with_timing(
-                engine=engine,
-                intent_draft=intent_draft,
-                request_id=request_id,
-                thread_id=request_body.thread_id,
-                governance_snapshot=governance_snapshot,
-                inline=use_inline_governor,
+            governor_result, governor_timing = await (
+                input_runtime_ports.evaluate_governor_with_timing(
+                    engine=engine,
+                    intent_draft=intent_draft,
+                    request_id=request_id,
+                    thread_id=request_body.thread_id,
+                    governance_snapshot=governance_snapshot,
+                    inline=use_inline_governor,
+                )
             )
             governor_latency_ms = int(time.time() * 1000) - governor_started_ms
             if isinstance(governor_result, dict):

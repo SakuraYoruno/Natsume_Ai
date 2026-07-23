@@ -750,9 +750,9 @@
         "typed_input_cutoff_named_process_services_consumer_modules": 39,
         "typed_input_cutoff_named_process_services_imported_names": 110,
         "typed_input_cutoff_all_import_form_consumer_modules": 43,
-        "named_process_services_consumer_modules": 31,
-        "named_process_services_imported_names": 68,
-        "all_import_form_consumer_modules": 34,
+        "named_process_services_consumer_modules": 29,
+        "named_process_services_imported_names": 59,
+        "all_import_form_consumer_modules": 32,
         "process_service_container_total_fields": 50,
         "process_service_container_lock_fields": 3,
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 46
@@ -800,8 +800,9 @@
         "status": "LOCAL_TARGETED_PASS_PROGRAM_PARTIAL",
         "scope": "ASGI_AND_HOST_LIFECYCLE_REQUIRE_EXPLICIT_FROZEN_HOST_APPLICATION_PORTS_WITH_NO_PROCESS_SERVICES_IMPORT_OR_LOCATOR_FALLBACK",
         "production_mapping": "SINGLE_TRANSITIONAL_COMPOSITION_ROOT_ONLY",
-        "fresh_inventory": "31_NAMED_MODULES_68_NAMES_34_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
+        "fresh_inventory": "29_NAMED_MODULES_59_NAMES_32_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
         "targeted_regression": "68_PASSED_IN_11_03_SECONDS",
+        "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
         "static_checks": "COMPILEALL_AND_AST_NO_DIRECT_LOCATOR_IMPORT_PASS",
         "related_http_contract_baseline": "5_HEALTH_503_FAILURES_REPRODUCED_ON_ORIGIN_DEV_1EA153216_NOT_A_SLICE_REGRESSION",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
@@ -810,6 +811,48 @@
         "ne07_full_stack": "NOT_RUN_NE07",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
         "boundary": "PROCESS_SERVICE_CONTAINER_REMAINS_GLOBAL_THIS_IS_NOT_APP_LOCAL_INSTANCE_PROOF_OR_FULL_SERVICE_LOCATOR_REMOVAL"
+      },
+      "governed_chat_surface_ports_local_regression": {
+        "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+        "production_wiring": "HOST_LIFESPAN_AGENT_RUNTIME_AND_LIFE_AUTHORITY_TO_SURFACE_RUNTIME_PORTS_TO_INTERNAL_RUNTIME_COMPOSITION_TO_TOOL_RUNTIME_TO_FROZEN_CHAT_ROUTE",
+        "retired_path": "SURFACE_MAIN_CHAIN_ADAPTER_HAS_NO_PROCESS_SERVICES_IMPORT_OR_REQUEST_TIME_COMPOSITION",
+        "fail_closed": "MISSING_AGENT_RUNTIME_OR_LIFE_AUTHORITY_REJECTS_BEFORE_LEGACY_SURFACE_FALLBACK",
+        "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
+        "evidence_refs": [
+          "host_brain/app/surface_runtime_composition.py",
+          "host_brain/app/internal_runtime_composition.py",
+          "host_brain/app/tool_runtime_composition.py",
+          "host_brain/app/surface_main_chain_adapter.py",
+          "tests/unit/test_ne01_surface_runtime_composition.py"
+        ],
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_canary": "NOT_RUN",
+        "docker_full_stack": "NOT_RUN_NE07",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "remaining_boundary": "CHAT_ACCEPTANCE_RECEIPT_GENERIC_DELEGATE_THALAMUS_ANS_GLOBAL_PROVIDERS_AND_SEVEN_ROUTE_EVIDENCE_REMAIN_INCOMPLETE"
+      },
+      "governed_chat_admission_ports_local_regression": {
+        "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
+        "production_wiring": "HOST_ASGI_INPUT_RUNTIME_PORTS_TO_CHAT_HANDLER_TO_CORTEX",
+        "retired_path": "CHAT_HANDLER_HAS_NO_PROCESS_SERVICES_OR_DIRECT_EMOTION_CONTEXT_IMPORT",
+        "fail_closed": "NORMAL_MODE_REJECTS_MISSING_INPUT_RUNTIME_PORTS",
+        "migrated_dependencies": "INTENT_ENGINE_GOVERNOR_TIMING_AND_EMOTION_CONTEXT_FROM_TYPED_INPUT_RUNTIME_PORTS",
+        "final_passed": 53,
+        "final_duration_seconds": 6.08,
+        "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
+        "remaining_boundary": "THALAMUS_AND_ANS_GLOBAL_AGENT_PROVIDERS_POST_COMMIT_EMBODIMENT_AND_COMMIT_BOUND_CHAT_ACCEPTANCE_REMAIN_INCOMPLETE",
+        "evidence_refs": [
+          "host_brain/app/asgi.py",
+          "host_brain/app/chat_handler.py",
+          "host_brain/input_runtime/ports.py",
+          "tests/unit/test_chat_handler_streaming.py",
+          "tests/unit/test_task0479_route_token_gate.py",
+          "tests/unit/test_ne01_chat_admission_ports.py"
+        ],
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_canary": "NOT_RUN",
+        "docker_full_stack": "NOT_RUN_NE07",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "full_architecture_static_gate": {
         "status": "PASS",
@@ -1190,7 +1233,7 @@
         "full_architecture_static_gate": "PASS",
         "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
       },
-      "boundary": "FRESH_AST_CURRENT_31_MODULES_68_NAMES_AND_34_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_THE_SINGLE_LEGACY_FACADE_MAPPING_IS_TRANSITIONAL_COMPOSITION_NOT_APP_LOCAL_INSTANCE_PROOF_OR_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_CONTAINER_52_3_48_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_AND_DEV_C2BE993BC_45_123_51_ARE_PREVIOUS_HISTORY_UNPREVIEWED_VOICE_EFFECTS_ZERO_GLOBAL_SERVICE_LOCATOR_REMAINS_HARD_STATE_0115_DURABLE_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_WIRED_CANARY_NOT_RUN_NE01_IN_PROGRESS",
+      "boundary": "FRESH_AST_CURRENT_29_MODULES_59_NAMES_AND_32_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_GOVERNED_CHAT_SURFACE_AND_ADMISSION_PORTS_ARE_LIFESPAN_INJECTED_THE_SINGLE_LEGACY_FACADE_MAPPING_IS_TRANSITIONAL_COMPOSITION_NOT_APP_LOCAL_INSTANCE_PROOF_OR_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_CONTAINER_52_3_48_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_AND_DEV_C2BE993BC_45_123_51_ARE_PREVIOUS_HISTORY_UNPREVIEWED_VOICE_EFFECTS_ZERO_GLOBAL_SERVICE_LOCATOR_REMAINS_HARD_STATE_0115_DURABLE_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_WIRED_CANARY_NOT_RUN_NE01_IN_PROGRESS",
       "agent_runtime_scope_boundary": "HOST_LIFESPAN_SCOPE_IS_A_LOCAL_DEPENDENCY_PUBLICATION_SLICE_ONLY_GENERIC_DELEGATE_MULTINODE_TASKGRAPH_AND_WAVE_INTEGRATION_REMAIN_UNPROVEN",
       "hard_state_receipt_boundary": "PERMANENT_HISTORICAL_LOOKUP_MUTATING_REVISION_MODE_EXACT_CAS_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE",
       "hard_state_operator_boundary": "REQUEST_IDENTITY_CONTRACT_PREPARED_ONLY_OPERATOR_HTTP_E2E_NOT_PROVEN_BLOCKED_BY_PREVIEW_AND_TASKGRAPH",

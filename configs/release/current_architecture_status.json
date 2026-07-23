@@ -580,9 +580,9 @@
     },
     "locator_consumer_inventory": {
       "combined_current_inventory": {
-        "named_modules": 31,
-        "named_imported_names": 68,
-        "all_import_form_consumer_modules": 34,
+        "named_modules": 29,
+        "named_imported_names": 59,
+        "all_import_form_consumer_modules": 32,
         "process_service_container_fields": 50,
         "process_service_container_lock_fields": 3,
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 46
@@ -638,14 +638,15 @@
       "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state", "obs_metrics_collector", "query_projection_store"],
       "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
       "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state", "get_obs_metrics_collector", "get_query_projection_store", "peek_query_projection_store"],
-      "boundary": "FRESH_AST_CURRENT_IS_31_MODULES_68_NAMES_34_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_THE_SINGLE_PRODUCTION_LEGACY_FACADE_MAPPING_IS_A_TRANSITIONAL_COMPOSITION_ROOT_NOT_APP_LOCAL_INSTANCE_PROOF_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
+      "boundary": "FRESH_AST_CURRENT_IS_29_MODULES_59_NAMES_32_ALL_FORM_CONSUMERS_AND_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_GOVERNED_CHAT_SURFACE_AND_ADMISSION_PORTS_ARE_LIFESPAN_INJECTED_THE_SINGLE_PRODUCTION_LEGACY_FACADE_MAPPING_IS_A_TRANSITIONAL_COMPOSITION_ROOT_NOT_APP_LOCAL_INSTANCE_PROOF_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_DEV_C2BE993BC_45_123_51_AND_OTHER_SLICE_INVENTORIES_ARE_COMMIT_BOUND_HISTORY_PROCESS_WIDE_LOCATOR_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
     },
     "host_application_port_root_current_validation": {
       "status": "LOCAL_TARGETED_PASS_PROGRAM_PARTIAL",
       "scope": "ASGI_AND_HOST_LIFECYCLE_CONSUME_EXPLICIT_FROZEN_HOST_APPLICATION_PORTS_WITH_NO_PROCESS_SERVICES_IMPORT_OR_LOCATOR_FALLBACK",
       "production_mapping": "SINGLE_TRANSITIONAL_COMPOSITION_ROOT_ONLY",
-      "fresh_locator_inventory": "31_NAMED_MODULES_68_NAMES_34_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
+      "fresh_locator_inventory": "29_NAMED_MODULES_59_NAMES_32_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
       "targeted_regression": "68_PASSED_IN_11_03_SECONDS",
+      "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
       "static_checks": "COMPILEALL_AND_AST_NO_DIRECT_LOCATOR_IMPORT_PASS",
       "related_http_contract_baseline": "5_HEALTH_503_FAILURES_HEALTH_DEGRADATION_AUTHORITY_UNAVAILABLE_REPRODUCED_ON_ORIGIN_DEV_1EA153216_NOT_A_SLICE_REGRESSION",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
@@ -654,6 +655,19 @@
       "ne07_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "boundary": "PROCESS_SERVICE_CONTAINER_REMAINS_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_THIS_DOES_NOT_PROVE_APP_LOCAL_INSTANCE_ISOLATION_WORKER_OBS_TYPED_CONTAINERS_OR_GLOBAL_SERVICE_LOCATOR_REMOVAL"
+    },
+    "governed_chat_explicit_ports_rebase_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "production_wiring": "HOST_LIFESPAN_AGENT_RUNTIME_AND_LIFE_AUTHORITY_TO_SURFACE_RUNTIME_PORTS_TO_INTERNAL_TOOL_RUNTIME_TO_FROZEN_CHAT_AND_HOST_ASGI_INPUT_RUNTIME_PORTS_TO_CHAT_HANDLER_TO_CORTEX",
+      "fail_closed": "SURFACE_OR_NORMAL_CHAT_MISSING_REQUIRED_TYPED_PORTS_REJECTS_WITHOUT_LOCATOR_FALLBACK",
+      "retired_paths": "SURFACE_MAIN_CHAIN_AND_CHAT_HANDLER_HAVE_NO_PROCESS_SERVICES_IMPORT_CHAT_HANDLER_HAS_NO_DIRECT_EMOTION_CONTEXT_IMPORT",
+      "fresh_locator_inventory": "29_NAMED_MODULES_59_NAMES_32_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
+      "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "EXPLICIT_DEPENDENCY_WIRING_ONLY_THALAMUS_ANS_GLOBAL_PROVIDERS_LEGACY_EXECUTIVE_GENERIC_DELEGATE_COMMIT_BOUND_CHAT_ACCEPTANCE_AND_SEVEN_ROUTE_EVIDENCE_REMAIN_INCOMPLETE"
     },
     "host_lifecycle_composition": {
       "status": "PARTIAL_APP_LOCAL_OWNER_WITH_DURABLE_RUNTIME_FENCED_HARD_STATE_AND_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",

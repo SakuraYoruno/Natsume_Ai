@@ -403,6 +403,7 @@ def create_app(
             metrics,
             governed_command_application=tool_composition.provide_runtime(),
             hard_state_provider=host_lifecycle.get_hard_state,
+            input_runtime_ports=input_runtime_ports,
             cortex_orchestrator_sse_generator=(
                 input_runtime_ports.cortex_orchestrator_sse_generator
             ),
