@@ -8,6 +8,9 @@ benefit result; the production acceptance status remains external-pending.
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
+import json
+from unittest.mock import patch
 
 import pytest
 
@@ -197,7 +200,7 @@ def _plan(arm_id: str, candidate: str) -> ResearchArmPlanV1:
 def _ledger_and_run(
     tmp_path,
     *,
-    arm_order: tuple[str, str] = ("BASELINE", "SELECTED"),
+    randomization_draw: int = 0,
     pair_max_tokens: int = 200,
 ) -> tuple[SQLiteResearchShadowLedger, str]:
     db_path = tmp_path / "d20c-paired.sqlite3"
@@ -219,16 +222,52 @@ def _ledger_and_run(
         pair_max_wall_time_ms=200,
     )
     registration_id = ledger.register(_binding(), profile, budget)
-    return (
-        ledger,
-        ledger.preregister_run(
+    with patch(
+        "host_brain.persistence.research_shadow_ledger_repository.secrets.randbelow",
+        return_value=randomization_draw,
+    ):
+        run_id = ledger.preregister_randomized_run(
             registration_id=registration_id,
             baseline=_plan("baseline", "research.baseline"),
             selected=_plan("selected", "research.selected"),
-            arm_order=arm_order,
-            randomized_arm_order=True,
-        ),
+            cohort_run_key=f"d20c-paired-{randomization_draw}-{pair_max_tokens}",
+        )
+    return ledger, run_id
+
+
+def _insert_legacy_run(ledger: SQLiteResearchShadowLedger) -> str:
+    profile = ResearchExecutionProfileV1(
+        prompt_digest=PROMPT_DIGEST,
+        profile_digest="6" * 64,
+        output_schema_digest=RESEARCH_CITATION_OUTPUT_SCHEMA_DIGEST_V1,
     )
+    budget = ResearchExecutionBudgetV1(100, 1, 100, 200, 200)
+    registration_id = ledger.register(_binding(), profile, budget)
+    baseline = _plan("legacy-baseline", "research.legacy.baseline")
+    selected = _plan("legacy-selected", "research.legacy.selected")
+    payload = {
+        "registration_id": registration_id,
+        "baseline": baseline.to_dict(),
+        "selected": selected.to_dict(),
+        "arm_order": ["BASELINE", "SELECTED"],
+        "randomized_arm_order": True,
+        "production_influence_enabled": False,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    run_id = f"researchrun_{digest[:32]}"
+    with ledger._connection() as conn:  # noqa: SLF001 - creates a read-only legacy compatibility fixture.
+        conn.execute(
+            """
+            INSERT INTO planning_search_research_run_spec
+            (run_id, spec_digest, registration_id, baseline_arm_id, selected_arm_id,
+             spec_json, randomized_arm_order, production_influence_enabled, created_at_ms)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0)
+            """,
+            (run_id, digest, registration_id, baseline.arm_id, selected.arm_id, encoded),
+        )
+        conn.commit()
+    return run_id
 
 
 def _inputs() -> dict[str, ResearchArmRuntimeInputV1]:
@@ -289,7 +328,7 @@ def _runner(
 
 
 async def test_d20c_runner_executes_persisted_order_and_exact_terminal_replay(tmp_path) -> None:
-    ledger, run_id = _ledger_and_run(tmp_path, arm_order=("SELECTED", "BASELINE"))
+    ledger, run_id = _ledger_and_run(tmp_path, randomization_draw=1)
     audit = _AuditLookup()
     service = _CanonicalModelService(audit=audit)
     outputs: list[str] = []
@@ -355,6 +394,31 @@ async def test_d20c_runner_rejects_mismatched_output_schema_before_model_call(tm
     with pytest.raises(ResearchPairedExecutionError, match="schema does not bind"):
         await runner.execute_preregistered(
             run_id=run_id,
+            arm_inputs=_inputs(),
+            owner_id="worker-a",
+        )
+
+    assert service.calls == []
+
+
+async def test_d20c_runner_refuses_legacy_caller_chosen_order_before_model_call(tmp_path) -> None:
+    ledger, _ = _ledger_and_run(tmp_path)
+    legacy_run_id = _insert_legacy_run(ledger)
+    legacy_spec = ledger.get_paired_run_spec(run_id=legacy_run_id)
+    assert legacy_spec.owner_randomized is False
+    audit = _AuditLookup()
+    service = _CanonicalModelService(audit=audit)
+    runner = _runner(
+        ledger=ledger,
+        audit=audit,
+        service=service,
+        outputs=[],
+        factory=_VerifierFactory(),
+    )
+
+    with pytest.raises(ResearchPairedExecutionError, match="owner-generated arm randomization"):
+        await runner.execute_preregistered(
+            run_id=legacy_run_id,
             arm_inputs=_inputs(),
             owner_id="worker-a",
         )

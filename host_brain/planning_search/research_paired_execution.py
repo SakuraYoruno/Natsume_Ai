@@ -168,6 +168,7 @@ class ResearchPairedExecutionRunner:
 
         normalized_run_id = _text(run_id, field="run_id", limit=255)
         normalized_owner_id = _text(owner_id, field="owner_id", limit=255)
+        spec = self._ledger.get_paired_run_spec(run_id=normalized_run_id)
         terminal = self._ledger.get_terminal_receipt(run_id=normalized_run_id)
         if terminal is not None:
             return ResearchPairedExecutionResult(
@@ -177,7 +178,10 @@ class ResearchPairedExecutionRunner:
                 replayed_terminal_receipt=True,
             )
 
-        spec = self._ledger.get_paired_run_spec(run_id=normalized_run_id)
+        if not spec.owner_randomized:
+            raise ResearchPairedExecutionError(
+                "Research paired execution requires owner-generated arm randomization"
+            )
         if self._citation_extractor.output_schema_digest != spec.profile.output_schema_digest:
             raise ResearchPairedExecutionError(
                 "Research citation extractor schema does not bind the preregistered profile"
