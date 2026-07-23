@@ -20,21 +20,10 @@ from host_brain.app.agent_runtime_composition import (
 from host_brain.app.chat_handler import handle_chat
 from host_brain.app.chat_immune_gate import evaluate_immune_gate_for_chat, schedule_chat_immune_gate_event
 from host_brain.app.chat_routes import handle_v1_chat_route
-from host_brain.composition.process_services import (
-    get_ledger,
-    get_intent_engine,
-    get_memory_worth_evaluator,
-    get_security_immune_agent,
-    set_memory_service_container,
-    get_token_service,
-    get_bond_dynamics_writer,
-    get_prompt_registry,
-    get_capability_forge_service,
-    get_capability_gap_telemetry,
-    get_capability_scorecard_provider,
-    get_life_snapshot_reader,
+from host_brain.app.asgi_runtime_helpers import (
+    build_scheduler_seed_configs,
+    dispatch_edge_events,
 )
-from host_brain.app.edge_event_routes import handle_edge_events_route
 from host_brain.app.http_hooks import runtime_lifespan
 from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
@@ -51,7 +40,6 @@ from host_brain.app.host_life_scheduler_wiring import (
     compose_life_command_authority,
     compose_life_dispatchers as _compose_life_dispatchers,
     reset_life_command_authority,
-    scheduler_seed_configs,
     submit_life_tick_command,
 )
 from host_brain.app.host_runtime_context_wiring import (
@@ -87,7 +75,6 @@ from host_brain.app.host_obs_source_composition import (
 from host_brain.app.process_service_wiring import configure_process_service_ports
 from host_brain.lifecycle_runtime.proactive_dispatch import run_proactive_intent_dispatch
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
-from host_brain.input_runtime.worker_dispatch import _dispatch_to_graph
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
 from host_brain.app.tool_runtime_composition import (
@@ -131,6 +118,10 @@ from host_brain.composition.canon import (
 from host_brain.composition.memory import (
     ProcessMemoryContainer,
     build_process_memory_container,
+)
+from host_brain.composition.host_application import (
+    HostApplicationPorts,
+    build_production_host_application_ports,
 )
 from host_brain.composition import agent_workspace as workspace
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER, build_process_life_container
@@ -202,27 +193,6 @@ def _submit_life_tick_command(
     )
 
 
-def resolve_bond_engine():
-    from host_brain.composition.process_services import (  # noqa: PLC0415
-        get_bond_stage_engine,
-    )
-
-    return get_bond_stage_engine()
-
-
-async def edge_events_endpoint(
-    request_body: EdgeEventsRequest,
-    *,
-    input_runtime_ports: InputRuntimeApplicationPorts,
-) -> EdgeEventsResponse:
-    return await handle_edge_events_route(
-        request_body=request_body,
-        get_ledger=get_ledger,
-        logger=logger,
-        input_dispatcher=partial(_dispatch_to_graph, ports=input_runtime_ports),
-    )
-
-
 def _command_ingress_hmac_secrets() -> dict[str, str]:
     return command_ingress_hmac_secrets(
         input_settings=get_input_settings(),
@@ -230,20 +200,33 @@ def _command_ingress_hmac_secrets() -> dict[str, str]:
     )
 
 
-def _scheduler_seed_configs():
-    return scheduler_seed_configs(
-        settings=get_scheduler_settings(),
-        security_immune_agent_provider=get_security_immune_agent,
-        logger=logger,
-    )
-
-
-def create_app() -> FastAPI:
+def create_app(
+    *,
+    host_application_ports: HostApplicationPorts | None = None,
+) -> FastAPI:
     from host_brain.app.tribe_composition import build_tribe_application_ports
 
     configure_process_service_ports()
-    host_lifecycle = build_host_lifecycle_container()
+    application_ports = (
+        host_application_ports
+        if host_application_ports is not None
+        else build_production_host_application_ports()
+    )
+    if not isinstance(application_ports, HostApplicationPorts):
+        raise TypeError("host_application_ports must be HostApplicationPorts")
+    host_lifecycle = build_host_lifecycle_container(
+        initial_sys_mode=get_core_settings().sys_mode,
+        ports=application_ports.lifecycle,
+        require_durable_hard_state=True,
+    )
     host_services = host_lifecycle.ports
+    ledger_provider = host_services.require_provider("ledger")
+    intent_engine_provider = host_services.require_provider("intent_engine")
+    prompt_registry_provider = host_services.require_provider("prompt_registry")
+    life_snapshot_reader_provider = host_services.require_provider(
+        "life_snapshot_reader"
+    )
+    bond_engine_provider = host_services.require_provider("bond_stage_engine")
     agent_runtime_scope = AgentRuntimeApplicationScope(host_services=host_services)
 
     tribe_application_ports = build_tribe_application_ports(
@@ -282,12 +265,12 @@ def create_app() -> FastAPI:
     tool_composition = GovernedHostToolRuntimeComposition(
         GovernedHostToolRuntimeDependencies(
             skill_registry=host_services.skill_registry,
-            token_service=get_token_service,
+            token_service=application_ports.token_service,
             capability_broker=host_services.capability_broker,
             resource_manager=host_lifecycle.get_resource_manager,
-            ledger=get_ledger,
+            ledger=ledger_provider,
             tool_catalog=host_services.tool_catalog,
-            intent_engine=get_intent_engine,
+            intent_engine=intent_engine_provider,
             model_attempt_service=host_services.model_attempt_service,
         )
     )
@@ -365,8 +348,8 @@ def create_app() -> FastAPI:
         tool_broker_provider=tool_composition.provide_tool_broker,
         tool_catalog_provider=host_services.tool_catalog,
         governed_tool_application_provider=tool_composition.provide_tool_application,
-        bond_engine_provider=resolve_bond_engine,
-        bond_writer_provider=get_bond_dynamics_writer,
+        bond_engine_provider=bond_engine_provider,
+        bond_writer_provider=application_ports.bond_dynamics_writer,
         mode_transition_service_provider=(
             host_lifecycle.get_mode_transition_service
         ),
@@ -437,7 +420,7 @@ def create_app() -> FastAPI:
             evaluate_immune_gate_fn=evaluate_immune_gate_for_chat,
             schedule_immune_gate_fn=partial(
                 schedule_chat_immune_gate_event,
-                get_ledger=get_ledger,
+                get_ledger=ledger_provider,
                 logger=logger,
             ),
             handle_chat_fn=handle_chat_with_runtime,
@@ -451,9 +434,11 @@ def create_app() -> FastAPI:
     ) -> EdgeEventsResponse:
         # Keep the FastAPI signature to one request body. ``functools.partial``
         # exposes the bound ports dataclass as a second body parameter.
-        return await edge_events_endpoint(
+        return await dispatch_edge_events(
             request_body,
             input_runtime_ports=input_runtime_ports,
+            ledger_provider=ledger_provider,
+            logger=logger,
         )
 
     def obs_command_ingress_provider():
@@ -502,7 +487,7 @@ def create_app() -> FastAPI:
         nonlocal guardian_heartbeat_task, catalog_rollout_guardian_task
         nonlocal startup_probe_statuses
         async with runtime_lifespan(
-            get_ledger=get_ledger,
+            get_ledger=ledger_provider,
             logger=logger,
             lifecycle_ports=lifecycle_runtime_ports,
             host_lifecycle=host_lifecycle,
@@ -560,13 +545,13 @@ def create_app() -> FastAPI:
                 runtime_context_application = runtime_context_composition = None
 
             try:
-                ledger = get_ledger()
+                ledger = ledger_provider()
                 security = build_process_security_service_container(
                     ledger=ledger,
                     canonical_db_path=str(
                         getattr(ledger, "canonical_db_path", "") or ""
                     ),
-                    token_service=get_token_service(),
+                    token_service=application_ports.token_service(),
                     route_ports=route_ports,
                     degradation_capability_port_provider=(
                         degradation_capability_port_provider
@@ -584,7 +569,7 @@ def create_app() -> FastAPI:
                 # This is the fail-closed durable startup gate.  The canonical
                 # migrations and process-owned stores must be ready before the
                 # ASGI lifespan yields and routes become available.
-                ledger = get_ledger()
+                ledger = ledger_provider()
                 # Host source readers may observe these services, but never
                 # construct them from a GET request.
                 host_obs_ledger = ledger
@@ -594,9 +579,11 @@ def create_app() -> FastAPI:
                 )
                 try:
                     host_obs_capability_gap_telemetry = (
-                        get_capability_gap_telemetry()
+                        application_ports.capability_gap_telemetry()
                     )
-                    host_obs_capability_forge = get_capability_forge_service()
+                    host_obs_capability_forge = (
+                        application_ports.capability_forge_service()
+                    )
                 except Exception:
                     logger.warning(
                         "HOST_OBS_CAPABILITY_SOURCE_PREWARM_FAILED",
@@ -611,7 +598,7 @@ def create_app() -> FastAPI:
                     )
                 try:
                     host_obs_capability_scorecards = (
-                        get_capability_scorecard_provider()
+                        application_ports.capability_scorecard_provider()
                     )
                 except Exception:
                     logger.warning(
@@ -937,13 +924,13 @@ def create_app() -> FastAPI:
                 memory = build_process_memory_container(
                     ledger=ledger,
                     canonical_db_path=task_runtime.canonical_db_path,
-                    worth_evaluator=get_memory_worth_evaluator(),
+                    worth_evaluator=application_ports.memory_worth_evaluator(),
                     memory_guard=ExistingMemoryGuardAdapter(
                         host_services.memory_guard()
                     ),
                     episodic_projection_store=episodic_projection_store,
                 )
-                set_memory_service_container(memory)
+                application_ports.memory_service_container_setter(memory)
                 internal_composition = _compose_internal_runtime(
                     application=application,
                     task_runtime=task_runtime,
@@ -961,10 +948,10 @@ def create_app() -> FastAPI:
                         lambda: life_command_authority_provider(ledger)[1]
                     ),
                     agent_runtime_ports=agent_runtime_ports,
-                    token_service_provider=get_token_service,
-                    intent_engine_provider=get_intent_engine,
+                    token_service_provider=application_ports.token_service,
+                    intent_engine_provider=intent_engine_provider,
                     model_attempt_service_provider=host_services.model_attempt_service,
-                    prompt_registry_provider=get_prompt_registry,
+                    prompt_registry_provider=prompt_registry_provider,
                     workspace_composer=workspace.compose_agent_workspace_application_scope,
                     artifact_store_factory=AgentArtifactStore,
                     scheduler_worker_registry_factory=SchedulerWorkerRegistry,
@@ -1029,8 +1016,8 @@ def create_app() -> FastAPI:
                         intent,
                         ports=lifecycle_runtime_ports,
                         logger=logger,
-                        get_ledger=get_ledger,
-                        life_snapshot_reader=get_life_snapshot_reader,
+                        get_ledger=ledger_provider,
+                        life_snapshot_reader=life_snapshot_reader_provider,
                         retention_policy=None,
                         ui_pusher=scheduler_ui_pusher,
                         execution_context=execution_context,
@@ -1044,7 +1031,7 @@ def create_app() -> FastAPI:
                     return _scheduler_result_wiring.distillation_scheduler_handler_result(report)
 
                 async def security_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    result = await get_security_immune_agent().run_once(
+                    result = await application_ports.security_immune_agent().run_once(
                         reason="scheduled"
                     )
                     return _scheduler_result_wiring.security_immune_scheduler_handler_result(result)
@@ -1205,10 +1192,10 @@ def create_app() -> FastAPI:
                 scheduler = build_process_scheduler_container(
                     task_runtime_container=task_runtime,
                     ledger=ledger,
-                    token_service=get_token_service(),
+                    token_service=application_ports.token_service(),
                     evaluator=command_ingress.evaluator,
                     claim_result_store=command_ingress.store,
-                    intent_engine=get_intent_engine(),
+                    intent_engine=intent_engine_provider(),
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
                     current_mode=scheduler_current_mode,
@@ -1222,7 +1209,13 @@ def create_app() -> FastAPI:
                         "security_immune": security_immune_scheduler_handler,
                         "agent_immune": agent_immune_scheduler_handler,
                     },
-                    seed_definitions=_scheduler_seed_configs(),
+                    seed_definitions=build_scheduler_seed_configs(
+                        settings=get_scheduler_settings(),
+                        security_immune_agent_provider=(
+                            application_ports.security_immune_agent
+                        ),
+                        logger=logger,
+                    ),
                     seed_worker_keys={
                         "life_tick": "life_command",
                         "life_io_dispatch_periodic": "life_io",
@@ -1268,7 +1261,7 @@ def create_app() -> FastAPI:
                         terminal_reconciliation_read_authority
                     ),
                     memory=memory,
-                    intent_engine_provider=get_intent_engine,
+                    intent_engine_provider=intent_engine_provider,
                     runtime_group_factory=GovernedRuntimeGroup,
                     review_command_service_factory=TaskReviewCommandService,
                     internal_command_service_factory=InternalAgentCommandService,
@@ -1325,7 +1318,9 @@ def create_app() -> FastAPI:
                     embodiment_authority_task=embodiment_authority_task,
                     reset_life_command_authority=_reset_life_command_authority,
                     embodiment_runtime=embodiment_runtime,
-                    set_memory_service_container=set_memory_service_container,
+                    set_memory_service_container=(
+                        application_ports.memory_service_container_setter
+                    ),
                     memory=memory,
                     command_ingress=command_ingress,
                     tool_composition=tool_composition,
@@ -1336,11 +1331,11 @@ def create_app() -> FastAPI:
         lifespan=app_lifespan,
         metrics=runtime_metrics,
         logger=logger,
-        get_ledger=get_ledger,
+        get_ledger=ledger_provider,
         get_tool_broker=tool_composition.provide_tool_broker,
         get_tool_catalog=host_services.tool_catalog,
-        get_bond_engine=resolve_bond_engine,
-        get_bond_writer=get_bond_dynamics_writer,
+        get_bond_engine=bond_engine_provider,
+        get_bond_writer=application_ports.bond_dynamics_writer,
         chat_endpoint=chat_endpoint_with_runtime,
         edge_events_endpoint=edge_events_endpoint_with_runtime,
         root_endpoint=root_endpoint,

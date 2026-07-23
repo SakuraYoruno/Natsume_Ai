@@ -14,6 +14,11 @@ from host_brain.app.host_lifecycle_composition import (
     HostLifecycleApplicationPorts,
     HostLifecycleContainer,
     HostLifecycleScopeError,
+    build_host_lifecycle_container,
+)
+from host_brain.composition.host_application import (
+    HostApplicationPorts,
+    build_production_host_application_ports,
 )
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
@@ -112,6 +117,61 @@ def test_host_lifecycle_ports_are_frozen_and_slotted() -> None:
 
     with pytest.raises(FrozenInstanceError):
         ports.memory_guard = object  # type: ignore[misc]
+    assert not hasattr(ports, "__dict__")
+
+
+def test_host_lifecycle_builder_requires_explicit_ports_without_locator_fallback() -> None:
+    ports = _ports([])
+
+    container = build_host_lifecycle_container(
+        initial_sys_mode="focus",
+        ports=ports,
+        require_durable_hard_state=True,
+    )
+
+    source = (
+        ROOT / "host_brain" / "app" / "host_lifecycle_composition.py"
+    ).read_text(encoding="utf-8-sig")
+    tree = ast.parse(source)
+    assert container.ports is ports
+    assert container.get_hard_state().sys_mode == "focus"
+    assert container.require_durable_hard_state is True
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "host_brain.composition.process_services"
+        for node in ast.walk(tree)
+    )
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "host_brain.composition"
+        and any(alias.name == "process_services" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+
+
+def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from host_brain.composition import process_services
+
+    ledger_provider = lambda: object()
+    token_provider = lambda: object()
+    bond_provider = lambda: object()
+    setter = lambda _value: None
+    monkeypatch.setattr(process_services, "get_ledger", ledger_provider)
+    monkeypatch.setattr(process_services, "get_token_service", token_provider)
+    monkeypatch.setattr(process_services, "get_bond_dynamics_writer", bond_provider)
+    monkeypatch.setattr(process_services, "set_memory_service_container", setter)
+
+    ports = build_production_host_application_ports()
+
+    assert isinstance(ports, HostApplicationPorts)
+    assert ports.lifecycle.ledger is ledger_provider
+    assert ports.token_service is token_provider
+    assert ports.bond_dynamics_writer is bond_provider
+    assert ports.memory_service_container_setter is setter
+    with pytest.raises(FrozenInstanceError):
+        ports.token_service = object  # type: ignore[misc]
     assert not hasattr(ports, "__dict__")
 
 
@@ -679,9 +739,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 33
-    assert sum(named_import_modules.values()) == 83
-    assert len(all_import_modules) == 37
+    assert len(named_import_modules) == 31
+    assert sum(named_import_modules.values()) == 68
+    assert len(all_import_modules) == 34
     assert (
         ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
     ) not in all_import_modules
@@ -696,11 +756,17 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
     ) not in all_import_modules
     assert ROOT / "host_brain" / "app" / "http_hooks.py" not in all_import_modules
     assert (
+        ROOT / "host_brain" / "app" / "host_lifecycle_composition.py"
+    ) not in all_import_modules
+    assert ROOT / "host_brain" / "app" / "asgi.py" not in all_import_modules
+    assert (
+        ROOT / "host_brain" / "composition" / "host_application.py"
+    ) in all_import_modules
+    assert (
         ROOT / "host_brain" / "app" / "conversation_writer.py"
     ) not in all_import_modules
     assert (
         ROOT / "host_brain" / "app" / "vts_emotion_driver.py"
     ) not in all_import_modules
     assert not (ROOT / "host_brain" / "app" / "intelligent_runtime.py").exists()
-    asgi_imports = named_import_modules[ROOT / "host_brain" / "app" / "asgi.py"]
-    assert asgi_imports == 13
+    assert (ROOT / "host_brain" / "app" / "asgi.py") not in named_import_modules

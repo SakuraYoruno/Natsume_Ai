@@ -370,7 +370,7 @@
           "host_brain/task_runtime/node_execution_runtime.py": 1498,
           "host_brain/task_runtime/operation_recovery_runtime.py": 205,
           "host_brain/app/acceptance_effect_handlers.py": 1262,
-          "host_brain/app/asgi.py": 1376,
+          "host_brain/app/asgi.py": 1389,
           "host_brain/persistence/scheduler_repository.py": 2942
         },
         "focused_modules": {
@@ -750,9 +750,9 @@
         "typed_input_cutoff_named_process_services_consumer_modules": 39,
         "typed_input_cutoff_named_process_services_imported_names": 110,
         "typed_input_cutoff_all_import_form_consumer_modules": 43,
-        "named_process_services_consumer_modules": 38,
-        "named_process_services_imported_names": 107,
-        "all_import_form_consumer_modules": 42,
+        "named_process_services_consumer_modules": 31,
+        "named_process_services_imported_names": 68,
+        "all_import_form_consumer_modules": 34,
         "process_service_container_total_fields": 50,
         "process_service_container_lock_fields": 3,
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 46
@@ -795,6 +795,21 @@
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "production_canary": "NOT_RUN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+      },
+      "host_application_port_root_local_regression": {
+        "status": "LOCAL_TARGETED_PASS_PROGRAM_PARTIAL",
+        "scope": "ASGI_AND_HOST_LIFECYCLE_REQUIRE_EXPLICIT_FROZEN_HOST_APPLICATION_PORTS_WITH_NO_PROCESS_SERVICES_IMPORT_OR_LOCATOR_FALLBACK",
+        "production_mapping": "SINGLE_TRANSITIONAL_COMPOSITION_ROOT_ONLY",
+        "fresh_inventory": "31_NAMED_MODULES_68_NAMES_34_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
+        "targeted_regression": "68_PASSED_IN_11_03_SECONDS",
+        "static_checks": "COMPILEALL_AND_AST_NO_DIRECT_LOCATOR_IMPORT_PASS",
+        "related_http_contract_baseline": "5_HEALTH_503_FAILURES_REPRODUCED_ON_ORIGIN_DEV_1EA153216_NOT_A_SLICE_REGRESSION",
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_canary": "NOT_RUN",
+        "real_model": "NOT_RUN",
+        "ne07_full_stack": "NOT_RUN_NE07",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "boundary": "PROCESS_SERVICE_CONTAINER_REMAINS_GLOBAL_THIS_IS_NOT_APP_LOCAL_INSTANCE_PROOF_OR_FULL_SERVICE_LOCATOR_REMOVAL"
       },
       "full_architecture_static_gate": {
         "status": "PASS",
@@ -850,7 +865,7 @@
         "remaining_static_gaps": [],
         "resolved_static_owner_splits": [
           "ACCEPTANCE_1798_TO_1262",
-          "ASGI_1527_TO_1376",
+          "ASGI_1527_TO_1389_UNDER_1400_GATE",
           "SCHEDULER_3537_TO_2942"
         ]
       },
@@ -1060,8 +1075,8 @@
         "react_cutoff_imported_names": 120,
         "visual_cutoff_modules": 41,
         "visual_cutoff_imported_names": 117,
-        "current_modules": 40,
-        "current_imported_names": 116,
+        "current_modules": 31,
+        "current_imported_names": 68,
         "scope": "ONLY_EXACT_FROM_HOST_BRAIN_COMPOSITION_PROCESS_SERVICES_IMPORT_FORM_NOT_FULL_REPOSITORY"
       },
       "all_process_services_import_consumer_modules": {
@@ -1069,16 +1084,16 @@
         "previous_dev_baseline": 51,
         "react_cutoff": 49,
         "visual_cutoff": 47,
-        "current": 46,
+        "current": 34,
         "scope": "ALL_IMPORT_FORMS"
       },
       "process_service_container": {
         "visual_cutoff_fields": 54,
         "visual_cutoff_lock_fields": 4,
         "visual_cutoff_mutable_service_references_excluding_locks_and_application_ports": 49,
-        "fields": 52,
+        "fields": 50,
         "lock_fields": 3,
-        "mutable_service_references_excluding_locks_and_application_ports": 48
+        "mutable_service_references_excluding_locks_and_application_ports": 46
       },
       "host_lifecycle_boundary": {
         "publication": "FACTORY_AND_START_MUST_SUCCEED_BEFORE_APP_LOCAL_PROVIDER_PUBLICATION",
@@ -1175,12 +1190,14 @@
         "full_architecture_static_gate": "PASS",
         "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
       },
-      "boundary": "CURRENT_33_MODULES_83_NAMES_IS_THE_NAMED_IMPORT_INVENTORY_ONLY_ALL_PROCESS_SERVICES_IMPORT_FORMS_STILL_HAVE_37_CONSUMER_MODULES_CONTAINER_IS_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_LIFECYCLE_RUNTIME_TRIBE_INPUT_RUNTIME_APPLICATION_MODEL_ATTEMPT_AND_HOST_LIFESPAN_AGENT_RUNTIME_SCOPE_USE_EXPLICIT_PROVIDERS_AND_FAIL_CLOSED_WHEN_MISSING_AGENT_RUNTIME_SCOPE_PUBLISHES_ONLY_AFTER_LIFE_AUTHORITY_TO_INPUT_CORTEX_LIFE_PROJECTION_AND_CONVERSATION_ACCEPTANCE_AND_INJECTS_MODEL_ROUTE_CATALOG_BOND_STAGE_ENGINE_SESSION_TOPIC_TACTIC_STORES_VTS_LEDGER_TTS_ROUTER_AND_META_LEARNING_UNUSED_INTELLIGENT_RUNTIME_PLANNING_AGENT_SKILL_COMPOSER_DIRECT_EXECUTION_IS_RETIRED_TTS_ROUTE_ACCEPTS_SCOPE_EXPLICIT_DEPENDENCIES_ONLY_THIS_IS_DEPENDENCY_RESOLUTION_CLEANUP_NOT_APP_LOCAL_INSTANCE_PROOF_OR_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_CONTAINER_52_3_48_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_AND_DEV_C2BE993BC_45_123_51_ARE_PREVIOUS_HISTORY_UNPREVIEWED_VOICE_EFFECTS_ZERO_GLOBAL_SERVICE_LOCATOR_REMAINS_HARD_STATE_0115_DURABLE_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_WIRED_CANARY_NOT_RUN_NE01_IN_PROGRESS",
+      "boundary": "FRESH_AST_CURRENT_31_MODULES_68_NAMES_AND_34_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_THE_SINGLE_LEGACY_FACADE_MAPPING_IS_TRANSITIONAL_COMPOSITION_NOT_APP_LOCAL_INSTANCE_PROOF_OR_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_CONTAINER_52_3_48_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_AND_DEV_C2BE993BC_45_123_51_ARE_PREVIOUS_HISTORY_UNPREVIEWED_VOICE_EFFECTS_ZERO_GLOBAL_SERVICE_LOCATOR_REMAINS_HARD_STATE_0115_DURABLE_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_WIRED_CANARY_NOT_RUN_NE01_IN_PROGRESS",
       "agent_runtime_scope_boundary": "HOST_LIFESPAN_SCOPE_IS_A_LOCAL_DEPENDENCY_PUBLICATION_SLICE_ONLY_GENERIC_DELEGATE_MULTINODE_TASKGRAPH_AND_WAVE_INTEGRATION_REMAIN_UNPROVEN",
       "hard_state_receipt_boundary": "PERMANENT_HISTORICAL_LOOKUP_MUTATING_REVISION_MODE_EXACT_CAS_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE",
       "hard_state_operator_boundary": "REQUEST_IDENTITY_CONTRACT_PREPARED_ONLY_OPERATOR_HTTP_E2E_NOT_PROVEN_BLOCKED_BY_PREVIEW_AND_TASKGRAPH",
       "evidence_refs": [
         "host_brain/app/host_lifecycle_composition.py",
+        "host_brain/composition/host_application.py",
+        "host_brain/app/asgi_runtime_helpers.py",
         "host_brain/app/agent_runtime_composition.py",
         "host_brain/app/lifecycle_runtime_composition.py",
         "host_brain/app/input_runtime_composition.py",

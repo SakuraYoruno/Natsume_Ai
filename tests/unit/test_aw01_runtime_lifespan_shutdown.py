@@ -9,9 +9,30 @@ from host_brain.app.lifecycle_runtime_composition import (
     build_lifecycle_runtime_application_ports,
 )
 from host_brain.app.host_lifecycle_composition import (
+    HostLifecycleApplicationPorts,
     build_host_lifecycle_container,
 )
 from host_brain.tribe.application_ports import TribeApplicationPorts
+
+
+
+def _host_lifecycle_ports() -> HostLifecycleApplicationPorts:
+    provider = lambda: object()
+    factory = lambda **_kwargs: object()
+    return HostLifecycleApplicationPorts(
+        memory_guard=provider,
+        state_arbiter=provider,
+        distillation_engine=provider,
+        semantic_recaller=provider,
+        episodic_store=provider,
+        skill_registry=provider,
+        tool_catalog=provider,
+        capability_broker=provider,
+        model_attempt_service=provider,
+        mode_transition_service_factory=factory,
+        activity_monitor_factory=factory,
+        resource_manager_factory=factory,
+    )
 
 
 @pytest.mark.asyncio
@@ -42,7 +63,10 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
         "unbind_tribe_application_ports",
         lambda **_kwargs: events.append("tribe-unbind"),
     )
-    host_lifecycle = build_host_lifecycle_container()
+    host_lifecycle = build_host_lifecycle_container(
+        initial_sys_mode="normal",
+        ports=_host_lifecycle_ports(),
+    )
 
     with pytest.raises(RuntimeError, match="lifespan body failed"):
         async with http_hooks.runtime_lifespan(
