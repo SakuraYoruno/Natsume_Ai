@@ -11,6 +11,8 @@
 
 当前结构边界：Acceptance、ASGI、Scheduler 三个 owner 为1262/1389/2942行，focused helper/wiring/store不转移原writer、lifespan/task owner或repository UoW owner。967行 Budget rejection Store只拥有受约束的 C mutation；444行只读 terminal resolver统一响应丢失、duplicate replay和reconciliation，93行纯 route helper绑定HostCommand/TaskNode/WorkerProjection且拒绝Internal降级。独立 Gate 1–14=`PASS`、`failed_gates=[]`，Gate 3=`new_mixed_over_800=[]`，没有扩allowlist；上一结构提交36文件265项只作历史。静态PASS不等于NE-01或完整架构完成，NE-01仍`PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+Tribe runtime 边界已从 Process Container 收敛到 `TribeRuntimeScope`：ASGI root 选定兼容 registry/state 和固定 agent provider catalog，scope 在 lifespan 内绑定/解绑 application ports、注册订阅、构造 handoff 并提供 Obs reader。全局 agent/bus 尚未迁移，跨 scope fence 因而只允许一个 live Host，第二 scope 失败关闭；当前 locator inventory 为 named21/47、all-form24、Container48/2/45。这个数据不代表多 app 隔离、全局 locator 删除或 NE-01 完成。
+
 ## 1. 系统边界
 
 Natsume AI 由一个 Host 控制面、多个接入/外显运行面和若干可选基础服务组成。Host 负责业务决策和长期状态，Gateway 负责平台协议，Edge 负责本机感知与物理动作，Observability 负责只读投影和 Operator 交互。

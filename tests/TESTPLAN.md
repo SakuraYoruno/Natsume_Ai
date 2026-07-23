@@ -324,6 +324,12 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-COMPOSITION-BUNDLE-03：locator inventory 必须由 AST 重新计算为 named 40 modules/116 names、all-form 44 modules、Container 50 fields/3 locks/46 mutable refs；Lifecycle Runtime 与 Tribe 两个模块必须不在 all-form 集合中。named 值不变是因为旧实现为 module import，不得伪写成20个 named import 被删除。typed bundle 的 provider identity 与完全省略 bundle 时的失败关闭均须有运行时测试，不能只靠词法扫描。
 - 本 Gate 只证明依赖解析点收敛，不证明 bundle 背后的 Tribe/Endocrine/Memory 等服务实例已 app-local，也不证明 Service Locator 清零。首轮为 `46 passed + 4 fixture/contract failures`；更新旧库存、显式 ModelAttempt fixture 和 Tribe 结构合同后，同一集合为 `50 passed in 7.33s`。加入 typed bundle identity 与省略 bundle fail-closed 运行时证据后，最终同一集合为 `52 passed in 9.05s`；各轮禁止相加。NE-01 波次集成和 production canary 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+### NE-01 Tribe Runtime 应用作用域
+
+- T-NE01-TRIBE-SCOPE-01：`create_app()` 必须构造一个 `TribeRuntimeScope` 并传给 lifespan；该 scope 必须独占 Tribe application-port bind/unbind、订阅注册、handoff coordinator 和 Obs state reader。`host_brain/composition/tribe_runtime.py`、`ProcessServiceContainer.tribe_runtime_composition`、`tribe_runtime_lock` 与 `get_tribe_handoff_coordinator()` 必须为 0。
+- T-NE01-TRIBE-SCOPE-02：production scope 只能从 composition root 接收 registry/state/fixed agent providers；scope 源码不得 import `process_services`、`ProcessServiceContainer` 或 singleton getter。两个 scope 竞争同一 compatibility agent catalog 时，恰好一个成功绑定，另一个以 `TRIBE_APPLICATION_PORTS_FOREIGN_BINDING` 失败；wrong owner、binding drift 和 provider 不可用必须失败关闭，释放后才允许顺序 rebind。
+- T-NE01-TRIBE-SCOPE-03：该 scope 只为仍 process-global 的 agents/bus 提供单活 binding fence，不得把它写成 concurrent multi-app isolation、完整 locator 删除、generic Delegate、七路线 receipt 或 NE-01 通过。最终定向单元/合同集合为 `73 passed in 12.05s`；波次 integration、真实 Docker 服务栈和远程 CI 均独立记录；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ### NE-01 Input Runtime 显式 Host service bundle
 
 - T-NE01-COMPOSITION-INPUT-01：生产 `create_app()` 必须把同一个 `HostLifecycleApplicationPorts` 传给 Input Runtime composition；Intent、Ledger、Life snapshot、Multimodal Observer/Processor 只能从该 bundle 解析，Input composition 对 `process_services` 的 import/回读必须为0。

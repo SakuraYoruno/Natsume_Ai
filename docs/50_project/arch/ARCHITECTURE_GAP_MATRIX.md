@@ -8,7 +8,7 @@
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
-最新 locator inventory（2026-07-23）为具名 `21` consumer 模块、`47` 个具名 import、`24` 个全部 import-form consumer，Container 仍为 `50/3/46`。Tribe 把同一 Host lifespan ledger 显式传给偏好、对话经历和每个 bundle 自有的 `IntentSequenceAllocator`；后者不再保留进程级缓存或 locator fallback，无 caller 的 `input_service_log.get_ledger_safe()`、`surface_reply_postprocessor.py` 与未预算的 `codex_spark_reply_judge.py`（连同 setting、prompt/prewarm/profile route）继续退役。frozen Chat 只接受主 Surface ModelAttempt，旧 secondary trace 失败关闭。Thalamus、Agent Runtime 和 frozen Surface 都只持有既有 belief/lesson 的 read pack，post-process 也不再直写 Conversation Experience。这是 `MISSING_WITH_CLEANUP_PROGRESS` 中的局部减法：旧 writer 已收回，但 NE-06 proposal/activation writer、Composition、Chat 和 NE-01 仍未完成。
+最新 locator inventory（2026-07-23）为具名 `21` consumer 模块、`47` 个具名 import、`24` 个全部 import-form consumer，Container 为 `48/2/45`。`TribeRuntimeScope` 已从 process Container 接管 Tribe port bind/unbind、订阅、handoff 与 Obs reader；旧 `composition/tribe_runtime.py`、Container slot 和 lock 已删除。compatibility state/registry/agents/bus 仍是 process-global 注入依赖，因此 binding fence 只支持单活 Host、第二 scope 失败关闭，并不提供并发 multi-app 隔离。这是 `MISSING_WITH_CLEANUP_PROGRESS` 中的局部减法：旧 writer/slot 已收回，但 NE-06 proposal/activation writer、完整 Composition、Chat、通用 Delegate 和 NE-01 仍未完成。
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 

@@ -3,6 +3,8 @@
 
 # Natsume AI 下一代演进正式执行合同
 
+> 当前库存纠偏：本文件早期切片中出现的 `named27/53、all-form30、Container50/3/46` 均为对应提交的历史快照；当前工作树以 `named21/47、all-form24、Container48/2/45` 为准。Tribe runtime 已改由 ASGI-owned `TribeRuntimeScope` 管理，但兼容 agents/bus 仍 process-global，只保证单活 Host。
+
 版本：v3.1
 日期：2026-07-23
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
@@ -223,6 +225,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW`。
 
 #### Lane D：Composition 与 workspace
 
+- 当前 Tribe scope 切片：`create_app()` 构造一个 `TribeRuntimeScope`，lifespan 仅经它 bind/unbind `TribeApplicationPorts`、注册订阅并向 Obs 提供 state reader；`composition/tribe_runtime.py` 与 ProcessServiceContainer 的 Tribe slot/lock 必须为 0。compatibility registry、state registry、agents/bus 仍由唯一 composition root 注入且保持 process-global，因此 shared binding fence 仅允许单活 Host，第二 scope 失败关闭，不能把本切片写成 per-app Tribe 状态隔离、generic Delegate 切流或 NE-01 完成。
 - D0/W0/W1 已完成既定围栏；W2 在 Internal Agent 单路线接入 graph-bound Git worktree、heartbeat/handoff/takeover 和 cleanup continuation，并保持缺 secret 默认 fail closed。protected-artifact 消费者现证明 clean/no-change accepted HEAD、0116 promotion、启动期 sealed checkpoint continuation与精确终态sealed abandon/cleanup，不证明一般 write promotion或一般恢复。PR #88 依次切断 `run_skill`/`dispatch_sub_agent` 与 Visual Agent route-local loop，但没有退役普通 ReAct/Agent Tool authority。仍需周期 survivor continuation、crash-left unsealed partial cleanup、failure/cancel/budget claim closeout、general `settle_worker` crash bundle、受控container/OS tenant、进程级取消、一般写节点、Domain/Skill全路线与真实canary，不能把 `DIRECTORY_FENCE + worktree` 写成完整隔离；
 - mixed-file ceiling 与 allowlist 均未抬高。首批四个 authority 文件和第二批七个文件均按“生命周期 helper、纯 codec/contract、无独立 store 的 command mixin”边界完成拆分；fresh 全仓 Gate 已返回 `issues=[]`。这只关闭 mixed-responsibility 静态清单，`DurableDagSchedulingRuntime` 仍是临时 outer orchestrator，46 个可变 Service Locator 引用、一般恢复和生产 canary 仍未完成；full architecture static 当前为 `PASS`、`failed_gates=[]`，但不能据此宣称 NE-01 或完整架构闭环；
 - 用 `HostApplicationContainer`、`ObsApplicationContainer`、`WorkerApplicationContainer` 等 typed scopes 替代模块全局 container；

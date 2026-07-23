@@ -62,15 +62,12 @@ class ProcessServiceContainer:
     model_runtime_composition: Any = None
     capability_runtime_composition: Any = None
     application_ports: Any = None
-    tribe_runtime_composition: Any = None
     model_runtime_lock: RLock = None  # type: ignore[assignment]
     capability_runtime_lock: RLock = None  # type: ignore[assignment]
-    tribe_runtime_lock: RLock = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         self.model_runtime_lock = RLock()
         self.capability_runtime_lock = RLock()
-        self.tribe_runtime_lock = RLock()
 
     def clear_service_references(self) -> None:
         """Reset service references while preserving synchronization objects."""

@@ -750,12 +750,12 @@
         "typed_input_cutoff_named_process_services_consumer_modules": 39,
         "typed_input_cutoff_named_process_services_imported_names": 110,
         "typed_input_cutoff_all_import_form_consumer_modules": 43,
-        "named_process_services_consumer_modules": 29,
-        "named_process_services_imported_names": 59,
-        "all_import_form_consumer_modules": 32,
-        "process_service_container_total_fields": 50,
-        "process_service_container_lock_fields": 3,
-        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 46
+        "named_process_services_consumer_modules": 21,
+        "named_process_services_imported_names": 47,
+        "all_import_form_consumer_modules": 24,
+        "process_service_container_total_fields": 48,
+        "process_service_container_lock_fields": 2,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 45
       },
       "typed_host_service_bundle_local_regression": {
         "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
@@ -800,7 +800,7 @@
         "status": "LOCAL_TARGETED_PASS_PROGRAM_PARTIAL",
         "scope": "ASGI_AND_HOST_LIFECYCLE_REQUIRE_EXPLICIT_FROZEN_HOST_APPLICATION_PORTS_WITH_NO_PROCESS_SERVICES_IMPORT_OR_LOCATOR_FALLBACK",
         "production_mapping": "SINGLE_TRANSITIONAL_COMPOSITION_ROOT_ONLY",
-        "fresh_inventory": "29_NAMED_MODULES_59_NAMES_32_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS",
+        "fresh_inventory": "21_NAMED_MODULES_47_NAMES_24_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS",
         "targeted_regression": "68_PASSED_IN_11_03_SECONDS",
         "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
         "static_checks": "COMPILEALL_AND_AST_NO_DIRECT_LOCATOR_IMPORT_PASS",
@@ -810,7 +810,7 @@
         "real_model": "NOT_RUN",
         "ne07_full_stack": "NOT_RUN_NE07",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-        "boundary": "PROCESS_SERVICE_CONTAINER_REMAINS_GLOBAL_THIS_IS_NOT_APP_LOCAL_INSTANCE_PROOF_OR_FULL_SERVICE_LOCATOR_REMOVAL"
+        "boundary": "PROCESS_SERVICE_CONTAINER_REMAINS_GLOBAL_AT_48_FIELDS_2_LOCKS_45_MUTABLE_REFS_TRIBE_RUNTIME_SLOT_LOCK_AND_PROCESS_HELPER_ARE_RETIRED_TRIBE_RUNTIME_SCOPE_IS_ASGI_OWNED_BUT_COMPATIBILITY_AGENTS_BUS_AND_REGISTRIES_REMAIN_PROCESS_GLOBAL_SINGLE_LIVE_HOST_ONLY_THIS_IS_NOT_APP_LOCAL_INSTANCE_PROOF_OR_FULL_SERVICE_LOCATOR_REMOVAL"
       },
       "governed_chat_surface_ports_local_regression": {
         "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
@@ -858,6 +858,19 @@
         "production_canary": "NOT_RUN",
         "docker_full_stack": "NOT_RUN_NE07",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+      },
+      "tribe_runtime_scope_local_regression": {
+        "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+        "production_wiring": "ASGI_COMPOSITION_ROOT_TO_TRIBE_RUNTIME_SCOPE_TO_LIFESPAN_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_STATE_READER",
+        "retired_paths": "COMPOSITION_TRIBE_RUNTIME_PROCESS_CONTAINER_TRIBE_SLOT_LOCK_AND_PROCESS_HANDOFF_ACCESSOR_REMOVED",
+        "binding_safety": "FIXED_AGENT_PROVIDER_CATALOG_SHARED_PORT_FENCE_FOREIGN_BINDING_WRONG_OWNER_AND_BINDING_DRIFT_FAIL_CLOSED_SEQUENTIAL_REBIND_AFTER_RELEASE_ONLY",
+        "current_inventory": "21_NAMED_MODULES_47_NAMES_24_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS",
+        "targeted_regression": "73_PASSED_IN_12_05_SECONDS",
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_canary": "NOT_RUN",
+        "docker_full_stack": "NOT_RUN_NE07",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "boundary": "COMPATIBILITY_TRIBE_AGENTS_BUS_STATE_AND_HOST_REGISTRIES_REMAIN_PROCESS_GLOBAL_SINGLE_LIVE_HOST_ONLY_NOT_PARALLEL_MULTI_APP_ISOLATION_OR_SERVICE_LOCATOR_REMOVAL"
       },
       "full_architecture_static_gate": {
         "status": "PASS",
@@ -1123,8 +1136,8 @@
         "react_cutoff_imported_names": 120,
         "visual_cutoff_modules": 41,
         "visual_cutoff_imported_names": 117,
-        "current_modules": 31,
-        "current_imported_names": 68,
+        "current_modules": 21,
+        "current_imported_names": 47,
         "scope": "ONLY_EXACT_FROM_HOST_BRAIN_COMPOSITION_PROCESS_SERVICES_IMPORT_FORM_NOT_FULL_REPOSITORY"
       },
       "all_process_services_import_consumer_modules": {
@@ -1132,23 +1145,24 @@
         "previous_dev_baseline": 51,
         "react_cutoff": 49,
         "visual_cutoff": 47,
-        "current": 34,
+        "current": 24,
         "scope": "ALL_IMPORT_FORMS"
       },
       "process_service_container": {
         "visual_cutoff_fields": 54,
         "visual_cutoff_lock_fields": 4,
         "visual_cutoff_mutable_service_references_excluding_locks_and_application_ports": 49,
-        "fields": 50,
-        "lock_fields": 3,
-        "mutable_service_references_excluding_locks_and_application_ports": 46
+        "fields": 48,
+        "lock_fields": 2,
+        "mutable_service_references_excluding_locks_and_application_ports": 45
       },
       "host_lifecycle_boundary": {
         "publication": "FACTORY_AND_START_MUST_SUCCEED_BEFORE_APP_LOCAL_PROVIDER_PUBLICATION",
         "activity_factory_failure": "MODE_AUTHORITY_NOT_PUBLISHED",
         "close_begin_fence": "ACLOSE_CLOSING_BLOCKS_BEGIN",
         "resource_manager_startup_sample": "RUNS_IN_THE_SOLE_OWNED_RESOURCE_MANAGER_LOOP_THREAD",
-        "tribe_lifespan_binding": "PROCESS_GLOBAL_EXACT_OWNER_BIND_UNBIND_ONLY_ONE_LIVE_HOST_SECOND_LIVE_HOST_FAILS_CLOSED_SEQUENTIAL_REBIND_AFTER_RELEASE_ALLOWED",
+        "tribe_lifespan_binding": "ASGI_OWNED_TRIBE_RUNTIME_SCOPE_BINDS_UNBINDS_AND_REGISTERS_SUBSCRIPTIONS_THROUGH_SHARED_EXACT_OWNER_FENCE_ONLY_ONE_LIVE_HOST_SECOND_SCOPE_FAILS_CLOSED_SEQUENTIAL_REBIND_AFTER_RELEASE_ALLOWED",
+        "tribe_runtime_scope": "APP_LOCAL_LIFESPAN_OWNER_FOR_PORT_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_READER_NO_PROCESS_CONTAINER_RUNTIME_SLOT",
         "concurrent_multi_app_tribe_isolation": "NOT_SUPPORTED_NOT_CLAIMED",
         "hard_state_owner": "APP_LOCAL_HOST_HARD_STATE_OWNER_SHARED_BY_CHAT_TRIBE_LIFECYCLE_AND_SCHEDULER",
         "hard_state_bootstrap": "CORE_SETTINGS_SYS_MODE_BOOTSTRAP_ONLY_NO_RUNTIME_ENV_READ_OR_WRITE",
@@ -1238,7 +1252,7 @@
         "full_architecture_static_gate": "PASS",
         "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
       },
-      "boundary": "FRESH_AST_CURRENT_29_MODULES_59_NAMES_AND_32_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_50_FIELDS_3_LOCKS_46_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_GOVERNED_CHAT_SURFACE_AND_ADMISSION_PORTS_ARE_LIFESPAN_INJECTED_THE_SINGLE_LEGACY_FACADE_MAPPING_IS_TRANSITIONAL_COMPOSITION_NOT_APP_LOCAL_INSTANCE_PROOF_OR_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_TYPED_INPUT_39_110_43_TYPED_LIFECYCLE_TRIBE_40_116_44_HARD_STATE_40_116_46_CONTAINER_52_3_48_VISUAL_41_117_47_CONTAINER_54_4_49_REACT_43_120_49_AND_DEV_C2BE993BC_45_123_51_ARE_PREVIOUS_HISTORY_UNPREVIEWED_VOICE_EFFECTS_ZERO_GLOBAL_SERVICE_LOCATOR_REMAINS_HARD_STATE_0115_DURABLE_RESTART_FENCE_MUTATING_REVISION_MODE_EXACT_CAS_PERMANENT_HISTORICAL_RECEIPT_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_AND_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE_WIRED_CANARY_NOT_RUN_NE01_IN_PROGRESS",
+    "boundary": "FRESH_AST_CURRENT_21_MODULES_47_NAMES_AND_24_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_GOVERNED_CHAT_SURFACE_AND_ADMISSION_PORTS_ARE_LIFESPAN_INJECTED_TRIBE_RUNTIME_SCOPE_OWNS_PORT_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_STATE_READER_WITHOUT_PROCESS_CONTAINER_COMPATIBILITY_TRIBE_AGENTS_BUS_AND_REGISTRIES_REMAIN_PROCESS_GLOBAL_SINGLE_LIVE_HOST_ONLY_NOT_APP_LOCAL_INSTANCE_PROOF_OR_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_GLOBAL_SERVICE_LOCATOR_REMAINS_HARD_STATE_0115_DURABLE_RESTART_FENCE_WIRED_CANARY_NOT_RUN_NE01_IN_PROGRESS",
       "agent_runtime_scope_boundary": "HOST_LIFESPAN_SCOPE_IS_A_LOCAL_DEPENDENCY_PUBLICATION_SLICE_ONLY_GENERIC_DELEGATE_MULTINODE_TASKGRAPH_AND_WAVE_INTEGRATION_REMAIN_UNPROVEN",
       "hard_state_receipt_boundary": "PERMANENT_HISTORICAL_LOOKUP_MUTATING_REVISION_MODE_EXACT_CAS_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE",
       "hard_state_operator_boundary": "REQUEST_IDENTITY_CONTRACT_PREPARED_ONLY_OPERATOR_HTTP_E2E_NOT_PROVEN_BLOCKED_BY_PREVIEW_AND_TASKGRAPH",
@@ -1258,7 +1272,7 @@
         "host_brain/persistence/hard_state_journal.py",
         "host_brain/audit/migrations/0115_host_hard_state_journal.sql",
         "host_brain/app/tribe_composition.py",
-        "host_brain/composition/tribe_runtime.py",
+        "host_brain/app/tribe_runtime_scope.py",
         "host_brain/core/resource_manager.py",
         "tests/unit/test_ne01_host_lifecycle_composition.py",
         "tests/unit/test_ne01_agent_runtime_composition.py",

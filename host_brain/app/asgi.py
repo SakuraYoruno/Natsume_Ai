@@ -143,7 +143,6 @@ from host_brain.task_runtime.review_command_service import TaskReviewCommandServ
 from host_brain.secure_ingress.graph_cancellation_authority import (
     SecureIngressGraphCancellationAuthorityVerifier,
 )
-from host_brain.composition.tribe_runtime import require_process_tribe_runtime
 from host_brain.runtime.context_application import (
     RuntimeContextApplicationService,
 )
@@ -206,6 +205,7 @@ def create_app(
 ) -> FastAPI:
     from host_brain.app.tribe_composition import (
         build_production_tribe_runtime_agent_ports,
+        build_production_tribe_runtime_scope,
         build_tribe_application_ports,
     )
 
@@ -231,6 +231,7 @@ def create_app(
     )
     bond_engine_provider = host_services.require_provider("bond_stage_engine")
     agent_runtime_scope = AgentRuntimeApplicationScope(host_services=host_services)
+    tribe_runtime = build_production_tribe_runtime_scope()
 
     tribe_application_ports = build_tribe_application_ports(
         host_services=host_services,
@@ -502,6 +503,7 @@ def create_app(
             host_lifecycle=host_lifecycle,
             tribe_application_ports=tribe_application_ports,
             tribe_runtime_agent_ports=tribe_runtime_agent_ports,
+            tribe_runtime=tribe_runtime,
             canon_service_provider=canon_service_provider,
             startup_probe_sink=capture_startup_probe_statuses,
             degradation_state_provider=(
@@ -585,7 +587,7 @@ def create_app(
                 host_obs_ledger = ledger
                 host_obs_source_epoch = HostObsSourceEpoch.create()
                 host_obs_tribe_state_reader = (
-                    require_process_tribe_runtime().state_registry.snapshot
+                    tribe_runtime.state_registry.snapshot
                 )
                 try:
                     host_obs_capability_gap_telemetry = (

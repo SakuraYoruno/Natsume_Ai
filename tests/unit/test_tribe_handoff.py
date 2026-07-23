@@ -2,38 +2,29 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.composition.process_service_container import ProcessServiceContainer
-from host_brain.composition.tribe_runtime import compose_process_tribe_runtime
+from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
 from host_brain.tribe.handoff import TribeHandoffCoordinator
 from host_brain.tribe.registry import HostTribeRegistry
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
-def test_process_tribe_runtime_reuses_one_explicit_registry_pair(monkeypatch) -> None:
-    process = ProcessServiceContainer()
-    monkeypatch.setattr(
-        "host_brain.composition.tribe_runtime.get_process_service_container",
-        lambda: process,
-    )
+def test_app_tribe_runtime_scope_owns_one_explicit_registry_pair() -> None:
     state_registry = TribeStateRegistry()
     tribe_registry = HostTribeRegistry()
 
-    runtime = compose_process_tribe_runtime(
+    runtime = TribeRuntimeScope(
         state_registry=state_registry,
         tribe_registry=tribe_registry,
-    )
-    repeated = compose_process_tribe_runtime(
-        state_registry=state_registry,
-        tribe_registry=tribe_registry,
+        agent_providers=(("fixture", object),),
     )
 
-    assert repeated is runtime
     assert runtime.handoff_coordinator.state_registry is state_registry
     assert runtime.handoff_coordinator.tribe_registry is tribe_registry
-    with pytest.raises(RuntimeError, match="PROCESS_TRIBE_AUTHORITY_ALREADY_COMPOSED"):
-        compose_process_tribe_runtime(
+    with pytest.raises(TypeError, match="agent provider"):
+        TribeRuntimeScope(
             state_registry=TribeStateRegistry(),
             tribe_registry=tribe_registry,
+            agent_providers=(("fixture", "not-callable"),),
         )
 
 

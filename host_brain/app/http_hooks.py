@@ -21,9 +21,8 @@ from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.app.host_lifecycle_composition import HostLifecycleContainer
 from host_brain.app.tribe_composition import (
     TribeRuntimeAgentPorts,
-    bind_tribe_application_ports,
-    unbind_tribe_application_ports,
 )
+from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
 from host_brain.tribe.application_ports import TribeApplicationPorts
 # P3-2：导入拆分后的子模块
 from host_brain.app.http_hooks_inbound import add_request_id_and_audit, should_emit_request_info
@@ -164,6 +163,7 @@ def runtime_lifespan(
     host_lifecycle: HostLifecycleContainer,
     tribe_application_ports: TribeApplicationPorts,
     tribe_runtime_agent_ports: TribeRuntimeAgentPorts,
+    tribe_runtime: TribeRuntimeScope,
     canon_service_provider: Callable[[], Any | None] | None = None,
     mode_transition_service_sink: Callable[[Any | None], None] | None = None,
     startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
@@ -180,7 +180,7 @@ def runtime_lifespan(
         host_lifecycle.begin()
         tribe_ports_bound = False
         try:
-            bind_tribe_application_ports(
+            tribe_runtime.bind_application_ports(
                 owner=host_lifecycle,
                 ports=tribe_application_ports,
             )
@@ -189,7 +189,7 @@ def runtime_lifespan(
         except Exception:
             try:
                 if tribe_ports_bound:
-                    unbind_tribe_application_ports(owner=host_lifecycle)
+                    tribe_runtime.unbind_application_ports(owner=host_lifecycle)
             finally:
                 await host_lifecycle.aclose(logger=logger)
             raise
@@ -643,11 +643,7 @@ def runtime_lifespan(
                     "belongs to the command repository"
                 )
 
-                from host_brain.composition.tribe_runtime import (  # noqa: PLC0415
-                    register_tribe_subscriptions,
-                )
-
-                _tribe_sub_errors = register_tribe_subscriptions(logger=logger)
+                _tribe_sub_errors = tribe_runtime.register_subscriptions(logger=logger)
 
 
                 # T-130: initialize the shared EdgeCommandPusher singleton for host->edge commands.
@@ -693,7 +689,7 @@ def runtime_lifespan(
             finally:
                 try:
                     if tribe_ports_bound:
-                        unbind_tribe_application_ports(owner=host_lifecycle)
+                        tribe_runtime.unbind_application_ports(owner=host_lifecycle)
                 finally:
                     await host_lifecycle.aclose(logger=logger)
 

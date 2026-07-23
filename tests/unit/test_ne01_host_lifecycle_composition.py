@@ -766,57 +766,121 @@ async def test_close_unpublishes_before_stop_and_is_best_effort_exact_once() -> 
     await container.aclose(logger=logger)
 
 
-def test_process_tribe_ports_are_owner_fenced_and_rebind_only_after_release(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from host_brain.composition import tribe_runtime
+def test_app_tribe_ports_are_owner_fenced_and_rebind_only_after_release() -> None:
+    from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
     from host_brain.tribe.application_ports import TribeApplicationPorts
+    from host_brain.tribe.registry import HostTribeRegistry
+    from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    binding = tribe_runtime.ProcessTribeApplicationPortBinding()
-    runtime = SimpleNamespace(application_port_binding=binding)
     agents = [SimpleNamespace(application_ports=None) for _ in range(3)]
-    monkeypatch.setattr(
-        tribe_runtime,
-        "require_process_tribe_runtime",
-        lambda: runtime,
+    providers = tuple(
+        (f"agent-{index}", lambda agent=agent: agent)
+        for index, agent in enumerate(agents)
     )
-    monkeypatch.setattr(
-        tribe_runtime,
-        "_tribe_agents",
-        lambda: tuple((f"agent-{index}", agent) for index, agent in enumerate(agents)),
+    runtime = TribeRuntimeScope(
+        state_registry=TribeStateRegistry(),
+        tribe_registry=HostTribeRegistry(),
+        agent_providers=providers,
+    )
+    concurrent_runtime = TribeRuntimeScope(
+        state_registry=TribeStateRegistry(),
+        tribe_registry=HostTribeRegistry(),
+        agent_providers=providers,
     )
 
     owner_a = object()
     owner_b = object()
     ports_a = TribeApplicationPorts()
     ports_b = TribeApplicationPorts()
-    tribe_runtime.bind_process_tribe_application_ports(
+    runtime.bind_application_ports(
         owner=owner_a,
         ports=ports_a,
     )
 
-    assert binding.owner is owner_a
-    assert binding.ports is ports_a
+    assert runtime.application_ports is ports_a
     assert all(agent.application_ports is ports_a for agent in agents)
     with pytest.raises(
         RuntimeError,
-        match="PROCESS_TRIBE_APPLICATION_PORTS_ALREADY_BOUND",
+        match="TRIBE_APPLICATION_PORTS_ALREADY_BOUND",
     ):
-        tribe_runtime.bind_process_tribe_application_ports(
+        runtime.bind_application_ports(
             owner=owner_b,
             ports=ports_b,
         )
     with pytest.raises(
         RuntimeError,
-        match="PROCESS_TRIBE_APPLICATION_PORTS_OWNER_MISMATCH",
+        match="TRIBE_APPLICATION_PORTS_OWNER_MISMATCH",
     ):
-        tribe_runtime.unbind_process_tribe_application_ports(owner=owner_b)
+        runtime.unbind_application_ports(owner=owner_b)
+    with pytest.raises(
+        RuntimeError,
+        match="TRIBE_APPLICATION_PORTS_FOREIGN_BINDING",
+    ):
+        concurrent_runtime.bind_application_ports(owner=owner_b, ports=ports_b)
     assert all(agent.application_ports is ports_a for agent in agents)
 
-    assert tribe_runtime.unbind_process_tribe_application_ports(owner=owner_a) is True
+    assert runtime.unbind_application_ports(owner=owner_a) is True
     assert all(agent.application_ports is None for agent in agents)
-    tribe_runtime.bind_process_tribe_application_ports(owner=owner_b, ports=ports_b)
+    concurrent_runtime.bind_application_ports(owner=owner_b, ports=ports_b)
     assert all(agent.application_ports is ports_b for agent in agents)
+    assert concurrent_runtime.unbind_application_ports(owner=owner_b) is True
+
+
+def test_app_tribe_ports_cross_scope_bind_is_atomic() -> None:
+    from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
+    from host_brain.tribe.application_ports import TribeApplicationPorts
+    from host_brain.tribe.registry import HostTribeRegistry
+    from host_brain.tribe.tribe_state import TribeStateRegistry
+
+    agents = [SimpleNamespace(application_ports=None) for _ in range(3)]
+    providers = tuple(
+        (f"agent-{index}", lambda agent=agent: agent)
+        for index, agent in enumerate(agents)
+    )
+    runtimes = [
+        TribeRuntimeScope(
+            state_registry=TribeStateRegistry(),
+            tribe_registry=HostTribeRegistry(),
+            agent_providers=providers,
+        )
+        for _ in range(2)
+    ]
+    owners = [object(), object()]
+    ports = [TribeApplicationPorts(), TribeApplicationPorts()]
+    start = threading.Barrier(3)
+    result_lock = threading.Lock()
+    outcomes: list[tuple[int, str]] = []
+
+    def bind(index: int) -> None:
+        start.wait()
+        try:
+            runtimes[index].bind_application_ports(
+                owner=owners[index],
+                ports=ports[index],
+            )
+        except RuntimeError as exc:
+            outcome = str(exc)
+        else:
+            outcome = "BOUND"
+        with result_lock:
+            outcomes.append((index, outcome))
+
+    workers = [threading.Thread(target=bind, args=(index,)) for index in range(2)]
+    for worker in workers:
+        worker.start()
+    start.wait()
+    for worker in workers:
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+
+    bound = [(index, outcome) for index, outcome in outcomes if outcome == "BOUND"]
+    rejected = [(index, outcome) for index, outcome in outcomes if outcome != "BOUND"]
+    assert len(bound) == 1
+    assert len(rejected) == 1
+    assert rejected[0][1].startswith("TRIBE_APPLICATION_PORTS_FOREIGN_BINDING")
+    winning_index = bound[0][0]
+    assert all(agent.application_ports is ports[winning_index] for agent in agents)
+    assert runtimes[winning_index].unbind_application_ports(owner=owners[winning_index])
 
 
 def test_resource_manager_immediate_sample_uses_the_owned_loop_thread(

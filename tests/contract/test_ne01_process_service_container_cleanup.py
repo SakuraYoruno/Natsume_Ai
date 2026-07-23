@@ -33,6 +33,7 @@ RETIRED_PROCESS_ACCESSORS = {
     "get_obs_metrics_collector",
     "get_query_projection_store",
     "peek_query_projection_store",
+    "get_tribe_handoff_coordinator",
 }
 
 RETIRED_PROCESS_SETTERS = {
@@ -54,7 +55,6 @@ RETIRED_PROCESS_REEXPORTS = {
 PROCESS_LOCKS = {
     "capability_runtime_lock",
     "model_runtime_lock",
-    "tribe_runtime_lock",
 }
 
 
@@ -62,8 +62,9 @@ def test_ne01_dead_process_locators_are_removed_from_the_container() -> None:
     container_fields = {field.name for field in fields(ProcessServiceContainer)}
 
     assert container_fields.isdisjoint(RETIRED_PROCESS_LOCATORS)
-    assert len(container_fields) == 50
-    assert len(container_fields - PROCESS_LOCKS - {"application_ports"}) == 46
+    assert "tribe_runtime_composition" not in container_fields
+    assert len(container_fields) == 48
+    assert len(container_fields - PROCESS_LOCKS - {"application_ports"}) == 45
 
 
 def test_ne01_dead_process_accessors_are_not_reexported() -> None:

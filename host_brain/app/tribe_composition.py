@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
+from host_brain.app.tribe_runtime_scope import (
+    TribeAgentProviders,
+    TribeRuntimeScope,
+)
 from host_brain.tribe.application_ports import TribeApplicationPorts
 
 
@@ -66,6 +70,90 @@ def build_production_tribe_runtime_agent_ports() -> TribeRuntimeAgentPorts:
     )
 
 
+def build_tribe_runtime_scope(
+    *,
+    state_registry: Any,
+    tribe_registry: Any,
+    agent_providers: TribeAgentProviders,
+) -> TribeRuntimeScope:
+    """Build an ASGI-owned Tribe scope from explicitly supplied dependencies."""
+
+    return TribeRuntimeScope(
+        state_registry=state_registry,
+        tribe_registry=tribe_registry,
+        agent_providers=agent_providers,
+    )
+
+
+def build_production_tribe_runtime_scope() -> TribeRuntimeScope:
+    """Map legacy compatibility singletons only at the Host composition root."""
+
+    from host_brain.tribe.registry import get_host_tribe_registry  # noqa: PLC0415
+    from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+
+    return build_tribe_runtime_scope(
+        state_registry=get_global_registry(),
+        tribe_registry=get_host_tribe_registry(),
+        agent_providers=build_production_tribe_agent_providers(),
+    )
+
+
+def build_production_tribe_agent_providers() -> TribeAgentProviders:
+    """Return the fixed compatibility Agent catalog without runtime discovery."""
+
+    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+    from host_brain.tribe.cerebellum_agent import get_cerebellum_agent  # noqa: PLC0415
+    from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: PLC0415
+    from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+    from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+    from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
+    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+    from host_brain.tribe.initiative_governor_agent import (  # noqa: PLC0415
+        get_initiative_governor_agent,
+    )
+    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+    from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+    from host_brain.tribe.mirror_neuron_agent import get_mirror_neuron_agent  # noqa: PLC0415
+    from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
+    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+    from host_brain.tribe.peripheral_agent import get_peripheral_agent  # noqa: PLC0415
+    from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+    from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
+    from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+    from host_brain.tribe.somatic_agent import get_somatic_agent  # noqa: PLC0415
+    from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
+    from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: PLC0415
+
+    return (
+        ("limbic_agent", get_limbic_agent),
+        ("prefrontal_agent", get_prefrontal_agent),
+        ("social_brain_agent", get_social_brain_agent),
+        ("cortex_agent", get_cortex_agent),
+        ("pain_reward_agent", get_pain_reward_agent),
+        ("endocrine_agent", get_endocrine_agent),
+        ("immune_agent", get_immune_agent),
+        ("hippocampus_agent", get_hippocampus_agent),
+        ("ans_agent", get_ans_agent),
+        ("language_system_agent", get_language_system_agent),
+        ("somatic_agent", get_somatic_agent),
+        ("peripheral_agent", get_peripheral_agent),
+        ("circadian_agent", get_circadian_agent),
+        ("proprioception_agent", get_proprioception_agent),
+        ("initiative_governor_agent", get_initiative_governor_agent),
+        ("default_mode_agent", get_default_mode_agent),
+        ("mirror_neuron_agent", get_mirror_neuron_agent),
+        ("interoception_agent", get_interoception_agent),
+        ("motor_cortex_agent", get_motor_cortex_agent),
+        ("cerebellum_agent", get_cerebellum_agent),
+        ("glymphatic_agent", get_glymphatic_agent),
+        ("vestibular_agent", get_vestibular_agent),
+        ("thalamus_agent", get_thalamus_agent),
+    )
+
+
 def build_tribe_application_ports(
     *,
     host_services: HostLifecycleApplicationPorts | None = None,
@@ -86,14 +174,6 @@ def build_tribe_application_ports(
     )
     from host_brain.app.intent_seq import IntentSequenceAllocator
     from host_brain.app.user_preference_store import build_user_preference_pack
-    from host_brain.composition.tribe_runtime import compose_process_tribe_runtime
-    from host_brain.tribe.registry import get_host_tribe_registry
-    from host_brain.tribe.tribe_state import get_global_registry
-
-    compose_process_tribe_runtime(
-        state_registry=get_global_registry(),
-        tribe_registry=get_host_tribe_registry(),
-    )
 
     resolved_activity_monitor_provider = (
         activity_monitor_provider or _missing_app_local_provider
@@ -179,37 +259,11 @@ def _require_runtime_agent(
     return agent
 
 
-def bind_tribe_application_ports(*, owner: Any, ports: TribeApplicationPorts) -> None:
-    """Acquire the process Tribe port lease for one live Host lifespan."""
-
-    from host_brain.composition.tribe_runtime import (
-        bind_process_tribe_application_ports,
-        compose_process_tribe_runtime,
-    )
-    from host_brain.tribe.registry import get_host_tribe_registry
-    from host_brain.tribe.tribe_state import get_global_registry
-
-    compose_process_tribe_runtime(
-        state_registry=get_global_registry(),
-        tribe_registry=get_host_tribe_registry(),
-    )
-    bind_process_tribe_application_ports(owner=owner, ports=ports)
-
-
-def unbind_tribe_application_ports(*, owner: Any) -> bool:
-    """Release the process Tribe port lease held by one Host lifespan."""
-
-    from host_brain.composition.tribe_runtime import (
-        unbind_process_tribe_application_ports,
-    )
-
-    return unbind_process_tribe_application_ports(owner=owner)
-
-
 __all__ = [
     "TribeRuntimeAgentPorts",
-    "bind_tribe_application_ports",
     "build_tribe_application_ports",
+    "build_production_tribe_agent_providers",
     "build_production_tribe_runtime_agent_ports",
-    "unbind_tribe_application_ports",
+    "build_production_tribe_runtime_scope",
+    "build_tribe_runtime_scope",
 ]

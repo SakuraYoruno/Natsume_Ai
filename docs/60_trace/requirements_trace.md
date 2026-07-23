@@ -3,6 +3,8 @@
 
 # 当前需求可追溯矩阵
 
+> 当前库存纠偏：TRACE-EXEC-08/08I 内的 `named27/53、all-form30、Container50/3/46` 为各自提交的历史收据；现行工作树是 `named21/47、all-form24、Container48/2/45`。Tribe runtime scope 的当前证据见 TRACE-EXEC-08J，且只证明单活 binding fence。
+
 版本：v4.1
 核对日期：2026-07-23
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
@@ -75,6 +77,8 @@
 | TRACE-EXEC-09 | FR-ARCH-001、FR-ARCH-010 | Agent/Verification 路径不得逃逸 workspace | canonical resolver + scoped tool/verification wiring | resolver/tool/verification unit + contract | `D0_WIRED / OWNERSHIP_INCOMPLETE` | NE-01 |
 | TRACE-EXEC-09A | FR-ARCH-003、FR-AGENT-RUNTIME | ReAct Skill/Delegate 不得在当前节点内绕过 TaskGraph 直执行 | ReAct registry/loop、Skill executor、Delegate dispatcher | `run_skill` / `dispatch_sub_agent` discovery 为 0；注入 legacy ToolSpec 在低层执行前固定拒绝；其他 Agent Tool authority 不在该结论内 | `RETIRED_FAIL_CLOSED / POSITIVE_PATH_MISSING` | NE-01 新 graph revision 节点 |
 | TRACE-EXEC-09B | FR-ARCH-003、FR-AGENT-RUNTIME | Visual Agent HTTP 不得持有 route-local 模型/ClawdBot/Edge 执行 authority | `/v1/agent/run` compatibility route、vision chat format fence、legacy Action Planner seal | 固定 SSE 拒绝、raw loop/client/Ledger writer 退役、非 text 在模型/Memory/Ledger 前拒绝；不等于 Delegate `vision_agent` 或正向 Visual executor | `RETIRED_COMPATIBILITY_ONLY / PRODUCTION_OFF` | NE-01 governed Visual TaskGraph revision |
+
+TRACE-EXEC-08J（Tribe runtime scope）：`TribeRuntimeScope` 必须由 ASGI composition root 构造，拥有 bind/unbind、subscription、handoff 和 Obs reader；`composition/tribe_runtime.py`、Container Tribe slot/lock 和 `get_tribe_handoff_coordinator()` 必须不存在。其 agent providers 由 composition root 注入，scope 本身不得 import `process_services` 或 singleton getter。两个 scope 竞争同一兼容 agent catalog 时只能有一个 bind 成功，另一个以 foreign binding 失败；wrong owner 不能 unbind，释放后才允许顺序 rebind。agent/bus/state registry 仍有 process-global compatibility boundary，故该 fence 不代表 multi-app isolation、generic Delegate、七路线 receipt 或 NE-01 完成。当前 inventory=`named21/47、all-form24、Container48/2/45`。
 
 TRACE-EXEC-08F 的历史分组只作为已被当前切片包含或重叠的证据，不得相加。当前检查点UoW Gate集中验证：DB路径一致性、唯一WorkerProjection SQL owner、private hook调用者、四个生产coordinator接线、A/B/C边界、A中间故障共同回滚、C内五故障点共同回滚、response-loss mutation调用数为1及exact read-only reopen。最终唯一去重的10文件批次为`130 passed in 296.69s`、0 fail/skip；首轮128+2与两项修正保留，旧87/35/3/62/46/4及上一结构切片265不得相加。NE-01波次集成、真实模型、NE-07 Docker/前后端服务栈与canary仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 

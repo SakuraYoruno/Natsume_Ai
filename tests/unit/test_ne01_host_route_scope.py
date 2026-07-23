@@ -134,7 +134,7 @@ def test_process_and_tribe_composition_fence_one_live_host_mode_owner() -> None:
     assert "configure_process_service_ports()" in asgi_source
     assert "build_tribe_application_ports(" in asgi_source
     assert "tribe_application_ports=tribe_application_ports" in asgi_source
-    assert "bind_tribe_application_ports(" in (
+    assert "tribe_runtime.bind_application_ports(" in (
         root / "http_hooks.py"
     ).read_text(encoding="utf-8")
     assert "host_lifecycle.get_mode_transition_service" in asgi_source

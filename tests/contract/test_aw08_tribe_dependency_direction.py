@@ -30,19 +30,22 @@ def test_tribe_runtime_services_are_explicitly_composed() -> None:
     adapter_source = (ROOT / "host_brain" / "app" / "tribe_composition.py").read_text(
         encoding="utf-8"
     )
-    runtime_source = (
-        ROOT / "host_brain" / "composition" / "tribe_runtime.py"
-    ).read_text(encoding="utf-8")
+    runtime_source = (ROOT / "host_brain" / "app" / "tribe_runtime_scope.py").read_text(
+        encoding="utf-8"
+    )
     assert "TribeApplicationPorts(" in adapter_source
     assert "agent.application_ports = ports" in runtime_source
     assert 'model_attempt_service=_host_provider(host_services, "model_attempt_service")' in adapter_source
     assert "host_brain.composition import process_services" not in adapter_source
+    assert "get_process_service_container" not in runtime_source
+    assert not (ROOT / "host_brain" / "composition" / "tribe_runtime.py").exists()
     assert "host_services=host_services" in (
         ROOT / "host_brain" / "app" / "asgi.py"
     ).read_text(encoding="utf-8")
-    assert "compose_process_tribe_runtime(" in adapter_source
-    assert "state_registry=get_global_registry()" in adapter_source
-    assert "tribe_registry=get_host_tribe_registry()" in adapter_source
+    assert "build_production_tribe_runtime_scope" in adapter_source
+    assert "tribe_runtime=tribe_runtime" in (
+        ROOT / "host_brain" / "app" / "asgi.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_tribe_handoff_has_no_lazy_global_or_implicit_registry_fallback() -> None:
