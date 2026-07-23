@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
 import math
 from typing import TYPE_CHECKING, Any
 
 from host_brain.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_DOMAIN,
+    CAPABILITY_PLANNING_EXECUTION_STEPS,
     CAPABILITY_PLANNING_MODE,
     CAPABILITY_PLANNING_NODE_OUTPUT_SCHEMA,
     CapabilityPlanningError,
@@ -60,12 +62,11 @@ class CapabilitySuccessorCatalog:
             return ()
         facts = _facts(resolved)
         phase = str(facts.get("phase") or "root").strip().lower()
-        if phase == "root":
-            values = self._execution_candidates()
+        selected_ids = _selected_capability_ids(facts, expected=self._snapshot)
+        if phase in {"root", "executing"}:
+            values = self._execution_candidates(excluded=selected_ids)
         elif phase == "executed":
-            selected = str(facts.get("selected_capability_id") or "").strip()
-            capability = self._capabilities.get(selected)
-            values = (self._synthesis_candidate(capability),) if capability else ()
+            values = (self._synthesis_candidate(selected_ids),)
         else:
             values = ()
         return tuple(values[: max(0, int(limit))])
@@ -97,29 +98,57 @@ class CapabilitySuccessorCatalog:
                 "candidate is not a legal successor of the frozen capability state"
             )
         facts = _facts(current)
+        selected_ids = list(_selected_capability_ids(facts, expected=self._snapshot))
         action = str(candidate.payload.get("capability_action") or "").strip()
         if action == "execute":
             capability_id = str(
                 candidate.payload.get("capability_id") or ""
             ).strip()
-            if capability_id not in self._capabilities:
+            if capability_id not in self._capabilities or capability_id in selected_ids:
                 raise CapabilityPlanningError("selected capability is not registered")
-            facts["phase"] = "executed"
-            facts["selected_capability_id"] = capability_id
+            selected_ids.append(capability_id)
+            if len(selected_ids) > CAPABILITY_PLANNING_EXECUTION_STEPS:
+                raise CapabilityPlanningError("selected capability path exceeds its frozen step bound")
+            facts["selected_capability_ids"] = selected_ids
+            facts["phase"] = (
+                "executed"
+                if len(selected_ids) == CAPABILITY_PLANNING_EXECUTION_STEPS
+                else "executing"
+            )
         elif action == "synthesize":
-            selected = str(facts.get("selected_capability_id") or "").strip()
-            if selected != str(candidate.payload.get("capability_id") or "").strip():
-                raise CapabilityPlanningError("synthesis candidate does not match selected capability")
+            candidate_ids = _candidate_capability_ids(candidate.payload)
+            if tuple(selected_ids) != candidate_ids:
+                raise CapabilityPlanningError("synthesis candidate does not match selected capabilities")
+            if len(selected_ids) != CAPABILITY_PLANNING_EXECUTION_STEPS:
+                raise CapabilityPlanningError("synthesis requires the complete frozen capability path")
             facts["phase"] = "synthesized"
         else:
             raise CapabilityPlanningError("unsupported capability planning action")
         return current.replace(facts=facts)
 
-    def _execution_candidates(self) -> tuple[SearchCandidate, ...]:
-        values = [self._execution_candidate(capability) for capability in self._snapshot.capabilities]
+    def _execution_candidates(
+        self,
+        *,
+        excluded: Sequence[str] = (),
+    ) -> tuple[SearchCandidate, ...]:
+        excluded_ids = frozenset(str(item or "").strip() for item in excluded)
+        dependencies = tuple(f"capability.execute.{item}" for item in excluded)
+        values = [
+            self._execution_candidate(
+                capability,
+                dependency_candidate_ids=dependencies,
+            )
+            for capability in self._snapshot.capabilities
+            if capability.capability_id not in excluded_ids
+        ]
         return tuple(sorted(values, key=lambda item: (-item.prior_score, item.candidate_id)))
 
-    def _execution_candidate(self, capability: PlanningCapability) -> SearchCandidate:
+    def _execution_candidate(
+        self,
+        capability: PlanningCapability,
+        *,
+        dependency_candidate_ids: Sequence[str] = (),
+    ) -> SearchCandidate:
         relevance = _relevance(capability, requested_tags=self._snapshot.requested_tags)
         risk = _risk_unit(capability.risk_level)
         prior = relevance + (0.06 if capability.reversible else 0.0)
@@ -150,17 +179,34 @@ class CapabilitySuccessorCatalog:
                 "estimated_relevance": _rounded(relevance),
                 "estimated_risk": _rounded(risk),
                 "estimated_cost": _rounded(capability.estimated_cost),
+                "depends_on_candidate_ids": list(dependency_candidate_ids),
                 "requires_lookahead": True,
             },
             labels=("capability", "execute", capability.family),
             simulation_only=True,
         )
 
-    def _synthesis_candidate(self, capability: PlanningCapability) -> SearchCandidate:
-        execution_id = f"capability.execute.{capability.capability_id}"
+    def _synthesis_candidate(self, capability_ids: Sequence[str]) -> SearchCandidate:
+        selected_ids = tuple(str(item or "").strip() for item in capability_ids)
+        if len(selected_ids) != CAPABILITY_PLANNING_EXECUTION_STEPS:
+            raise CapabilityPlanningError("synthesis requires exactly the frozen capability step count")
+        if len(set(selected_ids)) != len(selected_ids) or any(
+            item not in self._capabilities for item in selected_ids
+        ):
+            raise CapabilityPlanningError("synthesis has invalid selected capabilities")
+        digest = hashlib.sha256("\x1f".join(selected_ids).encode("utf-8")).hexdigest()[:32]
+        execution_ids = tuple(f"capability.execute.{item}" for item in selected_ids)
         return SearchCandidate(
-            candidate_id=f"capability.synthesize.{capability.capability_id}",
-            prior_score=0.95 - 0.04 * _risk_unit(capability.risk_level),
+            candidate_id=f"capability.synthesize.{digest}",
+            prior_score=0.95
+            - 0.04
+            * (
+                sum(
+                    _risk_unit(self._capabilities[item].risk_level)
+                    for item in selected_ids
+                )
+                / len(selected_ids)
+            ),
             payload={
                 "worker_route": "chat",
                 "target_id": "surface_reply",
@@ -179,13 +225,13 @@ class CapabilitySuccessorCatalog:
                 "risk_level": 1,
                 "capability_requirements": ["surface_reply"],
                 "capability_action": "synthesize",
-                "capability_id": capability.capability_id,
+                "capability_ids": list(selected_ids),
                 "estimated_relevance": 1.0,
                 "estimated_risk": 0.0,
                 "estimated_cost": 0.04,
-                "depends_on_candidate_ids": [execution_id],
+                "depends_on_candidate_ids": list(execution_ids),
             },
-            labels=("capability", "synthesize", capability.family),
+            labels=("capability", "synthesize", "multi_step"),
             simulation_only=True,
         )
 
@@ -240,17 +286,27 @@ class CapabilityRewardModel:
         facts = _facts(resolved)
         if str(facts.get("phase") or "").strip().lower() != "synthesized":
             return -0.55
-        capability = self._capabilities.get(
-            str(facts.get("selected_capability_id") or "").strip()
-        )
-        if capability is None:
+        selected_ids = _selected_capability_ids(facts, expected=self._snapshot)
+        if len(selected_ids) != CAPABILITY_PLANNING_EXECUTION_STEPS:
             return -1.0
+        capabilities = [self._capabilities.get(item) for item in selected_ids]
+        if any(item is None for item in capabilities):
+            return -1.0
+        resolved = [item for item in capabilities if item is not None]
+        relevance = sum(
+            _relevance(item, requested_tags=self._snapshot.requested_tags)
+            for item in resolved
+        ) / len(resolved)
+        risk = sum(_risk_unit(item.risk_level) for item in resolved) / len(resolved)
+        cost = sum(item.estimated_cost for item in resolved) / len(resolved)
+        diversity = len({item.family for item in resolved}) / len(resolved)
         return (
             1.0
-            + 0.45 * _relevance(capability, requested_tags=self._snapshot.requested_tags)
-            + (0.06 if capability.reversible else 0.0)
-            - 0.22 * _risk_unit(capability.risk_level)
-            - 0.16 * capability.estimated_cost
+            + 0.45 * relevance
+            + 0.08 * diversity
+            + 0.03 * sum(1 for item in resolved if item.reversible) / len(resolved)
+            - 0.22 * risk
+            - 0.16 * cost
         )
 
 
@@ -415,6 +471,7 @@ def bind_selected_capability_inputs(
         "catalog_ref": snapshot.catalog_ref,
         "requested_tags": list(snapshot.requested_tags),
         "max_risk_level": snapshot.max_risk_level,
+        "execution_steps": CAPABILITY_PLANNING_EXECUTION_STEPS,
     }
     return PlanningCompilationContext(
         domain=base_context.domain,
@@ -447,6 +504,7 @@ def _candidate_input(
     capability_id = str(payload.get("capability_id") or "").strip()
     action = str(payload.get("capability_action") or "").strip()
     if action == "execute":
+        dependencies = _candidate_dependency_ids(payload)
         return {
             "route": "skill",
             "target_id": capability_id,
@@ -456,9 +514,16 @@ def _candidate_input(
                 "catalog_ref": snapshot.catalog_ref,
                 "capability_id": capability_id,
             },
-            "depends_on_candidate_ids": [],
+            "depends_on_candidate_ids": list(dependencies),
         }
     if action == "synthesize":
+        capability_ids = _candidate_capability_ids(payload)
+        dependencies = _candidate_dependency_ids(payload)
+        expected_dependencies = tuple(
+            f"capability.execute.{item}" for item in capability_ids
+        )
+        if dependencies != expected_dependencies:
+            raise CapabilityPlanningError("synthesis dependencies differ from selected capabilities")
         return {
             "route": "chat",
             "target_id": "surface_reply",
@@ -466,9 +531,9 @@ def _candidate_input(
             "args": {
                 "planning_mode": CAPABILITY_PLANNING_MODE,
                 "catalog_ref": snapshot.catalog_ref,
-                "selected_capability_id": capability_id,
+                "selected_capability_ids": list(capability_ids),
             },
-            "depends_on_candidate_ids": [f"capability.execute.{capability_id}"],
+            "depends_on_candidate_ids": list(dependencies),
         }
     raise CapabilityPlanningError("candidate action is unsupported")
 
@@ -497,6 +562,7 @@ def _capability_state(
         or constraints.get("requested_tags") != list(expected.requested_tags)
         or constraints.get("max_risk_level") != expected.max_risk_level
         or constraints.get("candidate_count") != len(expected.capabilities)
+        or constraints.get("execution_steps") != CAPABILITY_PLANNING_EXECUTION_STEPS
         or tuple(value.source_refs)
         != (expected.task_ref, expected.catalog_ref, *expected.source_refs)
     ):
@@ -504,15 +570,15 @@ def _capability_state(
             "capability virtual state is not bound to its frozen registry snapshot"
         )
     phase = str(facts.get("phase") or "").strip().lower()
-    selected = str(facts.get("selected_capability_id") or "").strip()
-    if phase not in {"root", "executed", "synthesized"}:
+    selected_ids = _selected_capability_ids(facts, expected=expected)
+    if phase not in {"root", "executing", "executed", "synthesized"}:
         raise CapabilityPlanningError("capability virtual state phase is invalid")
-    if phase == "root" and selected:
+    if phase == "root" and selected_ids:
         raise CapabilityPlanningError("root capability state must not select a capability")
-    if phase != "root" and selected not in {
-        item.capability_id for item in expected.capabilities
-    }:
-        raise CapabilityPlanningError("capability virtual state selected unknown capability")
+    if phase == "executing" and not 0 < len(selected_ids) < CAPABILITY_PLANNING_EXECUTION_STEPS:
+        raise CapabilityPlanningError("executing capability state has an invalid selected step count")
+    if phase in {"executed", "synthesized"} and len(selected_ids) != CAPABILITY_PLANNING_EXECUTION_STEPS:
+        raise CapabilityPlanningError("terminal capability state has an incomplete selected path")
     return value
 
 
@@ -521,6 +587,48 @@ def _facts(state: VirtualStateSnapshot) -> dict[str, Any]:
     if not isinstance(facts, dict):
         raise CapabilityPlanningError("capability state facts are invalid")
     return facts
+
+
+def _selected_capability_ids(
+    facts: Mapping[str, Any],
+    *,
+    expected: CapabilityPlanningSnapshot,
+) -> tuple[str, ...]:
+    raw = facts.get("selected_capability_ids", ())
+    if isinstance(raw, (str, bytes, bytearray)) or not isinstance(raw, Sequence):
+        raise CapabilityPlanningError("selected_capability_ids must be an explicit sequence")
+    values = tuple(str(item or "").strip() for item in raw)
+    if any(not item for item in values) or len(set(values)) != len(values):
+        raise CapabilityPlanningError("selected_capability_ids are invalid")
+    if any(item not in {capability.capability_id for capability in expected.capabilities} for item in values):
+        raise CapabilityPlanningError("capability virtual state selected unknown capability")
+    if len(values) > CAPABILITY_PLANNING_EXECUTION_STEPS:
+        raise CapabilityPlanningError("selected capability path exceeds its frozen step bound")
+    return values
+
+
+def _candidate_capability_ids(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    raw = payload.get("capability_ids", ())
+    if isinstance(raw, (str, bytes, bytearray)) or not isinstance(raw, Sequence):
+        raise CapabilityPlanningError("synthesis candidate capability_ids must be an explicit sequence")
+    values = tuple(str(item or "").strip() for item in raw)
+    if (
+        len(values) != CAPABILITY_PLANNING_EXECUTION_STEPS
+        or any(not item for item in values)
+        or len(set(values)) != len(values)
+    ):
+        raise CapabilityPlanningError("synthesis candidate capability_ids are invalid")
+    return values
+
+
+def _candidate_dependency_ids(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    raw = payload.get("depends_on_candidate_ids", ())
+    if isinstance(raw, (str, bytes, bytearray)) or not isinstance(raw, Sequence):
+        raise CapabilityPlanningError("candidate dependencies must be an explicit sequence")
+    values = tuple(str(item or "").strip() for item in raw)
+    if any(not item for item in values) or len(set(values)) != len(values):
+        raise CapabilityPlanningError("candidate dependencies are invalid")
+    return values
 
 
 def _relevance(

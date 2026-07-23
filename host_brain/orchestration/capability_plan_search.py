@@ -38,6 +38,7 @@ from host_brain.planning_search.capability_domain import (
 )
 from host_brain.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_DOMAIN,
+    CAPABILITY_PLANNING_EXECUTION_STEPS,
     CAPABILITY_PLANNING_MODE,
     CAPABILITY_PLANNING_TARGET_ID,
     CapabilityPlanningError,
@@ -271,7 +272,7 @@ def build_capability_plan_search(
             explicit=budget_policy,
             intent=raw_intent,
             scope=resolved_scope,
-            node_count=2,
+            node_count=CAPABILITY_PLANNING_EXECUTION_STEPS + 1,
         )
         resolved_review_ref = resolve_governed_plan_review_ref(
             explicit=review_ref,
@@ -293,17 +294,17 @@ def build_capability_plan_search(
         domain=CAPABILITY_PLANNING_DOMAIN,
         objective=objective,
         success_criteria=(
-            "select one registry-proven capability path",
+            "select a bounded distinct registry-proven capability path",
             "return a governed synthesized result",
         ),
         frozen_context_refs=(task_ref, snapshot.catalog_ref),
     )
     search_budget = SearchBudget(
-        max_candidates=min(32, max(8, len(capabilities) * 2)),
-        max_expansions=min(32, max(8, len(capabilities) * 2)),
-        max_transitions=min(48, max(12, len(capabilities) * 3)),
-        max_rollouts=min(24, max(8, len(capabilities) * 4)),
-        max_depth=2,
+        max_candidates=min(48, max(12, len(capabilities) * 3)),
+        max_expansions=min(48, max(12, len(capabilities) * 3)),
+        max_transitions=min(72, max(18, len(capabilities) * 5)),
+        max_rollouts=min(32, max(12, len(capabilities) * 6)),
+        max_depth=CAPABILITY_PLANNING_EXECUTION_STEPS + 1,
         branching_factor=min(8, max(2, len(capabilities))),
     )
     goal_request = GoalPlanningRequest(
@@ -356,6 +357,7 @@ def build_capability_plan_search(
                 "requested_max_risk_level": requested_max_risk_level,
                 "governor_max_risk_level": governor_max_risk_level,
                 "effective_max_risk_level": max_risk_level,
+                "execution_steps": CAPABILITY_PLANNING_EXECUTION_STEPS,
             },
         },
         input_refs=_dedupe_refs((*input_refs, approval_ref, snapshot.catalog_ref)),
@@ -363,6 +365,7 @@ def build_capability_plan_search(
             "source": "registry_capability_planning_search",
             "intent_id": intent_id,
             "catalog_ref": snapshot.catalog_ref,
+            "execution_steps": CAPABILITY_PLANNING_EXECUTION_STEPS,
         },
         goal=goal,
         virtual_state=state,

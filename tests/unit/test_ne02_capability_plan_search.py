@@ -157,20 +157,31 @@ def test_registry_capability_search_generates_competing_paths_without_planned_st
     assert intent == before
     assert result.mcts_used is True
     assert result.side_effects_executed is False
-    assert len(result.selected_path) == 2
-    selected_capability_id = result.selected_path[0].payload["capability_id"]
-    assert result.selected_path[0].candidate_id == (
-        f"capability.execute.{selected_capability_id}"
+    assert len(result.selected_path) == 3
+    execution_path = result.selected_path[:-1]
+    selected_capability_ids = tuple(
+        item.payload["capability_id"] for item in execution_path
     )
-    assert result.selected_path[1].candidate_id == (
-        f"capability.synthesize.{selected_capability_id}"
+    assert len(set(selected_capability_ids)) == 2
+    assert [item.candidate_id for item in execution_path] == [
+        f"capability.execute.{capability_id}"
+        for capability_id in selected_capability_ids
+    ]
+    assert result.selected_path[-1].candidate_id.startswith("capability.synthesize.")
+    assert tuple(result.selected_path[-1].payload["capability_ids"]) == (
+        selected_capability_ids
     )
     assert [node.route.split(":", 1)[0] for node in compiled.task_graph.nodes] == [
+        "skill",
         "skill",
         "chat",
     ]
     assert compiled.task_graph.nodes[1].dependencies == (
         compiled.task_graph.nodes[0].node_id,
+    )
+    assert compiled.task_graph.nodes[2].dependencies == (
+        compiled.task_graph.nodes[0].node_id,
+        compiled.task_graph.nodes[1].node_id,
     )
     assert compiled.work_order.input_pack["capability_planning"]["catalog_ref"] == (
         adapter.snapshot.catalog_ref
@@ -180,7 +191,7 @@ def test_registry_capability_search_generates_competing_paths_without_planned_st
         item.candidate_id for item in result.selected_path
     }
     assert compiled.work_order.allowed_actions == (
-        f"skill:{selected_capability_id}",
+        *(f"skill:{capability_id}" for capability_id in selected_capability_ids),
         "render_reply",
     )
 
@@ -267,6 +278,7 @@ def test_governor_risk_ceiling_tightens_the_frozen_candidate_catalog() -> None:
         "requested_max_risk_level": 3,
         "governor_max_risk_level": 1,
         "effective_max_risk_level": 1,
+        "execution_steps": 2,
     }
 
 

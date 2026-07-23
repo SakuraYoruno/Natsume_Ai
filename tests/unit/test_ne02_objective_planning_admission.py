@@ -107,11 +107,17 @@ def test_research_objective_plan_survives_thalamus_governor_and_dynamic_search()
     assert intent == before
     assert result.mcts_used is True
     assert result.side_effects_executed is False
+    assert len(result.selected_path) == 3
     assert result.selected_path[0].candidate_id in {
         "capability.execute.research_fast",
         "capability.execute.research_crosscheck",
     }
-    assert result.selected_path[1].candidate_id.startswith("capability.synthesize.")
+    assert result.selected_path[1].candidate_id in {
+        "capability.execute.research_fast",
+        "capability.execute.research_crosscheck",
+    }
+    assert result.selected_path[0].candidate_id != result.selected_path[1].candidate_id
+    assert result.selected_path[2].candidate_id.startswith("capability.synthesize.")
 
 
 def test_frontend_objective_plan_uses_the_same_governed_contract() -> None:
