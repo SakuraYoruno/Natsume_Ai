@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.host_runtime_context_wiring import compose_host_runtime_context
 from host_brain.app.acceptance_effect_handlers import (
@@ -15,6 +16,7 @@ from host_brain.app.acceptance_effect_handlers import (
     _surface_gateway_payload_digest,
     build_production_acceptance_effect_handlers,
 )
+from host_brain.app.conversation_writer import record_user_turn
 from host_brain.app.governed_task_adapter import (
     build_governed_host_runtime as _build_governed_host_runtime,
 )
@@ -100,6 +102,53 @@ def _intent(
             }
         )
     return value
+
+
+def _production_acceptance_effect_ports(
+    *,
+    ledger,
+    life,
+) -> AgentRuntimeApplicationPorts:  # noqa: ANN001
+    """Bind the same durable conversation writer used by Host composition.
+
+    This integration fixture exercises the governed runtime directly, so it
+    does not build the entire ASGI lifecycle container.  The Acceptance Effect
+    dispatcher still needs the real application port for its first durable
+    write; omitting it intentionally leaves the graph queue in reconciliation
+    and correctly prevents any outward reply delivery.
+    """
+
+    async def _unused_async(**_kwargs):  # noqa: ANN003, ANN202
+        return None
+
+    def _record_user_turn(**kwargs):  # noqa: ANN003
+        return record_user_turn(
+            ledger=ledger,
+            life_service=life.command_service,
+            life_reader=life.snapshot_reader,
+            **kwargs,
+        )
+
+    return AgentRuntimeApplicationPorts(
+        record_user_turn=_record_user_turn,
+        record_assistant_turn=lambda **_kwargs: {},
+        run_retrieval=_unused_async,
+        filter_retrieval_evidence_items_for_prompt=lambda **_kwargs: [],
+        build_user_preference_pack=lambda **_kwargs: {},
+        resolve_host_llm_runtime_async=_unused_async,
+        resolve_state_arbiter_bond_fact=_unused_async,
+        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
+        build_conversation_experience_read_pack=lambda **_kwargs: {},
+        drive_stream_vts_emotion=_unused_async,
+        resolve_tts_route=lambda **_kwargs: None,
+        conversation_history=lambda: None,
+        life_memory_service=lambda: None,
+        audit_ledger=lambda: ledger,
+        prompt_registry=lambda: None,
+        model_attempt_service=lambda: None,
+        task_status_projection=lambda: None,
+        persist_post_process_audit=_unused_async,
+    )
 
 
 async def _execute(
@@ -389,7 +438,11 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                     ),
                     preference_store=UserPreferenceStore(ledger=ledger),
                     life_receipt_reader_provider=lambda: life.snapshot_reader,
-            ),
+                    agent_runtime_ports=_production_acceptance_effect_ports(
+                        ledger=ledger,
+                        life=life,
+                    ),
+                ),
             owner_id="gr05-universal-acceptance-effects",
             action_preview_service=action_preview_service,
         )

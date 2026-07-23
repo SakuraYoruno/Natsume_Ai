@@ -1,6 +1,6 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-23",
+  "as_of_date": "2026-07-24",
   "source_baseline": {
     "dev_commit": "1ea153216e79305d2c14c737b0efd17e0a1a4bf3",
     "repository_cleanup_commit": "f0cd1dfd7",
@@ -44,6 +44,14 @@
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "boundary": "ONE_BOOT_PASS_ONLY_NO_PERIODIC_SURVIVOR_SCAN_LEASE_EXPIRY_RESCAN_UNKNOWN_EFFECT_OR_GENERAL_MULTI_NODE_BATCH_RECOVERY"
+    },
+    "gr05_production_port_fixture_validation": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "targeted_integration": "1_PASSED_IN_14_00_SECONDS_CHAT_DELEGATE_THREE_NODE_PLAN_EXACT_REPLAY",
+      "fixture_authority": "DIRECT_RUNTIME_FIXTURE_INJECTS_THE_REAL_AGENTRUNTIME_RECORD_USER_TURN_PORT_BOUND_TO_THE_SAME_SQLITE_LEDGER_AND_LIFE_AUTHORITY",
+      "fail_closed_control": "MISSING_RECORD_USER_TURN_PORT_LEAVES_CONVERSATION_USER_TURN_RECOVERY_PENDING_AND_BLOCKS_SURFACE_REPLY_DELIVERY",
+      "scope": "FIXES_TEST_COMPOSITION_ONLY_DOES_NOT_PROMOTE_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_WAVE_INTEGRATION_OR_NE07_FULL_STACK",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
     },
     "legacy_plan_cycle_safety": {
       "status": "LOCAL_TARGETED_PASS_PROGRAM_PARTIAL",
