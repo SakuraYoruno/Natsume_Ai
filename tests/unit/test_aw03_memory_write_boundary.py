@@ -15,7 +15,6 @@ from host_brain.memory.life_memory.store import (
 ROOT = Path(__file__).resolve().parents[2]
 CHAT_PRODUCTION_FILES = (
     ROOT / "host_brain/app/agent_runtime_shared.py",
-    ROOT / "host_brain/app/chat_handler_vision.py",
     ROOT / "host_brain/app/chat_handler.py",
     ROOT / "host_brain/persona/surface_memory_recall.py",
 )
@@ -37,9 +36,6 @@ def test_chat_production_has_no_legacy_memory_writer_or_helper() -> None:
         }
         assert not forbidden_symbols.intersection(names | attributes), path
         assert "get_episodic_store" not in names, path
-        if path.name == "chat_handler_vision.py":
-            assert source.count(".admit_chat") == 1, path
-
     writer = (ROOT / "host_brain/app/conversation_writer.py").read_text(
         encoding="utf-8-sig"
     )

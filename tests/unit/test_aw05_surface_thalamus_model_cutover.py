@@ -10,7 +10,6 @@ from host_brain.model_runtime import (
     SURFACE_MAIN_TEXT_PROMPT_ID,
     SURFACE_MEMORY_REPAIR_PROMPT_ID,
     VISION_ACTION_PLANNER_PROMPT_ID,
-    VISION_UI_ANALYSIS_PROMPT_ID,
     CallableRoutePolicy,
     build_default_production_model_runtime,
 )
@@ -37,7 +36,6 @@ def test_default_composition_installs_live_prompts_dynamic_route_and_one_attempt
         SURFACE_MAIN_TEXT_PROMPT_ID: "text",
         SURFACE_MEMORY_REPAIR_PROMPT_ID: "json_object",
         VISION_ACTION_PLANNER_PROMPT_ID: "json_object",
-        VISION_UI_ANALYSIS_PROMPT_ID: "text",
     }
     assert {
         prompt_id: composition.prompt_registry.definition(prompt_id).output_contract.kind.value

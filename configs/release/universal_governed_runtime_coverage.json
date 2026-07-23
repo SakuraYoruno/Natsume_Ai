@@ -636,10 +636,12 @@
       "retired_paths": [
         "host_brain/app/vision/agent_loop.py",
         "host_brain/app/vision/edge_rpc_client.py",
+        "host_brain/app/chat_handler_vision.py",
         "SQLiteLedger.log_agent_loop"
       ],
       "legacy_execution_symbol_production_references": 0,
       "model_ledger_edge_or_clawdbot_resolution": 0,
+      "legacy_vision_text_helper": "REMOVED_ZERO_PRODUCTION_CALLERS",
       "chat_actions_boundary": "ONLY_TEXT_CONTINUES; ACTIONS_AND_UNKNOWN_VALUES_REJECT_BEFORE_RUNTIME_MODEL_PROMPT_MEMORY_LEDGER",
       "legacy_action_planner_model_entry": "SEALED_FIXED_REJECTION",
       "retained_parser_authority": "NONE_PROPOSAL_ONLY",
@@ -648,12 +650,10 @@
       "evidence_refs": [
         "host_brain/app/agent_routes.py",
         "host_brain/app/chat_routes.py",
-        "host_brain/app/chat_handler_vision.py",
         "host_brain/app/vision/action_planner.py",
         "tests/unit/test_agent_routes.py",
         "tests/unit/test_ne01_visual_agent_authority_cutover.py",
-        "tests/unit/test_fastapi_app_immune_gate.py",
-        "tests/unit/test_vision_ui_handler.py"
+        "tests/unit/test_fastapi_app_immune_gate.py"
       ]
     },
     "revision_plus_one_replan": {

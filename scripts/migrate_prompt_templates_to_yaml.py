@@ -24,7 +24,7 @@ _AGENT_SCOPES = {
     "translate_agent_handler", "repair_agent_handler", "emotion_agent_handler",
     "surface_reply_handler", "retrieval_agent_handler", "judge_agent_handler",
     "supervisor_dispatch_handler", "sub_agent_protocol", "react_loop",
-    "vision.action_planner", "chat_handler_vision",
+    "vision.action_planner",
 }
 _CHAT_SCOPES = {
     "surface_reply", "chat_handler", "chat_context_builder", "prompt_builder",

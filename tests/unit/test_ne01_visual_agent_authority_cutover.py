@@ -126,13 +126,8 @@ def test_legacy_action_planner_is_sealed_and_has_no_process_model_locator() -> N
     assert "raise RuntimeError(VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED)" in source
 
 
-def test_vision_chat_actions_path_cannot_generate_or_commit_action_plan() -> None:
-    source = CHAT_VISION_PATH.read_text(encoding="utf-8-sig")
-    assert "generate_action_plan" not in source
-    assert 'if response_format != "text"' in source
-    assert '"decision": "REJECT"' in source
-    assert "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED" in source
-    assert 'commit_payload["action_plan"]' not in source
+def test_historical_vision_chat_helper_is_physically_removed() -> None:
+    assert not CHAT_VISION_PATH.exists()
 
 
 def test_real_chat_route_rejects_non_text_before_chat_services() -> None:
@@ -143,26 +138,6 @@ def test_real_chat_route_rejects_non_text_before_chat_services() -> None:
     assert gate_index < source.index("evaluate_immune_gate_fn(request_body)")
     assert gate_index < source.index("handle_chat_fn(")
     assert "VISUAL_AGENT_GOVERNED_ADMISSION_REQUIRED" in source
-
-
-def test_historical_vision_helper_has_zero_production_callers() -> None:
-    callers: list[str] = []
-    for path in PRODUCTION_ROOT.rglob("*.py"):
-        if path == CHAT_VISION_PATH:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if isinstance(node.func, ast.Name):
-                name = node.func.id
-            elif isinstance(node.func, ast.Attribute):
-                name = node.func.attr
-            else:
-                continue
-            if name == "_vision_ui_sse_generator":
-                callers.append(path.relative_to(ROOT).as_posix())
-    assert callers == []
 
 
 def test_visual_agent_compatibility_routes_are_registered_once() -> None:

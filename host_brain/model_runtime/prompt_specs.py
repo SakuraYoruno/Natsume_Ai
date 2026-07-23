@@ -390,32 +390,6 @@ _VISION_ACTION_PLANNER_PROMPT_TEMPLATES = {
     ),
 }
 
-_CHAT_HANDLER_VISION_ANALYSIS_PROMPTS = {
-    "no_screenshot_context": "没有提供截图或视觉上下文。",
-    "screen_description_label": "屏幕描述：{value}",
-    "app_name_label": "应用：{value}",
-    "os_info_label": "系统：{value}",
-    "resolution_label": "分辨率：{value}",
-    "error_text_label": "错误文本：{value}",
-    "selected_text_label": "选中文本：{value}",
-    "context_title": "视觉上下文：",
-    "empty_context": "视觉上下文为空。",
-    "system_prompt": (
-        "你是视觉 UI 分析助手。只根据截图、OCR 和已给视觉上下文回答，"
-        "不要编造看不到的元素。"
-    ),
-    "user_prompt_template": "用户请求：{user_message}\n{vision_context_section}\n请给出简洁分析或操作建议。",
-}
-
-_CHAT_HANDLER_VISION_FALLBACK_TEXTS = {
-    "llm_unavailable": "视觉模型暂时不可用，我只能根据已有文字上下文判断。",
-    "empty_narrative": "这次没有生成有效的视觉分析结果。",
-    "llm_error": "视觉分析调用失败。",
-    "hmac_rejected": "视觉请求签名校验失败。",
-    "origin_not_allowed": "视觉请求来源未被允许。",
-    "sse_error": "视觉处理过程中发生内部错误。",
-}
-
 _HIPPOCAMPUS_RECALL_ASSOCIATION_PROMPT = {
     "system_prompt": {
         "zh": "你负责做记忆联想摘要，只输出简洁、自然、可直接注入上下文的结论。",
@@ -724,22 +698,6 @@ _SPECS: dict[str, PromptSpec] = {
         output_type="json_object",
         content=_VISION_ACTION_PLANNER_PROMPT_TEMPLATES,
         category="agent_prompt",
-        scope="vision_agent",
-    ),
-    "chat_handler_vision.analysis_prompt.templates": _spec(
-        "chat_handler_vision.analysis_prompt.templates",
-        purpose="vision_analysis_prompt_templates",
-        output_type="json_object",
-        content=_CHAT_HANDLER_VISION_ANALYSIS_PROMPTS,
-        category="agent_prompt",
-        scope="vision_agent",
-    ),
-    "chat_handler_vision.fallback_texts": _spec(
-        "chat_handler_vision.fallback_texts",
-        purpose="vision_handler_fallback_texts",
-        output_type="json_object",
-        content=_CHAT_HANDLER_VISION_FALLBACK_TEXTS,
-        category="agent_runtime_text",
         scope="vision_agent",
     ),
     "hippocampus.recall_association.prompt": _spec(
