@@ -15,6 +15,9 @@ from host_brain.app.governed_task_adapter import (
     GovernedHostAdapterError,
     GovernedHostRuntime,
 )
+from host_brain.orchestration.failure_replan_intent import (
+    FAILURE_REPLAN_SCHEMA_VERSION,
+)
 from natsume_contracts.task import HostCommandSurface
 
 
@@ -493,6 +496,128 @@ async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
         assert captured["resolver"] is capability_adapter.compilation_context_for
         authority = captured["authority"]
         assert authority.target_id == "planning_search"
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_capability_plan_failure_replan_uses_durable_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _PlanService:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured["resolver"] = kwargs.get("compilation_context_resolver")
+
+        async def prepare_initial(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            pytest.fail("failure replan must not create a second initial graph")
+
+        async def execute_stream(self, prepared):  # noqa: ANN001
+            assert prepared is captured["prepared"]
+            yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
+
+    class _RecoveryService:
+        def __init__(self, *, execution_service, task_store) -> None:  # noqa: ANN001
+            captured["execution_service"] = execution_service
+            captured["task_store"] = task_store
+
+        async def prepare_failure_replan(self, request, **kwargs):  # noqa: ANN001, ANN003
+            captured["request"] = request
+            captured["replan_kwargs"] = dict(kwargs)
+            prepared = object()
+            captured["prepared"] = prepared
+            return prepared
+
+    capability_adapter = SimpleNamespace(
+        request=object(),
+        compilation_context_for=lambda _result: object(),
+    )
+    durable_store = object()
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "build_capability_plan_search",
+        lambda *_args, **_kwargs: capability_adapter,
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "build_plan_intent_search",
+        lambda *_args, **_kwargs: pytest.fail("legacy plan adapter must not run"),
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "GovernedPlanningExecutionService",
+        _PlanService,
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "GovernedPlanningAdmissionService",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        governed_task_adapter,
+        "GovernedPlanningRecoveryService",
+        _RecoveryService,
+    )
+    runtime = GovernedHostRuntime(
+        application=_BlockingApplication(),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=_EmptyCommandRepository(),
+        task_store=durable_store,
+        planning_enabled=True,
+        planning_skill_registry=object(),
+    )
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": "intent-capability-plan-replan",
+        "session_id": "session-capability-plan-replan",
+        "seq": 2,
+        "nonce": "nonce-capability-plan-replan",
+        "route": "plan",
+        "target_id": "planning_search",
+        "task": "replan bounded research after durable failure",
+        "args": {
+            "planning_mode": "CAPABILITY_SEARCH_V1",
+            "planning_capability_tags": ["research"],
+        },
+        "failure_replan": {
+            "schema_version": FAILURE_REPLAN_SCHEMA_VERSION,
+            "graph_id": "graph-capability-plan-replan",
+            "previous_revision": 1,
+        },
+    }
+    governor = {
+        "request_id": "request-capability-plan-replan",
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "tokens": {},
+        "ts_ms": 1_800_000_000_000,
+    }
+
+    assert runtime.supports(intent) is True
+    await runtime.activate()
+    try:
+        events = await _collect(
+            runtime.execute_stream(
+                request_body=SimpleNamespace(input_source="GATEWAY"),
+                request_id=governor["request_id"],
+                session_id=intent["session_id"],
+                ts_ms=governor["ts_ms"],
+                intent_draft=intent,
+                governor_result=governor,
+                person_id="person-capability-plan-replan",
+                sanitized_message=intent["task"],
+                command_authority={"body_sha256": "f" * 64},
+            )
+        )
+        assert events[-1]["decision"] == "APPROVE"
+        assert captured["task_store"] is durable_store
+        assert captured["request"] is capability_adapter.request
+        assert captured["resolver"] is capability_adapter.compilation_context_for
+        replan_kwargs = captured["replan_kwargs"]
+        assert replan_kwargs["graph_id"] == "graph-capability-plan-replan"
+        assert replan_kwargs["previous_revision"] == 1
+        assert replan_kwargs["created_at"] == governor["ts_ms"]
     finally:
         await runtime.aclose()
 

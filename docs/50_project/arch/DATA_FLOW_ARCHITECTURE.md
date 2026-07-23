@@ -360,7 +360,9 @@ Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_disp
 
 [plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py) 的遗留模式只接受 `route=plan`，从 Governor 已批准的 `planned_steps/steps` 构造候选，检查 `skill` / `delegate` / `chat` 节点与依赖，选出完整合法的拓扑顺序。[planning_execution.py](../../../host_brain/orchestration/planning_execution.py) 把 search result 交给 [planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py)，编译成不可变 TaskGraph。
 
-显式 `route=plan + args.planning_mode=CAPABILITY_SEARCH_V1` 不接受 `planned_steps/steps`。它经 [capability_plan_search.py](../../../host_brain/orchestration/capability_plan_search.py) 从 app-composed `SkillRegistry` 冻结至少两项 `scope=host`、`require_confirm=false`、风险不高于 Governor-bound 上限且标签匹配的能力元数据；[capability_domain.py](../../../host_brain/planning_search/capability_domain.py) 用公共 L1/L2/条件 L3 选择一条 `skill → chat` 的纯虚拟路径。只有搜索选中后，`compilation_context_resolver` 才重建 selected-only `approved_candidate_inputs`，再进入 compiler/admission；Registry handler、未选候选和 worker 都不进入搜索。
+显式 `route=plan + args.planning_mode=CAPABILITY_SEARCH_V1` 不接受 `planned_steps/steps`。普通用户输入中，只有 Thalamus server-owned rule 识别出的明确 Research/调研和 Frontend/可用性计划会填入 `task`、受限 tag 与最大风险；`compile_intent_draft()` 只保留这一声明合同，Governor schema/binding 再冻结它。仅建议、禁止调用工具、通用目标、Code/Pentest 不会由这条规则获得执行 authority。随后它经 [capability_plan_search.py](../../../host_brain/orchestration/capability_plan_search.py) 从 app-composed `SkillRegistry` 冻结至少两项 `scope=host`、`require_confirm=false`、风险不高于 Governor-bound 上限且标签匹配的能力元数据；[capability_domain.py](../../../host_brain/planning_search/capability_domain.py) 用公共 L1/L2/条件 L3 选择一条 `skill → chat` 的纯虚拟路径。只有搜索选中后，`compilation_context_resolver` 才重建 selected-only `approved_candidate_inputs`，再进入 compiler/admission；Registry handler、未选候选和 worker 都不进入搜索。若携带显式、Governor-bound `failure_replan`，同一路径必须先由 `GovernedPlanningRecoveryService` 重开 canonical `FAILED` graph、quiescence 和 failure evidence，才可创建同 root 的 revision `+1`；它不是 worker 失败后的自动触发器。
+
+Risk 收紧发生在 Registry 快照前：`requested_max_risk_level` 与 Governor approved binding 的整数 risk ceiling 取最小值，Governor decision ref 进入 virtual-state source refs；缺失、布尔值、非整数或越界 ceiling 均在搜索前失败关闭。该数据流只减少 Research/Frontend capability catalog 的候选，不能把 intent 参数提升为 grant，也不扩展到一般 Plan、Code 或 Pentest。
 
 当前 Plan **不会**：
 
@@ -369,7 +371,7 @@ Delegate worker 仅接受冻结的 `target_id`。D10 的 [governed_delegate_disp
 - 在真实 Code/Research 场景中证明 Graph Search 或 MCTS 收益；
 - 在 worker 失败时自动生成 revision + 1 并继续调度。
 
-显式 failure-replan metadata 可以构造 graph revision + 1，但这只是合同能力，不是完整的自动重规划闭环。
+显式 failure-replan metadata 现可由 Host capability route 走 canonical durable recovery 构造 graph revision + 1；它仍只是人工/显式恢复，不是完整的自动或 failure-adaptive 重规划闭环。
 
 ### 4.7 PlanningSearch shadow calibration
 

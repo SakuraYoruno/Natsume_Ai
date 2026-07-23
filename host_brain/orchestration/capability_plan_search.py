@@ -20,7 +20,10 @@ from host_brain.orchestration.goal_planning import (
     GoalPlanningRequest,
     GoalPlanningService,
 )
-from host_brain.orchestration.governor_grant import governor_grant_ref
+from host_brain.orchestration.governor_grant import (
+    durable_governor_binding,
+    governor_grant_ref,
+)
 from host_brain.orchestration.plan_intent_search import (
     PlanIntentSearchError,
     require_governed_plan_authority,
@@ -36,6 +39,7 @@ from host_brain.planning_search.capability_domain import (
 from host_brain.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_DOMAIN,
     CAPABILITY_PLANNING_MODE,
+    CAPABILITY_PLANNING_TARGET_ID,
     CapabilityPlanningError,
     CapabilityPlanningSnapshot,
     PlanningCapability,
@@ -52,7 +56,6 @@ from host_brain.planning_search.contracts import (
 CAPABILITY_PLAN_SEARCH_INVALID = "CAPABILITY_PLAN_SEARCH_INVALID"
 CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID = "CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID"
 CAPABILITY_PLAN_SEARCH_NO_COMPETITION = "CAPABILITY_PLAN_SEARCH_NO_COMPETITION"
-CAPABILITY_PLAN_SEARCH_REPLAN_UNSUPPORTED = "CAPABILITY_PLAN_SEARCH_REPLAN_UNSUPPORTED"
 
 _SENSITIVE_EXACT_KEYS = frozenset(
     {
@@ -134,6 +137,8 @@ def is_capability_plan_intent(intent: Mapping[str, Any] | None) -> bool:
     args = payload.get("args")
     return (
         str(payload.get("route") or "").strip().lower() == "plan"
+        and str(payload.get("target_id") or "").strip()
+        == CAPABILITY_PLANNING_TARGET_ID
         and isinstance(args, Mapping)
         and str(args.get("planning_mode") or "").strip()
         == CAPABILITY_PLANNING_MODE
@@ -168,7 +173,7 @@ def build_capability_plan_search(
     if not is_capability_plan_intent(raw_intent):
         raise CapabilityPlanSearchError(
             CAPABILITY_PLAN_SEARCH_INVALID,
-            "capability planning requires route=plan and explicit planning_mode",
+            "capability planning requires route=plan, target_id=planning_search and explicit planning_mode",
         )
     if "planned_steps" in raw_intent or "steps" in raw_intent:
         raise CapabilityPlanSearchError(
@@ -220,7 +225,15 @@ def build_capability_plan_search(
         args.get("planning_capability_tags"),
         field_name="intent.args.planning_capability_tags",
     )
-    max_risk_level = _max_risk(args.get("planning_max_risk_level", 3))
+    requested_max_risk_level = _max_risk(
+        args.get("planning_max_risk_level", 3)
+    )
+    approval_ref = governor_grant_ref(request_ref, governor)
+    governor_max_risk_level = _governor_risk_ceiling(governor)
+    # The intent describes a requested constraint, never a permission grant.
+    # A selected capability must therefore satisfy both the frozen request and
+    # the Governor's approved authority ceiling.
+    max_risk_level = min(requested_max_risk_level, governor_max_risk_level)
     task_ref = _governed_ref_from_input_refs(input_refs)
     capabilities = _registry_capabilities(
         skill_registry,
@@ -239,6 +252,7 @@ def build_capability_plan_search(
             requested_tags=requested_tags,
             max_risk_level=max_risk_level,
             capabilities=capabilities,
+            source_refs=(approval_ref,),
         )
     except CapabilityPlanningError as exc:
         raise CapabilityPlanSearchError(
@@ -246,7 +260,6 @@ def build_capability_plan_search(
             str(exc),
         ) from exc
 
-    approval_ref = governor_grant_ref(request_ref, governor)
     try:
         resolved_scope = resolve_governed_plan_business_scope(
             explicit=business_idempotency_scope,
@@ -340,6 +353,9 @@ def build_capability_plan_search(
                 "planning_mode": CAPABILITY_PLANNING_MODE,
                 "task": objective,
                 "requested_tags": list(requested_tags),
+                "requested_max_risk_level": requested_max_risk_level,
+                "governor_max_risk_level": governor_max_risk_level,
+                "effective_max_risk_level": max_risk_level,
             },
         },
         input_refs=_dedupe_refs((*input_refs, approval_ref, snapshot.catalog_ref)),
@@ -530,6 +546,31 @@ def _max_risk(value: Any) -> int:
     return resolved
 
 
+def _governor_risk_ceiling(governor: Mapping[str, Any]) -> int:
+    """Read the exact approved authority ceiling for a capability plan.
+
+    The generic Plan binding already proves that the Governor approved the
+    complete intent payload.  This additional check ensures a bounded
+    capability search cannot reinterpret a broad ``planning_max_risk_level``
+    field as authority to select a capability riskier than that approval.
+    """
+
+    binding = durable_governor_binding(governor)
+    raw = binding.get("risk_level")
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise CapabilityPlanSearchError(
+            CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID,
+            "Governor binding has no valid integer risk ceiling",
+        )
+    resolved = int(raw)
+    if not 1 <= resolved <= 5:
+        raise CapabilityPlanSearchError(
+            CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID,
+            "Governor binding risk ceiling must be between 1 and 5",
+        )
+    return resolved
+
+
 def _governed_ref_from_input_refs(input_refs: Sequence[str]) -> str:
     for raw in input_refs:
         value = str(raw or "").strip()
@@ -583,7 +624,6 @@ __all__ = [
     "CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID",
     "CAPABILITY_PLAN_SEARCH_INVALID",
     "CAPABILITY_PLAN_SEARCH_NO_COMPETITION",
-    "CAPABILITY_PLAN_SEARCH_REPLAN_UNSUPPORTED",
     "CapabilityPlanSearchAdapter",
     "CapabilityPlanSearchError",
     "build_capability_plan_search",

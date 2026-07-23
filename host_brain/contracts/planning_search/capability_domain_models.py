@@ -21,6 +21,7 @@ from host_brain.contracts.planning_search.contracts import VirtualStateSnapshot
 
 CAPABILITY_PLANNING_DOMAIN = "skill"
 CAPABILITY_PLANNING_MODE = "CAPABILITY_SEARCH_V1"
+CAPABILITY_PLANNING_TARGET_ID = "planning_search"
 CAPABILITY_PLANNING_SCHEMA = "natsume.capability-planning.snapshot.v1"
 CAPABILITY_PLANNING_STATE_SCHEMA = "natsume.capability-planning.state.v1"
 CAPABILITY_PLANNING_NODE_OUTPUT_SCHEMA = "natsume.capability-planning.node-output.v1"
@@ -284,6 +285,7 @@ def _rounded(value: float) -> float:
 __all__ = [
     "CAPABILITY_PLANNING_DOMAIN",
     "CAPABILITY_PLANNING_MODE",
+    "CAPABILITY_PLANNING_TARGET_ID",
     "CAPABILITY_PLANNING_NODE_OUTPUT_SCHEMA",
     "CAPABILITY_PLANNING_SCHEMA",
     "CAPABILITY_PLANNING_STATE_SCHEMA",
