@@ -332,6 +332,8 @@ class ResearchModelExecutionReceiptV1:
     arm_id: str
     evidence_class: str
     attempt_ids: tuple[str, ...]
+    prompt_digest: str | None = None
+    tool_call_count: int | None = None
     total_tokens: int | None = None
     cost_micros: int | None = None
     attestation_ref: str | None = None
@@ -345,7 +347,12 @@ class ResearchModelExecutionReceiptV1:
             raise ResearchBenchmarkContractError("unsupported Research evidence_class")
         object.__setattr__(self, "evidence_class", evidence_class)
         object.__setattr__(self, "attempt_ids", _refs(self.attempt_ids, "attempt_ids"))
-        for name in ("total_tokens", "cost_micros"):
+        prompt_digest = (
+            None
+            if self.prompt_digest is None
+            else _digest(self.prompt_digest, "prompt_digest")
+        )
+        for name in ("tool_call_count", "total_tokens", "cost_micros"):
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                 raise ResearchBenchmarkContractError(f"{name} must be a non-negative integer")
@@ -363,6 +370,14 @@ class ResearchModelExecutionReceiptV1:
         if evidence_class == "ATTESTED_EXTERNAL" and (self.total_tokens is None or self.cost_micros is None):
             raise ResearchBenchmarkContractError(
                 "attested external evidence requires token and cost usage"
+            )
+        if evidence_class == "ATTESTED_EXTERNAL" and prompt_digest is None:
+            raise ResearchBenchmarkContractError(
+                "attested external evidence requires the rendered prompt digest"
+            )
+        if evidence_class == "ATTESTED_EXTERNAL" and self.tool_call_count is None:
+            raise ResearchBenchmarkContractError(
+                "attested external evidence requires tool-call usage"
             )
         if evidence_class == "ATTESTED_EXTERNAL" and external_attestation is None:
             raise ResearchBenchmarkContractError(
@@ -386,10 +401,17 @@ class ResearchModelExecutionReceiptV1:
             )
         object.__setattr__(self, "attestation_ref", attestation)
         object.__setattr__(self, "attestation", external_attestation)
+        object.__setattr__(self, "prompt_digest", prompt_digest)
 
     @property
     def benefit_eligible(self) -> bool:
-        return self.evidence_class == "ATTESTED_EXTERNAL" and bool(self.attempt_ids) and self.attestation_ref is not None
+        return (
+            self.evidence_class == "ATTESTED_EXTERNAL"
+            and bool(self.attempt_ids)
+            and self.attestation_ref is not None
+            and self.prompt_digest is not None
+            and self.tool_call_count is not None
+        )
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -397,6 +419,8 @@ class ResearchModelExecutionReceiptV1:
             "arm_id": self.arm_id,
             "evidence_class": self.evidence_class,
             "attempt_ids": list(self.attempt_ids),
+            "prompt_digest": self.prompt_digest,
+            "tool_call_count": self.tool_call_count,
             "total_tokens": self.total_tokens,
             "cost_micros": self.cost_micros,
             "attestation_ref": self.attestation_ref,
@@ -482,6 +506,7 @@ class PairedResearchRunReceiptV1:
     selected_model: ResearchModelExecutionReceiptV1
     baseline_verifier: ResearchVerifierReceiptV1
     selected_verifier: ResearchVerifierReceiptV1
+    arm_order: tuple[str, str]
     randomized_arm_order: bool
     production_influence_enabled: bool = False
 
@@ -496,10 +521,21 @@ class PairedResearchRunReceiptV1:
             raise ResearchBenchmarkContractError("model receipts do not bind paired execution ids")
         if self.baseline_verifier.execution_id != baseline_id or self.selected_verifier.execution_id != selected_id:
             raise ResearchBenchmarkContractError("verifier receipts do not bind paired execution ids")
+        if isinstance(self.arm_order, (str, bytes, bytearray)):
+            raise ResearchBenchmarkContractError("paired Research arm_order must be an explicit sequence")
+        arm_order = tuple(str(value or "").strip().upper() for value in self.arm_order)
+        if len(arm_order) != 2 or set(arm_order) != {"BASELINE", "SELECTED"}:
+            raise ResearchBenchmarkContractError(
+                "paired Research arm_order must contain BASELINE and SELECTED exactly once"
+            )
+        if not self.randomized_arm_order:
+            raise ResearchBenchmarkContractError("paired Research receipt requires a randomized arm order")
         if self.production_influence_enabled:
             raise ResearchBenchmarkContractError("Research shadow receipt cannot enable production influence")
         object.__setattr__(self, "baseline_execution_id", baseline_id)
         object.__setattr__(self, "selected_execution_id", selected_id)
+        object.__setattr__(self, "arm_order", arm_order)
+        object.__setattr__(self, "randomized_arm_order", True)
         object.__setattr__(self, "production_influence_enabled", False)
 
     @property
@@ -524,6 +560,7 @@ class PairedResearchRunReceiptV1:
             "selected_model": self.selected_model.to_dict(),
             "baseline_verifier": self.baseline_verifier.to_dict(),
             "selected_verifier": self.selected_verifier.to_dict(),
+            "arm_order": list(self.arm_order),
             "randomized_arm_order": self.randomized_arm_order,
             "benefit_eligible": self.benefit_eligible,
             "production_influence_enabled": False,

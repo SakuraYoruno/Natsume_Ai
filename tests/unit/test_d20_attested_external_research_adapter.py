@@ -57,6 +57,7 @@ def _result(*, cached: bool = False, provider_latency: int | None = 87) -> Model
             "token_count": 123,
             "completion_tokens": 34,
             "model_cost_micros": 56,
+            "tool_call_count": 0,
         }
     }
     if provider_latency is not None:
@@ -133,6 +134,8 @@ async def test_d20c_adapter_builds_attested_receipt_from_one_fresh_canonical_att
     assert run.model_receipt.benefit_eligible is True
     assert run.attestation.provider == "openai"
     assert run.model_receipt.attestation_ref == run.attestation.attestation_ref
+    assert run.model_receipt.prompt_digest == "a" * 64
+    assert run.model_receipt.tool_call_count == 0
     assert service.requests[0].request_id == "research-execution-1"
     assert service.requests[0].foreground is True
     assert service.requests[0].max_attempts == 1

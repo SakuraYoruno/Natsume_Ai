@@ -68,6 +68,7 @@ def _records() -> tuple[ModelAttemptRecord, ModelAttemptRecord, ModelAttemptResu
                 "token_count": 101,
                 "completion_tokens": 33,
                 "model_cost_micros": 29,
+                "tool_call_count": 0,
             },
             "provider_transport_measurements": {"provider_latency_ms": 37},
         },

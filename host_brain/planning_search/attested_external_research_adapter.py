@@ -139,6 +139,28 @@ class AttestedExternalResearchAdapter:
             attempt_audit_lookup=self._attempt_audit_lookup,
         )
 
+    def canonical_audit_records(self, *, execution_id: str) -> tuple[ModelAttemptRecord, ...]:
+        """Reopen canonical audit rows for durable arm recovery.
+
+        The paired-run owner may use this read-only operation only after its
+        durable operation journal records ``EXTERNAL_CALL_STARTED``.  It
+        deliberately exposes canonical records rather than a boolean so the
+        caller cannot reinterpret an audit lookup failure as an empty audit.
+        """
+
+        normalized_execution_id = _text(execution_id, field="execution_id", limit=160)
+        try:
+            records = tuple(self._attempt_audit_lookup.records_for_request(normalized_execution_id))
+        except Exception as exc:
+            raise AttestedExternalResearchError(
+                "cannot inspect canonical model audit for external execution"
+            ) from exc
+        if not all(isinstance(record, ModelAttemptRecord) for record in records):
+            raise AttestedExternalResearchError(
+                "canonical model attempt audit returned an invalid record"
+            )
+        return records
+
 
 def _attest_result(
     *,
@@ -181,6 +203,10 @@ def _attest_result(
         measurements.get("model_cost_micros"),
         field="model_cost_micros",
     )
+    tool_call_count = _non_negative_int(
+        measurements.get("tool_call_count"),
+        field="tool_call_count",
+    )
     provider_latency_ms = _non_negative_int(
         result.response.metadata.get("provider_latency_ms"),
         field="provider_latency_ms",
@@ -221,6 +247,8 @@ def _attest_result(
         arm_id=arm_id,
         evidence_class="ATTESTED_EXTERNAL",
         attempt_ids=(attempt.attempt_id,),
+        prompt_digest=attempt.prompt_digest,
+        tool_call_count=tool_call_count,
         total_tokens=total_tokens,
         cost_micros=cost_micros,
         attestation_ref=attestation.attestation_ref,

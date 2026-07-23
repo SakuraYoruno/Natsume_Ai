@@ -77,6 +77,7 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
         registration_id=registration_id,
         baseline=baseline,
         selected=selected,
+        arm_order=("BASELINE", "SELECTED"),
         randomized_arm_order=True,
     )
     ledger.append_arm_execution(
@@ -118,6 +119,7 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
         selected_model=_model("selected-execution", selected.arm_id),
         baseline_verifier=_verifier("baseline-execution"),
         selected_verifier=_verifier("selected-execution"),
+        arm_order=("BASELINE", "SELECTED"),
         randomized_arm_order=True,
     )
     receipt_ref = ledger.complete(run_id=run_id, receipt=receipt)
@@ -135,6 +137,7 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
         selected_model=_model("selected-execution", selected.arm_id),
         baseline_verifier=_verifier("baseline-execution"),
         selected_verifier=_verifier("selected-execution"),
+        arm_order=("BASELINE", "SELECTED"),
         randomized_arm_order=True,
     )
     with pytest.raises(ResearchShadowLedgerError, match="does not bind its registration"):
@@ -150,6 +153,7 @@ def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(t
         selected_model=_model("selected-execution", selected.arm_id),
         baseline_verifier=_verifier("baseline-execution-drift"),
         selected_verifier=_verifier("selected-execution"),
+        arm_order=("BASELINE", "SELECTED"),
         randomized_arm_order=True,
     )
     with pytest.raises(ResearchShadowLedgerError, match="does not match persisted arm evidence"):
@@ -180,6 +184,7 @@ def test_d20c_arm_operation_fences_external_calls_and_preserves_unknown_effects(
         registration_id=registration_id,
         baseline=baseline,
         selected=selected,
+        arm_order=("SELECTED", "BASELINE"),
         randomized_arm_order=True,
     )
 

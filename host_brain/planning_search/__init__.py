@@ -66,6 +66,14 @@ from .attested_external_research_adapter import (
     AttestedExternalResearchError,
     AttestedExternalResearchRun,
 )
+from .research_paired_execution import (
+    ResearchArmRuntimeInputV1,
+    ResearchCitationExtractor,
+    ResearchCitationVerifierPort,
+    ResearchPairedExecutionError,
+    ResearchPairedExecutionResult,
+    ResearchPairedExecutionRunner,
+)
 from .research_domain import (
     ResearchCognitiveRanker,
     ResearchMCTSCondition,
@@ -159,6 +167,12 @@ __all__ = [
     "AttestedExternalResearchAdapter",
     "AttestedExternalResearchError",
     "AttestedExternalResearchRun",
+    "ResearchArmRuntimeInputV1",
+    "ResearchCitationExtractor",
+    "ResearchCitationVerifierPort",
+    "ResearchPairedExecutionError",
+    "ResearchPairedExecutionResult",
+    "ResearchPairedExecutionRunner",
     "ResearchCorpusBindingV1",
     "ResearchExecutionBudgetV1",
     "ResearchExecutionProfileV1",

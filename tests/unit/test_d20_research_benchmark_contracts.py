@@ -74,6 +74,7 @@ def test_d20b_scripted_pair_is_structural_only_and_never_benefit_eligible() -> N
         selected_model=_model("selected-run", "selected"),
         baseline_verifier=_verifier("baseline-run"),
         selected_verifier=_verifier("selected-run"),
+        arm_order=("SELECTED", "BASELINE"),
         randomized_arm_order=True,
     )
 
@@ -166,6 +167,8 @@ def test_d20c_attested_model_receipt_requires_exact_provider_attestation() -> No
         attempt_ids=("attempt::external-run",),
         total_tokens=321,
         cost_micros=42,
+        prompt_digest="c" * 64,
+        tool_call_count=0,
         attestation_ref=attestation.attestation_ref,
         attestation=attestation,
     )
@@ -180,6 +183,8 @@ def test_d20c_attested_model_receipt_requires_exact_provider_attestation() -> No
             attempt_ids=("attempt::external-run",),
             total_tokens=320,
             cost_micros=42,
+            prompt_digest="c" * 64,
+            tool_call_count=0,
             attestation_ref=attestation.attestation_ref,
             attestation=attestation,
         )
