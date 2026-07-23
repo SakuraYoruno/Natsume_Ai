@@ -56,6 +56,9 @@ from host_brain.app.governed_tool_runtime import (
 from host_brain.app.governed_delegate_dispatch import (
     GovernedDelegateDispatchError,
 )
+from host_brain.app.host_startup_graph_continuation import (
+    HostStartupGraphContinuation,
+)
 from host_brain.app.governed_frozen_skill_runtime import (
     GOVERNED_HOST_GOVERNOR_GRANT_MISSING,
     GOVERNED_HOST_ROUTE_UNSUPPORTED,
@@ -146,14 +149,68 @@ class GovernedHostRuntime:
         self._runtime_context_application = runtime_context_application
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
         self._lifecycle = asyncio.Condition()
+        self._activation_lock = asyncio.Lock()
         self._in_flight = 0
         self._active = False
         self._accepting = False
+        self._startup_recovery_completed = False
+        self._startup_continuation = (
+            HostStartupGraphContinuation(
+                task_store=task_store,
+                command_repository=command_repository,
+                resume_admission=self._resume_startup_admission,
+            )
+            if task_store is not None
+            and callable(getattr(task_store, "list_nonterminal_graphs", None))
+            else None
+        )
 
     async def activate(self) -> None:
-        async with self._lifecycle:
-            self._active = True
-            self._accepting = True
+        # RuntimeGroup may receive an already-active Host instance while it
+        # composes Review continuation.  Durable graph recovery is invoked by
+        # the Host lifespan only after the complete RuntimeGroup and shared
+        # Acceptance Effect owner are live.
+        async with self._activation_lock:
+            async with self._lifecycle:
+                if self._active:
+                    return
+            async with self._lifecycle:
+                self._active = True
+                self._accepting = True
+
+    @property
+    def startup_continuation_report(self) -> tuple[dict[str, Any], ...]:
+        """Expose the bounded, durable Host restart continuation evidence."""
+
+        continuation = self._startup_continuation
+        return () if continuation is None else continuation.report
+
+    async def recover_startup_graphs(self) -> tuple[dict[str, Any], ...]:
+        """Run the one boot-scoped recovery pass after full composition.
+
+        The method is intentionally not folded into ``activate``.  Direct
+        test or compatibility callers can activate a Host façade before the
+        shared Acceptance Effect owner exists; re-entering a graph there would
+        create a second, partial startup authority.  ASGI calls this only
+        after the runtime group has activated every governed surface.
+        """
+
+        async with self._activation_lock:
+            async with self._lifecycle:
+                if not self._active or not self._accepting:
+                    raise GovernedHostAdapterError(
+                        GOVERNED_HOST_RUNTIME_INACTIVE,
+                        "governed Host runtime is not active for startup continuation",
+                    )
+                if self._startup_recovery_completed:
+                    return self.startup_continuation_report
+            continuation = self._startup_continuation
+            if continuation is None:
+                self._startup_recovery_completed = True
+                return ()
+            report = await continuation.recover()
+            self._startup_recovery_completed = True
+            return report
 
     async def close_admission(self) -> None:
         async with self._lifecycle:
@@ -676,6 +733,40 @@ class GovernedHostRuntime:
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
 
+    async def _resume_startup_admission(
+        self,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        assignment: Any,
+        graph: Any,
+    ) -> Mapping[str, Any]:
+        """Re-enter an already-admitted Host graph without rebuilding input.
+
+        This is intentionally narrower than ``execute_stream``: startup owns
+        no raw request, Governor decision, or plan search authority.  The
+        continuation receives only the exact durable command tuple selected by
+        ``HostStartupGraphContinuation`` and still sends accepted effects to
+        the shared app-local dispatcher.
+        """
+
+        terminal: dict[str, Any] | None = None
+        terminal_count = 0
+        async for event in self._application.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        ):
+            if bool(event.get("done")):
+                terminal_count += 1
+                terminal = await self._dispatch_accepted_effects(event)
+        if terminal_count != 1 or terminal is None:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "startup continuation produced no unique durable terminal result",
+            )
+        return terminal
+
     async def _execute_plan_stream(
         self,
         *,
@@ -899,6 +990,13 @@ def build_governed_host_runtime(
         build_governed_delegate_dispatcher,
     )
 
+    if not callable(
+        getattr(task_runtime_container.task_store, "list_nonterminal_graphs", None)
+    ):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "production governed Host runtime requires bounded nonterminal graph inventory",
+        )
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,
         token_service=token_service,

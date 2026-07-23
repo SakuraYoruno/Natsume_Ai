@@ -128,6 +128,14 @@ def test_surface_adapter_and_internal_composition_have_no_hidden_locator_fallbac
     assert "surface_runtime_ports=surface_runtime_ports" in composition_source
 
 
+def test_internal_runtime_lifespan_runs_host_graph_recovery_after_group_activation() -> None:
+    source = inspect.getsource(internal_runtime_composition.activate_internal_runtime)
+    activation = source.index("await task_runtime.activate_runtime()")
+    continuation = source.index("await composition.host_runtime.recover_startup_graphs()")
+    scheduler = source.index("await scheduler.activate_clock()")
+    assert activation < continuation < scheduler
+
+
 def test_agent_and_surface_runtime_ports_expose_experience_read_pack_only() -> None:
     agent_ports_source = inspect.getsource(AgentRuntimeApplicationPorts)
     surface_ports_source = inspect.getsource(surface_runtime_composition)

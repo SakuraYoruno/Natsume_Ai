@@ -23,6 +23,7 @@ DAG_STATE_METHODS = (
     "insert_outbox_in_transaction",
     "get_graph",
     "list_graphs",
+    "list_nonterminal_graphs",
     "get_node",
     "read_scheduler_snapshot",
     "transition_graph",

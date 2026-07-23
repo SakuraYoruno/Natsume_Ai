@@ -528,7 +528,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     container = Container()
 
-    governed_runtime = object()
+    class GovernedRuntime:
+        async def recover_startup_graphs(self) -> tuple[object, ...]:
+            events.append("host-startup-graphs-recovered")
+            return ()
+
+    governed_runtime = GovernedRuntime()
     acceptance_effect_dispatcher = object()
     acceptance_effect_runtime = object()
     scheduler_worker_registry = object()
@@ -1432,6 +1437,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "scheduler-runtime-built",
         "governed-runtime-bound",
         "governed-runtime-activated",
+        "host-startup-graphs-recovered",
         "scheduler-clock-activated",
         "serving",
         "guardian-heartbeat-stopped",
