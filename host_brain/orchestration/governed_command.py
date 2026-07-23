@@ -340,7 +340,15 @@ class GovernedCommandApplication:
             execution_kwargs["node_grant_refs"] = {
                 str(node_id): str(ref) for node_id, ref in refs.items()
             }
-        elif review_status not in {"REJECTED", "EXPIRED", "CANCELLED"}:
+        elif review_status in {"REJECTED", "EXPIRED", "CANCELLED"}:
+            # A denied Review is a durable terminalization action, not a
+            # worker re-entry.  The scheduler must still reopen the exact
+            # waiting node to release Budget and persist REVIEW_DENIED, but
+            # it must never mint or require an executable node grant.
+            execution_kwargs["denied_review_node_id"] = str(
+                claim.get("node_id") or ""
+            ).strip()
+        else:
             raise GovernedRuntimeError(
                 GOVERNED_ADMISSION_INVALID,
                 "Review continuation requires a canonical terminal Review status",

@@ -213,6 +213,7 @@ class GovernedTaskCoordinator:
         command: HostCommand,
         work_order: Any,
         node_grant_refs: Mapping[str, str] | None = None,
+        denied_review_node_id: str | None = None,
     ) -> dict[str, Any]:
         terminal: dict[str, Any] | None = None
         async for event in self.execute_stream(
@@ -220,6 +221,7 @@ class GovernedTaskCoordinator:
             command=command,
             work_order=work_order,
             node_grant_refs=node_grant_refs,
+            denied_review_node_id=denied_review_node_id,
         ):
             if bool(event.get("done")):
                 terminal = dict(event)
@@ -237,6 +239,7 @@ class GovernedTaskCoordinator:
         command: HostCommand,
         work_order: Any,
         node_grant_refs: Mapping[str, str] | None = None,
+        denied_review_node_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         admitted.validate()
         async with self._execution_registry.track(
@@ -248,6 +251,7 @@ class GovernedTaskCoordinator:
                 command=command,
                 work_order=work_order,
                 node_grant_refs=node_grant_refs,
+                denied_review_node_id=denied_review_node_id,
             ):
                 yield event
 

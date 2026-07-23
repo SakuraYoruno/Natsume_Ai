@@ -91,48 +91,6 @@ class _ApplicationContinuationRuntime:
         return result
 
 
-class _NodeGrantService:
-    """Issue exact test refs while retaining the production application boundary."""
-
-    def __init__(self) -> None:
-        self.continuation_claims: list[dict[str, Any]] = []
-
-    def validate_parent_binding(self, **_kwargs: Any) -> bool:
-        return True
-
-    def derive(
-        self,
-        *,
-        parent_grant_ref: str,
-        task_graph: Any,
-        **_: Any,
-    ) -> SimpleNamespace:
-        return self._batch(parent_grant_ref=parent_grant_ref, graph=task_graph)
-
-    def derive_review_continuation(
-        self,
-        *,
-        parent_grant_ref: str,
-        task_graph: Any,
-        continuation_claim: Mapping[str, Any],
-        **_: Any,
-    ) -> SimpleNamespace:
-        self.continuation_claims.append(dict(continuation_claim))
-        return self._batch(parent_grant_ref=parent_grant_ref, graph=task_graph)
-
-    @staticmethod
-    def _batch(*, parent_grant_ref: str, graph: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            parent_grant_ref=parent_grant_ref,
-            task_graph_id=graph.graph_id,
-            graph_revision=graph.revision,
-            grant_refs={
-                node.node_id: f"node-grant://review-continuation/{node.node_id}"
-                for node in graph.nodes
-            },
-        )
-
-
 class _GovernedResolver:
     def __init__(self, calls: list[str]) -> None:
         self._worker = _Worker(calls, set())
@@ -220,27 +178,6 @@ class _ExactResolver:
         assert executor == "canonical"
         assert worker_route.startswith("skill:")
         return self._worker
-
-
-def _with_governor_grant(
-    contracts: tuple[Any, Any, Any, Any],
-) -> tuple[Any, Any, Any, Any]:
-    graph = replace(
-        contracts[3],
-        nodes=tuple(
-            replace(node, route=f"skill:{node.node_id}")
-            for node in contracts[3].nodes
-        ),
-    )
-    return (
-        replace(
-            contracts[0],
-            governor_grant_ref="governor-grant://review-continuation/root",
-        ),
-        contracts[1],
-        contracts[2],
-        graph,
-    )
 
 
 def _install_parent_grant(
@@ -486,59 +423,97 @@ async def test_post_review_worker_resumes_acceptance_without_worker_reexecution(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)
-    contracts = _with_governor_grant(_contracts((("root", ()),)))
-    calls: list[str] = []
-    reviews = ReviewStore(db_path, clock=lambda: NOW)
-    node_grants = _NodeGrantService()
-    projection_store = WorkerProjectionStore(db_path, clock=lambda: NOW)
-    application = GovernedCommandApplication(
-        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
-        coordinator=_coordinator(
-            db_path,
-            calls,
-            review_runtime=TaskNodeReviewRuntime(reviews, clock=lambda: NOW),
-            acceptance_decision="REVIEW",
-            worker_resolver=_ExactResolver(
-                _DurableReviewWorker(calls, projection_store)
+    ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    try:
+        base_contracts = _contracts((("root", ()),))
+        tokens = TokenService(approval_ttl_ms=600_000)
+        parent_ref = _install_parent_grant(
+            ledger=ledger,
+            token_service=tokens,
+            command=base_contracts[0],
+            expires_at_ms=NOW + 100_000,
+        )
+        contracts = _with_real_governor_authority(
+            base_contracts,
+            parent_grant_ref=parent_ref,
+        )
+        calls: list[str] = []
+        reviews = ReviewStore(db_path, clock=lambda: NOW)
+        continuation_store = ReviewContinuationStore(db_path, clock=lambda: NOW)
+        grant_clock = _MutableClock()
+        node_grants = NodeBoundGrantService(
+            ledger=ledger,
+            token_service=tokens,
+            review_store=continuation_store,
+            clock=grant_clock,
+            child_ttl_ms=60_000,
+        )
+        grant_verifier = DurableNodeGrantVerifier(
+            ledger=ledger,
+            review_store=continuation_store,
+            clock=grant_clock,
+        )
+        projection_store = WorkerProjectionStore(db_path, clock=lambda: NOW)
+        application = GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+            coordinator=_coordinator(
+                db_path,
+                calls,
+                review_runtime=TaskNodeReviewRuntime(reviews, clock=lambda: NOW),
+                acceptance_decision="REVIEW",
+                worker_resolver=_ExactResolver(
+                    _DurableReviewWorker(calls, projection_store)
+                ),
+                node_grant_verifier=grant_verifier,
+                projection_reader=projection_store,
             ),
-            projection_reader=projection_store,
-        ),
-        node_grant_service=node_grants,
-    )
+            node_grant_service=node_grants,
+        )
 
-    waiting = await _initial_receipt(application, contracts)
+        waiting = await _initial_receipt(application, contracts)
 
-    assert waiting["status"] == "WAITING_ACCEPTANCE_REVIEW"
-    assert calls == ["root"]
-    review = waiting["projection"]["review"]
-    with sqlite3.connect(str(db_path)) as conn:
-        attempt_before = conn.execute(
-            "SELECT attempt_id, attempt_no, status FROM task_runtime_attempt"
-        ).fetchall()
-    assert len(attempt_before) == 1
-    assert attempt_before[0][1:] == (1, "SUCCEEDED")
+        assert waiting["status"] == "WAITING_ACCEPTANCE_REVIEW"
+        assert calls == ["root"]
+        review = waiting["projection"]["review"]
+        with sqlite3.connect(str(db_path)) as conn:
+            attempt_before = conn.execute(
+                "SELECT attempt_id, attempt_no, status FROM task_runtime_attempt"
+            ).fetchall()
+        assert len(attempt_before) == 1
+        assert attempt_before[0][1:] == (1, "SUCCEEDED")
 
-    _consume_review(reviews, review)
-    continuation_store = ReviewContinuationStore(db_path, clock=lambda: NOW)
-    runtime = _ApplicationContinuationRuntime(application, contracts)
+        _consume_review(reviews, review)
+        runtime = _ApplicationContinuationRuntime(application, contracts)
 
-    delivered = await _worker(
-        store=continuation_store,
-        runtime=runtime,
-        worker_id="review-continuation-post",
-    ).run_once()
+        delivered = await _worker(
+            store=continuation_store,
+            runtime=runtime,
+            worker_id="review-continuation-post",
+        ).run_once()
 
-    assert delivered == 1
-    assert runtime.results[-1]["execution_receipt"]["status"] == "ACCEPTED"
-    assert runtime.results[-1]["execution_receipt"]["replayed"] is True
-    assert calls == ["root"]
-    assert node_grants.continuation_claims == runtime.claims
-    assert continuation_store.get_review_continuation(review["review_id"]) is None
-    with sqlite3.connect(str(db_path)) as conn:
-        attempt_after = conn.execute(
-            "SELECT attempt_id, attempt_no, status FROM task_runtime_attempt"
-        ).fetchall()
-    assert attempt_after == attempt_before
+        assert delivered == 1
+        assert runtime.results[-1]["execution_receipt"]["status"] == "ACCEPTED"
+        assert runtime.results[-1]["execution_receipt"]["replayed"] is True
+        assert calls == ["root"]
+        renewal_rows = [
+            row
+            for row in ledger.trace_request(contracts[0].request_id)["governor_log"]
+            if row.get("reason_code")
+            == "TASK_GRAPH_NODE_REVIEW_CONTINUATION_APPROVE"
+        ]
+        assert len(renewal_rows) == 1
+        assert (
+            renewal_rows[0]["snapshot_refs"]["review_continuation_authority"]
+            == runtime.claims[-1]
+        )
+        assert continuation_store.get_review_continuation(review["review_id"]) is None
+        with sqlite3.connect(str(db_path)) as conn:
+            attempt_after = conn.execute(
+                "SELECT attempt_id, attempt_no, status FROM task_runtime_attempt"
+            ).fetchall()
+        assert attempt_after == attempt_before
+    finally:
+        ledger.close()
 
 
 @pytest.mark.asyncio

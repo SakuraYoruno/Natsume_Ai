@@ -559,6 +559,8 @@ claim runnable node
 
 启动恢复数据流为 migration → TaskStore 0093/0094/0095/0098/0099 与 Review 0096 readiness → `task_store.recover_startup` → 0099 单次最多 10,000 个 terminal Graph inventory → 可选且默认关闭的 exact system auto → publisher → recovery outbox publish → RuntimeGroup 激活共享 Acceptance Effect owner、Host/Internal/Scheduler/Operator → `HostStartupGraphContinuation` 只读最多 100 条 `CREATED/ACTIVE/BLOCKED` 图 → `get_by_graph()` 精确重开 Host-owned immutable admission → scheduler clock 与 cancellation/Review workers。Host continuation 只覆盖 `CHAT/HOST_INPUT/TOOL/GATEWAY`：live Lease 或已有执行 owner 只记 `DEFERRED`，达到 inventory 上限、tuple/snapshot/receipt 漂移全部失败关闭；它不构造请求、不重新 Governor/规划，也不直接抢 Lease 或重放 worker。0099 inventory 是显式历史终态分类，Host continuation 是一次 boot-scoped 正确入口，两者都不是 general recovery；单节点 post-budget Operation takeover仍发生在 exact request re-entry，batch/multi-node/pre-budget 以及 live Lease 过期后的周期 survivor 都不会被启动流程自动修复。
 
+拒绝性 Review continuation 的数据流独立于 worker re-entry：`REJECTED/EXPIRED/CANCELLED` claim → immutable `denied_review_node_id`（无 node grant）→ scheduler 读取同一 TaskGraph snapshot → 精确等待节点/无活跃 sibling 检查 → ReviewStore 重开 `REVIEW_DENIED` → 既有 terminal release、Verification/Acceptance receipt 与 outbox 路径。claim 指向未知节点、携带 grant、节点已离开等待 checkpoint、sibling 正在执行或 Review disposition 变化时，流程在任何状态 mutation 前以 durable-state conflict 失败关闭；不得把拒绝当成可重跑 worker 的许可。
+
 Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。concurrency charge 和超限后的完整 `DEGRADE` / `REVIEW` 分支还没有闭环。
 
 ### 5.3 Scheduler Clock/Effect 与 Internal result 边界

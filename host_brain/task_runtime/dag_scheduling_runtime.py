@@ -52,6 +52,12 @@ from .dag_scheduler import (
 from .dag_scheduling_records import (
     _validated_node_grant_refs,
 )
+from .dag_scheduling_review_denial import (
+    assert_denied_review_gate,
+    assert_denied_review_waiting_node,
+    normalize_denied_review_node,
+)
+from .dag_scheduling_reentry import reconstruct_parallel_outcomes
 from .errors import (
     GOVERNED_ADMISSION_INVALID,
     GOVERNED_BUDGET_EXCEEDED,
@@ -167,6 +173,7 @@ class DurableDagSchedulingRuntime:
         command: HostCommand,
         work_order: Any,
         node_grant_refs: Mapping[str, str] | None = None,
+        denied_review_node_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         admitted.validate()
         if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
@@ -175,6 +182,10 @@ class DurableDagSchedulingRuntime:
                 "runtime command differs from admitted command",
         )
         grant_refs = _validated_node_grant_refs(admitted, node_grant_refs)
+        node_ids = {binding.node_id for binding in admitted.nodes}
+        denied_review_node = normalize_denied_review_node(
+            denied_review_node_id, node_ids, grant_refs
+        )
         parallel_success_enabled = (
             admitted.completion_policy
             == TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1.value
@@ -182,7 +193,10 @@ class DurableDagSchedulingRuntime:
         if parallel_success_enabled and (
             not self.supports_completion_policy(admitted.completion_policy)
             or not admitted.result_node_id
-            or set(grant_refs) != {binding.node_id for binding in admitted.nodes}
+            or (
+                not denied_review_node
+                and set(grant_refs) != node_ids
+            )
         ):
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
@@ -229,6 +243,7 @@ class DurableDagSchedulingRuntime:
                 node_id: _status(node)
                 for node_id, node in durable_nodes.items()
             }
+            assert_denied_review_waiting_node(denied_review_node, statuses=statuses)
             final_admission = admitted.for_node(
                 admitted.result_node_id or admitted.nodes[-1].node_id
             )
@@ -436,6 +451,7 @@ class DurableDagSchedulingRuntime:
             if (
                 graph_status == "ACTIVE"
                 and len(admitted.nodes) > 1
+                and not denied_review_node
                 and not operation_free_node_ids
                 and (
                     budget.status == "EXCEEDED"
@@ -508,6 +524,11 @@ class DurableDagSchedulingRuntime:
                         attempt_id=None,
                         reason="TaskNode requires durable pre-execution approval",
                     ),
+                )
+                assert_denied_review_gate(
+                    denied_review_node,
+                    disposition=gate.disposition,
+                    phase="pre-execution",
                 )
                 review_refs = _review_evidence_refs(gate)
                 pre_review_refs = tuple(
@@ -607,6 +628,11 @@ class DurableDagSchedulingRuntime:
                         attempt_id=attempt_id,
                         reason="Acceptance policy requires durable post-execution review",
                     )
+                )
+                assert_denied_review_gate(
+                    denied_review_node,
+                    disposition=gate.disposition,
+                    phase="acceptance",
                 )
                 review_refs = _review_evidence_refs(gate)
                 post_review_refs = tuple(
@@ -1427,38 +1453,12 @@ class DurableDagSchedulingRuntime:
         graph: Mapping[str, Any],
         durable_nodes: Mapping[str, Mapping[str, Any]],
     ) -> tuple[_ParallelNodeOutcome, ...]:
-        reconstructable = {
-            "ACCEPTED",
-            "FAILED",
-            "RETRY_PENDING",
-            "VERIFICATION_FAILED",
-            "WAITING_ACCEPTANCE_REVIEW",
-            "CANCELLED",
-        }
-        outcomes: list[_ParallelNodeOutcome] = []
-        for binding in admitted.nodes:
-            node = durable_nodes.get(binding.node_id)
-            if not isinstance(node, Mapping) or _status(node) not in reconstructable:
-                continue
-            node_admission = admitted.for_node(binding.node_id)
-            receipt = await self._node_execution_projection.terminal_replay(
-                node_admission,
-                graph=graph,
-                node=node,
-                allow_incomplete_atomic_graph_outcome=True,
-            )
-            if receipt is None:
-                raise GovernedRuntimeError(
-                    GOVERNED_DURABLE_STATE_CONFLICT,
-                    f"parallel re-entry cannot reconstruct TaskNode {binding.node_id}",
-                )
-            outcomes.append(
-                _ParallelNodeOutcome.from_terminal_event(
-                    node_id=binding.node_id,
-                    event=terminal_event(receipt),
-                )
-            )
-        return tuple(outcomes)
+        return await reconstruct_parallel_outcomes(
+            admitted=admitted,
+            graph=graph,
+            durable_nodes=durable_nodes,
+            node_execution_projection=self._node_execution_projection,
+        )
 
     async def _settle_waiting_approval(
         self,
@@ -1489,6 +1489,7 @@ class DurableDagSchedulingRuntime:
                 "pre-execution review did not produce a blocking settlement",
             )
         return budget, terminal
+
 
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value

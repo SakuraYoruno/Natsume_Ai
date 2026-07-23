@@ -16,11 +16,13 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 
 # Frozen after the scheduler became the only composition owner that can resume
 # an exact multi-node COMMITTED checkpoint after every live owner fence clears.
+# The current baseline also permits one exact denied Review to terminalize
+# without minting a worker grant, while retaining fail-closed durable guards.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "1ee98f2fafbf8e6482f0402e827ea6388621126d0eb6303c8ea3e850d30b72e3"
+    "f405c49e2741bce114ff60d006785894732b9e7e35c2a8633694a0b35344c68a"
 )
 _REENTERED_OUTCOMES_BASELINE_SHA256 = (
-    "29c3e28bf46b666d694d026a2e7bd7711ed832199027f12d1eb100fcb885ea8a"
+    "22ceb5f01e2b2e47f50bd9d2ec755774b3c45e26867195c53a1bce5616978207"
 )
 _SUPPORTS_POLICY_BASELINE_SHA256 = (
     "0d8633080b6b026804024b9064f572a554f41eeadea6ebf8fd73ff87cf17ef00"
@@ -520,7 +522,7 @@ def test_records_module_is_one_pure_validation_helper() -> None:
 
 
 def test_coordinator_is_a_small_registry_scoped_facade() -> None:
-    assert len(inspect.getsource(coordinator).splitlines()) == 271
+    assert len(inspect.getsource(coordinator).splitlines()) == 275
     owner = _class(coordinator, "GovernedTaskCoordinator")
     methods = {
         node.name

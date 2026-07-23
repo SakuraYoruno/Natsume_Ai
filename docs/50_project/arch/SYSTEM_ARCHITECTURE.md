@@ -530,3 +530,5 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 Host 启动时默认运行的 terminal exact-auto 只处理 `EXACT_REPAIRABLE`。隔离真实 SQLite restart canary 已证明：canonical FAILED 半状态只释放绑定预算并写确定性 proof/Outbox，不创建 Attempt、Lease 或重进 worker；同库的 signed-required CANCELLED 半状态保持不变并阻断 readiness。Operator HTTP 签名链、部署存量和 Operation/Effect 对账仍未完成，因此取消生产开关继续关闭。
 
 这条 terminal inventory 之外，Host lifespan 还在 RuntimeGroup（含共享 Acceptance Effect owner）完全激活后执行一次 `HostStartupGraphContinuation`。它只读取最多 100 条 nonterminal durable graph，并经 canonical command repository 重开同一 immutable admission；只有 Host 的 `CHAT/HOST_INPUT/TOOL/GATEWAY` surface 可进入已有 governed application。live Lease 与并发执行均保持 `DEFERRED`，没有 scanner 自行夺取 Lease、生成新图或重放未知副作用；达到上限或任何 lineage/receipt 失配均失败关闭。它是 Host restart 的窄恢复入口，不改变 Scheduler/Internal 各自的 recovery owner，也不使通用多节点恢复完成。
+
+Review 的拒绝终结由同一 Task Runtime 持有，而非新的 worker 入口：应用层只传递精确 node identity，scheduler 仅在无 node grant、目标仍为等待 Review、无活跃 sibling 且 durable Review decision 仍为 `REVIEW_DENIED` 时继续既有终结链。该 guard 不发行执行 authority，漂移一律失败关闭，因此不能被解释为通用恢复或并发 fan-out 已启用。
