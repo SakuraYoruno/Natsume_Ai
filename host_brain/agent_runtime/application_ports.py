@@ -16,7 +16,7 @@ class AgentRuntimeApplicationPorts:
     resolve_host_llm_runtime_async: Callable[..., Awaitable[Any]]
     resolve_state_arbiter_bond_fact: Callable[..., Awaitable[Any]]
     apply_surface_emotion_bond_flow: Callable[..., Any]
-    get_conversation_experience_store: Callable[[], Any]
+    build_conversation_experience_read_pack: Callable[..., dict[str, Any]]
     drive_stream_vts_emotion: Callable[..., Awaitable[Any]]
     resolve_tts_route: Callable[..., Any]
     conversation_history: Callable[[], Any]

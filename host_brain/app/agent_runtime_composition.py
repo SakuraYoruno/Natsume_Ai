@@ -14,7 +14,7 @@ from host_brain.app.chat_retrieval_helpers import (
     filter_retrieval_evidence_items_for_prompt,
 )
 from host_brain.app.context.conversation_experience_store import (
-    get_conversation_experience_store,
+    build_conversation_experience_read_pack,
 )
 from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
 from host_brain.app.durable_task_status import build_durable_task_status_projection
@@ -184,8 +184,15 @@ def build_agent_runtime_application_ports(
     def task_status_projection() -> Any:
         return build_durable_task_status_projection(ledger=ledger())
 
-    def conversation_experience_store() -> Any:
-        return get_conversation_experience_store(ledger=ledger())
+    def conversation_experience_read_pack(**kwargs: Any) -> dict[str, Any]:
+        """Expose persisted Conversation Experience as an immutable read pack.
+
+        Frozen Chat nodes may consume prior belief and lessons while executing,
+        but they must not receive a mutable ConversationExperienceStore.  New
+        experience mutation is deferred to the NE-06 proposal/activation path.
+        """
+
+        return build_conversation_experience_read_pack(ledger=ledger(), **kwargs)
 
     async def drive_stream_vts_emotion_with_ledger(**kwargs: Any) -> Any:
         return await _drive_stream_vts_emotion(
@@ -211,7 +218,7 @@ def build_agent_runtime_application_ports(
         resolve_host_llm_runtime_async=resolve_host_llm_runtime_with_catalog,
         resolve_state_arbiter_bond_fact=resolve_state_arbiter_bond_fact_with_engine,
         apply_surface_emotion_bond_flow=apply_surface_emotion_bond_flow_with_queue,
-        get_conversation_experience_store=conversation_experience_store,
+        build_conversation_experience_read_pack=conversation_experience_read_pack,
         drive_stream_vts_emotion=drive_stream_vts_emotion_with_ledger,
         resolve_tts_route=resolve_tts_route_with_host_services,
         conversation_history=conversation_history,

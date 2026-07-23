@@ -92,6 +92,33 @@ def _chunk_text_for_surface(text: str, *, chunk_size: int, limit: int) -> tuple[
     return tuple(out)
 
 
+def _surface_conversation_experience_read_pack(
+    agent_input: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+    domain: str | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Read the narrow, authority-free Experience projection for one node."""
+
+    pack = _safe_mapping(
+        ports.build_conversation_experience_read_pack(
+            session_id=str(getattr(agent_input, "session_id", "") or "").strip()
+            or None,
+            person_id=str(getattr(agent_input, "person_id", "") or "").strip()
+            or None,
+            domain=str(domain or "").strip() or None,
+            query_text=str(getattr(agent_input, "user_message", "") or ""),
+            lesson_limit=5,
+        )
+    )
+    lessons = [
+        _safe_mapping(item)
+        for item in list(pack.get("experience_lessons") or [])
+        if isinstance(item, Mapping)
+    ]
+    return _safe_mapping(pack.get("previous_belief")), lessons
+
+
 def _surface_pragmatic_intent_fact_lines(
     agent_input: Any,
     *,
@@ -109,11 +136,15 @@ def _surface_pragmatic_intent_fact_lines(
     if not understanding:
         try:
             preference_pack = _surface_user_preference_pack(agent_input, ports=ports)
-            experience_store = ports.get_conversation_experience_store()
             session_id = str(getattr(agent_input, "session_id", "") or "").strip() or None
-            previous_belief = experience_store.get_belief(
-                session_id=session_id,
-                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or None,
+            previous_belief, experience_lessons = _surface_conversation_experience_read_pack(
+                agent_input,
+                ports=ports,
+                domain=str(
+                    (semantic or {}).get("domain")
+                    or (pragmatic or {}).get("domain")
+                    or ""
+                ),
             )
             recent_turns: list[dict[str, Any]] = []
             if session_id:
@@ -135,12 +166,6 @@ def _surface_pragmatic_intent_fact_lines(
                         )
                 except Exception:
                     recent_turns = []
-            experience_lessons = experience_store.recall_lessons(
-                person_id=str(getattr(agent_input, "person_id", "") or "").strip() or None,
-                domain=str((semantic or {}).get("domain") or (pragmatic or {}).get("domain") or "").strip() or None,
-                query_text=str(getattr(agent_input, "user_message", "") or ""),
-                limit=5,
-            )
             understanding = _safe_mapping(
                 ports.build_conversation_understanding_pack(
                     text=str(getattr(agent_input, "user_message", "") or ""),
@@ -332,10 +357,16 @@ def _surface_pragmatic_guidance_action(
         if semantic or pragmatic:
             try:
                 preference_pack = _surface_user_preference_pack(agent_input, ports=ports)
-                experience_store = ports.get_conversation_experience_store()
-                person_id = str(getattr(agent_input, "person_id", "") or "").strip() or None
                 session_id = str(getattr(agent_input, "session_id", "") or "").strip() or None
-                previous_belief = experience_store.get_belief(session_id=session_id, person_id=person_id)
+                previous_belief, lessons = _surface_conversation_experience_read_pack(
+                    agent_input,
+                    ports=ports,
+                    domain=str(
+                        (semantic or {}).get("domain")
+                        or (pragmatic or {}).get("domain")
+                        or ""
+                    ),
+                )
                 recent_turns: list[dict[str, Any]] = []
                 if session_id:
                     try:
@@ -356,13 +387,6 @@ def _surface_pragmatic_guidance_action(
                             )
                     except Exception:
                         recent_turns = []
-                lessons = experience_store.recall_lessons(
-                    person_id=person_id,
-                    domain=str((semantic or {}).get("domain") or (pragmatic or {}).get("domain") or "").strip()
-                    or None,
-                    query_text=str(getattr(agent_input, "user_message", "") or ""),
-                    limit=5,
-                )
                 understanding = _safe_mapping(
                     ports.build_conversation_understanding_pack(
                         text=str(getattr(agent_input, "user_message", "") or ""),

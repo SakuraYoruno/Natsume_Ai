@@ -32,10 +32,10 @@ def surface_runtime_ports_factory():
             "get_conversation_history": lambda: SimpleNamespace(
                 fetch_for_messages=lambda **_kwargs: []
             ),
-            "get_conversation_experience_store": lambda: SimpleNamespace(
-                get_belief=lambda **_kwargs: None,
-                recall_lessons=lambda **_kwargs: [],
-            ),
+            "build_conversation_experience_read_pack": lambda **_kwargs: {
+                "previous_belief": {},
+                "experience_lessons": [],
+            },
             "build_conversation_understanding_pack": lambda **_kwargs: {},
             "build_memory_context_debug": lambda **_kwargs: {},
             "model_attempt_service": _model_attempt_service,

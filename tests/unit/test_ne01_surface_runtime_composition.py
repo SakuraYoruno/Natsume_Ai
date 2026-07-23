@@ -10,6 +10,7 @@ from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPo
 from host_brain.app import internal_runtime_composition
 from host_brain.app import surface_main_chain_adapter
 from host_brain.app import surface_runtime_composition
+from host_brain.surface_runtime import subagent_context
 from host_brain.app.surface_runtime_composition import (
     SurfaceRuntimeCompositionError,
     build_surface_runtime_ports,
@@ -30,7 +31,10 @@ def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRun
         resolve_host_llm_runtime_async=_async_stub,
         resolve_state_arbiter_bond_fact=_async_stub,
         apply_surface_emotion_bond_flow=lambda **_kwargs: {},
-        get_conversation_experience_store=lambda: "experience-store",
+        build_conversation_experience_read_pack=lambda **kwargs: {
+            "source": "experience-read-pack",
+            "arguments": dict(kwargs),
+        },
         drive_stream_vts_emotion=_async_stub,
         resolve_tts_route=lambda **_kwargs: {},
         conversation_history=lambda: "conversation-history",
@@ -69,7 +73,18 @@ def test_surface_runtime_ports_bind_one_lifespan_authority_pair(
     assert ports.get_life_command_service() is command_service
     assert ports.get_life_snapshot_reader() is snapshot_reader
     assert ports.get_conversation_history() == "conversation-history"
-    assert ports.get_conversation_experience_store() == "experience-store"
+    assert ports.build_conversation_experience_read_pack(
+        session_id="session-1",
+        person_id="person-1",
+        query_text="只读经历",
+    ) == {
+        "source": "experience-read-pack",
+        "arguments": {
+            "session_id": "session-1",
+            "person_id": "person-1",
+            "query_text": "只读经历",
+        },
+    }
     assert ports.model_attempt_service() is model_attempt_service
     assert ports.build_surface_context_packet(user_message="显式端口") == {
         "status": "BOUND"
@@ -111,3 +126,15 @@ def test_surface_adapter_and_internal_composition_have_no_hidden_locator_fallbac
     assert "host_brain.composition.process_services" not in adapter_source
     assert "build_surface_runtime_ports(" in composition_source
     assert "surface_runtime_ports=surface_runtime_ports" in composition_source
+
+
+def test_agent_and_surface_runtime_ports_expose_experience_read_pack_only() -> None:
+    agent_ports_source = inspect.getsource(AgentRuntimeApplicationPorts)
+    surface_ports_source = inspect.getsource(surface_runtime_composition)
+    assert "build_conversation_experience_read_pack" in agent_ports_source
+    assert "get_conversation_experience_store" not in agent_ports_source
+    assert "build_conversation_experience_read_pack" in surface_ports_source
+    assert "get_conversation_experience_store" not in surface_ports_source
+    surface_context_source = inspect.getsource(subagent_context)
+    assert "build_conversation_experience_read_pack" in surface_context_source
+    assert "get_conversation_experience_store" not in surface_context_source
