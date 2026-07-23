@@ -27,7 +27,6 @@ def test_prompt_specs_expose_versioned_agent_prompt_catalog() -> None:
     }
 
     assert "multimodal_observer.model_prompt.templates" in spec_ids
-    assert "thalamus_agent.intent_classification_prompts" in spec_ids
     assert "immune_agent.semantic_intent_analysis" in spec_ids
     assert required_agent_specs.issubset(spec_ids)
     assert all(spec.version.startswith("v") for spec in list_prompt_specs())

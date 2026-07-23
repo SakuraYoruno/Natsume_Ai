@@ -89,6 +89,7 @@ def build_production_host_application_ports() -> HostApplicationPorts:
             state_write_arbiter=process_services.get_state_write_arbiter,
             emotion_timeline=process_services.get_emotion_timeline,
             bond_stage_engine=process_services.get_bond_stage_engine,
+            bond_neo4j_client=process_services.get_bond_neo4j_client,
             shared_memory_index=process_services.get_shared_memory_index,
             milestone_tracker=process_services.get_milestone_tracker,
             prompt_registry=process_services.get_prompt_registry,

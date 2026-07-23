@@ -135,6 +135,25 @@ flowchart TD
     class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim,ProtectedStage,InternalEffect,WorkspacePromotion partial;
 ```
 
+### 2.1 Chat 与 Host Input 的显式 Tribe 端口边界
+
+```mermaid
+flowchart LR
+    Root["Host ASGI composition root"] --> Surface["SurfaceRuntimePorts\nAgentRuntime + Life authority"]
+    Root --> Tribe["TribeRuntimeAgentPorts\nprocess-bound transition bridge"]
+    Root --> Input["InputRuntimeApplicationPorts"]
+    Tribe --> Input
+    Input --> Chat["普通 Chat handler"]
+    Input --> Gateway["Gateway / ASR input normalization"]
+    Tribe --> Startup["startup / lifespan warmup"]
+    Chat --> Cortex["Governor → Cortex → governed runtime"]
+    Gateway --> Cortex
+```
+
+普通 Chat、Gateway 与 ASR 现在通过 ASGI 传入的 `InputRuntimeApplicationPorts` 取得 Thalamus/ANS/Immune；聊天免疫门禁通过同一 composition root 的 `TribeRuntimeAgentPorts.require_immune_agent()`，输入归一化通过 `InputRuntimeApplicationPorts.require_immune_agent()`。两者不再直接调用全局 getter；缺少端口分别以 `HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED`、`HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED` 拒绝，不回退至请求期 singleton。普通检查器故障仍记为 `IMMUNE_EVALUATE_DEGRADED`。`TribeRuntimeAgentPorts` 目前只把剩余 process-bound Tribe bridge 收敛到 composition 层，未提供多 Host 隔离，也不构成 Chat acceptance、全局 Service Locator 清零或 NE-01 完成。补充边界集合 `141 passed in 9.66s` 与既有 `131 passed in 7.25s`、旧免疫 `43 passed in 7.75s` 和 #103+#104 的 `196 passed in 21.08s` 均重叠，不能相加。
+
+普通 Cortex 的检索支路也不再在 helper 内重新发现依赖：`AgentRuntimeApplicationPorts.run_retrieval()` 从同一 Host scope 传入会话历史、偏好构造器和 recall factory；factory 在 composition 内绑定 ledger、Life memory 与 Bond Neo4j。`chat_retrieval_helpers.py` 只消费这些显式输入，缺失的低层 authority 只能让该检索支路降级，不能回退至 `process_services`。这只说明读取依赖的解析边界已收口，尚不等于可见对话在 Acceptance 后原子提交。
+
 上图的核心结论是：
 
 - Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。D10 已让 `pentest_agent` Delegate 带着冻结的 command/graph/node/attempt/lease/fence/parent+node grant invocation 执行；真正调用前重验 node grant，Attempt/Lease/Fence 仍由外层 durable worker 保持。该 handler 仅生成无副作用的 Domain Pack/SecureRun handoff，且不写 legacy `skill_exec_log`。`intent_agent`、`translate_agent`、`vision_agent`、`repair_agent` 与未注册 target 均在 HostCommand/TaskGraph admission 前拒绝，因此 Delegate 通用平台仍未完成。
@@ -189,7 +208,7 @@ flowchart LR
     Container --> Close["closing fence → unpublish\nblock begin → exact-once close"]
 ```
 
-Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 把同一个 typed Host service bundle 显式传给 Lifecycle Runtime、Tribe、Input Runtime 与 AgentRuntime scope；模型端口、RouteCatalog、Bond stage engine、session topic/tactic stores、VTS ledger、TTS router/meta-learning 都从这个 bundle接收显式 provider，缺依赖均失败关闭。Life command authority 建立后，`AgentRuntimeApplicationScope` 才发布同一 immutable `AgentRuntimeApplicationPorts`；Chat 只能经 Input→Cortex closure 使用它，Life projection 与 conversation Acceptance effect 也接收同一 bundle。关停会先撤销这个 publication，再释放其依赖；retired `agent_runtime_shared` 不再是全局 authority。无生产调用者的 `intelligent_runtime` 二次 PlanningAgent/SkillComposer/直接执行路径已删除，TTS 改为 `tts_route` 接收 scope 显式 provider。HardState 快照为 named40/116、all-form46、Container52/3/48；Lifecycle/Tribe为40/116/all-form44，Input为39/110/all-form43，当前库存为 named29/59、all-form32、Container50/3/46。底层实例仍可能 process-global；generic delegate 的 legacy Executive path 仍未获得这条正向 production wiring；无Task-bound Preview的Gateway voice Effect为0；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
+Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 把同一个 typed Host service bundle 显式传给 Lifecycle Runtime、Tribe、Input Runtime 与 AgentRuntime scope；模型端口、RouteCatalog、Bond stage engine、session topic/tactic stores、VTS ledger、TTS router/meta-learning 都从这个 bundle接收显式 provider，缺依赖均失败关闭。Life command authority 建立后，`AgentRuntimeApplicationScope` 才发布同一 immutable `AgentRuntimeApplicationPorts`；Chat 只能经 Input→Cortex closure 使用它，Life projection 与 conversation Acceptance effect 也接收同一 bundle。关停会先撤销这个 publication，再释放其依赖；retired `agent_runtime_shared` 不再是全局 authority。无生产调用者的 `intelligent_runtime` 二次 PlanningAgent/SkillComposer/直接执行路径已删除，TTS 改为 `tts_route` 接收 scope 显式 provider。HardState 快照为 named40/116、all-form46、Container52/3/48；Lifecycle/Tribe为40/116/all-form44，Input为39/110/all-form43，当前库存为 named27/53、all-form30、Container50/3/46。底层实例仍可能 process-global；generic delegate 的 legacy Executive path 仍未获得这条正向 production wiring；无Task-bound Preview的Gateway voice Effect为0；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
 
 ```mermaid
 flowchart LR
@@ -209,6 +228,8 @@ flowchart LR
 ```
 
 ## 3. 入口与路由分流
+
+最新 Tribe state-helper 流把 `HostLifecycleApplicationPorts.ledger` 经 `TribeApplicationPorts` 传给偏好包、对话经历 read pack 与每个 bundle 自有的 `IntentSequenceAllocator`；allocator 用显式 provider 读 durable baseline，未注入 ledger 时失败关闭，不从 `process_services` 再发现 authority。无 caller 的 `input_service_log.get_ledger_safe()`、遗留 `surface_reply_postprocessor.py` 与未预算的 `codex_spark_reply_judge.py`（含 setting、prompt/prewarm/profile route）继续删除；frozen Chat 只投影主 Surface ModelAttempt，旧 secondary trace 在终态前失败关闭。Thalamus 入口现在只做确定性规则/default chat seed：普通意图和 Pentest 目标的模型分类、prompt spec 与配置均已删除，因此没有 `ModelAttemptService`、计划或权限可在 `HostCommand → TaskGraph` 前产生。对话经历端口只返回既有持久 belief/lesson snapshot，无法在这个阶段追加 inference 或 outcome feedback。当前 locator AST inventory 为 named `21` / imports `47` / all-form `24`（Container `50/3/46`）。这只约束局部 helper，不能替代 Cortex 的准入前模型、Chat 的 TaskGraph、Acceptance、Outbox、Conversation Experience post-Acceptance writer 或 Tribe app-local 实例隔离。
 
 ### 3.1 Host 对话入口
 

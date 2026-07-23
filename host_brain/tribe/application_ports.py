@@ -35,7 +35,7 @@ class TribeApplicationPorts:
     resolve_chat_emotion_context: ServiceProvider | None = None
     build_chat_emotion_snapshot: ServiceProvider | None = None
     build_user_preference_pack: ServiceProvider | None = None
-    conversation_experience_store: ServiceProvider | None = None
+    build_conversation_experience_read_pack: ServiceProvider | None = None
     build_conversation_understanding_pack: ServiceProvider | None = None
     allocate_intent_seq: ServiceProvider | None = None
 

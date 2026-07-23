@@ -1,25 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from host_brain.composition import process_services as dependencies
-from host_brain.model_runtime import (
-    CallableProviderAdapter,
-    InMemoryAttemptAuditRepository,
-    ProviderTarget,
-    RouteDecision,
-    StaticRoutePolicy,
-    build_model_runtime_composition,
-    build_production_prompt_registry,
-)
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
-    _resolve_intent_classification_prompt_templates,
     classify_task_intent,
-    classify_task_intent_by_llm,
     classify_task_intent_fastpath,
     classify_task_intent_by_rules,
 )
@@ -774,227 +763,118 @@ def test_classify_and_compile_intent_draft_keeps_canonical_route_seed_without_re
     assert compiled["args"]["query"] == "session"
 
 
-def test_intent_classification_prompt_templates_resolve_canonical_defaults() -> None:
-    merged = _resolve_intent_classification_prompt_templates()
+def test_classify_task_intent_never_calls_a_model_before_admission() -> None:
+    model_port_calls = 0
 
-    assert isinstance(merged, dict)
-    assert "system_prompt" in merged
-    assert "user_prompt_template" in merged
+    def _unexpected_model_attempt_service():  # noqa: ANN202
+        nonlocal model_port_calls
+        model_port_calls += 1
+        raise AssertionError("intent classification must not resolve model_attempt_service")
 
-
-def test_classify_task_intent_by_llm_uses_canonical_attempt_service(monkeypatch) -> None:
-    captured: dict = {}
-
-    async def _fake_complete(attempt):  # noqa: ANN001
-        captured["attempt"] = attempt
-        return {
-            "content": '{"route":"chat","target_id":"","task":"normal chat","reason_code":"LLM_CHAT","confidence":0.91}'
-        }
-
-    monkeypatch.setenv("HOST_CORTEX_INTENT_LLM_ENABLED", "true")
-    monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_SCENE", "THALAMUS_INTENT")
-    monkeypatch.setenv("HOST_THALAMUS_INTENT_LLM_TIMEOUT_MS", "1200")
-
-    route = RouteDecision(
-        decision_id="test-thalamus-route",
-        targets=(
-            ProviderTarget(
-                adapter_id="test.thalamus",
-                provider="mock",
-                model_id="mock-intent",
-                timeout_ms=1_200,
-            ),
-        ),
-        reason="TEST_THALAMUS_ROUTE",
-        max_attempts=2,
-    )
-    composition = build_model_runtime_composition(
-        prompt_registry=build_production_prompt_registry(),
-        route_policy=StaticRoutePolicy(route),
-        provider_adapters=[
-            CallableProviderAdapter("test.thalamus", complete_fn=_fake_complete)
-        ],
-        audit_repository=InMemoryAttemptAuditRepository(),
-    )
-    dependencies.reset_model_runtime_composition(composition)
-    try:
+    with (
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_fastpath", return_value=None),
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
+    ):
         decision = _run(
-            classify_task_intent_by_llm(
-                request_id="req-thalamus-canonical-attempt",
-                session_id="session-thalamus-canonical-attempt",
-                text="普通聊天，不要走 Codex",
+            classify_task_intent(
+                request_id="req-thalamus-no-pre-admission-model",
+                session_id="session-thalamus-no-pre-admission-model",
+                text="ambiguous ingress request",
                 application_ports=TribeApplicationPorts(
-                    model_attempt_service=dependencies.get_model_attempt_service,
+                    model_attempt_service=_unexpected_model_attempt_service,
                 ),
             )
         )
-    finally:
-        dependencies.reset_model_runtime_composition()
 
-    assert decision is not None
-    assert decision["route"] == "chat"
-    attempt = captured["attempt"]
-    assert attempt.scene_type == "THALAMUS_INTENT"
-    assert 1_000 <= attempt.timeout_ms <= 1_200
-    assert attempt.prompt.prompt_id == "thalamus_agent.intent_classification_prompts"
-    assert "普通聊天，不要走 Codex" in attempt.prompt.messages[1]["content"]
-    assert "api_key" not in repr(attempt)
-    trace = decision["model_attempt_trace"]
-    assert trace["route_decision_id"] == "test-thalamus-route"
-    assert trace["attempt_ids"]
-
-
-def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_rules_miss() -> None:
-    agent = ThalamusAgent()
-
-    with patch(
-        "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-        new=AsyncMock(
-            return_value={
-                "route": "skill",
-                "target_id": "agent_worker",
-                "task": "please fix the failing test",
-                "reason_code": "LLM_ROUTE_agent_worker",
-                "confidence": 0.93,
-                "route_source": "llm",
-            }
-        ),
-    ) as classify_mock:
-        compiled = _run(
-            agent.classify_and_compile_intent_draft(
-                request_id="req-thalamus-fallback",
-                session_id="session-thalamus-fallback",
-                user_message="please fix the failing test",
-                source="chat_handler",
-                ts_ms=1776349003300,
-            )
-        )
-
-    classify_mock.assert_awaited_once()
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "agent_worker"
-    assert compiled["route_source"] == "llm"
-
-
-def test_classify_task_intent_rejects_low_confidence_llm_route_when_rules_miss() -> None:
-    with (
-        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "skill",
-                    "target_id": "agent_worker",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_agent_worker",
-                    "confidence": 0.41,
-                    "route_source": "llm",
-                }
-            ),
-        ),
-    ):
-        decision = _run(
-            classify_task_intent(
-                request_id="req-thalamus-low-llm",
-                session_id="session-thalamus-low-llm",
-                text="ambiguous fallback request",
-            )
-        )
-
+    assert model_port_calls == 0
     assert decision["route"] == "chat"
     assert decision["target_id"] == ""
     assert decision["reason_code"] == "DEFAULT_CHAT"
 
 
-def test_classify_task_intent_rejects_unknown_llm_skill_target_when_rules_miss() -> None:
+def test_classify_task_intent_preserves_a_rule_seed_without_model_override() -> None:
+    rule_seed = {
+        "route": "skill",
+        "target_id": "agent_worker",
+        "task": "run the approved task",
+        "reason_code": "THALAMUS_RULE_TEST",
+        "confidence": 0.93,
+        "route_source": "thalamus.rule",
+    }
     with (
-        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "skill",
-                    "target_id": "invented_runtime_skill",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_INVENTED",
-                    "confidence": 0.96,
-                    "route_source": "llm",
-                }
-            ),
-        ),
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_fastpath", return_value=None),
+        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=rule_seed),
     ):
         decision = _run(
             classify_task_intent(
-                request_id="req-thalamus-unknown-llm-target",
-                session_id="session-thalamus-unknown-llm-target",
-                text="ambiguous fallback request",
+                request_id="req-thalamus-rule-seed",
+                session_id="session-thalamus-rule-seed",
+                text="ambiguous ingress request",
             )
         )
 
-    assert decision["route"] == "chat"
-    assert decision["target_id"] == ""
-    assert decision["reason_code"] == "DEFAULT_CHAT"
+    assert decision == rule_seed
 
 
-def test_classify_task_intent_normalizes_llm_plan_route_when_rules_miss() -> None:
-    with (
-        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "plan",
-                    "target_id": "",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_PLAN",
-                    "confidence": 0.93,
-                    "route_source": "llm",
-                }
-            ),
-        ),
-    ):
-        decision = _run(
-            classify_task_intent(
-                request_id="req-thalamus-llm-plan",
-                session_id="session-thalamus-llm-plan",
-                text="ambiguous fallback request",
-            )
+def test_intent_compiler_uses_a_read_only_experience_pack_before_admission() -> None:
+    read_calls: list[dict[str, object]] = []
+
+    def _build_read_pack(**kwargs: object) -> dict[str, object]:
+        read_calls.append(dict(kwargs))
+        return {
+            "previous_belief": {"selected_intent": "support"},
+            "experience_lessons": [
+                {"lesson_id": "lesson-1", "confidence": 0.9}
+            ],
+        }
+
+    def _build_understanding(**kwargs: object) -> dict[str, object]:
+        return {
+            "selected_intent": "support",
+            "confidence": 0.9,
+            "previous_belief": dict(kwargs["previous_belief"]),
+            "experience_lessons": list(kwargs["experience_lessons"]),
+        }
+
+    agent = ThalamusAgent(
+        application_ports=TribeApplicationPorts(
+            build_conversation_experience_read_pack=_build_read_pack,
+            build_user_preference_pack=lambda **_kwargs: {},
+            build_conversation_understanding_pack=_build_understanding,
         )
+    )
+    compiled = agent.compile_intent_draft(
+        request_id="req-thalamus-read-only-experience",
+        session_id="session-thalamus-read-only-experience",
+        person_id="person-thalamus-read-only-experience",
+        user_message="我想聊聊最近的状态。",
+        source="chat_handler",
+        ts_ms=1776349003350,
+    )
 
-    assert decision["route"] == "plan"
-    assert decision["target_id"] == "skill_dag"
-    assert decision["reason_code"] == "LLM_ROUTE_PLAN"
-    assert decision["route_source"] == "llm"
+    assert read_calls == [
+        {
+            "session_id": "session-thalamus-read-only-experience",
+            "person_id": "person-thalamus-read-only-experience",
+            "domain": "general",
+            "query_text": "我想聊聊最近的状态。",
+            "lesson_limit": 5,
+        }
+    ]
+    assert compiled["conversation_understanding"]["selected_intent"] == "support"
 
 
-def test_classify_task_intent_strips_llm_chat_target_when_rules_miss() -> None:
-    with (
-        patch("host_brain.tribe.thalamus_agent.classify_task_intent_by_rules", return_value=None),
-        patch(
-            "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-            new=AsyncMock(
-                return_value={
-                    "route": "chat",
-                    "target_id": "agent_worker",
-                    "task": "ambiguous fallback request",
-                    "reason_code": "LLM_ROUTE_CHAT",
-                    "confidence": 0.95,
-                    "route_source": "llm",
-                }
-            ),
-        ),
-    ):
-        decision = _run(
-            classify_task_intent(
-                request_id="req-thalamus-llm-chat",
-                session_id="session-thalamus-llm-chat",
-                text="ambiguous fallback request",
-            )
-        )
+def test_intent_compiler_source_has_no_pre_admission_experience_writer() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "host_brain"
+        / "tribe"
+        / "thalamus_agent.py"
+    ).read_text(encoding="utf-8")
 
-    assert decision["route"] == "chat"
-    assert decision["target_id"] == ""
-    assert decision["reason_code"] == "LLM_ROUTE_CHAT"
+    assert "build_conversation_experience_read_pack" in source
+    assert ".record_inference(" not in source
+    assert ".record_outcome_feedback(" not in source
 
 
 def test_classify_task_intent_by_rules_keeps_legacy_translate_rule() -> None:
@@ -1282,6 +1162,22 @@ def test_classify_task_intent_routes_authorized_pentest_to_pentest_agent() -> No
     assert decision["args"]["secure_run_required"] is True
     assert decision["args"]["secure_run_surface"] == "pentest.secure-run"
     assert decision["args"]["scope_hint_present"] is True
+
+
+def test_pentest_ingress_classification_does_not_call_llm_before_admission() -> None:
+    with patch(
+        "host_brain.pentest.llm_react_planner._call_llm",
+        side_effect=AssertionError("pentest ingress classification must not call an LLM"),
+    ):
+        decision = classify_task_intent_by_rules(
+            "授权渗透测试 scope=10.10.10.0/24，只做配置审计和漏洞验证"
+        )
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "pentest_agent"
+    assert decision["args"].get("requested_goal") is None
+    assert "_classified_by" not in decision["args"]
 
 
 def test_classify_task_intent_routes_structured_scope_pentest_hint_to_agent() -> None:
@@ -1679,31 +1575,27 @@ def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_light
     assert "workspace_strategy" not in compiled["args"]
 
 
-def test_classify_and_compile_intent_draft_defaults_to_chat_when_no_rule_or_llm() -> None:
+def test_classify_and_compile_intent_draft_defaults_to_chat_without_model_classification() -> None:
     agent = ThalamusAgent()
 
-    with patch(
-        "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
-        new=AsyncMock(return_value=None),
-    ):
-        compiled = _run(
-            agent.classify_and_compile_intent_draft(
-                request_id="req-thalamus-default-chat",
-                session_id="session-thalamus-default-chat",
-                user_message=(
-                    "我想和你聊聊最近这段时间的很多事情，包括工作上的疲惫、和朋友之间的距离感、"
-                    "还有我对未来节奏的犹豫。我不一定马上要结论，只是想把这些感觉慢慢说给你听，"
-                    "也想看看你会怎么接住我。"
-                    "\n\n"
-                    "这段话我会继续补充很多细节，比如过去几周发生的事情、我对自己状态的反思、"
-                    "还有我为什么会在这种时候更想慢慢聊，而不是马上要一个短回答。"
-                    "我也想把每一个让我犹豫、拧巴、停不下来的瞬间都描述得更完整一点，"
-                    "包括那些我没来得及和别人说、但其实一直压在心里的部分。"
-                ),
-                source="chat_handler",
-                ts_ms=1776349003400,
-            )
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-default-chat",
+            session_id="session-thalamus-default-chat",
+            user_message=(
+                "我想和你聊聊最近这段时间的很多事情，包括工作上的疲惫、和朋友之间的距离感、"
+                "还有我对未来节奏的犹豫。我不一定马上要结论，只是想把这些感觉慢慢说给你听，"
+                "也想看看你会怎么接住我。"
+                "\n\n"
+                "这段话我会继续补充很多细节，比如过去几周发生的事情、我对自己状态的反思、"
+                "还有我为什么会在这种时候更想慢慢聊，而不是马上要一个短回答。"
+                "我也想把每一个让我犹豫、拧巴、停不下来的瞬间都描述得更完整一点，"
+                "包括那些我没来得及和别人说、但其实一直压在心里的部分。"
+            ),
+            source="chat_handler",
+            ts_ms=1776349003400,
         )
+    )
 
     assert compiled["route"] == "chat"
     assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"

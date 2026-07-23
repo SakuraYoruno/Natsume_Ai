@@ -122,19 +122,6 @@ _MULTIMODAL_OBSERVER_MODEL_PROMPT = {
     ),
 }
 
-_THALAMUS_INTENT_PROMPT = {
-    "system_prompt": (
-        "你是意图路由分类器。根据用户消息判断意图类型，输出单个 JSON 对象。\n"
-        "route 只能是：chat / delegate / skill / task_progress / recent_turn。\n"
-        "delegate 时 target_id 只能是：intent_agent / translate_agent / vision_agent / retrieval_agent / emotion_agent / pentest_agent。\n"
-        "pentest_agent 只负责安全评估需求澄清、无副作用规划和 Domain Pack/SecureRun 交接；它本身不执行扫描或攻击。\n"
-        "skill 时 target_id 填技能名称。\n"
-        "严格要求：仅输出 JSON，不要 markdown。\n"
-        "字段：route, target_id, task, confidence, reason。"
-    ),
-    "user_prompt_template": "族状态：{tribe_summary}\n用户消息：{text}\n输出 JSON：",
-}
-
 _IMMUNE_SEMANTIC_INTENT_PROMPT = {
     "system_prompt": (
         "你是安全意图分类器。只判断输入是否安全、可疑或有害。\n"
@@ -511,13 +498,6 @@ _SPECS: dict[str, PromptSpec] = {
         output_type="json_object",
         content=_MULTIMODAL_OBSERVER_MODEL_PROMPT,
         category="observer_prompt",
-    ),
-    "thalamus_agent.intent_classification_prompts": _spec(
-        "thalamus_agent.intent_classification_prompts",
-        purpose="intent_route_json",
-        output_type="json_object",
-        content=_THALAMUS_INTENT_PROMPT,
-        category="agent_prompt",
     ),
     "immune_agent.semantic_intent_analysis": _spec(
         "immune_agent.semantic_intent_analysis",

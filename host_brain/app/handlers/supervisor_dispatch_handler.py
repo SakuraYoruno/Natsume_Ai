@@ -185,7 +185,7 @@ def supervisor_dispatch_handler(
     Phase XV 改造：
     - 优先消费 intent_draft.route/target_id（由 thalamus_agent 统一收口后填充）
     - _SCENE_DEFAULT_AGENT 降为兜底（scene_type 有效时使用）
-    - SUPERVISOR_MODE=llm 不再独立调用 LLM，改为复用 intent_draft 中已有的 LLM 路由结果
+    - SUPERVISOR_MODE=llm 不再独立调用 LLM，只保留对既有 intent_draft 的兼容观测
     """
     ctx = dict(context or {})
     node_id = str(ctx.get("node_id") or "supervisor_dispatch").strip()
@@ -228,8 +228,8 @@ def supervisor_dispatch_handler(
         decision_source = f"scene_type:{scene_type}:rule_fallback"
 
     # ── SUPERVISOR_MODE 观测（不再影响决策，仅记录）──────────────────────────
-    # Phase XV：SUPERVISOR_MODE=llm 不再独立调用 LLM，intent_draft 中已包含 LLM 路由结果。
-    # route_source="llm" 时，说明 thalamus 的 canonical classifier 已走过 LLM 兜底。
+    # Phase XV：SUPERVISOR_MODE=llm 不再独立调用 LLM，也不会触发模型路由。
+    # route_source="llm" 仅表示历史或上游兼容 seed；Thalamus ingress 不再产生该值。
     raw_mode = str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower()
     supervisor_mode = "llm" if raw_mode == "llm" else "rule"
     supervisor_failure_code: str | None = None

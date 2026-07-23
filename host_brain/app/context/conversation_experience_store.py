@@ -82,14 +82,6 @@ def classify_outcome_signal(text: str | None) -> str:
     return "unknown"
 
 
-def _get_ledger(ledger: Any | None = None) -> Any:
-    if ledger is not None:
-        return ledger
-    from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
-
-    return get_ledger()
-
-
 def _stable_id(prefix: str, *parts: str, fallback_random: bool = False) -> str:
     material = "\0".join(str(part or "") for part in parts)
     if material.replace("\0", ""):
@@ -107,9 +99,9 @@ class ConversationExperienceStore:
         ledger: Any | None = None,
         repository: ExperienceRepository | None = None,
     ) -> None:
-        self.ledger = ledger if ledger is not None else (
-            None if repository is not None else _get_ledger()
-        )
+        if ledger is None and repository is None:
+            raise RuntimeError("CONVERSATION_EXPERIENCE_LEDGER_NOT_INJECTED")
+        self.ledger = ledger
         self.repository = repository or ExperienceRepository.from_ledger(self.ledger)
 
     def ensure_schema(self) -> None:
@@ -578,13 +570,53 @@ class ConversationExperienceStore:
 
 
 def get_conversation_experience_store(
-    *, ledger: Any | None = None
+    *,
+    ledger: Any | None = None,
+    repository: ExperienceRepository | None = None,
 ) -> ConversationExperienceStore:
-    return ConversationExperienceStore(ledger=ledger)
+    return ConversationExperienceStore(ledger=ledger, repository=repository)
+
+
+def build_conversation_experience_read_pack(
+    *,
+    ledger: Any,
+    session_id: str | None,
+    person_id: str | None = None,
+    domain: str | None = None,
+    query_text: str | None = None,
+    lesson_limit: int = 5,
+) -> dict[str, Any]:
+    """Return the narrow, read-only experience view allowed before admission.
+
+    Intent compilation happens before a HostCommand exists.  It may use
+    already persisted belief and lesson projections to form a context pack, but
+    it must not receive a write-capable experience store or append feedback and
+    inference events.  The returned data is therefore a snapshot, not a
+    persistence authority.
+    """
+
+    try:
+        resolved_lesson_limit = max(1, int(lesson_limit or 5))
+    except (TypeError, ValueError):
+        resolved_lesson_limit = 5
+    store = get_conversation_experience_store(ledger=ledger)
+    return {
+        "previous_belief": store.get_belief(
+            session_id=session_id,
+            person_id=person_id,
+        ),
+        "experience_lessons": store.recall_lessons(
+            person_id=person_id,
+            domain=domain,
+            query_text=query_text,
+            limit=resolved_lesson_limit,
+        ),
+    }
 
 
 __all__ = [
     "ConversationExperienceStore",
+    "build_conversation_experience_read_pack",
     "classify_outcome_signal",
     "get_conversation_experience_store",
 ]

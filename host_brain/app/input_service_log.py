@@ -13,15 +13,6 @@ from typing import Any
 _logger = logging.getLogger("Natsume.input_routes")
 
 
-def get_ledger_safe() -> Any:
-    """安全获取 ledger 实例，失败时返回 None。"""
-    try:
-        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
-        return get_ledger()
-    except Exception:
-        return None
-
-
 def build_reply_preview(text: str, *, limit: int = 120) -> str:
     """构建回复预览文本（截断超长内容）。"""
     normalized = str(text or "").strip().replace("\r", " ").replace("\n", " ")
@@ -166,7 +157,6 @@ def get_request_skill_exec_rows(ledger: Any, *, request_id: str) -> list[dict[st
 
 
 __all__ = [
-    "get_ledger_safe",
     "build_reply_preview",
     "build_input_preview",
     "log_input_event",

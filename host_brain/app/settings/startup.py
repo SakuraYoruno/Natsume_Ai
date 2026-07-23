@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_CODEX_PREWARM_FEATURE_KEYS = (
     "pool:CHAT_SURFACE:A,pool:THALAMUS_INTENT:C,pool:EXEC_INTENT:C,"
-    "surface_spark_reply_judge,subagent_gateway,pool:NATSUME_AGENT:B,"
+    "subagent_gateway,pool:NATSUME_AGENT:B,"
     "pool:PROACTIVE_TALK:C,pool:INNER_WORLD:B,pool:EVOLUTION_DESIRE:B,"
     "memory_distillation,pool:MEMORY_DISTILLATION:B,pool:SCHEDULER_NARRATIVE:D"
 )

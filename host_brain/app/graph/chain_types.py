@@ -14,8 +14,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
-from host_brain.app.intent_seq import allocate_intent_seq, sync_intent_seq
-
 from ..schemas import TaskType
 from ..schemas.memory_types import ProposerClass
 from ..failure_matrix import FailureHandler, FailureEvent

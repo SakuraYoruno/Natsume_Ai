@@ -174,11 +174,22 @@ async def receive_input(
             text=text,
             source=source,
             session_id=session_id,
+            ports=ports,
             person_id=str(body.person_id or "").strip() or None,
         )
     except Exception as exc:
-        _logger.warning("input_routes: immune gate evaluate degraded request_id=%s: %s", request_id, exc)
-        immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
+        if str(exc) == "HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED":
+            _logger.error(
+                "input_routes: immune gate authority unavailable request_id=%s",
+                request_id,
+            )
+            immune_result = {
+                "decision": "BLOCK",
+                "reason_codes": ["IMMUNE_GATE_UNAVAILABLE"],
+            }
+        else:
+            _logger.warning("input_routes: immune gate evaluate degraded request_id=%s: %s", request_id, exc)
+            immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
     immune_decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
     payload["immune_gate"] = {
         "decision": immune_decision,
@@ -187,6 +198,19 @@ async def receive_input(
         "reason_codes": list(immune_result.get("reason_codes") or []),
     }
     if immune_decision == "BLOCK":
+        immune_unavailable = "IMMUNE_GATE_UNAVAILABLE" in set(
+            str(item) for item in immune_result.get("reason_codes") or ()
+        )
+        reason_code = (
+            "IMMUNE_GATE_UNAVAILABLE"
+            if immune_unavailable
+            else "IMMUNE_BLOCKED_HIGH_RISK"
+        )
+        detail = (
+            "immune gate authority unavailable"
+            if immune_unavailable
+            else "immune gate blocked high-risk input"
+        )
         _log_input_event(
             ledger=_get_ledger_safe(ports=ports),
             request_id=request_id,
@@ -195,8 +219,8 @@ async def receive_input(
             input_payload=payload,
             phase="REJECTED",
             status="REJECTED",
-            reason_code="IMMUNE_BLOCKED_HIGH_RISK",
-            detail="immune gate blocked high-risk input",
+            reason_code=reason_code,
+            detail=detail,
             ts_ms=ts_ms,
         )
         result_persisted = _persist_gateway_ingress_result(
@@ -215,7 +239,7 @@ async def receive_input(
             request_id=request_id,
             source=source,
             status="REJECTED",
-            detail="immune gate blocked high-risk input",
+            detail=detail,
             ts_ms=ts_ms,
         )
     if immune_decision == "REPORT":

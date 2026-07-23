@@ -38,6 +38,7 @@ def _host_services(**overrides: object) -> HostLifecycleApplicationPorts:
         "life_memory_store": provider,
         "life_memory_service": provider,
         "conversation_history": provider,
+        "bond_neo4j_client": provider,
         "prompt_registry": provider,
         "bond_update_queue": provider,
         "model_route_catalog": provider,
@@ -262,6 +263,79 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
     assert tts_kwargs["meta_learning_loop"] is meta_learning_loop
 
 
+def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
+    monkeypatch,
+) -> None:
+    ledger = object()
+    life_memory_store = object()
+    conversation_history = object()
+    bond_neo4j_client = object()
+    recall_service = object()
+    captured: dict[str, object] = {}
+
+    async def fake_run_retrieval(**kwargs):  # noqa: ANN003, ANN202
+        captured["retrieval"] = kwargs
+        return {"status": "OK"}, []
+
+    def fake_build_recall_service(**kwargs):  # noqa: ANN003, ANN202
+        captured["recall_service"] = kwargs
+        return recall_service
+
+    def fake_build_user_preference_pack(**kwargs):  # noqa: ANN003, ANN202
+        captured["preference_pack"] = kwargs
+        return {"status": "OK"}
+
+    monkeypatch.setattr(agent_runtime_composition, "_run_retrieval", fake_run_retrieval)
+    monkeypatch.setattr(
+        agent_runtime_composition,
+        "_build_surface_memory_recall_service",
+        fake_build_recall_service,
+    )
+    monkeypatch.setattr(
+        agent_runtime_composition,
+        "build_user_preference_pack",
+        fake_build_user_preference_pack,
+    )
+    ports = build_agent_runtime_application_ports(
+        host_services=_host_services(
+            ledger=lambda: ledger,
+            life_memory_store=lambda: life_memory_store,
+            conversation_history=lambda: conversation_history,
+            bond_neo4j_client=lambda: bond_neo4j_client,
+        ),
+        life_authority_provider=lambda: (object(), object()),
+    )
+
+    assert asyncio.run(
+        ports.run_retrieval(
+            request_id="request-chat-retrieval-scope",
+            message="回顾刚才的约定",
+            person_id="person-chat-retrieval-scope",
+            session_id="session-chat-retrieval-scope",
+            ts_ms=1,
+            emotion_tag="NEUTRAL",
+            render_target_lang="zh",
+        )
+    ) == ({"status": "OK"}, [])
+
+    retrieval_kwargs = dict(captured["retrieval"])
+    assert retrieval_kwargs["life_memory_store"] is life_memory_store
+    assert retrieval_kwargs["conversation_history"] is conversation_history
+    assert callable(retrieval_kwargs["build_user_preference_pack"])
+    assert callable(retrieval_kwargs["recall_service_factory"])
+    assert retrieval_kwargs["build_user_preference_pack"](
+        person_id="person-chat-retrieval-scope",
+        query_text="回顾刚才的约定",
+    ) == {"status": "OK"}
+    assert dict(captured["preference_pack"])["ledger"] is ledger
+    assert retrieval_kwargs["recall_service_factory"]() is recall_service
+    assert dict(captured["recall_service"]) == {
+        "ledger": ledger,
+        "life_memory_store": life_memory_store,
+        "bond_neo4j_client": bond_neo4j_client,
+    }
+
+
 def test_agent_runtime_scope_fails_closed_when_nested_host_provider_is_missing() -> None:
     with pytest.raises(
         HostLifecycleScopeError,
@@ -281,7 +355,6 @@ def test_production_adapters_do_not_import_the_retired_global_port_bundle() -> N
         "host_brain/app/life_projection_handlers.py",
         "host_brain/app/acceptance_effect_handlers.py",
         "host_brain/app/sub_agent_protocol.py",
-        "host_brain/app/surface_reply_postprocessor.py",
     )
     for relative in production_files:
         source = (root / relative).read_text(encoding="utf-8-sig")

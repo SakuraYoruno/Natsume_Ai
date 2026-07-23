@@ -472,7 +472,11 @@ def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
     return "UNCHANGED"
 
 
-def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
+def warmup_chat_runtime_basics(
+    *,
+    eager_persona: bool = True,
+    thalamus_agent_provider: Callable[[], Any] | None = None,
+) -> str:
     """预热聊天主链常用的轻量运行时单例，降低首轮聊天冷启动抖动。"""
     try:
         from host_brain.composition.process_services import (  # noqa: PLC0415
@@ -482,12 +486,12 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
             get_state_write_arbiter,
         )
         from host_brain.persona.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
-        from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
-
+        if not callable(thalamus_agent_provider):
+            raise RuntimeError("HOST_STARTUP_THALAMUS_AGENT_NOT_INJECTED")
         get_routing_matrix()
         get_intent_engine()
         get_state_write_arbiter()
-        get_thalamus_agent()
+        thalamus_agent_provider()
         compiled_soul = load_compiled_soul()
         soul_runtime_state = _reconcile_runtime_soul_state(
             soul_id=str(getattr(compiled_soul, "soul_id", "") or "").strip(),
@@ -714,7 +718,11 @@ def warmup_retrieval_runtime_basics() -> str:
         return f"DEGRADED: {exc}"
 
 
-def warmup_all(*, eager: bool = False) -> dict[str, str]:
+def warmup_all(
+    *,
+    eager: bool = False,
+    thalamus_agent_provider: Callable[[], Any] | None = None,
+) -> dict[str, str]:
     """执行所有启动预热，返回各模块状态字典。
 
     Args:
@@ -728,7 +736,10 @@ def warmup_all(*, eager: bool = False) -> dict[str, str]:
     # 快速预热（始终执行）
     statuses["skill_registry"] = warmup_skill_registry()
     statuses["graph_runtime"] = warmup_graph_runtime()
-    statuses["chat_runtime"] = warmup_chat_runtime_basics(eager_persona=eager)
+    statuses["chat_runtime"] = warmup_chat_runtime_basics(
+        eager_persona=eager,
+        thalamus_agent_provider=thalamus_agent_provider,
+    )
     statuses["chat_llm_runtime"] = warmup_chat_llm_runtime_profiles()
     statuses["surface_quote_runtime"] = warmup_surface_quote_runtime()
     statuses["codex_exec_intent"] = warmup_codex_exec_intent_pool()

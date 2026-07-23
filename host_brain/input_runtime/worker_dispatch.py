@@ -152,6 +152,7 @@ async def _dispatch_to_graph_worker(
             text=text,
             payload=payload,
             ts_ms=ts_ms,
+            ports=ports,
         )
     except Exception as intent_exc:
         _logger.warning("[%s] thalamus intent draft build degraded before input dispatch: %s", request_id, intent_exc)

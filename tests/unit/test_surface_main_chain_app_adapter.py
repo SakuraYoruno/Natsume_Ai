@@ -1183,42 +1183,6 @@ async def test_governed_surface_model_failure_rejects_without_approval_fallback(
 
 
 @pytest.mark.asyncio
-async def test_governed_surface_skips_codex_spark_secondary_model_call(monkeypatch) -> None:
-    async def _fake_run(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        return _fake_surface_chain_result("先把实际输入和期望输出并排看。")
-
-    async def _spark_must_not_run(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("a guarded surface node must not make an unbudgeted Spark call")
-
-    monkeypatch.setattr(
-        "host_brain.app.surface_main_chain_adapter.run_surface_main_chain_for_surface_reply_input",
-        _fake_run,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.codex_spark_reply_judge.judge_surface_reply_with_codex_spark",
-        _spark_must_not_run,
-    )
-
-    events = [
-        _parse_sse(chunk)
-        async for chunk in _surface_stream(
-            _agent_input(
-                trace_stage_meta={
-                    "governed_model_budget": _governed_model_budget_payload(),
-                }
-            )
-        )
-    ]
-    commit = next(event for event in events if event.get("phase") == "COMMIT")
-
-    assert commit["decision"] == "APPROVE"
-    assert commit["audit_refs"]["trace_stage_meta"]["codex_spark_reply_judge"] == {
-        "status": "SKIPPED",
-        "reason_code": "GOVERNED_MODEL_BUDGET_BOUNDARY",
-    }
-
-
-@pytest.mark.asyncio
 async def test_surface_main_chain_failure_returns_contextual_fallback_for_substantive_prompt(monkeypatch) -> None:
     async def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")

@@ -111,8 +111,15 @@ async def handle_v1_chat_route(
     try:
         immune_result = evaluate_immune_gate_fn(request_body)
     except Exception as exc:
-        logger.warning("immune gate evaluate degraded: %s", exc)
-        immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
+        if str(exc) == "HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED":
+            logger.warning("immune gate authority unavailable")
+            immune_result = {
+                "decision": "BLOCK",
+                "reason_codes": ["IMMUNE_GATE_UNAVAILABLE"],
+            }
+        else:
+            logger.warning("immune gate evaluate degraded: %s", exc)
+            immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
     request.state.immune_inspection = immune_result
     schedule_immune_gate_fn(
         request_id=request_id,
@@ -121,6 +128,9 @@ async def handle_v1_chat_route(
     )
     immune_decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
     if immune_decision == "BLOCK":
+        immune_unavailable = "IMMUNE_GATE_UNAVAILABLE" in set(
+            str(item) for item in immune_result.get("reason_codes") or ()
+        )
         logger.warning(
             "immune gate blocked /v1/chat request_id=%s reasons=%s",
             request_id,
@@ -131,7 +141,11 @@ async def handle_v1_chat_route(
                 "phase": "COMMIT",
                 "done": True,
                 "decision": "REJECT",
-                "reason_code": "IMMUNE_BLOCKED_HIGH_RISK",
+                "reason_code": (
+                    "IMMUNE_GATE_UNAVAILABLE"
+                    if immune_unavailable
+                    else "IMMUNE_BLOCKED_HIGH_RISK"
+                ),
                 "narrative": "",
                 "request_id": request_id,
                 "immune": {

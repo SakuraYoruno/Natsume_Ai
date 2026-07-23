@@ -52,6 +52,7 @@ class HostLifecycleApplicationPorts:
     state_write_arbiter: ServiceProvider | None = None
     emotion_timeline: ServiceProvider | None = None
     bond_stage_engine: ServiceProvider | None = None
+    bond_neo4j_client: ServiceProvider | None = None
     shared_memory_index: ServiceProvider | None = None
     milestone_tracker: ServiceProvider | None = None
     prompt_registry: ServiceProvider | None = None

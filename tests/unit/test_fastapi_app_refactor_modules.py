@@ -185,6 +185,34 @@ async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_chat_route_fails_closed_when_immune_agent_port_is_missing() -> None:
+    logger = _Logger()
+    scheduled: list[dict] = []
+
+    async def _must_not_handle_chat(**_kwargs):  # noqa: ANN003
+        raise AssertionError("missing immune authority must reject before chat")
+
+    response = await handle_v1_chat_route(
+        request_body=ChatRequest(message="hello"),
+        request=_request(),
+        metrics=RuntimeMetrics(),
+        logger=logger,  # type: ignore[arg-type]
+        evaluate_immune_gate_fn=lambda _body: (_ for _ in ()).throw(
+            RuntimeError("HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED")
+        ),
+        schedule_immune_gate_fn=lambda **kwargs: scheduled.append(dict(kwargs)),
+        handle_chat_fn=_must_not_handle_chat,
+    )
+
+    body = "".join([chunk async for chunk in response.body_iterator])
+    assert '"reason_code": "IMMUNE_GATE_UNAVAILABLE"' in body
+    assert scheduled[-1]["immune_result"] == {
+        "decision": "BLOCK",
+        "reason_codes": ["IMMUNE_GATE_UNAVAILABLE"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_app_factory_exception_handler_uses_injected_logger(monkeypatch: pytest.MonkeyPatch) -> None:
     logger = _Logger()
     seen: dict = {}

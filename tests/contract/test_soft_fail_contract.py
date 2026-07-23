@@ -4,7 +4,6 @@
   1. soft_fail 可导入且行为符合契约（捕获 expected_exc、返回 fallback、致命不吞）
   2. 进程内 Counter 正确累加 stage × exc_type
   3. MetricsCollector.collect() 暴露 soft_failure_metrics 段落
-  4. build_runtime_mode_flags 的业务段降级纳入观测
 """
 
 from __future__ import annotations
@@ -136,47 +135,3 @@ class TestMetricsCollectorSoftFailureExposure:
             "by_stage_exc_type": {},
             "top_stages": [],
         }
-
-
-# ---------------------------------------------------------------------------
-# 契约 3：chat_generation_payload 业务段改造生效
-# ---------------------------------------------------------------------------
-
-
-class TestChatContextBuilderSoftFailIntegration:
-    def test_runtime_mode_flags_soft_fails_on_activity_monitor_crash(self) -> None:
-        """当 activity_monitor.get_status 抛异常时，runtime_flags 必须降级为
-        仅含 sys_mode，且 SoftFailure 计数器记录 stage=chat.runtime_mode.activity_monitor。
-        """
-        from host_brain.app.chat_generation_payload import build_runtime_mode_flags
-
-        class _BrokenMonitor:
-            def get_status(self):  # noqa: D401, ANN001
-                raise RuntimeError("monitor down")
-
-        flags = build_runtime_mode_flags(
-            {},
-            activity_monitor_provider=_BrokenMonitor,
-        )
-
-        assert flags["sys_mode"] == "normal"
-        assert "activity_monitor" not in flags  # 降级为无该字段
-        snap = snapshot_soft_failures()
-        assert "chat.runtime_mode.activity_monitor" in snap
-        assert snap["chat.runtime_mode.activity_monitor"].get("RuntimeError") == 1
-
-    def test_runtime_mode_flags_happy_path_no_soft_failure(self) -> None:
-        """正常路径不应产生 SoftFailure。"""
-        from host_brain.app.chat_generation_payload import build_runtime_mode_flags
-
-        class _HealthyMonitor:
-            def get_status(self):  # noqa: D401, ANN001
-                return {"cpu": 0.1, "mem": 0.2}
-
-        flags = build_runtime_mode_flags(
-            {},
-            activity_monitor_provider=_HealthyMonitor,
-        )
-
-        assert flags.get("activity_monitor") == {"cpu": 0.1, "mem": 0.2}
-        assert snapshot_soft_failures() == {}

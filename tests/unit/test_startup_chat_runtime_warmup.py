@@ -40,10 +40,6 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
         lambda: object(),
     )
     monkeypatch.setattr(
-        "host_brain.tribe.thalamus_agent.get_thalamus_agent",
-        lambda: object(),
-    )
-    monkeypatch.setattr(
         "host_brain.persona.persona_engine.PersonaEngine.get_instance",
         lambda *args, **kwargs: object(),
     )
@@ -56,7 +52,10 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
         lambda: object(),
     )
 
-    status = warmup_chat_runtime_basics(eager_persona=True)
+    status = warmup_chat_runtime_basics(
+        eager_persona=True,
+        thalamus_agent_provider=lambda: object(),
+    )
 
     assert status.startswith("OK")
     assert "prompt_registry=ready" in status
@@ -73,7 +72,10 @@ def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch) -> None:
         lambda: (_ for _ in ()).throw(RuntimeError("intent engine unavailable")),
     )
 
-    status = warmup_chat_runtime_basics(eager_persona=False)
+    status = warmup_chat_runtime_basics(
+        eager_persona=False,
+        thalamus_agent_provider=lambda: object(),
+    )
 
     assert status == "DEGRADED: intent engine unavailable"
 

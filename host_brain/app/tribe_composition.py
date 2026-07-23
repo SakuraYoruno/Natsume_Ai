@@ -3,10 +3,67 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.tribe.application_ports import TribeApplicationPorts
+
+
+@dataclass(frozen=True, slots=True)
+class TribeRuntimeAgentPorts:
+    """Explicit access to the process-bound Tribe agents used by one Host.
+
+    Tribe agent instances are still process-bound during the NE-01 transition.
+    The transition boundary is deliberately concentrated here: application and
+    input code receive this immutable bundle instead of importing a Tribe
+    singleton getter at request time.
+    """
+
+    get_thalamus_agent: Callable[[], Any]
+    get_ans_agent: Callable[[], Any]
+    get_immune_agent: Callable[[], Any] | None = None
+
+    def __post_init__(self) -> None:
+        for field_name in ("get_thalamus_agent", "get_ans_agent"):
+            if not callable(getattr(self, field_name)):
+                raise TypeError(f"{field_name} must be callable")
+        if self.get_immune_agent is not None and not callable(self.get_immune_agent):
+            raise TypeError("get_immune_agent must be callable when provided")
+
+    def require_thalamus_agent(self) -> Any:
+        return _require_runtime_agent(
+            self.get_thalamus_agent,
+            "HOST_TRIBE_THALAMUS_AGENT_NOT_INJECTED",
+        )
+
+    def require_ans_agent(self) -> Any:
+        return _require_runtime_agent(
+            self.get_ans_agent,
+            "HOST_TRIBE_ANS_AGENT_NOT_INJECTED",
+        )
+
+    def require_immune_agent(self) -> Any:
+        if self.get_immune_agent is None:
+            raise RuntimeError("HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED")
+        return _require_runtime_agent(
+            self.get_immune_agent,
+            "HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED",
+        )
+
+
+def build_production_tribe_runtime_agent_ports() -> TribeRuntimeAgentPorts:
+    """Expose the remaining Tribe singleton bridge only at composition time."""
+
+    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+    from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
+
+    return TribeRuntimeAgentPorts(
+        get_thalamus_agent=get_thalamus_agent,
+        get_ans_agent=get_ans_agent,
+        get_immune_agent=get_immune_agent,
+    )
 
 
 def build_tribe_application_ports(
@@ -21,13 +78,13 @@ def build_tribe_application_ports(
         build_conversation_understanding_pack,
     )
     from host_brain.app.context.conversation_experience_store import (
-        get_conversation_experience_store,
+        build_conversation_experience_read_pack,
     )
     from host_brain.app.emotion_context import (
         build_chat_emotion_snapshot,
         resolve_chat_emotion_context,
     )
-    from host_brain.app.intent_seq import allocate_intent_seq
+    from host_brain.app.intent_seq import IntentSequenceAllocator
     from host_brain.app.user_preference_store import build_user_preference_pack
     from host_brain.composition.tribe_runtime import compose_process_tribe_runtime
     from host_brain.tribe.registry import get_host_tribe_registry
@@ -44,6 +101,10 @@ def build_tribe_application_ports(
     resolved_resource_manager_provider = (
         resource_manager_provider or _missing_app_local_provider
     )
+    ledger_provider = _host_provider(host_services, "ledger")
+    intent_sequence_allocator = IntentSequenceAllocator(
+        ledger_provider=ledger_provider
+    )
 
     def resolve_process_mode_transition_service():
         if mode_transition_service_provider is not None:
@@ -51,11 +112,22 @@ def build_tribe_application_ports(
         monitor = resolved_activity_monitor_provider()
         return getattr(monitor, "_mode_service", None) if monitor is not None else None
 
+    def build_user_preference_pack_with_ledger(**kwargs: Any) -> dict[str, Any]:
+        return build_user_preference_pack(ledger=ledger_provider(), **kwargs)
+
+    def build_conversation_experience_read_pack_with_ledger(
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return build_conversation_experience_read_pack(
+            ledger=ledger_provider(),
+            **kwargs,
+        )
+
     return TribeApplicationPorts(
         activity_monitor=resolved_activity_monitor_provider,
         mode_transition_service=resolve_process_mode_transition_service,
         bond_update_queue=_host_provider(host_services, "bond_update_queue"),
-        ledger=_host_provider(host_services, "ledger"),
+        ledger=ledger_provider,
         life_snapshot_reader=_host_provider(host_services, "life_snapshot_reader"),
         silence_engine=_host_provider(host_services, "silence_engine"),
         state_write_arbiter=_host_provider(host_services, "state_write_arbiter"),
@@ -69,10 +141,12 @@ def build_tribe_application_ports(
         prompt_registry=_host_provider(host_services, "prompt_registry"),
         resolve_chat_emotion_context=resolve_chat_emotion_context,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
-        build_user_preference_pack=build_user_preference_pack,
-        conversation_experience_store=get_conversation_experience_store,
+        build_user_preference_pack=build_user_preference_pack_with_ledger,
+        build_conversation_experience_read_pack=(
+            build_conversation_experience_read_pack_with_ledger
+        ),
         build_conversation_understanding_pack=build_conversation_understanding_pack,
-        allocate_intent_seq=allocate_intent_seq,
+        allocate_intent_seq=intent_sequence_allocator.allocate,
     )
 
 
@@ -93,6 +167,16 @@ def _missing_host_hard_state_owner(*_args: Any, **_kwargs: Any) -> Any:
     """Reject Tribe HardState access when an app owner was not injected."""
 
     raise RuntimeError("HOST_HARD_STATE_OWNER_NOT_INJECTED")
+
+
+def _require_runtime_agent(
+    provider: Callable[[], Any],
+    missing_code: str,
+) -> Any:
+    agent = provider()
+    if agent is None:
+        raise RuntimeError(missing_code)
+    return agent
 
 
 def bind_tribe_application_ports(*, owner: Any, ports: TribeApplicationPorts) -> None:
@@ -123,7 +207,9 @@ def unbind_tribe_application_ports(*, owner: Any) -> bool:
 
 
 __all__ = [
+    "TribeRuntimeAgentPorts",
     "bind_tribe_application_ports",
     "build_tribe_application_ports",
+    "build_production_tribe_runtime_agent_ports",
     "unbind_tribe_application_ports",
 ]

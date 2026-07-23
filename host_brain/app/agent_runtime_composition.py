@@ -9,6 +9,7 @@ from typing import Any
 
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.app.chat_retrieval_helpers import (
+    _build_surface_memory_recall_service,
     _run_retrieval,
     filter_retrieval_evidence_items_for_prompt,
 )
@@ -100,6 +101,7 @@ def build_agent_runtime_application_ports(
     )
     tts_context_router = host_services.require_provider("tts_context_router")
     meta_learning_loop = host_services.require_provider("meta_learning_loop")
+    bond_neo4j_client = host_services.require_provider("bond_neo4j_client")
 
     def resolve_life_authority() -> tuple[Any, Any]:
         try:
@@ -116,9 +118,20 @@ def build_agent_runtime_application_ports(
 
     async def run_retrieval_with_life_authority(**kwargs: Any) -> Any:
         _, reader = resolve_life_authority()
+
+        def build_surface_memory_recall_service() -> Any:
+            return _build_surface_memory_recall_service(
+                ledger=ledger(),
+                life_memory_store=life_memory_store(),
+                bond_neo4j_client=bond_neo4j_client(),
+            )
+
         return await _run_retrieval(
             life_snapshot_reader=reader,
             life_memory_store=life_memory_store(),
+            conversation_history=conversation_history(),
+            build_user_preference_pack=build_user_preference_pack_with_ledger,
+            recall_service_factory=build_surface_memory_recall_service,
             **kwargs,
         )
 
