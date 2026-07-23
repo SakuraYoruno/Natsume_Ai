@@ -2,10 +2,10 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-24",
   "source_baseline": {
-    "dev_commit": "1ea153216e79305d2c14c737b0efd17e0a1a4bf3",
+    "dev_commit": "b4615323c5bc997bdec8bccf9cfcf1578b52fe15",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "PRE_COMMIT_WORKTREE_OVER_REVISED_BASELINE"
+    "evaluated_source": "REBASED_NE03_GUARDIAN_WORKTREE_OVER_ORIGIN_DEV_B4615323C"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
@@ -2883,7 +2883,7 @@
       "compatibility_projection_conflict_boundary": {
         "status": "SCOPED_LOCAL_GATE_PASSED_NOT_SCENE_OR_EXECUTION_AUTHORITY",
         "semantics": "Same-source observations deduplicate by higher confidence. Different source refs with different values are retained as competing_source_refs and read-only competing_facts; matching values are retained as corroborating_source_refs without manufacturing a conflict.",
-        "local_validation": "43_PASSED_WORLD_UNIT_CONTRACT_AND_SQLITE_INTEGRATION",
+        "local_validation": "TARGETED_53_PASSED_WORLD_GUARDIAN_ASGI_AND_OBS_REGRESSION_BATCH_IN_8_66_SECONDS",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
         "boundary": "This compatibility projection does not replace workspace-scoped WorldResolver, SceneResolver, RuntimeGuardian, or a predictive planning world model."
       },
@@ -2996,7 +2996,16 @@
       "post_merge_corrective_slice": {
         "status": "SCOPED_LOCAL_GATE_PASSED_NE03_STILL_INCOMPLETE",
         "scope": "ServiceHealthHeartbeat owns the creating Host ASGI lifespan task, optional keepalive, Guardian observer, probe cache, and HTTP transport; it cannot rebind, cancel, read, or close another Host scope. A compatibility probe without that observer cannot write the global degradation reducer, and the dedicated Obs read model does not consume any process cache.",
-        "local_validation": "TARGETED_50_PASSED_APP_LOCAL_PROBE_STATE_GUARDIAN_STARTUP_HEALTH_DEVICE_AND_INTERNAL_ROUTE_BATCH_IN_7_96_SECONDS",
+        "local_validation": "REBASING_ON_DEV_06AD32E47_TARGETED_54_PASSED_APP_LOCAL_PROBE_STATE_GUARDIAN_STARTUP_HEALTH_DEVICE_AND_INTERNAL_ROUTE_BATCH_IN_8_55_SECONDS",
+        "wave_integration": {
+          "status": "LOCAL_WAVE_INTEGRATION_PASSED_PROGRAM_INCOMPLETE",
+          "initial_combined_command": "TIMEOUT_120_SECONDS_NOT_COUNTED_AS_PASS",
+          "runtime_context_sqlite": "REBASING_ON_DEV_06AD32E47_7_PASSED_IN_72_02_SECONDS_SCENE_1001_REPLAY_GUARDIAN_1001_REPLAY_SCHEMA_COMPOSITION_STALE_HEAD_LEASE_TAKEOVER_AND_CONCURRENT_HEAD",
+          "guardian_sqlite": "REBASING_ON_DEV_06AD32E47_3_PASSED_IN_29_65_SECONDS_CURSOR_PAGING_DUAL_INSTANCE_COMPETITION_AND_APPEND_RESPONSE_LOSS",
+          "scene_intent_preview": "REBASING_ON_DEV_06AD32E47_136_PASSED_IN_125_32_SECONDS_CONTEXT_APPLICATION_ACTION_PREVIEW_SCENE_RESOLVER_AND_PRODUCTION_INTENT_AUTHORITY",
+          "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+          "boundary": "LOCAL_SQLITE_AND_CONTRACT_EVIDENCE_ONLY_NOT_REAL_MULTI_INSTANCE_WINDOWS_GRACEFUL_STOP_OR_NE07_SERVICE_STACK_ACCEPTANCE"
+        },
         "static_validation": "COMPILEALL_JSON_DIFF_CHECK_AND_DOCUMENT_AUTHORITY_FRESHNESS_GATES_PASS",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
         "remaining_boundary": "Real multi-instance deployment and NE-07 service-stack acceptance are not complete."
