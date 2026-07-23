@@ -27,6 +27,8 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 本轮 NE-01 还收口了一个此前明确缺失的窄窗口：无前置 Review 的到期 `RETRY_PENDING` 不再先独立提交 READY，而是与 Attempt、Lease、Heartbeat 和 claim Outbox 在同一 SQLite writer UoW 中完成；若 Attempt Outbox identity 漂移，READY promotion 也会回滚。需要新 Review 的重试仍先落 durable Review、后续再 claim，不能以原子化为由绕过审批。该证据只覆盖这条 retry 边界，不代表 general/multi-node recovery、生产 canary 或 NE-01 完成。
 
+Plan compatibility 的循环依赖现在也 fail-closed：`PlanIntentSearch` 对真实 dependency cycle 返回 `PLAN_CYCLE`，兼容 `SkillDag` 在 cycle 时只输出空批次，不能再忽略依赖并伪造串行执行。它是遗留路径安全围栏，不是原生多节点恢复、动态 replan 或 NE-01 完成证据。
+
 最近一次 post-checkpoint `EXACT_REJECTED` response-loss 回归还修正了 generic failure bundle 与专用 checkpoint Budget 拒绝链的边界：generic bundle 不得替 node/Attempt-bound rejection authority 释放 graph Budget；后者会独立重验 BudgetReservation、rejected BudgetUsage 与 Outbox lineage。`tests/integration/test_ne01_multinode_budget_settlement_hold.py` 与 `tests/integration/test_ne01_operation_online_takeover.py` 的唯一组合复跑为 `26 passed in 69.45s`。这是本地窄切片证据，不与其他批次相加；NE-01 wave integration、真实模型、Docker 全服务栈和远程 CI 仍分别为未运行/`NOT_RUN_ACCOUNT_QUOTA`。
 
 当前活动波次为 NE-01。此前职责拆分将 Acceptance、ASGI、Scheduler 三个 owner 分别降至 1262、1376、2942 行，并保持原 writer、lifespan/task owner 和 repository UoW owner。上一 checkpoint UoW 切片把 exact C-boundary read-only reopen 补进 `task_internal_agent_budget_rejection_store.py`；该文件仍只处理受约束的 Budget rejection/replay，WorkerProjection INSERT 仍只有一个物理 owner。独立 Gate 1–14 重新评估为 `PASS`、`failed_gates=[]`、`各 Gate issues=[]`，Gate 3 为 `issues=[]`、`new_mixed_over_800=[]`，没有扩白名单。上一结构提交的 36 文件 `265 passed` 只作历史，不能与当前集中批次相加。静态通过不关闭 Service Locator、旧执行 authority、一般恢复、七路线、wave integration、真实模型或 Docker 全栈缺口，NE-01 继续 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

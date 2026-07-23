@@ -110,3 +110,33 @@ def test_build_skill_dag_plan_preserves_step_args_payload() -> None:
     assert dag.nodes[0].args_payload["workspace_strategy"] == "runtime_repo"
     assert dag.nodes[0].args_payload["task"] == "fix failing test"
     assert merged_steps[0]["args_payload"]["workspace_strategy"] == "runtime_repo"
+
+
+def test_cycle_is_non_executable_instead_of_being_forced_serial() -> None:
+    dag = build_skill_dag_plan(
+        plan_id="plan::cycle",
+        steps=[
+            {
+                "node_id": "left",
+                "step_index": 1,
+                "route": "skill",
+                "target_id": "web_search",
+                "description": "left",
+                "task_description": "left",
+                "depends_on": ["right"],
+            },
+            {
+                "node_id": "right",
+                "step_index": 2,
+                "route": "skill",
+                "target_id": "system_info",
+                "description": "right",
+                "task_description": "right",
+                "depends_on": ["left"],
+            },
+        ],
+    )
+
+    assert dag.has_cycle_warning is True
+    assert dag.execution_batches == []
+    assert dag.as_dict()["execution_batches"] == []

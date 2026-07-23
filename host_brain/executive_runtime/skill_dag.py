@@ -59,7 +59,10 @@ class SkillDagPlan:
     nodes: list[SkillDagNode] = field(default_factory=list)
     execution_batches: list[list[str]] = field(default_factory=list)
     parallel_window: int = 1
-    has_cycle_warning: bool = False  # 检测到循环依赖时为 True，调用方可据此决定是否降级
+    # Retained field name for serialized compatibility. ``True`` means this
+    # plan is non-executable: callers must block admission with PLAN_CYCLE
+    # rather than discard dependencies and serialize the nodes one-by-one.
+    has_cycle_warning: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -194,8 +197,9 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
     """构建执行批次。
 
     Returns:
-        (batches, has_cycle_warning) — has_cycle_warning 为 True 表示检测到循环/无效依赖，
-        依赖关系已被忽略并强制按 step_index 顺序执行，调用方可据此决定是否降级处理。
+        (batches, has_cycle_warning) — has_cycle_warning 为 True 表示检测到
+        cycle；此时 ``batches`` 必须为空，调用方只能以 ``PLAN_CYCLE``
+        阻断 admission，不能忽略依赖后串行执行。
     """
     if not nodes:
         return [], False
@@ -216,25 +220,16 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
     ]
     pending_ids = {node.node_id for node in nodes}
     batches: list[list[str]] = []
-    has_cycle_warning = False
-
     while pending_ids:
         ready = sorted(
             [node for node in ready if node.node_id in pending_ids],
             key=lambda item: (item.step_index, item.node_id),
         )
         if not ready:
-            # Fallback for cyclic/invalid dependencies: force one-by-one in step order.
-            # 警告：检测到循环依赖或无效依赖，强制按 step_index 顺序单步推进
-            import logging as _logging  # noqa: PLC0415
-            _logging.getLogger("Natsume.skill_dag_planner").warning(
-                "build_execution_batches: 检测到循环依赖或无效依赖，"
-                "强制按 step_index 顺序单步推进。pending_ids=%s",
-                sorted(pending_ids),
-            )
-            has_cycle_warning = True  # 标记循环依赖，调用方可据此决定是否降级
-            forced = next(node for node in sorted(nodes, key=lambda item: (item.step_index, item.node_id)) if node.node_id in pending_ids)
-            current_batch = [forced]
+            # A cycle has no safe topological order. Returning an empty
+            # execution projection makes old callers fail closed instead of
+            # converting an invalid plan into a different serial plan.
+            return [], True
         else:
             first = ready[0]
             if first.allow_parallel:
@@ -255,7 +250,7 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
                     if successor is not None:
                         ready.append(successor)
 
-    return batches, has_cycle_warning
+    return batches, False
 
 
 def build_skill_dag_plan(

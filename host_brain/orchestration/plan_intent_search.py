@@ -20,7 +20,10 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BUDGET_POLICY_SCHEMA_VERSION,
     BudgetPolicy,
 )
-from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.contract_errors import (
+    PLAN_CYCLE,
+    ContractViolation,
+)
 from host_brain.contracts.agent_runtime.task_graph import normalize_task_retry_policy
 from host_brain.contracts.agent_runtime.work_order import (
     ALLOWED_AGENT_DOMAINS,
@@ -707,7 +710,7 @@ def _topological_order(nodes: Sequence[_ApprovedNode]) -> tuple[str, ...]:
     if len(ordered) != len(nodes):
         blocked = sorted(set(node_by_id) - set(ordered))
         raise PlanIntentSearchError(
-            PLAN_INTENT_GRAPH_INVALID,
+            PLAN_CYCLE,
             "approved Plan graph contains a cycle: " + ",".join(blocked),
         )
     return tuple(ordered)

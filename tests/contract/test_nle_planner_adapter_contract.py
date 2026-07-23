@@ -625,6 +625,39 @@ def test_t_nle_05_skill_dag_preserves_builder_batch_order() -> None:
     assert [list(batch) for batch in adapted.execution_batches] == source.execution_batches
 
 
+def test_t_nle_05_skill_dag_cycle_is_rejected_before_task_graph_compilation() -> None:
+    source = build_skill_dag_plan(
+        plan_id="builder-cycle",
+        steps=[
+            {
+                "step_index": 1,
+                "node_id": "left",
+                "route": "skill",
+                "target_id": "read_only_status",
+                "description": "left",
+                "task_description": "left",
+                "depends_on": ["right"],
+            },
+            {
+                "step_index": 2,
+                "node_id": "right",
+                "route": "skill",
+                "target_id": "read_only_status",
+                "description": "right",
+                "task_description": "right",
+                "depends_on": ["left"],
+            },
+        ],
+    )
+
+    assert source.has_cycle_warning is True
+    assert source.execution_batches == []
+    with pytest.raises(ContractViolation) as error:
+        adapt_skill_dag_plan(source, identity=_identity())
+
+    assert error.value.reason_code == PLAN_CYCLE
+
+
 def test_t_nle_05_ask_only_plan_fails_closed_with_stable_reason() -> None:
     plan = TaskPlan(
         task_id="needs-input",
