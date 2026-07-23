@@ -20,11 +20,16 @@ from host_brain.planning_search.attested_external_research_adapter import (
 
 
 class _CanonicalModelService:
-    def __init__(self, result: ModelAttemptResult) -> None:
+    def __init__(self, result: ModelAttemptResult, *, writer, started, terminal) -> None:  # noqa: ANN001
         self._result = result
+        self._writer = writer
+        self._started = started
+        self._terminal = terminal
 
     async def complete(self, request):  # noqa: ANN201
         assert request.request_id == self._result.request_id
+        await self._writer.record_attempt(self._started)
+        await self._writer.record_attempt(self._terminal)
         return self._result
 
 
@@ -86,18 +91,18 @@ def _records() -> tuple[ModelAttemptRecord, ModelAttemptRecord, ModelAttemptResu
 async def test_d20c_reopens_sqlite_model_audit_before_external_attestation(tmp_path) -> None:  # noqa: ANN001
     db_path = tmp_path / "d20c-model-audit.sqlite3"
     started, terminal, result = _records()
-    ledger = SQLiteLedger(db_path=str(db_path))
-    writer = LedgerAttemptAuditRepository(ledger)
-    await writer.record_attempt(started)
-    await writer.record_attempt(terminal)
-    ledger.close()
-
-    reopened = SQLiteLedger(db_path=str(db_path))
+    writer_ledger = SQLiteLedger(db_path=str(db_path))
+    reader_ledger = SQLiteLedger(db_path=str(db_path))
+    writer = LedgerAttemptAuditRepository(writer_ledger)
+    lookup = LedgerAttemptAuditLookup(reader_ledger)
     try:
-        lookup = LedgerAttemptAuditLookup(reopened)
-        assert lookup.records_for_request(result.request_id) == (started, terminal)
         adapter = AttestedExternalResearchAdapter(
-            model_attempt_service=_CanonicalModelService(result),
+            model_attempt_service=_CanonicalModelService(
+                result,
+                writer=writer,
+                started=started,
+                terminal=terminal,
+            ),
             attempt_audit_lookup=lookup,
         )
 
@@ -113,4 +118,5 @@ async def test_d20c_reopens_sqlite_model_audit_before_external_attestation(tmp_p
         assert run.attestation.total_tokens == 101
         assert run.attestation.provider_latency_ms == 37
     finally:
-        reopened.close()
+        reader_ledger.close()
+        writer_ledger.close()

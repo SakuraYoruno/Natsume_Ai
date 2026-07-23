@@ -5,7 +5,9 @@ does not choose a provider or inspect credentials: it asks the already
 composed :class:`ModelAttemptService` to execute one fresh foreground request,
 then converts only a complete, non-cached single-attempt result into the
 immutable D20c attestation contracts.  Missing external configuration remains
-an execution failure, not simulated benefit evidence.
+an execution failure, not simulated benefit evidence.  Before that call it
+reopens the canonical audit and rejects any prior record for the exact
+execution identity, so a crash cannot silently reissue an external request.
 """
 
 from __future__ import annotations
@@ -100,6 +102,17 @@ class AttestedExternalResearchAdapter:
             raise AttestedExternalResearchError("messages must not be empty")
         if isinstance(deadline_ms, bool) or not isinstance(deadline_ms, int) or deadline_ms <= 0:
             raise AttestedExternalResearchError("deadline_ms must be a positive integer")
+
+        # A completed or merely-started canonical request is already an
+        # external-effect ambiguity.  Do not call a provider again with the
+        # same D20 execution identity: the durable model audit deliberately
+        # excludes response bodies, so a restarted experiment cannot safely
+        # reconstruct and verify an interrupted arm.  The paired-run owner
+        # must reconcile that audit/ledger boundary before it can progress.
+        _assert_no_prior_attempt_audit(
+            execution_id=normalized_execution_id,
+            lookup=self._attempt_audit_lookup,
+        )
 
         result = await self._model_attempt_service.complete(
             ModelAttemptRequest(
@@ -286,6 +299,32 @@ def _assert_durable_attempt_audit(
     if not isinstance(transport, Mapping) or transport.get("provider_latency_ms") != provider_latency_ms:
         raise AttestedExternalResearchError(
             "canonical model attempt audit is missing provider latency"
+        )
+
+
+def _assert_no_prior_attempt_audit(
+    *,
+    execution_id: str,
+    lookup: AttemptAuditLookup,
+) -> None:
+    """Block a duplicate external request before its first provider call.
+
+    ``request_id`` is the durable D20 arm execution identity, not a best-effort
+    retry token.  Any prior audit row means the caller must reconcile the
+    ledger and canonical model trail instead of causing an unbounded external
+    duplicate.  A lookup fault is equally unsafe because the adapter cannot
+    establish that the execution is fresh.
+    """
+
+    try:
+        prior = tuple(lookup.records_for_request(execution_id))
+    except Exception as exc:
+        raise AttestedExternalResearchError(
+            "cannot inspect canonical model audit before external execution"
+        ) from exc
+    if prior:
+        raise AttestedExternalResearchError(
+            "external execution id already has canonical audit records; reconciliation required"
         )
 
 

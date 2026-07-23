@@ -20,12 +20,15 @@ from host_brain.planning_search.attested_external_research_adapter import (
 
 
 class _AttemptService:
-    def __init__(self, result: ModelAttemptResult) -> None:
+    def __init__(self, result: ModelAttemptResult, *, audit=None) -> None:  # noqa: ANN001
         self.result = result
+        self.audit = audit
         self.requests = []
 
     async def complete(self, request):  # noqa: ANN201
         self.requests.append(request)
+        if self.audit is not None:
+            self.audit.records = _audit_records(self.result)
         return self.result
 
 
@@ -112,8 +115,8 @@ def _audit_records(result: ModelAttemptResult):  # noqa: ANN201
 
 async def test_d20c_adapter_builds_attested_receipt_from_one_fresh_canonical_attempt() -> None:
     result = _result()
-    service = _AttemptService(result)
-    audit = _AuditLookup(_audit_records(result))
+    audit = _AuditLookup(())
+    service = _AttemptService(result, audit=audit)
     adapter = AttestedExternalResearchAdapter(
         model_attempt_service=service,
         attempt_audit_lookup=audit,
@@ -137,6 +140,28 @@ async def test_d20c_adapter_builds_attested_receipt_from_one_fresh_canonical_att
         "research_external_execution_id": "research-execution-1",
         "research_arm_id": "baseline",
     }
+    assert audit.request_ids == ["research-execution-1", "research-execution-1"]
+
+
+async def test_d20c_adapter_never_replays_an_execution_with_prior_canonical_audit() -> None:
+    result = _result()
+    service = _AttemptService(result)
+    audit = _AuditLookup(_audit_records(result))
+    adapter = AttestedExternalResearchAdapter(
+        model_attempt_service=service,
+        attempt_audit_lookup=audit,
+    )
+
+    with pytest.raises(AttestedExternalResearchError, match="reconciliation required"):
+        await adapter.execute(
+            execution_id="research-execution-1",
+            arm_id="baseline",
+            prompt_id="research.prompt",
+            messages=({"role": "user", "content": "x"},),
+            deadline_ms=1_000,
+        )
+
+    assert service.requests == []
     assert audit.request_ids == ["research-execution-1"]
 
 
@@ -203,9 +228,10 @@ async def test_d20c_adapter_rejects_a_retry_or_route_identity_drift() -> None:
         ),
         final_target=foreign_target,
     )
+    drifted_audit = _AuditLookup(())
     drifted = AttestedExternalResearchAdapter(
-        model_attempt_service=_AttemptService(route_drift),
-        attempt_audit_lookup=_AuditLookup(_audit_records(route_drift)),
+        model_attempt_service=_AttemptService(route_drift, audit=drifted_audit),
+        attempt_audit_lookup=drifted_audit,
     )
     with pytest.raises(AttestedExternalResearchError, match="selected external route"):
         await drifted.execute(

@@ -615,7 +615,7 @@ Transition 必须：
   → promotion proposal
 ```
 
-未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。模型证据还必须由唯一模型 authority 生成：D20c 只能接受一个 canonical `ModelAttemptService` request 的非缓存、单成功 attempt，且将 target/输出摘要、provider 与总延迟、token、成本一起封入不可分离的 attestation。适配器还必须重开同一 request 的 canonical audit started/terminal pair，并核对 provider latency；cache、多 attempt、缺测量或 audit drift 都不能转换为外部收益证据。单纯的 URI、fixture 或调用者自报字段永远不是批准证据；请求参数也不能覆盖路由自己的 retry authority。D20a～D20c 只建立后续实验的输入和结构化证据边界，尚无真实 credential/provider execution、production prompt/workload、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research 是 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
+未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。模型证据还必须由唯一模型 authority 生成：D20c 只能接受一个 canonical `ModelAttemptService` request 的非缓存、单成功 attempt，且将 target/输出摘要、provider 与总延迟、token、成本一起封入不可分离的 attestation。适配器在 provider 调用前必须确认该 execution ID 没有任何 canonical audit row；只要已有 started/terminal 行或 audit lookup 失败，就必须先 reconciliation，不能以同一 ID 盲目重放。签发时还必须重开同一 request 的 canonical audit started/terminal pair，并核对 provider latency；cache、多 attempt、缺测量或 audit drift 都不能转换为外部收益证据。单纯的 URI、fixture 或调用者自报字段永远不是批准证据；请求参数也不能覆盖路由自己的 retry authority。D20a～D20c 只建立后续实验的输入和结构化证据边界，尚无真实 credential/provider execution、production prompt/workload、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research 是 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
 
 ### 10.5 编译是规划与执行之间的防火墙
 
