@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.app.chat_handler import _evaluate_governor_with_timing
 from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator
 from host_brain.app.durable_task_status import build_durable_task_status_projection
@@ -30,6 +31,9 @@ def build_input_runtime_application_ports(
     host_services: HostLifecycleApplicationPorts | None = None,
     embodiment_runtime_provider: Callable[[], Any | None] | None = None,
     notify_user_interaction_callback: Callable[[], None] | None = None,
+    agent_runtime_ports_provider: (
+        Callable[[], AgentRuntimeApplicationPorts | None] | None
+    ) = None,
 ) -> InputRuntimeApplicationPorts:
     """Build one immutable dependency graph for one Host application."""
 
@@ -53,6 +57,20 @@ def build_input_runtime_application_ports(
             embodiment_runtime=runtime,
         )
 
+    async def cortex_orchestrator_with_app_ports(**kwargs: Any):  # noqa: ANN202
+        application_ports = (
+            agent_runtime_ports_provider()
+            if agent_runtime_ports_provider is not None
+            else None
+        )
+        if not isinstance(application_ports, AgentRuntimeApplicationPorts):
+            raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
+        async for event in cortex_orchestrator_sse_generator(
+            application_ports=application_ports,
+            **kwargs,
+        ):
+            yield event
+
     return InputRuntimeApplicationPorts(
         get_intent_engine=get_intent_engine,
         get_ledger=get_ledger,
@@ -68,7 +86,7 @@ def build_input_runtime_application_ports(
         build_chat_governance_snapshot=build_chat_governance_snapshot,
         resolve_chat_emotion_context=resolve_chat_emotion_context,
         chat_request_factory=ChatRequest,
-        cortex_orchestrator_sse_generator=cortex_orchestrator_sse_generator,
+        cortex_orchestrator_sse_generator=cortex_orchestrator_with_app_ports,
         create_multimodal_job=create_multimodal_job,
         update_multimodal_job=update_multimodal_job,
         reply_form_decision_type=ReplyFormDecision,

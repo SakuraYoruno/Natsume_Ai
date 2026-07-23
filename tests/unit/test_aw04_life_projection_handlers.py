@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.app.life_projection_handlers import handle_life_projection
 from natsume_contracts.life import (
     LifeIntentKind,
@@ -21,6 +22,32 @@ def _message(target: str, payload: dict) -> LifeProjectionMessage:
         payload_digest="a" * 64,
         attempt_count=1,
         fencing_token=1,
+    )
+
+
+def _agent_runtime_ports() -> AgentRuntimeApplicationPorts:
+    async def _async_value(**_kwargs):  # noqa: ANN003
+        return {}
+
+    return AgentRuntimeApplicationPorts(
+        record_user_turn=lambda **_kwargs: {"status": "OK"},
+        record_assistant_turn=lambda **_kwargs: {"status": "OK"},
+        run_retrieval=_async_value,
+        filter_retrieval_evidence_items_for_prompt=lambda value, **_kwargs: value,
+        build_user_preference_pack=lambda **_kwargs: {},
+        resolve_host_llm_runtime_async=_async_value,
+        resolve_state_arbiter_bond_fact=_async_value,
+        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
+        get_conversation_experience_store=lambda: object(),
+        drive_stream_vts_emotion=_async_value,
+        resolve_tts_route=lambda **_kwargs: {},
+        conversation_history=lambda: object(),
+        life_memory_service=lambda: object(),
+        audit_ledger=lambda: object(),
+        prompt_registry=lambda: object(),
+        model_attempt_service=lambda: object(),
+        task_status_projection=lambda: {},
+        persist_post_process_audit=_async_value,
     )
 
 
@@ -48,7 +75,8 @@ def test_surface_projection_runs_durable_only_post_process_mode(monkeypatch) -> 
                     "emotion_context": {"emotion_tag": "HAPPY"},
                     "trace_stage_meta": {"surface_main_chain_used": True},
                 },
-            )
+            ),
+            agent_runtime_ports=_agent_runtime_ports(),
         )
     )
 

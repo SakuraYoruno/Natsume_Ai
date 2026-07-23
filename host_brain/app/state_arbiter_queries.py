@@ -138,17 +138,25 @@ async def _resolve_state_arbiter_bond_fact(
     *,
     session_id: str,
     request_id: str,
+    bond_stage_engine: Any | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """查询 BondGraph 关系强度，注入 prompt 作为关系上下文。"""
+    """查询 BondGraph 关系强度，注入 prompt 作为关系上下文。
+
+    Canonical Host composition supplies ``bond_stage_engine`` explicitly.  The
+    lazy social-brain lookup remains only for legacy compatibility callers that
+    have not joined the Host lifespan scope yet.
+    """
     summary: dict[str, Any] = {
         "status": "SKIPPED",
         "reason_code": "NOT_AVAILABLE",
         "fact_key": "bond_graph_state",
     }
     try:
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+        _bond_engine = bond_stage_engine
+        if _bond_engine is None:
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
-        _bond_engine = get_social_brain_agent().resolve_stage_engine()
+            _bond_engine = get_social_brain_agent().resolve_stage_engine()
         if _bond_engine is None:
             summary["reason_code"] = "BOND_ENGINE_NOT_AVAILABLE"
             return summary, None

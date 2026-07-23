@@ -15,7 +15,6 @@ import re
 import time
 from typing import Any, Dict
 
-from host_brain.composition.process_services import get_ledger
 from host_brain.channels.embodiment import submit_avatar_command
 from host_brain.channels.vts_rate_limiter import VTSRateLimiter
 from natsume_contracts.edge.v1 import now_ms
@@ -90,6 +89,7 @@ async def _drive_stream_vts_emotion(
     request_id: str,
     emotion_context: Dict[str, Any] | None,
     ts_ms: int,
+    ledger: Any,
 ) -> Dict[str, Any]:
     if not _parse_bool_env("HOST_STREAM_VTS_EMOTION_ENABLED", default=True):
         return {
@@ -112,7 +112,6 @@ async def _drive_stream_vts_emotion(
             "detail": "流式情感上下文中缺少情感标签",
         }
 
-    ledger = get_ledger()
     limiter = _get_stream_vts_rate_limiter()
     limit_result = limiter.check()
     if not limit_result.allowed:
@@ -213,6 +212,7 @@ async def _wrap_vts_with_latency(
     request_id: str,
     emotion_context: Dict[str, Any] | None,
     ts_ms: int,
+    ledger: Any,
     suppress_edge_vts: bool = False,
 ) -> tuple[Dict[str, Any], int]:
     """包装版，返回 (result_dict, latency_ms)。"""
@@ -230,5 +230,6 @@ async def _wrap_vts_with_latency(
         request_id=request_id,
         emotion_context=emotion_context,
         ts_ms=ts_ms,
+        ledger=ledger,
     )
     return result, max(0, int(time.time() * 1000) - _t0)

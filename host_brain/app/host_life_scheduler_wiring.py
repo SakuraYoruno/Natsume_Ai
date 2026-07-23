@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import partial
 from typing import Any, Callable, Mapping, Protocol
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.runtime.context_application import RuntimeContextApplicationService
 from host_brain.scheduler.task_registry import (
     SchedulerTaskConfig,
@@ -59,6 +61,7 @@ def compose_life_dispatchers(
     *,
     embodiment_runtime: Any,
     action_preview_service: Any | None = None,
+    agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
 ) -> tuple[Any, Any]:
     """Bind projection and delivery workers to the canonical Life repository."""
 
@@ -76,9 +79,14 @@ def compose_life_dispatchers(
         LifeCommandRepository,
     )
 
+    if not isinstance(agent_runtime_ports, AgentRuntimeApplicationPorts):
+        raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
     repository = LifeCommandRepository.from_ledger(ledger)
     return (
-        LifeProjectionDispatcher(repository, handle_life_projection),
+        LifeProjectionDispatcher(
+            repository,
+            partial(handle_life_projection, agent_runtime_ports=agent_runtime_ports),
+        ),
         LifeOutboxDispatcher(
             repository,
             LifeDeliveryTransport(

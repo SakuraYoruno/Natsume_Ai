@@ -105,11 +105,6 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
-
     metrics = _DummyMetrics()
     response = await handle_chat(
         request_body=ChatRequest(message="我想和你认真聊聊今天的心情。"),
@@ -117,6 +112,9 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         metrics=metrics,
         governed_command_application=governed_command_application,
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     assert fake_thalamus.calls == 0
@@ -156,11 +154,6 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
-
     response = await handle_chat(
         request_body=ChatRequest(
             message="这是什么",
@@ -174,6 +167,9 @@ async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     body_iter = response.body_iterator
@@ -222,11 +218,6 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
-
     response = await handle_chat(
         request_body=ChatRequest(
             message="我刚才让你记了什么？",
@@ -238,6 +229,9 @@ async def test_handle_chat_normalizes_surface_memory_recall_before_governor(monk
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     body_iter = response.body_iterator
@@ -290,16 +284,14 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
 
     monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
     monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: intent_engine)
-    monkeypatch.setattr(
-        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
-        _fake_cortex_orchestrator_sse_generator,
-    )
-
     response = await handle_chat(
         request_body=ChatRequest(message="还记得我说推荐格式要怎样吗？"),
         request=_build_request(),
         metrics=_DummyMetrics(),
         hard_state_provider=lambda: {"sys_mode": "normal"},
+        cortex_orchestrator_sse_generator=(
+            _fake_cortex_orchestrator_sse_generator
+        ),
     )
 
     body_iter = response.body_iterator

@@ -59,6 +59,13 @@ class HostLifecycleApplicationPorts:
     intent_engine: ServiceProvider | None = None
     multimodal_observer: ServiceProvider | None = None
     multimodal_processor: ServiceProvider | None = None
+    conversation_history: ServiceProvider | None = None
+    life_memory_service: ServiceProvider | None = None
+    model_route_catalog: ServiceProvider | None = None
+    session_topic_ledger_store: ServiceProvider | None = None
+    session_tactic_ledger_store: ServiceProvider | None = None
+    tts_context_router: ServiceProvider | None = None
+    meta_learning_loop: ServiceProvider | None = None
 
     def require_provider(self, field_name: str) -> ServiceProvider:
         provider = getattr(self, str(field_name or ""), None)
@@ -379,6 +386,13 @@ def build_host_lifecycle_container() -> HostLifecycleContainer:
             intent_engine=process_services.get_intent_engine,
             multimodal_observer=process_services.get_multimodal_observer,
             multimodal_processor=process_services.get_multimodal_processor,
+            conversation_history=process_services.get_conversation_history,
+            life_memory_service=process_services.get_life_memory_service,
+            model_route_catalog=process_services.get_model_route_catalog,
+            session_topic_ledger_store=process_services.get_session_topic_ledger_store,
+            session_tactic_ledger_store=process_services.get_session_tactic_ledger_store,
+            tts_context_router=process_services.get_tts_context_router,
+            meta_learning_loop=process_services.get_meta_learning_loop,
             mode_transition_service_factory=ModeTransitionService,
             activity_monitor_factory=ActivityMonitor,
             resource_manager_factory=SystemResourceManager,

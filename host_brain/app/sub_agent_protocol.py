@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.model_runtime.prompt_contract import resolve_prompt_contract_json
 from host_brain.app.sub_agent_context import (
     ContextEnvelopeError,
@@ -294,8 +295,13 @@ class SubAgentDispatcher:
     （现有 handler 是同步函数），超时后返回降级结果。
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        application_ports: AgentRuntimeApplicationPorts | None = None,
+    ) -> None:
         self._handler_map: dict[str, Any] = {}  # 延迟加载
+        self._application_ports = application_ports
 
     def _ensure_handlers(self) -> None:
         """延迟导入 handler，避免循环依赖。"""
@@ -359,22 +365,23 @@ class SubAgentDispatcher:
         # Build sub-agent gateway lazily from current runtime routing.
         try:
             from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-                resolve_host_llm_runtime_async,
                 resolve_subagent_llm_runtime,
             )
             from host_brain.agent_runtime.subagent_gateway import (  # noqa: PLC0415
                 _build_subagent_gateway_from_runtime,
             )
-            from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
+            application_ports = self._application_ports
+            if not isinstance(application_ports, AgentRuntimeApplicationPorts):
+                raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
 
-            base_runtime = await resolve_host_llm_runtime_async(
+            base_runtime = await application_ports.resolve_host_llm_runtime_async(
                 rollout_key=str(req.session_id or req.request_id or req.agent_id),
                 scene_type="EXEC_INTENT",
             )
             subagent_runtime = resolve_subagent_llm_runtime(base_runtime=dict(base_runtime or {}))
             gateway = _build_subagent_gateway_from_runtime(
                 subagent_runtime,
-                application_ports=AGENT_RUNTIME_PORTS,
+                application_ports=application_ports,
                 request_id=req.request_id,
             )
             if gateway is None:
@@ -593,8 +600,10 @@ class SubAgentDispatcher:
     def _log_dispatch(self, req: SubAgentRequest, resp: SubAgentResponse) -> None:
         """将子 Agent 调度结果写入 skill_exec_log 供链路追踪。"""
         try:
-            from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
-            ledger = get_ledger()
+            application_ports = self._application_ports
+            if not isinstance(application_ports, AgentRuntimeApplicationPorts):
+                return
+            ledger = application_ports.audit_ledger()
             result_code = "SUB_AGENT_OK" if resp.success else "SUB_AGENT_FAILED"
             raw_result = str(resp.result or resp.error or "").strip()
             result_digest = public_decision_summary(
@@ -621,12 +630,10 @@ class SubAgentDispatcher:
             pass  # 审计不影响主流程
 
 
-# 模块级单例
-_dispatcher: SubAgentDispatcher | None = None
+def get_sub_agent_dispatcher(
+    *,
+    application_ports: AgentRuntimeApplicationPorts | None = None,
+) -> SubAgentDispatcher:
+    """Return a fresh dispatcher; Host composition owns any app-local ports."""
 
-
-def get_sub_agent_dispatcher() -> SubAgentDispatcher:
-    global _dispatcher
-    if _dispatcher is None:
-        _dispatcher = SubAgentDispatcher()
-    return _dispatcher
+    return SubAgentDispatcher(application_ports=application_ports)

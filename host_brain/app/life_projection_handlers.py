@@ -5,18 +5,25 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from natsume_contracts.life import LifeProjectionMessage
 
 
 async def handle_life_projection(
     message: LifeProjectionMessage,
+    *,
+    agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
 ) -> Mapping[str, Any]:
     """Apply one projection after its source command is durably committed."""
 
     target = str(message.target or "").strip().lower()
     payload = dict(message.payload)
     if target == "surface.post_process":
-        return await _handle_surface_post_process(message, payload)
+        return await _handle_surface_post_process(
+            message,
+            payload,
+            agent_runtime_ports=agent_runtime_ports,
+        )
     if target in {
         "work.environment",
         "life.experience",
@@ -40,9 +47,13 @@ async def handle_life_projection(
 async def _handle_surface_post_process(
     message: LifeProjectionMessage,
     payload: dict[str, Any],
+    *,
+    agent_runtime_ports: AgentRuntimeApplicationPorts | None,
 ) -> Mapping[str, Any]:
-    from host_brain.app.agent_runtime_shared import AGENT_RUNTIME_PORTS  # noqa: PLC0415
     from host_brain.agent_runtime.postprocess import _async_post_process  # noqa: PLC0415
+
+    if not isinstance(agent_runtime_ports, AgentRuntimeApplicationPorts):
+        raise RuntimeError("HOST_AGENT_RUNTIME_PORTS_NOT_INJECTED")
 
     trace = _mapping(payload.get("trace_stage_meta"))
     trace.update(
@@ -57,7 +68,7 @@ async def _handle_surface_post_process(
     )
     model_audit = _mapping(payload.get("model_audit"))
     await _async_post_process(
-        application_ports=AGENT_RUNTIME_PORTS,
+        application_ports=agent_runtime_ports,
         request_id=str(payload.get("request_id") or message.command_id),
         person_id=str(payload.get("person_id") or message.person_id),
         session_id=str(payload.get("session_id") or ""),

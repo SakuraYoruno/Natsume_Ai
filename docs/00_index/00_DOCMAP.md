@@ -3,8 +3,8 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v8.6
-维护日期：2026-07-20
+版本：v8.7
+维护日期：2026-07-22
 状态：`CURRENT_AUTHORITY_MAP`
 
 ## 1. 权威顺序
@@ -68,7 +68,7 @@ flowchart TD
 
 - Full Architecture：`INCOMPLETE`。
 - 当前静态结构：独立 Gate 1–14=`PASS`、`failed_gates=[]`、`各 Gate issues=[]`；Acceptance 1262、ASGI 1376、Scheduler 2942，focused 模块不转移 writer/lifespan/UoW authority。967行 Budget rejection Store 只拥有受约束的 internal/canonical C-boundary 写入；444行只读 exact terminal resolver供响应丢失、duplicate replay与reconciliation复用，93行纯 route helper绑定 HostCommand/TaskNode/WorkerProjection；Gate 3 `new_mixed_over_800=[]`，没有扩 allowlist。旧36文件265项只作历史。静态 PASS 不改变 Full Architecture=`INCOMPLETE` 或 NE-01=`PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
-- Host `chat/skill/delegate/plan`：`WIRED`。
+- Host AgentRuntime：`PARTIAL_APP_LOCAL_PORT_CUTOVER`。Life authority 就绪后，Host lifespan scope 向 Input→Cortex、Life projection 与 conversation Acceptance 发布同一 immutable port bundle，并在 shutdown 撤销；model RouteCatalog、Bond stage engine、session topic/tactic stores、VTS ledger、TTS router/meta-learning 也由同一 bundle 显式供应。无生产调用者的 `intelligent_runtime` 二次 PlanningAgent/SkillComposer/直接执行路径已删除，TTS 保留为只接受 scope 显式依赖的 `tts_route`；当前 locator 机械库存为 named33/83、all-form37、Container50/3/46。此举消除了该 bundle 的 global authority，但不证明底层实例隔离。Direct Skill 仍是已切出的受治理 vertical slice；普通 Chat 全量、legacy Executive generic Delegate、Plan 多节点执行和其余路线不因本切片而视为 `WIRED`。
 - Scheduler：`PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE`；Internal Agent：`PARTIAL / INTERNAL_SEALED_CHECKPOINT_CONTINUATION`。受治理 Internal 单节点可在下一次 runtime activation 从 seal 后/WorkerProjection 前的密封检查点重开完整 lineage，重建唯一 projection 并继续 Verification、Acceptance、Effect、claim 与 clean/no-change promotion，Agent 不重跑。检查点 mutation 已由 composition-owned `InternalAgentCheckpointUnitOfWorkPort` 封口，WorkerProjection 只有一个物理 INSERT owner；A（projection/Operation）、B（Budget charge）、C（rejected terminal bundle）是三个 durable atomic UoW，不是整链单事务。response loss 只读重开，禁止二次 mutation。app-local 周期 worker 只做终态 sealed abandon/cleanup。周期 survivor continuation、crash-left unsealed partial cleanup、failure/cancel/budget claim closeout、general `settle_worker` crash bundle 仍缺；一般write、handle-level TOCTOU、OS/container isolation与legacy bridge也未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 - 单节点 Operation 已 `COMMITTED` 后的 Budget settlement 双重响应丢失现采用不附加 lifecycle/finalization mutation 的 hold；BudgetUsage 只分为 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT`。Lease 到期后，更高 fence owner 可只读重开前两类或幂等补写 `MISSING`，`CONFLICT` 失败关闭，worker 不重跑。多节点/批次当前只保证安全 hold，settlement recovery 仍缺。
 - Host HardState / governed Operator：`THREE_OF_37_VERTICAL_SLICES / NE01_IN_PROGRESS`。HardState 使用 migration 0115；仓库 migration head 已推进到 `0119_terminal_operator_signed_command.sql`。0118 继续封闭 visible turn、Preference 与 Life projection；0119 将签名终态修复的 exact command 与通用 TaskGraph 输入分离：signature/key 只进入独立不可变表，图内只携带 ref/digest，Review 后由 Acceptance Effect 执行。当前 `scheduler.task.trigger`、`sys_mode.switch`、`task_terminal.reconcile` 为 3/37，本地 SQLite governed integration 已通过，但真实 HTTP/network canary、波次集成、真实模型与 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

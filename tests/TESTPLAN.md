@@ -327,9 +327,17 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 
 - T-NE01-COMPOSITION-MODEL-01：`ApplicationModelAttemptServicePort`必须是frozen/slotted非所有权adapter，并在构造时接收`ModelAttemptService` provider；`complete`、`complete_sync`与`prompt_registry`不得导入或回读`process_services`。
 - T-NE01-COMPOSITION-MODEL-02：Tool runtime必须从ASGI typed Host bundle传入provider；中断Domain Pack恢复必须从同一lifecycle bundle传入。无provider构造仅为兼容测试，首次使用必须稳定报`HOST_APP_LOCAL_MODEL_ATTEMPT_PROVIDER_NOT_INJECTED`。
-- T-NE01-COMPOSITION-MODEL-03：fresh locator inventory必须为named38 modules/107 names、all-form42 modules、Container50 fields/3 locks/46 refs；Input的39/110/all-form43只作前一提交历史。
+- T-NE01-COMPOSITION-MODEL-03：模型端口切片末的 locator inventory 为 named38 modules/107 names、all-form42 modules、Container50 fields/3 locks/46 refs；Input的39/110/all-form43只作前一提交历史。后续 AgentRuntime 生命周期端口及其嵌套 Host provider 切片，以及删除无生产调用者的 `intelligent_runtime` 二次规划/直接执行路径并将 TTS 路由限制为 scope 显式依赖后，当前库存收敛为 named33 modules/83 names、all-form37 modules；不把该结果倒写成模型端口自身的完成证据。
 - T-NE01-COMPOSITION-MODEL-04：ASGI composition 集成夹具必须构造真实 `HostLifecycleApplicationPorts`，覆盖所有已消费 provider；不得再用缺少 `require_provider()` 的 `SimpleNamespace` 冒充 Host bundle。Tool runtime 构造模型尝试端口时，夹具必须断言传入精确的 `host_lifecycle.ports.model_attempt_service` provider。该项只修复测试接线，不改变生产能力或 NE-01 状态。
 - 宽集合首轮为`103 passed + 4 failures`；4项来自两份既有Task Runtime集成fixture缺少`internal_agent_checkpoint_uow`，失败发生在Coordinator构造、早于模型端口调用，不计模型回归PASS，也不在本切片夹带修复。移除两份无关失真fixture后的精确集合为`99 passed in 24.03s`。NE-01 wave integration与production canary仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### NE-01 AgentRuntime Host 生命周期端口
+
+- T-NE01-COMPOSITION-AGENT-RUNTIME-01：生产 `create_app()` 必须创建唯一 `AgentRuntimeApplicationScope`，且只可在 Life authority 已建立后初始化。Input→Cortex、Life projection 与 conversation Acceptance 必须消费同一 immutable `AgentRuntimeApplicationPorts`；缺失 Life authority、未初始化或重复初始化均稳定失败关闭，shutdown 必须撤销 bundle。
+- T-NE01-COMPOSITION-AGENT-RUNTIME-02：生产模块不得再 import 或读取 `AGENT_RUNTIME_PORTS` 全局 bundle；`agent_runtime_shared` 仅可作为无状态兼容 re-export，不能重新成为 authority。测试必须验证 bundle identity、生命周期清理和缺依赖失败关闭，不能只依赖词法扫描。
+- T-NE01-COMPOSITION-AGENT-RUNTIME-03：本切片不证明 legacy Executive generic delegate 已进入 scoped gateway，也不证明 Chat、Skill、Plan、Delegate、Scheduler、Internal、Operator 七路线均已贯通 TaskGraph。它只收敛 Host 生命周期内的 AgentRuntime 依赖注入；多节点执行、Budget/Lease/Review/unknown-effect 一般恢复和旧 Service Locator 清零仍由后续 NE-01 切片验收。
+- T-NE01-COMPOSITION-AGENT-RUNTIME-04：scope 必须从同一 typed Host bundle 显式解析 model RouteCatalog、Bond stage engine、session topic/tactic stores、VTS ledger、TTS router 与 meta-learning loop；当前 scope 的 conversation writer 与 VTS driver 不得再直接导入 `process_services`。缺 nested provider 在 composition 时失败关闭；兼容 helper 的 lazy fallback 不得成为当前 Host scope 的调用路径。
+- 当前定向集合为 `257 passed in 49.51s`，覆盖 ASGI lifecycle、Input/Cortex、Life projection、conversation Acceptance、SubAgent scoped ports、nested Host providers、结构合同与受影响 integration；它替代本 scope 早先的 `231 passed in 31.11s` 记录，不得与历史批次相加或写成 generic Delegate、七路线 TaskGraph、NE-01 wave integration 或真实服务栈验收。文档 Gate 与静态检查另行通过；production canary和NE-07真实服务栈均未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ### NE-01 Scheduler post-Acceptance handler 切流
 

@@ -893,6 +893,7 @@ def receive_edge_events_response(
                                         "emotion_intensity": intensity,
                                     },
                                     ts_ms=ev_ts,
+                                    ledger=ledger,
                                 )
                             except Exception as vts_exc:
                                 logger.debug(

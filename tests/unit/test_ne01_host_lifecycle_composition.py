@@ -679,9 +679,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 38
-    assert sum(named_import_modules.values()) == 107
-    assert len(all_import_modules) == 42
+    assert len(named_import_modules) == 33
+    assert sum(named_import_modules.values()) == 83
+    assert len(all_import_modules) == 37
     assert (
         ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
     ) not in all_import_modules
@@ -695,5 +695,12 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         ROOT / "host_brain" / "app" / "model_provider_composition.py"
     ) not in all_import_modules
     assert ROOT / "host_brain" / "app" / "http_hooks.py" not in all_import_modules
+    assert (
+        ROOT / "host_brain" / "app" / "conversation_writer.py"
+    ) not in all_import_modules
+    assert (
+        ROOT / "host_brain" / "app" / "vts_emotion_driver.py"
+    ) not in all_import_modules
+    assert not (ROOT / "host_brain" / "app" / "intelligent_runtime.py").exists()
     asgi_imports = named_import_modules[ROOT / "host_brain" / "app" / "asgi.py"]
     assert asgi_imports == 13

@@ -5,10 +5,6 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.composition.process_services import (
-    get_session_tactic_ledger_store,
-    get_session_topic_ledger_store,
-)
 from host_brain.persona.context.soul_runtime import get_compiled_soul
 from host_brain.input_runtime.reply_envelope import can_persist
 from host_brain.core.soft_fail import soft_fail
@@ -76,6 +72,8 @@ def record_assistant_turn(
     ledger: Any,
     life_service: Any,
     life_reader: Any,
+    session_topic_ledger_store: Any,
+    session_tactic_ledger_store: Any,
     request_id: str,
     session_id: str,
     person_id: str | None,
@@ -142,7 +140,7 @@ def record_assistant_turn(
             len(normalized_content),
         )
         try:
-            tracked_topics = get_session_topic_ledger_store().record_reply_plan(
+            tracked_topics = session_topic_ledger_store.record_reply_plan(
                 session_id=session_id,
                 person_id=person_id,
                 request_id=request_id,
@@ -167,7 +165,7 @@ def record_assistant_turn(
                     str(session_id or "").strip(),
                     ",".join(tracked_topics),
                 )
-            get_session_tactic_ledger_store().record_reply_plan(
+            session_tactic_ledger_store.record_reply_plan(
                 session_id=session_id,
                 request_id=request_id,
                 topic_key=str(plan_payload.get("primary_topic") or "").strip(),
