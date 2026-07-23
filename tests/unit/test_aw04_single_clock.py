@@ -4,7 +4,14 @@ import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
-from host_brain.app import asgi, host_life_scheduler_wiring, host_runtime_shutdown, http_hooks
+from host_brain.app import (
+    asgi,
+    host_life_scheduler_wiring,
+    host_runtime_shutdown,
+    http_hooks,
+    internal_runtime_composition,
+)
+from host_brain.app.asgi_runtime_helpers import build_scheduler_seed_configs
 from host_brain.scheduler import scheduling_center
 from host_brain.tribe.tribe_state import TribeStateRegistry
 from host_brain.runtime.context_contracts import SceneDecisionV2
@@ -40,11 +47,14 @@ def _life_tick_runtime_context() -> tuple[dict, object]:
 def test_production_startup_has_one_clock_and_no_private_life_or_tribe_loop() -> None:
     lifespan_source = inspect.getsource(http_hooks.runtime_lifespan)
     asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
+    activation_source = inspect.getsource(
+        internal_runtime_composition.activate_internal_runtime
+    )
     shutdown_source = inspect.getsource(
         host_runtime_shutdown.shutdown_host_runtime_authority
     )
 
-    assert asgi_source.count("await scheduler.activate_clock()") == 1
+    assert activation_source.count("await scheduler.activate_clock()") == 1
     assert "start_life_continuity_loop" not in lifespan_source
     assert ".start_periodic_save(" not in lifespan_source
     assert ".load_snapshot(" not in lifespan_source
@@ -91,13 +101,13 @@ def test_scheduler_seed_has_exactly_one_life_tick_before_repository_registration
         "build_personality_scheduler_seed_task_configs",
         lambda: [life_tick],
     )
-    monkeypatch.setattr(
-        asgi,
-        "get_security_immune_agent",
-        lambda: (_ for _ in ()).throw(RuntimeError("disabled in unit test")),
+    configs = build_scheduler_seed_configs(
+        settings=settings,
+        security_immune_agent_provider=lambda: (
+            _ for _ in ()
+        ).throw(RuntimeError("disabled in unit test")),
+        logger=asgi.logger,
     )
-
-    configs = asgi._scheduler_seed_configs()
 
     assert [config.task_id for config in configs].count("life_tick") == 1
     assert [config.task_id for config in configs].count("life_io_dispatch_periodic") == 1
@@ -319,11 +329,14 @@ def test_life_periodic_side_effect_definitions_are_retired() -> None:
 
 def test_life_io_is_a_projection_drain_on_the_same_scheduler_clock() -> None:
     source = Path(asgi.__file__).read_text(encoding="utf-8")
+    activation_source = inspect.getsource(
+        internal_runtime_composition.activate_internal_runtime
+    )
     handler = source.split("async def life_io_scheduler_handler", 1)[1].split(
         "def scheduler_current_mode", 1
     )[0]
 
-    assert source.count("await scheduler.activate_clock()") == 1
+    assert activation_source.count("await scheduler.activate_clock()") == 1
     assert '"life_io_dispatch_periodic": "life_io"' in source
     assert "projection_dispatcher.dispatch_pending_async" in handler
     assert "outbox_dispatcher.dispatch_pending_async" in handler

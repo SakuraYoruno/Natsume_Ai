@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from host_brain.app import asgi, tool_runtime_composition
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.composition.host_application import HostApplicationPorts
 
 
 def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
@@ -54,6 +55,26 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
     }
     values.update(overrides)
     return HostLifecycleApplicationPorts(**values)  # type: ignore[arg-type]
+
+
+def _host_application_ports(
+    *,
+    lifecycle: HostLifecycleApplicationPorts,
+    **overrides: object,
+) -> HostApplicationPorts:
+    provider = lambda: object()
+    values: dict[str, object] = {
+        "memory_worth_evaluator": provider,
+        "security_immune_agent": provider,
+        "token_service": provider,
+        "bond_dynamics_writer": provider,
+        "capability_forge_service": provider,
+        "capability_gap_telemetry": provider,
+        "capability_scorecard_provider": provider,
+        "memory_service_container_setter": lambda _value: None,
+    }
+    values.update(overrides)
+    return HostApplicationPorts(lifecycle=lifecycle, **values)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -427,6 +448,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             capability_broker=lambda: capability_broker,
             model_attempt_service=lambda: model_attempt_service,
             ledger=lambda: ledger,
+            life_snapshot_reader=lambda: object(),
+            prompt_registry=lambda: prompt_registry,
+            intent_engine=lambda: intent_engine,
+            bond_stage_engine=lambda: object(),
         ),
         get_hard_state=lambda: SimpleNamespace(sys_mode="gaming"),
         get_endocrine_state=lambda **_kwargs: {},
@@ -1025,11 +1050,33 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             events.append("guardian-heartbeat-stopped")
             raise
 
+    host_application_ports = _host_application_ports(
+        lifecycle=host_lifecycle.ports,
+        memory_worth_evaluator=object,
+        security_immune_agent=lambda: object(),
+        token_service=lambda: token_service,
+        bond_dynamics_writer=lambda: object(),
+        capability_forge_service=lambda: object(),
+        capability_gap_telemetry=lambda: object(),
+        capability_scorecard_provider=lambda: object(),
+        memory_service_container_setter=lambda value: events.append(
+            "memory-published" if value is memory_container else "memory-unpublished"
+        ),
+    )
+
+    def build_host_lifecycle_from_explicit_ports(**kwargs):
+        assert kwargs == {
+            "initial_sys_mode": "normal",
+            "ports": host_application_ports.lifecycle,
+            "require_durable_hard_state": True,
+        }
+        return host_lifecycle
+
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
         asgi,
         "build_host_lifecycle_container",
-        lambda: host_lifecycle,
+        build_host_lifecycle_from_explicit_ports,
     )
     monkeypatch.setattr(
         asgi,
@@ -1040,7 +1087,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             and base_lifespan()
         ),
     )
-    monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
     monkeypatch.setattr(
         asgi,
         "QueryProjectionStore",
@@ -1115,7 +1161,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         }
         else pytest.fail("wrong Intent admission composition"),
     )
-    monkeypatch.setattr(asgi, "get_token_service", lambda: token_service)
     monkeypatch.setattr(
         tool_runtime_composition,
         "ApplicationModelAttemptServicePort",
@@ -1123,7 +1168,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         if provider is host_lifecycle.ports.model_attempt_service
         else pytest.fail("wrong app-local model attempt provider"),
     )
-    monkeypatch.setattr(asgi, "get_prompt_registry", lambda: prompt_registry)
     monkeypatch.setattr(
         asgi,
         "AgentRuntimeExecutor",
@@ -1140,6 +1184,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         asgi,
         "get_core_settings",
         lambda: SimpleNamespace(
+            sys_mode="normal",
             task_runtime_canonical_owner="test-canonical-owner",
             task_graph_cancellation_operator_enabled=False,
             task_operation_reconciliation_operator_enabled=True,
@@ -1160,7 +1205,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             ),
         ),
     )
-    monkeypatch.setattr(asgi, "get_intent_engine", lambda: intent_engine)
     monkeypatch.setattr(
         tool_runtime_composition,
         "SecureIngressHttpAuthorityAdapter",
@@ -1170,14 +1214,6 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         tool_runtime_composition,
         "GovernedToolHttpApplication",
         lambda **_kwargs: governed_tool_application,
-    )
-    monkeypatch.setattr(asgi, "get_memory_worth_evaluator", object)
-    monkeypatch.setattr(
-        asgi,
-        "set_memory_service_container",
-        lambda value: events.append(
-            "memory-published" if value is memory_container else "memory-unpublished"
-        ),
     )
     monkeypatch.setattr(
         asgi,
@@ -1201,7 +1237,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             clock_batch_limit=64,
         ),
     )
-    monkeypatch.setattr(asgi, "_scheduler_seed_configs", lambda: [])
+    monkeypatch.setattr(asgi, "build_scheduler_seed_configs", lambda **_kwargs: [])
     monkeypatch.setattr(
         asgi,
         "SchedulerWorkerRegistry",
@@ -1279,7 +1315,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         else pytest.fail("wrong internal runtime"),
     )
 
-    application = asgi.create_app()
+    application = asgi.create_app(host_application_ports=host_application_ports)
     lifespan = captured["lifespan"]
     assert application.state.task_runtime_container is None
     assert application.state.task_runtime_container_provider() is None
@@ -1448,13 +1484,22 @@ def test_asgi_task_runtime_startup_failure_is_fail_closed_and_releases_security(
         events.append("task-runtime-build-failed")
         raise RuntimeError("canonical migration rejected")
 
+    host_application_ports = _host_application_ports(
+        lifecycle=_host_lifecycle_ports(
+            ledger=lambda: ledger,
+            life_snapshot_reader=lambda: object(),
+            intent_engine=lambda: object(),
+            prompt_registry=lambda: object(),
+            bond_stage_engine=lambda: object(),
+        ),
+        token_service=object,
+    )
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
         asgi,
         "runtime_lifespan",
         lambda **_kwargs: base_lifespan(),
     )
-    monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
     monkeypatch.setattr(
         asgi,
         "_compose_life_command_authority",
@@ -1469,7 +1514,6 @@ def test_asgi_task_runtime_startup_failure_is_fail_closed_and_releases_security(
         if current is ledger
         else pytest.fail("wrong Life dispatcher ledger"),
     )
-    monkeypatch.setattr(asgi, "get_token_service", object)
     monkeypatch.setattr(
         asgi,
         "build_process_security_service_container",
@@ -1481,7 +1525,7 @@ def test_asgi_task_runtime_startup_failure_is_fail_closed_and_releases_security(
         fail_task_runtime,
     )
 
-    application = asgi.create_app()
+    application = asgi.create_app(host_application_ports=host_application_ports)
     lifespan = captured["lifespan"]
 
     async def scenario() -> None:
@@ -1547,6 +1591,11 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
             tool_catalog=provider,
             capability_broker=provider,
             model_attempt_service=provider,
+            ledger=lambda: ledger,
+            life_snapshot_reader=provider,
+            intent_engine=provider,
+            prompt_registry=provider,
+            bond_stage_engine=provider,
         ),
         get_hard_state=lambda: SimpleNamespace(sys_mode="normal"),
         get_endocrine_state=lambda **_kwargs: {},
@@ -1567,19 +1616,25 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
 
     monkeypatch.setenv("PENTEST_WEB_LAB_MODE", "true")
     monkeypatch.setenv("PENTEST_ALLOW_EXPLOIT", "1")
+    host_application_ports = _host_application_ports(
+        lifecycle=host_lifecycle.ports,
+        token_service=object,
+        capability_gap_telemetry=object,
+        capability_forge_service=object,
+        capability_scorecard_provider=get_scorecards,
+        memory_service_container_setter=lambda _value: None,
+    )
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
         asgi,
         "build_host_lifecycle_container",
-        lambda: host_lifecycle,
+        lambda **_kwargs: host_lifecycle,
     )
     monkeypatch.setattr(
         asgi,
         "runtime_lifespan",
         lambda **_kwargs: base_lifespan(),
     )
-    monkeypatch.setattr(asgi, "get_ledger", lambda: ledger)
-    monkeypatch.setattr(asgi, "get_token_service", object)
     # This test stops at the Life-authority prewarm boundary; it is not a
     # Task Runtime migration test.  Keep the unit fixture independent from
     # the production-only durable-path requirement introduced by D8.
@@ -1606,23 +1661,19 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
             state_registry=SimpleNamespace(snapshot=lambda: {}),
         ),
     )
-    monkeypatch.setattr(asgi, "get_capability_gap_telemetry", object)
-    monkeypatch.setattr(asgi, "get_capability_forge_service", object)
-    monkeypatch.setattr(asgi, "get_capability_scorecard_provider", get_scorecards)
     monkeypatch.setattr(
         asgi,
         "_compose_life_command_authority",
         read_governance_then_stop,
     )
     monkeypatch.setattr(asgi, "_reset_life_command_authority", lambda: None)
-    monkeypatch.setattr(asgi, "set_memory_service_container", lambda _value: None)
     monkeypatch.setattr(
         asgi.workspace,
         "quiesce_agent_workspace_application_scope",
         lambda *_args: None,
     )
 
-    application = asgi.create_app()
+    application = asgi.create_app(host_application_ports=host_application_ports)
     lifespan = captured["lifespan"]
 
     async def scenario() -> None:

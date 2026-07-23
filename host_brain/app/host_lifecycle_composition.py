@@ -348,55 +348,27 @@ class HostLifecycleContainer:
                 self._closing = False
 
 
-def build_host_lifecycle_container() -> HostLifecycleContainer:
-    """Resolve the production Host lifecycle graph once per ``create_app``."""
+def build_host_lifecycle_container(
+    *,
+    initial_sys_mode: str,
+    ports: HostLifecycleApplicationPorts,
+    require_durable_hard_state: bool = True,
+    endocrine_resolver: KeywordFactory | None = None,
+) -> HostLifecycleContainer:
+    """Build one Host lifecycle owner from explicit frozen application ports.
 
-    from host_brain.composition import process_services
-    from host_brain.app import emotion_context
-    from host_brain.app.settings.core import get_core_settings
-    from host_brain.core.activity_monitor import ActivityMonitor
-    from host_brain.core.mode_transition import ModeTransitionService
-    from host_brain.core.resource_manager import SystemResourceManager
+    Production mapping of legacy process-level services belongs to the ASGI
+    composition root.  This module deliberately has no locator fallback, so a
+    Host, worker, or test scope must state the exact dependencies it owns.
+    """
 
+    if not isinstance(ports, HostLifecycleApplicationPorts):
+        raise TypeError("ports must be HostLifecycleApplicationPorts")
     return HostLifecycleContainer(
-        initial_sys_mode=get_core_settings().sys_mode,
-        require_durable_hard_state=True,
-        ports=HostLifecycleApplicationPorts(
-            memory_guard=process_services.get_memory_guard,
-            state_arbiter=process_services.get_state_arbiter,
-            distillation_engine=process_services.get_distillation_engine,
-            semantic_recaller=process_services.get_semantic_recaller,
-            episodic_store=process_services.get_episodic_store,
-            skill_registry=process_services.get_skill_registry,
-            tool_catalog=process_services.get_tool_catalog,
-            capability_broker=process_services.get_capability_broker,
-            model_attempt_service=process_services.get_model_attempt_service,
-            ledger=process_services.get_ledger,
-            life_memory_store=process_services.get_life_memory_store,
-            bond_update_queue=process_services.get_bond_update_queue,
-            life_snapshot_reader=process_services.get_life_snapshot_reader,
-            silence_engine=process_services.get_silence_engine,
-            state_write_arbiter=process_services.get_state_write_arbiter,
-            emotion_timeline=process_services.get_emotion_timeline,
-            bond_stage_engine=process_services.get_bond_stage_engine,
-            shared_memory_index=process_services.get_shared_memory_index,
-            milestone_tracker=process_services.get_milestone_tracker,
-            prompt_registry=process_services.get_prompt_registry,
-            user_emotion_profile=emotion_context.get_user_emotion_profile,
-            intent_engine=process_services.get_intent_engine,
-            multimodal_observer=process_services.get_multimodal_observer,
-            multimodal_processor=process_services.get_multimodal_processor,
-            conversation_history=process_services.get_conversation_history,
-            life_memory_service=process_services.get_life_memory_service,
-            model_route_catalog=process_services.get_model_route_catalog,
-            session_topic_ledger_store=process_services.get_session_topic_ledger_store,
-            session_tactic_ledger_store=process_services.get_session_tactic_ledger_store,
-            tts_context_router=process_services.get_tts_context_router,
-            meta_learning_loop=process_services.get_meta_learning_loop,
-            mode_transition_service_factory=ModeTransitionService,
-            activity_monitor_factory=ActivityMonitor,
-            resource_manager_factory=SystemResourceManager,
-        )
+        initial_sys_mode=str(initial_sys_mode or "normal"),
+        require_durable_hard_state=bool(require_durable_hard_state),
+        endocrine_resolver=endocrine_resolver,
+        ports=ports,
     )
 
 
