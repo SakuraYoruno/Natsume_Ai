@@ -128,14 +128,18 @@ flowchart TD
     Internal["Internal Agent"] --> InternalWO["边界 v2 → WorkOrderV3\nBudget + child grant"]
     InternalWO --> Admission
     Worker -.-> ProtectedStage["protected raw artifact stage\nexact inventory + ref/digest projection"]
+    ProtectedStage -.-> InternalPostReview["POST Review\nsame SUCCEEDED Attempt + sealed checkpoint\nclaim remains open"]
+    InternalPostReview -.-> InternalEffect
     ProtectedStage -.-> InternalEffect["internal.agent.result_commit\npost-Acceptance exact TaskStore evidence"]
     InternalEffect -.-> WorkspacePromotion["clean/no-change Git Workspace\n0116 ACTIVE→ACCEPTED→PROMOTED"]
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
     class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,GraphHook,Schema,Worker,HB,Checkpoint,VA,Receipt,EffectHook,Effects,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
-    class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim,ProtectedStage,InternalEffect,WorkspacePromotion partial;
+    class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim,ProtectedStage,InternalPostReview,InternalEffect,WorkspacePromotion partial;
 ```
+
+Internal POST Review 不是 worker 失败分支：`EXECUTED + acceptance=REVIEW` 或 `review_required=true` 先以 Verification `PASS` 停在 `WAITING_ACCEPTANCE_REVIEW`，claim 不写 `result_ref`。批准续接只读取同一 `SUCCEEDED` Attempt 和 sealed WorkerProjection，不能再执行 Agent；Review renewal grant 仅用于续接资格，最终 success 再核对 checkpoint 的历史 grant。`internal.agent.result_commit` 只有已经 `COMMITTED` 并能精确重开 canonical `agentresult://...` 时，才由 Runtime Group 完成入口 claim；`worker-projection://...` 永远不是该对外结果。
 
 ### 2.1 Chat 与 Host Input 的显式 Tribe 端口边界
 

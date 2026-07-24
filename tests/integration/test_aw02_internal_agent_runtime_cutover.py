@@ -58,6 +58,7 @@ from host_brain.app.internal_task_runtime import (
 )
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.integrations.runtime_events import RuntimeEventStore, RuntimeOutboxPublisher
 from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
@@ -2488,6 +2489,7 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
 
     ledger = SQLiteLedger(str(db_path))
     runtime = None
+    runtime_group = None
     claim_store = SQLiteSecureIngressStore(db_path)
     try:
         task_store = DurableTaskStore(db_path)
@@ -2699,11 +2701,13 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
         )
         review_receipt = review_terminal["execution_receipt"]
         assert review_terminal["decision"] == "REJECT"
-        assert review_receipt["status"] == "VERIFICATION_FAILED"
-        assert review_receipt["verification_status"] == "FAIL"
+        assert review_receipt["status"] == "WAITING_ACCEPTANCE_REVIEW"
+        assert review_receipt["verification_status"] == "PASS"
         assert review_receipt["accepted"] is False
-        assert review_receipt["reason_code"] == "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"
-        assert "review" not in review_receipt["projection"]
+        assert review_receipt["reason_code"] == "GOVERNED_REVIEW_REQUIRED"
+        assert review_receipt["projection"]["review"]["resume_phase"] == (
+            "POST_EXECUTION_ACCEPTANCE"
+        )
         review_command = HostCommandRepository(db_path).get(
             review_receipt["command_id"]
         )
@@ -2713,51 +2717,126 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             review_command["command"].graph_revision,
             review_command["work_order"].task_node_id,
         )
-        assert review_node["status"] == "VERIFICATION_FAILED"
+        assert review_node["status"] == "WAITING_ACCEPTANCE_REVIEW"
         with sqlite3.connect(str(db_path)) as conn:
             review_claim_result = conn.execute(
                 "SELECT result_ref FROM secure_ingress_idempotency_claim "
                 "WHERE claim_ref = ?",
                 (review_claim_ref,),
             ).fetchone()[0]
-        assert str(review_claim_result).startswith(
-            INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX
+        assert review_claim_result is None
+        open_reviews = review_store.list_open_reviews(limit=10)
+        assert len(open_reviews) == 1
+        assert open_reviews[0]["review"]["review_type"] == (
+            "POST_EXECUTION_ACCEPTANCE"
         )
+        assert calls == [
+            "work-order-internal-runtime",
+            "work-order-internal-runtime-review",
+        ]
+        assert intent_engine.calls == 2
+
+        post_review = open_reviews[0]["review"]
+        approved_post_review = review_store.approve_review(
+            post_review["review_id"],
+            actor_id="internal-reviewer",
+            expected_subject_ref=post_review["subject_ref"],
+            expected_subject_version=post_review["subject_version"],
+            expected_resume_phase=post_review["resume_phase"],
+            expected_checkpoint_id=post_review["checkpoint_id"],
+        )
+        approved_post_item = approved_post_review["review"]["review"]
+        resumed_post_review = review_store.resume_review(
+            post_review["review_id"],
+            resume_token_ref=approved_post_review["resume_token_ref"],
+            subject_ref=approved_post_item["subject_ref"],
+            subject_version=approved_post_item["subject_version"],
+            resume_phase=approved_post_item["resume_phase"],
+            checkpoint_id=approved_post_item["checkpoint_id"],
+        )
+        assert resumed_post_review["review"]["review"]["status"] == "CONSUMED"
+        raw_post_continuation = (
+            infrastructure.review_continuation_store.claim_pending_review_continuations(
+                worker_id="internal-post-review-claim",
+                lease_ms=60_000,
+                limit=1,
+            )
+        )[0]
+        post_continuation = (
+            infrastructure.review_continuation_store.validate_review_continuation_claim(
+                raw_post_continuation
+            )
+        )
+
+        class _NoopReviewContinuationWorker:
+            def __init__(self, **_kwargs: Any) -> None:
+                pass
+
+            async def start(self) -> None:
+                return None
+
+            def wake(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
+            async def join(self) -> None:
+                return None
+
+        runtime_group = GovernedRuntimeGroup(
+            {"internal_agent": runtime},
+            review_store=infrastructure.review_continuation_store,
+            review_decision_store=review_store,
+            command_repository=infrastructure.command_repository,
+            claim_result_store=claim_store,
+            review_continuation_worker_factory=_NoopReviewContinuationWorker,
+            review_continuation_worker_id="internal-post-review-group",
+        )
+        await runtime_group.activate()
+        continued_post_review = await runtime_group.continue_review_continuation(
+            post_continuation
+        )
+        continued_receipt = continued_post_review["execution_receipt"]
+        assert continued_receipt["status"] == "ACCEPTED"
+        assert continued_receipt["verification_status"] == "PASS"
+        assert continued_receipt["accepted"] is True
+        assert continued_post_review["internal_agent_effect_status"] == "COMMITTED"
+        assert calls == [
+            "work-order-internal-runtime",
+            "work-order-internal-runtime-review",
+        ]
+        completed_post_continuation = (
+            infrastructure.review_continuation_store.complete_review_continuation(
+                post_review["review_id"],
+                worker_id="internal-post-review-claim",
+                claim_token=raw_post_continuation["claim_token"],
+                fencing_token=raw_post_continuation["claim_fencing_token"],
+                expected_version=raw_post_continuation["status_version"],
+            )
+        )
+        assert completed_post_continuation["completed"] is True
+        assert (
+            infrastructure.review_continuation_store.get_review_continuation(
+                post_review["review_id"]
+            )
+            is None
+        )
+        with sqlite3.connect(str(db_path)) as conn:
+            completed_post_claim = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (review_claim_ref,),
+            ).fetchone()[0]
+        assert completed_post_claim == continued_post_review[
+            "internal_agent_result_receipt_ref"
+        ]
         assert (
             HostCommandRepository(db_path).validate_ingress_claim_result(
                 review_receipt["command_id"]
             )["command"].command_id
             == review_receipt["command_id"]
         )
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.execute(
-                "UPDATE secure_ingress_idempotency_claim SET result_ref = ? "
-                "WHERE claim_ref = ?",
-                (
-                    INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX + ("0" * 64),
-                    review_claim_ref,
-                ),
-            )
-            conn.commit()
-        with pytest.raises(HostCommandRepositoryError) as tampered_claim:
-            HostCommandRepository(db_path).validate_ingress_claim_result(
-                review_receipt["command_id"]
-            )
-        assert tampered_claim.value.reason_code == HOST_COMMAND_INGRESS_CONFLICT
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.execute(
-                "UPDATE secure_ingress_idempotency_claim SET result_ref = ? "
-                "WHERE claim_ref = ?",
-                (review_claim_result, review_claim_ref),
-            )
-            conn.commit()
-        open_reviews = review_store.list_open_reviews(limit=10)
-        assert open_reviews == []
-        assert calls == [
-            "work-order-internal-runtime",
-            "work-order-internal-runtime-review",
-        ]
-        assert intent_engine.calls == 2
 
         pre_request_id = "request-internal-runtime-pre-review"
         pre_body_sha256 = _sha256("internal-pre-review-request-body")
@@ -2816,7 +2895,9 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
         assert pre_claim_result == (None,)
         assert task_store.list_pending_outbox(limit=100) == []
     finally:
-        if runtime is not None:
+        if runtime_group is not None:
+            await runtime_group.aclose()
+        elif runtime is not None:
             await runtime.aclose()
         claim_store.close()
         ledger.close()

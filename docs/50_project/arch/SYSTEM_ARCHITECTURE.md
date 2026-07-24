@@ -403,6 +403,8 @@ flowchart LR
 
 Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admission，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 的 `AgentWorkOrder` 只保留为未准入的外部 v2 描述；显式 V3 或顶层图身份会在入口拒绝，frozen worker、executor、prompt、review 与 Workspace 原生消费同一 V3，不能回投 v2。raw result material 在 protected stage，公共 projection 只暴露 ref/digest。启动期sealed checkpoint可重建projection并继续accepted path；显式checkpoint端口与单一Projection INSERT owner使A/B/C分别原子且response loss只读exact reopen，终态sealed cleanup也已落窄范围authority。精确 sealed post-checkpoint `BUDGET_BLOCKED` 会在 C-boundary reopen 后封闭 claim，重启 worker 必须在 cleanup 前完成它。但周期survivor continuation、unsealed crash-left cleanup、failure/cancellation/general-multinode/unknown-effect claim closeout和general `settle_worker` crash bundle仍缺。0096 task-bound Review不等于一般recoverable Attempt takeover；一般write与 cancellation `PRODUCTION_OFF` 定级均未改变。
 
+在 Internal POST Review 上，worker 的 `EXECUTED + acceptance=REVIEW` 或 `review_required=true` 是可验证的中间结果：它以 Verification `PASS` 进入 `WAITING_ACCEPTANCE_REVIEW`，而不是被降级为失败。批准后的 continuation 仅重用原 `SUCCEEDED` Attempt 和 sealed WorkerProjection，Agent 调用数不增加；短期续接 grant 不替代 checkpoint 的历史 grant。对冻结 criteria 的 Review judgement 使用 durable Review/checkpoint refs，并且只有 effect `COMMITTED`、Internal result ledger 精确重开 canonical `agentresult://...` 后才封存 Secure Ingress claim。`worker-projection://...` 只属于内部 checkpoint evidence。该路径目前证明 exact single-node approval；live cancellation、unknown effect 与一般多节点仍未完成。
+
 ## 6. 状态与数据 authority
 
 | 状态域 | 当前主要 authority | 读模型/衍生层 | 关键约束 |

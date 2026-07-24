@@ -187,6 +187,12 @@ class DurableDagSchedulingRuntime:
                 "runtime command differs from admitted command",
         )
         grant_refs = _validated_node_grant_refs(admitted, node_grant_refs)
+        # A consumed POST Review renews a short-lived execution credential but
+        # must accept the already committed worker checkpoint, not replay it.
+        # Keep the normal live grant batch for every new worker execution and
+        # replace only the exact reviewed node with its reopened historical
+        # projection grant before the all-node success finalizer validates it.
+        parallel_success_grant_refs = dict(grant_refs)
         node_ids = {binding.node_id for binding in admitted.nodes}
         denied_review_node = normalize_denied_review_node(
             denied_review_node_id, node_ids, grant_refs
@@ -659,7 +665,28 @@ class DurableDagSchedulingRuntime:
                         "decision": "ACCEPT",
                         "reason_code": None,
                         "evidence_refs": list(post_review_refs),
-                        "criteria": [],
+                        # Approval does not replay the worker, but it is an
+                        # explicit durable acceptance decision for the frozen
+                        # node criteria.  Preserve the exact criterion list
+                        # so AcceptanceGate can verify that the same TaskNode
+                        # the reviewer approved is the one being accepted.
+                        "criteria": [
+                            {
+                                "criterion_id": (
+                                    f"review-criterion::{gate.review_id}::{index}"
+                                ),
+                                "criterion_text": criterion,
+                                "verdict": "PASS",
+                                "evidence_refs": list(post_review_refs),
+                                "deterministic": True,
+                                "reason_code": None,
+                                "critic_verdict": None,
+                            }
+                            for index, criterion in enumerate(
+                                review_admission.active_node.acceptance_criteria,
+                                start=1,
+                            )
+                        ],
                         "critic_candidate": {
                             "source": "durable_review",
                             "review": gate.to_dict(),
@@ -685,6 +712,18 @@ class DurableDagSchedulingRuntime:
                             GOVERNED_DURABLE_STATE_CONFLICT,
                             "review-approved TaskNode worker projection is invalid",
                         ) from exc
+                    historical_node_grant_ref = _text(
+                        worker_output.get("node_grant_ref")
+                    )
+                    if not historical_node_grant_ref:
+                        raise GovernedRuntimeError(
+                            GOVERNED_DURABLE_STATE_CONFLICT,
+                            "review-approved TaskNode worker projection lacks "
+                            "its historical node grant",
+                        )
+                    parallel_success_grant_refs[review_admission.node_id] = (
+                        historical_node_grant_ref
+                    )
                     await self._node_lifecycle.accept_node_output(
                         review_admission,
                         review_node,
@@ -888,7 +927,7 @@ class DurableDagSchedulingRuntime:
                         command=command,
                         work_order=work_order,
                         budget=budget,
-                        node_grant_refs=grant_refs,
+                        node_grant_refs=parallel_success_grant_refs,
                     )
                     yield graph_terminal
                     return

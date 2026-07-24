@@ -304,6 +304,8 @@ D11 只收紧一条已 admission 的 Host `chat` 垂线：`FrozenNodeInput` 的 
 
 PRE Review 不创建伪 worker Attempt：0090 outcome 与公开 receipt 对 `WAITING_APPROVAL` 使用 `attempt_id=null`，其余状态仍要求真实 Attempt。POST continuation 复用原 `SUCCEEDED` Attempt，不重跑 worker。等待超过原 child-grant TTL 时，Application 只能凭 consumed Review 与当前 live continuation claim 派生短期 renewal；worker entry 再验证 owner、claim-token digest、expiry 与 fence，claim 漂移后旧 renewal 立即失效。Review route 与 Operator command 都经 process-owned `TaskReviewCommandService` 写同一 Store，wake 仅是事务提交后的延迟提示。
 
+Internal 的 exact POST Review approval 现已实际接通：`EXECUTED + acceptance=REVIEW` 或 `review_required=true` 是结构通过的 output，因而生成 `Verification=PASS / Acceptance=REVIEW` 并保持 `WAITING_ACCEPTANCE_REVIEW` 与未封存 ingress claim。批准续接读取同一 sealed WorkerProjection 和原 `SUCCEEDED` Attempt，不重跑 Agent；renewal grant 仅授权 continuation，finalizer 对该节点改为重验 projection 的历史 grant。Review acceptance judgement 对 immutable criteria 逐项写入 durable Review/checkpoint evidence。effect 未 `COMMITTED`、canonical result 缺失或精确重开不匹配时，Runtime Group 失败关闭，不得以 `worker-projection://...` 封存 claim；只有 matching `agentresult://...` 可以成为 terminal result。当前是 exact single-node approval 证据，live post-review cancellation、unknown-effect 与一般多节点仍未完成。
+
 自动续跑只覆盖 canonical task-bound PRE/POST Review；非 Task subject 仍只返回 decision/token 结果，不会被 0096 worker误当作 TaskGraph 调度请求。Operator UI 必须按该范围展示，不能把局部 `automatic_resume=true` 解释成任意 Review 都会执行任务。
 
 ### 4.4 Conversation 与 Delivery

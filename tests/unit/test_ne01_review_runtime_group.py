@@ -56,6 +56,15 @@ class _Runtime:
                 "accepted": True,
             }
         }
+        if name == "internal_agent":
+            self.result.update(
+                {
+                    "internal_agent_effect_status": "COMMITTED",
+                    "internal_agent_result_receipt_ref": (
+                        "agentresult://review-group/internal-agent"
+                    ),
+                }
+            )
 
     async def activate(self) -> None:
         self.log.append(f"runtime:{self.name}:activate")
@@ -77,6 +86,17 @@ class _Runtime:
         assert record["command"].graph_id == claim["graph_id"]
         self.claims.append(dict(claim))
         return dict(self.result)
+
+    async def exact_accepted_result_receipt(
+        self,
+        *,
+        command_id: str,
+        expected_receipt_ref: str,
+    ) -> str:
+        assert self.name == "internal_agent"
+        assert command_id
+        assert expected_receipt_ref == "agentresult://review-group/internal-agent"
+        return expected_receipt_ref
 
 
 class _Commands:
@@ -218,9 +238,47 @@ async def test_group_routes_exact_host_command_surface_and_completes_ingress(
     assert sum(len(runtime.claims) for runtime in runtimes.values()) == 1
     if surface in {HostCommandSurface.INTERNAL, HostCommandSurface.SCHEDULER}:
         assert claims.completed[0]["claim_ref"] == command.ingress_claim_ref
-        assert claims.completed[0]["result_ref"] == f"task-receipt://{runtime_name}"
+        expected_result_ref = (
+            "agentresult://review-group/internal-agent"
+            if surface is HostCommandSurface.INTERNAL
+            else f"task-receipt://{runtime_name}"
+        )
+        assert claims.completed[0]["result_ref"] == expected_result_ref
     else:
         assert claims.completed == []
+    await group.aclose()
+
+
+@pytest.mark.asyncio
+async def test_group_refuses_internal_review_completion_without_committed_canonical_result(
+) -> None:
+    group, runtimes, command, claims, _worker, _log = _group(
+        HostCommandSurface.INTERNAL
+    )
+    runtimes["internal_agent"].result = {
+        "execution_receipt": {
+            "status": "ACCEPTED",
+            "receipt_ref": "worker-projection://review-group/internal-agent",
+            "accepted": True,
+        }
+    }
+    await group.activate()
+
+    with pytest.raises(
+        RuntimeError,
+        match="REVIEW_CONTINUATION_INTERNAL_EFFECT_NOT_COMMITTED",
+    ):
+        await group.continue_review_continuation(
+            {
+                "review_id": "review-group-internal-missing-result",
+                "review_status": "CONSUMED",
+                "graph_id": command.graph_id,
+                "graph_revision": command.graph_revision,
+                "node_id": "review-group-node",
+            }
+        )
+
+    assert claims.completed == []
     await group.aclose()
 
 

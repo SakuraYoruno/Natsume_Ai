@@ -282,6 +282,8 @@ Internal 的 terminal reconciler 另有一个极窄的 unsealed cancellation 路
 
 Internal Agent Runtime 现新增只读的 nonacceptance claim resolver：它不拥有 Task/Graph/Lease 写 authority，只在 exact persisted terminal 已证实为 `TERMINAL_VERIFICATION_FAILED` 或具备 finalized cancellation authority 的 `TERMINAL_POST_REVIEW_CANCELLED` 时，输出绑定 command、graph/revision、node、attempt、reservation、projection 和两代 Lease 的确定性结果引用。runtime service 先闭合 Secure Ingress claim，terminal reconciler 仅在该 closure 成功后继续已有 artifact cleanup。`TERMINAL_REVIEW_REJECTED` 仍由 Review 子系统输出的 decision receipt 处理；其他失败/取消/未知效果/多节点情况不在该模块承诺范围内。
 
+Internal 的 POST Review 批准续接已形成一个独立的窄模块边界：`EXECUTED + acceptance=REVIEW` 或 `review_required=true` 是结构有效的 worker output，Verification 为 `PASS`，但 Acceptance 为 `REVIEW`，故节点停在 `WAITING_ACCEPTANCE_REVIEW` 而入口 claim 不写结果。consumed Review 只恢复原 `SUCCEEDED` Attempt 和 sealed WorkerProjection，不重跑 Agent；续接的短期 grant 不能覆盖 worker 历史 grant，all-node success 会重验该 checkpoint 的 grant。冻结 criteria 由 durable Review/checkpoint refs 逐项生成 `PASS` judgement。只有 `internal.agent.result_commit` 已提交且 Internal result ledger 精确重开匹配 `agentresult://...` 后，Runtime Group 才能完成 Secure Ingress claim；WorkerProjection ref 只能证明 checkpoint，不能充当对外 terminal result。该模块已有真实 SQLite+Git 批准续接证据；post-review cancellation live E2E、一般多节点和未知 effect 仍不在范围。
+
 Scheduler 的 worker 只生成 plan，不调用真实 handler；Review pending 时 handler=0，Effect commit 后只调用一次，duplicate 重放既有结果。handler 调用后的响应丢失或过期 claim 先只读查询 operation/result authority，无法归因时保持恢复状态而不盲调。Internal 只在 ingress 接受 `AgentWorkOrder`，剥离调用方 authority 后立即编译为 `WorkOrderV3 + BudgetPolicy`；child grant 验证后既有 executor 原生接收该 V3，不能再接收兼容投影。0096 已把两者的长时间 Review grant renewal 与 surface continuation 接入同一合同，但 Scheduler 其余 authority、一般恢复和七路线验收仍使 NE-01 保持 `IN_PROGRESS`。
 
 ### 6.3 数字生命与主动输出

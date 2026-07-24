@@ -151,12 +151,14 @@ def test_internal_governor_intent_binds_secure_ingress_principal() -> None:
     ("review_required", "inner_decision", "reason"),
     [
         (False, "ACCEPT", None),
-        (True, "ACCEPT", "INTERNAL_AGENT_REVIEW_REQUIRED"),
-        (False, "REVIEW", "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
+        # A successful worker can ask for POST Review.  The outer TaskGraph,
+        # not structural verification, owns that durable transition.
+        (True, "ACCEPT", None),
+        (False, "REVIEW", None),
         (False, "FAIL", "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
     ],
 )
-def test_internal_acceptance_never_hides_agent_review_semantics(
+def test_internal_structural_gate_preserves_post_review_semantics(
     review_required: bool,
     inner_decision: str,
     reason: str | None,

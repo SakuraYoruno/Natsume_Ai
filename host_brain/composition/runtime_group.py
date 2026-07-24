@@ -512,6 +512,11 @@ class GovernedRuntimeGroup:
         )
         if result_ref is None:
             return
+        result_ref = await self._exact_internal_continuation_result_ref(
+            command=command,
+            continuation_result=continuation_result,
+            fallback_result_ref=result_ref,
+        )
         if result_ref.startswith("review-decision://"):
             complete_review = getattr(
                 self._claim_result_store,
@@ -573,6 +578,59 @@ class GovernedRuntimeGroup:
             at_ms=int(time.time() * 1_000),
         )
         await _await_call(completed)
+
+    async def _exact_internal_continuation_result_ref(
+        self,
+        *,
+        command: HostCommand,
+        continuation_result: Mapping[str, Any],
+        fallback_result_ref: str,
+    ) -> str:
+        """Use the canonical Internal result only after accepted effects commit.
+
+        A post-execution Review resumes a sealed worker checkpoint, whose
+        ``receipt_ref`` remains a worker-projection reference.  It is evidence
+        for the worker, not the terminal Secure Ingress result.  The Internal
+        runtime must therefore reopen the accepted result ledger before this
+        group is permitted to close the ingress claim.
+        """
+
+        if command.surface is not HostCommandSurface.INTERNAL:
+            return fallback_result_ref
+        receipt_raw = continuation_result.get("execution_receipt")
+        receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}
+        if (
+            str(receipt.get("status") or "").strip().upper() != "ACCEPTED"
+            or receipt.get("accepted") is not True
+        ):
+            return fallback_result_ref
+        effect_status = str(
+            continuation_result.get("internal_agent_effect_status") or ""
+        ).strip().upper()
+        if effect_status != "COMMITTED":
+            raise RuntimeError(
+                "REVIEW_CONTINUATION_INTERNAL_EFFECT_NOT_COMMITTED"
+            )
+        expected_ref = str(
+            continuation_result.get("internal_agent_result_receipt_ref") or ""
+        ).strip()
+        runtime = self._runtimes.get("internal_agent")
+        verifier = getattr(runtime, "exact_accepted_result_receipt", None)
+        if not expected_ref or not callable(verifier):
+            raise RuntimeError(
+                "REVIEW_CONTINUATION_INTERNAL_RESULT_ATTRIBUTION_MISSING"
+            )
+        verified = await _await_call(
+            verifier(
+                command_id=command.command_id,
+                expected_receipt_ref=expected_ref,
+            )
+        )
+        if str(verified or "").strip() != expected_ref:
+            raise RuntimeError(
+                "REVIEW_CONTINUATION_INTERNAL_RESULT_ATTRIBUTION_MISSING"
+            )
+        return expected_ref
 
     async def _finalize_operator_review_outcome(
         self,
