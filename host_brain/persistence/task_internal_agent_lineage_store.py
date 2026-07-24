@@ -54,10 +54,88 @@ from host_brain.contracts.agent_runtime.worker_budget_usage import (
 
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
+_NONACCEPTANCE_TERMINAL_STATES = {
+    ("FAILED", "VERIFICATION_FAILED", "SUCCEEDED"): (
+        "TERMINAL_VERIFICATION_FAILED"
+    ),
+    ("CANCELLED", "CANCELLED", "SUCCEEDED"): (
+        "TERMINAL_POST_REVIEW_CANCELLED"
+    ),
+}
 
 
 class TaskInternalAgentLineageStoreMixin:
     """Exact Internal Agent direct/takeover Lease lineage authority."""
+
+    def resolve_internal_agent_nonacceptance_checkpoint_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        """Reopen one exact executed-but-not-accepted Internal checkpoint.
+
+        This is deliberately narrower than generic failure/cancellation
+        recovery: a worker projection and a committed operation checkpoint
+        must already exist.  Raw worker failure and pre-checkpoint cancellation
+        therefore remain outside this authority and cannot settle an ingress
+        claim by merely sharing a terminal Task status.
+        """
+
+        attempt_ref = self._nonacceptance_attempt_ref(attempt_id)
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            resolved = self._resolve_internal_agent_nonacceptance_checkpoint_terminal_uow(
+                conn,
+                attempt_ref,
+            )
+            conn.commit()
+            return resolved
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def try_resolve_internal_agent_nonacceptance_checkpoint_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any] | None:
+        """Return an exact non-acceptance terminal or no known authority."""
+
+        attempt_ref = self._nonacceptance_attempt_ref(attempt_id)
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            attempt = self._require_attempt(conn, attempt_ref)
+            node = self._require_node(
+                conn,
+                str(attempt["graph_id"]),
+                int(attempt["graph_revision"]),
+                str(attempt["node_id"]),
+            )
+            graph = self._require_graph(
+                conn,
+                str(attempt["graph_id"]),
+                int(attempt["graph_revision"]),
+            )
+            if self._nonacceptance_terminal_reason(
+                graph=graph,
+                node=node,
+                attempt=attempt,
+            ) is None:
+                conn.commit()
+                return None
+            resolved = self._resolve_internal_agent_nonacceptance_checkpoint_terminal_uow(
+                conn,
+                attempt_ref,
+            )
+            conn.commit()
+            return resolved
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def resolve_internal_agent_completion_lineage(
         self,
@@ -85,6 +163,132 @@ class TaskInternalAgentLineageStoreMixin:
             expected_attempt_status="SUCCEEDED",
             require_takeover=False,
         )
+
+    @staticmethod
+    def _nonacceptance_attempt_ref(value: object) -> str:
+        attempt_ref = str(value or "").strip()
+        if not attempt_ref:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Internal Agent non-acceptance terminal requires attempt_id",
+            )
+        return attempt_ref
+
+    def _resolve_internal_agent_nonacceptance_checkpoint_terminal_uow(
+        self,
+        conn: sqlite3.Connection,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        attempt = self._require_attempt(conn, attempt_id)
+        graph_id = str(attempt["graph_id"])
+        graph_revision = int(attempt["graph_revision"])
+        node_id = str(attempt["node_id"])
+        node = self._require_node(conn, graph_id, graph_revision, node_id)
+        graph = self._require_graph(conn, graph_id, graph_revision)
+        terminal_reason = self._nonacceptance_terminal_reason(
+            graph=graph,
+            node=node,
+            attempt=attempt,
+        )
+        if terminal_reason is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent checkpoint is not an exact non-acceptance terminal",
+            )
+        reservations = conn.execute(
+            """
+            SELECT * FROM task_runtime_idempotency_reservation
+            WHERE attempt_id = ? ORDER BY reservation_id
+            """,
+            (attempt_id,),
+        ).fetchall()
+        if len(reservations) != 1:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent non-acceptance reservation cardinality drifted",
+            )
+        historical_lease_id = str(reservations[0]["lease_id"] or "").strip()
+        if not historical_lease_id:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent non-acceptance reservation lacks its Lease",
+            )
+        historical = self._require_lease(conn, historical_lease_id)
+        lineage = self._resolve_internal_agent_terminal_lineage_uow(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            historical_lease_id=historical_lease_id,
+            historical_lease_owner=str(historical["owner_id"]),
+            historical_fencing_token=int(historical["fencing_token"]),
+            expected_graph_status=str(graph["status"]),
+            expected_node_status=str(node["status"]),
+            expected_attempt_status=str(attempt["status"]),
+            require_takeover=False,
+            allow_nonacceptance_projection=True,
+        )
+        if terminal_reason == "TERMINAL_POST_REVIEW_CANCELLED":
+            self._assert_finalized_nonacceptance_cancellation_uow(
+                conn,
+                graph_id=graph_id,
+                graph_revision=graph_revision,
+            )
+        return {
+            **lineage,
+            "authority_kind": "INTERNAL_AGENT_NONACCEPTANCE_TERMINAL",
+            "terminal_reason": terminal_reason,
+        }
+
+    @staticmethod
+    def _nonacceptance_terminal_reason(
+        *,
+        graph: Any,
+        node: Any,
+        attempt: Any,
+    ) -> str | None:
+        return _NONACCEPTANCE_TERMINAL_STATES.get(
+            (
+                str(graph["status"] or ""),
+                str(node["status"] or ""),
+                str(attempt["status"] or ""),
+            )
+        )
+
+    def _assert_finalized_nonacceptance_cancellation_uow(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        graph_id: str,
+        graph_revision: int,
+    ) -> None:
+        row = conn.execute(
+            """
+            SELECT * FROM task_runtime_graph_cancellation_intent
+            WHERE graph_id = ? AND graph_revision = ?
+            """,
+            (graph_id, graph_revision),
+        ).fetchone()
+        validator = getattr(self, "_validated_graph_cancellation_intent_record", None)
+        if row is None or not callable(validator):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "post-review cancellation lacks a durable cancellation authority",
+            )
+        record = validator(conn, row)
+        payload = record.get("payload") if isinstance(record, Mapping) else None
+        if (
+            str(record.get("status") or "") != "FINALIZED"
+            or str(record.get("graph_id") or "") != graph_id
+            or int(record.get("graph_revision") or 0) != graph_revision
+            or not isinstance(payload, Mapping)
+            or str(payload.get("graph_target_status") or "") != "CANCELLED"
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "post-review cancellation authority drifted",
+            )
 
     def resolve_internal_agent_takeover_lineage(
         self,
@@ -209,6 +413,7 @@ class TaskInternalAgentLineageStoreMixin:
                 expected_node_status=statuses[1],
                 expected_attempt_status=statuses[2],
                 require_takeover=require_takeover,
+                allow_nonacceptance_projection=False,
             )
             conn.commit()
             return resolved
@@ -233,6 +438,7 @@ class TaskInternalAgentLineageStoreMixin:
         expected_node_status: str,
         expected_attempt_status: str,
         require_takeover: bool,
+        allow_nonacceptance_projection: bool = False,
     ) -> dict[str, Any]:
         graph = self._require_graph(conn, graph_id, graph_revision)
         node = self._require_node(conn, graph_id, graph_revision, node_id)
@@ -322,15 +528,27 @@ class TaskInternalAgentLineageStoreMixin:
             owner_id=str(final_lease["owner_id"]),
             fencing_token=int(final_lease["fencing_token"]),
         )
-        self._validate_internal_checkpoint_projection_authority(
-            projection,
-            command=command,
-            work_order=work_order,
-            graph=graph,
-            node_payload=node_payload,
-            reservation=reservation,
-            attempt=attempt,
-        )
+        if allow_nonacceptance_projection:
+            self._validate_internal_nonacceptance_projection_authority(
+                conn,
+                projection=projection,
+                command=command,
+                work_order=work_order,
+                graph=graph,
+                node_payload=node_payload,
+                reservation=reservation,
+                attempt=attempt,
+            )
+        else:
+            self._validate_internal_checkpoint_projection_authority(
+                projection,
+                command=command,
+                work_order=work_order,
+                graph=graph,
+                node_payload=node_payload,
+                reservation=reservation,
+                attempt=attempt,
+            )
         exact = (
             str(graph["status"]) == expected_graph_status
             and str(node["status"]) == expected_node_status
@@ -508,6 +726,114 @@ class TaskInternalAgentLineageStoreMixin:
             raise TaskStoreError(
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "Internal Agent checkpoint historical/takeover Lease lineage drifted",
+            )
+
+    @staticmethod
+    def _validate_internal_nonacceptance_projection_authority(
+        conn: sqlite3.Connection,
+        *,
+        projection: Mapping[str, Any],
+        command: sqlite3.Row,
+        work_order: WorkOrderV3,
+        graph: sqlite3.Row,
+        node_payload: Mapping[str, Any],
+        reservation: sqlite3.Row,
+        attempt: sqlite3.Row,
+    ) -> None:
+        """Validate a committed proposal that never became an Agent result.
+
+        The worker proposal still needs its canonical action Preview, node
+        grant, exact result digest and internal effect intent.  Unlike an
+        accepted artifact, a non-acceptance terminal may legitimately have no
+        staged-artifact descriptor because it produced no accepted effect.
+        """
+
+        effects = projection.get("acceptance_effect_intents")
+        audit = projection.get("audit_refs")
+        if (
+            not isinstance(effects, list)
+            or len(effects) != 1
+            or not isinstance(effects[0], Mapping)
+            or not isinstance(audit, Mapping)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent non-acceptance projection authority is incomplete",
+            )
+        effect = dict(effects[0])
+        payload = effect.get("payload")
+        if not isinstance(payload, Mapping):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent non-acceptance result payload is missing",
+            )
+        result = payload.get("result")
+        result_payload = dict(result) if isinstance(result, Mapping) else {}
+        expected_result_digest = "sha256:" + hashlib.sha256(
+            _dumps(result_payload).encode("utf-8")
+        ).hexdigest()
+        protected_present = "protected_artifact" in result_payload
+        protected = result_payload.get("protected_artifact")
+        protected_valid = (
+            not protected_present
+            or (
+                isinstance(protected, Mapping)
+                and set(protected) == {"schema_version", "ref", "digest"}
+                and protected.get("schema_version")
+                == "Natsume.agent.governed_artifact_stage.v1"
+                and str(protected.get("ref") or "").startswith("agent-stage://")
+                and _SHA256.fullmatch(str(protected.get("digest") or "")) is not None
+            )
+        )
+        preview_ref = str(audit.get("action_preview_receipt_ref") or "")
+        preview_event = str(audit.get("action_preview_event_id") or "")
+        accepted_result_exists = conn.execute(
+            """
+            SELECT 1 FROM agent_execution_result
+            WHERE command_id = ? LIMIT 1
+            """,
+            (str(command["command_id"]),),
+        ).fetchone()
+        exact = (
+            set(effect) == {"effect_type", "commit_scope", "payload"}
+            and effect.get("effect_type") == "internal.agent.result_commit"
+            and effect.get("commit_scope") == "NODE"
+            and set(payload)
+            == {
+                "schema_version",
+                "work_order_id",
+                "target_id",
+                "operation_fingerprint",
+                "result_digest",
+                "result",
+            }
+            and payload.get("schema_version")
+            == "Natsume.internal.agent_result_proposal.v1"
+            and payload.get("work_order_id") == work_order.work_order_id
+            and payload.get("target_id") == "agent_runtime"
+            and payload.get("operation_fingerprint")
+            == str(reservation["operation_fingerprint"])
+            and payload.get("result_digest") == expected_result_digest
+            and protected_valid
+            and str(projection.get("node_grant_ref") or "")
+            == str(audit.get("node_grant_ref") or "")
+            and _SHA256.fullmatch(str(audit.get("node_grant_digest") or ""))
+            is not None
+            and preview_ref.startswith("action-preview://")
+            and preview_event.startswith("runtimeevent://")
+            and str(command["governor_grant_ref"] or "")
+            != str(projection.get("node_grant_ref") or "")
+            and str(command["request_id"]) == str(projection["request_id"])
+            and str(graph["root_work_order_id"]) == work_order.root_work_order_id
+            and str(node_payload.get("node_id") or "") == str(attempt["node_id"])
+            and str(projection.get("decision") or "") == "APPROVE"
+            and projection.get("done") is True
+            and accepted_result_exists is None
+        )
+        if not exact:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent non-acceptance projection authority drifted",
             )
 
     @staticmethod

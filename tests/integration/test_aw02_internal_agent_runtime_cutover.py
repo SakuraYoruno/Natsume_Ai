@@ -39,6 +39,9 @@ from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
 from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
     INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX,
 )
+from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
+    INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX,
+)
 import host_brain.app.internal_task_runtime as internal_task_runtime_module
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
@@ -2711,6 +2714,43 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             review_command["work_order"].task_node_id,
         )
         assert review_node["status"] == "VERIFICATION_FAILED"
+        with sqlite3.connect(str(db_path)) as conn:
+            review_claim_result = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (review_claim_ref,),
+            ).fetchone()[0]
+        assert str(review_claim_result).startswith(
+            INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX
+        )
+        assert (
+            HostCommandRepository(db_path).validate_ingress_claim_result(
+                review_receipt["command_id"]
+            )["command"].command_id
+            == review_receipt["command_id"]
+        )
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "UPDATE secure_ingress_idempotency_claim SET result_ref = ? "
+                "WHERE claim_ref = ?",
+                (
+                    INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX + ("0" * 64),
+                    review_claim_ref,
+                ),
+            )
+            conn.commit()
+        with pytest.raises(HostCommandRepositoryError) as tampered_claim:
+            HostCommandRepository(db_path).validate_ingress_claim_result(
+                review_receipt["command_id"]
+            )
+        assert tampered_claim.value.reason_code == HOST_COMMAND_INGRESS_CONFLICT
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "UPDATE secure_ingress_idempotency_claim SET result_ref = ? "
+                "WHERE claim_ref = ?",
+                (review_claim_result, review_claim_ref),
+            )
+            conn.commit()
         open_reviews = review_store.list_open_reviews(limit=10)
         assert open_reviews == []
         assert calls == [

@@ -42,6 +42,10 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
     build_internal_budget_rejection_result_ref,
 )
+from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
+    INTERNAL_NONACCEPTANCE_TERMINAL_REASONS,
+    build_internal_nonacceptance_result_ref,
+)
 from host_brain.persistence.task_repository import OutboxMessage
 from host_brain.contracts.agent_runtime.work_order import (
     AgentWorkOrder,
@@ -250,15 +254,24 @@ class GovernedInternalRuntime:
                     )
         self._terminal_continuation_worker = terminal_continuation_worker
         self._terminal_worker_quiesced = terminal_continuation_worker is None
-        if terminal_claim_task_store is not None and not callable(
-            getattr(
-                terminal_claim_task_store,
-                "resolve_internal_agent_budget_rejection_terminal",
-                None,
-            )
-        ):
+        terminal_claim_methods = (
+            "resolve_internal_agent_budget_rejection_terminal",
+            "try_resolve_internal_agent_nonacceptance_checkpoint_terminal",
+            "get_graph_cancellation_for_graph",
+        )
+        missing_terminal_claim_methods = (
+            [
+                method_name
+                for method_name in terminal_claim_methods
+                if not callable(getattr(terminal_claim_task_store, method_name, None))
+            ]
+            if terminal_claim_task_store is not None
+            else []
+        )
+        if missing_terminal_claim_methods:
             raise TypeError(
-                "Internal terminal claim TaskStore lacks exact budget terminal resolver"
+                "Internal terminal claim TaskStore lacks: "
+                + ",".join(missing_terminal_claim_methods)
             )
         self._terminal_claim_task_store = terminal_claim_task_store
         self._startup_checkpoint_continuation = InternalStartupCheckpointContinuation(
@@ -706,6 +719,114 @@ class GovernedInternalRuntime:
         except ValueError:
             return None
 
+    async def exact_nonacceptance_checkpoint_claim_result_ref(
+        self,
+        *,
+        command: HostCommand,
+        execution_receipt: Mapping[str, Any],
+    ) -> str | None:
+        """Return a result only for an exact rejected committed checkpoint.
+
+        The emitted stream receipt is only a hint.  The canonical TaskStore
+        must reopen the final graph/node/attempt state and committed projection
+        before the caller may settle Secure Ingress.  Worker failures and
+        pre-checkpoint cancellation deliberately return ``None`` here.
+        """
+
+        store = self._terminal_claim_task_store
+        if store is None or command.surface is not HostCommandSurface.INTERNAL:
+            return None
+        receipt = dict(execution_receipt or {})
+        attempt_id = str(receipt.get("attempt_id") or "").strip()
+        node_id = str(receipt.get("node_id") or "").strip()
+        if (
+            receipt.get("accepted") is not False
+            or not attempt_id
+            or not command.ingress_claim_ref
+            or not node_id
+            or str(receipt.get("command_id") or "").strip() != command.command_id
+            or str(receipt.get("graph_id") or "").strip() != command.graph_id
+            or receipt.get("graph_revision") != command.graph_revision
+        ):
+            return None
+        try:
+            resolved = await asyncio.to_thread(
+                store.try_resolve_internal_agent_nonacceptance_checkpoint_terminal,
+                attempt_id,
+            )
+        except Exception:
+            return None
+        if not isinstance(resolved, Mapping):
+            return None
+        terminal_reason = str(resolved.get("terminal_reason") or "")
+        expected_receipt_status = {
+            "TERMINAL_VERIFICATION_FAILED": "VERIFICATION_FAILED",
+            "TERMINAL_POST_REVIEW_CANCELLED": "CANCELLED",
+        }.get(terminal_reason)
+        historical = resolved.get("historical_lease")
+        completion = resolved.get("completion_lease")
+        reservation = resolved.get("operation_reservation")
+        projection = resolved.get("projection")
+        if (
+            terminal_reason not in INTERNAL_NONACCEPTANCE_TERMINAL_REASONS
+            or str(receipt.get("status") or "").strip().upper()
+            != expected_receipt_status
+            or not all(
+                isinstance(value, Mapping)
+                for value in (historical, completion, reservation, projection)
+            )
+            or str(resolved.get("authority_kind") or "")
+            != "INTERNAL_AGENT_NONACCEPTANCE_TERMINAL"
+            or str(historical.get("attempt_id") or "") != attempt_id
+            or str(completion.get("attempt_id") or "") != attempt_id
+            or str(completion.get("status") or "") != "RELEASED"
+            or str(reservation.get("attempt_id") or "") != attempt_id
+            or str(projection.get("command_id") or "") != command.command_id
+            or str(projection.get("graph_id") or "") != command.graph_id
+            or int(projection.get("graph_revision") or 0)
+            != command.graph_revision
+            or str(projection.get("node_id") or "") != node_id
+            or str(projection.get("attempt_id") or "") != attempt_id
+        ):
+            return None
+        if terminal_reason == "TERMINAL_POST_REVIEW_CANCELLED":
+            try:
+                cancellation = await asyncio.to_thread(
+                    store.get_graph_cancellation_for_graph,
+                    command.graph_id,
+                    command.graph_revision,
+                )
+            except Exception:
+                return None
+            payload = (
+                cancellation.get("payload") if isinstance(cancellation, Mapping) else None
+            )
+            if (
+                not isinstance(payload, Mapping)
+                or str(cancellation.get("status") or "") != "FINALIZED"
+                or str(cancellation.get("graph_id") or "") != command.graph_id
+                or int(cancellation.get("graph_revision") or 0)
+                != command.graph_revision
+                or str(payload.get("graph_target_status") or "") != "CANCELLED"
+            ):
+                return None
+        try:
+            return build_internal_nonacceptance_result_ref(
+                command_id=command.command_id,
+                ingress_claim_ref=command.ingress_claim_ref,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                historical_lease_id=str(historical.get("lease_id") or ""),
+                completion_lease_id=str(completion.get("lease_id") or ""),
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                projection_id=str(projection.get("projection_id") or ""),
+                terminal_reason=terminal_reason,
+            )
+        except ValueError:
+            return None
+
 
 class InternalAgentCommandService:
     """Official Governor + durable runtime application boundary for routes."""
@@ -865,6 +986,25 @@ class InternalAgentCommandService:
                 raise GovernedInternalRuntimeError(
                     INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
                     "secure ingress budget terminal claim could not be completed",
+            ) from exc
+            return terminal
+        nonacceptance_terminal_ref = (
+            await self._runtime.exact_nonacceptance_checkpoint_claim_result_ref(
+                command=durable_command,
+                execution_receipt=receipt,
+            )
+        )
+        if nonacceptance_terminal_ref is not None:
+            try:
+                self._claim_results.complete_claim(
+                    claim_ref=claim_ref,
+                    result_ref=nonacceptance_terminal_ref,
+                    at_ms=int(ts_ms),
+                )
+            except Exception as exc:
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
+                    "secure ingress non-acceptance terminal claim could not be completed",
                 ) from exc
             return terminal
         effect_status = str(

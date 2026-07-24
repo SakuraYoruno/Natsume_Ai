@@ -14,6 +14,9 @@ from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
+from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
+    INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX,
+)
 
 
 def _authority(*, attempt_id: str = "attempt-raw") -> dict[str, Any]:
@@ -334,6 +337,46 @@ class _TaskStore:
             "historical_lease_id": "lease-agent",
         }
 
+    def resolve_internal_agent_nonacceptance_checkpoint_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        reasons = {
+            ("FAILED", "VERIFICATION_FAILED", "SUCCEEDED"): (
+                "TERMINAL_VERIFICATION_FAILED"
+            ),
+            ("CANCELLED", "CANCELLED", "SUCCEEDED"): (
+                "TERMINAL_POST_REVIEW_CANCELLED"
+            ),
+        }
+        reason = reasons.get(
+            (self.graph_status, self.node_status, self.attempt_status)
+        )
+        if (
+            attempt_id != "attempt-raw"
+            or reason is None
+            or self.lease_status != "RELEASED"
+            or self.operation_status != "COMMITTED"
+        ):
+            raise RuntimeError("non-acceptance terminal authority drifted")
+        return {
+            "authority_kind": "INTERNAL_AGENT_NONACCEPTANCE_TERMINAL",
+            "terminal_reason": reason,
+            "historical_lease": self.get_lease("lease-agent"),
+            "completion_lease": self.get_lease("lease-agent"),
+            "operation_reservation": self.get_operation_reservation(
+                "reservation-agent"
+            ),
+            "projection": {
+                "projection_id": "worker-projection://internal/1",
+                "command_id": "command-agent",
+                "graph_id": "graph-internal",
+                "graph_revision": 1,
+                "node_id": "node-agent",
+                "attempt_id": "attempt-raw",
+            },
+        }
+
     def get_graph_cancellation_for_graph(
         self,
         graph_id: str,
@@ -357,6 +400,7 @@ class _CommandRepository:
             graph_id=graph_id,
             graph_revision=graph_revision,
             surface=SimpleNamespace(value="internal"),
+            ingress_claim_ref="ingress-claim://internal/terminal",
         )
         graph = SimpleNamespace(
             nodes=(SimpleNamespace(node_id="node-agent", route="delegate:agent_runtime"),)
@@ -393,10 +437,19 @@ class _ProjectionStore:
         }
 
 
+class _ClaimStore:
+    def __init__(self) -> None:
+        self.completed: list[dict[str, Any]] = []
+
+    def complete_claim(self, **values: Any) -> None:
+        self.completed.append(dict(values))
+
+
 def _reconciler(
     seal: _Seal | None = None,
     *,
     unsealed: _Stage | None = None,
+    claim_store: _ClaimStore | None = None,
 ) -> tuple[
     InternalArtifactTerminalReconciler,
     _ArtifactStore,
@@ -418,6 +471,7 @@ def _reconciler(
         task_store=tasks,
         command_repository=_CommandRepository(),
         projection_store=_ProjectionStore(tasks),
+        claim_result_store=claim_store,
     )
     return reconciler, artifacts, workspaces, repository, tasks
 
@@ -574,6 +628,74 @@ def test_exact_terminal_matrices_abandon_without_rerunning(
     assert report[0]["reason_code"] == reason_code
     assert len(workspaces.abandon_calls) == 1
     assert artifacts.abandoned == [seal.stage_ref]
+
+
+@pytest.mark.parametrize(
+    ("graph_status", "node_status", "attempt_status", "reason_code"),
+    (
+        (
+            "FAILED",
+            "VERIFICATION_FAILED",
+            "SUCCEEDED",
+            "TERMINAL_VERIFICATION_FAILED",
+        ),
+        (
+            "CANCELLED",
+            "CANCELLED",
+            "SUCCEEDED",
+            "TERMINAL_POST_REVIEW_CANCELLED",
+        ),
+    ),
+)
+def test_nonacceptance_terminal_claim_closes_before_abandonment(
+    graph_status: str,
+    node_status: str,
+    attempt_status: str,
+    reason_code: str,
+) -> None:
+    seal = _Seal()
+    claims = _ClaimStore()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        seal,
+        claim_store=claims,
+    )
+    tasks.graph_status = graph_status
+    tasks.node_status = node_status
+    tasks.attempt_status = attempt_status
+    tasks.lease_status = "RELEASED"
+    tasks.operation_status = "COMMITTED"
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "ABANDONED"
+    assert report[0]["reason_code"] == reason_code
+    assert artifacts.abandoned == [seal.stage_ref]
+    assert len(workspaces.abandon_calls) == 1
+    assert len(claims.completed) == 1
+    assert claims.completed[0]["claim_ref"] == "ingress-claim://internal/terminal"
+    assert claims.completed[0]["result_ref"].startswith(
+        INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX
+    )
+
+
+def test_raw_worker_failure_never_closes_nonacceptance_claim() -> None:
+    seal = _Seal()
+    claims = _ClaimStore()
+    reconciler, artifacts, _workspaces, _repository, tasks = _reconciler(
+        seal,
+        claim_store=claims,
+    )
+    tasks.graph_status = "FAILED"
+    tasks.node_status = "FAILED"
+    tasks.attempt_status = "FAILED"
+    tasks.lease_status = "RELEASED"
+    tasks.operation_status = "RECOVERY_REQUIRED"
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "ABANDONED"
+    assert artifacts.abandoned == [seal.stage_ref]
+    assert claims.completed == []
 
 
 def test_committed_projection_must_bind_the_exact_protected_seal() -> None:

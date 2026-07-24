@@ -21,6 +21,10 @@ from host_brain.contracts.agent_runtime.projection_recovery import (
 from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
     build_internal_budget_rejection_result_ref,
 )
+from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
+    INTERNAL_NONACCEPTANCE_TERMINAL_REASONS,
+    build_internal_nonacceptance_result_ref,
+)
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
@@ -90,6 +94,7 @@ class InternalArtifactTerminalReconciler:
             (task_store, "get_graph_cancellation_for_graph"),
             (task_store, "resolve_internal_agent_takeover_lineage"),
             (task_store, "resolve_internal_agent_budget_rejection_terminal"),
+            (task_store, "resolve_internal_agent_nonacceptance_checkpoint_terminal"),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -193,6 +198,11 @@ class InternalArtifactTerminalReconciler:
                     continue
                 if reason == "TERMINAL_BUDGET_REJECTED":
                     self._complete_budget_rejection_claim(seal)
+                elif reason in INTERNAL_NONACCEPTANCE_TERMINAL_REASONS:
+                    self._complete_nonacceptance_claim(
+                        seal,
+                        terminal_reason=reason,
+                    )
                 receipt = self._workspaces.abandon_terminal_artifact(
                     workspace_id=str(seal.workspace_id),
                     execution_authority=dict(seal.execution_authority),
@@ -467,6 +477,115 @@ class InternalArtifactTerminalReconciler:
         except ValueError as exc:
             raise InternalArtifactTerminalReconciliationError(
                 "budget rejected claim result identity is invalid"
+            ) from exc
+        claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
+
+    def _complete_nonacceptance_claim(
+        self,
+        seal: Any,
+        *,
+        terminal_reason: str,
+    ) -> None:
+        """Settle one sealed, executed-but-not-accepted checkpoint claim.
+
+        This runs before tombstoning the protected artifact.  It intentionally
+        excludes raw worker failures and pre-checkpoint cancellations: neither
+        owns the committed projection lineage required to make a terminal
+        ingress result independently re-openable.
+        """
+
+        claims = self._claim_results
+        if claims is None:
+            return
+        if terminal_reason not in INTERNAL_NONACCEPTANCE_TERMINAL_REASONS:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsupported non-acceptance terminal reason"
+            )
+        authority = dict(getattr(seal, "execution_authority", {}) or {})
+        attempt_id = str(authority.get("attempt_id") or "").strip()
+        graph_id = str(authority.get("graph_id") or "").strip()
+        node_id = str(authority.get("node_id") or "").strip()
+        lease_id = str(authority.get("lease_id") or "").strip()
+        lease_owner_id = str(authority.get("lease_owner_id") or "").strip()
+        fencing_token = authority.get("fencing_token")
+        revision = authority.get("graph_revision")
+        if (
+            not all((attempt_id, graph_id, node_id, lease_id, lease_owner_id))
+            or type(revision) is not int
+            or revision < 1
+            or type(fencing_token) is not int
+            or fencing_token < 1
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance artifact has invalid execution authority"
+            )
+        terminal = self._tasks.resolve_internal_agent_nonacceptance_checkpoint_terminal(
+            attempt_id
+        )
+        if not isinstance(terminal, Mapping):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance terminal authority is incomplete"
+            )
+        historical = terminal.get("historical_lease")
+        completion = terminal.get("completion_lease")
+        reservation = terminal.get("operation_reservation")
+        projection = terminal.get("projection")
+        if not all(
+            isinstance(value, Mapping)
+            for value in (historical, completion, reservation, projection)
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance terminal lineage is incomplete"
+            )
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_NONACCEPTANCE_TERMINAL"
+            or str(terminal.get("terminal_reason") or "") != terminal_reason
+            or str(historical.get("lease_id") or "") != lease_id
+            or str(historical.get("attempt_id") or "") != attempt_id
+            or str(historical.get("owner_id") or "") != lease_owner_id
+            or int(historical.get("fencing_token") or 0) != fencing_token
+            or str(completion.get("attempt_id") or "") != attempt_id
+            or str(completion.get("status") or "") != "RELEASED"
+            or str(reservation.get("attempt_id") or "") != attempt_id
+            or str(reservation.get("lease_id") or "") != lease_id
+            or str(projection.get("command_id") or "")
+            != str(authority.get("command_id") or "")
+            or str(projection.get("graph_id") or "") != graph_id
+            or int(projection.get("graph_revision") or 0) != revision
+            or str(projection.get("node_id") or "") != node_id
+            or str(projection.get("attempt_id") or "") != attempt_id
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance terminal lineage drifted"
+            )
+        record = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        frozen = {**authority, "route": "delegate", "target_id": "agent_runtime"}
+        self._assert_internal_admission(record, frozen=frozen)
+        command = record.get("command") if isinstance(record, Mapping) else None
+        claim_ref = str(getattr(command, "ingress_claim_ref", "") or "").strip()
+        if not claim_ref:
+            return
+        try:
+            result_ref = build_internal_nonacceptance_result_ref(
+                command_id=str(getattr(command, "command_id", "") or ""),
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                historical_lease_id=lease_id,
+                completion_lease_id=str(completion.get("lease_id") or ""),
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                projection_id=str(projection.get("projection_id") or ""),
+                terminal_reason=terminal_reason,
+            )
+        except ValueError as exc:
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance claim result identity is invalid"
             ) from exc
         claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
 

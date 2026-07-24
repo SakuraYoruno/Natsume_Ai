@@ -87,6 +87,16 @@ class TaskStorePort(Protocol):
         attempt_id: str,
     ) -> Mapping[str, Any]: ...
 
+    def resolve_internal_agent_nonacceptance_checkpoint_terminal(
+        self,
+        attempt_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def try_resolve_internal_agent_nonacceptance_checkpoint_terminal(
+        self,
+        attempt_id: str,
+    ) -> Mapping[str, Any] | None: ...
+
     def try_resolve_checkpoint_budget_rejection_terminal(
         self,
         attempt_id: str,
