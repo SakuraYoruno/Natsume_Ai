@@ -309,7 +309,7 @@ Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加�
 
 ### 4.3 外部 Skill 生命周期（NE-05）
 
-外部 bundle 不会因为存在于目录中就进入运行时。签名接收先完成 quarantine/stage；0109 ledger 再把 Lab report、Review、SBOM、signature、sandbox、rollback 和 maturity 固定为不可变 evidence。只有 fenced Supply Chain Repository 成功推进 `STAGED → ACTIVE` 后，content-addressed registry 才能返回该版本；降级和回滚同样必须留下 durable receipt。
+外部 bundle 不会因为存在于目录中就进入运行时。签名接收先完成 quarantine/stage；0109 ledger 再把 Lab report、Review、SBOM、signature、sandbox、rollback 和 maturity 固定为不可变 evidence。只有 fenced Supply Chain Repository 成功推进 `STAGED → ACTIVE` 后，content-addressed registry 才能返回该版本；降级和回滚同样必须留下 durable receipt。回滚会重开目标版本自己此前的 `ACTIVATED` receipt 与精确 evidence，拒绝从未独立激活或跨 skill kind/name 的 target；它不得复制当前版本的证据来授权旧版本。
 
 ```mermaid
 flowchart LR
@@ -327,7 +327,7 @@ flowchart LR
     Active --> Rollback[ROLLED_BACK receipt]
 ```
 
-该链已经在 repository/service/contract 层可回放；外部 provider 的真实 sandbox canary、Review production route 和 bundle import 仍标记为未验收，不能把 stage 或测试 fixture 写成生产激活。
+该链已经在 repository/service/contract 层可回放；V1 的 URI reference 仍不是对真实 Lab/Review authority 的查询，Supply Chain 状态、evidence 与 terminal receipt 也还不是同一 UoW。外部 provider 的真实 sandbox canary、Review production route 和 bundle import 仍标记为未验收，不能把 stage 或测试 fixture 写成生产激活。
 
 ### 4.4 Feedback、Knowledge 与 Identity 演化（NE-06）
 

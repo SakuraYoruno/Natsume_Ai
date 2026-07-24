@@ -40,6 +40,10 @@ class SkillLifecycleReceiptStore(Protocol):
 
     def append_receipt(self, receipt: SkillLifecycleReceiptV1) -> str: ...
 
+    def latest_activated_evidence(
+        self, *, bundle_id: str
+    ) -> SkillActivationEvidenceV1 | None: ...
+
     def list_receipts(
         self, *, bundle_id: str | None = None, limit: int = 100
     ) -> list[Mapping[str, Any]]: ...
@@ -175,8 +179,12 @@ class SkillLifecycleService:
         fencing_token: int,
         idempotency_key: str,
     ) -> SkillLifecycleReceiptV1:
+        if not isinstance(evidence, SkillActivationEvidenceV1):
+            raise SkillLifecycleError("SKILL_LIFECYCLE_EVIDENCE_INVALID")
         if evidence.previous_bundle_id is None:
             raise SkillLifecycleError("SKILL_LIFECYCLE_ROLLBACK_TARGET_REQUIRED")
+        current = self._require_active(evidence)
+        self._assert_bundle_evidence(current, evidence)
         target = self._supply_chain.get_bundle(
             bundle_id=evidence.previous_bundle_id
         )
@@ -186,26 +194,47 @@ class SkillLifecycleService:
             )
         if evidence.bundle_id == evidence.previous_bundle_id:
             raise SkillLifecycleError("SKILL_LIFECYCLE_ROLLBACK_TARGET_INVALID")
-        # Treat rollback as a fenced activation of the target version.  The
-        # terminal receipt keeps the version being replaced in
-        # ``previous_bundle_id``.
+        if (
+            str(target.get("bundle_kind") or "")
+            != str(current.get("bundle_kind") or "")
+            or str(target.get("bundle_name") or "")
+            != str(current.get("bundle_name") or "")
+        ):
+            raise SkillLifecycleError("SKILL_LIFECYCLE_ROLLBACK_TARGET_SCOPE_INVALID")
+        target_activation_evidence = self._receipts.latest_activated_evidence(
+            bundle_id=evidence.previous_bundle_id
+        )
+        if target_activation_evidence is None:
+            raise SkillLifecycleError("SKILL_LIFECYCLE_ROLLBACK_TARGET_EVIDENCE_MISSING")
+        self._assert_bundle_evidence(target, target_activation_evidence)
+
+        # A rollback is a new fenced activation of the old version.  It must
+        # reuse that version's own Lab/Review/SBOM/signature/sandbox evidence;
+        # copying evidence from the version being replaced would let a newer
+        # approval silently authorize an older bundle.
+        rollback_identity = hashlib.sha256(
+            (
+                f"{evidence.evidence_digest}|{target_activation_evidence.evidence_digest}|"
+                f"{evidence.bundle_id}|{evidence.previous_bundle_id}"
+            ).encode("utf-8")
+        ).hexdigest()
         target_evidence = SkillActivationEvidenceV1(
             activation_id=(
                 "skill-activation://rollback/"
-                f"{evidence.evidence_digest.split(':', 1)[1]}"
+                f"{rollback_identity}"
             ),
             bundle_id=evidence.previous_bundle_id,
             bundle_digest=str(target.get("bundle_digest")),
             bundle_version=str(target.get("bundle_version")),
-            lab_report_ref=evidence.lab_report_ref,
-            review_ref=evidence.review_ref,
-            sbom_digest=evidence.sbom_digest,
-            signature_audit_ref=evidence.signature_audit_ref,
-            sandbox_receipt_ref=evidence.sandbox_receipt_ref,
-            rollback_ref=evidence.rollback_ref,
+            lab_report_ref=target_activation_evidence.lab_report_ref,
+            review_ref=target_activation_evidence.review_ref,
+            sbom_digest=target_activation_evidence.sbom_digest,
+            signature_audit_ref=target_activation_evidence.signature_audit_ref,
+            sandbox_receipt_ref=target_activation_evidence.sandbox_receipt_ref,
+            rollback_ref=target_activation_evidence.rollback_ref,
             previous_bundle_id=evidence.bundle_id,
-            maturity_level=evidence.maturity_level,
-            new_capability=False,
+            maturity_level=target_activation_evidence.maturity_level,
+            new_capability=target_activation_evidence.new_capability,
             reason_code="SKILL_ROLLBACK_ACTIVATED",
         )
         self._receipts.append_evidence(target_evidence)

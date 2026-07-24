@@ -3182,7 +3182,7 @@
         "host_brain/audit/migrations/0109_skill_lifecycle.sql",
         "tests/unit/test_ne05_skill_lifecycle.py"
       ],
-      "boundary": "PR #82 retains useful intake and lifecycle records, but evidence refs are not resolved against real authorities, supply-chain state and terminal receipts are not one UoW, exact replay is broken after activation, rollback evidence is version-incorrect, and production Host still uses the legacy skill registry."
+      "boundary": "PR #82 retains useful intake and lifecycle records. The current V1 rollback patch reopens the target bundle's own immutable ACTIVATED evidence and rejects never-activated or cross-skill targets, so a newer bundle's evidence cannot authorize an older bundle. Evidence refs are still not resolved against real authorities, supply-chain state and terminal receipts are not one UoW, exact replay remains broken after activation, and production Host still uses the legacy skill registry."
     },
     "capability_maturity": {
       "status": "PARTIAL_NE05_PRODUCTION_FAIL_CLOSED",
