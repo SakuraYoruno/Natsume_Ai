@@ -1,7 +1,8 @@
 {
   "schema_version": "natsume.universal-runtime-route-acceptance.v2",
+  "fixture_kind": "SYNTHETIC_CONTRACT_ONLY_NOT_PRODUCTION_ACCEPTANCE",
   "commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
-  "migration_head": "0121_research_shadow_arm_operation.sql",
+  "migration_head": "0122_evolution_lab_v2_evidence.sql",
   "route_acceptance": {
     "chat": {
       "status": "PASS"

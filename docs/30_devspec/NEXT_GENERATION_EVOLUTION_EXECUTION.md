@@ -345,6 +345,8 @@ ReAct 切片只让 `run_skill` 与 `dispatch_sub_agent` 退出发现面，并让
 
 完成条件：Research planning、主动行为、记忆写入三类实验可重复；同 seed/dataset digest 结果稳定；Lab 外部副作用为 0。
 
+当前边界：0122 已并行新增 `ExperimentSpecV2`、frozen `DatasetManifestV1`、sandbox/effect-audit/verifier receipt 与 append-only V2 evidence ledger。runner 会重算 dataset digest，拒绝 verifier identity/evidence 或 sandbox profile 漂移；evidence 与 run receipt 在同一 SQLite 事务写入。该切片仅是本地结构性证据边界，`promotion_eligible=false`，没有真实隔离 worker/container、外部模型、三条 Golden Experiment、Review 或 activation，不能当作 NE-04 完成或生产副作用为零的实测证明。
+
 ### NE-05：Skill Compiler、成熟度与签名供应链
 
 目标：把材料和成功轨迹转为可验证能力，但默认不能自动上线。
@@ -470,7 +472,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0121_research_shadow_arm_operation.sql`：0115～0119 保留为连续历史资产，0120 是 bounded fan-out feature-canary 门禁，0121 只扩展 Research shadow operation journal。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0122_evolution_lab_v2_evidence.sql`：0115～0119 保留为连续历史资产，0120 是 bounded fan-out feature-canary 门禁，0121 只扩展 Research shadow operation journal，0122 只扩展 proposal-only 的 Evolution Lab V2 evidence ledger。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 

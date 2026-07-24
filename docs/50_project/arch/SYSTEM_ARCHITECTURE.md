@@ -278,7 +278,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0121_research_shadow_arm_operation.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118 封闭 Conversation Preference evaluation/profile history，0119 隔离 signed Operator command 与通用 TaskGraph 输入，0120 为 bounded fan-out 增加签名 durable receipt 的精确 build/migration/config 门禁，0121 只隔离 Research shadow 外部双臂的 reservation/claim/recovery journal；它们都不代表 Chat、Universal Runtime 或 NE-01 完成。
+当前连续 SQLite migration head 为 `0122_evolution_lab_v2_evidence.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118 封闭 Conversation Preference evaluation/profile history，0119 隔离 signed Operator command 与通用 TaskGraph 输入，0120 为 bounded fan-out 增加签名 durable receipt 的精确 build/migration/config 门禁，0121 只隔离 Research shadow 外部双臂的 reservation/claim/recovery journal，0122 只隔离 proposal-only Evolution Lab V2 evidence；它们都不代表 Chat、Universal Runtime 或 NE-01 完成。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -418,7 +418,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0121_research_shadow_arm_operation.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119 只定义签名 Operator 入站 authority，0120 只定义 bounded fan-out 的签名 feature-canary 启用门禁，0121 只定义 Research shadow arm operation journal；它们都不改变七路线总体 `INCOMPLETE`。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0122_evolution_lab_v2_evidence.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119 只定义签名 Operator 入站 authority，0120 只定义 bounded fan-out 的签名 feature-canary 启用门禁，0121 只定义 Research shadow arm operation journal，0122 只定义 Evolution Lab V2 evidence；它们都不改变七路线总体 `INCOMPLETE`。
 
 ## 7. 数字生命状态模型
 
