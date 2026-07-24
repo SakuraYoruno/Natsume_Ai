@@ -58,6 +58,10 @@ from .dag_scheduling_review_denial import (
     normalize_denied_review_node,
 )
 from .dag_scheduling_reentry import reconstruct_parallel_outcomes
+from .dag_scheduling_completion_replay import (
+    is_completed_internal_checkpoint_without_parallel_decision,
+)
+from .dag_scheduling_settlement import settle_waiting_approval
 from .errors import (
     GOVERNED_ADMISSION_INVALID,
     GOVERNED_BUDGET_EXCEEDED,
@@ -70,6 +74,7 @@ from .errors import (
     GovernedRuntimeError,
 )
 from .graph_cancellation_runtime import GraphCancellationRuntime
+from .internal_checkpoint_budget_rejection import is_internal_budget_terminal
 from .node_execution_projection import NodeExecutionProjection
 from .node_execution_records import build_review_context
 from .node_execution_runtime import DurableNodeExecutionRuntime
@@ -585,10 +590,11 @@ class DurableDagSchedulingRuntime:
                 )
                 waiting_event = terminal_event(receipt)
                 if status == "WAITING_APPROVAL" and graph_status == "ACTIVE":
-                    budget, waiting_event = await self._settle_waiting_approval(
+                    budget, waiting_event = await settle_waiting_approval(
                         admitted=admitted,
                         receipt_event=waiting_event,
                         budget=budget,
+                        parallel_settlement=self._parallel_settlement,
                     )
                 yield waiting_event
                 return
@@ -862,6 +868,21 @@ class DurableDagSchedulingRuntime:
                 and all(status == "ACCEPTED" for status in statuses.values())
             ):
                 if parallel_success_enabled:
+                    if await is_completed_internal_checkpoint_without_parallel_decision(
+                        task_store=self._store,
+                        admitted=admitted,
+                        command=command,
+                        graph_status=graph_status,
+                    ):
+                        async for event in self._node_execution.execute_stream(
+                            admitted=final_admission,
+                            command=command,
+                            work_order=work_order,
+                            budget=budget,
+                            node_grant_ref=grant_refs.get(final_admission.node_id),
+                        ):
+                            yield event
+                        return
                     budget, graph_terminal = await self._parallel_success.complete(
                         admitted=admitted,
                         command=command,
@@ -1216,10 +1237,11 @@ class DurableDagSchedulingRuntime:
                         "budget": budget.execution_payload(),
                     },
                 )
-                budget, waiting_event = await self._settle_waiting_approval(
+                budget, waiting_event = await settle_waiting_approval(
                     admitted=admitted,
                     receipt_event=terminal_event(receipt),
                     budget=budget,
+                    parallel_settlement=self._parallel_settlement,
                 )
                 yield waiting_event
                 return
@@ -1420,6 +1442,9 @@ class DurableDagSchedulingRuntime:
                     )
                 receipt = node_terminal.get("execution_receipt")
                 accepted = isinstance(receipt, Mapping) and bool(receipt.get("accepted"))
+                if parallel_success_enabled and is_internal_budget_terminal(admitted, command, receipt):
+                    yield node_terminal
+                    return
                 if parallel_success_enabled:
                     outcome = _ParallelNodeOutcome.from_terminal_event(
                         node_id=binding.node_id,
@@ -1459,37 +1484,6 @@ class DurableDagSchedulingRuntime:
             durable_nodes=durable_nodes,
             node_execution_projection=self._node_execution_projection,
         )
-
-    async def _settle_waiting_approval(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        receipt_event: Mapping[str, Any],
-        budget: BudgetRuntimeContext,
-    ) -> tuple[BudgetRuntimeContext, dict[str, Any]]:
-        receipt = receipt_event.get("execution_receipt")
-        node_id = _text(receipt.get("node_id")) if isinstance(receipt, Mapping) else ""
-        if not node_id:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "pre-execution review outcome has no TaskNode identity",
-            )
-        outcome = _ParallelNodeOutcome.from_terminal_event(
-            node_id=node_id,
-            event=receipt_event,
-        )
-        budget, terminal = await self._parallel_settlement.resolve_parallel_outcomes(
-            admitted=admitted,
-            outcomes=(outcome,),
-            budget=budget,
-        )
-        if terminal is None:
-            raise GovernedRuntimeError(
-                GOVERNED_DURABLE_STATE_CONFLICT,
-                "pre-execution review did not produce a blocking settlement",
-            )
-        return budget, terminal
-
 
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value

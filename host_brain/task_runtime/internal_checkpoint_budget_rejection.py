@@ -30,6 +30,29 @@ def is_internal_agent_checkpoint_authority(
     )
 
 
+def requires_internal_terminal_bundle(
+    admitted: AdmittedExecution,
+    command: Any,
+) -> bool:
+    """Return whether this route requires an exact Attempt-bound terminal UoW."""
+
+    return len(admitted.nodes) == 1 and is_internal_agent_checkpoint_authority(command)
+
+
+def is_internal_budget_terminal(
+    admitted: AdmittedExecution,
+    command: Any,
+    receipt: Any,
+) -> bool:
+    """Return whether the exact Internal terminal already owns graph closure."""
+
+    return (
+        requires_internal_terminal_bundle(admitted, command)
+        and isinstance(receipt, Mapping)
+        and _status(receipt) == "BUDGET_BLOCKED"
+    )
+
+
 class InternalCheckpointBudgetRejectionRuntime:
     """Use one Store-owned transaction for internal or canonical checkpoints."""
 
@@ -185,5 +208,7 @@ async def _maybe_await(value: Any) -> Any:
 
 __all__ = [
     "InternalCheckpointBudgetRejectionRuntime",
+    "is_internal_budget_terminal",
     "is_internal_agent_checkpoint_authority",
+    "requires_internal_terminal_bundle",
 ]

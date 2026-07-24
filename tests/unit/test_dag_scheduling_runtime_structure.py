@@ -19,7 +19,7 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 # The current baseline also permits one exact denied Review to terminalize
 # without minting a worker grant, while retaining fail-closed durable guards.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "f405c49e2741bce114ff60d006785894732b9e7e35c2a8633694a0b35344c68a"
+    "3efe8c2b0f93576b523a3fb2f2e50f05f18290da593a4b5d4db6f4d0a17b5cce"
 )
 _REENTERED_OUTCOMES_BASELINE_SHA256 = (
     "22ceb5f01e2b2e47f50bd9d2ec755774b3c45e26867195c53a1bce5616978207"
@@ -230,7 +230,7 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "matching_parallel_decision": 4,
             "selected_parallel_decision_outcome": 4,
         },
-        "_node_execution": {"execute_stream": 7},
+        "_node_execution": {"execute_stream": 8},
         "_parallel_settlement": {
             "assert_parallel_reentry_idle": 1,
             "resolve_parallel_outcomes": 3,

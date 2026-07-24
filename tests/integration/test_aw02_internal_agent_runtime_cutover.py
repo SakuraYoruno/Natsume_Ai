@@ -1725,6 +1725,28 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
             assert rejected_usage[0][0] == 0
             assert rejected_usage[0][1] == "TASK_STORE_BUDGET_EXCEEDED"
             assert json.loads(rejected_usage[0][2])["token_count"] == 101
+            terminal_outboxes = conn.execute(
+                """
+                SELECT event_type, attempt_id
+                FROM task_runtime_outbox
+                WHERE event_type IN (
+                    'TASK_ATTEMPT_FAILED', 'TASK_NODE_FAILED',
+                    'TASK_GRAPH_BLOCKED', 'TASK_LEASE_RELEASED_TERMINAL',
+                    'BUDGET_RESERVATION_RELEASED'
+                )
+                ORDER BY event_type
+                """
+            ).fetchall()
+            assert {row[0] for row in terminal_outboxes} == {
+                "TASK_ATTEMPT_FAILED",
+                "TASK_NODE_FAILED",
+                "TASK_GRAPH_BLOCKED",
+                "TASK_LEASE_RELEASED_TERMINAL",
+                "BUDGET_RESERVATION_RELEASED",
+            }
+            assert {row[1] for row in terminal_outboxes} == {
+                snapshot["attempts"][0]["attempt_id"]
+            }
 
         staging = first_artifacts.inventory_governed_seals(
             namespace="staging",
@@ -2208,6 +2230,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
             intent_engine=intent_engine,
             claim_result_store=claim_store,
         )
+        assert reopened_store.get_latest_parallel_success_decision(graph_id, 1) is None
         terminal = await reopened_service.execute(
             work_order=work_order,
             request_id=request_id,

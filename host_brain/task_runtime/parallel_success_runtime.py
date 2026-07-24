@@ -358,7 +358,10 @@ class ParallelSuccessRuntime:
                 work_order=work_order,
                 node_id=result_node_id,
                 attempt_id=result_attempt_id,
-                worker_commit=result_projection,
+                worker_commit={
+                    **result_projection,
+                    "receipt_ref": result_receipt_ref,
+                },
             )
         except Exception as exc:
             raise GovernedRuntimeError(

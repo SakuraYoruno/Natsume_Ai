@@ -16,7 +16,7 @@ from host_brain.task_runtime.parallel_success_runtime import ParallelSuccessRunt
 # Frozen from fa03e0e71 GovernedTaskCoordinator._complete_parallel_success.
 # The fixture intentionally survives removal of the source Coordinator method.
 _COMPLETE_BASELINE_SHA256 = (
-    "492d58c0591d204d7b81fbae588011a617cd9f45f02f2c3208445a4bd5a8c8e7"
+    "37512557f3e7ef077e7610b7a7269598aedf30d8730233e1f37895764e9ad5cc"
 )
 _ROUTE_AUTHORITY_BASELINE_SHA256 = (
     "7ac394f0ca329bec9cc25a78c30fa296ccd6fa57cf093d3d8fb430e8fcdd5fcd"
