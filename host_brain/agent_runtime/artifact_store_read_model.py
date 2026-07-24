@@ -154,6 +154,93 @@ def inventory_governed_seals(
     return tuple(seals)
 
 
+def inventory_unsealed_governed_stages(
+    store: Any,
+    *,
+    limit: int = 100,
+    after_stage_ref: str | None = None,
+) -> tuple[Any, ...]:
+    """Return exact unsealed staging candidates without taking mutation authority."""
+
+    core = _artifact_store_module()
+    if isinstance(limit, bool) or type(limit) is not int or not 1 <= limit <= 1000:
+        raise core.GovernedAgentArtifactError(
+            "inventory limit must be within [1, 1000]"
+        )
+    cursor = str(after_stage_ref or "").strip()
+    if cursor and core._STAGE_REF.fullmatch(cursor) is None:
+        raise core.GovernedAgentArtifactError("inventory cursor is invalid")
+    governed_root = store._governed_root()
+    if not core._path_lexists(governed_root):
+        return ()
+    core._require_regular_directory(governed_root, root=store.runs_root)
+    for child in governed_root.iterdir():
+        if child.name not in {"staging", "accepted", "abandoned"}:
+            raise core.GovernedAgentArtifactError(
+                "governed artifact root contains an unknown namespace"
+            )
+        core._require_regular_directory(child, root=store.runs_root)
+    staging_root = governed_root / "staging"
+    if not core._path_lexists(staging_root):
+        return ()
+    core._require_regular_directory(staging_root, root=store.runs_root)
+    allowed = {
+        "owner.json",
+        *core._SEALED_FILES,
+        core._PROJECTION_RECOVERY_FILE,
+        "seal.json",
+        "promotion.json",
+        ".tmp",
+    }
+    candidates: list[tuple[str, Any]] = []
+    for workspace_dir in staging_root.iterdir():
+        core._portable_segment(
+            workspace_dir.name,
+            field="workspace_id",
+            maximum=120,
+        )
+        core._require_regular_directory(workspace_dir, root=store.runs_root)
+        for attempt_dir in workspace_dir.iterdir():
+            if re.fullmatch(r"attempt-[0-9a-f]{32}", attempt_dir.name) is None:
+                raise core.GovernedAgentArtifactError(
+                    "governed inventory contains an invalid attempt directory"
+                )
+            core._require_regular_directory(attempt_dir, root=store.runs_root)
+            names: set[str] = set()
+            for entry in attempt_dir.iterdir():
+                if entry.name not in allowed or not core._is_regular_file_without_reparse(entry):
+                    raise core.GovernedAgentArtifactError(
+                        "governed inventory contains unknown attempt material"
+                    )
+                names.add(entry.name)
+            if "owner.json" not in names:
+                raise core.GovernedAgentArtifactError(
+                    "governed inventory attempt has no owner"
+                )
+            if "promotion.json" in names and "seal.json" not in names:
+                raise core.GovernedAgentArtifactError(
+                    "governed inventory promotion has no seal"
+                )
+            if "seal.json" in names:
+                continue
+            owner = core._read_json_object(
+                attempt_dir / "owner.json",
+                field="stage owner",
+            )
+            stage_ref = str(owner.get("stage_ref") or "").strip()
+            stage = store._load_stage(stage_ref)
+            if stage.stage_dir != attempt_dir:
+                raise core.GovernedAgentArtifactError(
+                    "governed inventory owner resolved to another authority"
+                )
+            candidates.append((stage_ref, stage))
+    return tuple(
+        stage
+        for stage_ref, stage in sorted(candidates)
+        if not cursor or stage_ref > cursor
+    )[:limit]
+
+
 def inspect_governed_promotion(
     store: Any,
     *,

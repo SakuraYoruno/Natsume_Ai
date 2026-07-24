@@ -323,6 +323,7 @@ class AgentArtifactStore:
             stage.stage_dir / "promotion.json"
         ):
             raise GovernedAgentArtifactError("sealed stage cannot be discarded")
+        self._discard_stale_metadata_temp(stage.stage_dir)
         entries = list(stage.stage_dir.iterdir())
         allowed = {"owner.json", *_SEALED_FILES, _PROJECTION_RECOVERY_FILE}
         for entry in entries:
@@ -416,6 +417,20 @@ class AgentArtifactStore:
         return _read_model.inventory_governed_seals(
             self,
             namespace=namespace,
+            limit=limit,
+            after_stage_ref=after_stage_ref,
+        )
+
+    def inventory_unsealed_governed_stages(
+        self,
+        *,
+        limit: int = 100,
+        after_stage_ref: str | None = None,
+    ) -> tuple[GovernedAgentArtifactStage, ...]:
+        """Return bounded, verified staging material that was never sealed."""
+
+        return _read_model.inventory_unsealed_governed_stages(
+            self,
             limit=limit,
             after_stage_ref=after_stage_ref,
         )

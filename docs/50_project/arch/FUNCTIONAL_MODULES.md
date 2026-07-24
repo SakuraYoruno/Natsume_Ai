@@ -278,6 +278,8 @@ authenticated Internal Agent
   → native WorkOrderV3 Agent executor（外部只接收未准入 v2；V3/顶层图身份拒绝）
 ```
 
+Internal 的 terminal reconciler 另有一个极窄的 unsealed cancellation 路径：它只会对 owner-bound protected stage 重开 exact Internal admission、single-node `delegate:agent_runtime` 和 `Graph/Node/Attempt/Lease=CANCELLED`，再验证同 graph/revision 的 `FINALIZED` cancellation decision。通过后顺序为 `Workspace cleanup durable receipt → discard unsealed stage`；sealed、accepted、缺 decision、lineage drift、失败、预算拒绝和 unknown effect 均不会走该删除路径。该路径为生产 composition 已接线的本地定向证据，不是通用 terminal recovery；真实 SQLite+Git sealed budget-rejection restart 用例在未修改 dev 同样失败，状态为 `LOCAL_UNIT_PROVEN / INTEGRATION_BASELINE_FAIL`。
+
 Scheduler 的 worker 只生成 plan，不调用真实 handler；Review pending 时 handler=0，Effect commit 后只调用一次，duplicate 重放既有结果。handler 调用后的响应丢失或过期 claim 先只读查询 operation/result authority，无法归因时保持恢复状态而不盲调。Internal 只在 ingress 接受 `AgentWorkOrder`，剥离调用方 authority 后立即编译为 `WorkOrderV3 + BudgetPolicy`；child grant 验证后既有 executor 原生接收该 V3，不能再接收兼容投影。0096 已把两者的长时间 Review grant renewal 与 surface continuation 接入同一合同，但 Scheduler 其余 authority、一般恢复和七路线验收仍使 NE-01 保持 `IN_PROGRESS`。
 
 ### 6.3 数字生命与主动输出

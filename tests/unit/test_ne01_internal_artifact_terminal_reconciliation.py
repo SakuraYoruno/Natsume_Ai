@@ -51,11 +51,29 @@ class _Seal:
         }
 
 
+class _Stage:
+    def __init__(self, *, attempt_id: str = "attempt-raw", suffix: str = "c") -> None:
+        self.execution_authority = _authority(attempt_id=attempt_id)
+        self.workspace_id = "workspace-internal"
+        self.attempt_id = attempt_id
+        self.stage_ref = (
+            f"agent-stage://{self.workspace_id}/"
+            f"{governed_attempt_segment(attempt_id)}/sha256/{suffix * 64}"
+        )
+
+
 class _ArtifactStore:
-    def __init__(self, seals: list[_Seal] | None = None) -> None:
+    def __init__(
+        self,
+        seals: list[_Seal] | None = None,
+        unsealed: list[_Stage] | None = None,
+    ) -> None:
         self.seals = sorted(seals or [], key=lambda item: item.stage_ref)
+        self.unsealed = sorted(unsealed or [], key=lambda item: item.stage_ref)
         self.inventory_cursors: list[tuple[str, str | None]] = []
+        self.unsealed_inventory_cursors: list[str | None] = []
         self.abandoned: list[str] = []
+        self.discarded: list[str] = []
         self.tombstones: dict[str, dict[str, Any]] = {}
         self.promotions: dict[str, dict[str, Any]] = {}
         self.accepted: dict[tuple[str, str], _Seal] = {}
@@ -77,6 +95,25 @@ class _ArtifactStore:
             for item in source
             if after_stage_ref is None or item.stage_ref > after_stage_ref
         )[:limit]
+
+    def inventory_unsealed_governed_stages(
+        self,
+        *,
+        limit: int,
+        after_stage_ref: str | None = None,
+    ) -> tuple[_Stage, ...]:
+        self.unsealed_inventory_cursors.append(after_stage_ref)
+        return tuple(
+            item
+            for item in self.unsealed
+            if after_stage_ref is None or item.stage_ref > after_stage_ref
+        )[:limit]
+
+    def discard_unsealed_governed_stage(self, stage: _Stage) -> None:
+        self.discarded.append(stage.stage_ref)
+        self.unsealed = [
+            item for item in self.unsealed if item.stage_ref != stage.stage_ref
+        ]
 
     @staticmethod
     def read_projection_recovery(seal: _Seal) -> dict[str, Any]:
@@ -181,6 +218,7 @@ class _WorkspaceRuntime:
         self.repository = repository
         self.abandon_calls: list[dict[str, Any]] = []
         self.cleanup_calls: list[dict[str, Any]] = []
+        self.unsealed_cleanup_calls: list[str] = []
 
     def abandon_terminal_artifact(self, **values: Any) -> Any:
         self.abandon_calls.append(dict(values))
@@ -193,6 +231,10 @@ class _WorkspaceRuntime:
         self.cleanup_calls.append(dict(values))
         return SimpleNamespace(receipt_ref="workspace-cleanup://receipt/1")
 
+    def cleanup(self, workspace_id: str) -> Any:
+        self.unsealed_cleanup_calls.append(workspace_id)
+        return SimpleNamespace(receipt_ref="workspace-cleanup://receipt/unsealed")
+
 
 class _TaskStore:
     def __init__(self) -> None:
@@ -203,9 +245,16 @@ class _TaskStore:
         self.operation_status = "COMMITTED"
         self.protected_override: dict[str, str] | None = None
         self.seal: _Seal | None = None
+        self.cancellation_status: str | None = "FINALIZED"
+        self.root_work_order_id = "work-order-root"
 
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
-        return {"graph_id": graph_id, "revision": revision, "status": self.graph_status}
+        return {
+            "graph_id": graph_id,
+            "revision": revision,
+            "root_work_order_id": self.root_work_order_id,
+            "status": self.graph_status,
+        }
 
     def get_node(self, graph_id: str, revision: int, node_id: str) -> dict[str, Any]:
         del graph_id, revision
@@ -285,6 +334,20 @@ class _TaskStore:
             "historical_lease_id": "lease-agent",
         }
 
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> dict[str, Any] | None:
+        if self.cancellation_status is None:
+            return None
+        return {
+            "status": self.cancellation_status,
+            "graph_id": graph_id,
+            "graph_revision": revision,
+            "payload": {"graph_target_status": "CANCELLED"},
+        }
+
 
 class _CommandRepository:
     @staticmethod
@@ -332,6 +395,8 @@ class _ProjectionStore:
 
 def _reconciler(
     seal: _Seal | None = None,
+    *,
+    unsealed: _Stage | None = None,
 ) -> tuple[
     InternalArtifactTerminalReconciler,
     _ArtifactStore,
@@ -339,7 +404,10 @@ def _reconciler(
     _WorkspaceRepository,
     _TaskStore,
 ]:
-    artifacts = _ArtifactStore([seal] if seal is not None else [])
+    artifacts = _ArtifactStore(
+        [seal] if seal is not None else [],
+        [unsealed] if unsealed is not None else [],
+    )
     repository = _WorkspaceRepository()
     workspaces = _WorkspaceRuntime(repository)
     tasks = _TaskStore()
@@ -360,6 +428,70 @@ def test_waiting_acceptance_review_is_held_without_abandonment() -> None:
     assert report[0]["action"] == "HOLD"
     assert workspaces.abandon_calls == []
     assert artifacts.abandoned == []
+
+
+def test_exact_cancelled_unsealed_stage_is_cleaned_without_worker_rerun() -> None:
+    stage = _Stage()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+
+    report = reconciler.run_once()
+
+    assert report == (
+        {
+            "workspace_id": stage.workspace_id,
+            "attempt_id": stage.attempt_id,
+            "action": "UNSEALED_CLEANED",
+            "reason_code": "TERMINAL_EXECUTION_CANCELLED_UNSEALED",
+            "receipt_ref": "workspace-cleanup://receipt/unsealed",
+        },
+    )
+    assert artifacts.discarded == [stage.stage_ref]
+    assert artifacts.unsealed == []
+    assert workspaces.unsealed_cleanup_calls == [stage.workspace_id]
+
+
+def test_unsealed_stage_without_finalized_cancellation_is_preserved() -> None:
+    stage = _Stage()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+    tasks.cancellation_status = None
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "BLOCKED"
+    assert artifacts.discarded == []
+    assert artifacts.unsealed == [stage]
+    assert workspaces.unsealed_cleanup_calls == []
+
+
+def test_unsealed_stage_with_root_lineage_drift_is_preserved() -> None:
+    stage = _Stage()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+    tasks.root_work_order_id = "work-order-drifted"
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "BLOCKED"
+    assert artifacts.discarded == []
+    assert artifacts.unsealed == [stage]
+    assert workspaces.unsealed_cleanup_calls == []
 
 
 @pytest.mark.parametrize(

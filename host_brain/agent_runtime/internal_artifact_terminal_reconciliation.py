@@ -66,6 +66,8 @@ class InternalArtifactTerminalReconciler:
     ) -> None:
         required = (
             (artifact_store, "inventory_governed_seals"),
+            (artifact_store, "inventory_unsealed_governed_stages"),
+            (artifact_store, "discard_unsealed_governed_stage"),
             (artifact_store, "inspect_governed_stage_for_authority"),
             (artifact_store, "read_projection_recovery"),
             (artifact_store, "plan_governed_abandonment"),
@@ -74,12 +76,14 @@ class InternalArtifactTerminalReconciler:
             (artifact_store, "inspect_governed_promotion"),
             (workspace_runtime, "abandon_terminal_artifact"),
             (workspace_runtime, "cleanup_terminal_workspace"),
+            (workspace_runtime, "cleanup"),
             (task_store, "get_graph"),
             (task_store, "get_node"),
             (task_store, "get_attempt"),
             (task_store, "get_lease"),
             (task_store, "get_operation_reservation"),
             (task_store, "get_committed_operation_checkpoint"),
+            (task_store, "get_graph_cancellation_for_graph"),
             (task_store, "resolve_internal_agent_takeover_lineage"),
             (task_store, "resolve_internal_agent_budget_rejection_terminal"),
             (command_repository, "get_by_graph"),
@@ -101,6 +105,7 @@ class InternalArtifactTerminalReconciler:
         self._commands = command_repository
         self._projections = projection_store
         self._staging_cursor: str | None = None
+        self._unsealed_staging_cursor: str | None = None
         self._lifecycle_cursor: str | None = None
 
     def run_once(self, *, limit: int = 100) -> tuple[dict[str, Any], ...]:
@@ -109,6 +114,52 @@ class InternalArtifactTerminalReconciler:
                 "terminal reconciliation limit must be within [1, 1000]"
             )
         reports: list[InternalArtifactTerminalReport] = []
+        unsealed = self._artifacts.inventory_unsealed_governed_stages(
+            limit=limit,
+            after_stage_ref=self._unsealed_staging_cursor,
+        )
+        self._unsealed_staging_cursor = (
+            str(unsealed[-1].stage_ref) if len(unsealed) == limit else None
+        )
+        for stage in unsealed:
+            try:
+                reason = self._unsealed_cancellation_reason(stage)
+                if reason is None:
+                    reports.append(
+                        InternalArtifactTerminalReport(
+                            workspace_id=str(stage.workspace_id),
+                            attempt_id=str(stage.attempt_id),
+                            action="HOLD",
+                        )
+                    )
+                    continue
+                cleanup = self._workspaces.cleanup(str(stage.workspace_id))
+                receipt_ref = str(getattr(cleanup, "receipt_ref", "") or "")
+                if "://" not in receipt_ref:
+                    raise InternalArtifactTerminalReconciliationError(
+                        "unsealed Workspace cleanup has no durable receipt"
+                    )
+                self._artifacts.discard_unsealed_governed_stage(stage)
+                reports.append(
+                    InternalArtifactTerminalReport(
+                        workspace_id=str(stage.workspace_id),
+                        attempt_id=str(stage.attempt_id),
+                        action="UNSEALED_CLEANED",
+                        reason_code=reason,
+                        receipt_ref=receipt_ref,
+                    )
+                )
+            except Exception as exc:  # preserve raw stage unless authority is exact
+                reports.append(
+                    InternalArtifactTerminalReport(
+                        workspace_id=str(getattr(stage, "workspace_id", "unknown")),
+                        attempt_id=str(getattr(stage, "attempt_id", "unknown")),
+                        action="BLOCKED",
+                        reason_code=str(
+                            getattr(exc, "reason_code", INTERNAL_ARTIFACT_TERMINAL_INVALID)
+                        ),
+                    )
+                )
         staging = self._artifacts.inventory_governed_seals(
             namespace="staging",
             limit=limit,
@@ -456,6 +507,83 @@ class InternalArtifactTerminalReconciler:
             )
         return terminal
 
+    def _unsealed_cancellation_reason(self, stage: Any) -> str | None:
+        """Allow destructive cleanup only after finalized graph cancellation.
+
+        An unsealed directory has no projection envelope, so it is never
+        eligible for accepted promotion or failure abandonment.  The only
+        safe recovery in this slice is the exact cancellation matrix, backed
+        by the canonical finalized cancellation decision.
+        """
+
+        authority = dict(getattr(stage, "execution_authority", {}) or {})
+        frozen = {
+            **authority,
+            "route": "delegate",
+            "target_id": "agent_runtime",
+        }
+        required = {
+            "root_work_order_id",
+            "graph_id",
+            "graph_revision",
+            "node_id",
+            "attempt_id",
+            "lease_id",
+            "command_id",
+            "principal_id",
+            "lease_owner_id",
+            "fencing_token",
+        }
+        if set(authority) != required:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed artifact execution authority differs"
+            )
+        graph_id = str(authority["graph_id"])
+        revision = int(authority["graph_revision"])
+        node_id = str(authority["node_id"])
+        attempt_id = str(authority["attempt_id"])
+        lease_id = str(authority["lease_id"])
+        command = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        self._assert_internal_admission(command, frozen=frozen)
+        graph = self._tasks.get_graph(graph_id, revision)
+        node = self._tasks.get_node(graph_id, revision, node_id)
+        attempt = self._tasks.get_attempt(attempt_id)
+        lease = self._tasks.get_lease(lease_id)
+        self._assert_unsealed_execution_records(
+            authority=authority,
+            graph=graph,
+            node=node,
+            attempt=attempt,
+            lease=lease,
+        )
+        if (
+            str(graph.get("status") or "") != "CANCELLED"
+            or str(node.get("status") or "") != "CANCELLED"
+            or str(attempt.get("status") or "") != "CANCELLED"
+            or str(lease.get("status") or "") != "CANCELLED"
+        ):
+            return None
+        cancellation = self._tasks.get_graph_cancellation_for_graph(
+            graph_id,
+            revision,
+        )
+        payload = cancellation.get("payload") if isinstance(cancellation, Mapping) else None
+        if (
+            not isinstance(cancellation, Mapping)
+            or str(cancellation.get("status") or "") != "FINALIZED"
+            or str(cancellation.get("graph_id") or "") != graph_id
+            or int(cancellation.get("graph_revision") or 0) != revision
+            or not isinstance(payload, Mapping)
+            or str(payload.get("graph_target_status") or "") != "CANCELLED"
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "cancelled unsealed artifact has no finalized cancellation authority"
+            )
+        return "TERMINAL_EXECUTION_CANCELLED_UNSEALED"
+
     @staticmethod
     def _assert_frozen_authority(seal: Any, frozen: Mapping[str, Any]) -> None:
         required = {
@@ -570,6 +698,40 @@ class InternalArtifactTerminalReconciler:
         ):
             raise InternalArtifactTerminalReconciliationError(
                 "sealed artifact Task/Operation lineage drifted"
+            )
+
+    @staticmethod
+    def _assert_unsealed_execution_records(
+        *,
+        authority: Mapping[str, Any],
+        graph: Mapping[str, Any],
+        node: Mapping[str, Any],
+        attempt: Mapping[str, Any],
+        lease: Mapping[str, Any],
+    ) -> None:
+        node_contract = node.get("node")
+        if (
+            str(graph.get("graph_id") or "") != str(authority["graph_id"])
+            or int(graph.get("revision") or 0) != int(authority["graph_revision"])
+            or str(graph.get("root_work_order_id") or "")
+            != str(authority["root_work_order_id"])
+            or str(node.get("node_id") or "") != str(authority["node_id"])
+            or not isinstance(node_contract, Mapping)
+            or str(node_contract.get("route") or "") != _INTERNAL_ROUTE
+            or str(attempt.get("attempt_id") or "") != str(authority["attempt_id"])
+            or str(attempt.get("graph_id") or "") != str(authority["graph_id"])
+            or int(attempt.get("graph_revision") or 0)
+            != int(authority["graph_revision"])
+            or str(attempt.get("node_id") or "") != str(authority["node_id"])
+            or str(lease.get("lease_id") or "") != str(authority["lease_id"])
+            or str(lease.get("attempt_id") or "") != str(authority["attempt_id"])
+            or str(lease.get("owner_id") or "")
+            != str(authority["lease_owner_id"])
+            or int(lease.get("fencing_token") or 0)
+            != int(authority["fencing_token"])
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed artifact Task lineage drifted"
             )
 
     def _assert_committed_projection(
