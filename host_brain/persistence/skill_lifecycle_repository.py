@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterator
 
 from host_brain.contracts.skill_lifecycle import (
     SkillActivationEvidenceV1,
+    SkillLifecycleError,
     SkillLifecycleReceiptV1,
 )
 from host_brain.core.ids import now_ms
@@ -137,6 +138,64 @@ class SQLiteSkillLifecycleRepository:
                 (str(activation_id),),
             ).fetchone()
             return None if row is None else json.loads(str(row[0]))
+
+    def latest_activated_evidence(
+        self, *, bundle_id: str
+    ) -> SkillActivationEvidenceV1 | None:
+        """Return the exact evidence that previously activated one bundle.
+
+        Rollback cannot reuse evidence from the version being replaced.  This
+        query deliberately follows an immutable ``ACTIVATED`` receipt back to
+        its immutable evidence row, so a staged target that has never passed
+        its own approval cannot become active through rollback.
+        """
+
+        normalized = str(bundle_id or "").strip()
+        if not normalized:
+            raise SkillLifecycleRepositoryError(
+                "SKILL_LIFECYCLE_BUNDLE_ID_INVALID"
+            )
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT evidence.evidence_json
+                FROM skill_lifecycle_receipt AS receipt
+                INNER JOIN skill_activation_evidence AS evidence
+                    ON evidence.activation_id = receipt.activation_id
+                    AND evidence.evidence_digest = receipt.evidence_digest
+                WHERE receipt.bundle_id = ? AND receipt.event = 'ACTIVATED'
+                ORDER BY receipt.created_at_ms DESC, receipt.rowid DESC
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            raw = json.loads(str(row["evidence_json"]))
+            if not isinstance(raw, dict):
+                raise ValueError("evidence payload is not an object")
+            return SkillActivationEvidenceV1(
+                activation_id=raw.get("activation_id", ""),
+                bundle_id=raw.get("bundle_id", ""),
+                bundle_digest=raw.get("bundle_digest", ""),
+                bundle_version=raw.get("bundle_version", ""),
+                lab_report_ref=raw.get("lab_report_ref", ""),
+                review_ref=raw.get("review_ref", ""),
+                sbom_digest=raw.get("sbom_digest", ""),
+                signature_audit_ref=raw.get("signature_audit_ref", ""),
+                sandbox_receipt_ref=raw.get("sandbox_receipt_ref", ""),
+                rollback_ref=raw.get("rollback_ref", ""),
+                previous_bundle_id=raw.get("previous_bundle_id"),
+                maturity_level=raw.get("maturity_level"),
+                new_capability=raw.get("new_capability"),
+                reason_code=raw.get("reason_code", ""),
+                evidence_digest=raw.get("evidence_digest", ""),
+            )
+        except (TypeError, ValueError, SkillLifecycleError) as exc:
+            raise SkillLifecycleRepositoryError(
+                "SKILL_LIFECYCLE_ACTIVATION_EVIDENCE_CORRUPT"
+            ) from exc
 
     def append_receipt(self, receipt: SkillLifecycleReceiptV1) -> str:
         if not isinstance(receipt, SkillLifecycleReceiptV1):

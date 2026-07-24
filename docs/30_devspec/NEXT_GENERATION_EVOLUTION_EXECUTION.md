@@ -362,7 +362,7 @@ ReAct 切片只让 `run_skill` 与 `dispatch_sub_agent` 退出发现面，并让
 - promotion/degradation 由 durable evidence 与 Review 决定；
 - 退役旧 Capability Forge 平行 routing authority，只保留 proposal source。
 
-当前进度：确定性 `SkillDraftV1`、0109 evidence/receipt ledger、fenced activate/degrade/rollback service 和 active-only content-addressed registry 已落地；外部 provider sandbox canary、真实 Review/实验报告生产接线和 bundle import 仍未完成。最终完成条件仍是：至少一份 Markdown 和一条 accepted trace 各生成一个 draft；隔离验证、拒绝、staged activation、降级和 rollback 都有 receipt；未经审批自动升级为 0。
+当前进度：确定性 `SkillDraftV1`、0109 evidence/receipt ledger、fenced activate/degrade/rollback service 和 active-only content-addressed registry 已落地。V1 rollback 只能重开目标 bundle 自己此前不可变 `ACTIVATED` receipt 所绑定的 evidence；从未独立激活或跨 skill kind/name 的 target 均失败关闭，不能复制被替换版本的 Lab/Review/SBOM/signature/sandbox 证据。该修复不把 URI 当成真实审批 authority，也不提供 Supply Chain 状态、evidence 与 terminal receipt 的同一 SQLite UoW；外部 provider sandbox canary、真实 Review/实验报告生产接线和 bundle import 仍未完成。最终完成条件仍是：至少一份 Markdown 和一条 accepted trace 各生成一个 draft；隔离验证、拒绝、staged activation、降级和 rollback 都有 receipt；未经审批自动升级为 0。
 
 ### NE-06：Experience Feedback、Knowledge OS 与 Identity Migration
 

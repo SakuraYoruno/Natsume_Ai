@@ -107,7 +107,7 @@ Gate 10 的证据不能和其它批次相加：Runtime Context `7 passed`；Cata
 
 Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界保持。该切片先前基线为 `FAIL [1,6,10]`，后续 Gate 1/6/10/11 在各自提交绑定快照关闭，本轮 owner 拆分再关闭 Gate 3；当前 fresh 全仓为 `PASS`、`issues=[]`。NE-01 与完整架构项目仍未完成；wave integration=`NOT_RUN_PER_WAVE_POLICY`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 | Workspace ownership | `PARTIAL_W2_NO_CHANGE_PROMOTION_WIRED / GENERAL_WRITE_INCOMPLETE` | 0101+0116、Workspace repositories/runtime、projection recovery、terminal reconciler、真实 SQLite+Git integration | exact graph epoch、frozen source、独立 Git worktree、lease/handoff/takeover/cleanup保持；启动期sealed checkpoint可继续clean/no-change promotion，终态worker可精确sealed abandon/cleanup。周期survivor continuation、crash-left unsealed partial cleanup、failure/cancel/budget claim closeout、general `settle_worker` crash bundle仍缺；该路径也不是handle-level原子TOCTOU，一般write、Domain/Skill/Codex、逐操作fence/强杀及OS/container/tenant隔离未完成，canary未跑 | NE-01 |
-| 外部 Skill 安全接收 | `PARTIAL_NON_ATOMIC_NO_RUNTIME_RESOLVER` | Signed Intake、Quarantine、Supply Chain、0109 lifecycle ledger | URI 未查询真实 authority；状态、evidence 与 terminal receipt 非原子；exact replay/rollback evidence 有缺陷；Host registry 未切流 | NE-05 |
+| 外部 Skill 安全接收 | `PARTIAL_NON_ATOMIC_NO_RUNTIME_RESOLVER` | Signed Intake、Quarantine、Supply Chain、0109 lifecycle ledger | rollback 已重开目标版本自己既有 `ACTIVATED` evidence，未独立激活或跨 skill target 失败关闭；但 URI 未查询真实 authority，状态、evidence 与 terminal receipt 仍非原子，exact replay 仍有缺陷，Host registry 未切流 | NE-05 |
 
 ## 4. 数字生命与长期演化
 
