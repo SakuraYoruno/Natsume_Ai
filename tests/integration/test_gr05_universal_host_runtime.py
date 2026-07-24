@@ -35,7 +35,9 @@ from host_brain.composition.life import (
     build_process_life_container,
 )
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
-from host_brain.app.production_authority import verify_durable_production_authority
+from host_brain.app.production_authority import (
+    build_durable_production_authority_verifier,
+)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.task_runtime import build_process_task_runtime_container
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
@@ -302,6 +304,9 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
 
     db_path = tmp_path / "universal-host-runtime.sqlite3"
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    authority_verifier = build_durable_production_authority_verifier(
+        ledger_provider=lambda: ledger,
+    )
     container = None
     runtime = None
     embodiment_runtime = None
@@ -400,7 +405,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             token_service=token_service,
             capability_broker=dependencies.get_capability_broker(),
             model_attempt_service=ApplicationModelAttemptServicePort(),
-            production_authority_verifier=verify_durable_production_authority,
+            production_authority_verifier=authority_verifier,
             resource_manager=None,
             episodic_store=None,
             semantic_recaller=None,

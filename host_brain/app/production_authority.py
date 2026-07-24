@@ -1,25 +1,63 @@
-"""Application adapter for validating canonical production Task authority."""
+"""Application adapter for validating canonical production Task authority.
+
+The durable ledger is an explicit Host-composition dependency.  This module
+must not resolve it through the process service locator: a worker verifier is
+bound once to the same ledger provider that owns its ASGI lifespan.
+"""
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Callable
+from typing import Any, Mapping
 
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.core.ids import now_ms
 
-def verify_durable_production_authority(
+LedgerProvider = Callable[[], Any]
+ProductionAuthorityVerifier = Callable[[Mapping[str, str], AgentWorkOrder], str | None]
+
+
+def build_durable_production_authority_verifier(
+    *,
+    ledger_provider: LedgerProvider,
+    clock_ms: Callable[[], int] = now_ms,
+) -> ProductionAuthorityVerifier:
+    """Bind one verifier to the exact ledger provider owned by a Host scope."""
+
+    if not callable(ledger_provider):
+        raise TypeError("ledger_provider must be callable")
+    if not callable(clock_ms):
+        raise TypeError("clock_ms must be callable")
+
+    def verify(
+        authority: Mapping[str, str],
+        order: AgentWorkOrder,
+    ) -> str | None:
+        return _verify_durable_production_authority(
+            authority=authority,
+            order=order,
+            ledger_provider=ledger_provider,
+            clock_ms=clock_ms,
+        )
+
+    return verify
+
+
+def _verify_durable_production_authority(
+    *,
     authority: Mapping[str, str],
     order: AgentWorkOrder,
+    ledger_provider: LedgerProvider,
+    clock_ms: Callable[[], int],
 ) -> str | None:
     """Re-resolve the Host command, running Task attempt and Governor grant."""
 
     try:
-        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
         from host_brain.orchestration import DurableGovernorGrantResolver  # noqa: PLC0415
         from host_brain.persistence.host_command_repository import HostCommandRepository  # noqa: PLC0415
         from host_brain.persistence.task_repository import DurableTaskStore  # noqa: PLC0415
 
-        ledger = get_ledger()
+        ledger = ledger_provider()
         db_path = str(getattr(ledger, "canonical_db_path", "") or "").strip()
         if not db_path or db_path == ":memory:":
             return "AGENT_PRODUCTION_DURABLE_AUTHORITY_UNAVAILABLE"
@@ -74,7 +112,7 @@ def verify_durable_production_authority(
             or int(lease.get("fencing_token") or 0)
             != int(authority.get("fencing_token") or 0)
             or str(lease.get("status") or "").strip().upper() != "ACTIVE"
-            or int(lease.get("expires_ts_ms") or 0) <= now_ms()
+            or int(lease.get("expires_ts_ms") or 0) <= int(clock_ms())
         ):
             return "AGENT_PRODUCTION_DURABLE_LEASE_BINDING_MISMATCH"
         DurableGovernorGrantResolver(ledger).require(
@@ -85,4 +123,9 @@ def verify_durable_production_authority(
         return "AGENT_PRODUCTION_DURABLE_AUTHORITY_INVALID"
     return None
 
-__all__ = ["verify_durable_production_authority"]
+
+__all__ = [
+    "LedgerProvider",
+    "ProductionAuthorityVerifier",
+    "build_durable_production_authority_verifier",
+]

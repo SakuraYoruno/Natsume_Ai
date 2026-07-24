@@ -26,7 +26,9 @@ from host_brain.app.governed_tool_runtime import (
     GovernedToolHttpApplication,
 )
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
-from host_brain.app.production_authority import verify_durable_production_authority
+from host_brain.app.production_authority import (
+    build_durable_production_authority_verifier,
+)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition import process_services as dependencies
 from host_brain.composition.command_ingress import build_process_command_ingress_container
@@ -162,7 +164,11 @@ def _runtime(container, *, ledger, registry, tokens, boundary, catalog, owner): 
         token_service=tokens,
         capability_broker=dependencies.get_capability_broker(),
         model_attempt_service=ApplicationModelAttemptServicePort(),
-        production_authority_verifier=verify_durable_production_authority,
+        production_authority_verifier=(
+            build_durable_production_authority_verifier(
+                ledger_provider=lambda: ledger,
+            )
+        ),
         resource_manager=None,
         episodic_store=None,
         semantic_recaller=None,

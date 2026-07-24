@@ -12,7 +12,9 @@ from host_brain.app.governed_task_adapter import (
 )
 from host_brain.app.governed_tool_runtime import GovernedToolHttpApplication
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
-from host_brain.app.production_authority import verify_durable_production_authority
+from host_brain.app.production_authority import (
+    build_durable_production_authority_verifier,
+)
 from host_brain.composition.command_ingress import ProcessCommandIngressContainer
 from host_brain.composition.task_runtime import ProcessTaskRuntimeContainer
 from host_brain.governor.decision import IntentDecisionEngine
@@ -174,7 +176,11 @@ class GovernedHostToolRuntimeComposition:
             model_attempt_service=ApplicationModelAttemptServicePort(
                 dependencies.model_attempt_service,
             ),
-            production_authority_verifier=verify_durable_production_authority,
+            production_authority_verifier=(
+                build_durable_production_authority_verifier(
+                    ledger_provider=lambda: ledger,
+                )
+            ),
             resource_manager=dependencies.resource_manager(create_if_missing=False),
             episodic_store=episodic_store,
             semantic_recaller=semantic_recaller,

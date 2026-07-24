@@ -806,9 +806,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         assert kwargs["capability_broker"] is capability_broker
         assert kwargs["resource_manager"] is resource_manager
         assert kwargs["model_attempt_service"] is model_attempt_service
-        assert kwargs["production_authority_verifier"] is (
-            tool_runtime_composition.verify_durable_production_authority
-        )
+        assert callable(kwargs["production_authority_verifier"])
+        captured["production_authority_verifier"] = kwargs[
+            "production_authority_verifier"
+        ]
         captured["cancellation_authority_verifier"] = kwargs[
             "cancellation_authority_verifier"
         ]
@@ -1051,10 +1052,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             events.append("guardian-heartbeat-stopped")
             raise
 
+    security_immune_agent = object()
     host_application_ports = _host_application_ports(
         lifecycle=host_lifecycle.ports,
         memory_worth_evaluator=object,
-        security_immune_agent=lambda: object(),
+        security_immune_agent=lambda: security_immune_agent,
         token_service=lambda: token_service,
         bond_dynamics_writer=lambda: object(),
         capability_forge_service=lambda: object(),
@@ -1365,6 +1367,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert (
                 captured["route_ports"].governed_tool_application_provider()
                 is governed_tool_application
+            )
+            assert (
+                captured["route_ports"].security_immune_agent_provider()
+                is security_immune_agent
             )
             assert captured["obs_command_ingress_provider"]() is obs_ingress
             assert (
