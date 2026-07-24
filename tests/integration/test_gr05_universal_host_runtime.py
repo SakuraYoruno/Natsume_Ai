@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.host_runtime_context_wiring import compose_host_runtime_context
 from host_brain.app.acceptance_effect_handlers import (
@@ -15,25 +16,20 @@ from host_brain.app.acceptance_effect_handlers import (
     _surface_gateway_payload_digest,
     build_production_acceptance_effect_handlers,
 )
-from host_brain.app.governed_task_adapter import (
-    build_governed_host_runtime as _build_governed_host_runtime,
+from host_brain.app.conversation_writer import (
+    record_assistant_turn,
+    record_user_turn,
 )
+from host_brain.app.governed_task_adapter import build_governed_host_runtime
+from host_brain.app.host_life_scheduler_wiring import compose_life_dispatchers
 from host_brain.app.user_preference_store import UserPreferenceStore
 from host_brain.channels.embodiment import HostEmbodimentRuntime
-from host_brain.runtime.degradation_authority import LegacyModuleGlobalDegradationAdapter
-
-
-def build_governed_host_runtime(**kwargs):  # type: ignore[no-untyped-def]
-    kwargs.setdefault(
-        "degradation_capability_port",
-        LegacyModuleGlobalDegradationAdapter(),
-    )
-    return _build_governed_host_runtime(**kwargs)
 from host_brain.composition import process_services as dependencies
 from host_brain.composition.life import (
     PROCESS_LIFE_PROVIDER,
     build_process_life_container,
 )
+from host_brain.composition.memory import build_process_memory_container
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
 from host_brain.app.production_authority import (
     build_durable_production_authority_verifier,
@@ -51,6 +47,8 @@ from host_brain.persistence.embodiment_outbox_repository import (
 from host_brain.persistence.context_memory_repository import MemoryEventRepository
 from host_brain.persistence.context_repository import ContextRepository
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
+from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
 from host_brain.runtime.action_preview_resolver import (
     ProductionActionPreviewAuthorityResolver,
 )
@@ -102,6 +100,83 @@ def _intent(
             }
         )
     return value
+
+
+def _production_acceptance_effect_ports(
+    *,
+    ledger,
+    life,
+    life_memory_service,
+) -> AgentRuntimeApplicationPorts:  # noqa: ANN001
+    """Bind the same durable conversation writer used by Host composition.
+
+    This integration fixture exercises the governed runtime directly, so it
+    does not build the entire ASGI lifecycle container.  The Acceptance Effect
+    dispatcher still needs the real application port for its first durable
+    write; omitting it intentionally leaves the graph queue in reconciliation
+    and correctly prevents any outward reply delivery.
+    """
+
+    async def _unused_async(**_kwargs):  # noqa: ANN003, ANN202
+        return None
+
+    topic_ledger_store = SessionTopicLedgerStore(ledger)
+    tactic_ledger_store = SessionTacticLedgerStore(ledger)
+
+    def _record_user_turn(**kwargs):  # noqa: ANN003
+        return record_user_turn(
+            ledger=ledger,
+            life_service=life.command_service,
+            life_reader=life.snapshot_reader,
+            **kwargs,
+        )
+
+    def _record_assistant_turn(**kwargs):  # noqa: ANN003
+        return record_assistant_turn(
+            ledger=ledger,
+            life_service=life.command_service,
+            life_reader=life.snapshot_reader,
+            session_topic_ledger_store=topic_ledger_store,
+            session_tactic_ledger_store=tactic_ledger_store,
+            **kwargs,
+        )
+
+    return AgentRuntimeApplicationPorts(
+        record_user_turn=_record_user_turn,
+        record_assistant_turn=_record_assistant_turn,
+        run_retrieval=_unused_async,
+        filter_retrieval_evidence_items_for_prompt=lambda **_kwargs: [],
+        build_user_preference_pack=lambda **_kwargs: {},
+        resolve_host_llm_runtime_async=_unused_async,
+        resolve_state_arbiter_bond_fact=_unused_async,
+        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
+        build_conversation_experience_read_pack=lambda **_kwargs: {},
+        drive_stream_vts_emotion=_unused_async,
+        resolve_tts_route=lambda **_kwargs: None,
+        conversation_history=lambda: None,
+        life_memory_service=lambda: life_memory_service,
+        audit_ledger=lambda: ledger,
+        prompt_registry=lambda: None,
+        model_attempt_service=lambda: None,
+        task_status_projection=lambda: None,
+        persist_post_process_audit=_unused_async,
+    )
+
+
+class _AlwaysWriteMemoryWorth:
+    def evaluate(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN201
+        return SimpleNamespace(
+            decision="write",
+            worth_score=0.8,
+            tags=["governed-runtime"],
+            reason="gr05",
+        )
+
+
+class _AllowMemoryGuard:
+    def validate(self, _candidate, *, tags):  # noqa: ANN001, ANN201
+        del tags
+        return None
 
 
 async def _execute(
@@ -311,6 +386,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
     runtime = None
     embodiment_runtime = None
     life = None
+    memory = None
     ingress_store = None
     mismatch_ingress_store = None
     try:
@@ -324,6 +400,12 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             adopted_at_ms=int(time.time() * 1000),
         )
         PROCESS_LIFE_PROVIDER.install(life)
+        memory = build_process_memory_container(
+            ledger=ledger,
+            canonical_db_path=db_path,
+            worth_evaluator=_AlwaysWriteMemoryWorth(),
+            memory_guard=_AllowMemoryGuard(),
+        )
         monkeypatch.setattr(dependencies.get_process_service_container(), "ledger", ledger)
         monkeypatch.setattr(
             dependencies.get_process_service_container(),
@@ -385,6 +467,11 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 runtime_context_application=runtime_context_application,
             ),
         )
+        agent_runtime_ports = _production_acceptance_effect_ports(
+            ledger=ledger,
+            life=life,
+            life_memory_service=memory.service,
+        )
         acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
             task_store=container.task_store,
                 handlers=build_production_acceptance_effect_handlers(
@@ -394,7 +481,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                     ),
                     preference_store=UserPreferenceStore(ledger=ledger),
                     life_receipt_reader_provider=lambda: life.snapshot_reader,
-            ),
+                    agent_runtime_ports=agent_runtime_ports,
+                ),
             owner_id="gr05-universal-acceptance-effects",
             action_preview_service=action_preview_service,
         )
@@ -597,6 +685,25 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         assert all(call["request_body"].suppress_edge_tts is True for call in chat_calls)
         assert all(call["request_body"].suppress_edge_vts is True for call in chat_calls)
 
+        # Acceptance only commits the immutable foreground command.  The
+        # production Life I/O worker must subsequently drain its durable
+        # projection intent to persist the visible assistant turn and Memory
+        # admission.  Do not replace this with a direct conversation writer:
+        # that would bypass the exact queue/replay boundary operated by Host.
+        projection_dispatcher, _outbox_dispatcher = compose_life_dispatchers(
+            ledger,
+            embodiment_runtime=embodiment_runtime,
+            action_preview_service=action_preview_service,
+            agent_runtime_ports=agent_runtime_ports,
+        )
+        projection = await projection_dispatcher.dispatch_pending_async(limit=100)
+        projection_replay = await projection_dispatcher.dispatch_pending_async(
+            limit=100
+        )
+        assert projection.failed == 0
+        assert projection.delivered >= 3
+        assert projection_replay.claimed == 0
+
         with sqlite3.connect(db_path) as conn:
             routes = conn.execute(
                 "SELECT route_type FROM host_command_journal ORDER BY created_at_ms, command_id"
@@ -643,6 +750,15 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 """,
                 (plan["request_id"],),
             ).fetchone()
+            assistant_turns = conn.execute(
+                """
+                SELECT request_id, content
+                FROM conversation_turn
+                WHERE session_id = ? AND role = 'assistant'
+                ORDER BY request_id
+                """,
+                (chat["session_id"],),
+            ).fetchall()
         assert sorted(row[0] for row in routes) == ["chat", "delegate", "plan"]
         assert plan_graph[2] == HostCommandSurface.GATEWAY.value
         assert plan_graph[3] == plan_authority["principal_id"]
@@ -697,6 +813,12 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             }
             for route in ("delegate", "plan")
         )
+        assert {row[0] for row in assistant_turns} == {
+            chat["request_id"],
+            delegate["request_id"],
+            plan["request_id"],
+        }
+        assert len(assistant_turns) == 3
         graph = container.task_store.get_graph(plan_graph[0], plan_graph[1])
         assert graph["status"] == TaskGraphStatus.COMPLETED.value
         assert [node["status"] for node in graph["nodes"]] == [
@@ -717,4 +839,6 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             await container.aclose()
         if life is not None:
             PROCESS_LIFE_PROVIDER.clear(life)
+        if memory is not None:
+            memory.close()
         ledger.close()

@@ -551,6 +551,8 @@ Review 必须绑定：
 
 旧对话中的同意不能用于新 revision；不同动作之间不能共享确认。
 
+拒绝也不是可执行授权：`REJECTED`、`EXPIRED` 或 `CANCELLED` 的 Review 只能终结其精确绑定的等待节点、释放该节点可证明的状态，不能借 continuation 重签 worker grant、重跑 worker 或扩展到 sibling。任何节点、版本、checkpoint 或 decision 漂移都应失败关闭。
+
 ### 9.5 降级必须更保守
 
 当身份、策略、预算、依赖、存储或 verifier 不可用时，系统应：

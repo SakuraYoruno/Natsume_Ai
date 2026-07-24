@@ -213,6 +213,7 @@ async def activate_internal_runtime(
     )
     task_runtime.bind_runtime(runtime_group)
     await task_runtime.activate_runtime()
+    await composition.host_runtime.recover_startup_graphs()
     await scheduler.activate_clock()
     internal_command_service = internal_command_service_factory(
         runtime=composition.internal_runtime,

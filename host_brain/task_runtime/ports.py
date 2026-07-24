@@ -16,6 +16,13 @@ class CommandRepositoryPort(Protocol):
 
     def get(self, command_id: str) -> Mapping[str, Any] | None: ...
 
+    def get_by_graph(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
     def admit(
         self,
         command: Any,
@@ -29,6 +36,12 @@ class TaskStorePort(Protocol):
     """Subset of ``DurableTaskStore`` required by the DAG coordinator."""
 
     def get_graph(self, graph_id: str, revision: int) -> Mapping[str, Any]: ...
+
+    def list_nonterminal_graphs(
+        self,
+        *,
+        limit: int = 100,
+    ) -> Sequence[Mapping[str, Any]]: ...
 
     def assert_budget_usage_ready(self) -> None: ...
 

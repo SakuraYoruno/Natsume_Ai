@@ -76,6 +76,9 @@ class _Coordinator:
     def __init__(self) -> None:
         self.execution: dict[str, Any] | None = None
 
+    def supports_completion_policy(self, _value: str | None) -> bool:
+        return True
+
     async def execute_stream(self, **kwargs: Any):
         self.execution = dict(kwargs)
         yield {"phase": "COMMIT", "done": True}
@@ -287,3 +290,4 @@ async def test_application_denied_review_reconciles_without_worker_grant() -> No
     assert grants.calls == []
     assert coordinator.execution is not None
     assert "node_grant_refs" not in coordinator.execution
+    assert coordinator.execution["denied_review_node_id"] == contracts.graph.nodes[0].node_id

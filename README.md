@@ -30,6 +30,10 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 本轮 NE-01 还收口了一个此前明确缺失的窄窗口：无前置 Review 的到期 `RETRY_PENDING` 不再先独立提交 READY，而是与 Attempt、Lease、Heartbeat 和 claim Outbox 在同一 SQLite writer UoW 中完成；若 Attempt Outbox identity 漂移，READY promotion 也会回滚。需要新 Review 的重试仍先落 durable Review、后续再 claim，不能以原子化为由绕过审批。该证据只覆盖这条 retry 边界，不代表 general/multi-node recovery、生产 canary 或 NE-01 完成。
 
+最新 Host 启动恢复切片把一条此前依赖客户端重复请求的路径接入生产生命周期：`task_store.recover_startup()`、完整 RuntimeGroup 与共享 Acceptance Effect owner 就绪后，Host 以最多 100 条的只读 inventory 读取 `CREATED/ACTIVE/BLOCKED` 图；仅 `CHAT/HOST_INPUT/TOOL/GATEWAY` surface 的图可从 `HostCommandRepository.get_by_graph()` 重开同一 immutable `HostCommand + WorkOrderV3 + ExecutorAssignment + TaskGraph` tuple。该流程不重建原始请求、不重新 Governor/规划，也不在 scanner 内直接重放 worker；live Lease 或 `GOVERNED_EXECUTION_IN_PROGRESS` 一律记录为 `DEFERRED`，达到 inventory 上限或任一 identity/receipt 漂移则启动失败关闭。该一轮 boot-scoped continuation 有 SQLite admission/inventory 证据，但没有周期性 survivor 扫描、unknown-effect、一般多节点/批次或真实服务栈验收，NE-01 仍为 `IN_PROGRESS`。
+
+同一 Runtime 的精确拒绝性 Review continuation 现在只携带 immutable `graph/revision/node` 身份，绝不签发 worker node grant。调度器先确认目标仍处于等待 Review 的 checkpoint、没有活跃 sibling，再从 ReviewStore 重开 `REVIEW_DENIED`；任一 node、状态、grant 或决策漂移都以 `GOVERNED_DURABLE_STATE_CONFLICT` 失败关闭。它仅终结当前拒绝路径，不把通用 Review 恢复或多节点并发恢复提升为完成。
+
 Plan compatibility 的循环依赖现在也 fail-closed：`PlanIntentSearch` 对真实 dependency cycle 返回 `PLAN_CYCLE`，兼容 `SkillDag` 在 cycle 时只输出空批次，不能再忽略依赖并伪造串行执行。它是遗留路径安全围栏，不是原生多节点恢复、动态 replan 或 NE-01 完成证据。
 
 最近一次 post-checkpoint `EXACT_REJECTED` response-loss 回归还修正了 generic failure bundle 与专用 checkpoint Budget 拒绝链的边界：generic bundle 不得替 node/Attempt-bound rejection authority 释放 graph Budget；后者会独立重验 BudgetReservation、rejected BudgetUsage 与 Outbox lineage。`tests/integration/test_ne01_multinode_budget_settlement_hold.py` 与 `tests/integration/test_ne01_operation_online_takeover.py` 的唯一组合复跑为 `26 passed in 69.45s`。这是本地窄切片证据，不与其他批次相加；NE-01 wave integration、真实模型、Docker 全服务栈和远程 CI 仍分别为未运行/`NOT_RUN_ACCOUNT_QUOTA`。

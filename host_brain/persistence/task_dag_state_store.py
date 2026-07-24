@@ -335,6 +335,54 @@ class TaskDagStateStoreMixin:
         finally:
             conn.close()
 
+    def list_nonterminal_graphs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return a bounded, consistent inventory of resumable Graphs.
+
+        Startup continuation must never infer unfinished work from a generic
+        recent-history query: a busy installation can have far more completed
+        Graphs than active work.  This read adapter exposes only the durable
+        states that may still require a worker, Review, or terminal recovery.
+        It deliberately has no write authority and returns the same validated
+        projection shape as :meth:`list_graphs`.
+        """
+
+        size = max(1, min(int(limit), 500))
+        resumable_statuses = (
+            TaskGraphStatus.CREATED.value,
+            TaskGraphStatus.ACTIVE.value,
+            TaskGraphStatus.BLOCKED.value,
+        )
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            graph_rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_graph
+                WHERE status IN (?, ?, ?)
+                ORDER BY updated_ts_ms DESC, graph_id, revision DESC
+                LIMIT ?
+                """,
+                (*resumable_statuses, size),
+            ).fetchall()
+            records: list[dict[str, Any]] = []
+            for graph_row in graph_rows:
+                node_rows = conn.execute(
+                    """
+                    SELECT * FROM task_runtime_node
+                    WHERE graph_id = ? AND graph_revision = ?
+                    ORDER BY node_id
+                    """,
+                    (str(graph_row["graph_id"]), int(graph_row["revision"])),
+                ).fetchall()
+                records.append(_graph_record(graph_row, node_rows))
+            conn.commit()
+            return records
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def get_node(self, graph_id: str, graph_revision: int, node_id: str) -> dict[str, Any]:
         conn = self._connect()
         try:
