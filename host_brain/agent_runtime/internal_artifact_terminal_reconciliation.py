@@ -18,6 +18,9 @@ from host_brain.contracts.agent_runtime.projection_recovery import (
     ProjectionRecoveryContractError,
     validate_projection_recovery_envelope,
 )
+from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
+    build_internal_budget_rejection_result_ref,
+)
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
@@ -63,6 +66,7 @@ class InternalArtifactTerminalReconciler:
         task_store: Any,
         command_repository: Any,
         projection_store: Any,
+        claim_result_store: Any | None = None,
     ) -> None:
         required = (
             (artifact_store, "inventory_governed_seals"),
@@ -95,6 +99,12 @@ class InternalArtifactTerminalReconciler:
                 "Internal artifact terminal reconciler lacks: "
                 + ",".join(sorted(set(missing)))
             )
+        if claim_result_store is not None and not callable(
+            getattr(claim_result_store, "complete_claim", None)
+        ):
+            raise TypeError(
+                "Internal artifact terminal claim store must expose complete_claim"
+            )
         repository = getattr(workspace_runtime, "repository", None)
         if not callable(getattr(repository, "list_terminal_lifecycle_candidates", None)):
             raise TypeError("Workspace lifecycle terminal inventory is required")
@@ -104,6 +114,7 @@ class InternalArtifactTerminalReconciler:
         self._tasks = task_store
         self._commands = command_repository
         self._projections = projection_store
+        self._claim_results = claim_result_store
         self._staging_cursor: str | None = None
         self._unsealed_staging_cursor: str | None = None
         self._lifecycle_cursor: str | None = None
@@ -180,6 +191,8 @@ class InternalArtifactTerminalReconciler:
                         )
                     )
                     continue
+                if reason == "TERMINAL_BUDGET_REJECTED":
+                    self._complete_budget_rejection_claim(seal)
                 receipt = self._workspaces.abandon_terminal_artifact(
                     workspace_id=str(seal.workspace_id),
                     execution_authority=dict(seal.execution_authority),
@@ -369,6 +382,93 @@ class InternalArtifactTerminalReconciler:
                 "Workspace terminal event historical Lease drifted"
             )
         return owner
+
+    def _complete_budget_rejection_claim(self, seal: Any) -> None:
+        """Settle an exact C-boundary claim before deleting its seal.
+
+        The terminal worker may be the first process to observe this state
+        after a crash.  It therefore repeats the durable terminal resolver
+        rather than trusting a filename, prior worker output, or a stale
+        in-memory completion result.
+        """
+
+        claims = self._claim_results
+        if claims is None:
+            return
+        authority = dict(getattr(seal, "execution_authority", {}) or {})
+        attempt_id = str(authority.get("attempt_id") or "").strip()
+        graph_id = str(authority.get("graph_id") or "").strip()
+        node_id = str(authority.get("node_id") or "").strip()
+        revision = authority.get("graph_revision")
+        if (
+            not attempt_id
+            or not graph_id
+            or not node_id
+            or type(revision) is not int
+            or revision < 1
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected artifact has invalid execution authority"
+            )
+        terminal = self._tasks.resolve_internal_agent_budget_rejection_terminal(
+            attempt_id
+        )
+        attempt = terminal.get("attempt") if isinstance(terminal, Mapping) else None
+        node = terminal.get("node") if isinstance(terminal, Mapping) else None
+        graph = terminal.get("graph") if isinstance(terminal, Mapping) else None
+        reservation = (
+            terminal.get("reservation") if isinstance(terminal, Mapping) else None
+        )
+        budget = terminal.get("budget") if isinstance(terminal, Mapping) else None
+        usage = terminal.get("usage") if isinstance(terminal, Mapping) else None
+        if not all(
+            isinstance(value, Mapping)
+            for value in (attempt, node, graph, reservation, budget, usage)
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected terminal authority is incomplete"
+            )
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_BUDGET_REJECTED"
+            or str(attempt.get("attempt_id") or "") != attempt_id
+            or str(attempt.get("graph_id") or "") != graph_id
+            or attempt.get("graph_revision") != revision
+            or str(attempt.get("node_id") or "") != node_id
+            or str(node.get("node_id") or "") != node_id
+            or str(graph.get("graph_id") or "") != graph_id
+            or graph.get("revision") != revision
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected terminal lineage drifted"
+            )
+        record = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        frozen = {**authority, "route": "delegate", "target_id": "agent_runtime"}
+        self._assert_internal_admission(record, frozen=frozen)
+        command = record.get("command") if isinstance(record, Mapping) else None
+        claim_ref = str(getattr(command, "ingress_claim_ref", "") or "").strip()
+        if not claim_ref:
+            return
+        try:
+            result_ref = build_internal_budget_rejection_result_ref(
+                command_id=str(getattr(command, "command_id", "") or ""),
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                budget_id=str(budget.get("budget_id") or ""),
+                usage_id=str(usage.get("usage_id") or ""),
+            )
+        except ValueError as exc:
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected claim result identity is invalid"
+            ) from exc
+        claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
 
     def _terminal_abandonment_reason(self, seal: Any) -> str | None:
         try:

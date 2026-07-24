@@ -36,6 +36,9 @@ from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.persistence.task_store_types import TaskStoreError
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
+from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
+    INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX,
+)
 import host_brain.app.internal_task_runtime as internal_task_runtime_module
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
@@ -44,7 +47,9 @@ from host_brain.contracts.agent_runtime.workspace_lifecycle import (
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.governor.tokens import TokenService
 from host_brain.app.internal_task_runtime import (
+    INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
     InternalAgentCommandService,
+    GovernedInternalRuntimeError,
     _build_contracts,
     build_governed_internal_runtime,
 )
@@ -55,6 +60,10 @@ from host_brain.persistence.agent_execution_repository import (
     AgentExecutionResultRepository,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.host_command_repository_types import (
+    HOST_COMMAND_INGRESS_CONFLICT,
+    HostCommandRepositoryError,
+)
 from host_brain.persistence.internal_agent_checkpoint_uow import (
     DurableInternalAgentCheckpointUnitOfWork,
 )
@@ -1125,6 +1134,15 @@ async def test_internal_checkpoint_charge_and_terminal_bundle_preserve_abc_bound
         assert terminal["execution_receipt"]["reason_code"] == (
             "GOVERNED_BUDGET_EXCEEDED"
         )
+        with sqlite3.connect(str(db_path)) as conn:
+            direct_budget_claim_result_ref = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (claim_ref,),
+            ).fetchone()[0]
+        assert str(direct_budget_claim_result_ref).startswith(
+            INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX
+        )
         assert response_loss_uow.reject_calls == 1
         assert response_loss_uow.last_rejection is not None
         reopen_args, reopen_kwargs = response_loss_uow.last_rejection
@@ -1150,6 +1168,12 @@ async def test_internal_checkpoint_charge_and_terminal_bundle_preserve_abc_bound
         )
         assert admitted is not None
         command = admitted["command"]
+        assert (
+            command_repository.validate_ingress_claim_result(command.command_id)[
+                "command"
+            ]
+            == command
+        )
         snapshot = durable_store.read_scheduler_snapshot(
             command.graph_id,
             command.graph_revision,
@@ -1679,25 +1703,36 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         first_terminal_worker.join()
         first_runtime._terminal_worker_quiesced = True
 
+        class _CrashBeforeClaimClose:
+            @staticmethod
+            def complete_claim(**_kwargs: Any) -> None:
+                raise RuntimeError("simulated process loss before claim close")
+
         first_service = InternalAgentCommandService(
             runtime=first_runtime,
             intent_engine=intent_engine,
-            claim_result_store=claim_store,
+            claim_result_store=_CrashBeforeClaimClose(),
         )
-        terminal = await first_service.execute(
-            work_order=work_order,
-            request_id=request_id,
-            session_id="session-internal-real-budget-rejected",
-            ts_ms=NOW,
-            command_authority=authority,
-        )
-        assert terminal["execution_receipt"]["status"] == "BUDGET_BLOCKED"
-        assert terminal["execution_receipt"]["reason_code"] == (
-            "GOVERNED_BUDGET_EXCEEDED"
-        )
+        with pytest.raises(GovernedInternalRuntimeError) as ingress_failure:
+            await first_service.execute(
+                work_order=work_order,
+                request_id=request_id,
+                session_id="session-internal-real-budget-rejected",
+                ts_ms=NOW,
+                command_authority=authority,
+            )
+        assert ingress_failure.value.reason_code == INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED
         assert agent_calls == ["work-order-internal-real-budget-rejected"]
+        with sqlite3.connect(str(db_path)) as conn:
+            budget_claim_result_ref = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (claim_ref,),
+            ).fetchone()[0]
+        assert budget_claim_result_ref is None
 
-        admitted = HostCommandRepository(db_path, clock=clock).get_by_request(
+        command_repository = HostCommandRepository(db_path, clock=clock)
+        admitted = command_repository.get_by_request(
             surface="internal",
             request_id=request_id,
         )
@@ -1786,6 +1821,39 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         await reopened_runtime.activate()
 
         assert agent_calls == ["work-order-internal-real-budget-rejected"]
+        with sqlite3.connect(str(db_path)) as conn:
+            recovered_budget_claim_result_ref = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (claim_ref,),
+            ).fetchone()[0]
+        assert str(recovered_budget_claim_result_ref).startswith(
+            INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX
+        )
+        assert (
+            HostCommandRepository(
+                db_path,
+                clock=clock,
+            ).validate_ingress_claim_result(command.command_id)["command"]
+            == command
+        )
+        tampered_db_path = tmp_path / "internal-real-budget-rejected-tampered.sqlite3"
+        with sqlite3.connect(str(db_path)) as source_conn:
+            with sqlite3.connect(str(tampered_db_path)) as target_conn:
+                source_conn.backup(target_conn)
+        with sqlite3.connect(str(tampered_db_path)) as conn:
+            conn.execute(
+                "UPDATE secure_ingress_idempotency_claim SET result_ref = ? "
+                "WHERE claim_ref = ?",
+                ("task-terminal://internal-budget-rejection/sha256/tampered", claim_ref),
+            )
+            conn.commit()
+        with pytest.raises(HostCommandRepositoryError) as tampered:
+            HostCommandRepository(
+                tampered_db_path,
+                clock=clock,
+            ).validate_ingress_claim_result(command.command_id)
+        assert tampered.value.reason_code == HOST_COMMAND_INGRESS_CONFLICT
         assert reopened_artifacts.inventory_governed_seals(
             namespace="staging",
             limit=10,
@@ -1823,6 +1891,13 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         assert replay["replayed"] is True
         assert replay["execution_receipt"]["status"] == "BUDGET_BLOCKED"
         assert agent_calls == ["work-order-internal-real-budget-rejected"]
+        with sqlite3.connect(str(db_path)) as conn:
+            replay_claim_result_ref = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (claim_ref,),
+            ).fetchone()[0]
+        assert replay_claim_result_ref == recovered_budget_claim_result_ref
         assert reopened_artifacts.inspect_governed_tombstone_ref(
             tombstone_ref
         )["reason_code"] == "TERMINAL_BUDGET_REJECTED"

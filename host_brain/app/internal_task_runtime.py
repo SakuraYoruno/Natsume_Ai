@@ -39,6 +39,9 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetExceededAction,
     BudgetPolicy,
 )
+from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
+    build_internal_budget_rejection_result_ref,
+)
 from host_brain.persistence.task_repository import OutboxMessage
 from host_brain.contracts.agent_runtime.work_order import (
     AgentWorkOrder,
@@ -222,6 +225,7 @@ class GovernedInternalRuntime:
         startup_task_store: Any | None = None,
         startup_artifact_store: Any | None = None,
         startup_claim_result_store: Any | None = None,
+        terminal_claim_task_store: Any | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
     ) -> None:
         self._application = application
@@ -246,6 +250,17 @@ class GovernedInternalRuntime:
                     )
         self._terminal_continuation_worker = terminal_continuation_worker
         self._terminal_worker_quiesced = terminal_continuation_worker is None
+        if terminal_claim_task_store is not None and not callable(
+            getattr(
+                terminal_claim_task_store,
+                "resolve_internal_agent_budget_rejection_terminal",
+                None,
+            )
+        ):
+            raise TypeError(
+                "Internal terminal claim TaskStore lacks exact budget terminal resolver"
+            )
+        self._terminal_claim_task_store = terminal_claim_task_store
         self._startup_checkpoint_continuation = InternalStartupCheckpointContinuation(
             task_store=startup_task_store,
             artifact_store=startup_artifact_store,
@@ -340,6 +355,21 @@ class GovernedInternalRuntime:
                 surface=HostCommandSurface.INTERNAL.value,
                 request_id=str(request_id or "").strip(),
             )
+            if existing is not None:
+                existing_command = existing.get("command")
+                validate_claim = getattr(
+                    self._commands,
+                    "validate_ingress_claim_result",
+                    None,
+                )
+                if isinstance(existing_command, HostCommand) and callable(validate_claim):
+                    try:
+                        existing = validate_claim(existing_command.command_id)
+                    except Exception as exc:
+                        raise GovernedInternalRuntimeError(
+                            INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                            "durable Internal replay ingress claim is invalid",
+                        ) from exc
             if existing is None:
                 frozen_runtime_context = self._freeze_runtime_context(
                     work_order=legacy_order,
@@ -598,6 +628,84 @@ class GovernedInternalRuntime:
             expected_receipt_ref=expected_receipt_ref,
         )
 
+    async def exact_budget_rejection_claim_result_ref(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        execution_receipt: Mapping[str, Any],
+    ) -> str | None:
+        """Return a claim result only for one re-opened C-boundary terminal.
+
+        A ``BUDGET_BLOCKED`` stream event is not sufficient authority by
+        itself.  The TaskStore must independently reopen the exact Internal
+        checkpoint rejection (including its five terminal Outboxes) before a
+        Secure Ingress claim can be completed.  All other rejected outcomes
+        deliberately remain open for their own reconciliation path.
+        """
+
+        store = self._terminal_claim_task_store
+        if store is None or command.surface is not HostCommandSurface.INTERNAL:
+            return None
+        receipt = dict(execution_receipt or {})
+        if (
+            str(receipt.get("status") or "").strip().upper() != "BUDGET_BLOCKED"
+            or receipt.get("accepted") is not False
+            or str(receipt.get("reason_code") or "").strip()
+            != "GOVERNED_BUDGET_EXCEEDED"
+        ):
+            return None
+        attempt_id = str(receipt.get("attempt_id") or "").strip()
+        node_id = str(receipt.get("node_id") or "").strip()
+        if (
+            not attempt_id
+            or node_id != str(work_order.task_node_id or "").strip()
+            or str(receipt.get("command_id") or "").strip() != command.command_id
+            or str(receipt.get("graph_id") or "").strip() != command.graph_id
+            or receipt.get("graph_revision") != command.graph_revision
+            or not command.ingress_claim_ref
+        ):
+            return None
+        try:
+            resolved = await asyncio.to_thread(
+                store.resolve_internal_agent_budget_rejection_terminal,
+                attempt_id,
+            )
+        except Exception:
+            return None
+        attempt = dict(resolved.get("attempt") or {})
+        node = dict(resolved.get("node") or {})
+        graph = dict(resolved.get("graph") or {})
+        reservation = dict(resolved.get("reservation") or {})
+        budget = dict(resolved.get("budget") or {})
+        usage = dict(resolved.get("usage") or {})
+        if (
+            str(resolved.get("authority_kind") or "")
+            != "INTERNAL_AGENT_BUDGET_REJECTED"
+            or str(attempt.get("attempt_id") or "") != attempt_id
+            or str(attempt.get("graph_id") or "") != command.graph_id
+            or attempt.get("graph_revision") != command.graph_revision
+            or str(attempt.get("node_id") or "") != node_id
+            or str(node.get("node_id") or "") != node_id
+            or str(graph.get("graph_id") or "") != command.graph_id
+            or graph.get("revision") != command.graph_revision
+        ):
+            return None
+        try:
+            return build_internal_budget_rejection_result_ref(
+                command_id=command.command_id,
+                ingress_claim_ref=command.ingress_claim_ref,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                budget_id=str(budget.get("budget_id") or ""),
+                usage_id=str(usage.get("usage_id") or ""),
+            )
+        except ValueError:
+            return None
+
 
 class InternalAgentCommandService:
     """Official Governor + durable runtime application boundary for routes."""
@@ -724,10 +832,16 @@ class InternalAgentCommandService:
             return terminal
         durable = self._runtime.existing_command(request_id=request_ref)
         durable_command = durable.get("command") if durable is not None else None
+        durable_work_order = durable.get("work_order") if durable is not None else None
         if not isinstance(durable_command, HostCommand):
             raise GovernedInternalRuntimeError(
                 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
                 "terminal internal command has no durable HostCommand",
+            )
+        if not isinstance(durable_work_order, WorkOrderV3):
+            raise GovernedInternalRuntimeError(
+                INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
+                "terminal internal command has no durable WorkOrderV3",
             )
         claim_ref = str(durable_command.ingress_claim_ref or "").strip()
         if not claim_ref:
@@ -735,6 +849,24 @@ class InternalAgentCommandService:
                 INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
                 "terminal internal command has no durable claim reference",
             )
+        budget_terminal_ref = await self._runtime.exact_budget_rejection_claim_result_ref(
+            command=durable_command,
+            work_order=durable_work_order,
+            execution_receipt=receipt,
+        )
+        if budget_terminal_ref is not None:
+            try:
+                self._claim_results.complete_claim(
+                    claim_ref=claim_ref,
+                    result_ref=budget_terminal_ref,
+                    at_ms=int(ts_ms),
+                )
+            except Exception as exc:
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_INGRESS_COMPLETION_FAILED,
+                    "secure ingress budget terminal claim could not be completed",
+                ) from exc
+            return terminal
         effect_status = str(
             terminal.get("internal_agent_effect_status") or ""
         ).strip().upper()
@@ -880,6 +1012,7 @@ def build_governed_internal_runtime(
                 task_store=task_runtime_container.task_store,
                 command_repository=task_runtime_container.command_repository,
                 projection_store=projection_store,
+                claim_result_store=claim_result_store,
             )
         )
     return GovernedInternalRuntime(
@@ -895,6 +1028,7 @@ def build_governed_internal_runtime(
         ),
         startup_artifact_store=artifact_store,
         startup_claim_result_store=claim_result_store,
+        terminal_claim_task_store=task_runtime_container.task_store,
     )
 
 
