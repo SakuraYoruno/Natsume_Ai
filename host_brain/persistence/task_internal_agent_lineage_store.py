@@ -33,6 +33,7 @@ from host_brain.persistence.task_store_types import (
 )
 from host_brain.persistence.task_record_codec import (
     _dumps,
+    _graph_cancellation_decision_record,
     _graph_record,
     _loads_object,
     _node_record,
@@ -277,12 +278,40 @@ class TaskInternalAgentLineageStoreMixin:
                 "post-review cancellation lacks a durable cancellation authority",
             )
         record = validator(conn, row)
-        payload = record.get("payload") if isinstance(record, Mapping) else None
+        decision_row = conn.execute(
+            """
+            SELECT * FROM task_runtime_graph_cancellation_decision
+            WHERE intent_ref = ?
+            """,
+            (str(record.get("intent_ref") or ""),),
+        ).fetchone()
+        if decision_row is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "post-review cancellation lacks a final decision",
+            )
+        decision = _graph_cancellation_decision_record(decision_row)
+        decision_validator = getattr(
+            self,
+            "_assert_graph_cancellation_decision_trusted",
+            None,
+        )
+        if not callable(decision_validator):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "post-review cancellation decision authority is unavailable",
+            )
+        decision_validator(conn, decision)
+        payload = decision.get("payload") if isinstance(decision, Mapping) else None
         if (
             str(record.get("status") or "") != "FINALIZED"
             or str(record.get("graph_id") or "") != graph_id
             or int(record.get("graph_revision") or 0) != graph_revision
+            or str(decision.get("intent_ref") or "")
+            != str(record.get("intent_ref") or "")
             or not isinstance(payload, Mapping)
+            or str(payload.get("graph_id") or "") != graph_id
+            or int(payload.get("graph_revision") or 0) != graph_revision
             or str(payload.get("graph_target_status") or "") != "CANCELLED"
         ):
             raise TaskStoreError(

@@ -49,13 +49,10 @@ from .dag_scheduler import (
     DagScheduleInputError,
     compute_dag_schedule,
 )
-from .dag_scheduling_records import (
-    _validated_node_grant_refs,
-)
+from .dag_scheduling_preflight import prepare_dag_scheduling_preflight
 from .dag_scheduling_review_denial import (
     assert_denied_review_gate,
     assert_denied_review_waiting_node,
-    normalize_denied_review_node,
 )
 from .dag_scheduling_reentry import reconstruct_parallel_outcomes
 from .dag_scheduling_completion_replay import (
@@ -63,7 +60,6 @@ from .dag_scheduling_completion_replay import (
 )
 from .dag_scheduling_settlement import settle_waiting_approval
 from .errors import (
-    GOVERNED_ADMISSION_INVALID,
     GOVERNED_BUDGET_EXCEEDED,
     GOVERNED_BUDGET_STATE_CONFLICT,
     GOVERNED_DURABLE_STATE_CONFLICT,
@@ -180,55 +176,35 @@ class DurableDagSchedulingRuntime:
         node_grant_refs: Mapping[str, str] | None = None,
         denied_review_node_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        admitted.validate()
-        if not isinstance(command, HostCommand) or command.command_id != admitted.command_id:
-            raise GovernedRuntimeError(
-                GOVERNED_ADMISSION_INVALID,
-                "runtime command differs from admitted command",
+        preflight = await prepare_dag_scheduling_preflight(
+            admitted=admitted,
+            command=command,
+            work_order=work_order,
+            node_grant_refs=node_grant_refs,
+            denied_review_node_id=denied_review_node_id,
+            store=self._store,
+            budgets=self._budgets,
+            graph_cancellations=self._graph_cancellations,
+            supports_completion_policy=self.supports_completion_policy,
         )
-        grant_refs = _validated_node_grant_refs(admitted, node_grant_refs)
+        grant_refs = preflight.grant_refs
         # A consumed POST Review renews a short-lived execution credential but
         # must accept the already committed worker checkpoint, not replay it.
         # Keep the normal live grant batch for every new worker execution and
         # replace only the exact reviewed node with its reopened historical
         # projection grant before the all-node success finalizer validates it.
-        parallel_success_grant_refs = dict(grant_refs)
-        node_ids = {binding.node_id for binding in admitted.nodes}
-        denied_review_node = normalize_denied_review_node(
-            denied_review_node_id, node_ids, grant_refs
-        )
-        parallel_success_enabled = (
-            admitted.completion_policy
-            == TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1.value
-        )
-        if parallel_success_enabled and (
-            not self.supports_completion_policy(admitted.completion_policy)
-            or not admitted.result_node_id
-            or (
-                not denied_review_node
-                and set(grant_refs) != node_ids
-            )
-        ):
+        parallel_success_grant_refs = preflight.parallel_success_grant_refs
+        denied_review_node = preflight.denied_review_node
+        parallel_success_enabled = preflight.parallel_success_enabled
+        if preflight.cancellation_event is not None:
+            yield preflight.cancellation_event
+            return
+        budget = preflight.budget
+        if budget is None:
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
-                "TaskGraph requires atomic success semantics that this runtime cannot execute",
+                "DAG preflight returned neither cancellation nor Budget authority",
             )
-        await _maybe_await(self._store.assert_dag_scheduling_ready())
-        await _maybe_await(self._store.assert_parallel_settlement_decision_ready())
-        await _maybe_await(self._store.assert_graph_cancellation_ready())
-        if parallel_success_enabled:
-            await _maybe_await(self._store.assert_parallel_success_decision_ready())
-        cancellation_event = (
-            await self._graph_cancellations.continue_requested_graph_cancellation(
-                admitted=admitted,
-                command=command,
-                work_order=work_order,
-            )
-        )
-        if cancellation_event is not None:
-            yield cancellation_event
-            return
-        budget = await self._budgets.ensure_active(admitted=admitted, work_order=work_order)
 
         while True:
             graph = await _maybe_await(
@@ -473,10 +449,11 @@ class DurableDagSchedulingRuntime:
                     admitted=admitted,
                     durable_nodes=durable_nodes,
                 )
-                outcomes = await self._reentered_parallel_outcomes(
+                outcomes = await reconstruct_parallel_outcomes(
                     admitted=admitted,
                     graph=graph,
                     durable_nodes=durable_nodes,
+                    node_execution_projection=self._node_execution_projection,
                 )
                 if not outcomes or all(outcome.accepted for outcome in outcomes):
                     raise GovernedRuntimeError(
@@ -1509,20 +1486,6 @@ class DurableDagSchedulingRuntime:
                 if _status(latest_graph) == "COMPLETED":
                     yield node_terminal
                     return
-
-    async def _reentered_parallel_outcomes(
-        self,
-        *,
-        admitted: AdmittedExecution,
-        graph: Mapping[str, Any],
-        durable_nodes: Mapping[str, Mapping[str, Any]],
-    ) -> tuple[_ParallelNodeOutcome, ...]:
-        return await reconstruct_parallel_outcomes(
-            admitted=admitted,
-            graph=graph,
-            durable_nodes=durable_nodes,
-            node_execution_projection=self._node_execution_projection,
-        )
 
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value

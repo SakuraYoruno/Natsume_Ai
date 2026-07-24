@@ -388,7 +388,23 @@ class _TaskStore:
             "status": self.cancellation_status,
             "graph_id": graph_id,
             "graph_revision": revision,
-            "payload": {"graph_target_status": "CANCELLED"},
+            "intent_ref": "taskcancel-intent://sha256/" + "a" * 64,
+        }
+
+    def get_graph_cancellation_decision_for_intent(
+        self,
+        intent_ref: str,
+    ) -> dict[str, Any] | None:
+        if self.cancellation_status is None:
+            return None
+        assert intent_ref == "taskcancel-intent://sha256/" + "a" * 64
+        return {
+            "intent_ref": intent_ref,
+            "payload": {
+                "graph_id": "graph-internal",
+                "graph_revision": 1,
+                "graph_target_status": "CANCELLED",
+            },
         }
 
 

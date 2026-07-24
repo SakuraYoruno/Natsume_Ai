@@ -92,6 +92,7 @@ class InternalArtifactTerminalReconciler:
             (task_store, "get_operation_reservation"),
             (task_store, "get_committed_operation_checkpoint"),
             (task_store, "get_graph_cancellation_for_graph"),
+            (task_store, "get_graph_cancellation_decision_for_intent"),
             (task_store, "resolve_internal_agent_takeover_lineage"),
             (task_store, "resolve_internal_agent_budget_rejection_terminal"),
             (task_store, "resolve_internal_agent_nonacceptance_checkpoint_terminal"),
@@ -785,23 +786,57 @@ class InternalArtifactTerminalReconciler:
             or str(lease.get("status") or "") != "CANCELLED"
         ):
             return None
+        self._require_finalized_cancellation(
+            graph_id=graph_id,
+            revision=revision,
+        )
+        return "TERMINAL_EXECUTION_CANCELLED_UNSEALED"
+
+    def _require_finalized_cancellation(
+        self,
+        *,
+        graph_id: str,
+        revision: int,
+    ) -> None:
+        """Reopen both immutable cancellation records before cleanup.
+
+        The intent's target is deliberately ``BLOCKED``: it is the durable
+        fence installed before worker quiescence.  ``CANCELLED`` belongs only
+        to the signed final decision, so treating the intent payload as a
+        final decision would either block safe cleanup forever or tempt a
+        caller to rewrite the intent's immutable history.
+        """
+
         cancellation = self._tasks.get_graph_cancellation_for_graph(
             graph_id,
             revision,
         )
-        payload = cancellation.get("payload") if isinstance(cancellation, Mapping) else None
+        intent_ref = str(
+            cancellation.get("intent_ref")
+            if isinstance(cancellation, Mapping)
+            else ""
+        ).strip()
+        decision = (
+            self._tasks.get_graph_cancellation_decision_for_intent(intent_ref)
+            if intent_ref
+            else None
+        )
+        payload = decision.get("payload") if isinstance(decision, Mapping) else None
         if (
             not isinstance(cancellation, Mapping)
             or str(cancellation.get("status") or "") != "FINALIZED"
             or str(cancellation.get("graph_id") or "") != graph_id
             or int(cancellation.get("graph_revision") or 0) != revision
+            or not isinstance(decision, Mapping)
+            or str(decision.get("intent_ref") or "") != intent_ref
             or not isinstance(payload, Mapping)
+            or str(payload.get("graph_id") or "") != graph_id
+            or int(payload.get("graph_revision") or 0) != revision
             or str(payload.get("graph_target_status") or "") != "CANCELLED"
         ):
             raise InternalArtifactTerminalReconciliationError(
-                "cancelled unsealed artifact has no finalized cancellation authority"
+                "cancelled artifact has no finalized cancellation decision"
             )
-        return "TERMINAL_EXECUTION_CANCELLED_UNSEALED"
 
     @staticmethod
     def _assert_frozen_authority(seal: Any, frozen: Mapping[str, Any]) -> None:

@@ -42,7 +42,7 @@ from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
 from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
     INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX,
 )
-import host_brain.app.internal_task_runtime as internal_task_runtime_module
+import host_brain.app.internal_task_contracts as internal_task_contracts_module
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOrderV3
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
@@ -76,6 +76,14 @@ from host_brain.persistence.review_continuation_store import ReviewContinuationS
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.persistence.workspace_repository import WorkspaceRepository
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.secure_ingress import ClaimStatus, IngressAuditEvent
+from host_brain.secure_ingress.graph_cancellation_authority import (
+    SecureIngressGraphCancellationAuthorityVerifier,
+    TASK_GRAPH_CANCEL_ACTION,
+    TASK_GRAPH_CANCEL_PATH,
+    TASK_GRAPH_CANCEL_REQUIRED_SCOPES,
+    canonical_task_graph_cancel_body,
+)
 from host_brain.model_runtime import (
     ModelAttemptResult,
     ProviderResponse,
@@ -399,6 +407,87 @@ def _insert_secure_authority(
                 NOW,
             ),
         )
+
+
+def _commit_graph_cancellation_authority(
+    db_path: Path,
+    *,
+    graph_id: str,
+    graph_revision: int,
+    request_id: str,
+    principal_id: str,
+    reason_code: str = "OPERATOR_REQUEST",
+) -> dict[str, Any]:
+    """Create the exact durable Operator authority used by production cancel."""
+
+    raw_body = canonical_task_graph_cancel_body(
+        graph_id=graph_id,
+        graph_revision=graph_revision,
+        reason_code=reason_code,
+    )
+    body_sha256 = _sha256(raw_body)
+    store = SQLiteSecureIngressStore(db_path, rate_limit=100)
+    try:
+        claim = store.try_claim(
+            principal_id=principal_id,
+            surface="obs.command",
+            action=TASK_GRAPH_CANCEL_ACTION,
+            required_scopes=TASK_GRAPH_CANCEL_REQUIRED_SCOPES,
+            idempotency_key=f"idempotency:{request_id}",
+            nonce=f"nonce:{request_id}",
+            body_sha256=body_sha256,
+            request_id=request_id,
+            at_ms=NOW,
+            expires_at_ms=NOW + 60_000,
+        )
+        assert claim.status is ClaimStatus.NEW
+        assert claim.claim_ref is not None
+        audit_ref = store.commit_with_audit(
+            claim_ref=claim.claim_ref,
+            event=IngressAuditEvent(
+                request_id=request_id,
+                correlation_id=f"correlation:{request_id}",
+                surface="obs.command",
+                action=TASK_GRAPH_CANCEL_ACTION,
+                method="POST",
+                normalized_path=TASK_GRAPH_CANCEL_PATH,
+                principal_id=principal_id,
+                tenant_id="tenant-internal-cancellation",
+                key_id="key-internal-cancellation",
+                credential_kind="hmac-sha256",
+                credential_ref_digest=f"sha256:{_sha256('credential:' + request_id)}",
+                requested_scopes=TASK_GRAPH_CANCEL_REQUIRED_SCOPES,
+                required_scopes=TASK_GRAPH_CANCEL_REQUIRED_SCOPES,
+                body_sha256=body_sha256,
+                idempotency_digest=f"sha256:{_sha256('idempotency:' + request_id)}",
+                nonce_digest=f"sha256:{_sha256('nonce:' + request_id)}",
+                transport_key_digest=f"sha256:{_sha256('transport:' + request_id)}",
+                decision="ALLOW",
+                reason_code="SECURE_INGRESS_ALLOWED",
+                stage="COMPLETE",
+                claim_ref=claim.claim_ref,
+                rate_snapshot={"backend": "sqlite", "current_count": 1},
+                side_effects_executed=False,
+                ts_ms=NOW,
+            ),
+        )
+        durable = store.resolve_committed_authority_by_audit(audit_ref=audit_ref)
+        assert durable is not None
+        assert durable["claim_result_ref"] is None
+    finally:
+        store.close()
+    return {
+        "allowed": True,
+        "duplicate": False,
+        "audit_ref": audit_ref,
+        "claim_ref": claim.claim_ref,
+        "request_id": request_id,
+        "principal_id": principal_id,
+        "tenant_id": "tenant-internal-cancellation",
+        "body_sha256": body_sha256,
+        "action": TASK_GRAPH_CANCEL_ACTION,
+        "required_scopes": TASK_GRAPH_CANCEL_REQUIRED_SCOPES,
+    }
 
 
 class _Executor:
@@ -1035,7 +1124,7 @@ async def test_internal_checkpoint_charge_and_terminal_bundle_preserve_abc_bound
         audit_ref=audit_ref,
     )
     monkeypatch.setattr(
-        internal_task_runtime_module,
+        internal_task_contracts_module,
         "_INTERNAL_AGENT_BUDGET_LIMITS",
         BudgetAmount(
             token_count=100,
@@ -1261,7 +1350,7 @@ async def test_internal_boundary_c_rolls_back_every_terminal_bundle_fault(
         audit_ref=audit_ref,
     )
     monkeypatch.setattr(
-        internal_task_runtime_module,
+        internal_task_contracts_module,
         "_INTERNAL_AGENT_BUDGET_LIMITS",
         BudgetAmount(
             token_count=100,
@@ -1488,7 +1577,7 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         audit_ref=audit_ref,
     )
     monkeypatch.setattr(
-        internal_task_runtime_module,
+        internal_task_contracts_module,
         "_INTERNAL_AGENT_BUDGET_LIMITS",
         BudgetAmount(
             token_count=100,
@@ -1905,6 +1994,459 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         assert reopened_artifacts.inspect_governed_tombstone_ref(
             tombstone_ref
         )["reason_code"] == "TERMINAL_BUDGET_REJECTED"
+    finally:
+        for runtime in reversed(runtimes):
+            await runtime.aclose()
+        claim_store.close()
+        ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_internal_post_review_cancellation_recovers_sealed_checkpoint_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A real Operator cancellation must settle the waiting Internal claim only after recovery.
+
+    This joins the production cancellation-authority adapter to the real
+    Internal Agent artifact/Workspace continuation boundary.  It deliberately
+    stops the terminal worker before cancellation, proving a restarted process
+    reopens the sealed checkpoint instead of replaying the Agent or trusting a
+    streamed cancellation receipt.
+    """
+
+    source = tmp_path / "s"
+    source.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "post-review-cancel@example.invalid"),
+        ("config", "user.name", "Post Review Cancellation Test"),
+    ):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+    (source / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    for args in (("add", "baseline.txt"), ("commit", "-m", "initial")):
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+    db_path = tmp_path / "internal-post-review-cancel.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="internal-post-review-cancel-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    request_id = "request-internal-post-review-cancel"
+    principal_id = "principal-internal-post-review-cancel"
+    body_sha256 = _sha256("internal-post-review-cancel")
+    claim_ref = "ingress-claim://internal/post-review-cancel"
+    audit_ref = "audit://secure-ingress/internal/post-review-cancel"
+    _insert_secure_authority(
+        db_path,
+        request_id=request_id,
+        principal_id=principal_id,
+        body_sha256=body_sha256,
+        claim_ref=claim_ref,
+        audit_ref=audit_ref,
+    )
+
+    suffix = hashlib.sha256(f"internal\n{request_id}".encode()).hexdigest()[:40]
+    graph_id = f"graph-internal-{suffix}"
+    workspace_id = DurableWorkspaceRuntime.workspace_id_for(
+        graph_id=graph_id,
+        graph_revision=1,
+    )
+    managed = tmp_path / "w"
+    managed.mkdir()
+    artifact_root = tmp_path / "a"
+    clock = _MutableClock()
+    token_secret = b"c" * 48
+    agent_calls: list[str] = []
+    runtimes: list[Any] = []
+
+    class _CanonicalPostReviewAgentExecutor:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+            assert workspace == (managed / workspace_id).resolve()
+            assert cancelled is not None and cancelled() is False
+            agent_calls.append(candidate.work_order_id)
+            return AgentResult(
+                status="EXECUTED",
+                work_order_id=candidate.work_order_id,
+                summary="result awaiting durable post-execution review",
+                result_text="result awaiting durable post-execution review",
+                verification={"status": "PASS"},
+                acceptance={"decision": "REVIEW"},
+                review_required=True,
+                metadata={
+                    "model_attempts": [
+                        {
+                            "schema_version": (
+                                "Natsume.model_runtime.budget_measurement.v1"
+                            ),
+                            "measurement_ref": (
+                                "model-budget://internal-post-review-cancel/1"
+                            ),
+                            "attempt_count": 1,
+                            "retry_count": 0,
+                            "token_count": 10,
+                            "model_cost_micros": 10_000,
+                        }
+                    ],
+                    "trace": {
+                        "schema_version": "nle.trace.redacted.v1",
+                        "payload_hash": "sha256:" + "e" * 64,
+                        "steps": [],
+                    },
+                },
+            )
+
+    monkeypatch.setattr(
+        agent_runtime_executor_module,
+        "AgentExecutor",
+        _CanonicalPostReviewAgentExecutor,
+    )
+
+    def build_workspace_runtime(
+        *, owner_id: str
+    ) -> tuple[WorkspaceRepository, DurableWorkspaceRuntime]:
+        repository = WorkspaceRepository(db_path, clock=clock)
+        runtime = DurableWorkspaceRuntime(
+            repository=repository,
+            allocator=WorkspaceAllocator(
+                repository=repository,
+                managed_roots={
+                    "post-review-cancel-worktrees": ManagedWorkspaceRoot(
+                        root_ref="post-review-cancel-worktrees",
+                        path=managed,
+                        isolation_modes=frozenset({"DIRECTORY_FENCE"}),
+                    )
+                },
+                git_sources={
+                    "post-review-cancel-source": ManagedGitSource(
+                        source_key="post-review-cancel-source",
+                        source_ref_prefix=(
+                            "git-worktree://post-review-cancel-source"
+                        ),
+                        repository=source.resolve(),
+                    )
+                },
+            ),
+            runtime_owner_id=owner_id,
+            managed_root_ref="post-review-cancel-worktrees",
+            git_source_key="post-review-cancel-source",
+            lease_ms=60_000,
+            heartbeat_interval_ms=1_000,
+            token_secret=token_secret,
+        )
+        return repository, runtime
+
+    ledger = SQLiteLedger(str(db_path))
+    claim_store = SQLiteSecureIngressStore(db_path)
+    token_service = TokenService(approval_ttl_ms=180_000)
+    intent_engine = _IntentEngine(ledger, token_service)
+    preview_authority = _ExactPreviewAuthority()
+    result_repository = AgentExecutionResultRepository(db_path)
+
+    def build_runtime(
+        *,
+        owner_id: str,
+        task_store: DurableTaskStore,
+        workspace_runtime: DurableWorkspaceRuntime,
+        artifacts: AgentArtifactStore,
+    ) -> Any:
+        command_repository = HostCommandRepository(db_path, clock=clock)
+        projections = WorkerProjectionStore(db_path, clock=clock)
+        event_store = RuntimeEventStore(db_path)
+        infrastructure = SimpleNamespace(
+            task_store=task_store,
+            review_store=ReviewStore(db_path),
+            review_continuation_store=ReviewContinuationStore(db_path),
+            command_repository=command_repository,
+            outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
+            worker_projection_store=projections,
+        )
+        infrastructure.internal_agent_checkpoint_uow = _checkpoint_uow(
+            task_store,
+            projections,
+        )
+        accepted_result = InternalAcceptedResultHandler(
+            command_repository=command_repository,
+            projection_store=projections,
+            result_repository=result_repository,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            task_store=task_store,
+        )
+        dispatcher = AcceptanceEffectDispatcher(
+            task_store=task_store,
+            handlers={"internal.agent.result_commit": accepted_result},
+            owner_id=f"{owner_id}-effect",
+            action_preview_service=preview_authority,
+        )
+        canonical_executor = AgentRuntimeExecutor(
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            model_attempt_service=object(),
+            prompt_registry=object(),
+        )
+        return build_governed_internal_runtime(
+            task_runtime_container=infrastructure,
+            ledger=ledger,
+            token_service=token_service,
+            result_repository=result_repository,
+            runtime_router=CanonicalRuntimeRouter(),
+            owner_id=owner_id,
+            canonical_executor=canonical_executor,
+            cancellation_authority_verifier=(
+                SecureIngressGraphCancellationAuthorityVerifier(claim_store)
+            ),
+            runtime_context_application=_RuntimeContextAuthority(
+                principal_id=principal_id
+            ),
+            action_preview_service=preview_authority,
+            acceptance_effect_dispatcher=dispatcher,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            claim_result_store=claim_store,
+        )
+
+    work_order = AgentWorkOrder(
+        work_order_id="work-order-internal-post-review-cancel",
+        domain="code",
+        run_mode="inspect",
+        objective="seal one result before an Operator cancels post-review",
+        workspace={
+            "strategy": "durable_workspace",
+            "workspace_id": workspace_id,
+        },
+        allowed_actions=["read_files"],
+        forbidden_actions=["write_files"],
+        verification_plan={
+            "required": True,
+            "commands": [["git", "status", "--porcelain"]],
+        },
+        acceptance_criteria=["result executed"],
+        review_policy={"review_required": False},
+    )
+    authority = {
+        "principal_id": principal_id,
+        "claim_ref": claim_ref,
+        "audit_ref": audit_ref,
+        "body_sha256": body_sha256,
+    }
+    try:
+        first_store = DurableTaskStore(db_path, clock=clock)
+        first_workspace_repository, first_workspace_runtime = build_workspace_runtime(
+            owner_id="internal-post-review-cancel-owner-a"
+        )
+        first_artifacts = AgentArtifactStore(artifact_root)
+        first_runtime = build_runtime(
+            owner_id="internal-post-review-cancel-owner-a",
+            task_store=first_store,
+            workspace_runtime=first_workspace_runtime,
+            artifacts=first_artifacts,
+        )
+        runtimes.append(first_runtime)
+        await first_runtime.activate()
+
+        terminal_worker = first_runtime._terminal_continuation_worker
+        assert terminal_worker is not None
+        terminal_worker.stop()
+        terminal_worker.join()
+        first_runtime._terminal_worker_quiesced = True
+
+        first_service = InternalAgentCommandService(
+            runtime=first_runtime,
+            intent_engine=intent_engine,
+            claim_result_store=claim_store,
+        )
+        waiting = await first_service.execute(
+            work_order=work_order,
+            request_id=request_id,
+            session_id="session-internal-post-review-cancel",
+            ts_ms=NOW,
+            command_authority=authority,
+        )
+        waiting_receipt = waiting["execution_receipt"]
+        assert waiting_receipt["status"] == "WAITING_ACCEPTANCE_REVIEW"
+        assert waiting_receipt["verification_status"] == "PASS"
+        assert waiting_receipt["accepted"] is False
+        assert agent_calls == ["work-order-internal-post-review-cancel"]
+
+        command_repository = HostCommandRepository(db_path, clock=clock)
+        admitted = command_repository.get_by_request(
+            surface="internal",
+            request_id=request_id,
+        )
+        assert admitted is not None
+        command = admitted["command"]
+        snapshot = first_store.read_scheduler_snapshot(
+            command.graph_id,
+            command.graph_revision,
+        )
+        assert snapshot["graph_record"]["status"] == "BLOCKED"
+        assert snapshot["graph_record"]["nodes"][0]["status"] == (
+            "WAITING_ACCEPTANCE_REVIEW"
+        )
+        assert snapshot["attempts"][0]["status"] == "SUCCEEDED"
+        assert first_workspace_repository.get(workspace_id).status == "ACTIVE"
+        staging = first_artifacts.inventory_governed_seals(
+            namespace="staging",
+            limit=10,
+        )
+        assert len(staging) == 1
+        sealed = staging[0]
+
+        cancel_request_id = "request-operator-post-review-cancel"
+        cancellation_authority = _commit_graph_cancellation_authority(
+            db_path,
+            graph_id=command.graph_id,
+            graph_revision=command.graph_revision,
+            request_id=cancel_request_id,
+            principal_id="service.operator.post-review-cancel",
+        )
+        cancelled = await first_runtime.request_graph_cancellation(
+            admitted,
+            authority=cancellation_authority,
+            source="OPERATOR",
+            reason_code="OPERATOR_REQUEST",
+        )
+        cancellation_receipt = cancelled["execution_receipt"]
+        assert cancellation_receipt["status"] == "CANCELLED"
+        assert cancellation_receipt["accepted"] is False
+        assert cancellation_receipt["projection"]["graph_cancellation"] == {
+            "status": "FINALIZED",
+            "graph_status": "CANCELLED",
+            "intent_ref": cancellation_receipt["projection"]["graph_cancellation"][
+                "intent_ref"
+            ],
+            "decision_ref": cancellation_receipt["projection"]["graph_cancellation"][
+                "decision_ref"
+            ],
+            "request_id": cancel_request_id,
+            "request_identity": cancellation_authority["audit_ref"],
+            "source": "OPERATOR",
+            "reason_code": "OPERATOR_REQUEST",
+            "local_pending_tasks": [],
+        }
+        cancelled_snapshot = first_store.read_scheduler_snapshot(
+            command.graph_id,
+            command.graph_revision,
+        )
+        assert cancelled_snapshot["graph_record"]["status"] == "CANCELLED"
+        assert cancelled_snapshot["graph_record"]["nodes"][0]["status"] == "CANCELLED"
+        assert cancelled_snapshot["attempts"][0]["status"] == "SUCCEEDED"
+        assert cancelled_snapshot["budgets"][0]["status"] == "RELEASED"
+        cancellation_record = first_store.get_graph_cancellation_for_graph(
+            command.graph_id,
+            command.graph_revision,
+        )
+        assert cancellation_record is not None
+        assert cancellation_record["status"] == "FINALIZED"
+        # The immutable intent records the initial BLOCKED fence.  The final
+        # CANCELLED outcome lives in its signed decision rather than rewriting
+        # the intent history.
+        assert cancellation_record["payload"]["graph_target_status"] == "BLOCKED"
+        cancellation_decision = (
+            first_store.get_graph_cancellation_decision_for_intent(
+                cancellation_record["intent_ref"]
+            )
+        )
+        assert cancellation_decision is not None
+        assert cancellation_decision["payload"]["graph_target_status"] == "CANCELLED"
+        with sqlite3.connect(str(db_path)) as conn:
+            review_states = conn.execute(
+                "SELECT status FROM agent_runtime_review WHERE task_graph_id = ?",
+                (command.graph_id,),
+            ).fetchall()
+            effect_fences = conn.execute(
+                """
+                SELECT effect.status, fence.resolution_status
+                FROM task_runtime_acceptance_effect_intent AS effect
+                JOIN task_runtime_graph_cancellation_effect_fence AS fence
+                  ON fence.effect_id = effect.effect_id
+                WHERE effect.graph_id = ? AND effect.graph_revision = ?
+                """,
+                (command.graph_id, command.graph_revision),
+            ).fetchall()
+            assert conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (claim_ref,),
+            ).fetchone() == (None,)
+        assert review_states == [("CANCELLED",)]
+        assert effect_fences == []
+
+        await first_runtime.aclose()
+        runtimes.remove(first_runtime)
+        clock.advance(60_001)
+
+        reopened_store = DurableTaskStore(db_path, clock=clock)
+        reopened_workspace_repository, reopened_workspace_runtime = (
+            build_workspace_runtime(owner_id="internal-post-review-cancel-owner-b")
+        )
+        reopened_artifacts = AgentArtifactStore(artifact_root)
+        reopened_runtime = build_runtime(
+            owner_id="internal-post-review-cancel-owner-b",
+            task_store=reopened_store,
+            workspace_runtime=reopened_workspace_runtime,
+            artifacts=reopened_artifacts,
+        )
+        runtimes.append(reopened_runtime)
+        await reopened_runtime.activate()
+
+        assert agent_calls == ["work-order-internal-post-review-cancel"]
+        with sqlite3.connect(str(db_path)) as conn:
+            recovered_claim_ref = conn.execute(
+                "SELECT result_ref FROM secure_ingress_idempotency_claim "
+                "WHERE claim_ref = ?",
+                (claim_ref,),
+            ).fetchone()[0]
+        assert str(recovered_claim_ref).startswith(
+            INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX
+        )
+        assert (
+            HostCommandRepository(
+                db_path,
+                clock=clock,
+            ).validate_ingress_claim_result(command.command_id)["command"]
+            == command
+        )
+        assert reopened_artifacts.inventory_governed_seals(
+            namespace="staging",
+            limit=10,
+        ) == ()
+        assert reopened_artifacts.inventory_governed_seals(
+            namespace="accepted",
+            limit=10,
+        ) == ()
+        lifecycle = reopened_workspace_repository.get_lifecycle(workspace_id)
+        assert lifecycle.state is WorkspaceLifecycleState.ABANDONED
+        assert lifecycle.latest_event is not None
+        assert lifecycle.latest_event.reason_code == "TERMINAL_POST_REVIEW_CANCELLED"
+        tombstone_ref = reopened_artifacts.inspect_governed_tombstone(
+            stage_ref=sealed.stage_ref,
+            seal_digest=sealed.seal_digest,
+            reason_code="TERMINAL_POST_REVIEW_CANCELLED",
+        )
+        assert tombstone_ref == lifecycle.latest_event.terminal_ref
+        assert reopened_workspace_repository.get(workspace_id).status == "CLEANED"
+        assert not (managed / workspace_id).exists()
+        assert reopened_store.list_terminal_reconciliation_inventory_candidates() == ()
     finally:
         for runtime in reversed(runtimes):
             await runtime.aclose()

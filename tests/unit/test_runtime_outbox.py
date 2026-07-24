@@ -425,6 +425,7 @@ def test_coordinator_wires_one_runtime_outbox_and_keeps_budget_factory_binding()
     )
     assert tuple(inspect.signature(coordinator_module.GovernedTaskCoordinator).parameters) == (
         "task_store",
+        "internal_agent_checkpoint_uow",
         "outbox_publisher",
         "outbox_factory",
         "worker_resolver",
@@ -531,8 +532,8 @@ def test_every_runtime_outbox_call_uses_the_shared_instance_and_explicit_command
     ]
     builds = [node for node in calls if node.func.attr == "build"]
     publishes = [node for node in calls if node.func.attr == "publish_pending"]
-    assert len(builds) == 27
-    assert len(publishes) == 31
+    assert len(builds) == 29
+    assert len(publishes) == 34
     assert not [node for node in calls if node.func.attr not in {"build", "publish_pending"}]
     assert all(not node.args for node in builds)
     for build in builds:
@@ -580,8 +581,8 @@ def test_runtime_outbox_call_matrix_is_frozen() -> None:
                 ):
                     best_effort_count += 1
 
-    assert len(rows) == 58
-    assert best_effort_count == 5
+    assert len(rows) == 63
+    assert best_effort_count == 8
     assert hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest() == (
-        "21a248d36343f51365f8c9c1f649e1d25ff29da4a63231866edb87c242492f0c"
+        "0e90542ce684f1281e514a3f6dda50d34765babe87a0d7ce84f9bde7e4007772"
     )

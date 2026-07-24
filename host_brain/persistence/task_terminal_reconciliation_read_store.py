@@ -37,6 +37,10 @@ from .task_terminal_reconciliation_common import (
 from .task_terminal_reconciliation_schema import (
     assert_terminal_reconciliation_schema,
 )
+from .task_terminal_cancellation_read import (
+    cancelled_effects_are_exactly_fenced,
+    cancelled_parallel_predecessor_is_exact,
+)
 from .task_terminal_reconciliation_decision_authority import (
     canonical_parallel_terminal_decision,
     graph_cancellation_authority_valid,
@@ -1031,10 +1035,38 @@ class TaskTerminalReconciliationReadMixin:
                         budget,
                     )
                 )
+                cancellation_effects_fenced = (
+                    cancellation_authority_valid
+                    and cancelled_effects_are_exactly_fenced(
+                        conn,
+                        graph_id=str(graph["graph_id"]),
+                        graph_revision=int(graph["revision"]),
+                        intent_ref=str(cancellation_rows[0]["intent_ref"]),
+                    )
+                )
+                cancellation_parallel_authority_valid = (
+                    cancellation_authority_valid
+                    and cancelled_parallel_predecessor_is_exact(
+                        conn,
+                        graph_id=str(graph["graph_id"]),
+                        graph_revision=int(graph["revision"]),
+                        intent_ref=str(cancellation_rows[0]["intent_ref"]),
+                    )
+                )
+                cancellation_live_conflict = (
+                    any(row["status"] in _LIVE_ATTEMPT_STATUSES for row in attempts)
+                    or any(row["status"] == "ACTIVE" for row in leases)
+                    or any(
+                        row["status"] in _UNRESOLVED_OPERATION_STATUSES
+                        for row in operations
+                    )
+                    or any(row["status"] in _ACTIVE_REVIEW_STATUSES for row in reviews)
+                    or not cancellation_effects_fenced
+                    or not cancellation_parallel_authority_valid
+                )
                 if (
-                    live_conflict
+                    cancellation_live_conflict
                     or not terminal_lineage_valid
-                    or observation["parallel_decisions"]
                     or observation["success_decisions"]
                     or not cancellation_authority_valid
                     or budget["status"] not in {"RELEASED", "CANCELLED"}

@@ -9,6 +9,7 @@ import host_brain.task_runtime as task_runtime
 from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import coordinator_receipts
 from host_brain.task_runtime import coordinator_records
+from host_brain.task_runtime import dag_scheduling_preflight
 from host_brain.task_runtime import dag_scheduling_runtime
 from host_brain.task_runtime import graph_cancellation_projection
 from host_brain.task_runtime import graph_cancellation_records
@@ -367,16 +368,28 @@ def test_cancellation_orchestration_is_owned_by_leaf_services() -> None:
         for node in dag_owner.body
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "execute_stream"
     )
+    preflight = next(
+        node
+        for node in _module_tree(dag_scheduling_preflight).body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "prepare_dag_scheduling_preflight"
+    )
     reentry_calls = [
         node
-        for node in ast.walk(execute_impl)
+        for node in ast.walk(preflight)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "continue_requested_graph_cancellation"
     ]
     assert len(reentry_calls) == 1
-    assert isinstance(reentry_calls[0].func.value, ast.Attribute)
-    assert reentry_calls[0].func.value.attr == "_graph_cancellations"
+    assert isinstance(reentry_calls[0].func.value, ast.Name)
+    assert reentry_calls[0].func.value.id == "graph_cancellations"
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "prepare_dag_scheduling_preflight"
+        for node in ast.walk(execute_impl)
+    )
 
 
 def test_cancellation_services_are_small_and_hold_no_coordinator_callback() -> None:
