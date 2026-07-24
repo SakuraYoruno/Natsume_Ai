@@ -183,6 +183,11 @@ def test_registry_capability_search_generates_competing_paths_without_planned_st
         compiled.task_graph.nodes[0].node_id,
         compiled.task_graph.nodes[1].node_id,
     )
+    assert [node.output_contract["required"] for node in compiled.task_graph.nodes] == [
+        ["receipt_ref", "narrative"],
+        ["receipt_ref", "narrative"],
+        ["receipt_ref", "narrative"],
+    ]
     assert compiled.work_order.input_pack["capability_planning"]["catalog_ref"] == (
         adapter.snapshot.catalog_ref
     )
@@ -212,11 +217,19 @@ def test_capability_plan_rejects_a_noncanonical_target_before_search() -> None:
     assert caught.value.reason_code == CAPABILITY_PLAN_SEARCH_INVALID
 
 
-def test_capability_mode_is_explicit_and_refuses_legacy_preplanned_graphs() -> None:
+@pytest.mark.parametrize("legacy_field", ("planned_steps", "steps"))
+@pytest.mark.parametrize("nested", (False, True))
+def test_capability_mode_is_explicit_and_refuses_legacy_preplanned_graphs(
+    legacy_field: str,
+    nested: bool,
+) -> None:
     intent, governor = _intent()
-    intent["planned_steps"] = [{"candidate_id": "smuggled"}]
+    if nested:
+        intent["args"][legacy_field] = [{"candidate_id": "smuggled"}]
+    else:
+        intent[legacy_field] = [{"candidate_id": "smuggled"}]
 
-    assert is_capability_plan_intent(intent) is True
+    assert is_capability_plan_intent(intent) is False
     with pytest.raises(CapabilityPlanSearchError) as caught:
         build_capability_plan_search(
             intent,
@@ -226,7 +239,7 @@ def test_capability_mode_is_explicit_and_refuses_legacy_preplanned_graphs() -> N
         )
 
     assert caught.value.reason_code == CAPABILITY_PLAN_SEARCH_INVALID
-    assert "planned_steps" in caught.value.detail
+    assert "legacy" in caught.value.detail
 
 
 def test_registry_requires_two_non_confirming_eligible_capabilities() -> None:

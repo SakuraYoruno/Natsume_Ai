@@ -2357,8 +2357,9 @@
     "host_candidate_plan_generation": {
       "status": "PARTIAL_RULED_OBJECTIVE_CAPABILITY_SEARCH_V1",
       "implemented": "The Thalamus server-owned rule maps only explicit Research/调研 and Frontend/可用性 planning requests to route=plan with args.planning_mode=CAPABILITY_SEARCH_V1. compile_intent_draft preserves only this declared task/tag/risk contract, and Governor strict schema/action binding freezes it before the app-composed SkillRegistry adapter runs. That adapter freezes at least two eligible host-scope, require_confirm=false, Governor-bound tag/risk candidates; L1 expands capability choices, L2 ranks frozen relevance/risk/cost, conditional L3 MCTS evaluates virtual complete paths, and the selected virtual path contains exactly two distinct Skills followed by synthesis. The server-owned step bound and ordered dependencies are frozen into virtual state: the second Skill depends on the first, and Chat depends on both. Only that selected `skill -> skill -> chat` path is rebound into approved_candidate_inputs before immutable TaskGraph compilation; workers cannot replan. An explicit Governor-bound failure_replan reuses GovernedPlanningRecoveryService, so canonical TaskStore validation of a same-root FAILED predecessor, quiescence and failure evidence is mandatory before revision + 1 admission.",
+      "host_production_boundary": "GovernedHostRuntime no longer imports or invokes plan_intent_search.py. The only admitted Plan mode is catalog-backed CAPABILITY_SEARCH_V1. Top-level and args-level legacy planned_steps/steps are rejected before Host context construction or admission, so a caller cannot relabel an ordered execution list as a search result. The registry-derived selected graph uses Task Runtime's canonical receipt_ref plus narrative output contract for both Skill execution and Chat synthesis. A real SQLite Host integration derives the two Skill candidates from the composed registry and executes the immutable selected graph; this is narrow runtime wiring evidence, not generic PlanningSearch, cross-domain benefit, provider or promotion evidence.",
       "enforced": [
-        "legacy planned_steps or steps are rejected instead of relabeled as search",
+        "top-level or args-level legacy planned_steps/steps are rejected before Host context construction or admission instead of being relabeled as search",
         "only target_id=planning_search can enter the capability-search adapter",
         "registry handlers, credentials and mutable registry state stay outside the snapshot",
         "fewer than two eligible candidates, confirmation-required candidates, risk/tag mismatches and forged successors fail closed",
@@ -2383,7 +2384,7 @@
         "automatic or failure-adaptive execution-time replanning",
         "real provider/model execution, independent verification, paired cohort, benefit result or promotion authority"
       ],
-      "local_validation": "Prior focused objective-admission, capability-search, Thalamus and Host-runtime batch: 122 passed in 2.05 seconds; documentation/metadata/runtime-coverage gate: 27 passed in 4.90 seconds. Latest explicit capability failure-replan and planning-context authority unit batch: 49 passed in 2.03 seconds; compileall, JSON validation and git diff --check passed. It proves rule seed -> compile preservation -> Governor strict validation/binding -> canonical target -> dynamic frozen Research candidates, advice-only rejection, delegation of explicit failure_replan to canonical recovery, and parent-grant mismatch rejection before pure search. It is local unit evidence only; SQLite recovery integration was not rerun for this small slice, and wave integration, real provider and Docker/NE-07 are not implied. REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA.",
+      "local_validation": "Targeted capability-plan authority batch: 62 passed in 16.48 seconds across Host adapter, capability search, objective admission, legacy-plan contract, planning execution/context, and real SQLite GR05 Host integration. It proves top-level and args-level legacy step-list rejection, registry-derived competition, canonical narrative output contracts, immutable selected-graph execution, and the existing explicit recovery boundary. It is targeted local evidence only; generic cross-domain PlanningSearch, external provider/cohort benefit, wave integration, Docker and NE-07 are not implied. REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA.",
       "evidence_refs": [
         "host_brain/tribe/thalamus_agent.py",
         "host_brain/governor/schemas.py",
@@ -2394,7 +2395,9 @@
         "tests/unit/test_ne02_capability_plan_search.py",
         "tests/unit/test_ne02_objective_planning_admission.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
-        "tests/unit/test_gr04_planning_execution.py"
+        "tests/unit/test_gr04_planning_execution.py",
+        "tests/unit/test_ne01_legacy_executive_planning_retirement.py",
+        "tests/integration/test_gr05_universal_host_runtime.py"
       ]
     },
     "pentest_conditional_mcts": {

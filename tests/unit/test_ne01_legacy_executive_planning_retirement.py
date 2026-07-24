@@ -54,7 +54,8 @@ def test_governed_adapter_uses_planning_search_not_executive_planning() -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom)
     }
-    assert "host_brain.orchestration.plan_intent_search" in imported_modules
+    assert "host_brain.orchestration.capability_plan_search" in imported_modules
+    assert "host_brain.orchestration.plan_intent_search" not in imported_modules
     assert "host_brain.orchestration.planning_graph_compiler" in imported_modules
     assert not any(module.startswith("host_brain.executive_runtime") for module in imported_modules)
 

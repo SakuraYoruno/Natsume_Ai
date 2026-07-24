@@ -317,7 +317,7 @@ async def test_direct_delegate_rejects_unenabled_target_before_application_admis
 
 
 @pytest.mark.asyncio
-async def test_secure_ingress_plan_preserves_surface_principal_and_digest(
+async def test_secure_ingress_catalog_plan_preserves_surface_principal_and_digest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list[object] = []
@@ -333,10 +333,14 @@ async def test_secure_ingress_plan_preserves_surface_principal_and_digest(
         async def execute_stream(self, _prepared):  # noqa: ANN001
             yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
 
+    capability_adapter = SimpleNamespace(
+        request=object(),
+        compilation_context_for=lambda _result: object(),
+    )
     monkeypatch.setattr(
         governed_task_adapter,
-        "build_plan_intent_search",
-        lambda *_args, **_kwargs: SimpleNamespace(request=object()),
+        "build_capability_plan_search",
+        lambda *_args, **_kwargs: capability_adapter,
     )
     monkeypatch.setattr(
         governed_task_adapter,
@@ -353,6 +357,7 @@ async def test_secure_ingress_plan_preserves_surface_principal_and_digest(
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=_EmptyCommandRepository(),
         planning_enabled=True,
+        planning_skill_registry=object(),
     )
     intent = {
         "schema_version": "Natsume.intent.v1",
@@ -363,7 +368,10 @@ async def test_secure_ingress_plan_preserves_surface_principal_and_digest(
         "route": "plan",
         "target_id": "planning_search",
         "task": "secure governed plan",
-        "planned_steps": [{"candidate_id": "step-1"}],
+        "args": {
+            "planning_mode": "CAPABILITY_SEARCH_V1",
+            "planning_capability_tags": ["research"],
+        },
     }
     governor = {
         "request_id": "request-secure-plan",
@@ -406,6 +414,66 @@ async def test_secure_ingress_plan_preserves_surface_principal_and_digest(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_field", ("planned_steps", "steps"))
+@pytest.mark.parametrize("nested", (False, True))
+async def test_legacy_plan_steps_are_rejected_before_context_or_admission(
+    legacy_field: str,
+    nested: bool,
+) -> None:
+    runtime = GovernedHostRuntime(
+        application=_BlockingApplication(),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=_EmptyCommandRepository(),
+        planning_enabled=True,
+        planning_skill_registry=object(),
+    )
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": "intent-legacy-plan-rejected",
+        "session_id": "session-legacy-plan-rejected",
+        "seq": 1,
+        "nonce": "nonce-legacy-plan-rejected",
+        "route": "plan",
+        "target_id": "planning_search",
+        "task": "do not execute caller supplied plan steps",
+    }
+    if nested:
+        intent["args"] = {legacy_field: [{"candidate_id": "step-1"}]}
+    else:
+        intent[legacy_field] = [{"candidate_id": "step-1"}]
+    governor = {
+        "request_id": "request-legacy-plan-rejected",
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "tokens": {},
+        "ts_ms": 1_800_000_000_000,
+    }
+
+    assert runtime.supports(intent) is False
+    await runtime.activate()
+    try:
+        with pytest.raises(
+            governed_task_adapter.GovernedHostAdapterError,
+            match="GOVERNED_HOST_PLANNING_SEARCH_REQUIRED",
+        ):
+            await _collect(
+                runtime.execute_stream(
+                    request_body=SimpleNamespace(input_source="GATEWAY"),
+                    request_id=governor["request_id"],
+                    session_id=intent["session_id"],
+                    ts_ms=governor["ts_ms"],
+                    intent_draft=intent,
+                    governor_result=governor,
+                    person_id="person-legacy-plan-rejected",
+                    sanitized_message=intent["task"],
+                    command_authority={"body_sha256": "a" * 64},
+                )
+            )
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -431,11 +499,6 @@ async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
         governed_task_adapter,
         "build_capability_plan_search",
         lambda *_args, **_kwargs: capability_adapter,
-    )
-    monkeypatch.setattr(
-        governed_task_adapter,
-        "build_plan_intent_search",
-        lambda *_args, **_kwargs: pytest.fail("legacy plan adapter must not run"),
     )
     monkeypatch.setattr(
         governed_task_adapter,
@@ -538,11 +601,6 @@ async def test_capability_plan_failure_replan_uses_durable_recovery(
         governed_task_adapter,
         "build_capability_plan_search",
         lambda *_args, **_kwargs: capability_adapter,
-    )
-    monkeypatch.setattr(
-        governed_task_adapter,
-        "build_plan_intent_search",
-        lambda *_args, **_kwargs: pytest.fail("legacy plan adapter must not run"),
     )
     monkeypatch.setattr(
         governed_task_adapter,

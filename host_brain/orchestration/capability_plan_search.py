@@ -143,6 +143,7 @@ def is_capability_plan_intent(intent: Mapping[str, Any] | None) -> bool:
         and isinstance(args, Mapping)
         and str(args.get("planning_mode") or "").strip()
         == CAPABILITY_PLANNING_MODE
+        and not _has_legacy_plan_steps(payload)
     )
 
 
@@ -171,15 +172,15 @@ def build_capability_plan_search(
     context = _mapping_copy(frozen_context or {}, field_name="frozen_context")
     _assert_secret_free(raw_intent, path="intent")
     _assert_secret_free(context, path="frozen_context")
+    if _has_legacy_plan_steps(raw_intent):
+        raise CapabilityPlanSearchError(
+            CAPABILITY_PLAN_SEARCH_INVALID,
+            "capability planning refuses legacy planned_steps/steps input at the plan boundary",
+        )
     if not is_capability_plan_intent(raw_intent):
         raise CapabilityPlanSearchError(
             CAPABILITY_PLAN_SEARCH_INVALID,
             "capability planning requires route=plan, target_id=planning_search and explicit planning_mode",
-        )
-    if "planned_steps" in raw_intent or "steps" in raw_intent:
-        raise CapabilityPlanSearchError(
-            CAPABILITY_PLAN_SEARCH_INVALID,
-            "capability planning refuses legacy planned_steps/steps input",
         )
     if not callable(getattr(skill_registry, "all", None)):
         raise CapabilityPlanSearchError(
@@ -375,6 +376,24 @@ def build_capability_plan_search(
         goal_request=goal_request,
         snapshot=snapshot,
         base_context=base_context,
+    )
+
+
+def _has_legacy_plan_steps(payload: Mapping[str, Any]) -> bool:
+    """Reject caller-owned execution lists in both supported intent locations.
+
+    Legacy plan envelopes have historically carried ``planned_steps`` or
+    ``steps`` at the top level and, for compatibility, duplicated them in
+    ``args``.  A registry-derived plan cannot accept either form: allowing the
+    nested copy would recreate the same caller-authorized execution path under
+    the canonical capability mode.
+    """
+
+    if "planned_steps" in payload or "steps" in payload:
+        return True
+    args = payload.get("args")
+    return isinstance(args, Mapping) and (
+        "planned_steps" in args or "steps" in args
     )
 
 

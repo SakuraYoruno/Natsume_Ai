@@ -34,7 +34,6 @@ from host_brain.orchestration.capability_plan_search import (
     build_capability_plan_search,
     is_capability_plan_intent,
 )
-from host_brain.orchestration.plan_intent_search import build_plan_intent_search
 from host_brain.orchestration.planning_admission import GovernedPlanningAdmissionService
 from host_brain.orchestration.planning_execution import (
     GovernedPlanningExecutionService,
@@ -108,6 +107,9 @@ GOVERNED_HOST_ACCEPTANCE_EFFECTS_UNAVAILABLE = (
 )
 GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE = (
     "GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE"
+)
+GOVERNED_HOST_PLANNING_SEARCH_REQUIRED = (
+    "GOVERNED_HOST_PLANNING_SEARCH_REQUIRED"
 )
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
 class GovernedHostRuntime:
@@ -239,12 +241,17 @@ class GovernedHostRuntime:
         draft = dict(intent_draft or {})
         route = str(draft.get("route") or "").strip().lower()
         if route == "plan":
-            if is_capability_plan_intent(draft):
-                return self._planning_enabled and self._planning_skill_registry is not None
-            steps = draft.get("planned_steps")
-            if not isinstance(steps, list):
-                steps = draft.get("steps")
-            return self._planning_enabled and isinstance(steps, list) and bool(steps)
+            # A caller-provided step list is not a search space.  The only
+            # currently enabled Host plan route reconstructs competing
+            # candidates from the app-composed registry and compiles the
+            # selected result into a TaskGraph.  Keep pure legacy adapters
+            # outside this production boundary until another domain supplies
+            # the same catalog-backed authority.
+            return (
+                self._planning_enabled
+                and self._planning_skill_registry is not None
+                and is_capability_plan_intent(draft)
+            )
         if route not in self._supported_routes:
             return False
         if route == "chat":
@@ -434,6 +441,13 @@ class GovernedHostRuntime:
                 )
             self._in_flight += 1
         try:
+            route = str(intent_draft.get("route") or "").strip().lower()
+            if route == "plan" and not is_capability_plan_intent(intent_draft):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_PLANNING_SEARCH_REQUIRED,
+                    "Host Plan requires a catalog-backed PlanningSearch intent; "
+                    "planned_steps/steps cannot authorize execution",
+                )
             if not self.supports(intent_draft):
                 raise GovernedHostAdapterError(
                     GOVERNED_HOST_ROUTE_UNSUPPORTED,
@@ -444,7 +458,6 @@ class GovernedHostRuntime:
                     GOVERNED_HOST_GOVERNOR_GRANT_MISSING,
                     "an approved official Governor decision is required",
                 )
-            route = str(intent_draft.get("route") or "").strip().lower()
             if route == "tool":
                 authority = dict(command_authority or {})
                 ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
@@ -787,31 +800,26 @@ class GovernedHostRuntime:
             authority=ingress,
         )
         input_ref = f"input://sha256/{input_sha256.removeprefix('sha256:')}"
-        capability_plan = is_capability_plan_intent(intent_draft)
-        if capability_plan:
-            if self._planning_skill_registry is None:
-                raise GovernedHostAdapterError(
-                    GOVERNED_HOST_AUTHORITY_INVALID,
-                    "capability planning requires the app-composed SkillRegistry",
-                )
-            adapter = build_capability_plan_search(
-                intent_draft,
-                governor_result=governor_result,
-                skill_registry=self._planning_skill_registry,
-                request_id=request_id,
-                input_refs=(input_ref,),
-                frozen_context=frozen_context,
+        if not is_capability_plan_intent(intent_draft):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_PLANNING_SEARCH_REQUIRED,
+                "Host Plan requires a catalog-backed PlanningSearch intent; "
+                "planned_steps/steps cannot authorize execution",
             )
-            compilation_context_resolver = adapter.compilation_context_for
-        else:
-            adapter = build_plan_intent_search(
-                intent_draft,
-                governor_result=governor_result,
-                request_id=request_id,
-                input_refs=(input_ref,),
-                frozen_context=frozen_context,
+        if self._planning_skill_registry is None:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "capability planning requires the app-composed SkillRegistry",
             )
-            compilation_context_resolver = None
+        adapter = build_capability_plan_search(
+            intent_draft,
+            governor_result=governor_result,
+            skill_registry=self._planning_skill_registry,
+            request_id=request_id,
+            input_refs=(input_ref,),
+            frozen_context=frozen_context,
+        )
+        compilation_context_resolver = adapter.compilation_context_for
         ingress_claim_ref, ingress_audit_ref = _ingress_references(ingress)
         authority = PlanningExecutionAuthority(
             surface=_resolve_host_command_surface(
@@ -850,9 +858,9 @@ class GovernedHostRuntime:
                 created_at=int(ts_ms),
             )
         else:
-            # Both legacy and registry-derived plans use the same durable
-            # recovery gate.  The incoming reference selects only a stored
-            # revision; failure evidence and quiescence come from TaskStore.
+            # A failure reference selects only a stored immutable revision.
+            # The next catalog-backed search is still independent, while
+            # failure evidence and quiescence come from TaskStore.
             if self._task_store is None:
                 raise GovernedHostAdapterError(
                     GOVERNED_HOST_AUTHORITY_INVALID,
