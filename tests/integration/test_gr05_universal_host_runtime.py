@@ -62,6 +62,15 @@ from natsume_contracts.edge.transport_v1 import EdgeTransportResult
 from natsume_contracts.task import HostCommandSurface
 
 
+_CAPABILITY_PLAN_ARGS = {
+    "planning_mode": "CAPABILITY_SEARCH_V1",
+    # The production registry contributes the candidates.  The caller cannot
+    # name a worker or smuggle an ordered execution list into this plan.
+    "planning_capability_tags": ["production"],
+    "planning_max_risk_level": 2,
+}
+
+
 def _intent(
     *,
     request_id: str,
@@ -70,7 +79,7 @@ def _intent(
     route: str,
     target_id: str,
     task: str,
-    planned_steps: list[dict] | None = None,
+    plan_args: dict[str, object] | None = None,
 ) -> dict:
     value = {
         "schema_version": "Natsume.intent.v1",
@@ -90,13 +99,12 @@ def _intent(
         "principal_id": "person-gr05-universal",
         "args": {"text": task},
     }
-    if planned_steps is not None:
-        value["planned_steps"] = planned_steps
+    if plan_args is not None:
+        assert route == "plan"
         value["args"].update(
             {
-                "planned_steps": planned_steps,
-                "route": "plan",
-                "target_id": target_id,
+                "task": task,
+                **plan_args,
             }
         )
     return value
@@ -326,7 +334,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
     )
 
     def frozen_skill_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
-        skill_calls.append("agent_memory_curator")
+        skill_calls.append(str(_order.metadata.get("skill_id") or ""))
         return {
             "status": "EXECUTED",
             "summary": "frozen skill completed",
@@ -530,38 +538,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             seq=3,
             route="plan",
             target_id="planning_search",
-            task="delegate then synthesize through governed plan",
-            planned_steps=[
-                {
-                    "candidate_id": "curate",
-                    "step_index": 1,
-                    "route": "skill",
-                    "target_id": "agent_memory_curator",
-                    "task_description": "curate the approved plan input",
-                    "dependencies": [],
-                    "allow_parallel": True,
-                    "args": {
-                        "task": "curate the approved plan input",
-                        "artifacts_root": str(tmp_path / "plan-skill-runs"),
-                    },
-                },
-                {
-                    "candidate_id": "research",
-                    "step_index": 2,
-                    "route": "delegate",
-                    "target_id": "pentest_agent",
-                    "task_description": "prepare a read-only security plan for example.test",
-                    "dependencies": ["curate"],
-                },
-                {
-                    "candidate_id": "synthesize",
-                    "step_index": 3,
-                    "route": "chat",
-                    "target_id": "surface_reply",
-                    "task_description": "synthesize the approved result",
-                    "dependencies": ["research"],
-                },
-            ],
+            task="select and synthesize a bounded production capability plan",
+            plan_args=_CAPABILITY_PLAN_ARGS,
         )
         ingress_store, plan_authority = _gateway_ingress_authority(
             db_path,
@@ -620,21 +598,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             route="plan",
             target_id="planning_search",
             task="reject mismatched planning principal before admission",
-            planned_steps=[
-                {
-                    "candidate_id": "curate",
-                    "step_index": 1,
-                    "route": "skill",
-                    "target_id": "agent_memory_curator",
-                    "task_description": "must not be admitted",
-                    "dependencies": [],
-                    "allow_parallel": True,
-                    "args": {
-                        "task": "must not be admitted",
-                        "artifacts_root": str(tmp_path / "mismatch-plan-skill-runs"),
-                    },
-                }
-            ],
+            plan_args=_CAPABILITY_PLAN_ARGS,
         )
         mismatch_ingress_store, mismatch_authority = _gateway_ingress_authority(
             db_path,
@@ -673,7 +637,8 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             results["plan"][-1]["execution_receipt"]["command_id"]
         )
         assert len(chat_calls) == 2
-        assert skill_calls == ["agent_memory_curator"]
+        assert len(skill_calls) == 2
+        assert all(skill_id for skill_id in skill_calls)
         assert len(delivered_replies) == 1
         assert delivered_replies[0]["request_id"] == chat["request_id"]
         assert delivered_replies[0]["payload"]["platform"] == "qq"

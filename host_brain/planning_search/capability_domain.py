@@ -169,7 +169,12 @@ class CapabilitySuccessorCatalog:
                 "output_contract": {
                     "schema_version": CAPABILITY_PLANNING_NODE_OUTPUT_SCHEMA,
                     "kind": "capability_execution",
-                    "required": ["receipt_ref", "result_summary"],
+                    # Governed Skill workers expose their committed result
+                    # through the common Task Runtime ``narrative`` field.
+                    # Do not require a domain-only alias that no admitted
+                    # worker writes; the durable receipt remains the exact
+                    # artifact identity.
+                    "required": ["receipt_ref", "narrative"],
                 },
                 "retry_policy": {"max_attempts": 1, "retry_backoff_ms": 0},
                 "risk_level": capability.risk_level,
@@ -219,7 +224,9 @@ class CapabilitySuccessorCatalog:
                 "output_contract": {
                     "schema_version": CAPABILITY_PLANNING_NODE_OUTPUT_SCHEMA,
                     "kind": "capability_synthesis",
-                    "required": ["receipt_ref", "response_summary"],
+                    # Frozen Chat uses the same canonical committed narrative
+                    # field as a direct governed Chat node.
+                    "required": ["receipt_ref", "narrative"],
                 },
                 "retry_policy": {"max_attempts": 1, "retry_backoff_ms": 0},
                 "risk_level": 1,
