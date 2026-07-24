@@ -2,7 +2,7 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "PRE_COMMIT_WORKTREE_OVER_REVISED_BASELINE",
+  "evaluated_source": "PRE_COMMIT_NE01_OBS_PROJECTION_SUPERVISION_WORKTREE_OVER_ORIGIN_DEV_99AE35CA4",
   "evidence_binding": {
     "evaluated_commit_sha": "a5c4fb86cc23f0713bbaae2f03138cc8b4b2b87b",
     "migration_head": "0122_evolution_lab_v2_evidence.sql"
@@ -954,6 +954,7 @@
         "failed_gates": [],
         "origin_dev_failed_gates": [1, 3],
         "pre_89_origin_dev_failed_gates": [1, 6, 10],
+        "current_slice_added_failures": [],
         "resolved_gates": [1, 3, 6, 10, 11],
         "issues": [],
         "strongly_connected_components": [],
@@ -1178,7 +1179,7 @@
         "boundary": "STATIC_INVENTORY_ONLY_PRODUCTION_EXECUTOR_ZERO_REAL_WORKSPACE_BOUND_GOVERNED_TOOL_MCP_EXECUTOR_AND_NE01_REMAIN_INCOMPLETE"
       },
       "obs_projection_lifecycle_authority": {
-        "status": "GATE_6_PASS_CONTINUOUS_SLO_INCOMPLETE_NE01_STILL_IN_PROGRESS",
+        "status": "GATE_6_PASS_APP_LOCAL_SUPERVISION_WIRED_DURABLE_SLO_PARTIAL_NE01_STILL_IN_PROGRESS",
         "production_start_api": "ObsApplicationContainer.start_projection_jobs",
         "production_start_call_count": 1,
         "production_start_owner": "host_brain/app/obs_fastapi_app.py nested ASGI lifespan",
@@ -1196,13 +1197,17 @@
           "daemon_cadence_shutdown_serialization_start_single_flight_passed": 4,
           "final_targeted_passed": 19,
           "batch_overlap": "BATCHES_OVERLAP_DO_NOT_SUM",
+          "supervision_new_and_contract_passed": 6,
+          "supervision_existing_obs_projection_passed": 70,
+          "supervision_file_disjoint_total_passed": 76,
+          "supervision_behavior": "SECRET_FREE_HEALTH_ORDINARY_FAILURE_CONTINUES_SUCCESS_RECOVERS_PROCESS_CONTROL_EXIT_FAILED_REQUIRES_CLOSE",
           "gate_6_issues": [],
           "full_architecture_static_gate": "PASS",
-          "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_CONTINUOUS_SLO_AND_NE01_REMAIN_INCOMPLETE",
+          "full_architecture_static_gate_boundary": "GATES_1_3_6_10_11_PASS_BUT_DURABLE_SLO_AND_NE01_REMAIN_INCOMPLETE",
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
-        "known_boundary": "UNCAUGHT_BACKGROUND_RENEW_OR_OTHER_DAEMON_EXIT_NOT_YET_DIRECTLY_EXPOSED_BY_HEALTH_RUNNING_LAST_FAILURE_CONTINUOUS_SLO_INCOMPLETE"
+        "known_boundary": "APP_LOCAL_HEALTH_NOW_EXPOSES_RUNNING_LAST_FAILURE_AND_RECOVERY_BUT_CROSS_RESTART_DURABLE_SLO_GUARDIAN_ACKNOWLEDGEMENT_PRODUCTION_CANARY_AND_WAVE_INTEGRATION_REMAIN_INCOMPLETE"
       },
       "named_from_process_services_import_inventory": {
         "before_modules": 47,
@@ -1327,7 +1332,7 @@
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
         "ne07_full_stack": "NOT_RUN_NE07",
         "full_architecture_static_gate": "PASS",
-        "full_architecture_static_gate_boundary": "GATES_1_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
+        "full_architecture_static_gate_boundary": "GATES_1_3_6_10_11_PASS_BUT_GLOBAL_SERVICE_LOCATOR_AND_NE01_REMAIN_INCOMPLETE"
       },
     "boundary": "FRESH_AST_CURRENT_19_MODULES_45_NAMES_AND_22_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_GOVERNED_CHAT_SURFACE_AND_ADMISSION_PORTS_ARE_LIFESPAN_INJECTED_TRIBE_RUNTIME_SCOPE_OWNS_PORT_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_STATE_READER_PRODUCTION_AUTHORITY_VERIFIER_CAPTURES_EXPLICIT_LEDGER_PROVIDER_AND_INTERNAL_SECURITY_IMMUNE_ROUTER_CAPTURES_THE_HOST_ROUTE_AGENT_PROVIDER_WITHOUT_PROCESS_CONTAINER_COMPATIBILITY_TRIBE_AGENTS_BUS_AND_REGISTRIES_REMAIN_PROCESS_GLOBAL_SINGLE_LIVE_HOST_ONLY_NOT_APP_LOCAL_INSTANCE_PROOF_OR_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_GLOBAL_SERVICE_LOCATOR_REMAINS_HARD_STATE_0115_DURABLE_RESTART_FENCE_WIRED_CANARY_NOT_RUN_NE01_IN_PROGRESS",
       "agent_runtime_scope_boundary": "HOST_LIFESPAN_SCOPE_IS_A_LOCAL_DEPENDENCY_PUBLICATION_SLICE_ONLY_GENERIC_DELEGATE_MULTINODE_TASKGRAPH_AND_WAVE_INTEGRATION_REMAIN_UNPROVEN",

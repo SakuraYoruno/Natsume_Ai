@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -389,10 +389,20 @@ def create_obs_app(
             for job in container.ports.projection_jobs
             if job.source_mode != TYPED_UNAVAILABLE
         ]
+        projection_daemon = container.health_snapshot()["projection_daemon"]
+        projection_daemon_degraded = (
+            not isinstance(projection_daemon, Mapping)
+            or projection_daemon.get("status") != "RUNNING"
+        )
         return {
             "status": (
                 "DEGRADED"
-                if missing_jobs or unavailable_jobs or partial_jobs
+                if (
+                    missing_jobs
+                    or unavailable_jobs
+                    or partial_jobs
+                    or projection_daemon_degraded
+                )
                 else "OK"
             ),
             "service": "obs",
@@ -425,6 +435,7 @@ def create_obs_app(
                     job.name: job.source_mode
                     for job in container.ports.projection_jobs
                 },
+                "projection_daemon": projection_daemon,
             },
             "projection": projection_meta(
                 SERVICE_HEALTH_KIND,

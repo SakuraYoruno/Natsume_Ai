@@ -981,7 +981,20 @@ flowchart LR
 
 Obs projection 生命周期现在只有一条生产控制流：`ObsApplicationPorts` bundle 先执行内部原子 single-use claim，`ObsApplicationContainer.compose()` 创建 app-local daemon，嵌套 ASGI `lifespan` 唯一调用 `start_projection_jobs()`，启动后才 `yield`。finally 先 stop/join 并等待 background/manual in-flight fence，再释放 exact leader lease、关闭 owned SQLite，最后清除 app state。stop timeout 或 rollback close failure 会保留原 container/ports 句柄，供后续精确重试。`dataclasses.replace()` 继承同一 claim，不能生成可二次消费的 derived bundle；全新独立 ports/app 则保持隔离。无 module-global daemon，无新 migration。
 
-Gate 6 最终定向集合为 `19 passed`；原始证据批次重叠禁止相加。该切片完成时 full architecture static 从 `FAIL [1,6,10]` 变为 `FAIL [1,11]`，后续 Gate 1/11 在各自提交绑定快照关闭；当前独立 Gate 1–14 已评估为 `PASS`、`failed_gates=[]`、`各 Gate issues=[]`。NE-01 仍 `PARTIAL / IN_PROGRESS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。后台 daemon 的 continuous-SLO supervision 仍未闭环。
+Gate 6 最终定向集合为 `19 passed`；原始证据批次重叠禁止相加。后续 supervision 数据流为 `background/manual wave → result classification → app-local secret-free health snapshot → Obs /health`：lease acquire/renew、job 与意外 wave 错误只保留 stable error type/incident/failing jobs，普通异常继续下一 tick，成功 wave 清零连续失败并保留历史 failure，process-control 退出转为 `FAILED` 且必须 close 后释放 lease；响应不包含异常正文。本次最新 `dev` 重放新增/合同 6 与既有 Obs/Projection 70 项不重叠，共 76 项通过。当前仍没有 `health snapshot → durable RuntimeEvent/Guardian journal` 的跨重启流，也未运行生产 canary/wave integration；NE-01 保持 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+```mermaid
+flowchart LR
+    Tick["Background / manual wave"] --> Lease["Acquire / renew leader lease"]
+    Lease --> Jobs["Run due projection jobs"]
+    Jobs --> Classify["Classify OK / skipped / failed"]
+    Classify --> Health["App-local secret-free health snapshot"]
+    Health --> Endpoint["Obs /health"]
+    Classify --> Recover["Next all-success wave clears consecutive failures"]
+    Classify --> Fatal["Process-control exit marks FAILED"]
+    Fatal --> Close["Close releases exact lease before any restart"]
+    Health -. "尚未接线" .-> Durable["Durable RuntimeEvent / Guardian journal"]
+```
 
 Service Catalog 分层切片随后把启动数据流固定为 `Host/ASGI → service_catalog/startup_coordinator.py → ServiceCatalogRolloutAuthority Protocol → SQLiteServiceCatalogRolloutRepository`；DTO、校验和 port 从 `contracts/service_catalog.py` 进入，旧 composition/类型路径仅作同对象重导出，`rollout_authority.py` 只观察 Guardian。该流清除了 application→composition 两条与 Catalog persistence→application 一条依赖，Gate 1 SCC 缩为 application/persistence；该切片完成时仍有 11 条 persistence→application 反向依赖（PlanningSearch 7、Evolution/Lab/Skill/World 4）。验证为 contract/unit `61 passed`、真实 socket integration `7 passed`、边界复跑 `7 passed`，集合可能重叠不得相加。
 

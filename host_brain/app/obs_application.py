@@ -186,6 +186,12 @@ class ObsApplicationContainer:
             interval_ms=interval_ms,
         )
 
+    def health_snapshot(self) -> dict[str, object]:
+        return {
+            "closed": self.closed,
+            "projection_daemon": self.projection_daemon.health_snapshot(),
+        }
+
     def close(self) -> dict[str, object]:
         if self.closed:
             return {"running": False, "closed": True}
