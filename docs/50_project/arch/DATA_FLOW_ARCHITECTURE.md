@@ -982,6 +982,24 @@ PlanningSearch 持久化合同分层切片把仓储依赖流改为 `SQLite repos
 
 最终合同切片把剩余仓储依赖流固定为 `Evolution Governance / Evolution Lab / Skill Lifecycle / World Observation repositories → contracts/{evolution,evolution_lab,skill_lifecycle,runtime_context}`。旧 Evolution/Lab/Runtime Context 模块仅同对象重导出，Skill Lifecycle 应用模块只保留服务与合同重导出，因此不再存在 `persistence → application` 回流。fresh static Gate 1 `issues=[]`、SCC=`[]`、persistence→application=0、Edge finding/violation=0、reverse imports=`[]`，Gate 6/10 继续通过。边界 `4 passed`、相关定向 `32 passed`、py_compile/diff-check 通过；无 migration。该流只收口类型依赖方向，不新增 Lab、Skill activation、Feedback/Knowledge/Identity 或 PlanningSearch 的生产 authority。
 
+0122 在不改变 0108 V1 的前提下增加一条 proposal-only 的 V2 Lab evidence 流。`LabDatasetV1` 只在 runner 内存中使用，runner 重算其 canonical digest、record count 和 workspace-bound manifest；isolated executor 必须返回 no-network/read-only/temporary-output sandbox receipt 与零 effect audit，独立 verifier 必须提供同一 execution 的 identity、version、digest 与 evidence digest。repository 在一个 SQLite 事务中先写 evidence 再写 run；任一 run 写入失败共同回滚。report 只能关联已经精确持久化的所有 arm，proposal 仍固定 `review_required=true` 和 `production_influence_enabled=false`。这条数据流是结构性本地 SQLite 边界，并不证明真实 container、只读 mount、network namespace、外部模型、Golden Experiment 或生产侧零 effect。
+
+```mermaid
+flowchart LR
+    Manifest["冻结 DatasetManifestV1\nworkspace + digest + schema + count"] --> Reader["V2 DatasetReader"]
+    Reader --> Rehash["Runner 重算 dataset digest"]
+    Rehash --> Executor["窄 IsolatedLabExecutor port"]
+    Executor --> Sandbox["SandboxReceiptV1\nnetwork off / readonly / temporary"]
+    Executor --> Audit["EffectAuditReceiptV1\neffect_count = 0"]
+    Executor --> Verifier["独立 V2LabVerifier"]
+    Verifier --> Verify["VerificationReceiptV1\nidentity + evidence digest"]
+    Sandbox --> Ledger["0122 V2 evidence + run\n同一 SQLite transaction"]
+    Audit --> Ledger
+    Verify --> Ledger
+    Ledger --> Report["immutable ExperimentReportV2"]
+    Report --> Proposal["EvolutionProposalV2\nReview required / no production influence"]
+```
+
 随后 Gate 11 把 Tool 对象流固定为 `Host ASGI lifespan → GovernedHostToolRuntimeComposition → ToolRuntimeBoundary → ToolBroker`；process Broker accessor/slot/provider 保持删除，唯一 app-local constructor count=1。该切片的提交绑定静态快照与当前独立 Gate 1–14 均为 `PASS`。真实 workspace-bound governed executor 与剩余全局对象图仍缺，NE-01 继续 `PARTIAL / IN_PROGRESS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ```mermaid

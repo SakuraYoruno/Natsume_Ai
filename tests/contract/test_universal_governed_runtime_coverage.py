@@ -25,7 +25,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
 
     assert report.status == PROGRAM_INCOMPLETE
     assert report.evaluated_commit_sha == "a5c4fb86cc23f0713bbaae2f03138cc8b4b2b87b"
-    assert report.migration_head == "0121_research_shadow_arm_operation.sql"
+    assert report.migration_head == "0122_evolution_lab_v2_evidence.sql"
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
         "chat": "INCOMPLETE",

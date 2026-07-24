@@ -10,7 +10,7 @@
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "MIGRATION_HEAD_0121_GATE_1_TO_14_STATIC_PASS_HOST_STARTUP_EXACT_NONTERMINAL_GRAPH_CONTINUATION_BOOT_SCOPED_LOCAL_SQLITE_PASS_DIRECT_AND_APPROVED_PLAN_PRODUCTION_SKILL_ADMISSION_FROZEN_PAYLOAD_SLICE_INTERNAL_POST_ADMISSION_NATIVE_WORKORDERV3_SLICE_DIRECT_PRE_RESERVATION_TERMINAL_BUDGET_FIVE_AGGREGATE_UOW_LOCAL_SQLITE_PASS_PROMPT_INTELLIGENCE_PROPOSAL_ONLY_NO_LEGACY_PLAN_OR_SKILL_EXECUTION_ZERO_CALL_CHAT_GENERATION_PAYLOAD_RETIRED_THALAMUS_PRE_ADMISSION_INTENT_MODEL_CALLS_RETIRED_CONVERSATION_EXPERIENCE_WRITERS_RETIRED_TO_READ_PACK_ONLY_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "MIGRATION_HEAD_0122_NE04_V2_EVIDENCE_BOUNDARY_ADDED_GATE_1_TO_14_STATIC_PASS_HOST_STARTUP_EXACT_NONTERMINAL_GRAPH_CONTINUATION_BOOT_SCOPED_LOCAL_SQLITE_PASS_DIRECT_AND_APPROVED_PLAN_PRODUCTION_SKILL_ADMISSION_FROZEN_PAYLOAD_SLICE_INTERNAL_POST_ADMISSION_NATIVE_WORKORDERV3_SLICE_DIRECT_PRE_RESERVATION_TERMINAL_BUDGET_FIVE_AGGREGATE_UOW_LOCAL_SQLITE_PASS_PROMPT_INTELLIGENCE_PROPOSAL_ONLY_NO_LEGACY_PLAN_OR_SKILL_EXECUTION_ZERO_CALL_CHAT_GENERATION_PAYLOAD_RETIRED_THALAMUS_PRE_ADMISSION_INTENT_MODEL_CALLS_RETIRED_CONVERSATION_EXPERIENCE_WRITERS_RETIRED_TO_READ_PACK_ONLY_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -1456,7 +1456,7 @@
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
         "evaluated_commit_sha": "913312d80917a21cad524aaf46841461ab7c1da8",
-        "migration_head": "0121_research_shadow_arm_operation.sql",
+        "migration_head": "0122_evolution_lab_v2_evidence.sql",
         "route_status": "ALL_SEVEN_INCOMPLETE",
         "commit_bound_acceptance": "MISSING_ALL_SEVEN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
@@ -3143,25 +3143,33 @@
       "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Post-admission Internal workers now natively consume WorkOrderV3 and reject graph metadata drift; external v2 is ingress compatibility only. For a governed Internal single-node sealed checkpoint, the next runtime activation can reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C are three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. A generic single-node post-COMMIT Budget settlement whose write response and first read-back are both lost now holds without additional lifecycle/finalization mutation, then handles EXACT_ACCEPTED, EXACT_REJECTED, or MISSING after Lease expiry while CONFLICT fails closed; process-control BaseException does not create a false terminal. The app-local terminal worker can abandon and clean exact terminal sealed artifacts. This remains partial: periodic survivor continuation, crash-left unsealed partial cleanup, failure/cancel/budget Secure Ingress claim closeout and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
-      "status": "SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER",
+      "status": "PARTIAL_V2_CODE_BOUNDARY_NO_PRODUCTION_CALLER",
       "evidence_refs": [
         "host_brain/evolution_lab/contracts.py",
         "host_brain/evolution_lab/policy.py",
         "host_brain/evolution_lab/runner.py",
         "host_brain/persistence/evolution_lab_ledger_repository.py",
         "host_brain/audit/migrations/0108_evolution_lab_ledger.sql",
-        "tests/integration/test_ne04_evolution_lab_ledger.py"
+        "tests/integration/test_ne04_evolution_lab_ledger.py",
+        "host_brain/evolution_lab/v2_runner.py",
+        "host_brain/persistence/evolution_lab_v2_repository.py",
+        "host_brain/audit/migrations/0122_evolution_lab_v2_evidence.sql",
+        "tests/unit/test_ne04_evolution_lab_v2_contracts.py",
+        "tests/unit/test_ne04_evolution_lab_v2_runner.py",
+        "tests/integration/test_ne04_evolution_lab_v2_ledger.py"
       ],
-      "boundary": "PR #81 provides an append-only V1 ledger and self-attested runner only. Dataset digests are not independently recomputed, verifier evidence may be synthesized, attribute-name isolation is bypassable, and there is no production composition; V1 is permanently benefit_eligible=false."
+      "boundary": "V1 remains read-only self-attested shadow evidence: it does not independently recompute datasets, can synthesize verifier evidence and uses an attribute-name isolation check. Parallel 0122 V2 recomputes the ephemeral dataset against a frozen workspace manifest, requires exact sandbox/no-effect-audit/verifier identities and atomically appends evidence plus run receipts. V2 is a structural local SQLite boundary only: no real container, mounted dataset, external model, production composition, golden experiment, Review, activation or promotion evidence exists; V1 and V2 remain benefit_eligible=false and proposal-only."
     },
     "counterfactual_analysis": {
-      "status": "PARTIAL_NE04_CONTRACT_AND_DURABLE_REPORT",
+      "status": "PARTIAL_NE04_V2_CONTRACT_AND_DURABLE_REPORT",
       "evidence_refs": [
         "host_brain/evolution_lab/contracts.py",
         "host_brain/persistence/evolution_lab_ledger_repository.py",
-        "tests/integration/test_ne04_evolution_lab_ledger.py"
+        "tests/integration/test_ne04_evolution_lab_ledger.py",
+        "host_brain/persistence/evolution_lab_v2_repository.py",
+        "tests/integration/test_ne04_evolution_lab_v2_ledger.py"
       ],
-      "boundary": "CounterfactualPair is persisted only inside an immutable ExperimentReport; it has no production writer or promotion authority."
+      "boundary": "V1 and V2 counterfactual pairs are persisted only inside immutable reports. V2 additionally records outcome/evidence/cost/latency/risk/verification deltas, but it has no production writer, real isolated arm cohort or promotion authority."
     },
     "skill_supply_chain": {
       "status": "PARTIAL_NON_ATOMIC_NO_RUNTIME_RESOLVER",
