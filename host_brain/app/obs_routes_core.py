@@ -2742,10 +2742,9 @@ def _build_trace_live_feed_delta(
 def _build_probe_registry(ledger, since_ms: int):
     """基于 ledger 历史数据构建被动探测函数注册表，同时返回 extra_data 字典（含 success_rate/call_count 等）。
     若当前窗口内无数据，则用 7 日窗口回退，避免所有服务显示 UNKNOWN（探测不到服务码）。
-    优先使用心跳缓存（service_health_heartbeat）：若某服务在 TTL 内有心跳结果，则直接返回，不再依赖 ledger。
+    独立 Obs 进程只消费 durable ledger/projection，不把 Host 进程内心跳缓存当作跨进程真相。
     """
     from host_brain.observability.service_health_aggregator import ServiceHealthResult, ALL_SERVICES as _AGGREGATOR_ALL_SERVICES
-    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
 
     now_ms = _now_ms()
     host_services_for_aggregator = [s for s in _AGGREGATOR_ALL_SERVICES if s.get("side") == "host"]
@@ -2789,33 +2788,8 @@ def _build_probe_registry(ledger, since_ms: int):
     registry = {}
     extra_data = {}  # service_id -> {success_rate, call_count, role, provider, model_id}
 
-    # 边缘服务探测：优先用心跳缓存，否则用 ledger
+    # 边缘服务探测：只使用 durable ledger。
     for sid, prefixes in _EDGE_SERVICE_EVENT_PREFIXES.items():
-        cached = heartbeat.get_cached(sid)
-        if cached:
-            cap = (
-                str(cached.get("status") or "UNKNOWN").strip().upper(),
-                cached.get("latency_ms"),
-                cached.get("last_check_ts"),
-                sid,
-                cached.get("name") or sid.upper().replace("_", " "),
-            )
-
-            async def _make_edge_probe_cached(_sid_ignored=None, c=cap):
-                st, p95, last_ts, sid_val, dname = c
-                try:
-                    p95_int = int(p95) if p95 is not None else None
-                except (TypeError, ValueError):
-                    p95_int = None
-                try:
-                    last_int = int(last_ts) if last_ts is not None else None
-                except (TypeError, ValueError):
-                    last_int = None
-                return ServiceHealthResult(sid_val, dname, "edge", st, latency_ms=p95_int, last_check_ts=last_int)
-
-            registry[sid] = _make_edge_probe_cached
-            extra_data[sid] = {"success_rate": None, "call_count": 0}
-            continue
         svc_rows = [
             r for r in voice_rows
             if any(str(r.get("event_type", "")).upper().startswith(p) for p in prefixes)
@@ -2835,69 +2809,14 @@ def _build_probe_registry(ledger, since_ms: int):
             "call_count":   health.get("call_count", 0),
         }
 
-    # Host 侧 15 服务（llm_gateway, neo4j, ...）：优先用心跳缓存，否则无 probe → aggregator 返回 UNKNOWN
+    # Host 侧服务无 durable audit 记录时由 aggregator 显示 UNKNOWN。
     for svc in host_services_for_aggregator:
         sid = svc["service_id"]
         if sid in registry:
             continue
-        cached = heartbeat.get_cached(sid)
-        if cached:
-            cap = (
-                str(cached.get("status") or "UNKNOWN").strip().upper(),
-                cached.get("latency_ms"),
-                cached.get("last_check_ts"),
-                sid,
-                cached.get("name") or svc.get("name") or sid,
-            )
 
-            async def _make_host_probe_cached(_sid_ignored=None, c=cap):
-                st, p95, last_ts, sid_val, dname = c
-                try:
-                    p95_int = int(p95) if p95 is not None else None
-                except (TypeError, ValueError):
-                    p95_int = None
-                try:
-                    last_int = int(last_ts) if last_ts is not None else None
-                except (TypeError, ValueError):
-                    last_int = None
-                return ServiceHealthResult(sid_val, dname, "host", st, latency_ms=p95_int, last_check_ts=last_int)
-
-            registry[sid] = _make_host_probe_cached
-            extra_data[sid] = {"success_rate": None, "call_count": 0}
-
-    # LLM 节点探测：优先用心跳缓存（Host 整体），否则用 ledger
+    # LLM 节点探测：只使用 durable ModelAttempt audit。
     for node_id, meta in _LLM_NODE_REGISTRY.items():
-        cached = heartbeat.get_cached(node_id)
-        if cached:
-            cap = (
-                str(cached.get("status") or "UNKNOWN").strip().upper(),
-                cached.get("latency_ms"),
-                cached.get("last_check_ts"),
-                node_id,
-                meta,
-            )
-
-            async def _make_llm_probe_cached(_sid_ignored=None, c=cap):
-                st, p95, last_ts, nid, m = c
-                try:
-                    p95_int = int(p95) if p95 is not None else None
-                except (TypeError, ValueError):
-                    p95_int = None
-                try:
-                    last_int = int(last_ts) if last_ts is not None else None
-                except (TypeError, ValueError):
-                    last_int = None
-                return ServiceHealthResult(nid, m["role"], "host", st, latency_ms=p95_int, last_check_ts=last_int)
-
-            registry[node_id] = _make_llm_probe_cached
-            extra_data[node_id] = {
-                "role": meta["role"],
-                "provider": meta["provider"],
-                "model_id": meta["model_id"],
-                "success_rate": None,
-                "call_count": 0,
-            }
-            continue
         node_rows = [r for r in llm_rows if model_attempt_node_id(r) == node_id]
         health = _compute_node_health(node_rows)
         _status = health["status"]

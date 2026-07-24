@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from json import loads as json_loads
 from pathlib import Path
 from typing import Any, Dict, Mapping
@@ -17,7 +17,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from natsume_contracts.edge.service_catalog_v1 import build_edge_transport_probe_statuses
 
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
-from host_brain.composition.process_services import collect_dependency_probes, get_ledger
 from host_brain.app.main import (
     build_env_readiness_report,
     build_service_health_report,
@@ -45,13 +44,68 @@ from host_brain.app.obs_route_ports import require_obs_query_projection_store
 _logger = logging.getLogger("Natsume.health_routes")
 
 DegradationStateProvider = Callable[[], Mapping[str, Any]]
+HealthLedgerProvider = Callable[[], Any]
+DependencyProbeProvider = Callable[[], Awaitable[Mapping[str, Any]]]
 
 
 class DegradationStateUnavailable(RuntimeError):
     """The app-local degradation read authority is unavailable or invalid."""
 
 
+class HealthRuntimeDependencyUnavailable(RuntimeError):
+    """A production health route was not given one of its read ports."""
+
+
 _support_router = APIRouter()
+
+
+def _read_health_ledger(
+    *,
+    ledger_provider: HealthLedgerProvider | None,
+    allow_legacy_process_providers: bool,
+) -> Any:
+    provider = ledger_provider
+    if provider is None and allow_legacy_process_providers:
+        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
+
+        provider = get_ledger
+    if not callable(provider):
+        raise HealthRuntimeDependencyUnavailable(
+            "HOST_HEALTH_LEDGER_PROVIDER_UNAVAILABLE"
+        )
+    try:
+        return provider()
+    except Exception as exc:
+        raise HealthRuntimeDependencyUnavailable(
+            "HOST_HEALTH_LEDGER_READ_FAILED"
+        ) from exc
+
+
+async def _read_dependency_probes(
+    *,
+    dependency_probe_provider: DependencyProbeProvider | None,
+    allow_legacy_process_providers: bool,
+) -> dict[str, Any]:
+    provider = dependency_probe_provider
+    if provider is None and allow_legacy_process_providers:
+        from host_brain.app.startup import collect_dependency_probes  # noqa: PLC0415
+
+        provider = collect_dependency_probes
+    if not callable(provider):
+        raise HealthRuntimeDependencyUnavailable(
+            "HOST_HEALTH_DEPENDENCY_PROBE_PROVIDER_UNAVAILABLE"
+        )
+    try:
+        result = await provider()
+    except Exception as exc:
+        raise HealthRuntimeDependencyUnavailable(
+            "HOST_HEALTH_DEPENDENCY_PROBE_READ_FAILED"
+        ) from exc
+    if not isinstance(result, Mapping):
+        raise HealthRuntimeDependencyUnavailable(
+            "HOST_HEALTH_DEPENDENCY_PROBE_RESULT_INVALID"
+        )
+    return dict(result)
 
 
 def _read_degradation_state(
@@ -192,7 +246,10 @@ async def build_live_health_report(
     request_id: str | None = None,
     ts_ms: int | None = None,
     degradation_state_provider: DegradationStateProvider | None = None,
+    ledger_provider: HealthLedgerProvider | None = None,
+    dependency_probe_provider: DependencyProbeProvider | None = None,
     allow_legacy_degradation_provider: bool = False,
+    allow_legacy_process_providers: bool = False,
 ) -> dict[str, Any]:
     req_id = str(request_id or new_request_id()).strip()
     ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
@@ -200,12 +257,19 @@ async def build_live_health_report(
     _host_result = load_host_config()
     _runtime_statuses: dict[str, Any] = {}
     _dep_probes: dict[str, Any] = {}
+    ledger = _read_health_ledger(
+        ledger_provider=ledger_provider,
+        allow_legacy_process_providers=allow_legacy_process_providers,
+    )
     if _host_result.success and _host_result.config is not None:
         _runtime_statuses = build_host_runtime_statuses(_host_result.config)
 
     if not skip_dependency_probes:
         try:
-            _dep_probes = await collect_dependency_probes()
+            _dep_probes = await _read_dependency_probes(
+                dependency_probe_provider=dependency_probe_provider,
+                allow_legacy_process_providers=allow_legacy_process_providers,
+            )
             _runtime_statuses.update(_dep_probes)
             _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
             _runtime_statuses.update(
@@ -214,6 +278,8 @@ async def build_live_health_report(
                     detail=str(_edge_gateway.get("detail") or "").strip() or None,
                 )
             )
+        except HealthRuntimeDependencyUnavailable:
+            raise
         except Exception as _edge_exc:
             _logger.warning("Edge transport probe failed (degraded): %s", _edge_exc)
             _runtime_statuses.update(
@@ -225,7 +291,7 @@ async def build_live_health_report(
     health_report = build_service_health_report(
         runtime_statuses=_runtime_statuses,
         request_id=req_id,
-        ledger=get_ledger(),
+        ledger=ledger,
         ts_ms=ts_value,
     )
     # GET /health is a read adapter. Service probe observations are owned by
@@ -245,18 +311,28 @@ async def build_live_readiness_report(
     *,
     request_id: str | None = None,
     ts_ms: int | None = None,
+    ledger_provider: HealthLedgerProvider | None = None,
+    dependency_probe_provider: DependencyProbeProvider | None = None,
+    allow_legacy_process_providers: bool = False,
 ) -> dict[str, Any]:
     req_id = str(request_id or new_request_id()).strip()
     ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
     node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
-    dependency_probes = await collect_dependency_probes()
+    ledger = _read_health_ledger(
+        ledger_provider=ledger_provider,
+        allow_legacy_process_providers=allow_legacy_process_providers,
+    )
+    dependency_probes = await _read_dependency_probes(
+        dependency_probe_provider=dependency_probe_provider,
+        allow_legacy_process_providers=allow_legacy_process_providers,
+    )
     readiness_report = build_env_readiness_report(
         env=str(os.environ.get("Natsume_ENV") or "dev"),
         node_inventory=node_inventory,
         expected_node_count=expected_node_count,
         dependency_probes=dependency_probes,
         request_id=req_id,
-        ledger=get_ledger(),
+        ledger=ledger,
         ts_ms=ts_value,
     )
     if inventory_path:
@@ -275,7 +351,10 @@ async def health_check(
     ),
     *,
     degradation_state_provider: DegradationStateProvider | None = None,
+    ledger_provider: HealthLedgerProvider | None = None,
+    dependency_probe_provider: DependencyProbeProvider | None = None,
     allow_legacy_degradation_provider: bool = False,
+    allow_legacy_process_providers: bool = False,
 ) -> HealthResponse:
     """Health endpoint."""
     request_id = new_request_id()
@@ -287,9 +366,12 @@ async def health_check(
             request_id=request_id,
             ts_ms=ts_ms,
             degradation_state_provider=degradation_state_provider,
+            ledger_provider=ledger_provider,
+            dependency_probe_provider=dependency_probe_provider,
             allow_legacy_degradation_provider=(
                 allow_legacy_degradation_provider
             ),
+            allow_legacy_process_providers=allow_legacy_process_providers,
         )
         if include_immune_proposal:
             proposal = build_immune_proposal_from_report(health_report, source="health")
@@ -314,6 +396,15 @@ async def health_check(
     except DegradationStateUnavailable as exc:
         _logger.warning(
             "Health degradation authority unavailable",
+            extra={"request_id": request_id, "reason_code": str(exc)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except HealthRuntimeDependencyUnavailable as exc:
+        _logger.warning(
+            "Health route dependency unavailable",
             extra={"request_id": request_id, "reason_code": str(exc)},
         )
         raise HTTPException(
@@ -351,12 +442,15 @@ async def degradation_health_state(
         ) from exc
 
 
-@_support_router.get("/ready", response_model=ReadinessResponse)
 async def environment_readiness(
     include_immune_proposal: bool = Query(
         False,
         description="Attach a Codex immune proposal when the readiness report is degraded or failed.",
     ),
+    *,
+    ledger_provider: HealthLedgerProvider | None = None,
+    dependency_probe_provider: DependencyProbeProvider | None = None,
+    allow_legacy_process_providers: bool = False,
 ) -> ReadinessResponse:
     """Readiness endpoint."""
     request_id = new_request_id()
@@ -366,6 +460,9 @@ async def environment_readiness(
         readiness_report = await build_live_readiness_report(
             request_id=request_id,
             ts_ms=ts_ms,
+            ledger_provider=ledger_provider,
+            dependency_probe_provider=dependency_probe_provider,
+            allow_legacy_process_providers=allow_legacy_process_providers,
         )
         if include_immune_proposal:
             proposal = build_immune_proposal_from_report(readiness_report, source="readiness")
@@ -381,6 +478,15 @@ async def environment_readiness(
             timestamp=ts_ms,
             summary=readiness_report,
         )
+    except HealthRuntimeDependencyUnavailable as exc:
+        _logger.warning(
+            "Readiness route dependency unavailable",
+            extra={"request_id": request_id, "reason_code": str(exc)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         _logger.error("Readiness check failed", extra={"request_id": request_id, "error": str(exc)})
         raise HTTPException(
@@ -511,7 +617,10 @@ async def env_readiness_report() -> Dict[str, Any]:
 def create_health_router(
     *,
     degradation_state_provider: DegradationStateProvider | None = None,
+    ledger_provider: HealthLedgerProvider | None = None,
+    dependency_probe_provider: DependencyProbeProvider | None = None,
     allow_legacy_degradation_provider: bool = False,
+    allow_legacy_process_providers: bool = False,
 ) -> APIRouter:
     """Create a health router bound to one app-local degradation reader.
 
@@ -543,9 +652,12 @@ def create_health_router(
             skip_dependency_probes=skip_dependency_probes,
             include_immune_proposal=include_immune_proposal,
             degradation_state_provider=degradation_state_provider,
+            ledger_provider=ledger_provider,
+            dependency_probe_provider=dependency_probe_provider,
             allow_legacy_degradation_provider=(
                 allow_legacy_degradation_provider
             ),
+            allow_legacy_process_providers=allow_legacy_process_providers,
         )
 
     @health_router.get("/health/degradation")
@@ -557,6 +669,23 @@ def create_health_router(
             ),
         )
 
+    @health_router.get("/ready", response_model=ReadinessResponse)
+    async def app_environment_readiness(
+        include_immune_proposal: bool = Query(
+            False,
+            description=(
+                "Attach a Codex immune proposal when the readiness report is "
+                "degraded or failed."
+            ),
+        ),
+    ) -> ReadinessResponse:
+        return await environment_readiness(
+            include_immune_proposal=include_immune_proposal,
+            ledger_provider=ledger_provider,
+            dependency_probe_provider=dependency_probe_provider,
+            allow_legacy_process_providers=allow_legacy_process_providers,
+        )
+
     health_router.include_router(_support_router)
     return health_router
 
@@ -564,12 +693,18 @@ def create_health_router(
 # Compatibility-only router for direct imports and embedded test apps.  The
 # production Host registry always calls ``create_health_router`` with an
 # explicit app-local provider and never mounts this object.
-router = create_health_router(allow_legacy_degradation_provider=True)
+router = create_health_router(
+    allow_legacy_degradation_provider=True,
+    allow_legacy_process_providers=True,
+)
 
 
 __all__ = [
     "DegradationStateProvider",
     "DegradationStateUnavailable",
+    "DependencyProbeProvider",
+    "HealthLedgerProvider",
+    "HealthRuntimeDependencyUnavailable",
     "build_live_health_report",
     "build_live_readiness_report",
     "canon_sync_health_check",

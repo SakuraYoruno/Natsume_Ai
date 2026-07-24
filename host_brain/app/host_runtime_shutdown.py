@@ -26,6 +26,7 @@ _RUNTIME_STATE_FIELDS = (
     "service_catalog_rollout_store",
     "service_catalog_rollout_observer",
     "runtime_context_composition",
+    "service_health_heartbeat",
 )
 _SHUTDOWN_REASON = "HOST_RUNTIME_SHUTDOWN_RETRY_REQUIRED"
 

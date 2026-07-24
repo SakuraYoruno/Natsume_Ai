@@ -100,7 +100,6 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from host_brain.app import internal_tribe_routes
-    from host_brain.app.observability_runtime import service_health_heartbeat
     from host_brain.tribe import cortex_agent
 
     events: list[str] = []
@@ -125,16 +124,8 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
         async def stop(self) -> None:
             events.append("tribe-bus")
 
-    async def stop_heartbeat() -> None:
-        events.append("heartbeat")
-
     test_logger = logging.getLogger("test.aw01.runtime-shutdown")
     monkeypatch.setattr(cortex_agent, "get_cortex_agent", Cortex)
-    monkeypatch.setattr(
-        service_health_heartbeat,
-        "stop_heartbeat",
-        stop_heartbeat,
-    )
     monkeypatch.setattr(internal_tribe_routes, "get_tribe_event_bus", Bus)
 
     await http_hooks._shutdown_runtime(
@@ -147,6 +138,5 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
         "activity",
         "resource",
         "bond-queue",
-        "heartbeat",
         "tribe-bus",
     ]

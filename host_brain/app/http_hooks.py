@@ -59,6 +59,31 @@ def _startup_status_is_degraded(value: Any) -> bool:
     return startup_status_is_degraded(value)
 
 
+def _publish_startup_probe_batch(
+    *,
+    statuses: Mapping[str, Any],
+    startup_probe_sink: Callable[[Mapping[str, Any]], None] | None,
+    logger: Any,
+) -> bool:
+    """Export startup observations only through the owning app-local sink.
+
+    A startup probe is an observation, not permission to mutate the retired
+    process-global degradation reducer.  The production ASGI composition
+    injects the RuntimeGuardian observer after it owns the runtime scope,
+    lease, and fence.  Embedded callers without that composition keep their
+    report unbound rather than silently writing a second authority.
+    """
+
+    if startup_probe_sink is None:
+        logger.warning(
+            "Startup probe batch is unbound; skipping degradation projection",
+            extra={"startup_probe_status_count": len(statuses)},
+        )
+        return False
+    startup_probe_sink(dict(statuses))
+    return True
+
+
 def _tool_runtime_startup_status(
     *,
     seeded_count: int,
@@ -171,7 +196,6 @@ def runtime_lifespan(
     tool_broker_provider: Callable[[], Any] | None = None,
     tool_catalog_provider: Callable[[], Any] | None = None,
     skill_registry_provider: Callable[[], Any] | None = None,
-    start_service_heartbeat: bool = True,
     defer_activity_monitor: bool = False,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
@@ -464,29 +488,16 @@ def runtime_lifespan(
             new_module_statuses["life_continuity_loop"] = (
                 "RETIRED: governed SchedulerClock life_tick owns periodic Life commands"
             )
-            if startup_probe_sink is not None:
-                # ASGI owns the app-local RuntimeGuardian, but it can only be
-                # composed after Task Runtime migrations and the Host fencing
-                # lease exist.  Export this probe batch without writing the
-                # retired module-global degradation aggregate.
-                startup_probe_sink(dict(new_module_statuses))
-            else:
-                try:
-                    from host_brain.app.startup import reconcile_startup_degradation  # noqa: PLC0415
-
-                    _degradation_ts_ms = int(time.time() * 1000)
-                    reconcile_startup_degradation(
-                        new_module_statuses,
-                        source_ref=f"startup-probe://runtime/{_degradation_ts_ms}",
-                        now_ms=_degradation_ts_ms,
-                    )
-                except Exception as _degradation_exc:
-                    # Compatibility-only owner used outside the production
-                    # ASGI composition during the rollback window.
-                    logger.warning(
-                        "Startup degradation projection skipped: %s",
-                        _degradation_exc,
-                    )
+            new_module_statuses["runtime_guardian_startup_probe"] = (
+                "EXPORTED: app-local RuntimeGuardian observer"
+                if startup_probe_sink is not None
+                else "UNBOUND: app-local RuntimeGuardian observer unavailable"
+            )
+            _publish_startup_probe_batch(
+                statuses=new_module_statuses,
+                startup_probe_sink=startup_probe_sink,
+                logger=logger,
+            )
             report = build_startup_report(
                 runtime_statuses=new_module_statuses,
                 dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
@@ -585,14 +596,6 @@ def runtime_lifespan(
             except Exception as _rm_exc:
                 new_module_statuses["system_resource_manager"] = f"DEGRADED: {_rm_exc}"
                 logger.warning("SystemResourceManager 启动失败（降级）: %s", _rm_exc)
-
-            # 服务健康心跳：定时探测 Edge/Host，避免总览一直显示「未知」
-            if start_service_heartbeat:
-                try:
-                    from host_brain.app.observability_runtime.service_health_heartbeat import start_heartbeat
-                    start_heartbeat(interval_sec=30.0)
-                except Exception as hb_exc:
-                    logger.warning("Service health heartbeat start skipped: %s", hb_exc)
 
             # [Tribe 基础设施] 初始化 TribeEventBus 单例 + HostTribeRegistry 单例
             # Phase 0：确保所有族 Agent 在启动时可以通过 get_tribe_event_bus() /

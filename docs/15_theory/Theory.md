@@ -462,7 +462,7 @@ WorldFact {
 }
 ```
 
-当前生产 Context 路径先把服务端观测追加到 workspace-scoped Observation Journal，再由 [WorldResolver](../../host_brain/runtime/world_resolver.py) 以捕获的单调 head 重开。TTL 只能由显式 expiry transition 推进，读取不能续期；冲突事实保留 competing refs，不能只按 confidence 静默覆盖。[WorldProjectionReadModel](../../host_brain/runtime/world_model.py) 仍是兼容的只读投影，二者都不是可供 MCTS 随意推进的 simulator，更不代表预测型 World Model 已完成。
+当前生产 Context 路径先把服务端观测追加到 workspace-scoped Observation Journal，再由 [WorldResolver](../../host_brain/runtime/world_resolver.py) 以捕获的单调 head 重开。TTL 只能由显式 expiry transition 推进，读取不能续期；冲突事实保留 competing refs，不能只按 confidence 静默覆盖。兼容 `WorldProjectionReadModel` 也按 `(key, source_ref)` 留存来源：值不同才标记 conflict，同值多来源是可追溯佐证。[WorldProjectionReadModel](../../host_brain/runtime/world_model.py) 仍是兼容的只读投影，二者都不是可供 MCTS 随意推进的 simulator，更不代表预测型 World Model 已完成。
 
 ### 8.3 Scene 的职责边界
 
@@ -537,6 +537,10 @@ expiry(child) ≤ expiry(parent)
 
 Preview 的职责是把“已有权限在此刻是否仍能用于这个精确动作”变成可重放证据，而不是新建一张权限票。签发和执行都必须重开 immutable Command/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack/Scene 与当前 Guardian；derived receipt 在最终网络/设备边界还必须递归重开原始 Attempt/Lease，不能把中间证据当成继续权限。receipt 固定 `authority_granted=false`。下游动作只能匹配预先冻结的 EffectDescriptor，不能靠更换 scope、参数、target 或复用 origin receipt 扩展能力。Acceptance 只绑定它明确验收的效果：若只验收一条文本，就不能顺带加入 `raw_extra`、媒体、二次回复、语音或 Avatar 变换；这些都需要独立 effect 与 Preview。没有可重开的 authority、旧任务缺少 Context、终端网络/设备调用没有 exact proof 时，正确结果是隔离或失败关闭。
 
+### 9.3.1 Guardian 健康心跳也有生命周期所有权
+
+健康探测不是执行授权，但它会把降级事实输入 Guardian，因此 task、observer、probe cache 与 HTTP transport 都不能由模块全局单例持有。每个 Host ASGI lifespan 必须创建自己的 `ServiceHealthHeartbeat`，在 scope 关闭时只 cancel/join 自己创建的 heartbeat/keepalive task，并关闭自己创建的 transport；第二个 Host 的 observer、task、cache、transport 与关闭顺序不能被第一个 Host 改绑、读取、取消或关闭。没有显式 observer 的 compatibility probe 只能更新自身兼容 cache，不能回退到全局 degradation reducer；独立 Obs 进程不能把任何内存 cache 充当跨进程 read model，只能读取 durable ledger/projection。兼容顶层 helper 仍仅供嵌入调用和测试，不能成为 Host production authority；这项收口不等于 Windows graceful stop、真实多实例或整个 NE-03 完成。
+
 ### 9.4 Review 不是聊天里的“好吧”
 
 Review 必须绑定：
@@ -563,6 +567,10 @@ Review 必须绑定：
 - 允许只读或安全降级时明确标记；
 - 将恢复动作与原请求区分；
 - 不用模型猜测缺失的授权或事实。
+
+启动 probe 同样只是 observation。只有拥有 Host runtime scope、lease 与 fence 的 app-local `RuntimeGuardian` sink 才能接收它；没有 sink 的嵌入式启动必须保留 `UNBOUND` 报告，而不是回退写入 module-global degradation reducer。通用 lifespan 也不得再启动或停止模块级 service heartbeat；正式 Host 的健康任务只能由 ASGI lifespan 自己创建、取消并等待。这样缺失 composition 会显式暴露，不能被第二套进程内 authority 掩盖。
+
+同一条边界也适用于健康读取：生产 `/health`、`/ready` 和内部免疫实时报告必须从 Host composition 接收 ledger、依赖探测与 Guardian 读端口，不能在路由内回读 `ProcessServiceContainer`。缺失端口是显式 503，不是以全局服务或伪造降级结果继续运行；模块级兼容 router 的 legacy provider 只能显式启用，不能成为 Host 默认路径。
 
 ---
 
