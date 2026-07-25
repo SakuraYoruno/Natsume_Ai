@@ -15,6 +15,10 @@ from host_brain.persistence.task_store_types import (
     OutboxMessage,
     TaskStoreError,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 from host_brain.task_runtime import coordinator as coordinator_module
 from host_brain.task_runtime import (
     dag_scheduling_runtime as dag_scheduling_runtime_module,
@@ -230,23 +234,28 @@ def test_same_command_keeps_legacy_identity_but_revision_conflict_fails_closed(
     )
     assert migrated.success is True, migrated.as_dict()
     with sqlite3.connect(db_path) as conn:
+        register_task_graph_admission_authority(conn)
         for revision in (1, 2):
-            conn.execute(
-                """
-                INSERT INTO task_runtime_graph(
-                    graph_id, revision, root_work_order_id, planner_ref,
-                    status, status_version, graph_json, source_kind,
-                    source_ref, legacy_snapshot_json, created_ts_ms,
-                    updated_ts_ms
-                ) VALUES ('graph-stable-command', ?, ?, ?, 'CREATED', 0,
-                          '{}', 'CANONICAL', NULL, NULL, 1, 1)
-                """,
-                (
-                    revision,
-                    f"work-order-stable-{revision}",
-                    f"planner://stable/{revision}",
-                ),
-            )
+            with canonical_task_graph_admission_scope(
+                "graph-stable-command",
+                revision,
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO task_runtime_graph(
+                        graph_id, revision, root_work_order_id, planner_ref,
+                        status, status_version, graph_json, source_kind,
+                        source_ref, legacy_snapshot_json, created_ts_ms,
+                        updated_ts_ms
+                    ) VALUES ('graph-stable-command', ?, ?, ?, 'CREATED', 0,
+                              '{}', 'CANONICAL', NULL, NULL, 1, 1)
+                    """,
+                    (
+                        revision,
+                        f"work-order-stable-{revision}",
+                        f"planner://stable/{revision}",
+                    ),
+                )
 
         def insert(message: dict[str, Any]) -> None:
             conn.execute(

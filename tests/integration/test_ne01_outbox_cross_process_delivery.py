@@ -12,6 +12,10 @@ from host_brain.integrations.runtime_events import (
     RuntimeOutboxPublisher,
 )
 from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 @dataclass
@@ -53,23 +57,25 @@ def _insert_outbox(
     created_ts_ms: int,
 ) -> None:
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref, status,
-                status_version, graph_json, source_kind, source_ref,
-                legacy_snapshot_json, created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, ?, 'planner://ne01/outbox-test', 'CREATED',
-                      0, '{}', 'CANONICAL', ?, NULL, ?, ?)
-            """,
-            (
-                aggregate_id,
-                f"work-order::{aggregate_id}",
-                f"{aggregate_id}@1",
-                created_ts_ms,
-                created_ts_ms,
-            ),
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope(aggregate_id, 1):
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref, status,
+                    status_version, graph_json, source_kind, source_ref,
+                    legacy_snapshot_json, created_ts_ms, updated_ts_ms
+                ) VALUES (?, 1, ?, 'planner://ne01/outbox-test', 'CREATED',
+                          0, '{}', 'CANONICAL', ?, NULL, ?, ?)
+                """,
+                (
+                    aggregate_id,
+                    f"work-order::{aggregate_id}",
+                    f"{aggregate_id}@1",
+                    created_ts_ms,
+                    created_ts_ms,
+                ),
+            )
         conn.execute(
             """
             INSERT INTO task_runtime_outbox(

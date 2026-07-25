@@ -20,6 +20,10 @@ from host_brain.persistence.review_continuation_store import (
     ReviewContinuationStoreError,
 )
 from host_brain.persistence.review_repository import ReviewStore, ReviewStoreError
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 @dataclass
@@ -52,27 +56,29 @@ def _insert_checkpoint(
 ) -> None:
     with sqlite3.connect(str(path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref,
-                status, status_version, graph_json, source_kind, source_ref,
-                legacy_snapshot_json, created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, 'work-review', 'planner://review/test',
-                      'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
-            """,
-            (graph_id, revision),
-        )
-        conn.execute(
-            """
-            INSERT INTO task_runtime_node(
-                graph_id, graph_revision, node_id, status, status_version,
-                node_json, cancellation_requested_ts_ms,
-                created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, ?, ?, ?, '{}', NULL, 1000, 1000)
-            """,
-            (graph_id, revision, node_id, node_status, node_version),
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope(graph_id, revision):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref,
+                    status, status_version, graph_json, source_kind, source_ref,
+                    legacy_snapshot_json, created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, 'work-review', 'planner://review/test',
+                          'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
+                """,
+                (graph_id, revision),
+            )
+            conn.execute(
+                """
+                INSERT INTO task_runtime_node(
+                    graph_id, graph_revision, node_id, status, status_version,
+                    node_json, cancellation_requested_ts_ms,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, '{}', NULL, 1000, 1000)
+                """,
+                (graph_id, revision, node_id, node_status, node_version),
+            )
         if attempt_id is not None:
             conn.execute(
                 """
@@ -553,16 +559,18 @@ def _post_downstream_execution_authority(
     )
     with sqlite3.connect(str(path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
-            INSERT INTO task_runtime_node(
-                graph_id, graph_revision, node_id, status, status_version,
-                node_json, cancellation_requested_ts_ms,
-                created_ts_ms, updated_ts_ms
-            ) VALUES ('graph-review', 1, 'node-downstream', 'RUNNING', 3,
-                      '{}', NULL, 1000, 1000)
-            """
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope("graph-review", 1):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_node(
+                    graph_id, graph_revision, node_id, status, status_version,
+                    node_json, cancellation_requested_ts_ms,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES ('graph-review', 1, 'node-downstream', 'RUNNING', 3,
+                          '{}', NULL, 1000, 1000)
+                """
+            )
         conn.execute(
             """
             INSERT INTO task_runtime_attempt(

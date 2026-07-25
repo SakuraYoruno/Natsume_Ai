@@ -8,6 +8,10 @@ import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 from host_brain.persistence.task_store_types import (
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_INVALID,
@@ -60,22 +64,24 @@ def _insert_outbox(
         f"{aggregate_id}@{graph_revision}/{aggregate_version}"
     )
     with sqlite3.connect(store.db_path) as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref,
-                status, status_version, graph_json, source_kind,
-                source_ref, legacy_snapshot_json, created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, ?, ?, 'ACTIVE', 0, ?, 'CANONICAL', NULL, NULL, 0, 0)
-            """,
-            (
-                aggregate_id,
-                graph_revision,
-                f"work-order::{aggregate_id}",
-                f"planner::{aggregate_id}",
-                f'{{"graph_id":"{aggregate_id}","revision":{graph_revision}}}',
-            ),
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope(aggregate_id, graph_revision):
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref,
+                    status, status_version, graph_json, source_kind,
+                    source_ref, legacy_snapshot_json, created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, 'ACTIVE', 0, ?, 'CANONICAL', NULL, NULL, 0, 0)
+                """,
+                (
+                    aggregate_id,
+                    graph_revision,
+                    f"work-order::{aggregate_id}",
+                    f"planner::{aggregate_id}",
+                    f'{{"graph_id":"{aggregate_id}","revision":{graph_revision}}}',
+                ),
+            )
         conn.execute(
             """
             INSERT INTO task_runtime_outbox(

@@ -23,6 +23,10 @@ from host_brain.persistence.review_repository import (
     ReviewStore,
     ReviewStoreError,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 @dataclass
@@ -46,17 +50,19 @@ def _db(tmp_path: Path) -> Path:
 def _insert_graph(path: Path, *, graph_id: str = "graph-review") -> None:
     with sqlite3.connect(str(path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref,
-                status, status_version, graph_json, source_kind, source_ref,
-                legacy_snapshot_json, created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, 'work-review', 'planner://review/test',
-                      'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
-            """,
-            (graph_id,),
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope(graph_id, 1):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref,
+                    status, status_version, graph_json, source_kind, source_ref,
+                    legacy_snapshot_json, created_ts_ms, updated_ts_ms
+                ) VALUES (?, 1, 'work-review', 'planner://review/test',
+                          'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
+                """,
+                (graph_id,),
+            )
 
 
 def _insert_node(
@@ -69,16 +75,18 @@ def _insert_node(
 ) -> None:
     with sqlite3.connect(str(path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
-            INSERT INTO task_runtime_node(
-                graph_id, graph_revision, node_id, status, status_version,
-                node_json, cancellation_requested_ts_ms,
-                created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, ?, ?, ?, '{}', NULL, 1000, 1000)
-            """,
-            (graph_id, node_id, status, status_version),
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope(graph_id, 1):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_node(
+                    graph_id, graph_revision, node_id, status, status_version,
+                    node_json, cancellation_requested_ts_ms,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES (?, 1, ?, ?, ?, '{}', NULL, 1000, 1000)
+                """,
+                (graph_id, node_id, status, status_version),
+            )
 
 
 def _insert_attempt(

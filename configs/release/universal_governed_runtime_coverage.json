@@ -2,10 +2,10 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_HOST_EDGE_AUTHORITY_CONSOLIDATION_IMPLEMENTATION_COMMIT_A836FB1FCFC3206A8C90E72B37E5C489E9C2F9E0",
+  "evaluated_source": "NE01_TASK_GRAPH_SQL_ADMISSION_WORKTREE_OVER_ORIGIN_DEV_C347135F3",
   "evidence_binding": {
-    "evaluated_commit_sha": "a836fb1fcfc3206a8c90e72b37e5c489e9c2f9e0",
-    "migration_head": "0123_resource_manager_status_journal.sql"
+    "evaluated_commit_sha": "c347135f3dbd16e43bb5efd46598204da375217c",
+    "migration_head": "0124_task_graph_admission_authority.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
@@ -466,8 +466,8 @@
       "review_continuation_boundary": "Migration 0096 closes task-bound Review continuation without creating a second Review or Task truth. ReviewStore atomically queues CONSUMED, REJECTED, and EXPIRED decisions and validates create-time Task bindings; expiration, reconciliation, and claim processing isolate poison rows. Fixed-field secret-free authority is checked in the READY Attempt/Lease transaction and at first worker entry with exact owner/fence. Credentials cover budget time plus child TTL up to 24 hours but cannot replace the live hand-off. After first worker verification, Task Attempt/Lease owns an already-started blocking call; Review heartbeat loss cannot revoke external effects or authorize stale completion. PRE uses null Attempt and POST does not rerun the reviewed worker. REJECTED/EXPIRED/CANCELLED terminalization carries only the exact admitted node identity, no node grant: the scheduler rechecks that node's waiting checkpoint, rejects active siblings, and requires ReviewStore to return REVIEW_DENIED before any terminal transition. Node/grant/status/decision drift fails closed. Denial refs, legacy POST claim repair, and review.operator/review:decide identity are exact. Migration 0097 makes all node grants atomic and unique across processes. This is not general Review recovery; real production canary remains NOT_RUN.",
       "task_runtime_lifecycle_boundary": "Any incomplete activation rollback or aclose quiescence returns TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED, locks bind and activate, and permits only aclose retry. Rollback unbinds only after cancellation/Review workers and coordinator cleanup all succeed; GovernedRuntimeGroup retains children that fail to close. Coordinator admission close, drain, or aclose failure keeps all Stores open. Outbox drain and infrastructure close begin only after Coordinator and both continuation workers are quiescent.",
       "application_write_authority": {
-        "status": "APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED",
-        "physical_database_boundary": "SQL_DIRECT_BYPASS_PRESENT",
+        "status": "APPLICATION_AND_SQL_ADMISSION_WRITE_AUTHORITY_SEALED",
+        "physical_database_boundary": "GRAPH_NODE_HOST_COMMAND_INSERT_FENCED_ACCEPTANCE_EFFECT_AND_OTHER_MUTATIONS_OUT_OF_SCOPE",
         "removed_public_durable_task_store_methods": [
           "create_graph",
           "insert_graph_in_transaction",
@@ -493,10 +493,13 @@
         },
         "test_fixture": "EXPLICIT_RAW_ORPHAN_STATE_WITHOUT_HOST_COMMAND_JOURNAL_PRODUCTION_IMPORT_FORBIDDEN",
         "sqlite_enforcement": {
-          "raw_orphan_sql": "PRESENT",
-          "migration_added_this_slice": false,
-          "trigger_added_this_slice": false,
-          "physical_single_writer_claim": "NOT_MADE"
+          "migration": "0124_task_graph_admission_authority.sql",
+          "trigger_count": 3,
+          "exact_scope": "graph_id_plus_graph_revision",
+          "graph_node_host_command_insert_bypass": "SEALED_FAIL_CLOSED",
+          "existing_rows": "UNCHANGED",
+          "acceptance_effect_and_other_runtime_mutations": "OUT_OF_SCOPE",
+          "physical_single_writer_claim": "ADMISSION_INSERTS_ONLY"
         },
         "validation": {
           "authority_and_structure_passed": 19,
@@ -511,11 +514,12 @@
           "terminal_passed": 32,
           "third_fixture_node_risk_level": "REPRODUCIBLE_ON_ORIGIN_DEV_AND_FIXED",
           "final_key_regression_passed": 26,
+          "sql_admission_authority_passed": 27,
           "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
           "full_architecture_static_gate_at_slice_completion": "FAIL_GATES_1_6_10_NOT_PASS",
           "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
         },
-        "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_NE01_REMAINS_IN_PROGRESS"
+        "boundary": "APPLICATION_AND_SQL_ADMISSION_INSERT_AUTHORITY_ONLY_ACCEPTANCE_EFFECT_AND_OTHER_RUNTIME_MUTATIONS_REMAIN_NE01_IN_PROGRESS"
       },
       "evidence_refs": [
         "host_brain/orchestration/governed_command.py",
@@ -619,6 +623,8 @@
         "host_brain/persistence/task_graph_cancellation_request.py",
         "host_brain/persistence/task_graph_cancellation_continuation_store.py",
         "host_brain/persistence/host_command_repository.py",
+        "host_brain/persistence/task_graph_admission_authority.py",
+        "host_brain/audit/migrations/0124_task_graph_admission_authority.sql",
         "host_brain/persistence/task_parallel_success_store.py",
         "host_brain/persistence/task_parallel_settlement_store.py",
         "host_brain/persistence/task_parallel_state.py",
@@ -669,6 +675,8 @@
         "tests/integration/test_ne01_operation_online_takeover.py",
         "tests/unit/test_ne01_checkpoint_budget_recovery_hold.py",
         "tests/integration/test_ne01_accepted_effect_finalization_recovery.py",
+        "tests/integration/test_ne01_task_graph_sql_admission_authority.py",
+        "tests/contract/test_ne01_task_store_write_authority.py",
         "tests/contract/test_ne01_operation_checkpoint_store.py",
         "tests/unit/test_ne01_operation_recovery_runtime.py",
         "tests/unit/test_parallel_settlement_budget_winner_selection.py"

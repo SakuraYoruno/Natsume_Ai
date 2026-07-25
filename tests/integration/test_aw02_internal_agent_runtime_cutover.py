@@ -34,6 +34,10 @@ from host_brain.agent_runtime.agent_tools import (
 )
 from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.persistence.task_store_types import TaskStoreError
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
 from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
@@ -672,22 +676,24 @@ async def test_internal_proposal_supplies_exact_durable_workspace_authority(
     )
     assert migrated.success is True, migrated.as_dict()
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref,
-                status, status_version, graph_json, source_kind,
-                created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', ?, ?)
-            """,
-            (
-                graph.graph_id,
-                work_order.root_work_order_id,
-                graph.planner_ref,
-                NOW,
-                NOW,
-            ),
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope(graph.graph_id, 1):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref,
+                    status, status_version, graph_json, source_kind,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES (?, 1, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', ?, ?)
+                """,
+                (
+                    graph.graph_id,
+                    work_order.root_work_order_id,
+                    graph.planner_ref,
+                    NOW,
+                    NOW,
+                ),
+            )
     managed = tmp_path / "managed"
     managed.mkdir()
     repository = WorkspaceRepository(db_path)

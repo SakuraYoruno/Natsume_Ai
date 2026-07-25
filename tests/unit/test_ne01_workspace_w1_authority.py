@@ -29,6 +29,10 @@ from host_brain.persistence.workspace_repository import (
     WorkspaceRepository,
     WorkspaceRepositoryError,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 def test_workspace_repository_and_operation_fencing_remain_focused() -> None:
@@ -92,21 +96,23 @@ def _insert_graph(
     revision: int = 1,
 ) -> None:
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref,
-                status, status_version, graph_json, source_kind,
-                created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', 1, 1)
-            """,
-            (
-                graph_id,
-                revision,
-                root_work_order_id,
-                f"planner://workspace/{graph_id}/{revision}",
-            ),
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope(graph_id, revision):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref,
+                    status, status_version, graph_json, source_kind,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', 1, 1)
+                """,
+                (
+                    graph_id,
+                    revision,
+                    root_work_order_id,
+                    f"planner://workspace/{graph_id}/{revision}",
+                ),
+            )
 
 
 def _repository(

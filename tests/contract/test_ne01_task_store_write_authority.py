@@ -18,6 +18,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_ROOT = ROOT / "host_brain"
 GRAPH_INSERT_HOOK = "_insert_graph_from_host_command_in_transaction"
 EFFECT_STAGE_HOOK = "_stage_acceptance_effect_intent_in_transaction"
+ADMISSION_AUTHORITY_MODULE = (
+    "host_brain.persistence.task_graph_admission_authority"
+)
 
 
 class _AttributeCallVisitor(ast.NodeVisitor):
@@ -91,6 +94,56 @@ def _production_attribute_calls(
     return list(_production_attribute_call_inventory().get(attribute, ()))
 
 
+def _production_named_calls(
+    function_name: str,
+) -> list[tuple[Path, int, str | None]]:
+    calls: list[tuple[Path, int, str | None]] = []
+    for path, tree in _production_syntax_trees():
+        parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        for node in ast.walk(tree):
+            if (
+                not isinstance(node, ast.Call)
+                or not isinstance(node.func, ast.Name)
+                or node.func.id != function_name
+            ):
+                continue
+            owner: str | None = None
+            current: ast.AST = node
+            while current in parents:
+                current = parents[current]
+                if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    owner = current.name
+                    break
+            calls.append((path.relative_to(ROOT), node.lineno, owner))
+    return sorted(calls)
+
+
+def _production_admission_authority_imports(
+) -> list[tuple[Path, str, str | None]]:
+    imports: list[tuple[Path, str, str | None]] = []
+    for path, tree in _production_syntax_trees():
+        relative = path.relative_to(ROOT)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == ADMISSION_AUTHORITY_MODULE
+            ):
+                imports.extend(
+                    (relative, alias.name, alias.asname)
+                    for alias in node.names
+                )
+            elif isinstance(node, ast.Import):
+                imports.extend(
+                    (relative, alias.name, alias.asname)
+                    for alias in node.names
+                    if alias.name == ADMISSION_AUTHORITY_MODULE
+                )
+    return sorted(imports)
+
+
 def test_task_store_exposes_no_standalone_graph_or_effect_staging_authority() -> None:
     assert not hasattr(DurableTaskStore, "create_graph")
     assert not hasattr(DurableTaskStore, "insert_graph_in_transaction")
@@ -112,6 +165,72 @@ def test_host_command_repository_is_the_only_graph_insert_hook_caller() -> None:
     assert owner == "_admit_normalized"
     assert receiver == "self._task_store"
     assert first_arg == "conn"
+
+
+def test_host_command_repository_is_the_only_production_admission_scope_owner() -> None:
+    assert _production_admission_authority_imports() == [
+        (
+            Path("host_brain/persistence/host_command_repository.py"),
+            "TaskGraphAdmissionAuthoritySchemaError",
+            None,
+        ),
+        (
+            Path("host_brain/persistence/host_command_repository.py"),
+            "assert_task_graph_admission_authority_schema",
+            None,
+        ),
+        (
+            Path("host_brain/persistence/host_command_repository.py"),
+            "canonical_task_graph_admission_scope",
+            None,
+        ),
+        (
+            Path("host_brain/persistence/host_command_repository.py"),
+            "register_task_graph_admission_authority",
+            None,
+        ),
+        (
+            Path("host_brain/persistence/task_repository.py"),
+            "register_task_graph_admission_authority",
+            None,
+        ),
+    ]
+    assert _production_attribute_calls(
+        "canonical_task_graph_admission_scope"
+    ) == []
+    assert _production_attribute_calls(
+        "register_task_graph_admission_authority"
+    ) == []
+
+    scope_calls = _production_named_calls(
+        "canonical_task_graph_admission_scope"
+    )
+    assert [
+        (path, owner)
+        for path, _line, owner in scope_calls
+    ] == [
+        (
+            Path("host_brain/persistence/host_command_repository.py"),
+            "_admit_normalized",
+        )
+    ]
+
+    registration_calls = _production_named_calls(
+        "register_task_graph_admission_authority"
+    )
+    assert {
+        (path, owner)
+        for path, _line, owner in registration_calls
+    } == {
+        (
+            Path("host_brain/persistence/host_command_repository.py"),
+            "_connect",
+        ),
+        (
+            Path("host_brain/persistence/task_repository.py"),
+            "_connect",
+        ),
+    }
 
 
 def test_effect_insert_hook_remains_inside_canonical_acceptance_uows() -> None:

@@ -72,6 +72,12 @@ from host_brain.persistence.host_command_repository_types import (
 from host_brain.persistence.host_command_claim_result_validation import (
     HostCommandClaimResultValidationMixin,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    TaskGraphAdmissionAuthoritySchemaError,
+    assert_task_graph_admission_authority_schema,
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 class HostCommandRepository(HostCommandClaimResultValidationMixin):
@@ -116,6 +122,7 @@ class HostCommandRepository(HostCommandClaimResultValidationMixin):
             isolation_level=None,
         )
         conn.row_factory = sqlite3.Row
+        register_task_graph_admission_authority(conn)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(f"PRAGMA busy_timeout = {self._timeout_ms}")
         return conn
@@ -188,6 +195,7 @@ class HostCommandRepository(HostCommandClaimResultValidationMixin):
                     (HOST_COMMAND_SUPERSESSION_MIGRATION_ASSET_KEY,),
                 ).fetchone()
                 assert_graph_revision_supersession_schema(conn)
+                assert_task_graph_admission_authority_schema(conn)
                 foreign_keys_enabled = int(conn.execute("PRAGMA foreign_keys").fetchone()[0])
             finally:
                 conn.close()
@@ -195,6 +203,7 @@ class HostCommandRepository(HostCommandClaimResultValidationMixin):
             raise
         except (
             GraphRevisionSupersessionSchemaError,
+            TaskGraphAdmissionAuthoritySchemaError,
             sqlite3.DatabaseError,
             TaskStoreError,
         ) as exc:
@@ -342,57 +351,61 @@ class HostCommandRepository(HostCommandClaimResultValidationMixin):
                     replan=replan,
                 )
             self._validate_ingress_claim(conn, normalized)
-            self._task_store._insert_graph_from_host_command_in_transaction(
-                conn,
-                normalized["graph"],
-                outbox=graph_outbox,
-                ts_ms=admitted_at_ms,
-            )
-            self._fault("after_graph")
-            conn.execute(
-                """
-                INSERT INTO host_command_journal(
-                    command_id, schema_version, request_id, surface, principal_id,
-                    session_id, ingress_claim_ref, ingress_audit_ref,
-                    governor_grant_ref, input_ref, input_sha256, route_type,
-                    target_id, business_scope, operation_fingerprint, root_work_order_id,
-                    graph_id, graph_revision, assignment_id,
-                    command_json, command_digest, work_order_json,
-                    work_order_digest, assignment_json, assignment_digest,
-                    graph_json, graph_digest, created_at_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    normalized["command_id"],
-                    normalized["schema_version"],
-                    normalized["request_id"],
-                    normalized["surface"],
-                    normalized["principal_id"],
-                    normalized["session_id"],
-                    normalized["ingress_claim_ref"],
-                    normalized["ingress_audit_ref"],
-                    normalized["governor_grant_ref"],
-                    normalized["input_ref"],
-                    normalized["input_sha256"],
-                    normalized["route_type"],
-                    normalized["target_id"],
-                    normalized["business_scope"],
-                    normalized["operation_fingerprint"],
-                    normalized["root_work_order_id"],
-                    normalized["graph_id"],
-                    normalized["graph_revision"],
-                    normalized["assignment_id"],
-                    normalized["command_json"],
-                    normalized["command_digest"],
-                    normalized["work_order_json"],
-                    normalized["work_order_digest"],
-                    normalized["assignment_json"],
-                    normalized["assignment_digest"],
-                    normalized["graph_json"],
-                    normalized["graph_digest"],
-                    admitted_at_ms,
-                ),
-            )
+            with canonical_task_graph_admission_scope(
+                normalized["graph_id"],
+                normalized["graph_revision"],
+            ):
+                self._task_store._insert_graph_from_host_command_in_transaction(
+                    conn,
+                    normalized["graph"],
+                    outbox=graph_outbox,
+                    ts_ms=admitted_at_ms,
+                )
+                self._fault("after_graph")
+                conn.execute(
+                    """
+                    INSERT INTO host_command_journal(
+                        command_id, schema_version, request_id, surface, principal_id,
+                        session_id, ingress_claim_ref, ingress_audit_ref,
+                        governor_grant_ref, input_ref, input_sha256, route_type,
+                        target_id, business_scope, operation_fingerprint, root_work_order_id,
+                        graph_id, graph_revision, assignment_id,
+                        command_json, command_digest, work_order_json,
+                        work_order_digest, assignment_json, assignment_digest,
+                        graph_json, graph_digest, created_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        normalized["command_id"],
+                        normalized["schema_version"],
+                        normalized["request_id"],
+                        normalized["surface"],
+                        normalized["principal_id"],
+                        normalized["session_id"],
+                        normalized["ingress_claim_ref"],
+                        normalized["ingress_audit_ref"],
+                        normalized["governor_grant_ref"],
+                        normalized["input_ref"],
+                        normalized["input_sha256"],
+                        normalized["route_type"],
+                        normalized["target_id"],
+                        normalized["business_scope"],
+                        normalized["operation_fingerprint"],
+                        normalized["root_work_order_id"],
+                        normalized["graph_id"],
+                        normalized["graph_revision"],
+                        normalized["assignment_id"],
+                        normalized["command_json"],
+                        normalized["command_digest"],
+                        normalized["work_order_json"],
+                        normalized["work_order_digest"],
+                        normalized["assignment_json"],
+                        normalized["assignment_digest"],
+                        normalized["graph_json"],
+                        normalized["graph_digest"],
+                        admitted_at_ms,
+                    ),
+                )
             self._fault("after_command")
             self._task_store.insert_outbox_in_transaction(
                 conn,

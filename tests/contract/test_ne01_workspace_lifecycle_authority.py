@@ -21,6 +21,10 @@ from host_brain.persistence.workspace_repository import (
     WorkspaceRepository,
     WorkspaceRepositoryError,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 TOKEN = "workspace-lifecycle-token-" + ("x" * 32)
@@ -49,6 +53,15 @@ class SequenceClock:
         return self.last
 
 
+def _execute_task_admission_insert(
+    conn: sqlite3.Connection,
+    sql: str,
+) -> None:
+    register_task_graph_admission_authority(conn)
+    with canonical_task_graph_admission_scope("graph-workspace", 1):
+        conn.execute(sql)
+
+
 def _migrated_runtime(
     tmp_path: Path,
     *,
@@ -64,9 +77,10 @@ def _migrated_runtime(
     assert result.success is True, result.as_dict()
     # The fixture always migrates through the current catalog head; 0116 is
     # verified below as an immutable historical asset, not as the latest head.
-    assert result.summary["current_version"] == 120
+    assert result.summary["current_version"] == 124
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
+        _execute_task_admission_insert(
+            conn,
             """
             INSERT INTO task_runtime_graph(
                 graph_id, revision, root_work_order_id, planner_ref,
@@ -76,15 +90,16 @@ def _migrated_runtime(
                 'graph-workspace', 1, 'work-order-workspace',
                 'planner://workspace/1', 'ACTIVE', 0, '{}', 'CANONICAL', 1, 1
             )
-            """
+            """,
         )
-        conn.execute(
+        _execute_task_admission_insert(
+            conn,
             """
             INSERT INTO task_runtime_node(
                 graph_id, graph_revision, node_id, status, status_version,
                 node_json, created_ts_ms, updated_ts_ms
             ) VALUES ('graph-workspace', 1, 'node-write', 'RUNNING', 0, '{}', 1, 1)
-            """
+            """,
         )
         conn.execute(
             """

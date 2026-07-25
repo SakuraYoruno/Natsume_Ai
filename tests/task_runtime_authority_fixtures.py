@@ -24,6 +24,9 @@ from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+)
 
 
 def seed_raw_task_graph_for_test(
@@ -36,12 +39,16 @@ def seed_raw_task_graph_for_test(
 
     ts_ms = store._now()
     with store._transaction() as conn:
-        store._insert_graph_from_host_command_in_transaction(
-            conn,
-            graph,
-            outbox=outbox,
-            ts_ms=ts_ms,
-        )
+        with canonical_task_graph_admission_scope(
+            graph.graph_id,
+            graph.revision,
+        ):
+            store._insert_graph_from_host_command_in_transaction(
+                conn,
+                graph,
+                outbox=outbox,
+                ts_ms=ts_ms,
+            )
     return store.get_graph(graph.graph_id, graph.revision)
 
 
