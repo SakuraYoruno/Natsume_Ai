@@ -58,6 +58,9 @@ from host_brain.app.governed_delegate_dispatch import (
 from host_brain.app.host_startup_graph_continuation import (
     HostStartupGraphContinuation,
 )
+from host_brain.app.periodic_durable_continuation import (
+    PeriodicDurableContinuation,
+)
 from host_brain.app.governed_frozen_skill_runtime import (
     GOVERNED_HOST_GOVERNOR_GRANT_MISSING,
     GOVERNED_HOST_ROUTE_UNSUPPORTED,
@@ -112,6 +115,12 @@ GOVERNED_HOST_PLANNING_SEARCH_REQUIRED = (
     "GOVERNED_HOST_PLANNING_SEARCH_REQUIRED"
 )
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
+_DEFAULT_SURVIVOR_INTERVAL_MS = 5_000
+_HOST_SURVIVOR_CONTINUATION_FAILED = (
+    "GOVERNED_HOST_SURVIVOR_CONTINUATION_FAILED"
+)
+
+
 class GovernedHostRuntime:
     """Lifecycle-aware application facade published by the ASGI composition."""
 
@@ -129,6 +138,7 @@ class GovernedHostRuntime:
         planning_skill_registry: Any | None = None,
         runtime_context_application: RuntimeContextApplicationService | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
+        survivor_interval_ms: int = _DEFAULT_SURVIVOR_INTERVAL_MS,
     ) -> None:
         self._application = application
         self._runtime_router = runtime_router
@@ -173,6 +183,16 @@ class GovernedHostRuntime:
             )
             else None
         )
+        self._survivor_continuation = (
+            PeriodicDurableContinuation(
+                runner=self._startup_continuation.recover,
+                task_name="governed-host-survivor-continuation",
+                failure_reason_code=_HOST_SURVIVOR_CONTINUATION_FAILED,
+                interval_ms=int(survivor_interval_ms),
+            )
+            if self._startup_continuation is not None
+            else None
+        )
 
     async def activate(self) -> None:
         # RuntimeGroup may receive an already-active Host instance while it
@@ -186,6 +206,7 @@ class GovernedHostRuntime:
             async with self._lifecycle:
                 self._active = True
                 self._accepting = True
+                self._startup_recovery_completed = False
 
     @property
     def startup_continuation_report(self) -> tuple[dict[str, Any], ...]:
@@ -194,8 +215,25 @@ class GovernedHostRuntime:
         continuation = self._startup_continuation
         return () if continuation is None else continuation.report
 
+    @property
+    def survivor_continuation_health(self) -> dict[str, Any]:
+        """Expose only lifecycle/scan health, never a second task truth."""
+
+        continuation = self._survivor_continuation
+        return (
+            {
+                "running": False,
+                "stop_requested": False,
+                "completed_cycles": 0,
+                "last_report": (),
+                "last_failure": None,
+            }
+            if continuation is None
+            else continuation.health_snapshot()
+        )
+
     async def recover_startup_graphs(self) -> tuple[dict[str, Any], ...]:
-        """Run the one boot-scoped recovery pass after full composition.
+        """Run the mandatory boot pass, then own periodic survivor scans.
 
         The method is intentionally not folded into ``activate``.  Direct
         test or compatibility callers can activate a Host façade before the
@@ -213,17 +251,28 @@ class GovernedHostRuntime:
                     )
                 if self._startup_recovery_completed:
                     return self.startup_continuation_report
-            continuation = self._startup_continuation
-            if continuation is None:
+            supervisor = self._survivor_continuation
+            if supervisor is None:
                 self._startup_recovery_completed = True
                 return ()
-            report = await continuation.recover()
+            report = await supervisor.run_once()
             self._startup_recovery_completed = True
+            await supervisor.start()
             return report
+
+    def wake_survivor_continuation(self) -> None:
+        """Request a coalesced exact scan after a relevant durable transition."""
+
+        continuation = self._survivor_continuation
+        if continuation is not None:
+            continuation.wake()
 
     async def close_admission(self) -> None:
         async with self._lifecycle:
             self._accepting = False
+        continuation = self._survivor_continuation
+        if continuation is not None:
+            continuation.request_stop()
 
     async def drain(self) -> None:
         async def _wait_until_idle() -> None:
@@ -237,6 +286,15 @@ class GovernedHostRuntime:
                 GOVERNED_HOST_DRAIN_TIMEOUT,
                 f"governed Host runtime still has {self._in_flight} in-flight command(s)",
             ) from exc
+        continuation = self._survivor_continuation
+        if continuation is not None:
+            try:
+                await continuation.join(timeout_s=self._drain_timeout_s)
+            except RuntimeError as exc:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_DRAIN_TIMEOUT,
+                    "governed Host survivor continuation did not quiesce",
+                ) from exc
 
     async def aclose(self) -> None:
         await self.close_admission()
@@ -368,6 +426,7 @@ class GovernedHostRuntime:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
+            self.wake_survivor_continuation()
 
     async def request_graph_cancellation(
         self,
@@ -417,6 +476,7 @@ class GovernedHostRuntime:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
+            self.wake_survivor_continuation()
 
     async def execute_stream(
         self,
@@ -697,6 +757,7 @@ class GovernedHostRuntime:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
+            self.wake_survivor_continuation()
 
     async def continue_review_admission(
         self,
@@ -752,6 +813,7 @@ class GovernedHostRuntime:
                 self._in_flight -= 1
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
+            self.wake_survivor_continuation()
 
     async def _resume_startup_admission(
         self,

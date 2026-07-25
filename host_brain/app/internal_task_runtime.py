@@ -78,9 +78,16 @@ from host_brain.task_runtime.worker_registry import (
 from host_brain.app.internal_startup_checkpoint_continuation import (
     InternalStartupCheckpointContinuation,
 )
+from host_brain.app.periodic_durable_continuation import (
+    PeriodicDurableContinuation,
+)
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
 _DEFAULT_DRAIN_TIMEOUT_S = 120.0
+_DEFAULT_SURVIVOR_INTERVAL_MS = 5_000
+_INTERNAL_SURVIVOR_CONTINUATION_FAILED = (
+    "GOVERNED_INTERNAL_SURVIVOR_CONTINUATION_FAILED"
+)
 _INTERNAL_TASK_NODE_ROUTE = INTERNAL_TASK_NODE_ROUTE
 _FORBIDDEN_DURABLE_KEY = re.compile(
     r"(?:^|_)(?:api_?key|authorization|bearer|credential|password|raw_?body|secret|signature|token)(?:$|_)",
@@ -201,6 +208,7 @@ class GovernedInternalRuntime:
         startup_claim_result_store: Any | None = None,
         terminal_claim_task_store: Any | None = None,
         drain_timeout_s: float = _DEFAULT_DRAIN_TIMEOUT_S,
+        survivor_interval_ms: int = _DEFAULT_SURVIVOR_INTERVAL_MS,
     ) -> None:
         self._application = application
         self._runtime_router = runtime_router
@@ -262,28 +270,52 @@ class GovernedInternalRuntime:
             deferred_code=INTERNAL_RUNTIME_STARTUP_CONTINUATION_DEFERRED,
             error_factory=GovernedInternalRuntimeError,
         )
+        self._checkpoint_survivor_continuation = (
+            PeriodicDurableContinuation(
+                runner=self._recover_startup_sealed_checkpoints,
+                task_name="governed-internal-survivor-continuation",
+                failure_reason_code=_INTERNAL_SURVIVOR_CONTINUATION_FAILED,
+                interval_ms=int(survivor_interval_ms),
+            )
+            if startup_task_store is not None and startup_artifact_store is not None
+            else None
+        )
         self._drain_timeout_s = max(0.1, float(drain_timeout_s))
         self._condition = asyncio.Condition()
+        self._activation_lock = asyncio.Lock()
         self._active = False
         self._accepting = False
         self._in_flight = 0
 
     async def activate(self) -> None:
-        worker = self._terminal_continuation_worker
-        if worker is not None:
-            await asyncio.to_thread(worker.run_once)
-        await self._recover_startup_sealed_checkpoints()
-        if worker is not None:
-            await asyncio.to_thread(worker.run_once)
-            worker.start()
-            self._terminal_worker_quiesced = False
-        async with self._condition:
-            self._active = True
-            self._accepting = True
+        async with self._activation_lock:
+            async with self._condition:
+                if self._active:
+                    return
+            worker = self._terminal_continuation_worker
+            if worker is not None:
+                await asyncio.to_thread(worker.run_once)
+            survivor = self._checkpoint_survivor_continuation
+            if survivor is None:
+                await self._recover_startup_sealed_checkpoints()
+            else:
+                await survivor.run_once()
+            if worker is not None:
+                await asyncio.to_thread(worker.run_once)
+                worker.start()
+                self._terminal_worker_quiesced = False
+            if survivor is not None:
+                await survivor.start()
+            async with self._condition:
+                self._active = True
+                self._accepting = True
 
     async def close_admission(self) -> None:
         async with self._condition:
             self._accepting = False
+        survivor = self._checkpoint_survivor_continuation
+        if survivor is not None:
+            survivor.request_stop()
 
     async def drain(self) -> None:
         async def _wait() -> None:
@@ -297,6 +329,15 @@ class GovernedInternalRuntime:
                 INTERNAL_RUNTIME_DRAIN_TIMEOUT,
                 f"internal runtime still has {self._in_flight} in-flight command(s)",
             ) from exc
+        survivor = self._checkpoint_survivor_continuation
+        if survivor is not None:
+            try:
+                await survivor.join(timeout_s=self._drain_timeout_s)
+            except RuntimeError as exc:
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_DRAIN_TIMEOUT,
+                    "internal survivor continuation did not quiesce",
+                ) from exc
         worker = self._terminal_continuation_worker
         if worker is not None and not self._terminal_worker_quiesced:
             worker.stop()
@@ -589,10 +630,28 @@ class GovernedInternalRuntime:
     def startup_checkpoint_report(self) -> tuple[dict[str, Any], ...]:
         return self._startup_checkpoint_continuation.report
 
+    @property
+    def survivor_continuation_health(self) -> dict[str, Any]:
+        continuation = self._checkpoint_survivor_continuation
+        return (
+            {
+                "running": False,
+                "stop_requested": False,
+                "completed_cycles": 0,
+                "last_report": (),
+                "last_failure": None,
+            }
+            if continuation is None
+            else continuation.health_snapshot()
+        )
+
     def _wake_terminal_continuation(self) -> None:
         worker = self._terminal_continuation_worker
         if worker is not None:
             worker.wake()
+        survivor = self._checkpoint_survivor_continuation
+        if survivor is not None:
+            survivor.wake()
 
     async def _recover_startup_sealed_checkpoints(
         self,

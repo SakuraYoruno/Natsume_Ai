@@ -3,9 +3,19 @@
 
 # 测试与验收目录
 
-版本：v2.4
+版本：v2.5
 维护日期：2026-07-25
 状态：当前证据
+
+## NE-01 Host/Internal 周期 survivor 当前切片
+
+- `PeriodicDurableContinuation` 只监督 cadence、wake 合并和关停，不持有 TaskGraph、Lease、worker 或 Effect authority。单元测试覆盖 timer/wake 串行、普通失败留痕后重试，以及关停等待活动 durable scan 而不取消事务。
+- Host 在完整 RuntimeGroup 与共享 Acceptance Effect owner 就绪后先执行 mandatory boot pass，再周期重用 `HostStartupGraphContinuation`。真实 SQLite 测试持久化一个 live Lease，首次扫描保持 `DEFERRED`；可信 clock 越过 expiry 后，在线 wake 无需重启 Host 或客户端 replay 即重入同一个 immutable admission。
+- Internal 首次 sealed-checkpoint scan 后启动同一生命周期 supervisor；`HOLD` checkpoint 在下一次周期可重新评估，但仍必须通过既有 seal、projection recovery envelope、historical Lease、higher fence、Operation/Budget/Grant/Preview/Task lineage，Agent 不会由 supervisor 直接调用。
+- 当前 file-disjoint 运行时验证为：新增 supervisor/Host/Internal/SQLite 集合 `13 passed in 4.58s`；Host/ASGI/RuntimeGroup/Internal terminal 与四条真实 Internal SQLite+Git checkpoint/review/cancellation 恢复合并集合 `85 passed in 27.57s`。两组可合计为 98 个不同 case，但历史批次和后续文档 Gate 不得重复相加。兼容集合首次命令使用了不存在的旧 recovery 文件名，pytest 在 collection 前以“no tests ran”退出；改为 `test_aw02_internal_agent_runtime_cutover.py` 的四个精确 selector 后 85 项全绿。
+- 覆盖 manifest、文档 authority/freshness、交付元数据与本切片核心回归的最终组合 Gate 为 `52 passed`；它包含前述 13 项新增集合，不能与 98 相加。第一次命令引用了不存在的旧文件名，pytest 在 collection 前以“no tests ran”退出；修正为 `test_delivery_metadata_gate.py` 后组合 Gate 全绿，不能把首次命令伪记为测试失败或 PASS。
+- 目标模块 `compileall`、两份机器状态 JSON、`git diff --check` 均通过；fresh architecture static Gate 1～14 为 `PASS`、`failed_gates=[]`，未扩大白名单。
+- 该切片没有 migration，不证明 raw worker failure、unknown-effect attribution、其它 cancellation、一般 multi-node/batch settlement、一般 write、NE-01 波次 integration 或 NE-07 Docker 全栈。程序状态保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Internal pre-checkpoint 无副作用取消收口当前切片
 

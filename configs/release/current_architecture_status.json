@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-25",
   "source_baseline": {
-    "dev_commit": "1183e433b8b0d12a8a2d219cd63dd9731d1a89aa",
+    "dev_commit": "9800bb2ec66fd33c0aac495a6da0c207643ea640",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "THIS_DOCUMENT_COMMIT_NE01_HOST_AFFECT_RUNTIME_SCOPE_OVER_ORIGIN_DEV_1183E433B_WITH_OBS_PROJECTION_SUPERVISION_AND_0124_0125_AUTHORITIES"
+    "evaluated_source": "THIS_DOCUMENT_COMMIT_NE01_HOST_INTERNAL_LIFECYCLE_SURVIVOR_OVER_ORIGIN_DEV_9800BB2EC"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "OBS_PROJECTION_APP_LOCAL_SECRET_FREE_SUPERVISION_WIRED_HOST_AFFECT_AND_REPLY_FORM_MODULE_GLOBAL_AUTHORITIES_RETIRED_MIGRATION_HEAD_0125_TASK_ACCEPTANCE_EFFECT_STAGING_AUTHORITY_RESOURCE_MANAGER_STATUS_DURABLE_PRODUCTION_LOCATOR_RETIRED_APPLICATION_SQL_ADMISSION_AND_EFFECT_STAGING_INSERT_AUTHORITIES_SEALED_GATE_1_TO_14_STATIC_PASS_HOST_AFFECT_STATE_EPOCH_LOCAL_NON_DURABLE_DURABLE_SLO_JOURNAL_GUARDIAN_ACKNOWLEDGEMENT_AND_CANARY_MISSING_PROGRAM_INCOMPLETE_REMAINING_33_OPERATOR_COMMANDS_REAL_EDGE_GATEWAY_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_EXTERNAL_NAMESPACES_CANCELLATION_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "HOST_AND_INTERNAL_LIFECYCLE_SURVIVOR_PERIODIC_EXACT_CONTINUATION_WIRED_LIVE_HOST_LEASE_EXPIRY_ONLINE_REENTRY_PROVEN_INTERNAL_SEALED_CHECKPOINT_PERIODIC_RECHECK_WIRED_NO_NEW_EXECUTION_OR_EFFECT_AUTHORITY_MIGRATION_HEAD_0125_STATIC_GATE_1_TO_14_PASS_PROGRAM_INCOMPLETE_REMAINING_RAW_FAILURE_UNKNOWN_EFFECT_OTHER_CANCELLATION_GENERAL_MULTI_NODE_WORKSPACE_GENERAL_WRITE_TRANSACTIONAL_CHAT_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,34 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "HOST_AFFECT_AND_OBS_PROJECTION_APP_LOCAL_SUPERVISION_LOCAL_PASS_PROGRAM_INCOMPLETE",
+    "status": "HOST_INTERNAL_LIFECYCLE_SURVIVOR_LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
     "commit_binding": "THIS_DOCUMENT_COMMIT_WITH_POST_COMMIT_ARTIFACTS_LOCAL_GATES_MATCHING_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_HOST_AFFECT_RUNTIME_SCOPE_OVER_OBS_PROJECTION_APP_LOCAL_SUPERVISION",
+    "slice": "NE01_HOST_INTERNAL_LIFECYCLE_SURVIVOR_EXACT_CONTINUATION",
+    "lifecycle_survivor_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "migration": "NONE",
+      "host_owner": "ONE_PERIODIC_DURABLE_CONTINUATION_PER_GOVERNED_HOST_RUNTIME_STARTED_ONLY_AFTER_COMPLETE_RUNTIME_GROUP_AND_SHARED_ACCEPTANCE_EFFECT_OWNER",
+      "internal_owner": "ONE_PERIODIC_DURABLE_CONTINUATION_PER_GOVERNED_INTERNAL_RUNTIME_STARTED_AFTER_MANDATORY_SEALED_CHECKPOINT_SCAN",
+      "authority_boundary": "SUPERVISOR_OWNS_ONLY_TIMER_WAKE_SERIALIZATION_AND_SHUTDOWN_EXISTING_EXACT_CONTINUATIONS_RETAIN_ALL_TASK_LEASE_WORKER_EFFECT_AND_RECONCILIATION_AUTHORITY",
+      "host_sqlite_boundary": "PERSISTED_LIVE_LEASE_FIRST_DEFERRED_TRUSTED_CLOCK_AFTER_EXPIRY_ONLINE_WAKE_REENTERS_EXACT_IMMUTABLE_ADMISSION_WITHOUT_HOST_RESTART_OR_CLIENT_REPLAY",
+      "internal_boundary": "HELD_SEALED_CHECKPOINT_REEVALUATED_BY_THE_SAME_CONTINUATION_AGENT_IS_NOT_CALLED_BY_THE_SUPERVISOR",
+      "ordinary_failure_behavior": "TYPE_AND_REASON_ONLY_HEALTH_NEXT_TIMER_RETRIES",
+      "shutdown_behavior": "STOP_NEW_SCANS_THEN_JOIN_ACTIVE_DURABLE_SCAN_WITHOUT_TASK_CANCELLATION",
+      "new_and_exact_host_validation": "13_PASSED_IN_4_58_SECONDS",
+      "host_asgi_runtimegroup_internal_terminal_plus_real_internal_sqlite_git_recovery": "85_PASSED_IN_27_57_SECONDS",
+      "file_disjoint_case_total": 98,
+      "documentation_coverage_metadata_combined_gate": "52_PASSED_FINAL_RERUN_INCLUDES_THE_13_NEW_CASES_DO_NOT_ADD",
+      "invalid_first_documentation_command": "NO_TESTS_RAN_OLD_NONEXISTENT_TEST_DELIVERY_METADATA_FILENAME_CORRECTED_BEFORE_VALIDATION",
+      "invalid_first_compatibility_command": "NO_TESTS_RAN_NONEXISTENT_INTERNAL_RECOVERY_FILENAMES_CORRECTED_TO_FOUR_EXACT_TEST_AW02_INTERNAL_AGENT_RUNTIME_CUTOVER_SELECTORS",
+      "compile_json_diff_checks": "PASS",
+      "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "RAW_FAILURE_UNKNOWN_EFFECT_OTHER_CANCELLATION_GENERAL_MULTI_NODE_BATCH_GENERAL_WRITE_AND_COMMIT_BOUND_SEVEN_ROUTE_ACCEPTANCE_REMAIN_INCOMPLETE"
+    },
     "obs_projection_supervision_current_validation": {
       "status": "APP_LOCAL_SUPERVISION_WIRED_DURABLE_SLO_AND_CANARY_MISSING_NE01_IN_PROGRESS",
       "migration": "NONE",
@@ -875,19 +899,22 @@
       "boundary": "APP_LOCAL_PRODUCTION_BACKING_AUTHORITY_WIRING_PLUS_LATER_PRODUCTION_LOCATOR_PHYSICAL_RETIREMENT_EXTERNAL_CHROMA_NEO4J_NAMESPACE_TOKEN_MCP_DURABLE_RESTART_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_AND_SEVEN_ROUTE_RUNTIME_REMAIN_INCOMPLETE"
     },
     "host_startup_graph_continuation_current_validation": {
-      "status": "LOCAL_TARGETED_PASS_BOOT_SCOPED_HOST_CONTINUATION_PROGRAM_INCOMPLETE",
-      "production_wiring": "ACTIVATE_INTERNAL_RUNTIME_CALLS_RECOVER_STARTUP_GRAPHS_AFTER_TASK_RUNTIME_RUNTIME_GROUP_AND_SHARED_ACCEPTANCE_EFFECT_OWNER_ACTIVATION_AND_BEFORE_SCHEDULER_CLOCK",
+      "status": "LOCAL_TARGETED_PASS_LIFECYCLE_HOST_SURVIVOR_PROGRAM_INCOMPLETE",
+      "production_wiring": "ACTIVATE_INTERNAL_RUNTIME_CALLS_RECOVER_STARTUP_GRAPHS_AFTER_TASK_RUNTIME_RUNTIME_GROUP_AND_SHARED_ACCEPTANCE_EFFECT_OWNER_ACTIVATION_AND_BEFORE_SCHEDULER_CLOCK; HOST_OPERATION_FINALIZERS_WAKE_THE_RUNNING_SUPERVISOR",
       "inventory": "HOSTCOMMAND_PLUS_TASKGRAPH_SINGLE_READ_TRANSACTION_CREATED_ACTIVE_BLOCKED_SURFACE_FILTERED_LIMIT_PLUS_ONE_EXACT_LIMIT_ACCEPTED_TRUE_OVERFLOW_FAILS_CLOSED",
       "authority": "CANONICAL_LIST_NONTERMINAL_ADMISSIONS_EXACT_HOSTCOMMAND_WORKORDERV3_ASSIGNMENT_TASKGRAPH_ONLY_NO_INGRESS_GOVERNOR_OR_PLAN_RECONSTRUCTION",
       "surface_scope": "CHAT_HOST_INPUT_TOOL_GATEWAY_FILTERED_IN_SQL_FOREIGN_SURFACES_CANNOT_CONSUME_HOST_BOUND",
       "live_execution": "ACTIVE_LEASE_OR_GOVERNED_EXECUTION_IN_PROGRESS_DEFERRED_ZERO_SCANNER_WORKER_REPLAY",
+      "periodic_supervision": "MANDATORY_BOOT_PASS_THEN_APP_LOCAL_SERIAL_TIMER_OR_WAKE_REUSES_THE_SAME_EXACT_CONTINUATION",
+      "lease_expiry_online_reentry": "REAL_SQLITE_PERSISTED_LIVE_LEASE_DEFERRED_THEN_TRUSTED_CLOCK_AFTER_EXPIRY_REENTERED_WITHOUT_HOST_RESTART_OR_CLIENT_REPLAY",
+      "shutdown": "REQUEST_STOP_PREVENTS_NEW_SCANS_JOIN_WAITS_ACTIVE_DURABLE_SCAN_NO_TASK_CANCELLATION",
       "sqlite_durable_admission_inventory": "PASSED_WITH_EXACT_DURABLE_TUPLE_CAPTURE",
-      "targeted_batch": "20_PASSED_HOST_STARTUP_UNIT_SQLITE_DURABLE_ADMISSION_AND_HOSTCOMMAND_CONTRACT",
+      "targeted_batch": "13_PASSED_CORE_HOST_INTERNAL_PERIODIC_SURVIVOR_AND_REAL_HOST_SQLITE_LEASE_EXPIRY_ONLINE_REENTRY",
       "static_analysis": "PYTHON_COMPILEALL_PASS_RUFF_NOT_RUN_TOOL_NOT_INSTALLED",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-      "boundary": "ONE_BOOT_PASS_ONLY_NO_PERIODIC_SURVIVOR_SCAN_LEASE_EXPIRY_RESCAN_UNKNOWN_EFFECT_OR_GENERAL_MULTI_NODE_BATCH_RECOVERY"
+      "boundary": "UNKNOWN_EFFECT_AND_GENERAL_MULTI_NODE_BATCH_RECOVERY_REMAIN_INCOMPLETE"
     },
     "gr05_production_port_fixture_validation": {
       "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
@@ -995,7 +1022,7 @@
     "sys_mode_reconciliation": "EXACT_HARD_STATE_REOPEN_ONLY_SWITCH_MODE_NOT_REINVOKED",
     "recovery_loop_observability": "APP_LOCAL_RUNTIME_GUARDIAN_DURABLE_SLO_FAILURE_AND_RECOVERY_OPAQUE_INCIDENT_ONLY_NO_EXCEPTION_BODY",
     "generic_effect_reconciliation": "VISIBLE_TURN_PREFERENCE_AND_LIFE_PROJECTION_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_OR_NON_BOOLEAN_FAILS_CLOSED_ZERO_WRITE_EXPLICIT_FALSE_OR_MALFORMED_ENV_PARSES_BOOLEAN_FALSE_AND_WRITES_ONLY_DISABLED_RECEIPT_ZERO_EVENT_PROFILE_0118_EVENT_APPEND_ONLY_CHILD_PROFILE_AND_RECEIPT_SAME_UOW_PARENT_SEALED_TRIGGER_AND_FULL_SET_RECONCILIATION_REAL_NO_SIGNAL_STRICT_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_CANONICAL_DELIVERY_DIGEST_GATEWAY_READ_ONLY_QUERY_REOPENS_SAME_SQLITE_PAYLOAD_AND_VALIDATES_EFFECT_ID_NOT_FOUND_ALWAYS_UNKNOWN",
-    "internal_result_boundary": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION_POST_ADMISSION_WORKER_CONSUMES_NATIVE_WORKORDERV3_AND_V3_TOP_LEVEL_GRAPH_FIELDS_CONFLICT_WITH_LEGACY_METADATA_FAIL_CLOSED_EXTERNAL_V2_INGRESS_COMPATIBILITY_REMAINS_WITHOUT_V3_TO_V2_WORKER_REPROJECTION_SINGLE_NODE_POST_COMMIT_CHECKPOINT_AND_EXACT_OPERATION_FREE_PERSISTED_ATTEMPT_HAVE_SEPARATE_HIGHER_FENCE_TAKEOVER_WINDOWS_OPERATION_FREE_WINDOW_REUSES_THE_SAME_ATTEMPT_ONLY_AFTER_EXACT_PRECHARGE_AND_ATOMIC_RESERVATION_ID_PLUS_SCOPE_FINGERPRINT_ABSENCE_PROOF_DETERMINISTIC_ACQUISITION_IDENTITY_BINDS_ATTEMPT_OWNER_TTL_VERSION_MODE_AND_RESERVATION_EXACT_RESPONSE_REPLAY_REVALIDATES_LEASE_HEARTBEAT_FENCE_EXPIRY_AND_OUTBOX_ORDINARY_EXECUTION_REQUIRES_ONE_ACTIVE_GRAPH_BUDGET_LIVE_OWNER_FAILS_CLOSED_POST_RESERVATION_FAILURE_PRESERVES_RECOVERY_AUTHORITY_EXACT_SIGNED_RELEASE_NO_SIDE_EFFECT_PRECHECKPOINT_CANCELLATION_CLOSES_SECURE_INGRESS_CLAIM_BEFORE_WORKSPACE_AND_STAGE_CLEANUP_PERIODIC_SURVIVOR_CONTINUATION_GENERAL_CRASH_LEFT_UNSEALED_PARTIAL_CLEANUP_RAW_FAILURE_UNKNOWN_EFFECT_OTHER_CANCELLATION_CLAIM_CLOSEOUT_ORDINARY_GRAPH_BUDGET_AND_SUCCESS_EFFECT_ATOMIC_UOW_MULTI_NODE_BATCH_SETTLEMENT_GENERAL_WRITE_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_REMAIN_INCOMPLETE",
+    "internal_result_boundary": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_PERIODIC_CONTINUATION_POST_ADMISSION_NATIVE_WORKORDERV3_NO_V3_TO_V2_WORKER_REPROJECTION_EXACT_LIFECYCLE_SURVIVOR_REUSES_EXISTING_SEAL_LINEAGE_HIGHER_FENCE_AUTHORITY_SINGLE_NODE_CHECKPOINT_AND_OPERATION_FREE_ATTEMPT_TAKEOVER_REMAIN_DISTINCT_EXACT_SIGNED_RELEASE_NO_SIDE_EFFECT_PRECHECKPOINT_CANCELLATION_CLOSES_CLAIM_BEFORE_CLEANUP_GENERAL_CRASH_LEFT_UNSEALED_RAW_FAILURE_UNKNOWN_EFFECT_OTHER_CANCELLATION_MULTI_NODE_BATCH_GENERAL_WRITE_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_REMAIN_INCOMPLETE",
     "scheduler_clock_targeted_validation": {
       "status": "37_TARGETED_SCHEDULER_MIGRATION_AND_COVERAGE_TESTS_SUCCEEDED",
       "scope": "SCHEDULER_MIGRATION_COVERAGE_PLUS_ATOMIC_DUE_TO_OCCURRENCE_FENCE_HEARTBEAT_ACTUAL_FAILURE_TIME_BACKOFF",
@@ -1161,7 +1188,7 @@
       "boundary": "THIS_RETIRES_THE_LEGACY_MUTABLE_EXPERIENCE_PATH_ONLY_NEW_CONVERSATION_FEEDBACK_OR_PERSONA_EVOLUTION_REQUIRES_THE_FUTURE_NE06_PROPOSAL_REVIEW_AND_ACTIVATION_OWNER"
     },
     "internal_protected_artifact_current_validation": {
-      "status": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION",
+      "status": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_PERIODIC_CONTINUATION",
       "fresh_consolidated_affected_batch": {
         "passed": 130,
         "failed": 0,
@@ -2506,18 +2533,18 @@
       ]
     },
     "internal_agent_governed_runtime": {
-      "status": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_CONTINUATION",
+      "status": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_PERIODIC_CONTINUATION",
       "scope": ["authenticated internal Agent WorkOrder"],
-      "semantics": "Secure Ingress principal + Governor grant + WorkOrderV3 + BudgetPolicy + verified child grant + exact FrozenNodeInput authority + protected exact-inventory raw artifact stage + startup activation sealed-checkpoint projection continuation + strict terminal gates + post-Acceptance real TaskStore evidence + clean/no-change Git Workspace 0116 ACTIVE-to-ACCEPTED-to-PROMOTED + canonical result + post-Acceptance response-loss reconciliation without Agent rerun",
+      "semantics": "Secure Ingress principal + Governor grant + WorkOrderV3 + BudgetPolicy + verified child grant + exact FrozenNodeInput authority + protected exact-inventory raw artifact stage + activation and lifecycle-periodic sealed-checkpoint projection continuation + strict terminal gates + post-Acceptance real TaskStore evidence + clean/no-change Git Workspace 0116 ACTIVE-to-ACCEPTED-to-PROMOTED + canonical result + post-Acceptance response-loss reconciliation without Agent rerun",
       "workspace_execution_authority": "root WorkOrder, graph/revision, node, attempt, lease, command, principal, lease owner and fencing token are projected exactly into DurableWorkspaceRuntime; real SQLite plus Git worktree integration succeeded",
       "terminal_result_gate": "NOT_RUN, RETRY, REVIEW, SPLIT, non-EXECUTED and review_required results fail verification and outer Acceptance, and the final result handler rechecks the same terminal predicate",
       "protected_artifact_boundary": "Raw work order, prompt, metadata, result, changed-files and verification material is sealed in an exact-inventory protected stage. Every existing component from the configured root to the target is checked with lexical lstat; symlinks, Windows reparse points and junctions fail closed. Directories are created component by component, raw/metadata open, atomic replace and controlled remove revalidate the path, and a reverse legacy alias into the governed namespace is rejected. Extra files and byte drift also fail closed. The public WorkerProjection carries only the protected ref/digest and bounded summary. These repeated checks are not a handle-level atomic TOCTOU boundary or OS isolation.",
       "post_acceptance_evidence": "Promotion reopens the real TaskStore Command/Graph/Node, ACCEPTED Node, SUCCEEDED Attempt, exact owner/fence RELEASED Lease, Node artifact and claimed/committed Effect payload/digest/fence before any Workspace transition.",
       "workspace_promotion_boundary": "Only a clean Git worktree whose HEAD still equals the frozen base is accepted. Migration 0116 advances ACTIVE to ACCEPTED to PROMOTED; response-loss reconciliation can continue only an already-started durable operation and never reruns the Agent.",
-      "pre_projection_crash_boundary": "For one governed Internal single-node sealed checkpoint, the next runtime activation scans the sealed inventory before any client retry, reopens the seal-bound recovery envelope and exact Operation, Budget, Preview, Grant, Task and historical Lease lineage, acquires a strictly higher-fence completion Lease, reconstructs the unique WorkerProjection and continues Verification, Acceptance, Effect, Secure Ingress claim completion, canonical result, clean/no-change promotion and cleanup without rerunning Agent. This is startup activation continuation only, not periodic survivor continuation or general recovery.",
+      "pre_projection_crash_boundary": "For one governed Internal single-node sealed checkpoint, the mandatory activation scan and lifecycle-owned periodic survivor both reuse the same exact continuation before any client retry. They reopen the seal-bound recovery envelope and exact Operation, Budget, Preview, Grant, Task and historical Lease lineage, acquire only the already-authorized strictly higher-fence completion Lease, reconstruct the unique WorkerProjection and continue Verification, Acceptance, Effect, Secure Ingress claim completion, canonical result, clean/no-change promotion and cleanup without rerunning Agent. The supervisor owns cadence only and does not provide general recovery.",
       "budget_rejection_boundary": "The explicit composition-owned checkpoint UoW is the only public mutation authority and WorkerProjection has one physical INSERT owner. Boundary A atomically commits the unique WorkerProjection, Operation COMMITTED and its Outbox. Boundary B separately atomically commits the rejected BudgetUsage, Budget ACTIVE-to-EXCEEDED transition and BUDGET_EXCEEDED Outbox. Boundary C revalidates A and B, then atomically commits Graph BLOCKED, Node and Attempt FAILED, Lease and Budget RELEASED plus five terminal Outboxes. Internal and canonical single-node checkpoints share that exact SQL transaction with separate strict authority modes. Canonical mode binds the durable HostCommand, TaskNode route and WorkerProjection and rejects any Internal Agent marker instead of permitting authority downgrade. Five injected faults prove rollback only inside C; A, B and C are not one transaction. Response loss, later duplicate HostCommand replay and terminal reconciliation consume one read-only exact internal/canonical terminal authority; identity drift is fail-closed.",
-      "terminal_artifact_boundary": "The app-local periodic worker only reconciles exact terminal sealed artifacts through abandon and cleanup. It does not periodically re-enter live sealed checkpoints.",
-      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. An explicit WorkOrderV3 schema or top-level graph binding is rejected as INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN instead of being down-projected into a second graph. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace; no V3-to-v2 executor projection remains. WorkOrderV3 top-level root/graph/node/revision fields are authoritative and conflicting legacy metadata fails closed. Single-node post-COMMIT settlement and exact operation-free persisted Attempt takeover are separate higher-fence windows. The latter reuses the same deterministic Attempt only after latest lineage, expired Lease, unique ACTIVE/EXCEEDED graph Budget, canonical PRECHARGE and atomic reservation-id plus scope/fingerprint absence validation. Lease acquisition identity binds Attempt, owner, TTL, expected version, takeover mode and reservation ID; committed-response replay also revalidates the exact unrenewed Lease, initial Heartbeat, fence, expiry and Outbox. Ordinary Attempt/Lease/Operation authority requires exactly one ACTIVE graph Budget. Any live owner, Operation race or identity/row drift fails closed before worker execution. Once an Operation is reserved, worker errors and collisions preserve recovery authority without ordinary Attempt/Node/Graph failure or Budget/Lease release. Graph/Budget terminal writers reject active execution facts and fence later Attempts. Exact signed RELEASE plus NO_SIDE_EFFECT pre-checkpoint cancellation can close the Secure Ingress claim before Workspace and unsealed stage cleanup. Ordinary Graph+Budget terminal and success/effect atomic UoW, multi-node/batch settlement recovery, raw failures, unknown effects, periodic survivor continuation, general crash-left unsealed cleanup, other cancellation claim closeout, general write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
+      "terminal_artifact_boundary": "The existing terminal worker reconciles exact terminal sealed artifacts through abandon and cleanup. A separate app-local async survivor now periodically re-enters only exact live sealed checkpoints through InternalStartupCheckpointContinuation; neither worker acquires the other's authority.",
+      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. An explicit WorkOrderV3 schema or top-level graph binding is rejected as INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN instead of being down-projected into a second graph. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace; no V3-to-v2 executor projection remains. WorkOrderV3 top-level root/graph/node/revision fields are authoritative and conflicting legacy metadata fails closed. Single-node post-COMMIT settlement and exact operation-free persisted Attempt takeover remain separate higher-fence windows. The lifecycle survivor only repeats the exact inventory and cannot bypass live owner, Operation, Budget, Grant, Preview, Task or Lease checks. Exact signed RELEASE plus NO_SIDE_EFFECT pre-checkpoint cancellation can close the Secure Ingress claim before Workspace and unsealed stage cleanup. Ordinary Graph+Budget terminal and success/effect atomic UoW, multi-node/batch settlement recovery, raw failures, unknown effects, general crash-left unsealed cleanup, other cancellation claim closeout, general write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
       "claim_boundary": "Accepted startup continuation, exact Budget rejection, exact verification/post-review nonacceptance and exact signed NO_SIDE_EFFECT pre-checkpoint cancellation each prove their own deterministic Secure Ingress result completion. Raw worker failure, unknown effect and other cancellation claim closeout remain incomplete and must not be inferred from those narrow paths.",
       "precheckpoint_no_effect_cancellation_validation": "Real SQLite with a real Ed25519 reconciliation proof proves pre-proof hold, signed RELEASE plus NO_SIDE_EFFECT terminalization, claim-before-cleanup ordering, restart exact replay and tampered-proof rejection. The focused combined batch is 44 passed in 5.40 seconds; the separate 8-test Internal runtime compatibility batch is non-additive. The final affected repository, contract, coverage, metadata and documentation batch is 115 passed in 51.41 seconds and includes the focused tests; static architecture Gates 1 through 14 all pass.",
       "local_validation": "The final worktree validation uses five file-disjoint groups: 184 runtime/structure/online-takeover tests in 289.38 seconds, 69 TaskStore/Heartbeat tests in 23.43 seconds, 23 Acceptance/atomic-failure tests in 101.70 seconds, 68 cancellation/parallel tests in 228.20 seconds, and 52 checkpoint/Budget/Intent tests in 123.58 seconds. They total 396 passes with zero failures or skips. The native V3 follow-up separately proves real SQLite+Git Internal frozen-worker delivery, V3 Workspace graph binding and metadata-drift rejection; it is local focused evidence, not program closure. Static architecture Gates 1 through 14 pass with failed_gates empty; task_repository.py is 4585 lines below the unchanged 4600 ceiling, the Lease takeover mixin is 230 lines, and the pure identity module is 93 lines. No allowlist was widened. Coverage includes zero-Budget execution rejection, deterministic Lease/initial-Heartbeat request identity, exact committed-response replay, TTL/mode/reservation/row tamper rejection, classifier/preparation, same-Attempt higher fence, Operation absence TOCTOU, ACTIVE/EXCEEDED takeover Budget and PRECHARGE matrices, online takeover, mixed live owners, post-reservation recovery hold, Graph/Budget terminal fences, Coordinator and structure. One serialized compatibility command timed out without a test-failure result and then its three groups passed separately. One new AST test made an incorrect first-argument assumption; production-related tests passed and the corrected identity/structure set reran 11 passes. Historical 191+1, 198/49/45, 71/39 and checkpoint-UoW batches are not added. Overall NE-01 remains incomplete and remote CI is NOT_RUN_ACCOUNT_QUOTA.",
@@ -2525,6 +2552,7 @@
       "review_continuation": "Explicit task-bound Review decisions may re-enter the original surface through migration 0096 coordination, but a non-terminal inner Agent result is not review-eligible and cannot be promoted by the generic post-acceptance continuation. READY and first worker entry remain live-claim-fenced.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
+        "host_brain/app/periodic_durable_continuation.py",
         "host_brain/agent_runtime/projection_recovery_contract.py",
         "host_brain/agent_runtime/internal_artifact_terminal_reconciliation.py",
         "host_brain/agent_runtime/artifact_store.py",
@@ -2554,6 +2582,9 @@
         "host_brain/task_runtime/operation_checkpoint_budget_recovery.py",
         "host_brain/task_runtime/dag_scheduling_runtime.py",
         "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
+        "tests/integration/test_ne01_host_startup_graph_continuation.py",
+        "tests/unit/test_ne01_periodic_durable_continuation.py",
+        "tests/unit/test_ne01_internal_survivor_continuation.py",
         "tests/integration/test_ne01_operation_online_takeover.py",
         "tests/integration/test_ne01_multinode_budget_settlement_hold.py",
         "tests/unit/test_ne01_checkpoint_budget_recovery_hold.py",
@@ -2730,7 +2761,7 @@
       "status": "PARTIAL",
       "stage": "PARTIAL_ATOMIC_DEFAULT_FANOUT_CANCELLATION_OFF",
       "host_startup_graph_continuation": {
-        "status": "PARTIAL_BOOT_SCOPED_EXACT_HOST_REENTRY",
+        "status": "PARTIAL_LIFECYCLE_OWNED_EXACT_HOST_REENTRY",
         "owner": "GOVERNED_HOST_RUNTIME_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION",
         "durable_inventory": "HOST_COMMAND_REPOSITORY_SURFACE_FILTERED_LIST_NONTERMINAL_ADMISSIONS_SINGLE_READ_TRANSACTION_CREATED_ACTIVE_BLOCKED_LIMIT_PLUS_ONE",
         "canonical_reentry": "HOST_COMMAND_REPOSITORY_EXACT_COMMAND_WORKORDER_ASSIGNMENT_GRAPH_RECORD",
@@ -2742,11 +2773,12 @@
         ],
         "live_lease_or_execution": "DEFERRED_NO_LEASE_TAKEOVER_NO_SCANNER_WORKER_REPLAY",
         "fail_closed": "TRUE_OVERFLOW_OR_FOREIGN_SURFACE_OR_COMMAND_GRAPH_SNAPSHOT_RECEIPT_IDENTITY_DRIFT_EXACT_BOUND_ACCEPTED",
-        "validated": "20_PASSED_HOST_STARTUP_UNIT_SQLITE_DURABLE_ADMISSION_AND_HOSTCOMMAND_CONTRACT",
+        "periodic_supervision": "MANDATORY_BOOT_SCAN_THEN_SERIAL_APP_LOCAL_TIMER_OR_HOST_OPERATION_COMPLETION_WAKE; SHUTDOWN_JOINS_ACTIVE_SCAN_WITHOUT_CANCELLATION",
+        "validated": "13_PASSED_CORE_HOST_INTERNAL_PERIODIC_SURVIVOR_AND_REAL_HOST_SQLITE_LEASE_EXPIRY_ONLINE_REENTRY",
         "not_claimed": [
-          "periodic_survivor_continuation",
-          "lease_expiry_rescan",
           "unknown_effect_reconciliation",
+          "raw_worker_failure_reconciliation",
+          "other_cancellation_reconciliation",
           "general_multi_node_batch_recovery",
           "wave_integration",
           "ne07_full_stack"
@@ -4112,7 +4144,6 @@
         "new graph-revision Tool node binding exact node Grant and WorkspaceRuntime",
         "per-operation durable fence and lease-loss preemption for future governed Tool execution",
         "general workspace write promotion beyond the clean/no-change Internal inspect slice",
-        "periodic survivor continuation for live sealed checkpoints",
         "crash-left unsealed partial inventory and cleanup",
         "failure/cancel/budget Secure Ingress claim closeout",
         "multi-node and batch post-COMMIT Budget settlement recovery",
@@ -4121,7 +4152,7 @@
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Post-admission Internal workers now natively consume WorkOrderV3 and reject graph metadata drift; external v2 is ingress compatibility only. For a governed Internal single-node sealed checkpoint, the next runtime activation can reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C are three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. A generic single-node post-COMMIT Budget settlement whose write response and first read-back are both lost now holds without additional lifecycle/finalization mutation, then handles EXACT_ACCEPTED, EXACT_REJECTED, or MISSING after Lease expiry while CONFLICT fails closed; process-control BaseException does not create a false terminal. The app-local terminal worker can abandon and clean exact terminal sealed artifacts. This remains partial: periodic survivor continuation, crash-left unsealed partial cleanup, failure/cancel/budget Secure Ingress claim closeout and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
+      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Post-admission Internal workers natively consume WorkOrderV3 and reject graph metadata drift; external v2 is ingress compatibility only. For a governed Internal single-node sealed checkpoint, the mandatory activation scan and lifecycle-owned periodic survivor reuse the same exact continuation to reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C remain three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. The supervisor only owns cadence, serializes timer/wake scans and waits for active scans on shutdown. This remains partial: crash-left unsealed cleanup, raw failure, unknown effect, other cancellation and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
       "status": "PARTIAL_V2_CODE_BOUNDARY_NO_PRODUCTION_CALLER",
