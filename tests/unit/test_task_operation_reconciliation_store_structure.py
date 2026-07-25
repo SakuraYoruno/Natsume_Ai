@@ -7,6 +7,9 @@ from host_brain.persistence import task_repository
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_worker_interruption_store import (
+    TaskWorkerInterruptionStoreMixin,
+)
 
 
 def test_operation_reconciliation_entry_is_owned_by_focused_store_mixin() -> None:
@@ -62,3 +65,21 @@ def test_operation_reconciliation_entry_is_owned_by_focused_store_mixin() -> Non
         "attestation_signature",
         "_required_cancellation_intent_ref",
     }
+
+
+def test_worker_interruption_entry_is_owned_by_focused_transactional_mixin() -> None:
+    assert (
+        task_repository.DurableTaskStore.mark_worker_interruption_recovery_required
+        is TaskWorkerInterruptionStoreMixin.mark_worker_interruption_recovery_required
+    )
+    assert TaskWorkerInterruptionStoreMixin in task_repository.DurableTaskStore.__bases__
+    module = inspect.getmodule(TaskWorkerInterruptionStoreMixin)
+    assert module is not None
+    tree = ast.parse(inspect.getsource(module))
+    mixin = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    methods = {
+        node.name
+        for node in mixin.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert methods == {"mark_worker_interruption_recovery_required"}

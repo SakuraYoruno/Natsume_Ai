@@ -9,8 +9,13 @@ from typing import Any
 
 import pytest
 
+from host_brain.contracts.agent_runtime.operation_reconciliation import (
+    OperationReconciliationStoreRejected,
+)
 from host_brain.persistence.task_repository import (
+    TASK_STORE_CAS_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
+    TASK_STORE_INVALID,
     DurableTaskStore,
     TaskStoreError,
 )
@@ -319,3 +324,105 @@ def test_reconcile_operation_reservation_state_keeps_live_reservation_unchanged(
             """
         ).fetchone()
     assert count == (0,)
+
+
+def test_worker_interruption_marks_live_operation_recovery_required_exactly_once(
+    tmp_path: Path,
+) -> None:
+    store, lease = _reserved_operation(
+        tmp_path,
+        name="checkpoint-worker-interruption.sqlite3",
+        lease_ttl_ms=30_000,
+        operation_ttl_ms=30_000,
+    )
+    arguments = {
+        "attempt_id": "attempt-1",
+        "lease_id": str(lease["lease_id"]),
+        "owner_id": "worker-a",
+        "fencing_token": int(lease["fencing_token"]),
+        "expected_version": 0,
+        "reason_code": "GOVERNED_WORKER_FAILED",
+    }
+
+    first = store.mark_worker_interruption_recovery_required(
+        "reservation-checkpoint",
+        **arguments,
+    )
+    replay = store.mark_worker_interruption_recovery_required(
+        "reservation-checkpoint",
+        **arguments,
+    )
+
+    assert first["status"] == "RECOVERY_REQUIRED"
+    assert first["status_version"] == 1
+    assert first["recovery_reason_code"] == "GOVERNED_WORKER_FAILED"
+    assert first["recovery_ts_ms"] is not None
+    assert replay == first
+    with sqlite3.connect(str(store.db_path)) as conn:
+        count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE aggregate_type = 'OPERATION_RESERVATION'
+              AND aggregate_id = 'reservation-checkpoint'
+              AND aggregate_version = 1
+              AND event_type = 'OPERATION_RECOVERY_REQUIRED'
+            """
+        ).fetchone()
+    assert count == (1,)
+
+
+@pytest.mark.parametrize(
+    ("override", "reason_code"),
+    (
+        ({"expected_version": 1}, TASK_STORE_CAS_CONFLICT),
+        ({"owner_id": "worker-forged"}, TASK_STORE_CAS_CONFLICT),
+        ({"reason_code": "GOVERNED_OTHER_FAILURE"}, TASK_STORE_CAS_CONFLICT),
+        ({"reason_code": "private detail"}, TASK_STORE_INVALID),
+        ({"fencing_token": True}, TASK_STORE_INVALID),
+    ),
+)
+def test_worker_interruption_replay_rejects_identity_or_reason_drift(
+    tmp_path: Path,
+    override: dict[str, Any],
+    reason_code: str,
+) -> None:
+    store, lease = _reserved_operation(
+        tmp_path,
+        name=(
+            "checkpoint-worker-interruption-drift-"
+            f"{sorted(override)[0]}.sqlite3"
+        ),
+        lease_ttl_ms=30_000,
+        operation_ttl_ms=30_000,
+    )
+    arguments: dict[str, Any] = {
+        "attempt_id": "attempt-1",
+        "lease_id": str(lease["lease_id"]),
+        "owner_id": "worker-a",
+        "fencing_token": int(lease["fencing_token"]),
+        "expected_version": 0,
+        "reason_code": "GOVERNED_WORKER_FAILED",
+    }
+    first = store.mark_worker_interruption_recovery_required(
+        "reservation-checkpoint",
+        **arguments,
+    )
+
+    with pytest.raises(OperationReconciliationStoreRejected) as rejected:
+        store.mark_worker_interruption_recovery_required(
+            "reservation-checkpoint",
+            **{**arguments, **override},
+        )
+
+    assert rejected.value.reason_code == reason_code
+    assert store.get_operation_reservation("reservation-checkpoint") == first
+    with sqlite3.connect(str(store.db_path)) as conn:
+        count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE aggregate_type = 'OPERATION_RESERVATION'
+              AND aggregate_id = 'reservation-checkpoint'
+              AND event_type = 'OPERATION_RECOVERY_REQUIRED'
+            """
+        ).fetchone()
+    assert count == (1,)

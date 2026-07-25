@@ -1293,7 +1293,19 @@ def test_finalized_cancellation_getter_revalidates_operation_proof_signature(
         {"reconciler-cancel-v1": public_key}
     )
     store = _store(tmp_path, reconciliation_proof_verifier=verifier)
-    _running_operation(store)
+    lease, reserved = _running_operation(store)
+    assert reserved["status"] == "RESERVED"
+    interrupted = store.mark_worker_interruption_recovery_required(
+        "reservation-cancel",
+        attempt_id="attempt-cancel",
+        lease_id=str(lease["lease_id"]),
+        owner_id="worker-cancel",
+        fencing_token=int(lease["fencing_token"]),
+        expected_version=0,
+        reason_code="GOVERNED_WORKER_FAILED",
+    )
+    assert interrupted["status"] == "RECOVERY_REQUIRED"
+    assert interrupted["recovery_reason_code"] == "GOVERNED_WORKER_FAILED"
     requested = _request_snapshot(
         store,
         before_status="RUNNING",

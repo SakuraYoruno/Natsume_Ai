@@ -173,6 +173,9 @@ from host_brain.persistence.task_graph_cancellation_continuation_store import (
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_worker_interruption_store import (
+    TaskWorkerInterruptionStoreMixin,
+)
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
 )
@@ -438,6 +441,7 @@ class DurableTaskStore(
     TaskAtomicFailureStoreMixin,
     TaskInternalAgentCheckpointStoreMixin,
     TaskOperationCheckpointStoreMixin,
+    TaskWorkerInterruptionStoreMixin,
     TaskOperationReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,
     TaskGraphCancellationEffectOverlayMixin,

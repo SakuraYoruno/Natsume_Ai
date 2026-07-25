@@ -497,6 +497,18 @@ class TaskStorePort(Protocol):
         outbox: Any,
     ) -> Mapping[str, Any]: ...
 
+    def mark_worker_interruption_recovery_required(
+        self,
+        reservation_id: str,
+        *,
+        attempt_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_version: int,
+        reason_code: str,
+    ) -> Mapping[str, Any]: ...
+
     def transition_attempt(
         self,
         attempt_id: str,
