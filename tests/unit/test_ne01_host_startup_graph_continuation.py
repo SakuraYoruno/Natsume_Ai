@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from typing import Any
 
@@ -70,6 +71,7 @@ class _CommandRepository:
 class _Application:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.cancellations: list[dict[str, Any]] = []
 
     async def execute_stream(self, **kwargs: Any):
         self.calls.append(dict(kwargs))
@@ -83,6 +85,10 @@ class _Application:
                 "accepted": True,
             },
         }
+
+    async def request_graph_cancellation(self, **kwargs: Any) -> dict[str, Any]:
+        self.cancellations.append(dict(kwargs))
+        return {"status": "CANCELLED"}
 
 
 def _contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -176,6 +182,19 @@ async def test_host_runtime_activation_reenters_exact_nonterminal_graph() -> Non
             "reason_code": None,
         },
     )
+    cancellation = await runtime.request_graph_cancellation(
+        record,
+        authority={"grant_ref": "grant://test/cancel"},
+        source="test",
+        reason_code="USER_CANCELLED",
+    )
+    assert cancellation == {"status": "CANCELLED"}
+
+    async def wait_for_operation_completion_wake() -> None:
+        while runtime.survivor_continuation_health["completed_cycles"] < 2:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_operation_completion_wake(), timeout=1.0)
     await runtime.aclose()
 
 
@@ -214,6 +233,56 @@ async def test_host_runtime_startup_never_reenters_graph_with_live_lease() -> No
         },
     )
     await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_host_runtime_periodically_reenters_after_live_lease_expires() -> None:
+    record, graph_record, snapshot = _contracts()
+    graph_id = graph_record["graph_id"]
+    graph_revision = graph_record["revision"]
+    snapshot["active_leases"] = [
+        {
+            "status": "ACTIVE",
+            "expires_ts_ms": NOW + 60_000,
+        }
+    ]
+    store = _StartupStore(
+        snapshots={(graph_id, graph_revision): snapshot},
+    )
+    application = _Application()
+    runtime = GovernedHostRuntime(
+        application=application,
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=_CommandRepository(record),
+        task_store=store,
+        survivor_interval_ms=10,
+    )
+
+    await runtime.activate()
+    initial = await runtime.recover_startup_graphs()
+    assert initial[0]["status"] == "DEFERRED"
+    assert application.calls == []
+
+    snapshot["observed_ts_ms"] = NOW + 60_001
+    runtime.wake_survivor_continuation()
+
+    async def wait_for_reentry() -> None:
+        while not application.calls:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_reentry(), timeout=1.0)
+    health = runtime.survivor_continuation_health
+    assert health["completed_cycles"] >= 2
+    assert health["last_report"] == (
+        {
+            "graph_id": graph_id,
+            "graph_revision": graph_revision,
+            "status": "COMPLETED",
+            "reason_code": None,
+        },
+    )
+    await runtime.aclose()
+    assert runtime.survivor_continuation_health["running"] is False
 
 
 @pytest.mark.asyncio

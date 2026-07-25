@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from typing import Any
 
 import pytest
@@ -30,9 +32,11 @@ NOW = 1_900_000_000_000
 class _CapturingApplication:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.completed = asyncio.Event()
 
     async def execute_stream(self, **kwargs: Any):
         self.calls.append(dict(kwargs))
+        self.completed.set()
         graph = kwargs["graph"]
         yield {
             "done": True,
@@ -43,6 +47,14 @@ class _CapturingApplication:
                 "accepted": True,
             },
         }
+
+
+class _MutableClock:
+    def __init__(self, value: int) -> None:
+        self.value = int(value)
+
+    def __call__(self) -> int:
+        return self.value
 
 
 def _contracts() -> tuple[Any, Any, Any, Any]:
@@ -177,3 +189,100 @@ async def test_host_startup_continuation_reads_exact_sqlite_admission(
         ),
     )
     assert store.list_nonterminal_graphs(limit=10) == []
+
+
+@pytest.mark.asyncio
+async def test_host_survivor_reopens_sqlite_graph_after_persisted_lease_expiry(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "host-survivor-continuation.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="ne01-host-survivor-continuation-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    command, work_order, assignment, graph = _contracts()
+    clock = _MutableClock(NOW)
+    commands = HostCommandRepository(db_path, clock=clock)
+    commands.admit(command, work_order, assignment, graph)
+    node_id = graph.nodes[0].node_id
+    attempt_id = "attempt-host-survivor-sqlite"
+    lease_id = "lease-host-survivor-sqlite"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, owner_id, operation_scope,
+                operation_fingerprint, created_ts_ms, acquired_ts_ms,
+                started_ts_ms, completed_ts_ms, updated_ts_ms, error_ref
+            ) VALUES (?, ?, ?, ?, 1, 'RUNNING', 2, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
+            """,
+            (
+                attempt_id,
+                graph.graph_id,
+                graph.revision,
+                node_id,
+                "crashed-host-owner",
+                "host-survivor-test",
+                "host-survivor-test-operation",
+                NOW,
+                NOW,
+                NOW,
+                NOW,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_lease(
+                lease_id, attempt_id, owner_id, fencing_token,
+                acquired_ts_ms, heartbeat_ts_ms, expires_ts_ms,
+                released_ts_ms, status, status_version
+            ) VALUES (?, ?, ?, 1, ?, ?, ?, NULL, 'ACTIVE', 0)
+            """,
+            (
+                lease_id,
+                attempt_id,
+                "crashed-host-owner",
+                NOW,
+                NOW,
+                NOW + 60_000,
+            ),
+        )
+        conn.commit()
+
+    store = DurableTaskStore(db_path, clock=clock)
+    application = _CapturingApplication()
+    runtime = GovernedHostRuntime(
+        application=application,
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=commands,
+        task_store=store,
+        survivor_interval_ms=60_000,
+    )
+    await runtime.activate()
+    initial = await runtime.recover_startup_graphs()
+    assert initial == (
+        {
+            "graph_id": graph.graph_id,
+            "graph_revision": graph.revision,
+            "status": "DEFERRED",
+            "reason_code": "GOVERNED_HOST_STARTUP_LIVE_LEASE",
+        },
+    )
+    assert application.calls == []
+
+    clock.value = NOW + 60_001
+    runtime.wake_survivor_continuation()
+    await asyncio.wait_for(application.completed.wait(), timeout=1.0)
+    assert len(application.calls) == 1
+    assert runtime.startup_continuation_report == (
+        {
+            "graph_id": graph.graph_id,
+            "graph_revision": graph.revision,
+            "status": "COMPLETED",
+            "reason_code": None,
+        },
+    )
+    await runtime.aclose()
+    assert runtime.survivor_continuation_health["running"] is False
