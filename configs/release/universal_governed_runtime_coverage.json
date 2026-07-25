@@ -2,10 +2,10 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_SIGNED_WORKER_CHECKPOINT_COMMIT_OVER_ORIGIN_DEV_6036E876D",
-  "current_document_slice": "NE01_SIGNED_WORKER_CHECKPOINT_COMMIT_AND_EXACT_GRAPH_CONTINUATION_THIS_DOCUMENT_COMMIT",
+  "evaluated_source": "NE01_SIGNED_SINGLE_NODE_RAW_FAILURE_OVER_ORIGIN_DEV_320F559267",
+  "current_document_slice": "NE01_SIGNED_SINGLE_NODE_RAW_FAILURE_AND_INTERNAL_CLAIM_BEFORE_CLEANUP_EVALUATED_CODE_COMMIT_E392D945",
   "evidence_binding": {
-    "evaluated_commit_sha": "6036e876dae699e79ac8d829b334c64fc3a80524",
+    "evaluated_commit_sha": "e392d945c4dfbc6ec28f8142b374db7b60b523c8",
     "migration_head": "0127_worker_projection_immutability.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
