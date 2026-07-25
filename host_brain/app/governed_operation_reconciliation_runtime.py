@@ -435,6 +435,11 @@ def require_durable_operation_reconciliation_outcome(
         "RELEASE": "RELEASED",
         "REACQUIRE": "COMMITTED",
     }[evidence["action"]]
+    expected_reconciliation_outcome = (
+        "SIDE_EFFECT_CONFIRMED"
+        if evidence["action"] == "COMMIT"
+        else "NO_SIDE_EFFECT"
+    )
     expected_receipt_ref = operation_reconciliation_handler_receipt_ref(
         request=evidence,
         operation=operation_record,
@@ -448,6 +453,15 @@ def require_durable_operation_reconciliation_outcome(
         or str(operation_record.get("status") or "").upper() != expected_status
         or str(operation_record.get("reconciliation_action") or "").upper()
         != evidence["action"]
+        or str(
+            operation_record.get("reconciliation_outcome") or ""
+        ).upper()
+        != expected_reconciliation_outcome
+        or (
+            evidence["action"] == "COMMIT"
+            and str(operation_record.get("receipt_ref") or "")
+            != str(evidence.get("downstream_receipt_ref") or "")
+        )
         or str(operation_record.get("reconciler_actor_id") or "")
         != evidence["reconciler_actor_id"]
         or operation_record.get("reconciliation_recovery_version")
@@ -594,8 +608,15 @@ def _normalize_request(
             action == "REACQUIRE"
             and request["downstream_receipt_ref"] is not None
         )
-        or (action in {"COMMIT", "RELEASE"} and request["intent_ref"] is None)
+        or (action == "RELEASE" and request["intent_ref"] is None)
         or (action == "COMMIT" and request["downstream_receipt_ref"] is None)
+        or (
+            action == "COMMIT"
+            and request["intent_ref"] is None
+            and not str(request["downstream_receipt_ref"]).startswith(
+                "worker-projection://"
+            )
+        )
         or (
             action == "RELEASE"
             and request["downstream_receipt_ref"] is not None

@@ -25,6 +25,9 @@ from .ports import (
     ReconciliationProofVerifierPort,
     TaskOutboxFactoryPort,
 )
+from .operation_checkpoint_reconciliation import (
+    OperationCheckpointReconciliationService,
+)
 
 
 _DURABLE_REFERENCE_PATTERN = re.compile(
@@ -520,18 +523,20 @@ class OperationReacquisitionService:
 
 
 class OperationReconciliationCommandService:
-    """Keep cancellation settlement and generic REACQUIRE action-exclusive."""
+    """Dispatch cancellation, checkpoint COMMIT, and REACQUIRE exclusively."""
 
-    __slots__ = ("_cancellation", "_reacquisition")
+    __slots__ = ("_cancellation", "_checkpoint", "_reacquisition")
 
     def __init__(
         self,
         *,
         cancellation_service: GraphCancellationOperationReconciliationService,
         reacquisition_service: OperationReacquisitionService,
+        checkpoint_service: OperationCheckpointReconciliationService,
     ) -> None:
         self._cancellation = cancellation_service
         self._reacquisition = reacquisition_service
+        self._checkpoint = checkpoint_service
 
     def bind_execution_owner(self, owner_id: str) -> None:
         self._reacquisition.bind_execution_owner(owner_id)
@@ -566,10 +571,22 @@ class OperationReconciliationCommandService:
                 attestation_key_id=attestation_key_id,
                 attestation_signature=attestation_signature,
             )
+        if normalized_action == "COMMIT" and cancellation_ref is None:
+            return self._checkpoint.reconcile_operation_checkpoint(
+                reservation_id=reservation_id,
+                expected_version=expected_version,
+                action=normalized_action,
+                reconciler_actor_id=reconciler_actor_id,
+                downstream_receipt_ref=downstream_receipt_ref,
+                attestation_ref=attestation_ref,
+                attestation_key_id=attestation_key_id,
+                attestation_signature=attestation_signature,
+            )
         if normalized_action not in {"COMMIT", "RELEASE"} or cancellation_ref is None:
             raise OperationReacquisitionError(
                 OPERATION_RECONCILIATION_INVALID,
-                "COMMIT/RELEASE require an exact cancellation intent",
+                "RELEASE requires cancellation intent; COMMIT requires either "
+                "cancellation intent or an exact worker checkpoint",
                 side_effects_may_have_run=False,
             )
         return self._cancellation.reconcile_graph_cancellation_operation(

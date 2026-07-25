@@ -68,10 +68,6 @@ from host_brain.contracts.agent_runtime.operation_reconciliation import (
     OperationReconciliationContractError,
     build_reconciliation_attestation_binding,
 )
-from host_brain.persistence.worker_projection_repository import (
-    WorkerProjectionStoreError,
-    validate_worker_projection_record,
-)
 from host_brain.persistence.task_graph_admission_authority import (
     register_task_graph_admission_authority,
 )
@@ -176,6 +172,10 @@ from host_brain.persistence.task_graph_cancellation_continuation_store import (
 )
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
+)
+from host_brain.persistence.task_operation_checkpoint_reconciliation_store import (
+    TaskOperationCheckpointReconciliationStoreMixin,
+    assert_worker_checkpoint_reconciliation_in_transaction,
 )
 from host_brain.persistence.task_operation_reconciliation_evidence_store import (
     TaskOperationReconciliationEvidenceStoreMixin,
@@ -375,6 +375,7 @@ class DurableTaskStore(
     TaskOperationCheckpointStoreMixin,
     TaskWorkerInterruptionStoreMixin,
     TaskOperationReconciliationEvidenceStoreMixin,
+    TaskOperationCheckpointReconciliationStoreMixin,
     TaskOperationReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,
     TaskGraphCancellationEffectOverlayMixin,
@@ -3061,6 +3062,8 @@ class DurableTaskStore(
         attestation_signature: str | None = None,
         ttl_ms: int | None = None,
         _required_cancellation_intent_ref: str | None = None,
+        _required_worker_projection_ref: str | None = None,
+        _require_expired_worker_lease: bool = False,
     ) -> dict[str, Any]:
         try:
             recovery_action = IdempotencyRecoveryAction(str(action).strip().upper())
@@ -3107,6 +3110,9 @@ class DurableTaskStore(
         required_cancellation_ref = str(
             _required_cancellation_intent_ref or ""
         ).strip() or None
+        required_projection_ref = str(
+            _required_worker_projection_ref or ""
+        ).strip() or None
         if (
             required_cancellation_ref is not None
             and recovery_action is IdempotencyRecoveryAction.REACQUIRE
@@ -3114,6 +3120,21 @@ class DurableTaskStore(
             raise TaskStoreError(
                 TASK_STORE_CANCELLATION_CONFLICT,
                 "cancellation reconciliation cannot REACQUIRE an operation",
+            )
+        if required_projection_ref is not None and (
+            recovery_action is not IdempotencyRecoveryAction.COMMIT
+            or receipt != required_projection_ref
+            or required_cancellation_ref is not None
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "worker checkpoint authority requires a non-cancellation COMMIT "
+                "whose receipt is the exact projection",
+            )
+        if _require_expired_worker_lease and required_projection_ref is None:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "worker Lease expiry guard requires a checkpoint projection",
             )
 
         ts_ms = self._now()
@@ -3126,8 +3147,8 @@ class DurableTaskStore(
                     TASK_STORE_INVALID,
                     f"reservation {reservation_id} is not RECOVERY_REQUIRED",
                 )
+            original_attempt_ref = str(row["attempt_id"] or "").strip() or None
             if required_cancellation_ref is not None:
-                original_attempt_ref = str(row["attempt_id"] or "").strip()
                 if not original_attempt_ref:
                     raise TaskStoreError(
                         TASK_STORE_OWNERSHIP_CONFLICT,
@@ -3161,6 +3182,16 @@ class DurableTaskStore(
                         TASK_STORE_OWNERSHIP_CONFLICT,
                         "operation reservation does not belong to the cancelling graph revision",
                     )
+            if required_projection_ref is not None:
+                assert_worker_checkpoint_reconciliation_in_transaction(
+                    self,
+                    conn,
+                    operation_row=row,
+                    attempt_id=original_attempt_ref,
+                    projection_ref=required_projection_ref,
+                    observed_ts_ms=ts_ms,
+                    require_expired_lease=_require_expired_worker_lease,
+                )
             try:
                 proof_binding = build_reconciliation_attestation_binding(
                     reservation_id=str(row["reservation_id"]),
@@ -3200,7 +3231,6 @@ class DurableTaskStore(
                     "reconciliation attestation signature is invalid or binding was tampered",
                 )
 
-            original_attempt_ref = str(row["attempt_id"] or "").strip() or None
             if recovery_action is IdempotencyRecoveryAction.REACQUIRE:
                 if original_attempt_ref is not None:
                     original_attempt = self._require_attempt(conn, original_attempt_ref)

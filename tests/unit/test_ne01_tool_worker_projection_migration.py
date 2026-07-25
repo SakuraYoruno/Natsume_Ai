@@ -67,6 +67,11 @@ def test_0114_preserves_historical_projection_and_expands_tool_route(tmp_path: P
                 "{}",
             ),
         )
+        conn.executescript(
+            (
+                MIGRATIONS / "0127_worker_projection_immutability.sql"
+            ).read_text("utf-8")
+        )
     WorkerProjectionStore(db_path).assert_schema_ready()
 
 
@@ -78,7 +83,7 @@ def test_current_catalog_preserves_0114_worker_projection_readiness(
         request_id="ne01-tool-projection-through-current-head"
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 120
+    assert result.summary["current_version"] == 127
     WorkerProjectionStore(db_path).assert_schema_ready()
 
 
@@ -98,6 +103,39 @@ def test_worker_projection_readiness_rejects_weakened_tool_guard(tmp_path: Path)
             (sql.replace("'chat', 'skill', 'delegate', 'tool'", "'chat', 'skill', 'delegate', 'tool', 'other'"),),
         )
         conn.execute("PRAGMA writable_schema = OFF")
+    with pytest.raises(WorkerProjectionStoreError) as raised:
+        WorkerProjectionStore(db_path)
+    assert raised.value.reason_code == WORKER_PROJECTION_SCHEMA_NOT_READY
+
+
+@pytest.mark.parametrize(
+    ("trigger_name", "operation"),
+    (
+        ("trg_task_runtime_worker_projection_no_update", "UPDATE"),
+        ("trg_task_runtime_worker_projection_no_delete", "DELETE"),
+    ),
+)
+def test_worker_projection_readiness_rejects_weakened_immutability_trigger(
+    tmp_path: Path,
+    trigger_name: str,
+    operation: str,
+) -> None:
+    db_path = tmp_path / f"worker-projection-{operation.lower()}-trigger.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id=f"ne01-worker-projection-weakened-{operation.lower()}"
+    )
+    assert result.success is True, result.as_dict()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(f"DROP TRIGGER {trigger_name}")
+        conn.execute(
+            f"""
+            CREATE TRIGGER {trigger_name}
+            BEFORE {operation} ON task_runtime_worker_projection
+            BEGIN
+                SELECT 1;
+            END
+            """
+        )
     with pytest.raises(WorkerProjectionStoreError) as raised:
         WorkerProjectionStore(db_path)
     assert raised.value.reason_code == WORKER_PROJECTION_SCHEMA_NOT_READY

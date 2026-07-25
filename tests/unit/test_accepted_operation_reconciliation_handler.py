@@ -58,6 +58,37 @@ def _payload() -> dict[str, Any]:
     }
 
 
+def _checkpoint_evidence() -> dict[str, Any]:
+    return {
+        **_evidence(),
+        "request_id": "request-operation-checkpoint-handler",
+        "intent_ref": None,
+        "action": "COMMIT",
+        "downstream_receipt_ref": (
+            "worker-projection://checkpoint/" + "d" * 64
+        ),
+    }
+
+
+def _checkpoint_payload() -> dict[str, Any]:
+    evidence = _checkpoint_evidence()
+    return {
+        "operator_command_id": "task_operation.reconcile",
+        **{
+            key: evidence[key]
+            for key in (
+                "request_id",
+                "evidence_ref",
+                "evidence_digest",
+                "reservation_id",
+                "expected_version",
+                "action",
+                "reconciler_actor_id",
+            )
+        },
+    }
+
+
 class _EvidenceStore:
     def __init__(self, evidence: dict[str, Any] | None = None) -> None:
         self.evidence = dict(evidence or _evidence())
@@ -110,6 +141,51 @@ class _Continuation:
             }
         }
 
+    async def continue_operation_reconciliation(
+        self,
+        reconciliation: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append(dict(reconciliation))
+        return {
+            "execution_receipt": {
+                "accepted": True,
+                "status": "ACCEPTED",
+                "graph_id": "graph-operation-target",
+                "graph_revision": 2,
+            }
+        }
+
+
+class _CheckpointService:
+    def __init__(self, *, replayed: bool = False) -> None:
+        self.replayed = replayed
+        self.calls: list[dict[str, Any]] = []
+
+    def reconcile_operation(self, **request: Any) -> dict[str, Any]:
+        self.calls.append(dict(request))
+        receipt = str(request["downstream_receipt_ref"])
+        return {
+            "graph_id": "graph-operation-target",
+            "graph_revision": 2,
+            "node_id": "node-operation-target",
+            "attempt_id": "attempt-operation-target",
+            "operation": {
+                "reservation_id": request["reservation_id"],
+                "status": "COMMITTED",
+                "status_version": request["expected_version"] + 1,
+                "receipt_ref": receipt,
+                "reconciliation_action": "COMMIT",
+                "reconciliation_outcome": "SIDE_EFFECT_CONFIRMED",
+                "fencing_token": 9,
+            },
+            "checkpoint": {
+                "projection_ref": receipt,
+                "payload_digest": "sha256:" + "d" * 64,
+                "decision": "APPROVE",
+            },
+            "replayed": self.replayed,
+        }
+
 
 @pytest.mark.asyncio
 async def test_handler_reopens_evidence_and_continues_target_exactly_once() -> None:
@@ -151,6 +227,32 @@ async def test_exact_terminal_replay_does_not_reenter_target_runtime() -> None:
     assert result["exact_replay"] is True
     assert len(service.calls) == 1
     assert continuation.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_replayed", (False, True))
+async def test_checkpoint_commit_continues_original_graph_even_after_response_loss(
+    service_replayed: bool,
+) -> None:
+    evidence = _checkpoint_evidence()
+    service = _CheckpointService(replayed=service_replayed)
+    continuation = _Continuation()
+    handler = AcceptedOperationReconciliationHandler(
+        service=service,
+        evidence_store=_EvidenceStore(evidence),
+        continuation_provider=lambda: continuation,
+    )
+
+    result = await handler(_checkpoint_payload())
+
+    assert result["operation_status"] == "COMMITTED"
+    assert result["target_continuation"]["execution_receipt"]["accepted"] is True
+    assert result["exact_replay"] is service_replayed
+    assert len(service.calls) == 1
+    assert len(continuation.calls) == 1
+    assert continuation.calls[0]["checkpoint"]["projection_ref"].startswith(
+        "worker-projection://checkpoint/"
+    )
 
 
 @pytest.mark.asyncio

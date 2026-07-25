@@ -423,6 +423,28 @@ def assert_exact_committed_checkpoint(
         if isinstance(outbox, Mapping)
         else ()
     )
+    event_type = (
+        _text(outbox.get("event_type"))
+        if isinstance(outbox, Mapping)
+        else ""
+    )
+    normal_commit = (
+        event_type == "OPERATION_COMMITTED"
+        and evidence_refs == (receipt_ref, checkpoint_digest_ref)
+    )
+    signed_checkpoint_commit = (
+        event_type == "OPERATION_RECOVERY_COMMIT"
+        and isinstance(reservation, Mapping)
+        and _text(reservation.get("reconciliation_action")).upper()
+        == "COMMIT"
+        and _text(reservation.get("reconciliation_outcome")).upper()
+        == "SIDE_EFFECT_CONFIRMED"
+        and evidence_refs
+        == (
+            _text(reservation.get("reconciliation_proof_ref")),
+            receipt_ref,
+        )
+    )
     if (
         not isinstance(outbox, Mapping)
         or _text(outbox.get("aggregate_type")) != "OPERATION_RESERVATION"
@@ -431,9 +453,8 @@ def assert_exact_committed_checkpoint(
             outbox.get("aggregate_version"),
             expected_version + 1,
         )
-        or _text(outbox.get("event_type")) != "OPERATION_COMMITTED"
+        or not (normal_commit or signed_checkpoint_commit)
         or _text(outbox.get("attempt_id")) != attempt_id
-        or evidence_refs != (receipt_ref, checkpoint_digest_ref)
         or _text(checkpoint.get("checkpoint_digest_ref"))
         != checkpoint_digest_ref
     ):

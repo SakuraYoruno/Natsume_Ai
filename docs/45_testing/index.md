@@ -7,6 +7,16 @@
 维护日期：2026-07-26
 状态：当前证据
 
+## NE-01 signed WorkerProjection checkpoint COMMIT 当前切片
+
+- `task_operation.reconcile` 在没有 cancellation intent 时只允许 `COMMIT + worker-projection://.../<sha256>`；任意 transport receipt、普通 `RELEASE` 或非 canonical projection 在 admission/handler/Store 边界失败关闭。
+- 服务读取层重开 immutable HostCommand、TaskGraph、Node、Attempt、Operation 与 WorkerProjection；focused Store 在 Operation CAS 的同一真实 SQLite UoW 中再次验证 Graph/Node/Attempt、scope/fingerprint、projection digest、无 cancellation 和旧 Lease expiry。0127 trigger 阻断 WorkerProjection UPDATE/DELETE；readiness 比较 exact trigger set 与 canonical SQL，同名弱化 trigger 也会拒绝。
+- 真实 SQLite 集成覆盖：worker 已执行一次并提交 projection、heartbeat-loss 后 Operation 为 `RECOVERY_REQUIRED`、错误 Ed25519 签名拒绝、live Lease 阻断、Lease 到期后签名 COMMIT、首次响应丢失 exact reopen、Accepted handler 继续原图、同一 Attempt/Graph 完成、唯一 `OPERATION_RECOVERY_COMMIT`，以及 Task terminal replay 不重跑 worker。
+- 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
+- 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
+- Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
+- 当前 migration head 为 `0127_worker_projection_immutability.sql`。该证据使用本地临时 key、单节点和进程内 route continuation；部署 key/HTTP/network canary、普通 RELEASE、任意外部效果 receipt、general multi-node/batch、七路线波次与 NE-07 Docker 全栈仍未运行。状态为 `SIGNED_SINGLE_NODE_WORKER_CHECKPOINT_COMMIT_LOCAL_PROVEN / DEFAULT_OFF / GENERAL_RECOVERY_INCOMPLETE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 
 - migration 0126 新增 `task_runtime_operation_reconciliation_evidence`。写入时用 verification-only Ed25519 key ring 验签并绑定当前 `RECOVERY_REQUIRED` reservation/version/action；evidence ref/digest 确定性派生，同 request exact replay 只读，payload drift 拒绝。真实 SQLite trigger 阻断 UPDATE/DELETE。

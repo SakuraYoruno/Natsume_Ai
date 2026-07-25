@@ -755,6 +755,17 @@ class ExecutionProjectionReaderPort(Protocol):
     def load(self, receipt_ref: str) -> Mapping[str, Any] | None: ...
 
 
+class HostCommandAdmissionReaderPort(Protocol):
+    """Reopen one immutable HostCommand admission by exact Graph revision."""
+
+    def get_by_graph(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
+
 class TaskOutboxFactoryPort(Protocol):
     """Factory compatible with ``OutboxMessage.create``."""
 
@@ -837,6 +848,56 @@ class OperationReacquisitionStorePort(Protocol):
         attestation_key_id: str,
         attestation_signature: str,
         ttl_ms: int,
+    ) -> Mapping[str, Any]: ...
+
+
+class OperationCheckpointReconciliationStorePort(Protocol):
+    """Reads and the one atomic mutation for signed checkpoint COMMIT."""
+
+    def get_operation_reservation(
+        self,
+        reservation_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
+
+    def get_active_lease(
+        self,
+        attempt_id: str,
+    ) -> Mapping[str, Any] | None: ...
+
+    def get_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any]: ...
+
+    def get_node(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> Mapping[str, Any] | None: ...
+
+    def reconcile_operation_checkpoint(
+        self,
+        reservation_id: str,
+        *,
+        action: str,
+        attempt_id: str,
+        expected_version: int,
+        outbox: Any,
+        reconciler_actor_id: str,
+        downstream_receipt_ref: str,
+        attestation_ref: str,
+        attestation_key_id: str,
+        attestation_signature: str,
     ) -> Mapping[str, Any]: ...
 
 
@@ -998,6 +1059,8 @@ __all__ = [
     "ExecutionProjectionReaderPort",
     "GraphCancellationEffectReconciliationStorePort",
     "GraphCancellationOperationReconciliationStorePort",
+    "HostCommandAdmissionReaderPort",
+    "OperationCheckpointReconciliationStorePort",
     "OperationReacquisitionStorePort",
     "ReconciliationProofVerifierPort",
     "GovernedWorkerPort",

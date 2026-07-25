@@ -116,23 +116,35 @@ class AcceptedOperationReconciliationHandler:
             if isinstance(initial_operation_raw, Mapping)
             else {}
         )
-        if (
+        reacquisition_continuation = (
             request["action"] == "REACQUIRE"
             and str(initial_operation.get("status") or "").upper()
             != "COMMITTED"
-        ):
+        )
+        checkpoint_continuation = (
+            request["action"] == "COMMIT"
+            and request["intent_ref"] is None
+            and str(initial_operation.get("status") or "").upper()
+            == "COMMITTED"
+        )
+        if reacquisition_continuation or checkpoint_continuation:
             runtime = self._continuation_provider()
-            continue_reacquisition = getattr(
+            continuation_method = (
+                "continue_operation_reacquisition"
+                if reacquisition_continuation
+                else "continue_operation_reconciliation"
+            )
+            continue_target = getattr(
                 runtime,
-                "continue_operation_reacquisition",
+                continuation_method,
                 None,
             )
-            if not callable(continue_reacquisition):
+            if not callable(continue_target):
                 raise AcceptanceEffectOutcomeUnknown(
-                    "reacquired Operation has no app-local continuation owner"
+                    "reconciled Operation has no app-local continuation owner"
                 )
             try:
-                continued_raw = continue_reacquisition(result)
+                continued_raw = continue_target(result)
                 continued = (
                     await continued_raw
                     if inspect.isawaitable(continued_raw)
@@ -140,11 +152,11 @@ class AcceptedOperationReconciliationHandler:
                 )
             except Exception as exc:
                 raise AcceptanceEffectOutcomeUnknown(
-                    "reacquired Operation continuation outcome is uncertain"
+                    "reconciled Operation continuation outcome is uncertain"
                 ) from exc
             if not isinstance(continued, Mapping):
                 raise AcceptanceEffectOutcomeUnknown(
-                    "reacquired Operation continuation result is invalid"
+                    "reconciled Operation continuation result is invalid"
                 )
             continuation = dict(continued)
             receipt_raw = continuation.get("execution_receipt")
@@ -160,24 +172,25 @@ class AcceptedOperationReconciliationHandler:
                 or receipt.get("graph_revision") != result.get("graph_revision")
             ):
                 raise AcceptanceEffectOutcomeUnknown(
-                    "reacquired target graph has no exact accepted receipt"
+                    "reconciled target graph has no exact accepted receipt"
                 )
-            try:
-                settled_raw = self._service.reconcile_operation(**request)
-                settled = (
-                    await settled_raw
-                    if inspect.isawaitable(settled_raw)
-                    else settled_raw
-                )
-            except Exception as exc:
-                raise AcceptanceEffectOutcomeUnknown(
-                    "reacquired Operation final state cannot be reopened"
-                ) from exc
-            if not isinstance(settled, Mapping):
-                raise AcceptanceEffectOutcomeUnknown(
-                    "reacquired Operation final state is invalid"
-                )
-            result = dict(settled)
+            if reacquisition_continuation:
+                try:
+                    settled_raw = self._service.reconcile_operation(**request)
+                    settled = (
+                        await settled_raw
+                        if inspect.isawaitable(settled_raw)
+                        else settled_raw
+                    )
+                except Exception as exc:
+                    raise AcceptanceEffectOutcomeUnknown(
+                        "reacquired Operation final state cannot be reopened"
+                    ) from exc
+                if not isinstance(settled, Mapping):
+                    raise AcceptanceEffectOutcomeUnknown(
+                        "reacquired Operation final state is invalid"
+                    )
+                result = dict(settled)
         operation_raw = result.get("operation")
         operation = (
             dict(operation_raw) if isinstance(operation_raw, Mapping) else {}
@@ -204,8 +217,16 @@ def operation_reconciliation_handler_receipt_ref(
     request: Mapping[str, Any],
     operation: Mapping[str, Any],
 ) -> str:
-    material = {
-        "schema_version": "Natsume.task.operation_reconciliation_receipt.v1",
+    checkpoint_commit = (
+        str(request.get("action") or "").strip().upper() == "COMMIT"
+        and not str(request.get("intent_ref") or "").strip()
+    )
+    material: dict[str, Any] = {
+        "schema_version": (
+            "Natsume.task.operation_reconciliation_receipt.v2"
+            if checkpoint_commit
+            else "Natsume.task.operation_reconciliation_receipt.v1"
+        ),
         "reservation_id": str(request.get("reservation_id") or "").strip(),
         "expected_version": request.get("expected_version"),
         "action": str(request.get("action") or "").strip().upper(),
@@ -220,6 +241,27 @@ def operation_reconciliation_handler_receipt_ref(
         "operation_status_version": operation.get("status_version"),
         "operation_fencing_token": operation.get("fencing_token"),
     }
+    if checkpoint_commit:
+        material.update(
+            {
+                "downstream_receipt_ref": str(
+                    request.get("downstream_receipt_ref") or ""
+                ).strip(),
+                "operation_receipt_ref": str(
+                    operation.get("receipt_ref") or ""
+                ).strip(),
+                "operation_reconciliation_action": str(
+                    operation.get("reconciliation_action") or ""
+                )
+                .strip()
+                .upper(),
+                "operation_reconciliation_outcome": str(
+                    operation.get("reconciliation_outcome") or ""
+                )
+                .strip()
+                .upper(),
+            }
+        )
     encoded = json.dumps(
         material,
         ensure_ascii=False,

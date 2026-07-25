@@ -25,12 +25,15 @@ flowchart LR
     H --> V["Review + Preview + Verification + Acceptance"]
     V --> A["Accepted reconciliation handler"]
     A --> O["重开 evidence 并再次验签"]
-    O --> Q["同 Attempt / higher fence / 新 Budget segment"]
-    Q --> C["原 route continuation"]
+    O --> Q{"reconciliation action"}
+    Q -->|"REACQUIRE"| L["同 Attempt / higher fence / 新 Budget segment"]
+    Q -->|"COMMIT + worker projection"| P["0127 immutable projection\n同事务重验 lineage + expired Lease"]
+    L --> C["原 route continuation"]
+    P --> C
     C --> T["Operation COMMITTED / exact replay 只读"]
 ```
 
-WorkOrder、TaskGraph、Review authority 和 Acceptance Effect 都不保存 `attestation_signature`；只有 evidence ledger 保存并在读取时复验它。`REACQUIRE` 不能创建第二 Attempt 或第二图，也不能越过 Budget/Lease；终态 exact replay 不调用 continuation。这是本地 SQLite 的单 Operation 正向链，不覆盖一般未知副作用和多节点/批次恢复。
+WorkOrder、TaskGraph、Review authority 和 Acceptance Effect 都不保存 `attestation_signature`；只有 evidence ledger 保存并在读取时复验它。`REACQUIRE` 不能创建第二 Attempt 或第二图，也不能越过 Budget/Lease。checkpoint `COMMIT` 不使用 cancellation intent，只接受 canonical `worker-projection://.../<sha256>`；读取层与 mutation UoW 都重验 immutable admission、Graph/Node/Attempt、Operation scope/fingerprint、旧 Lease expiry 和投影 digest。Operation receipt 与唯一 recovery Outbox 提交后，原图继续 Verification/Acceptance/Effect；响应丢失 exact reopen 不重跑 worker。普通 `RELEASE`、任意 transport receipt 和多节点/批次仍不在这条正向链内。
 
 情感数据流现在分成有副作用的 admission 与无副作用的 replay 两条。生产 admission 为 `Input/Tribe → HostLifecycleApplicationPorts.emotion_context_runtime → HostEmotionRuntime.ingest → current vector/timeline/profile`；同一 Host root 共享同一 identity，不同 root 不共享状态。`normalize_chat_emotion_context(raw)` 不带 runtime 时只计算归一化、echo 和 trigger，不追加 Timeline、不改变画像或前一标签。回复形态为 `Input composition → owned ResponseFormDecider → locked quota check+record`，不再经过进程 singleton。
 

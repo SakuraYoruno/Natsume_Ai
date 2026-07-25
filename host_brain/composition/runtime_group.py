@@ -312,11 +312,70 @@ class GovernedRuntimeGroup:
             != "NO_SIDE_EFFECT"
         ):
             raise RuntimeError("OPERATION_REACQUISITION_BINDING_DRIFT")
+        return await self._continue_reconciled_operation_target(
+            operation=operation,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            detail_prefix="OPERATION_REACQUISITION",
+        )
+
+    async def continue_operation_reconciliation(
+        self,
+        reconciliation: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Re-enter one graph from a signed, durable worker checkpoint."""
+
+        if not self._continuation_open or not self._active_names:
+            raise RuntimeError("OPERATION_RECONCILIATION_RUNTIME_INACTIVE")
+        normalized = _mapping(
+            reconciliation,
+            field_name="Operation checkpoint reconciliation result",
+        )
+        operation = _mapping(
+            normalized.get("operation"),
+            field_name="committed checkpoint Operation",
+        )
+        checkpoint = _mapping(
+            normalized.get("checkpoint"),
+            field_name="committed worker checkpoint",
+        )
+        graph_id = str(normalized.get("graph_id") or "").strip()
+        graph_revision = normalized.get("graph_revision")
+        receipt_ref = str(operation.get("receipt_ref") or "").strip()
+        if (
+            not graph_id
+            or type(graph_revision) is not int
+            or graph_revision < 1
+            or str(operation.get("status") or "").upper() != "COMMITTED"
+            or str(operation.get("reconciliation_action") or "").upper()
+            != "COMMIT"
+            or str(operation.get("reconciliation_outcome") or "").upper()
+            != "SIDE_EFFECT_CONFIRMED"
+            or not receipt_ref.startswith("worker-projection://")
+            or str(checkpoint.get("projection_ref") or "").strip()
+            != receipt_ref
+        ):
+            raise RuntimeError("OPERATION_RECONCILIATION_BINDING_DRIFT")
+        return await self._continue_reconciled_operation_target(
+            operation=operation,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            detail_prefix="OPERATION_RECONCILIATION",
+        )
+
+    async def _continue_reconciled_operation_target(
+        self,
+        *,
+        operation: Mapping[str, Any],
+        graph_id: str,
+        graph_revision: int,
+        detail_prefix: str,
+    ) -> Mapping[str, Any]:
         async with self._operation_reacquisition_lock:
             getter = getattr(self._command_repository, "get_by_graph", None)
             if not callable(getter):
                 raise RuntimeError(
-                    "OPERATION_REACQUISITION_COMMAND_REPOSITORY_UNAVAILABLE"
+                    f"{detail_prefix}_COMMAND_REPOSITORY_UNAVAILABLE"
                 )
             record_raw = await _await_call(
                 getter(graph_id=graph_id, graph_revision=graph_revision)
@@ -331,7 +390,9 @@ class GovernedRuntimeGroup:
                 or command.graph_id != graph_id
                 or command.graph_revision != graph_revision
             ):
-                raise RuntimeError("OPERATION_REACQUISITION_COMMAND_BINDING_DRIFT")
+                raise RuntimeError(
+                    f"{detail_prefix}_COMMAND_BINDING_DRIFT"
+                )
             runtime_name = _runtime_name_for_command(command)
             runtime = self._runtimes.get(str(runtime_name or ""))
             continuation = getattr(
@@ -341,23 +402,23 @@ class GovernedRuntimeGroup:
             )
             if runtime is None or not callable(continuation):
                 raise RuntimeError(
-                    "OPERATION_REACQUISITION_SURFACE_UNAVAILABLE:"
+                    f"{detail_prefix}_SURFACE_UNAVAILABLE:"
                     f"{command.surface.value}"
                 )
             result = _mapping(
                 await _await_call(continuation(record, operation)),
-                field_name="Operation reacquisition continuation result",
+                field_name="Operation reconciliation continuation result",
             )
             receipt = _mapping(
                 result.get("execution_receipt"),
-                field_name="Operation reacquisition execution receipt",
+                field_name="Operation reconciliation execution receipt",
             )
             if (
                 str(receipt.get("graph_id") or "").strip() != graph_id
                 or receipt.get("graph_revision") != graph_revision
             ):
                 raise RuntimeError(
-                    "OPERATION_REACQUISITION_RECEIPT_BINDING_DRIFT"
+                    f"{detail_prefix}_RECEIPT_BINDING_DRIFT"
                 )
             return result
 
