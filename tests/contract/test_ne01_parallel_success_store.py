@@ -774,18 +774,18 @@ def test_parallel_success_projection_digest_drift_rolls_back_terminal_write(
     store = fixture[0]
     before_outbox = len(store.list_pending_outbox(limit=1_000))
     with sqlite3.connect(store.db_path) as conn:
-        conn.execute(
-            """
-            UPDATE task_runtime_worker_projection
-            SET payload_digest = ?
-            WHERE node_id = 'left'
-            """,
-            ("sha256:" + "f" * 64,),
-        )
-        conn.commit()
-
-    with pytest.raises(TaskStoreError, match="projection is invalid"):
-        _complete(*fixture)
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="TASK_RUNTIME_WORKER_PROJECTION_IMMUTABLE",
+        ):
+            conn.execute(
+                """
+                UPDATE task_runtime_worker_projection
+                SET payload_digest = ?
+                WHERE node_id = 'left'
+                """,
+                ("sha256:" + "f" * 64,),
+            )
     assert store.get_graph(
         "graph-parallel-success-projection-drift", 1
     )["status"] == "ACTIVE"

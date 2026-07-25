@@ -197,9 +197,32 @@ async def takeover_committed_checkpoint(
     if (
         budget_usage.state
         is WorkerBudgetUsageCheckpointState.EXACT_REJECTED
-    ) != (budget_status == "EXCEEDED"):
+        and budget_status != "EXCEEDED"
+    ):
         _blocked(
             "committed checkpoint BudgetUsage outcome and reservation status differ"
+        )
+    if (
+        budget_status == "EXCEEDED"
+        and budget_usage.state
+        is not WorkerBudgetUsageCheckpointState.EXACT_REJECTED
+    ):
+        if (
+            len(admitted.nodes) == 1
+            or budget_usage.state
+            is not WorkerBudgetUsageCheckpointState.EXACT_ACCEPTED
+        ):
+            _blocked(
+                "committed checkpoint BudgetUsage outcome and reservation status differ"
+            )
+        _assert_exact_sibling_budget_rejection(
+            snapshot,
+            admitted=admitted,
+            budget_id=_required_text(budget_id, "budget_id"),
+            current_attempt_id=_required_text(
+                latest_attempt.get("attempt_id"),
+                "attempt_id",
+            ),
         )
     durable_elapsed_ms = (
         _checkpoint_elapsed_ms(
@@ -322,6 +345,82 @@ def _checkpoint_elapsed_ms(
     if type(override) is not int or override <= 0:
         _blocked("sealed checkpoint elapsed time is invalid")
     return override
+
+
+def _assert_exact_sibling_budget_rejection(
+    snapshot: Mapping[str, Any],
+    *,
+    admitted: AdmittedExecution,
+    budget_id: str,
+    current_attempt_id: str,
+) -> None:
+    """Prove why an accepted node may coexist with an EXCEEDED graph Budget."""
+
+    raw_attempts = snapshot.get("attempts")
+    raw_usages = snapshot.get("budget_usage")
+    if not isinstance(raw_attempts, list) or not isinstance(raw_usages, list):
+        _blocked(
+            "EXCEEDED multi-node checkpoint lacks a canonical scheduler snapshot"
+        )
+    attempts: dict[str, Mapping[str, Any]] = {}
+    for raw in raw_attempts:
+        if not isinstance(raw, Mapping):
+            _blocked(
+                "EXCEEDED multi-node checkpoint Attempt journal is malformed"
+            )
+        attempt_id = _text(raw.get("attempt_id"))
+        if not attempt_id or attempt_id in attempts:
+            _blocked(
+                "EXCEEDED multi-node checkpoint Attempt identity is ambiguous"
+            )
+        attempts[attempt_id] = raw
+
+    admitted_node_ids = {binding.node_id for binding in admitted.nodes}
+    for raw in raw_usages:
+        if not isinstance(raw, Mapping):
+            _blocked(
+                "EXCEEDED multi-node checkpoint BudgetUsage journal is malformed"
+            )
+        attempt_id = _text(raw.get("attempt_id"))
+        node_id = _text(raw.get("node_id"))
+        attempt = attempts.get(attempt_id)
+        version_before = raw.get("reservation_version_before")
+        version_after = raw.get("reservation_version_after")
+        exceeded_dimensions = raw.get("exceeded_dimensions")
+        if (
+            attempt_id
+            and attempt_id != current_attempt_id
+            and node_id in admitted_node_ids
+            and node_id != admitted.node_id
+            and _text(raw.get("budget_id")) == budget_id
+            and _text(raw.get("graph_id")) == admitted.graph_id
+            and type(raw.get("graph_revision")) is int
+            and raw.get("graph_revision") == admitted.graph_revision
+            and raw.get("accepted") is False
+            and _text(raw.get("reason_code"))
+            == "TASK_STORE_BUDGET_EXCEEDED"
+            and (
+                _text(raw.get("charge_kind")).startswith("WORKER_USAGE")
+                or _text(raw.get("charge_kind")) == "WORKER_ELAPSED"
+            )
+            and isinstance(exceeded_dimensions, list)
+            and bool(exceeded_dimensions)
+            and type(version_before) is int
+            and type(version_after) is int
+            and version_before >= 1
+            and version_after == version_before + 1
+            and isinstance(attempt, Mapping)
+            and _text(attempt.get("attempt_id")) == attempt_id
+            and _text(attempt.get("graph_id")) == admitted.graph_id
+            and type(attempt.get("graph_revision")) is int
+            and attempt.get("graph_revision") == admitted.graph_revision
+            and _text(attempt.get("node_id")) == node_id
+        ):
+            return
+    _blocked(
+        "accepted checkpoint under an EXCEEDED graph Budget has no exact "
+        "sibling rejection"
+    )
 
 
 def _blocked(detail: str) -> None:
