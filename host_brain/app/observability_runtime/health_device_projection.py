@@ -38,30 +38,30 @@ DEVICE_MAX_AGE_MS = 300_000
 ORGAN_TRIBE_MAX_AGE_MS = 120_000
 
 
-ORGAN_AGENT_REGISTRY: tuple[tuple[str, str, str, str], ...] = (
-    ("limbic_agent", "limbic", "host_brain.tribe.limbic_agent", "_LIMBIC_AGENT"),
-    ("social_brain_agent", "social_brain", "host_brain.tribe.social_brain_agent", "_SOCIAL_BRAIN_AGENT"),
-    ("prefrontal_agent", "prefrontal", "host_brain.tribe.prefrontal_agent", "_PREFRONTAL_AGENT"),
-    ("ans_agent", "ans", "host_brain.tribe.ans_agent", "_ANS_AGENT"),
-    ("immune_agent", "immune", "host_brain.tribe.immune_agent", "_IMMUNE_AGENT"),
-    ("pain_reward_agent", "pain_reward", "host_brain.tribe.pain_reward_agent", "_PAIN_REWARD_AGENT"),
-    ("hippocampus_agent", "hippocampus", "host_brain.tribe.hippocampus_agent", "_HIPPOCAMPUS_AGENT"),
-    ("cortex_agent", "cortex", "host_brain.tribe.cortex_agent", "_CORTEX_AGENT"),
-    ("peripheral_agent", "peripheral", "host_brain.tribe.peripheral_agent", "_PERIPHERAL_AGENT"),
-    ("motor_cortex_agent", "motor_cortex", "host_brain.tribe.motor_cortex_agent", "_MOTOR_CORTEX_AGENT"),
-    ("thalamus_agent", "thalamus", "host_brain.tribe.thalamus_agent", "_THALAMUS_AGENT"),
-    ("language_system_agent", "language", "host_brain.tribe.language_system_agent", "_LANGUAGE_SYSTEM_AGENT"),
-    ("endocrine_agent", "endocrine", "host_brain.tribe.endocrine_agent", "_ENDOCRINE_AGENT"),
-    ("initiative_governor_agent", "initiative_governor", "host_brain.tribe.initiative_governor_agent", "_INITIATIVE_GOVERNOR_AGENT"),
-    ("circadian_agent", "circadian", "host_brain.tribe.circadian_agent", "_CIRCADIAN_AGENT"),
-    ("mirror_neuron_agent", "mirror_neuron", "host_brain.tribe.mirror_neuron_agent", "_MIRROR_NEURON_AGENT"),
-    ("somatic_agent", "somatic", "host_brain.tribe.somatic_agent", "_SOMATIC_AGENT"),
-    ("proprioception_agent", "proprioception", "host_brain.tribe.proprioception_agent", "_PROPRIOCEPTION_AGENT"),
-    ("interoception_agent", "interoception", "host_brain.tribe.interoception_agent", "_INTEROCEPTION_AGENT"),
-    ("vestibular_agent", "vestibular", "host_brain.tribe.vestibular_agent", "_VESTIBULAR_AGENT"),
-    ("glymphatic_agent", "glymphatic", "host_brain.tribe.glymphatic_agent", "_GLYMPHATIC_AGENT"),
-    ("cerebellum_agent", "cerebellum", "host_brain.tribe.cerebellum_agent", "_CEREBELLUM_AGENT"),
-    ("default_mode_agent", "default_mode", "host_brain.tribe.default_mode_agent", "_DEFAULT_MODE_AGENT"),
+ORGAN_AGENT_REGISTRY: tuple[tuple[str, str], ...] = (
+    ("limbic_agent", "limbic"),
+    ("social_brain_agent", "social_brain"),
+    ("prefrontal_agent", "prefrontal"),
+    ("ans_agent", "ans"),
+    ("immune_agent", "immune"),
+    ("pain_reward_agent", "pain_reward"),
+    ("hippocampus_agent", "hippocampus"),
+    ("cortex_agent", "cortex"),
+    ("peripheral_agent", "peripheral"),
+    ("motor_cortex_agent", "motor_cortex"),
+    ("thalamus_agent", "thalamus"),
+    ("language_system_agent", "language"),
+    ("endocrine_agent", "endocrine"),
+    ("initiative_governor_agent", "initiative_governor"),
+    ("circadian_agent", "circadian"),
+    ("mirror_neuron_agent", "mirror_neuron"),
+    ("somatic_agent", "somatic"),
+    ("proprioception_agent", "proprioception"),
+    ("interoception_agent", "interoception"),
+    ("vestibular_agent", "vestibular"),
+    ("glymphatic_agent", "glymphatic"),
+    ("cerebellum_agent", "cerebellum"),
+    ("default_mode_agent", "default_mode"),
 )
 
 # Public Organ projection is deny-by-default.  Registry state may contain
@@ -79,7 +79,7 @@ _SAFE_OPERATIONAL_AGENT_METRICS = frozenset(
 )
 ORGAN_AGENT_PUBLIC_METRIC_ALLOWLIST: Mapping[str, frozenset[str]] = {
     agent_id: _SAFE_OPERATIONAL_AGENT_METRICS
-    for agent_id, _family, _module, _singleton in ORGAN_AGENT_REGISTRY
+    for agent_id, _family in ORGAN_AGENT_REGISTRY
 }
 
 
@@ -424,7 +424,7 @@ def build_organ_tribe_public_snapshot(
     active = 0
     evidence_ts_ms = 0
 
-    for agent_id, family, _module_path, _singleton_name in ORGAN_AGENT_REGISTRY:
+    for agent_id, family in ORGAN_AGENT_REGISTRY:
         candidate = snapshots.get(agent_id)
         if not isinstance(candidate, Mapping):
             candidate = snapshots.get(family)

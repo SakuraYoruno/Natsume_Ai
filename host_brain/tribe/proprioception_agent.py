@@ -399,22 +399,18 @@ class ProprioceptionAgent:
             pass
 
 
-_PROPRIOCEPTION_AGENT: ProprioceptionAgent | None = None
-
-
 def get_proprioception_agent() -> ProprioceptionAgent:
-    global _PROPRIOCEPTION_AGENT
-    if _PROPRIOCEPTION_AGENT is None:
-        _PROPRIOCEPTION_AGENT = ProprioceptionAgent()
-    return _PROPRIOCEPTION_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "proprioception_agent",
+        expected_type=ProprioceptionAgent,
+    )
 
 
-def set_proprioception_agent(agent: ProprioceptionAgent | None) -> None:
-    global _PROPRIOCEPTION_AGENT
-    _PROPRIOCEPTION_AGENT = agent
-
-
-__all__ = ["ProprioceptionAgent", "get_proprioception_agent", "set_proprioception_agent"]
+__all__ = ["ProprioceptionAgent", "get_proprioception_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

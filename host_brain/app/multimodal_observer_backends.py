@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlparse
 
 from host_brain.app.prompt_builder import extract_langchain_content_text
@@ -505,6 +505,7 @@ class OpenAICompatMultimodalBackend:
         timeout_ms: int = 15000,
         image_max_bytes: int = 4 * 1024 * 1024,
         max_video_frames: int = 4,
+        model_attempt_service_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._provider_name = str(provider_name or "").strip().lower() or PROVIDER_GEMINI
         self._sync_model_id = str(sync_model_id or "").strip()
@@ -512,6 +513,7 @@ class OpenAICompatMultimodalBackend:
         self._timeout_ms = max(3000, int(timeout_ms))
         self._image_max_bytes = max(64 * 1024, int(image_max_bytes))
         self._max_video_frames = max(1, int(max_video_frames))
+        self._model_attempt_service_provider = model_attempt_service_provider
         self._templates = _load_template_mapping("multimodal_observer.model_prompt.templates")
 
     @property
@@ -746,12 +748,16 @@ class OpenAICompatMultimodalBackend:
 
     def _invoke_model(self, *, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
-        from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
         from host_brain.model_runtime.live_prompts import MULTIMODAL_OBSERVER_PROMPT_ID  # noqa: PLC0415
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
+        if self._model_attempt_service_provider is None:
+            raise RuntimeError("MULTIMODAL_MODEL_ATTEMPT_SERVICE_NOT_COMPOSED")
+        attempt_service = self._model_attempt_service_provider()
+        if attempt_service is None:
+            raise RuntimeError("MULTIMODAL_MODEL_ATTEMPT_SERVICE_UNAVAILABLE")
         result = complete_compiled_prompt_sync(
-            attempt_service=get_model_attempt_service(),
+            attempt_service=attempt_service,
             prompt_id=MULTIMODAL_OBSERVER_PROMPT_ID,
             request_id=f"multimodal::{self.backend_name}::{int(time.time() * 1000)}",
             scene_type="MULTIMODAL",

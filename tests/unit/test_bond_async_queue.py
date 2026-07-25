@@ -95,3 +95,19 @@ def test_bond_async_queue_task_failure_updates_failed_count() -> None:
         assert sink == []
     finally:
         queue.shutdown()
+
+
+def test_bond_queue_rejects_enqueue_after_exact_shutdown() -> None:
+    queue = BondUpdateQueue(
+        writer_factory=lambda: object(),
+        max_queue_size=2,
+        worker_enabled=False,
+    )
+
+    assert queue.shutdown() is True
+    result = queue.enqueue({"request_id": "req-after-close"})
+
+    assert result["status"] == "DEGRADED"
+    assert result["reason_code"] == "BOND_QUEUE_CLOSED"
+    assert queue.snapshot()["closed"] is True
+    assert queue.snapshot()["queue_size"] == 0

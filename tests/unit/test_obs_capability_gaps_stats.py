@@ -236,8 +236,6 @@ def test_obs_capability_gaps_stats_endpoint_never_calls_live_services(monkeypatc
     projected_quality = forge_service.runtime_quality_stats()
     telemetry.calls = 0
     forge_service.calls = 0
-    monkeypatch.setattr("host_brain.composition.process_services.get_capability_gap_telemetry", lambda: telemetry)
-    monkeypatch.setattr("host_brain.composition.process_services.get_capability_forge_service", lambda: forge_service)
     monkeypatch.setattr(
         "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection_from_store",
         lambda _store: (

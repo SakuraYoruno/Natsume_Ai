@@ -92,6 +92,21 @@ def test_apply_surface_emotion_bond_flow_enqueues_compressed_bond_payload() -> N
     assert captured["payload"]["payload"]["assistant_emotion_tag"] == "NEUTRAL"
 
 
+def test_apply_surface_emotion_bond_flow_fails_closed_without_queue() -> None:
+    result = apply_surface_emotion_bond_flow(
+        request_id="req-surface-bond-no-queue",
+        person_id="user-1",
+        session_id="sess-1",
+        user_message="这次也一起记住。",
+        assistant_reply="好，我会把这次关联起来。",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        reply_plan={"primary_topic": "technical_help"},
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["queue_reason_code"] == "BOND_UPDATE_QUEUE_NOT_COMPOSED"
+
+
 def test_bond_stage_engine_uses_real_valence_for_texture() -> None:
     engine = BondStageEngine()
     result = engine.apply_event(

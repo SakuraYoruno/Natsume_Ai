@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 from pathlib import Path
 import threading
@@ -20,6 +21,10 @@ from host_brain.app.internal_task_runtime import (
     InternalAgentCommandService,
     parse_external_v2_work_order,
 )
+from host_brain.app.host_route_ports import (
+    HostRoutePorts,
+    bind_host_route_endpoint,
+)
 from host_brain.app.settings.core import get_core_settings
 from host_brain.app.settings.internal_agent import get_internal_agent_settings
 from host_brain.core.ids import now_ms
@@ -29,7 +34,7 @@ from host_brain.integrations.runtime_events import (
 )
 from host_brain.runtime.degradation_authority import evaluate_degradation_capability
 
-router = APIRouter(prefix="/internal/codex", tags=["internal-codex"])
+_base_router = APIRouter(prefix="/internal/codex", tags=["internal-codex"])
 
 _immune_auto_state_lock = threading.Lock()
 _immune_auto_state: dict[str, Any] = {
@@ -293,6 +298,7 @@ def _persist_owner_directive_from_payload(
     *,
     order: AgentWorkOrder | None = None,
     explicit_route: bool = False,
+    life_memory_store_provider: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     directive = _extract_owner_directive(payload, order=order, explicit_route=explicit_route)
     if directive is None:
@@ -301,12 +307,23 @@ def _persist_owner_directive_from_payload(
         return {"attempted": True, "status": "SKIPPED", "reason_code": "OWNER_DIRECTIVE_EMPTY_TEXT"}
 
     store = None
-    try:
-        from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
-
-        store = get_life_memory_store()
-    except Exception:
-        store = None
+    if callable(life_memory_store_provider):
+        try:
+            store = life_memory_store_provider()
+        except Exception:
+            store = None
+    if store is None:
+        return {
+            "attempted": True,
+            "status": "SKIPPED",
+            "reason_code": "LIFE_MEMORY_STORE_UNAVAILABLE",
+            "episode_id": None,
+            "evidence_refs": [],
+            "distillation": {
+                "status": "SKIPPED",
+                "reason_code": "OWNER_DIRECTIVE_DISTILL_DISABLED",
+            },
+        }
 
     from host_brain.app.observability_persist import persist_owner_directive_memory  # noqa: PLC0415
 
@@ -352,14 +369,14 @@ def _persist_owner_directive_from_payload(
     return result
 
 
-@router.post("/work-orders/preview")
+@_base_router.post("/work-orders/preview")
 async def preview_work_order(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     order = _parse_external_v2_work_order(payload)
     order.validate()
     return {"ok": True, "work_order": order.to_dict()}
 
 
-@router.post("/work-orders/execute")
+@_base_router.post("/work-orders/execute")
 async def execute_work_order(
     request: Request,
     payload: dict[str, Any] = Body(...),
@@ -400,9 +417,16 @@ async def execute_work_order(
     }
 
 
-@router.post("/owner-directives")
-async def ingest_owner_directive(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    owner_directive_memory = _persist_owner_directive_from_payload(payload, explicit_route=True)
+async def ingest_owner_directive(
+    payload: dict[str, Any] = Body(...),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    owner_directive_memory = _persist_owner_directive_from_payload(
+        payload,
+        explicit_route=True,
+        life_memory_store_provider=_route_ports.life_memory_store_provider,
+    )
     status = str(owner_directive_memory.get("status") or "").upper()
     reason = str(owner_directive_memory.get("reason_code") or "").upper()
     if status == "SKIPPED" and reason == "OWNER_DIRECTIVE_EMPTY_TEXT":
@@ -412,7 +436,7 @@ async def ingest_owner_directive(payload: dict[str, Any] = Body(...)) -> dict[st
     return {"accepted": True, "owner_directive_memory": owner_directive_memory}
 
 
-@router.post("/reviews")
+@_base_router.post("/reviews")
 async def create_review(
     request: Request,
     payload: dict[str, Any] = Body(...),
@@ -448,7 +472,7 @@ async def create_review(
     return {"accepted": True, "review": record}
 
 
-@router.post("/reviews/{review_id}/approve")
+@_base_router.post("/reviews/{review_id}/approve")
 async def approve_review(
     review_id: str,
     request: Request,
@@ -475,7 +499,7 @@ async def approve_review(
     return {"accepted": True, **approved}
 
 
-@router.post("/reviews/{review_id}/reject")
+@_base_router.post("/reviews/{review_id}/reject")
 async def reject_review(
     review_id: str,
     request: Request,
@@ -493,7 +517,7 @@ async def reject_review(
     return {"accepted": True, "review": record}
 
 
-@router.post("/reviews/{review_id}/resume")
+@_base_router.post("/reviews/{review_id}/resume")
 async def resume_review(
     review_id: str,
     request: Request,
@@ -523,13 +547,13 @@ async def resume_review(
     return {"accepted": True, "resume": resume}
 
 
-@router.get("/jobs/{job_id}")
+@_base_router.get("/jobs/{job_id}")
 async def get_codex_job(job_id: str) -> dict[str, Any]:
     del job_id
     raise HTTPException(status_code=410, detail="LEGACY_AGENT_JOB_REGISTRY_RETIRED")
 
 
-@router.get("/runtime/drain-report")
+@_base_router.get("/runtime/drain-report")
 async def get_runtime_drain_report() -> dict[str, Any]:
     return {
         "accepted": True,
@@ -542,7 +566,7 @@ async def get_runtime_drain_report() -> dict[str, Any]:
     }
 
 
-@router.get("/runtime/events")
+@_base_router.get("/runtime/events")
 async def list_runtime_events(
     after: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -573,7 +597,7 @@ async def list_runtime_events(
     }
 
 
-@router.get("/runtime/events/sse")
+@_base_router.get("/runtime/events/sse")
 async def stream_runtime_events_sse(
     request: Request,
     after: int = Query(0, ge=0),
@@ -664,7 +688,7 @@ async def _live_report(*, request: Request, source: str) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-@router.post("/immune/proposal")
+@_base_router.post("/immune/proposal")
 async def build_immune_proposal(
     request: Request,
     payload: dict[str, Any] | None = Body(default=None),
@@ -676,7 +700,7 @@ async def build_immune_proposal(
     return build_immune_proposal_from_report(report, source=source)
 
 
-@router.post("/immune/dispatch")
+@_base_router.post("/immune/dispatch")
 async def dispatch_immune_work_order(
     request: Request,
     payload: dict[str, Any] | None = Body(default=None),
@@ -746,12 +770,31 @@ async def dispatch_immune_work_order(
     }
 
 
-@router.get("/immune/auto-state")
+@_base_router.get("/immune/auto-state")
 async def get_immune_auto_state() -> dict[str, Any]:
     with _immune_auto_state_lock:
         return dict(_immune_auto_state)
 
 
-__all__ = [
-    "router",
-]
+def create_internal_agent_router(route_ports: HostRoutePorts) -> APIRouter:
+    """Create internal Codex routes with app-owned memory authority."""
+
+    if not isinstance(route_ports, HostRoutePorts):
+        raise TypeError("route_ports must be HostRoutePorts")
+    router = APIRouter()
+    router.include_router(_base_router)
+    router.add_api_route(
+        "/internal/codex/owner-directives",
+        bind_host_route_endpoint(ingest_owner_directive, route_ports),
+        methods=["POST"],
+        tags=["internal-codex"],
+    )
+    return router
+
+
+# Compatibility-only router; owner-directive persistence fails closed without
+# an explicitly injected LifeMemory provider.
+router = create_internal_agent_router(HostRoutePorts())
+
+
+__all__ = ["create_internal_agent_router", "router"]

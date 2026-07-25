@@ -13,11 +13,9 @@ _GLYMPHATIC_LOG_COOLDOWN_MS = 30_000
 
 
 def _default_state_registry() -> Any:
-    try:
-        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
-        return get_global_registry()
-    except Exception:
-        return None
+    from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+
+    return get_global_registry()
 
 
 def _resolve_ans_persona_id(value: Any = None) -> str:
@@ -857,7 +855,7 @@ class ANSAgent:
             )
             # 写入 TribeStateRegistry，供后续调度门控读取
             try:
-                registry = get_global_registry()
+                registry = self.state_registry
                 registry.write(
                     namespace="ans_agent",
                     writer="ANSAgent._on_voice_pipeline_started",
@@ -888,7 +886,7 @@ class ANSAgent:
                 request_id, session_id, status,
             )
             try:
-                registry = get_global_registry()
+                registry = self.state_registry
                 registry.write(
                     namespace="ans_agent",
                     writer="ANSAgent._on_voice_pipeline_ended",
@@ -922,7 +920,7 @@ class ANSAgent:
             )
             try:
                 from host_brain.core.ids import now_ms  # noqa: PLC0415
-                registry = get_global_registry()
+                registry = self.state_registry
                 registry.write(
                     namespace="ans_agent",
                     writer="ANSAgent._on_channel_message_received",
@@ -939,26 +937,21 @@ class ANSAgent:
 
 # ── 单例管理 ──────────────────────────────────────────────────────────────────
 
-_ANS_AGENT: ANSAgent | None = None
-
-
 def get_ans_agent() -> ANSAgent:
-    global _ANS_AGENT
-    if _ANS_AGENT is None:
-        _ANS_AGENT = ANSAgent()
-    return _ANS_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "ans_agent",
+        expected_type=ANSAgent,
+    )
 
 
-def set_ans_agent(agent: ANSAgent | None) -> None:
-    global _ANS_AGENT
-    _ANS_AGENT = agent
-
-
-__all__ = ["ANSAgent", "get_ans_agent", "set_ans_agent"]
+__all__ = ["ANSAgent", "get_ans_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
 from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
-from host_brain.tribe.tribe_state import get_global_registry  # noqa: E402, F401

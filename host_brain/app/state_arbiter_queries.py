@@ -80,17 +80,21 @@ async def _resolve_state_arbiter_world_fact(
     *,
     session_id: str,
     request_id: str,
+    state_arbiter: Any | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     summary: dict[str, Any] = {
         "status": "SKIPPED",
         "reason_code": "NOT_AVAILABLE",
         "fact_key": "world_canon_facts",
     }
+    if state_arbiter is None:
+        summary["reason_code"] = "STATE_ARBITER_NOT_COMPOSED"
+        return summary, None
     try:
-        from host_brain.composition.process_services import get_state_arbiter  # noqa: PLC0415
-
-        arbiter = get_state_arbiter()
-        result = await arbiter.resolve("world_canon_facts", session_id=session_id)
+        result = await state_arbiter.resolve(
+            "world_canon_facts",
+            session_id=session_id,
+        )
         if result is None:
             summary["reason_code"] = "NO_MATCH"
             return summary, None
@@ -142,9 +146,8 @@ async def _resolve_state_arbiter_bond_fact(
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """查询 BondGraph 关系强度，注入 prompt 作为关系上下文。
 
-    Canonical Host composition supplies ``bond_stage_engine`` explicitly.  The
-    lazy social-brain lookup remains only for legacy compatibility callers that
-    have not joined the Host lifespan scope yet.
+    Canonical Host composition supplies ``bond_stage_engine`` explicitly.
+    Compatibility callers without an app-bound engine fail closed.
     """
     summary: dict[str, Any] = {
         "status": "SKIPPED",
@@ -152,17 +155,12 @@ async def _resolve_state_arbiter_bond_fact(
         "fact_key": "bond_graph_state",
     }
     try:
-        _bond_engine = bond_stage_engine
-        if _bond_engine is None:
-            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-
-            _bond_engine = get_social_brain_agent().resolve_stage_engine()
-        if _bond_engine is None:
+        if bond_stage_engine is None:
             summary["reason_code"] = "BOND_ENGINE_NOT_AVAILABLE"
             return summary, None
 
         _bond_state = await asyncio.to_thread(
-            _bond_engine.get_bond_state,
+            bond_stage_engine.get_bond_state,
             session_id=session_id,
         )
         if _bond_state is None:
@@ -224,6 +222,7 @@ async def _resolve_state_arbiter_episodic_fact(
     *,
     session_id: str,
     request_id: str,
+    state_arbiter: Any | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """查询最新情节记忆，注入 prompt 作为近期记忆上下文。"""
     summary: dict[str, Any] = {
@@ -231,11 +230,14 @@ async def _resolve_state_arbiter_episodic_fact(
         "reason_code": "NOT_AVAILABLE",
         "fact_key": "episodic_latest",
     }
+    if state_arbiter is None:
+        summary["reason_code"] = "STATE_ARBITER_NOT_COMPOSED"
+        return summary, None
     try:
-        from host_brain.composition.process_services import get_state_arbiter  # noqa: PLC0415
-
-        arbiter = get_state_arbiter()
-        result = await arbiter.resolve("episodic_latest", session_id=session_id)
+        result = await state_arbiter.resolve(
+            "episodic_latest",
+            session_id=session_id,
+        )
         if result is None:
             summary["reason_code"] = "NO_MATCH"
             return summary, None

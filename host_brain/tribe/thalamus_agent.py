@@ -3703,19 +3703,15 @@ class ThalamusAgent:
         return compiled
 
 
-_THALAMUS_AGENT: ThalamusAgent | None = None
-
-
 def get_thalamus_agent() -> ThalamusAgent:
-    global _THALAMUS_AGENT
-    if _THALAMUS_AGENT is None:
-        _THALAMUS_AGENT = ThalamusAgent()
-    return _THALAMUS_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_thalamus_agent(agent: ThalamusAgent | None) -> None:
-    global _THALAMUS_AGENT
-    _THALAMUS_AGENT = agent
+    return require_active_tribe_agent(
+        "thalamus_agent",
+        expected_type=ThalamusAgent,
+    )
 
 
 __all__ = [
@@ -3726,5 +3722,4 @@ __all__ = [
     "classify_task_intent_by_rules",
     "get_thalamus_agent",
     "resolve_scene_type_from_intent_decision",
-    "set_thalamus_agent",
 ]

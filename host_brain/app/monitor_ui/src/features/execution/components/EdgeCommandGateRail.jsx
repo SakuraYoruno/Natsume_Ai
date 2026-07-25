@@ -96,18 +96,21 @@ function buildHandoffSteps({
   status,
 }) {
   const linkReady = !error && !loading && Boolean(status?.enabled)
+  const governedOnly = status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
   const fieldMissing = formValidation?.missing?.join(', ') || 'command_type / target_agent / source_agent'
 
   return [
     {
       key: 'link',
       label: 'Link Status',
-      value: loading ? 'syncing' : (status?.enabled ? 'enabled' : 'disabled'),
+      value: loading ? 'syncing' : (status?.enabled ? 'enabled' : governedOnly ? 'governed only' : 'disabled'),
       detail: linkReady
         ? `Edge base URL ${status?.edge_base_url || '未返回'} 可用于下行命令。`
         : error
           ? 'Host 状态接口不可用，禁止发送。'
-          : 'Edge pusher 未启用或状态仍在同步。',
+          : governedOnly
+            ? '进程级直推 authority 已退役；必须由 TaskGraph、Acceptance 与 Preview proof 投递。'
+            : 'Edge transport 未启用或状态仍在同步。',
       state: linkReady ? 'ready' : (loading ? 'warning' : 'blocked'),
     },
     {
@@ -248,11 +251,21 @@ function buildFocusActions({
     }]
   }
 
+  if (status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY') {
+    return [{
+      icon: ShieldCheck,
+      title: '直推 authority 已退役',
+      detail: '本页不会绕过 TaskGraph 发送命令；请从执行审查进入受治理任务和回执链。',
+      to: '/execution/task-runtime',
+      label: '进入执行审查',
+    }]
+  }
+
   if (!status?.enabled) {
     return [{
       icon: RadioTower,
-      title: 'Edge pusher 未启用',
-      detail: '下行链路当前不可发送命令，先确认 Edge base URL、通道和 host 配置。',
+      title: 'Edge transport 未启用',
+      detail: '下行传输当前不可用，先确认 Edge base URL、通道和 Host 配置。',
       to: '/execution/gateway',
       label: '查看通道健康',
     }]
@@ -337,9 +350,13 @@ export default function EdgeCommandGateRail({
       detail: error ? 'Host 状态接口不可用。' : (loading ? '正在读取 Edge 状态。' : 'Host 已返回 Edge Command 状态。'),
     },
     {
-      label: 'Edge pusher',
+      label: '执行 authority',
       state: status?.enabled ? 'ready' : 'blocked',
-      detail: status?.enabled ? '下行通道已启用。' : 'Edge pusher 未启用，禁止发送。',
+      detail: status?.enabled
+        ? '受治理下行通道已启用。'
+        : status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
+          ? '旧直推 owner 已退役，等待 TaskGraph 正向执行路径。'
+          : 'Edge transport 未启用，禁止发送。',
     },
     {
       label: '控制门',

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from host_brain.app.multimodal_observer_backends import (
     MultimodalObserverBackend,
@@ -66,6 +66,7 @@ class MultimodalObserver:
         video_max_duration_seconds: int | None = None,
         model_backend: MultimodalObserverBackend | None = None,
         fallback_backend: MultimodalObserverBackend | None = None,
+        model_attempt_service_provider: Callable[[], Any] | None = None,
     ) -> None:
         if sync_file_limit_bytes is None:
             sync_file_limit_bytes = _parse_int_env(
@@ -99,6 +100,7 @@ class MultimodalObserver:
             timeout_ms=_parse_int_env("HOST_MULTIMODAL_TIMEOUT_MS", default=15000, minimum=3000),
             image_max_bytes=_parse_int_env("HOST_MULTIMODAL_IMAGE_MAX_BYTES", default=4 * 1024 * 1024, minimum=64 * 1024),
             max_video_frames=_parse_int_env("HOST_MULTIMODAL_VIDEO_MAX_FRAMES", default=4, minimum=1),
+            model_attempt_service_provider=model_attempt_service_provider,
         )
 
     def observe(

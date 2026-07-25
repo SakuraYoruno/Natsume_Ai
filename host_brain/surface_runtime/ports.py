@@ -22,6 +22,7 @@ class SurfaceRuntimePorts:
     build_conversation_experience_read_pack: Callable[..., dict[str, Any]]
     build_conversation_understanding_pack: Callable[..., dict[str, Any]]
     build_memory_context_debug: Callable[..., dict[str, Any]]
+    resolve_surface_reply_llm_runtime: Callable[..., dict[str, Any]]
     model_attempt_service: Callable[[], Any]
 
 

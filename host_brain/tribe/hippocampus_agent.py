@@ -739,22 +739,18 @@ class HippocampusAgent:
         }
 
 
-_HIPPOCAMPUS_AGENT: HippocampusAgent | None = None
-
-
 def get_hippocampus_agent() -> HippocampusAgent:
-    global _HIPPOCAMPUS_AGENT
-    if _HIPPOCAMPUS_AGENT is None:
-        _HIPPOCAMPUS_AGENT = HippocampusAgent()
-    return _HIPPOCAMPUS_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "hippocampus_agent",
+        expected_type=HippocampusAgent,
+    )
 
 
-def set_hippocampus_agent(agent: HippocampusAgent | None) -> None:
-    global _HIPPOCAMPUS_AGENT
-    _HIPPOCAMPUS_AGENT = agent
-
-
-__all__ = ["HippocampusAgent", "get_hippocampus_agent", "set_hippocampus_agent"]
+__all__ = ["HippocampusAgent", "get_hippocampus_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

@@ -150,10 +150,6 @@ def test_governed_skill_ports_freeze_two_independent_service_snapshots(
         "host_brain.composition.process_services.get_episodic_store",
         poisoned_locator,
     )
-    monkeypatch.setattr(
-        "host_brain.composition.process_services.get_semantic_recaller",
-        poisoned_locator,
-    )
     services_a = (object(), object(), object())
     services_b = (object(), object(), object())
     ports_a = build_governed_skill_execution_ports(

@@ -7,9 +7,15 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 
-from host_brain.app import asgi, tool_runtime_composition
+from host_brain.app import (
+    asgi,
+    asgi_authority_adapters,
+    host_runtime_context_wiring,
+    tool_runtime_composition,
+)
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
 from host_brain.composition.host_application import HostApplicationPorts
 
 
@@ -24,6 +30,8 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "semantic_recaller": provider,
         "episodic_store": provider,
         "skill_registry": provider,
+        "graph_runtime": provider,
+        "routing_matrix": provider,
         "tool_catalog": provider,
         "capability_broker": provider,
         "model_attempt_service": provider,
@@ -46,6 +54,7 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "multimodal_observer": provider,
         "multimodal_processor": provider,
         "conversation_history": provider,
+        "conversation_turn_store": provider,
         "life_memory_service": provider,
         "model_route_catalog": provider,
         "session_topic_ledger_store": provider,
@@ -72,7 +81,14 @@ def _host_application_ports(
         "capability_forge_service": provider,
         "capability_gap_telemetry": provider,
         "capability_scorecard_provider": provider,
-        "memory_service_container_setter": lambda _value: None,
+        "begin_authority_runtime": lambda: None,
+        "close_authority_runtime": lambda: None,
+        "begin_bond_runtime": lambda: None,
+        "close_bond_runtime": lambda: None,
+        "begin_governance_runtime": lambda: None,
+        "close_governance_runtime": lambda: None,
+        "publish_memory_service_container": lambda _value: None,
+        "withdraw_memory_service_container": lambda _value: None,
     }
     values.update(overrides)
     return HostApplicationPorts(lifecycle=lifecycle, **values)  # type: ignore[arg-type]
@@ -93,7 +109,7 @@ def test_runtime_environment_observation_uses_app_local_mode_authority(
     mode: str,
     activity: str,
 ) -> None:
-    provider = asgi._runtime_environment_observation_provider(
+    provider = host_runtime_context_wiring.runtime_environment_observation_provider(
         SimpleNamespace(get_current_status=lambda: {"sys_mode": mode})
     )
 
@@ -109,12 +125,12 @@ def test_runtime_environment_observation_fails_without_app_local_authority() -> 
         RuntimeError,
         match="HOST_RUNTIME_CONTEXT_MODE_AUTHORITY_UNAVAILABLE",
     ):
-        asgi._runtime_environment_observation_provider(None)
+        host_runtime_context_wiring.runtime_environment_observation_provider(None)
 
 
 def test_scheduler_clock_secret_is_added_only_under_explicit_key(monkeypatch) -> None:
     monkeypatch.setattr(
-        asgi,
+        asgi_authority_adapters,
         "get_input_settings",
         lambda: SimpleNamespace(
             secure_ingress_hmac_secrets_json='{"external.key":"external-secret"}',
@@ -123,7 +139,7 @@ def test_scheduler_clock_secret_is_added_only_under_explicit_key(monkeypatch) ->
         ),
     )
     monkeypatch.setattr(
-        asgi,
+        asgi_authority_adapters,
         "get_scheduler_settings",
         lambda: SimpleNamespace(
             clock_key_id="scheduler.clock.key",
@@ -466,6 +482,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         stop_activity_monitor=lambda **_kwargs: events.append(
             "activity-monitor-stopped"
         ),
+        stop_resource_manager=lambda **_kwargs: None,
         notify_user_interaction=lambda: None,
     )
     class EmbodimentRuntime:
@@ -1040,14 +1057,23 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         events.append("scheduler-runtime-built")
         return scheduler_container
 
-    def fake_compose_runtime_context(**kwargs):
+    action_preview_service = object()
+
+    def fake_start_runtime_context_services(**kwargs):
         assert kwargs["task_runtime"] is task_runtime_container
         assert kwargs["ledger"] is ledger
         assert kwargs["embodiment_runtime"] is embodiment_runtime
-        environment = kwargs["environment_observation_provider"](now_ms=1_900_000_000_000)
+        assert kwargs["host_lifecycle"] is host_lifecycle
+        environment = (
+            host_runtime_context_wiring.runtime_environment_observation_provider(
+                host_lifecycle.get_mode_transition_service()
+            )(now_ms=1_900_000_000_000)
+        )
         assert environment["activity_state"] == "GAMING"
+        host_lifecycle.start_activity_monitor(ledger=ledger)
         events.append("runtime-context-built")
-        return runtime_context_application
+        events.append("guardian-startup-observed")
+        return runtime_context_application, action_preview_service
 
     async def fake_guardian_heartbeat(*_args, **kwargs):
         assert kwargs["resource_manager_provider"]() is resource_manager
@@ -1067,8 +1093,11 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         capability_forge_service=lambda: object(),
         capability_gap_telemetry=lambda: object(),
         capability_scorecard_provider=lambda: object(),
-        memory_service_container_setter=lambda value: events.append(
-            "memory-published" if value is memory_container else "memory-unpublished"
+        publish_memory_service_container=lambda value: events.append(
+            "memory-published" if value is memory_container else "memory-publish-mismatch"
+        ),
+        withdraw_memory_service_container=lambda value: events.append(
+            "memory-unpublished" if value is memory_container else "memory-withdraw-mismatch"
         ),
     )
 
@@ -1092,6 +1121,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         lambda **kwargs: (
             kwargs["host_lifecycle"] is host_lifecycle
             and kwargs["defer_activity_monitor"] is True
+            and kwargs["defer_resource_manager"] is True
             and base_lifespan()
         ),
     )
@@ -1148,8 +1178,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     )
     monkeypatch.setattr(
         asgi,
-        "_compose_host_runtime_context",
-        fake_compose_runtime_context,
+        "_start_host_runtime_context_services",
+        fake_start_runtime_context_services,
     )
     monkeypatch.setattr(
         asgi,
@@ -1617,6 +1647,7 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
         get_resource_manager=lambda **_kwargs: None,
         get_mode_transition_service=lambda: None,
         stop_activity_monitor=lambda **_kwargs: None,
+        stop_resource_manager=lambda **_kwargs: None,
         notify_user_interaction=lambda: None,
     )
 
@@ -1635,7 +1666,8 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
         capability_gap_telemetry=object,
         capability_forge_service=object,
         capability_scorecard_provider=get_scorecards,
-        memory_service_container_setter=lambda _value: None,
+        publish_memory_service_container=lambda _value: None,
+        withdraw_memory_service_container=lambda _value: None,
     )
     monkeypatch.setattr(asgi, "create_host_fastapi_app", fake_app_factory)
     monkeypatch.setattr(
@@ -1674,6 +1706,15 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
         "build_production_tribe_runtime_scope",
         lambda: SimpleNamespace(
             state_registry=SimpleNamespace(snapshot=lambda: {}),
+        ),
+    )
+    monkeypatch.setattr(
+        tribe_composition,
+        "build_production_tribe_runtime_agent_ports",
+        lambda **_kwargs: TribeRuntimeAgentPorts(
+            get_thalamus_agent=object,
+            get_ans_agent=object,
+            get_immune_agent=object,
         ),
     )
     monkeypatch.setattr(

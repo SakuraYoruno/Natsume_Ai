@@ -47,7 +47,14 @@ def test_asgi_bond_provider_uses_the_injected_lifecycle_port() -> None:
         capability_forge_service=service_provider,
         capability_gap_telemetry=service_provider,
         capability_scorecard_provider=service_provider,
-        memory_service_container_setter=lambda _value: None,
+        begin_authority_runtime=lambda: None,
+        close_authority_runtime=lambda: None,
+        begin_bond_runtime=lambda: None,
+        close_bond_runtime=lambda: None,
+        begin_governance_runtime=lambda: None,
+        close_governance_runtime=lambda: None,
+        publish_memory_service_container=lambda _value: None,
+        withdraw_memory_service_container=lambda _value: None,
     )
 
     assert ports.lifecycle.require_provider("bond_stage_engine") is provider

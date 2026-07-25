@@ -74,7 +74,6 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
     monkeypatch.setattr(sysmode, "_build_runtime_snapshot_response", forbidden)
     monkeypatch.setattr(life, "_build_life_body_payload", forbidden)
     monkeypatch.setattr(life, "_build_targeted_request_event", forbidden)
-    monkeypatch.setattr(core, "_load_resource_manager_status_file", forbidden)
     monkeypatch.setattr(dependencies, "get_resource_manager", forbidden)
     monkeypatch.setattr(
         dependencies,

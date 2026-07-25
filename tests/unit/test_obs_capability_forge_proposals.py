@@ -42,7 +42,7 @@ def _build_service() -> CapabilityForgeService:
     return CapabilityForgeService(telemetry=telemetry)
 
 
-def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
+def test_obs_capability_forge_read_endpoints_and_removed_mutations(monkeypatch) -> None:
     service = _build_service()
     seeded = service.create_proposal(
         session_id="sess-direct-seed",
@@ -51,7 +51,6 @@ def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
     )
     proposal_id = seeded["proposal_id"]
     baseline = service.list_proposals(limit=20)
-    monkeypatch.setattr("host_brain.composition.process_services.get_capability_forge_service", lambda: service)
     monkeypatch.setattr(
         "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection_from_store",
         lambda _store: (
@@ -74,15 +73,6 @@ def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
     app.include_router(router)
     client = TestClient(app)
 
-    preview_resp = client.post(
-        "/obs/capability-gaps/forge-proposals/preview",
-        json={"canary_traffic_percent": 8},
-    )
-    assert preview_resp.status_code == 200
-    preview_payload = preview_resp.json()
-    assert preview_payload["candidate"]["suggested_family"] == "code"
-    assert service.list_proposals(limit=20) == baseline
-
     list_resp = client.get("/obs/capability-gaps/forge-proposals?limit=10")
     assert list_resp.status_code == 200
     assert list_resp.json()["total"] == 1
@@ -92,6 +82,10 @@ def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
     assert get_resp.json()["proposal"]["proposal_id"] == proposal_id
 
     removed_mutations = (
+        (
+            "/obs/capability-gaps/forge-proposals/preview",
+            {"canary_traffic_percent": 8},
+        ),
         (
             "/obs/capability-gaps/forge-proposals",
             {"session_id": "sess-api", "proposer": "api-user"},

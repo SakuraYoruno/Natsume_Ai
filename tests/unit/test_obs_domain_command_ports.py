@@ -215,18 +215,10 @@ def test_bio_adapter_uses_bound_principal_not_caller_owner(monkeypatch) -> None:
     assert captured == {}
 
 
-def test_capability_forge_adapter_maps_bound_proposer(monkeypatch) -> None:
+def test_capability_forge_adapter_stays_blocked_without_legacy_locator() -> None:
     from host_brain.composition import process_services as dependencies
 
-    captured: dict[str, object] = {}
-
-    class _Forge:
-        @staticmethod
-        def create_proposal(**kwargs):  # noqa: ANN003
-            captured.update(kwargs)
-            return {"proposal_id": "proposal-1", "status": "PENDING_APPROVAL"}
-
-    monkeypatch.setattr(dependencies, "get_capability_forge_service", lambda: _Forge())
+    assert not hasattr(dependencies, "get_capability_forge_service")
     with pytest.raises(ObsCommandPortExecutionError) as blocked:
         _execute(
             "capability_forge.proposal.create",
@@ -238,7 +230,6 @@ def test_capability_forge_adapter_maps_bound_proposer(monkeypatch) -> None:
         )
     assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
     assert blocked.value.side_effects_may_have_run is False
-    assert captured == {}
 
 
 def test_avatar_adapter_fails_before_async_edge_port_without_task_preview(monkeypatch) -> None:

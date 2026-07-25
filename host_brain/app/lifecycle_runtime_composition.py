@@ -66,7 +66,9 @@ def _resolve_emotion_timeline(
 ) -> Any:
     if host_services is None:
         return _MissingEmotionTimeline()
-    return _host_provider(host_services, "emotion_timeline")()
+    return _LazyEmotionTimeline(
+        _host_provider(host_services, "emotion_timeline")
+    )
 
 
 def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
@@ -81,6 +83,23 @@ class _MissingEmotionTimeline:
     def build_daily_diary(self, *, window_ms: int) -> dict[str, Any]:
         del window_ms
         return _missing_app_local_provider()
+
+
+class _LazyEmotionTimeline:
+    """Resolve the app-local timeline only when runtime projections use it."""
+
+    def __init__(self, provider: Callable[[], Any]) -> None:
+        self._provider = provider
+
+    def rebuild_summary(self, *, window_ms: int) -> dict[str, Any]:
+        return dict(
+            self._provider().rebuild_summary(window_ms=window_ms) or {}
+        )
+
+    def build_daily_diary(self, *, window_ms: int) -> dict[str, Any]:
+        return dict(
+            self._provider().build_daily_diary(window_ms=window_ms) or {}
+        )
 
 
 __all__ = ["build_lifecycle_runtime_application_ports"]

@@ -585,7 +585,6 @@ __all__ = [
     "_maybe_build_contextual_style_answer",
     "_maybe_build_recent_turn_answer",
     "_maybe_build_previous_meaning_answer",
-    "_should_buffer_stream_output",
     "_extract_delegate_from_llm_output",
     "_extract_visible_text",
     "_build_retrieval_bond_summary",

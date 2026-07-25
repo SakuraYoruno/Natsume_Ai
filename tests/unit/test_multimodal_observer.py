@@ -649,14 +649,17 @@ def test_multimodal_backend_uses_dedicated_multimodal_tier(monkeypatch) -> None:
         return _Result()
 
     monkeypatch.setattr("host_brain.model_runtime.invocation.complete_compiled_prompt_sync", _fake_complete)
+    attempt_service = object()
     backend = OpenAICompatMultimodalBackend(
         provider_name="gemini",
         sync_model_id="gemini-2.5-flash-lite",
         async_model_id="gemini-2.5-pro",
+        model_attempt_service_provider=lambda: attempt_service,
     )
 
     raw, trace = backend._invoke_model(messages=[{"role": "user", "content": "hello"}])
 
+    assert captured["attempt_service"] is attempt_service
     assert raw
     assert trace["route_decision_id"] == "route-1"
     assert captured["scene_type"] == "MULTIMODAL"

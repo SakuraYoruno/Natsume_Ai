@@ -578,22 +578,18 @@ class LanguageSystemAgent:
             pass
 
 
-_LANGUAGE_SYSTEM_AGENT: LanguageSystemAgent | None = None
-
-
 def get_language_system_agent() -> LanguageSystemAgent:
-    global _LANGUAGE_SYSTEM_AGENT
-    if _LANGUAGE_SYSTEM_AGENT is None:
-        _LANGUAGE_SYSTEM_AGENT = LanguageSystemAgent()
-    return _LANGUAGE_SYSTEM_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "language_system_agent",
+        expected_type=LanguageSystemAgent,
+    )
 
 
-def set_language_system_agent(agent: LanguageSystemAgent | None) -> None:
-    global _LANGUAGE_SYSTEM_AGENT
-    _LANGUAGE_SYSTEM_AGENT = agent
-
-
-__all__ = ["LanguageSystemAgent", "get_language_system_agent", "set_language_system_agent"]
+__all__ = ["LanguageSystemAgent", "get_language_system_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

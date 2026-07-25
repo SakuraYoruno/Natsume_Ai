@@ -406,25 +406,20 @@ class InitiativeGovernorAgent:
         }
 
 
-_INITIATIVE_GOVERNOR_AGENT: InitiativeGovernorAgent | None = None
-
-
 def get_initiative_governor_agent() -> InitiativeGovernorAgent:
-    global _INITIATIVE_GOVERNOR_AGENT
-    if _INITIATIVE_GOVERNOR_AGENT is None:
-        _INITIATIVE_GOVERNOR_AGENT = InitiativeGovernorAgent()
-    return _INITIATIVE_GOVERNOR_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_initiative_governor_agent(agent: InitiativeGovernorAgent | None) -> None:
-    global _INITIATIVE_GOVERNOR_AGENT
-    _INITIATIVE_GOVERNOR_AGENT = agent
+    return require_active_tribe_agent(
+        "initiative_governor_agent",
+        expected_type=InitiativeGovernorAgent,
+    )
 
 
 __all__ = [
     "InitiativeGovernorAgent",
     "get_initiative_governor_agent",
-    "set_initiative_governor_agent",
 ]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────

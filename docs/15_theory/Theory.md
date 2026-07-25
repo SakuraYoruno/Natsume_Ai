@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.4
+版本：v2.6
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-19
+维护日期：2026-07-25
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -108,7 +108,9 @@ flowchart LR
 
 ### 3.4.2 依赖解析必须随运行时作用域传递
 
-真实请求链不得在业务 helper 内重新发现 ledger、会话历史、存储或外部客户端。它们必须由唯一 composition root 绑定到对应 runtime scope，并经显式 port 或冻结 factory 传递；缺少依赖只能形成可观察的拒绝或降级，不能回读全局 Service Locator。这个原则收敛的是 authority 的解析边界，不自动证明底层实例已经多租户隔离，也不替代 TaskGraph、Acceptance 或外部效果的验收证据。
+真实请求链不得在业务 helper 内重新发现 ledger、会话历史、存储或外部客户端。它们必须由唯一 composition root 绑定到对应 runtime scope，并经显式 port 或冻结 factory 传递；缺少依赖只能形成可观察的拒绝或降级，不能回读全局 Service Locator。写端口与读端口还必须作为同一作用域的组合对象传递：例如 Life command writer 与 snapshot reader 必须来自同一 Host lifespan，不能由路由分别从两个进程 singleton 取得。兼容开关只能保留调用签名，不能重新授予请求期定位 authority。这个原则收敛的是 authority 的解析边界，不自动证明底层实例已经多租户隔离，也不替代 TaskGraph、Acceptance 或外部效果的验收证据。
+
+当前实现已把 Conversation context、Bond/StateArbiter、LifeMemory/Episodic、Multimodal ModelAttempt、Guardian heartbeat Edge probe、RouteCatalog、启动预热和验证 harness 纳入这条规则。无调用者的五个认知/规划进程单例已经删除；Policy cache 与 Forge token 下沉到唯一消费它们的 engine/service。三十五项 wrapper/state/runtime/publication/authority owner 由每个 Host composition root 独立持有；同一 root 稳定复用、跨 root 不共享。`HostAuthorityRuntimeOwner` 在 migration-first 后持有同一 epoch 的 canonical ledger、Episodic/LifeMemory、独立 Prompt/Route/Provider/ModelAttempt 图和 CapabilityBroker 图；Memory 与 Governance owner 再从该 authority 图绑定 exact 依赖。Authority 先于 Governance/Bond 启动，并在其他 Host 资源之后按 Capability→Model→Chroma→Ledger 关闭；失败会保留未完成资源并围栏新 epoch。ResourceManager 也不再把进程状态写入共享 JSON：它只能在 Task Runtime、Host lease/fence 与 Guardian 建立后启动，并以 runtime scope 分区的 append-only Runtime Event journal 保存有界状态；关停状态必须在 Task Runtime 和 Host lease 释放前提交，写入不确定时保留 owner 以便 exact retry。Tribe 的 state registry、Host registry、event bus 与固定 23-Agent catalog 也由每个 Host root fresh 构造；scope bind 仅冻结所有权，execution-local `ContextVar` 才为 lifespan/background task 或 HTTP request 选择 exact `TribeRuntimeContext`。legacy helper 与 cross-Agent getter 因而只借用当前 execution 的 Host 对象，不能懒建第二套生产真相；两个重叠 execution 已证明 Agent/registry identity 分离，同 execution 跨 Host、active execution 解绑、owner drift 和 stale inherited context 均失败关闭。23 个 Agent backing singleton/setter 与 state/Host registry/event bus 的无上下文 fallback 已物理删除；缺 exact context 统一拒绝，验证 harness 也必须显式拥有自己的 scope。易失 EventBus 不能充当 durable journal，完整 Host multi-app 仍需 production canary。生产 `ProcessServiceContainer`、facade、environment 与旧 wiring 已物理删除，ASGI/CLI 只把 fresh construction ports 显式交给 Host root；pytest-only bridge 不属于生产对象图。外部 Chroma/Neo4j namespace、Token/MCP durable restart 与其它外部资源恢复仍未证明，所以 ResourceManager status、locator 和 Tribe fallback 的局部收口仍不能等同事务化 Chat、全租户隔离或完整对象图迁移。
 
 ### 3.5 不确定性必须保留
 
@@ -127,6 +129,8 @@ worker 不拥有二次规划权。若失败后需要改变路径，必须生成�
 worker 返回的结果先被验证和验收，再由可信编译器生成 effect intent；worker 不能自行决定 durable identity、投递目标或授权字段。
 
 当前代码中的对应边界是 [Acceptance Effect compiler](../../host_brain/task_runtime/acceptance_effects.py) 与 [durable dispatcher](../../host_brain/task_runtime/acceptance_effect_dispatcher.py)。
+
+外部传输客户端本身也不能成为 authority。即使它在调用点校验 Preview，只要业务模块可以通过进程单例、getter 或启动期全局注册随时取得它，系统仍保留了一条与 TaskGraph 并列的执行真相。正确边界是：业务模块只生成观测或提案；受治理节点在 Acceptance 后显式取得 proof-bound transport；没有 Task/Node/Attempt/Lease/Grant/Preview 身份时，传输对象不可发现、旧入口必须在 I/O 前失败关闭。删除全局客户端只证明旁路退役，不证明正向设备能力已经完成。
 
 ### 3.9 学习只能先产生提案
 
@@ -570,7 +574,7 @@ Review 必须绑定：
 
 启动 probe 同样只是 observation。只有拥有 Host runtime scope、lease 与 fence 的 app-local `RuntimeGuardian` sink 才能接收它；没有 sink 的嵌入式启动必须保留 `UNBOUND` 报告，而不是回退写入 module-global degradation reducer。通用 lifespan 也不得再启动或停止模块级 service heartbeat；正式 Host 的健康任务只能由 ASGI lifespan 自己创建、取消并等待。这样缺失 composition 会显式暴露，不能被第二套进程内 authority 掩盖。
 
-同一条边界也适用于健康读取：生产 `/health`、`/ready` 和内部免疫实时报告必须从 Host composition 接收 ledger、依赖探测与 Guardian 读端口，不能在路由内回读 `ProcessServiceContainer`。缺失端口是显式 503，不是以全局服务或伪造降级结果继续运行；模块级兼容 router 的 legacy provider 只能显式启用，不能成为 Host 默认路径。
+同一条边界也适用于健康读取：生产 `/health`、`/ready` 和内部免疫实时报告必须从 Host composition 接收 ledger、依赖探测与 Guardian 读端口，不能在路由内回读 `ProcessServiceContainer`。缺失端口是显式 503，不是以全局服务或伪造降级结果继续运行；模块级兼容 router 可以保留只读 API 形状，但不得借 legacy flag 重新发现进程级 ledger 或 probe。
 
 ---
 
@@ -636,6 +640,10 @@ Transition 必须：
 ```
 
 未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。模型证据还必须由唯一模型 authority 生成：D20c 只能接受一个 canonical `ModelAttemptService` request 的非缓存、单成功 attempt，且将 target/输出摘要、provider 与总延迟、token、成本一起封入不可分离的 attestation。适配器在 provider 调用前必须确认该 execution ID 没有任何 canonical audit row；只要已有 started/terminal 行或 audit lookup 失败，就必须先 reconciliation，不能以同一 ID 盲目重放。签发时还必须重开同一 request 的 canonical audit started/terminal pair，并核对 provider latency；cache、多 attempt、缺测量或 audit drift 都不能转换为外部收益证据。单纯的 URI、fixture 或调用者自报字段永远不是批准证据；请求参数也不能覆盖路由自己的 retry authority。D20a～D20c 只建立后续实验的输入和结构化证据边界，尚无真实 credential/provider execution、production prompt/workload、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research 是 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
+
+持久证据的“唯一写 owner”不要求把所有序列化、类型和数据库职责塞进同一文件。Research shadow ledger 的 SQLite 连接、事务和 append-only UoW 继续只属于 repository owner；canonical JSON 编解码与篡改校验属于无连接 codec，snapshot/error 属于 typed projection 模块。对外 repository import 与 replay 语义保持稳定，而 codec/models 不得获得连接、事务或第二写 authority。这样的拆分降低物理复杂度，却不改变证据归属，也不能被解读为 Research 收益或生产 promotion 已完成。
+
+跨层共享类型也遵循同一原则：合同的物理归属应由“谁共同消费”决定，而不是由最早实现它的应用模块决定。Task Runtime feature-canary receipt 同时被持久层与运行时消费，Host lifecycle ports 同时被 Composition 与 App 消费，因此 canonical type 必须位于中立 `contracts` 层；旧路径只能重导出同一个 Python 对象，不能复制 dataclass/Protocol 或改变序列化形状。这样才能同时消除 persistence→application、composition→app 回边，并避免兼容层制造第二套类型身份。静态 SCC 归零只证明依赖方向正确，不证明七路线执行、持久恢复或生产验收完成。
 
 ### 10.5 编译是规划与执行之间的防火墙
 

@@ -177,24 +177,19 @@ class HostTribeRegistry:
         return "cortex"
 
 
-_HOST_TRIBE_REGISTRY: HostTribeRegistry | None = None
-
-
 def get_host_tribe_registry() -> HostTribeRegistry:
-    global _HOST_TRIBE_REGISTRY
-    if _HOST_TRIBE_REGISTRY is None:
-        _HOST_TRIBE_REGISTRY = HostTribeRegistry()
-    return _HOST_TRIBE_REGISTRY
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_tribe_runtime_context,
+    )
 
-
-def set_host_tribe_registry(registry: HostTribeRegistry | None) -> None:
-    global _HOST_TRIBE_REGISTRY
-    _HOST_TRIBE_REGISTRY = registry
+    registry = require_tribe_runtime_context().tribe_registry
+    if not isinstance(registry, HostTribeRegistry):
+        raise RuntimeError("TRIBE_RUNTIME_REGISTRY_TYPE_DRIFT")
+    return registry
 
 
 __all__ = [
     "HostTribeRegistry",
     "TribeFamilySpec",
     "get_host_tribe_registry",
-    "set_host_tribe_registry",
 ]

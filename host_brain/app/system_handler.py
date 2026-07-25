@@ -14,7 +14,6 @@ from typing import Any, Callable, Mapping
 from fastapi import HTTPException, status
 
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
-from host_brain.composition.process_services import collect_dependency_probes_sync
 from host_brain.app.main import (
     build_env_readiness_report,
     build_request_observability_report,
@@ -22,6 +21,7 @@ from host_brain.app.main import (
     build_startup_report,
     emit_runtime_bootstrap_logs,
 )
+from host_brain.app.startup import collect_dependency_probes_sync
 from host_brain.app.schemas import (
     EdgeEventsRequest,
     EdgeEventsResponse,

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from host_brain.app import (
     asgi,
+    asgi_authority_adapters,
     host_life_scheduler_wiring,
     host_runtime_shutdown,
     http_hooks,
@@ -116,7 +117,11 @@ def test_scheduler_seed_has_exactly_one_life_tick_before_repository_registration
 def test_life_tick_handler_only_reads_version_and_submits_one_typed_command(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(asgi, "now_ms", lambda: 1_900_000_000_123)
+    monkeypatch.setattr(
+        asgi_authority_adapters,
+        "now_ms",
+        lambda: 1_900_000_000_123,
+    )
     class Reader:
         def get_receipt(self, command_id: str):
             assert command_id == "life_tick::scheduleroccurrence://sha256/abc"
@@ -287,9 +292,21 @@ def test_life_command_authority_adopts_legacy_projections_before_return(
         events.append(("build", ledger, adopted_at_ms))
         return container
 
-    monkeypatch.setattr(asgi, "build_process_life_container", build_container)
-    monkeypatch.setattr(asgi, "PROCESS_LIFE_PROVIDER", provider)
-    monkeypatch.setattr(asgi, "now_ms", lambda: 1_900_000_000_123)
+    monkeypatch.setattr(
+        asgi_authority_adapters,
+        "build_process_life_container",
+        build_container,
+    )
+    monkeypatch.setattr(
+        asgi_authority_adapters,
+        "PROCESS_LIFE_PROVIDER",
+        provider,
+    )
+    monkeypatch.setattr(
+        asgi_authority_adapters,
+        "now_ms",
+        lambda: 1_900_000_000_123,
+    )
 
     resolved_service, resolved_reader = asgi._compose_life_command_authority(ledger)
 
@@ -306,7 +323,11 @@ def test_life_command_authority_shutdown_resets_shared_app_providers(
 ) -> None:
     calls = []
     provider = SimpleNamespace(clear=lambda: calls.append("clear"))
-    monkeypatch.setattr(asgi, "PROCESS_LIFE_PROVIDER", provider)
+    monkeypatch.setattr(
+        asgi_authority_adapters,
+        "PROCESS_LIFE_PROVIDER",
+        provider,
+    )
 
     asgi._reset_life_command_authority()
 

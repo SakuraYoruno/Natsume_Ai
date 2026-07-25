@@ -1,9 +1,7 @@
-"""Typed projections and strict canonical codecs for the Research shadow ledger."""
+"""Canonical JSON codecs and validation helpers for the Research shadow ledger."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import json
 import sqlite3
@@ -19,83 +17,193 @@ from host_brain.contracts.planning_search.research_benchmark_contracts import (
     ResearchModelExecutionReceiptV1,
     ResearchVerifierReceiptV1,
 )
+from host_brain.persistence.research_shadow_ledger_models import (
+    ResearchArmExecutionSnapshot,
+    ResearchPairedRunSpecSnapshot,
+    ResearchShadowLedgerError,
+)
+
+_OWNER_RANDOMIZED_RUN_SPEC_SCHEMA = "natsume.research-run-spec.owner-randomized.v1"
+_OWNER_RANDOMIZATION_ALGORITHM = "PYTHON_SECRETS_RANDBELOW_V1"
 
 
-class ResearchShadowLedgerError(RuntimeError):
-    """Durable Research evidence failed closed."""
+def digest(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-class ResearchArmOperationState(str, Enum):
-    """Durable recovery state for one external Research arm identity."""
-
-    RESERVED = "RESERVED"
-    CALL_CLAIMED = "CALL_CLAIMED"
-    EXTERNAL_CALL_STARTED = "EXTERNAL_CALL_STARTED"
-    RETRY_AUTHORIZED_NO_AUDIT = "RETRY_AUTHORIZED_NO_AUDIT"
-    EVIDENCE_PERSISTED = "EVIDENCE_PERSISTED"
-    RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
+def canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-@dataclass(frozen=True, slots=True)
-class ResearchArmOperationSnapshot:
-    """Immutable operation projection reconstructed from its event chain."""
-
-    operation_id: str
-    operation_digest: str
-    run_id: str
-    arm_role: str
-    arm_id: str
-    execution_id: str
-    state: ResearchArmOperationState
-    event_sequence: int
-    claim_id: str | None = None
-    claim_owner_id: str | None = None
-    claim_fencing_token: int | None = None
-    claim_expires_at_ms: int | None = None
-    reconciliation_reason: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ResearchPairedRunSpecSnapshot:
-    """Typed, immutable projection of one preregistered Research run."""
-
-    run_id: str
-    registration_id: str
-    binding: ResearchCorpusBindingV1
-    profile: ResearchExecutionProfileV1
-    budget: ResearchExecutionBudgetV1
-    baseline: ResearchArmPlanV1
-    selected: ResearchArmPlanV1
-    arm_order: tuple[str, str]
-    owner_randomized: bool
-    randomization_algorithm: str | None
-    randomization_draw: int | None
-    cohort_run_key_digest: str | None
+def owner_randomized_run_identity(
+    *,
+    registration_id: str,
+    baseline: ResearchArmPlanV1,
+    selected: ResearchArmPlanV1,
+    cohort_run_key_digest: str,
+) -> dict[str, Any]:
+    return {
+        "schema": _OWNER_RANDOMIZED_RUN_SPEC_SCHEMA,
+        "registration_id": registration_id,
+        "baseline": baseline.to_dict(),
+        "selected": selected.to_dict(),
+        "cohort_run_key_digest": operation_digest(
+            cohort_run_key_digest,
+            field="cohort_run_key_digest",
+        ),
+        "production_influence_enabled": False,
+    }
 
 
-@dataclass(frozen=True, slots=True)
-class ResearchArmExecutionSnapshot:
-    """One reopened arm receipt reconstructed from canonical ledger JSON."""
+def owner_randomized_arm_order(randomization_draw: Any) -> tuple[str, str]:
+    if (
+        isinstance(randomization_draw, bool)
+        or not isinstance(randomization_draw, int)
+        or randomization_draw not in {0, 1}
+    ):
+        raise ResearchShadowLedgerError("Research randomization draw must be 0 or 1")
+    return (
+        ("BASELINE", "SELECTED")
+        if randomization_draw == 0
+        else ("SELECTED", "BASELINE")
+    )
 
-    run_id: str
-    role: str
-    plan: ResearchArmPlanV1
-    model: ResearchModelExecutionReceiptV1
-    verifier: ResearchVerifierReceiptV1
-    evidence_digest: str
+
+def owner_randomized_run_payload(
+    *,
+    identity: dict[str, Any],
+    arm_order: tuple[str, str],
+    randomization_draw: int,
+) -> dict[str, Any]:
+    expected_arm_order = owner_randomized_arm_order(randomization_draw)
+    if paired_arm_order(arm_order) != expected_arm_order:
+        raise ResearchShadowLedgerError("Research randomization draw and arm order drift")
+    return {
+        **identity,
+        "randomization_algorithm": _OWNER_RANDOMIZATION_ALGORITHM,
+        "randomization_draw": randomization_draw,
+        "arm_order": list(expected_arm_order),
+        "randomized_arm_order": True,
+        "owner_randomized": True,
+    }
 
 
-@dataclass(frozen=True, slots=True)
-class ResearchTerminalReceiptSnapshot:
-    """One reopened immutable paired terminal receipt."""
+def assert_owner_randomized_run_replay(
+    *,
+    raw: dict[str, Any],
+    identity: dict[str, Any],
+) -> dict[str, Any]:
+    randomization_draw = raw.get("randomization_draw")
+    arm_order = paired_arm_order(raw.get("arm_order"))
+    expected = owner_randomized_run_payload(
+        identity=identity,
+        arm_order=arm_order,
+        randomization_draw=randomization_draw,
+    )
+    if canonical(raw) != canonical(expected):
+        raise ResearchShadowLedgerError("Research RunSpec replay drift")
+    return expected
 
-    run_id: str
-    receipt: PairedResearchRunReceiptV1
-    receipt_digest: str
 
-    @property
-    def receipt_ref(self) -> str:
-        return f"research-receipt://sha256/{self.receipt_digest}"
+def paired_run_spec_from_row(row: sqlite3.Row) -> ResearchPairedRunSpecSnapshot:
+    registration_id = operation_text(
+        row["registration_id"],
+        field="registration_id",
+        limit=255,
+    )
+    run_id = operation_text(row["run_id"], field="run_id", limit=255)
+    registration = canonical_object(
+        row["registration_json"],
+        label="Research registration",
+    )
+    run_spec = canonical_object(row["spec_json"], label="Research RunSpec")
+    binding = research_binding_from_dict(registration.get("binding"))
+    profile = research_profile_from_dict(registration.get("profile"))
+    budget = research_budget_from_dict(registration.get("budget"))
+    expected_registration = {
+        "schema": "natsume.research-benchmark.shadow.v1",
+        "registration_id": registration_id,
+        "binding": binding.to_dict(),
+        "profile": profile.to_dict(),
+        "budget": budget.to_dict(),
+        "production_influence_enabled": False,
+    }
+    if (
+        canonical(registration) != canonical(expected_registration)
+        or str(row["binding_digest"]) != binding.binding_digest
+        or str(row["profile_digest"]) != profile.profile_digest
+        or str(row["budget_digest"]) != budget.budget_digest
+        or int(row["registration_production_influence_enabled"]) != 0
+    ):
+        raise ResearchShadowLedgerError("Research registration payload drift")
+    baseline = research_arm_plan_from_dict(run_spec.get("baseline"))
+    selected = research_arm_plan_from_dict(run_spec.get("selected"))
+    arm_order = paired_arm_order(run_spec.get("arm_order"))
+    owner_randomized = False
+    randomization_algorithm: str | None = None
+    randomization_draw: int | None = None
+    cohort_run_key_digest: str | None = None
+    if "schema" not in run_spec:
+        expected_run_spec = {
+            "registration_id": registration_id,
+            "baseline": baseline.to_dict(),
+            "selected": selected.to_dict(),
+            "arm_order": list(arm_order),
+            "randomized_arm_order": True,
+            "production_influence_enabled": False,
+        }
+        expected_run_id = f"researchrun_{digest(expected_run_spec)[:32]}"
+    else:
+        cohort_run_key_digest = operation_digest(
+            run_spec.get("cohort_run_key_digest"),
+            field="cohort_run_key_digest",
+        )
+        randomization_algorithm = operation_text(
+            run_spec.get("randomization_algorithm"),
+            field="randomization_algorithm",
+            limit=128,
+        )
+        if randomization_algorithm != _OWNER_RANDOMIZATION_ALGORITHM:
+            raise ResearchShadowLedgerError("Research randomization algorithm drift")
+        randomization_draw = run_spec.get("randomization_draw")
+        identity = owner_randomized_run_identity(
+            registration_id=registration_id,
+            baseline=baseline,
+            selected=selected,
+            cohort_run_key_digest=cohort_run_key_digest,
+        )
+        expected_run_spec = owner_randomized_run_payload(
+            identity=identity,
+            arm_order=arm_order,
+            randomization_draw=randomization_draw,
+        )
+        expected_run_id = f"researchrun_{digest(identity)[:32]}"
+        owner_randomized = True
+    if (
+        canonical(run_spec) != canonical(expected_run_spec)
+        or str(row["spec_digest"]) != digest(expected_run_spec)
+        or run_id != expected_run_id
+        or str(row["baseline_arm_id"]) != baseline.arm_id
+        or str(row["selected_arm_id"]) != selected.arm_id
+        or int(row["run_randomized_arm_order"]) != 1
+        or int(row["run_production_influence_enabled"]) != 0
+    ):
+        raise ResearchShadowLedgerError("Research RunSpec payload drift")
+    return ResearchPairedRunSpecSnapshot(
+        run_id=run_id,
+        registration_id=registration_id,
+        binding=binding,
+        profile=profile,
+        budget=budget,
+        baseline=baseline,
+        selected=selected,
+        arm_order=arm_order,
+        owner_randomized=owner_randomized,
+        randomization_algorithm=randomization_algorithm,
+        randomization_draw=randomization_draw,
+        cohort_run_key_digest=cohort_run_key_digest,
+    )
 
 
 def arm_execution_snapshot_from_row(
@@ -109,10 +217,7 @@ def arm_execution_snapshot_from_row(
         canonical_object(row["model_receipt_json"], label="Research model receipt")
     )
     verifier = research_verifier_receipt_from_dict(
-        canonical_object(
-            row["verifier_receipt_json"],
-            label="Research verifier receipt",
-        )
+        canonical_object(row["verifier_receipt_json"], label="Research verifier receipt")
     )
     evidence_digest = operation_digest(row["evidence_digest"], field="evidence_digest")
     expected_evidence = {
@@ -124,7 +229,7 @@ def arm_execution_snapshot_from_row(
         str(row["arm_id"]) != expected_plan.arm_id
         or model.arm_id != expected_plan.arm_id
         or verifier.execution_id != model.execution_id
-        or _digest(expected_evidence) != evidence_digest
+        or digest(expected_evidence) != evidence_digest
     ):
         raise ResearchShadowLedgerError("Research arm evidence payload drift")
     return ResearchArmExecutionSnapshot(
@@ -155,10 +260,8 @@ def research_binding_from_dict(raw: Any) -> ResearchCorpusBindingV1:
             ),
         )
     except (TypeError, ValueError) as exc:
-        raise ResearchShadowLedgerError(
-            "Research corpus binding payload is invalid"
-        ) from exc
-    if _canonical(binding.to_dict()) != _canonical(raw):
+        raise ResearchShadowLedgerError("Research corpus binding payload is invalid") from exc
+    if canonical(binding.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research corpus binding payload drift")
     return binding
 
@@ -174,10 +277,8 @@ def research_profile_from_dict(raw: Any) -> ResearchExecutionProfileV1:
             cache_policy=raw.get("cache_policy", "NONE"),
         )
     except (TypeError, ValueError) as exc:
-        raise ResearchShadowLedgerError(
-            "Research execution profile payload is invalid"
-        ) from exc
-    if _canonical(profile.to_dict()) != _canonical(raw):
+        raise ResearchShadowLedgerError("Research execution profile payload is invalid") from exc
+    if canonical(profile.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research execution profile payload drift")
     return profile
 
@@ -193,17 +294,12 @@ def research_budget_from_dict(raw: Any) -> ResearchExecutionBudgetV1:
             pair_max_tokens=raw.get("pair_max_tokens"),
             pair_max_wall_time_ms=raw.get("pair_max_wall_time_ms"),
             declared_only_fields=tuple(
-                as_sequence(
-                    raw.get("declared_only_fields"),
-                    field="declared_only_fields",
-                )
+                as_sequence(raw.get("declared_only_fields"), field="declared_only_fields")
             ),
         )
     except (TypeError, ValueError) as exc:
-        raise ResearchShadowLedgerError(
-            "Research execution budget payload is invalid"
-        ) from exc
-    if _canonical(budget.to_dict()) != _canonical(raw):
+        raise ResearchShadowLedgerError("Research execution budget payload is invalid") from exc
+    if canonical(budget.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research execution budget payload drift")
     return budget
 
@@ -214,31 +310,22 @@ def research_arm_plan_from_dict(raw: Any) -> ResearchArmPlanV1:
     try:
         plan = ResearchArmPlanV1(
             arm_id=raw.get("arm_id"),
-            candidate_ids=tuple(
-                as_sequence(raw.get("candidate_ids"), field="candidate_ids")
-            ),
+            candidate_ids=tuple(as_sequence(raw.get("candidate_ids"), field="candidate_ids")),
             source_ids=tuple(as_sequence(raw.get("source_ids"), field="source_ids")),
             graph_digest=raw.get("graph_digest"),
             path_digest=raw.get("path_digest"),
-            generated_by=raw.get(
-                "generated_by",
-                "RESEARCH_SUCCESSOR_CATALOG",
-            ),
+            generated_by=raw.get("generated_by", "RESEARCH_SUCCESSOR_CATALOG"),
         )
     except (TypeError, ValueError) as exc:
         raise ResearchShadowLedgerError("Research arm plan payload is invalid") from exc
-    if _canonical(plan.to_dict()) != _canonical(raw):
+    if canonical(plan.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research arm plan payload drift")
     return plan
 
 
-def research_provider_attestation_from_dict(
-    raw: Any,
-) -> ExternalProviderRunAttestationV1:
+def research_provider_attestation_from_dict(raw: Any) -> ExternalProviderRunAttestationV1:
     if not isinstance(raw, dict):
-        raise ResearchShadowLedgerError(
-            "Research provider attestation payload is invalid"
-        )
+        raise ResearchShadowLedgerError("Research provider attestation payload is invalid")
     try:
         attestation = ExternalProviderRunAttestationV1(
             execution_id=raw.get("execution_id"),
@@ -256,14 +343,12 @@ def research_provider_attestation_from_dict(
         raise ResearchShadowLedgerError(
             "Research provider attestation payload is invalid"
         ) from exc
-    if _canonical(attestation.to_dict()) != _canonical(raw):
+    if canonical(attestation.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research provider attestation payload drift")
     return attestation
 
 
-def research_model_receipt_from_dict(
-    raw: Any,
-) -> ResearchModelExecutionReceiptV1:
+def research_model_receipt_from_dict(raw: Any) -> ResearchModelExecutionReceiptV1:
     if not isinstance(raw, dict):
         raise ResearchShadowLedgerError("Research model receipt payload is invalid")
     raw_attestation = raw.get("attestation")
@@ -277,9 +362,7 @@ def research_model_receipt_from_dict(
             execution_id=raw.get("execution_id"),
             arm_id=raw.get("arm_id"),
             evidence_class=raw.get("evidence_class"),
-            attempt_ids=tuple(
-                as_sequence(raw.get("attempt_ids"), field="attempt_ids")
-            ),
+            attempt_ids=tuple(as_sequence(raw.get("attempt_ids"), field="attempt_ids")),
             prompt_digest=raw.get("prompt_digest"),
             tool_call_count=raw.get("tool_call_count"),
             total_tokens=raw.get("total_tokens"),
@@ -288,10 +371,8 @@ def research_model_receipt_from_dict(
             attestation=attestation,
         )
     except (TypeError, ValueError) as exc:
-        raise ResearchShadowLedgerError(
-            "Research model receipt payload is invalid"
-        ) from exc
-    if _canonical(receipt.to_dict()) != _canonical(raw):
+        raise ResearchShadowLedgerError("Research model receipt payload is invalid") from exc
+    if canonical(receipt.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research model receipt payload drift")
     return receipt
 
@@ -310,10 +391,8 @@ def research_verifier_receipt_from_dict(raw: Any) -> ResearchVerifierReceiptV1:
             fact_truth_attested=raw.get("fact_truth_attested", False),
         )
     except (TypeError, ValueError) as exc:
-        raise ResearchShadowLedgerError(
-            "Research verifier receipt payload is invalid"
-        ) from exc
-    if _canonical(receipt.to_dict()) != _canonical(raw):
+        raise ResearchShadowLedgerError("Research verifier receipt payload is invalid") from exc
+    if canonical(receipt.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research verifier receipt payload drift")
     return receipt
 
@@ -338,25 +417,17 @@ def paired_receipt_from_dict(raw: Any) -> PairedResearchRunReceiptV1:
             ),
             arm_order=tuple(as_sequence(raw.get("arm_order"), field="arm_order")),
             randomized_arm_order=raw.get("randomized_arm_order"),
-            production_influence_enabled=raw.get(
-                "production_influence_enabled",
-                False,
-            ),
+            production_influence_enabled=raw.get("production_influence_enabled", False),
         )
     except (TypeError, ValueError) as exc:
-        raise ResearchShadowLedgerError(
-            "Research terminal receipt payload is invalid"
-        ) from exc
-    if _canonical(receipt.to_dict()) != _canonical(raw):
+        raise ResearchShadowLedgerError("Research terminal receipt payload is invalid") from exc
+    if canonical(receipt.to_dict()) != canonical(raw):
         raise ResearchShadowLedgerError("Research terminal receipt payload drift")
     return receipt
 
 
 def as_sequence(value: Any, *, field: str) -> tuple[Any, ...]:
-    if isinstance(value, (str, bytes, bytearray)) or not isinstance(
-        value,
-        (list, tuple),
-    ):
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, (list, tuple)):
         raise ResearchShadowLedgerError(f"{field} must be an explicit sequence")
     return tuple(value)
 
@@ -376,7 +447,7 @@ def canonical_object(raw: Any, *, label: str) -> dict[str, Any]:
         value = json.loads(str(raw))
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ResearchShadowLedgerError(f"{label} JSON is unreadable") from exc
-    if not isinstance(value, dict) or _canonical(value) != str(raw):
+    if not isinstance(value, dict) or canonical(value) != str(raw):
         raise ResearchShadowLedgerError(f"{label} JSON is not canonical")
     return value
 
@@ -384,9 +455,7 @@ def canonical_object(raw: Any, *, label: str) -> dict[str, Any]:
 def run_spec_plan(run_spec: dict[str, Any], *, key: str) -> dict[str, Any]:
     value = run_spec.get(key)
     if not isinstance(value, dict):
-        raise ResearchShadowLedgerError(
-            "Research RunSpec is missing a paired arm plan"
-        )
+        raise ResearchShadowLedgerError("Research RunSpec is missing a paired arm plan")
     return value
 
 
@@ -405,14 +474,8 @@ def operation_role(value: Any) -> str:
 
 
 def bounded_positive_int(value: Any, *, field: str, maximum: int) -> int:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or not 0 < value <= maximum
-    ):
-        raise ResearchShadowLedgerError(
-            f"{field} must be a positive bounded integer"
-        )
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= maximum:
+        raise ResearchShadowLedgerError(f"{field} must be a positive bounded integer")
     return value
 
 
@@ -429,41 +492,21 @@ def operation_digest(value: Any, *, field: str) -> str:
     return result
 
 
-def _canonical(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
-
-
 __all__ = [
-    "ResearchArmExecutionSnapshot",
-    "ResearchArmOperationSnapshot",
-    "ResearchArmOperationState",
-    "ResearchPairedRunSpecSnapshot",
-    "ResearchShadowLedgerError",
-    "ResearchTerminalReceiptSnapshot",
     "arm_execution_snapshot_from_row",
-    "as_sequence",
+    "assert_owner_randomized_run_replay",
     "bounded_positive_int",
+    "canonical",
     "canonical_object",
+    "digest",
     "non_negative_operation_int",
     "operation_digest",
     "operation_role",
     "operation_text",
-    "paired_arm_order",
+    "owner_randomized_arm_order",
+    "owner_randomized_run_identity",
+    "owner_randomized_run_payload",
     "paired_receipt_from_dict",
-    "research_arm_plan_from_dict",
-    "research_binding_from_dict",
-    "research_budget_from_dict",
-    "research_model_receipt_from_dict",
-    "research_profile_from_dict",
-    "research_verifier_receipt_from_dict",
+    "paired_run_spec_from_row",
     "run_spec_plan",
 ]

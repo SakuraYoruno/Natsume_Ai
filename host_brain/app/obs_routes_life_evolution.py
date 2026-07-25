@@ -83,6 +83,7 @@ async def post_life_evolution_action_preview(
 ) -> dict[str, Any]:
     """Compute a governed DRY_RUN; recording and executors are intentionally unavailable."""
     _require_life_views_enabled()
+    from host_brain.governor.action_arbiter import ActionArbiter
     from host_brain.governor.action_preview import preview_action
 
     trusted: dict[str, Any] = {}
@@ -187,6 +188,19 @@ async def post_life_evolution_action_preview(
             )
             trusted = {}
     try:
+        degradation_authority = None
+        degradation_provider = (
+            route_ports.degradation_capability_port_provider
+        )
+        if trusted and degradation_provider is not None:
+            try:
+                degradation_authority = await _resolve(
+                    degradation_provider()
+                )
+            except Exception:
+                # Preview remains available but must fail closed when its
+                # app-local Guardian authority cannot be resolved.
+                degradation_authority = None
         result = preview_action(
             governor_decision=dict(trusted.get("governor_decision") or {}),
             proposed_action=proposed_action,
@@ -201,6 +215,9 @@ async def post_life_evolution_action_preview(
             now_ms=now_ms,
             runtime_event_store=None,
             record_runtime_event=False,
+            arbiter=ActionArbiter(
+                degradation_capability_port=degradation_authority,
+            ),
         )
         if not trusted and result.get("would_execute"):
             raise RuntimeError("untrusted preview context cannot be executable")

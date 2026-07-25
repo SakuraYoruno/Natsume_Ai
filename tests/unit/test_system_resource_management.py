@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from host_brain.core.resource_manager import SystemResourceManager
 from host_brain.core.resource_manager import assess_background_task_pressure
 from host_brain.skills.impl import system_executor
@@ -322,7 +324,6 @@ def test_resource_manager_run_once_uses_heuristic_when_llm_disabled(monkeypatch,
         interval_s=999,
         llm_enabled=False,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
 
     tick = manager.run_once(reason="manual")
@@ -365,7 +366,6 @@ def test_resource_manager_auto_records_pressure_analysis_under_high_pressure(mon
         interval_s=999,
         llm_enabled=False,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
 
     tick = manager.run_once(reason="periodic")
@@ -382,10 +382,39 @@ def test_resource_manager_auto_trim_is_enabled_by_default(monkeypatch, tmp_path)
         interval_s=999,
         llm_enabled=False,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
 
     assert manager.get_status()["auto_trim_enabled"] is True
+
+
+def test_resource_manager_stop_keeps_owner_when_loop_does_not_exit() -> None:
+    class StuckThread:
+        def __init__(self) -> None:
+            self.join_calls: list[float | None] = []
+
+        def is_alive(self) -> bool:
+            return True
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_calls.append(timeout)
+
+    manager = SystemResourceManager(
+        interval_s=999,
+        llm_enabled=False,
+        auto_gc_enabled=False,
+    )
+    stuck = StuckThread()
+    manager._running = True  # noqa: SLF001
+    manager._thread = stuck  # type: ignore[assignment]  # noqa: SLF001
+
+    with pytest.raises(
+        RuntimeError,
+        match="RESOURCE_MANAGER_LOOP_STOP_TIMEOUT",
+    ):
+        manager.stop()
+
+    assert manager._thread is stuck  # noqa: SLF001
+    assert stuck.join_calls == [5.0]
 
 
 def test_resource_manager_auto_trims_safe_memory_candidates(monkeypatch, tmp_path) -> None:
@@ -402,7 +431,6 @@ def test_resource_manager_auto_trims_safe_memory_candidates(monkeypatch, tmp_pat
         llm_enabled=False,
         auto_gc_enabled=False,
         auto_trim_enabled=True,
-        status_path=tmp_path / "resource_manager.json",
     )
 
     actions = manager._apply_safe_actions(  # noqa: SLF001
@@ -448,7 +476,6 @@ def test_resource_manager_does_not_trim_for_vram_only_pressure(monkeypatch, tmp_
         llm_enabled=False,
         auto_gc_enabled=False,
         auto_trim_enabled=True,
-        status_path=tmp_path / "resource_manager.json",
     )
 
     actions = manager._apply_safe_actions(  # noqa: SLF001
@@ -508,7 +535,6 @@ def test_resource_manager_records_governed_model_attempt_failure(monkeypatch, tm
         interval_s=999,
         llm_enabled=True,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
 
     decision = manager._analyze_with_llm(  # noqa: SLF001
@@ -532,7 +558,6 @@ def test_resource_manager_no_pressure_summary_does_not_claim_llm_unavailable(tmp
         interval_s=999,
         llm_enabled=True,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
     manager._last_llm_error = "LLM_POOL_EXHAUSTED: deepseek/deepseek-v4-flash FAILED(POOL_TIMEOUT)"  # noqa: SLF001
 
@@ -550,7 +575,6 @@ def test_resource_manager_does_not_reuse_normal_cache_under_high_pressure(tmp_pa
         interval_s=999,
         llm_enabled=False,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
     manager._last_analysis_ts = time.monotonic()  # noqa: SLF001
     manager._last_decision = {"pressure_level": "NORMAL", "source": "heuristic:no_pressure"}  # noqa: SLF001
@@ -875,7 +899,6 @@ def test_resource_manager_gate_does_not_promote_runtime_cpu_only_to_synthetic_hi
         interval_s=999,
         llm_enabled=False,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
     manager._last_snapshot = {  # noqa: SLF001
         "pressure": {"status": "ELEVATED", "memory_percent": 55.0, "vram_percent": 33.0, "reasons": ["natsume_runtime_cpu_elevated"]}
@@ -901,7 +924,6 @@ def test_resource_manager_gate_can_opt_into_llm_pressure_promotion(monkeypatch, 
         interval_s=999,
         llm_enabled=False,
         auto_gc_enabled=False,
-        status_path=tmp_path / "resource_manager.json",
     )
     manager._last_snapshot = {  # noqa: SLF001
         "pressure": {"status": "ELEVATED", "memory_percent": 55.0, "vram_percent": 33.0, "reasons": ["natsume_runtime_cpu_elevated"]}

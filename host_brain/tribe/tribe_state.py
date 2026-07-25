@@ -1117,25 +1117,17 @@ def _upsert_bucket_sample(
         del samples[:-max_items]
 
 
-# ── T-29：全局单例 TribeStateRegistry ────────────────────────────────────────
-# 各族 Agent 共享同一个 registry 实例，确保状态快照跨 Agent 可见，
-# 并且持久化时能一次性保存所有命名空间。
-_GLOBAL_REGISTRY: TribeStateRegistry | None = None
-_GLOBAL_REGISTRY_LOCK = threading.Lock()
-
-
 def get_global_registry() -> TribeStateRegistry:
-    """获取全局共享的 TribeStateRegistry 单例。
+    """Return the exact execution-bound Host registry."""
 
-    T-29：所有族 Agent 应使用此函数获取 registry，
-    确保状态快照跨 Agent 可见，并支持统一持久化。
-    """
-    global _GLOBAL_REGISTRY
-    if _GLOBAL_REGISTRY is None:
-        with _GLOBAL_REGISTRY_LOCK:
-            if _GLOBAL_REGISTRY is None:
-                _GLOBAL_REGISTRY = TribeStateRegistry()
-    return _GLOBAL_REGISTRY
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_tribe_runtime_context,
+    )
+
+    registry = require_tribe_runtime_context().state_registry
+    if not isinstance(registry, TribeStateRegistry):
+        raise RuntimeError("TRIBE_RUNTIME_STATE_REGISTRY_TYPE_DRIFT")
+    return registry
 
 
 __all__ = ["TribeStateRegistry", "get_global_registry"]

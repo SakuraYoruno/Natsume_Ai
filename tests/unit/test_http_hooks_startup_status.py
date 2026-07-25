@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 
-from host_brain.app.http_hooks import _init_edge_command_pusher_status
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
 from host_brain.app.http_hooks import _startup_status_is_degraded
 from host_brain.app.http_hooks import _tool_runtime_startup_status
@@ -50,39 +49,6 @@ def test_tool_runtime_startup_status_requires_exact_ready_seed() -> None:
 
     assert status == "OK (2 tools registered, 1 governed executors)"
     assert _startup_status_is_degraded(status) is False
-
-
-def test_init_edge_command_pusher_status_returns_ok(monkeypatch) -> None:
-    class _FakePusher:
-        enabled = True
-        edge_base_url = "http://edge.local"
-
-    monkeypatch.setattr(
-        "host_brain.tribe.edge_command_pusher.init_edge_command_pusher",
-        lambda: _FakePusher(),
-    )
-
-    status = _init_edge_command_pusher_status(
-        logger=logging.getLogger("tests.edge_command_pusher.ok"),
-    )
-
-    assert status == "OK (enabled=True, edge_url=http://edge.local)"
-
-
-def test_init_edge_command_pusher_status_returns_degraded(monkeypatch) -> None:
-    def _raise() -> None:
-        raise RuntimeError("pusher unavailable")
-
-    monkeypatch.setattr(
-        "host_brain.tribe.edge_command_pusher.init_edge_command_pusher",
-        _raise,
-    )
-
-    status = _init_edge_command_pusher_status(
-        logger=logging.getLogger("tests.edge_command_pusher.degraded"),
-    )
-
-    assert status == "DEGRADED: pusher unavailable"
 
 
 def test_world_canon_sync_on_startup_backfills_world_canon_index(tmp_path) -> None:

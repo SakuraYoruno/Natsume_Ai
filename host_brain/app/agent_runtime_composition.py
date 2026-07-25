@@ -16,11 +16,13 @@ from host_brain.app.chat_retrieval_helpers import (
 from host_brain.app.context.conversation_experience_store import (
     build_conversation_experience_read_pack,
 )
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.app.conversation_writer import record_assistant_turn, record_user_turn
 from host_brain.app.durable_task_status import build_durable_task_status_projection
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.route_catalog_runtime import (
     resolve_host_llm_runtime_async_from_catalog,
+    resolve_surface_reply_llm_runtime,
 )
 from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact
 from host_brain.app.surface_emotion_bond_flow import apply_surface_emotion_bond_flow
@@ -88,6 +90,9 @@ def build_agent_runtime_application_ports(
     life_memory_store = host_services.require_provider("life_memory_store")
     life_memory_service = host_services.require_provider("life_memory_service")
     conversation_history = host_services.require_provider("conversation_history")
+    conversation_turn_store = host_services.require_provider(
+        "conversation_turn_store"
+    )
     prompt_registry = host_services.require_provider("prompt_registry")
     model_attempt_service = host_services.require_provider("model_attempt_service")
     bond_update_queue = host_services.require_provider("bond_update_queue")
@@ -166,6 +171,19 @@ def build_agent_runtime_application_ports(
             **kwargs,
         )
 
+    def resolve_surface_reply_llm_runtime_with_catalog(
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        catalog = model_route_catalog()
+        if not callable(getattr(catalog, "resolve", None)):
+            raise AgentRuntimeCompositionError(
+                "HOST_AGENT_RUNTIME_MODEL_ROUTE_CATALOG_UNAVAILABLE"
+            )
+        return resolve_surface_reply_llm_runtime(
+            catalog=catalog,
+            **kwargs,
+        )
+
     async def resolve_state_arbiter_bond_fact_with_engine(**kwargs: Any) -> Any:
         return await _resolve_state_arbiter_bond_fact(
             bond_stage_engine=bond_stage_engine(),
@@ -216,6 +234,9 @@ def build_agent_runtime_application_ports(
         ),
         build_user_preference_pack=build_user_preference_pack_with_ledger,
         resolve_host_llm_runtime_async=resolve_host_llm_runtime_with_catalog,
+        resolve_surface_reply_llm_runtime=(
+            resolve_surface_reply_llm_runtime_with_catalog
+        ),
         resolve_state_arbiter_bond_fact=resolve_state_arbiter_bond_fact_with_engine,
         apply_surface_emotion_bond_flow=apply_surface_emotion_bond_flow_with_queue,
         build_conversation_experience_read_pack=conversation_experience_read_pack,
@@ -226,6 +247,12 @@ def build_agent_runtime_application_ports(
         audit_ledger=ledger,
         prompt_registry=prompt_registry,
         model_attempt_service=model_attempt_service,
+        context_read_ports=ConversationContextReadPorts(
+            conversation_history=conversation_history,
+            conversation_turn_store=conversation_turn_store,
+            session_topic_ledger_store=session_topic_ledger_store,
+            session_tactic_ledger_store=session_tactic_ledger_store,
+        ),
         task_status_projection=task_status_projection,
         persist_post_process_audit=partial(
             _persist_post_process_audit,

@@ -3,9 +3,54 @@
 
 # 测试与验收目录
 
-版本：v2.1
-维护日期：2026-07-20
+版本：v2.3
+维护日期：2026-07-25
 状态：当前证据
+
+## NE-01 Edge 指令全局 authority 退役当前切片
+
+- `EdgeCommandPusher` 只保留 proof-bound 低层 HTTP 适配器；进程级 `_PUSHER/_PUSHER_LOCK`、`get/init/set_edge_command_pusher`、Host startup singleton 与所有生产 lookup 均为 0。
+- Motor 无显式 governed executor 时固定拒绝；Limbic/Cortex 只记录观察。内部调试 POST 和 Obs `edge.command.push` 均在网络前返回 `ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED`；状态 API/Monitor UI 显示 `GOVERNED_TASKGRAPH_ONLY`。
+- Edge adapter、Host↔Edge loopback、Tribe Agents、内部 routes、Obs domain、Action Preview、ASGI startup 与 Host lifecycle composition 的同一受影响集合为 `171 passed in 63.37s`；相邻 Host/Tribe/Resource/Research/locator 合并回归另为 `147 passed / 8 existing warnings in 120.11s`，#114 Internal SQLite+Git 合并回归另为 `60 passed in 69.87s`，三组重叠且不得相加。`compileall`、`git diff --check`、统一 static scan 与 fresh Gate 1～14 均通过，`failed_gates=[]`；Monitor UI production build 通过。`npm ci` 审计出的 2 个 moderate、6 个 high 依赖链漏洞未用破坏性 `audit fix --force` 自动改写，留待独立供应链修复。
+- 这只证明旧直推 owner 和调用点已退役、缺 proof 时零 I/O；正向 governed Edge TaskNode、Acceptance Effect、durable receipt/reconciliation、波次 integration、production canary 和 NE-07 真实服务栈仍未验收。NE-01 继续 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Runtime 合同分层当前切片
+
+- `TaskRuntimeFeatureCanaryReceipt` 与 `HostLifecycleApplicationPorts` 分别迁入中立 `contracts/task_runtime_feature_canary.py`、`contracts/host_lifecycle.py`；旧 Runtime/App 路径保持同一对象导出。
+- 合同测试同时锁定类型 identity、Persistence/Composition source import 方向以及既有序列化和生命周期行为。
+- feature-canary、lifecycle、ASGI、HardState 受影响集合为 `74 passed in 21.79s`；fresh full architecture static Gate 1～14=`PASS`、`failed_gates=[]`，Gate 1 issues/SCC 为空，Gate 3 继续通过且未扩白名单。
+- 波次 integration、production canary、真实模型与 NE-07 Docker 全栈均未运行；本切片只验收静态分层，NE-01 继续 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Research shadow ledger 职责拆分当前切片
+
+- 对外 `SQLiteResearchShadowLedger` import、账本 UoW 与 `secrets.randbelow` 注入点保持不变；canonical JSON codec 和 typed projection/error 已分别迁入独立模块。
+- 行数从单文件 1788 行收敛为 repository owner 1271 行、codec 512 行、models 108 行；没有新增或扩大 `core_architecture_policy.json` 白名单。
+- Research ledger、paired execution 与 canonical persistence contract（含 split authority guards）的同一组回归为 `18 passed in 22.38s`。fresh full architecture static 从 `FAIL [1,3]` 收敛为 `FAIL [1]`，Gate 3 `PASS`，当前切片新增静态失败为 0。
+- 文档 authority/freshness、交付元数据、release/coverage 合同为 `62 passed`；`compileall`、JSON 解析和 `git diff --check` 通过。
+- 这是职责拆分证据，不是 Research provider、cohort、收益、promotion、NE-01 wave integration 或 NE-07 全栈验收；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Tribe 无上下文 fallback 退役当前切片
+
+- 每个 production `TribeRuntimeScope` fresh 持有 `TribeStateRegistry`、`HostTribeRegistry`、`InMemoryTribeEventBus` 与固定的 23-Agent `TribeAgentCatalog`；production provider 是 Agent constructor，不再是 process singleton getter。
+- Host bind 只建立 scope ownership；lifespan/background execution 与每个 HTTP request 通过 execution-local `ContextVar` 激活 exact-owner `TribeRuntimeContext`。旧 shared-state、cross-Agent getter 与 Chat/Input `TribeRuntimeAgentPorts` 只能返回该 execution 所属 scope 的 exact 对象/Agent。23 个 Agent backing singleton/setter、`_GLOBAL_REGISTRY`、`_HOST_TRIBE_REGISTRY` 与 `_EVENT_BUS` 已物理删除；无 exact context 统一以 `TRIBE_RUNTIME_CONTEXT_NOT_BOUND` 失败关闭。两个异步重叠 production scope 返回不同 Agent/registry，active execution 阻断解绑，解绑后的继承 context 以 stale reason 失败关闭。
+- `DigitalLifeSupervisor` 不再写入 Limbic/DefaultMode 模块单例；它为一次验证运行显式构造、绑定、激活并最终释放自己的 Tribe scope。旧裸构造行为测试使用显式隔离 registry 或 `tribe_runtime_context` fixture，不能靠 pytest 复活生产 fallback。
+- 排除已在 clean `5997daa2c` 基线复现的 7 个 Internal Runtime 既有失败后，覆盖 Agent/Tribe 的宽集合为 `659 passed, 4 skipped, 4 existing warnings in 53.83s`；包含 fallback、生命周期、Obs Organ 投影与 Digital Life harness 的最终集中复核为 `69 passed in 7.25s`。这些集合重叠、不得相加。基线 7 项继续作为独立待修缺口，不能冒充本切片回归。
+- Tribe 级 execution isolation 与 fallback 物理退役已有本地机械证据，但完整 Host multi-app（其他 authority、外部 namespace、真实 server lifecycle）仍未做 production canary，EventBus 仍易失。因此本切片不构成 durable Tribe journal、全 Host 多实例封板、NE-01 波次集成或 NE-07 全栈验收。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`，Ruff 在当前环境未安装，记为 `NOT_RUN_TOOL_UNAVAILABLE`。
+
+## NE-01 生产 Service Locator 物理退役当前切片
+
+- 生产 `process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 `process_service_wiring.py` 已物理删除；`ProcessApplicationPorts` 只剩 frozen contract，ASGI/CLI fresh 构造后显式传入 Host root，Host builder 不再有 require/global fallback。
+- 旧测试兼容逻辑只位于 `tests/support/process_service_compat.py`，由根 `conftest.py` 在 pytest 进程内安装；fresh 生产 ASGI 导入验证三个 retired module 名均不在 `sys.modules`。
+- 清洁退出的分组结果：结构/启动/路由 `27 passed`；Host lifecycle/Authority `44 passed`；Obs projection `16 passed`；Obs fresh-process `16 passed`；模型/Capability/Memory 测试桥 `105 passed`；受影响集成分别 `1 passed`、`5 passed`。最终精选结构/owner 复核为 `59 passed, 12 existing warnings in 29.06s`，它覆盖前述部分集合，不累计。一次合并批次虽打印 `103 passed in 118.69s`，但外层命令最终 timeout=124，明确不计为 clean PASS。
+- 文档/交付/仓库卫生组 `35 passed in 8.05s`，coverage/policy/repository 组 `40 passed in 45.17s`；两组测试文件互不重叠。`compileall`、三份 JSON、`git diff --check` 与 fresh 生产 ASGI 模块隔离检查通过。
+- 该历史 locator 切片完成时完整架构静态 Gate 为 `FAIL [1]`；当前分支已通过 neutral contract 切片独立复跑为 Gate 1～14 `PASS`。Gate 2 的 Capability 与 app-local Model constructor 均精确位于 `HostAuthorityRuntimeOwner`。波次集成、canary、真实模型与 NE-07 Docker 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Host Authority Runtime 上一切片
+
+- 该提交当时的生产 locator inventory 为 named0/0/all-form0、Container8/2/5；现已被上面的物理退役切片取代。生产 Host 继续由 `HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、Model Runtime 与 Capability Runtime。
+- Authority 切片的早期宽受影响集合为 `207 passed / 12 existing warning emissions`；最终选定集合为 `131 passed / 8 existing warnings`，相邻 FastAPI/Obs 为 `42 passed`，owner/model 的 `9 passed` 与主集合重叠，均不得相加。旧 HTTP skill smoke 因 fixture 已失效且真实 Chroma/Edge 不可用而失败，不作为本切片 PASS。
+- `compileall`、三份 JSON、`git diff --check` 和文档 Gate 已通过，文档合同为 `45 passed`。统一 static scan 精确保留 `host_application.py → HostLifecycleApplicationPorts / emotion_context` 两条既有 NLE boundary；完整架构 Gate 为基线 `FAIL [1]`，Gate 11 通过，本切片新增失败为 0。
+- 本切片不执行波次 integration、生产 canary、真实模型或 NE-07 Docker/前后端实栈；远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
 
 ## NE-01 上一检查点 UoW 切片（历史证据）
 
@@ -26,7 +71,7 @@
 
 - 覆盖普通 Chat、Gateway、ASR、startup 与 lifespan：`TribeRuntimeAgentPorts` 由 Host composition root 传给 `InputRuntimeApplicationPorts`，`chat_handler` 与输入归一化不再直接读取 Thalamus/ANS singleton getter；缺少 Input/Tribe 端口时 fail closed。
 - 当前定向命令覆盖 Chat streaming、Host Input、Gateway dispatch、startup warmup、lifespan shutdown 与 typed composition，结果为 `131 passed in 7.25s`。#103+#104 的 `196 passed in 21.08s` 为重叠历史，禁止相加。
-- 边界：该测试不证明 process-bound Tribe 已 app-local、多 Host 隔离、Chat Acceptance receipt、generic Delegate、NE-01 wave integration 或 NE-07 Docker/前后端实栈；远程 CI 继续为 `NOT_RUN_ACCOUNT_QUOTA`。
+- 边界：该历史端口测试本身不证明 Tribe Agent app-local；后续 catalog 切片已单独证明顺序 Host identity 隔离，但仍未证明并发多 Host、Chat Acceptance receipt、generic Delegate、NE-01 wave integration 或 NE-07 Docker/前后端实栈；远程 CI 继续为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 pre-Operation Attempt takeover 切片
 

@@ -100,7 +100,7 @@ def test_governor_and_app_local_tool_boundary_share_injected_token_service() -> 
         GovernedHostToolRuntimeComposition,
         GovernedHostToolRuntimeDependencies,
     )
-    from host_brain.composition import process_runtime_services, process_services
+    from host_brain.composition import process_services
     from host_brain.governor.decision import IntentDecisionEngine
     from host_brain.governor.tokens import TokenService
     from host_brain.tools.catalog import ToolCatalog
@@ -132,7 +132,6 @@ def test_governor_and_app_local_tool_boundary_share_injected_token_service() -> 
     assert second.provide_tool_broker() is not first_broker
     assert first_broker.token_service is token_service
     assert engine.token_service is token_service
-    assert not hasattr(process_runtime_services, "get_tool_broker")
     assert not hasattr(process_services, "get_tool_broker")
 
 

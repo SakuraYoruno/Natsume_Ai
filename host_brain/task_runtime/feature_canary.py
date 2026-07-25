@@ -1,33 +1,9 @@
-"""Compatibility re-exports for the neutral Task Runtime canary contract."""
+"""Compatibility exports for the canonical Task Runtime canary contracts.
 
-from host_brain.contracts.task_runtime_feature_canary import (
-    BOUNDED_FANOUT_FEATURE_KEY,
-    FeatureCanarySignatureVerifier,
-    TASK_RUNTIME_FEATURE_CANARY_EXPIRED,
-    TASK_RUNTIME_FEATURE_CANARY_INVALID,
-    TASK_RUNTIME_FEATURE_CANARY_MISMATCH,
-    TASK_RUNTIME_FEATURE_CANARY_REQUIRED,
-    TASK_RUNTIME_FEATURE_CANARY_SCHEMA_VERSION,
-    TASK_RUNTIME_FEATURE_CANARY_UNATTESTED,
-    TaskRuntimeFeatureCanaryError,
-    TaskRuntimeFeatureCanaryReceipt,
-    bounded_fanout_configuration_digest,
-    require_bounded_fanout_canary,
-    task_runtime_feature_canary_signing_message,
-)
+The authority-neutral contract lives under :mod:`host_brain.contracts` so the
+persistence layer never depends back on the application/runtime layer.  Keep
+this module as an identity-preserving import path for existing callers.
+"""
 
-__all__ = [
-    "BOUNDED_FANOUT_FEATURE_KEY",
-    "FeatureCanarySignatureVerifier",
-    "TASK_RUNTIME_FEATURE_CANARY_EXPIRED",
-    "TASK_RUNTIME_FEATURE_CANARY_INVALID",
-    "TASK_RUNTIME_FEATURE_CANARY_MISMATCH",
-    "TASK_RUNTIME_FEATURE_CANARY_REQUIRED",
-    "TASK_RUNTIME_FEATURE_CANARY_SCHEMA_VERSION",
-    "TASK_RUNTIME_FEATURE_CANARY_UNATTESTED",
-    "TaskRuntimeFeatureCanaryError",
-    "TaskRuntimeFeatureCanaryReceipt",
-    "bounded_fanout_configuration_digest",
-    "require_bounded_fanout_canary",
-    "task_runtime_feature_canary_signing_message",
-]
+from host_brain.contracts.task_runtime_feature_canary import *
+from host_brain.contracts.task_runtime_feature_canary import __all__

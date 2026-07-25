@@ -447,6 +447,7 @@ def hydrate_sub_agent_context(
     parent_agent_id: str = "",
     timeout_ms: int | None = None,
     history_max_turns: int | None = None,
+    conversation_history: Any | None = None,
 ) -> dict[str, Any]:
     """Fill common sub-agent context anchors before the envelope is built.
 
@@ -477,6 +478,7 @@ def hydrate_sub_agent_context(
     if session_id and not isinstance(hydrated.get("conversation_window"), Mapping) and "recent_turns" not in hydrated:
         effective_max_turns = history_max_turns if history_max_turns is not None else profile.recent_turn_limit
         window = _fetch_conversation_window(
+            conversation_history=conversation_history,
             session_id=session_id,
             request_id=request_id,
             max_turns=max(1, int(effective_max_turns or MAX_RECENT_TURNS)),
@@ -799,16 +801,17 @@ def _context_authorization_public_summary(value: Any) -> dict[str, Any]:
 
 def _fetch_conversation_window(
     *,
+    conversation_history: Any | None,
     session_id: str,
     request_id: str,
     max_turns: int,
     turn_chars: int = MAX_TURN_CHARS,
     summary_chars: int = MAX_SUMMARY_CHARS,
 ) -> dict[str, Any]:
+    if conversation_history is None:
+        return {}
     try:
-        from host_brain.composition.process_services import get_conversation_history  # noqa: PLC0415
-
-        window = get_conversation_history().fetch_window_for_messages(
+        window = conversation_history.fetch_window_for_messages(
             session_id=session_id,
             max_turns=max_turns,
             exclude_request_id=request_id or None,

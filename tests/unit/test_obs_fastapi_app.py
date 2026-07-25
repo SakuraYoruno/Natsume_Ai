@@ -201,15 +201,14 @@ def test_obs_fastapi_app_does_not_construct_task_reader_when_views_are_disabled(
 def test_obs_fastapi_app_does_not_configure_host_ports_in_a_fresh_process(tmp_path):
     program = "\n".join(
         (
-            "from host_brain.composition.process_service_container import get_process_service_container",
-            "container = get_process_service_container()",
-            "assert container.application_ports is None",
+            "from pathlib import Path",
+            "root = Path.cwd()",
+            "assert not (root / 'host_brain/composition/process_service_container.py').exists()",
+            "assert not (root / 'host_brain/composition/process_services.py').exists()",
             "from host_brain.app.obs_fastapi_app import app",
-            "assert container.application_ports is None",
             "from fastapi.testclient import TestClient",
             "with TestClient(app) as client:",
             "    assert client.get('/health').status_code == 200",
-            "assert container.application_ports is None",
         )
     )
     environment = dict(os.environ)

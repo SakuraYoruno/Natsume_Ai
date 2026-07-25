@@ -27,10 +27,11 @@ class BondUpdateQueue:
         self.worker_enabled = bool(worker_enabled)
         self.poll_interval_s = max(0.01, float(poll_interval_s))
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=self.max_queue_size)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._worker_thread: threading.Thread | None = None
         self._started = False
+        self._closed = False
         self._queued_count = 0
         self._processed_count = 0
         self._failed_count = 0
@@ -41,6 +42,8 @@ class BondUpdateQueue:
         if not self.worker_enabled:
             return
         with self._lock:
+            if self._closed:
+                return
             if self._worker_thread is not None and self._worker_thread.is_alive():
                 return
             self._worker_thread = threading.Thread(
@@ -54,23 +57,32 @@ class BondUpdateQueue:
     def enqueue(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         task = dict(payload or {})
         if not task:
-            self._dropped_count += 1
+            with self._lock:
+                self._dropped_count += 1
             return {
                 "status": "DROPPED",
                 "reason_code": "BOND_QUEUE_EMPTY_PAYLOAD",
                 "queue_size": int(self._queue.qsize()),
             }
-        self._ensure_worker_started()
-        try:
-            self._queue.put_nowait(task)
-        except queue.Full:
-            self._dropped_count += 1
-            return {
-                "status": "DEGRADED",
-                "reason_code": "BOND_QUEUE_FULL",
-                "queue_size": int(self._queue.qsize()),
-            }
-        self._queued_count += 1
+        with self._lock:
+            if self._closed:
+                self._dropped_count += 1
+                return {
+                    "status": "DEGRADED",
+                    "reason_code": "BOND_QUEUE_CLOSED",
+                    "queue_size": int(self._queue.qsize()),
+                }
+            self._ensure_worker_started()
+            try:
+                self._queue.put_nowait(task)
+            except queue.Full:
+                self._dropped_count += 1
+                return {
+                    "status": "DEGRADED",
+                    "reason_code": "BOND_QUEUE_FULL",
+                    "queue_size": int(self._queue.qsize()),
+                }
+            self._queued_count += 1
         return {
             "status": "QUEUED",
             "reason_code": None,
@@ -81,7 +93,8 @@ class BondUpdateQueue:
         try:
             writer = self.writer_factory()
         except Exception as exc:  # pragma: no cover - defensive guard
-            self._last_error = str(exc)
+            with self._lock:
+                self._last_error = str(exc)
             _logger.error("bond queue worker init failed: %s", exc)
             return
 
@@ -95,10 +108,12 @@ class BondUpdateQueue:
                 if task is None:
                     break
                 writer.apply_update(**dict(task))
-                self._processed_count += 1
+                with self._lock:
+                    self._processed_count += 1
             except Exception as exc:  # pragma: no cover - defensive guard
-                self._failed_count += 1
-                self._last_error = str(exc)
+                with self._lock:
+                    self._failed_count += 1
+                    self._last_error = str(exc)
                 _logger.warning("bond queue task failed: %s", exc)
             finally:
                 self._queue.task_done()
@@ -114,25 +129,32 @@ class BondUpdateQueue:
         return unfinished <= 0 and self._queue.empty()
 
     def snapshot(self) -> dict[str, Any]:
-        return {
-            "started": bool(self._started),
-            "worker_enabled": bool(self.worker_enabled),
-            "queue_size": int(self._queue.qsize()),
-            "max_queue_size": int(self.max_queue_size),
-            "queued_count": int(self._queued_count),
-            "processed_count": int(self._processed_count),
-            "failed_count": int(self._failed_count),
-            "dropped_count": int(self._dropped_count),
-            "last_error": self._last_error,
-        }
+        with self._lock:
+            worker = self._worker_thread
+            return {
+                "started": bool(self._started),
+                "closed": bool(self._closed),
+                "worker_alive": bool(worker is not None and worker.is_alive()),
+                "worker_enabled": bool(self.worker_enabled),
+                "queue_size": int(self._queue.qsize()),
+                "max_queue_size": int(self.max_queue_size),
+                "queued_count": int(self._queued_count),
+                "processed_count": int(self._processed_count),
+                "failed_count": int(self._failed_count),
+                "dropped_count": int(self._dropped_count),
+                "last_error": self._last_error,
+            }
 
-    def shutdown(self) -> None:
-        self._stop_event.set()
+    def shutdown(self, *, timeout_s: float = 0.5) -> bool:
+        with self._lock:
+            self._closed = True
+            self._stop_event.set()
+            worker = self._worker_thread
         if self.worker_enabled:
             try:
                 self._queue.put_nowait(None)
             except queue.Full:
                 pass
-            worker = self._worker_thread
             if worker is not None and worker.is_alive():
-                worker.join(timeout=0.5)
+                worker.join(timeout=max(0.0, float(timeout_s)))
+        return bool(worker is None or not worker.is_alive())

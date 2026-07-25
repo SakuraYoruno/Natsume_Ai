@@ -76,6 +76,7 @@ def build_surface_runtime_ports(
     ) -> dict[str, Any]:
         return build_surface_context_packet(
             life_snapshot_reader=get_life_snapshot_reader(),
+            context_read_ports=agent_runtime_ports.context_read_ports,
             **kwargs,
         )
 
@@ -96,6 +97,9 @@ def build_surface_runtime_ports(
             build_conversation_understanding_pack
         ),
         build_memory_context_debug=build_memory_context_debug,
+        resolve_surface_reply_llm_runtime=(
+            agent_runtime_ports.resolve_surface_reply_llm_runtime
+        ),
         model_attempt_service=agent_runtime_ports.model_attempt_service,
     )
 

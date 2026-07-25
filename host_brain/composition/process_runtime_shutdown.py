@@ -11,7 +11,6 @@ from typing import Any
 class ProcessRuntimeShutdownDependencies:
     """Teardown capabilities resolved once by the application adapter."""
 
-    stop_bond_queue: Callable[[Any], None]
     get_tribe_event_bus: Callable[[], Any | None]
 
 
@@ -36,10 +35,6 @@ async def shutdown_process_runtime(
             logger.info("SystemResourceManager 已停止")
     except Exception as resource_stop_exc:
         logger.warning("SystemResourceManager 停止失败: %s", resource_stop_exc)
-    try:
-        dependencies.stop_bond_queue(logger)
-    except Exception as bond_queue_exc:
-        logger.warning("BondUpdateQueue 关闭失败: %s", bond_queue_exc)
     try:
         shutdown_bus = dependencies.get_tribe_event_bus()
         if shutdown_bus is not None:

@@ -401,22 +401,18 @@ class InteroceptionAgent:
             return {"ticked": False, "error": str(exc)}
 
 
-_INTEROCEPTION_AGENT: InteroceptionAgent | None = None
-
-
 def get_interoception_agent() -> InteroceptionAgent:
-    global _INTEROCEPTION_AGENT
-    if _INTEROCEPTION_AGENT is None:
-        _INTEROCEPTION_AGENT = InteroceptionAgent()
-    return _INTEROCEPTION_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "interoception_agent",
+        expected_type=InteroceptionAgent,
+    )
 
 
-def set_interoception_agent(agent: InteroceptionAgent | None) -> None:
-    global _INTEROCEPTION_AGENT
-    _INTEROCEPTION_AGENT = agent
-
-
-__all__ = ["InteroceptionAgent", "get_interoception_agent", "set_interoception_agent"]
+__all__ = ["InteroceptionAgent", "get_interoception_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: E402, F401

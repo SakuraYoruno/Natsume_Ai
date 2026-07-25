@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -1331,30 +1330,9 @@ class LimbicAgent:
                 except Exception as _tl_exc:
                     _log.debug("LimbicAgent write_emotion_timeline 失败（降级）: %s", _tl_exc)
 
-            # T-125：通过 EdgeCommandPusher 将情绪状态推送回 edge_client，驱动 vts_driver 表情
-            # 实现 LimbicAgent → SomaticAgent 的下行反馈闭环（身心联动）
-            try:
-                from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
-                _pusher = get_edge_command_pusher()
-                if _pusher is not None and _pusher.enabled and trusted_runtime_emotion:
-                    _push_result = await asyncio.to_thread(
-                        _pusher.push_emotion_state,
-                        emotion_tag=emotion_tag,
-                        intensity=(
-                            float(emotion_intensity)
-                            if isinstance(emotion_intensity, (int, float))
-                            else None
-                        ),
-                        mood_state=mood_state,
-                        session_id=session_id or None,
-                        source_agent="limbic_agent",
-                    )
-                    _log.debug(
-                        "LimbicAgent 情绪指令已推送到 edge_client: emotion_tag=%s ok=%s",
-                        emotion_tag, _push_result.get("ok"),
-                    )
-            except Exception as _push_exc:
-                _log.debug("LimbicAgent 推送情绪指令失败（降级）: %s", _push_exc)
+            # Limbic only records the trusted observation.  Any downstream
+            # somatic effect must be admitted as a governed TaskGraph node and
+            # dispatched after Acceptance with an exact Preview proof.
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
@@ -1899,19 +1877,15 @@ class LimbicAgent:
             return {"decayed": False, "error": str(exc)}
 
 
-_LIMBIC_AGENT: LimbicAgent | None = None
-
-
 def get_limbic_agent() -> LimbicAgent:
-    global _LIMBIC_AGENT
-    if _LIMBIC_AGENT is None:
-        _LIMBIC_AGENT = LimbicAgent()
-    return _LIMBIC_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "limbic_agent",
+        expected_type=LimbicAgent,
+    )
 
 
-def set_limbic_agent(agent: LimbicAgent | None) -> None:
-    global _LIMBIC_AGENT
-    _LIMBIC_AGENT = agent
-
-
-__all__ = ["LimbicAgent", "get_limbic_agent", "set_limbic_agent"]
+__all__ = ["LimbicAgent", "get_limbic_agent"]

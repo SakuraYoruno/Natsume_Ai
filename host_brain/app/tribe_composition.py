@@ -16,12 +16,12 @@ from host_brain.tribe.application_ports import TribeApplicationPorts
 
 @dataclass(frozen=True, slots=True)
 class TribeRuntimeAgentPorts:
-    """Explicit access to the process-bound Tribe agents used by one Host.
+    """Explicit access to the app-local Tribe agents used by one Host.
 
-    Tribe agent instances are still process-bound during the NE-01 transition.
-    The transition boundary is deliberately concentrated here: application and
-    input code receive this immutable bundle instead of importing a Tribe
-    singleton getter at request time.
+    The provider functions retain the historical getter signatures, but an
+    active Host resolves them through its owner-bound ``TribeAgentCatalog``.
+    Application and input code receive this immutable bundle instead of
+    importing those compatibility getters at request time.
     """
 
     get_thalamus_agent: Callable[[], Any]
@@ -56,17 +56,21 @@ class TribeRuntimeAgentPorts:
         )
 
 
-def build_production_tribe_runtime_agent_ports() -> TribeRuntimeAgentPorts:
-    """Expose the remaining Tribe singleton bridge only at composition time."""
+def build_production_tribe_runtime_agent_ports(
+    *,
+    tribe_runtime: TribeRuntimeScope,
+) -> TribeRuntimeAgentPorts:
+    """Bind application ports to one exact Host-owned Agent catalog."""
 
-    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
-    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
-    from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
+    if not isinstance(tribe_runtime, TribeRuntimeScope):
+        raise TypeError("tribe_runtime must be TribeRuntimeScope")
 
     return TribeRuntimeAgentPorts(
-        get_thalamus_agent=get_thalamus_agent,
-        get_ans_agent=get_ans_agent,
-        get_immune_agent=get_immune_agent,
+        get_thalamus_agent=lambda: tribe_runtime.require_agent(
+            "thalamus_agent"
+        ),
+        get_ans_agent=lambda: tribe_runtime.require_agent("ans_agent"),
+        get_immune_agent=lambda: tribe_runtime.require_agent("immune_agent"),
     )
 
 
@@ -74,6 +78,7 @@ def build_tribe_runtime_scope(
     *,
     state_registry: Any,
     tribe_registry: Any,
+    event_bus: Any,
     agent_providers: TribeAgentProviders,
 ) -> TribeRuntimeScope:
     """Build an ASGI-owned Tribe scope from explicitly supplied dependencies."""
@@ -81,76 +86,79 @@ def build_tribe_runtime_scope(
     return TribeRuntimeScope(
         state_registry=state_registry,
         tribe_registry=tribe_registry,
+        event_bus=event_bus,
         agent_providers=agent_providers,
     )
 
 
 def build_production_tribe_runtime_scope() -> TribeRuntimeScope:
-    """Map legacy compatibility singletons only at the Host composition root."""
+    """Build fresh Host-owned shared state around compatibility Agent providers."""
 
-    from host_brain.tribe.registry import get_host_tribe_registry  # noqa: PLC0415
-    from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+    from host_brain.tribe.event_bus import InMemoryTribeEventBus  # noqa: PLC0415
+    from host_brain.tribe.registry import HostTribeRegistry  # noqa: PLC0415
+    from host_brain.tribe.tribe_state import TribeStateRegistry  # noqa: PLC0415
 
     return build_tribe_runtime_scope(
-        state_registry=get_global_registry(),
-        tribe_registry=get_host_tribe_registry(),
+        state_registry=TribeStateRegistry(),
+        tribe_registry=HostTribeRegistry(),
+        event_bus=InMemoryTribeEventBus(max_events=2048),
         agent_providers=build_production_tribe_agent_providers(),
     )
 
 
 def build_production_tribe_agent_providers() -> TribeAgentProviders:
-    """Return the fixed compatibility Agent catalog without runtime discovery."""
+    """Return constructors for one fresh Host-owned Agent catalog."""
 
-    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
-    from host_brain.tribe.cerebellum_agent import get_cerebellum_agent  # noqa: PLC0415
-    from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: PLC0415
-    from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
-    from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
-    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
-    from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
-    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
-    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+    from host_brain.tribe.ans_agent import ANSAgent  # noqa: PLC0415
+    from host_brain.tribe.cerebellum_agent import CerebellumAgent  # noqa: PLC0415
+    from host_brain.tribe.circadian_agent import CircadianAgent  # noqa: PLC0415
+    from host_brain.tribe.cortex_agent import CortexAgent  # noqa: PLC0415
+    from host_brain.tribe.default_mode_agent import DefaultModeAgent  # noqa: PLC0415
+    from host_brain.tribe.endocrine_agent import EndocrineAgent  # noqa: PLC0415
+    from host_brain.tribe.glymphatic_agent import GlymphaticAgent  # noqa: PLC0415
+    from host_brain.tribe.hippocampus_agent import HippocampusAgent  # noqa: PLC0415
+    from host_brain.tribe.immune_agent import ImmuneAgent  # noqa: PLC0415
     from host_brain.tribe.initiative_governor_agent import (  # noqa: PLC0415
-        get_initiative_governor_agent,
+        InitiativeGovernorAgent,
     )
-    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
-    from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
-    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
-    from host_brain.tribe.mirror_neuron_agent import get_mirror_neuron_agent  # noqa: PLC0415
-    from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
-    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
-    from host_brain.tribe.peripheral_agent import get_peripheral_agent  # noqa: PLC0415
-    from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
-    from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
-    from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-    from host_brain.tribe.somatic_agent import get_somatic_agent  # noqa: PLC0415
-    from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
-    from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: PLC0415
+    from host_brain.tribe.interoception_agent import InteroceptionAgent  # noqa: PLC0415
+    from host_brain.tribe.language_system_agent import LanguageSystemAgent  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import LimbicAgent  # noqa: PLC0415
+    from host_brain.tribe.mirror_neuron_agent import MirrorNeuronAgent  # noqa: PLC0415
+    from host_brain.tribe.motor_cortex_agent import MotorCortexAgent  # noqa: PLC0415
+    from host_brain.tribe.pain_reward_agent import PainRewardAgent  # noqa: PLC0415
+    from host_brain.tribe.peripheral_agent import PeripheralAgent  # noqa: PLC0415
+    from host_brain.tribe.prefrontal_agent import PrefrontalAgent  # noqa: PLC0415
+    from host_brain.tribe.proprioception_agent import ProprioceptionAgent  # noqa: PLC0415
+    from host_brain.tribe.social_brain_agent import SocialBrainAgent  # noqa: PLC0415
+    from host_brain.tribe.somatic_agent import SomaticAgent  # noqa: PLC0415
+    from host_brain.tribe.thalamus_agent import ThalamusAgent  # noqa: PLC0415
+    from host_brain.tribe.vestibular_agent import VestibularAgent  # noqa: PLC0415
 
     return (
-        ("limbic_agent", get_limbic_agent),
-        ("prefrontal_agent", get_prefrontal_agent),
-        ("social_brain_agent", get_social_brain_agent),
-        ("cortex_agent", get_cortex_agent),
-        ("pain_reward_agent", get_pain_reward_agent),
-        ("endocrine_agent", get_endocrine_agent),
-        ("immune_agent", get_immune_agent),
-        ("hippocampus_agent", get_hippocampus_agent),
-        ("ans_agent", get_ans_agent),
-        ("language_system_agent", get_language_system_agent),
-        ("somatic_agent", get_somatic_agent),
-        ("peripheral_agent", get_peripheral_agent),
-        ("circadian_agent", get_circadian_agent),
-        ("proprioception_agent", get_proprioception_agent),
-        ("initiative_governor_agent", get_initiative_governor_agent),
-        ("default_mode_agent", get_default_mode_agent),
-        ("mirror_neuron_agent", get_mirror_neuron_agent),
-        ("interoception_agent", get_interoception_agent),
-        ("motor_cortex_agent", get_motor_cortex_agent),
-        ("cerebellum_agent", get_cerebellum_agent),
-        ("glymphatic_agent", get_glymphatic_agent),
-        ("vestibular_agent", get_vestibular_agent),
-        ("thalamus_agent", get_thalamus_agent),
+        ("limbic_agent", LimbicAgent),
+        ("prefrontal_agent", PrefrontalAgent),
+        ("social_brain_agent", SocialBrainAgent),
+        ("cortex_agent", CortexAgent),
+        ("pain_reward_agent", PainRewardAgent),
+        ("endocrine_agent", EndocrineAgent),
+        ("immune_agent", ImmuneAgent),
+        ("hippocampus_agent", HippocampusAgent),
+        ("ans_agent", ANSAgent),
+        ("language_system_agent", LanguageSystemAgent),
+        ("somatic_agent", SomaticAgent),
+        ("peripheral_agent", PeripheralAgent),
+        ("circadian_agent", CircadianAgent),
+        ("proprioception_agent", ProprioceptionAgent),
+        ("initiative_governor_agent", InitiativeGovernorAgent),
+        ("default_mode_agent", DefaultModeAgent),
+        ("mirror_neuron_agent", MirrorNeuronAgent),
+        ("interoception_agent", InteroceptionAgent),
+        ("motor_cortex_agent", MotorCortexAgent),
+        ("cerebellum_agent", CerebellumAgent),
+        ("glymphatic_agent", GlymphaticAgent),
+        ("vestibular_agent", VestibularAgent),
+        ("thalamus_agent", ThalamusAgent),
     )
 
 

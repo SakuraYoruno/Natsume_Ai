@@ -22,6 +22,7 @@ from host_brain.tribe.immune_agent import ImmuneAgent
 from host_brain.tribe.language_system_agent import LanguageSystemAgent
 from host_brain.tribe.model_invocation import complete_tribe_json, tribe_model_semantic
 from host_brain.tribe.motor_cortex_agent import MotorCortexAgent
+from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
 TRIBE_MODEL_FILES = (
@@ -136,22 +137,37 @@ def test_representative_tribe_business_returns_are_preserved(monkeypatch) -> Non
     )
     ports = TribeApplicationPorts(model_attempt_service=lambda: object())
 
-    assert CircadianAgent(application_ports=ports).generate_circadian_mood_hint(
+    assert CircadianAgent(
+        application_ports=ports,
+        state_registry=TribeStateRegistry(),
+    ).generate_circadian_mood_hint(
         energy_level=0.2,
         sleep_pressure=0.7,
     ) == "夜间节律"
-    cerebellum = CerebellumAgent(application_ports=ports)
+    cerebellum = CerebellumAgent(
+        application_ports=ports,
+        state_registry=TribeStateRegistry(),
+    )
     assert cerebellum.generate_correction_narrative(strategy="RETRY_ONCE") == "正在调整"
     assert cerebellum.analyze_failure_pattern(consecutive_failures=3) == "检查重复失败"
-    language = LanguageSystemAgent(application_ports=ports)
+    language = LanguageSystemAgent(
+        application_ports=ports,
+        state_registry=TribeStateRegistry(),
+    )
     parsed = language.wernicke_deep_parse(user_text="复杂输入", intent_type="complex")
     assert parsed["source"] == "wernicke_llm"
     assert parsed["implicit_need"] == "需求"
     assert language.broca_generate_opening_hint(emotional_pressure=0.8) == "先慢慢说"
-    immune = ImmuneAgent(application_ports=ports).semantic_intent_analysis(text="灰区", rule_score=0.4)
+    immune = ImmuneAgent(
+        application_ports=ports,
+        state_registry=TribeStateRegistry(),
+    ).semantic_intent_analysis(text="灰区", rule_score=0.4)
     assert immune["intent_class"] == "SUSPICIOUS"
     assert immune["source"] == "semantic_llm"
-    style = MotorCortexAgent(application_ports=ports).plan_speak_style(arousal=0.8)
+    style = MotorCortexAgent(
+        application_ports=ports,
+        state_registry=TribeStateRegistry(),
+    ).plan_speak_style(arousal=0.8)
     assert style == {
         "speed": 1.1,
         "pause_hint": "短",

@@ -453,22 +453,18 @@ class MirrorNeuronAgent:
         )
 
 
-_MIRROR_NEURON_AGENT: MirrorNeuronAgent | None = None
-
-
 def get_mirror_neuron_agent() -> MirrorNeuronAgent:
-    global _MIRROR_NEURON_AGENT
-    if _MIRROR_NEURON_AGENT is None:
-        _MIRROR_NEURON_AGENT = MirrorNeuronAgent()
-    return _MIRROR_NEURON_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "mirror_neuron_agent",
+        expected_type=MirrorNeuronAgent,
+    )
 
 
-def set_mirror_neuron_agent(agent: MirrorNeuronAgent | None) -> None:
-    global _MIRROR_NEURON_AGENT
-    _MIRROR_NEURON_AGENT = agent
-
-
-__all__ = ["MirrorNeuronAgent", "get_mirror_neuron_agent", "set_mirror_neuron_agent"]
+__all__ = ["MirrorNeuronAgent", "get_mirror_neuron_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

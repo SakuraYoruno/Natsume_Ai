@@ -8,6 +8,9 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
+import host_brain.contracts.task_runtime_feature_canary as canonical_canary
+import host_brain.persistence.task_runtime_feature_canary_repository as canary_repository
+import host_brain.task_runtime.feature_canary as legacy_canary
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.reconciliation_proof_verifier import (
     Ed25519ReconciliationProofVerifier,
@@ -31,6 +34,28 @@ NOW_MS = 1_900_000_000_000
 BUILD_SHA = "a" * 40
 MIGRATION_VERSION = 120
 KEY_ID = "task-runtime-canary-v1"
+
+
+def test_feature_canary_contract_has_one_authority_neutral_type_identity() -> None:
+    """Persistence and the legacy runtime path must share one contract object."""
+
+    assert (
+        legacy_canary.TaskRuntimeFeatureCanaryReceipt
+        is canonical_canary.TaskRuntimeFeatureCanaryReceipt
+    )
+    assert (
+        legacy_canary.TaskRuntimeFeatureCanaryError
+        is canonical_canary.TaskRuntimeFeatureCanaryError
+    )
+    assert (
+        canary_repository.TaskRuntimeFeatureCanaryReceipt
+        is canonical_canary.TaskRuntimeFeatureCanaryReceipt
+    )
+    repository_source = (
+        Path(canary_repository.__file__).read_text(encoding="utf-8-sig")
+    )
+    assert "host_brain.task_runtime.feature_canary" not in repository_source
+    assert "host_brain.contracts.task_runtime_feature_canary" in repository_source
 
 
 def _store(tmp_path: Path) -> SQLiteTaskRuntimeFeatureCanaryReceiptStore:

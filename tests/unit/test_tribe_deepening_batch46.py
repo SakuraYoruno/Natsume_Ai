@@ -102,8 +102,9 @@ def test_t348_bond_progress_triggers_default_mode():
 def test_t349_reward_triggers_default_mode_when_high_intensity():
     """T-349：奖励强度 >= 0.25 时，record_reward 应联动 DefaultModeAgent.tick_idle_cycle()。"""
     from host_brain.tribe.pain_reward_agent import PainRewardAgent
+    from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agent = PainRewardAgent()
+    agent = PainRewardAgent(state_registry=TribeStateRegistry())
     mock_dma = MagicMock()
     mock_dma.tick_idle_cycle = MagicMock()
 
@@ -120,8 +121,9 @@ def test_t349_reward_triggers_default_mode_when_high_intensity():
 def test_t349_reward_no_tick_when_low_intensity():
     """T-349：奖励强度 < 0.25 时，不应联动 DefaultModeAgent.tick_idle_cycle()。"""
     from host_brain.tribe.pain_reward_agent import PainRewardAgent
+    from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agent = PainRewardAgent()
+    agent = PainRewardAgent(state_registry=TribeStateRegistry())
     mock_dma = MagicMock()
 
     with patch("host_brain.tribe.pain_reward_agent.get_default_mode_agent", return_value=mock_dma), \

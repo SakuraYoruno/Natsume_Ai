@@ -56,8 +56,18 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
     monkeypatch.setattr(http_hooks, "_shutdown_runtime", record_shutdown)
 
     class _TribeRuntime:
+        event_bus = object()
+
         def bind_application_ports(self, **_kwargs) -> None:
             events.append("tribe-bind")
+
+        def activate_execution_context(self, **_kwargs) -> object:
+            events.append("tribe-context-activate")
+            return object()
+
+        def deactivate_execution_context(self, _activation: object) -> bool:
+            events.append("tribe-context-deactivate")
+            return True
 
         def unbind_application_ports(self, **_kwargs) -> bool:
             events.append("tribe-unbind")
@@ -87,21 +97,44 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
                 get_ans_agent=object,
             ),
             tribe_runtime=_TribeRuntime(),
+            begin_authority_runtime=lambda: events.append(
+                "authority-begin"
+            ),
+            close_authority_runtime=lambda: events.append(
+                "authority-close"
+            ),
+            begin_bond_runtime=lambda: events.append("bond-begin"),
+            close_bond_runtime=lambda: events.append("bond-close"),
+            begin_governance_runtime=lambda: events.append(
+                "governance-begin"
+            ),
+            close_governance_runtime=lambda: events.append(
+                "governance-close"
+            ),
         ):
             events.append("body")
             raise RuntimeError("lifespan body failed")
 
-    assert events == ["tribe-bind", "body", "shutdown", "tribe-unbind"]
+    assert events == [
+        "authority-begin",
+        "governance-begin",
+        "bond-begin",
+        "tribe-bind",
+        "tribe-context-activate",
+        "body",
+        "shutdown",
+        "bond-close",
+        "governance-close",
+        "authority-close",
+        "tribe-context-deactivate",
+        "tribe-unbind",
+    ]
     assert host_lifecycle.is_open is False
 
 
 @pytest.mark.asyncio
 async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from host_brain.app import internal_tribe_routes
-    from host_brain.tribe import cortex_agent
-
     events: list[str] = []
 
     class SyncStop:
@@ -114,29 +147,20 @@ async def test_shutdown_helper_stops_resources_and_critical_paths_in_order(
             if self.fail:
                 raise RuntimeError(f"{self.name} failed")
 
-    class Cortex:
-        def shutdown_bond_update_queue(self, *, logger, timeout_s: float) -> None:
-            assert logger is test_logger
-            assert timeout_s == 3.0
-            events.append("bond-queue")
-
     class Bus:
         async def stop(self) -> None:
             events.append("tribe-bus")
 
     test_logger = logging.getLogger("test.aw01.runtime-shutdown")
-    monkeypatch.setattr(cortex_agent, "get_cortex_agent", Cortex)
-    monkeypatch.setattr(internal_tribe_routes, "get_tribe_event_bus", Bus)
-
     await http_hooks._shutdown_runtime(
         activity_monitor=SyncStop("activity", fail=True),
         resource_manager=SyncStop("resource"),
+        tribe_event_bus=Bus(),
         logger=test_logger,
     )
 
     assert events == [
         "activity",
         "resource",
-        "bond-queue",
         "tribe-bus",
     ]

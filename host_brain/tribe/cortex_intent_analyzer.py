@@ -174,9 +174,7 @@ class CortexIntentAnalyzer:
 
         # ── 10. bond_trend_hint（SocialBrainAgent 快照）T-54 ─────────────────
         try:
-            from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
-
-            _sba_snap = get_global_registry().get_state("social_brain_agent") or {}
+            _sba_snap = self.state_registry.get_state("social_brain_agent") or {}
             _sba_state = dict(_sba_snap.get("state") or {})
             _hint = str(_sba_state.get("bond_trend_hint") or "").strip().lower()
             if _hint:

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import datetime as _dt
 import json
@@ -832,7 +832,7 @@ class PrefrontalAgent:
         narrative_text = str(narrative or "").strip()
         ctx = dict(context or {})
         trace_id = f"autobio_gate_{now_ms()}"
-        registry = get_global_registry()
+        registry = self.state_registry
         vitals = registry.aggregate_vital_signs()
         gate_state = str(vitals.get("gate_state") or "open").strip().lower()
         immune_risk = str(vitals.get("immune_risk_level") or "none").strip().lower()
@@ -1575,22 +1575,18 @@ class PrefrontalAgent:
             _logger.warning("PrefrontalAgent._on_immune_block_growth 异常: %s", exc)
 
 
-_PREFRONTAL_AGENT: PrefrontalAgent | None = None
-
-
 def get_prefrontal_agent() -> PrefrontalAgent:
-    global _PREFRONTAL_AGENT
-    if _PREFRONTAL_AGENT is None:
-        _PREFRONTAL_AGENT = PrefrontalAgent()
-    return _PREFRONTAL_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "prefrontal_agent",
+        expected_type=PrefrontalAgent,
+    )
 
 
-def set_prefrontal_agent(agent: PrefrontalAgent | None) -> None:
-    global _PREFRONTAL_AGENT
-    _PREFRONTAL_AGENT = agent
-
-
-__all__ = ["PrefrontalAgent", "get_prefrontal_agent", "set_prefrontal_agent"]
+__all__ = ["PrefrontalAgent", "get_prefrontal_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401

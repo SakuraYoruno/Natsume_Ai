@@ -25,15 +25,13 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
     from host_brain.app import health_routes
     from host_brain.app import memory_routes
     from host_brain.app import web_ui
+    from host_brain.app.host_route_ports import HostRoutePorts
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("GET opened a canonical source")
 
     projection_store = _EmptyProjectionStore()
     monkeypatch.setattr(dependencies, "get_ledger", forbidden)
-    monkeypatch.setattr(digital_life_routes, "get_ledger", forbidden)
-    monkeypatch.setattr(health_routes, "get_ledger", forbidden)
-    monkeypatch.setattr(memory_routes, "get_ledger", forbidden)
 
     world = asyncio.run(
         digital_life_routes.digital_life_world_snapshot(
@@ -41,6 +39,7 @@ def test_eight_host_gets_do_not_open_canonical_sources(monkeypatch) -> None:
             session_id="session-1",
             fact_key=[],
             projection_store=projection_store,
+            _route_ports=HostRoutePorts(),
         )
     )
     canon = asyncio.run(

@@ -61,6 +61,7 @@ def create_host_fastapi_app(
     input_runtime_ports: InputRuntimeApplicationPorts,
 ) -> FastAPI:
     effective_route_ports = route_ports or HostRoutePorts(
+        ledger_provider=get_ledger,
         canon_service_provider=canon_service_provider,
         tool_broker_provider=get_tool_broker,
         tool_catalog_provider=get_tool_catalog,

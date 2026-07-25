@@ -163,6 +163,11 @@ async def test_unbound_governed_chat_port_fails_closed_without_surface_authority
         match="requires lifespan-owned SurfaceRuntimePorts",
     ):
         _ = [event async for event in ports.surface_reply_sse_generator(object())]
+    with pytest.raises(
+        RouteExecutionBoundaryError,
+        match="requires lifespan-owned SurfaceRuntimePorts",
+    ):
+        ports.resolve_surface_reply_llm_runtime(base_runtime={})
 
 
 @pytest.mark.asyncio
@@ -193,6 +198,10 @@ async def test_bound_governed_chat_port_forwards_the_injected_surface_authority(
 
     assert events == ["data: explicit-surface-ports\n\n"]
     assert captured == ["frozen-input", surface_ports]
+    assert (
+        route_ports.resolve_surface_reply_llm_runtime
+        is surface_ports.resolve_surface_reply_llm_runtime
+    )
 
 
 @pytest.mark.asyncio

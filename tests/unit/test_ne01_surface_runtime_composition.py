@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.app import internal_runtime_composition
 from host_brain.app import surface_main_chain_adapter
 from host_brain.app import surface_runtime_composition
@@ -22,6 +23,12 @@ async def _async_stub(**_kwargs: Any) -> Any:
 
 
 def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRuntimeApplicationPorts:
+    context_read_ports = ConversationContextReadPorts(
+        conversation_history=lambda: "conversation-history",
+        conversation_turn_store=lambda: "conversation-turn-store",
+        session_topic_ledger_store=lambda: "session-topic-ledger-store",
+        session_tactic_ledger_store=lambda: "session-tactic-ledger-store",
+    )
     return AgentRuntimeApplicationPorts(
         record_user_turn=lambda **_kwargs: None,
         record_assistant_turn=lambda **_kwargs: None,
@@ -29,6 +36,9 @@ def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRun
         filter_retrieval_evidence_items_for_prompt=lambda **_kwargs: [],
         build_user_preference_pack=lambda **_kwargs: {},
         resolve_host_llm_runtime_async=_async_stub,
+        resolve_surface_reply_llm_runtime=lambda **kwargs: dict(
+            kwargs.get("base_runtime") or {}
+        ),
         resolve_state_arbiter_bond_fact=_async_stub,
         apply_surface_emotion_bond_flow=lambda **_kwargs: {},
         build_conversation_experience_read_pack=lambda **kwargs: {
@@ -42,6 +52,7 @@ def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRun
         audit_ledger=lambda: ledger,
         prompt_registry=lambda: object(),
         model_attempt_service=lambda: model_attempt_service,
+        context_read_ports=context_read_ports,
         task_status_projection=lambda: object(),
         persist_post_process_audit=_async_stub,
     )
@@ -90,6 +101,9 @@ def test_surface_runtime_ports_bind_one_lifespan_authority_pair(
         "status": "BOUND"
     }
     assert observed["life_snapshot_reader"] is snapshot_reader
+    assert observed["context_read_ports"].conversation_history() == (
+        "conversation-history"
+    )
     assert observed["user_message"] == "显式端口"
 
 

@@ -778,27 +778,20 @@ def _classify_hedonic_tone(net_valence: float) -> str:
         return "suffering"
 
 
-_PAIN_REWARD_AGENT: PainRewardAgent | None = None
-
-
 def get_pain_reward_agent() -> PainRewardAgent:
-    global _PAIN_REWARD_AGENT
-    if _PAIN_REWARD_AGENT is None:
-        _PAIN_REWARD_AGENT = PainRewardAgent()
-        # T-27：启动时自动加载持久化状态，避免重启后 hedonic_state 归零
-        _PAIN_REWARD_AGENT.load_state()
-    return _PAIN_REWARD_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_pain_reward_agent(agent: PainRewardAgent | None) -> None:
-    global _PAIN_REWARD_AGENT
-    _PAIN_REWARD_AGENT = agent
+    return require_active_tribe_agent(
+        "pain_reward_agent",
+        expected_type=PainRewardAgent,
+    )
 
 
 __all__ = [
     "PainRewardAgent",
     "get_pain_reward_agent",
-    "set_pain_reward_agent",
     "PAIN_SOURCES",
     "REWARD_SOURCES",
 ]

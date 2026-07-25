@@ -14,8 +14,6 @@ paths never enter the projection database.
 
 from __future__ import annotations
 
-import json
-import os
 import threading
 import time
 from collections.abc import Mapping
@@ -24,6 +22,10 @@ from typing import Any, Callable
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState
 
+from host_brain.contracts.resource_manager_status import (
+    RESOURCE_MANAGER_STATUS_AGGREGATE_TYPE,
+    RESOURCE_MANAGER_STATUS_EVENT_TYPE,
+)
 from .projection_runtime import projection_meta
 from host_brain.observability.projection_store import QueryProjectionStore, digest_json
 
@@ -212,75 +214,96 @@ def refresh_life_body_projection(
     return {"document_count": 1}
 
 
-def _resource_manager_status_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
-
-
-def _read_resource_manager_file(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return dict(payload) if isinstance(payload, Mapping) else {}
-
-
 def load_resource_manager_projection_source(
     *,
-    manager_provider: Callable[[], Any | None] | None = None,
-    status_path: Path | None = None,
+    event_store: Any,
 ) -> tuple[dict[str, Any], int, str]:
-    """Background source for live manager state with file fallback."""
+    """Read the latest Host-fenced status head from the canonical journal."""
 
     from host_brain.app.obs_routes_core import _compact_resource_manager_status
 
-    enabled = str(os.environ.get("HOST_RESOURCE_MANAGER_ENABLED") or "").strip().lower()
-    if enabled not in {"1", "true", "yes", "on"}:
-        now = int(time.time() * 1000)
+    try:
+        heads = event_store.list_latest_event_heads(
+            aggregate_type=RESOURCE_MANAGER_STATUS_AGGREGATE_TYPE,
+            event_type=RESOURCE_MANAGER_STATUS_EVENT_TYPE,
+            limit=100,
+        )
+    except Exception as exc:
         return (
             {
-                "status": "DISABLED",
-                "source": "disabled",
-                "timestamp": now,
+                "status": "UNAVAILABLE",
+                "source": "runtime_event_journal",
+                "timestamp": 0,
                 "running": False,
                 "registered": False,
-                "detail": "SystemResourceManager is disabled.",
+                "reason_code": "RESOURCE_MANAGER_STATUS_JOURNAL_UNAVAILABLE",
+                "detail": type(exc).__name__,
                 "status_ref": "resource-manager://status/current",
             },
-            now,
-            "disabled",
+            0,
+            "runtime_event_journal",
         )
-    raw: dict[str, Any] = {}
-    source = "unavailable"
-    try:
-        manager = manager_provider() if manager_provider is not None else None
-        if manager is not None:
-            value = manager.get_status()
-            raw = dict(value) if isinstance(value, Mapping) else {}
-            source = "live_manager"
-    except Exception:
-        raw = {}
-    path = status_path or _resource_manager_status_path()
-    if not raw:
-        raw = _read_resource_manager_file(path)
-        if raw:
-            source = "status_file"
-    cursor = max(
-        int(raw.get("last_tick_ts_ms") or 0),
-        int(path.stat().st_mtime * 1000) if source == "status_file" and path.exists() else 0,
-        int(time.time() * 1000),
+    if not heads:
+        return (
+            {
+                "status": "UNAVAILABLE",
+                "source": "runtime_event_journal",
+                "timestamp": 0,
+                "running": False,
+                "registered": False,
+                "reason_code": "RESOURCE_MANAGER_STATUS_NOT_RECORDED",
+                "status_ref": "resource-manager://status/current",
+            },
+            0,
+            "runtime_event_journal",
+        )
+    record = max(
+        heads,
+        key=lambda item: (
+            int(item.get("cursor") or 0),
+            int(item.get("aggregate_version") or 0),
+        ),
     )
+    durable = dict(record.get("payload") or {})
+    raw = durable.get("status")
+    if (
+        not isinstance(raw, Mapping)
+        or str(durable.get("runtime_scope_id") or "")
+        != str(record.get("aggregate_id") or "")
+        or int(durable.get("status_revision") or 0)
+        != int(record.get("aggregate_version") or 0)
+        or int(durable.get("observed_at_ms") or 0)
+        != int(record.get("ts_ms") or 0)
+    ):
+        return (
+            {
+                "status": "UNAVAILABLE",
+                "source": "runtime_event_journal",
+                "timestamp": 0,
+                "running": False,
+                "registered": False,
+                "reason_code": "RESOURCE_MANAGER_STATUS_DURABLE_DATA_INVALID",
+                "status_ref": "resource-manager://status/current",
+            },
+            int(record.get("cursor") or 0),
+            "runtime_event_journal",
+        )
+    observed_at_ms = int(durable["observed_at_ms"])
+    cursor = int(record.get("cursor") or 0)
     payload = {
-        "status": "OK" if raw else "UNAVAILABLE",
-        "source": source,
-        "timestamp": cursor,
-        **_compact_resource_manager_status(raw),
+        "status": "OK",
+        "source": "runtime_event_journal",
+        "timestamp": observed_at_ms,
+        **_compact_resource_manager_status(dict(raw)),
+        "registered": True,
+        "runtime_scope_id": str(durable["runtime_scope_id"]),
+        "status_revision": int(durable["status_revision"]),
+        "status_event_id": str(record.get("event_id") or ""),
+        "status_payload_digest": str(record.get("payload_digest") or ""),
+        "status_reason": str(durable.get("reason") or ""),
     }
-    # Never persist a machine-local status path.
-    payload.pop("status_path", None)
     payload["status_ref"] = "resource-manager://status/current"
-    return payload, cursor, source
+    return payload, cursor, "runtime_event_journal"
 
 
 _BIO_METADATA_FIELDS = frozenset(

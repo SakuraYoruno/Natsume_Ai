@@ -1,7 +1,11 @@
-"""EdgeCommandPusher：host_brain → edge_client 下行指令推送客户端。
+"""Proof-bound host_brain → edge_client command transport.
 
-Phase 6 T-124：实现大脑族向躯干族推送下行指令的 HTTP 客户端。
-支持两类指令：
+This module owns only the low-level HTTP adapter.  Production callers must
+construct it inside an app-local governed execution boundary and provide an
+exact node-bound ``ActionPreviewExecutionProof``.  It deliberately exposes no
+process-global instance or service-locator accessor.
+
+The adapter supports two compatibility command shapes:
   - emotion_state_command：LimbicAgent 推送情绪状态变化，驱动 vts_driver 表情
   - gate_control_command：CortexAgent 推送门控指令，控制 ChannelAgent 消息路由
 """
@@ -86,12 +90,17 @@ def edge_command_preview_scope(action_args: dict[str, Any]) -> str:
 
 
 class EdgeCommandPusher:
-    """向 edge_client /internal/tribe_command 推送下行指令的 HTTP 客户端。
+    """向 edge_client /internal/tribe_command 推送下行指令的低层 HTTP 适配器。
 
-    使用方式：
+    测试或受治理执行边界内的使用方式：
         pusher = EdgeCommandPusher.from_env()
-        pusher.push_emotion_state(emotion_tag="JOY", intensity=0.8)
-        pusher.push_gate_control(gate_open=False, reason="platform_disconnected")
+        pusher.push_emotion_state(
+            emotion_tag="JOY",
+            intensity=0.8,
+            action_preview_proof=proof,
+        )
+
+    ``from_env`` 只解析传输配置，不注册进程级 owner，也不授予执行权限。
     """
 
     def __init__(
@@ -385,46 +394,8 @@ class EdgeCommandPusher:
             action_preview_proof=action_preview_proof,
         )
 
-
-# ── 全局单例 ──────────────────────────────────────────────────────────────────
-
-_PUSHER: EdgeCommandPusher | None = None
-_PUSHER_LOCK: threading.Lock = threading.Lock()
-
-
-def get_edge_command_pusher() -> EdgeCommandPusher | None:
-    """获取全局 EdgeCommandPusher 单例（未初始化时返回 None）。"""
-    return _PUSHER
-
-
-def init_edge_command_pusher(pusher: EdgeCommandPusher | None = None) -> EdgeCommandPusher:
-    """初始化全局 EdgeCommandPusher 单例。
-
-    Args:
-        pusher: 可选，若不传则从环境变量自动构建。
-    """
-    global _PUSHER
-    if pusher is not None and type(pusher) is not EdgeCommandPusher:
-        raise TypeError("EdgeCommandPusher injection must use the canonical gated type")
-    with _PUSHER_LOCK:
-        if _PUSHER is None:
-            _PUSHER = pusher or EdgeCommandPusher.from_env()
-    return _PUSHER
-
-
-def set_edge_command_pusher(pusher: EdgeCommandPusher | None) -> None:
-    """强制替换全局单例（用于测试）。"""
-    global _PUSHER
-    if pusher is not None and type(pusher) is not EdgeCommandPusher:
-        raise TypeError("EdgeCommandPusher injection must use the canonical gated type")
-    _PUSHER = pusher
-
-
 __all__ = [
     "EdgeCommandPusher",
     "build_edge_command_preview_args",
     "edge_command_preview_scope",
-    "get_edge_command_pusher",
-    "init_edge_command_pusher",
-    "set_edge_command_pusher",
 ]

@@ -449,21 +449,3 @@ class SecurityImmuneAgent:
             )
         except Exception:
             return
-
-
-_global_security_immune_agent: SecurityImmuneAgent | None = None
-_global_lock = threading.Lock()
-
-
-def get_security_immune_agent(
-    *,
-    ledger_provider: Callable[[], Any] | None = None,
-    reset: bool = False,
-) -> SecurityImmuneAgent:
-    global _global_security_immune_agent
-    with _global_lock:
-        if reset or _global_security_immune_agent is None:
-            _global_security_immune_agent = SecurityImmuneAgent(ledger_provider=ledger_provider)
-        elif ledger_provider is not None and _global_security_immune_agent.ledger_provider is None:
-            _global_security_immune_agent.ledger_provider = ledger_provider
-        return _global_security_immune_agent

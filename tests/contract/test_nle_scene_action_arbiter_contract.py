@@ -508,8 +508,6 @@ def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(
         expires_at_ms=now + 120_000,
     )
     monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
-    monkeypatch.setattr("host_brain.composition.process_services.get_skill_registry", lambda: registry)
-    monkeypatch.setattr("host_brain.composition.process_services.get_token_service", lambda: token_service)
     ledger = SQLiteLedger(tmp_path / "nle-scene-skill.sqlite3")
     capability_broker = build_production_capability_runtime(
         execution_journal=SQLiteCapabilityExecutionJournal(ledger),

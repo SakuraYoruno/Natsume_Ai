@@ -678,6 +678,58 @@ class RuntimeEventStore:
             raise RuntimeEventError(exc.reason_code, exc.detail) from exc
         return _runtime_event_record(row) if row is not None else None
 
+    def get_latest_event_for_aggregate(
+        self,
+        *,
+        aggregate_type: str,
+        aggregate_id: str,
+    ) -> dict[str, Any] | None:
+        """Read the latest durable revision for one exact aggregate."""
+
+        kind = _require_text(
+            aggregate_type,
+            field_name="aggregate_type",
+            max_length=128,
+        )
+        identity = _require_text(aggregate_id, field_name="aggregate_id")
+        try:
+            row = self._repository.get_latest_journal_for_aggregate(
+                aggregate_type=kind,
+                aggregate_id=identity,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+        return _runtime_event_record(row) if row is not None else None
+
+    def list_latest_event_heads(
+        self,
+        *,
+        aggregate_type: str,
+        event_type: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Read one latest durable row per aggregate identity."""
+
+        kind = _require_text(
+            aggregate_type,
+            field_name="aggregate_type",
+            max_length=128,
+        )
+        event = _require_text(
+            event_type,
+            field_name="event_type",
+            max_length=128,
+        )
+        try:
+            rows = self._repository.list_latest_journal_heads(
+                aggregate_type=kind,
+                event_type=event,
+                limit=limit,
+            )
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+        return [_runtime_event_record(row) for row in rows]
+
     def list_events_for_aggregates(
         self,
         *,

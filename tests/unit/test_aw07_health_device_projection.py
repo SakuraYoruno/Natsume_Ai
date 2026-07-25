@@ -241,7 +241,12 @@ def test_organ_public_snapshot_uses_only_explicit_evidence(monkeypatch) -> None:
         def snapshot(self):
             raise AssertionError("public snapshot builder read the global registry")
 
-    monkeypatch.setattr(tribe_state, "_GLOBAL_REGISTRY", ForbiddenRegistry())
+    monkeypatch.setattr(
+        tribe_state,
+        "_GLOBAL_REGISTRY",
+        ForbiddenRegistry(),
+        raising=False,
+    )
     monkeypatch.setitem(
         sys.modules,
         "host_brain.tribe.prefrontal_agent",
@@ -284,6 +289,7 @@ def test_organ_public_snapshot_uses_only_explicit_evidence(monkeypatch) -> None:
         row for row in payload["agents"] if row["agent_id"] == "social_brain_agent"
     )
     assert payload["total_agents"] == len(ORGAN_AGENT_REGISTRY) == 23
+    assert all(len(entry) == 2 for entry in ORGAN_AGENT_REGISTRY)
     assert [row["agent_id"] for row in payload["agents"]] == [
         row[0] for row in ORGAN_AGENT_REGISTRY
     ]

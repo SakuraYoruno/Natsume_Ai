@@ -38,6 +38,7 @@ def _host_services(**overrides: object) -> HostLifecycleApplicationPorts:
         "life_memory_store": provider,
         "life_memory_service": provider,
         "conversation_history": provider,
+        "conversation_turn_store": provider,
         "bond_neo4j_client": provider,
         "prompt_registry": provider,
         "bond_update_queue": provider,
@@ -210,6 +211,8 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
         host_services=host_services,
         life_authority_provider=lambda: (object(), object()),
     )
+    assert ports.context_read_ports.session_topic_ledger_store() is topic_store
+    assert ports.context_read_ports.session_tactic_ledger_store() is tactic_store
 
     assert ports.record_assistant_turn(
         request_id="request-scoped-dependencies",

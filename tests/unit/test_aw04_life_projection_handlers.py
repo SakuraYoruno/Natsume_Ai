@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.app.life_projection_handlers import handle_life_projection
 from natsume_contracts.life import (
     LifeIntentKind,
@@ -36,6 +37,9 @@ def _agent_runtime_ports() -> AgentRuntimeApplicationPorts:
         filter_retrieval_evidence_items_for_prompt=lambda value, **_kwargs: value,
         build_user_preference_pack=lambda **_kwargs: {},
         resolve_host_llm_runtime_async=_async_value,
+        resolve_surface_reply_llm_runtime=lambda **kwargs: dict(
+            kwargs.get("base_runtime") or {}
+        ),
         resolve_state_arbiter_bond_fact=_async_value,
         apply_surface_emotion_bond_flow=lambda **_kwargs: {},
         build_conversation_experience_read_pack=lambda **_kwargs: {},
@@ -46,6 +50,12 @@ def _agent_runtime_ports() -> AgentRuntimeApplicationPorts:
         audit_ledger=lambda: object(),
         prompt_registry=lambda: object(),
         model_attempt_service=lambda: object(),
+        context_read_ports=ConversationContextReadPorts(
+            conversation_history=lambda: object(),
+            conversation_turn_store=lambda: object(),
+            session_topic_ledger_store=lambda: object(),
+            session_tactic_ledger_store=lambda: object(),
+        ),
         task_status_projection=lambda: {},
         persist_post_process_audit=_async_value,
     )

@@ -9,6 +9,7 @@ import time
 import pytest
 
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.app.host_runtime_context_wiring import compose_host_runtime_context
 from host_brain.app.acceptance_effect_handlers import (
@@ -156,6 +157,9 @@ def _production_acceptance_effect_ports(
         filter_retrieval_evidence_items_for_prompt=lambda **_kwargs: [],
         build_user_preference_pack=lambda **_kwargs: {},
         resolve_host_llm_runtime_async=_unused_async,
+        resolve_surface_reply_llm_runtime=lambda **kwargs: dict(
+            kwargs.get("base_runtime") or {}
+        ),
         resolve_state_arbiter_bond_fact=_unused_async,
         apply_surface_emotion_bond_flow=lambda **_kwargs: {},
         build_conversation_experience_read_pack=lambda **_kwargs: {},
@@ -166,6 +170,12 @@ def _production_acceptance_effect_ports(
         audit_ledger=lambda: ledger,
         prompt_registry=lambda: None,
         model_attempt_service=lambda: None,
+        context_read_ports=ConversationContextReadPorts(
+            conversation_history=lambda: None,
+            conversation_turn_store=lambda: None,
+            session_topic_ledger_store=lambda: topic_ledger_store,
+            session_tactic_ledger_store=lambda: tactic_ledger_store,
+        ),
         task_status_projection=lambda: None,
         persist_post_process_audit=_unused_async,
     )

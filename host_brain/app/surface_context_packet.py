@@ -5,6 +5,7 @@ from typing import Any
 
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.digital_life.application_boundary import (
     project_surface_organ_context,
     read_life_snapshot,
@@ -43,6 +44,7 @@ _MEMORY_PACKET_KEYS = (
 def build_surface_context_packet(
     *,
     life_snapshot_reader: Any,
+    context_read_ports: ConversationContextReadPorts | None = None,
     user_message: str,
     render_target_lang: str = "zh",
     emotion_context: Mapping[str, Any] | None = None,
@@ -94,6 +96,7 @@ def build_surface_context_packet(
     context_plane = assemble_prompt_context_plane(
         node_id=SURFACE_CONTEXT_NODE_ID,
         runtime_payload=runtime_payload,
+        context_read_ports=context_read_ports,
         history_max_turns=(6 if initial_compact_lane else None),
         allow_older_summary=(not initial_compact_lane),
     )
@@ -107,6 +110,7 @@ def build_surface_context_packet(
         context_plane = assemble_prompt_context_plane(
             node_id=SURFACE_CONTEXT_NODE_ID,
             runtime_payload=runtime_payload,
+            context_read_ports=context_read_ports,
             history_max_turns=6,
             allow_older_summary=False,
         )

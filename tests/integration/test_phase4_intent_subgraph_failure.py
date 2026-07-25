@@ -20,6 +20,12 @@ from host_brain.integrations.graph_contract import (
     PAYLOAD_KEY_SUBGRAPH_FAILURE,
     SUBGRAPH_FAILURE_KEYS,
 )
+from host_brain.composition.host_application import (
+    build_production_host_application_ports,
+)
+from host_brain.app.application_port_wiring import (
+    build_process_application_ports,
+)
 
 
 @pytest.fixture
@@ -35,7 +41,23 @@ def intent_graph_config():
     )
 
 
-def test_intent_exec_subgraph_failure_contained_and_consumable(monkeypatch, intent_graph_config):
+@pytest.fixture
+def host_graph_runtime():
+    ports = build_production_host_application_ports(
+        process_application_ports=build_process_application_ports()
+    )
+    ports.begin_authority_runtime()
+    try:
+        yield ports.lifecycle.graph_runtime()
+    finally:
+        ports.close_authority_runtime()
+
+
+def test_intent_exec_subgraph_failure_contained_and_consumable(
+    monkeypatch,
+    intent_graph_config,
+    host_graph_runtime,
+):
     """子图 core_reasoner_primary 失败时：payload 有 subgraph_failure，下游可消费，无跨图污染。"""
     from host_brain.integrations import graph_executor
 
@@ -58,9 +80,7 @@ def test_intent_exec_subgraph_failure_contained_and_consumable(monkeypatch, inte
     monkeypatch.setenv("HOST_LLM_PROVIDER", "mock")
     monkeypatch.setenv("HOST_ENABLE_RETRIEVAL", "false")
 
-    from host_brain.composition.process_services import get_graph_runtime
-
-    runtime = get_graph_runtime()
+    runtime = host_graph_runtime
     request_id = "p4-integration-fail-001"
     payload = {
         "request_id": request_id,

@@ -1,12 +1,9 @@
-"""Typed application bindings consumed by the process composition root."""
+"""Frozen construction ports supplied explicitly to one Host app root."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
-
-from host_brain.composition.process_service_container import get_process_service_container
-
 
 Factory = Callable[..., Any]
 GraphHandlerBinding = tuple[str, Callable[..., Any]]
@@ -19,7 +16,17 @@ class ProcessApplicationPorts:
     model_base_url_resolver: Callable[[str], str | None]
     model_transport: Callable[..., str | dict[str, Any]]
     graph_handler_bindings: Callable[[], Sequence[GraphHandlerBinding]]
+    graph_runtime_factory: Factory
+    bond_stage_engine_factory: Factory
+    bond_dynamics_writer_factory: Factory
+    bond_update_queue_factory: Factory
+    shared_memory_index_factory: Factory
     multimodal_observer_factory: Factory
+    conversation_turn_store_factory: Factory
+    conversation_history_factory: Factory
+    session_topic_ledger_store_factory: Factory
+    session_tactic_ledger_store_factory: Factory
+    security_immune_agent_factory: Factory
     capability_gap_telemetry_factory: Factory
     capability_forge_service_factory: Factory
     routing_matrix_factory: Factory
@@ -33,24 +40,10 @@ class ProcessApplicationPorts:
     build_edge_dependency_probe_statuses: Callable[..., Any]
     collect_dependency_probes: Callable[..., Any]
     collect_dependency_probes_sync: Callable[..., Any]
-
-
-def configure_process_application_ports(ports: ProcessApplicationPorts) -> None:
-    if not isinstance(ports, ProcessApplicationPorts):
-        raise TypeError("ports must be ProcessApplicationPorts")
-    get_process_service_container().application_ports = ports
-
-
-def require_process_application_ports() -> ProcessApplicationPorts:
-    ports = get_process_service_container().application_ports
-    if ports is None:
-        raise RuntimeError("PROCESS_APPLICATION_PORTS_NOT_CONFIGURED")
-    return ports
-
+    life_snapshot_reader: Callable[[], Any]
+    user_emotion_profile: Callable[[], Any]
 
 __all__ = [
     "GraphHandlerBinding",
     "ProcessApplicationPorts",
-    "configure_process_application_ports",
-    "require_process_application_ports",
 ]

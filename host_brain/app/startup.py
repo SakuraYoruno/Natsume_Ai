@@ -5,14 +5,15 @@
   - 启动时预热（EmotionTimeline、SkillRegistry 等）
   - 提供 warmup_all() 供 runtime_lifespan 调用
 
-与 dependencies.py 的分工：
-  - dependencies.py：只保留 get_xxx() 懒加载工厂函数（单例获取）
-  - startup.py：启动时主动调用的初始化/预热/探测逻辑
+依赖边界：
+  - Host composition 在 lifespan 开始时冻结 StartupApplicationPorts
+  - startup.py 只消费这些端口并执行有界预热/探测，不回读进程服务定位器
 """
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
@@ -20,9 +21,64 @@ import threading
 import time
 from typing import Any, Awaitable, Callable, Mapping, TypeVar
 
+from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
+from host_brain.core.edge_endpoint_config import (
+    resolve_edge_base_url,
+    resolve_edge_base_urls,
+)
+
 _logger = logging.getLogger("Natsume.startup")
 _AsyncT = TypeVar("_AsyncT")
-_SOUL_RUNTIME_STATE_PATH = Path(__file__).resolve().parents[1] / "data" / "runtime_soul_state.json"
+_SOUL_RUNTIME_STATE_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "runtime_soul_state.json"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class StartupApplicationPorts:
+    """App-local collaborators used only by bounded startup warmups."""
+
+    emotion_timeline: Callable[[], Any]
+    skill_registry: Callable[[], Any]
+    graph_runtime: Callable[[], Any]
+    ledger: Callable[[], Any]
+    prompt_registry: Callable[[], Any]
+    routing_matrix: Callable[[], Any]
+    intent_engine: Callable[[], Any]
+    state_write_arbiter: Callable[[], Any]
+    silence_engine: Callable[[], Any]
+    model_route_catalog: Callable[[], Any]
+    model_attempt_service: Callable[[], Any]
+    episodic_store: Callable[[], Any]
+
+
+def build_startup_application_ports(
+    host_services: HostLifecycleApplicationPorts,
+) -> StartupApplicationPorts:
+    """Freeze one Host lifespan's startup dependencies."""
+
+    if not isinstance(host_services, HostLifecycleApplicationPorts):
+        raise TypeError("host_services must be HostLifecycleApplicationPorts")
+    return StartupApplicationPorts(
+        emotion_timeline=host_services.require_provider("emotion_timeline"),
+        skill_registry=host_services.require_provider("skill_registry"),
+        graph_runtime=host_services.require_provider("graph_runtime"),
+        ledger=host_services.require_provider("ledger"),
+        prompt_registry=host_services.require_provider("prompt_registry"),
+        routing_matrix=host_services.require_provider("routing_matrix"),
+        intent_engine=host_services.require_provider("intent_engine"),
+        state_write_arbiter=host_services.require_provider(
+            "state_write_arbiter"
+        ),
+        silence_engine=host_services.require_provider("silence_engine"),
+        model_route_catalog=host_services.require_provider(
+            "model_route_catalog"
+        ),
+        model_attempt_service=host_services.require_provider(
+            "model_attempt_service"
+        ),
+        episodic_store=host_services.require_provider("episodic_store"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +117,7 @@ def _resolve_edge_probe_timeout_s() -> float:
 
 
 def _build_edge_rpc_skip_detail() -> str:
-    from host_brain.composition.process_services import get_edge_base_url  # noqa: PLC0415
-    return f"edge rpc skipped: gateway-only mode ({get_edge_base_url()})"
+    return f"edge rpc skipped: gateway-only mode ({resolve_edge_base_url()})"
 
 
 async def probe_edge_rpc_health() -> dict:
@@ -71,8 +126,6 @@ async def probe_edge_rpc_health() -> dict:
     从 dependencies.py 迁移，供 startup 和 health_routes 调用。
     """
     import time
-    from host_brain.composition.process_services import get_edge_base_url, get_edge_base_urls  # noqa: PLC0415
-
     t0 = int(time.time() * 1000)
     if not _is_edge_rpc_enabled():
         return {
@@ -83,26 +136,40 @@ async def probe_edge_rpc_health() -> dict:
             "base_url": "",
             "event": {},
         }
-    base_urls = get_edge_base_urls()
-    base_url = base_urls[0] if base_urls else get_edge_base_url()
+    base_urls = resolve_edge_base_urls()
+    base_url = base_urls[0] if base_urls else resolve_edge_base_url()
     try:
         import httpx
         last_error_detail = "edge rpc unreachable"
         attempts: list[str] = []
         for candidate in base_urls:
             try:
-                async with httpx.AsyncClient(timeout=_resolve_edge_probe_timeout_s(), trust_env=False) as client:
+                async with httpx.AsyncClient(
+                    timeout=_resolve_edge_probe_timeout_s(),
+                    trust_env=False,
+                ) as client:
                     resp = await client.get(f"{candidate}/v1/edge/health")
                 latency_ms = max(0, int(time.time() * 1000) - t0)
                 if resp.status_code == 200:
-                    body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                    body = (
+                        resp.json()
+                        if resp.headers.get("content-type", "").startswith(
+                            "application/json"
+                        )
+                        else {}
+                    )
                     return {
                         "available": True,
                         "status": str(body.get("status") or "OK"),
                         "detail": "edge rpc reachable",
                         "latency_ms": latency_ms,
                         "base_url": candidate,
-                        "event": dict(body.get("event") or {}) if isinstance(body, Mapping) and isinstance(body.get("event"), Mapping) else {},
+                        "event": (
+                            dict(body.get("event") or {})
+                            if isinstance(body, Mapping)
+                            and isinstance(body.get("event"), Mapping)
+                            else {}
+                        ),
                     }
                 last_error_detail = f"edge health returned HTTP {resp.status_code}"
                 attempts.append(f"{candidate}:HTTP{resp.status_code}")
@@ -356,28 +423,26 @@ def _run_async_sync(coro_factory: Callable[[], Awaitable[_AsyncT]]) -> _AsyncT:
 # 启动预热函数（从 dependencies.py 中的 get_xxx 内部逻辑提取）
 # ---------------------------------------------------------------------------
 
-def warmup_emotion_timeline() -> str:
+def warmup_emotion_timeline(*, ports: StartupApplicationPorts) -> str:
     """预热 EmotionTimeline：从 SQLite 加载最近 24h 情绪记录。
 
     返回状态字符串（"OK" / "DEGRADED: ..."）。
     """
     try:
-        from host_brain.composition.process_services import get_emotion_timeline  # noqa: PLC0415
-        get_emotion_timeline()
+        ports.emotion_timeline()
         return "OK"
     except Exception as exc:
         _logger.warning("EmotionTimeline 预热失败（降级）: %s", exc)
         return f"DEGRADED: {exc}"
 
 
-def warmup_skill_registry() -> str:
+def warmup_skill_registry(*, ports: StartupApplicationPorts) -> str:
     """预热 SkillRegistry：触发 MCP 工具注册和内置技能加载。
 
     返回状态字符串（"OK" / "DEGRADED: ..."）。
     """
     try:
-        from host_brain.composition.process_services import get_skill_registry  # noqa: PLC0415
-        registry = get_skill_registry()
+        registry = ports.skill_registry()
         skill_count = len(list(registry.all() or []))
         _logger.info("SkillRegistry 预热完成，已加载 %d 个技能", skill_count)
         return "OK"
@@ -386,14 +451,13 @@ def warmup_skill_registry() -> str:
         return f"DEGRADED: {exc}"
 
 
-def warmup_graph_runtime() -> str:
+def warmup_graph_runtime(*, ports: StartupApplicationPorts) -> str:
     """预热 GraphRuntimeContract：触发 handler 注册。
 
     返回状态字符串（"OK" / "DEGRADED: ..."）。
     """
     try:
-        from host_brain.composition.process_services import get_graph_runtime  # noqa: PLC0415
-        get_graph_runtime()
+        ports.graph_runtime()
         return "OK"
     except Exception as exc:
         _logger.warning("GraphRuntime 预热失败（降级）: %s", exc)
@@ -428,15 +492,18 @@ def _persist_runtime_soul_state(*, soul_id: str, source_path: str) -> None:
         _logger.warning("写入 runtime_soul_state 失败（忽略）: %s", exc)
 
 
-def _reset_short_term_continuity_for_soul_change(*, previous_soul_id: str, current_soul_id: str) -> str:
+def _reset_short_term_continuity_for_soul_change(
+    *,
+    previous_soul_id: str,
+    current_soul_id: str,
+    ledger_provider: Callable[[], Any],
+) -> str:
     try:
-        from host_brain.composition.process_services import (  # noqa: PLC0415
-            get_ledger,
-        )
-
         from host_brain.persistence.context_repository import ContextRepository  # noqa: PLC0415
 
-        cleared = ContextRepository.from_ledger(get_ledger()).reset_short_term_continuity()
+        cleared = ContextRepository.from_ledger(
+            ledger_provider()
+        ).reset_short_term_continuity()
         detail = (
             f"continuity reset for soul change "
             f"{str(previous_soul_id or '').strip() or '-'} -> {str(current_soul_id or '').strip() or '-'} "
@@ -450,7 +517,12 @@ def _reset_short_term_continuity_for_soul_change(*, previous_soul_id: str, curre
         return f"DEGRADED: {exc}"
 
 
-def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
+def _reconcile_runtime_soul_state(
+    *,
+    soul_id: str,
+    source_path: str,
+    ledger_provider: Callable[[], Any],
+) -> str:
     normalized_current = str(soul_id or "").strip()
     previous = _load_runtime_soul_state()
     normalized_previous = str(previous.get("soul_id") or "").strip()
@@ -458,6 +530,7 @@ def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
         reset_detail = _reset_short_term_continuity_for_soul_change(
             previous_soul_id="BOOTSTRAP",
             current_soul_id=normalized_current,
+            ledger_provider=ledger_provider,
         )
         _persist_runtime_soul_state(soul_id=normalized_current, source_path=source_path)
         return reset_detail
@@ -465,6 +538,7 @@ def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
         reset_detail = _reset_short_term_continuity_for_soul_change(
             previous_soul_id=normalized_previous,
             current_soul_id=normalized_current,
+            ledger_provider=ledger_provider,
         )
         _persist_runtime_soul_state(soul_id=normalized_current, source_path=source_path)
         return reset_detail
@@ -474,28 +548,25 @@ def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
 
 def warmup_chat_runtime_basics(
     *,
+    ports: StartupApplicationPorts,
     eager_persona: bool = True,
     thalamus_agent_provider: Callable[[], Any] | None = None,
 ) -> str:
     """预热聊天主链常用的轻量运行时单例，降低首轮聊天冷启动抖动。"""
     try:
-        from host_brain.composition.process_services import (  # noqa: PLC0415
-            get_intent_engine,
-            get_routing_matrix,
-            get_silence_engine,
-            get_state_write_arbiter,
-        )
         from host_brain.persona.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
         if not callable(thalamus_agent_provider):
             raise RuntimeError("HOST_STARTUP_THALAMUS_AGENT_NOT_INJECTED")
-        get_routing_matrix()
-        get_intent_engine()
-        get_state_write_arbiter()
+        ports.prompt_registry()
+        ports.routing_matrix()
+        ports.intent_engine()
+        ports.state_write_arbiter()
         thalamus_agent_provider()
         compiled_soul = load_compiled_soul()
         soul_runtime_state = _reconcile_runtime_soul_state(
             soul_id=str(getattr(compiled_soul, "soul_id", "") or "").strip(),
             source_path=str(getattr(compiled_soul, "source_path", "") or "").strip(),
+            ledger_provider=ports.ledger,
         )
         warmed_parts = [
             "prompt_registry=ready",
@@ -512,7 +583,7 @@ def warmup_chat_runtime_basics(
             from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
             PersonaEngine.get_instance()
-            get_silence_engine()
+            ports.silence_engine()
             get_body_sense_model()
             warmed_parts.append("persona_runtime=ready")
         else:
@@ -525,7 +596,10 @@ def warmup_chat_runtime_basics(
         return f"DEGRADED: {exc}"
 
 
-def warmup_chat_llm_runtime_profiles() -> str:
+def warmup_chat_llm_runtime_profiles(
+    *,
+    ports: StartupApplicationPorts,
+) -> str:
     """预热聊天主链最常用的 LLM runtime 解析路径，压低首轮 direct/context chat 冷启动。"""
     try:
         from host_brain.app.graph_config_builder import SCENE_CHAT  # noqa: PLC0415
@@ -536,16 +610,27 @@ def warmup_chat_llm_runtime_profiles() -> str:
             resolve_subagent_llm_runtime,
         )
 
+        catalog = ports.model_route_catalog()
         base_runtime = _run_async_sync(
             lambda: resolve_host_llm_runtime_async(
+                catalog=catalog,
                 rollout_key="startup::chat-warmup",
                 scene_type=SCENE_CHAT,
             )
         )
 
-        default_runtime = resolve_surface_reply_llm_runtime(base_runtime=base_runtime)
-        router_runtime = resolve_executive_router_llm_runtime(base_runtime=base_runtime)
-        subagent_runtime = resolve_subagent_llm_runtime(base_runtime=base_runtime)
+        default_runtime = resolve_surface_reply_llm_runtime(
+            catalog=catalog,
+            base_runtime=base_runtime,
+        )
+        router_runtime = resolve_executive_router_llm_runtime(
+            catalog=catalog,
+            base_runtime=base_runtime,
+        )
+        subagent_runtime = resolve_subagent_llm_runtime(
+            catalog=catalog,
+            base_runtime=base_runtime,
+        )
 
         warmed_parts = [
             f"base={str(base_runtime.get('provider_name') or 'unknown')}:{str(base_runtime.get('model_id') or 'unknown')}",
@@ -592,7 +677,10 @@ def warmup_surface_quote_runtime() -> str:
         return f"DEGRADED: {exc}"
 
 
-def warmup_codex_exec_intent_pool() -> str:
+def warmup_codex_exec_intent_pool(
+    *,
+    ports: StartupApplicationPorts,
+) -> str:
     """预热当前 server-owned EXEC_INTENT 模型路由。"""
     from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
 
@@ -604,14 +692,13 @@ def warmup_codex_exec_intent_pool() -> str:
         return "SKIPPED (disabled)"
     try:
         from host_brain.model_runtime.invocation import complete_compiled_prompt_sync  # noqa: PLC0415
-        from host_brain.composition.process_services import get_model_attempt_service  # noqa: PLC0415
         from host_brain.model_runtime.live_prompts import STARTUP_MODEL_WARMUP_PROMPT_ID  # noqa: PLC0415
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
         timeout_ms = int(settings.codex_exec_intent_warmup_timeout_ms)
         started_at = time.perf_counter()
         result = complete_compiled_prompt_sync(
-            attempt_service=get_model_attempt_service(),
+            attempt_service=ports.model_attempt_service(),
             prompt_id=STARTUP_MODEL_WARMUP_PROMPT_ID,
             request_id=f"startup-model-warmup::{int(time.time() * 1000)}",
             scene_type="STARTUP_MODEL_WARMUP",
@@ -642,7 +729,10 @@ def warmup_codex_exec_intent_pool() -> str:
         return f"DEGRADED: {exc}"
 
 
-def warmup_retrieval_runtime_basics() -> str:
+def warmup_retrieval_runtime_basics(
+    *,
+    ports: StartupApplicationPorts,
+) -> str:
     """预热 retrieval / embedding / Chroma 关键冷启动路径，降低首轮完整 chat 抖动。"""
     try:
         from host_brain.app.settings import get_startup_settings  # noqa: PLC0415
@@ -684,10 +774,9 @@ def warmup_retrieval_runtime_basics() -> str:
             except Exception as gate_exc:
                 _logger.debug("Retrieval warmup resource gate skipped: %s", gate_exc)
 
-        from host_brain.composition.process_services import get_episodic_store  # noqa: PLC0415
         from host_brain.memory.chroma_client import hash_embed_text  # noqa: PLC0415
 
-        store = get_episodic_store()
+        store = ports.episodic_store()
         warm_dim = store._resolve_embedding_dim()
         if settings.retrieval_warmup_embedding_enabled:
             warm_vector, warm_model_id = store._embed_text("startup retrieval warmup")
@@ -720,6 +809,7 @@ def warmup_retrieval_runtime_basics() -> str:
 
 def warmup_all(
     *,
+    ports: StartupApplicationPorts,
     eager: bool = False,
     thalamus_agent_provider: Callable[[], Any] | None = None,
     startup_probe_sink: Callable[[Mapping[str, Any]], None] | None = None,
@@ -735,20 +825,21 @@ def warmup_all(
     statuses: dict[str, str] = {}
 
     # 快速预热（始终执行）
-    statuses["skill_registry"] = warmup_skill_registry()
-    statuses["graph_runtime"] = warmup_graph_runtime()
+    statuses["skill_registry"] = warmup_skill_registry(ports=ports)
+    statuses["graph_runtime"] = warmup_graph_runtime(ports=ports)
     statuses["chat_runtime"] = warmup_chat_runtime_basics(
+        ports=ports,
         eager_persona=eager,
         thalamus_agent_provider=thalamus_agent_provider,
     )
-    statuses["chat_llm_runtime"] = warmup_chat_llm_runtime_profiles()
+    statuses["chat_llm_runtime"] = warmup_chat_llm_runtime_profiles(ports=ports)
     statuses["surface_quote_runtime"] = warmup_surface_quote_runtime()
-    statuses["codex_exec_intent"] = warmup_codex_exec_intent_pool()
-    statuses["retrieval_runtime"] = warmup_retrieval_runtime_basics()
+    statuses["codex_exec_intent"] = warmup_codex_exec_intent_pool(ports=ports)
+    statuses["retrieval_runtime"] = warmup_retrieval_runtime_basics(ports=ports)
 
     # 慢速预热（仅 eager 模式）
     if eager:
-        statuses["emotion_timeline"] = warmup_emotion_timeline()
+        statuses["emotion_timeline"] = warmup_emotion_timeline(ports=ports)
     else:
         statuses["emotion_timeline"] = "SKIPPED (lazy init)"
 
@@ -789,6 +880,8 @@ def reconcile_startup_degradation(
 
 
 __all__ = [
+    "StartupApplicationPorts",
+    "build_startup_application_ports",
     "probe_edge_rpc_health",
     "build_edge_dependency_probe_statuses",
     "collect_dependency_probes",

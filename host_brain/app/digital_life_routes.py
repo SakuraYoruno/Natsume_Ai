@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Query
 
-from host_brain.composition.process_services import get_ledger
-from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
+from host_brain.app.host_life_route_authority import (
+    HostLifeRouteAuthority,
+    require_host_life_route_authority,
+)
+from host_brain.app.host_route_ports import (
+    HostRoutePorts,
+    bind_host_route_endpoint,
+)
 from host_brain.digital_life.application_boundary import (
     project_inner_life_snapshot,
     read_life_events,
@@ -28,8 +34,6 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
 )
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 
-
-router = APIRouter(prefix="/v1/digital-life", tags=["digital-life"])
 
 _UNTRUSTED_INTENT_FIELDS = frozenset(
     {
@@ -51,7 +55,7 @@ def _life_projection_enabled() -> bool:
 def _state(
     person_id: str,
     *,
-    life: ProcessLifeContainer,
+    life: HostLifeRouteAuthority,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     snapshot = read_life_snapshot(
         str(person_id or "default"),
@@ -64,7 +68,7 @@ def _recent_events(
     person_id: str,
     *,
     limit: int,
-    life: ProcessLifeContainer,
+    life: HostLifeRouteAuthority,
 ) -> list[dict[str, Any]]:
     # Reader order is canonical ASC.  Fetching up to the bounded journal maximum
     # and slicing here preserves the historical "most recent first" HTTP contract.
@@ -77,7 +81,12 @@ def _recent_events(
     return list(reversed(rows[-max(1, int(limit or 1)) :]))
 
 
-def _command_payload(command_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+def _command_payload(
+    command_type: str,
+    payload: Mapping[str, Any],
+    *,
+    ledger_provider: Callable[[], Any] | None,
+) -> dict[str, Any]:
     normalized = {
         str(key): value
         for key, value in dict(payload or {}).items()
@@ -171,6 +180,7 @@ def _command_payload(command_type: str, payload: Mapping[str, Any]) -> dict[str,
                 content=content,
                 source_kind=source_kind,
             ),
+            ledger_provider=ledger_provider,
         )
         if (
             platform
@@ -200,6 +210,7 @@ def _validated_http_delivery_authorization(
     expected_action_kind: str,
     expected_target: str,
     expected_intent_args: Mapping[str, Any],
+    ledger_provider: Callable[[], Any] | None,
 ) -> LifeDeliveryAuthorization | None:
     if not isinstance(value, Mapping):
         return None
@@ -208,8 +219,10 @@ def _validated_http_delivery_authorization(
     request_id = str(expected_request_id or "").strip()
     if not request_id or request_ref != request_id or not grant_ref:
         return None
+    if not callable(ledger_provider):
+        return None
     try:
-        decision = DurableGovernorGrantResolver(get_ledger()).require_bound(
+        decision = DurableGovernorGrantResolver(ledger_provider()).require_bound(
             request_id=request_ref,
             expected_ref=grant_ref,
             expected_person_id=expected_person_id,
@@ -233,8 +246,10 @@ def _validated_http_delivery_authorization(
 async def _submit_route_command(
     command_type: str,
     payload: Mapping[str, Any],
+    *,
+    route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    life = PROCESS_LIFE_PROVIDER.require()
+    life = require_host_life_route_authority(route_ports)
     body = dict(payload or {})
     person_id = str(body.get("person_id") or "default")
     body["person_id"] = person_id
@@ -250,6 +265,7 @@ async def _submit_route_command(
         _command_payload,
         command_type,
         body,
+        ledger_provider=route_ports.ledger_provider,
     )
     receipt = await asyncio.to_thread(
         submit_life_command,
@@ -288,15 +304,27 @@ async def _submit_route_command(
     }
 
 
-@router.get("/state")
-async def digital_life_state(person_id: str = Query("default")) -> dict[str, Any]:
-    _snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+async def digital_life_state(
+    person_id: str = Query("default"),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    _snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     return state
 
 
-@router.get("/runtime/health")
-async def digital_life_runtime_health(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+async def digital_life_runtime_health(
+    person_id: str = Query("default"),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     runtime = dict(state.get("runtime") or {})
     return {
         "person_id": snapshot["person_id"],
@@ -311,9 +339,15 @@ async def digital_life_runtime_health(person_id: str = Query("default")) -> dict
     }
 
 
-@router.get("/environment/current")
-async def digital_life_environment_current(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+async def digital_life_environment_current(
+    person_id: str = Query("default"),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     return {
         "person_id": snapshot["person_id"],
         "environment": dict(state.get("environment") or {}),
@@ -322,12 +356,13 @@ async def digital_life_environment_current(person_id: str = Query("default")) ->
     }
 
 
-@router.get("/causality/recent")
 async def digital_life_causality_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    life = PROCESS_LIFE_PROVIDER.require()
+    life = require_host_life_route_authority(_route_ports)
     snapshot, _state_payload = _state(person_id, life=life)
     events = _recent_events(person_id, limit=limit, life=life)
     return {
@@ -339,15 +374,17 @@ async def digital_life_causality_recent(
     }
 
 
-@router.get("/world/snapshot")
 async def digital_life_world_snapshot(
     person_id: str = Query("default"),
     session_id: str = Query(""),
     fact_key: list[str] | None = Query(None),
     projection_store: Any = Depends(require_obs_query_projection_store),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
     """Read the background world projection without opening canonical stores."""
 
+    del _route_ports
     resolved_person = str(person_id or "default")
     payload, meta = read_from_store(
         projection_store,
@@ -382,9 +419,15 @@ async def digital_life_world_snapshot(
     }
 
 
-@router.get("/growth/state")
-async def digital_life_growth_state(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+async def digital_life_growth_state(
+    person_id: str = Query("default"),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     growth = dict(state.get("self_growth") or {})
     return {
         "person_id": snapshot["person_id"],
@@ -400,12 +443,13 @@ async def digital_life_growth_state(person_id: str = Query("default")) -> dict[s
     }
 
 
-@router.get("/learning/recent")
 async def digital_life_learning_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    life = PROCESS_LIFE_PROVIDER.require()
+    life = require_host_life_route_authority(_route_ports)
     snapshot, state = _state(person_id, life=life)
     learning = dict(state.get("learning_state") or {})
     events = [
@@ -427,33 +471,52 @@ async def digital_life_learning_recent(
     }
 
 
-@router.post("/work-event")
 async def digital_life_work_event(
     payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    return await _submit_route_command("work_event", payload)
+    return await _submit_route_command(
+        "work_event",
+        payload,
+        route_ports=_route_ports,
+    )
 
 
-@router.post("/tick")
 async def digital_life_tick(
     payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    return await _submit_route_command("tick", payload)
+    return await _submit_route_command(
+        "tick",
+        payload,
+        route_ports=_route_ports,
+    )
 
 
-@router.post("/advance")
 async def digital_life_advance(
     payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    return await _submit_route_command("advance", payload)
+    return await _submit_route_command(
+        "advance",
+        payload,
+        route_ports=_route_ports,
+    )
 
 
-@router.get("/inner-drive/current")
 async def digital_life_inner_drive_current(
     person_id: str = Query("default"),
     force: bool = Query(False),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+    snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     return {
         "status": "OK" if snapshot["version"] > 0 else "EMPTY",
         "reason_code": None if snapshot["version"] > 0 else "LIFE_SNAPSHOT_NOT_FOUND",
@@ -470,9 +533,15 @@ async def digital_life_inner_drive_current(
     }
 
 
-@router.get("/embodiment/current")
-async def digital_life_embodiment_current(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+async def digital_life_embodiment_current(
+    person_id: str = Query("default"),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     return {
         "person_id": snapshot["person_id"],
         "embodiment": dict(state.get("embodiment") or {}),
@@ -482,9 +551,15 @@ async def digital_life_embodiment_current(person_id: str = Query("default")) -> 
     }
 
 
-@router.get("/action/current")
-async def digital_life_action_current(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+async def digital_life_action_current(
+    person_id: str = Query("default"),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     return {
         "person_id": snapshot["person_id"],
         "life_action": dict(state.get("life_action") or {}),
@@ -493,33 +568,46 @@ async def digital_life_action_current(person_id: str = Query("default")) -> dict
     }
 
 
-@router.post("/proactive/attempt")
 async def digital_life_proactive_attempt(
     payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    return await _submit_route_command("proactive_attempt", payload)
+    return await _submit_route_command(
+        "proactive_attempt",
+        payload,
+        route_ports=_route_ports,
+    )
 
 
-@router.get("/proactive/recent")
 async def digital_life_proactive_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
+    life = require_host_life_route_authority(_route_ports)
     events = [
         row
         for row in _recent_events(
             person_id,
             limit=1000,
-            life=PROCESS_LIFE_PROVIDER.require(),
+            life=life,
         )
         if str(row.get("event_type") or "") == "proactive_attempt"
     ][:limit]
     return {"person_id": str(person_id or "default"), "items": events, "source": "life_snapshot_reader"}
 
 
-@router.get("/organs/state")
-async def digital_life_organs_state(person_id: str = Query("default")) -> dict[str, Any]:
-    snapshot, state = _state(person_id, life=PROCESS_LIFE_PROVIDER.require())
+async def digital_life_organs_state(
+    person_id: str = Query("default"),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    snapshot, state = _state(
+        person_id,
+        life=require_host_life_route_authority(_route_ports),
+    )
     organ = dict(state.get("organ_runtime") or {})
     return {
         "person_id": snapshot["person_id"],
@@ -532,45 +620,159 @@ async def digital_life_organs_state(person_id: str = Query("default")) -> dict[s
     }
 
 
-@router.get("/experience/recent")
 async def digital_life_experience_recent(
     person_id: str = Query("default"),
     limit: int = Query(50, ge=1, le=200),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
+    life = require_host_life_route_authority(_route_ports)
     events = [
         row
         for row in _recent_events(
             person_id,
             limit=1000,
-            life=PROCESS_LIFE_PROVIDER.require(),
+            life=life,
         )
         if str(row.get("event_type") or "") == "experience_ingest"
     ][:limit]
     return {"person_id": str(person_id or "default"), "items": events, "source": "life_snapshot_reader"}
 
 
-@router.post("/experience/ingest")
 async def digital_life_experience_ingest(
     payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
-    return await _submit_route_command("experience_ingest", payload)
+    return await _submit_route_command(
+        "experience_ingest",
+        payload,
+        route_ports=_route_ports,
+    )
 
 
-@router.get("/proactive/episodes/recent")
 async def digital_life_proactive_episodes_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
+    *,
+    _route_ports: HostRoutePorts,
 ) -> dict[str, Any]:
+    life = require_host_life_route_authority(_route_ports)
     events = [
         row
         for row in _recent_events(
             person_id,
             limit=1000,
-            life=PROCESS_LIFE_PROVIDER.require(),
+            life=life,
         )
         if str(row.get("event_type") or "") in {"proactive_attempt", "foreground_completed"}
     ][:limit]
     return {"person_id": str(person_id or "default"), "items": events, "source": "life_snapshot_reader"}
 
 
-__all__ = ["router"]
+def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
+    """Create Digital Life routes bound to one Host lifespan's authorities."""
+
+    if not isinstance(route_ports, HostRoutePorts):
+        raise TypeError("route_ports must be HostRoutePorts")
+    router = APIRouter(tags=["digital-life"])
+
+    def add(path: str, endpoint: Any, *, methods: list[str]) -> None:
+        router.add_api_route(
+            path,
+            bind_host_route_endpoint(endpoint, route_ports),
+            methods=methods,
+        )
+
+    add("/v1/digital-life/state", digital_life_state, methods=["GET"])
+    add(
+        "/v1/digital-life/runtime/health",
+        digital_life_runtime_health,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/environment/current",
+        digital_life_environment_current,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/causality/recent",
+        digital_life_causality_recent,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/world/snapshot",
+        digital_life_world_snapshot,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/growth/state",
+        digital_life_growth_state,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/learning/recent",
+        digital_life_learning_recent,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/work-event",
+        digital_life_work_event,
+        methods=["POST"],
+    )
+    add("/v1/digital-life/tick", digital_life_tick, methods=["POST"])
+    add("/v1/digital-life/advance", digital_life_advance, methods=["POST"])
+    add(
+        "/v1/digital-life/inner-drive/current",
+        digital_life_inner_drive_current,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/embodiment/current",
+        digital_life_embodiment_current,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/action/current",
+        digital_life_action_current,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/proactive/attempt",
+        digital_life_proactive_attempt,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/proactive/recent",
+        digital_life_proactive_recent,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/organs/state",
+        digital_life_organs_state,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/experience/recent",
+        digital_life_experience_recent,
+        methods=["GET"],
+    )
+    add(
+        "/v1/digital-life/experience/ingest",
+        digital_life_experience_ingest,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/proactive/episodes/recent",
+        digital_life_proactive_episodes_recent,
+        methods=["GET"],
+    )
+    return router
+
+
+# Compatibility-only router for embedded consumers. Mutation and Life reads
+# fail closed until those consumers provide an explicit HostRoutePorts bundle.
+router = create_digital_life_router(HostRoutePorts())
+
+
+__all__ = ["create_digital_life_router", "router"]

@@ -5,13 +5,18 @@ import time
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from host_brain.app.context.memory_context_orchestrator import (
     run_memory_sanitize,
 )
-from host_brain.composition.process_services import get_ledger
-from host_brain.composition.life import PROCESS_LIFE_PROVIDER
+from host_brain.app.host_life_route_authority import (
+    require_host_life_route_authority,
+)
+from host_brain.app.host_route_ports import (
+    HostRoutePorts,
+    bind_host_route_endpoint,
+)
 from host_brain.conversation.memory_spine import backfill_conversation_turn_memory_spine
 from host_brain.persistence.context_memory_repository import MemoryEventRepository
 from host_brain.persistence.sqlite_backup import SQLiteBackupManager
@@ -26,7 +31,29 @@ from host_brain.app.observability_runtime.remaining_query_projection import (
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 
 
-router = APIRouter(prefix="/v1/memory", tags=["memory"])
+_read_router = APIRouter(prefix="/v1/memory", tags=["memory"])
+
+
+def _require_ledger(route_ports: HostRoutePorts) -> Any:
+    provider = route_ports.ledger_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail="HOST_MEMORY_LEDGER_PROVIDER_UNAVAILABLE",
+        )
+    try:
+        ledger = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="HOST_MEMORY_LEDGER_PROVIDER_UNAVAILABLE",
+        ) from exc
+    if ledger is None:
+        raise HTTPException(
+            status_code=503,
+            detail="HOST_MEMORY_LEDGER_PROVIDER_INVALID",
+        )
+    return ledger
 
 
 def _rebuild_memory_system(*, ledger: Any, person_id: str) -> dict[str, Any]:
@@ -88,7 +115,7 @@ async def _require_memory_debug_scope(request: Request) -> None:
     context.require_scope("obs:memory:read")
 
 
-@router.get("/context/debug")
+@_read_router.get("/context/debug")
 async def memory_context_debug(
     session_id: str = Query(""),
     person_id: str = Query("default"),
@@ -118,7 +145,7 @@ async def memory_context_debug(
     }
 
 
-@router.get("/health")
+@_read_router.get("/health")
 async def memory_health_route(
     person_id: str = Query("default"),
     projection_store: Any = Depends(require_obs_query_projection_store),
@@ -135,7 +162,7 @@ async def memory_health_route(
     }
 
 
-@router.get("/events/recent")
+@_read_router.get("/events/recent")
 async def memory_events_recent(
     person_id: str = Query("default"),
     session_id: str = Query(""),
@@ -167,28 +194,37 @@ async def memory_events_recent(
     }
 
 
-@router.post("/rebuild/run")
-async def memory_rebuild_run(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+async def memory_rebuild_run(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
     return _rebuild_memory_system(
-        ledger=get_ledger(),
+        ledger=_require_ledger(_route_ports),
         person_id=str(payload.get("person_id") or "default"),
     )
 
 
-@router.post("/sanitize/run")
-async def memory_sanitize_run(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+async def memory_sanitize_run(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
     return run_memory_sanitize(
-        ledger=get_ledger(),
+        ledger=_require_ledger(_route_ports),
         person_id=str(payload.get("person_id") or "default"),
         dry_run=bool(payload.get("dry_run", False)),
     )
 
 
-@router.post("/spine/backfill")
-async def memory_spine_backfill(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-    life = PROCESS_LIFE_PROVIDER.require()
+async def memory_spine_backfill(
+    payload: dict[str, Any] = Body(default_factory=dict),
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    life = require_host_life_route_authority(_route_ports)
     return backfill_conversation_turn_memory_spine(
-        ledger=get_ledger(),
+        ledger=_require_ledger(_route_ports),
         life_service=life.command_service,
         life_reader=life.snapshot_reader,
         person_id=str(payload.get("person_id") or "default"),
@@ -199,4 +235,30 @@ async def memory_spine_backfill(payload: dict[str, Any] = Body(default_factory=d
     )
 
 
-__all__ = ["router"]
+def create_memory_router(route_ports: HostRoutePorts) -> APIRouter:
+    """Create memory routes bound to one Host application's authorities."""
+
+    if not isinstance(route_ports, HostRoutePorts):
+        raise TypeError("route_ports must be HostRoutePorts")
+    router = APIRouter()
+    router.include_router(_read_router)
+
+    def add(path: str, endpoint: Any) -> None:
+        router.add_api_route(
+            path,
+            bind_host_route_endpoint(endpoint, route_ports),
+            methods=["POST"],
+            tags=["memory"],
+        )
+
+    add("/v1/memory/rebuild/run", memory_rebuild_run)
+    add("/v1/memory/sanitize/run", memory_sanitize_run)
+    add("/v1/memory/spine/backfill", memory_spine_backfill)
+    return router
+
+
+# Compatibility-only read router; mutation routes fail closed without ports.
+router = create_memory_router(HostRoutePorts())
+
+
+__all__ = ["create_memory_router", "router"]

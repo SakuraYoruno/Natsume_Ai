@@ -10,12 +10,17 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, Mapping
 
+from host_brain.contracts.resource_manager_status import (
+    ResourceManagerStatusJournalPort,
+)
 from host_brain.core.ids import now_ms
+from host_brain.core.resource_manager_status_owner import (
+    ResourceManagerStatusOwner,
+)
 
 logger = logging.getLogger("Natsume.resource_manager")
 
@@ -632,7 +637,7 @@ class SystemResourceManager:
         *,
         interval_s: float | None = None,
         analysis_cooldown_s: float | None = None,
-        status_path: str | Path | None = None,
+        status_journal: ResourceManagerStatusJournalPort | None = None,
         llm_enabled: bool | None = None,
         auto_gc_enabled: bool | None = None,
         auto_trim_enabled: bool | None = None,
@@ -660,8 +665,6 @@ class SystemResourceManager:
         ):
             raise TypeError("degradation_state_provider must be callable")
         self._degradation_state_provider = degradation_state_provider
-        default_status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
-        self._status_path = Path(status_path) if status_path is not None else default_status_path
         self._shutdown_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
@@ -681,6 +684,11 @@ class SystemResourceManager:
         self._tick_count = 0
         self._analysis_count = 0
         self._auto_action_count = 0
+        self._status_owner = ResourceManagerStatusOwner(
+            status_journal,
+            state_provider=self._status_source_snapshot,
+            restore_consumer=self._restore_durable_status,
+        )
 
     @property
     def running(self) -> bool:
@@ -689,15 +697,23 @@ class SystemResourceManager:
     def start(self, *, run_immediately: bool = True) -> None:
         if self._running:
             return
-        self._running = True
+        self._status_owner.recover()
         self._shutdown_event.clear()
-        self._thread = threading.Thread(
-            target=self._loop,
-            kwargs={"run_immediately": bool(run_immediately)},
-            name="system-resource-manager",
-            daemon=True,
-        )
-        self._thread.start()
+        self._running = True
+        try:
+            self._persist_status(reason="started")
+            self._thread = threading.Thread(
+                target=self._loop,
+                kwargs={"run_immediately": bool(run_immediately)},
+                name="system-resource-manager",
+                daemon=True,
+            )
+            self._thread.start()
+        except Exception:
+            self._running = False
+            self._shutdown_event.set()
+            self._thread = None
+            raise
         logger.info(
             "SystemResourceManager started (interval=%.1fs, llm=%s, auto_gc=%s, auto_trim=%s)",
             self._interval_s,
@@ -707,16 +723,26 @@ class SystemResourceManager:
         )
 
     def stop(self) -> None:
-        if not self._running:
+        if (
+            not self._running
+            and self._thread is None
+            and not self._status_owner.has_pending
+        ):
             return
         self._running = False
         self._shutdown_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5.0)
+        thread = self._thread
+        if thread and thread.is_alive():
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                raise RuntimeError("RESOURCE_MANAGER_LOOP_STOP_TIMEOUT")
+        self._thread = None
+        self._persist_status(reason="stopped")
         logger.info("SystemResourceManager stopped")
 
     def get_status(self) -> dict[str, Any]:
         degradation_state = self._read_degradation_state()
+        durability = self._status_owner.status()
         with self._lock:
             return {
                 "running": self._running,
@@ -737,8 +763,62 @@ class SystemResourceManager:
                 "last_decision": dict(self._last_decision),
                 "last_actions": list(self._last_actions),
                 "degradation_state": degradation_state,
-                "status_path": str(self._status_path),
+                "durability": durability,
             }
+
+    def _status_source_snapshot(self) -> dict[str, Any]:
+        degradation = self._read_degradation_state()
+        with self._lock:
+            return {
+                "running": self._running,
+                "interval_s": self._interval_s,
+                "llm_enabled": self._llm_enabled,
+                "auto_gc_enabled": self._auto_gc_enabled,
+                "auto_trim_enabled": self._auto_trim_enabled,
+                "last_tick_ts_ms": self._last_tick_ts_ms,
+                "tick_count": self._tick_count,
+                "analysis_count": self._analysis_count,
+                "auto_action_count": self._auto_action_count,
+                "last_error": self._last_error,
+                "last_llm_error": self._last_llm_error,
+                "last_snapshot": dict(self._last_snapshot),
+                "last_decision": dict(self._last_decision),
+                "last_actions": list(self._last_actions),
+                "last_gate_decisions": list(self._last_gate_decisions),
+                "degradation": degradation,
+            }
+
+    def _restore_durable_status(self, status: Mapping[str, Any]) -> None:
+        with self._lock:
+            self._last_tick_ts_ms = max(
+                self._last_tick_ts_ms,
+                int(status.get("last_tick_ts_ms") or 0),
+            )
+            self._tick_count = max(
+                self._tick_count,
+                int(status.get("tick_count") or 0),
+            )
+            self._analysis_count = max(
+                self._analysis_count,
+                int(status.get("analysis_count") or 0),
+            )
+            self._auto_action_count = max(
+                self._auto_action_count,
+                int(status.get("auto_action_count") or 0),
+            )
+            pressure = _as_dict(status.get("pressure"))
+            if pressure:
+                self._last_snapshot = {"pressure": pressure}
+            decision = _as_dict(status.get("decision"))
+            if decision:
+                self._last_decision = decision
+            self._last_actions = [
+                _as_dict(item) for item in _as_list(status.get("actions"))
+            ]
+            self._last_gate_decisions = [
+                _as_dict(item)
+                for item in _as_list(status.get("gate_decisions"))
+            ]
 
     def _read_degradation_state(self) -> dict[str, Any]:
         """Read the explicitly composed authority, or fail closed.
@@ -809,21 +889,47 @@ class SystemResourceManager:
                 if pressure_analysis:
                     self._last_pressure_analysis = pressure_analysis
                 self._last_error = ""
-            self._persist_status()
-            return tick
         except Exception as exc:
             with self._lock:
                 self._last_error = f"{exc.__class__.__name__}: {exc}"
                 self._last_tick_ts_ms = now_ms()
             logger.warning("SystemResourceManager tick failed: %s", exc)
-            self._persist_status()
-            return {"status": "FAILED", "reason": reason, "error": str(exc), "ts_ms": now_ms()}
+            self._persist_status(reason="tick_failed")
+            return {
+                "status": "FAILED",
+                "reason": reason,
+                "error": str(exc),
+                "ts_ms": now_ms(),
+            }
+        self._persist_status(
+            reason=(
+                "startup_tick"
+                if str(reason).strip().lower() == "startup"
+                else (
+                    "periodic_tick"
+                    if str(reason).strip().lower() == "periodic"
+                    else "manual_tick"
+                )
+            )
+        )
+        return tick
 
     def _loop(self, *, run_immediately: bool = False) -> None:
-        if run_immediately and not self._shutdown_event.is_set():
-            self.run_once(reason="startup")
-        while not self._shutdown_event.wait(timeout=self._interval_s):
-            self.run_once(reason="periodic")
+        try:
+            if run_immediately and not self._shutdown_event.is_set():
+                self.run_once(reason="startup")
+            while not self._shutdown_event.wait(timeout=self._interval_s):
+                self.run_once(reason="periodic")
+        except Exception as exc:
+            with self._lock:
+                self._last_error = f"{exc.__class__.__name__}: {exc}"
+                self._running = False
+            self._shutdown_event.set()
+            logger.error(
+                "SystemResourceManager stopped after durable status failure: %s",
+                exc,
+                exc_info=True,
+            )
 
     def assess_background_task(
         self,
@@ -860,7 +966,16 @@ class SystemResourceManager:
         with self._lock:
             row = {**decision, "ts_ms": now_ms()}
             self._last_gate_decisions = [row, *self._last_gate_decisions[:19]]
-        self._persist_status()
+        try:
+            self._persist_status(reason="background_gate")
+        except Exception as exc:
+            return {
+                **decision,
+                "allowed": False,
+                "decision": "BLOCK",
+                "reason_code": "RESOURCE_MANAGER_STATUS_UNAVAILABLE",
+                "detail": type(exc).__name__,
+            }
         return decision
 
     def _maybe_analyze(
@@ -1218,12 +1333,5 @@ class SystemResourceManager:
                 self._auto_action_count += len(actions)
         return actions
 
-    def _persist_status(self) -> None:
-        try:
-            self._status_path.parent.mkdir(parents=True, exist_ok=True)
-            self._status_path.write_text(
-                json.dumps(self.get_status(), ensure_ascii=False, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-        except Exception as exc:
-            logger.debug("resource manager status persist skipped: %s", exc)
+    def _persist_status(self, *, reason: str) -> None:
+        self._status_owner.append(reason=reason)

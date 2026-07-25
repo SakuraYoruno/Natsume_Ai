@@ -14,6 +14,9 @@ from host_brain.model_runtime import (
     RejectingRoutePolicy,
     build_model_runtime_composition,
 )
+from host_brain.model_runtime.production_composition import (
+    build_app_local_production_model_runtime,
+)
 
 
 def test_composition_builds_one_consistent_service_graph() -> None:
@@ -33,6 +36,29 @@ def test_composition_builds_one_consistent_service_graph() -> None:
     assert composition.attempt_service.route_policy is route
     assert composition.attempt_service.provider_adapters is adapters
     assert composition.attempt_service.audit_repository is audit
+
+
+def test_app_local_production_composition_never_shares_mutable_model_roots() -> None:
+    class Ledger:
+        def log_model_attempt(self, _row) -> None:
+            return None
+
+    def build():
+        return build_app_local_production_model_runtime(
+            ledger=Ledger(),
+            credential_resolver=lambda _provider: None,
+            base_url_resolver=lambda _provider: None,
+            transport=lambda **_kwargs: {},
+        )
+
+    first = build()
+    second = build()
+
+    assert first is not second
+    assert first.prompt_registry is not second.prompt_registry
+    assert first.route_catalog is not second.route_catalog
+    assert first.provider_adapters is not second.provider_adapters
+    assert first.attempt_service is not second.attempt_service
 
 
 def test_dependencies_exposes_and_resets_only_the_whole_composition() -> None:

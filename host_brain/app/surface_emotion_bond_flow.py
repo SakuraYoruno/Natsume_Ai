@@ -205,9 +205,12 @@ def apply_surface_emotion_bond_flow(
     }
 
     if queue is None:
-        from host_brain.composition.process_services import get_bond_update_queue  # noqa: PLC0415
-
-        queue = get_bond_update_queue()
+        return {
+            "status": "FAILED",
+            "queue_reason_code": "BOND_UPDATE_QUEUE_NOT_COMPOSED",
+            "queue_size": None,
+            **plan.as_dict(),
+        }
     queue_result = dict(queue.enqueue(payload) or {})
     return {
         "status": str(queue_result.get("status") or "UNKNOWN"),

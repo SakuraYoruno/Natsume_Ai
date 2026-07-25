@@ -10,6 +10,10 @@ import warnings
 
 import pytest
 
+import host_brain.app.host_lifecycle_composition as legacy_host_lifecycle
+import host_brain.composition.host_application as host_application_module
+import host_brain.contracts.host_lifecycle as canonical_host_lifecycle
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.host_lifecycle_composition import (
     HostLifecycleApplicationPorts,
     HostLifecycleContainer,
@@ -20,6 +24,9 @@ from host_brain.composition.host_application import (
     HostApplicationPorts,
     build_production_host_application_ports,
 )
+from host_brain.app.application_port_wiring import (
+    build_process_application_ports,
+)
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
 )
@@ -29,6 +36,7 @@ from host_brain.app.lifecycle_runtime_composition import (
 from host_brain.app.model_provider_composition import (
     ApplicationModelAttemptServicePort,
 )
+from host_brain.app.startup import build_startup_application_ports
 from host_brain.app.tribe_composition import (
     TribeRuntimeAgentPorts,
     build_tribe_application_ports,
@@ -40,6 +48,79 @@ from host_brain.lifecycle_runtime.runtime_snapshot import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_host_lifecycle_contract_is_neutral_and_identity_preserving() -> None:
+    """Composition must not depend back on app for the shared lifecycle type."""
+
+    assert (
+        legacy_host_lifecycle.HostLifecycleApplicationPorts
+        is canonical_host_lifecycle.HostLifecycleApplicationPorts
+    )
+    assert (
+        legacy_host_lifecycle.HostLifecycleScopeError
+        is canonical_host_lifecycle.HostLifecycleScopeError
+    )
+    composition_source = (
+        ROOT / "host_brain" / "composition" / "host_application.py"
+    ).read_text(encoding="utf-8-sig")
+    assert "host_brain.app.host_lifecycle_composition" not in composition_source
+    assert "host_brain.contracts.host_lifecycle" in composition_source
+
+
+class _AuthorityRuntime:
+    def __init__(
+        self,
+        ledger: object,
+        *,
+        episodic_store: object | None = None,
+        model_attempt_service: object | None = None,
+    ) -> None:
+        self.ledger = ledger
+        self.episodic_store = episodic_store or object()
+        self.life_memory_store = SimpleNamespace(ledger=ledger)
+        self.model_attempt_service = model_attempt_service or object()
+        self.model_route_catalog = object()
+        self.prompt_registry = object()
+        self.capability_broker = object()
+        self.active = False
+
+    def begin(self) -> None:
+        if self.active:
+            raise RuntimeError("HOST_AUTHORITY_RUNTIME_ALREADY_ACTIVE")
+        self.active = True
+
+    def close(self) -> None:
+        self.active = False
+        close = getattr(self.ledger, "close", None)
+        if callable(close):
+            close()
+
+    def _require(self, value: object) -> object:
+        if not self.active:
+            raise RuntimeError("HOST_AUTHORITY_RUNTIME_NOT_ACTIVE")
+        return value
+
+    def require_ledger(self) -> object:
+        return self._require(self.ledger)
+
+    def require_episodic_store(self) -> object:
+        return self._require(self.episodic_store)
+
+    def require_life_memory_store(self) -> object:
+        return self._require(self.life_memory_store)
+
+    def require_model_attempt_service(self) -> object:
+        return self._require(self.model_attempt_service)
+
+    def require_model_route_catalog(self) -> object:
+        return self._require(self.model_route_catalog)
+
+    def require_prompt_registry(self) -> object:
+        return self._require(self.prompt_registry)
+
+    def require_capability_broker(self) -> object:
+        return self._require(self.capability_broker)
 
 
 class _Service:
@@ -152,30 +233,350 @@ def test_host_lifecycle_builder_requires_explicit_ports_without_locator_fallback
     )
 
 
+def test_startup_ports_preserve_exact_host_provider_identity_and_fail_closed() -> None:
+    provider_names = (
+        "emotion_timeline",
+        "skill_registry",
+        "graph_runtime",
+        "ledger",
+        "prompt_registry",
+        "routing_matrix",
+        "intent_engine",
+        "state_write_arbiter",
+        "silence_engine",
+        "model_route_catalog",
+        "model_attempt_service",
+        "episodic_store",
+    )
+    providers = {
+        name: (lambda value=name: value)
+        for name in provider_names
+    }
+    host_ports = replace(_ports([]), **providers)
+
+    startup_ports = build_startup_application_ports(host_ports)
+
+    for name, provider in providers.items():
+        assert getattr(startup_ports, name) is provider
+    with pytest.raises(
+        HostLifecycleScopeError,
+        match="HOST_SERVICE_PROVIDER_NOT_INJECTED:graph_runtime",
+    ):
+        build_startup_application_ports(replace(host_ports, graph_runtime=None))
+
+
 def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from host_brain.composition import process_services
-
-    ledger_provider = lambda: object()
-    token_provider = lambda: object()
-    bond_provider = lambda: object()
-    setter = lambda _value: None
-    monkeypatch.setattr(process_services, "get_ledger", ledger_provider)
-    monkeypatch.setattr(process_services, "get_token_service", token_provider)
-    monkeypatch.setattr(process_services, "get_bond_dynamics_writer", bond_provider)
-    monkeypatch.setattr(process_services, "set_memory_service_container", setter)
-
-    ports = build_production_host_application_ports()
+    ledger = object()
+    authority = _AuthorityRuntime(ledger)
+    bond_client = object()
+    edge_probe = lambda: object()
+    edge_status_builder = lambda _probe: {}
+    emotion_profile = object()
+    emotion_profile_provider = lambda: emotion_profile
+    construction_ports = replace(
+        build_process_application_ports(),
+        persistence_db_path=lambda: ":memory:",
+        probe_edge_rpc_health=edge_probe,
+        build_edge_dependency_probe_statuses=edge_status_builder,
+        user_emotion_profile=emotion_profile_provider,
+    )
+    monkeypatch.setattr(
+        host_application_module,
+        "build_host_bond_client",
+        lambda: bond_client,
+    )
+    ports = build_production_host_application_ports(
+        process_application_ports=construction_ports,
+        authority_runtime_owner=authority,  # type: ignore[arg-type]
+    )
 
     assert isinstance(ports, HostApplicationPorts)
-    assert ports.lifecycle.ledger is ledger_provider
-    assert ports.token_service is token_provider
-    assert ports.bond_dynamics_writer is bond_provider
-    assert ports.memory_service_container_setter is setter
+    assert ports.lifecycle.ledger.__self__ is authority
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_AUTHORITY_RUNTIME_NOT_ACTIVE",
+    ):
+        ports.lifecycle.ledger()
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_GOVERNANCE_RUNTIME_NOT_ACTIVE",
+    ):
+        ports.token_service()
+    with pytest.raises(RuntimeError, match="HOST_BOND_RUNTIME_NOT_ACTIVE"):
+        ports.bond_dynamics_writer()
+    ports.begin_authority_runtime()
+    ports.begin_governance_runtime()
+    ports.begin_bond_runtime()
+    token_service = ports.token_service()
+    assert ports.token_service() is token_service
+    bond_writer = ports.bond_dynamics_writer()
+    assert ports.bond_dynamics_writer() is bond_writer
+    assert bond_writer.ledger is ledger
+    assert bond_writer._stage_engine is ports.lifecycle.bond_stage_engine()
+    assert bond_writer.neo4j_client is bond_client
+    assert ports.lifecycle.probe_edge_rpc_health is edge_probe
+    assert (
+        ports.lifecycle.build_edge_dependency_probe_statuses
+        is edge_status_builder
+    )
+    assert ports.lifecycle.user_emotion_profile is emotion_profile_provider
+    assert ports.lifecycle.user_emotion_profile() is emotion_profile
+    with pytest.raises(RuntimeError, match="LIFE_MEMORY_SERVICE_NOT_COMPOSED"):
+        ports.lifecycle.life_memory_service()
+    memory_service = object()
+    memory_container = SimpleNamespace(service=memory_service)
+    ports.publish_memory_service_container(memory_container)
+    assert ports.lifecycle.life_memory_service() is memory_service
+    with pytest.raises(
+        RuntimeError,
+        match="HOST_MEMORY_SERVICE_PUBLICATION_MISMATCH",
+    ):
+        ports.withdraw_memory_service_container(
+            SimpleNamespace(service=object())
+        )
+    ports.withdraw_memory_service_container(memory_container)
+    with pytest.raises(RuntimeError, match="LIFE_MEMORY_SERVICE_NOT_COMPOSED"):
+        ports.lifecycle.life_memory_service()
     with pytest.raises(FrozenInstanceError):
         ports.token_service = object  # type: ignore[misc]
     assert not hasattr(ports, "__dict__")
+    ports.close_bond_runtime()
+    ports.close_governance_runtime()
+    ports.close_authority_runtime()
+
+
+def test_production_host_port_root_owns_selected_state_per_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_episodic_store = object()
+    second_episodic_store = object()
+    first_model_attempt_service = object()
+    second_model_attempt_service = object()
+    first_authority = _AuthorityRuntime(
+        SQLiteLedger(":memory:", check_same_thread=False),
+        episodic_store=first_episodic_store,
+        model_attempt_service=first_model_attempt_service,
+    )
+    second_authority = _AuthorityRuntime(
+        SQLiteLedger(":memory:", check_same_thread=False),
+        episodic_store=second_episodic_store,
+        model_attempt_service=second_model_attempt_service,
+    )
+    construction_ports = replace(
+        build_process_application_ports(),
+        persistence_db_path=lambda: ":memory:",
+    )
+    monkeypatch.setattr(
+        host_application_module,
+        "build_host_graph_runtime",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        host_application_module,
+        "build_host_routing_matrix",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        host_application_module,
+        "build_host_bond_client",
+        lambda: object(),
+    )
+    first = build_production_host_application_ports(
+        process_application_ports=construction_ports,
+        authority_runtime_owner=first_authority,  # type: ignore[arg-type]
+    )
+    second = build_production_host_application_ports(
+        process_application_ports=construction_ports,
+        authority_runtime_owner=second_authority,  # type: ignore[arg-type]
+    )
+    first.begin_authority_runtime()
+    second.begin_authority_runtime()
+    first.begin_governance_runtime()
+    second.begin_governance_runtime()
+    first.begin_bond_runtime()
+    second.begin_bond_runtime()
+    provider_pairs = (
+        (
+            first.lifecycle.silence_engine,
+            second.lifecycle.silence_engine,
+        ),
+        (
+            first.lifecycle.milestone_tracker,
+            second.lifecycle.milestone_tracker,
+        ),
+        (
+            first.lifecycle.multimodal_processor,
+            second.lifecycle.multimodal_processor,
+        ),
+        (
+            first.lifecycle.tts_context_router,
+            second.lifecycle.tts_context_router,
+        ),
+        (
+            first.lifecycle.meta_learning_loop,
+            second.lifecycle.meta_learning_loop,
+        ),
+        (
+            first.memory_worth_evaluator,
+            second.memory_worth_evaluator,
+        ),
+        (
+            first.security_immune_agent,
+            second.security_immune_agent,
+        ),
+        (
+            first.capability_gap_telemetry,
+            second.capability_gap_telemetry,
+        ),
+        (
+            first.capability_forge_service,
+            second.capability_forge_service,
+        ),
+        (
+            first.lifecycle.conversation_turn_store,
+            second.lifecycle.conversation_turn_store,
+        ),
+        (
+            first.lifecycle.conversation_history,
+            second.lifecycle.conversation_history,
+        ),
+        (
+            first.lifecycle.session_topic_ledger_store,
+            second.lifecycle.session_topic_ledger_store,
+        ),
+        (
+            first.lifecycle.session_tactic_ledger_store,
+            second.lifecycle.session_tactic_ledger_store,
+        ),
+        (
+            first.lifecycle.shared_memory_index,
+            second.lifecycle.shared_memory_index,
+        ),
+        (
+            first.lifecycle.multimodal_observer,
+            second.lifecycle.multimodal_observer,
+        ),
+        (
+            first.lifecycle.graph_runtime,
+            second.lifecycle.graph_runtime,
+        ),
+        (
+            first.lifecycle.routing_matrix,
+            second.lifecycle.routing_matrix,
+        ),
+        (
+            first.bond_dynamics_writer,
+            second.bond_dynamics_writer,
+        ),
+        (
+            first.lifecycle.memory_guard,
+            second.lifecycle.memory_guard,
+        ),
+        (
+            first.lifecycle.state_arbiter,
+            second.lifecycle.state_arbiter,
+        ),
+        (
+            first.lifecycle.state_write_arbiter,
+            second.lifecycle.state_write_arbiter,
+        ),
+        (
+            first.lifecycle.distillation_engine,
+            second.lifecycle.distillation_engine,
+        ),
+        (
+            first.lifecycle.semantic_recaller,
+            second.lifecycle.semantic_recaller,
+        ),
+        (
+            first.lifecycle.emotion_timeline,
+            second.lifecycle.emotion_timeline,
+        ),
+        (
+            first.token_service,
+            second.token_service,
+        ),
+        (
+            first.lifecycle.skill_registry,
+            second.lifecycle.skill_registry,
+        ),
+        (
+            first.lifecycle.tool_catalog,
+            second.lifecycle.tool_catalog,
+        ),
+        (
+            first.capability_scorecard_provider,
+            second.capability_scorecard_provider,
+        ),
+        (
+            first.lifecycle.intent_engine,
+            second.lifecycle.intent_engine,
+        ),
+    )
+
+    for first_provider, second_provider in provider_pairs:
+        first_instance = first_provider()
+        assert first_provider() is first_instance
+        assert second_provider() is not first_instance
+
+    assert (
+        first.capability_forge_service()._telemetry
+        is first.capability_gap_telemetry()
+    )
+    assert (
+        second.capability_forge_service()._telemetry
+        is second.capability_gap_telemetry()
+    )
+    assert (
+        first.lifecycle.distillation_engine()._guard
+        is first.lifecycle.memory_guard()
+    )
+    assert (
+        first.lifecycle.distillation_engine()._arbiter
+        is first.lifecycle.state_arbiter()
+    )
+    assert (
+        second.lifecycle.distillation_engine()._guard
+        is second.lifecycle.memory_guard()
+    )
+    assert (
+        second.lifecycle.distillation_engine()._arbiter
+        is second.lifecycle.state_arbiter()
+    )
+    assert (
+        first.lifecycle.conversation_history()._repository
+        is first.lifecycle.conversation_turn_store()
+    )
+    assert (
+        second.lifecycle.conversation_history()._repository
+        is second.lifecycle.conversation_turn_store()
+    )
+    assert (
+        first.lifecycle.shared_memory_index()._store
+        is first_episodic_store
+    )
+    assert (
+        second.lifecycle.shared_memory_index()._store
+        is second_episodic_store
+    )
+    assert (
+        first.lifecycle.multimodal_observer()
+        ._model_backend._model_attempt_service_provider()
+        is first_model_attempt_service
+    )
+    assert (
+        second.lifecycle.multimodal_observer()
+        ._model_backend._model_attempt_service_provider()
+        is second_model_attempt_service
+    )
+    first.close_bond_runtime()
+    second.close_bond_runtime()
+    first.close_governance_runtime()
+    second.close_governance_runtime()
+    first.close_authority_runtime()
+    second.close_authority_runtime()
 
 
 def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
@@ -249,7 +650,8 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
     assert lifecycle.get_ledger is provider
     assert lifecycle.get_life_memory_store is provider
     assert lifecycle.get_model_attempt_service is host_services.model_attempt_service
-    assert lifecycle.emotion_timeline is timeline
+    assert lifecycle.emotion_timeline.rebuild_summary(window_ms=1) == {}
+    assert lifecycle.emotion_timeline.build_daily_diary(window_ms=1) == {}
     assert lifecycle.get_user_emotion_profile() == {"source": "typed-bundle"}
     assert tribe.ledger is provider
     assert tribe.model_attempt_service is host_services.model_attempt_service
@@ -612,6 +1014,7 @@ async def test_explicit_start_publishes_exact_app_local_identity() -> None:
 
     activity = container.start_activity_monitor(ledger=object())
     resource = container.start_resource_manager(
+        status_journal=object(),
         degradation_state_provider=lambda: None,
         run_immediately=False,
     )
@@ -631,6 +1034,27 @@ async def test_explicit_start_publishes_exact_app_local_identity() -> None:
         "resource:stop",
         "activity:stop",
     ]
+
+
+@pytest.mark.asyncio
+async def test_resource_manager_requires_durable_status_journal_before_factory() -> None:
+    events: list[str] = []
+    container = HostLifecycleContainer(_ports(events))
+    container.begin()
+
+    with pytest.raises(
+        HostLifecycleScopeError,
+        match="RESOURCE_MANAGER_STATUS_JOURNAL_NOT_INJECTED",
+    ):
+        container.start_resource_manager(
+            status_journal=None,
+            degradation_state_provider=lambda: None,
+            run_immediately=False,
+        )
+
+    assert events == []
+    assert container.get_resource_manager() is None
+    await container.aclose(logger=logging.getLogger("test.lifecycle.no-journal"))
 
 
 @pytest.mark.asyncio
@@ -707,6 +1131,7 @@ async def test_partial_resource_start_does_not_unpublish_active_monitor() -> Non
 
     with pytest.raises(RuntimeError, match="resource start failed"):
         container.start_resource_manager(
+            status_journal=object(),
             degradation_state_provider=lambda: None,
             run_immediately=False,
         )
@@ -751,6 +1176,7 @@ async def test_close_unpublishes_before_stop_and_is_best_effort_exact_once() -> 
     container.begin()
     container.start_activity_monitor(ledger=object())
     container.start_resource_manager(
+        status_journal=object(),
         degradation_state_provider=lambda: None,
         run_immediately=False,
     )
@@ -769,10 +1195,18 @@ async def test_close_unpublishes_before_stop_and_is_best_effort_exact_once() -> 
 def test_app_tribe_ports_are_owner_fenced_and_rebind_only_after_release() -> None:
     from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
     from host_brain.tribe.application_ports import TribeApplicationPorts
+    from host_brain.tribe.event_bus import InMemoryTribeEventBus
     from host_brain.tribe.registry import HostTribeRegistry
     from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agents = [SimpleNamespace(application_ports=None) for _ in range(3)]
+    previous_state_registries = [object() for _ in range(3)]
+    agents = [
+        SimpleNamespace(
+            application_ports=None,
+            state_registry=previous_state_registries[index],
+        )
+        for index in range(3)
+    ]
     providers = tuple(
         (f"agent-{index}", lambda agent=agent: agent)
         for index, agent in enumerate(agents)
@@ -780,11 +1214,13 @@ def test_app_tribe_ports_are_owner_fenced_and_rebind_only_after_release() -> Non
     runtime = TribeRuntimeScope(
         state_registry=TribeStateRegistry(),
         tribe_registry=HostTribeRegistry(),
+        event_bus=InMemoryTribeEventBus(),
         agent_providers=providers,
     )
     concurrent_runtime = TribeRuntimeScope(
         state_registry=TribeStateRegistry(),
         tribe_registry=HostTribeRegistry(),
+        event_bus=InMemoryTribeEventBus(),
         agent_providers=providers,
     )
 
@@ -799,51 +1235,88 @@ def test_app_tribe_ports_are_owner_fenced_and_rebind_only_after_release() -> Non
 
     assert runtime.application_ports is ports_a
     assert all(agent.application_ports is ports_a for agent in agents)
-    with pytest.raises(
-        RuntimeError,
-        match="TRIBE_APPLICATION_PORTS_ALREADY_BOUND",
-    ):
-        runtime.bind_application_ports(
-            owner=owner_b,
-            ports=ports_b,
-        )
-    with pytest.raises(
-        RuntimeError,
-        match="TRIBE_APPLICATION_PORTS_OWNER_MISMATCH",
-    ):
-        runtime.unbind_application_ports(owner=owner_b)
-    with pytest.raises(
-        RuntimeError,
-        match="TRIBE_APPLICATION_PORTS_FOREIGN_BINDING",
-    ):
-        concurrent_runtime.bind_application_ports(owner=owner_b, ports=ports_b)
-    assert all(agent.application_ports is ports_a for agent in agents)
+    assert all(
+        agent.state_registry is runtime.state_registry
+        for agent in agents
+    )
+    from host_brain.tribe.event_bus import get_tribe_event_bus
+    from host_brain.tribe.registry import get_host_tribe_registry
+    from host_brain.tribe.runtime_context import active_tribe_runtime_context
+    from host_brain.tribe.tribe_state import get_global_registry
+
+    assert active_tribe_runtime_context() is None
+    activation = runtime.activate_execution_context(owner=owner_a)
+    try:
+        active_context = active_tribe_runtime_context()
+        assert active_context is not None
+        assert active_context.state_registry is runtime.state_registry
+        assert active_context.tribe_registry is runtime.tribe_registry
+        assert active_context.event_bus is runtime.event_bus
+        assert get_global_registry() is runtime.state_registry
+        assert get_host_tribe_registry() is runtime.tribe_registry
+        assert get_tribe_event_bus() is runtime.event_bus
+        with pytest.raises(
+            RuntimeError,
+            match="TRIBE_APPLICATION_PORTS_ALREADY_BOUND",
+        ):
+            runtime.bind_application_ports(
+                owner=owner_b,
+                ports=ports_b,
+            )
+        with pytest.raises(
+            RuntimeError,
+            match="TRIBE_APPLICATION_PORTS_OWNER_MISMATCH",
+        ):
+            runtime.unbind_application_ports(owner=owner_b)
+        with pytest.raises(
+            RuntimeError,
+            match="TRIBE_RUNTIME_CONTEXT_ALREADY_BOUND",
+        ):
+            concurrent_runtime.bind_application_ports(
+                owner=owner_b,
+                ports=ports_b,
+            )
+        assert all(agent.application_ports is ports_a for agent in agents)
+    finally:
+        runtime.deactivate_execution_context(activation)
 
     assert runtime.unbind_application_ports(owner=owner_a) is True
     assert all(agent.application_ports is None for agent in agents)
+    assert [
+        agent.state_registry for agent in agents
+    ] == previous_state_registries
+    assert active_tribe_runtime_context() is None
     concurrent_runtime.bind_application_ports(owner=owner_b, ports=ports_b)
     assert all(agent.application_ports is ports_b for agent in agents)
+    assert all(
+        agent.state_registry is concurrent_runtime.state_registry
+        for agent in agents
+    )
     assert concurrent_runtime.unbind_application_ports(owner=owner_b) is True
 
 
 def test_app_tribe_ports_cross_scope_bind_is_atomic() -> None:
     from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
     from host_brain.tribe.application_ports import TribeApplicationPorts
+    from host_brain.tribe.event_bus import InMemoryTribeEventBus
     from host_brain.tribe.registry import HostTribeRegistry
     from host_brain.tribe.tribe_state import TribeStateRegistry
 
-    agents = [SimpleNamespace(application_ports=None) for _ in range(3)]
-    providers = tuple(
-        (f"agent-{index}", lambda agent=agent: agent)
-        for index, agent in enumerate(agents)
-    )
+    agents_by_runtime = [
+        [SimpleNamespace(application_ports=None) for _ in range(3)]
+        for _ in range(2)
+    ]
     runtimes = [
         TribeRuntimeScope(
             state_registry=TribeStateRegistry(),
             tribe_registry=HostTribeRegistry(),
-            agent_providers=providers,
+            event_bus=InMemoryTribeEventBus(),
+            agent_providers=tuple(
+                (f"agent-{index}", lambda agent=agent: agent)
+                for index, agent in enumerate(agents)
+            ),
         )
-        for _ in range(2)
+        for agents in agents_by_runtime
     ]
     owners = [object(), object()]
     ports = [TribeApplicationPorts(), TribeApplicationPorts()]
@@ -875,12 +1348,47 @@ def test_app_tribe_ports_cross_scope_bind_is_atomic() -> None:
 
     bound = [(index, outcome) for index, outcome in outcomes if outcome == "BOUND"]
     rejected = [(index, outcome) for index, outcome in outcomes if outcome != "BOUND"]
-    assert len(bound) == 1
-    assert len(rejected) == 1
-    assert rejected[0][1].startswith("TRIBE_APPLICATION_PORTS_FOREIGN_BINDING")
-    winning_index = bound[0][0]
-    assert all(agent.application_ports is ports[winning_index] for agent in agents)
-    assert runtimes[winning_index].unbind_application_ports(owner=owners[winning_index])
+    assert len(bound) == 2
+    assert rejected == []
+    for index, agents in enumerate(agents_by_runtime):
+        assert all(agent.application_ports is ports[index] for agent in agents)
+        assert runtimes[index].unbind_application_ports(owner=owners[index])
+
+
+def test_app_tribe_scope_rolls_back_context_when_agent_resolution_fails() -> None:
+    from host_brain.app.tribe_runtime_scope import TribeRuntimeScope
+    from host_brain.tribe.application_ports import TribeApplicationPorts
+    from host_brain.tribe.event_bus import InMemoryTribeEventBus
+    from host_brain.tribe.registry import HostTribeRegistry
+    from host_brain.tribe.runtime_context import active_tribe_runtime_context
+    from host_brain.tribe.tribe_state import TribeStateRegistry
+
+    first = SimpleNamespace(application_ports=None, state_registry=object())
+    previous_registry = first.state_registry
+
+    def unavailable() -> None:
+        raise LookupError("fixture unavailable")
+
+    runtime = TribeRuntimeScope(
+        state_registry=TribeStateRegistry(),
+        tribe_registry=HostTribeRegistry(),
+        event_bus=InMemoryTribeEventBus(),
+        agent_providers=(
+            ("first", lambda: first),
+            ("unavailable", unavailable),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="TRIBE_AGENT_PROVIDER_UNAVAILABLE"):
+        runtime.bind_application_ports(
+            owner=object(),
+            ports=TribeApplicationPorts(),
+        )
+
+    assert active_tribe_runtime_context() is None
+    assert first.application_ports is None
+    assert first.state_registry is previous_registry
+    assert runtime.application_ports is None
 
 
 def test_resource_manager_immediate_sample_uses_the_owned_loop_thread(
@@ -894,7 +1402,6 @@ def test_resource_manager_immediate_sample_uses_the_owned_loop_thread(
         llm_enabled=False,
         auto_gc_enabled=False,
         auto_trim_enabled=False,
-        status_path=tmp_path / "resource-status.json",
     )
     sampled = threading.Event()
     thread_names: list[str] = []
@@ -1004,9 +1511,9 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
         if imported_names:
             named_import_modules[path] = imported_names
 
-    assert len(named_import_modules) == 19
-    assert sum(named_import_modules.values()) == 45
-    assert len(all_import_modules) == 22
+    assert len(named_import_modules) == 0
+    assert sum(named_import_modules.values()) == 0
+    assert len(all_import_modules) == 0
     assert (
         ROOT / "host_brain" / "app" / "lifecycle_runtime_composition.py"
     ) not in all_import_modules
@@ -1032,7 +1539,7 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
     ) not in all_import_modules
     assert (
         ROOT / "host_brain" / "composition" / "host_application.py"
-    ) in all_import_modules
+    ) not in all_import_modules
     assert (
         ROOT / "host_brain" / "app" / "conversation_writer.py"
     ) not in all_import_modules

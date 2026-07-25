@@ -11,9 +11,9 @@ from fastapi import HTTPException, Request
 
 from host_brain.app import obs_routes_life_evolution as routes
 from host_brain.app.obs_route_ports import ObsRoutePorts
-from host_brain.composition.process_services import get_token_service
 from host_brain.app.settings.core import get_core_settings
 from host_brain.governor.action_arbiter import build_governed_action_binding
+from host_brain.governor.tokens import TokenService
 from host_brain.observability.degradation_state import (
     DegradationStateMachine,
     set_global_degradation_state_machine,
@@ -392,10 +392,39 @@ def test_t_nle_22_client_forged_governor_context_is_ignored_and_blocked(monkeypa
 
 
 def test_t_nle_22_server_trusted_preview_is_governed_dry_run_without_execution_or_recording(monkeypatch: pytest.MonkeyPatch) -> None:
+    class AllowingGuardian:
+        def evaluate_capability(
+            self,
+            *,
+            capability_id: str,
+            static_risk_level: int,
+            capability_policy_decision: object = None,
+        ) -> dict:
+            del static_risk_level, capability_policy_decision
+            return {
+                "schema_version": "Natsume.degradation.capability_decision.v1",
+                "capability_id": capability_id,
+                "decision": "ALLOW",
+                "allowed": True,
+                "allowed_by_degradation": True,
+                "reason_code": "GUARDIAN_CAPABILITY_AVAILABLE",
+                "durability_required": True,
+                "durability_status": "READY",
+                "guardian_authority": {
+                    "authority": "RUNTIME_GUARDIAN",
+                    "authority_status": "ACTIVE",
+                    "durable": True,
+                    "aggregate_ref": "runtime-guardian://sha256/test",
+                    "guardian_revision": 1,
+                    "fencing_token": 1,
+                },
+            }
+
     monkeypatch.setenv("HOST_NLE_LIFE_VIEWS_ENABLED", "true")
     get_core_settings.cache_clear()
     now_ms = int(time.time() * 1000)
-    token = get_token_service().issue_approval_token(
+    token_service = TokenService()
+    token = token_service.issue_approval_token(
         intent_id="intent-ui-preview",
         skill_name="proactive_expression",
         session_id="session-ui-preview",
@@ -413,7 +442,8 @@ def test_t_nle_22_server_trusted_preview_is_governed_dry_run_without_execution_o
         ObsRoutePorts(
             query_projection_store_provider=lambda: object(),
             life_action_context_provider=lambda **_: trusted,
-            approval_token_validator=get_token_service().validate_bound_token,
+            approval_token_validator=token_service.validate_bound_token,
+            degradation_capability_port_provider=AllowingGuardian,
         )
     )
     try:

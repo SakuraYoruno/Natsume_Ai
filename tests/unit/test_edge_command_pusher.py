@@ -13,8 +13,6 @@ from host_brain.tribe.edge_command_pusher import (
     EdgeCommandPusher,
     build_edge_command_preview_args,
     edge_command_preview_scope,
-    init_edge_command_pusher,
-    set_edge_command_pusher,
 )
 
 
@@ -225,19 +223,11 @@ def test_edge_command_pusher_rejects_tamper_and_lost_lease_before_network() -> N
     assert session.calls == 0
 
 
-def test_edge_command_pusher_singleton_injection_cannot_replace_gated_type() -> None:
-    class UngatedPusher(EdgeCommandPusher):
-        pass
+def test_edge_command_pusher_exposes_no_process_global_owner() -> None:
+    from host_brain.tribe import edge_command_pusher
 
-    injected = UngatedPusher(edge_base_url="http://edge.local")
-    set_edge_command_pusher(None)
-    try:
-        for install in (set_edge_command_pusher, init_edge_command_pusher):
-            try:
-                install(injected)
-            except TypeError as exc:
-                assert "canonical gated type" in str(exc)
-            else:  # pragma: no cover - fail-closed assertion
-                raise AssertionError("subclass injection must not downgrade the gate")
-    finally:
-        set_edge_command_pusher(None)
+    assert not hasattr(edge_command_pusher, "get_edge_command_pusher")
+    assert not hasattr(edge_command_pusher, "init_edge_command_pusher")
+    assert not hasattr(edge_command_pusher, "set_edge_command_pusher")
+    assert not hasattr(edge_command_pusher, "_PUSHER")
+    assert not hasattr(edge_command_pusher, "_PUSHER_LOCK")

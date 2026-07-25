@@ -7,6 +7,11 @@ from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
+def _build_prefrontal_agent(**kwargs) -> PrefrontalAgent:
+    kwargs.setdefault("state_registry", TribeStateRegistry())
+    return PrefrontalAgent(**kwargs)
+
+
 class _FakeLogger:
     def __init__(self) -> None:
         self.info_calls: list[tuple[str, tuple[object, ...]]] = []
@@ -57,12 +62,11 @@ def test_prefrontal_run_evolution_cycle_success(monkeypatch) -> None:
             }
 
     monkeypatch.setattr("host_brain.app.emotion_context._global_emotion_timeline", _FakeTimeline())
-    monkeypatch.setattr("host_brain.composition.process_services.get_bond_stage_engine", lambda: _FakeBSE())
     monkeypatch.setattr("host_brain.persona.evolution_orchestrator.EvolutionOrchestrator", _FakeOrchestrator)
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_social_brain_agent", lambda: _FakeSocial())
     logger = _FakeLogger()
 
-    result = PrefrontalAgent(
+    result = _build_prefrontal_agent(
         application_ports=TribeApplicationPorts(emotion_timeline=lambda: _FakeTimeline()),
     ).run_evolution_cycle(
         system_intent={"args": {"user_id": "user_x", "date": "2026-04-08"}},
@@ -86,7 +90,7 @@ def test_prefrontal_run_evolution_cycle_degraded_on_error(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.persona.evolution_orchestrator.EvolutionOrchestrator", _boom)
     logger = _FakeLogger()
 
-    result = PrefrontalAgent().run_evolution_cycle(
+    result = _build_prefrontal_agent().run_evolution_cycle(
         system_intent={"args": {"user_id": "user_y"}},
         logger=logger,
     )
@@ -124,7 +128,7 @@ def test_prefrontal_resolve_self_reflection_context(monkeypatch) -> None:
         lambda **kwargs: (lambda prompt: "ok"),
     )
 
-    result = PrefrontalAgent().resolve_self_reflection_context(
+    result = _build_prefrontal_agent().resolve_self_reflection_context(
         persona_user_id="user-sr",
         timeline_summary={"dominant_emotion": "CALM"},
         timeline_diary={"entry_count": 3},
@@ -159,7 +163,7 @@ def test_prefrontal_resolve_self_reflection_context_skips_llm_when_background_di
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("self reflection llm should not resolve")),
     )
 
-    result = PrefrontalAgent().resolve_self_reflection_context(
+    result = _build_prefrontal_agent().resolve_self_reflection_context(
         persona_user_id="user-sr",
         timeline_summary={"dominant_emotion": "CALM"},
         timeline_diary={"entry_count": 3},
@@ -201,7 +205,7 @@ def test_prefrontal_resolve_self_reflection_context_can_be_read_only(monkeypatch
         },
     )
 
-    result = PrefrontalAgent().resolve_self_reflection_context(
+    result = _build_prefrontal_agent().resolve_self_reflection_context(
         persona_user_id="user-sr",
         timeline_summary={"dominant_emotion": "CALM"},
         timeline_diary={"entry_count": 3},
@@ -223,7 +227,7 @@ def test_prefrontal_resolve_style_evolution_summary(monkeypatch) -> None:
         ),
     )
 
-    result = PrefrontalAgent().resolve_style_evolution_summary()
+    result = _build_prefrontal_agent().resolve_style_evolution_summary()
 
     assert result == {"warmth": "rising", "humor": "stable"}
 
@@ -241,7 +245,7 @@ def test_prefrontal_run_persona_drift_cycle_does_not_write_hard_state(monkeypatc
 
     monkeypatch.setattr("host_brain.persona.drift_detector.PersonaDriftDetector", _FakeDetector)
 
-    result = PrefrontalAgent(
+    result = _build_prefrontal_agent(
         application_ports=TribeApplicationPorts(
             hard_state=lambda: (_ for _ in ()).throw(
                 AssertionError("Prefrontal must not write Host HardState")
@@ -277,7 +281,7 @@ def test_prefrontal_run_growth_feedback_cycle(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.persona.growth_feedback_collector.GrowthFeedbackCollector", _FakeCollector)
     monkeypatch.setattr("host_brain.persona.persona_growth.PersonaGrowthTracker", _FakeTracker)
 
-    result = PrefrontalAgent().run_growth_feedback_cycle(
+    result = _build_prefrontal_agent().run_growth_feedback_cycle(
         session_id="s-001",
         user_message="continue",
         assistant_reply="ok",
@@ -306,7 +310,7 @@ def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
             return SimpleNamespace(applied=True, reason="milestone-ok")
 
     monkeypatch.setattr("host_brain.persona.persona_growth.PersonaGrowthTracker", _FakeTracker)
-    agent = PrefrontalAgent()
+    agent = _build_prefrontal_agent()
 
     promoted = agent.apply_stage_promotion_growth(
         user_id="u-growth",
@@ -343,7 +347,7 @@ def test_prefrontal_evolution_event_deferred_by_resource_gate(monkeypatch) -> No
         lambda create_if_missing=False: _FakeResourceManager(),
     )
 
-    event_key = PrefrontalAgent(
+    event_key = _build_prefrontal_agent(
         application_ports=TribeApplicationPorts(
             resource_manager=lambda **_: _FakeResourceManager(),
         ),
@@ -365,7 +369,7 @@ def test_prefrontal_evolution_event_cooldown_after_release(monkeypatch) -> None:
         "host_brain.composition.process_services.get_resource_manager",
         lambda create_if_missing=False: None,
     )
-    agent = PrefrontalAgent()
+    agent = _build_prefrontal_agent()
 
     first_key = agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal")  # noqa: SLF001
     assert first_key == "u1:loneliness_signal"
@@ -384,7 +388,7 @@ def test_prefrontal_evolution_user_cooldown_merges_different_reasons(monkeypatch
         "host_brain.composition.process_services.get_resource_manager",
         lambda create_if_missing=False: None,
     )
-    agent = PrefrontalAgent()
+    agent = _build_prefrontal_agent()
 
     first_key = agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal")  # noqa: SLF001
     assert first_key == "u1:loneliness_signal"
@@ -406,7 +410,7 @@ def test_prefrontal_evolution_startup_grace_skips_background_events(monkeypatch)
         "host_brain.composition.process_services.get_resource_manager",
         lambda create_if_missing=False: None,
     )
-    agent = PrefrontalAgent()
+    agent = _build_prefrontal_agent()
     agent._created_monotonic = clock["now"]  # noqa: SLF001
 
     assert agent._reserve_evolution_event(user_id="u1", reason="loneliness_signal") is None  # noqa: SLF001
@@ -418,7 +422,7 @@ def test_prefrontal_evolution_startup_grace_skips_background_events(monkeypatch)
 def test_prefrontal_loneliness_logs_and_milestones_are_debounced(monkeypatch) -> None:
     monkeypatch.setenv("HOST_PREFRONTAL_LONELINESS_SIGNAL_LOG_COOLDOWN_S", "300")
     monkeypatch.setenv("HOST_PREFRONTAL_LONELINESS_MILESTONE_COOLDOWN_S", "600")
-    agent = PrefrontalAgent()
+    agent = _build_prefrontal_agent()
 
     assert agent._loneliness_signal_log_allowed(user_id="u1") is True  # noqa: SLF001
     assert agent._loneliness_signal_log_allowed(user_id="u1") is False  # noqa: SLF001
@@ -476,7 +480,7 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
         _Analyzer,
     )
 
-    agent = PrefrontalAgent()
+    agent = _build_prefrontal_agent()
     agent._emergent_growth_engine = _EmergentEngine()
 
     weekly = agent.run_emergent_growth_weekly(
@@ -495,7 +499,7 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
 
 
 def test_prefrontal_run_emergent_growth_weekly_skips_without_llm() -> None:
-    result = PrefrontalAgent().run_emergent_growth_weekly(
+    result = _build_prefrontal_agent().run_emergent_growth_weekly(
         user_id="user-eg",
         lookback_days=7,
         episodic_store=object(),
@@ -531,7 +535,7 @@ def test_prefrontal_resolve_persona_change_and_growth_payloads(monkeypatch) -> N
         _FakeEvolutionOrchestrator,
     )
 
-    agent = PrefrontalAgent()
+    agent = _build_prefrontal_agent()
     changes = agent.resolve_persona_change_log(persona_user_id="user-1", limit=3)
     growth_awareness = agent.resolve_growth_awareness()
     growth_summary = agent.resolve_growth_summary(persona_user_id="user-1", now_ts_ms=1234)
@@ -557,7 +561,9 @@ def test_prefrontal_resolve_persona_traits_fallback(monkeypatch) -> None:
     )
     monkeypatch.setattr("host_brain.persona.personality_traits.PersonalityTraits", _BaselineTraits)
 
-    result = PrefrontalAgent().resolve_persona_traits(persona_user_id="user-2")
+    result = _build_prefrontal_agent().resolve_persona_traits(
+        persona_user_id="user-2"
+    )
 
     assert result == {"warmth": 0.5}
 
@@ -590,7 +596,7 @@ def test_prefrontal_resolve_persona_expression_hint(monkeypatch) -> None:
         lambda self, *, persona_user_id: {"uid": persona_user_id},  # noqa: ARG005
     )
 
-    result = PrefrontalAgent().resolve_persona_expression_hint(
+    result = _build_prefrontal_agent().resolve_persona_expression_hint(
         persona_user_id="user-3",
         bond_stage="FRIEND",
         user_emotion_tag="HAPPY",
@@ -627,7 +633,7 @@ def test_prefrontal_resolve_bond_style_instruction(monkeypatch) -> None:
         _FakeBondAwareStyleEngine,
     )
 
-    result = PrefrontalAgent().resolve_bond_style_instruction(
+    result = _build_prefrontal_agent().resolve_bond_style_instruction(
         bond_stage="FRIEND",
         intimacy_score=0.62,
         mood_state="positive",
@@ -667,7 +673,6 @@ def test_prefrontal_autobiographical_gate_and_commit(monkeypatch) -> None:
             assert kwargs["gate_result"]["decision"] == "ALLOW"
             return {"layer": "autobiographical", "payload": {"narrative": kwargs["narrative"]}}
 
-    monkeypatch.setattr("host_brain.tribe.tribe_state.get_global_registry", lambda: registry)
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_social_brain_agent", lambda: _FakeSocial())
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_hippocampus_agent", lambda: _FakeHippocampus())
 
