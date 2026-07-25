@@ -89,6 +89,28 @@ class TaskStorePort(Protocol):
 
     def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
 
+    def stage_operation_reconciliation_evidence(
+        self,
+        *,
+        request_id: str,
+        ingress_audit_ref: str,
+        body_sha256: str,
+        reservation_id: str,
+        expected_version: int,
+        action: str,
+        intent_ref: str | None,
+        reconciler_actor_id: str,
+        downstream_receipt_ref: str | None,
+        attestation_ref: str,
+        attestation_key_id: str,
+        attestation_signature: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_operation_reconciliation_evidence(
+        self,
+        evidence_ref: str,
+    ) -> Mapping[str, Any]: ...
+
     def resolve_internal_agent_budget_rejection_terminal(
         self,
         attempt_id: str,
@@ -457,6 +479,7 @@ class TaskStorePort(Protocol):
         outbox: Any,
         absent_operation_reservation_id: str | None = None,
         existing_operation_reservation_id: str | None = None,
+        operation_reacquisition_authorization: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]: ...
 
     def heartbeat_lease(
@@ -777,6 +800,54 @@ class GraphCancellationOperationReconciliationStorePort(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class OperationReacquisitionStorePort(Protocol):
+    """Durable reads and fenced mutations required by signed REACQUIRE."""
+
+    def get_operation_reservation(self, reservation_id: str) -> Mapping[str, Any]: ...
+
+    def get_attempt(self, attempt_id: str) -> Mapping[str, Any]: ...
+
+    def get_active_lease(self, attempt_id: str) -> Mapping[str, Any] | None: ...
+
+    def acquire_lease(
+        self,
+        attempt_id: str,
+        *,
+        owner_id: str,
+        ttl_ms: int,
+        expected_attempt_version: int,
+        existing_operation_reservation_id: str,
+        operation_reacquisition_authorization: Mapping[str, Any],
+        outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def recover_operation_reservation(
+        self,
+        reservation_id: str,
+        *,
+        action: str,
+        attempt_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_version: int,
+        outbox: Any,
+        reconciler_actor_id: str,
+        attestation_ref: str,
+        attestation_key_id: str,
+        attestation_signature: str,
+        ttl_ms: int,
+    ) -> Mapping[str, Any]: ...
+
+
+class ReconciliationProofVerifierPort(Protocol):
+    """Verification-only public-key boundary; signing authority is excluded."""
+
+    def has_key(self, key_id: str) -> bool: ...
+
+    def verify(self, *, key_id: str, message: bytes, signature: str) -> bool: ...
+
+
 class GraphCancellationEffectReconciliationStorePort(Protocol):
     """Append-only proof boundary for one inventoried Effect uncertainty.
 
@@ -927,6 +998,8 @@ __all__ = [
     "ExecutionProjectionReaderPort",
     "GraphCancellationEffectReconciliationStorePort",
     "GraphCancellationOperationReconciliationStorePort",
+    "OperationReacquisitionStorePort",
+    "ReconciliationProofVerifierPort",
     "GovernedWorkerPort",
     "GovernedWorkerResolverPort",
     "InternalAgentCheckpointUnitOfWorkPort",

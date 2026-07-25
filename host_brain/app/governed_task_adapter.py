@@ -815,6 +815,59 @@ class GovernedHostRuntime:
                     self._lifecycle.notify_all()
             self.wake_survivor_continuation()
 
+    async def continue_operation_reacquisition(
+        self,
+        record: Mapping[str, Any],
+        _operation: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact Host admission after signed no-effect recovery."""
+
+        async with self._lifecycle:
+            if not self._active or not self._accepting:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_RUNTIME_INACTIVE,
+                    "governed Host runtime is not accepting Operation recovery",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            work_order = durable.get("work_order")
+            assignment = durable.get("assignment")
+            graph = durable.get("graph")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface
+                not in {
+                    HostCommandSurface.CHAT,
+                    HostCommandSurface.HOST_INPUT,
+                    HostCommandSurface.TOOL,
+                    HostCommandSurface.GATEWAY,
+                    HostCommandSurface.OPERATOR,
+                }
+                or not isinstance(work_order, WorkOrderV3)
+                or assignment is None
+                or graph is None
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "Operation recovery Host admission is incomplete or misrouted",
+                )
+            return dict(
+                await self._resume_startup_admission(
+                    command,
+                    work_order,
+                    assignment,
+                    graph,
+                )
+            )
+        finally:
+            async with self._lifecycle:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._lifecycle.notify_all()
+            self.wake_survivor_continuation()
+
     async def _resume_startup_admission(
         self,
         command: HostCommand,

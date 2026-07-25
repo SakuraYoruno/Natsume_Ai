@@ -23,9 +23,6 @@ from host_brain.observability.command_ports import (
     ObsCommandPortRegistry,
 )
 from host_brain.composition.runtime_group import GraphCancellationOperatorError
-from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
-    GraphCancellationOperationReconciliationError,
-)
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationError,
 )
@@ -59,6 +56,7 @@ GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
     "edge.command.push",
     "scheduler.task.trigger",
     "sys_mode.switch",
+    "task_operation.reconcile",
     "task_terminal.reconcile",
 })
 BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
@@ -67,7 +65,7 @@ BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 33
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 32
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -667,42 +665,17 @@ async def _task_graph_cancel(payload: Mapping[str, Any], _request_id: str) -> An
 
 async def _task_operation_reconcile(
     payload: Mapping[str, Any],
-    _request_id: str,
+    request_id: str,
 ) -> Any:
-    del _request_id
-    service = operator_runtime_value("task_operation_reconciliation_command_service")
-    reconcile = getattr(service, "reconcile_graph_cancellation_operation", None)
+    if operator_runtime_value(
+        "task_operation_reconciliation_operator_enabled"
+    ) is not True:
+        raise ObsDomainCommandError("OBS_TASK_OPERATION_RECONCILIATION_DISABLED")
+    runtime = operator_runtime_value("governed_operator_runtime")
+    reconcile = getattr(runtime, "execute_operation_reconciliation", None)
     if not callable(reconcile):
         raise ObsDomainCommandError("OBS_TASK_OPERATION_RECONCILIATION_UNAVAILABLE")
-    try:
-        result = reconcile(
-            intent_ref=_required_text(payload, "intent_ref"),
-            reservation_id=_required_text(payload, "reservation_id"),
-            expected_version=int(payload["expected_version"]),
-            action=_required_text(payload, "action").upper(),
-            reconciler_actor_id=_required_text(payload, "reconciler_actor_id"),
-            downstream_receipt_ref=_optional_text(
-                payload,
-                "downstream_receipt_ref",
-            ),
-            attestation_ref=_required_text(payload, "attestation_ref"),
-            attestation_key_id=_required_text(payload, "attestation_key_id"),
-            attestation_signature=_required_text(payload, "attestation_signature"),
-        )
-        if inspect.isawaitable(result):
-            result = await result
-    except GraphCancellationOperationReconciliationError as exc:
-        raise ObsCommandPortExecutionError(
-            exc.reason_code,
-            side_effects_may_have_run=exc.side_effects_may_have_run,
-        ) from exc
-    if not isinstance(result, Mapping):
-        raise ObsDomainCommandError("OBS_TASK_OPERATION_RECONCILIATION_RESULT_INVALID")
-    return {
-        "success": True,
-        "side_effects_executed": True,
-        "reconciliation": dict(result),
-    }
+    return await reconcile(payload, request_id)
 
 
 async def _task_effect_reconcile(

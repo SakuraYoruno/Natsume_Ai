@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -27,6 +27,16 @@ from host_brain.app.governed_operator_contracts import (
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
 )
+from host_brain.app.governed_operator_execution import (
+    FrozenSysModeSwitchExecutor,
+    SYS_MODE_ACTION_KIND as _ACTION_KIND,
+    SYS_MODE_EFFECT_TYPE as _EFFECT_TYPE,
+    SYS_MODE_INGRESS_ACTION as _INGRESS_ACTION,
+    SYS_MODE_INGRESS_PATH as _INGRESS_PATH,
+    SYS_MODE_INGRESS_REQUIRED_SCOPES as _INGRESS_REQUIRED_SCOPES,
+    SYS_MODE_TARGET_ID as _TARGET_ID,
+    require_operator_runtime_scope_id as _runtime_scope_id,
+)
 from host_brain.app.governed_operator_edge_support import (
     EDGE_ACTION_KIND as _EDGE_ACTION_KIND,
     EDGE_EFFECT_TYPE as _EDGE_EFFECT_TYPE,
@@ -35,7 +45,6 @@ from host_brain.app.governed_operator_edge_support import (
     EDGE_INGRESS_REQUIRED_SCOPES as _EDGE_INGRESS_REQUIRED_SCOPES,
     EDGE_TARGET_ID as _EDGE_TARGET_ID,
     build_edge_governor_intent as _build_edge_governor_intent,
-    compile_frozen_edge_command,
     embodiment_runtime_scope_id as _embodiment_runtime_scope_id,
     normalize_edge_command_args as _normalize_edge_command_args,
     pending_operator_reviews as _pending_operator_reviews,
@@ -46,7 +55,15 @@ from host_brain.app.governed_terminal_reconciliation_runtime import (
     TERMINAL_EFFECT_TYPE,
     TERMINAL_TARGET_ID,
     require_durable_terminal_outcome,
-    terminal_reconciliation_commit_event,
+)
+from host_brain.app.governed_operation_reconciliation_runtime import (
+    GovernedOperationReconciliationMixin,
+    OPERATION_RECONCILIATION_TARGET_ID,
+    operation_reconciliation_request_from_args,
+    require_durable_operation_reconciliation_outcome,
+)
+from host_brain.app.accepted_operation_reconciliation_handler import (
+    OPERATION_RECONCILIATION_EFFECT_TYPE,
 )
 from host_brain.app.governed_task_adapter import GovernedHostRuntime
 from host_brain.app.user_preference_store import UserPreferenceStore
@@ -75,21 +92,12 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
     AcceptanceEffectRuntime,
 )
-from host_brain.task_runtime.governed_workers import (
-    FrozenNodeInput,
-    GovernedFrozenNodeWorker,
-)
+from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from host_brain.task_runtime.worker_registry import GovernedWorkerRegistry
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
-_TARGET_ID = "operator_sys_mode_switch"
-_EFFECT_TYPE = "host.sys_mode_transition"
-_ACTION_KIND = "operator_sys_mode_transition"
-_INGRESS_ACTION = "obs:command:sys_mode.switch"
-_INGRESS_PATH = "/v1/host/obs-commands/sys_mode.switch"
-_INGRESS_REQUIRED_SCOPES = ("obs:sys-mode:write", "obs:write")
 @dataclass(frozen=True, slots=True)
 class GovernedOperatorComposition:
     runtime: "GovernedOperatorRuntime"
@@ -97,112 +105,10 @@ class GovernedOperatorComposition:
     acceptance_effect_runtime: AcceptanceEffectRuntime
 
 
-class FrozenSysModeSwitchExecutor:
-    """Compile supported frozen Operator commands into non-executable intents."""
-
-    def __init__(
-        self,
-        *,
-        runtime_scope_id: str,
-        embodiment_runtime_scope_id: str | None = None,
-    ) -> None:
-        self._runtime_scope_id = _runtime_scope_id(runtime_scope_id)
-        self._embodiment_runtime_scope_id = (
-            _runtime_scope_id(embodiment_runtime_scope_id)
-            if embodiment_runtime_scope_id is not None
-            else None
-        )
-
-    async def execute_stream(
-        self,
-        frozen: FrozenNodeInput,
-    ) -> AsyncIterator[Mapping[str, Any]]:
-        if frozen.route == "delegate" and frozen.target_id == TERMINAL_TARGET_ID:
-            yield terminal_reconciliation_commit_event(frozen)
-            return
-        if frozen.route == "delegate" and frozen.target_id == _EDGE_TARGET_ID:
-            yield compile_frozen_edge_command(
-                frozen,
-                runtime_scope_id=self._embodiment_runtime_scope_id,
-            )
-            return
-        if frozen.route != "delegate" or frozen.target_id != _TARGET_ID:
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "frozen Operator route is not sys_mode.switch",
-            )
-        pack = dict(frozen.input_pack or {})
-        intent = pack.get("intent_draft")
-        if not isinstance(intent, Mapping):
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "frozen Operator WorkOrder lacks intent_draft",
-            )
-        args = intent.get("args")
-        if not isinstance(args, Mapping):
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "frozen Operator intent lacks typed args",
-            )
-        target_mode = str(args.get("target_mode") or "").strip().lower()
-        reason = str(args.get("reason") or "").strip()
-        try:
-            source = TransitionSource(
-                str(args.get("source") or "").strip().lower()
-            ).value
-        except ValueError as exc:
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "frozen Operator source is invalid",
-            ) from exc
-        if (
-            str(intent.get("action") or "").strip() != _ACTION_KIND
-            or str(intent.get("target") or "").strip().lower() != "system"
-            or str(intent.get("route") or "").strip().lower() != "delegate"
-            or str(intent.get("target_id") or "").strip() != _TARGET_ID
-            or str(args.get("operator_command_id") or "").strip()
-            != "sys_mode.switch"
-            or not target_mode
-            or not reason
-        ):
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "frozen Operator intent binding drifted",
-            )
-        event_id = (
-            "obs-sys-mode:"
-            + hashlib.sha256(frozen.request_id.encode("utf-8")).hexdigest()
-        )
-        yield {
-            "phase": "COMMIT",
-            "done": True,
-            "decision": "APPROVE",
-            "request_id": frozen.request_id,
-            "narrative": f"系统模式切换已通过执行验收：{target_mode}",
-            "route_type": frozen.route,
-            "target_id": frozen.target_id,
-            "audit_refs": {
-                "operator_command_id": "sys_mode.switch",
-                "proposed_effect_type": _EFFECT_TYPE,
-            },
-            "acceptance_effect_intents": [
-                {
-                    "effect_type": _EFFECT_TYPE,
-                    "commit_scope": "NODE",
-                    "payload": {
-                        "operator_command_id": "sys_mode.switch",
-                        "request_id": frozen.request_id,
-                        "target_mode": target_mode,
-                        "source": source,
-                        "reason": reason,
-                        "event_id": event_id,
-                        "runtime_scope_id": self._runtime_scope_id,
-                    },
-                }
-            ],
-        }
-
-class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
+class GovernedOperatorRuntime(
+    GovernedOperationReconciliationMixin,
+    GovernedTerminalReconciliationMixin,
+):
     """Evaluate, admit and execute the sys_mode.switch Operator vertical slice."""
 
     def __init__(
@@ -317,6 +223,15 @@ class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
             bound["acceptance_effect_receipt"] = outcome
             bound["historical_side_effects_executed"] = True
             return bound
+        if operator_command_id == "task_operation.reconcile":
+            outcome = require_durable_operation_reconciliation_outcome(
+                task_store=self._task_store,
+                execution_receipt=receipt,
+                request=operation_reconciliation_request_from_args(args),
+            )
+            bound["acceptance_effect_receipt"] = outcome
+            bound["historical_side_effects_executed"] = True
+            return bound
         if operator_command_id == "edge.command.push":
             normalized = _normalize_edge_command_args(args)
             if (
@@ -373,6 +288,18 @@ class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
             outcome["hard_state_event"] is not None
         )
         return bound
+
+    async def continue_operation_reacquisition(
+        self,
+        record: Mapping[str, Any],
+        operation: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Delegate exact Operator worker recovery to its governed Host spine."""
+
+        return await self._runtime.continue_operation_reacquisition(
+            record,
+            operation,
+        )
 
     async def request_graph_cancellation(
         self,
@@ -907,7 +834,12 @@ def build_governed_operator_runtime(
         projections=projection_store,
         action_preview_service=action_preview_service,
         allowed_acceptance_effect_types=frozenset(
-            {_EFFECT_TYPE, _EDGE_EFFECT_TYPE, TERMINAL_EFFECT_TYPE}
+            {
+                _EFFECT_TYPE,
+                _EDGE_EFFECT_TYPE,
+                TERMINAL_EFFECT_TYPE,
+                OPERATION_RECONCILIATION_EFFECT_TYPE,
+            }
         ),
     )
     coordinator = GovernedTaskCoordinator(
@@ -1011,6 +943,17 @@ def build_governed_operator_composition(
             terminal_operator_command_store=(
                 task_runtime_container.terminal_operator_command_store
             ),
+            operation_reconciliation_service=(
+                task_runtime_container.operation_reconciliation_service
+            ),
+            operation_reconciliation_evidence_store=(
+                task_runtime_container.task_store
+            ),
+            operation_reacquisition_continuation_provider=lambda: getattr(
+                task_runtime_container,
+                "bound_runtime",
+                None,
+            ),
             scheduler_operation_handler=scheduler_operation_handler,
             internal_result_commit_handler=InternalAcceptedResultHandler(
                 command_repository=task_runtime_container.command_repository,
@@ -1062,7 +1005,12 @@ def build_governed_operator_composition(
 
 def _require_operator_target(target_id: str) -> str:
     target = str(target_id or "").strip()
-    if target not in {_TARGET_ID, _EDGE_TARGET_ID, TERMINAL_TARGET_ID}:
+    if target not in {
+        _TARGET_ID,
+        _EDGE_TARGET_ID,
+        TERMINAL_TARGET_ID,
+        OPERATION_RECONCILIATION_TARGET_ID,
+    }:
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,
             "unsupported governed Operator target",
@@ -1452,20 +1400,6 @@ def _runtime_scope_from_context(
         else getattr(authority, "runtime_scope_id", None)
     )
     return _runtime_scope_id(value)
-
-
-def _runtime_scope_id(value: Any) -> str:
-    scope = str(value or "").strip()
-    if (
-        not scope
-        or len(scope.encode("utf-8")) > 512
-        or any(ord(character) < 32 or ord(character) == 127 for character in scope)
-    ):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator runtime_scope_id is invalid",
-        )
-    return scope
 
 
 def _current_mode(service_provider: Any) -> str:

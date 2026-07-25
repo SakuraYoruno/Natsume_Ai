@@ -64,6 +64,10 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     normalize_graph_cancellation_decision,
     normalize_graph_cancellation_intent,
 )
+from host_brain.contracts.agent_runtime.operation_reconciliation import (
+    OperationReconciliationContractError,
+    build_reconciliation_attestation_binding,
+)
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
     validate_worker_projection_record,
@@ -173,6 +177,9 @@ from host_brain.persistence.task_graph_cancellation_continuation_store import (
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_operation_reconciliation_evidence_store import (
+    TaskOperationReconciliationEvidenceStoreMixin,
+)
 from host_brain.persistence.task_worker_interruption_store import (
     TaskWorkerInterruptionStoreMixin,
 )
@@ -233,6 +240,7 @@ TASK_RUNTIME_TABLES = frozenset(
         "task_runtime_idempotency_reservation",
         "task_runtime_budget_reservation",
         "task_runtime_outbox",
+        "task_runtime_operation_reconciliation_evidence",
     }
 )
 _TASK_RUNTIME_REQUIRED_COLUMNS = {
@@ -351,82 +359,6 @@ def build_operation_fingerprint(
     return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
-def build_reconciliation_attestation_binding(
-    *,
-    reservation_id: str,
-    business_scope: str,
-    operation_fingerprint: str,
-    recovery_version: int,
-    reconciler_actor_id: str,
-    attestation_ref: str,
-    recovery_action: str,
-    reconciliation_outcome: str,
-    receipt_ref: str | None = None,
-) -> bytes:
-    """Build canonical bytes signed by the isolated reconciliation authority."""
-
-    try:
-        normalized_recovery_version = int(recovery_version)
-    except (TypeError, ValueError) as exc:
-        raise TaskStoreError(
-            TASK_STORE_RECONCILIATION_PROOF_INVALID,
-            "recovery_version must be a non-negative integer",
-        ) from exc
-    action = str(recovery_action or "").strip().upper()
-    outcome = str(reconciliation_outcome or "").strip().upper()
-    receipt = str(receipt_ref or "").strip() or None
-    if outcome not in {"NO_SIDE_EFFECT", "SIDE_EFFECT_CONFIRMED"}:
-        raise TaskStoreError(
-            TASK_STORE_RECONCILIATION_PROOF_INVALID,
-            "reconciliation_outcome must be NO_SIDE_EFFECT or SIDE_EFFECT_CONFIRMED",
-        )
-    expected_outcome = {
-        "COMMIT": "SIDE_EFFECT_CONFIRMED",
-        "RELEASE": "NO_SIDE_EFFECT",
-        "REACQUIRE": "NO_SIDE_EFFECT",
-    }.get(action)
-    if expected_outcome is None or outcome != expected_outcome:
-        raise TaskStoreError(
-            TASK_STORE_RECONCILIATION_PROOF_INVALID,
-            "recovery_action and reconciliation_outcome are inconsistent",
-        )
-    if outcome == "SIDE_EFFECT_CONFIRMED":
-        if receipt is None or not _DURABLE_REFERENCE_PATTERN.fullmatch(receipt):
-            raise TaskStoreError(
-                TASK_STORE_RECONCILIATION_PROOF_INVALID,
-                "SIDE_EFFECT_CONFIRMED attestation requires a durable receipt_ref",
-            )
-    elif receipt is not None:
-        raise TaskStoreError(
-            TASK_STORE_RECONCILIATION_PROOF_INVALID,
-            "NO_SIDE_EFFECT attestation cannot bind a receipt_ref",
-        )
-    binding = {
-        "reservation_id": str(reservation_id or "").strip(),
-        "business_scope": str(business_scope or "").strip(),
-        "operation_fingerprint": str(operation_fingerprint or "").strip(),
-        "recovery_version": normalized_recovery_version,
-        "reconciler_actor_id": str(reconciler_actor_id or "").strip(),
-        "attestation_ref": str(attestation_ref or "").strip(),
-        "recovery_action": action,
-        "reconciliation_outcome": outcome,
-        "receipt_ref": receipt,
-    }
-    if (
-        not binding["reservation_id"]
-        or not binding["business_scope"]
-        or not binding["operation_fingerprint"]
-        or int(binding["recovery_version"]) < 0
-        or not binding["reconciler_actor_id"]
-        or not _DURABLE_REFERENCE_PATTERN.fullmatch(str(binding["attestation_ref"]))
-    ):
-        raise TaskStoreError(
-            TASK_STORE_RECONCILIATION_PROOF_INVALID,
-            "reconciliation attestation binding fields are invalid",
-        )
-    return _dumps(binding).encode("utf-8")
-
-
 class DurableTaskStore(
     TaskOutboxDeliveryStoreMixin,
     TaskGraphCancellationContinuationStoreMixin,
@@ -442,6 +374,7 @@ class DurableTaskStore(
     TaskInternalAgentCheckpointStoreMixin,
     TaskOperationCheckpointStoreMixin,
     TaskWorkerInterruptionStoreMixin,
+    TaskOperationReconciliationEvidenceStoreMixin,
     TaskOperationReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,
     TaskGraphCancellationEffectOverlayMixin,
@@ -1599,6 +1532,7 @@ class DurableTaskStore(
         outbox: OutboxMessage,
         absent_operation_reservation_id: str | None = None,
         existing_operation_reservation_id: str | None = None,
+        operation_reacquisition_authorization: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         owner = str(owner_id or "").strip()
         if not owner or int(ttl_ms) <= 0:
@@ -1610,6 +1544,14 @@ class DurableTaskStore(
             raise TaskStoreError(
                 TASK_STORE_INVALID,
                 "Lease takeover cannot require Operation presence and absence",
+            )
+        if (
+            operation_reacquisition_authorization is not None
+            and existing_operation_reservation_id is None
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Operation reacquisition authority requires an existing reservation",
             )
         lease_id, heartbeat_id = build_lease_acquisition_identity(
             attempt_id=str(attempt_id),
@@ -1634,6 +1576,13 @@ class DurableTaskStore(
                 attempt=attempt,
                 absent_operation_reservation_id=absent_operation_reservation_id,
                 existing_operation_reservation_id=existing_operation_reservation_id,
+                operation_reacquisition_authorization=(
+                    operation_reacquisition_authorization
+                ),
+                owner_id=owner,
+                expected_attempt_version=int(expected_attempt_version),
+                expected_lease_id=lease_id,
+                now_ts_ms=ts_ms,
             )
             replayed_lease = self._replay_committed_lease_acquisition(
                 conn,
@@ -3212,17 +3161,23 @@ class DurableTaskStore(
                         TASK_STORE_OWNERSHIP_CONFLICT,
                         "operation reservation does not belong to the cancelling graph revision",
                     )
-            proof_binding = build_reconciliation_attestation_binding(
-                reservation_id=str(row["reservation_id"]),
-                business_scope=str(row["business_scope"]),
-                operation_fingerprint=str(row["operation_fingerprint"]),
-                recovery_version=int(row["status_version"]),
-                reconciler_actor_id=reconciler_actor,
-                attestation_ref=proof,
-                recovery_action=recovery_action.value,
-                reconciliation_outcome=outcome,
-                receipt_ref=receipt,
-            )
+            try:
+                proof_binding = build_reconciliation_attestation_binding(
+                    reservation_id=str(row["reservation_id"]),
+                    business_scope=str(row["business_scope"]),
+                    operation_fingerprint=str(row["operation_fingerprint"]),
+                    recovery_version=int(row["status_version"]),
+                    reconciler_actor_id=reconciler_actor,
+                    attestation_ref=proof,
+                    recovery_action=recovery_action.value,
+                    reconciliation_outcome=outcome,
+                    receipt_ref=receipt,
+                )
+            except OperationReconciliationContractError as exc:
+                raise TaskStoreError(
+                    TASK_STORE_RECONCILIATION_PROOF_INVALID,
+                    str(exc),
+                ) from exc
             proof_digest = f"sha256:{hashlib.sha256(proof_binding).hexdigest()}"
             verifier = self._reconciliation_proof_verifier
             if verifier is None:
@@ -4471,10 +4426,11 @@ class DurableTaskStore(
                         else None
                     ),
                 )
-            except TaskStoreError as exc:
+            except (TaskStoreError, OperationReconciliationContractError) as exc:
                 raise TaskStoreError(
                     TASK_STORE_DURABLE_DATA_INVALID,
-                    f"persisted reconciliation proof binding is malformed: {exc.detail}",
+                    "persisted reconciliation proof binding is malformed: "
+                    f"{getattr(exc, 'detail', str(exc))}",
                 ) from exc
             expected_digest = f"sha256:{hashlib.sha256(proof_binding).hexdigest()}"
             if proof_digest != expected_digest:

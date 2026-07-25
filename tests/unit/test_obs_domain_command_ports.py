@@ -25,9 +25,6 @@ from host_brain.observability.command_router import (
     ObsCommandRoutingError,
 )
 from host_brain.composition.runtime_group import GraphCancellationOperatorError
-from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
-    GraphCancellationOperationReconciliationError,
-)
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationError,
 )
@@ -98,10 +95,11 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
             "edge.command.push",
             "scheduler.task.trigger",
             "sys_mode.switch",
+            "task_operation.reconcile",
             "task_terminal.reconcile",
         }
     )
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 33
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 32
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
         expected
     )
@@ -460,14 +458,15 @@ def test_task_graph_cancel_translates_only_trusted_runtime_certainty() -> None:
 def test_task_operation_reconcile_binds_actor_and_forwards_signed_proof() -> None:
     captured: dict[str, object] = {}
 
-    class _ReconciliationService:
+    class _GovernedOperatorRuntime:
         @staticmethod
-        async def reconcile_graph_cancellation_operation(**kwargs):  # noqa: ANN003
-            captured.update(kwargs)
+        async def execute_operation_reconciliation(payload, request_id):
+            captured.update(payload)
+            captured["request_id"] = request_id
             return {
-                "intent_ref": kwargs["intent_ref"],
-                "reservation_id": kwargs["reservation_id"],
-                "status": "RELEASED",
+                "success": True,
+                "status": "RECONCILED",
+                "reservation_id": payload["reservation_id"],
             }
 
     registry = build_default_obs_domain_command_registry()
@@ -488,28 +487,22 @@ def test_task_operation_reconcile_binds_actor_and_forwards_signed_proof() -> Non
         principal_id="reconciler.authenticated",
     )
     state = SimpleNamespace(
-        task_operation_reconciliation_command_service=_ReconciliationService(),
+        task_operation_reconciliation_operator_enabled=True,
+        governed_operator_runtime=_GovernedOperatorRuntime(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-proof"):
-        with pytest.raises(ObsCommandPortExecutionError) as blocked:
-            asyncio.run(registry.resolve_port("task_operation.reconcile").execute(envelope))
+        result = asyncio.run(
+            registry.resolve_port("task_operation.reconcile").execute(envelope)
+        )
 
     assert envelope.payload["reconciler_actor_id"] == "reconciler.authenticated"
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-    assert captured == {}
+    assert result.success is True
+    assert captured["reconciler_actor_id"] == "reconciler.authenticated"
+    assert captured["reservation_id"] == "reservation-1"
+    assert captured["request_id"] == "request-task_operation.reconcile"
 
 
-def test_task_operation_reconcile_translates_only_nominal_certainty() -> None:
-    class _ReconciliationService:
-        @staticmethod
-        def reconcile_graph_cancellation_operation(**_kwargs):  # noqa: ANN003
-            raise GraphCancellationOperationReconciliationError(
-                "OPERATION_RECONCILIATION_UNCERTAIN",
-                "response lost",
-                side_effects_may_have_run=True,
-            )
-
+def test_task_operation_reconcile_is_fail_closed_when_feature_is_disabled() -> None:
     registry = build_default_obs_domain_command_registry()
     envelope = _envelope(
         "task_operation.reconcile",
@@ -524,14 +517,17 @@ def test_task_operation_reconcile_translates_only_nominal_certainty() -> None:
         },
     )
     state = SimpleNamespace(
-        task_operation_reconciliation_command_service=_ReconciliationService(),
+        task_operation_reconciliation_operator_enabled=False,
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-proof"):
-        with pytest.raises(ObsCommandRoutingError) as raised:
-            asyncio.run(ObsCommandRouter(registry).route(envelope))
+        with pytest.raises(ObsDomainCommandError) as raised:
+            asyncio.run(
+                registry.resolve_port("task_operation.reconcile").execute(
+                    envelope
+                )
+            )
 
-    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert raised.value.side_effects_may_have_run is False
+    assert raised.value.reason_code == "OBS_TASK_OPERATION_RECONCILIATION_DISABLED"
 
 
 def test_task_effect_reconcile_binds_actor_and_forwards_exact_signed_snapshot() -> None:

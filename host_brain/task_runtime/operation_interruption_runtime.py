@@ -189,6 +189,7 @@ async def build_worker_interruption_receipt(
     worker_failure_default_reason_code: str,
     time_budget_exceeded_reason_code: str,
     budget_conflict_reason_code: str,
+    execution_segment: str | None = None,
 ) -> dict[str, Any]:
     """Settle metering and return a recovery receipt without terminalizing."""
 
@@ -232,6 +233,7 @@ async def build_worker_interruption_receipt(
             worker_started_ns=worker_started_ns,
             worker_failure_reason=worker_reason,
             time_budget_ms=worker_time_budget_ms,
+            execution_segment=execution_segment,
         )
         budget = charge.context
         evidence_refs = (charge.evidence_ref,)

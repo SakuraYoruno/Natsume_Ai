@@ -666,6 +666,15 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     canonical_task_store = CanonicalTaskStore()
 
+    class OperationReconciliationService:
+        bound_owner_id = None
+
+        def bind_execution_owner(self, owner_id: str) -> None:
+            assert owner_id == "test-canonical-owner::runtime::test-boot"
+            self.bound_owner_id = owner_id
+
+    _operation_reconciliation_service = OperationReconciliationService()
+
     class TaskRuntimeContainer:
         bound_runtime = None
         canonical_db_path = ledger.canonical_db_path
@@ -682,7 +691,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         scheduler_result_repository = scheduler_result_store
         task_store = canonical_task_store
         recovery_id = "test-recovery"
-        operation_reconciliation_service = object()
+        operation_reconciliation_service = _operation_reconciliation_service
         effect_reconciliation_service = object()
 
         @staticmethod
@@ -1033,6 +1042,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "graph_cancellation_operator_enabled": False,
             "graph_cancellation_state_reader": task_runtime_container.task_store,
             "acceptance_effect_runtime": acceptance_effect_runtime,
+            "operation_reacquisition_owner_id": (
+                "test-canonical-owner::runtime::test-boot"
+            ),
         }
         return runtime_group
 

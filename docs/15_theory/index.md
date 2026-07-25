@@ -3,8 +3,8 @@
 
 # 理论体系目录
 
-版本：v3.0
-维护日期：2026-07-15
+版本：v3.1
+维护日期：2026-07-26
 目录状态：`ONE_CANONICAL_THEORY`
 
 本目录回答“为什么这样设计、各概念如何协作、哪些边界不可破坏”。它不承担当前代码状态、目标完成状态或任务排期。
@@ -32,6 +32,7 @@
 - Governor、Grant、Review、Budget 与 authority lineage；
 - PlanningSearch、不可变 TaskGraph、retry 与 replan；
 - Verification、Acceptance、effect intent 与外部 Receipt；
+- 签名证据与执行引用隔离、higher-fence Operation 重获与 exact replay；
 - Feedback、Capability、Knowledge 和 Identity 的长期演化门禁；
 - 故障、降级、恢复、不变量与反模式。
 

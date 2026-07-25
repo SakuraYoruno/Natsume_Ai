@@ -1,14 +1,14 @@
 """Transactional authority checks for durable Lease takeover windows."""
-
 from __future__ import annotations
-
 import sqlite3
-from typing import Any
-
+from typing import Any, Mapping
 from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.persistence.task_lease_replay_identity import (
     lease_acquisition_replay_binding_is_valid,
+)
+from host_brain.persistence.task_operation_reacquisition_authority import (
+    assert_signed_reacquisition_lease_authority,
 )
 from host_brain.persistence.task_store_types import (
     IdempotencyStatus,
@@ -18,8 +18,6 @@ from host_brain.persistence.task_store_types import (
     TASK_STORE_INVALID,
     TaskStoreError,
 )
-
-
 class TaskLeaseTakeoverAuthorityMixin:
     """Validate the two explicit takeover modes under ``BEGIN IMMEDIATE``."""
 
@@ -63,6 +61,11 @@ class TaskLeaseTakeoverAuthorityMixin:
         attempt: sqlite3.Row,
         absent_operation_reservation_id: str | None,
         existing_operation_reservation_id: str | None,
+        operation_reacquisition_authorization: Mapping[str, Any] | None,
+        owner_id: str,
+        expected_attempt_version: int,
+        expected_lease_id: str,
+        now_ts_ms: int,
     ) -> None:
         if (
             absent_operation_reservation_id is None
@@ -115,9 +118,26 @@ class TaskLeaseTakeoverAuthorityMixin:
                 "WHERE reservation_id = ?",
                 (reservation_ref,),
             ).fetchone()
-            if (
-                existing_operation is None
-                or str(existing_operation["attempt_id"]) != str(attempt_id)
+            if existing_operation is None:
+                raise TaskStoreError(
+                    TASK_STORE_IDEMPOTENCY_RECOVERY_REQUIRED,
+                    "Lease takeover requires its exact Operation",
+                )
+            if operation_reacquisition_authorization is not None:
+                assert_signed_reacquisition_lease_authority(
+                    conn,
+                    operation=existing_operation,
+                    attempt=attempt,
+                    attempt_id=str(attempt_id),
+                    owner_id=str(owner_id),
+                    expected_attempt_version=int(expected_attempt_version),
+                    expected_lease_id=str(expected_lease_id),
+                    now_ts_ms=int(now_ts_ms),
+                    authorization=operation_reacquisition_authorization,
+                    proof_verifier=self._reconciliation_proof_verifier,
+                )
+            elif (
+                str(existing_operation["attempt_id"]) != str(attempt_id)
                 or str(existing_operation["status"])
                 != IdempotencyStatus.COMMITTED.value
                 or str(existing_operation["business_scope"])
@@ -225,6 +245,4 @@ class TaskLeaseTakeoverAuthorityMixin:
             expected_attempt_id=str(attempt_id),
         )
         return dict(lease)
-
-
 __all__ = ["TaskLeaseTakeoverAuthorityMixin"]

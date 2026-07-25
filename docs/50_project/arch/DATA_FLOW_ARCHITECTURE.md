@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.1
+版本：v3.2
 
-核对日期：2026-07-25
+核对日期：2026-07-26
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -14,6 +14,23 @@
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
 当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
+
+签名 Operation reconciliation 的当前数据流把秘密材料和执行图物理分离：
+
+```mermaid
+flowchart LR
+    I["Secure Ingress 原始签名请求"] --> E["0126 evidence ledger\n写入时验签 / append-only"]
+    E --> R["evidence ref + digest"]
+    R --> H["Operator HostCommand / immutable TaskGraph"]
+    H --> V["Review + Preview + Verification + Acceptance"]
+    V --> A["Accepted reconciliation handler"]
+    A --> O["重开 evidence 并再次验签"]
+    O --> Q["同 Attempt / higher fence / 新 Budget segment"]
+    Q --> C["原 route continuation"]
+    C --> T["Operation COMMITTED / exact replay 只读"]
+```
+
+WorkOrder、TaskGraph、Review authority 和 Acceptance Effect 都不保存 `attestation_signature`；只有 evidence ledger 保存并在读取时复验它。`REACQUIRE` 不能创建第二 Attempt 或第二图，也不能越过 Budget/Lease；终态 exact replay 不调用 continuation。这是本地 SQLite 的单 Operation 正向链，不覆盖一般未知副作用和多节点/批次恢复。
 
 情感数据流现在分成有副作用的 admission 与无副作用的 replay 两条。生产 admission 为 `Input/Tribe → HostLifecycleApplicationPorts.emotion_context_runtime → HostEmotionRuntime.ingest → current vector/timeline/profile`；同一 Host root 共享同一 identity，不同 root 不共享状态。`normalize_chat_emotion_context(raw)` 不带 runtime 时只计算归一化、echo 和 trigger，不追加 Timeline、不改变画像或前一标签。回复形态为 `Input composition → owned ResponseFormDecider → locked quota check+record`，不再经过进程 singleton。
 
@@ -243,7 +260,7 @@ flowchart LR
 - pre-Operation Attempt 流程为：`Node/Attempt RUNNING 且 Operation 不存在 → 单一 scheduler snapshot 校验 latest Attempt、过期 Lease、ACTIVE/EXCEEDED graph Budget 与 canonical PRECHARGE → TaskLeaseTakeoverAuthorityMixin 借用 TaskStore BEGIN IMMEDIATE 重验 deterministic reservation id + scope/fingerprint 均不存在 → Attempt/owner/TTL/version/mode/reservation 生成确定性 Lease+初始 Heartbeat identity → 同 Attempt、更高 fence Lease → worker 首次调用`。响应丢失重入必须在同一事务核对exact Lease、唯一初始Heartbeat、历史fence+1、未过期TTL和Outbox；参数或行漂移零写拒绝。mixin与纯identity模块都不创建连接、事务或第二 writer。普通Attempt/Lease/Operation authority先要求唯一ACTIVE graph Budget。任一 sibling live owner 先返回 `GOVERNED_EXECUTION_IN_PROGRESS`；Operation 在 absence 检查窗口出现则进入 `RECOVERY_REQUIRED`，不得启动或重放 worker。Operation 已预留后的异常只保留 reconciliation authority，不转普通失败。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 - TaskStore 生产写流已收窄到两个 private hook：Graph/Node 只能由 `HostCommandRepository._admit_normalized() → _insert_graph_from_host_command_in_transaction()` 在同一 admission UoW 写入，生产调用数为 1；Effect 只能由 `transition_graph_and_stage_acceptance_effects`、`commit_node_acceptance`、`complete_parallel_graph_success` 三个 canonical UoW 通过 `_stage_acceptance_effect_intent_in_transaction()` 写入，共 6 个调用点。对应 Graph/Node/Effect INSERT SQL 也各自只在这两个 hook 中。public `create_graph`、`insert_graph_in_transaction`、`stage_acceptance_effect_intent` 已删除。
-- 0124/0125 将这条流提升为窄范围的 `APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED`。Graph、Node 与 HostCommand 新 INSERT 必须命中 exact `graph_id + revision` scope；Effect 新 INSERT 必须命中 exact effect/graph/revision/node/attempt/commit-scope/idempotency scope，并满足规范初始状态。scope 分别只由 `HostCommandRepository._admit_normalized()` 与 Effect 私有 staging hook 的实际 INSERT 持有；exact replay 不取得写 scope。plain SQLite、unscoped/wrong scope、raw HostCommand、late Node、非规范 Effect 与 trigger drift 均失败关闭。既有行不重写；其它运行期 mutation、wave integration 与 NE-01 仍未完成。
+- 0124/0125 将 Graph admission 与 Effect staging 提升为窄范围的 `APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED`。0126 另行封闭签名 Operation evidence：只接受精确绑定当前 `RECOVERY_REQUIRED` version 的已验签 append，同 request drift 失败关闭，UPDATE/DELETE 由 trigger 拒绝。三者互不替代；其它运行期 mutation、wave integration 与 NE-01 仍未完成。
 
 Host lifecycle 的当前数据流为：
 
@@ -1058,7 +1075,7 @@ Host 请求经 [context_application.py](../../../host_brain/runtime/context_appl
 
 `RuntimeGuardian` 由 Host ASGI lifespan 中的 [runtime/production_composition.py](../../../host_brain/runtime/production_composition.py) 构造，并绑定同一 runtime scope/owner/lease/fence。Health/heartbeat 与已审计高风险前门通过 typed degradation port 消费 Guardian；每个 lifespan 的 [`ServiceHealthHeartbeat`](../../../host_brain/app/observability_runtime/service_health_heartbeat.py) 独占并关闭自身 heartbeat/keepalive task、observer、probe cache 与 HTTP transport，禁止跨 Host scope 改绑、读取、取消或关闭。没有 observer 的 compatibility probe 只能刷新自己的兼容 cache，不能回退写入全局 degradation reducer；独立 Obs health projection 和 probe registry 只读 durable ledger/projection，不能读任何跨进程不可见 cache。兼容顶层 helper 不是 Host production authority；Host lifespan 不再构造、绑定或在 shutdown 解绑 process-owned MCP broker。legacy global degradation 只能通过显式 compatibility adapter 使用。Guardian 先得到不可变 next-state、再持久化并替换本地投影，重放校验 RuntimeEvent envelope、revision/digest chain 和 from/to identity。
 
-[action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine，以及 Operator `host.sys_mode_transition`、`task.terminal_reconciliation` 与 `edge.embodiment_enqueue`。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和剩余 33 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明首条 Edge 安全执行链，不代表 Operator 平面或其它具身功能已迁移。
+[action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine，以及 Operator `host.sys_mode_transition`、`task.terminal_reconciliation`、`edge.embodiment_enqueue` 与 `task.operation_reconciliation`。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和剩余 32 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明局部安全执行链，不代表 Operator 平面或其它具身功能已迁移。
 
 签名终态修复的完整命令不会进入通用 TaskGraph：
 
@@ -1178,7 +1195,7 @@ sequenceDiagram
     O->>O: replace immutable memory state
 ```
 
-production owner 在 bind 前拒绝写入。0115 trigger 和 repository 都验证 exact lease/fence；event 与 head 同事务，故 `after_event_append` 或 `after_head_write` 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest/from-to chain，再采用 durable head；不同 bootstrap mode 不能覆盖已提交事实。成功 transition 只由 journal 形成 canonical audit；exact event replay 返回原结果且不再追加进程内 history 或 legacy `error_log`，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch` 已把这条 durable authority 接入 governed Operator vertical slice；Effect terminal proof 精确绑定 event/boundary/authority，历史回放用 permanent event-id lookup，`NO_CHANGE` 不制造 event。连同 `scheduler.task.trigger`、`task_terminal.reconcile` 与窄化的 `edge.command.push`，当前 Operator 共覆盖 4/37；本段只展开 mode route 和 current mode/transition history。自动模式规则、last-interaction、commit-bound acceptance、production canary 和 NE-01 wave integration仍未完成。
+production owner 在 bind 前拒绝写入。0115 trigger 和 repository 都验证 exact lease/fence；event 与 head 同事务，故 `after_event_append` 或 `after_head_write` 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest/from-to chain，再采用 durable head；不同 bootstrap mode 不能覆盖已提交事实。成功 transition 只由 journal 形成 canonical audit；exact event replay 返回原结果且不再追加进程内 history 或 legacy `error_log`，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch` 已把这条 durable authority 接入 governed Operator vertical slice；Effect terminal proof 精确绑定 event/boundary/authority，历史回放用 permanent event-id lookup，`NO_CHANGE` 不制造 event。连同 `scheduler.task.trigger`、`task_terminal.reconcile`、窄化的 `edge.command.push` 与 `task_operation.reconcile`，当前 Operator 共覆盖 5/37；本段只展开 mode route 和 current mode/transition history。自动模式规则、last-interaction、commit-bound acceptance、production canary 和 NE-01 wave integration仍未完成。
 
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|

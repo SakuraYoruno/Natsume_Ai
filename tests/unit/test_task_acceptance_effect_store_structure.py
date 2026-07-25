@@ -49,8 +49,14 @@ from host_brain.persistence.task_atomic_failure_store import (
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_operation_reconciliation_evidence_store import (
+    TaskOperationReconciliationEvidenceStoreMixin,
+)
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
+)
+from host_brain.persistence.task_worker_interruption_store import (
+    TaskWorkerInterruptionStoreMixin,
 )
 from host_brain.persistence.task_internal_agent_checkpoint_store import (
     TaskInternalAgentCheckpointStoreMixin,
@@ -171,6 +177,8 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskAtomicFailureStoreMixin,
         TaskInternalAgentCheckpointStoreMixin,
         TaskOperationCheckpointStoreMixin,
+        TaskWorkerInterruptionStoreMixin,
+        TaskOperationReconciliationEvidenceStoreMixin,
         TaskOperationReconciliationStoreMixin,
         TaskEffectReconciliationStoreMixin,
         TaskGraphCancellationEffectOverlayMixin,

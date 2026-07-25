@@ -53,7 +53,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "b71d3cd65f5a6dc2dc84c5b9fefdef89522a9434b217491532d6b86757b5dd6e"
+    "607c47ddd7e06ec2c45f303d64c564f184f2c4544839bb4106612812d1bb7b0d"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
@@ -420,7 +420,6 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "claim_ready_node": 1,
             "get_attempt": 1,
             "reserve_operation": 1,
-            "get_active_lease": 1,
             "commit_operation": 1,
         },
             "_runtime_outbox": {"build": 7, "publish_pending": 15},
@@ -451,11 +450,7 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "try_operation": 2,
         },
         "_operation_recovery": {
-            "assert_existing_lineage": 1,
-            "reconcile_reservation_state": 1,
-            "takeover_committed": 1,
             "commit_or_reconcile": 1,
-            "unresolved_projection": 1,
         },
         "_checkpoint_continuation": {"resume": 1},
         "_graph_finalizer": {"complete": 1},

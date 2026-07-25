@@ -26,6 +26,14 @@ _EDGE_REQUEST_ID = "request-gr06-operator-edge"
 _EDGE_TARGET = "operator_edge_command_push"
 _EDGE_NODE_GRANT_REF = "node-grant://operator-edge"
 _EDGE_NODE_GRANT_DIGEST = "sha256:" + "c" * 64
+_OPERATION_REQUEST_ID = "request-gr06-operation-reconcile"
+_OPERATION_TARGET = "operator_task_operation_reconcile"
+_OPERATION_NODE_GRANT_REF = "node-grant://operation-reconcile"
+_OPERATION_NODE_GRANT_DIGEST = "sha256:" + "e" * 64
+_OPERATION_EVIDENCE_DIGEST = "sha256:" + "d" * 64
+_OPERATION_EVIDENCE_REF = (
+    "operation-reconcile-evidence://sha256/" + "d" * 64
+)
 
 
 def _contracts():
@@ -255,6 +263,104 @@ def _edge_operator_commit():
                     "target_agent": "edge.somatic",
                     "payload": {"emotion_tag": "HAPPY", "intensity": 0.75},
                     "runtime_scope_id": "runtime-scope-operator-edge",
+                },
+            }
+        ],
+    }
+
+
+def _operation_reconciliation_contracts():
+    fact = WorldFactV2(
+        workspace_id="workspace-operation-reconcile",
+        subject_id="principal-operation-reconcile",
+        key="task.operation_reconciliation",
+        value="signed",
+        source_ref="world-observation://operator/operation-reconcile/1",
+        confidence=1.0,
+        observed_at_ms=300,
+        expires_at_ms=10_000,
+    )
+    snapshot = WorldSnapshotV2(
+        workspace_id=fact.workspace_id,
+        subject_id=fact.subject_id,
+        revision=1,
+        facts=(fact,),
+    )
+    return build_direct_host_route_contracts(
+        surface=HostCommandSurface.OPERATOR,
+        request_id=_OPERATION_REQUEST_ID,
+        session_id="session-gr06-operation-reconcile",
+        principal_id=fact.subject_id,
+        ts_ms=300,
+        intent_draft={
+            "id": "intent-gr06-operation-reconcile",
+            "route": "delegate",
+            "target_id": _OPERATION_TARGET,
+            "domain": "task_runtime",
+            "action": "operator_task_operation_reconciliation",
+            "target": "task_runtime",
+            "task": "reacquire one signed operation",
+            "args": {
+                "operator_command_id": "task_operation.reconcile",
+                "evidence_ref": _OPERATION_EVIDENCE_REF,
+                "evidence_digest": _OPERATION_EVIDENCE_DIGEST,
+                "reservation_id": "reservation-gr06-reacquire",
+                "expected_version": 2,
+                "action": "REACQUIRE",
+                "reconciler_actor_id": fact.subject_id,
+            },
+        },
+        governor_result={
+            "request_id": _OPERATION_REQUEST_ID,
+            "intent_id": "intent-gr06-operation-reconcile",
+            "decision": "APPROVE",
+            "risk_level": 4,
+            "ts_ms": 300,
+        },
+        sanitized_message="reacquire one signed operation",
+        person_id=fact.subject_id,
+        operator_command_id="task_operation.reconcile",
+        frozen_context={
+            "runtime_context_schema": "natsume.runtime-context.request.v1",
+            "workspace_id": fact.workspace_id,
+            "subject_id": fact.subject_id,
+            "world_snapshot_v2": snapshot.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": fact.workspace_id,
+                "subject_id": fact.subject_id,
+                "scene_id": "scene.operation-reconciliation",
+                "revision": 3,
+                "decision_digest": "f" * 64,
+            },
+        },
+    )
+
+
+def _operation_reconciliation_commit():
+    return {
+        "decision": "APPROVE",
+        "request_id": _OPERATION_REQUEST_ID,
+        "narrative": "accepted signed Operation reacquisition",
+        "route_type": "delegate",
+        "target_id": _OPERATION_TARGET,
+        "audit_refs": {
+            "node_grant_ref": _OPERATION_NODE_GRANT_REF,
+            "node_grant_digest": _OPERATION_NODE_GRANT_DIGEST,
+        },
+        "acceptance_effect_intents": [
+            {
+                "effect_type": "task.operation_reconciliation",
+                "commit_scope": "NODE",
+                "payload": {
+                    "operator_command_id": "task_operation.reconcile",
+                    "request_id": _OPERATION_REQUEST_ID,
+                    "evidence_ref": _OPERATION_EVIDENCE_REF,
+                    "evidence_digest": _OPERATION_EVIDENCE_DIGEST,
+                    "reservation_id": "reservation-gr06-reacquire",
+                    "expected_version": 2,
+                    "action": "REACQUIRE",
+                    "reconciler_actor_id": "principal-operation-reconcile",
                 },
             }
         ],
@@ -585,6 +691,51 @@ def test_operator_compiler_rejects_forged_edge_effect(
             work_order=contracts.work_order,
             node_id=contracts.graph.nodes[0].node_id,
             attempt_id="attempt-gr06-edge-forged",
+            worker_commit=commit,
+        )
+
+    assert raised.value.reason_code == ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID
+
+
+def test_operator_compiler_binds_signed_operation_reconciliation() -> None:
+    contracts = _operation_reconciliation_contracts()
+    kwargs = {
+        "command": contracts.command,
+        "work_order": contracts.work_order,
+        "node_id": contracts.graph.nodes[0].node_id,
+        "attempt_id": "attempt-gr06-operation-reconcile",
+        "worker_commit": _operation_reconciliation_commit(),
+    }
+
+    effects = compile_graph_acceptance_effects(**kwargs)
+    replay = compile_graph_acceptance_effects(**kwargs)
+
+    assert effects == replay
+    assert len(effects) == 1
+    effect = effects[0]
+    assert effect.effect_type == "task.operation_reconciliation"
+    assert effect.commit_scope is AcceptanceEffectCommitScope.GRAPH
+    assert effect.payload["action"] == "REACQUIRE"
+    assert effect.payload["evidence_ref"] == _OPERATION_EVIDENCE_REF
+    assert effect.payload["reservation_id"] == "reservation-gr06-reacquire"
+    assert effect.payload["_action_preview_context"]["node_grant_ref"] == (
+        _OPERATION_NODE_GRANT_REF
+    )
+
+
+def test_operator_compiler_rejects_forged_operation_reconciler() -> None:
+    contracts = _operation_reconciliation_contracts()
+    commit = deepcopy(_operation_reconciliation_commit())
+    commit["acceptance_effect_intents"][0]["payload"][
+        "reconciler_actor_id"
+    ] = "principal-forged"
+
+    with pytest.raises(AcceptanceEffectCompileError) as raised:
+        compile_graph_acceptance_effects(
+            command=contracts.command,
+            work_order=contracts.work_order,
+            node_id=contracts.graph.nodes[0].node_id,
+            attempt_id="attempt-gr06-operation-reconcile-forged",
             worker_commit=commit,
         )
 

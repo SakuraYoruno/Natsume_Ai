@@ -1,13 +1,10 @@
 """Production handlers for committed governed Acceptance Effects."""
-
 from __future__ import annotations
-
 from collections.abc import Callable, Mapping
 import hashlib
 import json
 import re
 from typing import Any
-
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.app.acceptance_effect_handler_common import (
     _canonical_id_ref,
@@ -26,6 +23,9 @@ from host_brain.app.acceptance_surface_effect_handler import (
 from host_brain.app.accepted_terminal_reconciliation_handler import (
     AcceptedTerminalReconciliationHandler,
 )
+from host_brain.app.accepted_operation_reconciliation_handler import (
+    AcceptedOperationReconciliationHandler,
+)
 from host_brain.app.accepted_edge_embodiment_handler import (
     AcceptedEdgeEmbodimentEnqueueHandler,
 )
@@ -40,8 +40,6 @@ from host_brain.digital_life.application_boundary import submit_life_command
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
 )
-
-
 def build_production_acceptance_effect_handlers(
     *,
     mode_transition_service_provider: Callable[[], Any] | None = None,
@@ -55,6 +53,9 @@ def build_production_acceptance_effect_handlers(
     terminal_reconciliation_service: Any | None = None,
     terminal_reconciliation_store: Any | None = None,
     terminal_operator_command_store: Any | None = None,
+    operation_reconciliation_service: Any | None = None,
+    operation_reconciliation_evidence_store: Any | None = None,
+    operation_reacquisition_continuation_provider: Callable[[], Any] | None = None,
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
     embodiment_runtime_provider: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
@@ -107,6 +108,22 @@ def build_production_acceptance_effect_handlers(
                 service=terminal_reconciliation_service,
                 task_store=terminal_reconciliation_store,
                 command_store=terminal_operator_command_store,
+            )
+        )
+    if operation_reconciliation_service is not None:
+        if operation_reacquisition_continuation_provider is None:
+            raise TypeError(
+                "Operation reconciliation handler requires continuation provider"
+            )
+        if operation_reconciliation_evidence_store is None:
+            raise TypeError(
+                "Operation reconciliation handler requires evidence store"
+            )
+        handlers["task.operation_reconciliation"] = (
+            AcceptedOperationReconciliationHandler(
+                service=operation_reconciliation_service,
+                evidence_store=operation_reconciliation_evidence_store,
+                continuation_provider=operation_reacquisition_continuation_provider,
             )
         )
     return handlers

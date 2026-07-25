@@ -1860,7 +1860,7 @@ async def test_heartbeat_loss_keeps_unknown_side_effect_blocked_for_signed_recon
 
 
 @pytest.mark.asyncio
-async def test_reserved_operation_expires_online_without_restart_or_worker_replay(
+async def test_interrupted_operation_stays_blocked_without_signed_reacquisition(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)
@@ -1893,7 +1893,7 @@ async def test_reserved_operation_expires_online_without_restart_or_worker_repla
     first = await _events(first_app, contracts)
     assert first[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
     before = durable.get_operation_reservation(admitted.reservation_id)
-    assert before["status"] == "RESERVED"
+    assert before["status"] == "RECOVERY_REQUIRED"
     clock.advance(31)
 
     second_app = GovernedCommandApplication(
@@ -1912,7 +1912,8 @@ async def test_reserved_operation_expires_online_without_restart_or_worker_repla
 
     assert second[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
     assert recovered["status"] == "RECOVERY_REQUIRED"
-    assert recovered["status_version"] == before["status_version"] + 1
+    assert recovered["status_version"] == before["status_version"]
+    assert recovered["recovery_reason_code"] == before["recovery_reason_code"]
     assert projection["online_takeover_state"] == "SIGNED_RECONCILIATION_REQUIRED"
     assert projection["side_effect_state"] == "UNKNOWN"
     assert projection["blocking_side_effect_reversible"] is False

@@ -579,6 +579,7 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
         # high risk but deliberately reviewable; the eventual Acceptance
         # Effect remains risk 5 and requires an exact Action Preview.
         "operator_task_terminal_reconciliation": 4,
+        "operator_task_operation_reconciliation": 4,
     }.get(action_name)
     if builtin_risk is not None:
         return builtin_risk
