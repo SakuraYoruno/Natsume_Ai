@@ -28,6 +28,9 @@ from .ports import (
 from .operation_checkpoint_reconciliation import (
     OperationCheckpointReconciliationService,
 )
+from .operation_failure_reconciliation import (
+    OperationFailureReconciliationService,
+)
 
 
 _DURABLE_REFERENCE_PATTERN = re.compile(
@@ -523,9 +526,14 @@ class OperationReacquisitionService:
 
 
 class OperationReconciliationCommandService:
-    """Dispatch cancellation, checkpoint COMMIT, and REACQUIRE exclusively."""
+    """Dispatch cancellation, terminal failure, checkpoint and reacquisition."""
 
-    __slots__ = ("_cancellation", "_checkpoint", "_reacquisition")
+    __slots__ = (
+        "_cancellation",
+        "_checkpoint",
+        "_failure",
+        "_reacquisition",
+    )
 
     def __init__(
         self,
@@ -533,10 +541,12 @@ class OperationReconciliationCommandService:
         cancellation_service: GraphCancellationOperationReconciliationService,
         reacquisition_service: OperationReacquisitionService,
         checkpoint_service: OperationCheckpointReconciliationService,
+        failure_service: OperationFailureReconciliationService,
     ) -> None:
         self._cancellation = cancellation_service
         self._reacquisition = reacquisition_service
         self._checkpoint = checkpoint_service
+        self._failure = failure_service
 
     def bind_execution_owner(self, owner_id: str) -> None:
         self._reacquisition.bind_execution_owner(owner_id)
@@ -582,11 +592,26 @@ class OperationReconciliationCommandService:
                 attestation_key_id=attestation_key_id,
                 attestation_signature=attestation_signature,
             )
+        if normalized_action == "RELEASE" and cancellation_ref is None:
+            if downstream_receipt_ref is not None:
+                raise OperationReacquisitionError(
+                    OPERATION_RECONCILIATION_INVALID,
+                    "terminal failure RELEASE cannot carry a downstream receipt",
+                    side_effects_may_have_run=False,
+                )
+            return self._failure.reconcile_operation_failure(
+                reservation_id=reservation_id,
+                expected_version=expected_version,
+                reconciler_actor_id=reconciler_actor_id,
+                attestation_ref=attestation_ref,
+                attestation_key_id=attestation_key_id,
+                attestation_signature=attestation_signature,
+            )
         if normalized_action not in {"COMMIT", "RELEASE"} or cancellation_ref is None:
             raise OperationReacquisitionError(
                 OPERATION_RECONCILIATION_INVALID,
-                "RELEASE requires cancellation intent; COMMIT requires either "
-                "cancellation intent or an exact worker checkpoint",
+                "COMMIT requires either cancellation intent or an exact worker "
+                "checkpoint",
                 side_effects_may_have_run=False,
             )
         return self._cancellation.reconcile_graph_cancellation_operation(

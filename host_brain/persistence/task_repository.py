@@ -173,6 +173,9 @@ from host_brain.persistence.task_graph_cancellation_continuation_store import (
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_operation_failure_reconciliation_store import (
+    TaskOperationFailureReconciliationStoreMixin,
+)
 from host_brain.persistence.task_operation_checkpoint_reconciliation_store import (
     TaskOperationCheckpointReconciliationStoreMixin,
     assert_worker_checkpoint_reconciliation_in_transaction,
@@ -377,6 +380,7 @@ class DurableTaskStore(
     TaskOperationReconciliationEvidenceStoreMixin,
     TaskOperationCheckpointReconciliationStoreMixin,
     TaskOperationReconciliationStoreMixin,
+    TaskOperationFailureReconciliationStoreMixin,
     TaskEffectReconciliationStoreMixin,
     TaskGraphCancellationEffectOverlayMixin,
     TaskTerminalReconciliationStoreMixin,
