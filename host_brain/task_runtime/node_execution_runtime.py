@@ -59,6 +59,7 @@ from .heartbeat import DurableExecutionHeartbeat
 from .internal_checkpoint_budget_rejection import (
     InternalCheckpointBudgetRejectionRuntime,
     is_internal_agent_checkpoint_authority,
+    requires_internal_terminal_bundle,
 )
 from .internal_agent_sealed_checkpoint_recovery import recover_internal_agent_sealed_checkpoint
 from .node_execution_projection import NodeExecutionProjection
@@ -1234,7 +1235,7 @@ class DurableNodeExecutionRuntime:
             internal_agent_checkpoint = is_internal_agent_checkpoint_authority(
                 command,
             )
-            if not defer_shared_terminal:
+            if not defer_shared_terminal or requires_internal_terminal_bundle(admitted, command):
                 receipt = await self._internal_budget_rejection.reject(
                     admitted=admitted,
                     charge=charge,
@@ -1495,5 +1496,4 @@ class DurableNodeExecutionRuntime:
             projection=worker_commit,
         )
         yield approved_commit_event(worker_commit, receipt)
-
 __all__ = ["DurableNodeExecutionRuntime"]

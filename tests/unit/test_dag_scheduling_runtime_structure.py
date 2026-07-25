@@ -7,6 +7,7 @@ import inspect
 from collections import Counter
 
 from host_brain.task_runtime import coordinator
+from host_brain.task_runtime import dag_scheduling_preflight
 from host_brain.task_runtime import dag_scheduling_records
 from host_brain.task_runtime import dag_scheduling_runtime
 from host_brain.task_runtime.dag_scheduling_runtime import (
@@ -19,10 +20,10 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 # The current baseline also permits one exact denied Review to terminalize
 # without minting a worker grant, while retaining fail-closed durable guards.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "f405c49e2741bce114ff60d006785894732b9e7e35c2a8633694a0b35344c68a"
+    "6b9b150890ac43d21657209d1635f8d9ee6898f7b291f12f87f44ee005a88dbc"
 )
-_REENTERED_OUTCOMES_BASELINE_SHA256 = (
-    "22ceb5f01e2b2e47f50bd9d2ec755774b3c45e26867195c53a1bce5616978207"
+_PREFLIGHT_BASELINE_SHA256 = (
+    "0808b13ad9b97bb5b116c44d195f7a09c3b3a591bb92c15eda3c2df3cd7ff1bd"
 )
 _SUPPORTS_POLICY_BASELINE_SHA256 = (
     "0d8633080b6b026804024b9064f572a554f41eeadea6ebf8fd73ff87cf17ef00"
@@ -114,6 +115,17 @@ def _self_dependency_calls(owner: ast.AST, dependency: str) -> list[ast.Call]:
     ]
 
 
+def _named_dependency_calls(owner: ast.AST, dependency: str) -> list[ast.Call]:
+    return [
+        node
+        for node in ast.walk(owner)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == dependency
+    ]
+
+
 def _constructor(owner: ast.ClassDef, field: str) -> ast.Call:
     initializer = _method(owner, "__init__")
     assignments = [
@@ -184,9 +196,15 @@ def test_extracted_methods_match_the_frozen_coordinator_semantics() -> None:
     execute = copy.deepcopy(_method(owner, "execute_stream"))
     execute.name = "EXECUTE_STREAM"
     assert _sha256(execute) == _EXECUTE_STREAM_BASELINE_SHA256
-    assert _sha256(_method(owner, "_reentered_parallel_outcomes")) == (
-        _REENTERED_OUTCOMES_BASELINE_SHA256
+    preflight = next(
+        node
+        for node in _tree(dag_scheduling_preflight).body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "prepare_dag_scheduling_preflight"
     )
+    preflight = copy.deepcopy(preflight)
+    preflight.name = "PREFLIGHT"
+    assert _sha256(preflight) == _PREFLIGHT_BASELINE_SHA256
     assert _sha256(_method(owner, "supports_completion_policy")) == (
         _SUPPORTS_POLICY_BASELINE_SHA256
     )
@@ -206,17 +224,13 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
     execute = _method(owner, "execute_stream")
     expected = {
         "_store": {
-            "assert_dag_scheduling_ready": 1,
-            "assert_parallel_settlement_decision_ready": 1,
-            "assert_graph_cancellation_ready": 1,
-            "assert_parallel_success_decision_ready": 1,
             "get_graph": 3,
             "read_scheduler_snapshot": 1,
             "get_node": 1,
             "resolve_node_input_artifacts": 1,
             "promote_retry_due": 1,
         },
-        "_budgets": {"ensure_active": 1, "refresh": 3, "finalize": 5},
+        "_budgets": {"refresh": 3, "finalize": 5},
         "_node_lifecycle": {
             "transition_graph": 11,
             "transition_node": 4,
@@ -230,7 +244,7 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "matching_parallel_decision": 4,
             "selected_parallel_decision_outcome": 4,
         },
-        "_node_execution": {"execute_stream": 7},
+        "_node_execution": {"execute_stream": 8},
         "_parallel_settlement": {
             "assert_parallel_reentry_idle": 1,
             "resolve_parallel_outcomes": 3,
@@ -241,7 +255,6 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "post_execution_acceptance_gate": 1,
             "lookup_pre_execution_gate": 1,
         },
-        "_graph_cancellations": {"continue_requested_graph_cancellation": 1},
         "_runtime_outbox": {"build": 1, "publish_pending": 7},
     }
     for dependency, matrix in expected.items():
@@ -255,6 +268,27 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
         for call in outbox_calls
         for keyword in call.keywords
     )
+    preflight = next(
+        node
+        for node in _tree(dag_scheduling_preflight).body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "prepare_dag_scheduling_preflight"
+    )
+    preflight_expected = {
+        "store": {
+            "assert_dag_scheduling_ready": 1,
+            "assert_parallel_settlement_decision_ready": 1,
+            "assert_graph_cancellation_ready": 1,
+            "assert_parallel_success_decision_ready": 1,
+        },
+        "budgets": {"ensure_active": 1},
+        "graph_cancellations": {"continue_requested_graph_cancellation": 1},
+    }
+    for dependency, matrix in preflight_expected.items():
+        assert Counter(
+            call.func.attr
+            for call in _named_dependency_calls(preflight, dependency)
+        ) == Counter(matrix)
 
 
 def test_preoperation_recovery_joins_bounded_schedule_without_review_replay() -> None:

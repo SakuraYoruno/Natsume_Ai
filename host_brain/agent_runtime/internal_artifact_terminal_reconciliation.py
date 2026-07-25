@@ -18,6 +18,13 @@ from host_brain.contracts.agent_runtime.projection_recovery import (
     ProjectionRecoveryContractError,
     validate_projection_recovery_envelope,
 )
+from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
+    build_internal_budget_rejection_result_ref,
+)
+from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
+    INTERNAL_NONACCEPTANCE_TERMINAL_REASONS,
+    build_internal_nonacceptance_result_ref,
+)
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
@@ -63,9 +70,12 @@ class InternalArtifactTerminalReconciler:
         task_store: Any,
         command_repository: Any,
         projection_store: Any,
+        claim_result_store: Any | None = None,
     ) -> None:
         required = (
             (artifact_store, "inventory_governed_seals"),
+            (artifact_store, "inventory_unsealed_governed_stages"),
+            (artifact_store, "discard_unsealed_governed_stage"),
             (artifact_store, "inspect_governed_stage_for_authority"),
             (artifact_store, "read_projection_recovery"),
             (artifact_store, "plan_governed_abandonment"),
@@ -74,14 +84,18 @@ class InternalArtifactTerminalReconciler:
             (artifact_store, "inspect_governed_promotion"),
             (workspace_runtime, "abandon_terminal_artifact"),
             (workspace_runtime, "cleanup_terminal_workspace"),
+            (workspace_runtime, "cleanup"),
             (task_store, "get_graph"),
             (task_store, "get_node"),
             (task_store, "get_attempt"),
             (task_store, "get_lease"),
             (task_store, "get_operation_reservation"),
             (task_store, "get_committed_operation_checkpoint"),
+            (task_store, "get_graph_cancellation_for_graph"),
+            (task_store, "get_graph_cancellation_decision_for_intent"),
             (task_store, "resolve_internal_agent_takeover_lineage"),
             (task_store, "resolve_internal_agent_budget_rejection_terminal"),
+            (task_store, "resolve_internal_agent_nonacceptance_checkpoint_terminal"),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -90,6 +104,12 @@ class InternalArtifactTerminalReconciler:
             raise TypeError(
                 "Internal artifact terminal reconciler lacks: "
                 + ",".join(sorted(set(missing)))
+            )
+        if claim_result_store is not None and not callable(
+            getattr(claim_result_store, "complete_claim", None)
+        ):
+            raise TypeError(
+                "Internal artifact terminal claim store must expose complete_claim"
             )
         repository = getattr(workspace_runtime, "repository", None)
         if not callable(getattr(repository, "list_terminal_lifecycle_candidates", None)):
@@ -100,7 +120,9 @@ class InternalArtifactTerminalReconciler:
         self._tasks = task_store
         self._commands = command_repository
         self._projections = projection_store
+        self._claim_results = claim_result_store
         self._staging_cursor: str | None = None
+        self._unsealed_staging_cursor: str | None = None
         self._lifecycle_cursor: str | None = None
 
     def run_once(self, *, limit: int = 100) -> tuple[dict[str, Any], ...]:
@@ -109,6 +131,52 @@ class InternalArtifactTerminalReconciler:
                 "terminal reconciliation limit must be within [1, 1000]"
             )
         reports: list[InternalArtifactTerminalReport] = []
+        unsealed = self._artifacts.inventory_unsealed_governed_stages(
+            limit=limit,
+            after_stage_ref=self._unsealed_staging_cursor,
+        )
+        self._unsealed_staging_cursor = (
+            str(unsealed[-1].stage_ref) if len(unsealed) == limit else None
+        )
+        for stage in unsealed:
+            try:
+                reason = self._unsealed_cancellation_reason(stage)
+                if reason is None:
+                    reports.append(
+                        InternalArtifactTerminalReport(
+                            workspace_id=str(stage.workspace_id),
+                            attempt_id=str(stage.attempt_id),
+                            action="HOLD",
+                        )
+                    )
+                    continue
+                cleanup = self._workspaces.cleanup(str(stage.workspace_id))
+                receipt_ref = str(getattr(cleanup, "receipt_ref", "") or "")
+                if "://" not in receipt_ref:
+                    raise InternalArtifactTerminalReconciliationError(
+                        "unsealed Workspace cleanup has no durable receipt"
+                    )
+                self._artifacts.discard_unsealed_governed_stage(stage)
+                reports.append(
+                    InternalArtifactTerminalReport(
+                        workspace_id=str(stage.workspace_id),
+                        attempt_id=str(stage.attempt_id),
+                        action="UNSEALED_CLEANED",
+                        reason_code=reason,
+                        receipt_ref=receipt_ref,
+                    )
+                )
+            except Exception as exc:  # preserve raw stage unless authority is exact
+                reports.append(
+                    InternalArtifactTerminalReport(
+                        workspace_id=str(getattr(stage, "workspace_id", "unknown")),
+                        attempt_id=str(getattr(stage, "attempt_id", "unknown")),
+                        action="BLOCKED",
+                        reason_code=str(
+                            getattr(exc, "reason_code", INTERNAL_ARTIFACT_TERMINAL_INVALID)
+                        ),
+                    )
+                )
         staging = self._artifacts.inventory_governed_seals(
             namespace="staging",
             limit=limit,
@@ -129,6 +197,13 @@ class InternalArtifactTerminalReconciler:
                         )
                     )
                     continue
+                if reason == "TERMINAL_BUDGET_REJECTED":
+                    self._complete_budget_rejection_claim(seal)
+                elif reason in INTERNAL_NONACCEPTANCE_TERMINAL_REASONS:
+                    self._complete_nonacceptance_claim(
+                        seal,
+                        terminal_reason=reason,
+                    )
                 receipt = self._workspaces.abandon_terminal_artifact(
                     workspace_id=str(seal.workspace_id),
                     execution_authority=dict(seal.execution_authority),
@@ -319,6 +394,202 @@ class InternalArtifactTerminalReconciler:
             )
         return owner
 
+    def _complete_budget_rejection_claim(self, seal: Any) -> None:
+        """Settle an exact C-boundary claim before deleting its seal.
+
+        The terminal worker may be the first process to observe this state
+        after a crash.  It therefore repeats the durable terminal resolver
+        rather than trusting a filename, prior worker output, or a stale
+        in-memory completion result.
+        """
+
+        claims = self._claim_results
+        if claims is None:
+            return
+        authority = dict(getattr(seal, "execution_authority", {}) or {})
+        attempt_id = str(authority.get("attempt_id") or "").strip()
+        graph_id = str(authority.get("graph_id") or "").strip()
+        node_id = str(authority.get("node_id") or "").strip()
+        revision = authority.get("graph_revision")
+        if (
+            not attempt_id
+            or not graph_id
+            or not node_id
+            or type(revision) is not int
+            or revision < 1
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected artifact has invalid execution authority"
+            )
+        terminal = self._tasks.resolve_internal_agent_budget_rejection_terminal(
+            attempt_id
+        )
+        attempt = terminal.get("attempt") if isinstance(terminal, Mapping) else None
+        node = terminal.get("node") if isinstance(terminal, Mapping) else None
+        graph = terminal.get("graph") if isinstance(terminal, Mapping) else None
+        reservation = (
+            terminal.get("reservation") if isinstance(terminal, Mapping) else None
+        )
+        budget = terminal.get("budget") if isinstance(terminal, Mapping) else None
+        usage = terminal.get("usage") if isinstance(terminal, Mapping) else None
+        if not all(
+            isinstance(value, Mapping)
+            for value in (attempt, node, graph, reservation, budget, usage)
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected terminal authority is incomplete"
+            )
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_BUDGET_REJECTED"
+            or str(attempt.get("attempt_id") or "") != attempt_id
+            or str(attempt.get("graph_id") or "") != graph_id
+            or attempt.get("graph_revision") != revision
+            or str(attempt.get("node_id") or "") != node_id
+            or str(node.get("node_id") or "") != node_id
+            or str(graph.get("graph_id") or "") != graph_id
+            or graph.get("revision") != revision
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected terminal lineage drifted"
+            )
+        record = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        frozen = {**authority, "route": "delegate", "target_id": "agent_runtime"}
+        self._assert_internal_admission(record, frozen=frozen)
+        command = record.get("command") if isinstance(record, Mapping) else None
+        claim_ref = str(getattr(command, "ingress_claim_ref", "") or "").strip()
+        if not claim_ref:
+            return
+        try:
+            result_ref = build_internal_budget_rejection_result_ref(
+                command_id=str(getattr(command, "command_id", "") or ""),
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                budget_id=str(budget.get("budget_id") or ""),
+                usage_id=str(usage.get("usage_id") or ""),
+            )
+        except ValueError as exc:
+            raise InternalArtifactTerminalReconciliationError(
+                "budget rejected claim result identity is invalid"
+            ) from exc
+        claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
+
+    def _complete_nonacceptance_claim(
+        self,
+        seal: Any,
+        *,
+        terminal_reason: str,
+    ) -> None:
+        """Settle one sealed, executed-but-not-accepted checkpoint claim.
+
+        This runs before tombstoning the protected artifact.  It intentionally
+        excludes raw worker failures and pre-checkpoint cancellations: neither
+        owns the committed projection lineage required to make a terminal
+        ingress result independently re-openable.
+        """
+
+        claims = self._claim_results
+        if claims is None:
+            return
+        if terminal_reason not in INTERNAL_NONACCEPTANCE_TERMINAL_REASONS:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsupported non-acceptance terminal reason"
+            )
+        authority = dict(getattr(seal, "execution_authority", {}) or {})
+        attempt_id = str(authority.get("attempt_id") or "").strip()
+        graph_id = str(authority.get("graph_id") or "").strip()
+        node_id = str(authority.get("node_id") or "").strip()
+        lease_id = str(authority.get("lease_id") or "").strip()
+        lease_owner_id = str(authority.get("lease_owner_id") or "").strip()
+        fencing_token = authority.get("fencing_token")
+        revision = authority.get("graph_revision")
+        if (
+            not all((attempt_id, graph_id, node_id, lease_id, lease_owner_id))
+            or type(revision) is not int
+            or revision < 1
+            or type(fencing_token) is not int
+            or fencing_token < 1
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance artifact has invalid execution authority"
+            )
+        terminal = self._tasks.resolve_internal_agent_nonacceptance_checkpoint_terminal(
+            attempt_id
+        )
+        if not isinstance(terminal, Mapping):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance terminal authority is incomplete"
+            )
+        historical = terminal.get("historical_lease")
+        completion = terminal.get("completion_lease")
+        reservation = terminal.get("operation_reservation")
+        projection = terminal.get("projection")
+        if not all(
+            isinstance(value, Mapping)
+            for value in (historical, completion, reservation, projection)
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance terminal lineage is incomplete"
+            )
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_NONACCEPTANCE_TERMINAL"
+            or str(terminal.get("terminal_reason") or "") != terminal_reason
+            or str(historical.get("lease_id") or "") != lease_id
+            or str(historical.get("attempt_id") or "") != attempt_id
+            or str(historical.get("owner_id") or "") != lease_owner_id
+            or int(historical.get("fencing_token") or 0) != fencing_token
+            or str(completion.get("attempt_id") or "") != attempt_id
+            or str(completion.get("status") or "") != "RELEASED"
+            or str(reservation.get("attempt_id") or "") != attempt_id
+            or str(reservation.get("lease_id") or "") != lease_id
+            or str(projection.get("command_id") or "")
+            != str(authority.get("command_id") or "")
+            or str(projection.get("graph_id") or "") != graph_id
+            or int(projection.get("graph_revision") or 0) != revision
+            or str(projection.get("node_id") or "") != node_id
+            or str(projection.get("attempt_id") or "") != attempt_id
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance terminal lineage drifted"
+            )
+        record = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        frozen = {**authority, "route": "delegate", "target_id": "agent_runtime"}
+        self._assert_internal_admission(record, frozen=frozen)
+        command = record.get("command") if isinstance(record, Mapping) else None
+        claim_ref = str(getattr(command, "ingress_claim_ref", "") or "").strip()
+        if not claim_ref:
+            return
+        try:
+            result_ref = build_internal_nonacceptance_result_ref(
+                command_id=str(getattr(command, "command_id", "") or ""),
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                historical_lease_id=lease_id,
+                completion_lease_id=str(completion.get("lease_id") or ""),
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                projection_id=str(projection.get("projection_id") or ""),
+                terminal_reason=terminal_reason,
+            )
+        except ValueError as exc:
+            raise InternalArtifactTerminalReconciliationError(
+                "non-acceptance claim result identity is invalid"
+            ) from exc
+        claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
+
     def _terminal_abandonment_reason(self, seal: Any) -> str | None:
         try:
             envelope = validate_projection_recovery_envelope(
@@ -456,6 +727,117 @@ class InternalArtifactTerminalReconciler:
             )
         return terminal
 
+    def _unsealed_cancellation_reason(self, stage: Any) -> str | None:
+        """Allow destructive cleanup only after finalized graph cancellation.
+
+        An unsealed directory has no projection envelope, so it is never
+        eligible for accepted promotion or failure abandonment.  The only
+        safe recovery in this slice is the exact cancellation matrix, backed
+        by the canonical finalized cancellation decision.
+        """
+
+        authority = dict(getattr(stage, "execution_authority", {}) or {})
+        frozen = {
+            **authority,
+            "route": "delegate",
+            "target_id": "agent_runtime",
+        }
+        required = {
+            "root_work_order_id",
+            "graph_id",
+            "graph_revision",
+            "node_id",
+            "attempt_id",
+            "lease_id",
+            "command_id",
+            "principal_id",
+            "lease_owner_id",
+            "fencing_token",
+        }
+        if set(authority) != required:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed artifact execution authority differs"
+            )
+        graph_id = str(authority["graph_id"])
+        revision = int(authority["graph_revision"])
+        node_id = str(authority["node_id"])
+        attempt_id = str(authority["attempt_id"])
+        lease_id = str(authority["lease_id"])
+        command = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        self._assert_internal_admission(command, frozen=frozen)
+        graph = self._tasks.get_graph(graph_id, revision)
+        node = self._tasks.get_node(graph_id, revision, node_id)
+        attempt = self._tasks.get_attempt(attempt_id)
+        lease = self._tasks.get_lease(lease_id)
+        self._assert_unsealed_execution_records(
+            authority=authority,
+            graph=graph,
+            node=node,
+            attempt=attempt,
+            lease=lease,
+        )
+        if (
+            str(graph.get("status") or "") != "CANCELLED"
+            or str(node.get("status") or "") != "CANCELLED"
+            or str(attempt.get("status") or "") != "CANCELLED"
+            or str(lease.get("status") or "") != "CANCELLED"
+        ):
+            return None
+        self._require_finalized_cancellation(
+            graph_id=graph_id,
+            revision=revision,
+        )
+        return "TERMINAL_EXECUTION_CANCELLED_UNSEALED"
+
+    def _require_finalized_cancellation(
+        self,
+        *,
+        graph_id: str,
+        revision: int,
+    ) -> None:
+        """Reopen both immutable cancellation records before cleanup.
+
+        The intent's target is deliberately ``BLOCKED``: it is the durable
+        fence installed before worker quiescence.  ``CANCELLED`` belongs only
+        to the signed final decision, so treating the intent payload as a
+        final decision would either block safe cleanup forever or tempt a
+        caller to rewrite the intent's immutable history.
+        """
+
+        cancellation = self._tasks.get_graph_cancellation_for_graph(
+            graph_id,
+            revision,
+        )
+        intent_ref = str(
+            cancellation.get("intent_ref")
+            if isinstance(cancellation, Mapping)
+            else ""
+        ).strip()
+        decision = (
+            self._tasks.get_graph_cancellation_decision_for_intent(intent_ref)
+            if intent_ref
+            else None
+        )
+        payload = decision.get("payload") if isinstance(decision, Mapping) else None
+        if (
+            not isinstance(cancellation, Mapping)
+            or str(cancellation.get("status") or "") != "FINALIZED"
+            or str(cancellation.get("graph_id") or "") != graph_id
+            or int(cancellation.get("graph_revision") or 0) != revision
+            or not isinstance(decision, Mapping)
+            or str(decision.get("intent_ref") or "") != intent_ref
+            or not isinstance(payload, Mapping)
+            or str(payload.get("graph_id") or "") != graph_id
+            or int(payload.get("graph_revision") or 0) != revision
+            or str(payload.get("graph_target_status") or "") != "CANCELLED"
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "cancelled artifact has no finalized cancellation decision"
+            )
+
     @staticmethod
     def _assert_frozen_authority(seal: Any, frozen: Mapping[str, Any]) -> None:
         required = {
@@ -570,6 +952,40 @@ class InternalArtifactTerminalReconciler:
         ):
             raise InternalArtifactTerminalReconciliationError(
                 "sealed artifact Task/Operation lineage drifted"
+            )
+
+    @staticmethod
+    def _assert_unsealed_execution_records(
+        *,
+        authority: Mapping[str, Any],
+        graph: Mapping[str, Any],
+        node: Mapping[str, Any],
+        attempt: Mapping[str, Any],
+        lease: Mapping[str, Any],
+    ) -> None:
+        node_contract = node.get("node")
+        if (
+            str(graph.get("graph_id") or "") != str(authority["graph_id"])
+            or int(graph.get("revision") or 0) != int(authority["graph_revision"])
+            or str(graph.get("root_work_order_id") or "")
+            != str(authority["root_work_order_id"])
+            or str(node.get("node_id") or "") != str(authority["node_id"])
+            or not isinstance(node_contract, Mapping)
+            or str(node_contract.get("route") or "") != _INTERNAL_ROUTE
+            or str(attempt.get("attempt_id") or "") != str(authority["attempt_id"])
+            or str(attempt.get("graph_id") or "") != str(authority["graph_id"])
+            or int(attempt.get("graph_revision") or 0)
+            != int(authority["graph_revision"])
+            or str(attempt.get("node_id") or "") != str(authority["node_id"])
+            or str(lease.get("lease_id") or "") != str(authority["lease_id"])
+            or str(lease.get("attempt_id") or "") != str(authority["attempt_id"])
+            or str(lease.get("owner_id") or "")
+            != str(authority["lease_owner_id"])
+            or int(lease.get("fencing_token") or 0)
+            != int(authority["fencing_token"])
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed artifact Task lineage drifted"
             )
 
     def _assert_committed_projection(

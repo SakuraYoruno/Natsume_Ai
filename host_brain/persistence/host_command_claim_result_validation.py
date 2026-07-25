@@ -10,10 +10,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import hashlib
+import hmac
 import json
 import sqlite3
 from typing import Any
 
+from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
+    build_internal_budget_rejection_result_ref,
+)
+from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
+    INTERNAL_NONACCEPTANCE_TERMINAL_REASONS,
+    build_internal_nonacceptance_result_ref,
+)
 from host_brain.persistence.host_command_repository_codec import (
     matches_review_decision_result,
     normalize_external_sha256,
@@ -178,6 +186,210 @@ def _matches_tool_nonworker_terminal(
     )
 
 
+def _matches_internal_budget_rejection_terminal(
+    owner: Any,
+    conn: sqlite3.Connection,
+    *,
+    result_ref: str,
+    command: Mapping[str, Any],
+) -> bool:
+    """Bind a claim result to one exact Internal C-boundary rejection.
+
+    This does not infer a terminal outcome merely from FAILED rows.  The
+    canonical TaskStore must independently reopen the Internal checkpoint
+    budget terminal, which verifies the committed worker operation, rejected
+    usage, released budget/lease and all five terminal Outboxes.
+    """
+
+    work_order = command.get("work_order")
+    node_id = str(getattr(work_order, "task_node_id", "") or "").strip()
+    command_id = str(command.get("command_id") or "").strip()
+    claim_ref = str(command.get("ingress_claim_ref") or "").strip()
+    graph_id = str(command.get("graph_id") or "").strip()
+    try:
+        revision = int(command.get("graph_revision") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not all((node_id, command_id, claim_ref, graph_id)) or revision < 1:
+        return False
+    try:
+        candidates = conn.execute(
+            """
+            SELECT attempt_id
+            FROM task_runtime_attempt
+            WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+              AND status = 'FAILED'
+            ORDER BY attempt_id
+            """,
+            (graph_id, revision, node_id),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return False
+    if len(candidates) != 1:
+        return False
+    task_store = getattr(owner, "_task_store", None)
+    resolver = getattr(
+        task_store,
+        "resolve_internal_agent_budget_rejection_terminal",
+        None,
+    )
+    if not callable(resolver):
+        return False
+    attempt_id = str(candidates[0]["attempt_id"] or "").strip()
+    if not attempt_id:
+        return False
+    try:
+        resolved = resolver(attempt_id)
+    except Exception:
+        return False
+    if not isinstance(resolved, Mapping):
+        return False
+    attempt = resolved.get("attempt")
+    node = resolved.get("node")
+    graph = resolved.get("graph")
+    reservation = resolved.get("reservation")
+    budget = resolved.get("budget")
+    usage = resolved.get("usage")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (attempt, node, graph, reservation, budget, usage)
+    ):
+        return False
+    if (
+        str(resolved.get("authority_kind") or "")
+        != "INTERNAL_AGENT_BUDGET_REJECTED"
+        or str(attempt.get("attempt_id") or "") != attempt_id
+        or str(attempt.get("graph_id") or "") != graph_id
+        or attempt.get("graph_revision") != revision
+        or str(attempt.get("node_id") or "") != node_id
+        or str(node.get("node_id") or "") != node_id
+        or str(graph.get("graph_id") or "") != graph_id
+        or graph.get("revision") != revision
+    ):
+        return False
+    try:
+        expected = build_internal_budget_rejection_result_ref(
+            command_id=command_id,
+            ingress_claim_ref=claim_ref,
+            graph_id=graph_id,
+            graph_revision=revision,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            reservation_id=str(reservation.get("reservation_id") or ""),
+            budget_id=str(budget.get("budget_id") or ""),
+            usage_id=str(usage.get("usage_id") or ""),
+        )
+    except ValueError:
+        return False
+    return hmac.compare_digest(str(result_ref or ""), expected)
+
+
+def _matches_internal_nonacceptance_terminal(
+    owner: Any,
+    conn: sqlite3.Connection,
+    *,
+    result_ref: str,
+    command: Mapping[str, Any],
+) -> bool:
+    """Bind a result to one exact executed-but-not-accepted checkpoint.
+
+    A terminal Task status alone is insufficient: the canonical TaskStore
+    reopens the committed projection and historical/final Lease lineage.  The
+    resolver intentionally returns no authority for raw worker failure or
+    pre-checkpoint cancellation.
+    """
+
+    work_order = command.get("work_order")
+    node_id = str(getattr(work_order, "task_node_id", "") or "").strip()
+    command_id = str(command.get("command_id") or "").strip()
+    claim_ref = str(command.get("ingress_claim_ref") or "").strip()
+    graph_id = str(command.get("graph_id") or "").strip()
+    try:
+        revision = int(command.get("graph_revision") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not all((node_id, command_id, claim_ref, graph_id)) or revision < 1:
+        return False
+    try:
+        candidates = conn.execute(
+            """
+            SELECT attempt_id
+            FROM task_runtime_attempt
+            WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+              AND status = 'SUCCEEDED'
+            ORDER BY attempt_id
+            """,
+            (graph_id, revision, node_id),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return False
+    task_store = getattr(owner, "_task_store", None)
+    resolver = getattr(
+        task_store,
+        "try_resolve_internal_agent_nonacceptance_checkpoint_terminal",
+        None,
+    )
+    if not callable(resolver):
+        return False
+    matches = 0
+    for candidate in candidates:
+        attempt_id = str(candidate["attempt_id"] or "").strip()
+        if not attempt_id:
+            return False
+        try:
+            terminal = resolver(attempt_id)
+        except Exception:
+            return False
+        if terminal is None:
+            continue
+        if not isinstance(terminal, Mapping):
+            return False
+        historical = terminal.get("historical_lease")
+        completion = terminal.get("completion_lease")
+        reservation = terminal.get("operation_reservation")
+        projection = terminal.get("projection")
+        terminal_reason = str(terminal.get("terminal_reason") or "")
+        if not all(
+            isinstance(value, Mapping)
+            for value in (historical, completion, reservation, projection)
+        ):
+            return False
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_NONACCEPTANCE_TERMINAL"
+            or terminal_reason not in INTERNAL_NONACCEPTANCE_TERMINAL_REASONS
+            or str(historical.get("attempt_id") or "") != attempt_id
+            or str(completion.get("attempt_id") or "") != attempt_id
+            or str(completion.get("status") or "") != "RELEASED"
+            or str(reservation.get("attempt_id") or "") != attempt_id
+            or str(projection.get("command_id") or "") != command_id
+            or str(projection.get("graph_id") or "") != graph_id
+            or int(projection.get("graph_revision") or 0) != revision
+            or str(projection.get("node_id") or "") != node_id
+            or str(projection.get("attempt_id") or "") != attempt_id
+        ):
+            return False
+        try:
+            expected = build_internal_nonacceptance_result_ref(
+                command_id=command_id,
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                historical_lease_id=str(historical.get("lease_id") or ""),
+                completion_lease_id=str(completion.get("lease_id") or ""),
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                projection_id=str(projection.get("projection_id") or ""),
+                terminal_reason=terminal_reason,
+            )
+        except ValueError:
+            return False
+        if hmac.compare_digest(str(result_ref or ""), expected):
+            matches += 1
+    return matches == 1
+
+
 def _operator_domain_result_ref(*, command_id: str, claim_ref: str) -> str:
     normalized_command = str(command_id or "").strip()
     normalized_claim = str(claim_ref or "").strip()
@@ -330,6 +542,20 @@ class HostCommandClaimResultValidationMixin:
             )
             if not terminal_result_matches:
                 terminal_result_matches = matches_review_decision_result(
+                    conn,
+                    result_ref=actual_result,
+                    command=normalized,
+                )
+            if not terminal_result_matches:
+                terminal_result_matches = _matches_internal_budget_rejection_terminal(
+                    self,
+                    conn,
+                    result_ref=actual_result,
+                    command=normalized,
+                )
+            if not terminal_result_matches:
+                terminal_result_matches = _matches_internal_nonacceptance_terminal(
+                    self,
                     conn,
                     result_ref=actual_result,
                     command=normalized,

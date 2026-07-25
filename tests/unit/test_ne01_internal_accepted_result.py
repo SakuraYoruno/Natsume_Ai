@@ -446,20 +446,71 @@ def test_public_projection_strips_real_executor_local_authority(
 
 
 @pytest.mark.parametrize(
-    ("result_status", "inner_decision", "review_required", "reason_code"),
+    (
+        "result_status",
+        "inner_decision",
+        "review_required",
+        "verification_status",
+        "acceptance_decision",
+        "reason_code",
+    ),
     [
-        ("EXECUTED", "NOT_RUN", False, "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
-        ("EXECUTED", "RETRY", False, "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
-        ("EXECUTED", "REVIEW", False, "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
-        ("EXECUTED", "SPLIT", False, "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"),
-        ("FAILED", "ACCEPT", False, "INTERNAL_AGENT_RESULT_NOT_EXECUTED"),
-        ("EXECUTED", "ACCEPT", True, "INTERNAL_AGENT_REVIEW_REQUIRED"),
+        (
+            "EXECUTED",
+            "NOT_RUN",
+            False,
+            "FAIL",
+            "REJECT",
+            "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED",
+        ),
+        (
+            "EXECUTED",
+            "RETRY",
+            False,
+            "FAIL",
+            "REJECT",
+            "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED",
+        ),
+        (
+            "EXECUTED",
+            "SPLIT",
+            False,
+            "FAIL",
+            "REJECT",
+            "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED",
+        ),
+        (
+            "FAILED",
+            "ACCEPT",
+            False,
+            "FAIL",
+            "REJECT",
+            "INTERNAL_AGENT_RESULT_NOT_EXECUTED",
+        ),
+        (
+            "EXECUTED",
+            "REVIEW",
+            False,
+            "PASS",
+            "REVIEW",
+            "INTERNAL_AGENT_REVIEW_REQUIRED",
+        ),
+        (
+            "EXECUTED",
+            "ACCEPT",
+            True,
+            "PASS",
+            "REVIEW",
+            "INTERNAL_AGENT_REVIEW_REQUIRED",
+        ),
     ],
 )
-def test_internal_result_gates_reject_non_terminal_inner_outcomes(
+def test_internal_result_preserves_post_execution_review_without_verification_downgrade(
     result_status: str,
     inner_decision: str,
     review_required: bool,
+    verification_status: str,
+    acceptance_decision: str,
     reason_code: str,
 ) -> None:
     command = build_host_command(
@@ -526,8 +577,10 @@ def test_internal_result_gates_reject_non_terminal_inner_outcomes(
         worker_commit={"receipt_ref": "worker-projection://inner-acceptance"},
         evidence_refs=(),
     )
-    assert verification["status"] == "FAIL"
-    assert verification["reason_code"] == reason_code
+    assert verification["status"] == verification_status
+    assert verification["reason_code"] == (
+        None if verification_status == "PASS" else reason_code
+    )
 
     judgement = acceptance.judge(
         command=command,
@@ -545,7 +598,7 @@ def test_internal_result_gates_reject_non_terminal_inner_outcomes(
         evidence_refs=(),
     )
 
-    assert judgement["decision"] == "REJECT"
+    assert judgement["decision"] == acceptance_decision
     assert judgement["reason_code"] == reason_code
 
     result = {
@@ -570,19 +623,30 @@ def test_internal_result_gates_reject_non_terminal_inner_outcomes(
             }
         ]
     }
-    with pytest.raises(
-        accepted_result_module.InternalAcceptedResultError,
-        match="not exact terminal success",
-    ):
-        accepted_result_module._proposal_result(
+    canonical = {
+        "work_order_id": work_order.work_order_id,
+        "target_id": "agent_runtime",
+        "operation_fingerprint": command.operation_fingerprint,
+        "result_digest": digest,
+    }
+    if acceptance_decision == "REVIEW":
+        # The outer TaskGraph review has not accepted the effect yet, but its
+        # worker checkpoint must remain structurally replayable.  Once the
+        # durable Review continuation accepts it, the same sealed proposal is
+        # the only permissible result-commit input.
+        assert accepted_result_module._proposal_result(
             projection,
-            canonical={
-                "work_order_id": work_order.work_order_id,
-                "target_id": "agent_runtime",
-                "operation_fingerprint": command.operation_fingerprint,
-                "result_digest": digest,
-            },
-        )
+            canonical=canonical,
+        ) == result
+    else:
+        with pytest.raises(
+            accepted_result_module.InternalAcceptedResultError,
+            match="not exact terminal success",
+        ):
+            accepted_result_module._proposal_result(
+                projection,
+                canonical=canonical,
+            )
 
 @pytest.mark.asyncio
 async def test_internal_claim_stays_open_until_exact_result_commit() -> None:
@@ -606,6 +670,18 @@ async def test_internal_claim_stays_open_until_exact_result_commit() -> None:
         governor_grant_ref="governor-grant://internal/effect-recovery",
     )
 
+    durable_work_order = WorkOrderV3(
+        work_order_id=command.root_work_order_id,
+        root_work_order_id=command.root_work_order_id,
+        domain="code",
+        run_mode="inspect",
+        objective="test exact result recovery",
+        task_graph_id=command.graph_id,
+        task_node_id="node-internal-effect-recovery",
+        graph_revision=command.graph_revision,
+        operation_fingerprint=command.operation_fingerprint,
+    )
+
     class Runtime:
         terminal: dict[str, Any] = {}
         exact_reads = 0
@@ -613,7 +689,7 @@ async def test_internal_claim_stays_open_until_exact_result_commit() -> None:
         @staticmethod
         def existing_command(*, request_id: str) -> dict[str, Any]:
             assert request_id == command.request_id
-            return {"command": command}
+            return {"command": command, "work_order": durable_work_order}
 
         async def execute_stream(self, **_kwargs: Any):
             yield dict(self.terminal)
@@ -627,6 +703,18 @@ async def test_internal_claim_stays_open_until_exact_result_commit() -> None:
             assert command_id == command.command_id
             self.exact_reads += 1
             return expected_receipt_ref
+
+        async def exact_budget_rejection_claim_result_ref(
+            self,
+            **_kwargs: Any,
+        ) -> None:
+            return None
+
+        async def exact_nonacceptance_checkpoint_claim_result_ref(
+            self,
+            **_kwargs: Any,
+        ) -> None:
+            return None
 
     class Claims:
         def __init__(self) -> None:

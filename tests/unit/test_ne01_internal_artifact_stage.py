@@ -192,6 +192,31 @@ def test_governed_stage_rejects_unsealed_extra_file(tmp_path: Path) -> None:
         store.seal_governed_stage(stage)
 
 
+def test_unsealed_inventory_reopens_exact_stage_and_discards_stale_temp(
+    tmp_path: Path,
+) -> None:
+    store = AgentArtifactStore(tmp_path / "runs")
+    authority = _authority()
+    stage = store.prepare_governed_stage(
+        workspace_id=_workspace_id(authority),
+        execution_authority=authority,
+    )
+    (stage.stage_dir / ".tmp").write_text("stale metadata", encoding="utf-8")
+
+    inventory = store.inventory_unsealed_governed_stages(limit=10)
+
+    assert inventory == (stage,)
+    store.discard_unsealed_governed_stage(inventory[0])
+    assert not stage.stage_dir.exists()
+
+
+def test_unsealed_inventory_never_returns_a_sealed_stage(tmp_path: Path) -> None:
+    store = AgentArtifactStore(tmp_path / "runs")
+    _sealed(store)
+
+    assert store.inventory_unsealed_governed_stages(limit=10) == ()
+
+
 @pytest.mark.parametrize(
     "fault_point",
     [

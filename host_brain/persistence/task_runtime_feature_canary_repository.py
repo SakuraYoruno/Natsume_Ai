@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from host_brain.task_runtime.feature_canary import (
+from host_brain.contracts.task_runtime_feature_canary import (
     FeatureCanarySignatureVerifier,
     TASK_RUNTIME_FEATURE_CANARY_EXPIRED,
     TASK_RUNTIME_FEATURE_CANARY_INVALID,

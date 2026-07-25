@@ -326,6 +326,7 @@ class InternalAgentProposalVerifier:
         **_: Any,
     ) -> dict[str, Any]:
         reason: str | None = None
+        proposal: Mapping[str, Any] = {}
         receipt_ref = str(dict(worker_commit or {}).get("receipt_ref") or "").strip()
         try:
             proposal = self._authority.require(
@@ -367,7 +368,7 @@ class InternalAgentProposalVerifier:
 
 
 class InternalAgentProposalAcceptance:
-    """Accept only an exact passing proposal; the result ledger is still empty."""
+    """Judge an exact proposal and preserve durable post-execution Review."""
 
     def __init__(
         self,
@@ -409,7 +410,31 @@ class InternalAgentProposalAcceptance:
         except (WorkerProjectionStoreError, TypeError, ValueError):
             reason = INTERNAL_AGENT_PROPOSAL_PROJECTION_INVALID
 
-        accepted = reason is None
+        result = proposal.get("result")
+        raw_acceptance = (
+            result.get("acceptance") if isinstance(result, Mapping) else None
+        )
+        inner_decision = (
+            str(raw_acceptance.get("decision") or "").strip().upper()
+            if isinstance(raw_acceptance, Mapping)
+            else ""
+        )
+        review_requested = (
+            reason is None
+            and (
+                inner_decision == "REVIEW"
+                or (isinstance(result, Mapping) and result.get("review_required") is True)
+            )
+        )
+        accepted = reason is None and not review_requested
+        decision = "ACCEPT" if accepted else "REVIEW" if review_requested else "REJECT"
+        reason_code = (
+            None
+            if accepted
+            else "INTERNAL_AGENT_REVIEW_REQUIRED"
+            if review_requested
+            else reason
+        )
         context = dict(execution_context or {})
         refs = _evidence_refs(evidence_refs, receipt_ref)
         criteria_text = tuple(
@@ -423,8 +448,8 @@ class InternalAgentProposalAcceptance:
             "task_graph_id": str(context.get("graph_id") or ""),
             "task_node_id": str(context.get("node_id") or ""),
             "attempt_id": str(context.get("attempt_id") or ""),
-            "decision": "ACCEPT" if accepted else "REJECT",
-            "reason_code": reason,
+            "decision": decision,
+            "reason_code": reason_code,
             "evidence_refs": refs,
             "criteria": [
                 {
@@ -436,7 +461,7 @@ class InternalAgentProposalAcceptance:
                     "verdict": "PASS" if accepted else "FAIL",
                     "evidence_refs": refs,
                     "deterministic": True,
-                    "reason_code": reason,
+                    "reason_code": reason_code,
                     "critic_verdict": None,
                 }
                 for index, criterion in enumerate(criteria_text, start=1)
@@ -947,15 +972,24 @@ def build_public_internal_agent_result(
 def internal_agent_terminal_result_reason(
     value: Mapping[str, Any],
 ) -> str | None:
-    """Return the stable fail-closed reason for a non-terminal Agent result."""
+    """Return only a structural verification failure for an Agent proposal.
+
+    A successful worker may ask for a post-execution review.  That is not a
+    verification failure: the Task Runtime must preserve its succeeded Attempt
+    and transition the node to ``WAITING_ACCEPTANCE_REVIEW`` so the durable
+    Review continuation or cancellation path owns the next step.
+    """
 
     if not isinstance(value, Mapping) or value.get("status") != "EXECUTED":
         return "INTERNAL_AGENT_RESULT_NOT_EXECUTED"
     acceptance = value.get("acceptance")
-    if not isinstance(acceptance, Mapping) or acceptance.get("decision") != "ACCEPT":
+    decision = (
+        str(acceptance.get("decision") or "").strip().upper()
+        if isinstance(acceptance, Mapping)
+        else ""
+    )
+    if decision not in {"ACCEPT", "REVIEW"}:
         return "INTERNAL_AGENT_INNER_ACCEPTANCE_NOT_ACCEPTED"
-    if value.get("review_required") is not False:
-        return "INTERNAL_AGENT_REVIEW_REQUIRED"
     return None
 
 

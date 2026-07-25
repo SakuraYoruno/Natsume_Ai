@@ -42,6 +42,7 @@ from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
 from .internal_checkpoint_budget_rejection import (
     InternalCheckpointBudgetRejectionRuntime,
     is_internal_agent_checkpoint_authority,
+    requires_internal_terminal_bundle,
 )
 from .node_worker_stream import _maybe_await
 from .operation_checkpoint_budget_recovery import recover_checkpoint_budget
@@ -196,7 +197,7 @@ class CommittedCheckpointContinuation:
             internal_agent_checkpoint = is_internal_agent_checkpoint_authority(
                 command,
             )
-            if not defer_shared_terminal:
+            if not defer_shared_terminal or requires_internal_terminal_bundle(admitted, command):
                 receipt = await self._internal_budget_rejection.reject(
                     admitted=admitted,
                     charge=charge,

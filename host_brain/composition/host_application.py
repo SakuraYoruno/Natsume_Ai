@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
+from host_brain.contracts.host_lifecycle import HostLifecycleApplicationPorts
 
 
 ServiceProvider = Callable[[], Any]

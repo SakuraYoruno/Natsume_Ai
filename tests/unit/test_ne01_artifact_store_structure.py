@@ -8,6 +8,7 @@ from host_brain.agent_runtime import artifact_store, artifact_store_read_model
 
 _READ_MODEL_DELEGATES = {
     "inventory_governed_seals": "inventory_governed_seals",
+    "inventory_unsealed_governed_stages": "inventory_unsealed_governed_stages",
     "inspect_governed_promotion": "inspect_governed_promotion",
     "inspect_governed_stage_for_authority": "inspect_governed_stage_for_authority",
     "read_projection_recovery": "read_projection_recovery",

@@ -14,6 +14,9 @@ from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
+from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
+    INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX,
+)
 
 
 def _authority(*, attempt_id: str = "attempt-raw") -> dict[str, Any]:
@@ -51,11 +54,29 @@ class _Seal:
         }
 
 
+class _Stage:
+    def __init__(self, *, attempt_id: str = "attempt-raw", suffix: str = "c") -> None:
+        self.execution_authority = _authority(attempt_id=attempt_id)
+        self.workspace_id = "workspace-internal"
+        self.attempt_id = attempt_id
+        self.stage_ref = (
+            f"agent-stage://{self.workspace_id}/"
+            f"{governed_attempt_segment(attempt_id)}/sha256/{suffix * 64}"
+        )
+
+
 class _ArtifactStore:
-    def __init__(self, seals: list[_Seal] | None = None) -> None:
+    def __init__(
+        self,
+        seals: list[_Seal] | None = None,
+        unsealed: list[_Stage] | None = None,
+    ) -> None:
         self.seals = sorted(seals or [], key=lambda item: item.stage_ref)
+        self.unsealed = sorted(unsealed or [], key=lambda item: item.stage_ref)
         self.inventory_cursors: list[tuple[str, str | None]] = []
+        self.unsealed_inventory_cursors: list[str | None] = []
         self.abandoned: list[str] = []
+        self.discarded: list[str] = []
         self.tombstones: dict[str, dict[str, Any]] = {}
         self.promotions: dict[str, dict[str, Any]] = {}
         self.accepted: dict[tuple[str, str], _Seal] = {}
@@ -77,6 +98,25 @@ class _ArtifactStore:
             for item in source
             if after_stage_ref is None or item.stage_ref > after_stage_ref
         )[:limit]
+
+    def inventory_unsealed_governed_stages(
+        self,
+        *,
+        limit: int,
+        after_stage_ref: str | None = None,
+    ) -> tuple[_Stage, ...]:
+        self.unsealed_inventory_cursors.append(after_stage_ref)
+        return tuple(
+            item
+            for item in self.unsealed
+            if after_stage_ref is None or item.stage_ref > after_stage_ref
+        )[:limit]
+
+    def discard_unsealed_governed_stage(self, stage: _Stage) -> None:
+        self.discarded.append(stage.stage_ref)
+        self.unsealed = [
+            item for item in self.unsealed if item.stage_ref != stage.stage_ref
+        ]
 
     @staticmethod
     def read_projection_recovery(seal: _Seal) -> dict[str, Any]:
@@ -181,6 +221,7 @@ class _WorkspaceRuntime:
         self.repository = repository
         self.abandon_calls: list[dict[str, Any]] = []
         self.cleanup_calls: list[dict[str, Any]] = []
+        self.unsealed_cleanup_calls: list[str] = []
 
     def abandon_terminal_artifact(self, **values: Any) -> Any:
         self.abandon_calls.append(dict(values))
@@ -193,6 +234,10 @@ class _WorkspaceRuntime:
         self.cleanup_calls.append(dict(values))
         return SimpleNamespace(receipt_ref="workspace-cleanup://receipt/1")
 
+    def cleanup(self, workspace_id: str) -> Any:
+        self.unsealed_cleanup_calls.append(workspace_id)
+        return SimpleNamespace(receipt_ref="workspace-cleanup://receipt/unsealed")
+
 
 class _TaskStore:
     def __init__(self) -> None:
@@ -203,9 +248,16 @@ class _TaskStore:
         self.operation_status = "COMMITTED"
         self.protected_override: dict[str, str] | None = None
         self.seal: _Seal | None = None
+        self.cancellation_status: str | None = "FINALIZED"
+        self.root_work_order_id = "work-order-root"
 
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
-        return {"graph_id": graph_id, "revision": revision, "status": self.graph_status}
+        return {
+            "graph_id": graph_id,
+            "revision": revision,
+            "root_work_order_id": self.root_work_order_id,
+            "status": self.graph_status,
+        }
 
     def get_node(self, graph_id: str, revision: int, node_id: str) -> dict[str, Any]:
         del graph_id, revision
@@ -285,6 +337,76 @@ class _TaskStore:
             "historical_lease_id": "lease-agent",
         }
 
+    def resolve_internal_agent_nonacceptance_checkpoint_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        reasons = {
+            ("FAILED", "VERIFICATION_FAILED", "SUCCEEDED"): (
+                "TERMINAL_VERIFICATION_FAILED"
+            ),
+            ("CANCELLED", "CANCELLED", "SUCCEEDED"): (
+                "TERMINAL_POST_REVIEW_CANCELLED"
+            ),
+        }
+        reason = reasons.get(
+            (self.graph_status, self.node_status, self.attempt_status)
+        )
+        if (
+            attempt_id != "attempt-raw"
+            or reason is None
+            or self.lease_status != "RELEASED"
+            or self.operation_status != "COMMITTED"
+        ):
+            raise RuntimeError("non-acceptance terminal authority drifted")
+        return {
+            "authority_kind": "INTERNAL_AGENT_NONACCEPTANCE_TERMINAL",
+            "terminal_reason": reason,
+            "historical_lease": self.get_lease("lease-agent"),
+            "completion_lease": self.get_lease("lease-agent"),
+            "operation_reservation": self.get_operation_reservation(
+                "reservation-agent"
+            ),
+            "projection": {
+                "projection_id": "worker-projection://internal/1",
+                "command_id": "command-agent",
+                "graph_id": "graph-internal",
+                "graph_revision": 1,
+                "node_id": "node-agent",
+                "attempt_id": "attempt-raw",
+            },
+        }
+
+    def get_graph_cancellation_for_graph(
+        self,
+        graph_id: str,
+        revision: int,
+    ) -> dict[str, Any] | None:
+        if self.cancellation_status is None:
+            return None
+        return {
+            "status": self.cancellation_status,
+            "graph_id": graph_id,
+            "graph_revision": revision,
+            "intent_ref": "taskcancel-intent://sha256/" + "a" * 64,
+        }
+
+    def get_graph_cancellation_decision_for_intent(
+        self,
+        intent_ref: str,
+    ) -> dict[str, Any] | None:
+        if self.cancellation_status is None:
+            return None
+        assert intent_ref == "taskcancel-intent://sha256/" + "a" * 64
+        return {
+            "intent_ref": intent_ref,
+            "payload": {
+                "graph_id": "graph-internal",
+                "graph_revision": 1,
+                "graph_target_status": "CANCELLED",
+            },
+        }
+
 
 class _CommandRepository:
     @staticmethod
@@ -294,6 +416,7 @@ class _CommandRepository:
             graph_id=graph_id,
             graph_revision=graph_revision,
             surface=SimpleNamespace(value="internal"),
+            ingress_claim_ref="ingress-claim://internal/terminal",
         )
         graph = SimpleNamespace(
             nodes=(SimpleNamespace(node_id="node-agent", route="delegate:agent_runtime"),)
@@ -330,8 +453,19 @@ class _ProjectionStore:
         }
 
 
+class _ClaimStore:
+    def __init__(self) -> None:
+        self.completed: list[dict[str, Any]] = []
+
+    def complete_claim(self, **values: Any) -> None:
+        self.completed.append(dict(values))
+
+
 def _reconciler(
     seal: _Seal | None = None,
+    *,
+    unsealed: _Stage | None = None,
+    claim_store: _ClaimStore | None = None,
 ) -> tuple[
     InternalArtifactTerminalReconciler,
     _ArtifactStore,
@@ -339,7 +473,10 @@ def _reconciler(
     _WorkspaceRepository,
     _TaskStore,
 ]:
-    artifacts = _ArtifactStore([seal] if seal is not None else [])
+    artifacts = _ArtifactStore(
+        [seal] if seal is not None else [],
+        [unsealed] if unsealed is not None else [],
+    )
     repository = _WorkspaceRepository()
     workspaces = _WorkspaceRuntime(repository)
     tasks = _TaskStore()
@@ -350,6 +487,7 @@ def _reconciler(
         task_store=tasks,
         command_repository=_CommandRepository(),
         projection_store=_ProjectionStore(tasks),
+        claim_result_store=claim_store,
     )
     return reconciler, artifacts, workspaces, repository, tasks
 
@@ -360,6 +498,70 @@ def test_waiting_acceptance_review_is_held_without_abandonment() -> None:
     assert report[0]["action"] == "HOLD"
     assert workspaces.abandon_calls == []
     assert artifacts.abandoned == []
+
+
+def test_exact_cancelled_unsealed_stage_is_cleaned_without_worker_rerun() -> None:
+    stage = _Stage()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+
+    report = reconciler.run_once()
+
+    assert report == (
+        {
+            "workspace_id": stage.workspace_id,
+            "attempt_id": stage.attempt_id,
+            "action": "UNSEALED_CLEANED",
+            "reason_code": "TERMINAL_EXECUTION_CANCELLED_UNSEALED",
+            "receipt_ref": "workspace-cleanup://receipt/unsealed",
+        },
+    )
+    assert artifacts.discarded == [stage.stage_ref]
+    assert artifacts.unsealed == []
+    assert workspaces.unsealed_cleanup_calls == [stage.workspace_id]
+
+
+def test_unsealed_stage_without_finalized_cancellation_is_preserved() -> None:
+    stage = _Stage()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+    tasks.cancellation_status = None
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "BLOCKED"
+    assert artifacts.discarded == []
+    assert artifacts.unsealed == [stage]
+    assert workspaces.unsealed_cleanup_calls == []
+
+
+def test_unsealed_stage_with_root_lineage_drift_is_preserved() -> None:
+    stage = _Stage()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+    tasks.root_work_order_id = "work-order-drifted"
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "BLOCKED"
+    assert artifacts.discarded == []
+    assert artifacts.unsealed == [stage]
+    assert workspaces.unsealed_cleanup_calls == []
 
 
 @pytest.mark.parametrize(
@@ -442,6 +644,74 @@ def test_exact_terminal_matrices_abandon_without_rerunning(
     assert report[0]["reason_code"] == reason_code
     assert len(workspaces.abandon_calls) == 1
     assert artifacts.abandoned == [seal.stage_ref]
+
+
+@pytest.mark.parametrize(
+    ("graph_status", "node_status", "attempt_status", "reason_code"),
+    (
+        (
+            "FAILED",
+            "VERIFICATION_FAILED",
+            "SUCCEEDED",
+            "TERMINAL_VERIFICATION_FAILED",
+        ),
+        (
+            "CANCELLED",
+            "CANCELLED",
+            "SUCCEEDED",
+            "TERMINAL_POST_REVIEW_CANCELLED",
+        ),
+    ),
+)
+def test_nonacceptance_terminal_claim_closes_before_abandonment(
+    graph_status: str,
+    node_status: str,
+    attempt_status: str,
+    reason_code: str,
+) -> None:
+    seal = _Seal()
+    claims = _ClaimStore()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        seal,
+        claim_store=claims,
+    )
+    tasks.graph_status = graph_status
+    tasks.node_status = node_status
+    tasks.attempt_status = attempt_status
+    tasks.lease_status = "RELEASED"
+    tasks.operation_status = "COMMITTED"
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "ABANDONED"
+    assert report[0]["reason_code"] == reason_code
+    assert artifacts.abandoned == [seal.stage_ref]
+    assert len(workspaces.abandon_calls) == 1
+    assert len(claims.completed) == 1
+    assert claims.completed[0]["claim_ref"] == "ingress-claim://internal/terminal"
+    assert claims.completed[0]["result_ref"].startswith(
+        INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX
+    )
+
+
+def test_raw_worker_failure_never_closes_nonacceptance_claim() -> None:
+    seal = _Seal()
+    claims = _ClaimStore()
+    reconciler, artifacts, _workspaces, _repository, tasks = _reconciler(
+        seal,
+        claim_store=claims,
+    )
+    tasks.graph_status = "FAILED"
+    tasks.node_status = "FAILED"
+    tasks.attempt_status = "FAILED"
+    tasks.lease_status = "RELEASED"
+    tasks.operation_status = "RECOVERY_REQUIRED"
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "ABANDONED"
+    assert artifacts.abandoned == [seal.stage_ref]
+    assert claims.completed == []
 
 
 def test_committed_projection_must_bind_the_exact_protected_seal() -> None:

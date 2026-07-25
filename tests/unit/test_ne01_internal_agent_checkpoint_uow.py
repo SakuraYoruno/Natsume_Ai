@@ -36,6 +36,7 @@ from host_brain.persistence.worker_projection_repository import (
 )
 from host_brain.task_runtime import internal_agent_sealed_checkpoint_recovery
 from host_brain.task_runtime import internal_checkpoint_budget_rejection
+from host_brain.task_runtime import dag_scheduling_completion_replay
 from host_brain.task_runtime.internal_checkpoint_budget_rejection import (
     InternalCheckpointBudgetRejectionRuntime,
 )
@@ -544,6 +545,29 @@ def test_runtime_uses_explicit_uow_once_and_keeps_abc_budget_boundary() -> None:
             target_id="other_agent",
         )
     )
+    internal_command = SimpleNamespace(
+        surface="internal",
+        route_type="delegate",
+        target_id="agent_runtime",
+    )
+    assert internal_checkpoint_budget_rejection.requires_internal_terminal_bundle(
+        SimpleNamespace(nodes=(object(),)),
+        internal_command,
+    )
+    assert not internal_checkpoint_budget_rejection.requires_internal_terminal_bundle(
+        SimpleNamespace(nodes=(object(), object())),
+        internal_command,
+    )
+    assert internal_checkpoint_budget_rejection.is_internal_budget_terminal(
+        SimpleNamespace(nodes=(object(),)),
+        internal_command,
+        {"status": "BUDGET_BLOCKED"},
+    )
+    assert not internal_checkpoint_budget_rejection.is_internal_budget_terminal(
+        SimpleNamespace(nodes=(object(),)),
+        internal_command,
+        {"status": "FAILED"},
+    )
     assert canonical_checkpoint_route_authority_matches(
         command_surface="chat",
         command_route="chat",
@@ -577,6 +601,53 @@ def test_runtime_uses_explicit_uow_once_and_keeps_abc_budget_boundary() -> None:
         projection_target="root",
     )
     assert "internal_agent_checkpoint_uow" in _INFRASTRUCTURE_ORDER
+
+
+@pytest.mark.asyncio
+async def test_completed_internal_checkpoint_replay_requires_missing_parallel_decision() -> None:
+    class _Store:
+        def __init__(self, decision: object | None) -> None:
+            self._decision = decision
+
+        async def get_latest_parallel_success_decision(
+            self,
+            graph_id: str,
+            graph_revision: int,
+        ) -> object | None:
+            assert (graph_id, graph_revision) == ("graph-replay", 1)
+            return self._decision
+
+    admitted = SimpleNamespace(
+        graph_id="graph-replay",
+        graph_revision=1,
+        nodes=(object(),),
+    )
+    command = SimpleNamespace(
+        surface="internal",
+        route_type="delegate",
+        target_id="agent_runtime",
+    )
+    replay_guard = (
+        dag_scheduling_completion_replay.is_completed_internal_checkpoint_without_parallel_decision
+    )
+    assert await replay_guard(
+        task_store=_Store(None),
+        admitted=admitted,
+        command=command,
+        graph_status="COMPLETED",
+    )
+    assert not await replay_guard(
+        task_store=_Store({"decision_ref": "parallel-success://present"}),
+        admitted=admitted,
+        command=command,
+        graph_status="COMPLETED",
+    )
+    assert not await replay_guard(
+        task_store=_Store(None),
+        admitted=admitted,
+        command=command,
+        graph_status="ACTIVE",
+    )
 
 
 @pytest.mark.asyncio
