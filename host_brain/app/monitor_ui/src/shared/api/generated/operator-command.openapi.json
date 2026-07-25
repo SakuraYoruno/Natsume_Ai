@@ -4226,7 +4226,6 @@
                       }
                     },
                     "required": [
-                      "intent_ref",
                       "reservation_id",
                       "expected_version",
                       "action",
@@ -4738,6 +4737,169 @@
         "x-natsume-required-scopes": [
           "obs:write",
           "task-review:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/task_terminal.reconcile": {
+      "post": {
+        "operationId": "execute_task_terminal_reconcile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "task_terminal.reconcile",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "attestation_key_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "attestation_ref": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "attestation_signature": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "case_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "expected_case_snapshot_sha256": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "expected_subject_snapshot_sha256": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "issued_ts_ms": {
+                        "type": "integer"
+                      },
+                      "target_budget_status": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "target_graph_status": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "case_id",
+                      "expected_case_snapshot_sha256",
+                      "expected_subject_snapshot_sha256",
+                      "action",
+                      "issued_ts_ms",
+                      "attestation_ref",
+                      "attestation_key_id",
+                      "attestation_signature"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute task_terminal.reconcile",
+        "x-natsume-action": "obs:command:task_terminal.reconcile",
+        "x-natsume-command-id": "task_terminal.reconcile",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "task-runtime:reconcile"
         ]
       }
     },

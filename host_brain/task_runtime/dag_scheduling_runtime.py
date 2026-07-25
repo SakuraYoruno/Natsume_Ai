@@ -70,6 +70,7 @@ from .errors import (
     GovernedRuntimeError,
 )
 from .graph_cancellation_runtime import GraphCancellationRuntime
+from .existing_operation_resolution import has_blocking_live_recovery_lease
 from .internal_checkpoint_budget_rejection import is_internal_budget_terminal
 from .node_execution_projection import NodeExecutionProjection
 from .node_execution_records import build_review_context
@@ -319,17 +320,10 @@ class DurableDagSchedulingRuntime:
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "durable scheduler Lease snapshot is invalid",
                     )
-                reservation_attempt_ids = {
-                    _required_record_text(reservation, "attempt_id")
-                    for _, reservation in recovery_bindings
-                }
-                if any(
-                    isinstance(lease, Mapping)
-                    and _status(lease) == "ACTIVE"
-                    and _text(lease.get("attempt_id")) in reservation_attempt_ids
-                    and _record_non_negative_int(lease, "expires_ts_ms")
-                    > observed_ts_ms
-                    for lease in raw_active_leases
+                if has_blocking_live_recovery_lease(
+                    recovery_bindings,
+                    raw_active_leases,
+                    observed_ts_ms=observed_ts_ms,
                 ):
                     raise GovernedRuntimeError(
                         GOVERNED_EXECUTION_IN_PROGRESS,

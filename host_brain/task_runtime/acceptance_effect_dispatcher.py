@@ -301,6 +301,7 @@ class AcceptanceEffectDispatcher:
             # is level 4 so an exact Preview + consumed Review may authorize
             # it; it is never silently executable.
             "task.terminal_reconciliation": 4,
+            "task.operation_reconciliation": 4,
             "conversation.user_turn": 1,
             "conversation.preference_signal": 1,
             "life.conversation_turn_recorded": 2,

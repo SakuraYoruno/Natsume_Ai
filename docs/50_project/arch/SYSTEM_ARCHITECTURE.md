@@ -3,8 +3,8 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.8
-核对日期：2026-07-25
+版本：v2.9
+核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
@@ -12,6 +12,8 @@
 当前分支的独立 Gate 1～14 已全部 `PASS`、`failed_gates=[]`。最后两条回环通过中立合同层关闭：`SQLiteTaskRuntimeFeatureCanaryReceiptStore → contracts/task_runtime_feature_canary`，`composition/host_application → contracts/host_lifecycle`；旧 Task Runtime 与 App lifecycle 路径只重导出 canonical 对象，类型 identity 不分叉。Gate 1 的 issues/SCC 均为空，Gate 3 继续由 Research ledger 的 1271 行 repository owner、512 行 canonical codec 与 108 行 typed projection 保持通过，未扩白名单。该结果是当前工作树的静态分层证据，不是 Universal Runtime、NE-01 或完整架构项目封板；NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 Task Runtime 现把 Operation 预留后的“中断分类”拆为两个 focused owner：`operation_interruption_runtime.py` 只编排 exact marker、Budget metering 与 recovery receipt，`task_worker_interruption_store.py` 只在 canonical Store 的同一连接/UoW 中把 live `RESERVED` Operation 与 Outbox 原子推进为 `RECOVERY_REQUIRED`。两者都不能 `COMMIT/RELEASE` Operation，也不能终结 Attempt/Node/Graph/Budget/Lease；外部效果归因仍归签名 reconciliation。当前 `node_execution_runtime.py`、`task_repository.py` 与新 helper 分别为 1495、4597、273 行，均低于未变的 1500/4600/300 结构边界，没有扩大例外。
+
+签名 reconciliation 的生产边界现分成“证据接收”和“执行 continuation”两段。`GovernedOperationReconciliationRuntime` 先将完整 Ed25519 attestation 写入 0126 append-only evidence ledger，再把无签名的 ref/digest 与 Operation subject 编译为 Operator HostCommand/TaskGraph；`AcceptedOperationReconciliationHandler` 只有在 Review、Preview、Verification 和 Acceptance 后才重开 evidence、重新验签并调用 `OperationReacquisitionService`。`REACQUIRE` 通过 TaskStore 同一 authority 验证同一 Attempt、旧 Operation version、严格更高 fence、Budget segment 和新 owner，随后由原 route-specific continuation 继续 immutable graph；Operation terminal exact replay 不再进入目标 runtime。为保持职责边界，frozen Operator 编译已拆入 170 行的 `governed_operator_execution.py`，主 runtime 降为 1432 行；Gate 3 未增加例外。这个局部闭环不改变一般 unknown-effect、多节点/批次恢复和部署 canary 的未完成状态。
 
 `dev@99ae35ca4` 同时保留 exact Internal 单节点后置审核取消恢复：immutable `BLOCKED` intent 只建立取消围栏，独立 trusted `CANCELLED` decision 才授权 restart terminal worker 关闭 nonacceptance claim，随后才允许 tombstone 与 Workspace cleanup。该边界不提升一般取消、multi-node、unknown-effect 或 NE-01 状态。
 
@@ -301,7 +303,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0125_task_acceptance_effect_staging_authority.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118 封闭 Conversation Preference evaluation/profile history，0119 隔离 signed Operator command 与通用 TaskGraph 输入，0120 为 bounded fan-out 增加签名 durable receipt 的精确 build/migration/config 门禁，0121 只隔离 Research shadow 外部双臂的 reservation/claim/recovery journal，0122 只隔离 proposal-only Evolution Lab V2 evidence，0123 只隔离 runtime-scope ResourceManager status，0124 只封闭 TaskGraph admission INSERT，0125 只封闭 Acceptance Effect staging INSERT；它们都不代表 Chat、Universal Runtime 或 NE-01 完成。
+当前连续 SQLite migration head 为 `0126_task_operation_reconciliation_evidence.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0125 继续封闭各自既有边界；0126 只隔离已验签 Operation reconciliation evidence，提供 append-only table、subject index 和禁止 UPDATE/DELETE trigger。它不提供部署 key、Operator credential、自动 effect attribution 或一般 recovery，因此不代表 Chat、Universal Runtime 或 NE-01 完成。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -441,7 +443,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0125_task_acceptance_effect_staging_authority.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119 只定义签名 Operator 入站 authority，0120 只定义 bounded fan-out 的签名 feature-canary 启用门禁，0121 只定义 Research shadow arm operation journal，0122 只定义 Evolution Lab V2 evidence，0123 只定义 ResourceManager status 的 append-only Runtime Event revision 与 Host lease fencing，0124 只定义 TaskGraph admission INSERT authority，0125 只定义 Acceptance Effect staging INSERT authority；它们都不改变七路线总体 `INCOMPLETE`。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0126_task_operation_reconciliation_evidence.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0125 保持各自既有窄 authority；0126 只定义签名 Operation 对账 evidence 的不可变接收边界，不定义执行准许。它们都不改变七路线总体 `INCOMPLETE`。
 
 ## 7. 数字生命状态模型
 

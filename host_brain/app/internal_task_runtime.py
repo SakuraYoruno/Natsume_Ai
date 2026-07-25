@@ -578,6 +578,56 @@ class GovernedInternalRuntime:
                 if self._in_flight == 0:
                     self._condition.notify_all()
 
+    async def continue_operation_reacquisition(
+        self,
+        record: Mapping[str, Any],
+        _operation: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact Internal admission after signed no-effect recovery."""
+
+        async with self._condition:
+            if not self._active or not self._accepting:
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_INACTIVE,
+                    "internal runtime is not accepting Operation recovery",
+                )
+            self._in_flight += 1
+        try:
+            durable = dict(record or {})
+            command = durable.get("command")
+            work_order = durable.get("work_order")
+            assignment = durable.get("assignment")
+            graph = durable.get("graph")
+            if (
+                not isinstance(command, HostCommand)
+                or command.surface is not HostCommandSurface.INTERNAL
+                or not isinstance(work_order, WorkOrderV3)
+                or assignment is None
+                or graph is None
+            ):
+                raise GovernedInternalRuntimeError(
+                    INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                    "Operation recovery Internal admission is incomplete or misrouted",
+                )
+            result = await _review_continuation_result(
+                self._application.execute_stream(
+                    command=command,
+                    work_order=work_order,
+                    assignment=assignment,
+                    graph=graph,
+                )
+            )
+            return await self._accepted_effect_runtime.dispatch(
+                result,
+                command=command,
+            )
+        finally:
+            self._wake_terminal_continuation()
+            async with self._condition:
+                self._in_flight -= 1
+                if self._in_flight == 0:
+                    self._condition.notify_all()
+
     async def request_graph_cancellation(
         self,
         record: Mapping[str, Any],

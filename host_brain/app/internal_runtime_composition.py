@@ -208,11 +208,22 @@ async def activate_internal_runtime(
         graph_cancellation_operator_enabled=cancellation_operator_enabled,
         graph_cancellation_state_reader=task_runtime.task_store,
         acceptance_effect_runtime=composition.acceptance_effect_runtime,
+        operation_reacquisition_owner_id=composition.canonical_owner,
     )
     review_commands = review_command_service_factory(
         review_store=task_runtime.review_store,
         wake_continuation=runtime_group.wake_review_continuation,
     )
+    bind_reacquisition_owner = getattr(
+        task_runtime.operation_reconciliation_service,
+        "bind_execution_owner",
+        None,
+    )
+    if not callable(bind_reacquisition_owner):
+        raise TypeError(
+            "Operation reconciliation service lacks execution-owner binding"
+        )
+    bind_reacquisition_owner(composition.canonical_owner)
     task_runtime.bind_runtime(runtime_group)
     await task_runtime.activate_runtime()
     await composition.host_runtime.recover_startup_graphs()
@@ -231,6 +242,9 @@ async def activate_internal_runtime(
     application.state.scheduler_container = scheduler
     application.state.task_review_command_service = review_commands
     application.state.task_graph_cancellation_command_service = runtime_group
+    application.state.task_operation_reacquisition_continuation = (
+        runtime_group if operation_reconciliation_operator_enabled else None
+    )
     application.state.task_operation_reconciliation_command_service = (
         task_runtime.operation_reconciliation_service
         if operation_reconciliation_operator_enabled

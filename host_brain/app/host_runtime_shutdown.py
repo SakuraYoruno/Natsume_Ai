@@ -18,6 +18,7 @@ _RUNTIME_STATE_FIELDS = (
     "task_review_command_service",
     "task_graph_cancellation_command_service",
     "task_operation_reconciliation_command_service",
+    "task_operation_reacquisition_continuation",
     "task_effect_reconciliation_command_service",
     "task_terminal_reconciliation_operator_enabled",
     "task_terminal_reconciliation_read_authority",

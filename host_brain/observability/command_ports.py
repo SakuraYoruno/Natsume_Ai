@@ -658,7 +658,6 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         "task-runtime:reconcile",
         _schema(
             required=(
-                "intent_ref",
                 "reservation_id",
                 "expected_version",
                 "action",
@@ -666,7 +665,7 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
                 "attestation_key_id",
                 "attestation_signature",
             ),
-            optional=("downstream_receipt_ref",),
+            optional=("intent_ref", "downstream_receipt_ref"),
             strings=(
                 "intent_ref",
                 "reservation_id",

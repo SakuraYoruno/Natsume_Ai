@@ -49,6 +49,7 @@ class _Runtime:
         self.name = name
         self.log = log
         self.claims: list[dict[str, Any]] = []
+        self.operation_reacquisitions: list[dict[str, Any]] = []
         self.result: dict[str, Any] = {
             "execution_receipt": {
                 "status": "ACCEPTED",
@@ -86,6 +87,23 @@ class _Runtime:
         assert record["command"].graph_id == claim["graph_id"]
         self.claims.append(dict(claim))
         return dict(self.result)
+
+    async def continue_operation_reacquisition(
+        self,
+        record: Mapping[str, Any],
+        operation: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        command = record["command"]
+        self.operation_reacquisitions.append(dict(operation))
+        return {
+            "execution_receipt": {
+                "status": "ACCEPTED",
+                "accepted": True,
+                "receipt_ref": f"task-receipt://{self.name}/reacquired",
+                "graph_id": command.graph_id,
+                "graph_revision": command.graph_revision,
+            }
+        }
 
     async def exact_accepted_result_receipt(
         self,
@@ -204,6 +222,68 @@ def _group(surface: HostCommandSurface):
     assert created[0].kwargs["review_expirer"] is decision_store
     assert created[0].kwargs["runtime"] is group
     return group, runtimes, command, claims, created[0], log
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("surface", "target_id", "runtime_name"),
+    (
+        (HostCommandSurface.CHAT, "chat", "host"),
+        (HostCommandSurface.HOST_INPUT, "host-input", "host"),
+        (HostCommandSurface.TOOL, "tool", "host"),
+        (HostCommandSurface.GATEWAY, "gateway", "host"),
+        (HostCommandSurface.INTERNAL, "internal", "internal_agent"),
+        (HostCommandSurface.SCHEDULER, "scheduler", "scheduler"),
+        (
+            HostCommandSurface.OPERATOR,
+            "operator_sys_mode_switch",
+            "operator",
+        ),
+    ),
+)
+async def test_group_routes_signed_operation_reacquisition_once(
+    surface: HostCommandSurface,
+    target_id: str,
+    runtime_name: str,
+) -> None:
+    log: list[str] = []
+    runtimes = {
+        name: _Runtime(name, log)
+        for name in ("host", "internal_agent", "scheduler", "operator")
+    }
+    command = _command(surface, with_claim=False, target_id=target_id)
+    group = GovernedRuntimeGroup(
+        runtimes,
+        review_store=object(),
+        review_decision_store=object(),
+        command_repository=_Commands(command),
+        review_continuation_worker_factory=lambda **kwargs: _Worker(
+            log,
+            **kwargs,
+        ),
+        review_continuation_worker_id="operation-reacquire-group-worker",
+        operation_reacquisition_owner_id="runtime-owner-b",
+    )
+    await group.activate()
+    result = await group.continue_operation_reacquisition(
+        {
+            "graph_id": command.graph_id,
+            "graph_revision": command.graph_revision,
+            "operation": {
+                "owner_id": "runtime-owner-b",
+                "reconciliation_action": "REACQUIRE",
+                "reconciliation_outcome": "NO_SIDE_EFFECT",
+            },
+        }
+    )
+
+    assert result["execution_receipt"]["accepted"] is True
+    assert len(runtimes[runtime_name].operation_reacquisitions) == 1
+    assert (
+        sum(len(runtime.operation_reacquisitions) for runtime in runtimes.values())
+        == 1
+    )
+    await group.aclose()
 
 
 @pytest.mark.asyncio

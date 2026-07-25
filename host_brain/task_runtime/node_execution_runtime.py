@@ -56,13 +56,16 @@ from .errors import (
     GovernedRuntimeError,
     RetryableWorkerPreparationError,
 )
+from .existing_operation_resolution import (
+    ExistingOperationResolution,
+    resolve_existing_operation,
+)
 from .heartbeat import DurableExecutionHeartbeat
 from .internal_checkpoint_budget_rejection import (
     InternalCheckpointBudgetRejectionRuntime,
     is_internal_agent_checkpoint_authority,
     requires_internal_terminal_bundle,
 )
-from .internal_agent_sealed_checkpoint_recovery import recover_internal_agent_sealed_checkpoint
 from .node_execution_projection import NodeExecutionProjection
 from .node_execution_preparation import (
     bind_preoperation_recovery_attempt,
@@ -250,6 +253,8 @@ class DurableNodeExecutionRuntime:
                 "durable TaskAttempt journal is not contiguous",
             )
         existing_reservation = await self._projection.try_operation(admitted.reservation_id)
+        existing_resolution: ExistingOperationResolution | None = None
+        execution_segment: str | None = None
         if existing_reservation is not None:
             if not attempts:
                 raise GovernedRuntimeError(
@@ -257,75 +262,30 @@ class DurableNodeExecutionRuntime:
                     "existing operation reservation has no durable Attempt",
                 )
             latest_attempt = attempts[-1]
-            self._operation_recovery.assert_existing_lineage(
+            existing_resolution = await resolve_existing_operation(
+                task_store=self._store,
+                checkpoint_uow=self._checkpoint_uow,
+                worker_resolver=self._workers,
+                operation_recovery=self._operation_recovery,
+                runtime_outbox=self._runtime_outbox,
+                owner_id=self._owner_id,
                 admitted=admitted,
+                command=command,
+                work_order=work_order,
+                budget=budget,
+                graph=graph,
+                node=node,
                 reservation=existing_reservation,
                 latest_attempt=latest_attempt,
+                node_grant_ref=node_grant_ref,
+                allow_multinode_checkpoint_continuation=(
+                    scheduler_checkpoint_continuation_authority
+                    is self._scheduler_checkpoint_continuation_authority
+                ),
             )
-            existing_reservation = (
-                await self._operation_recovery.reconcile_reservation_state(
-                    admitted=admitted,
-                    reservation=existing_reservation,
-                    latest_attempt=latest_attempt,
-                )
-            )
-            reservation_status = _status(existing_reservation)
-            sealed_recovery_detail: str | None = None
-            sealed_worker_elapsed_ms: int | None = None
-            if reservation_status in {"RECOVERY_REQUIRED", "COMMITTED"}:
-                try:
-                    recovered = await recover_internal_agent_sealed_checkpoint(
-                        task_store=self._store,
-                        checkpoint_uow=self._checkpoint_uow,
-                        worker_resolver=self._workers,
-                        operation_recovery=self._operation_recovery,
-                        runtime_outbox=self._runtime_outbox,
-                        admitted=admitted,
-                        command=command,
-                        work_order=work_order,
-                        budget=budget,
-                        graph=graph,
-                        node=node,
-                        reservation=existing_reservation,
-                        latest_attempt=latest_attempt,
-                        node_grant_ref=node_grant_ref,
-                    )
-                except Exception as exc:
-                    recovered = None
-                    _logger.warning(
-                        "Internal Agent sealed checkpoint recovery was rejected: %s",
-                        exc,
-                    )
-                    sealed_recovery_detail = _exception_reason(
-                        exc,
-                        GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                    )
-                if recovered is not None:
-                    existing_reservation, sealed_worker_elapsed_ms = recovered
-                    reservation_status = _status(existing_reservation)
-            if reservation_status != "COMMITTED":
-                active_lease = await _maybe_await(
-                    self._store.get_active_lease(
-                        _required_record_text(latest_attempt, "attempt_id")
-                    )
-                )
-                recovery_projection = {
-                    **self._operation_recovery.unresolved_projection(
-                        existing_reservation
-                    ),
-                    "online_takeover_state": (
-                        "WAITING_FOR_LEASE_EXPIRY"
-                        if reservation_status == "RESERVED"
-                        and active_lease is not None
-                        else "SIGNED_RECONCILIATION_REQUIRED"
-                    ),
-                    "budget": budget.execution_payload(),
-                }
-                if sealed_recovery_detail:
-                    recovery_projection["sealed_checkpoint_state"] = "INVALID"
-                    recovery_projection["sealed_checkpoint_detail"] = (
-                        sealed_recovery_detail
-                    )
+            existing_reservation = existing_resolution.reservation
+            latest_attempt = existing_resolution.latest_attempt
+            if existing_resolution.kind == "BLOCKED":
                 receipt = build_execution_receipt(
                     admitted,
                     attempt_id=_required_record_text(latest_attempt, "attempt_id"),
@@ -333,81 +293,35 @@ class DurableNodeExecutionRuntime:
                     verification_status="NOT_RUN",
                     accepted=False,
                     reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                    projection=recovery_projection,
+                    projection=dict(existing_resolution.blocked_projection or {}),
                 )
                 yield terminal_event(receipt)
                 return
-            if graph_status != "ACTIVE" or node_status not in {
-                "LEASED",
-                "RUNNING",
-                "EXECUTED",
-                "VERIFYING",
-                "VERIFIED",
-            }:
-                raise GovernedRuntimeError(
-                    GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                    "committed checkpoint durable Graph/Node state is not continuable",
-                )
-            try:
-                checkpoint = await self._operation_recovery.takeover_committed(
+            if existing_resolution.kind == "COMMITTED":
+                checkpoint = existing_resolution.checkpoint
+                if checkpoint is None:
+                    raise GovernedRuntimeError(
+                        GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                        "committed Operation resolution has no checkpoint",
+                    )
+                async for event in self._checkpoint_continuation.resume(
                     admitted=admitted,
                     command=command,
-                    reservation=existing_reservation,
-                    latest_attempt=latest_attempt,
+                    work_order=work_order,
+                    budget=budget,
+                    graph=graph,
+                    node=node,
+                    checkpoint=checkpoint,
                     node_grant_ref=node_grant_ref,
-                    budget_id=budget.budget_id,
-                    durable_elapsed_ms_override=sealed_worker_elapsed_ms,
-                    allow_multinode_checkpoint_continuation=(
-                        scheduler_checkpoint_continuation_authority
-                        is self._scheduler_checkpoint_continuation_authority
-                    ),
-                )
-            except GovernedRuntimeError as exc:
-                _logger.warning(
-                    "Committed checkpoint takeover was rejected: %s",
-                    exc,
-                )
-                receipt = build_execution_receipt(
-                    admitted,
-                    attempt_id=_required_record_text(
-                        latest_attempt,
-                        "attempt_id",
-                    ),
-                    status="RECOVERY_REQUIRED",
-                    verification_status="NOT_RUN",
-                    accepted=False,
-                    reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                    projection={
-                        "online_takeover_state": (
-                            "BATCH_RECOVERY_PENDING"
-                            if len(admitted.nodes) != 1
-                            else "CHECKPOINT_INCOMPLETE"
-                        ),
-                        "checkpoint_detail": _exception_reason(
-                            exc,
-                            GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                        ),
-                        "worker_replayed": False,
-                        "budget": budget.execution_payload(),
-                    },
-                )
-                yield terminal_event(receipt)
+                    defer_shared_terminal=defer_shared_terminal,
+                ):
+                    yield event
                 return
-            async for event in self._checkpoint_continuation.resume(
-                admitted=admitted,
-                command=command,
-                work_order=work_order,
-                budget=budget,
-                graph=graph,
-                node=node,
-                checkpoint=checkpoint,
-                node_grant_ref=node_grant_ref,
-                defer_shared_terminal=defer_shared_terminal,
-            ):
-                yield event
-            return
+            execution_segment = existing_resolution.execution_segment
         preoperation_candidate: PreOperationRecoveryCandidate | None = None
-        if graph_status == "ACTIVE" and node_status in {"LEASED", "RUNNING"}:
+        if existing_resolution is not None:
+            pass
+        elif graph_status == "ACTIVE" and node_status in {"LEASED", "RUNNING"}:
             preoperation_candidate = await load_preoperation_recovery_candidate(
                 task_store=self._store,
                 admitted=admitted,
@@ -444,7 +358,17 @@ class DurableNodeExecutionRuntime:
                 )
             graph = await self._node_lifecycle.transition_graph(admitted, graph, "ACTIVE")
 
-        if preoperation_candidate is not None:
+        if existing_resolution is not None:
+            attempt = existing_resolution.latest_attempt
+            lease = existing_resolution.lease
+            if lease is None:
+                raise GovernedRuntimeError(
+                    GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    "signed reacquisition lost its live Lease",
+                )
+            attempt_no = _record_positive_int(attempt, "attempt_no")
+            attempt_id = _required_record_text(attempt, "attempt_id")
+        elif preoperation_candidate is not None:
             attempt_no = preoperation_candidate.attempt_no
             attempt_id = preoperation_candidate.attempt_id
             latest_attempt = bind_preoperation_recovery_attempt(
@@ -554,6 +478,7 @@ class DurableNodeExecutionRuntime:
                 node_id=admitted.node_id,
                 attempt_id=attempt_id,
                 tool_call_count=_precharged_tool_call_count(admitted.worker_route),
+                execution_segment=execution_segment,
             )
         except GovernedRuntimeError:
             refreshed_budget = await self._budgets.refresh(budget)
@@ -601,6 +526,7 @@ class DurableNodeExecutionRuntime:
             budget,
             node_id=admitted.node_id,
             attempt_id=attempt_id,
+            execution_segment=execution_segment,
         )
         if time_guard is not None:
             budget = time_guard.context
@@ -871,27 +797,31 @@ class DurableNodeExecutionRuntime:
             yield terminal_event(receipt)
             return
 
-        reserved_raw = await _maybe_await(
-            self._store.reserve_operation(
-                reservation_id=admitted.reservation_id,
-                business_scope=admitted.business_scope,
-                operation_fingerprint=admitted.operation_fingerprint,
-                attempt_id=attempt_id,
-                lease_id=lease_id,
-                owner_id=self._owner_id,
-                fencing_token=fencing_token,
-                ttl_ms=self._operation_ttl_ms,
-                outbox=self._runtime_outbox.build(
-                    command_id=admitted.command_id,
-                    aggregate_type="OPERATION_RESERVATION",
-                    aggregate_id=admitted.reservation_id,
-                    aggregate_version=0,
-                    event_type="OPERATION_RESERVED",
+        if existing_resolution is not None:
+            reservation_acquired = True
+            reservation = existing_resolution.reservation
+        else:
+            reserved_raw = await _maybe_await(
+                self._store.reserve_operation(
+                    reservation_id=admitted.reservation_id,
+                    business_scope=admitted.business_scope,
+                    operation_fingerprint=admitted.operation_fingerprint,
                     attempt_id=attempt_id,
-                ),
+                    lease_id=lease_id,
+                    owner_id=self._owner_id,
+                    fencing_token=fencing_token,
+                    ttl_ms=self._operation_ttl_ms,
+                    outbox=self._runtime_outbox.build(
+                        command_id=admitted.command_id,
+                        aggregate_type="OPERATION_RESERVATION",
+                        aggregate_id=admitted.reservation_id,
+                        aggregate_version=0,
+                        event_type="OPERATION_RESERVED",
+                        attempt_id=attempt_id,
+                    ),
+                )
             )
-        )
-        reservation_acquired, reservation = _reservation_result(reserved_raw)
+            reservation_acquired, reservation = _reservation_result(reserved_raw)
         if not reservation_acquired:
             # Another owner won the exact Operation reservation after our
             # initial read.  From this point the external effect is ambiguous;
@@ -950,6 +880,8 @@ class DurableNodeExecutionRuntime:
         }
         if node_grant_ref is not None:
             execution_context["node_grant_ref"] = node_grant_ref
+        if execution_segment is not None:
+            execution_context["operation_reacquisition_segment"] = execution_segment
 
         def heartbeat_outbox(**values: Any) -> Any:
             values.pop("attempt_id", None)
@@ -1127,6 +1059,7 @@ class DurableNodeExecutionRuntime:
                 worker_error=worker_error,
                 worker_started_ns=worker_started_ns,
                 worker_time_budget_ms=worker_time_budget_ms,
+                execution_segment=execution_segment,
                 operation_recovery_reason_code=(
                     GOVERNED_OPERATION_RECOVERY_REQUIRED
                 ),
@@ -1200,6 +1133,7 @@ class DurableNodeExecutionRuntime:
                 attempt_id=attempt_id,
                 worker_commit=worker_commit,
                 elapsed_ms=_worker_elapsed_ms(worker_started_ns),
+                execution_segment=execution_segment,
             )
         except Exception:
             # Operation COMMITTED proves the worker boundary was crossed.  A

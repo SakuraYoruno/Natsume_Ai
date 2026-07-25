@@ -310,6 +310,7 @@ def _effect_descriptor(
         "edge.embodiment_enqueue": 4,
         "host.sys_mode_transition": 4,
         "task.terminal_reconciliation": 4,
+        "task.operation_reconciliation": 4,
         "life.conversation_turn_recorded": 2,
         "life.foreground_completed": 2,
         "surface.reply_delivery": 3,

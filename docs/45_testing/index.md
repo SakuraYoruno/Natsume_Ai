@@ -3,9 +3,19 @@
 
 # 测试与验收目录
 
-版本：v2.5
-维护日期：2026-07-25
+版本：v2.6
+维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 受治理签名 Operation 重获与原图续跑当前切片
+
+- migration 0126 新增 `task_runtime_operation_reconciliation_evidence`。写入时用 verification-only Ed25519 key ring 验签并绑定当前 `RECOVERY_REQUIRED` reservation/version/action；evidence ref/digest 确定性派生，同 request exact replay 只读，payload drift 拒绝。真实 SQLite trigger 阻断 UPDATE/DELETE。
+- `task_operation.reconcile` 通过 Secure Ingress、typed Governor、risk-4 Review、Action Preview、HostCommand/TaskGraph、Verification、Acceptance Effect 后执行。通用图中没有 `attestation_signature`，Accepted handler 从 evidence ledger 重开并再次验签。
+- `REACQUIRE` 只保留同一 Attempt，签发严格更高 fence、新 owner 与新的 Budget execution segment；随后调用原 route continuation。真实 SQLite 端到端测试证明首次请求为 `WAITING_REVIEW`，批准后原 worker 只续跑一次并将 Operation 收敛为 `COMMITTED`；相同外层请求重放不再次进入 target runtime。
+- handler、compiler、Store 结构、签名重获及 governed Operator 关键组合为 `64 passed in 12.77s`；单条完整生产 composition 路径独立为 `1 passed in 7.77s`，二者可能重叠，不相加。
+- 最终回归按完整文件拆开执行：Operation/Governor `39 passed`，Action Preview `25 passed`，Scheduler/SysMode/Edge Operator 分别 `3/2/1 passed`，online takeover `23 passed`，Composition/结构 `104 passed`，migration contract/compatibility 分别 `23/31 passed`，文档 authority/freshness/metadata `27 passed`。职责拆分后的 58+2 项与前述集合重叠，不相加。两次合并 pytest 命令达到 60 秒工具上限而被终止，未计为失败或 PASS；同一完整文件已在上述拆分批次重跑。
+- `governed_operator_runtime.py` 已从 1559 行拆为 1432 行主编排与 170 行纯 frozen-execution 模块；未扩 policy allowlist。生成 Operator client `--check`、统一 doc Gate、统一 static scan、JSON/compile/diff-check 通过，完整架构静态 Gate 1～14 为 `PASS`、`failed_gates=[]`。
+- 测试 key 是临时 Ed25519 材料；功能默认关闭，未验证部署 key lifecycle、真实 HTTP/network、一般 unknown-effect 自动归因、general multi-node/batch recovery、NE-01 wave integration 或 NE-07 Docker 全栈。总体保持 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 执行中断持久分类与签名取消续接当前切片
 
@@ -13,7 +23,7 @@
 - marker 只保存有界大写原因码，不保存异常正文；caller cancellation 原样向上传播。marker、运行时 helper 与 Store mixin 均没有 Attempt/Node/Graph/Budget/Lease terminal authority，也不能 `COMMIT/RELEASE` Operation。
 - 跨进程集成从该 marker 开始，用临时 Ed25519 key 生成 `RELEASE + NO_SIDE_EFFECT` proof，重建 Store 后运行 `GraphCancellationContinuationWorker`；Graph/Node/Attempt 为 `CANCELLED`，Operation 为 `RELEASED`，第二次重启零工作，`OPERATION_RECOVERY_REQUIRED`、`OPERATION_RECOVERY_RELEASE`、`TASK_GRAPH_CANCELLED` Outbox 各一条，worker 没有重跑。
 - 当前 runtime/store/structure/cancellation 定向集合为 `133 passed in 91.94s`。随后把文档 authority/freshness、机器 coverage、metadata、Obs 合同与受影响 Runtime 合并复核为 `147 passed in 140.38s`；它包含或重叠前述测试，不相加。目标模块 `compileall`、两份 JSON、doc-only delivery gate、统一 static scan 与 `git diff --check` 均通过；fresh architecture Gate 1～14 为 `PASS`、`failed_gates=[]`，`task_repository.py` 4597 行、`node_execution_runtime.py` 1495 行，未扩大 policy。
-- 没有 migration。测试 key 是进程内临时验签材料，不是部署凭据；Operation/Effect Operator 仍默认关闭，HTTP/key lifecycle/canary 未运行。一般 unknown-effect attribution、其它 cancellation、general multi-node/batch、Workspace 一般写、七路线验收、波次 integration 与 NE-07 Docker 全栈仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史切片自身没有 migration；仓库当前 head 已为 0126。测试 key 是进程内临时验签材料，不是部署凭据；Operation/Effect Operator 仍默认关闭，HTTP/key lifecycle/canary 未运行。一般 unknown-effect attribution、其它 cancellation、general multi-node/batch、Workspace 一般写、七路线验收、波次 integration 与 NE-07 Docker 全栈仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Host/Internal 周期 survivor 当前切片
 
@@ -57,7 +67,7 @@
 - 真实 SQLite 集成覆盖 Review 前 outbox 为 0、Acceptance 后唯一 `PENDING` 行、一次物理 dispatch、请求 exact replay 不重复入队/发送、unsupported command 不创建 HostCommand，以及 claim 失效后的 `IN_DOUBT → read-only receipt query → APPLIED` 且 submit 次数不增加。编译器测试另覆盖确定性 command/idempotency/authority identity 与 worker 伪造 runtime scope 拒绝。
 - Acceptance handler、Operator runtime 和 Edge 绑定 helper 已拆成聚焦模块；`acceptance_effect_handlers.py < 1300`、`governed_operator_runtime.py < 1500`，fresh architecture static Gate 1～14 全部通过且未扩大白名单。
 - 最终去重的 Operator/Acceptance/Preview/Edge 受影响集合为 `78 passed in 79.67s`；文档 authority、freshness 和交付元数据为 `27 passed in 10.53s`。目标模块 `py_compile`、机器状态 JSON 解析、`git diff --check` 与 fresh static Gate 均通过，`failed_gates=[]`。
-- 集成中的物理端口是记录型 async adapter，不是真实 Edge/Gateway 进程。波次 integration、production canary、真实网络/设备与 NE-07 Docker 全栈仍为 `NOT_RUN`；其余 33 个 Operator 写命令继续阻断，NE-01 保持 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 集成中的物理端口是记录型 async adapter，不是真实 Edge/Gateway 进程。波次 integration、production canary、真实网络/设备与 NE-07 Docker 全栈仍为 `NOT_RUN`；计入新的 Operation route 后，其余 32 个 Operator 写命令继续阻断，NE-01 保持 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Runtime 合同分层当前切片
 

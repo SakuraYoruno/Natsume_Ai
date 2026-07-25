@@ -254,6 +254,7 @@ class DurableBudgetRuntime:
         node_id: str,
         attempt_id: str,
         tool_call_count: int = 1,
+        execution_segment: str | None = None,
     ) -> BudgetCharge:
         if (
             isinstance(tool_call_count, bool)
@@ -264,7 +265,12 @@ class DurableBudgetRuntime:
                 GOVERNED_BUDGET_USAGE_INVALID,
                 "precharge tool_call_count must be a non-negative integer",
             )
-        usage_id = _internal_usage_id(context, node_id, attempt_id, "worker-precharge")
+        usage_id = _internal_usage_id(
+            context,
+            node_id,
+            attempt_id,
+            _segmented_kind("worker-precharge", execution_segment),
+        )
         return await self._charge(
             context,
             usage_id=usage_id,
@@ -280,6 +286,7 @@ class DurableBudgetRuntime:
         *,
         node_id: str,
         attempt_id: str,
+        execution_segment: str | None = None,
     ) -> BudgetCharge | None:
         """Fail before dispatch when a bounded graph has no time left.
 
@@ -293,7 +300,12 @@ class DurableBudgetRuntime:
         remaining = context.remaining_execution_time_ms()
         if remaining is None or remaining > 0:
             return None
-        usage_id = _internal_usage_id(context, node_id, attempt_id, "time-guard")
+        usage_id = _internal_usage_id(
+            context,
+            node_id,
+            attempt_id,
+            _segmented_kind("time-guard", execution_segment),
+        )
         charge = await self._charge(
             context,
             usage_id=usage_id,
@@ -317,11 +329,17 @@ class DurableBudgetRuntime:
         attempt_id: str,
         worker_commit: Mapping[str, Any] | None,
         elapsed_ms: int,
+        execution_segment: str | None = None,
     ) -> BudgetCharge:
         elapsed = max(0, int(elapsed_ms))
         payload = worker_commit.get("budget_usage") if isinstance(worker_commit, Mapping) else None
         if payload is None:
-            usage_id = _internal_usage_id(context, node_id, attempt_id, "worker-elapsed")
+            usage_id = _internal_usage_id(
+                context,
+                node_id,
+                attempt_id,
+                _segmented_kind("worker-elapsed", execution_segment),
+            )
             delta = BudgetAmount(time_ms=elapsed)
             kind = "WORKER_ELAPSED"
         else:
@@ -344,6 +362,7 @@ class DurableBudgetRuntime:
         worker_started_ns: int,
         worker_failure_reason: str,
         time_budget_ms: int | None,
+        execution_segment: str | None = None,
     ) -> BudgetCharge:
         """Settle an interrupted worker without weakening timeout evidence.
 
@@ -368,6 +387,7 @@ class DurableBudgetRuntime:
             attempt_id=attempt_id,
             worker_commit=None,
             elapsed_ms=elapsed_ms,
+            execution_segment=execution_segment,
         )
 
     async def settle_worker_checkpoint(
@@ -962,6 +982,18 @@ def _internal_usage_id(
         f"{context.budget_id}\n{node_id}\n{attempt_id}\n{kind}".encode("utf-8")
     ).hexdigest()
     return f"budget-usage://{digest}"
+
+
+def _segmented_kind(kind: str, execution_segment: str | None) -> str:
+    segment = str(execution_segment or "").strip()
+    if not segment:
+        return kind
+    if not re.fullmatch(r"reacquire-[0-9a-f]{32}", segment):
+        raise GovernedRuntimeError(
+            GOVERNED_BUDGET_USAGE_INVALID,
+            "execution budget segment is invalid",
+        )
+    return f"{kind}:{segment}"
 
 
 def _usage_evidence_ref(budget_id: str, usage_id: str) -> str:

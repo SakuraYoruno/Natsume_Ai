@@ -27,6 +27,9 @@ from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
     GraphCancellationOperationReconciliationService,
 )
+from host_brain.task_runtime.operation_reacquisition import (
+    OperationReconciliationCommandService,
+)
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
@@ -326,6 +329,10 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     )
     assert isinstance(
         container.operation_reconciliation_service,
+        OperationReconciliationCommandService,
+    )
+    assert isinstance(
+        container.operation_reconciliation_service._cancellation,
         GraphCancellationOperationReconciliationService,
     )
     assert isinstance(

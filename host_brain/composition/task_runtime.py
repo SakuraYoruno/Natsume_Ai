@@ -62,6 +62,10 @@ from host_brain.task_runtime.graph_cancellation_runtime import (
 from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
     GraphCancellationOperationReconciliationService,
 )
+from host_brain.task_runtime.operation_reacquisition import (
+    OperationReacquisitionService,
+    OperationReconciliationCommandService,
+)
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
@@ -193,7 +197,7 @@ class ProcessTaskRuntimeContainer:
     outbox_publisher: RuntimeOutboxPublisher
     graph_execution_registry: LocalGraphExecutionRegistry
     cancellation_continuation_worker: GraphCancellationContinuationWorker
-    operation_reconciliation_service: GraphCancellationOperationReconciliationService
+    operation_reconciliation_service: OperationReconciliationCommandService
     effect_reconciliation_service: GraphCancellationEffectReconciliationService
     terminal_reconciliation_service: TerminalStateReconciliationService
     terminal_operator_command_store: TerminalOperatorCommandStore
@@ -699,17 +703,18 @@ def _build_task_store_with_reconciliation_authority(
     canonical_db_path: str,
     task_store_builder: TaskStoreBuilder,
     reconciliation_public_keys: Mapping[str, bytes] | None,
+    reconciliation_proof_verifier: Ed25519ReconciliationProofVerifier | None = None,
 ) -> DurableTaskStore:
     """Inject the configured verification-only authority into TaskStore."""
 
-    if not reconciliation_public_keys:
+    verifier = reconciliation_proof_verifier
+    if verifier is None and reconciliation_public_keys:
+        verifier = Ed25519ReconciliationProofVerifier(reconciliation_public_keys)
+    if verifier is None:
         return task_store_builder(canonical_db_path)
-    reconciliation_proof_verifier = Ed25519ReconciliationProofVerifier(
-        reconciliation_public_keys
-    )
     return task_store_builder(
         canonical_db_path,
-        reconciliation_proof_verifier=reconciliation_proof_verifier,
+        reconciliation_proof_verifier=verifier,
     )
 
 
@@ -793,10 +798,16 @@ def build_process_task_runtime_container(
             if feature_canary_public_keys
             else None
         )
+        reconciliation_proof_verifier = (
+            Ed25519ReconciliationProofVerifier(reconciliation_public_keys)
+            if reconciliation_public_keys
+            else None
+        )
         task_store = _build_task_store_with_reconciliation_authority(
             canonical_db_path=canonical,
             task_store_builder=task_store_builder,
-            reconciliation_public_keys=reconciliation_public_keys,
+            reconciliation_public_keys=None,
+            reconciliation_proof_verifier=reconciliation_proof_verifier,
         )
         constructed.append(("task_store", task_store))
         task_store.assert_outbox_delivery_ready()
@@ -896,12 +907,22 @@ def build_process_task_runtime_container(
         constructed.append(
             ("cancellation_continuation_worker", cancellation_continuation_worker)
         )
-        operation_reconciliation_service = (
+        operation_cancellation_service = (
             GraphCancellationOperationReconciliationService(
                 task_store=task_store,
                 outbox_factory=OutboxMessage,
                 wake_cancellation=cancellation_continuation_worker.wake,
             )
+        )
+        operation_reacquisition_service = OperationReacquisitionService(
+            task_store=task_store,
+            outbox_factory=OutboxMessage,
+            proof_verifier=reconciliation_proof_verifier,
+            lease_ttl_ms=120_000,
+        )
+        operation_reconciliation_service = OperationReconciliationCommandService(
+            cancellation_service=operation_cancellation_service,
+            reacquisition_service=operation_reacquisition_service,
         )
         effect_reconciliation_service = GraphCancellationEffectReconciliationService(
             task_store=task_store,

@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.6
+版本：v2.7
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-25
+维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -711,6 +711,8 @@ Lease 不是“某个逻辑 worker 名称曾经拥有任务”，而是“某次
 `RECOVERY_REQUIRED` 只说明结果不可安全提交。它还需要 reconciliation 判断副作用是否发生，再决定 release、reacquire、takeover 或新 revision；心跳本身不能替代这一恢复流程。operation reservation 之前的失败可以在单事务内关闭 Attempt/Node/Graph/Lease，但 Budget 等其他账本必须明确纳入同一事务或拥有可证明的补偿合同。
 
 “中断分类”与“副作用归因”也必须分离。只要 Runtime 仍持有 exact Attempt、Lease、owner、fence 和 Operation version，它可以把已知 worker、heartbeat 或 caller interruption 立即原子记录为 `RECOVERY_REQUIRED + Outbox`，从而避免 `RESERVED` 一直停留到 TTL 到期；这一步只允许有界机器原因码，并且不得终结 Attempt、Node、Graph、Budget 或 Lease。它也不能从异常类型推断工具、网络或设备动作是否发生。之后仍必须由独立、可验签的 reconciliation 证据决定 `COMMIT` 或 `RELEASE`；无法取得证据时继续 hold，而不是重放 worker。
+
+“证明材料”与“执行引用”也必须分离。原始签名、attestation 和可能敏感的 transport identity 应保存在专用、不可改写、读取时仍会复验的 evidence authority 中；通用 WorkOrder、TaskGraph 和 Effect 只携带确定性的 ref/digest 与最小 subject binding。Review 和 Preview 都不把 ref 变成执行权，只有 Acceptance 后的 handler 重开完整证据并重新验证，才可调用 reconciliation service。若允许 `REACQUIRE`，它必须延续同一 Attempt、使用严格更高 fence、新 owner 和独立预算分段，并继续原 immutable graph；它不能靠创建第二 Attempt 或重新规划掩盖旧 Operation。终态 exact replay 必须只读返回，不得再次进入 worker。
 
 恢复发现也必须与恢复授权分离。启动扫描、周期轮询和事件 wake 只能重复询问“是否已有可继续的 durable authority”，不能因时间经过就获得 worker、Lease takeover 或副作用归因权。周期 supervisor 应串行化扫描、合并重复 wake，在关停时停止产生新扫描并等待已进入的持久化事务完成；普通故障可以留存不含敏感正文的类型化 health 并在下一轮重试，但不能通过取消协程截断未知提交边界。当前 Host 与 Internal survivor 都复用原 exact continuation：live Lease、漂移 tuple、未知效果和不满足 sealed lineage 的 checkpoint 仍分别 `DEFERRED`、`BLOCKED` 或 `HOLD`。因此“进程存活期间会再次发现”不等于“通用恢复已经完成”。
 

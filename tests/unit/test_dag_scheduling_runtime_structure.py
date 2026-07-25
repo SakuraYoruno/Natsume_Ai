@@ -20,7 +20,7 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 # The current baseline also permits one exact denied Review to terminalize
 # without minting a worker grant, while retaining fail-closed durable guards.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "6b9b150890ac43d21657209d1635f8d9ee6898f7b291f12f87f44ee005a88dbc"
+    "4842863e08a50966cc5c5b33f02be5dc11d8bc94384a0e946f80db6c5c7882ef"
 )
 _PREFLIGHT_BASELINE_SHA256 = (
     "0808b13ad9b97bb5b116c44d195f7a09c3b3a591bb92c15eda3c2df3cd7ff1bd"
@@ -369,16 +369,11 @@ def test_preoperation_recovery_joins_bounded_schedule_without_review_replay() ->
         node
         for node in ast.walk(execute)
         if isinstance(node, ast.If)
-        and {
-            "raw_active_leases",
-            "reservation_attempt_ids",
-            "observed_ts_ms",
-        }.issubset(
-            {
-                child.id
-                for child in ast.walk(node.test)
-                if isinstance(child, ast.Name)
-            }
+        and any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "has_blocking_live_recovery_lease"
+            for child in ast.walk(node.test)
         )
         and any(
             isinstance(child, ast.Name)

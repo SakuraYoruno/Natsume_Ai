@@ -239,14 +239,14 @@ def build_governance_snapshot(
     scope = str(merged.get("scope", "host")).strip().lower() or "host"
     allowlist_raw = merged.get(
         "scope_allowlist",
-        ("edge", "host", "memory", "system"),
+        ("edge", "host", "memory", "system", "task_runtime"),
     )
     if isinstance(allowlist_raw, (list, tuple, set)):
         allowlist = [str(item).strip().lower() for item in allowlist_raw if str(item).strip()]
     else:
-        allowlist = ["host", "memory", "system"]
+        allowlist = ["host", "memory", "system", "task_runtime"]
     if not allowlist:
-        allowlist = ["host", "memory", "system"]
+        allowlist = ["host", "memory", "system", "task_runtime"]
 
     trust = _clamp_int(merged.get("trust_level", 50), low=0, high=100, default=50)
     rate_limit_hit = bool(merged.get("rate_limit_hit", False))

@@ -109,6 +109,7 @@ class GovernedRuntimeGroup:
         graph_cancellation_operator_enabled: bool = False,
         graph_cancellation_state_reader: Any | None = None,
         acceptance_effect_runtime: Any | None = None,
+        operation_reacquisition_owner_id: str | None = None,
     ) -> None:
         normalized = {
             str(name).strip(): runtime
@@ -142,6 +143,10 @@ class GovernedRuntimeGroup:
         self._graph_cancellation_state_reader = graph_cancellation_state_reader
         self._acceptance_effect_runtime = acceptance_effect_runtime
         self._acceptance_effect_runtime_active = False
+        self._operation_reacquisition_owner_id = str(
+            operation_reacquisition_owner_id or ""
+        ).strip() or None
+        self._operation_reacquisition_lock = asyncio.Lock()
         if acceptance_effect_runtime is not None:
             for method_name in ("activate", "drain", "aclose"):
                 if not callable(getattr(acceptance_effect_runtime, method_name, None)):
@@ -272,6 +277,89 @@ class GovernedRuntimeGroup:
         worker = self._review_worker
         if worker is not None:
             worker.wake()
+
+    @property
+    def operation_reacquisition_owner_id(self) -> str | None:
+        return self._operation_reacquisition_owner_id
+
+    async def continue_operation_reacquisition(
+        self,
+        reconciliation: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Re-enter the exact admission selected by one signed REACQUIRE."""
+
+        owner_id = self._operation_reacquisition_owner_id
+        if owner_id is None or not self._continuation_open or not self._active_names:
+            raise RuntimeError("OPERATION_REACQUISITION_RUNTIME_INACTIVE")
+        normalized = _mapping(
+            reconciliation,
+            field_name="Operation reacquisition result",
+        )
+        operation = _mapping(
+            normalized.get("operation"),
+            field_name="reacquired Operation",
+        )
+        graph_id = str(normalized.get("graph_id") or "").strip()
+        graph_revision = normalized.get("graph_revision")
+        if (
+            not graph_id
+            or type(graph_revision) is not int
+            or graph_revision < 1
+            or str(operation.get("owner_id") or "").strip() != owner_id
+            or str(operation.get("reconciliation_action") or "").upper()
+            != "REACQUIRE"
+            or str(operation.get("reconciliation_outcome") or "").upper()
+            != "NO_SIDE_EFFECT"
+        ):
+            raise RuntimeError("OPERATION_REACQUISITION_BINDING_DRIFT")
+        async with self._operation_reacquisition_lock:
+            getter = getattr(self._command_repository, "get_by_graph", None)
+            if not callable(getter):
+                raise RuntimeError(
+                    "OPERATION_REACQUISITION_COMMAND_REPOSITORY_UNAVAILABLE"
+                )
+            record_raw = await _await_call(
+                getter(graph_id=graph_id, graph_revision=graph_revision)
+            )
+            record = _mapping(
+                record_raw,
+                field_name="reacquired durable HostCommand admission",
+            )
+            command = record.get("command")
+            if (
+                not isinstance(command, HostCommand)
+                or command.graph_id != graph_id
+                or command.graph_revision != graph_revision
+            ):
+                raise RuntimeError("OPERATION_REACQUISITION_COMMAND_BINDING_DRIFT")
+            runtime_name = _runtime_name_for_command(command)
+            runtime = self._runtimes.get(str(runtime_name or ""))
+            continuation = getattr(
+                runtime,
+                "continue_operation_reacquisition",
+                None,
+            )
+            if runtime is None or not callable(continuation):
+                raise RuntimeError(
+                    "OPERATION_REACQUISITION_SURFACE_UNAVAILABLE:"
+                    f"{command.surface.value}"
+                )
+            result = _mapping(
+                await _await_call(continuation(record, operation)),
+                field_name="Operation reacquisition continuation result",
+            )
+            receipt = _mapping(
+                result.get("execution_receipt"),
+                field_name="Operation reacquisition execution receipt",
+            )
+            if (
+                str(receipt.get("graph_id") or "").strip() != graph_id
+                or receipt.get("graph_revision") != graph_revision
+            ):
+                raise RuntimeError(
+                    "OPERATION_REACQUISITION_RECEIPT_BINDING_DRIFT"
+                )
+            return result
 
     async def continue_review_continuation(
         self,
