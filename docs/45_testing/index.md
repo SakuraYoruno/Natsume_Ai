@@ -7,6 +7,14 @@
 维护日期：2026-07-25
 状态：当前证据
 
+## NE-01 执行中断持久分类与签名取消续接当前切片
+
+- worker self-cancel、单节点 time guard、已识别 worker failure、heartbeat loss 与 caller cancellation 在 Operation 预留后先尝试 exact Attempt/Lease/owner/fence/version marker；`RESERVED → RECOVERY_REQUIRED` 与唯一 Outbox 在同一个真实 SQLite UoW 中提交，exact response-loss replay 不二次写，版本、owner、原因码或 Outbox 漂移均失败关闭。
+- marker 只保存有界大写原因码，不保存异常正文；caller cancellation 原样向上传播。marker、运行时 helper 与 Store mixin 均没有 Attempt/Node/Graph/Budget/Lease terminal authority，也不能 `COMMIT/RELEASE` Operation。
+- 跨进程集成从该 marker 开始，用临时 Ed25519 key 生成 `RELEASE + NO_SIDE_EFFECT` proof，重建 Store 后运行 `GraphCancellationContinuationWorker`；Graph/Node/Attempt 为 `CANCELLED`，Operation 为 `RELEASED`，第二次重启零工作，`OPERATION_RECOVERY_REQUIRED`、`OPERATION_RECOVERY_RELEASE`、`TASK_GRAPH_CANCELLED` Outbox 各一条，worker 没有重跑。
+- 当前 runtime/store/structure/cancellation 定向集合为 `133 passed in 91.94s`。随后把文档 authority/freshness、机器 coverage、metadata、Obs 合同与受影响 Runtime 合并复核为 `147 passed in 140.38s`；它包含或重叠前述测试，不相加。目标模块 `compileall`、两份 JSON、doc-only delivery gate、统一 static scan 与 `git diff --check` 均通过；fresh architecture Gate 1～14 为 `PASS`、`failed_gates=[]`，`task_repository.py` 4597 行、`node_execution_runtime.py` 1495 行，未扩大 policy。
+- 没有 migration。测试 key 是进程内临时验签材料，不是部署凭据；Operation/Effect Operator 仍默认关闭，HTTP/key lifecycle/canary 未运行。一般 unknown-effect attribution、其它 cancellation、general multi-node/batch、Workspace 一般写、七路线验收、波次 integration 与 NE-07 Docker 全栈仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 Host/Internal 周期 survivor 当前切片
 
 - `PeriodicDurableContinuation` 只监督 cadence、wake 合并和关停，不持有 TaskGraph、Lease、worker 或 Effect authority。单元测试覆盖 timer/wake 串行、普通失败留痕后重试，以及关停等待活动 durable scan 而不取消事务。

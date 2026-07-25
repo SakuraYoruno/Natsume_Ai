@@ -173,6 +173,7 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 | TRACE-EVO-12 | FR-NLE-005 | Identity snapshot 接 release | pure contract | `PARTIAL_DEFAULT_OFF` | NE-06 |
 | TRACE-EVO-13 | FR-ARCH-004、FR-ARCH-010 | Identity migration/regression/rollback | 无 executor | `MISSING` | NE-06 |
 | TRACE-EVO-14 | FR-NLE-005、FR-ARCH-010 | Persona trait 只能由 proposal→Lab→Review→版本激活写入 | legacy writer 已中央拒绝，`T-PERSONA-FENCE-01` 已接入；当前入口只形成无副作用候选 | `FENCE_COMPLETE / PROPOSAL_MISSING` | NE-01 围栏完成；NE-06 由 TRACE-EVO-10 全量替换 |
+| TRACE-EXEC-08AJ | FR-NLE-002、FR-ARCH-001 | Operation 预留后的已知中断必须立即留下 exact durable recovery fence，但不得由异常类型推断副作用 | `operation_interruption_runtime.py`、`task_worker_interruption_store.py`；真实 SQLite exact replay/漂移拒绝；Ed25519 `RELEASE + NO_SIDE_EFFECT` 后跨进程 cancellation continuation；133 项本地定向集合 | `KNOWN_INTERRUPTION_CLASSIFICATION_WIRED / EFFECT_ATTRIBUTION_INCOMPLETE` | marker 原子写 `RECOVERY_REQUIRED + Outbox`，caller cancel 继续传播；部署 key/HTTP canary、一般 unknown-effect 与多节点恢复仍待 NE-01 |
 
 ## 6. 下一代执行波映射
 

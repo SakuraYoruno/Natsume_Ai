@@ -6,6 +6,13 @@
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
+## T-NE01-WORKER-INTERRUPTION-RECOVERY
+
+- T-NE01-WORKER-INTERRUPTION-RECOVERY-01：Operation 预留后的已知 worker/heartbeat/caller interruption 必须以 exact Attempt、Lease、owner、fence 与 expected version 原子写 `RECOVERY_REQUIRED + OPERATION_RECOVERY_REQUIRED Outbox`；TTL 尚未到期也立即可见。
+- T-NE01-WORKER-INTERRUPTION-RECOVERY-02：同 expected version、原因码和 Outbox 的响应丢失只读重开；version/owner/reason/Outbox 漂移、布尔 fence、非法原因码全部 definite-no-commit。
+- T-NE01-WORKER-INTERRUPTION-RECOVERY-03：caller cancellation 在 best-effort marker 后仍传播原 `CancelledError`；raw/private异常正文不得进入持久状态、receipt projection 或结构化日志字段。
+- T-NE01-WORKER-INTERRUPTION-RECOVERY-04：真实 SQLite marker 经 Ed25519 `RELEASE + NO_SIDE_EFFECT` 后，重建 Store 的 cancellation worker 精确终结 Graph/Node/Attempt 并释放 Operation；重启幂等、三类 Outbox 各一条、worker 不重跑。该测试不证明部署 key、HTTP canary或一般 unknown-effect attribution。
+
 ## T-Intent
 - T-18：Intent 宽松解析 + 严格校验。
 - T-19：重放保护（nonce/request_id）拒绝。

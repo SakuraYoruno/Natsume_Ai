@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-25",
   "source_baseline": {
-    "dev_commit": "9800bb2ec66fd33c0aac495a6da0c207643ea640",
+    "dev_commit": "915874ce79b6f33e698a38c9734497c2612829f3",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "THIS_DOCUMENT_COMMIT_NE01_HOST_INTERNAL_LIFECYCLE_SURVIVOR_OVER_ORIGIN_DEV_9800BB2EC"
+    "evaluated_source": "THIS_DOCUMENT_COMMIT_NE01_WORKER_INTERRUPTION_RECONCILIATION_OVER_ORIGIN_DEV_915874CE7"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "HOST_AND_INTERNAL_LIFECYCLE_SURVIVOR_PERIODIC_EXACT_CONTINUATION_WIRED_LIVE_HOST_LEASE_EXPIRY_ONLINE_REENTRY_PROVEN_INTERNAL_SEALED_CHECKPOINT_PERIODIC_RECHECK_WIRED_NO_NEW_EXECUTION_OR_EFFECT_AUTHORITY_MIGRATION_HEAD_0125_STATIC_GATE_1_TO_14_PASS_PROGRAM_INCOMPLETE_REMAINING_RAW_FAILURE_UNKNOWN_EFFECT_OTHER_CANCELLATION_GENERAL_MULTI_NODE_WORKSPACE_GENERAL_WRITE_TRANSACTIONAL_CHAT_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK",
+  "active_wave_detail": "KNOWN_POST_RESERVATION_WORKER_HEARTBEAT_AND_CALLER_INTERRUPTION_IMMEDIATE_EXACT_OPERATION_RECOVERY_REQUIRED_PLUS_OUTBOX_WIRED_CALLER_CANCELLATION_PROPAGATES_SIGNED_RELEASE_NO_SIDE_EFFECT_RESTART_GRAPH_CANCELLATION_CONTINUATION_LOCAL_SQLITE_ED25519_PROVEN_NO_EFFECT_ATTRIBUTION_OR_TERMINAL_AUTHORITY_MIGRATION_HEAD_0125_PROGRAM_INCOMPLETE_REMAINING_GENERAL_UNKNOWN_EFFECT_OTHER_CANCELLATION_GENERAL_MULTI_NODE_WORKSPACE_GENERAL_WRITE_TRANSACTIONAL_CHAT_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_DEPLOYED_KEY_HTTP_CANARY_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,33 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "HOST_INTERNAL_LIFECYCLE_SURVIVOR_LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+    "status": "WORKER_INTERRUPTION_RECONCILIATION_LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
     "commit_binding": "THIS_DOCUMENT_COMMIT_WITH_POST_COMMIT_ARTIFACTS_LOCAL_GATES_MATCHING_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_HOST_INTERNAL_LIFECYCLE_SURVIVOR_EXACT_CONTINUATION",
+    "slice": "NE01_WORKER_INTERRUPTION_IMMEDIATE_DURABLE_RECONCILIATION",
+    "worker_interruption_reconciliation_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "migration": "NONE_HEAD_REMAINS_0125",
+      "classification": "KNOWN_WORKER_SELF_CANCEL_TIME_GUARD_WORKER_FAILURE_HEARTBEAT_LOSS_AND_CALLER_CANCELLATION_ATTEMPT_EXACT_DURABLE_MARKER",
+      "atomic_boundary": "EXACT_LIVE_ATTEMPT_LEASE_OWNER_FENCE_AND_OPERATION_VERSION_RESERVED_TO_RECOVERY_REQUIRED_PLUS_ONE_OUTBOX_IN_ONE_SQLITE_UOW",
+      "replay_boundary": "SAME_EXPECTED_VERSION_REASON_AND_OUTBOX_READ_ONLY_REOPEN_VERSION_OWNER_REASON_OR_OUTBOX_DRIFT_DEFINITE_NO_COMMIT",
+      "reason_boundary": "BOUNDED_UPPERCASE_MACHINE_REASON_ONLY_NO_EXCEPTION_DETAIL",
+      "caller_cancellation": "BEST_EFFORT_MARKER_THEN_ORIGINAL_CANCELLEDERROR_PROPAGATES",
+      "forbidden_authority": "MARKER_CANNOT_COMMIT_OR_RELEASE_OPERATION_OR_TERMINALIZE_ATTEMPT_NODE_GRAPH_BUDGET_LEASE_OR_ATTRIBUTE_EXTERNAL_EFFECT",
+      "signed_continuation": "REAL_SQLITE_EPHEMERAL_ED25519_RELEASE_NO_SIDE_EFFECT_STORE_RECONSTRUCTION_GRAPH_CANCELLATION_CONTINUATION_EXACT_CANCELLED_TERMINALIZATION_NO_WORKER_REPLAY",
+      "outbox_uniqueness": "ONE_OPERATION_RECOVERY_REQUIRED_ONE_OPERATION_RECOVERY_RELEASE_ONE_TASK_GRAPH_CANCELLED",
+      "targeted_unit_contract_cross_process_integration": "133_PASSED_IN_91_94_SECONDS",
+      "compile_json_diff_checks": "PASS",
+      "documentation_coverage_runtime_combined_gate": "147_PASSED_IN_140_38_SECONDS_INCLUDES_OVERLAPPING_RUNTIME_CASES_DO_NOT_ADD_TO_133",
+      "unified_static_scan": "PASS",
+      "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "deployed_key_lifecycle": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "GENERAL_UNKNOWN_EFFECT_ATTRIBUTION_OTHER_CANCELLATION_GENERAL_MULTI_NODE_BATCH_WORKSPACE_GENERAL_WRITE_AND_COMMIT_BOUND_SEVEN_ROUTE_ACCEPTANCE_REMAIN_INCOMPLETE"
+    },
     "lifecycle_survivor_current_validation": {
       "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
       "migration": "NONE",
@@ -52,7 +75,7 @@
       "production_canary": "NOT_RUN",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-      "boundary": "RAW_FAILURE_UNKNOWN_EFFECT_OTHER_CANCELLATION_GENERAL_MULTI_NODE_BATCH_GENERAL_WRITE_AND_COMMIT_BOUND_SEVEN_ROUTE_ACCEPTANCE_REMAIN_INCOMPLETE"
+      "boundary": "KNOWN_POST_RESERVATION_INTERRUPTION_CLASSIFICATION_NOW_WIRED_BUT_GENERAL_UNKNOWN_EFFECT_OTHER_CANCELLATION_GENERAL_MULTI_NODE_BATCH_GENERAL_WRITE_AND_COMMIT_BOUND_SEVEN_ROUTE_ACCEPTANCE_REMAIN_INCOMPLETE"
     },
     "obs_projection_supervision_current_validation": {
       "status": "APP_LOCAL_SUPERVISION_WIRED_DURABLE_SLO_AND_CANARY_MISSING_NE01_IN_PROGRESS",
@@ -1022,7 +1045,7 @@
     "sys_mode_reconciliation": "EXACT_HARD_STATE_REOPEN_ONLY_SWITCH_MODE_NOT_REINVOKED",
     "recovery_loop_observability": "APP_LOCAL_RUNTIME_GUARDIAN_DURABLE_SLO_FAILURE_AND_RECOVERY_OPAQUE_INCIDENT_ONLY_NO_EXCEPTION_BODY",
     "generic_effect_reconciliation": "VISIBLE_TURN_PREFERENCE_AND_LIFE_PROJECTION_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_OR_NON_BOOLEAN_FAILS_CLOSED_ZERO_WRITE_EXPLICIT_FALSE_OR_MALFORMED_ENV_PARSES_BOOLEAN_FALSE_AND_WRITES_ONLY_DISABLED_RECEIPT_ZERO_EVENT_PROFILE_0118_EVENT_APPEND_ONLY_CHILD_PROFILE_AND_RECEIPT_SAME_UOW_PARENT_SEALED_TRIGGER_AND_FULL_SET_RECONCILIATION_REAL_NO_SIGNAL_STRICT_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_CANONICAL_DELIVERY_DIGEST_GATEWAY_READ_ONLY_QUERY_REOPENS_SAME_SQLITE_PAYLOAD_AND_VALIDATES_EFFECT_ID_NOT_FOUND_ALWAYS_UNKNOWN",
-    "internal_result_boundary": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_PERIODIC_CONTINUATION_POST_ADMISSION_NATIVE_WORKORDERV3_NO_V3_TO_V2_WORKER_REPROJECTION_EXACT_LIFECYCLE_SURVIVOR_REUSES_EXISTING_SEAL_LINEAGE_HIGHER_FENCE_AUTHORITY_SINGLE_NODE_CHECKPOINT_AND_OPERATION_FREE_ATTEMPT_TAKEOVER_REMAIN_DISTINCT_EXACT_SIGNED_RELEASE_NO_SIDE_EFFECT_PRECHECKPOINT_CANCELLATION_CLOSES_CLAIM_BEFORE_CLEANUP_GENERAL_CRASH_LEFT_UNSEALED_RAW_FAILURE_UNKNOWN_EFFECT_OTHER_CANCELLATION_MULTI_NODE_BATCH_GENERAL_WRITE_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_REMAIN_INCOMPLETE",
+    "internal_result_boundary": "PARTIAL_INTERNAL_SEALED_CHECKPOINT_PERIODIC_CONTINUATION_POST_ADMISSION_NATIVE_WORKORDERV3_NO_V3_TO_V2_WORKER_REPROJECTION_EXACT_LIFECYCLE_SURVIVOR_REUSES_EXISTING_SEAL_LINEAGE_HIGHER_FENCE_AUTHORITY_SINGLE_NODE_CHECKPOINT_AND_OPERATION_FREE_ATTEMPT_TAKEOVER_REMAIN_DISTINCT_KNOWN_POST_RESERVATION_INTERRUPTION_IMMEDIATELY_CLASSIFIED_RECOVERY_REQUIRED_EXACT_SIGNED_RELEASE_NO_SIDE_EFFECT_PRECHECKPOINT_CANCELLATION_CLOSES_CLAIM_BEFORE_CLEANUP_GENERAL_CRASH_LEFT_UNSEALED_UNKNOWN_EFFECT_OTHER_CANCELLATION_MULTI_NODE_BATCH_GENERAL_WRITE_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_REMAIN_INCOMPLETE",
     "scheduler_clock_targeted_validation": {
       "status": "37_TARGETED_SCHEDULER_MIGRATION_AND_COVERAGE_TESTS_SUCCEEDED",
       "scope": "SCHEDULER_MIGRATION_COVERAGE_PLUS_ATOMIC_DUE_TO_OCCURRENCE_FENCE_HEARTBEAT_ACTUAL_FAILURE_TIME_BACKOFF",
@@ -1235,7 +1258,7 @@
       "startup_continuation": "PROVEN_FOR_GOVERNED_INTERNAL_SINGLE_NODE_SEALED_CHECKPOINT_ONLY",
       "periodic_survivor_continuation": "INCOMPLETE",
       "crash_left_unsealed_partial_cleanup": "PARTIAL_EXACT_SIGNED_NO_SIDE_EFFECT_PRECHECKPOINT_CANCELLATION_ONLY_GENERAL_CASES_INCOMPLETE",
-      "failure_cancel_budget_secure_ingress_claim_closeout": "PARTIAL_BUDGET_VERIFICATION_POST_REVIEW_AND_SIGNED_NO_SIDE_EFFECT_PRECHECKPOINT_CANCELLATION_ONLY_RAW_FAILURE_UNKNOWN_EFFECT_AND_OTHER_CANCELLATIONS_INCOMPLETE",
+      "failure_cancel_budget_secure_ingress_claim_closeout": "PARTIAL_BUDGET_VERIFICATION_POST_REVIEW_AND_SIGNED_NO_SIDE_EFFECT_PRECHECKPOINT_CANCELLATION_ONLY_KNOWN_RAW_INTERRUPTION_OPERATION_CLASSIFICATION_WIRED_GENERAL_UNKNOWN_EFFECT_AND_OTHER_CANCELLATIONS_INCOMPLETE",
       "single_node_post_commit_budget_settlement_double_loss": "PROVEN_NO_ADDITIONAL_LIFECYCLE_FINALIZATION_MUTATION_HOLD_EXACT_HIGHER_FENCE_TAKEOVER_EXACT_ACCEPTED_EXACT_REJECTED_MISSING_CONFLICT_FAIL_CLOSED",
       "multi_node_batch_settlement_recovery": "PARTIAL_SCHEDULER_OWNED_EXACT_COMMITTED_CHECKPOINT_CONTINUATION_ONLY",
       "handle_level_toctou": "INCOMPLETE_NOT_CLAIMED",
@@ -1617,7 +1640,9 @@
       "host_brain/agent_runtime/artifact_store.py": 1359,
       "host_brain/agent_runtime/internal_artifact_terminal_reconciliation.py": 1281,
       "host_brain/app/internal_task_runtime.py": 1354,
-      "host_brain/task_runtime/node_execution_runtime.py": 1499,
+      "host_brain/task_runtime/node_execution_runtime.py": 1495,
+      "host_brain/task_runtime/operation_interruption_runtime.py": 273,
+      "host_brain/persistence/task_repository.py": 4597,
       "host_brain/task_runtime/node_execution_projection.py": 477,
       "host_brain/task_runtime/operation_recovery_runtime.py": 205,
       "host_brain/agent_runtime/artifact_store_read_model.py": 412,
@@ -2544,10 +2569,10 @@
       "pre_projection_crash_boundary": "For one governed Internal single-node sealed checkpoint, the mandatory activation scan and lifecycle-owned periodic survivor both reuse the same exact continuation before any client retry. They reopen the seal-bound recovery envelope and exact Operation, Budget, Preview, Grant, Task and historical Lease lineage, acquire only the already-authorized strictly higher-fence completion Lease, reconstruct the unique WorkerProjection and continue Verification, Acceptance, Effect, Secure Ingress claim completion, canonical result, clean/no-change promotion and cleanup without rerunning Agent. The supervisor owns cadence only and does not provide general recovery.",
       "budget_rejection_boundary": "The explicit composition-owned checkpoint UoW is the only public mutation authority and WorkerProjection has one physical INSERT owner. Boundary A atomically commits the unique WorkerProjection, Operation COMMITTED and its Outbox. Boundary B separately atomically commits the rejected BudgetUsage, Budget ACTIVE-to-EXCEEDED transition and BUDGET_EXCEEDED Outbox. Boundary C revalidates A and B, then atomically commits Graph BLOCKED, Node and Attempt FAILED, Lease and Budget RELEASED plus five terminal Outboxes. Internal and canonical single-node checkpoints share that exact SQL transaction with separate strict authority modes. Canonical mode binds the durable HostCommand, TaskNode route and WorkerProjection and rejects any Internal Agent marker instead of permitting authority downgrade. Five injected faults prove rollback only inside C; A, B and C are not one transaction. Response loss, later duplicate HostCommand replay and terminal reconciliation consume one read-only exact internal/canonical terminal authority; identity drift is fail-closed.",
       "terminal_artifact_boundary": "The existing terminal worker reconciles exact terminal sealed artifacts through abandon and cleanup. A separate app-local async survivor now periodically re-enters only exact live sealed checkpoints through InternalStartupCheckpointContinuation; neither worker acquires the other's authority.",
-      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. An explicit WorkOrderV3 schema or top-level graph binding is rejected as INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN instead of being down-projected into a second graph. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace; no V3-to-v2 executor projection remains. WorkOrderV3 top-level root/graph/node/revision fields are authoritative and conflicting legacy metadata fails closed. Single-node post-COMMIT settlement and exact operation-free persisted Attempt takeover remain separate higher-fence windows. The lifecycle survivor only repeats the exact inventory and cannot bypass live owner, Operation, Budget, Grant, Preview, Task or Lease checks. Exact signed RELEASE plus NO_SIDE_EFFECT pre-checkpoint cancellation can close the Secure Ingress claim before Workspace and unsealed stage cleanup. Ordinary Graph+Budget terminal and success/effect atomic UoW, multi-node/batch settlement recovery, raw failures, unknown effects, general crash-left unsealed cleanup, other cancellation claim closeout, general write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
-      "claim_boundary": "Accepted startup continuation, exact Budget rejection, exact verification/post-review nonacceptance and exact signed NO_SIDE_EFFECT pre-checkpoint cancellation each prove their own deterministic Secure Ingress result completion. Raw worker failure, unknown effect and other cancellation claim closeout remain incomplete and must not be inferred from those narrow paths.",
+      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. An explicit WorkOrderV3 schema or top-level graph binding is rejected as INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN instead of being down-projected into a second graph. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace; no V3-to-v2 executor projection remains. WorkOrderV3 top-level root/graph/node/revision fields are authoritative and conflicting legacy metadata fails closed. Single-node post-COMMIT settlement and exact operation-free persisted Attempt takeover remain separate higher-fence windows. Known post-reservation worker, heartbeat, time-guard and caller interruptions now immediately mark the exact Operation RECOVERY_REQUIRED with one Outbox, without cleaning Workspace or attributing side effects. Exact signed RELEASE plus NO_SIDE_EFFECT pre-checkpoint cancellation can then close the Secure Ingress claim before Workspace and unsealed stage cleanup. Ordinary Graph+Budget terminal and success/effect atomic UoW, multi-node/batch settlement recovery, general unknown effects, general crash-left unsealed cleanup, other cancellation claim closeout, general write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
+      "claim_boundary": "Accepted startup continuation, exact Budget rejection, exact verification/post-review nonacceptance and exact signed NO_SIDE_EFFECT pre-checkpoint cancellation each prove their own deterministic Secure Ingress result completion. Known raw interruption classification now has a durable Operation fence, but general unknown effect and other cancellation claim closeout remain incomplete and must not be inferred from that marker.",
       "precheckpoint_no_effect_cancellation_validation": "Real SQLite with a real Ed25519 reconciliation proof proves pre-proof hold, signed RELEASE plus NO_SIDE_EFFECT terminalization, claim-before-cleanup ordering, restart exact replay and tampered-proof rejection. The focused combined batch is 44 passed in 5.40 seconds; the separate 8-test Internal runtime compatibility batch is non-additive. The final affected repository, contract, coverage, metadata and documentation batch is 115 passed in 51.41 seconds and includes the focused tests; static architecture Gates 1 through 14 all pass.",
-      "local_validation": "The final worktree validation uses five file-disjoint groups: 184 runtime/structure/online-takeover tests in 289.38 seconds, 69 TaskStore/Heartbeat tests in 23.43 seconds, 23 Acceptance/atomic-failure tests in 101.70 seconds, 68 cancellation/parallel tests in 228.20 seconds, and 52 checkpoint/Budget/Intent tests in 123.58 seconds. They total 396 passes with zero failures or skips. The native V3 follow-up separately proves real SQLite+Git Internal frozen-worker delivery, V3 Workspace graph binding and metadata-drift rejection; it is local focused evidence, not program closure. Static architecture Gates 1 through 14 pass with failed_gates empty; task_repository.py is 4585 lines below the unchanged 4600 ceiling, the Lease takeover mixin is 230 lines, and the pure identity module is 93 lines. No allowlist was widened. Coverage includes zero-Budget execution rejection, deterministic Lease/initial-Heartbeat request identity, exact committed-response replay, TTL/mode/reservation/row tamper rejection, classifier/preparation, same-Attempt higher fence, Operation absence TOCTOU, ACTIVE/EXCEEDED takeover Budget and PRECHARGE matrices, online takeover, mixed live owners, post-reservation recovery hold, Graph/Budget terminal fences, Coordinator and structure. One serialized compatibility command timed out without a test-failure result and then its three groups passed separately. One new AST test made an incorrect first-argument assumption; production-related tests passed and the corrected identity/structure set reran 11 passes. Historical 191+1, 198/49/45, 71/39 and checkpoint-UoW batches are not added. Overall NE-01 remains incomplete and remote CI is NOT_RUN_ACCOUNT_QUOTA.",
+      "local_validation": "The earlier pre-Operation worktree validation used five file-disjoint groups totaling 396 passes. The current worker-interruption slice separately reports 133 targeted passes and a 147-pass overlapping documentation/runtime Gate. Fresh static architecture Gates 1 through 14 pass with failed_gates empty; task_repository.py is now 4597 lines below the unchanged 4600 ceiling, node_execution_runtime.py is 1495 below 1500, and operation_interruption_runtime.py is 273 below its 300-line structure contract. No allowlist was widened. Known post-reservation interruptions now gain an immediate exact RECOVERY_REQUIRED Operation marker and Outbox, while effect attribution, claim closeout and general recovery remain separate incomplete authorities. Historical 396, 191+1, 198/49/45, 71/39 and checkpoint-UoW batches are not added. Overall NE-01 remains incomplete and remote CI is NOT_RUN_ACCOUNT_QUOTA.",
       "exception_redaction": "Canonical executor/workspace failures persist and log error_type plus a random incident only; raw detail is removed. One focused redaction test succeeded.",
       "review_continuation": "Explicit task-bound Review decisions may re-enter the original surface through migration 0096 coordination, but a non-terminal inner Agent result is not review-eligible and cannot be promoted by the generic post-acceptance continuation. READY and first worker entry remain live-claim-fenced.",
       "evidence_refs": [
@@ -2637,6 +2662,7 @@
       "operation_required_scopes": ["obs:write", "task-runtime:reconcile"],
       "operation_canary": "NOT_RUN",
       "operation_path": "The restricted signed service is constructed by ProcessTaskRuntimeContainer, registered in ASGI Operator Runtime state, exposed only through the scoped OBS command, and backed by verification-only Ed25519 public-key injection. Its feature flag is default off, startup requires Secure Ingress ENFORCE and an executable Gateway, and no production canary has run.",
+      "worker_interruption_classification": "PRODUCTION_RUNTIME_ON_FOR_KNOWN_POST_RESERVATION_INTERRUPTION_ONLY. Exact live Attempt, Lease, owner, fencing token and Operation version atomically advance RESERVED to RECOVERY_REQUIRED with one Outbox before Budget settlement. Exact response-loss replay is read-only. Caller cancellation still propagates. This marker never COMMITs or RELEASEs the Operation, never terminalizes Task aggregates, and never attributes an external effect. A real SQLite test with an ephemeral Ed25519 verification key proves the existing signed RELEASE plus NO_SIDE_EFFECT cancellation continuation across Store reconstruction; it is not a deployed-key or HTTP canary.",
       "effect_feature_flag": "HOST_TASK_EFFECT_RECONCILIATION_OPERATOR_ENABLED",
       "effect_command": "task_effect.reconcile",
       "effect_action": "obs:command:task_effect.reconcile",
@@ -2671,6 +2697,8 @@
         "host_brain/persistence/task_outbox_delivery_store.py",
         "host_brain/persistence/task_store_types.py",
         "host_brain/contracts/agent_runtime/operation_reconciliation.py",
+        "host_brain/persistence/task_worker_interruption_store.py",
+        "host_brain/task_runtime/operation_interruption_runtime.py",
         "host_brain/task_runtime/graph_cancellation_operation_reconciliation.py",
         "host_brain/persistence/task_operation_reconciliation_store.py",
         "host_brain/app/observability_runtime/domain_command_ports.py",
@@ -2688,7 +2716,9 @@
         "tests/integration/test_ne01_graph_cancellation_effect_reconciliation.py",
         "tests/integration/test_ne01_obs_effect_reconciliation_read.py",
         "tests/unit/test_ne01_graph_cancellation_operation_reconciliation.py",
-        "tests/unit/test_ne01_operation_reconciliation_verifier_wiring.py"
+        "tests/unit/test_ne01_operation_reconciliation_verifier_wiring.py",
+        "tests/contract/test_ne01_operation_checkpoint_store.py",
+        "tests/integration/test_ne01_graph_cancellation_cross_process_continuation.py"
       ]
     },
     "terminal_state_reconciliation": {
@@ -2777,7 +2807,7 @@
         "validated": "13_PASSED_CORE_HOST_INTERNAL_PERIODIC_SURVIVOR_AND_REAL_HOST_SQLITE_LEASE_EXPIRY_ONLINE_REENTRY",
         "not_claimed": [
           "unknown_effect_reconciliation",
-          "raw_worker_failure_reconciliation",
+          "raw_worker_failure_terminal_closeout_after_durable_operation_classification",
           "other_cancellation_reconciliation",
           "general_multi_node_batch_recovery",
           "wave_integration",
@@ -2808,6 +2838,7 @@
         "periodic Lease then Operation Reservation renewal with versioned Outboxes",
         "exact Lease and Operation Reservation renewal replay after committed response loss",
         "Coordinator checkpoints every worker stream event and final result and returns RECOVERY_REQUIRED without COMMIT on heartbeat failure",
+        "known post-reservation worker self-cancel, time guard, worker failure, heartbeat loss and caller cancellation atomically mark the exact live Operation RECOVERY_REQUIRED with one Outbox before any business terminalization; caller cancellation still propagates and no effect is attributed",
         "8/16/32-thread and cross-process Budget contention has exactly one BUDGET_EXCEEDED winner and Outbox; refreshed siblings persist ALREADY_EXCEEDED at the same terminal version and reference the winner authority",
         "Budget charge CAS attempts scale to at least the admitted BudgetPolicy concurrency plus one instead of the former fixed four-attempt ceiling",
         "single-node canonical WorkerProjection COMMITTED-checkpoint continuation validates the exact Operation Outbox, Attempt, historical Lease, receipt digest, graph Budget, and the four-state worker-usage classification EXACT_ACCEPTED, EXACT_REJECTED, MISSING, or CONFLICT; the first two are reopened read-only, only MISSING is settled from a positive durable elapsed upper bound after same-Attempt higher-fence takeover, and CONFLICT fails closed without worker replay; the DAG outer path prioritizes an active Operation checkpoint over aggregate EXCEEDED finalization, and EXACT_REJECTED requires takeover plus release of the new Lease",
@@ -2932,7 +2963,7 @@
       "safe_retry_boundary": "The contract path is wired, and a response lost after schedule_retry commit is exactly replayed only when Attempt, Node, Lease, Graph, Budget, BudgetUsage, and related Outboxes still match; retry budget is not charged twice. For a due RETRY_PENDING node that does not require a new Review, the scheduler passes TASK_NODE_READY into claim_ready_node and the canonical writer transaction promotes READY, creates Attempt/Lease/Heartbeat and writes the related claim Outboxes together; injected Attempt Outbox identity drift rolls all of it back, and exact replay does not create a second Attempt. A due retry that requires a new Review is intentionally promoted only to create the durable Review, then claimed on a later iteration; it cannot bypass approval. Parallel deferred children use a domain-separated node-only retry identity, keep the Graph ACTIVE, and have Coordinator response-loss integration evidence. Current Host, Scheduler, and Internal production resolvers do not emit RetryableWorkerPreparationError. Exceptions after operation reservation are never auto-retried, and CancelledError is not converted into an ordinary worker failure.",
       "failure_replan_boundary": "PARTIAL_DURABLE_SUPERSESSION_SAFE_SUBSET. Migration 0100 adds immutable append-only predecessor-to-replacement authority. HostCommandRepository admits revision+1 only in the same BEGIN IMMEDIATE transaction that revalidates one same-root FAILED predecessor, exact Graph terminal evidence, quiescent execution/review/budget/effect/cancellation/reconciliation facts, and then writes the deterministic supersession. Response-loss replay requires the exact row and injected post-insert failure rolls everything back. Shared TaskStore mutation guards fence old READY claim, retry, Budget, node/graph execution and Review continuation. BLOCKED remains denied; all historical Review continuation rows and all Acceptance Effect rows are conservatively rejected, automatic failure-triggered replan and a production/cross-process canary remain incomplete. SQL owns Graph/root/status/version checks and FK existence; repository transaction owns exact HostCommand lineage to preserve 0088 rebuild compatibility.",
       "terminal_failure_boundary": "DurableNodeLifecycleRuntime owns ordinary and exhausted pre-reservation failure orchestration but not persistence authority. For direct, non-deferred calls with no Operation reservation, it atomically closes Attempt, Node, Graph, Lease and the exact unique graph-scope ACTIVE/EXCEEDED Budget through the same DurableTaskStore bundle, writes four attempt/evidence-bound Outboxes plus one no-attempt BUDGET_RESERVATION_RELEASED Outbox, and response-loss replay revalidates Budget/outbox/version/timestamp. An injected Budget Outbox fault rolls back every aggregate. It retries only that identical bundle once after an ordinary response exception and never falls back to sequential transitions. Node-only deferred children explicitly receive no shared Budget authority and outer settlement remains responsible; retry-budget-exhaustion scheduling, cancellation/review and other terminal paths remain incomplete. CancelledError remains unswallowed.",
-      "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker events, and joins before COMMIT. COMMITTED takeover validates the exact Outbox, Attempt, historical Lease, receipt, canonical WorkerProjection and graph Budget; EXACT_ACCEPTED/EXACT_REJECTED reopen read-only, MISSING settles idempotently, CONFLICT fails closed, and worker replay is forbidden. The outer DurableDagSchedulingRuntime may authorize that exact continuation for a multi-node graph only after every live owner fence is clear; it resumes one checkpoint at a time, lets accepted work continue through remaining READY nodes, and routes rejected usage to existing parallel settlement. Before reservation, an independent recovery path accepts only an exact operation-free latest Attempt with expired Lease, unique ACTIVE/EXCEEDED graph Budget and canonical PRECHARGE. TaskStore revalidates deterministic reservation id and same scope/fingerprint absence in one write transaction before issuing a same-Attempt higher fence; worker runs for the first time only afterward. Any live owner returns GOVERNED_EXECUTION_IN_PROGRESS; an Operation race returns RECOVERY_REQUIRED. Post-reservation errors retain recovery authority without ordinary failure or release. Invalid lineage, public projection and unknown side effects fail closed. General multi-node/batch settlement recovery remains incomplete.",
+      "heartbeat_boundary": "After operation reservation, DurableExecutionHeartbeat renews Lease before Reservation, checkpoints worker events, and joins before COMMIT. Known worker, heartbeat, time-guard and caller interruptions first use the latest attached reservation version plus exact Attempt/Lease/owner/fence to atomically mark the live Operation RECOVERY_REQUIRED with one Outbox; exact replay is read-only and caller cancellation still propagates. The marker does not terminalize Attempt/Node/Graph/Budget/Lease and does not attribute side effects. COMMITTED takeover and operation-free pre-reservation takeover remain separate strict windows. Only signed reconciliation can COMMIT or RELEASE a RECOVERY_REQUIRED Operation. General unknown-effect attribution and multi-node/batch settlement recovery remain incomplete.",
       "bounded_fanout_boundary": "PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS. TaskGraph.completion_policy is durable and optional for compatibility, but every new production builder emits ATOMIC_GRAPH_SUCCESS_V1 with an explicit sink result_node_id. Host atomic capability defaults on and Scheduler, Internal, and Operator enable it explicitly. Application capability and grant checks run before repository admission; Coordinator direct entry requires exact all-node grants. Migration 0091 atomically commits whole-Graph success and migration 0090 atomically commits failure, Budget, or Review outcomes. Public accepted replay requires Graph COMPLETED and one CONSUMED graph Budget. Historical legacy Graphs remain compatible. Migration 0120 adds an append-only Ed25519 feature-canary receipt; bounded fan-out can be requested only when the receipt is durable, signature-verified and exactly matches the running build SHA, migration version, atomic policy and fan-out buffer. No such production receipt exists yet, so bounded fan-out and cancellation remain independently default off; general recovery, real wave canary and NE-07 full-stack evidence remain outstanding.",
       "cancellation_boundary": "B5C durable two-phase cancellation, exact-revision Operator authority, first-writer-wins 0091/0092 terminal decisions, signed Operation/Effect reconciliation, and the 0099 terminal reconciliation production gate are wired, but cancellation remains OFF. 0099 inventory never silently re-enters workers: exact proofs mutate only bound terminal Graph/Budget state plus deterministic Outboxes in one UoW; signed-required BLOCKED/CANCELLED cases require valid Operator attestation, while COMPLETED and structural anomalies remain QUARANTINED_STRUCTURAL with action NONE. Secure Ingress authority, graph/revision, request identity, side-effect fences, Review state, Outboxes, and proof bindings remain fail-closed. Deployed Operator/attestation credentials, full key lifecycle, external-database inventory remediation, general/multi-node/pre-budget recovery, and real canaries remain UNKNOWN or outstanding.",
       "terminal_reconciliation_boundary": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN. Migration 0099 is schema-only and append-only. Readiness compares canonical sqlite_master SQL for exactly 3 tables, 4 indexes, and 10 triggers; Python validators independently recheck case/subject/proof semantics. Startup scans at most 10,000 terminal Graphs. Classification requires one graph-scope Budget, exactly one canonical 0090 decision, complete 0091/0092 validators, exact Graph/Node/Review/Attempt/Lease state, and canonical failure Outbox payload refs; unsafe ambiguity is quarantined. Any unresolved current case is a graph-wide fence for ordinary TaskGraph transitions, cancellation requests, and Budget transition/consume/usage/retry writers; only the 0099 proof UoW explicitly bypasses it. Historical chains must terminate at a trusted proof. Automatic exact processing uses immutable case created_ts_ms for cross-process-stable proof identity and reports side_effects_may_have_run after partial commits. TERMINAL_HEALTHY_CLOSURE is generated only for an unresolved historical case plus a healthy current classifier, requires SIGNED_OPERATOR + NONE, writes no Graph/Budget/Outbox state, and appends replacement/supersession on drift. Main Host and independent Obs use physical query-only readers. Operator and auto remain default OFF; external inventory, key lifecycle, and canary remain UNKNOWN/NOT_RUN; general, multi-node, and pre-budget recovery remain INCOMPLETE.",
@@ -3353,19 +3384,21 @@
       "status": "PARTIAL",
       "scope": "HOST_CANONICAL_ROUTES",
       "contention_status": "PROVEN_8_16_32_THREADS_AND_CROSS_PROCESS",
-      "single_node_time_guard": "POSITIVE_TIME_MS_READS_CANONICAL_DURABLE_REMAINING_ZERO_PRE_DISPATCH_WRITES_TIME_GUARD_REJECTION_TIMEOUT_PRESERVES_OPERATION_AND_RETURNS_RECOVERY_REQUIRED",
+      "single_node_time_guard": "POSITIVE_TIME_MS_READS_CANONICAL_DURABLE_REMAINING_ZERO_PRE_DISPATCH_WRITES_TIME_GUARD_REJECTION_TIMEOUT_FIRST_ATOMICALLY_MARKS_EXACT_OPERATION_RECOVERY_REQUIRED_PLUS_OUTBOX_THEN_SETTLES_USAGE_NO_EFFECT_ATTRIBUTION",
       "terminal_semantics": "Exactly one BUDGET_EXCEEDED winner advances the reservation and owns the sole Outbox. Refreshed siblings persist ALREADY_EXCEEDED at the terminal version and reference that winner; they cannot become settlement authority. Parallel Budget decision write/read/replay uses one read snapshot and revalidates the terminal Reservation version, sole winner Outbox, Attempt/Graph lineage, and every passive sibling. Runtime CAS attempts scale to at least admitted concurrency plus one instead of a fixed four-attempt ceiling.",
       "evidence_refs": [
         "host_brain/persistence/task_budget_usage_store.py",
         "host_brain/task_runtime/budget_runtime.py",
         "host_brain/task_runtime/node_execution_runtime.py",
+        "host_brain/task_runtime/operation_interruption_runtime.py",
+        "host_brain/persistence/task_worker_interruption_store.py",
         "host_brain/task_runtime/node_worker_stream.py",
         "tests/integration/test_ne01_budget_contention_store.py",
         "tests/unit/test_ne01_budget_runtime_contention_retry.py",
         "tests/unit/test_aw02_governed_task_coordinator.py",
         "tests/unit/test_parallel_settlement_budget_winner_selection.py"
       ],
-      "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "general multi-node time budget enforcement", "unknown-effect recovery", "program-wide coverage"]
+      "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "general multi-node time budget enforcement", "general unknown-effect attribution and recovery", "program-wide coverage"]
     },
     "review_resume": {
       "status": "WIRED",
@@ -4152,7 +4185,7 @@
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Post-admission Internal workers natively consume WorkOrderV3 and reject graph metadata drift; external v2 is ingress compatibility only. For a governed Internal single-node sealed checkpoint, the mandatory activation scan and lifecycle-owned periodic survivor reuse the same exact continuation to reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C remain three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. The supervisor only owns cadence, serializes timer/wake scans and waits for active scans on shutdown. This remains partial: crash-left unsealed cleanup, raw failure, unknown effect, other cancellation and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
+      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Post-admission Internal workers natively consume WorkOrderV3 and reject graph metadata drift; external v2 is ingress compatibility only. For a governed Internal single-node sealed checkpoint, the mandatory activation scan and lifecycle-owned periodic survivor reuse the same exact continuation to reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Known post-reservation raw interruptions now immediately classify the exact Operation as RECOVERY_REQUIRED with one Outbox, but the marker neither cleans Workspace nor attributes an external effect. Only the existing exact signed RELEASE plus NO_SIDE_EFFECT cancellation flow can continue claim-before-cleanup. This remains partial: crash-left unsealed cleanup, general unknown effect, other cancellation and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
       "status": "PARTIAL_V2_CODE_BOUNDARY_NO_PRODUCTION_CALLER",

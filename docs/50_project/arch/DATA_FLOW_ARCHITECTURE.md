@@ -32,6 +32,20 @@ Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Se
 
 Internal 前置 checkpoint 取消现在另有一条更窄的可恢复数据流：只有签名 reconciliation proof 明确给出 `RELEASE + NO_SIDE_EFFECT`，并且 Graph/Node/Attempt/Lease 已由同一 trusted cancellation decision 收敛为 `CANCELLED` 时，terminal worker 才能先提交 deterministic Secure Ingress claim result，再清理 Workspace 和未 sealed stage。普通失败、unknown effect、缺 proof、proof 篡改或任一 lineage 漂移都会保留现场并失败关闭。
 
+Operation 预留后的已知执行中断现在先进入一个不做副作用归因的持久分类流。exact live fence 校验、状态 mutation 与 Outbox 在同一个 canonical SQLite UoW 中完成；marker 成功后 Runtime 才继续 Budget metering 和 recovery receipt。调用方取消不会被转成普通失败，而是标记后继续向上传播。
+
+```mermaid
+flowchart LR
+    I["worker / heartbeat / caller interruption"] --> F["exact Attempt + Lease + owner + fence + Operation version"]
+    F --> M["Operation RECOVERY_REQUIRED + unique Outbox"]
+    M --> H["durable hold；不重跑 worker"]
+    H --> S["signed Operation reconciliation"]
+    S -->|COMMIT| C["已发生副作用的可信证据"]
+    S -->|RELEASE + NO_SIDE_EFFECT| R["释放 Operation / cancellation continuation"]
+```
+
+该流只把已知中断从 `RESERVED` 立即推进为待对账状态。它不关闭 Attempt/Node/Graph/Budget/Lease，不清理 Workspace，不从异常类型推断外部动作，也不替代默认关闭的 Operator HTTP/key canary；无法取得签名证据时必须继续 hold。
+
 Edge 下行现在明确分成两条：Tribe 的平台/情绪事件只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。
 
 ```mermaid

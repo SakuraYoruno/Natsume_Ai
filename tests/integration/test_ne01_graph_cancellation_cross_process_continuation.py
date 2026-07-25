@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 import hashlib
 import multiprocessing
 from pathlib import Path
 from queue import Empty
+import sqlite3
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetAmount,
     BudgetPolicy,
+    BudgetReservation,
+    BudgetReservationStatus,
 )
 from host_brain.contracts.agent_runtime.graph_cancellation import (
     GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
@@ -28,11 +34,17 @@ from host_brain.contracts.agent_runtime.task_graph import (
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.task_repository import (
+    AttemptStatus,
     DurableTaskStore,
+    Ed25519ReconciliationProofVerifier,
     OutboxMessage,
     TASK_STORE_LEASE_CONFLICT,
     TaskStoreError,
     build_outbox_payload_ref,
+    build_reconciliation_attestation_binding,
+)
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationService,
 )
 from host_brain.task_runtime.graph_cancellation_continuation_worker import (
     GraphCancellationContinuationWorker,
@@ -102,14 +114,58 @@ def _event(
     )
 
 
-def _seed_requested_intent(tmp_path: Path) -> tuple[Path, str]:
+def _runtime_event(
+    aggregate_type: str,
+    aggregate_id: str,
+    aggregate_version: int,
+    event_type: str,
+    *,
+    outbox_id: str,
+    attempt_id: str | None = None,
+) -> OutboxMessage:
+    return OutboxMessage.create(
+        aggregate_type=aggregate_type,
+        aggregate_id=aggregate_id,
+        aggregate_version=aggregate_version,
+        event_type=event_type,
+        payload_ref=build_outbox_payload_ref(
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            aggregate_version=aggregate_version,
+        ),
+        idempotency_key=f"idempotency:{outbox_id}",
+        outbox_id=outbox_id,
+        attempt_id=attempt_id,
+    )
+
+
+def _seed_requested_intent(
+    tmp_path: Path,
+    *,
+    reconciliation_private_key: Ed25519PrivateKey | None = None,
+) -> tuple[Path, str]:
     db_path = tmp_path / "graph-cancellation-cross-process.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="ne01-graph-cancellation-cross-process",
         ts_ms=NOW,
     )
     assert migrated.success is True, migrated.as_dict()
-    store = DurableTaskStore(db_path, clock=_Clock(NOW))
+    private_key = reconciliation_private_key
+    reconciled_worker_interruption = private_key is not None
+    proof_verifier = None
+    if private_key is not None:
+        public_key = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        proof_verifier = Ed25519ReconciliationProofVerifier(
+            {"reconciler-cross-process-v1": public_key}
+        )
+    store = DurableTaskStore(
+        db_path,
+        clock=_Clock(NOW),
+        reconciliation_proof_verifier=proof_verifier,
+    )
     graph_id = "graph-cross-process-cancel"
     work_order_id = "work-order-cross-process-cancel"
     node_id = "node-1"
@@ -212,6 +268,161 @@ def _seed_requested_intent(tmp_path: Path) -> tuple[Path, str]:
             outbox_id="outbox-cross-process-active",
         ),
     )
+    node_states_before = {
+        "node-1": {"status": "READY", "status_version": 0},
+    }
+    node_states_after = {
+        "node-1": {"status": "CANCEL_REQUESTED", "status_version": 1},
+    }
+    budget_id: str | None = None
+    budget_status_before: str | None = None
+    budget_status_version_before: int | None = None
+    if reconciled_worker_interruption:
+        budget_id = "budget-cross-process-interrupted"
+        store.create_budget_reservation(
+            BudgetReservation(
+                budget_id=budget_id,
+                scope=f"graph:{graph_id}@1",
+                limits=BudgetAmount(
+                    token_count=1_000,
+                    tool_call_count=10,
+                    time_ms=60_000,
+                    concurrency=1,
+                    retry_count=1,
+                    model_cost_micros=100_000,
+                ),
+                reserved=BudgetAmount(
+                    token_count=1_000,
+                    tool_call_count=10,
+                    time_ms=60_000,
+                    concurrency=1,
+                    retry_count=1,
+                    model_cost_micros=100_000,
+                ),
+            ),
+            graph_id=graph_id,
+            graph_revision=1,
+            node_id=None,
+            attempt_id=None,
+            outbox=_runtime_event(
+                "BUDGET_RESERVATION",
+                budget_id,
+                0,
+                "BUDGET_RESERVATION_CREATED",
+                outbox_id="outbox-cross-process-budget-created",
+            ),
+        )
+        store.transition_budget(
+            budget_id,
+            expected_version=0,
+            target_status=BudgetReservationStatus.ACTIVE,
+            outbox=_runtime_event(
+                "BUDGET_RESERVATION",
+                budget_id,
+                1,
+                "BUDGET_RESERVATION_ACTIVE",
+                outbox_id="outbox-cross-process-budget-active",
+            ),
+        )
+        budget_status_before = "ACTIVE"
+        budget_status_version_before = 1
+        attempt_id = "attempt-cross-process-interrupted"
+        store.create_attempt(
+            attempt_id=attempt_id,
+            graph_id=graph_id,
+            graph_revision=1,
+            node_id=node_id,
+            attempt_no=1,
+            expected_node_version=0,
+            operation_scope="graph-cancellation-cross-process",
+            operation_fingerprint=operation_fingerprint,
+            outbox=_runtime_event(
+                "TASK_ATTEMPT",
+                attempt_id,
+                0,
+                "TASK_ATTEMPT_CREATED",
+                outbox_id="outbox-cross-process-attempt-created",
+                attempt_id=attempt_id,
+            ),
+        )
+        lease = store.acquire_lease(
+            attempt_id,
+            owner_id="worker-cross-process",
+            ttl_ms=60_000,
+            expected_attempt_version=0,
+            outbox=_runtime_event(
+                "TASK_ATTEMPT",
+                attempt_id,
+                1,
+                "TASK_ATTEMPT_LEASED",
+                outbox_id="outbox-cross-process-attempt-leased",
+                attempt_id=attempt_id,
+            ),
+        )
+        store.transition_node(
+            graph_id,
+            1,
+            node_id,
+            expected_version=1,
+            target_status=TaskNodeStatus.RUNNING,
+            outbox=_runtime_event(
+                "TASK_NODE",
+                f"{graph_id}@1/{node_id}",
+                2,
+                "TASK_NODE_RUNNING",
+                outbox_id="outbox-cross-process-node-running",
+            ),
+        )
+        store.transition_attempt(
+            attempt_id,
+            owner_id="worker-cross-process",
+            fencing_token=int(lease["fencing_token"]),
+            expected_version=1,
+            target_status=AttemptStatus.RUNNING,
+            outbox=_runtime_event(
+                "TASK_ATTEMPT",
+                attempt_id,
+                2,
+                "TASK_ATTEMPT_RUNNING",
+                outbox_id="outbox-cross-process-attempt-running",
+                attempt_id=attempt_id,
+            ),
+        )
+        reserved = store.reserve_operation(
+            reservation_id="reservation-cross-process-interrupted",
+            business_scope="graph-cancellation-cross-process",
+            operation_fingerprint=operation_fingerprint,
+            attempt_id=attempt_id,
+            lease_id=str(lease["lease_id"]),
+            owner_id="worker-cross-process",
+            fencing_token=int(lease["fencing_token"]),
+            ttl_ms=60_000,
+            outbox=_runtime_event(
+                "OPERATION_RESERVATION",
+                "reservation-cross-process-interrupted",
+                0,
+                "OPERATION_RESERVED",
+                outbox_id="outbox-cross-process-operation-reserved",
+                attempt_id=attempt_id,
+            ),
+        )
+        assert reserved.reservation["status"] == "RESERVED"
+        interrupted = store.mark_worker_interruption_recovery_required(
+            "reservation-cross-process-interrupted",
+            attempt_id=attempt_id,
+            lease_id=str(lease["lease_id"]),
+            owner_id="worker-cross-process",
+            fencing_token=int(lease["fencing_token"]),
+            expected_version=0,
+            reason_code="GOVERNED_WORKER_FAILED",
+        )
+        assert interrupted["status"] == "RECOVERY_REQUIRED"
+        node_states_before = {
+            "node-1": {"status": "RUNNING", "status_version": 2},
+        }
+        node_states_after = {
+            "node-1": {"status": "CANCEL_REQUESTED", "status_version": 3},
+        }
     payload = {
         "schema_version": GRAPH_CANCELLATION_INTENT_SCHEMA_VERSION,
         "request_id": "request-cross-process-cancel",
@@ -223,24 +434,20 @@ def _seed_requested_intent(tmp_path: Path) -> tuple[Path, str]:
         "graph_status_before": "ACTIVE",
         "graph_status_version_before": 1,
         "graph_target_status": "BLOCKED",
-        "budget_id": None,
-        "budget_status_before": None,
-        "budget_status_version_before": None,
-        "node_states_before": {
-            "node-1": {"status": "READY", "status_version": 0},
-        },
-        "node_states_after": {
-            "node-1": {"status": "CANCEL_REQUESTED", "status_version": 1},
-        },
+        "budget_id": budget_id,
+        "budget_status_before": budget_status_before,
+        "budget_status_version_before": budget_status_version_before,
+        "node_states_before": node_states_before,
+        "node_states_after": node_states_after,
         "graph_outbox_id": "outbox-cross-process-cancel-request",
     }
     intent = normalize_graph_cancellation_intent(payload)
     requested = store.request_graph_cancellation(
         graph_id,
         1,
-        budget_id=None,
+        budget_id=budget_id,
         expected_graph_version=1,
-        expected_budget_version=None,
+        expected_budget_version=budget_status_version_before,
         expected_node_states=payload["node_states_before"],
         intent_ref=intent.intent_ref,
         intent_payload=payload,
@@ -253,6 +460,51 @@ def _seed_requested_intent(tmp_path: Path) -> tuple[Path, str]:
         ),
     )
     assert requested["intent"]["status"] == "REQUESTED"
+    if reconciled_worker_interruption:
+        assert private_key is not None
+        intent_ref = str(requested["intent"]["intent_ref"])
+        recovery_version = int(
+            store.get_operation_reservation(
+                "reservation-cross-process-interrupted"
+            )["status_version"]
+        )
+        actor_id = "reconciler://operator/cross-process-test"
+        attestation_ref = "proof://graph-cancellation/cross-process-release"
+        proof_binding = build_reconciliation_attestation_binding(
+            reservation_id="reservation-cross-process-interrupted",
+            business_scope="graph-cancellation-cross-process",
+            operation_fingerprint=operation_fingerprint,
+            recovery_version=recovery_version,
+            reconciler_actor_id=actor_id,
+            attestation_ref=attestation_ref,
+            recovery_action="RELEASE",
+            reconciliation_outcome="NO_SIDE_EFFECT",
+            receipt_ref=None,
+        )
+        signature = "ed25519:" + base64.urlsafe_b64encode(
+            private_key.sign(proof_binding)
+        ).decode("ascii")
+        reconciliation = GraphCancellationOperationReconciliationService(
+            task_store=store,
+            outbox_factory=OutboxMessage,
+            wake_cancellation=lambda: None,
+        )
+        request = {
+            "intent_ref": intent_ref,
+            "reservation_id": "reservation-cross-process-interrupted",
+            "expected_version": recovery_version,
+            "action": "RELEASE",
+            "reconciler_actor_id": actor_id,
+            "downstream_receipt_ref": None,
+            "attestation_ref": attestation_ref,
+            "attestation_key_id": "reconciler-cross-process-v1",
+            "attestation_signature": signature,
+        }
+        first = reconciliation.reconcile_graph_cancellation_operation(**request)
+        replay = reconciliation.reconcile_graph_cancellation_operation(**request)
+        assert first["replayed"] is False
+        assert replay["replayed"] is True
+        assert first["operation"]["status"] == "RELEASED"
     return db_path, intent.intent_ref
 
 
@@ -506,6 +758,127 @@ async def test_real_worker_startup_scan_finalizes_requested_intent(
         "CANCELLED"
     )
     assert publisher.calls >= 2
+
+
+@pytest.mark.asyncio
+async def test_restarted_worker_finalizes_signed_interruption_without_replay(
+    tmp_path: Path,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    proof_verifier = Ed25519ReconciliationProofVerifier(
+        {"reconciler-cross-process-v1": public_key}
+    )
+    db_path, intent_ref = _seed_requested_intent(
+        tmp_path,
+        reconciliation_private_key=private_key,
+    )
+    store = DurableTaskStore(
+        db_path,
+        clock=_Clock(NOW),
+        reconciliation_proof_verifier=proof_verifier,
+    )
+    publisher = _NoopOutboxPublisher()
+    runtime = GraphCancellationRuntime(
+        task_store=store,
+        runtime_outbox=RuntimeOutbox(
+            publisher=publisher,
+            factory=OutboxMessage,
+            publish_limit=100,
+        ),
+        execution_registry=LocalGraphExecutionRegistry(),
+        lease_ttl_ms=1_000,
+    )
+    worker = GraphCancellationContinuationWorker(
+        task_store=store,
+        command_repository=HostCommandRepository(db_path, clock=_Clock(NOW)),
+        cancellation_runtime=runtime,
+        worker_id="cancellation-worker-interruption-restart",
+        claim_lease_ms=1_000,
+        retry_delay_ms=100,
+        batch_limit=1,
+    )
+
+    assert await worker.run_once() == 1
+    assert await worker.run_once() == 0
+
+    operation = store.get_operation_reservation(
+        "reservation-cross-process-interrupted"
+    )
+    assert operation["status"] == "RELEASED"
+    assert operation["reconciliation_action"] == "RELEASE"
+    assert operation["reconciliation_outcome"] == "NO_SIDE_EFFECT"
+    assert store.get_graph(
+        "graph-cross-process-cancel",
+        1,
+    )["status"] == "CANCELLED"
+    assert store.get_node(
+        "graph-cross-process-cancel",
+        1,
+        "node-1",
+    )["status"] == "CANCELLED"
+    assert store.get_attempt(
+        "attempt-cross-process-interrupted"
+    )["status"] == "CANCELLED"
+    assert store.get_graph_cancellation_continuation(intent_ref) is None
+
+    restarted_store = DurableTaskStore(
+        db_path,
+        clock=_Clock(NOW),
+        reconciliation_proof_verifier=proof_verifier,
+    )
+    restarted_runtime = GraphCancellationRuntime(
+        task_store=restarted_store,
+        runtime_outbox=RuntimeOutbox(
+            publisher=_NoopOutboxPublisher(),
+            factory=OutboxMessage,
+            publish_limit=100,
+        ),
+        execution_registry=LocalGraphExecutionRegistry(),
+        lease_ttl_ms=1_000,
+    )
+    restarted_worker = GraphCancellationContinuationWorker(
+        task_store=restarted_store,
+        command_repository=HostCommandRepository(db_path, clock=_Clock(NOW)),
+        cancellation_runtime=restarted_runtime,
+        worker_id="cancellation-worker-interruption-second-restart",
+        claim_lease_ms=1_000,
+        retry_delay_ms=100,
+        batch_limit=1,
+    )
+    assert await restarted_worker.run_once() == 0
+
+    with sqlite3.connect(db_path) as conn:
+        recovery_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE aggregate_type = 'OPERATION_RESERVATION'
+              AND aggregate_id = 'reservation-cross-process-interrupted'
+              AND event_type = 'OPERATION_RECOVERY_REQUIRED'
+            """
+        ).fetchone()
+        release_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE aggregate_type = 'OPERATION_RESERVATION'
+              AND aggregate_id = 'reservation-cross-process-interrupted'
+              AND event_type = 'OPERATION_RECOVERY_RELEASE'
+            """
+        ).fetchone()
+        cancelled_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE aggregate_type = 'TASK_GRAPH'
+              AND aggregate_id = 'graph-cross-process-cancel'
+              AND event_type = 'TASK_GRAPH_CANCELLED'
+            """
+        ).fetchone()
+    assert recovery_count == (1,)
+    assert release_count == (1,)
+    assert cancelled_count == (1,)
 
 
 @pytest.mark.asyncio

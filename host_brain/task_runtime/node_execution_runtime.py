@@ -41,6 +41,7 @@ from .errors import (
     GOVERNED_ADMISSION_INVALID,
     GOVERNED_BUDGET_EXCEEDED,
     GOVERNED_BUDGET_STATE_CONFLICT,
+    GOVERNED_CALLER_CANCELLED,
     GOVERNED_DURABLE_STATE_CONFLICT,
     GOVERNED_EXECUTION_IN_PROGRESS,
     GOVERNED_OPERATION_RECOVERY_REQUIRED,
@@ -87,6 +88,11 @@ from .node_worker_stream import (
     stop_heartbeat_after_interruption,
 )
 from .operation_checkpoint_continuation import CommittedCheckpointContinuation
+from .operation_interruption_runtime import (
+    build_worker_interruption_receipt,
+    classify_caller_cancellation,
+    classify_interrupted_operation,
+)
 from .operation_recovery_runtime import DurableOperationRecoveryRuntime
 from .ports import (
     AcceptancePort,
@@ -1038,12 +1044,35 @@ class DurableNodeExecutionRuntime:
                     "worker cancelled itself without a caller cancellation request",
                 )
             else:
+                # Classification is synchronous and best effort so the
+                # caller's cancellation remains the lifecycle authority.
+                classify_caller_cancellation(
+                    store=self._store,
+                    admitted=admitted,
+                    heartbeat=heartbeat,
+                    attempt_id=attempt_id,
+                    lease_id=lease_id,
+                    owner_id=self._owner_id,
+                    fencing_token=fencing_token,
+                    reason_code=GOVERNED_CALLER_CANCELLED,
+                    request_id=command.request_id,
+                )
                 raise worker_error
         if worker_error is not None and not isinstance(worker_error, Exception):
             raise worker_error
         if heartbeat_error is not None and not isinstance(heartbeat_error, Exception):
             raise heartbeat_error
         if heartbeat_error is not None:
+            heartbeat_interruption = classify_interrupted_operation(
+                store=self._store,
+                admitted=admitted,
+                heartbeat=heartbeat,
+                attempt_id=attempt_id,
+                lease_id=lease_id,
+                owner_id=self._owner_id,
+                fencing_token=fencing_token,
+                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
+            )
             _logger.error(
                 "Governed execution lost its durable heartbeat before commit",
                 extra={
@@ -1055,6 +1084,9 @@ class DurableNodeExecutionRuntime:
                     "worker_route": admitted.worker_route,
                     "heartbeat_phase": _heartbeat_failure_phase(heartbeat_error),
                     "exception_type": type(heartbeat_error).__name__,
+                    "recovery_marker_reason_code": (
+                        heartbeat_interruption.marker_failure_reason_code
+                    ),
                 },
                 exc_info=(
                     type(heartbeat_error),
@@ -1063,6 +1095,11 @@ class DurableNodeExecutionRuntime:
                 ),
             )
             await self._runtime_outbox.publish_pending(best_effort=True)
+            heartbeat_projection = {
+                "heartbeat_phase": _heartbeat_failure_phase(heartbeat_error),
+                **heartbeat_interruption.projection(),
+                "budget": budget.execution_payload(),
+            }
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -1070,73 +1107,32 @@ class DurableNodeExecutionRuntime:
                 verification_status="NOT_RUN",
                 accepted=False,
                 reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                projection={
-                    "heartbeat_phase": _heartbeat_failure_phase(heartbeat_error),
-                    "budget": budget.execution_payload(),
-                },
+                projection=heartbeat_projection,
             )
             yield terminal_event(receipt)
             return
         if worker_error is not None:
-            exc = worker_error
-            _logger.error(
-                "Governed worker execution failed",
-                extra={
-                    "request_id": command.request_id,
-                    "graph_id": admitted.graph_id,
-                    "graph_revision": admitted.graph_revision,
-                    "node_id": admitted.node_id,
-                    "attempt_id": attempt_id,
-                    "worker_route": admitted.worker_route,
-                    "reason_code": _exception_reason(exc, GOVERNED_WORKER_FAILED),
-                    "exception_type": type(exc).__name__,
-                },
-                exc_info=(type(exc), exc, exc.__traceback__),
-            )
-            worker_failure_reason = _exception_reason(exc, GOVERNED_WORKER_FAILED)
-            settlement_reason: str | None = None
-            evidence_refs: tuple[str, ...] = ()
-            try:
-                charge = await self._budgets.settle_interrupted_worker(
-                    budget,
-                    node_id=admitted.node_id,
-                    attempt_id=attempt_id,
-                    worker_started_ns=worker_started_ns,
-                    worker_failure_reason=worker_failure_reason,
-                    time_budget_ms=worker_time_budget_ms,
-                )
-                budget = charge.context
-                evidence_refs = (charge.evidence_ref,)
-            except asyncio.CancelledError:
-                raise
-            except Exception as settlement_exc:
-                # The Operation already exists.  Even a Budget response-loss
-                # cannot authorize ordinary Attempt/Node/Graph failure or
-                # Budget release; reconciliation must decide the external
-                # effect before any terminal mutation.
-                settlement_reason = _exception_reason(
-                    settlement_exc,
-                    GOVERNED_BUDGET_STATE_CONFLICT,
-                )
-            await self._runtime_outbox.publish_pending(best_effort=True)
-            projection = {
-                "worker_failure_reason_code": worker_failure_reason,
-                "reservation_status": "RESERVED",
-                "budget": budget.execution_payload(),
-            }
-            if worker_failure_reason == GOVERNED_TIME_BUDGET_EXCEEDED:
-                projection["time_budget_ms"] = worker_time_budget_ms
-            if settlement_reason is not None:
-                projection["budget_settlement_reason_code"] = settlement_reason
-            receipt = build_execution_receipt(
-                admitted,
+            receipt = await build_worker_interruption_receipt(
+                store=self._store,
+                budgets=self._budgets,
+                runtime_outbox=self._runtime_outbox,
+                admitted=admitted,
+                heartbeat=heartbeat,
+                command=command,
+                budget=budget,
                 attempt_id=attempt_id,
-                status="RECOVERY_REQUIRED",
-                verification_status="NOT_RUN",
-                accepted=False,
-                reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                evidence_refs=evidence_refs,
-                projection=projection,
+                lease_id=lease_id,
+                owner_id=self._owner_id,
+                fencing_token=fencing_token,
+                worker_error=worker_error,
+                worker_started_ns=worker_started_ns,
+                worker_time_budget_ms=worker_time_budget_ms,
+                operation_recovery_reason_code=(
+                    GOVERNED_OPERATION_RECOVERY_REQUIRED
+                ),
+                worker_failure_default_reason_code=GOVERNED_WORKER_FAILED,
+                time_budget_exceeded_reason_code=GOVERNED_TIME_BUDGET_EXCEEDED,
+                budget_conflict_reason_code=GOVERNED_BUDGET_STATE_CONFLICT,
             )
             yield terminal_event(receipt)
             return

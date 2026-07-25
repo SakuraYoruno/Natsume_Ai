@@ -369,8 +369,38 @@ class _FakeTaskStore:
             "status": "RESERVED" if self.reservation_acquired else "RECOVERY_REQUIRED",
             "status_version": 0,
             "receipt_ref": None,
+            "recovery_reason_code": None,
         }
         return _ReservationResult(self.reservation_acquired, dict(self.reservation))
+
+    def mark_worker_interruption_recovery_required(
+        self,
+        reservation_id: str,
+        *,
+        attempt_id: str,
+        lease_id: str,
+        owner_id: str,
+        fencing_token: int,
+        expected_version: int,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        assert self.reservation is not None
+        assert reservation_id == self.reservation["reservation_id"]
+        assert attempt_id == self.reservation["attempt_id"]
+        assert lease_id == self.reservation["lease_id"]
+        assert owner_id == self.reservation["owner_id"]
+        assert fencing_token == self.reservation["fencing_token"]
+        if self.reservation["status"] == "RECOVERY_REQUIRED":
+            assert self.reservation["status_version"] == expected_version + 1
+            assert self.reservation["recovery_reason_code"] == reason_code
+            return dict(self.reservation)
+        assert self.reservation["status"] == "RESERVED"
+        assert self.reservation["status_version"] == expected_version
+        self.calls.append("operation:RECOVERY_REQUIRED")
+        self.reservation["status"] = "RECOVERY_REQUIRED"
+        self.reservation["status_version"] += 1
+        self.reservation["recovery_reason_code"] = reason_code
+        return dict(self.reservation)
 
     def transition_attempt(
         self,
@@ -1117,12 +1147,143 @@ async def test_worker_self_cancellation_enters_durable_recovery_without_graph_in
         == "GOVERNED_WORKER_SELF_CANCELLED"
     )
     assert store.reservation is not None
-    assert store.reservation["status"] == "RESERVED"
+    assert store.reservation["status"] == "RECOVERY_REQUIRED"
+    assert (
+        store.reservation["recovery_reason_code"]
+        == "GOVERNED_WORKER_SELF_CANCELLED"
+    )
     assert list(store.attempts.values())[-1]["status"] == "RUNNING"
     assert store.get_graph_cancellation_for_graph(graph.graph_id, graph.revision) is None
     assert "attempt:FAILED" not in calls
     assert "node:FAILED" not in calls
     assert "graph:FAILED" not in calls
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_marks_operation_before_propagating() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+    worker_started = asyncio.Event()
+
+    class _BlockingWorker:
+        @staticmethod
+        async def execute_stream(**kwargs: Any):
+            del kwargs
+            worker_started.set()
+            await asyncio.Event().wait()
+            yield {"phase": "COMMIT", "decision": "APPROVE"}
+
+    class _BlockingResolver:
+        @staticmethod
+        def resolve(*, executor: str, worker_route: str) -> Any:
+            del executor, worker_route
+            return _BlockingWorker()
+
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        internal_agent_checkpoint_uow=object(),
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_BlockingResolver(),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    async def consume() -> list[dict[str, Any]]:
+        return [
+            event
+            async for event in app.execute_stream(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        ]
+
+    execution = asyncio.create_task(consume())
+    await asyncio.wait_for(worker_started.wait(), timeout=1.0)
+    execution.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+
+    assert store.reservation is not None
+    assert store.reservation["status"] == "RECOVERY_REQUIRED"
+    assert store.reservation["recovery_reason_code"] == "GOVERNED_CALLER_CANCELLED"
+    assert "attempt:FAILED" not in calls
+    assert "node:FAILED" not in calls
+    assert "graph:FAILED" not in calls
+
+
+@pytest.mark.asyncio
+async def test_worker_private_reason_is_not_persisted_or_projected() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+    store = _FakeTaskStore(graph, calls)
+
+    class _PrivateWorkerError(RuntimeError):
+        reason_code = "provider-secret: do-not-store"
+
+    class _PrivateReasonWorker:
+        @staticmethod
+        async def execute_stream(**kwargs: Any):
+            del kwargs
+            raise _PrivateWorkerError
+            if False:
+                yield {}
+
+    class _PrivateReasonResolver:
+        @staticmethod
+        def resolve(*, executor: str, worker_route: str) -> Any:
+            del executor, worker_route
+            return _PrivateReasonWorker()
+
+    coordinator = GovernedTaskCoordinator(
+        task_store=store,
+        internal_agent_checkpoint_uow=object(),
+        outbox_publisher=_Publisher(calls),
+        outbox_factory=_OutboxFactory(),
+        worker_resolver=_PrivateReasonResolver(),
+        verifier=_Verifier("PASS"),
+        acceptance=_Acceptance("ACCEPT"),
+        owner_id="worker-one",
+    )
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=work_order,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert (
+        receipt["projection"]["worker_failure_reason_code"]
+        == "GOVERNED_WORKER_FAILED"
+    )
+    assert store.reservation is not None
+    assert (
+        store.reservation["recovery_reason_code"]
+        == "GOVERNED_WORKER_FAILED"
+    )
+    assert "provider-secret" not in repr(receipt)
+    assert "provider-secret" not in repr(store.reservation)
 
 
 @pytest.mark.asyncio
@@ -1287,7 +1448,11 @@ async def test_worker_time_budget_timeout_preserves_operation_for_reconciliation
     assert receipt["projection"]["worker_failure_reason_code"] == "GOVERNED_TIME_BUDGET_EXCEEDED"
     assert receipt["projection"]["time_budget_ms"] == 1
     assert store.reservation is not None
-    assert store.reservation["status"] == "RESERVED"
+    assert store.reservation["status"] == "RECOVERY_REQUIRED"
+    assert (
+        store.reservation["recovery_reason_code"]
+        == "GOVERNED_TIME_BUDGET_EXCEEDED"
+    )
     assert store.budget is not None
     assert store.budget["status"] == "EXCEEDED"
     assert store.budget["exceeded_dimensions"] == ["time_ms"]

@@ -15,6 +15,7 @@ from host_brain.task_runtime import node_execution_runtime
 from host_brain.task_runtime import node_worker_stream
 from host_brain.task_runtime import operation_checkpoint_budget_recovery
 from host_brain.task_runtime import operation_checkpoint_continuation
+from host_brain.task_runtime import operation_interruption_runtime
 from host_brain.task_runtime import operation_recovery_checkpoint_loader
 from host_brain.task_runtime import operation_recovery_runtime
 from host_brain.task_runtime import preoperation_attempt_recovery
@@ -52,7 +53,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "c127d601adb775146bafc9bebf5572b8bde97eb16826a7c6651ef79e5e5c29d2"
+    "b71d3cd65f5a6dc2dc84c5b9fefdef89522a9434b217491532d6b86757b5dd6e"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
@@ -422,14 +423,13 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "get_active_lease": 1,
             "commit_operation": 1,
         },
-        "_runtime_outbox": {"build": 7, "publish_pending": 16},
+            "_runtime_outbox": {"build": 7, "publish_pending": 15},
         "_budgets": {
             "ensure_active": 1,
             "precharge": 1,
             "guard_execution_time": 1,
             "settle_worker": 1,
-            "settle_interrupted_worker": 1,
-            "finalize": 1,
+                "finalize": 1,
             "refresh": 1,
         },
         "_node_lifecycle": {
@@ -479,6 +479,36 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
         and node.func.attr in {"Lock", "RLock", "Semaphore", "create_task"}
         for node in ast.walk(tree)
     )
+
+
+def test_operation_interruption_runtime_owns_only_classification_and_metering() -> None:
+    tree = _tree(operation_interruption_runtime)
+    assert len(inspect.getsource(operation_interruption_runtime).splitlines()) < 300
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    ]
+    assert sum(
+        call.func.attr == "mark_worker_interruption_recovery_required"
+        for call in calls
+    ) == 1
+    assert sum(
+        call.func.attr == "settle_interrupted_worker"
+        for call in calls
+    ) == 1
+    assert sum(call.func.attr == "publish_pending" for call in calls) == 1
+    assert not {
+        call.func.attr
+        for call in calls
+        if call.func.attr in {
+            "execute_stream",
+            "transition_attempt",
+            "transition_node",
+            "transition_graph",
+            "commit_operation",
+        }
+    }
 
 
 def test_preparation_and_preoperation_helpers_preserve_authority_boundaries() -> None:
