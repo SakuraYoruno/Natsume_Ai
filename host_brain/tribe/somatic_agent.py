@@ -391,22 +391,18 @@ class SomaticAgent:
             }
 
 
-_SOMATIC_AGENT: SomaticAgent | None = None
-
-
 def get_somatic_agent() -> SomaticAgent:
-    global _SOMATIC_AGENT
-    if _SOMATIC_AGENT is None:
-        _SOMATIC_AGENT = SomaticAgent()
-    return _SOMATIC_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "somatic_agent",
+        expected_type=SomaticAgent,
+    )
 
 
-def set_somatic_agent(agent: SomaticAgent | None) -> None:
-    global _SOMATIC_AGENT
-    _SOMATIC_AGENT = agent
-
-
-__all__ = ["SomaticAgent", "get_somatic_agent", "set_somatic_agent"]
+__all__ = ["SomaticAgent", "get_somatic_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

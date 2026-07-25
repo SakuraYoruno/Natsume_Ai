@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
+
 
 @dataclass(frozen=True)
 class AgentRuntimeApplicationPorts:
@@ -14,6 +16,7 @@ class AgentRuntimeApplicationPorts:
     filter_retrieval_evidence_items_for_prompt: Callable[..., Any]
     build_user_preference_pack: Callable[..., Any]
     resolve_host_llm_runtime_async: Callable[..., Awaitable[Any]]
+    resolve_surface_reply_llm_runtime: Callable[..., Any]
     resolve_state_arbiter_bond_fact: Callable[..., Awaitable[Any]]
     apply_surface_emotion_bond_flow: Callable[..., Any]
     build_conversation_experience_read_pack: Callable[..., dict[str, Any]]
@@ -24,6 +27,7 @@ class AgentRuntimeApplicationPorts:
     audit_ledger: Callable[[], Any]
     prompt_registry: Callable[[], Any]
     model_attempt_service: Callable[[], Any]
+    context_read_ports: ConversationContextReadPorts
     task_status_projection: Callable[[], Any]
     persist_post_process_audit: Callable[..., Awaitable[None]]
 

@@ -126,25 +126,6 @@ def _build_world_canon_reader(*, ledger: Any) -> Any:
     )
 
 
-def _init_edge_command_pusher_status(*, logger: Any) -> str:
-    try:
-        from host_brain.tribe.edge_command_pusher import init_edge_command_pusher  # noqa: PLC0415
-
-        edge_cmd_pusher = init_edge_command_pusher()
-        logger.info(
-            "EdgeCommandPusher initialized: enabled=%s url=%s",
-            edge_cmd_pusher.enabled,
-            edge_cmd_pusher.edge_base_url,
-        )
-        return (
-            f"OK (enabled={edge_cmd_pusher.enabled}, "
-            f"edge_url={edge_cmd_pusher.edge_base_url})"
-        )
-    except Exception as exc:
-        logger.warning("EdgeCommandPusher initialization degraded: %s", exc)
-        return f"DEGRADED: {exc}"
-
-
 def _sync_world_canon_index_on_startup(
     *,
     logger: Any,
@@ -196,26 +177,84 @@ def runtime_lifespan(
     tool_broker_provider: Callable[[], Any] | None = None,
     tool_catalog_provider: Callable[[], Any] | None = None,
     skill_registry_provider: Callable[[], Any] | None = None,
+    begin_authority_runtime: Callable[[], Any] | None = None,
+    close_authority_runtime: Callable[[], Any] | None = None,
+    begin_bond_runtime: Callable[[], Any] | None = None,
+    close_bond_runtime: Callable[[], Any] | None = None,
+    begin_governance_runtime: Callable[[], Any] | None = None,
+    close_governance_runtime: Callable[[], Any] | None = None,
     defer_activity_monitor: bool = False,
+    defer_resource_manager: bool = False,
+    resource_manager_status_journal: Any | None = None,
 ) -> AsyncGenerator[None, None]:
     @asynccontextmanager
     async def _lifespan() -> AsyncGenerator[None, None]:
         logger.info("Natsume AI Host Brain starting up ...")
-        host_lifecycle.begin()
+        authority_runtime_started = False
+        governance_runtime_started = False
+        bond_runtime_started = False
+
+        def close_started_runtime_owners() -> None:
+            first_error: BaseException | None = None
+            for started, close_runtime in (
+                (bond_runtime_started, close_bond_runtime),
+                (governance_runtime_started, close_governance_runtime),
+                (authority_runtime_started, close_authority_runtime),
+            ):
+                if not started or close_runtime is None:
+                    continue
+                try:
+                    close_runtime()
+                except BaseException as exc:
+                    first_error = first_error or exc
+            if first_error is not None:
+                raise first_error
+
+        try:
+            if begin_authority_runtime is not None:
+                begin_authority_runtime()
+                authority_runtime_started = True
+            if begin_governance_runtime is not None:
+                begin_governance_runtime()
+                governance_runtime_started = True
+            if begin_bond_runtime is not None:
+                begin_bond_runtime()
+                bond_runtime_started = True
+            host_lifecycle.begin()
+        except Exception:
+            close_started_runtime_owners()
+            raise
         tribe_ports_bound = False
+        tribe_execution_activation = None
         try:
             tribe_runtime.bind_application_ports(
                 owner=host_lifecycle,
                 ports=tribe_application_ports,
             )
             tribe_ports_bound = True
+            tribe_execution_activation = (
+                tribe_runtime.activate_execution_context(
+                    owner=host_lifecycle,
+                )
+            )
             ledger = get_ledger()
         except Exception:
             try:
-                if tribe_ports_bound:
-                    tribe_runtime.unbind_application_ports(owner=host_lifecycle)
+                if tribe_execution_activation is not None:
+                    tribe_runtime.deactivate_execution_context(
+                        tribe_execution_activation
+                    )
             finally:
-                await host_lifecycle.aclose(logger=logger)
+                try:
+                    if tribe_ports_bound:
+                        tribe_runtime.unbind_application_ports(
+                            owner=host_lifecycle
+                        )
+                finally:
+                    try:
+                        await host_lifecycle.aclose(logger=logger)
+                    finally:
+                        close_started_runtime_owners()
             raise
         lifecycle_services = host_lifecycle.ports
         try:
@@ -293,6 +332,7 @@ def runtime_lifespan(
                     )
             try:
                 from host_brain.app.startup import (  # noqa: PLC0415
+                    build_startup_application_ports,
                     warmup_codex_exec_intent_pool,
                     warmup_chat_llm_runtime_profiles,
                     warmup_chat_runtime_basics,
@@ -300,16 +340,26 @@ def runtime_lifespan(
                     warmup_surface_quote_runtime,
                 )
 
+                startup_ports = build_startup_application_ports(
+                    lifecycle_services
+                )
                 new_module_statuses["chat_runtime_warmup"] = warmup_chat_runtime_basics(
+                    ports=startup_ports,
                     eager_persona=True,
                     thalamus_agent_provider=(
                         tribe_runtime_agent_ports.get_thalamus_agent
                     ),
                 )
-                new_module_statuses["chat_llm_runtime_warmup"] = warmup_chat_llm_runtime_profiles()
+                new_module_statuses["chat_llm_runtime_warmup"] = (
+                    warmup_chat_llm_runtime_profiles(ports=startup_ports)
+                )
                 new_module_statuses["surface_quote_runtime_warmup"] = warmup_surface_quote_runtime()
-                new_module_statuses["codex_exec_intent_warmup"] = warmup_codex_exec_intent_pool()
-                new_module_statuses["retrieval_runtime_warmup"] = warmup_retrieval_runtime_basics()
+                new_module_statuses["codex_exec_intent_warmup"] = (
+                    warmup_codex_exec_intent_pool(ports=startup_ports)
+                )
+                new_module_statuses["retrieval_runtime_warmup"] = (
+                    warmup_retrieval_runtime_basics(ports=startup_ports)
+                )
             except Exception as _chat_warmup_exc:
                 new_module_statuses["chat_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
                 new_module_statuses["chat_llm_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
@@ -574,12 +624,17 @@ def runtime_lifespan(
 
             # 整机资源管家：自动采样 CPU/GPU/内存/显存，压力触发 LLM 分析。
             try:
-                if not _background_tasks_enabled:
+                if defer_resource_manager:
+                    new_module_statuses["system_resource_manager"] = (
+                        "DEFERRED: Task Runtime and Host lease composition"
+                    )
+                elif not _background_tasks_enabled:
                     new_module_statuses["system_resource_manager"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
                 elif not core_settings.resource_manager_enabled:
                     new_module_statuses["system_resource_manager"] = "SKIPPED: HOST_RESOURCE_MANAGER_ENABLED=false"
                 else:
                     _resource_manager = host_lifecycle.start_resource_manager(
+                        status_journal=resource_manager_status_journal,
                         degradation_state_provider=degradation_state_provider,
                         run_immediately=(
                             core_settings.resource_manager_run_on_startup
@@ -597,34 +652,16 @@ def runtime_lifespan(
                 new_module_statuses["system_resource_manager"] = f"DEGRADED: {_rm_exc}"
                 logger.warning("SystemResourceManager 启动失败（降级）: %s", _rm_exc)
 
-            # [Tribe 基础设施] 初始化 TribeEventBus 单例 + HostTribeRegistry 单例
-            # Phase 0：确保所有族 Agent 在启动时可以通过 get_tribe_event_bus() /
-            # get_host_tribe_registry() 拿到同一个实例，而不是各自懒加载出不同对象。
+            # [Tribe 基础设施] 只使用当前 Host scope 已绑定的 fresh
+            # EventBus/State/Registry。Legacy Agent helper 在 active lifespan
+            # 中只能借用这三个 exact 对象，不得懒建第二套进程真相。
             try:
-                from host_brain.app.internal_tribe_routes import (  # noqa: PLC0415
-                    get_tribe_event_bus,
-                    set_tribe_event_bus,
+                _tribe_family_count = len(
+                    tribe_runtime.tribe_registry.list_families()
                 )
-                from host_brain.tribe.event_bus import InMemoryTribeEventBus  # noqa: PLC0415
-                from host_brain.tribe.registry import (  # noqa: PLC0415
-                    get_host_tribe_registry,
-                    set_host_tribe_registry,
-                    HostTribeRegistry,
+                _tribe_agent_count = len(
+                    tribe_runtime.tribe_registry.list_agents()
                 )
-
-                # 强制创建单例（若已存在则复用）
-                _tribe_bus = get_tribe_event_bus()
-                if _tribe_bus is None:
-                    _tribe_bus = InMemoryTribeEventBus(max_events=2048)
-                    set_tribe_event_bus(_tribe_bus)
-
-                _tribe_registry = get_host_tribe_registry()
-                if _tribe_registry is None:
-                    _tribe_registry = HostTribeRegistry()
-                    set_host_tribe_registry(_tribe_registry)
-
-                _tribe_family_count = len(_tribe_registry.list_families())
-                _tribe_agent_count = len(_tribe_registry.list_agents())
                 new_module_statuses["tribe_infrastructure"] = (
                     f"OK (families={_tribe_family_count}, agents={_tribe_agent_count})"
                 )
@@ -640,9 +677,7 @@ def runtime_lifespan(
             # [Tribe 分发循环] 启动 TribeEventBus dispatch_loop + 注册各族 Agent 订阅
             # Phase 1：Bus 启动后，各族 Agent 的 handler 才能被正确触发
             try:
-                from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
-
-                _bus = get_tribe_event_bus()
+                _bus = tribe_runtime.event_bus
                 await _bus.start()
 
                 new_module_statuses["tribe_state_persistence"] = (
@@ -652,19 +687,14 @@ def runtime_lifespan(
 
                 _tribe_sub_errors = tribe_runtime.register_subscriptions(logger=logger)
 
-
-                # T-130: initialize the shared EdgeCommandPusher singleton for host->edge commands.
-                try:
-                    new_module_statuses["edge_command_pusher"] = _init_edge_command_pusher_status(
-                        logger=logger,
-                    )
-                except Exception as _ecp_exc:
-                    new_module_statuses["edge_command_pusher"] = f"DEGRADED: {_ecp_exc}"
-                    logger.warning("EdgeCommandPusher initialization failed (degraded): %s", _ecp_exc)
+                new_module_statuses["edge_command_pusher"] = (
+                    "RETIRED: app-local governed TaskGraph Preview required"
+                )
 
                 # T-113~T-122: ANSAgent +VOICE_PIPELINE_STARTED/ENDED/CHANNEL_MESSAGE_RECEIVED(+3)
                 #              CortexAgent +PLATFORM_CONNECTED/DISCONNECTED(+2) = +5（第二十一批）
-                # T-123~T-132: EdgeCommandPusher 下行链路 + /edge_command 诊断端点（第二十二批）
+                # T-123~T-132 compatibility event subscriptions remain; the
+                # former process-global Edge command owner is retired.
                 _total_subscriptions = 88
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
@@ -685,20 +715,31 @@ def runtime_lifespan(
             if mode_transition_service_sink is not None:
                 mode_transition_service_sink(None)
             try:
-                # Stop the process-owned Tribe bus before releasing its exact
-                # Host application-port owner.  A second concurrent Host
-                # lifespan cannot overwrite this fenced binding.
+                # Stop this Host-owned Tribe bus before releasing its exact
+                # execution context and application-port owner.
                 await _shutdown_runtime(
                     activity_monitor=None,
                     resource_manager=None,
+                    tribe_event_bus=tribe_runtime.event_bus,
                     logger=logger,
                 )
             finally:
                 try:
-                    if tribe_ports_bound:
-                        tribe_runtime.unbind_application_ports(owner=host_lifecycle)
+                    close_started_runtime_owners()
                 finally:
-                    await host_lifecycle.aclose(logger=logger)
+                    try:
+                        if tribe_execution_activation is not None:
+                            tribe_runtime.deactivate_execution_context(
+                                tribe_execution_activation
+                            )
+                    finally:
+                        try:
+                            if tribe_ports_bound:
+                                tribe_runtime.unbind_application_ports(
+                                    owner=host_lifecycle
+                                )
+                        finally:
+                            await host_lifecycle.aclose(logger=logger)
 
     return _lifespan()
 

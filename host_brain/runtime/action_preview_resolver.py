@@ -307,6 +307,7 @@ def _effect_descriptor(
     risk = {
         "conversation.user_turn": 1,
         "conversation.preference_signal": 1,
+        "edge.embodiment_enqueue": 4,
         "host.sys_mode_transition": 4,
         "task.terminal_reconciliation": 4,
         "life.conversation_turn_recorded": 2,

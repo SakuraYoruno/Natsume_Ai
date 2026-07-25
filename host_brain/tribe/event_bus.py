@@ -11,8 +11,6 @@ from host_brain.core.ids import now_ms
 
 logger = logging.getLogger("Natsume.tribe.event_bus")
 
-_EVENT_BUS: InMemoryTribeEventBus | None = None
-
 # 事件处理器类型：接收 TribeEvent，返回 Awaitable[None]
 EventHandler = Callable[["TribeEvent"], Awaitable[None]]
 
@@ -348,22 +346,16 @@ class InMemoryTribeEventBus:
 
 
 def get_tribe_event_bus() -> InMemoryTribeEventBus:
-    """Return the process Tribe bus owned by the Tribe runtime.
+    """Return the exact execution-bound Host event bus."""
 
-    The HTTP application exposes and starts this bus, but it does not own the
-    domain service.  Keeping the authority here prevents every Tribe agent from
-    reaching back into the application routing layer merely to publish events.
-    """
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_tribe_runtime_context,
+    )
 
-    global _EVENT_BUS
-    if _EVENT_BUS is None:
-        _EVENT_BUS = InMemoryTribeEventBus(max_events=2048)
-    return _EVENT_BUS
-
-
-def set_tribe_event_bus(bus: InMemoryTribeEventBus | None) -> None:
-    global _EVENT_BUS
-    _EVENT_BUS = bus
+    bus = require_tribe_runtime_context().event_bus
+    if not isinstance(bus, InMemoryTribeEventBus):
+        raise RuntimeError("TRIBE_RUNTIME_EVENT_BUS_TYPE_DRIFT")
+    return bus
 
 
 def new_tribe_event(
@@ -393,5 +385,4 @@ __all__ = [
     "TribeEvent",
     "get_tribe_event_bus",
     "new_tribe_event",
-    "set_tribe_event_bus",
 ]

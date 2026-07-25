@@ -29,9 +29,6 @@ from host_brain.app.obs_projection_jobs import (
     STATIC_READ,
     TYPED_UNAVAILABLE,
 )
-from host_brain.composition.process_service_container import (
-    get_process_service_container,
-)
 from host_brain.app.observability_runtime.projection_runtime import (
     TASK_EXECUTION_INDEX_KEY,
     TASK_EXECUTION_KIND,
@@ -53,8 +50,6 @@ def _forbidden_locator(*_args, **_kwargs):  # noqa: ANN002, ANN003
 def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
     tmp_path: Path,
 ) -> None:
-    process_container = get_process_service_container()
-    before = process_container.application_ports
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "obs-d3-coverage.sqlite3",
     )
@@ -75,8 +70,8 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
             job.source_mode == AUTHENTICATED_HOST_READ
             for job in ports.projection_jobs
         ) == 4
-        assert sum(job.source_mode == DURABLE_READ for job in ports.projection_jobs) == 6
-        assert sum(job.source_mode == STATIC_READ for job in ports.projection_jobs) == 3
+        assert sum(job.source_mode == DURABLE_READ for job in ports.projection_jobs) == 7
+        assert sum(job.source_mode == STATIC_READ for job in ports.projection_jobs) == 2
         assert sum(
             job.source_mode == DURABLE_READ_PARTIAL
             for job in ports.projection_jobs
@@ -85,7 +80,6 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
             job.source_mode != TYPED_UNAVAILABLE
             for job in ports.projection_jobs
         ) == 21
-        assert process_container.application_ports is before
     finally:
         assert ports.close_owned_resources is not None
         ports.close_owned_resources()

@@ -8,7 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from host_brain.app.internal_agent_routes import router
+from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.internal_agent_routes import create_internal_agent_router
 from host_brain.app.settings.core import get_core_settings
 from host_brain.app.settings.internal_agent import get_internal_agent_settings
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
@@ -66,6 +67,7 @@ def _client(
     *,
     task_review_command_service: TaskReviewCommandService | None = None,
     review_principal_id: str = "codex-route",
+    life_memory_store: LifeMemoryStore | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.state.task_review_command_service = task_review_command_service
@@ -83,7 +85,17 @@ def _client(
         )
         return await call_next(request)
 
-    app.include_router(router)
+    app.include_router(
+        create_internal_agent_router(
+            HostRoutePorts(
+                life_memory_store_provider=(
+                    (lambda: life_memory_store)
+                    if life_memory_store is not None
+                    else None
+                ),
+            )
+        )
+    )
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -186,13 +198,11 @@ def test_codex_internal_immune_live_report_translates_missing_guardian_port(
     assert response.json()["detail"] == "DEGRADATION_STATE_PROVIDER_UNAVAILABLE"
 
 
-def test_codex_internal_owner_directive_route_persists_life_memory(monkeypatch) -> None:
+def test_codex_internal_owner_directive_route_persists_life_memory() -> None:
     ledger = SQLiteLedger(db_path=":memory:", check_same_thread=False)
     try:
         store = LifeMemoryStore(ledger=ledger)
-        monkeypatch.setattr("host_brain.composition.process_services.get_life_memory_store", lambda: store)
-
-        response = _client().post(
+        response = _client(life_memory_store=store).post(
             "/internal/codex/owner-directives",
             json={
                 "request_id": "owner-route-1",

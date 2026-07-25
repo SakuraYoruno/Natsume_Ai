@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
@@ -12,6 +14,9 @@ from host_brain.tribe.thalamus_agent import (
     classify_task_intent_fastpath,
     classify_task_intent_by_rules,
 )
+
+
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
 
 
 def _run(coro):

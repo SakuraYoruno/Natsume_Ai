@@ -25,6 +25,9 @@ from host_brain.tribe.mirror_neuron_agent import MirrorNeuronAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
+
+
 @pytest.fixture()
 def registry():
     return TribeStateRegistry()

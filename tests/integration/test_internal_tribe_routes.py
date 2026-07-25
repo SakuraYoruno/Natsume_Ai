@@ -1,19 +1,46 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from host_brain.app.internal_tribe_routes import (
-    router,
-    set_tribe_event_bus,
-)
+from host_brain.app.internal_tribe_routes import router
 from host_brain.tribe.event_bus import InMemoryTribeEventBus
+from host_brain.tribe.registry import HostTribeRegistry
+from host_brain.tribe.runtime_context import (
+    TribeAgentCatalog,
+    TribeRuntimeContext,
+    activate_tribe_runtime_context,
+    deactivate_tribe_runtime_context,
+)
+from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
 def _build_client() -> TestClient:
+    bus = InMemoryTribeEventBus(max_events=64)
+    owner = object()
+    context = TribeRuntimeContext(
+        state_registry=TribeStateRegistry(),
+        tribe_registry=HostTribeRegistry(),
+        event_bus=bus,
+        agent_catalog=TribeAgentCatalog(
+            (("test_placeholder_agent", object),)
+        ),
+        active_owner_provider=lambda: owner,
+    )
     app = FastAPI()
     app.include_router(router)
-    set_tribe_event_bus(InMemoryTribeEventBus(max_events=64))
+
+    @app.middleware("http")
+    async def bind_test_tribe_context(request: Request, call_next):
+        activation = activate_tribe_runtime_context(
+            owner=owner,
+            context=context,
+        )
+        try:
+            return await call_next(request)
+        finally:
+            deactivate_tribe_runtime_context(activation)
+
     return TestClient(app)
 
 
@@ -107,3 +134,39 @@ def test_gemini_key_status_response_shape(monkeypatch) -> None:
     assert "keys" not in body
     assert "api_key" not in body
     assert "pool_size" not in body
+
+
+def test_edge_command_compatibility_routes_are_fail_closed(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "secret-token")
+    client = _build_client()
+    headers = {"X-Internal-Token": "secret-token"}
+
+    status_response = client.get(
+        "/internal/edge_command/status",
+        headers=headers,
+    )
+    assert status_response.status_code == 200
+    status = status_response.json()
+    assert status == {
+        "enabled": False,
+        "edge_base_url": "",
+        "timeout_ms": 0,
+        "authority_state": "GOVERNED_TASKGRAPH_ONLY",
+        "reason_code": "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
+        "ts_ms": status["ts_ms"],
+    }
+
+    push_response = client.post(
+        "/internal/edge_command/push",
+        headers=headers,
+        json={
+            "command_type": "gate_control_command",
+            "target_agent": "edge.channel",
+            "source_agent": "operator",
+            "payload": {"gate_open": True},
+        },
+    )
+    assert push_response.status_code == 409
+    assert push_response.json()["detail"] == (
+        "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    )

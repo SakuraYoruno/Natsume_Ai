@@ -7,6 +7,7 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_prompt_context,
     get_chat_runtime_render_target_lang,
 )
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.conversation import conversation_max_turns
 
 from host_brain.persona.context.affect_state import AffectStateBlock, resolve_affect_state
@@ -130,6 +131,18 @@ class PromptContextPlaneV5:
 class ContextAssembler:
     """Assemble canonical prompt context for normal chat from one V4 fact plane."""
 
+    def __init__(
+        self,
+        *,
+        read_ports: ConversationContextReadPorts | None = None,
+    ) -> None:
+        if read_ports is not None and not isinstance(
+            read_ports,
+            ConversationContextReadPorts,
+        ):
+            raise TypeError("read_ports must be ConversationContextReadPorts or None")
+        self._read_ports = read_ports
+
     def assemble(
         self,
         *,
@@ -139,13 +152,25 @@ class ContextAssembler:
         history_max_turns: int | None = None,
         allow_older_summary: bool = True,
     ) -> PromptContextPlaneV5:
-        from host_brain.composition.process_services import (  # noqa: PLC0415
-            get_conversation_history,
-            get_session_tactic_ledger_store,
-            get_conversation_turn_store,
-            get_session_topic_ledger_store,
-        )
         from host_brain.persona.reply_plan import build_reply_plan  # noqa: PLC0415
+
+        read_ports = self._read_ports
+        conversation_history = (
+            read_ports.conversation_history() if read_ports is not None else None
+        )
+        conversation_turn_store = (
+            read_ports.conversation_turn_store() if read_ports is not None else None
+        )
+        session_topic_ledger_store = (
+            read_ports.session_topic_ledger_store()
+            if read_ports is not None
+            else None
+        )
+        session_tactic_ledger_store = (
+            read_ports.session_tactic_ledger_store()
+            if read_ports is not None
+            else None
+        )
 
         prompt_context = get_chat_runtime_prompt_context(runtime_payload)
         render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
@@ -196,21 +221,26 @@ class ContextAssembler:
                 fetched_turns=len(normalized_recent_turns),
             )
             current_turn_index = len(normalized_recent_turns)
-        elif request_id and session_id:
+        elif (
+            request_id
+            and session_id
+            and conversation_history is not None
+            and conversation_turn_store is not None
+        ):
             resolved_history_max_turns = max(
                 1,
                 int(history_max_turns if history_max_turns is not None else conversation_max_turns()),
             )
             current_request_turn = None
             try:
-                current_request_turn = get_conversation_turn_store().find_turn(
+                current_request_turn = conversation_turn_store.find_turn(
                     session_id=session_id,
                     request_id=request_id,
                     role="user",
                 )
             except Exception:
                 current_request_turn = None
-            history_window = get_conversation_history().fetch_window_for_messages(
+            history_window = conversation_history.fetch_window_for_messages(
                 session_id=session_id,
                 max_turns=resolved_history_max_turns,
                 exclude_request_id=request_id,
@@ -249,7 +279,12 @@ class ContextAssembler:
                 if current_request_turn is not None:
                     current_turn_index = int(current_request_turn.get("turn_index") or 0)
                 else:
-                    current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
+                    current_turn_index = int(
+                        conversation_turn_store.next_turn_index(
+                            session_id=session_id
+                        )
+                        - 1
+                    )
             except Exception:
                 current_turn_index = None
 
@@ -265,17 +300,17 @@ class ContextAssembler:
         )
 
         topic_ledger_state = (
-            get_session_topic_ledger_store().fetch_block(
+            session_topic_ledger_store.fetch_block(
                 session_id=session_id,
                 current_turn_index=current_turn_index,
             )
-            if session_id
+            if session_id and session_topic_ledger_store is not None
             else TopicLedgerBlock()
         )
         topic_ledger = TopicLedgerBlockWrapper(state=topic_ledger_state)
         tactic_ledger_state = (
-            get_session_tactic_ledger_store().fetch_block(session_id=session_id)
-            if session_id
+            session_tactic_ledger_store.fetch_block(session_id=session_id)
+            if session_id and session_tactic_ledger_store is not None
             else TacticLedgerBlock()
         )
         tactic_ledger = TacticLedgerBlockWrapper(state=tactic_ledger_state)
@@ -403,8 +438,9 @@ def assemble_prompt_context_plane(
     turn_context_sections: list[str] | tuple[str, ...] | None = None,
     history_max_turns: int | None = None,
     allow_older_summary: bool = True,
+    context_read_ports: ConversationContextReadPorts | None = None,
 ) -> PromptContextPlaneV4:
-    return ContextAssembler().assemble(
+    return ContextAssembler(read_ports=context_read_ports).assemble(
         node_id=node_id,
         runtime_payload=runtime_payload,
         turn_context_sections=turn_context_sections,
@@ -424,8 +460,9 @@ def assemble_prompt_context_plane_v5(
     turn_context_sections: list[str] | tuple[str, ...] | None = None,
     history_max_turns: int | None = None,
     allow_older_summary: bool = True,
+    context_read_ports: ConversationContextReadPorts | None = None,
 ) -> PromptContextPlaneV5:
-    return ContextAssembler().assemble(
+    return ContextAssembler(read_ports=context_read_ports).assemble(
         node_id=node_id,
         runtime_payload=runtime_payload,
         turn_context_sections=turn_context_sections,

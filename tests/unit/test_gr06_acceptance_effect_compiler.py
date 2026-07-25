@@ -22,6 +22,10 @@ _OPERATOR_REQUEST_ID = "request-gr06-operator-sys-mode"
 _OPERATOR_TARGET = "operator_sys_mode_switch"
 _OPERATOR_NODE_GRANT_REF = "node-grant://operator-sys-mode"
 _OPERATOR_NODE_GRANT_DIGEST = "sha256:" + "a" * 64
+_EDGE_REQUEST_ID = "request-gr06-operator-edge"
+_EDGE_TARGET = "operator_edge_command_push"
+_EDGE_NODE_GRANT_REF = "node-grant://operator-edge"
+_EDGE_NODE_GRANT_DIGEST = "sha256:" + "c" * 64
 
 
 def _contracts():
@@ -157,6 +161,100 @@ def _operator_commit():
                     "reason": "focused work",
                     "event_id": event_id,
                     "runtime_scope_id": "runtime-scope-operator-compiler",
+                },
+            }
+        ],
+    }
+
+
+def _edge_operator_contracts():
+    fact = WorldFactV2(
+        workspace_id="workspace-edge",
+        subject_id="principal-edge",
+        key="edge.connection",
+        value="ready",
+        source_ref="world-observation://operator/edge/1",
+        confidence=1.0,
+        observed_at_ms=200,
+        expires_at_ms=10_000,
+    )
+    snapshot = WorldSnapshotV2(
+        workspace_id=fact.workspace_id,
+        subject_id=fact.subject_id,
+        revision=1,
+        facts=(fact,),
+    )
+    return build_direct_host_route_contracts(
+        surface=HostCommandSurface.OPERATOR,
+        request_id=_EDGE_REQUEST_ID,
+        session_id="session-gr06-edge",
+        principal_id="principal-edge",
+        ts_ms=200,
+        intent_draft={
+            "id": "intent-gr06-operator-edge",
+            "route": "delegate",
+            "target_id": _EDGE_TARGET,
+            "domain": "organ_ops",
+            "action": "operator_edge_command_push",
+            "target": "edge",
+            "task": "set edge expression to happy",
+            "args": {
+                "operator_command_id": "edge.command.push",
+                "command_type": "emotion_state_command",
+                "target_agent": "edge.somatic",
+                "embodiment_runtime_scope_id": "runtime-scope-operator-edge",
+                "payload": {"emotion_tag": "HAPPY", "intensity": 0.75},
+            },
+        },
+        governor_result={
+            "request_id": _EDGE_REQUEST_ID,
+            "intent_id": "intent-gr06-operator-edge",
+            "decision": "APPROVE",
+            "risk_level": 4,
+            "ts_ms": 200,
+        },
+        sanitized_message="set edge expression to happy",
+        person_id="principal-edge",
+        operator_command_id="edge.command.push",
+        frozen_context={
+            "runtime_context_schema": "natsume.runtime-context.request.v1",
+            "workspace_id": fact.workspace_id,
+            "subject_id": fact.subject_id,
+            "world_snapshot_v2": snapshot.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": fact.workspace_id,
+                "subject_id": fact.subject_id,
+                "scene_id": "scene.operator-edge",
+                "revision": 2,
+                "decision_digest": "d" * 64,
+            },
+        },
+    )
+
+
+def _edge_operator_commit():
+    return {
+        "decision": "APPROVE",
+        "request_id": _EDGE_REQUEST_ID,
+        "narrative": "accepted edge expression command",
+        "route_type": "delegate",
+        "target_id": _EDGE_TARGET,
+        "audit_refs": {
+            "node_grant_ref": _EDGE_NODE_GRANT_REF,
+            "node_grant_digest": _EDGE_NODE_GRANT_DIGEST,
+        },
+        "acceptance_effect_intents": [
+            {
+                "effect_type": "edge.embodiment_enqueue",
+                "commit_scope": "NODE",
+                "payload": {
+                    "operator_command_id": "edge.command.push",
+                    "request_id": _EDGE_REQUEST_ID,
+                    "command_type": "emotion_state_command",
+                    "target_agent": "edge.somatic",
+                    "payload": {"emotion_tag": "HAPPY", "intensity": 0.75},
+                    "runtime_scope_id": "runtime-scope-operator-edge",
                 },
             }
         ],
@@ -417,6 +515,76 @@ def test_operator_compiler_rejects_forged_target_or_authority(
             work_order=contracts.work_order,
             node_id=contracts.graph.nodes[0].node_id,
             attempt_id="attempt-gr06-operator-forged",
+            worker_commit=commit,
+        )
+
+    assert raised.value.reason_code == ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID
+
+
+def test_operator_compiler_builds_deterministic_edge_embodiment_command() -> None:
+    contracts = _edge_operator_contracts()
+    kwargs = {
+        "command": contracts.command,
+        "work_order": contracts.work_order,
+        "node_id": contracts.graph.nodes[0].node_id,
+        "attempt_id": "attempt-gr06-edge",
+        "worker_commit": _edge_operator_commit(),
+    }
+
+    effects = compile_graph_acceptance_effects(**kwargs)
+    replay = compile_graph_acceptance_effects(**kwargs)
+
+    assert effects == replay
+    assert len(effects) == 1
+    effect = effects[0]
+    assert effect.effect_type == "edge.embodiment_enqueue"
+    assert effect.commit_scope is AcceptanceEffectCommitScope.GRAPH
+    payload = effect.payload
+    assert payload["operator_command_id"] == "edge.command.push"
+    assert payload["command_type"] == "emotion_state_command"
+    assert payload["target_agent"] == "edge.somatic"
+    assert payload["runtime_scope_id"] == "runtime-scope-operator-edge"
+    command = payload["embodiment_command"]
+    assert command["kind"] == "avatar"
+    assert command["action"] == "set_expression"
+    assert command["payload"] == {"emotion_tag": "HAPPY", "intensity": 0.75}
+    assert command["request_id"] == _EDGE_REQUEST_ID
+    assert command["grant_ref"] == _EDGE_NODE_GRANT_REF
+    assert command["idempotency_key"].startswith("task-edge-effect:")
+    assert command["authority_ref"].startswith(
+        "authority://task-acceptance/sha256/"
+    )
+    assert command["issued_at_ms"] == 200
+    assert command["deadline_ms"] == 604_800_200
+    preview = payload["_action_preview_context"]
+    assert preview["task_graph_id"] == contracts.command.graph_id
+    assert preview["task_node_id"] == contracts.graph.nodes[0].node_id
+    assert preview["node_grant_ref"] == _EDGE_NODE_GRANT_REF
+    assert preview["node_grant_digest"] == _EDGE_NODE_GRANT_DIGEST
+
+
+@pytest.mark.parametrize(
+    "payload_patch",
+    [
+        {"target_agent": "edge.channel"},
+        {"payload": {"emotion_tag": "HAPPY", "intensity": 1.5}},
+        {"runtime_scope_id": "runtime-scope-forged"},
+    ],
+    ids=("target-drift", "invalid-intensity", "runtime-scope-drift"),
+)
+def test_operator_compiler_rejects_forged_edge_effect(
+    payload_patch: dict[str, object],
+) -> None:
+    contracts = _edge_operator_contracts()
+    commit = deepcopy(_edge_operator_commit())
+    commit["acceptance_effect_intents"][0]["payload"].update(payload_patch)
+
+    with pytest.raises(AcceptanceEffectCompileError) as raised:
+        compile_graph_acceptance_effects(
+            command=contracts.command,
+            work_order=contracts.work_order,
+            node_id=contracts.graph.nodes[0].node_id,
+            attempt_id="attempt-gr06-edge-forged",
             worker_commit=commit,
         )
 

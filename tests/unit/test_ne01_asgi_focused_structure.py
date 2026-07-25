@@ -44,10 +44,13 @@ def test_asgi_keeps_lifespan_state_and_reverse_close_order_in_one_scope() -> Non
         "host_lifecycle.stop_activity_monitor",
         "reset_life_command_authority",
         "embodiment_runtime.close()",
-        "set_memory_service_container(None)",
+        "close_bond_runtime",
+        "close_governance_runtime",
+        "withdraw_memory_service_container(memory)",
         "memory.close()",
         "command_ingress.aclose()",
         "security.aclose()",
+        "close_authority_runtime",
     )
     ordered_shutdown = shutdown_source[
         shutdown_source.index('error = await _attempt(\n        "obs_operator_admission"') :
@@ -73,6 +76,6 @@ def test_focused_helpers_do_not_own_asgi_lifecycle() -> None:
     assert callable(asgi._compose_life_dispatchers)
     assert callable(asgi._submit_life_tick_command)
     assert callable(asgi._command_ingress_hmac_secrets)
-    assert callable(asgi._compose_host_runtime_context)
+    assert callable(asgi._start_host_runtime_context_services)
     assert callable(asgi._compose_internal_runtime)
     assert callable(asgi._activate_internal_runtime)

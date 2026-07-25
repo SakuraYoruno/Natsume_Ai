@@ -107,13 +107,10 @@ class TestMotorExecutionLoop:
         outcome = state.get("last_dispatch_outcome") or {}
         assert outcome.get("edge_ok") is False
 
-    def test_dispatch_action_no_executor_returns_no_executor(self, agent):
-        """dispatch_action() 无 executor 且无 EdgeCommandPusher 时应返回 ok=False。"""
+    def test_dispatch_action_no_executor_requires_governed_edge_command(self, agent):
+        """Edge plan without an injected governed executor must fail closed."""
         plan_result = agent.plan_action(action="test_action")
         with patch("host_brain.tribe.motor_cortex_agent.emit_tribe_event"):
-            with patch(
-                "host_brain.tribe.motor_cortex_agent.get_edge_command_pusher",
-                side_effect=ImportError,
-            ):
-                outcome = agent.dispatch_action(plan=plan_result["plan"])
+            outcome = agent.dispatch_action(plan=plan_result["plan"])
         assert outcome["ok"] is False
+        assert outcome["reason"] == "GOVERNED_EDGE_COMMAND_REQUIRED"

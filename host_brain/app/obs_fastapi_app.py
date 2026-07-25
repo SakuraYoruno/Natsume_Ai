@@ -235,6 +235,9 @@ def create_obs_app(
                     resolved_ports.life_action_context_provider
                 ),
                 approval_token_validator=resolved_ports.approval_token_validator,
+                degradation_capability_port_provider=(
+                    resolved_ports.degradation_capability_port_provider
+                ),
             )
             # Publish the minimum retryable graph before constructing optional
             # readers.  Routes cannot run until lifespan yields, while a

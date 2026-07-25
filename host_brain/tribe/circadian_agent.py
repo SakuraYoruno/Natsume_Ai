@@ -435,22 +435,18 @@ class CircadianAgent:
             return {"baseline_applied": False, "error": str(exc)}
 
 
-_CIRCADIAN_AGENT: "CircadianAgent | None" = None
-
-
 def get_circadian_agent() -> CircadianAgent:
-    global _CIRCADIAN_AGENT
-    if _CIRCADIAN_AGENT is None:
-        _CIRCADIAN_AGENT = CircadianAgent()
-    return _CIRCADIAN_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "circadian_agent",
+        expected_type=CircadianAgent,
+    )
 
 
-def set_circadian_agent(agent: CircadianAgent | None) -> None:
-    global _CIRCADIAN_AGENT
-    _CIRCADIAN_AGENT = agent
-
-
-__all__ = ["CircadianAgent", "get_circadian_agent", "set_circadian_agent"]
+__all__ = ["CircadianAgent", "get_circadian_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

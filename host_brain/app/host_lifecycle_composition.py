@@ -14,14 +14,14 @@ from threading import RLock
 from typing import Any
 
 from host_brain.app.host_hard_state import HostHardStateOwner
+from host_brain.contracts.host_hard_state import (
+    HostHardStateCommitV1,
+    HostHardStateJournalPort,
+)
 from host_brain.contracts.host_lifecycle import (
     HostLifecycleApplicationPorts,
     HostLifecycleScopeError,
     KeywordFactory,
-)
-from host_brain.contracts.host_hard_state import (
-    HostHardStateCommitV1,
-    HostHardStateJournalPort,
 )
 
 
@@ -132,11 +132,16 @@ class HostLifecycleContainer:
     def start_resource_manager(
         self,
         *,
+        status_journal: Any,
         degradation_state_provider: Callable[[], Mapping[str, Any] | None] | None,
         run_immediately: bool,
     ) -> Any:
         """Construct, start, and publish this app's resource manager."""
 
+        if status_journal is None:
+            raise HostLifecycleScopeError(
+                "RESOURCE_MANAGER_STATUS_JOURNAL_NOT_INJECTED"
+            )
         with self._lock:
             self._require_open()
             if self._owned_resource_manager is not None:
@@ -144,6 +149,7 @@ class HostLifecycleContainer:
             manager = self.ports.resource_manager_factory(
                 model_attempt_service=self.ports.model_attempt_service(),
                 degradation_state_provider=degradation_state_provider,
+                status_journal=status_journal,
             )
             self._owned_resource_manager = manager
             try:
@@ -262,6 +268,20 @@ class HostLifecycleContainer:
             except Exception as exc:
                 logger.warning("ActivityMonitor 停止失败: %s", exc)
         self._hard_state_owner.unbind_durable_journal()
+
+    def stop_resource_manager(self, *, logger: Any) -> None:
+        """Stop the status writer while Task Runtime and Host lease are live."""
+
+        with self._lock:
+            manager = self._owned_resource_manager
+        if manager is None:
+            return
+        manager.stop()
+        with self._lock:
+            if self._owned_resource_manager is manager:
+                self._owned_resource_manager = None
+                self._resource_manager = None
+        logger.info("SystemResourceManager 已停止")
 
     async def aclose(self, *, logger: Any) -> None:
         """Unpublish and stop all services exactly once for the open epoch."""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.conversation import conversation_max_turns
 from host_brain.persona.context.interaction_facts import InteractionFactsPlane
 
@@ -74,12 +75,34 @@ def assemble_interaction_facts_plane(
     runtime_payload: Mapping[str, Any],
     history_max_turns: int | None = None,
     allow_older_summary: bool = True,
+    context_read_ports: ConversationContextReadPorts | None = None,
 ) -> InteractionFactsPlane:
-    from host_brain.composition.process_services import (  # noqa: PLC0415
-        get_conversation_history,
-        get_conversation_turn_store,
-        get_session_tactic_ledger_store,
-        get_session_topic_ledger_store,
+    if context_read_ports is not None and not isinstance(
+        context_read_ports,
+        ConversationContextReadPorts,
+    ):
+        raise TypeError(
+            "context_read_ports must be ConversationContextReadPorts or None"
+        )
+    conversation_history = (
+        context_read_ports.conversation_history()
+        if context_read_ports is not None
+        else None
+    )
+    conversation_turn_store = (
+        context_read_ports.conversation_turn_store()
+        if context_read_ports is not None
+        else None
+    )
+    session_topic_ledger_store = (
+        context_read_ports.session_topic_ledger_store()
+        if context_read_ports is not None
+        else None
+    )
+    session_tactic_ledger_store = (
+        context_read_ports.session_tactic_ledger_store()
+        if context_read_ports is not None
+        else None
     )
 
     payload = _safe_mapping(runtime_payload)
@@ -102,18 +125,23 @@ def assemble_interaction_facts_plane(
     if eval_history:
         history_turns = _normalize_eval_history(eval_history)
         current_turn_index = len(history_turns)
-    elif request_id and session_id:
+    elif (
+        request_id
+        and session_id
+        and conversation_history is not None
+        and conversation_turn_store is not None
+    ):
         max_turns = max(1, int(history_max_turns if history_max_turns is not None else conversation_max_turns()))
         current_request_turn = None
         try:
-            current_request_turn = get_conversation_turn_store().find_turn(
+            current_request_turn = conversation_turn_store.find_turn(
                 session_id=session_id,
                 request_id=request_id,
                 role="user",
             )
         except Exception:
             current_request_turn = None
-        window = get_conversation_history().fetch_window_for_messages(
+        window = conversation_history.fetch_window_for_messages(
             session_id=session_id,
             max_turns=max_turns,
             exclude_request_id=request_id,
@@ -142,7 +170,12 @@ def assemble_interaction_facts_plane(
             if current_request_turn is not None:
                 current_turn_index = int(current_request_turn.get("turn_index") or 0)
             else:
-                current_turn_index = int(get_conversation_turn_store().next_turn_index(session_id=session_id) - 1)
+                current_turn_index = int(
+                    conversation_turn_store.next_turn_index(
+                        session_id=session_id
+                    )
+                    - 1
+                )
         except Exception:
             current_turn_index = None
 
@@ -159,16 +192,16 @@ def assemble_interaction_facts_plane(
     )
 
     topic_ledger: TopicLedgerBlock = (
-        get_session_topic_ledger_store().fetch_block(
+        session_topic_ledger_store.fetch_block(
             session_id=session_id,
             current_turn_index=current_turn_index,
         )
-        if session_id
+        if session_id and session_topic_ledger_store is not None
         else TopicLedgerBlock()
     )
     tactic_ledger: TacticLedgerBlock = (
-        get_session_tactic_ledger_store().fetch_block(session_id=session_id)
-        if session_id
+        session_tactic_ledger_store.fetch_block(session_id=session_id)
+        if session_id and session_tactic_ledger_store is not None
         else TacticLedgerBlock()
     )
 

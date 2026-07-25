@@ -3,7 +3,12 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from host_brain.tribe.ans_agent import ANSAgent
+
+
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
 
 
 def test_ans_agent_dedupes_repeated_glymphatic_cycle_logs(monkeypatch) -> None:

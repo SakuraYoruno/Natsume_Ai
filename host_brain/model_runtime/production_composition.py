@@ -47,8 +47,47 @@ def build_default_production_model_runtime(
     """Build the sole production prompt/route/provider/service object graph."""
 
     route_catalog = get_default_production_route_catalog()
-    return build_model_runtime_composition(
+    return _build_production_model_runtime(
+        ledger=ledger,
+        credential_resolver=credential_resolver,
+        base_url_resolver=base_url_resolver,
+        transport=transport,
         prompt_registry=get_default_production_prompt_registry(),
+        route_catalog=route_catalog,
+    )
+
+
+def build_app_local_production_model_runtime(
+    *,
+    ledger: Any,
+    credential_resolver: CredentialResolver,
+    base_url_resolver: BaseUrlResolver,
+    transport: SingleAttemptTransport,
+) -> ModelRuntimeComposition:
+    """Build a fresh prompt/route/provider/service graph for one Host epoch."""
+
+    route_catalog = build_production_server_route_catalog()
+    return _build_production_model_runtime(
+        ledger=ledger,
+        credential_resolver=credential_resolver,
+        base_url_resolver=base_url_resolver,
+        transport=transport,
+        prompt_registry=build_live_production_prompt_registry(),
+        route_catalog=route_catalog,
+    )
+
+
+def _build_production_model_runtime(
+    *,
+    ledger: Any,
+    credential_resolver: CredentialResolver,
+    base_url_resolver: BaseUrlResolver,
+    transport: SingleAttemptTransport,
+    prompt_registry: Any,
+    route_catalog: Any,
+) -> ModelRuntimeComposition:
+    return build_model_runtime_composition(
+        prompt_registry=prompt_registry,
         route_policy=build_server_owned_production_route_policy(
             route_catalog=route_catalog,
         ),
@@ -63,6 +102,7 @@ def build_default_production_model_runtime(
 
 
 __all__ = [
+    "build_app_local_production_model_runtime",
     "build_default_production_model_runtime",
     "get_default_production_prompt_registry",
     "get_default_production_route_catalog",

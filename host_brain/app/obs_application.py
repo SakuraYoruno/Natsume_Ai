@@ -110,6 +110,7 @@ class ObsApplicationPorts:
     life_snapshot_reader: Callable[[str], Mapping[str, Any]]
     life_action_context_provider: Callable[..., Any] | None = None
     approval_token_validator: Callable[..., Any] | None = None
+    degradation_capability_port_provider: Callable[[], Any] | None = None
     projection_jobs: tuple[ObsProjectionJob, ...] = ()
     close_owned_resources: Callable[[], None] | None = None
     projection_coverage: str = "CALLER_DEFINED"
@@ -138,6 +139,7 @@ class ObsApplicationPorts:
         for field_name in (
             "life_action_context_provider",
             "approval_token_validator",
+            "degradation_capability_port_provider",
         ):
             provider = getattr(self, field_name)
             if provider is not None and not callable(provider):

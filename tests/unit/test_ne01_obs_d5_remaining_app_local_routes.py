@@ -199,7 +199,6 @@ def test_unmaterialized_semantic_and_governance_views_fail_truthfully(
 
 def test_forge_preview_reads_the_app_projection_without_live_forge_service(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     from host_brain.app.obs_routes_stats_capability_agent import (
         CapabilityForgePreviewRequest,
@@ -211,11 +210,7 @@ def test_forge_preview_reads_the_app_projection_without_live_forge_service(
     )
     from host_brain.composition import process_services
 
-    monkeypatch.setattr(
-        process_services,
-        "get_capability_forge_service",
-        lambda: pytest.fail("preview must not discover the live Forge service"),
-    )
+    assert not hasattr(process_services, "get_capability_forge_service")
     ports = build_default_obs_application_ports(
         canonical_db_path=tmp_path / "forge-preview.sqlite3"
     )
@@ -293,6 +288,7 @@ def test_seven_gets_keep_two_obs_apps_and_sqlite_databases_distinct(
         process_services,
         "get_semantic_recaller",
         forbidden_global_source,
+        raising=False,
     )
     monkeypatch.setattr(
         process_services,

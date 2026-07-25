@@ -42,12 +42,13 @@ AcceptanceEffectRecoveryObserver = Callable[[Mapping[str, Any]], Any]
 
 _EFFECT_TYPE_ORDER = {
     "host.sys_mode_transition": 0,
-    "conversation.user_turn": 1,
-    "conversation.preference_signal": 2,
-    "life.conversation_turn_recorded": 3,
-    "life.foreground_completed": 4,
-    "surface.reply_delivery": 5,
-    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 6,
+    "edge.embodiment_enqueue": 1,
+    "conversation.user_turn": 2,
+    "conversation.preference_signal": 3,
+    "life.conversation_turn_recorded": 4,
+    "life.foreground_completed": 5,
+    "surface.reply_delivery": 6,
+    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 7,
 }
 
 _RECOVERY_POLL_SECONDS = 0.25
@@ -295,6 +296,7 @@ class AcceptanceEffectDispatcher:
         effect_type = str(effect.get("effect_type") or "").strip()
         risk_level = {
             "host.sys_mode_transition": 4,
+            "edge.embodiment_enqueue": 4,
             # Level 5 is an unconditional ActionArbiter block.  Signed repair
             # is level 4 so an exact Preview + consumed Review may authorize
             # it; it is never silently executable.

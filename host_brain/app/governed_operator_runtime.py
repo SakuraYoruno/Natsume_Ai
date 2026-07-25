@@ -1,9 +1,4 @@
-"""Governed Operator runtime for accepted Host hard-state transitions.
-
-The frozen worker can only propose one authority-free Acceptance Effect.  The
-app-local dispatcher performs the actual mode transition after Verification
-and Acceptance and commits its durable receipt through the canonical queue.
-"""
+"""Governed Operator runtime; workers propose, app-local dispatchers commit."""
 
 from __future__ import annotations
 
@@ -31,6 +26,20 @@ from host_brain.app.governed_operator_contracts import (
     GOVERNED_OPERATOR_GOVERNOR_REJECTED,
     GOVERNED_OPERATOR_RUNTIME_INVALID,
     GovernedOperatorRuntimeError,
+)
+from host_brain.app.governed_operator_edge_support import (
+    EDGE_ACTION_KIND as _EDGE_ACTION_KIND,
+    EDGE_EFFECT_TYPE as _EDGE_EFFECT_TYPE,
+    EDGE_INGRESS_ACTION as _EDGE_INGRESS_ACTION,
+    EDGE_INGRESS_PATH as _EDGE_INGRESS_PATH,
+    EDGE_INGRESS_REQUIRED_SCOPES as _EDGE_INGRESS_REQUIRED_SCOPES,
+    EDGE_TARGET_ID as _EDGE_TARGET_ID,
+    build_edge_governor_intent as _build_edge_governor_intent,
+    compile_frozen_edge_command,
+    embodiment_runtime_scope_id as _embodiment_runtime_scope_id,
+    normalize_edge_command_args as _normalize_edge_command_args,
+    pending_operator_reviews as _pending_operator_reviews,
+    require_durable_edge_outcome as _require_durable_edge_outcome,
 )
 from host_brain.app.governed_terminal_reconciliation_runtime import (
     GovernedTerminalReconciliationMixin,
@@ -81,8 +90,6 @@ _ACTION_KIND = "operator_sys_mode_transition"
 _INGRESS_ACTION = "obs:command:sys_mode.switch"
 _INGRESS_PATH = "/v1/host/obs-commands/sys_mode.switch"
 _INGRESS_REQUIRED_SCOPES = ("obs:sys-mode:write", "obs:write")
-
-
 @dataclass(frozen=True, slots=True)
 class GovernedOperatorComposition:
     runtime: "GovernedOperatorRuntime"
@@ -91,10 +98,20 @@ class GovernedOperatorComposition:
 
 
 class FrozenSysModeSwitchExecutor:
-    """Compile one frozen Operator command into a non-executable effect intent."""
+    """Compile supported frozen Operator commands into non-executable intents."""
 
-    def __init__(self, *, runtime_scope_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_scope_id: str,
+        embodiment_runtime_scope_id: str | None = None,
+    ) -> None:
         self._runtime_scope_id = _runtime_scope_id(runtime_scope_id)
+        self._embodiment_runtime_scope_id = (
+            _runtime_scope_id(embodiment_runtime_scope_id)
+            if embodiment_runtime_scope_id is not None
+            else None
+        )
 
     async def execute_stream(
         self,
@@ -102,6 +119,12 @@ class FrozenSysModeSwitchExecutor:
     ) -> AsyncIterator[Mapping[str, Any]]:
         if frozen.route == "delegate" and frozen.target_id == TERMINAL_TARGET_ID:
             yield terminal_reconciliation_commit_event(frozen)
+            return
+        if frozen.route == "delegate" and frozen.target_id == _EDGE_TARGET_ID:
+            yield compile_frozen_edge_command(
+                frozen,
+                runtime_scope_id=self._embodiment_runtime_scope_id,
+            )
             return
         if frozen.route != "delegate" or frozen.target_id != _TARGET_ID:
             raise GovernedOperatorRuntimeError(
@@ -179,7 +202,6 @@ class FrozenSysModeSwitchExecutor:
             ],
         }
 
-
 class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
     """Evaluate, admit and execute the sys_mode.switch Operator vertical slice."""
 
@@ -196,6 +218,7 @@ class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
         mode_transition_service_provider: Any,
         secure_ingress_authority_resolver: Any,
         runtime_scope_id: str,
+        embodiment_runtime_provider: Any | None = None,
     ) -> None:
         if not callable(
             getattr(
@@ -215,6 +238,11 @@ class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
         self._task_store = task_store
         self._terminal_operator_command_store = terminal_operator_command_store
         self._mode_transition_service_provider = mode_transition_service_provider
+        if embodiment_runtime_provider is not None and not callable(
+            embodiment_runtime_provider
+        ):
+            raise TypeError("embodiment_runtime_provider must be callable")
+        self._embodiment_runtime_provider = embodiment_runtime_provider
         self._runtime_scope_id = _runtime_scope_id(runtime_scope_id)
         self._secure_ingress_authority_resolver = (
             secure_ingress_authority_resolver
@@ -288,6 +316,31 @@ class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
             )
             bound["acceptance_effect_receipt"] = outcome
             bound["historical_side_effects_executed"] = True
+            return bound
+        if operator_command_id == "edge.command.push":
+            normalized = _normalize_edge_command_args(args)
+            if (
+                str(intent.get("action") or "").strip()
+                != _EDGE_ACTION_KIND
+                or str(intent.get("target") or "").strip().lower() != "edge"
+                or str(intent.get("target_id") or "").strip()
+                != _EDGE_TARGET_ID
+            ):
+                raise GovernedOperatorRuntimeError(
+                    GOVERNED_OPERATOR_RUNTIME_INVALID,
+                    "Edge Operator Review continuation intent binding drifted",
+                )
+            outcome = _require_durable_edge_outcome(
+                task_store=self._task_store,
+                embodiment_runtime_provider=self._embodiment_runtime_provider,
+                execution_receipt=receipt,
+                command=command,
+                normalized_args=normalized,
+            )
+            bound["acceptance_effect_receipt"] = outcome
+            bound["historical_side_effects_executed"] = bool(
+                outcome["physical_effect_verified"]
+            )
             return bound
         target_mode = str(args.get("target_mode") or "").strip().lower()
         reason = str(args.get("reason") or "").strip()
@@ -521,6 +574,232 @@ class GovernedOperatorRuntime(GovernedTerminalReconciliationMixin):
             "terminal_status": terminal.get("status"),
         }
 
+    async def execute_edge_command_push(
+        self,
+        payload: Mapping[str, Any],
+        request_id: str,
+    ) -> dict[str, Any]:
+        if self._embodiment_runtime_provider is None:
+            raise GovernedOperatorRuntimeError(
+                GOVERNED_OPERATOR_RUNTIME_INVALID,
+                "app-local embodiment runtime is unavailable",
+            )
+        value = dict(payload or {})
+        supplied_authority = _require_operator_authority(value)
+        request_ref = str(request_id or "").strip()
+        if not request_ref:
+            raise GovernedOperatorRuntimeError(
+                GOVERNED_OPERATOR_RUNTIME_INVALID,
+                "Edge Operator request_id is required",
+            )
+        existing = self._commands.get_by_request(
+            surface=HostCommandSurface.OPERATOR.value,
+            request_id=request_ref,
+        )
+        authority = _verify_durable_operator_authority(
+            supplied_authority,
+            resolver=self._secure_ingress_authority_resolver,
+            request_id=request_ref,
+            allow_settled_replay=isinstance(existing, Mapping),
+            operator_command_id="edge.command.push",
+            ingress_action=_EDGE_INGRESS_ACTION,
+            ingress_path=_EDGE_INGRESS_PATH,
+            required_scopes=_EDGE_INGRESS_REQUIRED_SCOPES,
+        )
+        normalized = _normalize_edge_command_args(value)
+        principal_id = str(authority["principal_id"])
+        if str(value.get("principal_id") or "").strip() != principal_id:
+            raise GovernedOperatorRuntimeError(
+                GOVERNED_OPERATOR_RUNTIME_INVALID,
+                "Edge Operator payload differs from Secure Ingress authority",
+            )
+        message = (
+            "向边缘表情执行器提交受治理指令："
+            f"{normalized['payload']['emotion_tag']}"
+        )
+        args = {
+            "text": message,
+            "route": "delegate",
+            "target_id": _EDGE_TARGET_ID,
+            "embodiment_runtime_scope_id": _embodiment_runtime_scope_id(
+                self._embodiment_runtime_provider
+            ),
+            **normalized,
+        }
+        intent_draft = {
+            "route": "delegate",
+            "target_id": _EDGE_TARGET_ID,
+            "domain": "edge_device",
+            "task": message,
+            "action": _EDGE_ACTION_KIND,
+            "target": "edge",
+            "args": args,
+        }
+        received_at_ms = now_ms()
+        if isinstance(existing, Mapping):
+            command = existing.get("command")
+            work_order = existing.get("work_order")
+            if (
+                not isinstance(command, HostCommand)
+                or not isinstance(work_order, WorkOrderV3)
+                or str(
+                    dict(work_order.metadata or {}).get("operator_command_id")
+                    or ""
+                ).strip()
+                != "edge.command.push"
+            ):
+                raise GovernedOperatorRuntimeError(
+                    GOVERNED_OPERATOR_RUNTIME_INVALID,
+                    "durable Edge Operator replay lacks exact command metadata",
+                )
+            decision = self._governor_grants.require(
+                request_id=request_ref,
+                expected_ref=command.governor_grant_ref,
+            )
+        else:
+            decision = dict(
+                self._intent_engine.evaluate_intent(
+                    raw_intent=_build_edge_governor_intent(
+                        request_id=request_ref,
+                        principal_id=principal_id,
+                        ts_ms=received_at_ms,
+                        args=args,
+                    ),
+                    request_id=request_ref,
+                    current_ms=received_at_ms,
+                    proposer_node_id="obs_secure_operator_ingress",
+                    model_snapshot="server-owned-edge-command",
+                    prompt_profile_id="operator-edge-command-v1",
+                )
+                or {}
+            )
+        if str(decision.get("decision") or "").strip().upper() != "APPROVE":
+            raise GovernedOperatorRuntimeError(
+                str(
+                    decision.get("reason_code")
+                    or GOVERNED_OPERATOR_GOVERNOR_REJECTED
+                ),
+                str(decision.get("detail") or "Governor rejected Edge command"),
+            )
+
+        terminal: dict[str, Any] | None = None
+        try:
+            async for raw in self._runtime.execute_stream(
+                request_body={"input_source": "OPERATOR"},
+                request_id=request_ref,
+                session_id=f"operator-{request_ref}",
+                ts_ms=received_at_ms,
+                intent_draft=intent_draft,
+                governor_result=decision,
+                person_id=principal_id,
+                sanitized_message=message,
+                command_authority=authority,
+            ):
+                event = dict(raw or {})
+                if bool(event.get("done")):
+                    terminal = event
+        except GovernedRuntimeError as exc:
+            if exc.reason_code != INTENT_ADMISSION_REVIEW_REQUIRED:
+                raise
+            return self._pending_edge_review_result(
+                request_id=request_ref,
+                normalized_args=normalized,
+            )
+        if terminal is None:
+            raise GovernedOperatorRuntimeError(
+                GOVERNED_OPERATOR_RUNTIME_INVALID,
+                "governed Edge Operator runtime emitted no terminal result",
+            )
+        receipt_raw = terminal.get("execution_receipt")
+        receipt = dict(receipt_raw) if isinstance(receipt_raw, Mapping) else {}
+        accepted = (
+            receipt.get("accepted") is True
+            and str(receipt.get("status") or "").strip().upper() == "ACCEPTED"
+        )
+        durable = self._commands.get_by_request(
+            surface=HostCommandSurface.OPERATOR.value,
+            request_id=request_ref,
+        )
+        command = durable.get("command") if isinstance(durable, Mapping) else None
+        if not isinstance(command, HostCommand):
+            raise GovernedOperatorRuntimeError(
+                GOVERNED_OPERATOR_RUNTIME_INVALID,
+                "Edge Operator command cannot be reopened",
+            )
+        outcome = _require_durable_edge_outcome(
+            task_store=self._task_store,
+            embodiment_runtime_provider=self._embodiment_runtime_provider,
+            execution_receipt=receipt,
+            command=command,
+            normalized_args=normalized,
+        )
+        replayed = receipt.get("replayed") is True
+        success = bool(
+            accepted
+            and outcome["committed"]
+            and outcome["durable_admitted"]
+            and outcome["delivery_status"] != "REJECTED"
+        )
+        effect_summary = dict(
+            dict(terminal.get("audit_refs") or {}).get("acceptance_effects")
+            or {}
+        )
+        return {
+            "success": success,
+            "side_effects_executed": bool(
+                success
+                and outcome["physical_effect_verified"]
+                and not replayed
+            ),
+            "historical_side_effects_executed": bool(
+                outcome["physical_effect_verified"]
+            ),
+            "exact_replay": replayed,
+            "command_type": normalized["command_type"],
+            "target_agent": normalized["target_agent"],
+            "delivery_status": outcome["delivery_status"],
+            "execution_receipt": receipt,
+            "acceptance_effects": effect_summary,
+            "acceptance_effect_receipt": outcome,
+            "graph_id": receipt.get("graph_id"),
+            "graph_revision": receipt.get("graph_revision"),
+            "terminal_status": terminal.get("status"),
+        }
+
+    def _pending_edge_review_result(
+        self,
+        *,
+        request_id: str,
+        normalized_args: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        durable = self._commands.get_by_request(
+            surface=HostCommandSurface.OPERATOR.value,
+            request_id=request_id,
+        )
+        command = durable.get("command") if isinstance(durable, Mapping) else None
+        if not isinstance(command, HostCommand):
+            raise GovernedOperatorRuntimeError(
+                GOVERNED_OPERATOR_RUNTIME_INVALID,
+                "durable Edge Operator Review admission is unavailable",
+            )
+        reviews = _pending_operator_reviews(
+            self._review_store,
+            graph_id=command.graph_id,
+            graph_revision=command.graph_revision,
+        )
+        return {
+            "success": True,
+            "accepted": True,
+            "side_effects_executed": False,
+            "status": "WAITING_REVIEW",
+            "reason_code": INTENT_ADMISSION_REVIEW_REQUIRED,
+            "command_type": normalized_args["command_type"],
+            "target_agent": normalized_args["target_agent"],
+            "graph_id": command.graph_id,
+            "graph_revision": command.graph_revision,
+            "reviews": reviews,
+        }
+
     def _pending_review_result(
         self,
         *,
@@ -594,8 +873,12 @@ def build_governed_operator_runtime(
     cancellation_authority_verifier: Any | None,
     secure_ingress_authority_resolver: Any,
     owner_id: str,
+    embodiment_runtime_provider: Any | None = None,
 ) -> GovernedOperatorRuntime:
     runtime_scope_id = _runtime_scope_from_context(runtime_context_application)
+    embodiment_runtime_scope_id = _embodiment_runtime_scope_id(
+        embodiment_runtime_provider
+    )
     projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     review_store = getattr(task_runtime_container, "review_store", None)
     continuation_store = getattr(
@@ -616,12 +899,15 @@ def build_governed_operator_runtime(
     )
     worker = GovernedFrozenNodeWorker(
         route_kind="delegate",
-        executor=FrozenSysModeSwitchExecutor(runtime_scope_id=runtime_scope_id),
+        executor=FrozenSysModeSwitchExecutor(
+            runtime_scope_id=runtime_scope_id,
+            embodiment_runtime_scope_id=embodiment_runtime_scope_id,
+        ),
         node_grants=node_grant_verifier,
         projections=projection_store,
         action_preview_service=action_preview_service,
         allowed_acceptance_effect_types=frozenset(
-            {_EFFECT_TYPE, TERMINAL_EFFECT_TYPE}
+            {_EFFECT_TYPE, _EDGE_EFFECT_TYPE, TERMINAL_EFFECT_TYPE}
         ),
     )
     coordinator = GovernedTaskCoordinator(
@@ -688,6 +974,7 @@ def build_governed_operator_runtime(
             secure_ingress_authority_resolver
         ),
         runtime_scope_id=runtime_scope_id,
+        embodiment_runtime_provider=embodiment_runtime_provider,
     )
 
 
@@ -709,6 +996,7 @@ def build_governed_operator_composition(
     internal_agent_artifact_store: Any | None = None,
     internal_agent_workspace_runtime: Any | None = None,
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
+    embodiment_runtime_provider: Any | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
@@ -740,6 +1028,7 @@ def build_governed_operator_composition(
                 gateway_reply_query_port or query_gateway_reply_delivery
             ),
             agent_runtime_ports=agent_runtime_ports,
+            embodiment_runtime_provider=embodiment_runtime_provider,
         ),
         owner_id=f"{runtime_owner_id}::acceptance-effects",
         action_preview_service=action_preview_service,
@@ -762,6 +1051,7 @@ def build_governed_operator_composition(
         cancellation_authority_verifier=cancellation_authority_verifier,
         secure_ingress_authority_resolver=secure_ingress_authority_resolver,
         owner_id=f"{runtime_owner_id}::operator",
+        embodiment_runtime_provider=embodiment_runtime_provider,
     )
     return GovernedOperatorComposition(
         runtime=runtime,
@@ -772,7 +1062,7 @@ def build_governed_operator_composition(
 
 def _require_operator_target(target_id: str) -> str:
     target = str(target_id or "").strip()
-    if target not in {_TARGET_ID, TERMINAL_TARGET_ID}:
+    if target not in {_TARGET_ID, _EDGE_TARGET_ID, TERMINAL_TARGET_ID}:
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,
             "unsupported governed Operator target",

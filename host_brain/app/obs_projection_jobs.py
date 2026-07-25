@@ -108,6 +108,7 @@ from host_brain.app.observability_runtime.runtime_snapshot_source import (
     RuntimeSnapshotSourceReader,
     RuntimeSnapshotSourceUnavailable,
 )
+from host_brain.integrations.runtime_events import RuntimeEventStore
 from host_brain.app.observability_runtime.host_read_transport import HostReadTransport
 from host_brain.app.observability_runtime.host_projection_sources import (
     AuthenticatedHostProjectionSources,
@@ -451,12 +452,15 @@ def _bio_ops_callback(store: QueryProjectionStore, root: Path) -> Callable[[], o
 
 def _resource_manager_callback(
     store: QueryProjectionStore,
-    status_path: Path,
+    canonical_db_path: str | Path,
 ) -> Callable[[], object]:
     def refresh() -> dict[str, int]:
+        try:
+            event_store = RuntimeEventStore(canonical_db_path)
+        except Exception:
+            event_store = None
         payload, observed, source = load_resource_manager_projection_source(
-            manager_provider=lambda: None,
-            status_path=status_path,
+            event_store=event_store,
         )
         unavailable = str(payload.get("status") or "").upper() == "UNAVAILABLE"
         _upsert(
@@ -1164,8 +1168,8 @@ def build_explicit_obs_projection_callbacks(
         ),
         "resource-manager": ExplicitObsProjectionCallback(
             "resource-manager",
-            _resource_manager_callback(store, host_root / "data" / "runtime_resource_manager.json"),
-            STATIC_READ,
+            _resource_manager_callback(store, database),
+            DURABLE_READ,
             30_000,
         ),
         "runtime-snapshot": ExplicitObsProjectionCallback(

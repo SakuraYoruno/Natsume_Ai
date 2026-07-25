@@ -110,6 +110,25 @@ def test_digital_life_supervisor_has_no_direct_scheduler_dispatch_authority(tmp_
     )
 
 
+def test_default_foreground_runner_fails_closed_without_composed_life_reader(
+    tmp_path,
+) -> None:
+    supervisor = DigitalLifeSupervisor(
+        DigitalLifeRuntimeConfig(
+            mode="fixture",
+            run_id="unit-missing-life-reader",
+            out_dir=tmp_path,
+        )
+    )
+
+    with supervisor:
+        result = supervisor.run_foreground_turn("测试显式 Life reader")
+
+    assert result["turn"]["status"] == "DEGRADED"
+    assert result["turn"]["reason_code"] == "LIFE_SNAPSHOT_READER_NOT_COMPOSED"
+    assert result["turn"]["mapped_organ_count"] == 0
+
+
 def test_digital_life_supervisor_runs_proactive_interaction_dry_run(tmp_path) -> None:
     supervisor = DigitalLifeSupervisor(
         DigitalLifeRuntimeConfig(

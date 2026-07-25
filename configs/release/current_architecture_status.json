@@ -1,16 +1,16 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-24",
+  "as_of_date": "2026-07-25",
   "source_baseline": {
-    "dev_commit": "b4615323c5bc997bdec8bccf9cfcf1578b52fe15",
+    "dev_commit": "99ae35ca4d86680b93645f91460f08a92abe5da1",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "REBASED_NE03_GUARDIAN_WORKTREE_OVER_ORIGIN_DEV_B4615323C"
+    "evaluated_source": "THIS_DOCUMENT_COMMIT_NE01_FIRST_GOVERNED_EDGE_EXPRESSION_SLICE"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "MIGRATION_HEAD_0122_NE04_V2_EVIDENCE_BOUNDARY_ADDED_GATE_1_TO_14_STATIC_PASS_HOST_STARTUP_EXACT_NONTERMINAL_GRAPH_CONTINUATION_BOOT_SCOPED_LOCAL_SQLITE_PASS_DIRECT_AND_APPROVED_PLAN_PRODUCTION_SKILL_ADMISSION_FROZEN_PAYLOAD_SLICE_INTERNAL_POST_ADMISSION_NATIVE_WORKORDERV3_SLICE_DIRECT_PRE_RESERVATION_TERMINAL_BUDGET_FIVE_AGGREGATE_UOW_LOCAL_SQLITE_PASS_PROMPT_INTELLIGENCE_PROPOSAL_ONLY_NO_LEGACY_PLAN_OR_SKILL_EXECUTION_ZERO_CALL_CHAT_GENERATION_PAYLOAD_RETIRED_THALAMUS_PRE_ADMISSION_INTENT_MODEL_CALLS_RETIRED_CONVERSATION_EXPERIENCE_WRITERS_RETIRED_TO_READ_PACK_ONLY_NEW_PRODUCTION_GRAPHS_ATOMIC_DEFAULT_TERMINAL_EXACT_AUTO_LOCAL_SQLITE_CANARY_PASS_OPERATOR_HTTP_CANARY_NOT_RUN_CANCELLATION_REQUIRES_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_SERVICE_LOCATOR_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "HOST_AND_EDGE_RUNTIME_AUTHORITY_CONSOLIDATED_ON_DEV_99AE35CA4_PRODUCTION_PROCESS_LOCATOR_AND_TRIBE_NO_CONTEXT_FALLBACKS_RETIRED_RESOURCE_MANAGER_STATUS_DURABLE_RESEARCH_LEDGER_RESPONSIBILITIES_SPLIT_SHARED_RUNTIME_CONTRACTS_NEUTRALIZED_EDGE_PROCESS_GLOBAL_DIRECT_PUSH_RETIRED_FIRST_GOVERNED_EDGE_EXPRESSION_TASKGRAPH_REVIEW_ACCEPTANCE_OUTBOX_AND_READ_ONLY_RECONCILIATION_SLICE_LOCAL_SQLITE_PASS_UNIFIED_STATIC_SCAN_AND_FULL_GATES_1_TO_14_LOCAL_PASS_PROGRAM_INCOMPLETE_REMAINING_33_OPERATOR_COMMANDS_REAL_EDGE_GATEWAY_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_EXTERNAL_NAMESPACES_CANCELLATION_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,735 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "TERMINAL_RECONCILIATION_ISOLATED_REAL_SQLITE_CANARY_PASS_OPERATOR_BUNDLE_PREFLIGHT_PASS_OPERATOR_HTTP_CANARY_PENDING_PROGRAM_INCOMPLETE",
-    "commit_binding": "ARTIFACTS_LOCAL_GATES_COMMIT_SHA_PATH_GENERATED_AFTER_COMMIT",
+    "status": "FIRST_GOVERNED_EDGE_EXPRESSION_SLICE_LOCAL_PASS_PROGRAM_INCOMPLETE",
+    "commit_binding": "THIS_DOCUMENT_COMMIT_WITH_POST_COMMIT_ARTIFACTS_LOCAL_GATES_MATCHING_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_ATOMIC_DEFAULT_PLUS_TERMINAL_EXACT_AUTO_AND_COMPLETE_RECONCILIATION_BUNDLE_GATE",
+    "slice": "NE01_FIRST_GOVERNED_EDGE_EXPRESSION_SLICE",
+    "resource_manager_status_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "migration": "0123_resource_manager_status_journal.sql",
+      "production_owner": "ONE_RESOURCE_MANAGER_PER_HOST_LIFECYCLE_CONTAINER_WITH_STATUS_AGGREGATE_PARTITIONED_BY_RUNTIME_SCOPE",
+      "startup_order": "TASK_RUNTIME_THEN_HOST_LEASE_FENCE_THEN_GUARDIAN_THEN_RESOURCE_MANAGER",
+      "shutdown_order": "ADMISSION_DRAIN_THEN_SCHEDULER_THEN_RESOURCE_MANAGER_DURABLE_STOP_THEN_TASK_RUNTIME_AND_HOST_LEASE",
+      "journal": "APPEND_ONLY_CONTIGUOUS_REVISION_FULL_DIGEST_CHAIN_REPLAY_EXACT_RESPONSE_LOSS_REOPEN_ACTIVE_HOST_LEASE_TRIGGER",
+      "restart_recovery": "1001_PLUS_EVENT_CURSOR_PAGING_AND_DURABLE_COUNTER_PRESSURE_DECISION_ACTION_GATE_RESTORE",
+      "failure_fences": [
+        "MISSING_STATUS_JOURNAL_REJECTED_BEFORE_RESOURCE_MANAGER_FACTORY",
+        "STALE_OR_RELEASED_HOST_FENCE_REJECTED",
+        "AUTHORITY_OR_PAYLOAD_DRIFT_FAILS_CLOSED",
+        "APPEND_FAILURE_STOPS_BACKGROUND_LOOP_AND_BLOCKS_BACKGROUND_ADMISSION",
+        "STOP_TIMEOUT_PRESERVES_OWNER_FOR_RETRY",
+        "STOP_APPEND_FAILURE_PRESERVES_TASK_RUNTIME_AND_HOST_AUTHORITY"
+      ],
+      "obs_projection": "CANONICAL_RUNTIME_EVENT_HEAD_ONLY_NO_HOST_MEMORY_OR_FILE_FALLBACK_NO_CURRENT_TIME_CURSOR",
+      "retired_paths": [
+        "host_brain/data/runtime_resource_manager.json production writer",
+        "Obs shared JSON reader",
+        "System Skill shared JSON fallback"
+      ],
+      "local_targeted_validation": "150_PASSED_IN_84_35_SECONDS_ONE_FILE_DISJOINT_BATCH_INCLUDES_REAL_SQLITE_0123_1001_EVENT_PAGING_RESPONSE_LOSS_STALE_FENCE_DUAL_SCOPE_LIFECYCLE_SHUTDOWN_OBS_AND_ASGI_STRUCTURE",
+      "full_architecture_static_gate": "FAIL_GATE_1_GATE_3_RESEARCH_LEDGER_SPLIT_PASS",
+      "full_architecture_static_gate_issues": {
+        "1": [
+          "target-layer dependency SCCs: [['application', 'persistence'], ['app', 'composition']]"
+        ]
+      },
+      "current_slice_added_static_failures": [],
+      "documentation_and_machine_state_validation": "62_PASSED_IN_10_35_SECONDS_PLUS_COMPILEALL_JSON_PARSE_AND_DIFF_CHECK_PASS",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "RESOURCE_MANAGER_STATUS_AUTHORITY_ONLY_OTHER_RESOURCE_RECOVERY_EXTERNAL_NAMESPACES_COMPLETE_TYPED_WORKER_OBS_COMPOSITION_AND_NE01_REMAIN_INCOMPLETE"
+    },
+    "research_shadow_ledger_split_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_GATE_3_PASS_NE01_IN_PROGRESS",
+      "responsibility_split": {
+        "repository_owner": "host_brain/persistence/research_shadow_ledger_repository.py",
+        "repository_owner_lines": 1271,
+        "canonical_codec": "host_brain/persistence/research_shadow_ledger_codec.py",
+        "canonical_codec_lines": 512,
+        "typed_projections": "host_brain/persistence/research_shadow_ledger_models.py",
+        "typed_projections_lines": 108
+      },
+      "compatibility": "PUBLIC_REPOSITORY_IMPORTS_AND_SECRETS_RANDBELOW_INJECTION_POINT_PRESERVED",
+      "local_targeted_validation": "18_PASSED_IN_22_38_SECONDS_RESEARCH_LEDGER_PAIRED_EXECUTION_AND_PERSISTENCE_CONTRACT_WITH_SPLIT_AUTHORITY_GUARDS",
+      "full_architecture_static_gate": "FAIL_GATE_1_ONLY",
+      "full_architecture_static_gate_issues": [
+        "target-layer dependency SCCs: [['application', 'persistence'], ['app', 'composition']]"
+      ],
+      "gate_3": "PASS_NO_UNCLASSIFIED_PRODUCTION_FILE_OVER_1500_LINES_NO_ALLOWLIST_EXPANSION",
+      "current_slice_added_static_failures": [],
+      "documentation_and_machine_state_validation": "62_PASSED_PLUS_COMPILEALL_JSON_PARSE_AND_DIFF_CHECK_PASS",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "RESPONSIBILITY_ONLY_NO_RESEARCH_PROMOTION_OR_BENEFIT_CLAIM_NE01_REMAINS_INCOMPLETE"
+    },
+    "runtime_contract_layering_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_FULL_STATIC_PASS_NE01_IN_PROGRESS",
+      "canonical_contracts": [
+        "host_brain/contracts/task_runtime_feature_canary.py",
+        "host_brain/contracts/host_lifecycle.py"
+      ],
+      "compatibility_exports": [
+        "host_brain/task_runtime/feature_canary.py",
+        "host_brain/app/host_lifecycle_composition.py"
+      ],
+      "retired_reverse_edges": [
+        "host_brain/persistence/task_runtime_feature_canary_repository.py -> host_brain/task_runtime/feature_canary.py",
+        "host_brain/composition/host_application.py -> host_brain/app/host_lifecycle_composition.py"
+      ],
+      "type_identity": "LEGACY_AND_CANONICAL_IMPORT_PATHS_RESOLVE_THE_SAME_CLASS_PROTOCOL_ERROR_AND_SERIALIZATION_OBJECTS",
+      "local_targeted_validation": "74_PASSED_IN_21_79_SECONDS_FEATURE_CANARY_LIFECYCLE_ASGI_HARD_STATE_AND_IDENTITY_BOUNDARIES",
+      "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
+      "gate_1": "PASS_ISSUES_EMPTY_STRONGLY_CONNECTED_COMPONENTS_EMPTY",
+      "gate_3": "PASS_NO_ALLOWLIST_EXPANSION",
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "STATIC_LAYERING_ONLY_UNIVERSAL_RUNTIME_SEVEN_ROUTE_ACCEPTANCE_GENERAL_RECOVERY_EXTERNAL_SERVICES_AND_NE01_REMAIN_INCOMPLETE"
+    },
+    "dev_baseline_post_review_cancellation_validation": {
+      "status": "MERGED_DEV_EXACT_INTERNAL_SINGLE_NODE_ONLY_PROGRAM_INCOMPLETE",
+      "merge_commit": "99ae35ca4d86680b93645f91460f08a92abe5da1",
+      "authority": "IMMUTABLE_BLOCKED_CANCELLATION_INTENT_PLUS_SEPARATELY_BOUND_TRUSTED_CANCELLED_FINAL_DECISION",
+      "restart_order": "NONACCEPTANCE_CLAIM_CLOSEOUT_BEFORE_TOMBSTONE_AND_WORKSPACE_CLEANUP",
+      "agent_reexecution": "FORBIDDEN",
+      "not_covered": "RAW_WORKER_FAILURE_PRECHECKPOINT_CANCELLATION_GENERAL_MULTINODE_UNKNOWN_EFFECT_PERIODIC_SURVIVOR_WAVE_INTEGRATION_AND_NE01_COMPLETION",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+    },
+    "edge_command_global_authority_retirement_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_FIRST_GOVERNED_SLICE_WIRED_REAL_EDGE_CANARY_MISSING_NE01_IN_PROGRESS",
+      "retired_symbols": [
+        "_PUSHER",
+        "_PUSHER_LOCK",
+        "get_edge_command_pusher",
+        "init_edge_command_pusher",
+        "set_edge_command_pusher"
+      ],
+      "retired_production_callers": [
+        "Host startup singleton registration",
+        "MotorCortex fallback dispatch",
+        "Limbic emotion event direct push",
+        "Cortex platform gate direct push",
+        "internal edge command direct POST",
+        "Obs edge.command.push direct domain writer"
+      ],
+      "retained_transport_boundary": "EXPLICIT_CONSTRUCTION_ONLY_EXACT_NODE_BOUND_ACTION_PREVIEW_EXECUTION_PROOF_REQUIRED",
+      "compatibility_status": "FIRST_GOVERNED_EXPRESSION_SLICE_ONLY",
+      "blocked_reason": "UNSUPPORTED_EDGE_COMMAND_REJECTED_BEFORE_HOSTCOMMAND_ADMISSION",
+      "monitor_ui": "DIRECT_PUSH_REMAINS_LOCKED_UNTIL_GOVERNED_TASK_RUNTIME_REVIEW",
+      "governed_positive_slice": {
+        "command_id": "edge.command.push",
+        "allowed_command_type": "emotion_state_command",
+        "allowed_target_agent": "edge.somatic",
+        "canonical_chain": "SECURE_INGRESS_TO_TYPED_GOVERNOR_TO_OPERATOR_HOSTCOMMAND_TO_IMMUTABLE_TASKGRAPH_TO_RISK4_REVIEW_TO_ATTEMPT_LEASE_GRANT_BUDGET_VERIFICATION_ACCEPTANCE_TO_EDGE_EMBODIMENT_ENQUEUE_TO_TERMINAL_PREVIEW_TO_APP_LOCAL_DURABLE_OUTBOX",
+        "compiled_action": "avatar.set_expression",
+        "durable_first_response": "PENDING_DURABLY_QUEUED_NOT_PHYSICALLY_VERIFIED",
+        "exact_replay": "REOPEN_SAME_ACCEPTANCE_EFFECT_AND_OUTBOX_NO_SECOND_ENQUEUE_OR_SUBMIT",
+        "unknown_effect_reconciliation": "EXPIRED_DISPATCH_CLAIM_TO_IN_DOUBT_THEN_READ_ONLY_RECEIPT_QUERY_NO_RESUBMIT",
+        "physical_test_boundary": "REAL_HOST_SQLITE_WITH_RECORDING_ASYNC_COMMAND_PORT_NOT_REAL_EDGE_PROCESS_OR_DEVICE"
+      },
+      "local_targeted_validation": "78_PASSED_IN_79_67_SECONDS_OPERATOR_ACCEPTANCE_PREVIEW_EDGE_SQLITE_AND_STRUCTURE_REGRESSION",
+      "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
+      "unified_static_scan": "PASS_FAILURES_EMPTY_AFTER_EDGE_HANDLER_AND_OPERATOR_SUPPORT_RESPONSIBILITY_SPLIT",
+      "targeted_py_compile": "PASS",
+      "documentation_and_machine_state_validation": "27_PASSED_IN_10_53_SECONDS_DOC_AUTHORITY_FRESHNESS_AND_DELIVERY_METADATA_PLUS_JSON_PARSE_AND_DIFF_CHECK_PASS",
+      "monitor_ui_build": "NOT_RUN_NO_UI_CHANGE",
+      "npm_audit": "NOT_RUN_NO_DEPENDENCY_CHANGE",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "FIRST_GOVERNED_EXPRESSION_SLICE_ONLY_REMAINING_33_OPERATOR_COMMANDS_MORE_EDGE_COMMAND_TYPES_REAL_EDGE_GATEWAY_DEVICE_AND_FULL_STACK_ACCEPTANCE_REMAIN_MISSING_NE01_REMAINS_INCOMPLETE"
+    },
+    "tribe_fallback_retirement_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "production_owner": "EACH_TRIBE_RUNTIME_SCOPE_FRESHLY_OWNS_STATE_REGISTRY_HOST_REGISTRY_EVENT_BUS_AND_FIXED_23_AGENT_CATALOG",
+      "production_agent_providers": "FIXED_AGENT_CONSTRUCTORS_NOT_PROCESS_SINGLETON_GETTERS",
+      "compatibility_context": "CONTEXTVAR_BINDS_EXACT_TRIBE_RUNTIME_CONTEXT_TO_CURRENT_REQUEST_OR_BACKGROUND_EXECUTION_WITH_NO_MODULE_GLOBAL_ACTIVE_OWNER",
+      "production_lifecycle": "LIFESPAN_ACTIVATES_STARTUP_AND_BACKGROUND_CONTEXT_HTTP_MIDDLEWARE_ACTIVATES_EACH_REQUEST_AND_BOTH_RELEASE_IN_FINALLY",
+      "agent_binding": "HOST_OWNED_AGENTS_RECEIVE_SCOPE_APPLICATION_PORTS_AND_STATE_REGISTRY_AND_RESTORE_PRIOR_FIELDS_ON_UNBIND",
+      "sequential_host_identity": "ALL_23_AGENT_IDENTITIES_ARE_DISTINCT_BETWEEN_SEQUENTIAL_PRODUCTION_SCOPES",
+      "concurrent_execution_identity": "TWO_OVERLAPPING_ASYNC_TRIBE_SCOPES_RESOLVE_DISTINCT_AGENT_AND_STATE_REGISTRY_IDENTITIES",
+      "retired_agent_backing_singletons": 23,
+      "retired_agent_setters": 23,
+      "retired_shared_runtime_fallbacks": [
+        "_GLOBAL_REGISTRY",
+        "_HOST_TRIBE_REGISTRY",
+        "_EVENT_BUS"
+      ],
+      "obs_projection_registry": "23_AGENT_ID_AND_FAMILY_PAIRS_ONLY_NO_REMOVED_MODULE_OR_SINGLETON_NAMES",
+      "no_context_result": "TRIBE_RUNTIME_CONTEXT_NOT_BOUND",
+      "validation_harness": "DIGITAL_LIFE_SUPERVISOR_EXPLICITLY_OWNS_BINDS_ACTIVATES_DEACTIVATES_AND_UNBINDS_ONE_TRIBE_SCOPE",
+      "removed_process_global_fences": [
+        "MODULE_GLOBAL_ACTIVE_TRIBE_OWNER",
+        "MODULE_GLOBAL_ACTIVE_TRIBE_CONTEXT",
+        "GLOBAL_APPLICATION_PORT_BINDING_FENCE"
+      ],
+      "failure_fences": [
+        "SAME_EXECUTION_CROSS_SCOPE_ACTIVATION_REJECTED",
+        "ALL_23_COMPATIBILITY_GETTERS_REJECTED_WITHOUT_EXACT_EXECUTION_CONTEXT",
+        "SHARED_STATE_HOST_REGISTRY_AND_EVENT_BUS_GETTERS_REJECTED_WITHOUT_EXACT_EXECUTION_CONTEXT",
+        "WRONG_OWNER_OR_CONTEXT_DRIFT_REJECTED",
+        "AGENT_PROVIDER_FAILURE_ROLLS_BACK_CONTEXT",
+        "APPLICATION_PORT_OR_STATE_REGISTRY_DRIFT_REJECTED",
+        "EXPLICIT_AGENT_PORT_REJECTED_WHILE_SCOPE_UNBOUND_OR_EXECUTION_CONTEXT_INACTIVE",
+        "UNBIND_WITH_ACTIVE_EXECUTION_REJECTED",
+        "INHERITED_CONTEXT_AFTER_SCOPE_RELEASE_REJECTED_AS_STALE"
+      ],
+      "targeted_validation": "69_PASSED_IN_7_25_SECONDS_INCLUDES_FALLBACK_LIFECYCLE_OBS_PROJECTION_AND_DIGITAL_LIFE_HARNESS",
+      "broad_agent_and_tribe_validation": "659_PASSED_4_SKIPPED_4_EXISTING_WARNINGS_IN_53_83_SECONDS_EXCLUDES_7_CLEAN_BASELINE_INTERNAL_RUNTIME_FAILURES_OVERLAPS_TARGETED_NOT_ADDITIVE",
+      "baseline_failure_audit": "7_INTERNAL_RUNTIME_FAILURES_REPRODUCED_UNCHANGED_IN_CLEAN_5997DAA2C_WORKTREE_NOT_ATTRIBUTED_TO_THIS_SLICE",
+      "historical_execution_context_validation": "105_PASSED_IN_15_61_SECONDS_SUPERSEDED_NON_ADDITIVE",
+      "historical_asgi_composition_and_scope_validation": "80_PASSED_IN_8_24_SECONDS_SUPERSEDED_NON_ADDITIVE",
+      "historical_agent_catalog_validation": "103_PASSED_IN_16_19_SECONDS_SUPERSEDED_NON_ADDITIVE",
+      "historical_shared_runtime_validation": "101_PASSED_IN_14_75_SECONDS_SUPERSEDED_NON_ADDITIVE",
+      "documentation_and_machine_state_validation": "74_PASSED_FINAL_RERUN_IN_51_83_SECONDS_JSON_PARSE_COMPILEALL_AND_DIFF_CHECK_PASS",
+      "ruff": "NOT_RUN_TOOL_UNAVAILABLE",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "TRIBE_NO_CONTEXT_FALLBACKS_ARE_PHYSICALLY_RETIRED_AND_OVERLAPPING_LOCAL_ASYNC_SCOPES_REMAIN_ISOLATED_BUT_FULL_HOST_MULTI_APP_CANARY_OTHER_AUTHORITIES_EXTERNAL_NAMESPACES_AND_DURABLE_EVENT_BUS_REMAIN_INCOMPLETE_NE01_REMAINS_INCOMPLETE"
+    },
+    "production_process_locator_physical_retirement_current_validation": {
+      "status": "LOCAL_AFFECTED_PASS_NE01_IN_PROGRESS",
+      "deleted_production_modules": [
+        "host_brain/composition/process_service_container.py",
+        "host_brain/composition/process_services.py",
+        "host_brain/composition/process_environment.py",
+        "host_brain/app/process_service_wiring.py"
+      ],
+      "replacement": "ASGI_AND_CLI_BUILD_FRESH_PROCESS_APPLICATION_PORTS_AND_PASS_EXPLICITLY_TO_HOST_ROOT_WITH_NO_GLOBAL_PUBLICATION_OR_FALLBACK",
+      "production_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
+      "test_compatibility_boundary": "TESTS_SUPPORT_PROCESS_SERVICE_COMPAT_IS_INSTALLED_ONLY_BY_PYTEST_CONFTEST_AND_IS_ABSENT_FROM_FRESH_PRODUCTION_IMPORT",
+      "retirement_structure_startup_route_regression": "27_PASSED_16_EXISTING_WARNING_EMISSIONS_IN_27_31_SECONDS",
+      "host_lifecycle_authority_regression": "44_PASSED_IN_7_48_SECONDS",
+      "obs_projection_regression": "16_PASSED_IN_42_84_SECONDS",
+      "obs_fastapi_fresh_process_regression": "16_PASSED_IN_41_53_SECONDS",
+      "test_bridge_model_capability_memory_regression": "105_PASSED_4_EXISTING_WARNING_EMISSIONS_IN_36_86_SECONDS",
+      "affected_phase4_integration": "1_PASSED_IN_1_78_SECONDS",
+      "affected_phase6_integration": "5_PASSED_IN_2_57_SECONDS",
+      "final_selected_structure_owner_regression": "59_PASSED_12_EXISTING_WARNING_EMISSIONS_IN_29_06_SECONDS_SUPERSEDES_OVERLAPPING_STRUCTURE_SUBSETS",
+      "timeout_wrapped_batch": "103_TESTS_REACHED_100_PERCENT_IN_118_69_SECONDS_BUT_OUTER_EXIT_124_NOT_COUNTED_AS_CLEAN_PASS",
+      "batch_overlap": "ALL_BATCHES_RECORDED_SEPARATELY_AND_MUST_NOT_BE_SUMMED",
+      "fresh_production_asgi_import": "PASS_RETIRED_MODULE_NAMES_ABSENT_FROM_SYS_MODULES",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3",
+      "gate_2": "PASS",
+      "current_slice_added_static_failures": [],
+      "documentation_gate": "35_DOC_AUTHORITY_FRESHNESS_DELIVERY_HYGIENE_TESTS_PASSED_PLUS_40_COVERAGE_POLICY_REPOSITORY_TESTS_PASSED_IN_SEPARATE_FILE_GROUPS",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "LOCATOR_RETIREMENT_ONLY_EXTERNAL_NAMESPACE_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_SEVEN_ROUTE_RUNTIME_AND_NE01_REMAIN_INCOMPLETE"
+    },
+    "host_route_locator_cutover_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "production_wiring": "HOST_ASGI_LIFESPAN_TO_FROZEN_HOST_ROUTE_AGENT_RUNTIME_CONTEXT_MULTIMODAL_HEARTBEAT_STARTUP_AND_ROUTE_CATALOG_PORTS_VALIDATION_HARNESS_TO_CONSTRUCTOR_LIFE_READER",
+      "life_authority": "ONE_HOST_LIFE_ROUTE_AUTHORITY_BINDS_COMMAND_SERVICE_AND_SNAPSHOT_READER_FROM_THE_SAME_LIFESPAN",
+      "retired_request_time_paths": [
+        "DIGITAL_LIFE_PROCESS_SERVICES_LEDGER",
+        "DIGITAL_LIFE_PROCESS_LIFE_PROVIDER",
+        "MEMORY_PROCESS_SERVICES_LEDGER",
+        "MEMORY_PROCESS_LIFE_PROVIDER",
+        "INTERNAL_OWNER_DIRECTIVE_PROCESS_LIFE_MEMORY_STORE",
+        "HEALTH_PROCESS_LEDGER_AND_PROBE_FALLBACK",
+        "OBS_CAPABILITY_FORGE_PROCESS_SERVICE",
+        "PROMPT_AND_INTERACTION_CONTEXT_PROCESS_READERS",
+        "SURFACE_BOND_QUEUE_PROCESS_FALLBACK",
+        "STATE_ARBITER_AND_SOCIAL_BRAIN_FALLBACK",
+        "OBSERVABILITY_MEMORY_STORE_FALLBACK",
+        "MULTIMODAL_MODEL_ATTEMPT_PROCESS_FALLBACK",
+        "HEARTBEAT_EDGE_PROBE_PROCESS_FALLBACK",
+        "CLI_AND_SYSTEM_PROCESS_PROBE_IMPORT",
+        "DEAD_SURFACE_CAPABILITY_AND_REFLECTION_FALLBACK",
+        "ROUTE_CATALOG_PROCESS_LOOKUP",
+        "STARTUP_WARMUP_PROCESS_LOOKUPS",
+        "VALIDATION_HARNESS_PROCESS_LIFE_READER"
+      ],
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
+      "frozen_remaining_business_consumers": 0,
+      "targeted_route_and_contract_batch": "56_PASSED_IN_11_84_SECONDS",
+      "targeted_health_query_and_asgi_batch": "41_PASSED_IN_6_17_SECONDS",
+      "overlap_boundary": "THE_TWO_BATCHES_MAY_OVERLAP_AND_MUST_NOT_BE_SUMMED",
+      "previous_host_route_batch": "129_PASSED_4_EXISTING_DEPRECATION_WARNINGS_IN_31_32_SECONDS_COMMIT_BOUND_HISTORY",
+      "previous_consolidated_targeted_batch": "218_PASSED_4_EXISTING_DEPRECATION_WARNINGS_IN_52_33_SECONDS_BEFORE_NEUTRAL_PORT_RELOCATION",
+      "expanded_first_run": "179_PASSED_5_OLD_FIXTURE_FAILURES_4_EXISTING_DEPRECATION_WARNINGS",
+      "context_cutover_commit_bound_final_file_disjoint_targeted_batches": "184_PASSED_4_EXISTING_DEPRECATION_WARNINGS_IN_51_00_SECONDS_PLUS_33_PASSED_IN_9_39_SECONDS_EQUALS_217_PASSED",
+      "locator_zero_preliminary_targeted_batch": "84_PASSED_4_EXISTING_WARNINGS_IN_12_97_SECONDS_SUBSET_OF_CURRENT_BATCH_DO_NOT_SUM",
+      "locator_zero_final_file_disjoint_targeted_batches": "191_PASSED_IN_31_09_SECONDS_PLUS_76_PASSED_12_EXISTING_WARNING_EMISSIONS_IN_21_93_SECONDS_EQUALS_267_PASSED",
+      "locator_zero_asgi_contract_first_run": "71_PASSED_2_FAILED_8_EXISTING_WARNING_EMISSIONS_OLD_ASGI_FIXTURE_AND_STALE_SURFACE_CONSTRUCTION_SITE_CONTRACT",
+      "locator_zero_failed_test_replay": "2_PASSED_4_EXISTING_WARNING_EMISSIONS_IN_7_79_SECONDS",
+      "locator_zero_startup_identity_test_first_run": "73_PASSED_1_TEST_FIXTURE_ASSERTION_FAILURE_8_EXISTING_WARNING_EMISSIONS_THEN_EXACT_REPLAY_1_PASSED",
+      "documentation_gate": "DELIVERY_DOC_GATE_PASS_AND_39_DOC_AUTHORITY_FRESHNESS_METADATA_COVERAGE_TESTS_PASSED_FINAL_RERUN",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3",
+      "full_architecture_static_gate_issues": {
+        "1": [
+          "target-layer dependency SCCs: [['application', 'persistence'], ['app', 'composition']]"
+        ],
+        "3": [
+          "production file >1500 lines has no mixed/cohesive responsibility decision: host_brain/persistence/research_shadow_ledger_repository.py:1788"
+        ]
+      },
+      "current_slice_added_static_failures": [],
+      "baseline_remediation_pr": "PR_114_OPEN",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "PRODUCTION_PROCESS_LOCATOR_IMPORTS_MODULES_FIELDS_LOCKS_AND_MUTABLE_REFS_ARE_ZERO_TEST_ONLY_PYTEST_BRIDGE_IS_NOT_A_PRODUCTION_OBJECT_GRAPH_RESOURCE_MANAGER_STATUS_IS_HOST_FENCED_DURABLE_EXTERNAL_NAMESPACES_AND_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_REMAIN_NE01_INCOMPLETE"
+    },
+    "business_locator_zero_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "production_wiring": "EXPLICIT_ROUTE_CATALOG_RESOLVER_STARTUP_APPLICATION_PORTS_PURE_EDGE_ENDPOINT_CONFIG_AND_CONSTRUCTOR_BOUND_VALIDATION_LIFE_READER",
+      "fail_closed": "MISSING_SURFACE_ROUTE_PORT_STARTUP_PROVIDER_OR_VALIDATION_LIFE_READER_DOES_NOT_FALL_BACK_TO_PROCESS_LOCATOR",
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
+      "remaining_business_consumers": [],
+      "remaining_import_form_consumers": [],
+      "final_file_disjoint_targeted_batches": "191_PASSED_IN_31_09_SECONDS_PLUS_76_PASSED_12_EXISTING_WARNING_EMISSIONS_IN_21_93_SECONDS_EQUALS_267_PASSED",
+      "transparent_first_run": "ASGI_CONTRACT_BATCH_FIRST_RAN_71_PASSED_2_FAILED_THEN_EXACT_FIX_REPLAY_2_PASSED_STARTUP_IDENTITY_TEST_ADDITION_FIRST_RAN_73_PASSED_1_TEST_FIXTURE_ASSERTION_FAILURE_THEN_EXACT_REPLAY_1_PASSED_FINAL_INVENTORY_TEST_ADDITION_FULL_BATCH_76_PASSED",
+      "documentation_gate": "DELIVERY_DOC_GATE_PASS_AND_39_DOC_AUTHORITY_FRESHNESS_METADATA_COVERAGE_TESTS_PASSED_FINAL_RERUN",
+      "unified_static_scan": "FAIL_BASELINE_TWO_NLE_BOUNDARY_UNLISTED_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_PORTS_AND_EMOTION_CONTEXT_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3",
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "PRODUCTION_LOCATOR_BOUNDARY_PHYSICALLY_RETIRED_EXTERNAL_NAMESPACE_RESOURCE_RECOVERY_AND_GENERIC_RUNTIME_AUTHORITIES_REMAIN"
+    },
+    "dead_process_singleton_retirement_commit_bound_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "retired_process_slots": [
+        "bond_aware_style_engine",
+        "reflection_chain",
+        "predictive_state_engine",
+        "planning_agent",
+        "runtime_capability_registry"
+      ],
+      "retired_process_accessors": [
+        "get_bond_aware_style_engine",
+        "get_reflection_chain",
+        "get_predictive_state_engine",
+        "get_planning_agent",
+        "get_runtime_capability_registry"
+      ],
+      "domain_implementations": "PRESERVED_AND_DIRECTLY_TESTED",
+      "commit_bound_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_43_FIELDS_2_LOCKS_40_MUTABLE_REFS",
+      "targeted_regression": "100_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_25_85_SECONDS",
+      "transparent_first_run": "96_PASSED_4_FAILED_OLD_MCP_TEST_FIXTURE_REFERENCED_ALREADY_RETIRED_OBS_METRICS_COLLECTOR_SLOT",
+      "exact_failed_file_replay": "5_PASSED_IN_8_57_SECONDS_AFTER_UNIFIED_CONTAINER_CLEAR",
+      "documentation_gate": "DELIVERY_DOC_GATE_PASS_AND_39_DOC_AUTHORITY_FRESHNESS_METADATA_COVERAGE_TESTS_PASSED",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_BASELINE_TWO_NLE_BOUNDARY_UNLISTED_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_PORTS_AND_EMOTION_CONTEXT_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3",
+      "full_architecture_static_gate_issues": {
+        "1": [
+          "target-layer dependency SCCs: [['application', 'persistence'], ['app', 'composition']]"
+        ],
+        "3": [
+          "production file >1500 lines has no mixed/cohesive responsibility decision: host_brain/persistence/research_shadow_ledger_repository.py:1788"
+        ]
+      },
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_FIVE_DEAD_PROCESS_AUTHORITIES_REMOVED_AT_40_MUTABLE_REFS_CURRENT_SIDECAR_OWNERSHIP_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "internal_sidecar_ownership_commit_bound_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "retired_process_slots": [
+        "policy_cache",
+        "capability_forge_token_service"
+      ],
+      "retired_process_accessors": [
+        "get_policy_cache",
+        "get_capability_forge_token_service"
+      ],
+      "owner_bindings": [
+        "IntentDecisionEngine._policy_cache",
+        "CapabilityForgeService._token_service"
+      ],
+      "commit_bound_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_41_FIELDS_2_LOCKS_38_MUTABLE_REFS",
+      "targeted_regression": "99_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_13_15_SECONDS",
+      "expanded_first_run": "135_PASSED_3_FAILED_IN_13_66_SECONDS_TWO_EXISTING_SKILL_LOADER_GOVERNED_GATE_EXPECTATIONS_AND_ONE_REMOVED_OBS_POST_ROUTE_NOT_IN_CURRENT_SLICE_PATH",
+      "documentation_gate": "DELIVERY_DOC_GATE_PASS_AND_45_DOC_AUTHORITY_FRESHNESS_METADATA_COVERAGE_TESTS_PASSED",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_BASELINE_TWO_NLE_BOUNDARY_UNLISTED_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_PORTS_AND_EMOTION_CONTEXT_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3",
+      "full_architecture_static_gate_issues": {
+        "1": [
+          "target-layer dependency SCCs: [['application', 'persistence'], ['app', 'composition']]"
+        ],
+        "3": [
+          "production file >1500 lines has no mixed/cohesive responsibility decision: host_brain/persistence/research_shadow_ledger_repository.py:1788"
+        ]
+      },
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_TWO_INTERNAL_SIDECAR_PROCESS_AUTHORITIES_REMOVED_AT_38_MUTABLE_REFS_CURRENT_APP_LOCAL_LIGHTWEIGHT_STATE_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_lightweight_state_app_local_commit_bound_validation": {
+      "status": "COMMIT_BOUND_LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "EmotionalSilenceEngine",
+        "MilestoneTracker",
+        "MultimodalProcessor",
+        "TtsContextRouter",
+        "MetaLearningLoop",
+        "MemoryWorthEvaluator"
+      ],
+      "retired_process_slots": [
+        "silence_engine",
+        "milestone_tracker",
+        "multimodal_processor",
+        "tts_context_router",
+        "meta_learning_loop",
+        "memory_worth_evaluator"
+      ],
+      "retired_process_accessors": [
+        "get_silence_engine",
+        "get_milestone_tracker",
+        "get_multimodal_processor",
+        "get_tts_context_router",
+        "get_meta_learning_loop",
+        "get_memory_worth_evaluator"
+      ],
+      "ownership_identity": "SAME_HOST_PROVIDER_REUSES_EXACT_INSTANCE_TWO_HOST_PORT_ROOTS_OWN_DISTINCT_INSTANCES",
+      "commit_bound_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_35_FIELDS_2_LOCKS_32_MUTABLE_REFS",
+      "targeted_regression": "133_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_16_85_SECONDS",
+      "documentation_gate": "45_PASSED_FINAL_RERUN_AND_DOC_GATE_PASS",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_TWO_EXISTING_NLE_BOUNDARIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_APPLICATION_PORTS_AND_EMOTION_CONTEXT",
+      "full_architecture_static_gate": "FAIL_GATES_1_AND_3_EXISTING_ORIGIN_DEV_BASELINE_APPLICATION_PERSISTENCE_AND_APP_COMPOSITION_SCC_PLUS_UNCLASSIFIED_RESEARCH_SHADOW_LEDGER_REPOSITORY_1788_LINES",
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_SIX_LIGHTWEIGHT_STATE_SERVICES_APP_LOCAL_AT_32_PROCESS_MUTABLE_REFS_SECURITY_EVOLUTION_STATE_COMMIT_BOUND_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_security_evolution_state_app_local_commit_bound_validation": {
+      "status": "COMMIT_BOUND_LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "SecurityImmuneAgent",
+        "CapabilityGapTelemetry",
+        "CapabilityForgeService"
+      ],
+      "retired_process_slots": [
+        "security_immune_agent",
+        "capability_gap_telemetry",
+        "capability_forge_service"
+      ],
+      "retired_process_accessors": [
+        "get_security_immune_agent",
+        "get_capability_gap_telemetry",
+        "get_capability_forge_service"
+      ],
+      "retired_module_global_authority": "host_brain.security_immune.agent.get_security_immune_agent_AND__global_security_immune_agent",
+      "ownership_identity": "SAME_HOST_PROVIDER_REUSES_EXACT_INSTANCE_TWO_HOST_PORT_ROOTS_OWN_DISTINCT_INSTANCES",
+      "forge_telemetry_identity": "EACH_HOST_FORGE_REUSES_THE_EXACT_TELEMETRY_INSTANCE_OWNED_BY_THE_SAME_HOST_ROOT",
+      "construction": "APP_LOCAL_THREAD_SAFE_LAZY_PROVIDER_VIA_TYPED_PROCESS_APPLICATION_FACTORY_NO_REQUEST_TIME_SERVICE_SPECIFIC_LOCATOR_TRANSITIONAL_LEDGER_PROVIDER_REMAINS",
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_32_FIELDS_2_LOCKS_29_MUTABLE_REFS",
+      "targeted_regression": "153_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_68_06_SECONDS",
+      "documentation_gate": "45_PASSED_FINAL_RERUN_AND_DOC_GATE_PASS",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_TWO_EXISTING_NLE_BOUNDARIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_APPLICATION_PORTS_AND_EMOTION_CONTEXT",
+      "full_architecture_static_gate": "FAIL_GATES_1_AND_3_EXISTING_ORIGIN_DEV_BASELINE_APPLICATION_PERSISTENCE_AND_APP_COMPOSITION_SCC_PLUS_UNCLASSIFIED_RESEARCH_SHADOW_LEDGER_REPOSITORY_1788_LINES",
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_THREE_SECURITY_EVOLUTION_STATE_SERVICES_APP_LOCAL_AT_29_PROCESS_MUTABLE_REFS_CURRENT_CONVERSATION_CONTEXT_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_conversation_context_app_local_commit_bound_validation": {
+      "status": "COMMIT_BOUND_LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "ContextRepository",
+        "ConversationHistory",
+        "SessionTopicLedgerStore",
+        "SessionTacticLedgerStore"
+      ],
+      "retired_process_slots": [
+        "conversation_turn_store",
+        "conversation_history",
+        "session_topic_ledger_store",
+        "session_tactic_ledger_store"
+      ],
+      "retired_process_accessors": [
+        "get_conversation_turn_store",
+        "get_conversation_history",
+        "get_session_topic_ledger_store",
+        "get_session_tactic_ledger_store"
+      ],
+      "ownership_identity": "SAME_HOST_PROVIDER_REUSES_EXACT_INSTANCE_TWO_HOST_PORT_ROOTS_OWN_DISTINCT_WRAPPER_INSTANCES",
+      "history_repository_identity": "EACH_HOST_CONVERSATION_HISTORY_REUSES_THE_EXACT_CONTEXT_REPOSITORY_OWNED_BY_THE_SAME_HOST_ROOT",
+      "construction": "APP_LOCAL_THREAD_SAFE_LAZY_PROVIDER_VIA_TYPED_PROCESS_APPLICATION_FACTORY_NO_REQUEST_TIME_SERVICE_SPECIFIC_LOCATOR_TRANSITIONAL_SHARED_LEDGER_PROVIDER_REMAINS",
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_28_FIELDS_2_LOCKS_25_MUTABLE_REFS",
+      "targeted_regression": "91_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_21_11_SECONDS",
+      "documentation_gate": "45_PASSED_FINAL_RERUN_AND_DOC_GATE_PASS",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_TWO_EXISTING_NLE_BOUNDARIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_APPLICATION_PORTS_AND_EMOTION_CONTEXT",
+      "full_architecture_static_gate": "FAIL_GATES_1_AND_3_EXISTING_ORIGIN_DEV_BASELINE_APPLICATION_PERSISTENCE_AND_APP_COMPOSITION_SCC_PLUS_UNCLASSIFIED_RESEARCH_SHADOW_LEDGER_REPOSITORY_1788_LINES",
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_FOUR_CONVERSATION_CONTEXT_WRAPPERS_APP_LOCAL_AT_25_PROCESS_MUTABLE_REFS_CURRENT_MULTIMODAL_SHARED_MEMORY_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_multimodal_shared_memory_app_local_commit_bound_validation": {
+      "status": "COMMIT_BOUND_LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "MultimodalObserver",
+        "SharedMemoryIndex"
+      ],
+      "retired_process_slots": [
+        "multimodal_observer",
+        "shared_memory_index"
+      ],
+      "retired_process_accessors": [
+        "get_multimodal_observer",
+        "get_shared_memory_index"
+      ],
+      "ownership_identity": "SAME_HOST_PROVIDER_REUSES_EXACT_INSTANCE_TWO_HOST_PORT_ROOTS_OWN_DISTINCT_WRAPPER_INSTANCES",
+      "dependency_identity": "EACH_HOST_SHARED_MEMORY_INDEX_CAPTURES_THE_EXPLICIT_EPISODIC_STORE_AND_EACH_MULTIMODAL_OBSERVER_CAPTURES_THE_EXPLICIT_MODEL_ATTEMPT_SERVICE_PROVIDER",
+      "construction": "APP_LOCAL_THREAD_SAFE_LAZY_WRAPPER_PROVIDER_VIA_TYPED_PROCESS_APPLICATION_FACTORY_TRANSITIONAL_BACKING_RESOLUTION_REMAINS_A_COMPOSITION_ROOT_PROCESS_PROVIDER",
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_26_FIELDS_2_LOCKS_23_MUTABLE_REFS",
+      "targeted_regression": "132_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_19_86_SECONDS",
+      "documentation_gate": "45_PASSED_FINAL_RERUN_AND_DOC_GATE_PASS",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_BASELINE_TWO_NLE_BOUNDARY_UNLISTED_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_PORTS_AND_EMOTION_CONTEXT_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "full_architecture_static_gate": "FAIL_GATES_1_AND_3_EXISTING_ORIGIN_DEV_BASELINE_APPLICATION_PERSISTENCE_AND_APP_COMPOSITION_SCC_PLUS_UNCLASSIFIED_RESEARCH_SHADOW_LEDGER_REPOSITORY_1788_LINES",
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_TWO_INPUT_MEMORY_WRAPPERS_APP_LOCAL_AT_23_PROCESS_MUTABLE_REFS_CURRENT_CORE_RUNTIME_OWNER_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_core_runtime_owner_app_local_commit_bound_validation": {
+      "status": "COMMIT_BOUND_LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "GraphRuntimeContract",
+        "RoutingMatrix",
+        "BondDynamicsWriter",
+        "HostMemoryServicePublication"
+      ],
+      "retired_process_slots": [
+        "graph_runtime",
+        "routing_matrix",
+        "bond_dynamics_writer",
+        "memory_service_container"
+      ],
+      "retired_process_accessors": [
+        "get_graph_runtime",
+        "get_routing_matrix",
+        "get_bond_dynamics_writer",
+        "get_memory_service_container",
+        "get_life_memory_service",
+        "set_memory_service_container"
+      ],
+      "ownership_identity": "SAME_HOST_PROVIDER_REUSES_EXACT_RUNTIME_WRAPPER_TWO_HOST_PORT_ROOTS_OWN_DISTINCT_GRAPH_ROUTING_AND_BOND_WRAPPERS",
+      "memory_publication": "APP_LOCAL_EXACT_IDENTITY_PUBLISH_REQUIRE_WITHDRAW_STALE_OR_OVERLAPPING_OWNER_FAILS_CLOSED",
+      "backing_boundary": "LEDGER_BOND_STAGE_ENGINE_AND_BOND_NEO4J_CLIENT_RESOLUTION_REMAIN_TRANSITIONAL_COMPOSITION_ROOT_PROVIDERS",
+      "asgi_responsibility_split": "FOUR_LIFE_AND_INGRESS_AUTHORITY_ADAPTERS_MOVED_TO_FOCUSED_MODULE_ASGI_1392_LINES_BELOW_1400_GATE_WITHOUT_THRESHOLD_CHANGE",
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_22_FIELDS_2_LOCKS_19_MUTABLE_REFS",
+      "focused_regression": "91_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_17_70_SECONDS",
+      "expanded_file_disjoint_regression": "56_PASSED_IN_21_76_SECONDS",
+      "consolidated_file_unique_regression": "218_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_41_15_SECONDS",
+      "transparent_harness_correction": "FIRST_EXPANDED_COMMAND_REFERENCED_ONE_NONEXISTENT_TEST_PATH_AND_ABORTED_BEFORE_COLLECTION_THEN_CORRECTED_COMMAND_RAN_56_TESTS",
+      "documentation_gate": "45_PASSED_IN_9_08_SECONDS_AND_DOC_GATE_PASS",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_EXACT_TWO_EXISTING_NLE_BOUNDARY_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_PORTS_AND_EMOTION_CONTEXT",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3_APPLICATION_PERSISTENCE_AND_APP_COMPOSITION_SCCS_PLUS_UNCLASSIFIED_RESEARCH_SHADOW_LEDGER_1788",
+      "current_slice_added_static_failures": [],
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_FOUR_RUNTIME_WRAPPER_OR_PUBLICATION_OWNERS_APP_LOCAL_AT_19_PROCESS_MUTABLE_REFS_CURRENT_BOND_RUNTIME_EPOCH_OWNER_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_bond_runtime_app_local_commit_bound_validation": {
+      "status": "COMMIT_BOUND_LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "BondStageEngine",
+        "BondDynamicsWriter",
+        "BondUpdateQueue",
+        "BondClient"
+      ],
+      "retired_process_slots": [
+        "bond_stage_engine",
+        "bond_update_queue"
+      ],
+      "retired_process_accessors": [
+        "get_bond_stage_engine",
+        "get_bond_update_queue",
+        "get_bond_neo4j_client"
+      ],
+      "ownership_identity": "SAME_HOST_ACTIVE_EPOCH_REUSES_EXACT_STAGE_WRITER_QUEUE_AND_CLIENT_TWO_HOST_ROOTS_AND_SUCCESSIVE_EPOCHS_OWN_DISTINCT_INSTANCES",
+      "dependency_identity": "WRITER_CAPTURES_EXACT_EPOCH_LEDGER_STAGE_AND_CLIENT_QUEUE_FACTORY_RESOLVES_THE_EXACT_EPOCH_WRITER",
+      "settings_boundary": "BOND_SETTINGS_ARE_FROZEN_ON_BEGIN_AND_NOT_REREAD_DURING_THE_ACTIVE_EPOCH",
+      "lifecycle": "HOST_ASGI_BEGINS_BOND_OWNER_BEFORE_HOST_LIFECYCLE_AND_CLOSES_QUEUE_DRAIN_STOP_BEFORE_CLIENT_CLOSE_NORMAL_HOST_RUNTIME_SHUTDOWN_AND_OUTER_LIFESPAN_RETRY_ARE_IDEMPOTENT",
+      "close_failure_fence": "ANY_DRAIN_STOP_OR_CLIENT_CLOSE_FAILURE_RETAINS_EXACT_OWNER_AND_REJECTS_NEW_BEGIN_WITH_HOST_BOND_RUNTIME_CLOSE_RETRY_REQUIRED",
+      "queue_boundary": "ENQUEUE_AFTER_CLOSE_RETURNS_BOND_QUEUE_CLOSED_QUEUE_IS_IN_PROCESS_AND_NOT_DURABLE_CRASH_RECOVERY_NOT_PROVEN",
+      "external_storage_boundary": "CLIENT_IDENTITY_IS_APP_LOCAL_EXTERNAL_NEO4J_NAMESPACE_OR_TENANT_ISOLATION_IS_NOT_PROVEN",
+      "commit_bound_locator_inventory": "0_NAMED_MODULES_0_NAMES_3_ALL_IMPORT_FORM_CONSUMERS_COMPOSITION_ONLY_CONTAINER_20_FIELDS_2_LOCKS_17_MUTABLE_REFS",
+      "asgi_responsibility_gate": "ASGI_1395_LINES_BELOW_1400_GATE_WITHOUT_THRESHOLD_CHANGE",
+      "focused_regression": "140_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_40_02_SECONDS",
+      "integration_attempt": "FULL_HOST_INTEGRATION_COMMAND_TIMED_OUT_AND_WAS_TERMINATED_ISOLATED_FIRST_CASE_FAILED_EXISTING_TOOL_REGISTRY_SCHEMA_NOT_READY_FIXTURE_WITH_CHROMA_AND_EDGE_UNAVAILABLE_NOT_A_VALID_PASS",
+      "wave_integration": "NOT_RUN_VALID_FIXTURE_UNAVAILABLE",
+      "documentation_gate": "45_PASSED_FINAL_RERUN_AND_DOC_GATE_PASS",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_EXACT_TWO_EXISTING_NLE_BOUNDARY_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_PORTS_AND_EMOTION_CONTEXT",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3_APPLICATION_PERSISTENCE_AND_APP_COMPOSITION_SCCS_PLUS_UNCLASSIFIED_RESEARCH_SHADOW_LEDGER_1788",
+      "current_slice_added_static_failures": [],
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_APP_LOCAL_BOND_RUNTIME_EPOCH_IDENTITY_AND_ORDERED_CLOSE_AT_17_PROCESS_MUTABLE_REFS_CURRENT_HOST_MEMORY_RUNTIME_OWNER_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_memory_runtime_app_local_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "MemoryGuard",
+        "StateArbiter",
+        "StateWriteArbiter",
+        "DistillationEngine",
+        "SemanticRecaller",
+        "EmotionTimeline"
+      ],
+      "retired_process_slots": [
+        "memory_guard",
+        "state_arbiter",
+        "state_write_arbiter",
+        "distillation_engine",
+        "semantic_recaller",
+        "emotion_timeline"
+      ],
+      "retired_process_accessors": [
+        "get_memory_guard",
+        "get_state_arbiter",
+        "get_state_write_arbiter",
+        "get_distillation_engine",
+        "get_semantic_recaller",
+        "get_emotion_timeline"
+      ],
+      "ownership_identity": "SAME_HOST_OWNER_REUSES_EXACT_SIX_RUNTIME_INSTANCES_TWO_HOST_ROOTS_OWN_DISTINCT_INSTANCES",
+      "dependency_identity": "DISTILLATION_REUSES_EXACT_OWNER_GUARD_STATE_ARBITER_EPISODIC_ADAPTER_AND_TRANSITIONAL_LEDGER",
+      "audit_boundary": "MEMORY_GUARD_STATE_ARBITER_AND_STATE_WRITE_ARBITER_AUDIT_CALLBACKS_WRITE_ONLY_THE_EXACT_OWNER_LEDGER",
+      "semantic_boundary": "SETTINGS_FROZEN_ONCE_PER_OWNER_VECTOR_DIMENSION_BOUND_TO_EMBEDDER_EXTERNAL_CHROMA_CLIENT_CLOSE_AND_RECOVERY_NOT_PROVEN",
+      "timeline_boundary": "PUBLIC_CANONICAL_DB_PATH_READ_ONLY_QUERY_REPOSITORY_NO_INLINE_SQL_OR_PRIVATE_LEDGER_FIELDS_QUERY_FAILURE_DEGRADES_TO_EMPTY",
+      "remaining_import_form_consumers": [],
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
+      "focused_regression": "120_PASSED_8_EXISTING_WARNING_EMISSIONS_IN_32_78_SECONDS",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "documentation_gate": "45_PASSED_IN_10_66_SECONDS_AND_UNIFIED_DOC_GATE_PASS",
+      "compile_json_diff_checks": "PASS",
+      "unified_static_scan": "FAIL_EXACT_TWO_EXISTING_NLE_BOUNDARY_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_APPLICATION_PORTS_AND_EMOTION_CONTEXT",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3_APPLICATION_PERSISTENCE_AND_APP_COMPOSITION_SCCS_PLUS_UNCLASSIFIED_RESEARCH_SHADOW_LEDGER_REPOSITORY_1788_LINES",
+      "current_slice_added_static_failures": [],
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_MEMORY_STATE_RUNTIME_IDENTITY_AND_DEPENDENCY_BINDING_CURRENT_AUTHORITY_OWNER_EVIDENCE_IS_RECORDED_SEPARATELY"
+    },
+    "host_governance_runtime_app_local_current_validation": {
+      "status": "LOCAL_AFFECTED_PASS_NE01_IN_PROGRESS",
+      "app_local_owned_services": [
+        "TokenService",
+        "IntentDecisionEngine",
+        "SkillRegistry",
+        "FederatedCapabilityScorecardProvider",
+        "MCPToolRegistry",
+        "ToolCatalog"
+      ],
+      "retired_process_slots": [
+        "token_service",
+        "intent_engine",
+        "skill_registry",
+        "capability_scorecard_provider",
+        "mcp_tool_registry",
+        "tool_catalog"
+      ],
+      "retired_process_accessors": [
+        "get_token_service",
+        "get_intent_engine",
+        "get_skill_registry",
+        "get_capability_scorecard_provider",
+        "get_mcp_tool_registry",
+        "get_tool_catalog"
+      ],
+      "retired_module": "host_brain/composition/process_runtime_services.py",
+      "ownership_identity": "SAME_HOST_EPOCH_REUSES_EXACT_SIX_SERVICE_GRAPH_TWO_HOST_ROOTS_AND_SUCCESSIVE_EPOCHS_OWN_DISTINCT_INSTANCES",
+      "dependency_identity": "INTENT_AND_SCORECARD_CAPTURE_OWNER_EXACT_TOKEN_SKILL_TOOL_AND_MCP_DEPENDENCIES_CAPABILITY_MATURITY_ENABLED",
+      "settings_boundary": "SKILL_PROVIDER_FLAGS_MCP_BRIDGE_AND_CANONICAL_DB_PATH_FROZEN_ON_BEGIN",
+      "lifecycle": "HOST_LIFESPAN_BEGINS_AUTHORITY_THEN_GOVERNANCE_THEN_BOND_AND_CLOSES_BOND_THEN_GOVERNANCE_THEN_AUTHORITY_AFTER_OTHER_HOST_RESOURCES",
+      "close_failure_fence": "MCP_CLOSE_FAILURE_RETAINS_EXACT_GRAPH_AND_REQUIRES_EXACT_CLOSE_RETRY_BEFORE_NEW_EPOCH",
+      "preview_guardian_wiring": "HOST_LIFE_ACTION_PREVIEW_RESOLVES_APP_LOCAL_RUNTIME_GUARDIAN_THROUGH_TYPED_OBS_ROUTE_PORT_MISSING_OR_PROVIDER_FAILURE_FAILS_CLOSED",
+      "remaining_import_form_consumers": [],
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
+      "remaining_compatibility_container_references": [],
+      "commit_bound_locator_inventory": "0_NAMED_MODULES_0_NAMES_1_ALL_IMPORT_FORM_CONSUMER_CONTAINER_8_FIELDS_2_LOCKS_5_COMPATIBILITY_MUTABLE_REFS",
+      "affected_regression": "202_PASSED_12_EXISTING_WARNING_EMISSIONS",
+      "compile_diff_checks": "PASS",
+      "documentation_gate": "45_PASSED_AND_AUTHORITY_AUDIENCE_FRESHNESS_GATES_PASS",
+      "unified_static_scan": "FAIL_EXACT_TWO_EXISTING_NLE_BOUNDARY_DEPENDENCIES_HOST_APPLICATION_TO_HOST_LIFECYCLE_APPLICATION_PORTS_AND_EMOTION_CONTEXT_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3_GATE_11_PASS_INTENT_DECISION_ENGINE_CONSTRUCTOR_MOVED_TO_APP_LOCAL_GOVERNANCE_OWNER_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "COMMIT_BOUND_GOVERNANCE_OWNER_RESULT_CURRENT_AUTHORITY_OWNER_NOW_OWNS_LEDGER_MEMORY_MODEL_CAPABILITY_PRODUCTION_GRAPH_TOKEN_SERVICE_REMAINS_EPOCH_MEMORY_MCP_REGISTRY_USES_SAME_APP_LOCAL_SQLITE_PRODUCTION_LOCATOR_NOW_PHYSICALLY_RETIRED_EXTERNAL_NAMESPACES_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_AND_SEVEN_ROUTE_RUNTIME_REMAIN"
+    },
+    "host_authority_runtime_app_local_current_validation": {
+      "status": "LOCAL_AFFECTED_PASS_NE01_IN_PROGRESS",
+      "production_wiring": "ASGI_CONSTRUCTION_RETURNS_EXPLICIT_PROCESS_APPLICATION_PORTS_HOST_APPLICATION_BUILDS_ONE_HOST_AUTHORITY_RUNTIME_OWNER_AND_NO_PRODUCTION_MODULE_IMPORTS_PROCESS_SERVICES",
+      "app_local_owned_authorities": [
+        "SQLiteLedger",
+        "EpisodicStore",
+        "LifeMemoryStore",
+        "PromptRegistry",
+        "ModelRouteCatalog",
+        "ModelAttemptService",
+        "CapabilityRuntime",
+        "CapabilityBroker"
+      ],
+      "identity_boundary": "SAME_HOST_EPOCH_REUSES_EXACT_LEDGER_MEMORY_MODEL_CAPABILITY_GRAPH_TWO_HOST_ROOTS_AND_SUCCESSIVE_EPOCHS_USE_DISTINCT_MUTABLE_ROOTS",
+      "construction_boundary": "MIGRATION_FIRST_CANONICAL_LEDGER_AND_FRESH_PROMPT_ROUTE_PROVIDER_ATTEMPT_GRAPH_PER_HOST_EPOCH",
+      "lifecycle": "AUTHORITY_BEGINS_BEFORE_GOVERNANCE_AND_BOND_AND_CLOSES_LAST_AFTER_HOST_TOOL_SECURITY_MEMORY_RESOURCES_CAPABILITY_MODEL_CHROMA_LEDGER_ORDER",
+      "close_failure_fence": "CLOSE_IS_SERIALIZED_SUCCESSFULLY_CLOSED_COMPONENTS_ARE_NOT_REPEATED_FAILURE_REQUIRES_CLOSE_RETRY_AND_FENCES_NEW_EPOCH",
+      "lazy_start_boundary": "EMOTION_TIMELINE_PROVIDER_IS_NOT_RESOLVED_BEFORE_LIFESPAN_BEGINS_AUTHORITY",
+      "remaining_import_form_consumers": [],
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
+      "compatibility_container_boundary": "PRODUCTION_PROCESS_SERVICE_CONTAINER_AND_FACADE_ARE_PHYSICALLY_ABSENT_TEST_COMPATIBILITY_BRIDGE_IS_PYTEST_ONLY",
+      "early_broad_affected_regression": "207_PASSED_12_EXISTING_WARNING_EMISSIONS_IN_33_03_SECONDS",
+      "final_selected_affected_regression": "131_PASSED_8_EXISTING_WARNINGS_IN_22_86_SECONDS",
+      "adjacent_fastapi_obs_regression": "42_PASSED_IN_48_25_SECONDS",
+      "owner_model_composition_regression": "9_PASSED_IN_0_61_SECONDS_OVERLAPS_AFFECTED_BATCH_DO_NOT_SUM",
+      "invalid_stale_http_smoke": "FAILED_EXISTING_STALE_FIXTURE_AND_EXTERNAL_STACK_UNAVAILABLE_NOT_COUNTED_AS_PASS",
+      "compile_json_diff_checks": "PASS",
+      "documentation_gate": "45_PASSED_FINAL_RERUN_AND_AUTHORITY_AUDIENCE_FRESHNESS_GATES_PASS",
+      "unified_static_scan": "FAIL_EXACT_TWO_EXISTING_NLE_BOUNDARIES_HOST_APPLICATION_LINE_10_TO_HOST_LIFECYCLE_APPLICATION_PORTS_AND_LINE_123_TO_EMOTION_CONTEXT_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "full_architecture_static_gate": "FAIL_BASELINE_GATES_1_3_GATE_11_PASS_CURRENT_SLICE_ADDED_FAILURES_ZERO",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "APP_LOCAL_PRODUCTION_BACKING_AUTHORITY_WIRING_PLUS_LATER_PRODUCTION_LOCATOR_PHYSICAL_RETIREMENT_EXTERNAL_CHROMA_NEO4J_NAMESPACE_TOKEN_MCP_DURABLE_RESTART_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_AND_SEVEN_ROUTE_RUNTIME_REMAIN_INCOMPLETE"
+    },
     "host_startup_graph_continuation_current_validation": {
       "status": "LOCAL_TARGETED_PASS_BOOT_SCOPED_HOST_CONTINUATION_PROGRAM_INCOMPLETE",
       "production_wiring": "ACTIVATE_INTERNAL_RUNTIME_CALLS_RECOVER_STARTUP_GRAPHS_AFTER_TASK_RUNTIME_RUNTIME_GROUP_AND_SHARED_ACCEPTANCE_EFFECT_OWNER_ACTIVATION_AND_BEFORE_SCHEDULER_CLOCK",
@@ -352,33 +1077,14 @@
       "compileall": "SUCCEEDED",
       "startup_continuation": "PROVEN_FOR_GOVERNED_INTERNAL_SINGLE_NODE_SEALED_CHECKPOINT_ONLY",
       "periodic_survivor_continuation": "INCOMPLETE",
-      "crash_left_unsealed_partial_cleanup": "PARTIAL_EXACT_FINALIZED_CANCELLATION_ONLY_LOCAL_UNIT_PROVEN_EXACT_INTERNAL_SQLITE_GIT_RESTART_AND_ACCEPTED_REPLAY_PROVEN",
-      "failure_cancel_budget_secure_ingress_claim_closeout": "PARTIAL_EXACT_INTERNAL_SINGLE_NODE_SEALED_POST_CHECKPOINT_BUDGET_REJECTION_CLAIM_CLOSEOUT_LOCAL_SQLITE_GIT_RESTART_PROVEN_FAILURE_CANCEL_GENERAL_MULTINODE_UNKNOWN_EFFECT_INCOMPLETE",
+      "crash_left_unsealed_partial_cleanup": "INCOMPLETE",
+      "failure_cancel_budget_secure_ingress_claim_closeout": "INCOMPLETE",
       "single_node_post_commit_budget_settlement_double_loss": "PROVEN_NO_ADDITIONAL_LIFECYCLE_FINALIZATION_MUTATION_HOLD_EXACT_HIGHER_FENCE_TAKEOVER_EXACT_ACCEPTED_EXACT_REJECTED_MISSING_CONFLICT_FAIL_CLOSED",
       "multi_node_batch_settlement_recovery": "PARTIAL_SCHEDULER_OWNED_EXACT_COMMITTED_CHECKPOINT_CONTINUATION_ONLY",
       "handle_level_toctou": "INCOMPLETE_NOT_CLAIMED",
       "general_write_promotion": "INCOMPLETE",
       "os_container_isolation": "INCOMPLETE",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
-      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
-    },
-    "unsealed_finalized_cancellation_cleanup_current_validation": {
-      "status": "PRODUCTION_WIRED_LOCAL_UNIT_PROVEN_PLUS_EXACT_INTERNAL_SQLITE_GIT_RESTART_AND_ACCEPTED_REPLAY_PROVEN",
-      "scope": "ONLY_OWNER_BOUND_UNSEALED_INTERNAL_PROTECTED_STAGES_WITH_EXACT_SINGLE_NODE_DELEGATE_AGENT_RUNTIME_ADMISSION_AND_GRAPH_NODE_ATTEMPT_LEASE_CANCELLED",
-      "authority": "SAME_GRAPH_REVISION_CANONICAL_CANCELLATION_MUST_BE_FINALIZED_WITH_GRAPH_TARGET_STATUS_CANCELLED",
-      "order": "DURABLE_WORKSPACE_CLEANUP_RECEIPT_BEFORE_UNSEALED_STAGE_DISCARD",
-      "local_validation": "46_PASSED_3_SKIPPED_WINDOWS_SYMLINK_JUNCTION_PRIVILEGE_IN_TARGETED_UNIT_AND_STRUCTURE_BATCH",
-      "sealed_budget_rejection_restart_validation": "tests/integration/test_aw02_internal_agent_runtime_cutover.py::test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_clean_workspace_PASSED_REAL_SQLITE_GIT_ASSERTS_EXACT_FIVE_TERMINAL_OUTBOXES_SHARE_THE_ATTEMPT_ID_CRASH_BEFORE_LIVE_CLAIM_CLOSE_RESTARTED_TERMINAL_WORKER_REOPENS_C_BOUNDARY_COMPLETES_DETERMINISTIC_INGRESS_RESULT_REF_BEFORE_TOMBSTONE_WORKSPACE_CLEANUP_TAMPER_REJECTED_AND_DUPLICATE_REPLAY_WITHOUT_AGENT_REEXECUTION",
-      "not_covered": "CANCELLATION_SUBFLOW_GENERAL_INTEGRATION_SEALED_OR_ACCEPTED_MATERIAL_FAILURE_BUDGET_REJECTION_OUTSIDE_THE_EXACT_RESTART_CASE_UNKNOWN_EFFECT_LIVE_SURVIVOR_GENERAL_UNSEALED_RECOVERY_GENERAL_WRITE_WAVE_INTEGRATION_AND_NE01_COMPLETION",
-      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
-    },
-    "internal_accepted_parallel_success_replay_current_validation": {
-      "status": "EXACT_INTERNAL_SQLITE_GIT_ACCEPTED_REPLAY_LOCAL_INTEGRATION_PROVEN",
-      "parallel_success_effect_boundary": "ONLY_THE_RECEIPT_REF_DERIVED_FROM_THE_ALREADY_VALIDATED_COMMITTED_OPERATION_AND_CANONICAL_WORKER_PROJECTION_IS_PASSED_TO_THE_EFFECT_COMPILER",
-      "completed_checkpoint_replay_boundary": "ONLY_SINGLE_NODE_INTERNAL_COMPLETED_GRAPHS_WITHOUT_A_PARALLEL_SUCCESS_DECISION_MAY_USE_NODE_TERMINAL_REPLAY_AFTER_EXACT_ACCEPTANCE_FINALIZATION",
-      "excluded": "PRESENT_PARALLEL_DECISION_NON_INTERNAL_MULTI_NODE_AND_GENERAL_ATOMIC_GRAPH_REPLAY_REMAIN_ON_THEIR_EXISTING_STRICT_AUTHORITIES",
-      "local_validation": "tests/integration/test_aw02_internal_agent_runtime_cutover.py_FULL_REAL_SQLITE_GIT_FILE_AND_RELATED_UNIT_STRUCTURE_BATCH_109_PASSED_3_SKIPPED_WINDOWS_SYMLINK_JUNCTION_PRIVILEGE",
-      "not_covered": "WAVE_INTEGRATION_GENERAL_MULTI_NODE_RECOVERY_GENERAL_UNSEALED_RECOVERY_EXTERNAL_MODEL_CANARY_DOCKER_FULL_STACK_AND_NE01_COMPLETION",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
     },
     "post_commit_budget_settlement_historical_validation": {
@@ -700,12 +1406,10 @@
       "host_brain/app/acceptance_effect_handlers.py",
       "host_brain/app/asgi.py",
       "host_brain/persistence/scheduler_repository.py",
-      "host_brain/persistence/research_shadow_ledger_repository.py",
-      "host_brain/persistence/task_terminal_reconciliation_read_store.py",
-      "host_brain/task_runtime/dag_scheduling_runtime.py"
+      "host_brain/persistence/research_shadow_ledger_repository.py"
     ],
     "remaining_mixed_file_gate_finding_count": 0,
-    "mixed_file_gate": "PASS_ISSUES_EMPTY_NEW_MIXED_OVER_800_EMPTY_NO_POLICY_EXPANSION",
+    "mixed_file_gate": "PASS_RESEARCH_SHADOW_LEDGER_SPLIT_1271_512_108_NO_ALLOWLIST_EXPANSION",
     "full_architecture_static_gate": {
       "status": "PASS",
       "failed_gates": [],
@@ -726,7 +1430,8 @@
         "process_tool_broker_container_slot_count": 0,
         "host_lifecycle_tool_broker_provider_count": 0
       },
-      "boundary": "CURRENT_GATE_1_TO_14_STATIC_PASS_ONLY_NE01_AND_FULL_ARCHITECTURE_REMAIN_PARTIAL_IN_PROGRESS"
+      "baseline_remediation_pr": "PR_114_OPEN",
+      "boundary": "CURRENT_FULL_STATIC_GATES_1_TO_14_PASS_STATIC_LAYERING_DOES_NOT_COMPLETE_UNIVERSAL_RUNTIME_NE01_OR_FULL_ARCHITECTURE_PROGRAM"
     },
     "focused_structure_current_lines": {
       "host_brain/app/asgi.py": 1342,
@@ -736,10 +1441,7 @@
       "host_brain/app/internal_runtime_composition.py": 253,
       "host_brain/app/host_runtime_context_wiring.py": 277,
       "host_brain/app/http_hooks.py": 637,
-      "host_brain/app/host_lifecycle_composition.py": 329,
-      "host_brain/contracts/host_lifecycle.py": 72,
-      "host_brain/contracts/task_runtime_feature_canary.py": 451,
-      "host_brain/task_runtime/feature_canary.py": 33,
+      "host_brain/app/host_lifecycle_composition.py": 349,
       "host_brain/app/tool_runtime_composition.py": 172,
       "host_brain/app/tribe_composition.py": 225,
       "host_brain/app/tribe_runtime_scope.py": 182,
@@ -753,14 +1455,7 @@
       "host_brain/persistence/task_checkpoint_budget_terminal_read_store.py": 444,
       "host_brain/persistence/task_checkpoint_budget_route_authority.py": 93,
       "host_brain/agent_runtime/artifact_store.py": 1359,
-      "host_brain/app/internal_task_runtime.py": 1350,
-      "host_brain/app/internal_task_contracts.py": 371,
-      "host_brain/persistence/task_terminal_reconciliation_read_store.py": 1433,
-      "host_brain/persistence/task_terminal_cancellation_read.py": 151,
-      "host_brain/persistence/research_shadow_ledger_repository.py": 1453,
-      "host_brain/persistence/research_shadow_ledger_codec.py": 469,
-      "host_brain/task_runtime/dag_scheduling_runtime.py": 1495,
-      "host_brain/task_runtime/dag_scheduling_preflight.py": 112,
+      "host_brain/app/internal_task_runtime.py": 1311,
       "host_brain/task_runtime/node_execution_runtime.py": 1499,
       "host_brain/task_runtime/node_execution_projection.py": 477,
       "host_brain/task_runtime/operation_recovery_runtime.py": 205,
@@ -801,12 +1496,14 @@
     },
     "locator_consumer_inventory": {
       "combined_current_inventory": {
-        "named_modules": 20,
-        "named_imported_names": 46,
-        "all_import_form_consumer_modules": 23,
-        "process_service_container_fields": 48,
-        "process_service_container_lock_fields": 2,
-        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 45
+        "named_modules": 0,
+        "named_imported_names": 0,
+        "all_import_form_consumer_modules": 0,
+        "process_locator_module_files": 0,
+        "process_service_container_fields": 0,
+        "process_service_container_lock_fields": 0,
+        "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 0,
+        "test_only_compatibility_bridge": "tests/support/process_service_compat.py"
       },
       "dev_c2be993bc_commit_bound_history": {
         "named_modules": 45,
@@ -856,16 +1553,16 @@
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 52,
         "scope": "TOOL_MCP_SLICE_SNAPSHOT_BEFORE_HOST_LIFECYCLE_REBASE"
       },
-      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state", "obs_metrics_collector", "query_projection_store", "tribe_runtime_composition"],
-      "retired_global_setters": ["set_activity_monitor", "set_resource_manager"],
-      "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state", "get_obs_metrics_collector", "get_query_projection_store", "peek_query_projection_store", "get_tribe_handoff_coordinator"],
-      "boundary": "FRESH_AST_CURRENT_IS_19_MODULES_45_NAMES_22_ALL_FORM_CONSUMERS_AND_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS_TRIBE_RUNTIME_SCOPE_OWNS_PORT_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_STATE_READER_PRODUCTION_AUTHORITY_VERIFIER_CAPTURES_EXPLICIT_LEDGER_PROVIDER_AND_INTERNAL_SECURITY_IMMUNE_ROUTER_CAPTURES_HOST_ROUTE_AGENT_PROVIDER_WITHOUT_PROCESS_SERVICE_CONTAINER_COMPATIBILITY_TRIBE_AGENTS_BUS_AND_REGISTRIES_REMAIN_PROCESS_GLOBAL_SINGLE_LIVE_HOST_ONLY_SECOND_SCOPE_FAILS_CLOSED_NOT_MULTI_APP_ISOLATION_SERVICE_LOCATOR_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
+      "retired_global_service_slots": ["activity_monitor", "resource_manager", "mcp_tool_broker", "tool_broker", "hard_state", "obs_metrics_collector", "query_projection_store", "tribe_runtime_composition", "bond_aware_style_engine", "reflection_chain", "predictive_state_engine", "planning_agent", "runtime_capability_registry", "policy_cache", "capability_forge_token_service", "silence_engine", "milestone_tracker", "multimodal_processor", "tts_context_router", "meta_learning_loop", "memory_worth_evaluator", "security_immune_agent", "capability_gap_telemetry", "capability_forge_service", "conversation_turn_store", "conversation_history", "session_topic_ledger_store", "session_tactic_ledger_store", "multimodal_observer", "shared_memory_index", "graph_runtime", "routing_matrix", "bond_dynamics_writer", "bond_stage_engine", "bond_update_queue", "memory_guard", "state_arbiter", "state_write_arbiter", "distillation_engine", "semantic_recaller", "emotion_timeline", "memory_service_container", "token_service", "intent_engine", "skill_registry", "capability_scorecard_provider", "mcp_tool_registry", "tool_catalog"],
+      "retired_global_setters": ["set_activity_monitor", "set_resource_manager", "set_memory_service_container"],
+      "retired_global_accessors": ["get_mcp_tool_broker", "get_tool_broker", "get_hard_state", "set_sys_mode", "get_endocrine_state", "get_obs_metrics_collector", "get_query_projection_store", "peek_query_projection_store", "get_tribe_handoff_coordinator", "get_bond_aware_style_engine", "get_reflection_chain", "get_predictive_state_engine", "get_planning_agent", "get_runtime_capability_registry", "get_policy_cache", "get_capability_forge_token_service", "get_silence_engine", "get_milestone_tracker", "get_multimodal_processor", "get_tts_context_router", "get_meta_learning_loop", "get_memory_worth_evaluator", "get_security_immune_agent", "get_capability_gap_telemetry", "get_capability_forge_service", "get_conversation_turn_store", "get_conversation_history", "get_session_topic_ledger_store", "get_session_tactic_ledger_store", "get_multimodal_observer", "get_shared_memory_index", "get_graph_runtime", "get_routing_matrix", "get_bond_dynamics_writer", "get_bond_stage_engine", "get_bond_update_queue", "get_bond_neo4j_client", "get_memory_guard", "get_state_arbiter", "get_state_write_arbiter", "get_distillation_engine", "get_semantic_recaller", "get_emotion_timeline", "get_memory_service_container", "get_life_memory_service", "get_token_service", "get_intent_engine", "get_skill_registry", "get_capability_scorecard_provider", "get_mcp_tool_registry", "get_tool_catalog"],
+      "boundary": "FRESH_AST_CURRENT_IS_0_NAMED_MODULES_0_NAMES_0_ALL_FORM_CONSUMERS_0_PRODUCTION_LOCATOR_MODULES_FIELDS_LOCKS_AND_MUTABLE_REFS_PROCESS_RUNTIME_SERVICES_AND_COMPATIBILITY_FACADE_DELETED_THIRTY_FIVE_HOST_OWNERS_APP_LOCAL_WITH_AUTHORITY_LEDGER_MEMORY_MODEL_CAPABILITY_GRAPH_RESOURCE_MANAGER_STATUS_HOST_FENCED_DURABLE_BUT_EXTERNAL_NAMESPACES_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_TRANSACTIONAL_CHAT_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_REMAIN"
     },
     "host_application_port_root_current_validation": {
       "status": "LOCAL_TARGETED_PASS_PROGRAM_PARTIAL",
       "scope": "ASGI_AND_HOST_LIFECYCLE_CONSUME_EXPLICIT_FROZEN_HOST_APPLICATION_PORTS_WITH_NO_PROCESS_SERVICES_IMPORT_OR_LOCATOR_FALLBACK",
-      "production_mapping": "SINGLE_TRANSITIONAL_COMPOSITION_ROOT_ONLY",
-      "fresh_locator_inventory": "19_NAMED_MODULES_45_NAMES_22_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS",
+      "production_mapping": "APP_LOCAL_HOST_AUTHORITY_ROOT_FROM_EXPLICIT_CONSTRUCTION_PORTS",
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
       "targeted_regression": "68_PASSED_IN_11_03_SECONDS",
       "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
       "static_checks": "COMPILEALL_AND_AST_NO_DIRECT_LOCATOR_IMPORT_PASS",
@@ -875,14 +1572,14 @@
       "real_model": "NOT_RUN",
       "ne07_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-      "boundary": "PROCESS_SERVICE_CONTAINER_REMAINS_48_FIELDS_2_LOCKS_45_MUTABLE_REFS_TRIBE_RUNTIME_SLOT_LOCK_AND_PROCESS_HELPER_ARE_RETIRED_TRIBE_RUNTIME_SCOPE_IS_ASGI_OWNED_BUT_COMPATIBILITY_AGENTS_BUS_AND_REGISTRIES_REMAIN_PROCESS_GLOBAL_SINGLE_LIVE_HOST_ONLY_THIS_DOES_NOT_PROVE_APP_LOCAL_INSTANCE_ISOLATION_WORKER_OBS_TYPED_CONTAINERS_OR_GLOBAL_SERVICE_LOCATOR_REMOVAL"
+      "boundary": "PRODUCTION_PROCESS_SERVICE_CONTAINER_FACADE_ENVIRONMENT_AND_OLD_WIRING_ARE_PHYSICALLY_ABSENT_THIRTY_FIVE_HOST_OWNERS_AND_PRODUCTION_LEDGER_MEMORY_MODEL_CAPABILITY_GRAPH_ARE_APP_LOCAL_RESOURCE_MANAGER_STATUS_IS_HOST_FENCED_DURABLE_TRIBE_CONTEXT_IS_EXECUTION_LOCAL_AND_NO_CONTEXT_FALLBACKS_ARE_RETIRED_BUT_EXTERNAL_NAMESPACES_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_DURABLE_TRIBE_EVENTS_AND_FULL_HOST_MULTI_APP_CANARY_REMAIN_INCOMPLETE_THIS_DOES_NOT_PROVE_WORKER_OBS_TYPED_CONTAINERS_OR_TRANSACTIONAL_CHAT"
     },
     "governed_chat_explicit_ports_rebase_validation": {
       "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
       "production_wiring": "HOST_LIFESPAN_AGENT_RUNTIME_AND_LIFE_AUTHORITY_TO_SURFACE_RUNTIME_PORTS_TO_INTERNAL_TOOL_RUNTIME_TO_FROZEN_CHAT_AND_HOST_ASGI_TRIBE_RUNTIME_AGENT_PORTS_TO_INPUT_RUNTIME_PORTS_TO_NORMAL_CHAT_GATEWAY_ASR_CORTEX_AND_LIFESPAN_WARMUP_CHAT_IMMUNE_USES_TRIBE_PORT_INPUT_IMMUNE_USES_INPUT_PORT",
       "fail_closed": "SURFACE_OR_NORMAL_CHAT_OR_HOST_INPUT_MISSING_REQUIRED_TYPED_OR_TRIBE_AGENT_PORTS_REJECTS_WITHOUT_LOCATOR_FALLBACK_CHAT_IMMUNE_HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED_AND_INPUT_IMMUNE_HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED_BLOCK",
       "retired_paths": "SURFACE_MAIN_CHAIN_AND_CHAT_HANDLER_HAVE_NO_PROCESS_SERVICES_IMPORT_CHAT_HANDLER_INPUT_NORMALIZATION_STARTUP_AND_HTTP_HOOKS_HAVE_NO_DIRECT_THALAMUS_ANS_OR_IMMUNE_SINGLETON_GETTER",
-      "fresh_locator_inventory": "19_NAMED_MODULES_45_NAMES_22_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS",
+      "fresh_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
       "rebase_combined_targeted_regression": "196_PASSED_IN_21_08_SECONDS",
       "chat_tribe_runtime_ports_targeted_regression": "131_PASSED_IN_7_25_SECONDS_OVERLAPS_REBASE_HISTORY_DO_NOT_SUM",
       "input_immune_port_targeted_regression": "141_PASSED_IN_9_66_SECONDS_OVERLAPS_EXISTING_CHAT_INPUT_AND_IMMUNE_BATCHES_DO_NOT_SUM",
@@ -893,24 +1590,24 @@
       "boundary": "EXPLICIT_DEPENDENCY_WIRING_ONLY_TRIBE_RUNTIME_AGENT_PORTS_REMAINS_A_PROCESS_BOUND_TRANSITION_BRIDGE_LEGACY_EXECUTIVE_GENERIC_DELEGATE_COMMIT_BOUND_CHAT_ACCEPTANCE_AND_SEVEN_ROUTE_EVIDENCE_REMAIN_INCOMPLETE"
     },
     "tribe_runtime_scope_local_regression": {
-      "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+      "status": "HISTORICAL_SCOPE_SLICE_SUPERSEDED_BY_EXECUTION_CONTEXT_AND_FALLBACK_RETIREMENT",
       "production_wiring": "ASGI_COMPOSITION_ROOT_BUILD_PRODUCTION_TRIBE_RUNTIME_SCOPE_TO_RUNTIME_LIFESPAN_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_STATE_READER",
       "retired_paths": "COMPOSITION_TRIBE_RUNTIME_MODULE_PROCESS_CONTAINER_TRIBE_SLOT_LOCK_AND_PROCESS_HANDOFF_ACCESSOR_REMOVED",
       "binding_safety": "FIXED_PROVIDER_CATALOG_SHARED_AGENT_PORT_FENCE_FOREIGN_BINDING_WRONG_OWNER_AND_BINDING_DRIFT_FAIL_CLOSED_SEQUENTIAL_REBIND_ONLY_AFTER_RELEASE",
-      "current_locator_inventory": "19_NAMED_MODULES_45_NAMES_22_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS",
+      "current_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
       "targeted_regression": "73_PASSED_IN_12_05_SECONDS",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "production_canary": "NOT_RUN",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-      "boundary": "COMPATIBILITY_TRIBE_AGENTS_BUS_STATE_REGISTRY_AND_HOST_REGISTRY_REMAIN_PROCESS_GLOBAL_SINGLE_LIVE_HOST_ONLY_NO_PARALLEL_MULTI_APP_ISOLATION_SERVICE_LOCATOR_AND_GENERIC_DELEGATE_REMAIN"
+      "boundary": "HISTORICAL_SINGLE_LIVE_HOST_AND_PROCESS_FALLBACK_BOUNDARY_SUPERSEDED_NO_CONTEXT_FALLBACKS_NOW_ZERO_FULL_HOST_MULTI_APP_CANARY_DURABLE_EVENT_BUS_AND_GENERIC_DELEGATE_REMAIN_INCOMPLETE"
     },
     "production_authority_ledger_injection_local_regression": {
       "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
       "production_wiring": "TOOL_RUNTIME_ACTIVATION_AND_RECOVERY_STARTUP_BUILD_DURABLE_PRODUCTION_AUTHORITY_VERIFIER_WITH_THE_EXPLICIT_HOST_LEDGER_PROVIDER",
       "retired_path": "PRODUCTION_AUTHORITY_MODULE_NO_LONGER_IMPORTS_PROCESS_SERVICES_OR_RESOLVES_GET_LEDGER_DURING_WORKER_EXECUTION",
       "fail_closed": "NON_CALLABLE_PROVIDER_IS_REJECTED_AND_MEMORY_OR_UNAVAILABLE_LEDGER_RETURNS_A_STABLE_DURABLE_AUTHORITY_FAILURE",
-      "current_locator_inventory": "19_NAMED_MODULES_45_NAMES_22_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS",
+      "current_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
       "targeted_regression": "63_PASSED_IN_8_19_SECONDS",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "production_canary": "NOT_RUN",
@@ -924,7 +1621,7 @@
       "retired_path": "INTERNAL_SECURITY_IMMUNE_ROUTE_MODULE_HAS_NO_PROCESS_SERVICES_IMPORT_OR_GET_SECURITY_IMMUNE_AGENT_FACTORY",
       "fail_closed": "MISSING_THROWING_OR_EMPTY_PROVIDER_AND_INVALID_AGENT_METHOD_OR_RESULT_RETURN_STABLE_503",
       "operator_boundary": "OBS_SECURITY_HUNT_RUN_ONCE_REUSES_THE_APP_LOCAL_PORT_BUT_REMAINS_IN_THE_BLOCKED_OPERATOR_COMMAND_SET",
-      "current_locator_inventory": "19_NAMED_MODULES_45_NAMES_22_ALL_IMPORT_FORM_CONSUMERS_CONTAINER_48_FIELDS_2_LOCKS_45_MUTABLE_REFS",
+      "current_locator_inventory": "0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_0_LOCATOR_MODULES_0_CONTAINER_FIELDS_0_LOCKS_0_MUTABLE_REFS",
       "targeted_regression": "101_PASSED_IN_8_67_SECONDS_SECURITY_ROUTE_OBS_PORT_ASGI_AND_LOCATOR_INVENTORY",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "production_canary": "NOT_RUN",
@@ -943,7 +1640,7 @@
       "boundary": "ONE_HIGH_RISK_INTERNAL_HTTP_ROUTE_AUTHORITY_CUTOVER_ONLY_NOT_OPERATOR_ENABLEMENT_SECURITY_IMMUNE_OUTCOME_PROOF_OR_NE01_CLOSEOUT"
     },
     "host_lifecycle_composition": {
-      "status": "PARTIAL_APP_LOCAL_OWNER_WITH_DURABLE_RUNTIME_FENCED_HARD_STATE_AND_PROCESS_GLOBAL_TRIBE_SINGLE_LIVE_HOST_FENCE",
+      "status": "PARTIAL_APP_LOCAL_OWNER_WITH_DURABLE_RUNTIME_FENCED_HARD_STATE_EXECUTION_LOCAL_TRIBE_CONTEXT_AND_NO_CONTEXT_FALLBACKS_RETIRED",
       "owner": "ONE_HOST_LIFECYCLE_CONTAINER_PER_FASTAPI_CREATE_APP",
       "agent_runtime_application_scope": "ONE_SCOPE_PER_HOST_APP_LIFESPAN_PUBLISHED_ONLY_AFTER_LIFE_AUTHORITY_TO_INPUT_CORTEX_LIFE_PROJECTION_AND_CONVERSATION_ACCEPTANCE_CLEARED_DURING_SHUTDOWN",
       "app_local_services": [
@@ -1002,15 +1699,15 @@
       "known_boundaries": [
         "ModeTransitionService auto-rule configuration and last-interaction timestamp remain process-local inputs outside the canonical mode journal",
         "HardState production deployment canary is NOT_RUN",
-        "sys_mode.switch is the second governed Operator vertical slice; the remaining 35 audited write commands are still blocked before handlers",
+        "sys_mode.switch and task_terminal.reconcile are the second and third governed Operator vertical slices; the remaining 34 audited write commands are still blocked before handlers",
         "Operator commit-bound acceptance, NE-01 wave integration and production canary are NOT_RUN",
         "RECOVERY_PENDING effect ownership must defer the Review continuation and outer claim; CANCELLED Review requires durable terminal evidence; neither may be projected as terminal success",
-        "Endocrine agent remains process-global behind an app-local immutable HardState snapshot",
-        "heartbeat cache and client remain process-global",
-        "Tribe agents and bus remain process-global behind a single-live-Host owner fence",
-        "SystemResourceManager status file remains a shared path",
+        "Endocrine event buffers and last-state projection are Host-scope Agent memory but remain transient across restart",
+        "heartbeat transport and cache are app-local; durable probe history and production canary remain incomplete",
+        "Tribe shared state, Host registry, event bus and 23-Agent production catalog are Host-scope owned; compatibility context is execution-local, overlapping Tribe scopes are isolated, all no-context fallbacks are physically retired, and the Obs Organ registry no longer carries removed module-singleton names; the bus remains transient and full Host multi-app production canary is not run",
+        "SystemResourceManager status is Host-fenced and durable; full-stack canary remains NOT_RUN",
         "AgentRuntime scoped ports do not migrate legacy Executive generic delegate or prove seven-route TaskGraph coverage",
-        "full Host and Worker Service Locator removal remains incomplete"
+        "production Service Locator is physically absent, while full Worker and Obs typed composition remains incomplete"
       ]
     },
     "task_store_application_write_authority": {
@@ -1337,11 +2034,19 @@
       ]
     },
     "governed_operator_progress": {
-      "migrated": 2,
+      "migrated": 4,
       "total": 37,
-      "positive_commands": ["scheduler.task.trigger", "sys_mode.switch"],
-      "blocked_before_handler": 35,
+      "positive_commands": [
+        "scheduler.task.trigger",
+        "sys_mode.switch",
+        "task_terminal.reconcile",
+        "edge.command.push"
+      ],
+      "blocked_before_handler": 33,
       "sys_mode_execution_chain": "SECURE_INGRESS_TO_TYPED_OPERATOR_HOSTCOMMAND_IMMUTABLE_TASKGRAPH_REVIEW_CONTINUATION_SINGLE_APP_LOCAL_ACCEPTANCE_EFFECT_RUNTIME_HARDSTATE_JOURNAL",
+      "edge_execution_chain": "SECURE_INGRESS_TO_TYPED_GOVERNOR_TO_OPERATOR_HOSTCOMMAND_TO_IMMUTABLE_TASKGRAPH_TO_RISK4_REVIEW_TO_ACCEPTANCE_EFFECT_TO_TERMINAL_PREVIEW_TO_DURABLE_HOST_EMBODIMENT_OUTBOX",
+      "edge_scope": "EDGE_SOMATIC_EMOTION_STATE_COMMAND_ONLY_MORE_COMMANDS_REJECTED_BEFORE_ADMISSION",
+      "edge_reconciliation": "EXACT_REPLAY_REOPENS_SAME_OUTBOX_EXPIRED_CLAIM_QUERIES_RECEIPT_READ_ONLY_AND_NEVER_RESUBMITS",
       "outer_claim_result_authority": "CHECKSUM_CHAINED_OBS_OUTCOME_JOURNAL_V2_SEPARATES_DOMAIN_CONTINUATION_AND_TERMINAL_REFS_AND_FINALIZES_CENTRAL_CLAIM_ONLY_AFTER_TERMINAL_CONTINUATION",
       "historical_replay": "EXACT_ACCEPTANCE_EFFECT_AND_PERMANENT_HARDSTATE_EVENT_ID_LOOKUP_NO_REEXECUTION_EVEN_AFTER_MORE_THAN_1000_NEW_EVENTS",
       "no_change_boundary": "STATUS_SPECIFIC_NO_CHANGE_HANDLER_RECEIPT_IS_RUNTIME_SCOPE_BOUND_REQUIRES_NO_HARDSTATE_EVENT_REPORTS_SIDE_EFFECTS_EXECUTED_FALSE_AND_NEVER_FABRICATES_EVENT",
@@ -1353,8 +2058,8 @@
       "startup_recovery_gate": "PENDING_OR_CLAIMED_ACCEPTANCE_EFFECTS_BLOCK_GOVERNED_ADMISSION_UNTIL_DRAINED_OR_RECONCILED",
       "shutdown_order": "OBS_INGRESS_DRAIN_THEN_PRODUCERS_THEN_TASK_RUNTIME_EFFECT_DRAIN_THEN_WORKSPACE_THEN_MODE_DEPENDENCIES_THEN_COMMAND_SECURITY_STORES_THEN_APP_REFS",
       "shutdown_failure_boundary": "LIVE_OBS_SCHEDULER_OR_TASK_RUNTIME_CLOSE_FAILURE_PRESERVES_DEPENDENCIES_AND_PUBLISHED_REFS_AND_RETURNS_STABLE_RETRY_REQUIRED_ERROR",
-      "focused_validation": "265_PASSED_IN_179_82_SECONDS_SINGLE_FINAL_CONSOLIDATED_AFFECTED_BATCH_FIRST_ATTEMPT_264_PASSED_ONE_STALE_TEST_FIXTURE_FAILED",
-      "commit_bound_acceptance": "MISSING",
+      "focused_validation": "CURRENT_EDGE_OPERATOR_ACCEPTANCE_AND_PREVIEW_REGRESSION_PASS_PLUS_HISTORICAL_SYS_MODE_BATCH_SEE_TESTING_INDEX",
+      "commit_bound_acceptance": "PARTIAL_LOCAL_SQLITE_EDGE_SLICE_ONLY_SEVEN_ROUTE_ACCEPTANCE_MISSING",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "production_canary": "NOT_RUN",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -1487,8 +2192,8 @@
       "scope": ["chat", "skill", "plan", "delegate", "scheduler", "internal", "operator"],
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
-        "evaluated_commit_sha": "913312d80917a21cad524aaf46841461ab7c1da8",
-        "migration_head": "0122_evolution_lab_v2_evidence.sql",
+        "evaluated_commit_sha": "a836fb1fcfc3206a8c90e72b37e5c489e9c2f9e0",
+        "migration_head": "0123_resource_manager_status_journal.sql",
         "route_status": "ALL_SEVEN_INCOMPLETE",
         "commit_bound_acceptance": "MISSING_ALL_SEVEN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
@@ -1661,24 +2366,20 @@
       "scope": ["authenticated internal Agent WorkOrder"],
       "semantics": "Secure Ingress principal + Governor grant + WorkOrderV3 + BudgetPolicy + verified child grant + exact FrozenNodeInput authority + protected exact-inventory raw artifact stage + startup activation sealed-checkpoint projection continuation + strict terminal gates + post-Acceptance real TaskStore evidence + clean/no-change Git Workspace 0116 ACTIVE-to-ACCEPTED-to-PROMOTED + canonical result + post-Acceptance response-loss reconciliation without Agent rerun",
       "workspace_execution_authority": "root WorkOrder, graph/revision, node, attempt, lease, command, principal, lease owner and fencing token are projected exactly into DurableWorkspaceRuntime; real SQLite plus Git worktree integration succeeded",
-      "terminal_result_gate": "NOT_RUN, RETRY, SPLIT and non-EXECUTED results fail verification and outer Acceptance. EXECUTED plus inner REVIEW or review_required=true is structurally verified and becomes durable POST Review; canonical result commit remains impossible until that Review is accepted.",
+      "terminal_result_gate": "NOT_RUN, RETRY, REVIEW, SPLIT, non-EXECUTED and review_required results fail verification and outer Acceptance, and the final result handler rechecks the same terminal predicate",
       "protected_artifact_boundary": "Raw work order, prompt, metadata, result, changed-files and verification material is sealed in an exact-inventory protected stage. Every existing component from the configured root to the target is checked with lexical lstat; symlinks, Windows reparse points and junctions fail closed. Directories are created component by component, raw/metadata open, atomic replace and controlled remove revalidate the path, and a reverse legacy alias into the governed namespace is rejected. Extra files and byte drift also fail closed. The public WorkerProjection carries only the protected ref/digest and bounded summary. These repeated checks are not a handle-level atomic TOCTOU boundary or OS isolation.",
       "post_acceptance_evidence": "Promotion reopens the real TaskStore Command/Graph/Node, ACCEPTED Node, SUCCEEDED Attempt, exact owner/fence RELEASED Lease, Node artifact and claimed/committed Effect payload/digest/fence before any Workspace transition.",
       "workspace_promotion_boundary": "Only a clean Git worktree whose HEAD still equals the frozen base is accepted. Migration 0116 advances ACTIVE to ACCEPTED to PROMOTED; response-loss reconciliation can continue only an already-started durable operation and never reruns the Agent.",
       "pre_projection_crash_boundary": "For one governed Internal single-node sealed checkpoint, the next runtime activation scans the sealed inventory before any client retry, reopens the seal-bound recovery envelope and exact Operation, Budget, Preview, Grant, Task and historical Lease lineage, acquires a strictly higher-fence completion Lease, reconstructs the unique WorkerProjection and continues Verification, Acceptance, Effect, Secure Ingress claim completion, canonical result, clean/no-change promotion and cleanup without rerunning Agent. This is startup activation continuation only, not periodic survivor continuation or general recovery.",
-      "budget_rejection_boundary": "The explicit composition-owned checkpoint UoW is the only public mutation authority and WorkerProjection has one physical INSERT owner. Boundary A atomically commits the unique WorkerProjection, Operation COMMITTED and its Outbox. Boundary B separately atomically commits the rejected BudgetUsage, Budget ACTIVE-to-EXCEEDED transition and BUDGET_EXCEEDED Outbox. Boundary C revalidates A and B, then atomically commits Graph BLOCKED, Node and Attempt FAILED, Lease and Budget RELEASED plus five terminal Outboxes. Internal and canonical single-node checkpoints share that exact SQL transaction with separate strict authority modes. Canonical mode binds the durable HostCommand, TaskNode route and WorkerProjection and rejects any Internal Agent marker instead of permitting authority downgrade. Five injected faults prove rollback only inside C; A, B and C are not one transaction. For the exact governed Internal single-node sealed post-checkpoint BUDGET_BLOCKED terminal, the result ref is recomputed from the reopened C-boundary lineage, including reservation, budget and usage identities; response loss, duplicate replay and terminal reconciliation reject drift rather than trusting a stream event.",
-      "terminal_artifact_boundary": "The app-local periodic worker only reconciles exact terminal sealed artifacts. Before tombstone, Workspace abandonment or cleanup it closes either the exact governed Internal single-node sealed post-checkpoint Budget-rejection claim, or an exact nonacceptance claim for TERMINAL_VERIFICATION_FAILED / TERMINAL_POST_REVIEW_CANCELLED. The latter must reopen the canonical projection, operation reservation, historical/completion Lease and, for post-review cancellation, both the immutable BLOCKED cancellation intent and the separately bound trusted FINALIZED CANCELLED decision before writing the deterministic result ref. It does not periodically re-enter live sealed checkpoints and it does not generalize this settlement to raw worker failure, pre-checkpoint cancellation, nonsealed, multi-node or unknown-effect terminals.",
-      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. An explicit WorkOrderV3 schema or top-level graph binding is rejected as INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN instead of being down-projected into a second graph. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace; no V3-to-v2 executor projection remains. WorkOrderV3 top-level root/graph/node/revision fields are authoritative and conflicting legacy metadata fails closed. Single-node post-COMMIT settlement and exact operation-free persisted Attempt takeover are separate higher-fence windows. The latter reuses the same deterministic Attempt only after latest lineage, expired Lease, unique ACTIVE/EXCEEDED graph Budget, canonical PRECHARGE and atomic reservation-id plus scope/fingerprint absence validation. Lease acquisition identity binds Attempt, owner, TTL, expected version, takeover mode and reservation ID; committed-response replay also revalidates the exact unrenewed Lease, initial Heartbeat, fence, expiry and Outbox. Ordinary Attempt/Lease/Operation authority requires exactly one ACTIVE graph Budget. Any live owner, Operation race or identity/row drift fails closed before worker execution. Once an Operation is reserved, worker errors and collisions preserve recovery authority without ordinary Attempt/Node/Graph failure or Budget/Lease release. Graph/Budget terminal writers reject active execution facts and fence later Attempts. The only nonacceptance claim exception is a sealed Internal single-node persisted TERMINAL_VERIFICATION_FAILED or finalized post-review cancellation; Review rejection remains owned by the existing Review decision receipt. Ordinary Graph+Budget terminal and success/effect atomic UoW, multi-node/batch settlement recovery, unknown effects, periodic survivor continuation, crash-left unsealed cleanup, raw worker failure/pre-checkpoint/general-multinode/unknown-effect claim closeout, general write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
-      "claim_boundary": "Accepted startup continuation proves exact Secure Ingress result completion. The exact governed Internal single-node sealed post-checkpoint BUDGET_BLOCKED terminal also closes the claim by a deterministic ref after an independent C-boundary reopen; a restart terminal worker performs that closure before destructive cleanup, and replay validates the ref fail-closed. A separate deterministic task-terminal://internal-nonacceptance/sha256 result ref now closes only TERMINAL_VERIFICATION_FAILED and a TERMINAL_POST_REVIEW_CANCELLED that reopens the same graph FINALIZED cancellation authority; it binds command, ingress claim, graph/revision, node, attempt, projection, reservation, historical Lease and completion Lease. TERMINAL_REVIEW_REJECTED remains Review-decision-receipt authority. Raw worker failure, pre-checkpoint cancellation, nonsealed, general multi-node, other cancellation and unknown-effect claim closeout remain incomplete and must not be inferred from these exact paths.",
-      "local_validation": "The final worktree validation uses five file-disjoint groups: 184 runtime/structure/online-takeover tests in 289.38 seconds, 69 TaskStore/Heartbeat tests in 23.43 seconds, 23 Acceptance/atomic-failure tests in 101.70 seconds, 68 cancellation/parallel tests in 228.20 seconds, and 52 checkpoint/Budget/Intent tests in 123.58 seconds. They total 396 passes with zero failures or skips. The native V3 follow-up separately proves real SQLite+Git Internal frozen-worker delivery, V3 Workspace graph binding and metadata-drift rejection; it is local focused evidence, not program closure. The latest post-review cancellation slice ran four file-disjoint groups with 128 final passes, zero failures and zero skips: 79 unit tests, 31 cancellation contracts, 9 cross-process/terminal integrations, and 9 full Internal SQLite+Git integrations. Its first post-split full-Internal run had 3 test-only failures because the fixture still patched the compatibility owner instead of internal_task_contracts; after correcting that fixture path, all 9 full integrations passed. It proves real Operator Secure Ingress cancellation, separate BLOCKED intent versus CANCELLED final decision, restart claim closure, tombstone/Workspace cleanup and no Agent rerun. The structure follow-up separately passed DAG 47, Research 16, canary/lifecycle 9 and RuntimeOutbox 12 focused tests; a final selected combined regression passed 69 tests in 49.53 seconds. Those groups overlap other evidence and are not summed. This does not prove general failure/other-cancellation/unknown-effect/multi-node recovery or wave integration. Static architecture Gates 1 through 14 pass with failed_gates empty; Internal, Research ledger, terminal reader and DAG scheduler owners are 1350/1453/1433/1495 lines after focused extraction, and no allowlist was widened. Historical 191+1, 198/49/45, 71/39, checkpoint-UoW, 55 and 107 batches are overlapping or non-additive and are not summed. Overall NE-01 remains incomplete and remote CI is NOT_RUN_ACCOUNT_QUOTA.",
-      "post_review_approval_boundary": "A real SQLite plus Git Internal cutover proves that EXECUTED plus inner REVIEW enters WAITING_ACCEPTANCE_REVIEW with no ingress result, then an approved/consumed Review is continued through the real continuation store and RuntimeGroup without rerunning the Agent. The continuation writes PASS evidence for the frozen criteria, preserves the worker projection historical grant for finalization, commits internal.agent.result_commit, reopens the matching agentresult receipt and only then completes the claim. A worker-projection receipt is never a successful claim result. This is exact single-node approval evidence; unknown-effect and multi-node recovery remain incomplete.",
-      "post_review_cancellation_boundary": "A real SQLite plus Git Internal cutover now exercises Operator Secure Ingress cancellation after WAITING_ACCEPTANCE_REVIEW. The 0092 UoW revokes Review/resume authority, keeps the immutable intent target at BLOCKED as the request fence, and persists a separately bound trusted FINALIZED decision with target CANCELLED. After a simulated process stop before Internal claim and artifact cleanup, the restarted terminal worker reopens the exact seal/projection/operation/Lease/intent/decision lineage, closes the deterministic nonacceptance claim, then tombstones and cleans Workspace without rerunning the Agent. Terminal inventory only accepts one trusted version-adjacent 0090 BLOCKED predecessor; extra or malformed parallel decisions remain quarantined.",
-      "post_review_approval_validation": "107 focused unit/integration/contract tests passed in 100.64 seconds after compileall. The set contains the real SQLite+Git Internal cutover, Internal proposal/accepted-result contracts, Review RuntimeGroup/automatic-continuation contracts, governed tool cutover, terminal reconciliation, HostCommand replay and coverage contract. It is non-additive local evidence, not NE-01 wave integration or remote CI.",
+      "budget_rejection_boundary": "The explicit composition-owned checkpoint UoW is the only public mutation authority and WorkerProjection has one physical INSERT owner. Boundary A atomically commits the unique WorkerProjection, Operation COMMITTED and its Outbox. Boundary B separately atomically commits the rejected BudgetUsage, Budget ACTIVE-to-EXCEEDED transition and BUDGET_EXCEEDED Outbox. Boundary C revalidates A and B, then atomically commits Graph BLOCKED, Node and Attempt FAILED, Lease and Budget RELEASED plus five terminal Outboxes. Internal and canonical single-node checkpoints share that exact SQL transaction with separate strict authority modes. Canonical mode binds the durable HostCommand, TaskNode route and WorkerProjection and rejects any Internal Agent marker instead of permitting authority downgrade. Five injected faults prove rollback only inside C; A, B and C are not one transaction. Response loss, later duplicate HostCommand replay and terminal reconciliation consume one read-only exact internal/canonical terminal authority; identity drift is fail-closed.",
+      "terminal_artifact_boundary": "The app-local periodic worker only reconciles exact terminal sealed artifacts through abandon and cleanup. It does not periodically re-enter live sealed checkpoints.",
+      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. An explicit WorkOrderV3 schema or top-level graph binding is rejected as INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN instead of being down-projected into a second graph. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace; no V3-to-v2 executor projection remains. WorkOrderV3 top-level root/graph/node/revision fields are authoritative and conflicting legacy metadata fails closed. Single-node post-COMMIT settlement and exact operation-free persisted Attempt takeover are separate higher-fence windows. The latter reuses the same deterministic Attempt only after latest lineage, expired Lease, unique ACTIVE/EXCEEDED graph Budget, canonical PRECHARGE and atomic reservation-id plus scope/fingerprint absence validation. Lease acquisition identity binds Attempt, owner, TTL, expected version, takeover mode and reservation ID; committed-response replay also revalidates the exact unrenewed Lease, initial Heartbeat, fence, expiry and Outbox. Ordinary Attempt/Lease/Operation authority requires exactly one ACTIVE graph Budget. Any live owner, Operation race or identity/row drift fails closed before worker execution. Once an Operation is reserved, worker errors and collisions preserve recovery authority without ordinary Attempt/Node/Graph failure or Budget/Lease release. Graph/Budget terminal writers reject active execution facts and fence later Attempts. Ordinary Graph+Budget terminal and success/effect atomic UoW, multi-node/batch settlement recovery, unknown effects, periodic survivor continuation, crash-left unsealed cleanup, claim closeout, general write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
+      "claim_boundary": "Accepted startup continuation proves exact Secure Ingress result completion. Failure, cancellation and Budget-rejection claim closeout remain incomplete and must not be inferred from the accepted path.",
+      "local_validation": "The final worktree validation uses five file-disjoint groups: 184 runtime/structure/online-takeover tests in 289.38 seconds, 69 TaskStore/Heartbeat tests in 23.43 seconds, 23 Acceptance/atomic-failure tests in 101.70 seconds, 68 cancellation/parallel tests in 228.20 seconds, and 52 checkpoint/Budget/Intent tests in 123.58 seconds. They total 396 passes with zero failures or skips. The native V3 follow-up separately proves real SQLite+Git Internal frozen-worker delivery, V3 Workspace graph binding and metadata-drift rejection; it is local focused evidence, not program closure. Static architecture Gates 1 through 14 pass with failed_gates empty; task_repository.py is 4585 lines below the unchanged 4600 ceiling, the Lease takeover mixin is 230 lines, and the pure identity module is 93 lines. No allowlist was widened. Coverage includes zero-Budget execution rejection, deterministic Lease/initial-Heartbeat request identity, exact committed-response replay, TTL/mode/reservation/row tamper rejection, classifier/preparation, same-Attempt higher fence, Operation absence TOCTOU, ACTIVE/EXCEEDED takeover Budget and PRECHARGE matrices, online takeover, mixed live owners, post-reservation recovery hold, Graph/Budget terminal fences, Coordinator and structure. One serialized compatibility command timed out without a test-failure result and then its three groups passed separately. One new AST test made an incorrect first-argument assumption; production-related tests passed and the corrected identity/structure set reran 11 passes. Historical 191+1, 198/49/45, 71/39 and checkpoint-UoW batches are not added. Overall NE-01 remains incomplete and remote CI is NOT_RUN_ACCOUNT_QUOTA.",
       "exception_redaction": "Canonical executor/workspace failures persist and log error_type plus a random incident only; raw detail is removed. One focused redaction test succeeded.",
-      "review_continuation": "Explicit task-bound Review decisions re-enter the original surface through migration 0096 coordination. For Internal Agent, EXECUTED plus inner REVIEW or review_required=true is structurally valid and remains WAITING_ACCEPTANCE_REVIEW with the ingress claim open; a consumed POST Review reuses the same SUCCEEDED Attempt and sealed WorkerProjection without rerunning the Agent. The renewal grant only authorizes that continuation, finalization rechecks the historical projection grant, and RuntimeGroup completes the claim only after an effect-COMMITTED exact agentresult receipt is reopened. READY and first worker entry remain live-claim-fenced.",
+      "review_continuation": "Explicit task-bound Review decisions may re-enter the original surface through migration 0096 coordination, but a non-terminal inner Agent result is not review-eligible and cannot be promoted by the generic post-acceptance continuation. READY and first worker entry remain live-claim-fenced.",
       "evidence_refs": [
         "host_brain/app/internal_task_runtime.py",
-        "host_brain/app/internal_task_contracts.py",
         "host_brain/agent_runtime/projection_recovery_contract.py",
         "host_brain/agent_runtime/internal_artifact_terminal_reconciliation.py",
         "host_brain/agent_runtime/artifact_store.py",
@@ -1690,8 +2391,6 @@
         "host_brain/agent_runtime/accepted_effect_runtime.py",
         "host_brain/agent_runtime/workspace_runtime.py",
         "host_brain/contracts/agent_runtime/work_order.py",
-        "host_brain/contracts/agent_runtime/internal_budget_claim_result.py",
-        "host_brain/contracts/agent_runtime/internal_nonacceptance_claim_result.py",
         "host_brain/persistence/internal_agent_checkpoint_uow.py",
         "host_brain/persistence/task_internal_agent_checkpoint_store.py",
         "host_brain/persistence/task_internal_agent_budget_rejection_store.py",
@@ -1699,9 +2398,6 @@
         "host_brain/persistence/task_checkpoint_budget_route_authority.py",
         "host_brain/persistence/worker_projection_repository.py",
         "host_brain/persistence/task_terminal_reconciliation_read_store.py",
-        "host_brain/persistence/task_terminal_cancellation_read.py",
-        "host_brain/persistence/task_internal_agent_lineage_store.py",
-        "host_brain/persistence/host_command_claim_result_validation.py",
         "host_brain/task_runtime/budget_runtime.py",
         "host_brain/task_runtime/node_execution_runtime.py",
         "host_brain/task_runtime/node_execution_projection.py",
@@ -1720,8 +2416,6 @@
         "tests/contract/test_ne01_workspace_lifecycle_authority.py",
         "tests/unit/test_ne01_internal_artifact_stage.py",
         "tests/unit/test_ne01_internal_task_runtime.py",
-        "tests/unit/test_ne01_internal_budget_claim_result.py",
-        "tests/unit/test_ne01_internal_nonacceptance_claim_result.py",
         "tests/unit/test_ne01_internal_accepted_result.py"
       ]
     },
@@ -2566,9 +3260,9 @@
     },
     "explicit_composition_root": {
       "status": "PARTIAL",
-      "global_service_locator": "PRESENT",
+      "global_service_locator": "PRODUCTION_PROCESS_LOCATOR_PHYSICALLY_RETIRED_TEST_ONLY_BRIDGE_EXCLUDED",
       "per_app_route_scope": "WIRED_HOST_LIFECYCLE_CANON_TOOL_BOND_36_IDENTIFIED_OBS_PROJECTION_ROUTES_5_MOUNTED_WEB_UI_GETS_7_REMAINING_MOUNTED_GETS_6_HOST_PROJECTION_GETS_EXPLICIT_MODE_ACTION_PREVIEW_AND_ACTIVITY_RESOURCE_PORTS_TYPED_HOST_FACTORY_PORTS_APP_LOCAL_LIFE_BODY_DURABLE_SOURCE",
-      "host_lifecycle_scope": "APP_LOCAL_MODE_TRANSITION_ACTIVITY_MONITOR_AND_RESOURCE_MANAGER_FOR_SELECTED_HOST_CONSUMERS_FACTORY_AND_START_SUCCESS_BEFORE_PUBLICATION_ACTIVITY_FACTORY_FAILURE_PUBLISHES_NO_MODE_ACLOSE_CLOSING_FENCE_BLOCKS_BEGIN_RESOURCE_STARTUP_SAMPLE_USES_SOLE_OWNED_LOOP_PROCESS_GLOBAL_TRIBE_PORTS_USE_EXACT_SINGLE_LIVE_HOST_OWNER_FENCE",
+      "host_lifecycle_scope": "APP_LOCAL_MODE_TRANSITION_ACTIVITY_MONITOR_RESOURCE_MANAGER_AND_TRIBE_SHARED_STATE_REGISTRY_EVENT_BUS_FACTORY_AND_START_SUCCESS_BEFORE_PUBLICATION_ACTIVITY_FACTORY_FAILURE_PUBLISHES_NO_MODE_ACLOSE_CLOSING_FENCE_BLOCKS_BEGIN_RESOURCE_STARTUP_SAMPLE_USES_SOLE_OWNED_LOOP_TRIBE_CONTEXT_IS_EXECUTION_LOCAL_NO_CONTEXT_FALLBACKS_ARE_RETIRED_FULL_HOST_MULTI_APP_CANARY_NOT_RUN",
       "obs_application_scope": "D7C_APP_LOCAL_LIFE_BODY_DURABLE_PARTIAL_DIRECT_SKILL_DEPENDENCY_FAIL_CLOSED_AND_OBS_APP_ASSEMBLY_D8_HOST_DURABLE_SCOPE_RUNTIME_LEASE_EDGE_RECONNECT_OWNER_BOUND_RECEIPT_AND_READ_ONLY_NO_LAZY_ACTIVITY_PROJECTION_PARTIAL_FULL_HOST_WORKER_AND_GLOBAL_SERVICE_LOCATOR_BOUNDARIES_PENDING",
       "obs_projection_coverage": "REGISTERED_21_OF_21_METADATA_ONLY",
       "obs_projection_count_semantics": "PRODUCER_REGISTRATION_AND_DECLARED_SOURCE_MODE_NOT_RUNTIME_SUCCESS",
@@ -2760,8 +3454,8 @@
       "obs_projection_lifecycle_owner": "GATE_6_PASS_ONLY_PRODUCTION_START_PROJECTION_JOBS_CALL_IS_NESTED_OBS_ASGI_LIFESPAN_NO_GENERIC_CONTAINER_START_NO_MODULE_GLOBAL_DAEMON",
       "obs_projection_continuous_slo_boundary": "INCOMPLETE_UNCAUGHT_DAEMON_RENEW_OR_OTHER_BACKGROUND_EXIT_NOT_YET_DIRECTLY_EXPOSED_AS_RUNNING_LAST_FAILURE_BY_HEALTH",
       "route_module_provider_setters": "REMOVED_FOR_CANON_TOOL_BOND",
-      "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_PROCESS_GLOBAL_TRIBE_EXACT_OWNER_FENCE_ALLOWS_ONLY_ONE_LIVE_HOST_SECOND_FAILS_CLOSED_CONCURRENT_MULTI_APP_TRIBE_ISOLATION_NOT_SUPPORTED_NOT_CLAIMED",
-      "remaining_locator_boundary": "Host lifecycle ownership is app-local for ModeTransitionService, ActivityMonitor, SystemResourceManager and HostHardStateOwner. Lifecycle/Input/AgentRuntime ports remain explicitly injected. TribeRuntimeScope now owns port bind/unbind, subscriptions, handoff and Obs reader without ProcessServiceContainer; compatibility agents, bus and registries remain process-global so the shared fence permits only one live Host. Current inventory is 21 named-import modules / 47 imported names / 24 all-form consumer modules with ProcessServiceContainer at 48 fields, 2 locks and 45 mutable references. This is dependency-resolution debt reduction, not Service Locator removal, backing-instance isolation, generic Delegate cutover or seven-route TaskGraph coverage. Production canary is NOT_RUN, wave integration is NOT_RUN_PER_WAVE_POLICY, REMOTE_CI is NOT_RUN_ACCOUNT_QUOTA and NE-07 is NOT_RUN.",
+      "multi_app_isolation": "PARTIAL_FOR_SELECTED_APP_LOCAL_PORTS_AND_TRIBE_SHARED_STATE_REGISTRY_EVENT_BUS_AND_23_AGENT_CATALOG_EXECUTION_LOCAL_CONTEXT_PROVES_TWO_OVERLAPPING_ASYNC_TRIBE_SCOPES_WITH_DISTINCT_AGENT_AND_REGISTRY_IDENTITIES_SAME_EXECUTION_CROSS_SCOPE_ACTIVE_EXECUTION_UNBIND_AND_STALE_INHERITED_CONTEXT_FAIL_CLOSED_FULL_HOST_MULTI_APP_PRODUCTION_CANARY_NOT_RUN_NOT_CLAIMED",
+      "remaining_locator_boundary": "Host lifecycle、HardState、Memory、Bond、Governance 与底层 Authority 均由每个 Host root 显式持有。HostAuthorityRuntimeOwner 在 migration-first 后创建同一 epoch 的 SQLiteLedger、EpisodicStore、LifeMemoryStore、独立 Prompt/Route/Provider/ModelAttempt 图和 CapabilityBroker 图；Authority 先启动并在 Capability、Model、Chroma、Ledger 顺序中最后关闭。Lifecycle/Input/AgentRuntime ports 继续显式注入；TribeRuntimeScope fresh 持有 state registry、Host registry、event bus 与固定 23-Agent catalog。bind 只建立 scope ownership，lifespan/background execution 与 HTTP request 通过 execution-local ContextVar 激活 exact owner；两个重叠 Tribe scope 的 Agent/registry identity 已隔离，同 execution 跨 scope、active execution 解绑和 stale inherited context 失败关闭。23 个 Agent backing singleton/setter 与 state/Host registry/event bus fallback 已物理归零，缺 exact context 统一失败关闭；DigitalLifeSupervisor 显式拥有验证 scope。生产 locator consumer/import/module/field/lock/ref 当前全为 0，ProcessServiceContainer、facade、environment 与旧 wiring 已物理删除；pytest-only bridge 不进入生产对象图。外部 Chroma/Neo4j namespace、Token/MCP durable restart、资源崩溃恢复、易失 EventBus、完整 Host multi-app canary、Worker/Obs typed containers、事务化 Chat、generic Delegate 和七路线 TaskGraph 仍未完成。Production canary=NOT_RUN，wave integration=NOT_RUN_PER_WAVE_POLICY，REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA，NE-07=NOT_RUN。",
       "typed_host_service_bundle_local_regression": {
         "status": "PASS_LOCAL_FOCUSED_ONLY_NE01_IN_PROGRESS",
         "initial_result": "46_PASSED_4_STALE_FIXTURE_OR_CONTRACT_FAILURES",
@@ -2836,9 +3530,9 @@
       "mixed_file_gate_findings": [],
       "effect_slice_structure_boundary": "The second NE-01 split moved ASGI lifecycle wiring, Obs response models, immutable Degradation policy, Node Grant and Planning codecs, Intent Review continuation, and Guardian contracts/commands into focused modules. The original authority owners remain the only lifecycle, connection, RuntimeEvent append, or journal-store owners. All eleven former findings are within the 1,500-line or pre-existing cohesive ceiling and the fresh repository gate returns no issues without adding or widening an allowlist. Service Locator, old execution bypasses, general recovery, and production enablement remain incomplete.",
       "cleanup_progress": {
-        "container_fields": 48,
+        "container_fields": 20,
         "container_lock_fields": 2,
-        "mutable_service_references_excluding_locks_and_application_ports": 45,
+        "mutable_service_references_excluding_locks_and_application_ports": 17,
         "retired_zero_consumer_slots": [
           "retrieval_orchestrator",
           "retrieval_pipeline",
@@ -2852,21 +3546,79 @@
           "hard_state",
           "obs_metrics_collector",
           "query_projection_store",
-          "tribe_runtime_composition"
+          "tribe_runtime_composition",
+          "bond_aware_style_engine",
+          "reflection_chain",
+          "predictive_state_engine",
+          "planning_agent",
+          "runtime_capability_registry",
+          "policy_cache",
+          "capability_forge_token_service",
+          "silence_engine",
+          "milestone_tracker",
+          "multimodal_processor",
+          "tts_context_router",
+          "meta_learning_loop",
+          "memory_worth_evaluator",
+          "security_immune_agent",
+          "capability_gap_telemetry",
+          "capability_forge_service",
+          "conversation_turn_store",
+          "conversation_history",
+          "session_topic_ledger_store",
+          "session_tactic_ledger_store",
+          "multimodal_observer",
+          "shared_memory_index",
+          "graph_runtime",
+          "routing_matrix",
+          "bond_dynamics_writer",
+          "bond_stage_engine",
+          "bond_update_queue",
+          "memory_service_container"
         ],
         "retired_global_publication_setters": [
           "set_activity_monitor",
-          "set_resource_manager"
+          "set_resource_manager",
+          "set_memory_service_container"
         ],
-        "retired_get_accessors": 8,
+        "retired_get_accessors": 41,
         "retired_broad_facade_reexports": [
           "BondDynamicsWriter",
           "BondStageEngine",
           "BondUpdateQueue",
           "IntentDecisionEngine",
           "MilestoneTracker",
+          "MemoryWorthEvaluator",
+          "MetaLearningLoop",
+          "MultimodalProcessor",
           "SharedMemoryIndex",
-          "get_capability_forge_token_service"
+          "TtsContextRouter",
+          "get_silence_engine",
+          "get_milestone_tracker",
+          "get_multimodal_processor",
+          "get_tts_context_router",
+          "get_meta_learning_loop",
+          "get_memory_worth_evaluator",
+          "get_policy_cache",
+          "get_capability_forge_token_service",
+          "get_security_immune_agent",
+          "get_capability_gap_telemetry",
+          "get_capability_forge_service",
+          "get_conversation_turn_store",
+          "get_conversation_history",
+          "get_session_topic_ledger_store",
+          "get_session_tactic_ledger_store",
+          "get_multimodal_observer",
+          "get_shared_memory_index",
+          "get_graph_runtime",
+          "get_routing_matrix",
+          "get_bond_dynamics_writer",
+          "get_bond_stage_engine",
+          "get_bond_update_queue",
+          "get_bond_neo4j_client",
+          "get_memory_service_container",
+          "get_life_memory_service",
+          "set_memory_service_container"
         ]
       },
       "evidence_refs": [
@@ -2894,14 +3646,24 @@
         "host_brain/app/tribe_composition.py",
         "host_brain/app/tribe_runtime_scope.py",
         "host_brain/core/resource_manager.py",
+        "host_brain/core/resource_manager_status_owner.py",
+        "host_brain/contracts/resource_manager_status.py",
+        "host_brain/app/resource_manager_status_journal.py",
+        "host_brain/audit/migrations/0123_resource_manager_status_journal.sql",
+        "tests/integration/test_ne01_resource_manager_status_journal.py",
         "host_brain/app/mateengine_routes.py",
         "host_brain/channels/embodiment.py",
         "host_brain/channels/embodiment_outbox.py",
         "host_brain/persistence/embodiment_outbox_repository.py",
         "host_brain/app/observability_runtime/projection_daemon.py",
+        "host_brain/composition/host_bond_runtime.py",
+        "host_brain/composition/host_memory_runtime.py",
         "host_brain/composition/process_service_container.py",
         "host_brain/composition/process_services.py",
-        "host_brain/composition/process_runtime_services.py",
+        "host_brain/composition/host_governance_runtime.py",
+        "tests/unit/test_ne01_host_bond_runtime.py",
+        "tests/unit/test_ne01_host_memory_runtime.py",
+        "tests/contract/test_aw03_emotion_timeline_query_repository.py",
         "tests/unit/test_ne01_host_route_scope.py",
         "tests/unit/test_ne01_host_lifecycle_composition.py",
         "tests/unit/test_ne01_agent_runtime_composition.py",
@@ -3012,13 +3774,14 @@
         "EdgeCommandPusher construction and injection cannot disable the Preview gate",
         "raw Edge HTTP transport and low-level embodiment command port are module-private and not exported",
         "Acceptance surface Gateway and Scheduler-derived Life Edge Gateway VTS MateEngine terminal proof reopen",
+        "Operator edge.embodiment_enqueue terminal proof reopens the accepted Task and app-local embodiment runtime scope before durable enqueue",
         "Acceptance surface permits only effect-bound minimal text and rejects raw_extra media secondary reply and content drift",
         "public embodiment submit and enqueue require exact Preview while claimed durable outbox dispatch uses a private submitter",
         "legacy WorkOrder and Acceptance Effect quarantine",
-        "all 37 direct Obs mutation commands fail closed before side effect"
+        "33 remaining direct Obs mutation commands fail closed before side effect"
       ],
       "missing": [
-        "Governed Operator TaskGraph replacement for 37 blocked commands",
+        "Governed Operator TaskGraph replacement for 33 blocked commands",
         "Acceptance-to-Embodiment derived Preview for reply-performance Gateway voice and chat cues",
         "production deployment multi-instance canary"
       ],
@@ -3029,11 +3792,14 @@
         "host_brain/governor/action_preview.py",
         "host_brain/task_runtime/acceptance_effect_dispatcher.py",
         "host_brain/app/acceptance_effect_handlers.py",
+        "host_brain/app/accepted_edge_embodiment_handler.py",
+        "host_brain/app/governed_operator_edge_support.py",
         "host_brain/channels/edge_transport.py",
         "host_brain/channels/embodiment.py",
         "host_brain/lifecycle_runtime/proactive_dispatch.py",
         "host_brain/app/vision/proactive_push_client.py",
         "tests/integration/test_ne03_action_preview_authority.py",
+        "tests/integration/test_ne01_governed_operator_edge_command.py",
         "tests/unit/test_ne03_action_preview_front_doors.py"
       ]
     },
@@ -3175,15 +3941,15 @@
         "per-operation durable fence and lease-loss preemption for future governed Tool execution",
         "general workspace write promotion beyond the clean/no-change Internal inspect slice",
         "periodic survivor continuation for live sealed checkpoints",
-        "generic crash-left unsealed inventory and cleanup outside the exact finalized-cancellation cleanup slice",
-        "raw worker failure/pre-checkpoint/other-cancellation/general-multinode/unknown-effect Secure Ingress claim closeout beyond exact sealed Internal budget-rejection, verification-failed and finalized-post-review-cancellation paths",
+        "crash-left unsealed partial inventory and cleanup",
+        "failure/cancel/budget Secure Ingress claim closeout",
         "multi-node and batch post-COMMIT Budget settlement recovery",
         "Domain Pack and codex_runtime durable-workspace injection",
         "cleanup worker health route and automatic shutdown retry orchestration",
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Post-admission Internal workers now natively consume WorkOrderV3 and reject graph metadata drift; external v2 is ingress compatibility only. For a governed Internal single-node sealed checkpoint, the next runtime activation can reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C are three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. A generic single-node post-COMMIT Budget settlement whose write response and first read-back are both lost now holds without additional lifecycle/finalization mutation, then handles EXACT_ACCEPTED, EXACT_REJECTED, or MISSING after Lease expiry while CONFLICT fails closed; process-control BaseException does not create a false terminal. The app-local terminal worker can abandon and clean exact terminal sealed artifacts. For exact governed Internal single-node sealed Budget-rejection, verification-failed and finalized-post-review-cancellation terminals, it first reopens the permitted canonical lineage and completes a deterministic Secure Ingress result ref before destructive cleanup; Review rejection stays on the existing Review receipt. A real SQLite+Git post-review cancellation E2E now proves the separate immutable BLOCKED intent and trusted CANCELLED final decision, restart claim closure, tombstone/Workspace cleanup and no Agent replay. This remains partial: periodic survivor continuation, all other crash-left unsealed cleanup, raw worker failure/pre-checkpoint/other-cancellation/general-multinode/unknown-effect Secure Ingress claim closeout and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
+      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Post-admission Internal workers now natively consume WorkOrderV3 and reject graph metadata drift; external v2 is ingress compatibility only. For a governed Internal single-node sealed checkpoint, the next runtime activation can reconstruct the unique WorkerProjection under a strictly higher completion fence and continue Verification, Acceptance, Effect, accepted claim completion and clean/no-change 0116 promotion without rerunning Agent. Checkpoint A, Budget charge B and rejected terminal C are three separate durable atomic boundaries behind one explicit checkpoint port; response-loss reconciliation is read-only and exact. A generic single-node post-COMMIT Budget settlement whose write response and first read-back are both lost now holds without additional lifecycle/finalization mutation, then handles EXACT_ACCEPTED, EXACT_REJECTED, or MISSING after Lease expiry while CONFLICT fails closed; process-control BaseException does not create a false terminal. The app-local terminal worker can abandon and clean exact terminal sealed artifacts. This remains partial: periodic survivor continuation, crash-left unsealed partial cleanup, failure/cancel/budget Secure Ingress claim closeout and multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, general write promotion, per-operation preemption, Domain/Skill/codex_runtime, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
       "status": "PARTIAL_V2_CODE_BOUNDARY_NO_PRODUCTION_CALLER",
@@ -3233,7 +3999,7 @@
       "evidence_refs": [
         "host_brain/governor/capability_policy.py",
         "host_brain/governor/decision.py",
-        "host_brain/composition/process_runtime_services.py",
+        "host_brain/composition/host_governance_runtime.py",
         "tests/contract/test_nle_capability_maturity_contract.py"
       ],
       "boundary": "Production IntentDecisionEngine composition enables the restrict-only maturity adapter explicitly; missing or forged scorecards resolve to maximum risk. Direct unit construction remains opt-in compatible, and durable promotion/degradation activation still requires NE-05 lifecycle evidence and Review."

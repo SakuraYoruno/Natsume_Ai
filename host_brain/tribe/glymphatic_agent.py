@@ -420,22 +420,18 @@ class GlymphaticAgent:
             return {"ticked": False, "error": str(exc)}
 
 
-_GLYMPHATIC_AGENT: GlymphaticAgent | None = None
-
-
 def get_glymphatic_agent() -> GlymphaticAgent:
-    global _GLYMPHATIC_AGENT
-    if _GLYMPHATIC_AGENT is None:
-        _GLYMPHATIC_AGENT = GlymphaticAgent()
-    return _GLYMPHATIC_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "glymphatic_agent",
+        expected_type=GlymphaticAgent,
+    )
 
 
-def set_glymphatic_agent(agent: GlymphaticAgent | None) -> None:
-    global _GLYMPHATIC_AGENT
-    _GLYMPHATIC_AGENT = agent
-
-
-__all__ = ["GlymphaticAgent", "get_glymphatic_agent", "set_glymphatic_agent"]
+__all__ = ["GlymphaticAgent", "get_glymphatic_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

@@ -28,24 +28,6 @@ class CortexAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
-    def shutdown_bond_update_queue(
-        self,
-        *,
-        logger: Any | None = None,
-        timeout_s: float = 3.0,
-    ) -> dict[str, Any]:
-        try:
-            queue = self.application_ports.require("bond_update_queue")()
-            drained = bool(queue.drain(timeout_s=float(timeout_s)))
-            queue.shutdown()
-            if logger is not None and hasattr(logger, "info"):
-                logger.info("BondUpdateQueue graceful shutdown completed (drained=%s)", drained)
-            return {"status": "OK", "drained": drained}
-        except Exception as exc:
-            if logger is not None and hasattr(logger, "warning"):
-                logger.warning("BondUpdateQueue shutdown failed: %s", exc)
-            return {"status": "DEGRADED", "reason_code": "BOND_QUEUE_SHUTDOWN_FAILED", "detail": str(exc)}
-
     async def post_process_bond_update(
         self,
         *,
@@ -606,21 +588,8 @@ class CortexAgent:
             logging.getLogger("Natsume.tribe.cortex_agent").info(
                 "CortexAgent PLATFORM_CONNECTED: platform=%s", platform,
             )
-            # T-129：平台连接后向 ChannelAgent 推送开门指令（允许消息路由）
-            try:
-                _pusher = get_edge_command_pusher()
-                if _pusher is not None and _pusher.enabled:
-                    await asyncio.to_thread(
-                        _pusher.push_gate_control,
-                        gate_open=True,
-                        reason="platform_connected",
-                        platform=platform,
-                        source_agent="cortex_agent",
-                    )
-            except Exception as _push_exc:
-                logging.getLogger("Natsume.tribe.cortex_agent").debug(
-                    "CortexAgent 推送开门指令失败（降级）: %s", _push_exc
-                )
+            # Platform observation does not grant an Edge effect.  Gate changes
+            # require a separately admitted TaskGraph node and exact Preview.
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -653,21 +622,8 @@ class CortexAgent:
             logging.getLogger("Natsume.tribe.cortex_agent").info(
                 "CortexAgent PLATFORM_DISCONNECTED: platform=%s", platform,
             )
-            # T-129：平台断线后向 ChannelAgent 推送关门指令（暂停该平台消息路由）
-            try:
-                _pusher = get_edge_command_pusher()
-                if _pusher is not None and _pusher.enabled:
-                    await asyncio.to_thread(
-                        _pusher.push_gate_control,
-                        gate_open=False,
-                        reason="platform_disconnected",
-                        platform=platform,
-                        source_agent="cortex_agent",
-                    )
-            except Exception as _push_exc:
-                logging.getLogger("Natsume.tribe.cortex_agent").debug(
-                    "CortexAgent 推送关门指令失败（降级）: %s", _push_exc
-                )
+            # State observation is durable input only; no direct Edge command
+            # is emitted from the Tribe event handler.
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -754,22 +710,18 @@ class CortexAgent:
             )
 
 
-_CORTEX_AGENT: CortexAgent | None = None
-
-
 def get_cortex_agent() -> CortexAgent:
-    global _CORTEX_AGENT
-    if _CORTEX_AGENT is None:
-        _CORTEX_AGENT = CortexAgent()
-    return _CORTEX_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "cortex_agent",
+        expected_type=CortexAgent,
+    )
 
 
-def set_cortex_agent(agent: CortexAgent | None) -> None:
-    global _CORTEX_AGENT
-    _CORTEX_AGENT = agent
-
-
-__all__ = ["CortexAgent", "get_cortex_agent", "set_cortex_agent"]
+__all__ = ["CortexAgent", "get_cortex_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401

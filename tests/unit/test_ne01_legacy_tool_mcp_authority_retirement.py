@@ -5,7 +5,11 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from host_brain.composition import process_runtime_services, process_services
+from host_brain.composition import process_services
+from host_brain.composition.host_governance_runtime import (
+    HostGovernanceRuntimeOwner,
+    load_host_governance_runtime_settings,
+)
 from host_brain.executive_runtime import skill_execution
 from host_brain.app import governed_frozen_skill_runtime
 from host_brain.mcp.tool_broker import MCPToolBroker
@@ -20,28 +24,32 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_asgi_does_not_construct_or_bind_the_legacy_mcp_broker() -> None:
     source = (ROOT / "host_brain" / "app" / "asgi.py").read_text(encoding="utf-8")
-    container_source = (
+    container_path = (
         ROOT / "host_brain" / "composition" / "process_service_container.py"
-    ).read_text(encoding="utf-8")
+    )
 
     assert "get_mcp_tool_broker" not in source
     assert "mcp_degradation_broker" not in source
-    assert not hasattr(process_runtime_services, "get_mcp_tool_broker")
-    assert "mcp_tool_broker" not in container_source
+    assert not container_path.exists()
+    assert not (
+        ROOT
+        / "host_brain"
+        / "composition"
+        / "process_runtime_services.py"
+    ).exists()
 
 
 def test_process_owned_tool_broker_locator_is_retired() -> None:
-    container_source = (
+    container_path = (
         ROOT / "host_brain" / "composition" / "process_service_container.py"
-    ).read_text(encoding="utf-8")
-    runtime_source = (
+    )
+    runtime_path = (
         ROOT / "host_brain" / "composition" / "process_runtime_services.py"
-    ).read_text(encoding="utf-8")
+    )
 
-    assert not hasattr(process_runtime_services, "get_tool_broker")
+    assert not runtime_path.exists()
+    assert not container_path.exists()
     assert not hasattr(process_services, "get_tool_broker")
-    assert "tool_broker:" not in container_source
-    assert "ToolBroker(" not in runtime_source
 
 
 def test_gate11_inventory_tracks_only_the_app_local_boundary_broker() -> None:
@@ -57,9 +65,15 @@ def test_gate11_inventory_tracks_only_the_app_local_boundary_broker() -> None:
 
 
 def test_process_mcp_skill_bridge_is_default_off_and_purges_stale_entries() -> None:
-    source = inspect.getsource(process_runtime_services._sync_mcp_skills_into_registry)
+    source = inspect.getsource(
+        HostGovernanceRuntimeOwner._sync_mcp_skills
+    )
+    settings_source = inspect.getsource(
+        load_host_governance_runtime_settings
+    )
 
-    assert 'HOST_SKILL_MCP_BRIDGE_ENABLED", default=False' in source
+    assert "HOST_SKILL_MCP_BRIDGE_ENABLED" in settings_source
+    assert "default=False" in settings_source
     assert 'startswith("mcp::")' in source
     assert "unregister(skill_name)" in source
 

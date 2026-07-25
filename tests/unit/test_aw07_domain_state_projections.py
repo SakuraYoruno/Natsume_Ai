@@ -103,9 +103,11 @@ def test_security_gets_never_initialize_agent(tmp_path, monkeypatch) -> None:  #
         freshness_ts_ms=now,
     )
     monkeypatch.setattr(
-        agent,
-        "get_security_immune_agent",
-        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("GET initialized Immune Agent")),
+        agent.SecurityImmuneAgent,
+        "__init__",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("GET initialized Immune Agent")
+        ),
     )
 
     runtime = routes.get_security_immune_runtime(store)

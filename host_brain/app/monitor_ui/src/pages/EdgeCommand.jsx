@@ -89,7 +89,9 @@ export default function EdgeCommand() {
 
   const canPush = controlGate && status?.enabled && formValidation.valid && payloadValidation.valid
   const disabledReason = !status?.enabled
-    ? 'Edge pusher 当前不可用。'
+    ? status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
+      ? '进程级直推 authority 已退役；必须通过受治理 TaskGraph、Acceptance 与 Preview proof。'
+      : 'Edge transport 当前不可用。'
     : !controlGate
       ? '开启控制门后才能发送。'
       : !formValidation.valid
@@ -131,7 +133,11 @@ export default function EdgeCommand() {
         description={EDGE_COMMAND_COPY.heroDescription}
         gradientClass="from-sky-50 via-white to-orange-50"
         metaItems={[
-          status?.enabled ? 'edge enabled' : 'edge disabled',
+          status?.enabled
+            ? 'edge enabled'
+            : status?.authority_state === 'GOVERNED_TASKGRAPH_ONLY'
+              ? 'governed only'
+              : 'edge disabled',
           controlGate ? 'control gate open' : 'control gate closed',
           payloadValidation.valid ? `payload ${payloadValidation.label}` : 'payload invalid',
           status?.edge_base_url || 'no edge url',

@@ -661,6 +661,78 @@ class RuntimeEventRepository:
         finally:
             conn.close()
 
+    def get_latest_journal_for_aggregate(
+        self,
+        *,
+        aggregate_type: str,
+        aggregate_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the immutable latest revision for one exact aggregate."""
+
+        kind = _required_text(aggregate_type, "aggregate_type", max_length=128)
+        identity = _required_text(aggregate_id, "aggregate_id")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM runtime_event_timeline
+                WHERE aggregate_type = ? AND aggregate_id = ?
+                ORDER BY aggregate_version DESC, cursor DESC
+                LIMIT 1
+                """,
+                (kind, identity),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            conn.close()
+
+    def list_latest_journal_heads(
+        self,
+        *,
+        aggregate_type: str,
+        event_type: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return one latest immutable row per aggregate identity."""
+
+        aggregate_kind = _required_text(
+            aggregate_type,
+            "aggregate_type",
+            max_length=128,
+        )
+        event_kind = _required_text(event_type, "event_type", max_length=128)
+        size = min(1000, max(1, int(limit)))
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT current.*
+                FROM runtime_event_timeline AS current
+                WHERE current.aggregate_type = ?
+                  AND current.event_type = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM runtime_event_timeline AS newer
+                      WHERE newer.aggregate_type = current.aggregate_type
+                        AND newer.aggregate_id = current.aggregate_id
+                        AND (
+                            newer.aggregate_version > current.aggregate_version
+                            OR (
+                                newer.aggregate_version = current.aggregate_version
+                                AND newer.cursor > current.cursor
+                            )
+                        )
+                  )
+                ORDER BY current.cursor DESC
+                LIMIT ?
+                """,
+                (aggregate_kind, event_kind, size),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
     def list_journal_for_aggregates(
         self,
         *,

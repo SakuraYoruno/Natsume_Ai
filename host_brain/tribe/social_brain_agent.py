@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -1132,22 +1132,18 @@ class SocialBrainAgent:
         }
 
 
-_SOCIAL_BRAIN_AGENT: SocialBrainAgent | None = None
-
-
 def get_social_brain_agent() -> SocialBrainAgent:
-    global _SOCIAL_BRAIN_AGENT
-    if _SOCIAL_BRAIN_AGENT is None:
-        _SOCIAL_BRAIN_AGENT = SocialBrainAgent()
-    return _SOCIAL_BRAIN_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "social_brain_agent",
+        expected_type=SocialBrainAgent,
+    )
 
 
-def set_social_brain_agent(agent: SocialBrainAgent | None) -> None:
-    global _SOCIAL_BRAIN_AGENT
-    _SOCIAL_BRAIN_AGENT = agent
-
-
-__all__ = ["SocialBrainAgent", "get_social_brain_agent", "set_social_brain_agent"]
+__all__ = ["SocialBrainAgent", "get_social_brain_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

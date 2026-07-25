@@ -24,7 +24,7 @@ def test_surface_runtime_ports_are_frozen_and_composed_only_by_app_adapter() -> 
                 construction_sites.append(path.relative_to(ROOT).as_posix())
 
     assert SurfaceRuntimePorts.__dataclass_params__.frozen is True
-    assert construction_sites == ["host_brain/app/surface_main_chain_adapter.py"]
+    assert construction_sites == ["host_brain/app/surface_runtime_composition.py"]
 
 
 def test_surface_runtime_has_no_app_or_composition_reverse_imports() -> None:

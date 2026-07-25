@@ -19,6 +19,9 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
 
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 场景 1：reduce_recovery_urgency 正常降低 recovery_urgency
 # ─────────────────────────────────────────────────────────────────────────────

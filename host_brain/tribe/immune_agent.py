@@ -1427,25 +1427,20 @@ def _parse_int_env(name: str, *, default: int, low: int, high: int) -> int:
     return max(int(low), min(int(high), value))
 
 
-_IMMUNE_AGENT: ImmuneAgent | None = None
-
-
 def get_immune_agent() -> ImmuneAgent:
-    global _IMMUNE_AGENT
-    if _IMMUNE_AGENT is None:
-        _IMMUNE_AGENT = ImmuneAgent()
-    return _IMMUNE_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_immune_agent(agent: ImmuneAgent | None) -> None:
-    global _IMMUNE_AGENT
-    _IMMUNE_AGENT = agent
+    return require_active_tribe_agent(
+        "immune_agent",
+        expected_type=ImmuneAgent,
+    )
 
 
 __all__ = [
     "ImmuneAgent",
     "get_immune_agent",
-    "set_immune_agent",
 ]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────

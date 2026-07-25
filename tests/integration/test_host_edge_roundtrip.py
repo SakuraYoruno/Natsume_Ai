@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from edge_client.app.fastapi_app import create_edge_fastapi_app
@@ -14,7 +14,7 @@ from edge_client.tribe.edge_tribe_bridge import EdgeTribeBridge
 from edge_client.tribe.peripheral_agent import PeripheralAgent as EdgePeripheralAgent
 from edge_client.tribe.registry import EdgeTribeRegistry
 from edge_client.tribe.somatic_agent import SomaticAgent as EdgeSomaticAgent
-from host_brain.app.internal_tribe_routes import router, set_tribe_event_bus
+from host_brain.app.internal_tribe_routes import router
 from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
 from host_brain.tribe.edge_command_pusher import EdgeCommandPusher
@@ -24,6 +24,13 @@ from host_brain.tribe.edge_command_pusher import (
 )
 from host_brain.tribe.event_bus import InMemoryTribeEventBus
 from host_brain.tribe.peripheral_agent import PeripheralAgent as HostPeripheralAgent
+from host_brain.tribe.registry import HostTribeRegistry
+from host_brain.tribe.runtime_context import (
+    TribeAgentCatalog,
+    TribeRuntimeContext,
+    activate_tribe_runtime_context,
+    deactivate_tribe_runtime_context,
+)
 from host_brain.tribe.somatic_agent import SomaticAgent as HostSomaticAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
@@ -132,10 +139,46 @@ def _build_edge_app() -> FastAPI:
     )
 
 
-def _build_host_client(bus: InMemoryTribeEventBus) -> TestClient:
+def _build_host_runtime_context(
+    *,
+    bus: InMemoryTribeEventBus,
+    state_registry: TribeStateRegistry,
+) -> tuple[object, TribeRuntimeContext]:
+    owner = object()
+    return owner, TribeRuntimeContext(
+        state_registry=state_registry,
+        tribe_registry=HostTribeRegistry(),
+        event_bus=bus,
+        agent_catalog=TribeAgentCatalog(
+            (("test_placeholder_agent", object),)
+        ),
+        active_owner_provider=lambda: owner,
+    )
+
+
+def _build_host_client(
+    bus: InMemoryTribeEventBus,
+    *,
+    state_registry: TribeStateRegistry,
+) -> TestClient:
+    owner, context = _build_host_runtime_context(
+        bus=bus,
+        state_registry=state_registry,
+    )
     app = FastAPI()
     app.include_router(router)
-    set_tribe_event_bus(bus)
+
+    @app.middleware("http")
+    async def bind_test_tribe_context(request: Request, call_next):
+        activation = activate_tribe_runtime_context(
+            owner=owner,
+            context=context,
+        )
+        try:
+            return await call_next(request)
+        finally:
+            deactivate_tribe_runtime_context(activation)
+
     return TestClient(app)
 
 
@@ -226,14 +269,27 @@ def test_edge_to_host_state_backflow_updates_host_snapshots(monkeypatch) -> None
     monkeypatch.setenv("HOST_INTERNAL_TRIBE_TOKEN", "tribe-token")
 
     bus = InMemoryTribeEventBus(max_events=128)
-    set_tribe_event_bus(bus)
     state_registry = TribeStateRegistry()
     host_somatic = HostSomaticAgent(state_registry=state_registry)
     host_peripheral = HostPeripheralAgent(state_registry=state_registry)
-    host_somatic.register_subscriptions()
-    host_peripheral.register_subscriptions()
+    owner, context = _build_host_runtime_context(
+        bus=bus,
+        state_registry=state_registry,
+    )
+    activation = activate_tribe_runtime_context(
+        owner=owner,
+        context=context,
+    )
+    try:
+        host_somatic.register_subscriptions()
+        host_peripheral.register_subscriptions()
+    finally:
+        deactivate_tribe_runtime_context(activation)
 
-    with _build_host_client(bus) as host_client:
+    with _build_host_client(
+        bus,
+        state_registry=state_registry,
+    ) as host_client:
         bridge = EdgeTribeBridge(
             host_base_url="http://host.local",
             token="tribe-token",
@@ -260,11 +316,18 @@ def test_edge_to_host_state_backflow_updates_host_snapshots(monkeypatch) -> None
             error=None,
         )
 
-    _dispatch_host_state_events(
-        bus=bus,
-        host_somatic=host_somatic,
-        host_peripheral=host_peripheral,
+    activation = activate_tribe_runtime_context(
+        owner=owner,
+        context=context,
     )
+    try:
+        _dispatch_host_state_events(
+            bus=bus,
+            host_somatic=host_somatic,
+            host_peripheral=host_peripheral,
+        )
+    finally:
+        deactivate_tribe_runtime_context(activation)
 
     somatic_state = host_somatic.export_runtime_state()
     peripheral_state = host_peripheral.export_runtime_state()

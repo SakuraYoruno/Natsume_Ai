@@ -1452,9 +1452,6 @@ def test_deliver_gateway_reply_qq_text_plus_sticker_sends_structured_image(monke
     with patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
-    ), patch(
-        "host_brain.composition.process_services.get_multimodal_processor",
-        return_value=fake_mm,
     ):
         result = _run(
             _deliver_gateway_reply(
@@ -1479,7 +1476,7 @@ def test_deliver_gateway_reply_qq_text_plus_sticker_sends_structured_image(monke
                     "cacheable": False,
                     "raw_extra": {"sticker": "https://example.invalid/sora-wave.webp"},
                 },
-                ports=_ports(),
+                ports=_ports(get_multimodal_processor=lambda: fake_mm),
             )
         )
 
@@ -1513,9 +1510,6 @@ def test_deliver_gateway_reply_text_plus_sticker_without_structured_payload_is_s
     with patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
-    ), patch(
-        "host_brain.composition.process_services.get_multimodal_processor",
-        return_value=fake_mm,
     ):
         result = _run(
             _deliver_gateway_reply(
@@ -1530,7 +1524,7 @@ def test_deliver_gateway_reply_text_plus_sticker_without_structured_payload_is_s
                 user_msg_type="text",
                 response_form="text_plus_sticker",
                 response_form_reason="phatic_greeting",
-                ports=_ports(),
+                ports=_ports(get_multimodal_processor=lambda: fake_mm),
             )
         )
 
@@ -1562,9 +1556,6 @@ def test_deliver_gateway_reply_plain_text_phatic_does_not_append_default_emoji(m
     with patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
-    ), patch(
-        "host_brain.composition.process_services.get_multimodal_processor",
-        return_value=fake_mm,
     ):
         result = _run(
             _deliver_gateway_reply(
@@ -1579,7 +1570,10 @@ def test_deliver_gateway_reply_plain_text_phatic_does_not_append_default_emoji(m
                 user_msg_type="text",
                 response_form="text",
                 response_form_reason="phatic_greeting",
-                ports=_ports(trigger_reply_performance=performance_mock),
+                ports=_ports(
+                    get_multimodal_processor=lambda: fake_mm,
+                    trigger_reply_performance=performance_mock,
+                ),
             )
         )
 
@@ -1611,9 +1605,6 @@ def test_deliver_gateway_reply_non_qq_text_plus_sticker_keeps_secondary_send(mon
     with patch(
         "host_brain.channels.edge_transport.submit_gateway_reply",
         new=post_gateway_reply_mock,
-    ), patch(
-        "host_brain.composition.process_services.get_multimodal_processor",
-        return_value=fake_mm,
     ):
         result = _run(
             _deliver_gateway_reply(
@@ -1638,7 +1629,7 @@ def test_deliver_gateway_reply_non_qq_text_plus_sticker_keeps_secondary_send(mon
                     "cacheable": False,
                     "raw_extra": {"sticker": "https://example.invalid/sora-wave.webp"},
                 },
-                ports=_ports(),
+                ports=_ports(get_multimodal_processor=lambda: fake_mm),
             )
         )
 

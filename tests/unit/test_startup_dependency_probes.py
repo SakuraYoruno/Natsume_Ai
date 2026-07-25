@@ -3,6 +3,31 @@ from __future__ import annotations
 import asyncio
 
 from host_brain.app import startup
+from host_brain.core.edge_endpoint_config import (
+    resolve_edge_base_url,
+    resolve_edge_base_urls,
+)
+
+
+def test_edge_endpoint_config_is_pure_normalized_and_deterministic(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_EDGE_RPC_BASE_URL", "edge.remote:17999/")
+    monkeypatch.setenv("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK", "true")
+
+    assert resolve_edge_base_url() == "http://edge.remote:17999"
+    assert resolve_edge_base_urls() == ["http://edge.remote:17999"]
+
+    monkeypatch.delenv("HOST_EDGE_RPC_BASE_URL")
+    monkeypatch.setenv("EDGE_RPC_HOST", "10.0.0.8")
+    monkeypatch.setenv("EDGE_RPC_PORT", "18999")
+
+    assert resolve_edge_base_url() == "http://10.0.0.8:18999"
+    assert resolve_edge_base_urls() == [
+        "http://10.0.0.8:18999",
+        "http://127.0.0.1:18999",
+        "http://localhost:18999",
+    ]
 
 
 def test_collect_dependency_probes_sync_runs_without_event_loop(monkeypatch) -> None:

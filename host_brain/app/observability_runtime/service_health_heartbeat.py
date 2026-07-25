@@ -155,14 +155,30 @@ class ServiceHealthProbeState:
         self,
         *,
         http_client_factory: Callable[[], Any] | None = None,
+        edge_probe: Callable[[], Any] | None = None,
+        edge_dependency_status_builder: Callable[
+            [Mapping[str, Any]], Mapping[str, Any]
+        ]
+        | None = None,
     ) -> None:
         if http_client_factory is not None and not callable(http_client_factory):
             raise TypeError("http_client_factory must be callable or None")
+        if edge_probe is not None and not callable(edge_probe):
+            raise TypeError("edge_probe must be callable or None")
+        if (
+            edge_dependency_status_builder is not None
+            and not callable(edge_dependency_status_builder)
+        ):
+            raise TypeError(
+                "edge_dependency_status_builder must be callable or None"
+            )
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._cache_lock = threading.Lock()
         self._http_client: Any | None = None
         self._http_client_lock = threading.Lock()
         self._http_client_factory = http_client_factory
+        self._edge_probe = edge_probe
+        self._edge_dependency_status_builder = edge_dependency_status_builder
         self._closed = False
 
     def get_http_client(self) -> Any:
@@ -629,10 +645,19 @@ def _resolve_edge_vts_sub_service(
     }
 
 
-def _collect_edge_sub_services(probe: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
-    from host_brain.composition.process_services import build_edge_dependency_probe_statuses
-
-    dependency_rows = build_edge_dependency_probe_statuses(probe)
+def _collect_edge_sub_services(
+    probe: Mapping[str, Any],
+    *,
+    dependency_status_builder: Callable[
+        [Mapping[str, Any]], Mapping[str, Any]
+    ]
+    | None = None,
+) -> Dict[str, Dict[str, Any]]:
+    dependency_rows = (
+        dependency_status_builder(probe)
+        if dependency_status_builder is not None
+        else {}
+    )
     sub_services: Dict[str, Dict[str, Any]] = {}
 
     for edge_sid, heartbeat_sid in _EDGE_RPC_SID_TO_HEARTBEAT_SID.items():
@@ -651,14 +676,32 @@ def _collect_edge_sub_services(probe: Mapping[str, Any]) -> Dict[str, Dict[str, 
 
     return sub_services
 
-async def _probe_edge() -> Dict[str, Any]:
+async def _probe_edge(
+    *,
+    probe_state: ServiceHealthProbeState | None = None,
+) -> Dict[str, Any]:
     """探测 Edge RPC：GET /v1/edge/health。返回 { status, latency_ms } 或 DOWN。Edge 正常时返回 status=ACCEPTED，视为 UP。"""
+    edge_probe = probe_state._edge_probe if probe_state is not None else None  # noqa: SLF001
+    dependency_status_builder = (
+        probe_state._edge_dependency_status_builder  # noqa: SLF001
+        if probe_state is not None
+        else None
+    )
+    if edge_probe is None:
+        return {
+            "status": "DOWN",
+            "latency_ms": None,
+            "sub_services": {},
+            "reason_code": "EDGE_HEALTH_PROBE_NOT_COMPOSED",
+        }
     try:
-        from host_brain.composition.process_services import probe_edge_rpc_health
-        out = await probe_edge_rpc_health()
+        out = await edge_probe()
         st = (out.get("status") or "").strip().upper()
         ok = out.get("available") and st in ("OK", "UP", "ACCEPTED")
-        sub_services = _collect_edge_sub_services(out)
+        sub_services = _collect_edge_sub_services(
+            out,
+            dependency_status_builder=dependency_status_builder,
+        )
         return {
             "status": "UP" if ok else "DEGRADED",
             "latency_ms": out.get("latency_ms"),
@@ -817,7 +860,7 @@ async def prime_core_service_cache_once(
     """
     now_ts = int(time.time() * 1000)
     try:
-        edge_result = await _probe_edge()
+        edge_result = await _probe_edge(probe_state=probe_state)
     except Exception as exc:
         logger.debug("Prime core cache edge probe failed: %s", exc)
         edge_result = {"status": "DOWN", "latency_ms": None, "sub_services": {}}
@@ -965,7 +1008,7 @@ async def run_once(
     """
     now_ts = int(time.time() * 1000)
     try:
-        edge_result = await _probe_edge()
+        edge_result = await _probe_edge(probe_state=probe_state)
     except Exception as exc:
         logger.debug("Heartbeat Edge probe failed (will cache DOWN): %s", exc)
         edge_result = {"status": "DOWN", "latency_ms": None, "sub_services": {}}
@@ -1137,6 +1180,11 @@ class ServiceHealthHeartbeat:
         degradation_observer: DegradationObserver,
         resource_manager_provider: Callable[..., Any] | None = None,
         http_client_factory: Callable[[], Any] | None = None,
+        edge_probe: Callable[[], Any] | None = None,
+        edge_dependency_status_builder: Callable[
+            [Mapping[str, Any]], Mapping[str, Any]
+        ]
+        | None = None,
     ) -> None:
         if not callable(degradation_observer):
             raise TypeError("degradation_observer must be an app-local callable")
@@ -1148,6 +1196,8 @@ class ServiceHealthHeartbeat:
         self._resource_manager_provider = resource_manager_provider
         self._probe_state = ServiceHealthProbeState(
             http_client_factory=http_client_factory,
+            edge_probe=edge_probe,
+            edge_dependency_status_builder=edge_dependency_status_builder,
         )
         self._heartbeat_task: asyncio.Task[Any] | None = None
         self._keepalive_task: asyncio.Task[Any] | None = None

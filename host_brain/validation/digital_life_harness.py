@@ -129,8 +129,9 @@ class DigitalLifeSupervisor:
         self._events: list[dict[str, Any]] = []
         self._old_env: dict[str, str | None] = {}
         self._old_self_dir: str | None = None
-        self._old_default_agent: Any = None
-        self._old_limbic_agent: Any = None
+        self._tribe_runtime: Any = None
+        self._tribe_runtime_owner: Any = None
+        self._tribe_runtime_activation: Any = None
         self.alive = False
 
     def __enter__(self) -> "DigitalLifeSupervisor":
@@ -151,7 +152,12 @@ class DigitalLifeSupervisor:
             self.out_dir.mkdir(parents=True, exist_ok=True)
         self._started_at_ms = _now_ms()
         self._prepare_runtime_environment()
-        self._prepare_persona_state()
+        try:
+            self._prepare_tribe_runtime()
+            self._prepare_persona_state()
+        except BaseException:
+            self._restore_runtime_environment()
+            raise
         self.alive = True
         self._record_event("runtime_started", self.snapshot())
         return self.snapshot()
@@ -445,56 +451,83 @@ class DigitalLifeSupervisor:
         os.environ["NATSUME_INNER_STREAM_CALM_INTERVAL_S"] = "0"
 
     def _restore_runtime_environment(self) -> None:
-        self._restore_persona_state()
-        if not self.config.manage_environment:
+        try:
+            self._restore_persona_state()
+        finally:
+            try:
+                self._restore_tribe_runtime()
+            finally:
+                if self.config.manage_environment:
+                    for key, value in dict(self._old_env).items():
+                        if value is None:
+                            os.environ.pop(key, None)
+                        else:
+                            os.environ[key] = value
+
+    def _prepare_tribe_runtime(self) -> None:
+        if self._tribe_runtime is not None:
+            raise RuntimeError("DIGITAL_LIFE_TRIBE_RUNTIME_ALREADY_BOUND")
+        from host_brain.app.tribe_composition import (  # noqa: PLC0415
+            build_production_tribe_runtime_scope,
+        )
+        from host_brain.tribe.application_ports import (  # noqa: PLC0415
+            TribeApplicationPorts,
+        )
+
+        runtime = build_production_tribe_runtime_scope()
+        owner = object()
+        runtime.bind_application_ports(
+            owner=owner,
+            ports=TribeApplicationPorts(),
+        )
+        try:
+            activation = runtime.activate_execution_context(owner=owner)
+        except BaseException:
+            runtime.unbind_application_ports(owner=owner)
+            raise
+        self._tribe_runtime = runtime
+        self._tribe_runtime_owner = owner
+        self._tribe_runtime_activation = activation
+
+    def _restore_tribe_runtime(self) -> None:
+        runtime = self._tribe_runtime
+        owner = self._tribe_runtime_owner
+        activation = self._tribe_runtime_activation
+        if runtime is None:
             return
-        for key, value in dict(self._old_env).items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+        try:
+            if activation is not None:
+                runtime.deactivate_execution_context(activation)
+            runtime.unbind_application_ports(owner=owner)
+        finally:
+            self._tribe_runtime_activation = None
+            self._tribe_runtime_owner = None
+            self._tribe_runtime = None
 
     def _prepare_persona_state(self) -> None:
         if not self.config.reset_persona_state_for_run:
             return
-        try:
-            import host_brain.persona.self_model as self_model  # noqa: PLC0415
-            import host_brain.tribe.default_mode_agent as default_mode_agent  # noqa: PLC0415
-            import host_brain.tribe.limbic_agent as limbic_agent  # noqa: PLC0415
-            from host_brain.tribe.default_mode_agent import DefaultModeAgent  # noqa: PLC0415
-            from host_brain.tribe.limbic_agent import LimbicAgent  # noqa: PLC0415
-            from host_brain.tribe.tribe_state import TribeStateRegistry  # noqa: PLC0415
+        import host_brain.persona.self_model as self_model  # noqa: PLC0415
+        import host_brain.tribe.default_mode_agent as default_mode_agent  # noqa: PLC0415
 
-            self._old_self_dir = str(getattr(self_model, "_DEFAULT_PERSISTENT_SELF_DIR", ""))
-            self._old_default_agent = getattr(default_mode_agent, "_DEFAULT_MODE_AGENT", None)
-            self._old_limbic_agent = getattr(limbic_agent, "_LIMBIC_AGENT", None)
-
-            if self.out_dir is not None:
-                self_dir = str(self.out_dir / "self_model_state")
-                self_model._DEFAULT_PERSISTENT_SELF_DIR = self_dir
-                self_model._PERSISTENT_SELF_CACHE.clear()
-
-            registry = TribeStateRegistry()
-            limbic_agent.set_limbic_agent(LimbicAgent(state_registry=registry))
-            default_mode_agent.set_default_mode_agent(DefaultModeAgent(state_registry=registry))
-            default_mode_agent._FOREGROUND_INTERACTION_CACHE["ts_ms"] = 0
-        except Exception as exc:  # pragma: no cover - defensive setup
-            self.logger.debug("persona state isolation degraded: %s", exc)
+        self._old_self_dir = str(
+            getattr(self_model, "_DEFAULT_PERSISTENT_SELF_DIR", "")
+        )
+        if self.out_dir is not None:
+            self_dir = str(self.out_dir / "self_model_state")
+            self_model._DEFAULT_PERSISTENT_SELF_DIR = self_dir
+            self_model._PERSISTENT_SELF_CACHE.clear()
+        default_mode_agent._FOREGROUND_INTERACTION_CACHE["ts_ms"] = 0
 
     def _restore_persona_state(self) -> None:
         if not self.config.reset_persona_state_for_run:
             return
-        try:
-            import host_brain.persona.self_model as self_model  # noqa: PLC0415
-            import host_brain.tribe.default_mode_agent as default_mode_agent  # noqa: PLC0415
-            import host_brain.tribe.limbic_agent as limbic_agent  # noqa: PLC0415
+        import host_brain.persona.self_model as self_model  # noqa: PLC0415
 
-            default_mode_agent.set_default_mode_agent(self._old_default_agent)
-            limbic_agent.set_limbic_agent(self._old_limbic_agent)
-            self_model._DEFAULT_PERSISTENT_SELF_DIR = self._old_self_dir or self_model._DEFAULT_PERSISTENT_SELF_DIR
-            self_model._PERSISTENT_SELF_CACHE.clear()
-        except Exception as exc:  # pragma: no cover - defensive restore
-            self.logger.debug("persona state restore degraded: %s", exc)
+        self_model._DEFAULT_PERSISTENT_SELF_DIR = (
+            self._old_self_dir or self_model._DEFAULT_PERSISTENT_SELF_DIR
+        )
+        self_model._PERSISTENT_SELF_CACHE.clear()
 
     def _last_interaction_or_outbound_ts(self) -> int | None:
         latest = max(int(self._last_foreground_ts_ms or 0), int(self._last_proactive_outbox_ts_ms or 0))
@@ -888,10 +921,11 @@ class DigitalLifeSupervisor:
         reason_code = ""
         try:
             from host_brain.app.surface_context_packet import build_surface_context_packet  # noqa: PLC0415
-            from host_brain.composition.process_services import get_life_snapshot_reader  # noqa: PLC0415
             from host_brain.persona.surface_packet_compiler import compile_reply_control_packet  # noqa: PLC0415
             from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
+            if self.life_snapshot_reader is None:
+                raise RuntimeError("LIFE_SNAPSHOT_READER_NOT_COMPOSED")
             raw_context = get_cortex_agent().collect_tribe_context(
                 request_body={
                     "request_id": request_id,
@@ -905,7 +939,7 @@ class DigitalLifeSupervisor:
             raw_context = dict(raw_context or {}) if isinstance(raw_context, Mapping) else {}
             raw_context_key_count = len(raw_context)
             surface_context = build_surface_context_packet(
-                life_snapshot_reader=get_life_snapshot_reader(),
+                life_snapshot_reader=self.life_snapshot_reader,
                 user_message=user_message,
                 request_id=request_id,
                 session_id=self.config.session_id,
@@ -928,7 +962,12 @@ class DigitalLifeSupervisor:
             status = "SURFACE_PACKET_COMPILED"
         except Exception as exc:
             status = "DEGRADED"
-            reason_code = type(exc).__name__
+            error_text = str(exc).strip()
+            reason_code = (
+                "LIFE_SNAPSHOT_READER_NOT_COMPOSED"
+                if error_text == "LIFE_SNAPSHOT_READER_NOT_COMPOSED"
+                else type(exc).__name__
+            )
             surface_context = {"error": str(exc)[:200]}
 
         influence = dict(surface_context.get("surface_influence_packet") or {})

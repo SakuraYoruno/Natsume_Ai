@@ -3,8 +3,8 @@ test_bond_sqlite_persistence.py —— 审计修复 #10 单元测试
 
 验证 SqliteBondClient 持久化功能：
 1. 写入事件后重新连接仍可读取（进程重启模拟）
-2. get_bond_neo4j_client() 根据环境变量正确选择客户端类型
-3. get_bond_update_queue() 的 writer_factory 使用持久化客户端
+2. build_host_bond_client() 根据环境变量正确选择客户端类型
+3. Host Bond writer 使用同一持久化客户端
 """
 from __future__ import annotations
 
@@ -174,15 +174,15 @@ class TestSqliteBondClientPersistence:
 
 
 # ---------------------------------------------------------------------------
-# 测试：get_bond_neo4j_client 环境变量切换
+# 测试：build_host_bond_client 环境变量切换
 # ---------------------------------------------------------------------------
 
-class TestGetBondNeo4jClient:
-    """get_bond_neo4j_client 环境变量切换测试。"""
+class TestBuildHostBondClient:
+    """build_host_bond_client 环境变量切换测试。"""
 
     def test_default_returns_in_memory_client(self):
         """验证默认（无环境变量）返回 InMemoryNeo4jBondClient。"""
-        from host_brain.composition.process_services import get_bond_neo4j_client
+        from host_brain.composition.host_bond_runtime import build_host_bond_client
 
         with patch.dict(os.environ, {}, clear=False):
             # 清除相关环境变量
@@ -190,7 +190,7 @@ class TestGetBondNeo4jClient:
             for key in ("HOST_BOND_BACKEND", "HOST_BOND_SQLITE_PATH"):
                 env_backup[key] = os.environ.pop(key, None)
             try:
-                client = get_bond_neo4j_client()
+                client = build_host_bond_client()
                 assert isinstance(client, InMemoryNeo4jBondClient)
             finally:
                 for key, val in env_backup.items():
@@ -199,25 +199,25 @@ class TestGetBondNeo4jClient:
 
     def test_sqlite_backend_returns_sqlite_client(self, tmp_path):
         """验证 HOST_BOND_BACKEND=sqlite 返回 SqliteBondClient。"""
-        from host_brain.composition.process_services import get_bond_neo4j_client
+        from host_brain.composition.host_bond_runtime import build_host_bond_client
 
         db_path = str(tmp_path / "bond_env.db")
         with patch.dict(os.environ, {
             "HOST_BOND_BACKEND": "sqlite",
             "HOST_BOND_SQLITE_PATH": db_path,
         }):
-            client = get_bond_neo4j_client()
+            client = build_host_bond_client()
             assert isinstance(client, SqliteBondClient)
 
     def test_sqlite_path_env_auto_upgrades_to_sqlite(self, tmp_path):
         """验证仅设置 HOST_BOND_SQLITE_PATH 也会自动升级为 SqliteBondClient。"""
-        from host_brain.composition.process_services import get_bond_neo4j_client
+        from host_brain.composition.host_bond_runtime import build_host_bond_client
 
         db_path = str(tmp_path / "bond_auto.db")
         env_backup = os.environ.pop("HOST_BOND_BACKEND", None)
         try:
             with patch.dict(os.environ, {"HOST_BOND_SQLITE_PATH": db_path}):
-                client = get_bond_neo4j_client()
+                client = build_host_bond_client()
                 assert isinstance(client, SqliteBondClient)
         finally:
             if env_backup is not None:
@@ -225,15 +225,15 @@ class TestGetBondNeo4jClient:
 
 
 # ---------------------------------------------------------------------------
-# 测试：get_bond_update_queue writer_factory 使用持久化客户端
+# 测试：Host Bond writer 使用持久化客户端
 # ---------------------------------------------------------------------------
 
-class TestBondUpdateQueueWriterFactory:
-    """验证 get_bond_update_queue 的 writer_factory 使用 get_bond_neo4j_client。"""
+class TestBondWriterClientBinding:
+    """验证 Host Bond writer 使用 app-local client builder。"""
 
-    def test_writer_factory_uses_get_bond_neo4j_client(self, tmp_path):
+    def test_writer_uses_host_bond_client(self, tmp_path):
         """验证 writer_factory 创建的 BondDynamicsWriter 使用持久化客户端。"""
-        from host_brain.composition.process_services import get_bond_neo4j_client
+        from host_brain.composition.host_bond_runtime import build_host_bond_client
         from host_brain.bond.bond_dynamics import BondDynamicsWriter
 
         db_path = str(tmp_path / "bond_queue.db")
@@ -241,6 +241,6 @@ class TestBondUpdateQueueWriterFactory:
             "HOST_BOND_BACKEND": "sqlite",
             "HOST_BOND_SQLITE_PATH": db_path,
         }):
-            client = get_bond_neo4j_client()
+            client = build_host_bond_client()
             writer = BondDynamicsWriter(neo4j_client=client)
             assert isinstance(writer.neo4j_client, SqliteBondClient)

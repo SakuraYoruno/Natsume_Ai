@@ -26,6 +26,12 @@ from host_brain.app.acceptance_surface_effect_handler import (
 from host_brain.app.accepted_terminal_reconciliation_handler import (
     AcceptedTerminalReconciliationHandler,
 )
+from host_brain.app.accepted_edge_embodiment_handler import (
+    AcceptedEdgeEmbodimentEnqueueHandler,
+)
+from host_brain.app.accepted_sys_mode_receipt import (
+    sys_mode_transition_handler_receipt_ref,
+)
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedLifeConversationProjectionV1,
     AcceptedPreferenceSignalV1,
@@ -50,6 +56,7 @@ def build_production_acceptance_effect_handlers(
     terminal_reconciliation_store: Any | None = None,
     terminal_operator_command_store: Any | None = None,
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
+    embodiment_runtime_provider: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
         "conversation.user_turn": _AcceptedConversationUserTurnHandler(
@@ -77,6 +84,14 @@ def build_production_acceptance_effect_handlers(
     if mode_transition_service_provider is not None:
         handlers["host.sys_mode_transition"] = _AcceptedSysModeTransitionHandler(
             service_provider=mode_transition_service_provider,
+        )
+    if embodiment_runtime_provider is not None:
+        if not callable(embodiment_runtime_provider):
+            raise TypeError("embodiment_runtime_provider must be callable")
+        handlers["edge.embodiment_enqueue"] = (
+            AcceptedEdgeEmbodimentEnqueueHandler(
+                runtime_provider=embodiment_runtime_provider,
+            )
         )
     if scheduler_operation_handler is not None:
         if not callable(scheduler_operation_handler):
@@ -676,36 +691,6 @@ def _reconcile_accepted_sys_mode_transition(
 
 class _SysModeTransitionDefinitelyNotCommitted(RuntimeError):
     """Exact HardState history authoritatively proved the event is absent."""
-
-
-def sys_mode_transition_handler_receipt_ref(
-    payload: Mapping[str, Any],
-    *,
-    outcome_status: str,
-) -> str:
-    """Return the canonical handler receipt for one frozen mode effect."""
-
-    value = dict(payload or {})
-    value.pop("_action_preview_context", None)
-    value.pop("_action_preview_terminal_proof", None)
-    required = {
-        "operator_command_id",
-        "request_id",
-        "target_mode",
-        "source",
-        "reason",
-        "event_id",
-        "runtime_scope_id",
-    }
-    if set(value) != required:
-        raise ValueError("sys_mode transition receipt payload drifted")
-    status = str(outcome_status or "").strip().upper()
-    if status not in {"APPLIED", "REPLAYED", "NO_CHANGE"}:
-        raise ValueError("sys_mode transition outcome status is invalid")
-    return _receipt(
-        f"host-sys-mode-{status.lower().replace('_', '-')}",
-        {**value, "handler_outcome_status": status},
-    )
 
 
 def _accepted_conversation_request(payload: Mapping[str, Any]) -> dict[str, Any]:

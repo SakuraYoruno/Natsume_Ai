@@ -10,22 +10,12 @@ from host_brain.composition.process_runtime_shutdown import (
 )
 
 
-def _dependencies() -> ProcessRuntimeShutdownDependencies:
-    def stop_bond_queue(logger: Any) -> None:
-        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
-
-        get_cortex_agent().shutdown_bond_update_queue(logger=logger, timeout_s=3.0)
-
-    def get_tribe_event_bus() -> Any | None:
-        from host_brain.app.internal_tribe_routes import (  # noqa: PLC0415
-            get_tribe_event_bus as get_bus,
-        )
-
-        return get_bus()
-
+def _dependencies(
+    *,
+    tribe_event_bus: Any | None,
+) -> ProcessRuntimeShutdownDependencies:
     return ProcessRuntimeShutdownDependencies(
-        stop_bond_queue=stop_bond_queue,
-        get_tribe_event_bus=get_tribe_event_bus,
+        get_tribe_event_bus=lambda: tribe_event_bus,
     )
 
 
@@ -33,13 +23,14 @@ async def shutdown_runtime(
     *,
     activity_monitor: Any | None,
     resource_manager: Any | None,
+    tribe_event_bus: Any | None,
     logger: Any,
 ) -> None:
     await shutdown_process_runtime(
         activity_monitor=activity_monitor,
         resource_manager=resource_manager,
         logger=logger,
-        dependencies=_dependencies(),
+        dependencies=_dependencies(tribe_event_bus=tribe_event_bus),
     )
 
 

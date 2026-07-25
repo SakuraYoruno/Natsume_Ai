@@ -76,13 +76,15 @@ def build_governed_route_execution_ports(
             "governed_delegate_dispatcher.dispatch is required"
         )
 
-    from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-        resolve_surface_reply_llm_runtime,
-    )
     from host_brain.app.surface_reply_preprocessor import (  # noqa: PLC0415
         SurfaceReplyInput,
     )
     if surface_runtime_ports is None:
+
+        def resolve_surface_reply_llm_runtime(**_kwargs: Any) -> dict[str, Any]:
+            raise RouteExecutionBoundaryError(
+                "governed Chat requires lifespan-owned SurfaceRuntimePorts"
+            )
 
         async def surface_reply_sse_generator(_value: Any) -> AsyncIterator[str]:
             if False:  # pragma: no cover - makes the fail-closed path an async iterator.
@@ -94,6 +96,10 @@ def build_governed_route_execution_ports(
     else:
         from host_brain.app.surface_reply_runtime import (  # noqa: PLC0415
             surface_reply_sse_generator as _surface_reply_sse_generator,
+        )
+
+        resolve_surface_reply_llm_runtime = (
+            surface_runtime_ports.resolve_surface_reply_llm_runtime
         )
 
         def surface_reply_sse_generator(value: Any) -> AsyncIterator[str]:
@@ -231,7 +237,9 @@ def _build_chat_input(
     trace_stage_meta: Mapping[str, Any],
     sub_agent_context: Any,
 ) -> Any:
-    resolved_llm_runtime = dict(llm_runtime or {}) if isinstance(llm_runtime, dict) else llm_runtime
+    resolved_llm_runtime = (
+        dict(llm_runtime or {}) if isinstance(llm_runtime, dict) else llm_runtime
+    )
     if isinstance(resolved_llm_runtime, dict) and resolved_llm_runtime:
         agent_role = _text(resolved_llm_runtime.get("agent_role"), lower=True)
         if agent_role != "surface_reply":

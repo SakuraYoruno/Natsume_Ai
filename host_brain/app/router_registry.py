@@ -24,13 +24,13 @@ from host_brain.app.health_routes import (
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.worker_dispatch import create_input_router
-from host_brain.app.internal_agent_routes import router as internal_codex_router
+from host_brain.app.internal_agent_routes import create_internal_agent_router
 from host_brain.app.internal_security_immune_routes import (
     create_internal_security_immune_router,
 )
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
-from host_brain.app.digital_life_routes import router as digital_life_router
-from host_brain.app.memory_routes import router as memory_router
+from host_brain.app.digital_life_routes import create_digital_life_router
+from host_brain.app.memory_routes import create_memory_router
 from host_brain.app.mateengine_routes import create_mateengine_router
 from host_brain.app.pentest_secure_run_routes import (
     PentestSecureRunCompositionProvider,
@@ -182,7 +182,7 @@ def register_host_routers(
     if host_obs_read_ports is not None:
         app.include_router(create_host_obs_read_router(host_obs_read_ports))
     app.include_router(
-        internal_codex_router,
+        create_internal_agent_router(route_ports),
         dependencies=[
             Depends(require_internal_agent_authority),
             Depends(bind_internal_agent_service),
@@ -190,8 +190,8 @@ def register_host_routers(
         ],
     )
     app.include_router(create_internal_security_immune_router(route_ports))
-    app.include_router(digital_life_router)
-    app.include_router(memory_router)
+    app.include_router(create_digital_life_router(route_ports))
+    app.include_router(create_memory_router(route_ports))
     app.include_router(create_mateengine_router(route_ports))
     app.include_router(
         create_obs_command_http_router(

@@ -62,9 +62,10 @@ def _load_dotenv_file() -> None:
 
 _load_dotenv_file()
 
-from host_brain.composition.process_services import collect_dependency_probes_sync
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
-from host_brain.app.process_service_wiring import configure_process_service_ports
+from host_brain.app.application_port_wiring import (
+    build_process_application_ports,
+)
 from host_brain.app.settings import get_core_settings, get_persistence_settings
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -185,10 +186,12 @@ def run_startup_check(db_path: str) -> bool:
                 )
             ledger = SQLiteLedger(db_path=db_path, initialize_schema=False)
         # The CLI startup check runs before Uvicorn imports the ASGI application.
-        # Since process application ports are normally bound by create_app(), bind
-        # them explicitly here before asking the composition layer for probes.
-        configure_process_service_ports(persistence_db_path=db_path)
-        dependency_probes = collect_dependency_probes_sync()
+        # Build an isolated port bundle and call its probe directly; do not publish
+        # mutable process state for the later ASGI root to discover.
+        application_ports = build_process_application_ports(
+            persistence_db_path=db_path
+        )
+        dependency_probes = application_ports.collect_dependency_probes_sync()
 
         report = build_startup_report(
             runtime_statuses={},

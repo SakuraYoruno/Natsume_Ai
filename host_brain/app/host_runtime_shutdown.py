@@ -96,7 +96,10 @@ async def shutdown_host_runtime_authority(
     embodiment_authority_task: Any | None,
     reset_life_command_authority: Callable[[], Any],
     embodiment_runtime: Any | None,
-    set_memory_service_container: Callable[[Any | None], Any],
+    close_bond_runtime: Callable[[], Any],
+    close_governance_runtime: Callable[[], Any],
+    close_authority_runtime: Callable[[], Any],
+    withdraw_memory_service_container: Callable[[Any], Any],
     memory: Any | None,
     command_ingress: Any | None,
     tool_composition: Any,
@@ -139,6 +142,16 @@ async def shutdown_host_runtime_authority(
         if error is not None and runtime_live:
             _raise_preserved_shutdown(application, failures, error)
 
+    error = await _attempt(
+        "resource_manager",
+        lambda: host_lifecycle.stop_resource_manager(logger=logger),
+        failures,
+        logger,
+    )
+    first_error = first_error or error
+    if error is not None and runtime_live:
+        _raise_preserved_shutdown(application, failures, error)
+
     if task_runtime is not None:
         error = await _attempt(
             "task_runtime",
@@ -175,9 +188,11 @@ async def shutdown_host_runtime_authority(
             if embodiment_runtime is not None
             else None,
         ),
+        ("bond_runtime", close_bond_runtime),
+        ("governance_runtime", close_governance_runtime),
         (
             "memory_publication",
-            lambda: set_memory_service_container(None),
+            lambda: withdraw_memory_service_container(memory),
         ),
         ("memory", lambda: memory.close() if memory is not None else None),
         (
@@ -188,6 +203,7 @@ async def shutdown_host_runtime_authority(
         ),
         ("security", lambda: security.aclose() if security is not None else None),
         ("tool_composition", tool_composition.clear),
+        ("authority_runtime", close_authority_runtime),
     )
     for component, action in pre_release_calls:
         error = await _attempt(component, action, failures, logger)

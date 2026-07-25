@@ -567,3 +567,36 @@ def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:
     sub_services = heartbeat._collect_edge_sub_services(probe)
     assert sub_services["vts"]["status"] == "UP"
     assert "vts healthy" in str(sub_services["vts"].get("detail") or "")
+
+
+def test_probe_edge_uses_only_app_local_probe_ports() -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+
+    async def edge_probe() -> dict:
+        return {
+            "available": True,
+            "status": "ACCEPTED",
+            "latency_ms": 9,
+            "detail": "edge ready",
+        }
+
+    def status_builder(_probe: dict) -> dict:
+        return {
+            "edge.rpc.asr": {
+                "available": True,
+                "detail": "asr ready",
+            }
+        }
+
+    state = heartbeat.ServiceHealthProbeState(
+        edge_probe=edge_probe,
+        edge_dependency_status_builder=status_builder,
+    )
+    result = asyncio.run(heartbeat._probe_edge(probe_state=state))
+
+    assert result["status"] == "UP"
+    assert result["latency_ms"] == 9
+    assert result["sub_services"]["asr"] == {
+        "status": "UP",
+        "detail": "asr ready",
+    }

@@ -31,11 +31,15 @@ ACTION_ALLOWLIST = {
     # Server-owned Operator control intent.  It is not a discoverable Skill;
     # the action exists only so Governor can bind an exact typed payload.
     "operator_sys_mode_transition",
+    "operator_edge_command_push",
     "operator_task_terminal_reconciliation",
     "work_code",
     "work_translate",
 }
-TARGET_ALLOWLIST = {"host", "memory", "system"}
+TARGET_ALLOWLIST = {"edge", "host", "memory", "system"}
+ACTION_TARGET_RULES = {
+    "operator_edge_command_push": "edge",
+}
 
 REQUIRED_FIELDS: dict[str, type] = {
     "schema_version": str,
@@ -98,6 +102,19 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "target_mode": str,
             "source": str,
             "reason": str,
+        },
+        "optional": {},
+    },
+    "operator_edge_command_push": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "command_type": str,
+            "target_agent": str,
+            "payload": dict,
+            "embodiment_runtime_scope_id": str,
         },
         "optional": {},
     },
@@ -273,6 +290,18 @@ def strict_validate_intent(
         lint["schema"].append(f"action not allowed: {normalized_json['action']}")
     if normalized_json["target"] not in TARGET_ALLOWLIST:
         lint["schema"].append(f"target not allowed: {normalized_json['target']}")
+    required_target = ACTION_TARGET_RULES.get(str(normalized_json["action"]))
+    if required_target is not None and normalized_json["target"] != required_target:
+        lint["schema"].append(
+            f"target for {normalized_json['action']} must be {required_target}"
+        )
+    if (
+        normalized_json["target"] == "edge"
+        and normalized_json["action"] != "operator_edge_command_push"
+    ):
+        lint["schema"].append(
+            "edge target is reserved for operator_edge_command_push"
+        )
     if normalized_json["schema_version"] != "Natsume.intent.v1":
         lint["schema"].append(
             f"schema_version not allowed: {normalized_json['schema_version']}"

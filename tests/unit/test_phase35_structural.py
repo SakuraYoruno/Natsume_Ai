@@ -71,11 +71,22 @@ def test_supervised_graph_has_workbench_nodes_for_handlers() -> None:
 
 def test_graph_runtime_does_not_register_codegen_skill_as_handler() -> None:
     """当前运行时不会把 codegen skill 当成可执行 handler 注册。"""
-    import host_brain.composition.process_services as deps
+    from host_brain.composition.host_application import (
+        build_production_host_application_ports,
+    )
+    from host_brain.app.application_port_wiring import (
+        build_process_application_ports,
+    )
 
-    deps.get_process_service_container().graph_runtime = None
-    runtime = deps.get_graph_runtime()
-    assert "agent_worker" not in getattr(runtime, "_handlers", {})
+    ports = build_production_host_application_ports(
+        process_application_ports=build_process_application_ports()
+    )
+    ports.begin_authority_runtime()
+    try:
+        runtime = ports.lifecycle.graph_runtime()
+        assert "agent_worker" not in getattr(runtime, "_handlers", {})
+    finally:
+        ports.close_authority_runtime()
 
 
 def test_chat_graph_work_code_uses_short_sequence() -> None:
@@ -118,4 +129,3 @@ def test_chat_graph_work_code_uses_short_sequence() -> None:
     active = chat_config.get("graph_meta", {}).get("active_nodes") or []
     assert CHAT_DIRECT_NODE_ID in active and CHAT_RENDER_NODE_ID in active
     assert "workbench_code_assist" not in active and "core_reasoner_primary" not in active
-

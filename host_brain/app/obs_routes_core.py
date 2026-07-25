@@ -16,7 +16,6 @@ from dataclasses import dataclass
 import json
 import logging
 import os
-from pathlib import Path
 import threading
 import time
 from typing import Annotated, Any, Callable, Dict, List, Optional
@@ -3128,25 +3127,46 @@ def get_llm_nodes(
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
 
 
-def _load_resource_manager_status_file() -> dict[str, Any]:
-    status_path = Path(__file__).resolve().parents[1] / "data" / "runtime_resource_manager.json"
-    if not status_path.exists():
-        return {}
-    try:
-        payload = json.loads(status_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.debug("resource manager status file read failed: %s", exc)
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
 def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
-    last_snapshot = payload.get("last_snapshot") if isinstance(payload.get("last_snapshot"), dict) else {}
-    last_decision = payload.get("last_decision") if isinstance(payload.get("last_decision"), dict) else {}
-    last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
-    last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
-    last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
-    degradation_state = payload.get("degradation_state") if isinstance(payload.get("degradation_state"), dict) else {}
+    durable_v1 = (
+        str(payload.get("schema_version") or "")
+        == "Natsume.resource-manager.status.v1"
+    )
+    if durable_v1:
+        pressure = (
+            payload.get("pressure")
+            if isinstance(payload.get("pressure"), dict)
+            else {}
+        )
+        last_snapshot = {"pressure": pressure} if pressure else {}
+        last_decision = (
+            payload.get("decision")
+            if isinstance(payload.get("decision"), dict)
+            else {}
+        )
+        last_actions = (
+            payload.get("actions")
+            if isinstance(payload.get("actions"), list)
+            else []
+        )
+        last_gate_decisions = (
+            payload.get("gate_decisions")
+            if isinstance(payload.get("gate_decisions"), list)
+            else []
+        )
+        last_llm_attempts: list[Any] = []
+        degradation_state = (
+            payload.get("degradation")
+            if isinstance(payload.get("degradation"), dict)
+            else {}
+        )
+    else:
+        last_snapshot = payload.get("last_snapshot") if isinstance(payload.get("last_snapshot"), dict) else {}
+        last_decision = payload.get("last_decision") if isinstance(payload.get("last_decision"), dict) else {}
+        last_actions = payload.get("last_actions") if isinstance(payload.get("last_actions"), list) else []
+        last_gate_decisions = payload.get("last_gate_decisions") if isinstance(payload.get("last_gate_decisions"), list) else []
+        last_llm_attempts = payload.get("last_llm_attempts") if isinstance(payload.get("last_llm_attempts"), list) else []
+        degradation_state = payload.get("degradation_state") if isinstance(payload.get("degradation_state"), dict) else {}
     return {
         "running": bool(payload.get("running")),
         "interval_s": payload.get("interval_s"),
@@ -3157,15 +3177,22 @@ def _compact_resource_manager_status(payload: dict[str, Any]) -> dict[str, Any]:
         "tick_count": payload.get("tick_count") or 0,
         "analysis_count": payload.get("analysis_count") or 0,
         "auto_action_count": payload.get("auto_action_count") or 0,
-        "last_error": payload.get("last_error"),
-        "last_llm_error": payload.get("last_llm_error"),
+        "last_error": (
+            payload.get("last_error_type")
+            if durable_v1
+            else payload.get("last_error")
+        ),
+        "last_llm_error": (
+            payload.get("last_llm_error_type")
+            if durable_v1
+            else payload.get("last_llm_error")
+        ),
         "last_llm_attempts": last_llm_attempts[:8],
         "last_snapshot": last_snapshot,
         "last_decision": last_decision,
         "last_actions": last_actions[:12],
         "last_gate_decisions": last_gate_decisions[:20],
         "degradation_state": degradation_state,
-        "status_path": payload.get("status_path"),
     }
 
 

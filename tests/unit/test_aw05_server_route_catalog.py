@@ -43,8 +43,15 @@ def test_scene_lanes_preserve_configured_provider_model_and_timeout(monkeypatch)
     monkeypatch.setenv("HOST_SUBAGENT_MODEL_ID", "subagent-model")
     monkeypatch.setenv("HOST_SUBAGENT_TIMEOUT_MS", "32000")
 
-    surface = resolve_surface_reply_llm_runtime(base_runtime={"api_key": "ignored"})
-    subagent = resolve_subagent_llm_runtime(base_runtime={"base_url_override": "ignored"})
+    catalog = ServerRouteCatalog()
+    surface = resolve_surface_reply_llm_runtime(
+        catalog=catalog,
+        base_runtime={"api_key": "ignored"},
+    )
+    subagent = resolve_subagent_llm_runtime(
+        catalog=catalog,
+        base_runtime={"base_url_override": "ignored"},
+    )
 
     assert (surface["provider_name"], surface["model_id"], surface["timeout_ms"]) == (
         "deepseek",
@@ -112,7 +119,11 @@ def test_chat_graph_runtime_projection_uses_same_catalog(monkeypatch) -> None:  
         cognitive_tier="B",
         prompt_id="",
     )
-    projected = resolve_host_llm_runtime(rollout_key="ignored", scene_type="CHAT")
+    projected = resolve_host_llm_runtime(
+        catalog=ServerRouteCatalog(),
+        rollout_key="ignored",
+        scene_type="CHAT",
+    )
 
     for field in ("provider_name", "model_id", "timeout_ms", "route_target"):
         assert projected[field] == direct[field]
@@ -137,4 +148,6 @@ def test_runtime_projection_uses_composition_owned_catalog() -> None:
     catalog = get_default_production_route_catalog()
 
     assert get_model_route_catalog() is catalog
-    assert "ServerRouteCatalog(" not in inspect.getsource(route_runtime)
+    source = inspect.getsource(route_runtime)
+    assert "ServerRouteCatalog(" not in source
+    assert "process_services" not in source

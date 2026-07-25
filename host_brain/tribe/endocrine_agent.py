@@ -447,25 +447,20 @@ def _safe_float(value: Any, default: float) -> float:
         return float(default)
 
 
-_ENDOCRINE_AGENT: EndocrineAgent | None = None
-
-
 def get_endocrine_agent() -> EndocrineAgent:
-    global _ENDOCRINE_AGENT
-    if _ENDOCRINE_AGENT is None:
-        _ENDOCRINE_AGENT = EndocrineAgent()
-    return _ENDOCRINE_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_endocrine_agent(agent: EndocrineAgent | None) -> None:
-    global _ENDOCRINE_AGENT
-    _ENDOCRINE_AGENT = agent
+    return require_active_tribe_agent(
+        "endocrine_agent",
+        expected_type=EndocrineAgent,
+    )
 
 
 __all__ = [
     "EndocrineAgent",
     "get_endocrine_agent",
-    "set_endocrine_agent",
 ]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────

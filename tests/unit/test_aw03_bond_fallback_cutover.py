@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from host_brain.composition.process_services import get_bond_neo4j_client
+from host_brain.composition.host_bond_runtime import build_host_bond_client
 from host_brain.bond.neo4j_client import BOND_WRITER_ID, SqliteBondClient
 from host_brain.persistence.bond_fallback_repository import (
     BOND_FALLBACK_MIGRATION_ASSET_KEY,
@@ -94,7 +94,7 @@ def test_app_composition_migrates_durable_bond_db_before_construction(
     monkeypatch.setenv("HOST_BOND_BACKEND", "sqlite")
     monkeypatch.setenv("HOST_BOND_SQLITE_PATH", str(db_path))
 
-    client = get_bond_neo4j_client()
+    client = build_host_bond_client()
     try:
         assert isinstance(client, SqliteBondClient)
         assert db_path.is_file()

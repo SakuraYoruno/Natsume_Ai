@@ -10,6 +10,9 @@ from typing import Any, Callable, Mapping
 from host_brain.composition.task_runtime import ProcessTaskRuntimeContainer
 from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.orchestration.node_grants import DurableNodeGrantVerifier
+from host_brain.app.resource_manager_status_journal import (
+    RuntimeEventResourceManagerStatusJournal,
+)
 from host_brain.persistence.hard_state_journal import SQLiteHardStateJournal
 from host_brain.persistence.world_observation_journal import (
     SQLiteWorldObservationJournal,
@@ -230,6 +233,107 @@ def bind_host_hard_state_runtime(
     return dict(result)
 
 
+def compose_resource_manager_status_journal(
+    *,
+    task_runtime: ProcessTaskRuntimeContainer,
+    embodiment_runtime: Any,
+) -> RuntimeEventResourceManagerStatusJournal:
+    """Bind ResourceManager status to the exact live Host runtime fence."""
+
+    runtime_scope_id = str(
+        getattr(embodiment_runtime, "runtime_scope_id", "") or ""
+    ).strip()
+    if not runtime_scope_id:
+        raise RuntimeError("HOST_RESOURCE_MANAGER_SCOPE_UNAVAILABLE")
+
+    def runtime_authority_provider() -> dict[str, Any]:
+        renew = getattr(embodiment_runtime, "renew_authority", None)
+        if not callable(renew):
+            raise RuntimeError("HOST_RESOURCE_MANAGER_AUTHORITY_UNAVAILABLE")
+        claim = renew()
+        if not isinstance(claim, Mapping):
+            raise RuntimeError("HOST_RESOURCE_MANAGER_AUTHORITY_INVALID")
+        return {**dict(claim), "runtime_scope_id": runtime_scope_id}
+
+    event_store = getattr(task_runtime, "event_store", None)
+    if event_store is None:
+        raise RuntimeError("HOST_RESOURCE_MANAGER_EVENT_STORE_UNAVAILABLE")
+    return RuntimeEventResourceManagerStatusJournal(
+        event_store=event_store,
+        runtime_scope_id=runtime_scope_id,
+        runtime_authority_provider=runtime_authority_provider,
+    )
+
+
+def start_host_runtime_context_services(
+    *,
+    task_runtime: ProcessTaskRuntimeContainer,
+    ledger: Any,
+    embodiment_runtime: Any,
+    host_lifecycle: Any,
+    startup_probe_statuses: dict[str, str],
+    runtime_settings: Any,
+    scheduler_settings: Any,
+    observed_at_ms: int,
+) -> tuple[RuntimeContextApplicationService, ActionPreviewService]:
+    """Compose Context first, then start its fenced ResourceManager writer."""
+
+    activity_monitor = host_lifecycle.start_activity_monitor(ledger=ledger)
+    startup_probe_statuses["activity_monitor"] = (
+        f"OK (gaming_check={activity_monitor._gaming_interval}s, "
+        f"idle_check={activity_monitor._idle_interval}s, "
+        "hard_state_journal=bound)"
+    )
+    application = compose_host_runtime_context(
+        task_runtime=task_runtime,
+        ledger=ledger,
+        embodiment_runtime=embodiment_runtime,
+        environment_observation_provider=runtime_environment_observation_provider(
+            host_lifecycle.get_mode_transition_service()
+        ),
+    )
+    preview = compose_action_preview_service(
+        task_runtime=task_runtime,
+        ledger=ledger,
+        runtime_context_application=application,
+    )
+    if not bool(scheduler_settings.background_tasks_enabled):
+        startup_probe_statuses["system_resource_manager"] = (
+            "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+        )
+    elif not bool(runtime_settings.resource_manager_enabled):
+        startup_probe_statuses["system_resource_manager"] = (
+            "SKIPPED: HOST_RESOURCE_MANAGER_ENABLED=false"
+        )
+    else:
+        manager = host_lifecycle.start_resource_manager(
+            status_journal=compose_resource_manager_status_journal(
+                task_runtime=task_runtime,
+                embodiment_runtime=embodiment_runtime,
+            ),
+            degradation_state_provider=(
+                application.composition.guardian.read_degradation_state
+            ),
+            run_immediately=bool(
+                runtime_settings.resource_manager_run_on_startup
+            ),
+        )
+        status = manager.get_status()
+        durability = dict(status.get("durability") or {})
+        startup_probe_statuses["system_resource_manager"] = (
+            "OK "
+            f"(interval={status.get('interval_s')}s, "
+            f"revision={durability.get('revision')}, "
+            f"durability={durability.get('status')})"
+        )
+    observe_runtime_startup(
+        runtime_context_application=application,
+        startup_probe_statuses=startup_probe_statuses,
+        observed_at_ms=observed_at_ms,
+    )
+    return application, preview
+
+
 def runtime_environment_observation_provider(
     mode_transition_service: Any,
 ) -> Callable[..., Mapping[str, Any]]:
@@ -271,7 +375,9 @@ __all__ = [
     "bind_host_hard_state_runtime",
     "compose_action_preview_service",
     "compose_host_runtime_context",
+    "compose_resource_manager_status_journal",
     "compose_service_catalog_guardian_observation",
     "observe_runtime_startup",
     "runtime_environment_observation_provider",
+    "start_host_runtime_context_services",
 ]

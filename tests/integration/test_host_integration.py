@@ -76,8 +76,6 @@ def test_client(mem_ledger):
     # 注入本例专用账本
     import host_brain.composition.process_services as _deps
     _deps.get_process_service_container().ledger = mem_ledger
-    _deps.get_process_service_container().bond_stage_engine = None
-    _deps.get_process_service_container().bond_update_queue = None
 
     # mock LLM 推理（避免真实 API 调用）
     async def _mock_llm_runtime(*args, **kwargs):
@@ -131,8 +129,6 @@ def test_client(mem_ledger):
     _deps.get_process_service_container().ledger = None
     _deps.get_process_service_container().intent_engine = None
     _deps.get_process_service_container().skill_registry = None
-    _deps.get_process_service_container().bond_stage_engine = None
-    _deps.get_process_service_container().bond_update_queue = None
     _deps.get_process_service_container().obs_metrics_collector = None
 
 
@@ -142,8 +138,6 @@ def _rebind_mem_ledger_each_test(mem_ledger):
     import host_brain.composition.process_services as _deps
 
     _deps.get_process_service_container().ledger = mem_ledger
-    _deps.get_process_service_container().bond_stage_engine = None
-    _deps.get_process_service_container().bond_update_queue = None
     yield
 
 

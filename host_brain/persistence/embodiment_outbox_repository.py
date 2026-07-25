@@ -404,6 +404,43 @@ class EmbodimentOutboxRepository:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def get_by_command_identity(
+        self,
+        *,
+        command_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Reopen one exact scoped command without mutating or redispatching it."""
+
+        resolved_command_id = _normalise_identifier(
+            command_id,
+            field="command_id",
+        )
+        resolved_key = _normalise_identifier(
+            idempotency_key,
+            field="idempotency_key",
+        )
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM host_embodiment_outbox "
+                "WHERE runtime_scope_id = ? AND command_id = ? "
+                "AND idempotency_key = ?",
+                (
+                    self._runtime_scope_id,
+                    resolved_command_id,
+                    resolved_key,
+                ),
+            ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record["command"] = json.loads(str(record["command_json"]))
+        if record.get("receipt_json"):
+            record["receipt"] = json.loads(str(record["receipt_json"]))
+        else:
+            record["receipt"] = None
+        return record
+
     # ------------------------------------------------------------------
     # Runtime authority lease.  Same owner is not special: an active claim
     # must be renewed with its exact lease/fence, never reacquired by name.

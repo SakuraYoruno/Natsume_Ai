@@ -687,10 +687,11 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
     manifest = {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
     assert GOVERNED_OPERATOR_COMMAND_IDS == {
         COMMAND_ID,
+        "edge.command.push",
         "sys_mode.switch",
         "task_terminal.reconcile",
     }
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 34
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 33
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == manifest
 
 

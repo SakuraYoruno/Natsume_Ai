@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-import host_brain.composition.process_services as app_dependencies
 import host_brain.app.graph_config_builder as graph_builder
 import host_brain.app.model_router as model_router
 from host_brain.app.graph_config_builder import (
@@ -15,6 +14,16 @@ from host_brain.app.graph_config_builder import (
     SCENE_TYPE_AUTO,
     build_chat_graph_config,
 )
+from host_brain.model_runtime.production_composition import (
+    get_default_production_route_catalog,
+)
+
+
+def _resolve_runtime(**kwargs: Any) -> dict[str, Any]:
+    return graph_builder.resolve_host_llm_runtime(
+        catalog=get_default_production_route_catalog(),
+        **kwargs,
+    )
 
 
 def _mock_config_result(
@@ -51,18 +60,7 @@ def _patch_runtime_dependencies(
     llm_provider: str = "gemini",
     codex_cli_available: bool = False,
 ) -> None:
-    class _CloudRoutingMatrix:
-        def select_with_fallback(self, *, task_type, latency_budget):  # noqa: ANN001
-            return SimpleNamespace(
-                task_type=task_type,
-                selected_model=SimpleNamespace(value=HOST_CHAT_ROUTE_CLOUD),
-                latency_budget=latency_budget,
-                is_fallback=False,
-                fallback_reason=None,
-            )
-
     monkeypatch.setattr(model_router, "_resolve_runtime_gemini_api_key", lambda: (None, None, None))
-    monkeypatch.setattr(app_dependencies, "get_routing_matrix", lambda: _CloudRoutingMatrix())
 
 
 _FORBIDDEN_RUNTIME_KEYS = frozenset(
@@ -103,7 +101,7 @@ def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
     monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
-    runtime = graph_builder.resolve_host_llm_runtime()
+    runtime = _resolve_runtime()
 
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
@@ -119,7 +117,7 @@ def test_resolve_host_llm_runtime_does_not_route_from_codex_credentials(monkeypa
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
     monkeypatch.setenv("HOST_CODEX_BASE_URL", "https://codex-relay.example.com")
 
-    runtime = graph_builder.resolve_host_llm_runtime()
+    runtime = _resolve_runtime()
 
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
@@ -132,7 +130,7 @@ def test_resolve_host_llm_runtime_does_not_route_from_deepseek_credentials(monke
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key="sk-deepseek")
     monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
-    runtime = graph_builder.resolve_host_llm_runtime()
+    runtime = _resolve_runtime()
 
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
@@ -154,7 +152,7 @@ def test_resolve_host_llm_runtime_can_select_minimax_as_primary(monkeypatch) -> 
     monkeypatch.setenv("HOST_LLM_PROVIDER", "minimax")
     monkeypatch.setenv("HOST_MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
 
-    runtime = graph_builder.resolve_host_llm_runtime()
+    runtime = _resolve_runtime()
 
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
@@ -174,7 +172,7 @@ def test_resolve_host_llm_runtime_prefers_healthy_local_chat_when_enabled(monkey
     monkeypatch.delenv("HOST_CHAT_LOCAL_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_CHAT)
+    runtime = _resolve_runtime(scene_type=SCENE_CHAT)
 
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
@@ -195,7 +193,7 @@ def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> N
     monkeypatch.delenv("HOST_CHAT_LOCAL_LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    runtime = graph_builder.resolve_host_llm_runtime()
+    runtime = _resolve_runtime()
 
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_HOST_14B
@@ -210,7 +208,7 @@ def test_resolve_host_llm_runtime_reasoning_scene_still_uses_remote_chain(monkey
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
     monkeypatch.setenv("HOST_LLM_PROVIDER", "codex")
 
-    runtime = graph_builder.resolve_host_llm_runtime(scene_type=SCENE_EXEC_INTENT)
+    runtime = _resolve_runtime(scene_type=SCENE_EXEC_INTENT)
 
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD

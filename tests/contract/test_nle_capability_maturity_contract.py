@@ -9,6 +9,10 @@ from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.route_token import RouteToken
 from host_brain.governor.tier_policy import ApprovalTier, GovernorTierPolicy
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.composition.host_governance_runtime import (
+    HostGovernanceRuntimeOwner,
+    HostGovernanceRuntimeSettings,
+)
 from host_brain.mcp.tool_registry import ToolMeta
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.pentest.agent.tool_registry import ToolDescriptor
@@ -346,11 +350,7 @@ def test_t_nle_18_federated_provider_reads_all_real_sources_without_mutation() -
     mcp.close()
 
 
-def test_t_nle_18_production_composition_injects_live_scorecard_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from host_brain.composition import process_services as dependencies
-
+def test_t_nle_18_production_composition_injects_live_scorecard_provider() -> None:
     registry = SkillRegistry()
     registry.register(
         SkillMeta(
@@ -362,40 +362,49 @@ def test_t_nle_18_production_composition_injects_live_scorecard_provider(
             handler=lambda args, ctx: {"status": "OK"},
         )
     )
-    monkeypatch.setenv("HOST_CAPABILITY_MATURITY_POLICY_ENABLED", "true")
-    monkeypatch.setattr(dependencies.get_process_service_container(), "skill_registry", registry)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "mcp_tool_registry", None)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "capability_scorecard_provider", None)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "intent_engine", None)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "ledger", SQLiteLedger(":memory:"))
-    monkeypatch.setattr(dependencies.get_process_service_container(), "token_service", None)
-    monkeypatch.setattr(dependencies.get_process_service_container(), "policy_cache", None)
-    monkeypatch.setattr(dependencies, "_sync_mcp_skills_into_registry", lambda _: None)
-
-    engine = dependencies.get_intent_engine()
+    ledger = SQLiteLedger(":memory:")
+    owner = HostGovernanceRuntimeOwner(
+        ledger_provider=lambda: ledger,
+        persistence_db_path_provider=lambda: ":memory:",
+        settings_provider=lambda: HostGovernanceRuntimeSettings(
+            mcp_registry_db_path=":memory:",
+            mcp_bridge_enabled=False,
+            skill_provider_flags=(),
+        ),
+        skill_registry_factory=lambda: registry,
+        skill_provider_registrar=lambda *_args, **_kwargs: 0,
+    )
+    owner.begin()
+    engine = owner.require_intent_engine()
     provider = engine._tier_policy._capability_policy.scorecard_provider
     assert isinstance(provider, FederatedCapabilityScorecardProvider)
     assert provider("production_reader") is not None
 
-    now = 10_000
-    result = engine.evaluate_intent(
-        {
-            "schema_version": "Natsume.intent.v1",
-            "id": "intent::production-reader::1",
-            "ts_ms": now - 1,
-            "session_id": "session::production-reader",
-            "seq": 1,
-            "type": "skill_call",
-            "action": "production_reader",
-            "target": "host",
-            "args": {},
-            "nonce": "nonce::production-reader::1",
-        },
-        current_ms=now,
-        governance_snapshot={"trust_level": 80, "energy_level": 80},
-    )
-    assert result["decision"] == "APPROVE"
-    assert result["committed_route_token"]["token"] != RouteToken.GOV_AIRLOCK_REVIEW.value
+    try:
+        now = 10_000
+        result = engine.evaluate_intent(
+            {
+                "schema_version": "Natsume.intent.v1",
+                "id": "intent::production-reader::1",
+                "ts_ms": now - 1,
+                "session_id": "session::production-reader",
+                "seq": 1,
+                "type": "skill_call",
+                "action": "production_reader",
+                "target": "host",
+                "args": {},
+                "nonce": "nonce::production-reader::1",
+            },
+            current_ms=now,
+            governance_snapshot={"trust_level": 80, "energy_level": 80},
+        )
+        assert result["decision"] == "APPROVE"
+        assert (
+            result["committed_route_token"]["token"]
+            != RouteToken.GOV_AIRLOCK_REVIEW.value
+        )
+    finally:
+        owner.close()
 
 
 def test_t_nle_18_intent_engine_consumes_scorecard_only_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:

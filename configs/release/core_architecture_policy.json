@@ -281,17 +281,17 @@
     },
     "IntentDecisionEngine": {
       "count": 1,
-      "allowed_paths": ["host_brain/composition/process_runtime_services.py"]
+      "allowed_paths": ["host_brain/composition/host_governance_runtime.py"]
     }
   },
   "composition_calls": {
     "build_production_capability_runtime": {
       "count": 1,
-      "allowed_paths": ["host_brain/composition/process_services.py"]
+      "allowed_paths": ["host_brain/composition/host_authority_runtime.py"]
     },
-    "build_default_production_model_runtime": {
+    "build_app_local_production_model_runtime": {
       "count": 1,
-      "allowed_paths": ["host_brain/composition/process_services.py"]
+      "allowed_paths": ["host_brain/composition/host_authority_runtime.py"]
     }
   },
   "private_connection_authorities": [

@@ -61,7 +61,7 @@ def test_production_has_no_retired_facade_imports_or_global_evidence_getter() ->
     assert violations == []
 
 
-def test_life_memory_store_is_constructed_only_by_process_composition() -> None:
+def test_life_memory_store_is_constructed_only_by_host_authority_owner() -> None:
     constructors: list[str] = []
     for path in (ROOT / "host_brain").rglob("*.py"):
         source = path.read_text(encoding="utf-8-sig")
@@ -72,7 +72,16 @@ def test_life_memory_store_is_constructed_only_by_process_composition() -> None:
             target = node.func
             if isinstance(target, ast.Name) and target.id == "LifeMemoryStore":
                 constructors.append(str(path.relative_to(ROOT)).replace("\\", "/"))
-    assert constructors == ["host_brain/composition/process_services.py"]
+    owner_source = (
+        ROOT
+        / "host_brain"
+        / "composition"
+        / "host_authority_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert constructors == []
+    assert "life_memory_store_factory: Factory = LifeMemoryStore" in owner_source
+    assert "self._life_memory_store_factory(" in owner_source
 
 
 def test_canonical_life_policy_owns_weather_and_reach_out_calibration() -> None:

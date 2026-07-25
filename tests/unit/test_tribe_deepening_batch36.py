@@ -23,6 +23,9 @@ from host_brain.tribe.proprioception_agent import ProprioceptionAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
+
+
 @pytest.fixture()
 def registry():
     return TribeStateRegistry()

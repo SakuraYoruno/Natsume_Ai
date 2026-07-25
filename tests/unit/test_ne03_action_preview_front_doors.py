@@ -972,12 +972,12 @@ async def test_life_gateway_actuator_requires_preview_and_strips_private_context
 
 
 @pytest.mark.asyncio
-async def test_legacy_operator_and_edge_actuators_fail_before_side_effect(
+async def test_legacy_operator_and_retired_edge_actuators_fail_before_side_effect(
     monkeypatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
     port = _DomainCommandPort(
-        command_id="edge.command.push",
+        command_id="mate.action.submit",
         handler=lambda payload, request_id: calls.append(
             {"payload": payload, "request_id": request_id}
         ),
@@ -989,10 +989,10 @@ async def test_legacy_operator_and_edge_actuators_fail_before_side_effect(
     )
     envelope = ObsCommandEnvelope(
         schema_version=OBS_COMMAND_ENVELOPE_SCHEMA,
-        command_id="edge.command.push",
-        action="device:edge:write",
-        required_scopes=("device:edge:write",),
-        payload={"command_type": "gate", "target_agent": "edge.channel"},
+        command_id="mate.action.submit",
+        action="device:mate:write",
+        required_scopes=("device:mate:write",),
+        payload={"action": "expression", "emotion_tag": "neutral"},
         authority=authority,
         claim_ref="secure-ingress-claim://preview/operator",
         audit_ref="audit://preview/operator",
@@ -1015,7 +1015,7 @@ async def test_legacy_operator_and_edge_actuators_fail_before_side_effect(
 
 
 @pytest.mark.asyncio
-async def test_all_34_legacy_obs_direct_commands_fail_before_handler() -> None:
+async def test_all_33_legacy_obs_direct_commands_fail_before_handler() -> None:
     calls: list[str] = []
     authority = ObsCommandAuthority.bind(
         principal_id="operator-preview",
@@ -1023,13 +1023,13 @@ async def test_all_34_legacy_obs_direct_commands_fail_before_handler() -> None:
         request_id="request-preview-all-obs",
     )
     assert len(DEFAULT_OBS_COMMAND_SPECS) == 37
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 34
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 33
     blocked_specs = tuple(
         spec
         for spec in DEFAULT_OBS_COMMAND_SPECS
         if spec.command_id in BLOCKED_OPERATOR_COMMAND_IDS
     )
-    assert len(blocked_specs) == 34
+    assert len(blocked_specs) == 33
     for spec in blocked_specs:
         port = _DomainCommandPort(
             command_id=spec.command_id,

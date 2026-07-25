@@ -59,12 +59,24 @@ class _TaskRuntime:
 
 
 class _HostLifecycle:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        fail_resource_manager: bool = False,
+    ) -> None:
         self.events = events
+        self.fail_resource_manager = fail_resource_manager
 
     def stop_activity_monitor(self, *, logger: Any) -> None:
         assert logger.name == "test.ne01.host-runtime-shutdown"
         self.events.append("hard-state:close")
+
+    def stop_resource_manager(self, *, logger: Any) -> None:
+        assert logger.name == "test.ne01.host-runtime-shutdown"
+        self.events.append("resource-manager:stop")
+        if self.fail_resource_manager:
+            raise RuntimeError("resource manager stop failed")
 
 
 class _SyncResource:
@@ -89,6 +101,7 @@ def _shutdown_kwargs(
     obs_fail: bool = False,
     task_live: bool = True,
     task_fail: bool = False,
+    resource_manager_fail: bool = False,
 ) -> tuple[dict[str, Any], SimpleNamespace, _TaskRuntime, _Security, list[str]]:
     events: list[str] = []
     task_runtime = _TaskRuntime(
@@ -114,15 +127,31 @@ def _shutdown_kwargs(
         "workspace_quiesce": (
             lambda *_args: events.append("workspace:close")
         ),
-        "host_lifecycle": _HostLifecycle(events),
+        "host_lifecycle": _HostLifecycle(
+            events,
+            fail_resource_manager=resource_manager_fail,
+        ),
         "logger": logging.getLogger("test.ne01.host-runtime-shutdown"),
         "embodiment_authority_task": None,
         "reset_life_command_authority": (
             lambda: events.append("life-authority:close")
         ),
         "embodiment_runtime": _SyncResource(events, "embodiment"),
-        "set_memory_service_container": (
-            lambda value: events.append(f"memory:publish:{value}")
+        "close_bond_runtime": (
+            lambda: events.append("bond-runtime:close")
+        ),
+        "close_governance_runtime": (
+            lambda: events.append("governance-runtime:close")
+        ),
+        "close_authority_runtime": (
+            lambda: events.append("authority-runtime:close")
+        ),
+        "withdraw_memory_service_container": (
+            lambda value: events.append(
+                "memory:withdraw:exact"
+                if value is memory
+                else "memory:withdraw:mismatch"
+            )
         ),
         "memory": memory,
         "command_ingress": SimpleNamespace(
@@ -167,8 +196,33 @@ async def test_task_runtime_close_failure_keeps_refs_and_hard_state_authority() 
         await shutdown_host_runtime_authority(**kwargs)
 
     assert raised.value.dependencies_preserved is True
-    assert events == ["obs:drain", "scheduler:stop", "task-runtime:close"]
+    assert events == [
+        "obs:drain",
+        "scheduler:stop",
+        "resource-manager:stop",
+        "task-runtime:close",
+    ]
     assert "hard-state:close" not in events
+    assert application.state.task_runtime_container is task_runtime
+    assert application.state.security_service_container is security
+    assert application.state.memory_service_container is kwargs["memory"]
+
+
+@pytest.mark.asyncio
+async def test_resource_manager_stop_failure_preserves_live_task_runtime() -> None:
+    kwargs, application, task_runtime, security, events = _shutdown_kwargs(
+        resource_manager_fail=True,
+    )
+
+    with pytest.raises(HostRuntimeShutdownError) as raised:
+        await shutdown_host_runtime_authority(**kwargs)
+
+    assert raised.value.dependencies_preserved is True
+    assert events == [
+        "obs:drain",
+        "scheduler:stop",
+        "resource-manager:stop",
+    ]
     assert application.state.task_runtime_container is task_runtime
     assert application.state.security_service_container is security
     assert application.state.memory_service_container is kwargs["memory"]
@@ -189,16 +243,20 @@ async def test_partial_startup_failure_releases_every_constructed_resource() -> 
     assert events == [
         "obs:drain",
         "scheduler:stop",
+        "resource-manager:stop",
         "task-runtime:close",
         "workspace:close",
         "hard-state:close",
         "life-authority:close",
         "embodiment:close",
-        "memory:publish:None",
+        "bond-runtime:close",
+        "governance-runtime:close",
+        "memory:withdraw:exact",
         "memory:close",
         "command-ingress:close",
         "security:close",
         "tools:clear",
+        "authority-runtime:close",
         "process-refs:withdraw",
     ]
     assert application.state.task_runtime_container is None

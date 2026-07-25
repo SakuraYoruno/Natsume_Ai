@@ -8,28 +8,11 @@ degraded paths without booting the application.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass
-from threading import RLock
 from typing import Any, Callable
 
 
 ServiceProvider = Callable[..., Any]
-
-
-# Compatibility Tribe agents still expose one process-global
-# ``application_ports`` attribute.  This lock is deliberately only a binding
-# fence for that foreign process-global surface; it is not a service registry
-# or an application authority.
-_APPLICATION_PORT_BINDING_FENCE = RLock()
-
-
-@contextmanager
-def application_port_binding_fence():
-    """Serialize bindings to the shared compatibility agent catalog."""
-
-    with _APPLICATION_PORT_BINDING_FENCE:
-        yield
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,5 +49,4 @@ class TribeApplicationPorts:
 __all__ = [
     "ServiceProvider",
     "TribeApplicationPorts",
-    "application_port_binding_fence",
 ]

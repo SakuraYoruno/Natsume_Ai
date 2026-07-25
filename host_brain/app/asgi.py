@@ -35,21 +35,22 @@ from host_brain.app.host_lifecycle_composition import (
 from host_brain.app import host_life_scheduler_wiring as _scheduler_result_wiring
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.host_life_route_authority import HostLifeRouteAuthority
 from host_brain.app.host_life_scheduler_wiring import (
     LifeCommandServicePort as _LifeCommandServicePort,
     LifeSnapshotReaderPort as _LifeSnapshotReaderPort,
-    compose_life_command_authority,
     compose_life_dispatchers as _compose_life_dispatchers,
-    reset_life_command_authority,
-    submit_life_tick_command,
+)
+from host_brain.app.asgi_authority_adapters import (
+    command_ingress_hmac_secrets_for_host as _command_ingress_hmac_secrets,
+    compose_life_command_authority_for_host as _compose_life_command_authority,
+    reset_life_command_authority_for_host as _reset_life_command_authority,
+    submit_life_tick_command_for_host as _submit_life_tick_command,
 )
 from host_brain.app.host_runtime_context_wiring import (
     bind_host_hard_state_runtime as _bind_host_hard_state_runtime,
-    compose_action_preview_service as _compose_action_preview_service,
-    compose_host_runtime_context as _compose_host_runtime_context,
     compose_service_catalog_guardian_observation as _compose_service_catalog_guardian_observation,
-    observe_runtime_startup as _observe_runtime_startup,
-    runtime_environment_observation_provider as _runtime_environment_observation_provider,
+    start_host_runtime_context_services as _start_host_runtime_context_services,
 )
 from host_brain.app.internal_runtime_composition import (
     activate_internal_runtime as _activate_internal_runtime,
@@ -61,7 +62,6 @@ from host_brain.app.host_runtime_startup_guards import (
     assert_task_effect_reconciliation_operator_startup as _assert_task_effect_reconciliation_operator_startup,
     assert_task_operation_reconciliation_operator_startup as _assert_task_operation_reconciliation_operator_startup,
     assert_task_terminal_reconciliation_operator_startup as _assert_task_terminal_reconciliation_operator_startup,
-    command_ingress_hmac_secrets,
 )
 from host_brain.app.host_runtime_shutdown import (
     shutdown_host_runtime_authority,
@@ -76,7 +76,9 @@ from host_brain.app.host_obs_source_composition import (
     HostObsSourceRuntimePorts,
     build_host_obs_read_ports,
 )
-from host_brain.app.process_service_wiring import configure_process_service_ports
+from host_brain.app.application_port_wiring import (
+    build_process_application_ports,
+)
 from host_brain.lifecycle_runtime.proactive_dispatch import run_proactive_intent_dispatch
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.app.runtime_metrics import RuntimeMetrics
@@ -128,7 +130,6 @@ from host_brain.composition.host_application import (
     build_production_host_application_ports,
 )
 from host_brain.composition import agent_workspace as workspace
-from host_brain.composition.life import PROCESS_LIFE_PROVIDER, build_process_life_container
 from host_brain.composition.runtime_group import GovernedRuntimeGroup
 from host_brain.composition.scheduler import (
     ProcessSchedulerContainer,
@@ -154,54 +155,8 @@ from host_brain.runtime.production_composition import (
     RuntimeContextComposition,
 )
 
-
 logger = logging.getLogger("Natsume.asgi")
 runtime_metrics = RuntimeMetrics()
-
-
-def _compose_life_command_authority(
-    ledger: Any,
-) -> tuple[_LifeCommandServicePort, _LifeSnapshotReaderPort]:
-    return compose_life_command_authority(
-        ledger,
-        container_builder=build_process_life_container,
-        provider=PROCESS_LIFE_PROVIDER,
-        clock_ms=now_ms,
-    )
-
-
-def _reset_life_command_authority() -> None:
-    reset_life_command_authority(provider=PROCESS_LIFE_PROVIDER)
-
-
-def _submit_life_tick_command(
-    *,
-    occurrence: Any,
-    definition: Any,
-    command: Any,
-    execution_context: Mapping[str, Any],
-    runtime_context_application: RuntimeContextApplicationService,
-    life_command_service: _LifeCommandServicePort,
-    life_snapshot_reader: _LifeSnapshotReaderPort,
-) -> dict[str, Any]:
-    return submit_life_tick_command(
-        occurrence=occurrence,
-        definition=definition,
-        command=command,
-        execution_context=execution_context,
-        runtime_context_application=runtime_context_application,
-        life_command_service=life_command_service,
-        life_snapshot_reader=life_snapshot_reader,
-        clock_ms=now_ms,
-    )
-
-
-def _command_ingress_hmac_secrets() -> dict[str, str]:
-    return command_ingress_hmac_secrets(
-        input_settings=get_input_settings(),
-        scheduler_settings=get_scheduler_settings(),
-    )
-
 
 def create_app(
     *,
@@ -213,12 +168,12 @@ def create_app(
         build_tribe_application_ports,
     )
 
-    configure_process_service_ports()
-    application_ports = (
-        host_application_ports
-        if host_application_ports is not None
-        else build_production_host_application_ports()
-    )
+    application_ports = host_application_ports
+    if application_ports is None:
+        process_application_ports = build_process_application_ports()
+        application_ports = build_production_host_application_ports(
+            process_application_ports=process_application_ports,
+        )
     if not isinstance(application_ports, HostApplicationPorts):
         raise TypeError("host_application_ports must be HostApplicationPorts")
     host_lifecycle = build_host_lifecycle_container(
@@ -246,7 +201,9 @@ def create_app(
         ),
         resource_manager_provider=host_lifecycle.get_resource_manager,
     )
-    tribe_runtime_agent_ports = build_production_tribe_runtime_agent_ports()
+    tribe_runtime_agent_ports = build_production_tribe_runtime_agent_ports(
+        tribe_runtime=tribe_runtime,
+    )
     lifecycle_runtime_ports = build_lifecycle_runtime_application_ports(
         host_services=host_services,
         activity_monitor_provider=host_lifecycle.get_activity_monitor,
@@ -353,7 +310,23 @@ def create_app(
     def embodiment_runtime_provider() -> Any | None:
         return embodiment_runtime
 
+    def life_route_authority_provider() -> HostLifeRouteAuthority | None:
+        current = life_command_authority
+        if current is None:
+            return None
+        command_service, snapshot_reader = current
+        return HostLifeRouteAuthority(
+            command_service=command_service,
+            snapshot_reader=snapshot_reader,
+        )
+
     route_ports = HostRoutePorts(
+        ledger_provider=ledger_provider,
+        life_command_authority_provider=life_route_authority_provider,
+        life_memory_store_provider=host_services.life_memory_store,
+        capability_forge_service_provider=(
+            application_ports.capability_forge_service
+        ),
         canon_service_provider=canon_service_provider,
         tool_broker_provider=tool_composition.provide_tool_broker,
         tool_catalog_provider=host_services.tool_catalog,
@@ -368,6 +341,7 @@ def create_app(
     )
     host_obs_route_ports = ObsRoutePorts(
         query_projection_store_provider=lambda: host_query_projection_store,
+        degradation_capability_port_provider=degradation_capability_port_provider,
     )
 
     host_obs_read_ports = build_host_obs_read_ports(
@@ -517,7 +491,14 @@ def create_app(
             tool_broker_provider=tool_composition.provide_tool_broker,
             tool_catalog_provider=host_services.tool_catalog,
             skill_registry_provider=host_services.skill_registry,
+            begin_authority_runtime=application_ports.begin_authority_runtime,
+            close_authority_runtime=application_ports.close_authority_runtime,
+            begin_bond_runtime=application_ports.begin_bond_runtime,
+            close_bond_runtime=application_ports.close_bond_runtime,
+            begin_governance_runtime=application_ports.begin_governance_runtime,
+            close_governance_runtime=application_ports.close_governance_runtime,
             defer_activity_monitor=True,
+            defer_resource_manager=True,
         ):
             security: ProcessSecurityServiceContainer | None = None
             command_ingress: ProcessCommandIngressContainer | None = None
@@ -761,36 +742,19 @@ def create_app(
                     embodiment_runtime=embodiment_runtime,
                     host_lifecycle=host_lifecycle,
                 )
-                activity_monitor = host_lifecycle.start_activity_monitor(
-                    ledger=ledger,
-                )
-                startup_probe_statuses["activity_monitor"] = (
-                    f"OK (gaming_check={activity_monitor._gaming_interval}s, "
-                    f"idle_check={activity_monitor._idle_interval}s, "
-                    "hard_state_journal=bound)"
-                )
-                runtime_context_application = _compose_host_runtime_context(
-                    task_runtime=task_runtime,
-                    ledger=ledger,
-                    embodiment_runtime=embodiment_runtime,
-                    environment_observation_provider=(
-                        _runtime_environment_observation_provider(
-                            host_lifecycle.get_mode_transition_service()
-                        )
-                    ),
+                runtime_context_application, action_preview_service = (
+                    _start_host_runtime_context_services(
+                        task_runtime=task_runtime,
+                        ledger=ledger,
+                        embodiment_runtime=embodiment_runtime,
+                        host_lifecycle=host_lifecycle,
+                        startup_probe_statuses=startup_probe_statuses,
+                        runtime_settings=runtime_settings,
+                        scheduler_settings=get_scheduler_settings(),
+                        observed_at_ms=now_ms(),
+                    )
                 )
                 runtime_context_composition = runtime_context_application.composition
-                action_preview_service = _compose_action_preview_service(
-                    task_runtime=task_runtime,
-                    ledger=ledger,
-                    runtime_context_application=runtime_context_application,
-                )
-                startup_observed_at_ms = now_ms()
-                _observe_runtime_startup(
-                    runtime_context_application=runtime_context_application,
-                    startup_probe_statuses=startup_probe_statuses,
-                    observed_at_ms=startup_observed_at_ms,
-                )
                 host_obs_degradation_state_provider = (
                     runtime_context_composition.guardian.read_degradation_state
                 )
@@ -799,6 +763,10 @@ def create_app(
                         runtime_context_composition.guardian.observe_service_batch
                     ),
                     resource_manager_provider=host_lifecycle.get_resource_manager,
+                    edge_probe=host_lifecycle.ports.probe_edge_rpc_health,
+                    edge_dependency_status_builder=(
+                        host_lifecycle.ports.build_edge_dependency_probe_statuses
+                    ),
                 )
                 service_health_heartbeat.start(interval_sec=30.0)
                 application.state.service_health_heartbeat = service_health_heartbeat
@@ -940,7 +908,7 @@ def create_app(
                     ),
                     episodic_projection_store=episodic_projection_store,
                 )
-                application_ports.memory_service_container_setter(memory)
+                application_ports.publish_memory_service_container(memory)
                 internal_composition = _compose_internal_runtime(
                     application=application,
                     task_runtime=task_runtime,
@@ -973,6 +941,7 @@ def create_app(
                     runtime_router_factory=CanonicalRuntimeRouter,
                     agent_executor_factory=AgentRuntimeExecutor,
                     internal_runtime_factory=build_governed_internal_runtime,
+                    embodiment_runtime_provider=lambda: embodiment_runtime,
                 )
                 canonical_owner = internal_composition.canonical_owner
                 agent_workspace_container = internal_composition.workspace_container
@@ -1342,8 +1311,11 @@ def create_app(
                     embodiment_authority_task=embodiment_authority_task,
                     reset_life_command_authority=_reset_life_command_authority,
                     embodiment_runtime=embodiment_runtime,
-                    set_memory_service_container=(
-                        application_ports.memory_service_container_setter
+                    close_bond_runtime=application_ports.close_bond_runtime,
+                    close_governance_runtime=application_ports.close_governance_runtime,
+                    close_authority_runtime=application_ports.close_authority_runtime,
+                    withdraw_memory_service_container=(
+                        application_ports.withdraw_memory_service_container
                     ),
                     memory=memory,
                     command_ingress=command_ingress,
@@ -1389,6 +1361,20 @@ def create_app(
         obs_route_ports=host_obs_route_ports,
         input_runtime_ports=input_runtime_ports,
     )
+
+    @application.middleware("http")
+    async def bind_tribe_execution_context(
+        request: Request,
+        call_next: Callable[[Request], Any],
+    ) -> Any:
+        activation = tribe_runtime.activate_execution_context(
+            owner=host_lifecycle,
+        )
+        try:
+            return await call_next(request)
+        finally:
+            tribe_runtime.deactivate_execution_context(activation)
+
     withdraw_published_runtime_state(application)
     application.state.host_runtime_shutdown_error = None
     application.state.security_service_container = None

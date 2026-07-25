@@ -338,8 +338,6 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.get_multimodal_observer", return_value=observer
-    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
@@ -353,19 +351,18 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
     assert dispatched_payload["content_is_multimodal_placeholder"] is True
     assert "attachment_processing_mode" not in dispatched_payload
     assert dispatched_payload["attachments"][0]["type"] == "image"
-    with patch("host_brain.composition.process_services.get_multimodal_observer", return_value=observer):
-        should_continue = _run(
-            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
-                request_id="req_mm_sync_test",
-                session_id="qq_dm_mm_sync_001",
-                source="GATEWAY",
-                text="",
-                payload=dispatched_payload,
-                    ts_ms=1,
-                    ledger=SimpleNamespace(),
-                    ports=_ports(get_multimodal_observer=lambda: observer),
-            )
+    should_continue = _run(
+        input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+            request_id="req_mm_sync_test",
+            session_id="qq_dm_mm_sync_001",
+            source="GATEWAY",
+            text="",
+            payload=dispatched_payload,
+            ts_ms=1,
+            ledger=SimpleNamespace(),
+            ports=_ports(get_multimodal_observer=lambda: observer),
         )
+    )
     assert should_continue is True
     assert dispatched_payload["attachment_processing_mode"] == "sync"
     assert dispatched_payload["attachment_summary"] == "收到一张图片。图片里写着你好。"
@@ -401,8 +398,6 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.get_multimodal_observer", return_value=observer
-    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
@@ -415,19 +410,18 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
     assert dispatched_payload["content_is_multimodal_placeholder"] is True
     assert "attachment_processing_mode" not in dispatched_payload
     assert dispatched_payload["attachments"][0]["type"] == "voice"
-    with patch("host_brain.composition.process_services.get_multimodal_observer", return_value=observer):
-        should_continue = _run(
-            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
-                request_id="req_mm_voice_test",
-                session_id="qq_dm_mm_voice_001",
-                source="GATEWAY",
-                text="",
-                payload=dispatched_payload,
-                    ts_ms=1,
-                    ledger=SimpleNamespace(),
-                    ports=_ports(get_multimodal_observer=lambda: observer),
-            )
+    should_continue = _run(
+        input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+            request_id="req_mm_voice_test",
+            session_id="qq_dm_mm_voice_001",
+            source="GATEWAY",
+            text="",
+            payload=dispatched_payload,
+            ts_ms=1,
+            ledger=SimpleNamespace(),
+            ports=_ports(get_multimodal_observer=lambda: observer),
         )
+    )
     assert should_continue is True
     assert dispatched_payload["attachment_processing_mode"] == "sync"
     assert dispatched_payload["attachment_summary"].startswith("收到一段语音。")
@@ -462,9 +456,6 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
     )
 
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.get_multimodal_observer",
-        return_value=observer,
-    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):
@@ -530,8 +521,6 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
 
     input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
     with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
-        "host_brain.composition.process_services.get_multimodal_observer", return_value=observer
-    ), patch(
         "host_brain.composition.process_services.notify_user_interaction",
         return_value=None,
     ), patch("host_brain.input_runtime.ingress._log_input_event"):

@@ -56,6 +56,7 @@ DomainHandler = Callable[[Mapping[str, Any], str], Any]
 # who asked; it is not an exact node-bound Preview Receipt.  Keep them visibly
 # fail-closed until NE-01 gives each command a Governed Operator route.
 GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
+    "edge.command.push",
     "scheduler.task.trigger",
     "sys_mode.switch",
     "task_terminal.reconcile",
@@ -66,7 +67,7 @@ BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 34
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 33
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -288,19 +289,33 @@ def _bio_owner_state_reject(payload: Mapping[str, Any], _request_id: str) -> Any
     return _bio_owner_state(payload, accept=False)
 
 
-def _capability_forge_service() -> Any:
-    from host_brain.composition.process_services import get_capability_forge_service
+def _capability_forge_service(route_ports: HostRoutePorts) -> Any:
+    provider = route_ports.capability_forge_service_provider
+    if not callable(provider):
+        raise ObsDomainCommandError("OBS_CAPABILITY_FORGE_DOMAIN_UNAVAILABLE")
+    try:
+        service = provider()
+    except Exception as exc:
+        raise ObsDomainCommandError(
+            "OBS_CAPABILITY_FORGE_DOMAIN_UNAVAILABLE"
+        ) from exc
+    if service is None:
+        raise ObsDomainCommandError("OBS_CAPABILITY_FORGE_DOMAIN_UNAVAILABLE")
+    return service
 
-    return get_capability_forge_service()
 
-
-def _forge_create(payload: Mapping[str, Any], _request_id: str) -> Any:
+def _forge_create(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
     canary_percent = (
         int(payload["canary_traffic_percent"])
         if "canary_traffic_percent" in payload
         else 5
     )
-    return _capability_forge_service().create_proposal(
+    return _capability_forge_service(route_ports).create_proposal(
         session_id=_required_text(payload, "session_id"),
         proposer=_required_text(payload, "proposer"),
         candidate_key=_optional_text(payload, "candidate_key"),
@@ -308,8 +323,13 @@ def _forge_create(payload: Mapping[str, Any], _request_id: str) -> Any:
     )
 
 
-def _forge_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _capability_forge_service().approve_and_promote(
+def _forge_approve(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    return _capability_forge_service(route_ports).approve_and_promote(
         proposal_id=_required_text(payload, "proposal_id"),
         approval_token_ref=_required_text(payload, "approval_token_ref"),
         approver=_required_text(payload, "approver"),
@@ -317,8 +337,13 @@ def _forge_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
     )
 
 
-def _forge_rollback(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _capability_forge_service().rollback(
+def _forge_rollback(
+    payload: Mapping[str, Any],
+    _request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    return _capability_forge_service(route_ports).rollback(
         proposal_id=_required_text(payload, "proposal_id"),
         operator=_required_text(payload, "operator"),
         reason=_optional_text(payload, "reason"),
@@ -374,6 +399,17 @@ async def _sysmode_switch(
     return await execute(payload, request_id)
 
 
+async def _edge_command_push(
+    payload: Mapping[str, Any],
+    request_id: str,
+) -> Any:
+    runtime = operator_runtime_value("governed_operator_runtime")
+    execute = getattr(runtime, "execute_edge_command_push", None)
+    if not callable(execute):
+        raise ObsDomainCommandError("OBS_GOVERNED_OPERATOR_RUNTIME_UNAVAILABLE")
+    return await execute(payload, request_id)
+
+
 def _sysmode_auto_rules(
     payload: Mapping[str, Any],
     _request_id: str,
@@ -402,8 +438,13 @@ def _sysmode_event(
     }
 
 
-def _forge_runtime_match(payload: Mapping[str, Any], request_id: str) -> Any:
-    return _capability_forge_service().get_runtime_route_override(
+def _forge_runtime_match(
+    payload: Mapping[str, Any],
+    request_id: str,
+    *,
+    route_ports: HostRoutePorts,
+) -> Any:
+    return _capability_forge_service(route_ports).get_runtime_route_override(
         request_id=request_id,
         suggested_family=_required_text(payload, "suggested_family"),
         missing_capability_tags=list(payload.get("missing_capability_tags") or ()),
@@ -559,20 +600,6 @@ def _bond_event(
     return bond_routes.submit_bond_event(
         bond_routes.BondEventRequest(**body_values),
         _route_ports=route_ports,
-    )
-
-
-def _edge_command_push(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.tribe.edge_command_pusher import get_edge_command_pusher
-
-    pusher = get_edge_command_pusher()
-    if pusher is None:
-        raise ObsDomainCommandError("OBS_EDGE_COMMAND_DOMAIN_UNAVAILABLE")
-    return pusher.push_command(
-        command_type=_required_text(payload, "command_type"),
-        target_agent=_required_text(payload, "target_agent"),
-        source_agent=_required_text(payload, "source_agent"),
-        payload=dict(payload.get("payload") or {}),
     )
 
 
@@ -866,6 +893,10 @@ _HANDLERS: Mapping[str, DomainHandler] = {
 
 
 _ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
+    "capability_forge.proposal.create": _forge_create,
+    "capability_forge.proposal.approve": _forge_approve,
+    "capability_forge.proposal.rollback": _forge_rollback,
+    "capability_forge.runtime.match": _forge_runtime_match,
     "tool.execute": _tool_execute,
     "bond.event.submit": _bond_event,
     "sys_mode.switch": _sysmode_switch,

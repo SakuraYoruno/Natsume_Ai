@@ -405,22 +405,18 @@ class CerebellumAgent:
         )
 
 
-_CEREBELLUM_AGENT: CerebellumAgent | None = None
-
-
 def get_cerebellum_agent() -> CerebellumAgent:
-    global _CEREBELLUM_AGENT
-    if _CEREBELLUM_AGENT is None:
-        _CEREBELLUM_AGENT = CerebellumAgent()
-    return _CEREBELLUM_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "cerebellum_agent",
+        expected_type=CerebellumAgent,
+    )
 
 
-def set_cerebellum_agent(agent: CerebellumAgent | None) -> None:
-    global _CEREBELLUM_AGENT
-    _CEREBELLUM_AGENT = agent
-
-
-__all__ = ["CerebellumAgent", "get_cerebellum_agent", "set_cerebellum_agent"]
+__all__ = ["CerebellumAgent", "get_cerebellum_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

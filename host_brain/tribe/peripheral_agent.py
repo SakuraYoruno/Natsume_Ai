@@ -476,22 +476,18 @@ def _to_float(value: Any, default: float) -> float:
         return float(default)
 
 
-_PERIPHERAL_AGENT: PeripheralAgent | None = None
-
-
 def get_peripheral_agent() -> PeripheralAgent:
-    global _PERIPHERAL_AGENT
-    if _PERIPHERAL_AGENT is None:
-        _PERIPHERAL_AGENT = PeripheralAgent()
-    return _PERIPHERAL_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "peripheral_agent",
+        expected_type=PeripheralAgent,
+    )
 
 
-def set_peripheral_agent(agent: PeripheralAgent | None) -> None:
-    global _PERIPHERAL_AGENT
-    _PERIPHERAL_AGENT = agent
-
-
-__all__ = ["PeripheralAgent", "get_peripheral_agent", "set_peripheral_agent"]
+__all__ = ["PeripheralAgent", "get_peripheral_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401

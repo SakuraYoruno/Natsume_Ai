@@ -25,7 +25,6 @@ _logger = logging.getLogger("Natsume.surface_reply")
 _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
 _FALLBACK_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _FALLBACK_AFFECTION_RE = re.compile(r"(想你|好想你|我想你了|想你啦|惦记你)")
-_FALLBACK_STRENGTH_RE = re.compile(r"(特长|擅长|你会什么|你能做什么|你会做什么)")
 _OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
 _OPEN_APP_HINT_RE = re.compile(
     r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
@@ -44,11 +43,6 @@ _MEMORY_DISCONTINUITY_FILLER_RE = re.compile(
 _ACK_CLOSE_STAGES = {"COMPANION", "INTIMATE", "FAMILY"}
 _ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
 _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
-
-
-def _resolve_minimal_fallback_text(*, kind: str, render_target_lang: str) -> str:
-    _ = kind, render_target_lang
-    return ""
 
 
 def _load_static_prompt_spec(template_id: str) -> dict[str, Any]:
@@ -728,30 +722,6 @@ def _apply_render_policy_hard_guard(
 # ---------------------------------------------------------------------------
 # 降级回复构建
 # ---------------------------------------------------------------------------
-def _build_minimal_surface_reply_fallback(*, user_message: str, sub_agent_ctx: SurfaceSubAgentContext | None, render_target_lang: str) -> str:
-    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
-        FallbackRequest,
-        build_fallback_reply,
-    )
-
-    text = str(user_message or "").strip()
-    if sub_agent_ctx is not None:
-        agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if is_agent_runtime_skill(agent_id):
-            return _resolve_minimal_fallback_text(kind="agent_worker", render_target_lang=render_target_lang)
-        if agent_id == "recent_turn_direct":
-            return _resolve_minimal_fallback_text(kind="recent_turn_direct", render_target_lang=render_target_lang)
-    if _FALLBACK_STRENGTH_RE.search(text):
-        return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
-    return build_fallback_reply(
-        FallbackRequest(
-            reason_code="surface_reply_preprocessor_minimal_degraded_fallback",
-            render_target_lang=render_target_lang,
-            user_message=text,
-        )
-    ).text
-
-
 def _build_surface_reply_quality_fallback(*, user_message: str, sub_agent_ctx: SurfaceSubAgentContext | None, bond_summary: Dict[str, Any] | None, emotion_context: Dict[str, Any] | None, render_target_lang: str, render_policy: Any = None, prompt_runtime_payload: Mapping[str, Any] | None = None) -> str:
     from host_brain.persona.fallback_policy import (  # noqa: PLC0415
         FallbackRequest,
@@ -783,76 +753,6 @@ def _build_surface_reply_fallback(*, user_message: str, sub_agent_ctx: SurfaceSu
         emotion_context=None,
         render_target_lang=render_target_lang,
     )
-
-
-def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
-    templates = _load_static_prompt_spec("surface_reply.capabilities.reply_templates")
-    try:
-        from host_brain.composition.process_services import get_skill_registry
-        from host_brain.app.agents.tool_registry import get_tools_for_agent
-        from host_brain.app.sub_agent_protocol import get_agent_capabilities
-        registry = get_skill_registry()
-        skill_names = sorted(str(name).strip() for name in registry.list_skill_names() if str(name).strip())
-        agent_summaries: list[str] = []
-        for agent_id, desc in get_agent_capabilities().items():
-            tools = get_tools_for_agent(agent_id, allow_side_effects=False)
-            if not tools:
-                continue
-            tool_ids = [str(tool.tool_id or "").strip() for tool in tools if str(tool.tool_id or "").strip()]
-            preview = "、".join(tool_ids[:4])
-            if len(tool_ids) > 4:
-                preview += _runtime_text("list_more_suffix", render_target_lang=render_target_lang)
-            agent_summaries.append(
-                _mapping_text(
-                    templates,
-                    "agent_summary",
-                    render_target_lang=render_target_lang,
-                    agent_id=agent_id,
-                    desc=desc,
-                    preview=preview,
-                )
-            )
-        parts: list[str] = [_mapping_text(templates, "intro", render_target_lang=render_target_lang)]
-        if agent_summaries:
-            parts.extend(agent_summaries[:6])
-        if skill_names:
-            preview_skills = "、".join(skill_names[:10])
-            if len(skill_names) > 10:
-                preview_skills += _runtime_text("list_more_suffix", render_target_lang=render_target_lang)
-            parts.append(_mapping_text(templates, "skill_suffix", render_target_lang=render_target_lang, preview_skills=preview_skills))
-        parts.append(_mapping_text(templates, "cta", render_target_lang=render_target_lang))
-        return "\n".join(parts)
-    except Exception:
-        return _mapping_text(templates, "fallback", render_target_lang=render_target_lang)
-
-
-def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, render_policy: Any = None) -> bool:
-    policy = _coerce_render_policy(render_policy)
-    primary_topic = str(policy.get("primary_topic") or "").strip()
-    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
-    if explicit_decision is not None:
-        return explicit_decision
-    if primary_topic in {
-        "assistant_reply_followup",
-        "emoji_social_reply",
-        "emoji_social_followup",
-        "auditory_check",
-        "playful_ping",
-        "identity",
-    }:
-        return False
-    if _render_policy_requires_buffering(render_policy):
-        return True
-    env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"
-    raw = str(os.environ.get(env_key, "")).strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        return False
-    try:
-        from host_brain.composition.process_services import get_reflection_chain
-        reflection = get_reflection_chain()
-        return bool(reflection.should_reflect(emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""), intent=str((bond_summary or {}).get("intent") or ""), bond_stage=str((bond_summary or {}).get("stage") or "FRIEND"), turn_count=int((emotion_context or {}).get("turn_count") or 1)))
-    except Exception:
-        return False
 
 
 # ---------------------------------------------------------------------------

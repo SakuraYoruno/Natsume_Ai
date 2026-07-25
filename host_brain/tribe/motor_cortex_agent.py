@@ -7,7 +7,6 @@ from typing import Any, Mapping
 from host_brain.core.ids import now_ms
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.base_agent import TribeAgentDescriptor
-from host_brain.tribe.edge_command_pusher import get_edge_command_pusher
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -277,22 +276,18 @@ class MotorCortexAgent:
             except Exception as exc:
                 result = {"ok": False, "reason": "EXECUTOR_ERROR", "detail": str(exc)}
         else:
-            result = {"ok": False, "reason": "NO_EXECUTOR"}
-            if target_agent.startswith("edge."):
-                try:
-
-                    pusher = get_edge_command_pusher()
-                    if pusher is not None and pusher.enabled:
-                        result = pusher.push_command(
-                            command_type=command_type,
-                            target_agent=target_agent,
-                            payload=payload,
-                            source_agent="motor_cortex_agent",
-                        )
-                    else:
-                        result = {"ok": False, "reason": "PUSHER_UNAVAILABLE"}
-                except Exception as exc:
-                    result = {"ok": False, "reason": "PUSH_FAILED", "detail": str(exc)}
+            # Motor plans are proposals, not execution authority.  Edge effects
+            # must be dispatched by the governed TaskGraph/Acceptance boundary
+            # through an explicitly injected executor carrying node-bound
+            # Preview proof.
+            result = {
+                "ok": False,
+                "reason": (
+                    "GOVERNED_EDGE_COMMAND_REQUIRED"
+                    if target_agent.startswith("edge.")
+                    else "NO_EXECUTOR"
+                ),
+            }
         latency_ms = max(0, now_ms() - started)
         outcome = {
             "plan_id": plan_id,
@@ -637,22 +632,18 @@ class MotorCortexAgent:
             return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "error"}
 
 
-_MOTOR_CORTEX_AGENT: MotorCortexAgent | None = None
-
-
 def get_motor_cortex_agent() -> MotorCortexAgent:
-    global _MOTOR_CORTEX_AGENT
-    if _MOTOR_CORTEX_AGENT is None:
-        _MOTOR_CORTEX_AGENT = MotorCortexAgent()
-    return _MOTOR_CORTEX_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
+
+    return require_active_tribe_agent(
+        "motor_cortex_agent",
+        expected_type=MotorCortexAgent,
+    )
 
 
-def set_motor_cortex_agent(agent: MotorCortexAgent | None) -> None:
-    global _MOTOR_CORTEX_AGENT
-    _MOTOR_CORTEX_AGENT = agent
-
-
-__all__ = ["MotorCortexAgent", "get_motor_cortex_agent", "set_motor_cortex_agent"]
+__all__ = ["MotorCortexAgent", "get_motor_cortex_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

@@ -66,6 +66,7 @@ def compose_internal_runtime(
     runtime_router_factory: Callable[[], Any],
     agent_executor_factory: Callable[..., Any],
     internal_runtime_factory: Callable[..., Any],
+    embodiment_runtime_provider: Callable[[], Any] | None = None,
 ) -> InternalRuntimeComposition:
     """Build one app-local canonical runtime graph without activating it."""
 
@@ -109,6 +110,7 @@ def compose_internal_runtime(
         agent_runtime_ports=agent_runtime_ports,
         internal_agent_artifact_store=artifact_store,
         internal_agent_workspace_runtime=workspace_runtime,
+        embodiment_runtime_provider=embodiment_runtime_provider,
     )
     acceptance_effect_dispatcher = operator_composition.acceptance_effect_dispatcher
     host_runtime = tool_composition.activate(

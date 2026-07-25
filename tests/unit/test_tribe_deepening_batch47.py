@@ -266,8 +266,9 @@ class TestT363ImmunesSafePassReward:
 
     def test_safe_pass_records_reward(self):
         from host_brain.tribe.immune_agent import ImmuneAgent
+        from host_brain.tribe.tribe_state import TribeStateRegistry
         # 使用完整构造，避免 slots 属性问题
-        agent = ImmuneAgent()
+        agent = ImmuneAgent(state_registry=TribeStateRegistry())
 
         mock_pr = MagicMock()
         mock_limbic = MagicMock()

@@ -1523,25 +1523,6 @@ def _execute_process_resource_top(payload: dict[str, Any], context: dict[str, An
     }
 
 
-def _read_json_file(path: Path) -> dict[str, Any]:
-    try:
-        if not path.exists():
-            return {}
-        parsed = json.loads(path.read_text(encoding="utf-8", errors="replace") or "{}")
-        return dict(parsed or {}) if isinstance(parsed, Mapping) else {}
-    except Exception:
-        return {}
-
-
-def _load_resource_manager_status_from_file() -> dict[str, Any]:
-    path = Path(__file__).resolve().parents[2] / "data" / "runtime_resource_manager.json"
-    payload = _read_json_file(path)
-    if payload:
-        payload.setdefault("registered", False)
-        payload.setdefault("status_path", str(path))
-    return payload
-
-
 def _fetch_local_json(url: str, *, timeout_s: float = 2.0) -> dict[str, Any]:
     try:
         return _fetch_json_url(url, timeout_s=timeout_s)
@@ -1943,10 +1924,6 @@ def _execute_resource_pressure_analysis(payload: dict[str, Any], context: dict[s
     combined_rows = _unique_rows_by_pid(process_rows, gpu_context_rows)
 
     manager_status = _execute_resource_manager_status({"create_if_missing": False}, context)
-    if not bool(manager_status.get("registered")):
-        file_status = _load_resource_manager_status_from_file()
-        if file_status:
-            manager_status = {"success": True, **file_status}
     host_health = _fetch_local_json("http://127.0.0.1:18080/health?skip_dependency_probes=1", timeout_s=2.0)
     obs_health = _fetch_local_json("http://127.0.0.1:18082/health", timeout_s=2.0)
     log_signals = _collect_resource_log_signals()

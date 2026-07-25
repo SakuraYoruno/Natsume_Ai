@@ -21,6 +21,10 @@ RouteProvider = Callable[[], Any | None]
 class HostRoutePorts:
     """Immutable provider bundle owned by one Host ASGI application."""
 
+    ledger_provider: RouteProvider | None = None
+    life_command_authority_provider: RouteProvider | None = None
+    life_memory_store_provider: RouteProvider | None = None
+    capability_forge_service_provider: RouteProvider | None = None
     canon_service_provider: RouteProvider | None = None
     tool_broker_provider: RouteProvider | None = None
     tool_catalog_provider: RouteProvider | None = None
@@ -33,6 +37,10 @@ class HostRoutePorts:
 
     def __post_init__(self) -> None:
         for field_name in (
+            "ledger_provider",
+            "life_command_authority_provider",
+            "life_memory_store_provider",
+            "capability_forge_service_provider",
             "canon_service_provider",
             "tool_broker_provider",
             "tool_catalog_provider",

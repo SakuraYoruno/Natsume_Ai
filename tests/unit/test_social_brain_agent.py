@@ -5,6 +5,12 @@ from types import SimpleNamespace
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.tribe.social_brain_agent import SocialBrainAgent
 from host_brain.tribe.application_ports import TribeApplicationPorts
+from host_brain.tribe.tribe_state import TribeStateRegistry
+
+
+def _build_social_brain_agent(**kwargs) -> SocialBrainAgent:
+    kwargs.setdefault("state_registry", TribeStateRegistry())
+    return SocialBrainAgent(**kwargs)
 
 
 class _FakeRift:
@@ -47,9 +53,7 @@ def test_social_brain_resolve_bond_snapshot_with_live_engine(monkeypatch) -> Non
             assert user_id == get_canonical_bond_user_id()
             return _FakeBondState()
 
-    monkeypatch.setattr("host_brain.composition.process_services.get_bond_stage_engine", lambda: _Engine())
-
-    snapshot = SocialBrainAgent(
+    snapshot = _build_social_brain_agent(
         application_ports=TribeApplicationPorts(bond_stage_engine=lambda: _Engine()),
     ).resolve_bond_snapshot(person_id="user_1")
 
@@ -63,10 +67,8 @@ def test_social_brain_resolve_bond_snapshot_with_live_engine(monkeypatch) -> Non
     assert snapshot["bond_state_obj"] is not None
 
 
-def test_social_brain_resolve_bond_snapshot_uses_fallback_summary(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.composition.process_services.get_bond_stage_engine", lambda: None)
-
-    snapshot = SocialBrainAgent().resolve_bond_snapshot(
+def test_social_brain_resolve_bond_snapshot_uses_fallback_summary() -> None:
+    snapshot = _build_social_brain_agent().resolve_bond_snapshot(
         person_id="user_2",
         bond_summary={"stage": "FRIEND", "trend": "steady", "capability_hint": "short_chat"},
     )
@@ -77,9 +79,11 @@ def test_social_brain_resolve_bond_snapshot_uses_fallback_summary(monkeypatch) -
     assert snapshot["bond_state_obj"] is None
 
 
-def test_social_brain_resolve_bond_stage_uppercases_default(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.composition.process_services.get_bond_stage_engine", lambda: None)
-    stage = SocialBrainAgent().resolve_bond_stage(person_id=None, default="friend")
+def test_social_brain_resolve_bond_stage_uppercases_default() -> None:
+    stage = _build_social_brain_agent().resolve_bond_stage(
+        person_id=None,
+        default="friend",
+    )
     assert stage == "FRIEND"
 
 
@@ -94,9 +98,7 @@ def test_social_brain_resolve_scheduler_bond_summary(monkeypatch) -> None:
             assert session_id == "default"
             return _Snapshot()
 
-    monkeypatch.setattr("host_brain.composition.process_services.get_bond_stage_engine", lambda: _Engine())
-
-    summary = SocialBrainAgent(
+    summary = _build_social_brain_agent(
         application_ports=TribeApplicationPorts(bond_stage_engine=lambda: _Engine()),
     ).resolve_scheduler_bond_summary(session_id="default")
 
@@ -107,9 +109,8 @@ def test_social_brain_resolve_scheduler_bond_summary(monkeypatch) -> None:
     }
 
 
-def test_social_brain_resolve_stage_engine(monkeypatch) -> None:
+def test_social_brain_resolve_stage_engine() -> None:
     sentinel = object()
-    monkeypatch.setattr("host_brain.composition.process_services.get_bond_stage_engine", lambda: sentinel)
-    assert SocialBrainAgent(
+    assert _build_social_brain_agent(
         application_ports=TribeApplicationPorts(bond_stage_engine=lambda: sentinel),
     ).resolve_stage_engine() is sentinel

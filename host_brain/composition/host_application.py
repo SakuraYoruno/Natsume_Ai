@@ -1,24 +1,68 @@
-"""Explicit, frozen Host application ports for one ASGI composition root.
-
-This module is the transitional production adapter around the remaining
-``process_services`` composition facade.  Host application code receives the
-immutable :class:`HostApplicationPorts` bundle instead of reaching back into
-that facade.  The process facade is still a legacy construction dependency and
-is deliberately not described as an app-local-instance or full locator
-retirement proof.
-"""
+"""Explicit, frozen Host application ports for one ASGI composition root."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any
 
+from host_brain.bond.milestone_tracker import MilestoneTracker
+from host_brain.channels.multimodal_processor import MultimodalProcessor
+from host_brain.channels.tts_context_router import TtsContextRouter
+from host_brain.composition.process_application_ports import ProcessApplicationPorts
+from host_brain.composition.host_authority_runtime import (
+    HostAuthorityRuntimeOwner,
+)
+from host_brain.composition.host_owned_runtime import (
+    HostMemoryServicePublication,
+    build_host_graph_runtime,
+    build_host_routing_matrix,
+)
+from host_brain.composition.host_bond_runtime import (
+    HostBondRuntimeOwner,
+    build_host_bond_client,
+)
+from host_brain.composition.host_governance_runtime import (
+    HostGovernanceRuntimeOwner,
+)
+from host_brain.composition.host_memory_runtime import HostMemoryRuntimeOwner
 from host_brain.contracts.host_lifecycle import HostLifecycleApplicationPorts
+from host_brain.core.meta_learning_loop import MetaLearningLoop
+from host_brain.governor.tokens import TokenService
+from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
+from host_brain.persona.emotional_silence import EmotionalSilenceEngine
 
 
 ServiceProvider = Callable[[], Any]
-MemoryContainerSetter = Callable[[Any | None], None]
+MemoryContainerAction = Callable[[Any], None]
+
+
+def _app_local_provider(instance: Any) -> ServiceProvider:
+    """Return one provider bound to the instance owned by this Host app."""
+
+    def provide() -> Any:
+        return instance
+
+    return provide
+
+
+def _app_local_lazy_provider(factory: Callable[[], Any]) -> ServiceProvider:
+    """Construct one dependency lazily inside this Host app object graph."""
+
+    lock = Lock()
+    missing = object()
+    instance: Any = missing
+
+    def provide() -> Any:
+        nonlocal instance
+        if instance is missing:
+            with lock:
+                if instance is missing:
+                    instance = factory()
+        return instance
+
+    return provide
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +77,14 @@ class HostApplicationPorts:
     capability_forge_service: ServiceProvider
     capability_gap_telemetry: ServiceProvider
     capability_scorecard_provider: ServiceProvider
-    memory_service_container_setter: MemoryContainerSetter
+    begin_authority_runtime: Callable[[], None]
+    close_authority_runtime: Callable[[], None]
+    begin_bond_runtime: Callable[[], None]
+    close_bond_runtime: Callable[[], None]
+    begin_governance_runtime: Callable[[], None]
+    close_governance_runtime: Callable[[], None]
+    publish_memory_service_container: MemoryContainerAction
+    withdraw_memory_service_container: MemoryContainerAction
 
     def __post_init__(self) -> None:
         if not isinstance(self.lifecycle, HostLifecycleApplicationPorts):
@@ -46,87 +97,238 @@ class HostApplicationPorts:
             "capability_forge_service",
             "capability_gap_telemetry",
             "capability_scorecard_provider",
-            "memory_service_container_setter",
+            "begin_authority_runtime",
+            "close_authority_runtime",
+            "begin_bond_runtime",
+            "close_bond_runtime",
+            "begin_governance_runtime",
+            "close_governance_runtime",
+            "publish_memory_service_container",
+            "withdraw_memory_service_container",
         ):
             if not callable(getattr(self, field_name)):
                 raise TypeError(f"{field_name} must be callable")
 
 
-def build_production_host_application_ports() -> HostApplicationPorts:
-    """Map the current production composition facade into frozen Host ports.
+def build_production_host_application_ports(
+    *,
+    process_application_ports: ProcessApplicationPorts,
+    authority_runtime_owner: HostAuthorityRuntimeOwner | None = None,
+) -> HostApplicationPorts:
+    """Build one Host-owned object graph from explicit construction ports."""
 
-    This is intentionally the last place in the Host application construction
-    path that knows the legacy ``process_services`` facade.  It must be called
-    only after ``configure_process_service_ports()`` has installed its typed
-    process-level construction bindings.
-    """
-
-    from host_brain.app import emotion_context  # noqa: PLC0415
     from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
     from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
     from host_brain.core.resource_manager import SystemResourceManager  # noqa: PLC0415
-    from host_brain.composition import process_services  # noqa: PLC0415
+    if not isinstance(process_application_ports, ProcessApplicationPorts):
+        raise TypeError(
+            "process_application_ports must be ProcessApplicationPorts"
+        )
+    authority_runtime_owner = (
+        authority_runtime_owner
+        if authority_runtime_owner is not None
+        else HostAuthorityRuntimeOwner(
+            persistence_db_path_provider=(
+                process_application_ports.persistence_db_path
+            ),
+            model_credential_resolver=(
+                process_application_ports.model_credential_resolver
+            ),
+            model_base_url_resolver=(
+                process_application_ports.model_base_url_resolver
+            ),
+            model_transport=process_application_ports.model_transport,
+        )
+    )
+    ledger_provider = authority_runtime_owner.require_ledger
+    memory_service_publication = HostMemoryServicePublication()
+    silence_engine = EmotionalSilenceEngine()
+    milestone_tracker = MilestoneTracker()
+    multimodal_processor = MultimodalProcessor()
+    tts_context_router = TtsContextRouter()
+    meta_learning_loop = MetaLearningLoop()
+    memory_worth_evaluator = MemoryWorthEvaluator()
+    capability_gap_telemetry = _app_local_lazy_provider(
+        process_application_ports.capability_gap_telemetry_factory
+    )
+    capability_forge_service = _app_local_lazy_provider(
+        lambda: process_application_ports.capability_forge_service_factory(
+            telemetry=capability_gap_telemetry(),
+            token_service=TokenService(),
+            ledger=ledger_provider(),
+        )
+    )
+    security_immune_agent = _app_local_lazy_provider(
+        lambda: process_application_ports.security_immune_agent_factory(
+            ledger_provider=ledger_provider,
+        )
+    )
+    conversation_turn_store = _app_local_lazy_provider(
+        lambda: process_application_ports.conversation_turn_store_factory(
+            ledger=ledger_provider(),
+        )
+    )
+    conversation_history = _app_local_lazy_provider(
+        lambda: process_application_ports.conversation_history_factory(
+            repository=conversation_turn_store(),
+        )
+    )
+    session_topic_ledger_store = _app_local_lazy_provider(
+        lambda: process_application_ports.session_topic_ledger_store_factory(
+            ledger=ledger_provider(),
+        )
+    )
+    session_tactic_ledger_store = _app_local_lazy_provider(
+        lambda: process_application_ports.session_tactic_ledger_store_factory(
+            ledger=ledger_provider(),
+        )
+    )
+    shared_memory_index = _app_local_lazy_provider(
+        lambda: process_application_ports.shared_memory_index_factory(
+            store=authority_runtime_owner.require_episodic_store(),
+        )
+    )
+    multimodal_observer = _app_local_lazy_provider(
+        lambda: process_application_ports.multimodal_observer_factory(
+            model_attempt_service_provider=(
+                authority_runtime_owner.require_model_attempt_service
+            ),
+        )
+    )
+    graph_runtime = _app_local_lazy_provider(
+        lambda: build_host_graph_runtime(
+            graph_runtime_factory=process_application_ports.graph_runtime_factory,
+            graph_handler_bindings=process_application_ports.graph_handler_bindings,
+            ledger_provider=ledger_provider,
+        )
+    )
+    routing_matrix = _app_local_lazy_provider(
+        lambda: build_host_routing_matrix(
+            routing_matrix_factory=process_application_ports.routing_matrix_factory,
+            ledger_provider=ledger_provider,
+        )
+    )
+    bond_runtime_owner = HostBondRuntimeOwner(
+        ledger_provider=ledger_provider,
+        stage_engine_factory=process_application_ports.bond_stage_engine_factory,
+        dynamics_writer_factory=(
+            process_application_ports.bond_dynamics_writer_factory
+        ),
+        update_queue_factory=process_application_ports.bond_update_queue_factory,
+        client_factory=build_host_bond_client,
+    )
+    memory_runtime_owner = HostMemoryRuntimeOwner(
+        ledger_provider=ledger_provider,
+        memory_guard_factory=process_application_ports.memory_guard_factory,
+        state_arbiter_factory=process_application_ports.state_arbiter_factory,
+        state_write_arbiter_factory=(
+            process_application_ports.state_write_arbiter_factory
+        ),
+        episodic_store_adapter_factory=(
+            process_application_ports.episodic_store_adapter_factory
+        ),
+        distillation_engine_factory=(
+            process_application_ports.distillation_engine_factory
+        ),
+        semantic_recaller_factory=(
+            process_application_ports.semantic_recaller_factory
+        ),
+    )
+    governance_runtime_owner = HostGovernanceRuntimeOwner(
+        ledger_provider=ledger_provider,
+        persistence_db_path_provider=(
+            process_application_ports.persistence_db_path
+        ),
+    )
 
     return HostApplicationPorts(
         lifecycle=HostLifecycleApplicationPorts(
-            memory_guard=process_services.get_memory_guard,
-            state_arbiter=process_services.get_state_arbiter,
-            distillation_engine=process_services.get_distillation_engine,
-            semantic_recaller=process_services.get_semantic_recaller,
-            episodic_store=process_services.get_episodic_store,
-            skill_registry=process_services.get_skill_registry,
-            tool_catalog=process_services.get_tool_catalog,
-            capability_broker=process_services.get_capability_broker,
-            model_attempt_service=process_services.get_model_attempt_service,
+            memory_guard=memory_runtime_owner.require_memory_guard,
+            state_arbiter=memory_runtime_owner.require_state_arbiter,
+            distillation_engine=(
+                memory_runtime_owner.require_distillation_engine
+            ),
+            semantic_recaller=(
+                memory_runtime_owner.require_semantic_recaller
+            ),
+            episodic_store=authority_runtime_owner.require_episodic_store,
+            skill_registry=governance_runtime_owner.require_skill_registry,
+            graph_runtime=graph_runtime,
+            routing_matrix=routing_matrix,
+            tool_catalog=governance_runtime_owner.require_tool_catalog,
+            capability_broker=(
+                authority_runtime_owner.require_capability_broker
+            ),
+            model_attempt_service=(
+                authority_runtime_owner.require_model_attempt_service
+            ),
             mode_transition_service_factory=ModeTransitionService,
             activity_monitor_factory=ActivityMonitor,
             resource_manager_factory=SystemResourceManager,
-            ledger=process_services.get_ledger,
-            life_memory_store=process_services.get_life_memory_store,
-            bond_update_queue=process_services.get_bond_update_queue,
-            life_snapshot_reader=process_services.get_life_snapshot_reader,
-            silence_engine=process_services.get_silence_engine,
-            state_write_arbiter=process_services.get_state_write_arbiter,
-            emotion_timeline=process_services.get_emotion_timeline,
-            bond_stage_engine=process_services.get_bond_stage_engine,
-            bond_neo4j_client=process_services.get_bond_neo4j_client,
-            shared_memory_index=process_services.get_shared_memory_index,
-            milestone_tracker=process_services.get_milestone_tracker,
-            prompt_registry=process_services.get_prompt_registry,
-            user_emotion_profile=emotion_context.get_user_emotion_profile,
-            intent_engine=process_services.get_intent_engine,
-            multimodal_observer=process_services.get_multimodal_observer,
-            multimodal_processor=process_services.get_multimodal_processor,
-            conversation_history=process_services.get_conversation_history,
-            life_memory_service=process_services.get_life_memory_service,
-            model_route_catalog=process_services.get_model_route_catalog,
-            session_topic_ledger_store=(
-                process_services.get_session_topic_ledger_store
+            ledger=ledger_provider,
+            life_memory_store=(
+                authority_runtime_owner.require_life_memory_store
             ),
-            session_tactic_ledger_store=(
-                process_services.get_session_tactic_ledger_store
+            bond_update_queue=bond_runtime_owner.require_update_queue,
+            life_snapshot_reader=(
+                process_application_ports.life_snapshot_reader
             ),
-            tts_context_router=process_services.get_tts_context_router,
-            meta_learning_loop=process_services.get_meta_learning_loop,
+            silence_engine=_app_local_provider(silence_engine),
+            state_write_arbiter=(
+                memory_runtime_owner.require_state_write_arbiter
+            ),
+            emotion_timeline=(
+                memory_runtime_owner.require_emotion_timeline
+            ),
+            bond_stage_engine=bond_runtime_owner.require_stage_engine,
+            bond_neo4j_client=bond_runtime_owner.require_client,
+            shared_memory_index=shared_memory_index,
+            milestone_tracker=_app_local_provider(milestone_tracker),
+            prompt_registry=authority_runtime_owner.require_prompt_registry,
+            user_emotion_profile=process_application_ports.user_emotion_profile,
+            intent_engine=governance_runtime_owner.require_intent_engine,
+            multimodal_observer=multimodal_observer,
+            multimodal_processor=_app_local_provider(multimodal_processor),
+            conversation_history=conversation_history,
+            conversation_turn_store=conversation_turn_store,
+            life_memory_service=memory_service_publication.require_service,
+            model_route_catalog=(
+                authority_runtime_owner.require_model_route_catalog
+            ),
+            session_topic_ledger_store=session_topic_ledger_store,
+            session_tactic_ledger_store=session_tactic_ledger_store,
+            tts_context_router=_app_local_provider(tts_context_router),
+            meta_learning_loop=_app_local_provider(meta_learning_loop),
+            probe_edge_rpc_health=(
+                process_application_ports.probe_edge_rpc_health
+            ),
+            build_edge_dependency_probe_statuses=(
+                process_application_ports.build_edge_dependency_probe_statuses
+            ),
         ),
-        memory_worth_evaluator=process_services.get_memory_worth_evaluator,
-        security_immune_agent=process_services.get_security_immune_agent,
-        token_service=process_services.get_token_service,
-        bond_dynamics_writer=process_services.get_bond_dynamics_writer,
-        capability_forge_service=process_services.get_capability_forge_service,
-        capability_gap_telemetry=process_services.get_capability_gap_telemetry,
+        memory_worth_evaluator=_app_local_provider(memory_worth_evaluator),
+        security_immune_agent=security_immune_agent,
+        token_service=governance_runtime_owner.require_token_service,
+        bond_dynamics_writer=bond_runtime_owner.require_writer,
+        capability_forge_service=capability_forge_service,
+        capability_gap_telemetry=capability_gap_telemetry,
         capability_scorecard_provider=(
-            process_services.get_capability_scorecard_provider
+            governance_runtime_owner.require_capability_scorecard_provider
         ),
-        memory_service_container_setter=(
-            process_services.set_memory_service_container
-        ),
+        begin_authority_runtime=authority_runtime_owner.begin,
+        close_authority_runtime=authority_runtime_owner.close,
+        begin_bond_runtime=bond_runtime_owner.begin,
+        close_bond_runtime=bond_runtime_owner.close,
+        begin_governance_runtime=governance_runtime_owner.begin,
+        close_governance_runtime=governance_runtime_owner.close,
+        publish_memory_service_container=memory_service_publication.publish,
+        withdraw_memory_service_container=memory_service_publication.withdraw,
     )
 
 
 __all__ = [
     "HostApplicationPorts",
-    "MemoryContainerSetter",
+    "MemoryContainerAction",
     "ServiceProvider",
     "build_production_host_application_ports",
 ]

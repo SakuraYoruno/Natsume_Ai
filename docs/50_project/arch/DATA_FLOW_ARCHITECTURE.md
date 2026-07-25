@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v2.8
+版本：v3.1
 
-核对日期：2026-07-24
+核对日期：2026-07-25
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -13,7 +13,43 @@
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
-当前 Tribe 生命周期数据流为：`ASGI composition root → TribeRuntimeScope(state/registry/fixed agent providers) → lifespan bind ports → subscriptions/handoff/Obs reader → exact-owner unbind`。该流不再经过 `ProcessServiceContainer`；production authority 数据流同时为：`Tool runtime activation / recovery startup → captured ledger provider → durable command/attempt/node/lease/grant re-open`，执行期不得回读 locator。内部 Security Immune 数据流为：`ASGI composition root → HostRoutePorts.security_immune_agent_provider → create_internal_security_immune_router → runtime/hunt/probe endpoint`；provider 缺失、异常或非法返回以 `503` 收口，不回退全局 agent factory。Obs `security.hunt.run_once` 仍在 admission 前阻断，不能把这一 HTTP port 注入写成 Operator 正向动作。compatibility agents/bus 仍是 process-global，所以专用 fence 只保证同一进程一个 live Host，foreign binding 失败关闭，不能将它视为独立 app Tribe state 或全局 locator 清零。当前库存为 `named19/45、all-form22、Container48/2/45`；本文随后出现的 `named27/53、all-form30、Container50/3/46` 仅是此前切片的历史快照。
+当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
+
+Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Secure Ingress → immutable `BLOCKED` cancellation intent → trusted `CANCELLED` final decision → restart terminal worker → deterministic nonacceptance claim → tombstone/Workspace cleanup。intent 不能冒充 final decision，任何 lineage 漂移均 fail-closed；该流不处理一般取消、多节点或 unknown effect。
+
+Edge 下行现在明确分成两条：Tribe 的平台/情绪事件只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。
+
+```mermaid
+flowchart LR
+    O["Tribe platform / emotion observation"] --> S["Host-owned state only"]
+    O -. "no direct transport" .-> X["retired global Edge owner"]
+    T["Governed TaskGraph node"] --> A["Verification + Acceptance"]
+    A --> P["exact Action Preview proof"]
+    P --> E["explicit EdgeCommandPusher"]
+    E --> R["Edge receipt / reconciliation"]
+    T -. "production issuer missing" .-> P
+```
+
+```mermaid
+flowchart LR
+    C["ASGI composition root"] --> CP["explicit ProcessApplicationPorts"]
+    CP --> AU["HostAuthorityRuntimeOwner"]
+    AU --> P["frozen HostRoutePorts"]
+    AU --> DB["canonical ledger + Memory + Model + Capability"]
+    L["lifespan Life command service"] --> A["HostLifeRouteAuthority"]
+    R["lifespan Life snapshot reader"] --> A
+    A --> P
+    P --> D["Digital Life router factory"]
+    P --> M["Memory router factory"]
+    P --> I["Internal owner directive"]
+    P --> H["Health / readiness"]
+    P --> O["Obs Capability Forge adapter"]
+    D --> X["stable 503 or zero delivery on missing authority"]
+    M --> X
+    I --> X
+    H --> X
+    O --> X
+```
 
 ## 1. 如何读本文
 
@@ -128,25 +164,21 @@ flowchart TD
     Internal["Internal Agent"] --> InternalWO["边界 v2 → WorkOrderV3\nBudget + child grant"]
     InternalWO --> Admission
     Worker -.-> ProtectedStage["protected raw artifact stage\nexact inventory + ref/digest projection"]
-    ProtectedStage -.-> InternalPostReview["POST Review\nsame SUCCEEDED Attempt + sealed checkpoint\nclaim remains open"]
-    InternalPostReview -.-> InternalEffect
     ProtectedStage -.-> InternalEffect["internal.agent.result_commit\npost-Acceptance exact TaskStore evidence"]
     InternalEffect -.-> WorkspacePromotion["clean/no-change Git Workspace\n0116 ACTIVE→ACCEPTED→PROMOTED"]
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
     class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,GraphHook,Schema,Worker,HB,Checkpoint,VA,Receipt,EffectHook,Effects,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
-    class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim,ProtectedStage,InternalPostReview,InternalEffect,WorkspacePromotion partial;
+    class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim,ProtectedStage,InternalEffect,WorkspacePromotion partial;
 ```
-
-Internal POST Review 不是 worker 失败分支：`EXECUTED + acceptance=REVIEW` 或 `review_required=true` 先以 Verification `PASS` 停在 `WAITING_ACCEPTANCE_REVIEW`，claim 不写 `result_ref`。批准续接只读取同一 `SUCCEEDED` Attempt 和 sealed WorkerProjection，不能再执行 Agent；Review renewal grant 仅用于续接资格，最终 success 再核对 checkpoint 的历史 grant。`internal.agent.result_commit` 只有已经 `COMMITTED` 并能精确重开 canonical `agentresult://...` 时，才由 Runtime Group 完成入口 claim；`worker-projection://...` 永远不是该对外结果。
 
 ### 2.1 Chat 与 Host Input 的显式 Tribe 端口边界
 
 ```mermaid
 flowchart LR
     Root["Host ASGI composition root"] --> Surface["SurfaceRuntimePorts\nAgentRuntime + Life authority"]
-    Root --> Tribe["TribeRuntimeAgentPorts\nprocess-bound transition bridge"]
+    Root --> Tribe["TribeRuntimeAgentPorts\nexact Host-owned Agent catalog"]
     Root --> Input["InputRuntimeApplicationPorts"]
     Tribe --> Input
     Input --> Chat["普通 Chat handler"]
@@ -156,7 +188,7 @@ flowchart LR
     Gateway --> Cortex
 ```
 
-普通 Chat、Gateway 与 ASR 现在通过 ASGI 传入的 `InputRuntimeApplicationPorts` 取得 Thalamus/ANS/Immune；聊天免疫门禁通过同一 composition root 的 `TribeRuntimeAgentPorts.require_immune_agent()`，输入归一化通过 `InputRuntimeApplicationPorts.require_immune_agent()`。两者不再直接调用全局 getter；缺少端口分别以 `HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED`、`HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED` 拒绝，不回退至请求期 singleton。普通检查器故障仍记为 `IMMUNE_EVALUATE_DEGRADED`。`TribeRuntimeAgentPorts` 目前只把剩余 process-bound Tribe bridge 收敛到 composition 层，未提供多 Host 隔离，也不构成 Chat acceptance、全局 Service Locator 清零或 NE-01 完成。补充边界集合 `141 passed in 9.66s` 与既有 `131 passed in 7.25s`、旧免疫 `43 passed in 7.75s` 和 #103+#104 的 `196 passed in 21.08s` 均重叠，不能相加。
+普通 Chat、Gateway 与 ASR 通过 ASGI 传入的 `InputRuntimeApplicationPorts` 取得 Thalamus/ANS/Immune；缺少端口分别以稳定 reason code 拒绝，不回退请求期 singleton。`TribeRuntimeAgentPorts` 绑定当前 `TribeRuntimeScope.require_agent()`，因此与 cross-Agent compatibility getter 解析同一个 Host-owned catalog；production provider 已从 singleton getter 改为 Agent constructor。Host bind 后不发布进程级 active context，lifespan/background execution 与 HTTP middleware 分别激活 exact scope；两个重叠 execution 已证明 Agent/registry identity 隔离，解绑后的继承 context 失败关闭。该证据仅覆盖 Tribe execution boundary，不等同完整 Host multi-app、Chat acceptance 或 NE-01 完成。生产 Service Locator 已物理清零；历史测试批次相互重叠，不能相加。
 
 普通 Cortex 的检索支路也不再在 helper 内重新发现依赖：`AgentRuntimeApplicationPorts.run_retrieval()` 从同一 Host scope 传入会话历史、偏好构造器和 recall factory；factory 在 composition 内绑定 ledger、Life memory 与 Bond Neo4j。`chat_retrieval_helpers.py` 只消费这些显式输入，缺失的低层 authority 只能让该检索支路降级，不能回退至 `process_services`。这只说明读取依赖的解析边界已收口，尚不等于可见对话在 Acceptance 后原子提交。
 
@@ -171,15 +203,12 @@ flowchart LR
 - Task Runtime 当前为 `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS`。新生产 Graph 已使用 0090/0091 原子终态；Budget 高竞争唯一 winner、single-node canonical COMMITTED checkpoint continuation、scheduler-owned 多节点 exact COMMITTED checkpoint continuation、exact operation-free persisted Attempt takeover、ACCEPTED→Effect restart 和 0099 窄 terminal reconciliation已有证据。正数 `time_ms` 只从 durable remaining projection 取得当前单节点 worker 截止：零剩余会在 Operation reservation 前写 `TIME_GUARD` 拒绝，超时则将测得时间至少结算到剩余额度以上并保留 Operation，返回 `RECOVERY_REQUIRED` 供 reconciliation；`time_ms=0` 仍表示未设截止。多节点 continuation 只接受 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING` 并复用同 Attempt 的更高 fence，accepted 回到 READY sibling、rejected 进入并行结算，worker 不重跑。bounded fan-out/cancellation仍 OFF；general/unknown-effect/multi-node batch recovery、跨节点时间预算、外部 deployment inventory/remediation、现实 resolver、部署凭据、完整 key lifecycle和真实 canary仍缺。
 - Chat 的 frozen model budget guard 属于执行约束，不是公开投影数据：route executor 先精确验证 terminal 携带的 guard 和 measurement，worker 再从公开 `audit_refs.trace_stage_meta` 移除已消费 guard，只把 typed `budget_usage.measurements` 写入 WorkerProjection。这样既保留 fail-closed Budget 证据，也不会让 `max_output_tokens/max_token_count` 绕过 projection 的敏感 token 字段门禁。
 - Preview 数据流固定为 `canonical WorkOrder → Runtime Context projection → Scene sha256 identity → Guardian exact authority → issue → terminal reopen`。同 Guardian lease 续租只能单调延长 expiry；terminal proof 的 boundary 使用独立 `action_args` 副本，再把 proof 注入 handler payload，因而不会形成 `payload → proof → boundary → payload` 循环。
-- focused 拆分后的数据方向仍是 `聚焦 helper/codec/preflight → 原 authority owner`：Internal contract builder只生成 canonical admission 合同，Research codec只重建证据，terminal cancellation reader只证明 intent/decision/effect/predecessor，DAG preflight只验证 admission/readiness/cancellation/Budget；它们都不持有第二 writer、Store/UoW 或 worker。对应原 owner 为1350/1453/1433/1495行，focused module为371/469/151/112行。Task Runtime canary 与 Host lifecycle ports 上移 neutral contracts后，persistence/composition 只依赖 contracts，旧路径只同对象重导出；Gate 1 SCC=[]。独立 Gate 1–14=`PASS`，Gate 3=`issues=[] / new_mixed_over_800=[]`，没有扩 allowlist；NE-01保持`PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- focused 拆分后的数据方向仍是 `聚焦 helper/wiring/mixin → 原 authority owner`：Acceptance common/Surface 不取得第二 writer，Internal/runtime-context wiring 不取得 ASGI lifespan/task owner，Scheduler retry mixin 复用原 repository connection/UoW。共享合同流现固定为 `SQLite feature-canary repository → contracts/task_runtime_feature_canary ← Task Runtime` 与 `Host Composition → contracts/host_lifecycle ← App lifecycle`；旧路径仅同对象重导出，不能形成第二合同 authority。三个原 owner 为1262/1389/2942行；967行 Budget rejection Store只拥有受约束的 C mutation，444行 terminal resolver只读重开exact internal/canonical终态，93行 route helper只做纯authority绑定。当前独立 Gate 1～14=`PASS`、Gate 1 SCC=`[]`；NE-01保持`PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 - Operator continuation 不把 `secure_ingress_idempotency_claim.result_ref` 当成任意非空 bearer。ASGI 从同一个 app-local OBS composition 向 Task Runtime 注入 Outcome Journal 的只读 lookup；HostCommand validation 精确绑定 checksum-chained outer receipt、claim/audit、command/action/scopes/body、`SUCCEEDED` 终态和可重建 domain result。lookup 缺失、异常、记录缺失或字段漂移均 fail closed，且 validation 不创建第二个 Journal/Store/UoW。
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。0117 在 occurrence admission 的同一 `BEGIN IMMEDIATE` 中把 live DUE retry row 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前 renew、运行中 heartbeat，过期 lease 不能自我复活，第二实例/stale fence不能 dispatch/clear/defer，backoff 取真实失败时刻。该 Clock 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因和 canary 仍未完成。
-- Internal 状态为 `PARTIAL / INTERNAL_SEALED_CHECKPOINT_CONTINUATION`。外部入口只接受未准入的 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，canonical lineage 才使用 V3；准入后的 frozen worker、Agent executor、prompt、review 和 Workspace 直接消费同一个 `WorkOrderV3`，不再由 V3 回投 v2，且顶层 graph/node/revision 与 legacy metadata 漂移失败关闭。worker 将 raw material写入exact-inventory protected stage，公共projection只含ref/digest与摘要。下一次runtime activation会扫描受治理Internal单节点sealed checkpoint，重开seal-bound recovery envelope、历史Lease→更高fence completion Lease与Operation/Budget/Preview/Grant/Task lineage，重建唯一projection并继续Verification→Acceptance→Effect→claim→clean/no-change promotion，Agent不重跑。数据提交依次经过三个独立原子边界：A=`WorkerProjection + Operation COMMITTED + Operation Outbox`，B=`rejected BudgetUsage + Budget EXCEEDED + Budget Outbox`，C=`重验A/B + Graph/Node/Attempt/Lease/Budget terminal + 5 Outbox`。它们由显式checkpoint UoW和durable continuation衔接，不是单一整链事务；response loss只读重开。对精确 sealed post-checkpoint `BUDGET_BLOCKED`，claim result 由 reopened C-boundary identity 生成；live close 中断时终态 worker 在 tombstone/cleanup 前完成 claim，tamper/replay drift失败关闭。周期survivor continuation、一般 crash-left unsealed partial cleanup、raw worker failure/pre-checkpoint/other cancellation/general-multinode/unknown-effect claim closeout、general `settle_worker` crash bundle仍缺；一般write、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
-- 新增的非 Acceptance closeout 数据流是：`sealed executed projection + terminal reason → canonical readonly lineage reopen → command/graph/revision/node/attempt/reservation/historical+completion Lease equality → task-terminal://internal-nonacceptance/sha256 result → Secure Ingress claim CAS →（仅 terminal reconciler）已有 cleanup`。允许 reason 只有 `TERMINAL_VERIFICATION_FAILED` 与具备 exact finalized cancellation decision 的 `TERMINAL_POST_REVIEW_CANCELLED`；取消必须分别重开 immutable intent 与 trusted final decision，intent 的 `graph_target_status=BLOCKED` 只表示先行围栏，只有绑定同一 intent 的 decision `graph_target_status=CANCELLED` 才是终态 authority。`TERMINAL_REVIEW_REJECTED` 继续流向 Review decision receipt，不能并存 nonacceptance receipt。任一阅读失败或 identity 漂移保持 pending/reconciliation，不能借用 raw worker failure、pre-checkpoint cancellation、unknown effect、一般多节点或其他 cancellation 的 terminal 数据。
-- POST Review 取消的真实恢复链为：`Operator task_graph.cancel → Secure Ingress committed audit/claim → 0092 immutable BLOCKED intent → Review/一次性 resume token 撤销 → signed FINALIZED CANCELLED decision → 进程在 Internal claim/工件清理前退出 → 重启 terminal worker 重开 seal、projection、operation、Lease、intent 与 decision → CAS nonacceptance claim → tombstone + Workspace cleanup`。终态 inventory 只把一个受信、版本紧邻且完整验证的 `0090 BLOCKED` predecessor 接到上述 0092 链；额外、并列、版本不邻接或不可重建的 predecessor 一律进入 quarantine。真实 SQLite+Git 用例证明 Agent 调用仍为一次、claim 先于 destructive cleanup、重启后 inventory 为空。
-- 同一 terminal worker 还允许一个 destructive unsealed 子流：`protected unsealed stage → exact Internal admission + Graph/Node/Attempt/Lease=CANCELLED + immutable intent + FINALIZED cancellation decision → Workspace cleanup durable receipt → discard stage`。它不把未密封 material 视作 accepted/abandoned，不接受缺失/漂移的 cancellation authority，也不覆盖 failure、budget、unknown effect 或 survivor。既有 46 项定向 unit/structure 测试通过（3 项 Windows link 权限 skip）；本轮后置审核取消受影响回归另以文件去重分组得到 `79 unit + 31 contract + 9 cross-process/terminal integration + 9 Internal integration = 128 passed`，0 fail/skip。与此相邻的 sealed budget-rejection restart、accepted replay 和本次 POST Review cancellation restart 都是窄单节点证据，不能泛化为一般 unsealed recovery、波次集成或 NE-01 完成。
+- Internal 状态为 `PARTIAL / INTERNAL_SEALED_CHECKPOINT_CONTINUATION`。外部入口只接受未准入的 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，canonical lineage 才使用 V3；准入后的 frozen worker、Agent executor、prompt、review 和 Workspace 直接消费同一个 `WorkOrderV3`，不再由 V3 回投 v2，且顶层 graph/node/revision 与 legacy metadata 漂移失败关闭。worker 将 raw material写入exact-inventory protected stage，公共projection只含ref/digest与摘要。下一次runtime activation会扫描受治理Internal单节点sealed checkpoint，重开seal-bound recovery envelope、历史Lease→更高fence completion Lease与Operation/Budget/Preview/Grant/Task lineage，重建唯一projection并继续Verification→Acceptance→Effect→claim→clean/no-change promotion，Agent不重跑。数据提交依次经过三个独立原子边界：A=`WorkerProjection + Operation COMMITTED + Operation Outbox`，B=`rejected BudgetUsage + Budget EXCEEDED + Budget Outbox`，C=`重验A/B + Graph/Node/Attempt/Lease/Budget terminal + 5 Outbox`。它们由显式checkpoint UoW和durable continuation衔接，不是单一整链事务；response loss只读重开。终态worker仅周期处理精确sealed abandon/cleanup。周期survivor continuation、crash-left unsealed partial cleanup、failure/cancel/budget claim closeout、general `settle_worker` crash bundle仍缺；一般write、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
 - 通用单节点 post-COMMIT settlement 流程为：`Operation COMMITTED → BudgetUsage write/read identity 不确定 → RECOVERY_REQUIRED（不附加 lifecycle/finalization mutation）→ Lease 自然到期 → higher-fence committed checkpoint takeover → EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT → ACCEPTED、BUDGET_BLOCKED 或 fail-closed`。hold 不覆盖可能已提交的 usage/`EXCEEDED`，进程控制异常不会被转换成业务失败；多节点/批次仅安全 hold，recovery 仍缺。
 - bounded fan-out 仍是默认关闭的 Host 组合能力：仅设置环境变量不会启用。启动时必须从 canonical SQLite 重开 migration 0120 的不可变 receipt，使用独立 Ed25519 公钥验签，并精确匹配当前 build SHA、migration version、atomic success policy 和 fan-out event buffer digest；缺失、过期、伪签名或任一漂移都在路由开放前失败关闭。该门禁不是实际 canary，真实 Docker/Host/Obs/Monitor/Edge/Gateway 服务栈验收仍属于 NE-07。
 - pre-Operation Attempt 流程为：`Node/Attempt RUNNING 且 Operation 不存在 → 单一 scheduler snapshot 校验 latest Attempt、过期 Lease、ACTIVE/EXCEEDED graph Budget 与 canonical PRECHARGE → TaskLeaseTakeoverAuthorityMixin 借用 TaskStore BEGIN IMMEDIATE 重验 deterministic reservation id + scope/fingerprint 均不存在 → Attempt/owner/TTL/version/mode/reservation 生成确定性 Lease+初始 Heartbeat identity → 同 Attempt、更高 fence Lease → worker 首次调用`。响应丢失重入必须在同一事务核对exact Lease、唯一初始Heartbeat、历史fence+1、未过期TTL和Outbox；参数或行漂移零写拒绝。mixin与纯identity模块都不创建连接、事务或第二 writer。普通Attempt/Lease/Operation authority先要求唯一ACTIVE graph Budget。任一 sibling live owner 先返回 `GOVERNED_EXECUTION_IN_PROGRESS`；Operation 在 absence 检查窗口出现则进入 `RECOVERY_REQUIRED`，不得启动或重放 worker。Operation 已预留后的异常只保留 reconciliation authority，不转普通失败。
@@ -193,6 +222,14 @@ Host lifecycle 的当前数据流为：
 flowchart LR
     ASGI["Host create_app"] --> Container["HostLifecycleContainer"]
     ASGI --> HostBundle["HostLifecycleApplicationPorts\nRouteCatalog · Bond · session stores\nVTS ledger · TTS/meta"]
+    ASGI --> MemoryOwner["HostMemoryRuntimeOwner\nper Host root"]
+    ASGI --> GovernanceOwner["HostGovernanceRuntimeOwner\nper Host epoch"]
+    Ledger["exact transitional ledger"] --> MemoryOwner
+    MemoryOwner --> MemoryState["MemoryGuard · StateArbiters\nDistillationEngine"]
+    MemoryOwner --> MemoryRead["SemanticRecaller · EmotionTimeline"]
+    GovernanceOwner --> Decision["TokenService · IntentDecisionEngine"]
+    GovernanceOwner --> Discovery["SkillRegistry · Scorecard\nMCPToolRegistry · ToolCatalog"]
+    Guardian["app-local RuntimeGuardian"] --> Preview["Life Action Preview\nfail closed without authority"]
     HostBundle --> AgentScope["AgentRuntimeApplicationScope\nLife authority ready 后才发布"]
     AgentScope --> AgentPorts["immutable AgentRuntimeApplicationPorts"]
     AgentPorts --> AgentConsumers["Input → Cortex · Life projection\nconversation Acceptance effect"]
@@ -201,6 +238,7 @@ flowchart LR
     Container --> Bootstrap["CoreSettings.sys_mode\nbootstrap only"]
     Bootstrap --> HardState["HostHardStateOwner\nproduction writes require durable bind"]
     Lease["Host runtime scope · owner\nlease · fencing token"] --> Journal["0115 append-only event\n+ canonical head"]
+    Lease --> ResourceJournal["0123 ResourceManager status\nappend-only Runtime Event"]
     HardState --> Journal
     Journal --> CAS["verify full chain + expected head\nevent/head one UoW"]
     CAS --> ModeChange["commit then immutable replacement\nno env write"]
@@ -211,13 +249,20 @@ flowchart LR
     Services --> Readers["Chat/Input · Tool · Scheduler · Guardian heartbeat · snapshot"]
     Services --> Snapshot["OBS/runtime snapshot\nread-only; no lazy start"]
     Container --> ResourceLoop["Resource startup sample\nsole owned loop"]
-    ASGI --> TribePorts["app-local Tribe application ports"]
-    TribePorts --> TribeFence["process-global exact owner fence\none live Host; second rejected"]
-    TribeFence --> TribeGlobal["process-global Tribe agents/bus"]
+    ResourceLoop --> StatusOwner["bounded status owner\npending exact replay"]
+    StatusOwner --> ResourceJournal
+    ResourceJournal --> ObsJob["standalone Obs durable reader\nlatest head per scope"]
+    ObsJob --> ResourceProjection["QueryProjectionStore\nMonitor resource status"]
+    ASGI --> TribeScope["app-local TribeRuntimeScope"]
+    TribeScope --> TribeShared["fresh state registry · Host registry · event bus"]
+    TribeScope --> AgentCatalog["fresh 23-Agent catalog\nconstructors + lazy exact instances"]
+    TribeShared --> TribeContext["exact-owner runtime context"]
+    AgentCatalog --> TribeContext
+    TribeContext --> TribeAgents["legacy getters borrow exact Host objects\nexecution-local scope; stale or cross-scope rejected"]
     Container --> Close["closing fence → unpublish\nblock begin → exact-once close"]
 ```
 
-Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。HardState repository 先完整复验 migration、chain/head 与 active Host lease/fence，再以 expected revision/mode CAS 将 event/head 同事务提交；owner 只在 commit 后替换 immutable snapshot，不递归读取 owner，Endocrine resolver 在锁外执行。Runtime snapshot 缺 app-local owner 时不回退 env；chat payload/routing helper 已删除 env fallback 并接收显式 mode，但尚无正向生产调用证据。Limbic/Prefrontal 不再产生伪 HardState 写。Process 三 facade、`hard_state` slot/lock 与 6 个目标 binding 均为0。ASGI 把同一个 typed Host service bundle 显式传给 Lifecycle Runtime、Tribe、Input Runtime 与 AgentRuntime scope；模型端口、RouteCatalog、Bond stage engine、session topic/tactic stores、VTS ledger、TTS router/meta-learning 都从这个 bundle接收显式 provider，缺依赖均失败关闭。Life command authority 建立后，`AgentRuntimeApplicationScope` 才发布同一 immutable `AgentRuntimeApplicationPorts`；Chat 只能经 Input→Cortex closure 使用它，Life projection 与 conversation Acceptance effect 也接收同一 bundle。关停会先撤销这个 publication，再释放其依赖；retired `agent_runtime_shared` 不再是全局 authority。无生产调用者的 `intelligent_runtime` 二次 PlanningAgent/SkillComposer/直接执行路径已删除，TTS 改为 `tts_route` 接收 scope 显式 provider。HardState 快照为 named40/116、all-form46、Container52/3/48；Lifecycle/Tribe为40/116/all-form44，Input为39/110/all-form43，当前库存为 named20/46、all-form23、Container48/2/45。底层实例仍可能 process-global；generic delegate 的 legacy Executive path 仍未获得这条正向 production wiring；无Task-bound Preview的Gateway voice Effect为0；auto-rules/last-interaction、heartbeat、shared status、真实 executor 与其余 Host/Worker authority仍在，所以 NE-01 继续 `IN_PROGRESS`。
+Activity factory 失败不会发布 Mode；`aclose()` 进入 closing 后新 `begin()` 必须失败。ASGI 把 typed Host bundle 显式传给 Lifecycle、Tribe、Input、Agent、Context、Startup、Multimodal 与 heartbeat。Authority migration-first 后建立 exact ledger、Memory、Model 与 Capability 图，启动顺序为 Authority→Governance→Bond；ResourceManager 则延后到 Task Runtime→Host lease/fence→Guardian 之后。关闭顺序先 drain admission 与 Scheduler，再写 ResourceManager stopped revision，之后才能关闭 Task Runtime、Workspace/Activity 和 Host lease；status append 不确定时保留后续 authority。Obs 不访问 Host 内存或共享文件，只将 0123 durable head 物化为 Monitor read model。Tribe 启动、订阅、内部路由与关闭都消费 scope-owned exact bus/registry/state/Agent catalog；23 个 Agent setter/backing singleton 与 state/Host registry/event bus fallback 已归零，无 exact context 失败关闭。EventBus 仍是易失通知面。生产 locator 和 ResourceManager shared status authority 已物理清零；外部 namespace、其它 crash recovery、generic Delegate、真实 executor 与完整 Host/Worker/Obs authority 仍未闭环。
 
 ```mermaid
 flowchart LR
@@ -226,19 +271,22 @@ flowchart LR
     BUNDLE --> TRIBE["TribeApplicationPorts"]
     BUNDLE --> INPUT["InputRuntimeApplicationPorts"]
     LIFE --> JOBS["Scheduler / Life jobs / snapshot"]
-    TRIBE --> AGENTS["process-fenced Tribe agents"]
+    TRIBE --> SHARED["scope-owned state / registry / bus"]
+    TRIBE --> AGENTS["scope-owned 23-Agent catalog\nprocess-fenced compatibility view"]
     INPUT --> INGRESS["Host Input / Gateway ingress"]
     BUNDLE --> AGENT_SCOPE["AgentRuntimeApplicationScope\nLife-bound publish / close"]
     AGENT_SCOPE --> AGENT_PORTS["AgentRuntimeApplicationPorts"]
     AGENT_PORTS --> CORTEX["Input → Cortex"]
     AGENT_PORTS --> EFFECTS["Life projection / conversation Acceptance"]
     BUNDLE --> MODEL["ApplicationModelAttemptServicePort provider"]
-    LOCATOR["ProcessServiceContainer"] -. "仅 composition root 解析；仍待继续删除" .-> ROOT
+    CLI["CLI startup check"] --> PORTS["fresh ProcessApplicationPorts"]
+    ROOT --> PORTS
+    PORTS --> BUNDLE
 ```
 
 ## 3. 入口与路由分流
 
-最新 Tribe state-helper 流把 `HostLifecycleApplicationPorts.ledger` 经 `TribeApplicationPorts` 传给偏好包、对话经历 read pack 与每个 bundle 自有的 `IntentSequenceAllocator`；allocator 用显式 provider 读 durable baseline，未注入 ledger 时失败关闭，不从 `process_services` 再发现 authority。无 caller 的 `input_service_log.get_ledger_safe()`、遗留 `surface_reply_postprocessor.py` 与未预算的 `codex_spark_reply_judge.py`（含 setting、prompt/prewarm/profile route）继续删除；frozen Chat 只投影主 Surface ModelAttempt，旧 secondary trace 在终态前失败关闭。Thalamus、AgentRuntime 和 frozen Surface 的 Experience 端口均只返回既有 belief/lesson snapshot；post-Acceptance `surface.post_process` 不再将 assistant reply 写回该 store。也就是说，当前链只读旧经历，已验收可见对话和 LifeMemory 仍走既有 effect；新的经历演化必须等待 NE-06 proposal/activation，而不是由 effect handler 静默补写。当前 locator AST inventory 为 named `21` / imports `47` / all-form `24`（Container `50/3/46`）。这只约束局部 helper，不能替代 Cortex 的准入前读路径、Chat 的 TaskGraph、Acceptance、Outbox、正式 evolution activation 或 Tribe app-local 实例隔离。
+Tribe state-helper 流把 Host ledger 显式传给偏好包、对话经历 read pack 与 `IntentSequenceAllocator`；该切片的 `3/15/6、Container48/2/45` 只作历史。现行生产 locator consumer/import/module/field/lock/ref 全为 0，ResourceManager status 由 0123 journal 持久化。Host-root owner 与底层 Authority identity 隔离仍不能替代外部 namespace、其它外部资源恢复、Chat TaskGraph、Acceptance、Outbox、正式 evolution activation 或 Tribe app-local 隔离。
 
 ### 3.1 Host 对话入口
 
@@ -437,6 +485,9 @@ ResearchTaskSnapshot + manifest + ResearchCorpusBindingV1
   → fresh FrozenResearchCorpusLoader per verify()
   → reopen cited source; verify UTF-8 byte boundary + span SHA-256
   → path/body-free ResearchVerifierReceiptV1
+  → typed projection/models (no connection or write authority)
+  → canonical JSON codec (no SQLite owner)
+  → SQLiteResearchShadowLedger (single connection/transaction/UoW owner)
   → 0107 reopen registration + RunSpec + two persisted arms
   → exact terminal receipt/replay only when plan/model/verifier/evidence digest all match
 
@@ -763,7 +814,7 @@ Host lifespan
 
 Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode transition history 已由 0115 journal 持久化；auto-rules/last-interaction 与 Organ 指标仍是易失派生状态，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0，并删除四个projection兼容模块的全局locator/helper；保留的是显式store/ledger/source端口。Host六个GET、sys-mode和Life action-preview按上图走app-owned route ports。D7b补上Life Body冷聚合与Direct Skill三项实例快照；Obs 的 sys mode 继续来自 durable root，而不是重新读取 app-local 内存或环境。Host lifecycle 现在收口 app-local monitor/resource/mode/HardState 与单活 Tribe fence；process三HardState facade、slot/lock、6个目标binding和两处伪写归零。HardState 快照库存为40/116/46、Container52/3/48；删除两个无消费者的 Obs cache 后当前 Container 为50/3/46。`HOST_SYS_MODES`/`HOST_MODE_TRANSITIONS`已进入neutral contract，数据依赖固定为`persistence → contracts/host_hard_state`而不再回流core application。前一210、D7b7、Operator/focus/runtime projection29分别保留；0115权威核心consolidated为`84 passed in 66.37s`，neutral-contract修复后的外围批次独立为`67 passed in 35.78s`，二者及旧83/82历史禁止相加。0115成功切换只以journal作为canonical audit，exact replay不重复追加进程内history或legacy `error_log`。当前 `scheduler.task.trigger`、`sys_mode.switch` 与 `task_terminal.reconcile` 已形成三条 governed Operator 正向链，但其余34条命令、commit-bound acceptance、真实workspace-bound executor、heartbeat、process-global Endocrine/Tribe、auto-rules/last-interaction、共享status、完整Host/Worker composition、剩余direct embodiment adapter和全局locator删除仍未完成。因此Query Plane、Composition与NE-01继续为partial/in-progress；签名终态本地 governed SQLite integration 已通过，HTTP/network canary 与 wave integration 未运行，remote CI=`NOT_RUN_ACCOUNT_QUOTA`。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0；后续切片又物理删除生产 locator container/facade/environment/wiring，让 Tribe shared state/registry/bus/23-Agent catalog 归 Host scope，并退役无上下文 fallback；Obs Organ registry 现在只保存 Agent ID/族名，不再保存已删除的模块单例名。现行生产 inventory 为 consumer/import/module/field/lock/ref 全 0。0123 又把 ResourceManager shared status file 改成 Host-fenced Runtime Event journal，Obs 只读 canonical head。当前四条 governed Operator 正向链仍不覆盖其余33条命令、commit-bound acceptance、事务化 Chat、真实 workspace-bound executor、易失 Endocrine 事件缓冲/last state、易失 bus、其它资源恢复和完整 Host/Worker/Obs composition；Edge 表情链只有本地 SQLite 与记录型 physical port 证据。Query Plane、Composition 与 NE-01 继续 partial/in-progress，HTTP/network canary 与 wave integration 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 
@@ -869,17 +920,17 @@ Host 侧只把精确回传的 outbox/delivery/platform/conversation/payload dige
 
 ## 8. Edge 设备与实体副作用
 
-Host 只创建版本化 `EmbodimentCommand`，不导入设备 driver。[embodiment.py](../../../host_brain/channels/embodiment.py) 把 avatar、voice、desktop 等意图发送给 Edge；Edge 是唯一物理 actuator。D8 后，Host 不再通过 module-global outbox、lease 或 receipt observer 共享这条 authority：每个 ASGI lifespan 创建一个 [`HostEmbodimentRuntime`](../../../host_brain/channels/embodiment.py)。0104 同时让每条新 outbox 记录绑定不可变 `runtime_scope_id`，并以 durable runtime lease/fence 保证同一 canonical DB/scope 只有一个 Host 进程可 claim 或投递；第二实例失败关闭，历史无 scope 行不被接管。
+Host 只创建版本化 `EmbodimentCommand`，不导入设备 driver。[embodiment.py](../../../host_brain/channels/embodiment.py) 把 avatar、voice、desktop 等意图发送给 Edge；Edge 是唯一物理 actuator。D8 后，Host 不再通过 module-global outbox、lease 或 receipt observer 共享这条 authority：每个 ASGI lifespan 创建一个 [`HostEmbodimentRuntime`](../../../host_brain/channels/embodiment.py)。0104 同时让每条新 outbox 记录绑定不可变 `runtime_scope_id`，并以 durable runtime lease/fence 保证同一 canonical DB/scope 只有一个 Host 进程可 claim 或投递；第二实例失败关闭，历史无 scope 行不被接管。NE-01 的首条 Operator 正向链在这条队列之前增加 `Secure Ingress → TaskGraph → Review → Acceptance → edge.embodiment_enqueue → terminal Preview`，只把 `edge.somatic` 表情命令编译成确定性的 `set_expression`。
 
 该 runtime 的 Edge session/owner 由 normalized canonical DB path 的稳定 hash 派生，并在持有当前 Host runtime fence 时保存 Edge 返回的精确 lease/fence。替代进程重启后读取该 credential，以同 session/owner 做 exact reconnect；若旧 Edge lease 仍 live，必须请求原子轮换 fence，且只接受新 lease ID 与旧 fence 加一的回包，才开放路由。回包、精确重连或 Host authority 任一不成立都会失败关闭；不同 store 不会争用默认 lease；同一 store 的第二 app 无 durable Host lease，不能借不同进程内身份获得第二 writer。
 
 | 阶段 | 当前流程 | 当前定级 |
 |---|---|---|
-| 选定 Host 路径入队 | 持有 exact ActionPreview 的 Life VTS/MateEngine 与 Gateway/Edge 出站从 app runtime 入队，新命令响应为 `PENDING / DURABLY_QUEUED`；旧 reply-performance、Gateway voice、chat cue 等缺证明调用失败关闭。精确重复返回既有 durable 状态，只有既有 `APPLIED` receipt 才能令 `physical_effect_verified=true`；`voice_started/vts_started` 不得由 admission 置真 | `PARTIAL_APP_OWNED_PREVIEW_GATED` |
+| 选定 Host 路径入队 | 持有 exact ActionPreview 的 Life VTS/MateEngine 与 Gateway/Edge 出站从 app runtime 入队；Operator `edge.command.push` 另经 immutable TaskGraph、risk-4 Review 与 `edge.embodiment_enqueue` 在 Acceptance 后写入同一队列。新命令响应为 `PENDING / DURABLY_QUEUED`；旧 reply-performance、Gateway voice、chat cue 等缺证明调用失败关闭。精确重复返回既有 durable 状态，只有既有 `APPLIED` receipt 才能令 `physical_effect_verified=true` | `FIRST_GOVERNED_EXPRESSION_SLICE` |
 | Host writer authority | 新行必须匹配 canonical DB 的 `runtime_scope_id`；enqueue、claim、过期、收口、对账与 Edge credential persistence 各自在同一 SQLite 写事务复验当前 durable runtime lease/fence，第二实例与旧 fence 失败关闭 | `WIRED_FOR_D8_SCOPE` |
 | 正常投递 | Host `PENDING → DISPATCHING`，取得 Edge session lease/fence 后 HMAC RPC；Edge 按 command/idempotency key 持久去重并写 durable receipt | `WIRED_FOR_D8_SCOPE` |
 | 不确定性 | 过期 claim 转 `IN_DOUBT`；Host 只发 receipt query，绝不 submit/retry。FOUND receipt 必须以 command/key identity 与 receipt digest CAS 收口；重复同 digest 不重复推进 observer/audit，`NOT_FOUND`、传输/校验失败保持 `IN_DOUBT` | `WIRED_FOR_D8_SCOPE` |
-| 未迁移路径 | 其余 legacy direct adapter 仍需要显式 runtime 注入；并非每个 Host embodiment 调用都先经过 Host Acceptance Effect Outbox | `INCOMPLETE` |
+| 未迁移路径 | 其余 legacy direct adapter 和 Edge command type 仍未经过 Operator TaskGraph；并非每个 Host embodiment 调用都先经过 Host Acceptance Effect Outbox | `INCOMPLETE` |
 
 ```text
 Host ASGI lifespan
@@ -895,6 +946,16 @@ Host ASGI lifespan
   → HMAC Edge command RPC
   → Edge SQLite command/key dedupe + immutable owner authority + durable receipt
 
+Obs edge.command.push
+  → Secure Ingress exact request/claim/audit
+  → typed Governor action + OPERATOR HostCommand
+  → immutable one-node TaskGraph + risk-4 Review
+  → Attempt / Lease / node Grant / Budget / Verification / Acceptance
+  → deterministic edge.embodiment_enqueue Acceptance Effect
+  → terminal Preview reopens Graph / Context / Scene / Guardian / Effect
+  → HostEmbodimentRuntime durable set_expression outbox
+  → exact replay reopens the same row; no second enqueue
+
 claim expiry or unknown command outcome
   → Host IN_DOUBT
   → HMAC+nonce read-only /v1/edge/embodiment/receipt
@@ -906,7 +967,7 @@ claim expiry or unknown command outcome
 
 [`embodiment_outbox_repository.py`](../../../host_brain/persistence/embodiment_outbox_repository.py) 管理 Host scope、runtime lease、outbox 和 Edge reconnect credential；[`embodiment_runtime.py`](../../../edge_client/gateway/embodiment_runtime.py) 管理 Edge 端 durable owner authority 与 receipt。receipt query 本身不执行命令：它只在同 owner 的 current live lease/session/fence 内返回同一 `command_id + idempotency_key` 的 receipt；legacy ownerless、跨 owner/session 或不匹配查询得到 `NOT_FOUND` 且不泄漏 receipt。Host transport 的明文 HTTP 只允许 loopback/localhost，非 loopback 必须使用 HTTPS并在创建 client 前失败关闭。
 
-真实 child Edge 的 loopback TCP/HMAC/SQLite 测试已覆盖命令、receipt query 和重启后的 exact replay。该最小 profile 故意不启动 MateEngine/实际设备，结果只能证明传输、认证和 durable receipt，不证明 TTS、VTS、桌面或任何硬件物理效果；因此物理效果保持 `NOT_TESTED`。所有外部副作用统一先经 Host Acceptance Effect Outbox 仍是 `TARGET`，不是当前事实。
+真实 child Edge 的 loopback TCP/HMAC/SQLite 历史测试已覆盖命令、receipt query 和重启后的 exact replay；本轮 Operator 集成则使用真实 Host SQLite 与记录型 async physical port，证明 Acceptance 前后边界、唯一入队、一次 dispatch 和 `IN_DOUBT` 只读对账。两类证据都没有在本轮拉起真实 Edge/Gateway/MateEngine/设备，因此不证明 TTS、VTS、桌面或任何硬件物理效果；物理效果保持 `NOT_TESTED`。所有外部副作用统一先经 Host Acceptance Effect Outbox 仍是目标，当前只完成首条表情命令切片。
 
 ## 9. Memory、Persona 与 Scene
 
@@ -955,7 +1016,7 @@ Host 请求经 [context_application.py](../../../host_brain/runtime/context_appl
 
 `RuntimeGuardian` 由 Host ASGI lifespan 中的 [runtime/production_composition.py](../../../host_brain/runtime/production_composition.py) 构造，并绑定同一 runtime scope/owner/lease/fence。Health/heartbeat 与已审计高风险前门通过 typed degradation port 消费 Guardian；每个 lifespan 的 [`ServiceHealthHeartbeat`](../../../host_brain/app/observability_runtime/service_health_heartbeat.py) 独占并关闭自身 heartbeat/keepalive task、observer、probe cache 与 HTTP transport，禁止跨 Host scope 改绑、读取、取消或关闭。没有 observer 的 compatibility probe 只能刷新自己的兼容 cache，不能回退写入全局 degradation reducer；独立 Obs health projection 和 probe registry 只读 durable ledger/projection，不能读任何跨进程不可见 cache。兼容顶层 helper 不是 Host production authority；Host lifespan 不再构造、绑定或在 shutdown 解绑 process-owned MCP broker。legacy global degradation 只能通过显式 compatibility adapter 使用。Guardian 先得到不可变 next-state、再持久化并替换本地投影，重放校验 RuntimeEvent envelope、revision/digest chain 和 from/to identity。
 
-[action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine，以及 Operator `host.sys_mode_transition` 与 `task.terminal_reconciliation`。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和剩余 34 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明安全封口，不代表 Operator 平面或这些功能已正向迁移。
+[action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine，以及 Operator `host.sys_mode_transition`、`task.terminal_reconciliation` 与 `edge.embodiment_enqueue`。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和剩余 33 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明首条 Edge 安全执行链，不代表 Operator 平面或其它具身功能已迁移。
 
 签名终态修复的完整命令不会进入通用 TaskGraph：
 
@@ -981,7 +1042,7 @@ flowchart LR
 
 Obs projection 生命周期现在只有一条生产控制流：`ObsApplicationPorts` bundle 先执行内部原子 single-use claim，`ObsApplicationContainer.compose()` 创建 app-local daemon，嵌套 ASGI `lifespan` 唯一调用 `start_projection_jobs()`，启动后才 `yield`。finally 先 stop/join 并等待 background/manual in-flight fence，再释放 exact leader lease、关闭 owned SQLite，最后清除 app state。stop timeout 或 rollback close failure 会保留原 container/ports 句柄，供后续精确重试。`dataclasses.replace()` 继承同一 claim，不能生成可二次消费的 derived bundle；全新独立 ports/app 则保持隔离。无 module-global daemon，无新 migration。
 
-Gate 6 最终定向集合为 `19 passed`；原始证据批次重叠禁止相加。该切片完成时 full architecture static 从 `FAIL [1,6,10]` 变为 `FAIL [1,11]`，后续 Gate 1/11 在各自提交绑定快照关闭；当前独立 Gate 1–14 已评估为 `PASS`、`failed_gates=[]`、`各 Gate issues=[]`。NE-01 仍 `PARTIAL / IN_PROGRESS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。后台 daemon 的 continuous-SLO supervision 仍未闭环。
+Gate 6 最终定向集合为 `19 passed`；原始证据批次重叠禁止相加。该切片完成时 full architecture static 从 `FAIL [1,6,10]` 变为 `FAIL [1,11]`，后续 Gate 1/11 曾在各自提交绑定快照关闭；那些静态 PASS 只属于历史提交。当前分支独立 Gate 1～14 已重新验证为 `PASS`、`failed_gates=[]`。NE-01 仍 `PARTIAL / IN_PROGRESS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。后台 daemon 的 continuous-SLO supervision 仍未闭环。
 
 Service Catalog 分层切片随后把启动数据流固定为 `Host/ASGI → service_catalog/startup_coordinator.py → ServiceCatalogRolloutAuthority Protocol → SQLiteServiceCatalogRolloutRepository`；DTO、校验和 port 从 `contracts/service_catalog.py` 进入，旧 composition/类型路径仅作同对象重导出，`rollout_authority.py` 只观察 Guardian。该流清除了 application→composition 两条与 Catalog persistence→application 一条依赖，Gate 1 SCC 缩为 application/persistence；该切片完成时仍有 11 条 persistence→application 反向依赖（PlanningSearch 7、Evolution/Lab/Skill/World 4）。验证为 contract/unit `61 passed`、真实 socket integration `7 passed`、边界复跑 `7 passed`，集合可能重叠不得相加。
 
@@ -1007,7 +1068,7 @@ flowchart LR
     Report --> Proposal["EvolutionProposalV2\nReview required / no production influence"]
 ```
 
-随后 Gate 11 把 Tool 对象流固定为 `Host ASGI lifespan → GovernedHostToolRuntimeComposition → ToolRuntimeBoundary → ToolBroker`；process Broker accessor/slot/provider 保持删除，唯一 app-local constructor count=1。该切片的提交绑定静态快照与当前独立 Gate 1–14 均为 `PASS`。真实 workspace-bound governed executor 与剩余全局对象图仍缺，NE-01 继续 `PARTIAL / IN_PROGRESS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+随后 Gate 11 把 Tool 对象流固定为 `Host ASGI lifespan → GovernedHostToolRuntimeComposition → ToolRuntimeBoundary → ToolBroker`；process Broker accessor/slot/provider 保持删除，唯一 app-local constructor count=1。该切片的提交绑定静态快照与当前分支独立全量静态结果均为 `PASS`，但证据范围仍分别绑定各自提交。真实 workspace-bound governed executor 与剩余全局对象图仍缺，NE-01 继续 `PARTIAL / IN_PROGRESS`，wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ```mermaid
 flowchart LR
@@ -1073,7 +1134,7 @@ sequenceDiagram
     O->>O: replace immutable memory state
 ```
 
-production owner 在 bind 前拒绝写入。0115 trigger 和 repository 都验证 exact lease/fence；event 与 head 同事务，故 `after_event_append` 或 `after_head_write` 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest/from-to chain，再采用 durable head；不同 bootstrap mode 不能覆盖已提交事实。成功 transition 只由 journal 形成 canonical audit；exact event replay 返回原结果且不再追加进程内 history 或 legacy `error_log`，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch` 已把这条 durable authority 接入 governed Operator vertical slice；Effect terminal proof 精确绑定 event/boundary/authority，历史回放用 permanent event-id lookup，`NO_CHANGE` 不制造 event。连同 `scheduler.task.trigger` 与 `task_terminal.reconcile`，当前 Operator 共覆盖 3/37；本段只展开 mode route 和 current mode/transition history。自动模式规则、last-interaction、commit-bound acceptance、production canary 和 NE-01 wave integration仍未完成。
+production owner 在 bind 前拒绝写入。0115 trigger 和 repository 都验证 exact lease/fence；event 与 head 同事务，故 `after_event_append` 或 `after_head_write` 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest/from-to chain，再采用 durable head；不同 bootstrap mode 不能覆盖已提交事实。成功 transition 只由 journal 形成 canonical audit；exact event replay 返回原结果且不再追加进程内 history 或 legacy `error_log`，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch` 已把这条 durable authority 接入 governed Operator vertical slice；Effect terminal proof 精确绑定 event/boundary/authority，历史回放用 permanent event-id lookup，`NO_CHANGE` 不制造 event。连同 `scheduler.task.trigger`、`task_terminal.reconcile` 与窄化的 `edge.command.push`，当前 Operator 共覆盖 4/37；本段只展开 mode route 和 current mode/transition history。自动模式规则、last-interaction、commit-bound acceptance、production canary 和 NE-01 wave integration仍未完成。
 
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|
@@ -1146,7 +1207,7 @@ All ingress sources
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
 10. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
-11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 路线执行 `server-derived workspace_id → source commit freeze → lease/worktree → worker protected stage → sealed checkpoint → runtime activation projection recovery → Acceptance → real TaskStore evidence → clean/no-change HEAD capture → 0116 ACTIVE→ACCEPTED→PROMOTED`；终态worker另行处理sealed abandon/cleanup，并只在精确 sealed Budget-rejection 的 reopened C-boundary 证明后结算 claim。该正向路径拒绝dirty/advanced HEAD，只覆盖no-change inspect。一般write promotion、周期survivor continuation、crash-left unsealed partial cleanup、failure/cancellation/general-multinode/unknown-effect claim closeout、general `settle_worker` crash bundle、逐操作fence/强杀、handle-level原子TOCTOU与OS/container/tenant隔离仍未解决。
+11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 路线执行 `server-derived workspace_id → source commit freeze → lease/worktree → worker protected stage → sealed checkpoint → runtime activation projection recovery → Acceptance → real TaskStore evidence → clean/no-change HEAD capture → 0116 ACTIVE→ACCEPTED→PROMOTED`；终态worker另行处理sealed abandon/cleanup。该正向路径拒绝dirty/advanced HEAD，只覆盖no-change inspect。一般write promotion、周期survivor continuation、crash-left unsealed partial cleanup、failure/cancel/budget claim closeout、general `settle_worker` crash bundle、逐操作fence/强杀、handle-level原子TOCTOU与OS/container/tenant隔离仍未解决。
 
 ## 13. 代码证据索引
 

@@ -9,7 +9,8 @@ from typing import Any
 import pytest
 
 from host_brain.app import digital_life_routes
-from host_brain.composition.life import PROCESS_LIFE_PROVIDER, ProcessLifeContainer
+from host_brain.app.host_life_route_authority import HostLifeRouteAuthority
+from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.digital_life.application_boundary import (
     project_inner_life_snapshot,
     project_life_director_pack,
@@ -128,18 +129,14 @@ def _snapshot(*, version: int = 4) -> dict[str, Any]:
 
 
 @pytest.fixture
-def composed_life() -> ProcessLifeContainer:
-    container = ProcessLifeContainer(
-        repository=object(),
-        command_service=object(),
-        snapshot_reader=object(),
+def composed_life() -> HostRoutePorts:
+    authority = HostLifeRouteAuthority(
+        command_service=_FakeService(),
+        snapshot_reader=_FakeReader(_snapshot()),
     )
-    PROCESS_LIFE_PROVIDER.clear()
-    PROCESS_LIFE_PROVIDER.install(container)
-    try:
-        yield container
-    finally:
-        PROCESS_LIFE_PROVIDER.clear(container)
+    return HostRoutePorts(
+        life_command_authority_provider=lambda: authority,
+    )
 
 
 def test_snapshot_projections_are_pure_and_legacy_compatible() -> None:
@@ -322,7 +319,7 @@ async def test_digital_life_get_is_pure_and_post_submits_command(
     monkeypatch,
     composed_life,
 ) -> None:  # noqa: ANN001
-    del composed_life
+    route_ports = composed_life
     snapshot = _snapshot(version=3)
     submit_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -349,8 +346,15 @@ async def test_digital_life_get_is_pure_and_post_submits_command(
     monkeypatch.setattr(digital_life_routes, "submit_life_command", _submit)
 
     before = copy.deepcopy(snapshot)
-    state = await digital_life_routes.digital_life_state("person-aw04")
-    inner = await digital_life_routes.digital_life_inner_drive_current("person-aw04", force=True)
+    state = await digital_life_routes.digital_life_state(
+        "person-aw04",
+        _route_ports=route_ports,
+    )
+    inner = await digital_life_routes.digital_life_inner_drive_current(
+        "person-aw04",
+        force=True,
+        _route_ports=route_ports,
+    )
     assert submit_calls == []
     assert snapshot == before
     assert state["version"] == 3
@@ -366,7 +370,8 @@ async def test_digital_life_get_is_pure_and_post_submits_command(
             "projection_intents": [{"target": "forged"}],
             "organ_intents": [{"target": "forged"}],
             "deliveries": [{"destination": "edge.proactive"}],
-        }
+        },
+        _route_ports=route_ports,
     )
     assert receipt["status"] == "APPLIED"
     assert len(submit_calls) == 1
@@ -384,7 +389,8 @@ async def test_digital_life_get_is_pure_and_post_submits_command(
             "platform": "qq",
             "conversation_id": "chat-1",
             "content": "unauthorized",
-        }
+        },
+        _route_ports=route_ports,
     )
     assert proactive["status"] == "APPLIED"
     assert submit_calls[-1]["payload"]["deliveries"] == []
@@ -400,7 +406,7 @@ async def test_http_proactive_rebuilds_authority_from_durable_grant(
     monkeypatch,
     composed_life,
 ) -> None:
-    del composed_life
+    base_route_ports = composed_life
     request_id = "http-proactive-authorized"
     intent_args = canonical_proactive_intent_args(
         person_id="person-aw04",
@@ -454,8 +460,13 @@ async def test_http_proactive_rebuilds_authority_from_durable_grant(
             "outbox_count": len(kwargs["payload"]["deliveries"]),
         }
 
-    monkeypatch.setattr(digital_life_routes, "get_ledger", lambda: Ledger())
     monkeypatch.setattr(digital_life_routes, "submit_life_command", submit)
+    route_ports = HostRoutePorts(
+        ledger_provider=lambda: Ledger(),
+        life_command_authority_provider=(
+            base_route_ports.life_command_authority_provider
+        ),
+    )
 
     response = await digital_life_routes.digital_life_proactive_attempt(
         {
@@ -470,7 +481,8 @@ async def test_http_proactive_rebuilds_authority_from_durable_grant(
                 "authority_kind": "surface_governor",
                 "authority_principal_id": "forged-client-principal",
             },
-        }
+        },
+        _route_ports=route_ports,
     )
 
     assert response["outbox_count"] == 1

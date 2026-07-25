@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from host_brain.composition.process_services import get_bond_neo4j_client
+from host_brain.composition.host_bond_runtime import build_host_bond_client
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine
@@ -94,7 +94,7 @@ def test_neo4j_prod_client_direct_write_and_fetch() -> None:
 
 def test_neo4j_prod_dependencies_and_bond_writer_use_real_client() -> None:
     config = _require_neo4j_runtime_config()
-    client = get_bond_neo4j_client()
+    client = build_host_bond_client()
     assert isinstance(client, Neo4jBondClient)
 
     event_id = 'codex_prod_evt_writer'

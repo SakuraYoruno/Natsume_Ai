@@ -9,16 +9,7 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_state_arbiter_bond_fact_degraded_when_stage_engine_missing(monkeypatch) -> None:
-    class _SocialBrain:
-        def resolve_stage_engine(self):
-            return None
-
-    monkeypatch.setattr(
-        "host_brain.tribe.social_brain_agent.get_social_brain_agent",
-        lambda: _SocialBrain(),
-    )
-
+def test_state_arbiter_bond_fact_degraded_when_stage_engine_missing() -> None:
     summary, evidence = _run(
         _resolve_state_arbiter_bond_fact(
             session_id="sess_1",
@@ -31,7 +22,7 @@ def test_state_arbiter_bond_fact_degraded_when_stage_engine_missing(monkeypatch)
     assert summary["reason_code"] == "BOND_ENGINE_NOT_AVAILABLE"
 
 
-def test_state_arbiter_bond_fact_uses_social_brain_engine(monkeypatch) -> None:
+def test_state_arbiter_bond_fact_uses_composed_stage_engine() -> None:
     class _BondState:
         stage = "ALLY"
         score = 0.72
@@ -43,19 +34,11 @@ def test_state_arbiter_bond_fact_uses_social_brain_engine(monkeypatch) -> None:
             assert session_id == "sess_2"
             return _BondState()
 
-    class _SocialBrain:
-        def resolve_stage_engine(self):
-            return _Engine()
-
-    monkeypatch.setattr(
-        "host_brain.tribe.social_brain_agent.get_social_brain_agent",
-        lambda: _SocialBrain(),
-    )
-
     summary, evidence = _run(
         _resolve_state_arbiter_bond_fact(
             session_id="sess_2",
             request_id="req_2",
+            bond_stage_engine=_Engine(),
         )
     )
 

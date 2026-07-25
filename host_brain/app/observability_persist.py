@@ -16,9 +16,6 @@ from host_brain.app.prompt_builder import repair_utf8_latin1_mojibake, _truncate
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
-_DEFAULT_EPISODIC_STORE = object()
-
-
 def build_payload_digest(value: Any) -> str | None:
     if value is None:
         return None
@@ -288,7 +285,7 @@ def persist_background_event_memory(
     reason_code: str | None = None,
     detail: str | None = None,
     ts_ms: int | None = None,
-    episodic_store: Any = _DEFAULT_EPISODIC_STORE,
+    episodic_store: Any | None = None,
     life_memory_store: Any | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -320,17 +317,11 @@ def persist_background_event_memory(
     life_result: dict[str, Any] = {"status": "SKIPPED", "reason_code": "LIFE_MEMORY_NOT_ATTEMPTED"}
     life_store = life_memory_store
     if life_store is None:
-        try:
-            from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
-
-            life_store = get_life_memory_store()
-        except Exception as exc:
-            life_result = {
-                "status": "SKIPPED",
-                "reason_code": "LIFE_MEMORY_STORE_UNAVAILABLE",
-                "episode_id": None,
-                "detail": str(exc)[:160],
-            }
+        life_result = {
+            "status": "SKIPPED",
+            "reason_code": "LIFE_MEMORY_STORE_NOT_COMPOSED",
+            "episode_id": None,
+        }
     if life_store is not None:
         try:
             life_result = life_store.write_background_episode(
@@ -383,19 +374,6 @@ def persist_background_event_memory(
         }
 
     store = episodic_store
-    if store is _DEFAULT_EPISODIC_STORE:
-        try:
-            from host_brain.composition.process_services import get_episodic_store  # noqa: PLC0415
-
-            store = get_episodic_store()
-        except Exception as exc:
-            return {
-                "status": "OK" if life_result.get("status") == "OK" else "SKIPPED",
-                "reason_code": "EPISODIC_STORE_UNAVAILABLE",
-                "memory_id": None,
-                "life_memory": life_result,
-                "detail": str(exc)[:160],
-            }
     if store is None:
         return {
             "status": "OK" if life_result.get("status") == "OK" else "SKIPPED",
@@ -534,7 +512,7 @@ def persist_life_action_event_memory(
     action_summary: str | None = None,
     ts_ms: int | None = None,
     evidence_refs: Sequence[str] | None = None,
-    episodic_store: Any = _DEFAULT_EPISODIC_STORE,
+    episodic_store: Any | None = None,
     life_memory_store: Any | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -585,17 +563,11 @@ def persist_life_action_event_memory(
     life_result: dict[str, Any] = {"status": "SKIPPED", "reason_code": "LIFE_MEMORY_NOT_ATTEMPTED"}
     life_store = life_memory_store
     if life_store is None:
-        try:
-            from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
-
-            life_store = get_life_memory_store()
-        except Exception as exc:
-            life_result = {
-                "status": "SKIPPED",
-                "reason_code": "LIFE_MEMORY_STORE_UNAVAILABLE",
-                "episode_id": None,
-                "detail": str(exc)[:160],
-            }
+        life_result = {
+            "status": "SKIPPED",
+            "reason_code": "LIFE_MEMORY_STORE_NOT_COMPOSED",
+            "episode_id": None,
+        }
     if life_store is not None:
         try:
             life_result = life_store.write_background_episode(
@@ -629,19 +601,6 @@ def persist_life_action_event_memory(
             }
 
     store = episodic_store
-    if store is _DEFAULT_EPISODIC_STORE:
-        try:
-            from host_brain.composition.process_services import get_episodic_store  # noqa: PLC0415
-
-            store = get_episodic_store()
-        except Exception as exc:
-            return {
-                "status": "OK" if life_result.get("status") == "OK" else "SKIPPED",
-                "reason_code": "EPISODIC_STORE_UNAVAILABLE",
-                "memory_id": None,
-                "life_memory": life_result,
-                "detail": str(exc)[:160],
-            }
     if store is None:
         return {
             "status": "OK" if life_result.get("status") == "OK" else "SKIPPED",
@@ -703,17 +662,11 @@ def persist_owner_directive_memory(
         }
     store = life_memory_store
     if store is None:
-        try:
-            from host_brain.composition.process_services import get_life_memory_store  # noqa: PLC0415
-
-            store = get_life_memory_store()
-        except Exception as exc:
-            return {
-                "status": "SKIPPED",
-                "reason_code": "LIFE_MEMORY_STORE_UNAVAILABLE",
-                "episode_id": None,
-                "detail": str(exc)[:160],
-            }
+        return {
+            "status": "SKIPPED",
+            "reason_code": "LIFE_MEMORY_STORE_NOT_COMPOSED",
+            "episode_id": None,
+        }
     try:
         return store.write_owner_directive_episode(
             request_id=request_id,

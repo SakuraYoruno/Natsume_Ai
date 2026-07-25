@@ -38,6 +38,10 @@ def surface_runtime_ports_factory():
             },
             "build_conversation_understanding_pack": lambda **_kwargs: {},
             "build_memory_context_debug": lambda **_kwargs: {},
+            "resolve_surface_reply_llm_runtime": lambda **kwargs: {
+                **dict(kwargs.get("base_runtime") or {}),
+                "agent_role": "surface_reply",
+            },
             "model_attempt_service": _model_attempt_service,
         }
         values.update(overrides)

@@ -96,6 +96,7 @@ class ObsRoutePorts:
     query_projection_store_provider: Callable[[], Any]
     life_action_context_provider: Callable[..., Any] | None = None
     approval_token_validator: Callable[..., Any] | None = None
+    degradation_capability_port_provider: Callable[[], Any] | None = None
     response_cache: ObsRouteResponseCache = field(
         default_factory=ObsRouteResponseCache,
     )
@@ -106,6 +107,7 @@ class ObsRoutePorts:
         for field_name in (
             "life_action_context_provider",
             "approval_token_validator",
+            "degradation_capability_port_provider",
         ):
             provider = getattr(self, field_name)
             if provider is not None and not callable(provider):

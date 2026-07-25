@@ -158,9 +158,9 @@ export const TRACE_COPY = Object.freeze({
 export const EDGE_COMMAND_COPY = Object.freeze({
   heroEyebrow: 'Execution / Edge Command',
   heroTitle: '边缘命令控制台',
-  heroDescription: '把 Edge 下行链路状态、显式控制门、payload 校验和 push 结果放在同一个 gated console，避免高风险命令混在普通 JSON 面板里。',
+  heroDescription: '展示 Edge 下行 authority、显式控制门、payload 校验和回执边界；进程级直推已退役，只有受治理 TaskGraph 才能获得执行资格。',
   commandRailTitle: 'Edge Command Gate',
-  commandRailDescription: '发送前先确认四件事：Host 能读到 Edge 状态、Edge pusher 已启用、控制门由操作者显式打开、payload JSON 可解析。',
+  commandRailDescription: '先确认 Host 能读到 authority 状态；若返回 governed-only，本页保持只读并引导到 TaskGraph 执行审查，不会绕过 Preview proof 直推。',
   gateTitle: '发送 Gate',
   focusTitle: '建议路径',
   quickLinksTitle: '相关入口',

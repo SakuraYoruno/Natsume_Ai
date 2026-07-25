@@ -33,12 +33,27 @@ def _bind_pytest_persistence_env() -> None:
 _bind_pytest_persistence_env()
 atexit.register(shutil.rmtree, _PYTEST_RUNTIME_ROOT, ignore_errors=True)
 
-# Import the application composition only after the test-owned persistence
-# environment exists. Importing ``host_brain.app`` may otherwise cache the
-# developer .env database before pytest can isolate it.
-from host_brain.app.process_service_wiring import configure_process_service_ports  # noqa: E402
+# Import application composition only after the test-owned persistence
+# environment exists.  The aliases below are test-only: production locator
+# modules have been physically deleted, while older tests may continue to
+# patch their historical names until those fixtures are simplified.
+import host_brain.composition as _composition_package  # noqa: E402
+from host_brain.app.application_port_wiring import (  # noqa: E402
+    build_process_application_ports,
+)
+from tests.support import process_service_compat as _process_compat  # noqa: E402
 
-configure_process_service_ports()
+for _retired_module_name in (
+    "host_brain.composition.process_service_container",
+    "host_brain.composition.process_services",
+    "host_brain.composition.process_environment",
+):
+    sys.modules[_retired_module_name] = _process_compat
+setattr(_composition_package, "process_service_container", _process_compat)
+setattr(_composition_package, "process_services", _process_compat)
+setattr(_composition_package, "process_environment", _process_compat)
+
+_process_compat.install_application_ports(build_process_application_ports())
 
 
 _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
@@ -80,10 +95,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         if mcp_registry is not None:
             with contextlib.suppress(Exception):
                 mcp_registry.close()
-        bond_queue = container.bond_update_queue
-        if bond_queue is not None:
-            with contextlib.suppress(Exception):
-                bond_queue.shutdown()
         ledger = container.ledger
         if ledger is not None:
             with contextlib.suppress(Exception):
@@ -100,34 +111,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         pass
 
     try:
-        tribe_state = sys.modules.get("host_brain.tribe.tribe_state")
-        if tribe_state is not None:
-            tribe_state._GLOBAL_REGISTRY = None
-
-        limbic_agent = sys.modules.get("host_brain.tribe.limbic_agent")
-        if limbic_agent is not None:
-            limbic_agent._LIMBIC_AGENT = None
-
-        prefrontal_agent = sys.modules.get("host_brain.tribe.prefrontal_agent")
-        if prefrontal_agent is not None:
-            prefrontal_agent._PREFRONTAL_AGENT = None
-
-        social_brain_agent = sys.modules.get("host_brain.tribe.social_brain_agent")
-        if social_brain_agent is not None:
-            social_brain_agent._SOCIAL_BRAIN_AGENT = None
-
-        endocrine_agent = sys.modules.get("host_brain.tribe.endocrine_agent")
-        if endocrine_agent is not None:
-            endocrine_agent._ENDOCRINE_AGENT = None
-
-        pain_reward_agent = sys.modules.get("host_brain.tribe.pain_reward_agent")
-        if pain_reward_agent is not None:
-            pain_reward_agent._PAIN_REWARD_AGENT = None
-
-        thalamus_agent = sys.modules.get("host_brain.tribe.thalamus_agent")
-        if thalamus_agent is not None:
-            thalamus_agent._THALAMUS_AGENT = None
-
         body_sense = sys.modules.get("host_brain.persona.body_sense")
         if body_sense is not None:
             body_sense._GLOBAL_BODY_SENSE = None
@@ -172,10 +155,8 @@ def _reset_host_brain_singletons():
     # Test-module collection is allowed to import configuration helpers, but
     # it must never redirect the actual test execution back to a developer DB.
     _bind_pytest_persistence_env()
-    # Some architecture/static-scan contracts reload the process composition
-    # modules.  Rebind the application-owned ports after every reset so later
-    # tests never inherit a freshly reloaded, unconfigured container.
-    configure_process_service_ports()
+    # Keep the test-only compatibility bridge isolated from developer state.
+    _process_compat.install_application_ports(build_process_application_ports())
     from host_brain.observability.degradation_state import (
         DegradationStateMachine,
         set_global_degradation_state_machine,
@@ -192,6 +173,43 @@ def _reset_host_brain_singletons():
     finally:
         set_global_degradation_state_machine(None)
         _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
+
+
+@pytest.fixture()
+def tribe_runtime_context(_reset_host_brain_singletons):
+    """Bind one isolated execution-local Tribe graph for legacy behavior tests."""
+
+    from host_brain.app.tribe_composition import (  # noqa: PLC0415
+        build_production_tribe_agent_providers,
+    )
+    from host_brain.tribe.event_bus import InMemoryTribeEventBus  # noqa: PLC0415
+    from host_brain.tribe.registry import HostTribeRegistry  # noqa: PLC0415
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        TribeAgentCatalog,
+        TribeRuntimeContext,
+        activate_tribe_runtime_context,
+        deactivate_tribe_runtime_context,
+    )
+    from host_brain.tribe.tribe_state import TribeStateRegistry  # noqa: PLC0415
+
+    owner = object()
+    context = TribeRuntimeContext(
+        state_registry=TribeStateRegistry(),
+        tribe_registry=HostTribeRegistry(),
+        event_bus=InMemoryTribeEventBus(max_events=256),
+        agent_catalog=TribeAgentCatalog(
+            build_production_tribe_agent_providers()
+        ),
+        active_owner_provider=lambda: owner,
+    )
+    activation = activate_tribe_runtime_context(
+        owner=owner,
+        context=context,
+    )
+    try:
+        yield context
+    finally:
+        deactivate_tribe_runtime_context(activation)
 
 
 def pytest_configure(config: pytest.Config) -> None:

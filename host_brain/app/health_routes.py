@@ -64,11 +64,10 @@ def _read_health_ledger(
     ledger_provider: HealthLedgerProvider | None,
     allow_legacy_process_providers: bool,
 ) -> Any:
+    # Kept in the signature for embedded callers during the cutover.  It no
+    # longer authorizes request-time discovery of a process-global ledger.
+    del allow_legacy_process_providers
     provider = ledger_provider
-    if provider is None and allow_legacy_process_providers:
-        from host_brain.composition.process_services import get_ledger  # noqa: PLC0415
-
-        provider = get_ledger
     if not callable(provider):
         raise HealthRuntimeDependencyUnavailable(
             "HOST_HEALTH_LEDGER_PROVIDER_UNAVAILABLE"
@@ -86,11 +85,9 @@ async def _read_dependency_probes(
     dependency_probe_provider: DependencyProbeProvider | None,
     allow_legacy_process_providers: bool,
 ) -> dict[str, Any]:
+    # A compatibility flag cannot recreate a request-time composition lookup.
+    del allow_legacy_process_providers
     provider = dependency_probe_provider
-    if provider is None and allow_legacy_process_providers:
-        from host_brain.app.startup import collect_dependency_probes  # noqa: PLC0415
-
-        provider = collect_dependency_probes
     if not callable(provider):
         raise HealthRuntimeDependencyUnavailable(
             "HOST_HEALTH_DEPENDENCY_PROBE_PROVIDER_UNAVAILABLE"
@@ -625,8 +622,9 @@ def create_health_router(
     """Create a health router bound to one app-local degradation reader.
 
     ``allow_legacy_degradation_provider`` exists solely for the module-level
-    compatibility router below.  Host composition must leave it disabled and
-    pass the current RuntimeGuardian read port explicitly.
+    compatibility router below.  ``allow_legacy_process_providers`` is a
+    no-op compatibility parameter: neither production nor embedded routers may
+    rediscover ledger/probe authority at request time.
     """
 
     health_router = APIRouter()
@@ -695,7 +693,6 @@ def create_health_router(
 # explicit app-local provider and never mounts this object.
 router = create_health_router(
     allow_legacy_degradation_provider=True,
-    allow_legacy_process_providers=True,
 )
 
 

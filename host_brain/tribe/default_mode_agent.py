@@ -504,25 +504,20 @@ class DefaultModeAgent:
         )
 
 
-_DEFAULT_MODE_AGENT: DefaultModeAgent | None = None
-
-
 def get_default_mode_agent() -> DefaultModeAgent:
-    global _DEFAULT_MODE_AGENT
-    if _DEFAULT_MODE_AGENT is None:
-        _DEFAULT_MODE_AGENT = DefaultModeAgent()
-    return _DEFAULT_MODE_AGENT
+    from host_brain.tribe.runtime_context import (  # noqa: PLC0415
+        require_active_tribe_agent,
+    )
 
-
-def set_default_mode_agent(agent: DefaultModeAgent | None) -> None:
-    global _DEFAULT_MODE_AGENT
-    _DEFAULT_MODE_AGENT = agent
+    return require_active_tribe_agent(
+        "default_mode_agent",
+        expected_type=DefaultModeAgent,
+    )
 
 
 __all__ = [
     "DefaultModeAgent",
     "get_default_mode_agent",
-    "set_default_mode_agent",
     "mark_recent_foreground_interaction",
 ]
 
