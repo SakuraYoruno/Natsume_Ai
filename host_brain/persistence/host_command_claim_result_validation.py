@@ -22,6 +22,9 @@ from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result impo
     INTERNAL_NONACCEPTANCE_TERMINAL_REASONS,
     build_internal_nonacceptance_result_ref,
 )
+from host_brain.contracts.agent_runtime.internal_precheckpoint_cancellation_claim_result import (
+    build_internal_precheckpoint_cancellation_result_ref,
+)
 from host_brain.persistence.host_command_repository_codec import (
     matches_review_decision_result,
     normalize_external_sha256,
@@ -390,6 +393,131 @@ def _matches_internal_nonacceptance_terminal(
     return matches == 1
 
 
+def _matches_internal_precheckpoint_cancellation_terminal(
+    owner: Any,
+    conn: sqlite3.Connection,
+    *,
+    result_ref: str,
+    command: Mapping[str, Any],
+) -> bool:
+    """Bind a claim result to one exact signed no-effect cancellation."""
+
+    work_order = command.get("work_order")
+    node_id = str(getattr(work_order, "task_node_id", "") or "").strip()
+    command_id = str(command.get("command_id") or "").strip()
+    claim_ref = str(command.get("ingress_claim_ref") or "").strip()
+    graph_id = str(command.get("graph_id") or "").strip()
+    try:
+        revision = int(command.get("graph_revision") or 0)
+    except (TypeError, ValueError):
+        return False
+    if not all((node_id, command_id, claim_ref, graph_id)) or revision < 1:
+        return False
+    try:
+        candidates = conn.execute(
+            """
+            SELECT attempt_id
+            FROM task_runtime_attempt
+            WHERE graph_id = ? AND graph_revision = ? AND node_id = ?
+              AND status = 'CANCELLED'
+            ORDER BY attempt_id
+            """,
+            (graph_id, revision, node_id),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return False
+    task_store = getattr(owner, "_task_store", None)
+    resolver = getattr(
+        task_store,
+        "try_resolve_internal_agent_precheckpoint_cancellation_terminal",
+        None,
+    )
+    if not callable(resolver):
+        return False
+    matches = 0
+    for candidate in candidates:
+        attempt_id = str(candidate["attempt_id"] or "").strip()
+        if not attempt_id:
+            return False
+        try:
+            terminal = resolver(attempt_id)
+        except Exception:
+            return False
+        if terminal is None:
+            continue
+        if not isinstance(terminal, Mapping):
+            return False
+        graph = terminal.get("graph")
+        node = terminal.get("node")
+        attempt = terminal.get("attempt")
+        lease = terminal.get("lease")
+        reservation = terminal.get("operation_reservation")
+        admission = terminal.get("command")
+        intent = terminal.get("cancellation_intent")
+        decision = terminal.get("cancellation_decision")
+        if not all(
+            isinstance(value, Mapping)
+            for value in (
+                graph,
+                node,
+                attempt,
+                lease,
+                reservation,
+                admission,
+                intent,
+                decision,
+            )
+        ):
+            return False
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_PRECHECKPOINT_CANCELLATION_TERMINAL"
+            or str(graph.get("graph_id") or "") != graph_id
+            or int(graph.get("revision") or 0) != revision
+            or str(graph.get("status") or "") != "CANCELLED"
+            or str(node.get("node_id") or "") != node_id
+            or str(node.get("status") or "") != "CANCELLED"
+            or str(attempt.get("attempt_id") or "") != attempt_id
+            or str(attempt.get("status") or "") != "CANCELLED"
+            or str(lease.get("attempt_id") or "") != attempt_id
+            or str(lease.get("status") or "") != "CANCELLED"
+            or str(reservation.get("attempt_id") or "") != attempt_id
+            or str(reservation.get("status") or "") != "RELEASED"
+            or str(reservation.get("reconciliation_action") or "") != "RELEASE"
+            or str(reservation.get("reconciliation_outcome") or "")
+            != "NO_SIDE_EFFECT"
+            or str(admission.get("command_id") or "") != command_id
+            or str(intent.get("status") or "") != "FINALIZED"
+            or str(decision.get("intent_ref") or "")
+            != str(intent.get("intent_ref") or "")
+        ):
+            return False
+        try:
+            expected = build_internal_precheckpoint_cancellation_result_ref(
+                command_id=command_id,
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                lease_id=str(lease.get("lease_id") or ""),
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                reconciliation_proof_ref=str(
+                    reservation.get("reconciliation_proof_ref") or ""
+                ),
+                reconciliation_proof_digest=str(
+                    reservation.get("reconciliation_proof_digest") or ""
+                ),
+                cancellation_intent_ref=str(intent.get("intent_ref") or ""),
+                cancellation_decision_ref=str(decision.get("decision_ref") or ""),
+            )
+        except ValueError:
+            return False
+        if hmac.compare_digest(str(result_ref or ""), expected):
+            matches += 1
+    return matches == 1
+
+
 def _operator_domain_result_ref(*, command_id: str, claim_ref: str) -> str:
     normalized_command = str(command_id or "").strip()
     normalized_claim = str(claim_ref or "").strip()
@@ -559,6 +687,15 @@ class HostCommandClaimResultValidationMixin:
                     conn,
                     result_ref=actual_result,
                     command=normalized,
+                )
+            if not terminal_result_matches:
+                terminal_result_matches = (
+                    _matches_internal_precheckpoint_cancellation_terminal(
+                        self,
+                        conn,
+                        result_ref=actual_result,
+                        command=normalized,
+                    )
                 )
         elif surface == "scheduler" and actual_result:
             terminal_result_matches = (

@@ -68,6 +68,236 @@ _NONACCEPTANCE_TERMINAL_STATES = {
 class TaskInternalAgentLineageStoreMixin:
     """Exact Internal Agent direct/takeover Lease lineage authority."""
 
+    def resolve_internal_agent_precheckpoint_cancellation_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        """Reopen one exact no-effect cancellation before worker checkpoint.
+
+        This authority deliberately excludes committed projections, Acceptance
+        effects and unknown external outcomes.  The only eligible operation is
+        a single RELEASED reservation whose signed reconciliation proof says
+        ``RELEASE`` + ``NO_SIDE_EFFECT`` and whose graph cancellation has a
+        trusted final ``CANCELLED`` decision.
+        """
+
+        attempt_ref = self._nonacceptance_attempt_ref(attempt_id)
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            resolved = (
+                self._resolve_internal_agent_precheckpoint_cancellation_terminal_uow(
+                    conn,
+                    attempt_ref,
+                )
+            )
+            conn.commit()
+            return resolved
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def try_resolve_internal_agent_precheckpoint_cancellation_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the exact pre-checkpoint cancellation or no such authority."""
+
+        attempt_ref = self._nonacceptance_attempt_ref(attempt_id)
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            attempt = self._require_attempt(conn, attempt_ref)
+            node = self._require_node(
+                conn,
+                str(attempt["graph_id"]),
+                int(attempt["graph_revision"]),
+                str(attempt["node_id"]),
+            )
+            graph = self._require_graph(
+                conn,
+                str(attempt["graph_id"]),
+                int(attempt["graph_revision"]),
+            )
+            if (
+                str(graph["status"]) != "CANCELLED"
+                or str(node["status"]) != "CANCELLED"
+                or str(attempt["status"]) != "CANCELLED"
+            ):
+                conn.commit()
+                return None
+            resolved = (
+                self._resolve_internal_agent_precheckpoint_cancellation_terminal_uow(
+                    conn,
+                    attempt_ref,
+                )
+            )
+            conn.commit()
+            return resolved
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _resolve_internal_agent_precheckpoint_cancellation_terminal_uow(
+        self,
+        conn: sqlite3.Connection,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        attempt = self._require_attempt(conn, attempt_id)
+        graph_id = str(attempt["graph_id"])
+        graph_revision = int(attempt["graph_revision"])
+        node_id = str(attempt["node_id"])
+        graph = self._require_graph(conn, graph_id, graph_revision)
+        node = self._require_node(conn, graph_id, graph_revision, node_id)
+        nodes = conn.execute(
+            """
+            SELECT * FROM task_runtime_node
+            WHERE graph_id = ? AND graph_revision = ? ORDER BY node_id
+            """,
+            (graph_id, graph_revision),
+        ).fetchall()
+        leases = conn.execute(
+            """
+            SELECT * FROM task_runtime_lease
+            WHERE attempt_id = ?
+            ORDER BY fencing_token, acquired_ts_ms, lease_id
+            """,
+            (attempt_id,),
+        ).fetchall()
+        reservations = conn.execute(
+            """
+            SELECT * FROM task_runtime_idempotency_reservation
+            WHERE attempt_id = ? ORDER BY reservation_id
+            """,
+            (attempt_id,),
+        ).fetchall()
+        commands = conn.execute(
+            """
+            SELECT * FROM host_command_journal
+            WHERE graph_id = ? AND graph_revision = ? ORDER BY command_id
+            """,
+            (graph_id, graph_revision),
+        ).fetchall()
+        projections = conn.execute(
+            """
+            SELECT projection_id FROM task_runtime_worker_projection
+            WHERE attempt_id = ? ORDER BY projection_id
+            """,
+            (attempt_id,),
+        ).fetchall()
+        effects = conn.execute(
+            """
+            SELECT effect_id FROM task_runtime_acceptance_effect_intent
+            WHERE attempt_id = ? ORDER BY effect_id
+            """,
+            (attempt_id,),
+        ).fetchall()
+        agent_results = conn.execute(
+            """
+            SELECT receipt_ref FROM agent_execution_result
+            WHERE command_id = ?
+            ORDER BY receipt_ref
+            """,
+            (str(commands[0]["command_id"]) if len(commands) == 1 else "",),
+        ).fetchall()
+        if (
+            len(nodes) != 1
+            or len(leases) != 1
+            or len(reservations) != 1
+            or len(commands) != 1
+            or projections
+            or effects
+            or agent_results
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent pre-checkpoint cancellation cardinality drifted",
+            )
+        lease = leases[0]
+        reservation_row = reservations[0]
+        command = commands[0]
+        try:
+            node_payload = _validated_node_payload(node)
+            work_order = WorkOrderV3.from_mapping(
+                _loads_object(
+                    str(command["work_order_json"]),
+                    field_name="Internal Agent cancellation WorkOrder",
+                )
+            )
+            graph_record = _graph_record(graph, list(nodes))
+            node_record = _node_record(node)
+            reservation = self._operation_record(reservation_row)
+        except (ContractViolation, TypeError, ValueError) as exc:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent cancellation contract is corrupt",
+            ) from exc
+        cancellation = self._assert_finalized_nonacceptance_cancellation_uow(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+        )
+        exact = (
+            str(graph["status"]) == "CANCELLED"
+            and str(node["status"]) == "CANCELLED"
+            and str(attempt["status"]) == "CANCELLED"
+            and str(lease["status"]) == "CANCELLED"
+            and lease["released_ts_ms"] is not None
+            and str(attempt["attempt_id"]) == attempt_id
+            and str(attempt["graph_id"]) == graph_id
+            and int(attempt["graph_revision"]) == graph_revision
+            and str(attempt["node_id"]) == node_id
+            and str(lease["attempt_id"]) == attempt_id
+            and str(reservation.get("status") or "") == "RELEASED"
+            and str(reservation.get("reconciliation_action") or "") == "RELEASE"
+            and str(reservation.get("reconciliation_outcome") or "")
+            == "NO_SIDE_EFFECT"
+            and not str(reservation.get("receipt_ref") or "")
+            and str(reservation.get("attempt_id") or "") == attempt_id
+            and str(reservation.get("lease_id") or "") == str(lease["lease_id"])
+            and str(reservation.get("owner_id") or "") == str(lease["owner_id"])
+            and int(reservation.get("fencing_token") or 0)
+            == int(lease["fencing_token"])
+            and str(command["surface"]) == "internal"
+            and str(command["route_type"]) == "delegate"
+            and str(command["target_id"]) == "agent_runtime"
+            and str(command["graph_id"]) == graph_id
+            and int(command["graph_revision"]) == graph_revision
+            and str(command["root_work_order_id"])
+            == str(graph["root_work_order_id"])
+            == work_order.root_work_order_id
+            and work_order.task_graph_id == graph_id
+            and work_order.task_node_id == node_id
+            and str(command["business_scope"])
+            == str(reservation.get("business_scope") or "")
+            and str(command["operation_fingerprint"])
+            == str(reservation.get("operation_fingerprint") or "")
+            and str(node_payload.get("node_id") or "") == node_id
+            and str(node_payload.get("route") or "") == "delegate:agent_runtime"
+        )
+        if not exact:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "Internal Agent pre-checkpoint cancellation authority drifted",
+            )
+        return {
+            "authority_kind": (
+                "INTERNAL_AGENT_PRECHECKPOINT_CANCELLATION_TERMINAL"
+            ),
+            "graph": graph_record,
+            "node": node_record,
+            "attempt": dict(attempt),
+            "lease": dict(lease),
+            "operation_reservation": reservation,
+            "command": dict(command),
+            "cancellation_intent": cancellation["intent"],
+            "cancellation_decision": cancellation["decision"],
+        }
+
     def resolve_internal_agent_nonacceptance_checkpoint_terminal(
         self,
         attempt_id: str,
@@ -263,7 +493,7 @@ class TaskInternalAgentLineageStoreMixin:
         *,
         graph_id: str,
         graph_revision: int,
-    ) -> None:
+    ) -> dict[str, Any]:
         row = conn.execute(
             """
             SELECT * FROM task_runtime_graph_cancellation_intent
@@ -318,6 +548,10 @@ class TaskInternalAgentLineageStoreMixin:
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "post-review cancellation authority drifted",
             )
+        return {
+            "intent": record,
+            "decision": decision,
+        }
 
     def resolve_internal_agent_takeover_lineage(
         self,

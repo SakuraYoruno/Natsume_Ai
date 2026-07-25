@@ -25,6 +25,9 @@ from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result impo
     INTERNAL_NONACCEPTANCE_TERMINAL_REASONS,
     build_internal_nonacceptance_result_ref,
 )
+from host_brain.contracts.agent_runtime.internal_precheckpoint_cancellation_claim_result import (
+    build_internal_precheckpoint_cancellation_result_ref,
+)
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
@@ -96,6 +99,10 @@ class InternalArtifactTerminalReconciler:
             (task_store, "resolve_internal_agent_takeover_lineage"),
             (task_store, "resolve_internal_agent_budget_rejection_terminal"),
             (task_store, "resolve_internal_agent_nonacceptance_checkpoint_terminal"),
+            (
+                task_store,
+                "resolve_internal_agent_precheckpoint_cancellation_terminal",
+            ),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -150,6 +157,7 @@ class InternalArtifactTerminalReconciler:
                         )
                     )
                     continue
+                self._complete_unsealed_cancellation_claim(stage)
                 cleanup = self._workspaces.cleanup(str(stage.workspace_id))
                 receipt_ref = str(getattr(cleanup, "receipt_ref", "") or "")
                 if "://" not in receipt_ref:
@@ -478,6 +486,115 @@ class InternalArtifactTerminalReconciler:
         except ValueError as exc:
             raise InternalArtifactTerminalReconciliationError(
                 "budget rejected claim result identity is invalid"
+            ) from exc
+        claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
+
+    def _complete_unsealed_cancellation_claim(self, stage: Any) -> None:
+        """Commit the ingress terminal before deleting pre-checkpoint state."""
+
+        authority = dict(getattr(stage, "execution_authority", {}) or {})
+        attempt_id = str(authority.get("attempt_id") or "").strip()
+        graph_id = str(authority.get("graph_id") or "").strip()
+        node_id = str(authority.get("node_id") or "").strip()
+        lease_id = str(authority.get("lease_id") or "").strip()
+        revision = authority.get("graph_revision")
+        if (
+            not all((attempt_id, graph_id, node_id, lease_id))
+            or type(revision) is not int
+            or revision < 1
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed cancellation claim authority is invalid"
+            )
+        terminal = (
+            self._tasks.resolve_internal_agent_precheckpoint_cancellation_terminal(
+                attempt_id
+            )
+        )
+        if not isinstance(terminal, Mapping):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed cancellation terminal authority is incomplete"
+            )
+        graph = terminal.get("graph")
+        node = terminal.get("node")
+        attempt = terminal.get("attempt")
+        lease = terminal.get("lease")
+        reservation = terminal.get("operation_reservation")
+        intent = terminal.get("cancellation_intent")
+        decision = terminal.get("cancellation_decision")
+        if not all(
+            isinstance(value, Mapping)
+            for value in (
+                graph,
+                node,
+                attempt,
+                lease,
+                reservation,
+                intent,
+                decision,
+            )
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed cancellation terminal lineage is incomplete"
+            )
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_PRECHECKPOINT_CANCELLATION_TERMINAL"
+            or str(graph.get("graph_id") or "") != graph_id
+            or int(graph.get("revision") or 0) != revision
+            or str(node.get("node_id") or "") != node_id
+            or str(attempt.get("attempt_id") or "") != attempt_id
+            or str(lease.get("lease_id") or "") != lease_id
+            or str(reservation.get("attempt_id") or "") != attempt_id
+            or str(reservation.get("lease_id") or "") != lease_id
+            or str(reservation.get("status") or "") != "RELEASED"
+            or str(reservation.get("reconciliation_action") or "") != "RELEASE"
+            or str(reservation.get("reconciliation_outcome") or "")
+            != "NO_SIDE_EFFECT"
+            or str(intent.get("status") or "") != "FINALIZED"
+            or str(decision.get("intent_ref") or "")
+            != str(intent.get("intent_ref") or "")
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed cancellation terminal lineage drifted"
+            )
+        record = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        frozen = {**authority, "route": "delegate", "target_id": "agent_runtime"}
+        self._assert_internal_admission(record, frozen=frozen)
+        command = record.get("command") if isinstance(record, Mapping) else None
+        claim_ref = str(getattr(command, "ingress_claim_ref", "") or "").strip()
+        if not claim_ref:
+            return
+        claims = self._claim_results
+        if claims is None:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed cancellation claim store is unavailable"
+            )
+        try:
+            result_ref = build_internal_precheckpoint_cancellation_result_ref(
+                command_id=str(getattr(command, "command_id", "") or ""),
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                lease_id=lease_id,
+                reservation_id=str(reservation.get("reservation_id") or ""),
+                reconciliation_proof_ref=str(
+                    reservation.get("reconciliation_proof_ref") or ""
+                ),
+                reconciliation_proof_digest=str(
+                    reservation.get("reconciliation_proof_digest") or ""
+                ),
+                cancellation_intent_ref=str(intent.get("intent_ref") or ""),
+                cancellation_decision_ref=str(decision.get("decision_ref") or ""),
+            )
+        except ValueError as exc:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed cancellation claim result identity is invalid"
             ) from exc
         claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
 
