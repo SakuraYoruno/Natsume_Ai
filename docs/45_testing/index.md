@@ -7,7 +7,15 @@
 维护日期：2026-07-25
 状态：当前证据
 
-## NE-01 Obs 投影 app-local 监督当前切片
+## NE-01 Host 情感与回复形态 app-local authority 当前切片
+
+- 每个 Host root 通过 `emotion_runtime_factory` 惰性持有一个 `HostEmotionRuntime`；Input、Tribe 与 Lifecycle 解析同一实例，两个重叠 Host root 的连续向量、Timeline 与用户画像互不共享。
+- 不带 runtime 的 `normalize_chat_emotion_context()` 是 replay/render 纯路径；只有 `resolve_chat_emotion_context(..., runtime=...)` 可以推进连续向量、前一标签、Timeline 与画像。缺失或错误 runtime 以 `HOST_EMOTION_RUNTIME_NOT_INJECTED` 失败关闭。
+- `ResponseFormDecider` 由每个 Input composition 独占，旧 `_decider/get_reply_form_decider/get_response_form_decider` 不存在；并发语音额度在一个锁内完成检查和记账。
+- 原 #119 分支在 #118 后的互不相加历史批次为：情感/Composition/Prefrontal `81 passed in 16.61s`，ASGI/Input/NE-03 `119 passed in 89.26s`，文档/机器状态 `51 passed in 23.26s`。以已合并 #120 的最新 `dev@1183e433b` 建立替代分支后，合并受影响集合为 `190 passed in 98.58s`，文档/机器状态与交付元数据初跑为 `39 passed in 11.27s`、证据刷新后为 `39 passed in 12.81s`；`compileall` 通过，完整架构静态 Gate 1～14 为 `PASS`、`failed_gates=[]`。历史与替代批次不得相加；这些结果只证明本地定向边界，不是波次 integration、真实多 Host server canary、情感 durability、NE-06 或 NE-07 全栈证据。
+- 无 migration；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
+
+## NE-01 Obs 投影 app-local 监督已合并切片
 
 - `ObsApplicationContainer.health_snapshot()` 把它精确持有的 `ProjectionJobDaemon` 监督快照接入真实 Obs `/health`；健康输出包含 lifecycle/running/generation/wave、连续失败、opaque incident、错误类型和恢复标记，不包含异常正文。
 - 普通 projection job、leader lease acquire/renew 故障保持后台线程存活并进入 `DEGRADED`；后续成功波清零连续失败。`SystemExit` 等进程控制异常令生命周期进入 `FAILED`，显式 `close/stop` 前拒绝重启。

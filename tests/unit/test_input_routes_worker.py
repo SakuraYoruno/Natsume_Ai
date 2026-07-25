@@ -36,6 +36,7 @@ from host_brain.app.schemas import ChatRequest
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.input_runtime.settings import get_input_settings, input_settings_from_mapping
 from host_brain.tribe.thalamus_agent import ThalamusAgent, classify_task_intent
+from host_brain.tribe.tribe_state import TribeStateRegistry
 from tests.text_quality_assertions import assert_natsume_style
 
 
@@ -69,7 +70,8 @@ def _ports(**overrides):  # noqa: ANN003
     )
     overrides.setdefault("evaluate_governor_with_timing", _approve_governor)
     overrides.setdefault("trigger_reply_performance", _noop_reply_performance)
-    overrides.setdefault("get_thalamus_agent", ThalamusAgent)
+    thalamus = ThalamusAgent(state_registry=TribeStateRegistry())
+    overrides.setdefault("get_thalamus_agent", lambda: thalamus)
     return replace(build_input_runtime_application_ports(), **overrides)
 
 

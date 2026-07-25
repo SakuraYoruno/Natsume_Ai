@@ -12,6 +12,8 @@
 
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal；外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它外部资源恢复、事务化 Chat、完整 Worker/Obs Composition 与 NE-01 仍未闭环。
 
+情感上下文模块的当前 owner 是 Host-local `HostEmotionRuntime`：它管理连续情绪向量、前一标签、Timeline、用户画像和日记节流；Input、Tribe 与 Lifecycle 只通过注入端口访问同一实例。`normalize_chat_emotion_context()` 是 replay/render 只读入口，`resolve_chat_emotion_context()` 是要求 exact runtime 的 admission ingest 入口。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。两者均不拥有 Persona/Feedback 的永久写 authority。
+
 Internal terminal recovery 模块当前另有一条 #114 精确能力：它把 `BLOCKED` cancellation intent 与 trusted `CANCELLED` final decision 作为不同事实重开，先结算 nonacceptance claim，再清理 Workspace。该模块不拥有一般 failure/cancellation/multi-node/unknown-effect recovery authority。
 
 Edge command 模块不再拥有进程级可发现 owner。Motor/Limbic/Cortex 仍只负责计划/观察，内部调试入口无权直连网络；Obs `edge.command.push` 的首条窄路径已经由 governed Operator TaskNode 在 Acceptance 后生成 `edge.embodiment_enqueue`，把 `edge.somatic + emotion_state_command` 写入 app-local durable outbox。物理 dispatch 与 receipt reconciliation 仍由 `HostEmbodimentRuntime` 独立负责，真实 Edge/Gateway canary 尚未执行。

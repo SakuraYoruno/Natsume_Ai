@@ -44,6 +44,7 @@ class HostLifecycleApplicationPorts:
     silence_engine: ServiceProvider | None = None
     state_write_arbiter: ServiceProvider | None = None
     emotion_timeline: ServiceProvider | None = None
+    emotion_context_runtime: ServiceProvider | None = None
     bond_stage_engine: ServiceProvider | None = None
     bond_neo4j_client: ServiceProvider | None = None
     shared_memory_index: ServiceProvider | None = None

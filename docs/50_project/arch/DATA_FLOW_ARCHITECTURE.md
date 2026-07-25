@@ -15,6 +15,19 @@
 
 当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
 
+情感数据流现在分成有副作用的 admission 与无副作用的 replay 两条。生产 admission 为 `Input/Tribe → HostLifecycleApplicationPorts.emotion_context_runtime → HostEmotionRuntime.ingest → current vector/timeline/profile`；同一 Host root 共享同一 identity，不同 root 不共享状态。`normalize_chat_emotion_context(raw)` 不带 runtime 时只计算归一化、echo 和 trigger，不追加 Timeline、不改变画像或前一标签。回复形态为 `Input composition → owned ResponseFormDecider → locked quota check+record`，不再经过进程 singleton。
+
+```mermaid
+flowchart LR
+    A["真实 Host admission"] --> P["Host-local emotion runtime provider"]
+    P --> E["HostEmotionRuntime ingest"]
+    E --> V["连续向量 / Timeline / 用户画像"]
+    R["Replay / Prompt / Projection"] --> N["纯 normalize"]
+    N -. "不推进状态" .-> V
+    I["Input composition"] --> D["owned ResponseFormDecider"]
+    D --> Q["原子额度检查 + 记账"]
+```
+
 Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Secure Ingress → immutable `BLOCKED` cancellation intent → trusted `CANCELLED` final decision → restart terminal worker → deterministic nonacceptance claim → tombstone/Workspace cleanup。intent 不能冒充 final decision，任何 lineage 漂移均 fail-closed；该流不处理一般取消、多节点或 unknown effect。
 
 Edge 下行现在明确分成两条：Tribe 的平台/情绪事件只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。

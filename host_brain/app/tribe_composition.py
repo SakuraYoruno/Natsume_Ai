@@ -177,6 +177,7 @@ def build_tribe_application_ports(
         build_conversation_experience_read_pack,
     )
     from host_brain.app.emotion_context import (
+        HostEmotionRuntime,
         build_chat_emotion_snapshot,
         resolve_chat_emotion_context,
     )
@@ -193,6 +194,14 @@ def build_tribe_application_ports(
     intent_sequence_allocator = IntentSequenceAllocator(
         ledger_provider=ledger_provider
     )
+    if host_services is None:
+        local_emotion_runtime = HostEmotionRuntime()
+        emotion_runtime_provider = lambda: local_emotion_runtime
+    else:
+        emotion_runtime_provider = _host_provider(
+            host_services,
+            "emotion_context_runtime",
+        )
 
     def resolve_process_mode_transition_service():
         if mode_transition_service_provider is not None:
@@ -211,6 +220,12 @@ def build_tribe_application_ports(
             **kwargs,
         )
 
+    def resolve_chat_emotion_context_with_runtime(**kwargs: Any) -> dict[str, Any]:
+        runtime = emotion_runtime_provider()
+        if not isinstance(runtime, HostEmotionRuntime):
+            raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
+        return resolve_chat_emotion_context(runtime=runtime, **kwargs)
+
     return TribeApplicationPorts(
         activity_monitor=resolved_activity_monitor_provider,
         mode_transition_service=resolve_process_mode_transition_service,
@@ -227,7 +242,7 @@ def build_tribe_application_ports(
         milestone_tracker=_host_provider(host_services, "milestone_tracker"),
         model_attempt_service=_host_provider(host_services, "model_attempt_service"),
         prompt_registry=_host_provider(host_services, "prompt_registry"),
-        resolve_chat_emotion_context=resolve_chat_emotion_context,
+        resolve_chat_emotion_context=resolve_chat_emotion_context_with_runtime,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_user_preference_pack=build_user_preference_pack_with_ledger,
         build_conversation_experience_read_pack=(

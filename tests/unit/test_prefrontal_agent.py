@@ -61,7 +61,6 @@ def test_prefrontal_run_evolution_cycle_success(monkeypatch) -> None:
                 },
             }
 
-    monkeypatch.setattr("host_brain.app.emotion_context._global_emotion_timeline", _FakeTimeline())
     monkeypatch.setattr("host_brain.persona.evolution_orchestrator.EvolutionOrchestrator", _FakeOrchestrator)
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_social_brain_agent", lambda: _FakeSocial())
     logger = _FakeLogger()
