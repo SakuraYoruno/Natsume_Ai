@@ -2,7 +2,7 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_TASK_GRAPH_SQL_ADMISSION_WORKTREE_OVER_ORIGIN_DEV_C347135F3",
+  "evaluated_source": "NE01_TASK_GRAPH_SQL_ADMISSION_AND_HOST_SURFACE_RECOVERY_INVENTORY_WORKTREE_OVER_ORIGIN_DEV_C347135F3",
   "evidence_binding": {
     "evaluated_commit_sha": "c347135f3dbd16e43bb5efd46598204da375217c",
     "migration_head": "0124_task_graph_admission_authority.sql"
@@ -29,7 +29,7 @@
     "legacy_direct_sub_agent_dispatch": "RETIRED_FAIL_CLOSED_NO_MODULE_GLOBAL_HANDLER_MAP_GATEWAY_BUILDER_INDEPENDENT_SKILL_EXEC_LOG_WRITER_OR_EXECUTIVE_COMPATIBILITY_DISPATCH_PORT_DIRECT_REQUESTS_RETURN_LEGACY_SUB_AGENT_DISPATCH_RETIRED_INTENT_LEGACY_CONTEXT_CANNOT_CALL_MODEL",
     "budget": "PARTIAL_CONTENTION_PROVEN_SINGLE_NODE_DURABLE_TIME_GUARD",
     "preoperation_attempt_takeover": "CANONICAL_OPERATION_FREE_PERSISTED_ATTEMPT_SAME_ATTEMPT_HIGHER_FENCE_PROVEN_POST_RESERVATION_RECOVERY_HOLD_PROVEN_GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE",
-    "host_startup_graph_continuation": "PARTIAL_BOOT_SCOPED_EXACT_HOST_ADMISSION_REENTRY_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION_LIVE_LEASE_OR_EXECUTION_DEFERRED_NO_WORKER_REPLAY_GENERAL_RECOVERY_INCOMPLETE",
+    "host_startup_graph_continuation": "PARTIAL_BOOT_SCOPED_EXACT_HOST_ADMISSION_REENTRY_SURFACE_FILTERED_SINGLE_READ_TRANSACTION_EXACT_BOUND_ACCEPTED_TRUE_OVERFLOW_FAIL_CLOSED_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION_LIVE_LEASE_OR_EXECUTION_DEFERRED_NO_WORKER_REPLAY_GENERAL_RECOVERY_INCOMPLETE",
     "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_OPERATOR_HTTP_E2E_NOT_PROVEN_CANARY_NOT_RUN",
     "production_canary": "TERMINAL_EXACT_LOCAL_SQLITE_PASS_FULL_RUNTIME_NOT_RUN",
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
@@ -369,8 +369,8 @@
       "host_startup_graph_continuation": {
         "status": "PARTIAL_BOOT_SCOPED_EXACT_HOST_REENTRY",
         "production_wiring": "ACTIVATE_INTERNAL_RUNTIME_AFTER_TASK_RUNTIME_ACTIVATION_AND_BEFORE_SCHEDULER_CLOCK",
-        "inventory": "READ_ONLY_CREATED_ACTIVE_BLOCKED_MAX_100_BOUND_REACHED_FAILS_CLOSED",
-        "admission": "GET_BY_GRAPH_EXACT_HOSTCOMMAND_WORKORDERV3_EXECUTOR_ASSIGNMENT_TASKGRAPH",
+        "inventory": "HOSTCOMMAND_TASKGRAPH_SINGLE_READ_TRANSACTION_CREATED_ACTIVE_BLOCKED_SURFACE_FILTERED_LIMIT_PLUS_ONE_EXACT_BOUND_ACCEPTED_TRUE_OVERFLOW_FAILS_CLOSED",
+        "admission": "LIST_NONTERMINAL_ADMISSIONS_EXACT_HOSTCOMMAND_WORKORDERV3_EXECUTOR_ASSIGNMENT_TASKGRAPH",
         "surfaces": [
           "CHAT",
           "HOST_INPUT",
@@ -378,7 +378,7 @@
           "GATEWAY"
         ],
         "live_lease_or_execution": "DEFERRED_NO_LEASE_TAKEOVER_OR_SCANNER_WORKER_REPLAY",
-        "local_validation": "71_PASSED_HOST_STARTUP_UNIT_SQLITE_DURABLE_ADMISSION_AND_AFFECTED_ASGI_RUNTIME_BOUNDARIES",
+        "local_validation": "20_PASSED_HOST_STARTUP_UNIT_SQLITE_DURABLE_ADMISSION_AND_HOSTCOMMAND_CONTRACT",
         "boundary": "NO_PERIODIC_SURVIVOR_LEASE_EXPIRY_RESCAN_UNKNOWN_EFFECT_OR_GENERAL_MULTI_NODE_BATCH_RECOVERY"
       },
       "nested_react_skill_delegate_execution": {
@@ -623,6 +623,7 @@
         "host_brain/persistence/task_graph_cancellation_request.py",
         "host_brain/persistence/task_graph_cancellation_continuation_store.py",
         "host_brain/persistence/host_command_repository.py",
+        "host_brain/persistence/host_command_recovery_inventory.py",
         "host_brain/persistence/task_graph_admission_authority.py",
         "host_brain/audit/migrations/0124_task_graph_admission_authority.sql",
         "host_brain/persistence/task_parallel_success_store.py",

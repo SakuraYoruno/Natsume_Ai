@@ -29,16 +29,9 @@ class _StartupStore:
     def __init__(
         self,
         *,
-        graphs: list[dict[str, Any]],
         snapshots: dict[tuple[str, int], dict[str, Any]],
     ) -> None:
-        self.graphs = graphs
         self.snapshots = snapshots
-        self.limits: list[int] = []
-
-    def list_nonterminal_graphs(self, *, limit: int) -> list[dict[str, Any]]:
-        self.limits.append(limit)
-        return list(self.graphs[:limit])
 
     def read_scheduler_snapshot(
         self,
@@ -49,18 +42,29 @@ class _StartupStore:
 
 
 class _CommandRepository:
-    def __init__(self, record: dict[str, Any]) -> None:
-        self.record = record
-        self.lookups: list[tuple[str, int]] = []
+    def __init__(
+        self,
+        record: dict[str, Any],
+        *,
+        additional_records: tuple[dict[str, Any], ...] = (),
+    ) -> None:
+        self.records = (record, *additional_records)
+        self.inventory_calls: list[tuple[tuple[str, ...], int]] = []
 
-    def get_by_graph(
+    def list_nonterminal_admissions(
         self,
         *,
-        graph_id: str,
-        graph_revision: int,
-    ) -> dict[str, Any]:
-        self.lookups.append((graph_id, graph_revision))
-        return dict(self.record)
+        surfaces: tuple[str, ...],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        normalized = tuple(str(item) for item in surfaces)
+        self.inventory_calls.append((normalized, int(limit)))
+        filtered = []
+        for record in self.records:
+            command = record.get("command")
+            if str(getattr(command, "surface", "")) in normalized:
+                filtered.append(dict(record))
+        return filtered[: int(limit) + 1]
 
 
 class _Application:
@@ -118,6 +122,9 @@ def _contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         "status": "CREATED",
     }
     record = {
+        "graph_id": direct.graph.graph_id,
+        "graph_revision": direct.graph.revision,
+        "runtime_graph_status": "CREATED",
         "command": direct.command,
         "work_order": direct.work_order,
         "assignment": assignment,
@@ -137,7 +144,6 @@ async def test_host_runtime_activation_reenters_exact_nonterminal_graph() -> Non
     graph_id = graph_record["graph_id"]
     graph_revision = graph_record["revision"]
     store = _StartupStore(
-        graphs=[graph_record],
         snapshots={(graph_id, graph_revision): snapshot},
     )
     commands = _CommandRepository(record)
@@ -153,8 +159,9 @@ async def test_host_runtime_activation_reenters_exact_nonterminal_graph() -> Non
     assert application.calls == []
     await runtime.recover_startup_graphs()
 
-    assert store.limits == [100]
-    assert commands.lookups == [(graph_id, graph_revision)]
+    assert commands.inventory_calls == [
+        (("chat", "gateway", "host_input", "tool"), 100)
+    ]
     assert len(application.calls) == 1
     resumed = application.calls[0]
     assert resumed["command"] is record["command"]
@@ -184,7 +191,6 @@ async def test_host_runtime_startup_never_reenters_graph_with_live_lease() -> No
         }
     ]
     store = _StartupStore(
-        graphs=[graph_record],
         snapshots={(graph_id, graph_revision): snapshot},
     )
     application = _Application()
@@ -211,7 +217,7 @@ async def test_host_runtime_startup_never_reenters_graph_with_live_lease() -> No
 
 
 @pytest.mark.asyncio
-async def test_startup_continuation_ignores_foreign_surface_before_host_tuple_check() -> None:
+async def test_startup_inventory_filters_foreign_surface_before_exact_bound() -> None:
     record, graph_record, snapshot = _contracts()
     graph_id = graph_record["graph_id"]
     graph_revision = graph_record["revision"]
@@ -235,7 +241,6 @@ async def test_startup_continuation_ignores_foreign_surface_before_host_tuple_ch
         )
     }
     store = _StartupStore(
-        graphs=[graph_record],
         snapshots={(graph_id, graph_revision): snapshot},
     )
     calls: list[tuple[Any, ...]] = []
@@ -246,14 +251,24 @@ async def test_startup_continuation_ignores_foreign_surface_before_host_tuple_ch
 
     continuation = HostStartupGraphContinuation(
         task_store=store,
-        command_repository=_CommandRepository(foreign_record),
+        command_repository=_CommandRepository(
+            foreign_record,
+            additional_records=(record,),
+        ),
         resume_admission=resume,
     )
 
-    report = await continuation.recover()
+    report = await continuation.recover(page_limit=1)
 
-    assert report == ()
-    assert calls == []
+    assert report == (
+        {
+            "graph_id": graph_id,
+            "graph_revision": graph_revision,
+            "status": "COMPLETED",
+            "reason_code": None,
+        },
+    )
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
@@ -262,12 +277,14 @@ async def test_startup_continuation_rejects_a_truncated_inventory() -> None:
     graph_id = graph_record["graph_id"]
     graph_revision = graph_record["revision"]
     store = _StartupStore(
-        graphs=[graph_record],
         snapshots={(graph_id, graph_revision): snapshot},
     )
     continuation = HostStartupGraphContinuation(
         task_store=store,
-        command_repository=_CommandRepository(record),
+        command_repository=_CommandRepository(
+            record,
+            additional_records=(record,),
+        ),
         resume_admission=lambda *_args: _completed_terminal(graph_id, graph_revision),
     )
 
@@ -287,7 +304,6 @@ async def test_startup_continuation_rejects_cross_work_order_tuple_drift() -> No
         work_order_id="different-root-work-order",
     )
     store = _StartupStore(
-        graphs=[graph_record],
         snapshots={(graph_id, graph_revision): snapshot},
     )
     calls: list[tuple[Any, ...]] = []

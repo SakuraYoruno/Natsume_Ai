@@ -25,6 +25,7 @@ _HOST_SURFACES = frozenset(
         HostCommandSurface.GATEWAY,
     }
 )
+_HOST_SURFACE_VALUES = tuple(sorted(surface.value for surface in _HOST_SURFACES))
 _RESUMABLE_GRAPH_STATUSES = frozenset({"CREATED", "ACTIVE", "BLOCKED"})
 _LIVE_LEASE_STATUS = "ACTIVE"
 _EXECUTION_IN_PROGRESS = "GOVERNED_EXECUTION_IN_PROGRESS"
@@ -48,10 +49,10 @@ ResumeAdmission = Callable[
 class HostStartupGraphContinuation:
     """Re-enter exact Host admissions after TaskStore startup recovery.
 
-    The inventory is intentionally bounded.  Reaching the limit is an
+    The inventory is intentionally bounded.  Exceeding the limit is an
     activation error rather than silently claiming that all resumable Graphs
-    were inspected.  A graph with a live Lease is reported as deferred and is
-    never sent to a worker by this component.
+    were inspected; an exact full page is valid.  A graph with a live Lease is
+    reported as deferred and is never sent to a worker by this component.
     """
 
     def __init__(
@@ -64,20 +65,18 @@ class HostStartupGraphContinuation:
         if not callable(resume_admission):
             raise TypeError("resume_admission must be callable")
         if task_store is not None:
-            for method_name in (
-                "list_nonterminal_graphs",
-                "read_scheduler_snapshot",
-            ):
+            for method_name in ("read_scheduler_snapshot",):
                 if not callable(getattr(task_store, method_name, None)):
                     raise TypeError(
                         "Host startup continuation TaskStore lacks "
                         f"{method_name}"
                     )
         if task_store is not None and not callable(
-            getattr(command_repository, "get_by_graph", None)
+            getattr(command_repository, "list_nonterminal_admissions", None)
         ):
             raise TypeError(
-                "Host startup continuation requires command_repository.get_by_graph"
+                "Host startup continuation requires a surface-filtered "
+                "command_repository inventory"
             )
         self._store = task_store
         self._commands = command_repository
@@ -103,38 +102,37 @@ class HostStartupGraphContinuation:
             raise HostStartupGraphContinuationError(
                 "startup continuation page_limit is outside [1, 500]"
             )
-        raw_graphs = await _maybe_await(
-            store.list_nonterminal_graphs(limit=int(page_limit))
+        raw_records = await _maybe_await(
+            self._commands.list_nonterminal_admissions(
+                surfaces=_HOST_SURFACE_VALUES,
+                limit=int(page_limit),
+            )
         )
-        if not isinstance(raw_graphs, Sequence) or isinstance(
-            raw_graphs,
+        if not isinstance(raw_records, Sequence) or isinstance(
+            raw_records,
             (str, bytes, bytearray),
         ):
             raise HostStartupGraphContinuationError(
-                "nonterminal TaskGraph inventory is invalid"
+                "nonterminal Host admission inventory is invalid"
             )
-        graphs = tuple(raw_graphs)
-        if len(graphs) >= int(page_limit):
+        records = tuple(raw_records)
+        if len(records) > int(page_limit):
             raise HostStartupGraphContinuationError(
-                "nonterminal TaskGraph inventory reached its safe startup bound"
+                "nonterminal Host admission inventory exceeded its safe startup bound"
             )
 
         reports: list[dict[str, Any]] = []
-        for raw_graph in graphs:
-            graph_id, graph_revision, graph_status = _graph_identity(raw_graph)
-            record = await _maybe_await(
-                self._commands.get_by_graph(
-                    graph_id=graph_id,
-                    graph_revision=graph_revision,
-                )
-            )
+        for record in records:
+            graph_id, graph_revision, graph_status = _admission_identity(record)
             command = _command_for_graph(
                 record,
                 graph_id=graph_id,
                 graph_revision=graph_revision,
             )
             if command.surface not in _HOST_SURFACES:
-                continue
+                raise HostStartupGraphContinuationError(
+                    "surface-filtered Host admission inventory returned foreign work"
+                )
             command, work_order, assignment, graph = _canonical_host_admission(
                 record,
                 command=command,
@@ -255,21 +253,21 @@ def _command_for_graph(
     return command
 
 
-def _graph_identity(value: Any) -> tuple[str, int, str]:
+def _admission_identity(value: Any) -> tuple[str, int, str]:
     if not isinstance(value, Mapping):
         raise HostStartupGraphContinuationError(
-            "nonterminal TaskGraph inventory item is invalid"
+            "nonterminal Host admission inventory item is invalid"
         )
     graph_id = str(value.get("graph_id") or "").strip()
-    revision = value.get("revision")
-    status = str(value.get("status") or "").strip().upper()
+    revision = value.get("graph_revision")
+    status = str(value.get("runtime_graph_status") or "").strip().upper()
     if not graph_id or isinstance(revision, bool) or not isinstance(revision, int):
         raise HostStartupGraphContinuationError(
-            "nonterminal TaskGraph inventory has an invalid identity"
+            "nonterminal Host admission inventory has an invalid identity"
         )
     if revision < 1 or status not in _RESUMABLE_GRAPH_STATUSES:
         raise HostStartupGraphContinuationError(
-            "nonterminal TaskGraph inventory has an invalid state"
+            "nonterminal Host admission inventory has an invalid state"
         )
     return graph_id, revision, status
 

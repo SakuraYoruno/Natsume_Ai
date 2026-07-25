@@ -163,7 +163,14 @@ class GovernedHostRuntime:
                 resume_admission=self._resume_startup_admission,
             )
             if task_store is not None
-            and callable(getattr(task_store, "list_nonterminal_graphs", None))
+            and callable(getattr(task_store, "read_scheduler_snapshot", None))
+            and callable(
+                getattr(
+                    command_repository,
+                    "list_nonterminal_admissions",
+                    None,
+                )
+            )
             else None
         )
 
@@ -999,11 +1006,16 @@ def build_governed_host_runtime(
     )
 
     if not callable(
-        getattr(task_runtime_container.task_store, "list_nonterminal_graphs", None)
+        getattr(
+            task_runtime_container.command_repository,
+            "list_nonterminal_admissions",
+            None,
+        )
     ):
         raise GovernedHostAdapterError(
             GOVERNED_HOST_AUTHORITY_INVALID,
-            "production governed Host runtime requires bounded nonterminal graph inventory",
+            "production governed Host runtime requires a surface-filtered "
+            "nonterminal admission inventory",
         )
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,

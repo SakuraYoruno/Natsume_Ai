@@ -72,6 +72,9 @@ from host_brain.persistence.host_command_repository_types import (
 from host_brain.persistence.host_command_claim_result_validation import (
     HostCommandClaimResultValidationMixin,
 )
+from host_brain.persistence.host_command_recovery_inventory import (
+    HostCommandRecoveryInventoryMixin,
+)
 from host_brain.persistence.task_graph_admission_authority import (
     TaskGraphAdmissionAuthoritySchemaError,
     assert_task_graph_admission_authority_schema,
@@ -80,7 +83,10 @@ from host_brain.persistence.task_graph_admission_authority import (
 )
 
 
-class HostCommandRepository(HostCommandClaimResultValidationMixin):
+class HostCommandRepository(
+    HostCommandRecoveryInventoryMixin,
+    HostCommandClaimResultValidationMixin,
+):
     """SQLite repository and UoW for one immutable command admission."""
 
     def __init__(
