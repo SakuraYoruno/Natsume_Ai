@@ -56,6 +56,7 @@ DomainHandler = Callable[[Mapping[str, Any], str], Any]
 # who asked; it is not an exact node-bound Preview Receipt.  Keep them visibly
 # fail-closed until NE-01 gives each command a Governed Operator route.
 GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
+    "edge.command.push",
     "scheduler.task.trigger",
     "sys_mode.switch",
     "task_terminal.reconcile",
@@ -66,7 +67,7 @@ BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 34
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 33
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -393,6 +394,17 @@ async def _sysmode_switch(
     del route_ports
     runtime = operator_runtime_value("governed_operator_runtime")
     execute = getattr(runtime, "execute_sys_mode_switch", None)
+    if not callable(execute):
+        raise ObsDomainCommandError("OBS_GOVERNED_OPERATOR_RUNTIME_UNAVAILABLE")
+    return await execute(payload, request_id)
+
+
+async def _edge_command_push(
+    payload: Mapping[str, Any],
+    request_id: str,
+) -> Any:
+    runtime = operator_runtime_value("governed_operator_runtime")
+    execute = getattr(runtime, "execute_edge_command_push", None)
     if not callable(execute):
         raise ObsDomainCommandError("OBS_GOVERNED_OPERATOR_RUNTIME_UNAVAILABLE")
     return await execute(payload, request_id)
@@ -868,7 +880,7 @@ _HANDLERS: Mapping[str, DomainHandler] = {
     "mate.action.submit": _mate_action,
     "mate.say.submit": _mate_say,
     "bond.event.submit": _bond_event,
-    "edge.command.push": _blocked_legacy_operator_handler,
+    "edge.command.push": _edge_command_push,
     "security.hunt.run_once": _security_hunt,
     "task_graph.cancel": _task_graph_cancel,
     "task_operation.reconcile": _task_operation_reconcile,

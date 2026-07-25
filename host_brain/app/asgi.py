@@ -941,6 +941,7 @@ def create_app(
                     runtime_router_factory=CanonicalRuntimeRouter,
                     agent_executor_factory=AgentRuntimeExecutor,
                     internal_runtime_factory=build_governed_internal_runtime,
+                    embodiment_runtime_provider=lambda: embodiment_runtime,
                 )
                 canonical_owner = internal_composition.canonical_owner
                 agent_workspace_container = internal_composition.workspace_container

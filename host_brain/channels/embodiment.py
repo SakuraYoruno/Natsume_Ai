@@ -850,6 +850,26 @@ class HostEmbodimentRuntime:
         self._require_authority()
         return self._outbox.enqueue(command)
 
+    def reopen_outbox_command(
+        self,
+        command: EmbodimentCommand,
+    ) -> dict[str, Any] | None:
+        """Read one exact durable Host command without enqueueing or dispatching it."""
+
+        if not isinstance(command, EmbodimentCommand):
+            raise TypeError("EmbodimentCommand is required")
+        self._require_authority()
+        row = self._repository.get_by_command_identity(
+            command_id=command.command_id,
+            idempotency_key=command.idempotency_key,
+        )
+        if row is None:
+            return None
+        stored = row.get("command")
+        if not isinstance(stored, Mapping) or dict(stored) != command.as_dict():
+            raise RuntimeError("EMBODIMENT_OUTBOX_COMMAND_IDENTITY_DRIFT")
+        return dict(row)
+
     async def submit(
         self,
         command: EmbodimentCommand,
@@ -1202,17 +1222,31 @@ def _require_terminal_embodiment_preview(
         (EMBODIMENT_KIND_AVATAR, "set_expression"): "embodiment.vts.set_expression",
         (EMBODIMENT_KIND_MATEENGINE, "command"): "embodiment.mateengine.command",
     }.get((str(command.kind), str(command.action)))
-    if (
-        expected_kind is None
-        or str(boundary.get("action_kind") or "") != expected_kind
-        or str(boundary.get("action_scope") or "") != str(command.idempotency_key)
-        or not isinstance(args, Mapping)
-        or dict(args)
-        != {
+    direct_preview = (
+        expected_kind is not None
+        and str(boundary.get("action_kind") or "") == expected_kind
+        and str(boundary.get("action_scope") or "")
+        == str(command.idempotency_key)
+        and isinstance(args, Mapping)
+        and dict(args)
+        == {
             "delivery_key": str(command.idempotency_key),
             "command": command.as_dict(),
         }
-    ):
+    )
+    authority_context = boundary.get("authority_context")
+    acceptance_effect_preview = (
+        str(boundary.get("action_kind") or "")
+        == "acceptance-effect.edge.embodiment_enqueue"
+        and isinstance(args, Mapping)
+        and dict(args).get("embodiment_command") == command.as_dict()
+        and isinstance(authority_context, Mapping)
+        and str(authority_context.get("effect_id") or "").strip()
+        == str(boundary.get("action_scope") or "").strip()
+        and str(authority_context.get("schema_version") or "")
+        == "Natsume.action_preview.acceptance_effect_authority_request.v1"
+    )
+    if not direct_preview and not acceptance_effect_preview:
         raise RuntimeError("ACTION_PREVIEW_DRIFT")
     action_preview_service.require_execution(
         event_id=str(action_preview_event_id),

@@ -573,6 +573,7 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
     # not belong in SkillRegistry.  Their risk is frozen here by the Governor
     # authority instead of being nominated by an ingress caller.
     builtin_risk = {
+        "operator_edge_command_push": 4,
         "operator_sys_mode_transition": 4,
         # Risk 5 is a non-overridable Intent block.  Signed terminal repair is
         # high risk but deliberately reviewable; the eventual Acceptance

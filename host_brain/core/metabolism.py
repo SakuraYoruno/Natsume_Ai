@@ -237,7 +237,10 @@ def build_governance_snapshot(
 ) -> dict[str, Any]:
     merged = dict(overrides or {})
     scope = str(merged.get("scope", "host")).strip().lower() or "host"
-    allowlist_raw = merged.get("scope_allowlist", ("host", "memory", "system"))
+    allowlist_raw = merged.get(
+        "scope_allowlist",
+        ("edge", "host", "memory", "system"),
+    )
     if isinstance(allowlist_raw, (list, tuple, set)):
         allowlist = [str(item).strip().lower() for item in allowlist_raw if str(item).strip()]
     else:
@@ -529,4 +532,3 @@ from host_brain.core.emotion_timeline import (  # noqa: E402, F401
     EmotionTimeline,
     compute_emotion_echo,
 )
-

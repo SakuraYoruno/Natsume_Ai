@@ -69,7 +69,7 @@ def test_production_consumers_do_not_resolve_retired_edge_owner() -> None:
         assert retained == set(), f"{path}: retained {sorted(retained)}"
 
 
-def test_legacy_edge_front_doors_remain_explicitly_fail_closed() -> None:
+def test_legacy_internal_edge_front_doors_remain_fail_closed_and_obs_is_governed() -> None:
     routes = (
         ROOT / "host_brain" / "app" / "internal_tribe_routes.py"
     ).read_text(encoding="utf-8")
@@ -83,4 +83,6 @@ def test_legacy_edge_front_doors_remain_explicitly_fail_closed() -> None:
 
     assert 'authority_state="GOVERNED_TASKGRAPH_ONLY"' in routes
     assert routes.count("ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED") >= 2
-    assert '"edge.command.push": _blocked_legacy_operator_handler' in domain_ports
+    assert '"edge.command.push": _edge_command_push' in domain_ports
+    assert "execute_edge_command_push" in domain_ports
+    assert '"edge.command.push": _blocked_legacy_operator_handler' not in domain_ports

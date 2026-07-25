@@ -3,16 +3,18 @@
 
 # 测试与验收目录
 
-版本：v2.3
+版本：v2.4
 维护日期：2026-07-25
 状态：当前证据
 
-## NE-01 Edge 指令全局 authority 退役当前切片
+## NE-01 Edge 指令首条正向 governed 切片
 
-- `EdgeCommandPusher` 只保留 proof-bound 低层 HTTP 适配器；进程级 `_PUSHER/_PUSHER_LOCK`、`get/init/set_edge_command_pusher`、Host startup singleton 与所有生产 lookup 均为 0。
-- Motor 无显式 governed executor 时固定拒绝；Limbic/Cortex 只记录观察。内部调试 POST 和 Obs `edge.command.push` 均在网络前返回 `ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED`；状态 API/Monitor UI 显示 `GOVERNED_TASKGRAPH_ONLY`。
-- Edge adapter、Host↔Edge loopback、Tribe Agents、内部 routes、Obs domain、Action Preview、ASGI startup 与 Host lifecycle composition 的同一受影响集合为 `171 passed in 63.37s`；相邻 Host/Tribe/Resource/Research/locator 合并回归另为 `147 passed / 8 existing warnings in 120.11s`，#114 Internal SQLite+Git 合并回归另为 `60 passed in 69.87s`，三组重叠且不得相加。`compileall`、`git diff --check`、统一 static scan 与 fresh Gate 1～14 均通过，`failed_gates=[]`；Monitor UI production build 通过。`npm ci` 审计出的 2 个 moderate、6 个 high 依赖链漏洞未用破坏性 `audit fix --force` 自动改写，留待独立供应链修复。
-- 这只证明旧直推 owner 和调用点已退役、缺 proof 时零 I/O；正向 governed Edge TaskNode、Acceptance Effect、durable receipt/reconciliation、波次 integration、production canary 和 NE-07 真实服务栈仍未验收。NE-01 继续 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 旧 `EdgeCommandPusher` 进程 owner、startup 注册与 Tribe/内部直推仍保持为 0；Obs `edge.command.push` 现在只允许 `target_agent=edge.somatic`、`command_type=emotion_state_command` 与 `emotion_tag/intensity` 白名单，其他 command 在 HostCommand admission 前失败关闭。
+- 正向链为 `Secure Ingress → typed Governor → OPERATOR HostCommand → immutable TaskGraph → risk-4 Review → Attempt/Lease/Grant/Budget → Verification/Acceptance → edge.embodiment_enqueue → terminal Preview → HostEmbodimentRuntime durable outbox`。首次响应只证明 durable enqueue；物理 dispatch 与回执独立推进。
+- 真实 SQLite 集成覆盖 Review 前 outbox 为 0、Acceptance 后唯一 `PENDING` 行、一次物理 dispatch、请求 exact replay 不重复入队/发送、unsupported command 不创建 HostCommand，以及 claim 失效后的 `IN_DOUBT → read-only receipt query → APPLIED` 且 submit 次数不增加。编译器测试另覆盖确定性 command/idempotency/authority identity 与 worker 伪造 runtime scope 拒绝。
+- Acceptance handler、Operator runtime 和 Edge 绑定 helper 已拆成聚焦模块；`acceptance_effect_handlers.py < 1300`、`governed_operator_runtime.py < 1500`，fresh architecture static Gate 1～14 全部通过且未扩大白名单。
+- 最终去重的 Operator/Acceptance/Preview/Edge 受影响集合为 `78 passed in 79.67s`；文档 authority、freshness 和交付元数据为 `27 passed in 10.53s`。目标模块 `py_compile`、机器状态 JSON 解析、`git diff --check` 与 fresh static Gate 均通过，`failed_gates=[]`。
+- 集成中的物理端口是记录型 async adapter，不是真实 Edge/Gateway 进程。波次 integration、production canary、真实网络/设备与 NE-07 Docker 全栈仍为 `NOT_RUN`；其余 33 个 Operator 写命令继续阻断，NE-01 保持 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Runtime 合同分层当前切片
 

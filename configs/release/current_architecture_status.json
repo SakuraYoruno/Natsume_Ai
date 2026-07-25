@@ -5,12 +5,12 @@
     "dev_commit": "99ae35ca4d86680b93645f91460f08a92abe5da1",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_HOST_EDGE_AUTHORITY_CONSOLIDATION_IMPLEMENTATION_COMMIT_A836FB1FCFC3206A8C90E72B37E5C489E9C2F9E0"
+    "evaluated_source": "THIS_DOCUMENT_COMMIT_NE01_FIRST_GOVERNED_EDGE_EXPRESSION_SLICE"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "HOST_AND_EDGE_RUNTIME_AUTHORITY_CONSOLIDATED_ON_DEV_99AE35CA4_PRODUCTION_PROCESS_LOCATOR_AND_TRIBE_NO_CONTEXT_FALLBACKS_RETIRED_RESOURCE_MANAGER_STATUS_DURABLE_RESEARCH_LEDGER_RESPONSIBILITIES_SPLIT_SHARED_RUNTIME_CONTRACTS_NEUTRALIZED_EDGE_PROCESS_GLOBAL_DIRECT_PUSH_RETIRED_USER_EMOTION_PROFILE_EXPLICITLY_INJECTED_UNIFIED_STATIC_SCAN_AND_FULL_GATES_1_TO_14_LOCAL_PASS_PROGRAM_INCOMPLETE_POSITIVE_EDGE_TASKGRAPH_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_EXTERNAL_NAMESPACES_CANCELLATION_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "HOST_AND_EDGE_RUNTIME_AUTHORITY_CONSOLIDATED_ON_DEV_99AE35CA4_PRODUCTION_PROCESS_LOCATOR_AND_TRIBE_NO_CONTEXT_FALLBACKS_RETIRED_RESOURCE_MANAGER_STATUS_DURABLE_RESEARCH_LEDGER_RESPONSIBILITIES_SPLIT_SHARED_RUNTIME_CONTRACTS_NEUTRALIZED_EDGE_PROCESS_GLOBAL_DIRECT_PUSH_RETIRED_FIRST_GOVERNED_EDGE_EXPRESSION_TASKGRAPH_REVIEW_ACCEPTANCE_OUTBOX_AND_READ_ONLY_RECONCILIATION_SLICE_LOCAL_SQLITE_PASS_UNIFIED_STATIC_SCAN_AND_FULL_GATES_1_TO_14_LOCAL_PASS_PROGRAM_INCOMPLETE_REMAINING_33_OPERATOR_COMMANDS_REAL_EDGE_GATEWAY_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_EXTERNAL_NAMESPACES_CANCELLATION_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,10 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "HOST_EDGE_AUTHORITY_CONSOLIDATION_LOCAL_PASS_PROGRAM_INCOMPLETE",
-    "commit_binding": "IMPLEMENTATION_COMMIT_A836FB1FCFC3206A8C90E72B37E5C489E9C2F9E0_ARTIFACTS_LOCAL_GATES_MATCHING_SHA",
+    "status": "FIRST_GOVERNED_EDGE_EXPRESSION_SLICE_LOCAL_PASS_PROGRAM_INCOMPLETE",
+    "commit_binding": "THIS_DOCUMENT_COMMIT_WITH_POST_COMMIT_ARTIFACTS_LOCAL_GATES_MATCHING_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_HOST_EDGE_AUTHORITY_CONSOLIDATION",
+    "slice": "NE01_FIRST_GOVERNED_EDGE_EXPRESSION_SLICE",
     "resource_manager_status_current_validation": {
       "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
       "migration": "0123_resource_manager_status_journal.sql",
@@ -128,7 +128,7 @@
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
     },
     "edge_command_global_authority_retirement_current_validation": {
-      "status": "LOCAL_TARGETED_PASS_RETIRED_FAIL_CLOSED_POSITIVE_PATH_MISSING_NE01_IN_PROGRESS",
+      "status": "LOCAL_TARGETED_PASS_FIRST_GOVERNED_SLICE_WIRED_REAL_EDGE_CANARY_MISSING_NE01_IN_PROGRESS",
       "retired_symbols": [
         "_PUSHER",
         "_PUSHER_LOCK",
@@ -142,23 +142,35 @@
         "Limbic emotion event direct push",
         "Cortex platform gate direct push",
         "internal edge command direct POST",
-        "Obs edge.command.push direct domain handler"
+        "Obs edge.command.push direct domain writer"
       ],
       "retained_transport_boundary": "EXPLICIT_CONSTRUCTION_ONLY_EXACT_NODE_BOUND_ACTION_PREVIEW_EXECUTION_PROOF_REQUIRED",
-      "compatibility_status": "GOVERNED_TASKGRAPH_ONLY",
-      "blocked_reason": "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
-      "monitor_ui": "DIRECT_PUSH_LOCKED_TASK_RUNTIME_REVIEW_LINK_EXPOSED",
-      "local_targeted_validation": "171_PASSED_IN_55_87_SECONDS_EDGE_ADAPTER_LOOPBACK_TRIBE_AGENTS_INTERNAL_ROUTES_OBS_PREVIEW_ASGI_STARTUP_AND_HOST_LIFECYCLE_COMPOSITION",
+      "compatibility_status": "FIRST_GOVERNED_EXPRESSION_SLICE_ONLY",
+      "blocked_reason": "UNSUPPORTED_EDGE_COMMAND_REJECTED_BEFORE_HOSTCOMMAND_ADMISSION",
+      "monitor_ui": "DIRECT_PUSH_REMAINS_LOCKED_UNTIL_GOVERNED_TASK_RUNTIME_REVIEW",
+      "governed_positive_slice": {
+        "command_id": "edge.command.push",
+        "allowed_command_type": "emotion_state_command",
+        "allowed_target_agent": "edge.somatic",
+        "canonical_chain": "SECURE_INGRESS_TO_TYPED_GOVERNOR_TO_OPERATOR_HOSTCOMMAND_TO_IMMUTABLE_TASKGRAPH_TO_RISK4_REVIEW_TO_ATTEMPT_LEASE_GRANT_BUDGET_VERIFICATION_ACCEPTANCE_TO_EDGE_EMBODIMENT_ENQUEUE_TO_TERMINAL_PREVIEW_TO_APP_LOCAL_DURABLE_OUTBOX",
+        "compiled_action": "avatar.set_expression",
+        "durable_first_response": "PENDING_DURABLY_QUEUED_NOT_PHYSICALLY_VERIFIED",
+        "exact_replay": "REOPEN_SAME_ACCEPTANCE_EFFECT_AND_OUTBOX_NO_SECOND_ENQUEUE_OR_SUBMIT",
+        "unknown_effect_reconciliation": "EXPIRED_DISPATCH_CLAIM_TO_IN_DOUBT_THEN_READ_ONLY_RECEIPT_QUERY_NO_RESUBMIT",
+        "physical_test_boundary": "REAL_HOST_SQLITE_WITH_RECORDING_ASYNC_COMMAND_PORT_NOT_REAL_EDGE_PROCESS_OR_DEVICE"
+      },
+      "local_targeted_validation": "78_PASSED_IN_79_67_SECONDS_OPERATOR_ACCEPTANCE_PREVIEW_EDGE_SQLITE_AND_STRUCTURE_REGRESSION",
       "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
-      "unified_static_scan": "PASS_FAILURES_EMPTY_AFTER_USER_EMOTION_PROFILE_EXPLICIT_CONSTRUCTION_PORT",
-      "compileall": "PASS",
-      "monitor_ui_build": "PASS_VITE_PRODUCTION_BUILD",
-      "npm_audit": "8_TRANSITIVE_VULNERABILITIES_2_MODERATE_6_HIGH_NOT_AUTO_FIXED_REQUIRES_SEPARATE_SUPPLY_CHAIN_REVIEW",
+      "unified_static_scan": "PASS_FAILURES_EMPTY_AFTER_EDGE_HANDLER_AND_OPERATOR_SUPPORT_RESPONSIBILITY_SPLIT",
+      "targeted_py_compile": "PASS",
+      "documentation_and_machine_state_validation": "27_PASSED_IN_10_53_SECONDS_DOC_AUTHORITY_FRESHNESS_AND_DELIVERY_METADATA_PLUS_JSON_PARSE_AND_DIFF_CHECK_PASS",
+      "monitor_ui_build": "NOT_RUN_NO_UI_CHANGE",
+      "npm_audit": "NOT_RUN_NO_DEPENDENCY_CHANGE",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "production_canary": "NOT_RUN",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-      "boundary": "NEGATIVE_AUTHORITY_RETIREMENT_ONLY_PRODUCTION_EDGE_TASKGRAPH_NODE_ACCEPTANCE_EFFECT_RECEIPT_RECONCILIATION_AND_REAL_EDGE_GATEWAY_CANARY_REMAIN_MISSING_NE01_REMAINS_INCOMPLETE"
+      "boundary": "FIRST_GOVERNED_EXPRESSION_SLICE_ONLY_REMAINING_33_OPERATOR_COMMANDS_MORE_EDGE_COMMAND_TYPES_REAL_EDGE_GATEWAY_DEVICE_AND_FULL_STACK_ACCEPTANCE_REMAIN_MISSING_NE01_REMAINS_INCOMPLETE"
     },
     "tribe_fallback_retirement_current_validation": {
       "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
@@ -2022,11 +2034,19 @@
       ]
     },
     "governed_operator_progress": {
-      "migrated": 2,
+      "migrated": 4,
       "total": 37,
-      "positive_commands": ["scheduler.task.trigger", "sys_mode.switch"],
-      "blocked_before_handler": 35,
+      "positive_commands": [
+        "scheduler.task.trigger",
+        "sys_mode.switch",
+        "task_terminal.reconcile",
+        "edge.command.push"
+      ],
+      "blocked_before_handler": 33,
       "sys_mode_execution_chain": "SECURE_INGRESS_TO_TYPED_OPERATOR_HOSTCOMMAND_IMMUTABLE_TASKGRAPH_REVIEW_CONTINUATION_SINGLE_APP_LOCAL_ACCEPTANCE_EFFECT_RUNTIME_HARDSTATE_JOURNAL",
+      "edge_execution_chain": "SECURE_INGRESS_TO_TYPED_GOVERNOR_TO_OPERATOR_HOSTCOMMAND_TO_IMMUTABLE_TASKGRAPH_TO_RISK4_REVIEW_TO_ACCEPTANCE_EFFECT_TO_TERMINAL_PREVIEW_TO_DURABLE_HOST_EMBODIMENT_OUTBOX",
+      "edge_scope": "EDGE_SOMATIC_EMOTION_STATE_COMMAND_ONLY_MORE_COMMANDS_REJECTED_BEFORE_ADMISSION",
+      "edge_reconciliation": "EXACT_REPLAY_REOPENS_SAME_OUTBOX_EXPIRED_CLAIM_QUERIES_RECEIPT_READ_ONLY_AND_NEVER_RESUBMITS",
       "outer_claim_result_authority": "CHECKSUM_CHAINED_OBS_OUTCOME_JOURNAL_V2_SEPARATES_DOMAIN_CONTINUATION_AND_TERMINAL_REFS_AND_FINALIZES_CENTRAL_CLAIM_ONLY_AFTER_TERMINAL_CONTINUATION",
       "historical_replay": "EXACT_ACCEPTANCE_EFFECT_AND_PERMANENT_HARDSTATE_EVENT_ID_LOOKUP_NO_REEXECUTION_EVEN_AFTER_MORE_THAN_1000_NEW_EVENTS",
       "no_change_boundary": "STATUS_SPECIFIC_NO_CHANGE_HANDLER_RECEIPT_IS_RUNTIME_SCOPE_BOUND_REQUIRES_NO_HARDSTATE_EVENT_REPORTS_SIDE_EFFECTS_EXECUTED_FALSE_AND_NEVER_FABRICATES_EVENT",
@@ -2038,8 +2058,8 @@
       "startup_recovery_gate": "PENDING_OR_CLAIMED_ACCEPTANCE_EFFECTS_BLOCK_GOVERNED_ADMISSION_UNTIL_DRAINED_OR_RECONCILED",
       "shutdown_order": "OBS_INGRESS_DRAIN_THEN_PRODUCERS_THEN_TASK_RUNTIME_EFFECT_DRAIN_THEN_WORKSPACE_THEN_MODE_DEPENDENCIES_THEN_COMMAND_SECURITY_STORES_THEN_APP_REFS",
       "shutdown_failure_boundary": "LIVE_OBS_SCHEDULER_OR_TASK_RUNTIME_CLOSE_FAILURE_PRESERVES_DEPENDENCIES_AND_PUBLISHED_REFS_AND_RETURNS_STABLE_RETRY_REQUIRED_ERROR",
-      "focused_validation": "265_PASSED_IN_179_82_SECONDS_SINGLE_FINAL_CONSOLIDATED_AFFECTED_BATCH_FIRST_ATTEMPT_264_PASSED_ONE_STALE_TEST_FIXTURE_FAILED",
-      "commit_bound_acceptance": "MISSING",
+      "focused_validation": "CURRENT_EDGE_OPERATOR_ACCEPTANCE_AND_PREVIEW_REGRESSION_PASS_PLUS_HISTORICAL_SYS_MODE_BATCH_SEE_TESTING_INDEX",
+      "commit_bound_acceptance": "PARTIAL_LOCAL_SQLITE_EDGE_SLICE_ONLY_SEVEN_ROUTE_ACCEPTANCE_MISSING",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "production_canary": "NOT_RUN",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -3754,13 +3774,14 @@
         "EdgeCommandPusher construction and injection cannot disable the Preview gate",
         "raw Edge HTTP transport and low-level embodiment command port are module-private and not exported",
         "Acceptance surface Gateway and Scheduler-derived Life Edge Gateway VTS MateEngine terminal proof reopen",
+        "Operator edge.embodiment_enqueue terminal proof reopens the accepted Task and app-local embodiment runtime scope before durable enqueue",
         "Acceptance surface permits only effect-bound minimal text and rejects raw_extra media secondary reply and content drift",
         "public embodiment submit and enqueue require exact Preview while claimed durable outbox dispatch uses a private submitter",
         "legacy WorkOrder and Acceptance Effect quarantine",
-        "all 37 direct Obs mutation commands fail closed before side effect"
+        "33 remaining direct Obs mutation commands fail closed before side effect"
       ],
       "missing": [
-        "Governed Operator TaskGraph replacement for 37 blocked commands",
+        "Governed Operator TaskGraph replacement for 33 blocked commands",
         "Acceptance-to-Embodiment derived Preview for reply-performance Gateway voice and chat cues",
         "production deployment multi-instance canary"
       ],
@@ -3771,11 +3792,14 @@
         "host_brain/governor/action_preview.py",
         "host_brain/task_runtime/acceptance_effect_dispatcher.py",
         "host_brain/app/acceptance_effect_handlers.py",
+        "host_brain/app/accepted_edge_embodiment_handler.py",
+        "host_brain/app/governed_operator_edge_support.py",
         "host_brain/channels/edge_transport.py",
         "host_brain/channels/embodiment.py",
         "host_brain/lifecycle_runtime/proactive_dispatch.py",
         "host_brain/app/vision/proactive_push_client.py",
         "tests/integration/test_ne03_action_preview_authority.py",
+        "tests/integration/test_ne01_governed_operator_edge_command.py",
         "tests/unit/test_ne03_action_preview_front_doors.py"
       ]
     },

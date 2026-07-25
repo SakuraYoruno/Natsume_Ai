@@ -95,12 +95,13 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
     assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset(
         {
+            "edge.command.push",
             "scheduler.task.trigger",
             "sys_mode.switch",
             "task_terminal.reconcile",
         }
     )
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 34
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 33
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
         expected
     )
