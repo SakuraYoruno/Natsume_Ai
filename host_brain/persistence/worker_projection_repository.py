@@ -62,6 +62,22 @@ _OPTIONAL_BODY_FIELDS = (
     "acceptance_effect_intents",
     "budget_usage",
 )
+_IMMUTABILITY_TRIGGER_SQL = {
+    "trg_task_runtime_worker_projection_no_update": """
+        CREATE TRIGGER trg_task_runtime_worker_projection_no_update
+        BEFORE UPDATE ON task_runtime_worker_projection
+        BEGIN
+            SELECT RAISE(ABORT, 'TASK_RUNTIME_WORKER_PROJECTION_IMMUTABLE');
+        END
+    """,
+    "trg_task_runtime_worker_projection_no_delete": """
+        CREATE TRIGGER trg_task_runtime_worker_projection_no_delete
+        BEFORE DELETE ON task_runtime_worker_projection
+        BEGIN
+            SELECT RAISE(ABORT, 'TASK_RUNTIME_WORKER_PROJECTION_IMMUTABLE');
+        END
+    """,
+}
 
 
 class WorkerProjectionStoreError(RuntimeError):
@@ -69,6 +85,10 @@ class WorkerProjectionStoreError(RuntimeError):
         self.reason_code = str(reason_code or WORKER_PROJECTION_INVALID)
         self.detail = str(detail or "worker projection store failed")
         super().__init__(f"{self.reason_code}: {self.detail}")
+
+
+def _normalize_schema_sql(value: Any) -> str:
+    return re.sub(r"[\s\"`\[\];]+", "", str(value or "").lower())
 
 
 def validate_worker_projection_payload(
@@ -248,14 +268,29 @@ class WorkerProjectionStore:
                 )
                 for name in required_indexes
             }
+            expected_triggers = {
+                name: _normalize_schema_sql(sql)
+                for name, sql in _IMMUTABILITY_TRIGGER_SQL.items()
+            }
+            triggers = {
+                str(item["name"]): _normalize_schema_sql(item["sql"])
+                for item in conn.execute(
+                    """
+                    SELECT name, sql FROM sqlite_master
+                    WHERE type = 'trigger' AND tbl_name = ?
+                    """,
+                    (_TABLE,),
+                ).fetchall()
+            }
             if (
                 columns != expected_columns
                 or route_guard not in create_sql
                 or indexes != required_indexes
+                or triggers != expected_triggers
             ):
                 raise WorkerProjectionStoreError(
                     WORKER_PROJECTION_SCHEMA_NOT_READY,
-                    "worker projection migration 0114 is missing or structurally drifted",
+                    "worker projection migrations 0114/0127 are missing or structurally drifted",
                 )
         finally:
             conn.close()

@@ -15,6 +15,16 @@
 - T-NE01-GOVERNED-OPERATION-REACQUIRE-05：`REACQUIRE` 必须保持同一 Attempt、分配严格更高 fencing token、新 owner 与新的 Budget execution segment；原 route continuation 只能在 durable reacquisition 成功后调用。首次续跑后 Operation 必须为 `COMMITTED`。
 - T-NE01-GOVERNED-OPERATION-REACQUIRE-06：相同外层请求或 Acceptance Effect exact replay 不得再次调用目标 continuation/worker；若首次结果不确定，必须映射为 Effect outcome unknown 并保留 reconciliation，不得伪造失败或盲重放。
 
+## T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT
+
+- T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT-01：无 cancellation intent 的 Operation reconciliation 只允许 `COMMIT`，且 `downstream_receipt_ref` 必须是 canonical `worker-projection://.../<sha256>`；普通 `RELEASE`、任意 transport URI 和缺失 projection 均失败关闭。
+- T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT-02：读取层必须重开 immutable HostCommand/TaskGraph、exact Node/Attempt、Operation scope/fingerprint、route/target 和 WorkerProjection，并重新计算 receipt tail 与 payload digest；调用方自报 lineage 不具备 authority。
+- T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT-03：Operation mutation 的同一 SQLite UoW 必须再次查询 Graph/Node/Attempt/cancellation/Lease/WorkerProjection；旧 Lease 未到期、Graph 正在取消、状态或 lineage 漂移时不能 COMMIT。focused Store 不得创建独立连接或第二 UoW。
+- T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT-04：0127 migration 必须以数据库 trigger 拒绝 WorkerProjection UPDATE/DELETE；schema readiness 缺 trigger 或 trigger SQL 漂移时失败。
+- T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT-05：签名 COMMIT 只产生一个 `OPERATION_RECOVERY_COMMIT`，保持同一 Attempt，并由原 route continuation 完成 Verification、Acceptance、Effect 与 Graph terminal；worker 调用数必须保持 1。
+- T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT-06：Store COMMIT 已成功但响应丢失时，服务必须 exact reopen 同一 terminal Operation；Accepted handler 可重新进入幂等 continuation以关闭其后崩溃窗，但 Task terminal replay不得再次执行 worker。
+- T-NE01-SIGNED-WORKER-CHECKPOINT-COMMIT-07：错误 Ed25519 key/signature、attestation drift、projection digest drift、直接 SQL UPDATE/DELETE 和 concurrent live Lease 均须零终态 mutation拒绝。该套测试只证明单节点 canonical checkpoint，不得标记 general unknown-effect 或 multi-node recovery 完成。
+
 ## T-NE01-WORKER-INTERRUPTION-RECOVERY
 
 - T-NE01-WORKER-INTERRUPTION-RECOVERY-01：Operation 预留后的已知 worker/heartbeat/caller interruption 必须以 exact Attempt、Lease、owner、fence 与 expected version 原子写 `RECOVERY_REQUIRED + OPERATION_RECOVERY_REQUIRED Outbox`；TTL 尚未到期也立即可见。

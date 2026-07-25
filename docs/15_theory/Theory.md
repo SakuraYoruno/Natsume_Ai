@@ -714,6 +714,8 @@ Lease 不是“某个逻辑 worker 名称曾经拥有任务”，而是“某次
 
 “证明材料”与“执行引用”也必须分离。原始签名、attestation 和可能敏感的 transport identity 应保存在专用、不可改写、读取时仍会复验的 evidence authority 中；通用 WorkOrder、TaskGraph 和 Effect 只携带确定性的 ref/digest 与最小 subject binding。Review 和 Preview 都不把 ref 变成执行权，只有 Acceptance 后的 handler 重开完整证据并重新验证，才可调用 reconciliation service。若允许 `REACQUIRE`，它必须延续同一 Attempt、使用严格更高 fence、新 owner 和独立预算分段，并继续原 immutable graph；它不能靠创建第二 Attempt 或重新规划掩盖旧 Operation。终态 exact replay 必须只读返回，不得再次进入 worker。
 
+签名 `COMMIT` 也不能只相信一个调用方提供的外部 URI。若 worker 已留下 canonical durable projection，则可把该 projection 当作检查点候选，但必须同时满足两层证据：读取层重新计算投影 digest 并绑定 immutable Command/Graph/Node/Attempt/route/target，写入层在与 Operation 状态变更相同的事务中再次打开同一投影、确认旧 Lease 已过期、Graph 未取消且 scope/fingerprint 未漂移。投影自身必须 append-only；否则签名之后被改写的 payload 会把证明与事实分离。只有上述条件全部成立时，`RECOVERY_REQUIRED → COMMITTED` 才表示“已确认这个既存 checkpoint”，后续仍由原图完成 Verification、Acceptance 和 Effect，而不是重新运行 worker。这个窄窗不推导 `NO_SIDE_EFFECT`、不授权普通 `RELEASE`，也不能从单节点证据外推到多节点批次。
+
 恢复发现也必须与恢复授权分离。启动扫描、周期轮询和事件 wake 只能重复询问“是否已有可继续的 durable authority”，不能因时间经过就获得 worker、Lease takeover 或副作用归因权。周期 supervisor 应串行化扫描、合并重复 wake，在关停时停止产生新扫描并等待已进入的持久化事务完成；普通故障可以留存不含敏感正文的类型化 health 并在下一轮重试，但不能通过取消协程截断未知提交边界。当前 Host 与 Internal survivor 都复用原 exact continuation：live Lease、漂移 tuple、未知效果和不满足 sealed lineage 的 checkpoint 仍分别 `DEFERRED`、`BLOCKED` 或 `HOLD`。因此“进程存活期间会再次发现”不等于“通用恢复已经完成”。
 
 ### 11.3 Verification、Acceptance 与 Receipt 不可合并

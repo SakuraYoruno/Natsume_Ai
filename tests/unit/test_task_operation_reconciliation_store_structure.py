@@ -7,6 +7,9 @@ from host_brain.persistence import task_repository
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
 )
+from host_brain.persistence.task_operation_checkpoint_reconciliation_store import (
+    TaskOperationCheckpointReconciliationStoreMixin,
+)
 from host_brain.persistence.task_worker_interruption_store import (
     TaskWorkerInterruptionStoreMixin,
 )
@@ -83,3 +86,33 @@ def test_worker_interruption_entry_is_owned_by_focused_transactional_mixin() -> 
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     assert methods == {"mark_worker_interruption_recovery_required"}
+
+
+def test_checkpoint_reconciliation_entry_is_owned_by_focused_store_mixin() -> None:
+    assert (
+        task_repository.DurableTaskStore.reconcile_operation_checkpoint
+        is TaskOperationCheckpointReconciliationStoreMixin.reconcile_operation_checkpoint
+    )
+    assert (
+        TaskOperationCheckpointReconciliationStoreMixin
+        in task_repository.DurableTaskStore.__bases__
+    )
+    module = inspect.getmodule(
+        TaskOperationCheckpointReconciliationStoreMixin
+    )
+    assert module is not None
+    tree = ast.parse(inspect.getsource(module))
+    mixin = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    methods = {
+        node.name
+        for node in mixin.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert methods == {"reconcile_operation_checkpoint"}
+    forbidden_attributes = {"_connect", "_transaction", "commit", "rollback"}
+    assert not {
+        node.attr
+        for node in ast.walk(mixin)
+        if isinstance(node, ast.Attribute)
+        and node.attr in forbidden_attributes
+    }

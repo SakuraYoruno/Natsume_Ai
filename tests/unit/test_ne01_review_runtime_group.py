@@ -288,6 +288,74 @@ async def test_group_routes_signed_operation_reacquisition_once(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("surface", "target_id", "runtime_name"),
+    (
+        (HostCommandSurface.CHAT, "chat", "host"),
+        (HostCommandSurface.HOST_INPUT, "host-input", "host"),
+        (HostCommandSurface.TOOL, "tool", "host"),
+        (HostCommandSurface.GATEWAY, "gateway", "host"),
+        (HostCommandSurface.INTERNAL, "internal", "internal_agent"),
+        (HostCommandSurface.SCHEDULER, "scheduler", "scheduler"),
+        (
+            HostCommandSurface.OPERATOR,
+            "operator_sys_mode_switch",
+            "operator",
+        ),
+    ),
+)
+async def test_group_routes_signed_checkpoint_continuation_once(
+    surface: HostCommandSurface,
+    target_id: str,
+    runtime_name: str,
+) -> None:
+    log: list[str] = []
+    runtimes = {
+        name: _Runtime(name, log)
+        for name in ("host", "internal_agent", "scheduler", "operator")
+    }
+    command = _command(surface, with_claim=False, target_id=target_id)
+    group = GovernedRuntimeGroup(
+        runtimes,
+        review_store=object(),
+        review_decision_store=object(),
+        command_repository=_Commands(command),
+        review_continuation_worker_factory=lambda **kwargs: _Worker(
+            log,
+            **kwargs,
+        ),
+        review_continuation_worker_id="operation-checkpoint-group-worker",
+    )
+    await group.activate()
+    projection_ref = "worker-projection://checkpoint/" + "d" * 64
+    result = await group.continue_operation_reconciliation(
+        {
+            "graph_id": command.graph_id,
+            "graph_revision": command.graph_revision,
+            "operation": {
+                "status": "COMMITTED",
+                "receipt_ref": projection_ref,
+                "reconciliation_action": "COMMIT",
+                "reconciliation_outcome": "SIDE_EFFECT_CONFIRMED",
+            },
+            "checkpoint": {
+                "projection_ref": projection_ref,
+                "payload_digest": "sha256:" + "d" * 64,
+                "decision": "APPROVE",
+            },
+        }
+    )
+
+    assert result["execution_receipt"]["accepted"] is True
+    assert len(runtimes[runtime_name].operation_reacquisitions) == 1
+    assert (
+        sum(len(runtime.operation_reacquisitions) for runtime in runtimes.values())
+        == 1
+    )
+    await group.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("surface", "runtime_name"),
     [
         (HostCommandSurface.CHAT, "host"),

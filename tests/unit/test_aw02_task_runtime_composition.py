@@ -30,6 +30,9 @@ from host_brain.task_runtime.graph_cancellation_operation_reconciliation import 
 from host_brain.task_runtime.operation_reacquisition import (
     OperationReconciliationCommandService,
 )
+from host_brain.task_runtime.operation_checkpoint_reconciliation import (
+    OperationCheckpointReconciliationService,
+)
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
@@ -334,6 +337,10 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     assert isinstance(
         container.operation_reconciliation_service._cancellation,
         GraphCancellationOperationReconciliationService,
+    )
+    assert isinstance(
+        container.operation_reconciliation_service._checkpoint,
+        OperationCheckpointReconciliationService,
     )
     assert isinstance(
         container.effect_reconciliation_service,
