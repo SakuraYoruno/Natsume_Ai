@@ -8,7 +8,9 @@
 版本：v3.1
 日期：2026-07-25
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
-修订执行基线：`origin/dev@c347135f3`；#103/#104/#114/#116 已合并，均只按其实际切片计证据。#114 只证明 exact Internal 单节点的后置审核取消可从独立 `BLOCKED` intent 与 trusted `CANCELLED` final decision 恢复，并在重启后先关闭 nonacceptance claim、再 tombstone/清理 Workspace；它不证明一般取消或多节点恢复。当前连续 migration head 为 0125 Acceptance Effect staging authority；0115～0125 保留为连续地基，但都不代表 canary、NE-01 或 D20c 外部收益已完成。生产 Service Locator 已物理清零，ResourceManager 共享状态文件 authority 也已由 0123 Host-fenced Runtime Event journal 取代；0124 封闭 Graph/Node/HostCommand 新准入 INSERT，0125 封闭 Acceptance Effect 新 INSERT 与非规范初始状态。当前 NE-01 后续转向其它运行期 mutation authority、其它外部资源恢复、外部 namespace、通用恢复和剩余执行 authority。
+修订执行基线：`origin/dev@5c8bd7d70`；#103/#104/#114/#116/#118 已合并，均只按其实际切片计证据。#114 只证明 exact Internal 单节点的后置审核取消可从独立 `BLOCKED` intent 与 trusted `CANCELLED` final decision 恢复，并在重启后先关闭 nonacceptance claim、再 tombstone/清理 Workspace；它不证明一般取消或多节点恢复。#116 只收敛生产 locator/Host authority 与首条受治理 Edge 表情指令链，不代表完整 Operator 或真实 Edge canary。当前连续 migration head 为 0125 Acceptance Effect staging authority；0115～0125 保留为连续地基，但都不代表 canary、NE-01 或 D20c 外部收益已完成。生产 Service Locator 已物理清零，ResourceManager 共享状态文件 authority 也已由 0123 Host-fenced Runtime Event journal 取代；0124 封闭 Graph/Node/HostCommand 新准入 INSERT，0125 封闭 Acceptance Effect 新 INSERT 与非规范初始状态。当前 NE-01 后续转向其它运行期 mutation authority、其它外部资源恢复、外部 namespace、通用恢复和剩余执行 authority。
+
+本分支正在收口另一类剩余执行期 authority：`HostEmotionRuntime` 由 Host root 构造并被 Input、Tribe、Lifecycle 精确共享，`ResponseFormDecider` 由 Input composition 独占；旧情绪向量、时间线、前一标签、画像、日记节流和回复形态 module-global singleton 全部退役。replay/render 归一化不得推进状态，只有 admission resolver 可 ingest。该切片无 migration，不把易失情感连续性升级为长期人格资产，也不改变 NE-01 `IN_PROGRESS`。
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)

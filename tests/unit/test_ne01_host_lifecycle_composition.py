@@ -27,6 +27,7 @@ from host_brain.composition.host_application import (
 from host_brain.app.application_port_wiring import (
     build_process_application_ports,
 )
+from host_brain.app.emotion_context import HostEmotionRuntime
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
 )
@@ -180,6 +181,7 @@ def _ports(
         return value
 
     provider = lambda: object()
+    emotion_runtime = HostEmotionRuntime()
     return HostLifecycleApplicationPorts(
         memory_guard=provider,
         state_arbiter=provider,
@@ -193,6 +195,8 @@ def _ports(
         mode_transition_service_factory=build_mode,
         activity_monitor_factory=build_activity,
         resource_manager_factory=build_resource,
+        emotion_context_runtime=lambda: emotion_runtime,
+        user_emotion_profile=emotion_runtime.user_emotion_profile,
     )
 
 
@@ -273,14 +277,11 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     bond_client = object()
     edge_probe = lambda: object()
     edge_status_builder = lambda _probe: {}
-    emotion_profile = object()
-    emotion_profile_provider = lambda: emotion_profile
     construction_ports = replace(
         build_process_application_ports(),
         persistence_db_path=lambda: ":memory:",
         probe_edge_rpc_health=edge_probe,
         build_edge_dependency_probe_statuses=edge_status_builder,
-        user_emotion_profile=emotion_profile_provider,
     )
     monkeypatch.setattr(
         host_application_module,
@@ -321,8 +322,13 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
         ports.lifecycle.build_edge_dependency_probe_statuses
         is edge_status_builder
     )
-    assert ports.lifecycle.user_emotion_profile is emotion_profile_provider
-    assert ports.lifecycle.user_emotion_profile() is emotion_profile
+    emotion_runtime = ports.lifecycle.emotion_context_runtime()
+    assert isinstance(emotion_runtime, HostEmotionRuntime)
+    assert ports.lifecycle.emotion_context_runtime() is emotion_runtime
+    assert (
+        ports.lifecycle.user_emotion_profile()
+        is emotion_runtime.user_emotion_profile()
+    )
     with pytest.raises(RuntimeError, match="LIFE_MEMORY_SERVICE_NOT_COMPOSED"):
         ports.lifecycle.life_memory_service()
     memory_service = object()
@@ -625,6 +631,7 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
             return {}
 
     timeline = Timeline()
+    emotion_runtime = HostEmotionRuntime(timeline_provider=lambda: timeline)
     provider = lambda: sentinel
     host_services = replace(
         _ports([]),
@@ -635,11 +642,12 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
         silence_engine=provider,
         state_write_arbiter=provider,
         emotion_timeline=lambda: timeline,
+        emotion_context_runtime=lambda: emotion_runtime,
         bond_stage_engine=provider,
         shared_memory_index=provider,
         milestone_tracker=provider,
         prompt_registry=provider,
-        user_emotion_profile=lambda: {"source": "typed-bundle"},
+        user_emotion_profile=emotion_runtime.user_emotion_profile,
     )
 
     lifecycle = build_lifecycle_runtime_application_ports(
@@ -652,7 +660,10 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
     assert lifecycle.get_model_attempt_service is host_services.model_attempt_service
     assert lifecycle.emotion_timeline.rebuild_summary(window_ms=1) == {}
     assert lifecycle.emotion_timeline.build_daily_diary(window_ms=1) == {}
-    assert lifecycle.get_user_emotion_profile() == {"source": "typed-bundle"}
+    assert (
+        lifecycle.get_user_emotion_profile()
+        is emotion_runtime.user_emotion_profile()
+    )
     assert tribe.ledger is provider
     assert tribe.model_attempt_service is host_services.model_attempt_service
     assert tribe.emotion_timeline() is timeline

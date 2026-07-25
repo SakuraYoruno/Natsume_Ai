@@ -14,6 +14,7 @@ from host_brain.app import (
     tool_runtime_composition,
 )
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
+from host_brain.app.emotion_context import HostEmotionRuntime
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
 from host_brain.composition.host_application import HostApplicationPorts
@@ -23,6 +24,7 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
     """Build the same typed Host bundle that the ASGI composition consumes."""
     provider = lambda: object()
     factory = lambda **_kwargs: object()
+    emotion_runtime = HostEmotionRuntime()
     values: dict[str, object] = {
         "memory_guard": provider,
         "state_arbiter": provider,
@@ -45,11 +47,12 @@ def _host_lifecycle_ports(**overrides: object) -> HostLifecycleApplicationPorts:
         "silence_engine": provider,
         "state_write_arbiter": provider,
         "emotion_timeline": provider,
+        "emotion_context_runtime": lambda: emotion_runtime,
         "bond_stage_engine": provider,
         "shared_memory_index": provider,
         "milestone_tracker": provider,
         "prompt_registry": provider,
-        "user_emotion_profile": provider,
+        "user_emotion_profile": emotion_runtime.user_emotion_profile,
         "intent_engine": provider,
         "multimodal_observer": provider,
         "multimodal_processor": provider,
@@ -938,6 +941,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "internal_agent_workspace_runtime": workspace_runtime,
             "life_receipt_reader_provider": kwargs[
                 "life_receipt_reader_provider"
+            ],
+            "embodiment_runtime_provider": kwargs[
+                "embodiment_runtime_provider"
             ],
         }
         fake_build_acceptance_effect_dispatcher(

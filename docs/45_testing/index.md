@@ -7,6 +7,14 @@
 维护日期：2026-07-25
 状态：当前证据
 
+## NE-01 Host 情感与回复形态 app-local authority 当前切片
+
+- 每个 Host root 通过 `emotion_runtime_factory` 惰性持有一个 `HostEmotionRuntime`；Input、Tribe 与 Lifecycle 解析同一实例，两个重叠 Host root 的连续向量、Timeline 与用户画像互不共享。
+- 不带 runtime 的 `normalize_chat_emotion_context()` 是 replay/render 纯路径；只有 `resolve_chat_emotion_context(..., runtime=...)` 可以推进连续向量、前一标签、Timeline 与画像。缺失或错误 runtime 以 `HOST_EMOTION_RUNTIME_NOT_INJECTED` 失败关闭。
+- `ResponseFormDecider` 由每个 Input composition 独占，旧 `_decider/get_reply_form_decider/get_response_form_decider` 不存在；并发语音额度在一个锁内完成检查和记账。
+- #118 合并并 rebase 后的最终互不相加验证批次为：情感/Composition/Prefrontal `81 passed in 16.61s`，ASGI/Input/NE-03 `119 passed in 89.26s`，文档/机器状态 `51 passed in 23.26s`；统一 static scan 无失败，完整架构静态 Gate 1～14 为 `PASS`、`failed_gates=[]`。这些结果只证明本地定向边界，不是波次 integration、真实多 Host server canary、情感 durability、NE-06 或 NE-07 全栈证据。
+- 无 migration；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
+
 ## NE-01 Edge 指令首条正向 governed 切片
 
 - 旧 `EdgeCommandPusher` 进程 owner、startup 注册与 Tribe/内部直推仍保持为 0；Obs `edge.command.push` 现在只允许 `target_agent=edge.somatic`、`command_type=emotion_state_command` 与 `emotion_tag/intensity` 白名单，其他 command 在 HostCommand admission 前失败关闭。

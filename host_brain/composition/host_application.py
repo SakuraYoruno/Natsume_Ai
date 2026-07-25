@@ -234,6 +234,11 @@ def build_production_host_application_ports(
             process_application_ports.semantic_recaller_factory
         ),
     )
+    emotion_context_runtime = _app_local_lazy_provider(
+        lambda: process_application_ports.emotion_runtime_factory(
+            timeline_provider=memory_runtime_owner.require_emotion_timeline,
+        )
+    )
     governance_runtime_owner = HostGovernanceRuntimeOwner(
         ledger_provider=ledger_provider,
         persistence_db_path_provider=(
@@ -280,12 +285,15 @@ def build_production_host_application_ports(
             emotion_timeline=(
                 memory_runtime_owner.require_emotion_timeline
             ),
+            emotion_context_runtime=emotion_context_runtime,
             bond_stage_engine=bond_runtime_owner.require_stage_engine,
             bond_neo4j_client=bond_runtime_owner.require_client,
             shared_memory_index=shared_memory_index,
             milestone_tracker=_app_local_provider(milestone_tracker),
             prompt_registry=authority_runtime_owner.require_prompt_registry,
-            user_emotion_profile=process_application_ports.user_emotion_profile,
+            user_emotion_profile=(
+                lambda: emotion_context_runtime().user_emotion_profile()
+            ),
             intent_engine=governance_runtime_owner.require_intent_engine,
             multimodal_observer=multimodal_observer,
             multimodal_processor=_app_local_provider(multimodal_processor),

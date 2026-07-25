@@ -12,10 +12,13 @@ import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.governed_task_adapter import _build_contracts
-from host_brain.app.asgi import _runtime_environment_observation_provider
 from host_brain.app.emotion_context import (
+    HostEmotionRuntime,
     build_chat_emotion_snapshot,
     resolve_chat_emotion_context,
+)
+from host_brain.app.host_runtime_context_wiring import (
+    runtime_environment_observation_provider,
 )
 from host_brain.integrations.runtime_events import RuntimeEventStore
 from host_brain.orchestration.host_route_contracts import (
@@ -590,7 +593,7 @@ def test_context_application_resolves_eight_required_scene_inputs(
     emotion: dict[str, Any] | None,
 ) -> None:
     production_mode = "gaming" if trusted_activity == "GAMING" else "focus"
-    environment_provider = _runtime_environment_observation_provider(
+    environment_provider = runtime_environment_observation_provider(
         SimpleNamespace(
             get_current_status=lambda: {"sys_mode": production_mode},
         )
@@ -673,7 +676,10 @@ def test_real_chat_emotion_chain_drives_world_and_scene_projection(
     request = _request(
         message="这个怎么又卡住了，真的很烦",
     )
-    emotion_context = resolve_chat_emotion_context(request_body=request)
+    emotion_context = resolve_chat_emotion_context(
+        request_body=request,
+        runtime=HostEmotionRuntime(),
+    )
     emotion_snapshot = build_chat_emotion_snapshot(
         emotion_context=emotion_context,
         source="chat_runtime_input",

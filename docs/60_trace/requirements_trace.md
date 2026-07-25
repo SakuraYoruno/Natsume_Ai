@@ -141,6 +141,8 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 
 本轮在同一 trace 边界继续移除 Chat retrieval 的直接 locator：生产 `run_retrieval` 现在携带 Host-scoped conversation history、preference-pack builder 和绑定 ledger/Life memory/Bond Neo4j 的 recall factory；`chat_retrieval_helpers.py` 的 `process_services` import 为 0。端口与检索定向集合 `48 passed in 5.55s`，相邻 Surface/read-route 单元集合 `17 passed in 1.17s`；二者不得与上文或历史集合相加。该证据不涵盖 Chat Acceptance、外部 delivery、全局 locator 清零、波次 integration 或 NE-07。
 
+| TRACE-EXEC-08AJ | FR-ARCH-001、FR-SURFACE、FR-NLE-003 | 情感连续状态与回复形态额度不得由进程 module-global singleton 拥有，回放不得推进 admission 状态 | `app/emotion_context.py`、`app/reply_form_decider.py`、`app/input_runtime_composition.py`、`app/tribe_composition.py`、`composition/host_application.py`、`contracts/host_lifecycle.py` | exact Host root 共享一个 `HostEmotionRuntime`，重叠 root identity/profile 隔离；Input composition 独占 `ResponseFormDecider`；纯 normalize 重放三次不改变 profile；50 个并发语音决定精确计数 50；旧 emotion/profile/decider globals 与 getters 静态库存为 0。最终批次分别为 affect/composition `81 passed`、ASGI/Input/NE-03 `119 passed`、文档/机器状态 `51 passed`，不得相加；统一 static scan 与 Gate 1～14 通过 | `APP_LOCAL_OWNER_WIRED / LOCAL_TARGETED_PASS / DURABILITY_CANARY_MISSING / NE01_IN_PROGRESS`；无 migration、波次 integration、真实 multi-Host server 或 NE-07 实测 | 将 Feedback/Persona 永久演化留给 NE-06；继续 NE-01 其它 authority 与恢复缺口 |
+
 ## 4. Planning Search
 
 | Trace | FR | 合同 | 生产落点 | 证据 | 当前状态 | 下一波 |

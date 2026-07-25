@@ -10,12 +10,17 @@ from host_brain.app.chat_handler import _evaluate_governor_with_timing
 from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator
 from host_brain.app.durable_task_status import build_durable_task_status_projection
 from host_brain.app.emotion_context import (
+    HostEmotionRuntime,
     build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
 )
 from host_brain.app.multimodal_jobs import create_multimodal_job, update_multimodal_job
-from host_brain.app.reply_form_decider import MsgType, ReplyFormDecision, get_reply_form_decider
+from host_brain.app.reply_form_decider import (
+    MsgType,
+    ReplyFormDecision,
+    ResponseFormDecider,
+)
 from host_brain.app.schemas import ChatRequest
 from host_brain.app.surface_reply_preprocessor import (
     render_quick_gateway_progress_text,
@@ -44,6 +49,8 @@ def build_input_runtime_application_ports(
     get_life_snapshot_reader = _host_provider(host_services, "life_snapshot_reader")
     get_multimodal_observer = _host_provider(host_services, "multimodal_observer")
     get_multimodal_processor = _host_provider(host_services, "multimodal_processor")
+    get_emotion_context_runtime = _emotion_runtime_provider(host_services)
+    reply_form_decider = ResponseFormDecider()
     get_thalamus_agent = _tribe_agent_provider(
         tribe_runtime_agent_ports,
         "get_thalamus_agent",
@@ -85,6 +92,12 @@ def build_input_runtime_application_ports(
         ):
             yield event
 
+    def resolve_chat_emotion_context_with_runtime(**kwargs: Any) -> dict[str, Any]:
+        return resolve_chat_emotion_context(
+            runtime=get_emotion_context_runtime(),
+            **kwargs,
+        )
+
     return InputRuntimeApplicationPorts(
         get_intent_engine=get_intent_engine,
         get_ledger=get_ledger,
@@ -98,13 +111,13 @@ def build_input_runtime_application_ports(
         evaluate_governor_with_timing=_evaluate_governor_with_timing,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_chat_governance_snapshot=build_chat_governance_snapshot,
-        resolve_chat_emotion_context=resolve_chat_emotion_context,
+        resolve_chat_emotion_context=resolve_chat_emotion_context_with_runtime,
         chat_request_factory=ChatRequest,
         cortex_orchestrator_sse_generator=cortex_orchestrator_with_app_ports,
         create_multimodal_job=create_multimodal_job,
         update_multimodal_job=update_multimodal_job,
         reply_form_decision_type=ReplyFormDecision,
-        get_reply_form_decider=get_reply_form_decider,
+        get_reply_form_decider=lambda: reply_form_decider,
         message_type=MsgType,
         trigger_reply_performance=trigger_reply_performance_with_runtime,
         render_quick_gateway_progress_text=render_quick_gateway_progress_text,
@@ -123,6 +136,23 @@ def _host_provider(
     if host_services is None:
         return _missing_app_local_provider
     return host_services.require_provider(field_name)
+
+
+def _emotion_runtime_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+) -> Callable[[], HostEmotionRuntime]:
+    if host_services is not None:
+        provider = host_services.require_provider("emotion_context_runtime")
+
+        def require_host_runtime() -> HostEmotionRuntime:
+            runtime = provider()
+            if not isinstance(runtime, HostEmotionRuntime):
+                raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
+            return runtime
+
+        return require_host_runtime
+    local_runtime = HostEmotionRuntime()
+    return lambda: local_runtime
 
 
 def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
