@@ -61,14 +61,15 @@
 - 目标模块 `compileall`、两份机器状态 JSON、`git diff --check` 均通过；fresh architecture static Gate 1～14 为 `PASS`、`failed_gates=[]`，未扩大白名单。
 - 该切片没有 migration，不证明 raw worker failure、unknown-effect attribution、其它 cancellation、一般 multi-node/batch settlement、一般 write、NE-01 波次 integration 或 NE-07 Docker 全栈。程序状态保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
-## NE-01 Internal pre-checkpoint 无副作用取消收口当前切片
+## NE-01 Internal pre-checkpoint 签名终态取消收口当前切片
 
-- 新 deterministic result 绑定 command/claim、graph revision、node/attempt/lease、Operation reservation、reconciliation proof digest、cancellation intent 与 final decision；任一字段漂移都会产生不同身份或失败关闭。
-- canonical TaskStore 只接受单节点 Internal `delegate:agent_runtime`、Graph/Node/Attempt/Lease 全部 `CANCELLED`、唯一 Operation 已验签为 `RELEASE + NO_SIDE_EFFECT`，并确认 WorkerProjection、Acceptance Effect 与 Agent result 均为 0。`RECOVERY_REQUIRED` 不会被推断为无副作用。
-- terminal reconciler 的破坏性顺序固定为 Secure Ingress claim durable commit → Workspace cleanup receipt → stage discard；claim 写失败时 Workspace 与 stage 都保留。HostCommand Repository 复用 Process Task Runtime 的同一验签 TaskStore，重启后可重新验证 result，proof signature 篡改会令 replay 拒绝。
-- 当前定向集合为 composition/unit/contract/integration `44 passed in 5.40s`，另有 Internal Runtime 单元 `8 passed in 0.57s`；两组不相加。真实 SQLite 集成覆盖签名 proof、unknown-effect hold、claim exact replay、进程对象重建与篡改拒绝。
-- 最终受影响 Gate 将上述运行时集合与 HostCommand repository/contract、Universal Runtime coverage、提交元数据及文档 freshness 合并为 `115 passed in 51.41s`；`compileall` 成功，静态架构 Gate 1～14 全部 `PASS`、`failed_gates=[]`。该 115 项包含前述测试，不得与 44/8 相加。
-- 该切片没有 migration，也不证明 raw worker failure、一般 unknown-effect attribution、其它取消、多节点恢复、周期 survivor、NE-01 wave integration 或 NE-07 Docker 全栈。NE-01 保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+- 中立合同校验器是 Store、terminal reconciler 与 HostCommand replay 的唯一终态矩阵定义。它只接受 `RELEASED + RELEASE + NO_SIDE_EFFECT + no receipt`，或 `COMMITTED + COMMIT + SIDE_EFFECT_CONFIRMED + durable receipt`；混合、缺失、未知或篡改组合失败关闭。
+- deterministic result 绑定 command/claim、graph revision、node/attempt/lease、Operation reservation、reconciliation proof digest、cancellation intent 与 final decision。无副作用路径继续产生 byte-compatible v1 digest；confirmed-effect 路径使用 v2 并额外绑定 action、outcome 与 downstream receipt，任一字段漂移都会改变身份或令 replay 拒绝。
+- canonical TaskStore 还要求单节点 Internal `delegate:agent_runtime`、Graph/Node/Attempt/Lease 全部 `CANCELLED`、唯一已验签 Operation、WorkerProjection/Acceptance Effect/Agent result 均为 0。confirmed downstream effect 只证明 Operation 终态，不会伪造 Agent result 或 Acceptance。
+- terminal reconciler 的破坏性顺序固定为 Secure Ingress claim durable commit → Workspace cleanup receipt → stage discard；claim 写失败时 Workspace 与 stage 都保留。真实 SQLite + Git 集成以临时 Ed25519 key 和真实 worktree 证明 COMMIT receipt 跨对象重建重开、claim-before-cleanup、source repository 不变及 proof/receipt 篡改拒绝。
+- 本切片聚焦的 unit/contract/integration 去重集合为 `83 passed in 78.94s`；共享中立校验器及其 exact status matrix 补测后的核心三文件复跑为 `40 passed in 9.19s`，后者包含于 83 项，不能相加。
+- 最终受影响 Gate 把上述运行时集合与 Universal Runtime coverage、文档 authority/freshness 和交付元数据合并为 `122 passed in 89.73s`；该 122 项包含 83/40，禁止再次相加。fresh 静态架构 Gate 1～14 为 `PASS`、`failed_gates=[]`。
+- 该切片没有 migration，也不证明 raw worker failure、一般 unknown-effect attribution、其它取消、多节点恢复、NE-01 wave integration 或 NE-07 Docker 全栈。NE-01 保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Host 情感与回复形态 app-local authority 已合并切片
 

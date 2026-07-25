@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import sqlite3
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,18 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime.internal_artifact_terminal_reconciliation import (
+    InternalArtifactTerminalReconciler,
+)
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.workspace_allocator import (
+    ManagedGitSource,
+    ManagedWorkspaceRoot,
+    WorkspaceAllocator,
+)
+from host_brain.agent_runtime.workspace_policy import WorkspacePolicy
+from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.app.internal_task_contracts import build_internal_task_contracts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.budget_policy import (
@@ -39,6 +51,10 @@ from host_brain.persistence.host_command_repository_types import (
     HOST_COMMAND_INGRESS_CONFLICT,
     HostCommandRepositoryError,
 )
+from host_brain.persistence.workspace_repository import WorkspaceRepository
+from host_brain.persistence.worker_projection_repository import (
+    WorkerProjectionStore,
+)
 from host_brain.persistence.task_repository import (
     AttemptStatus,
     DurableTaskStore,
@@ -49,6 +65,9 @@ from host_brain.persistence.task_repository import (
     build_reconciliation_attestation_binding,
 )
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.task_runtime.graph_cancellation_operation_reconciliation import (
+    GraphCancellationOperationReconciliationService,
+)
 
 
 NOW = 2_010_000_000_000
@@ -65,6 +84,32 @@ class _Clock:
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _git(repository: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repository), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    return str(completed.stdout or "").strip()
+
+
+def _source_repository(tmp_path: Path) -> Path:
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-b", "main")
+    _git(source, "config", "user.email", "unknown-effect@example.invalid")
+    _git(source, "config", "user.name", "Unknown Effect Test")
+    (source / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    _git(source, "add", "baseline.txt")
+    _git(source, "commit", "-m", "initial")
+    return source.resolve()
 
 
 def _event(
@@ -163,6 +208,8 @@ def _insert_secure_authority(
 
 def _cancelled_runtime(
     tmp_path: Path,
+    *,
+    reconciliation_action: str = "RELEASE",
 ) -> tuple[
     Path,
     DurableTaskStore,
@@ -171,6 +218,9 @@ def _cancelled_runtime(
     Ed25519PrivateKey,
     bytes,
 ]:
+    if reconciliation_action not in {"COMMIT", "RELEASE"}:
+        raise ValueError("unsupported test reconciliation action")
+    side_effect_confirmed = reconciliation_action == "COMMIT"
     db_path = tmp_path / "internal-precheckpoint-cancel.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="ne01-internal-precheckpoint-cancel",
@@ -209,6 +259,12 @@ def _cancelled_runtime(
             run_mode="inspect",
             objective="cancel before the Agent checkpoint",
             acceptance_criteria=["no external effect"],
+            allowed_actions=["write_files"],
+            forbidden_actions=["modify_secret_files"],
+            workspace={
+                "strategy": "durable_workspace",
+                "workspace_id": "caller-selected-and-replaced",
+            },
         ),
         request_id=request_id,
         session_id="session-internal-precheckpoint-cancel",
@@ -421,8 +477,17 @@ def _cancelled_runtime(
 
     reservation = task_store.get_operation_reservation(reservation_id)
     assert reservation["status"] == "RECOVERY_REQUIRED"
-    proof_ref = "operation-proof://internal/precheckpoint/no-side-effect"
+    proof_ref = (
+        "operation-proof://internal/precheckpoint/side-effect-confirmed"
+        if side_effect_confirmed
+        else "operation-proof://internal/precheckpoint/no-side-effect"
+    )
     actor_id = "reconciler://internal/precheckpoint"
+    downstream_receipt_ref = (
+        "provider-receipt://internal/precheckpoint/confirmed"
+        if side_effect_confirmed
+        else None
+    )
     proof_binding = build_reconciliation_attestation_binding(
         reservation_id=reservation_id,
         business_scope=work_order.business_idempotency_scope,
@@ -430,30 +495,37 @@ def _cancelled_runtime(
         recovery_version=int(reservation["status_version"]),
         reconciler_actor_id=actor_id,
         attestation_ref=proof_ref,
-        recovery_action="RELEASE",
-        reconciliation_outcome="NO_SIDE_EFFECT",
+        recovery_action=reconciliation_action,
+        reconciliation_outcome=(
+            "SIDE_EFFECT_CONFIRMED"
+            if side_effect_confirmed
+            else "NO_SIDE_EFFECT"
+        ),
+        receipt_ref=downstream_receipt_ref,
     )
     proof_signature = "ed25519:" + base64.urlsafe_b64encode(
         private_key.sign(proof_binding)
     ).decode("ascii")
-    task_store.recover_operation_reservation(
-        reservation_id,
-        action="RELEASE",
-        attempt_id=attempt_id,
+    wakes: list[str] = []
+    reconciliation = GraphCancellationOperationReconciliationService(
+        task_store=task_store,
+        outbox_factory=OutboxMessage,
+        wake_cancellation=lambda: wakes.append("wake"),
+    ).reconcile_graph_cancellation_operation(
+        intent_ref=intent.intent_ref,
+        reservation_id=reservation_id,
         expected_version=int(reservation["status_version"]),
+        action=reconciliation_action,
         reconciler_actor_id=actor_id,
+        downstream_receipt_ref=downstream_receipt_ref,
         attestation_ref=proof_ref,
         attestation_key_id=KEY_ID,
         attestation_signature=proof_signature,
-        outbox=_event(
-            "OPERATION_RESERVATION",
-            reservation_id,
-            int(reservation["status_version"]) + 1,
-            "OPERATION_RECOVERY_RELEASE",
-            outbox_id="outbox-internal-cancel-operation-release",
-            attempt_id=attempt_id,
-        ),
     )
+    assert reconciliation["operation"]["status"] == (
+        "COMMITTED" if side_effect_confirmed else "RELEASED"
+    )
+    assert wakes == ["wake"]
     advanced = task_store.advance_graph_cancellation(intent.intent_ref)
     assert advanced["ready_to_finalize"] is True
     blocked_graph = task_store.get_graph(graph_id, 1)
@@ -537,6 +609,7 @@ def _cancelled_runtime(
             "lease_id": str(lease["lease_id"]),
             "reservation_id": reservation_id,
             "claim_ref": claim_ref,
+            "downstream_receipt_ref": downstream_receipt_ref,
         },
         private_key,
         public_key,
@@ -635,3 +708,213 @@ def test_no_effect_cancellation_closes_claim_restarts_and_rejects_tamper(
             refs["command"].command_id
         )
     assert rejected.value.reason_code == HOST_COMMAND_INGRESS_CONFLICT
+
+
+def test_confirmed_side_effect_cancellation_closes_claim_and_binds_receipt(
+    tmp_path: Path,
+) -> None:
+    (
+        db_path,
+        task_store,
+        command_repository,
+        refs,
+        _private_key,
+        public_key,
+    ) = _cancelled_runtime(
+        tmp_path,
+        reconciliation_action="COMMIT",
+    )
+    terminal = (
+        task_store.resolve_internal_agent_precheckpoint_cancellation_terminal(
+            refs["attempt_id"]
+        )
+    )
+    reservation = terminal["operation_reservation"]
+    intent = terminal["cancellation_intent"]
+    decision = terminal["cancellation_decision"]
+    assert reservation["status"] == "COMMITTED"
+    assert reservation["reconciliation_action"] == "COMMIT"
+    assert reservation["reconciliation_outcome"] == "SIDE_EFFECT_CONFIRMED"
+    assert reservation["receipt_ref"] == refs["downstream_receipt_ref"]
+    result_ref = build_internal_precheckpoint_cancellation_result_ref(
+        command_id=refs["command"].command_id,
+        ingress_claim_ref=refs["claim_ref"],
+        graph_id=refs["command"].graph_id,
+        graph_revision=refs["command"].graph_revision,
+        node_id=refs["work_order"].task_node_id,
+        attempt_id=refs["attempt_id"],
+        lease_id=refs["lease_id"],
+        reservation_id=refs["reservation_id"],
+        reconciliation_proof_ref=reservation["reconciliation_proof_ref"],
+        reconciliation_proof_digest=reservation["reconciliation_proof_digest"],
+        cancellation_intent_ref=intent["intent_ref"],
+        cancellation_decision_ref=decision["decision_ref"],
+        reconciliation_action="COMMIT",
+        reconciliation_outcome="SIDE_EFFECT_CONFIRMED",
+        downstream_receipt_ref=refs["downstream_receipt_ref"],
+    )
+    claim_store = SQLiteSecureIngressStore(db_path)
+    try:
+        claim_store.complete_claim(
+            claim_ref=refs["claim_ref"],
+            result_ref=result_ref,
+        )
+    finally:
+        claim_store.close()
+    assert (
+        command_repository.validate_ingress_claim_result(
+            refs["command"].command_id
+        )["command"].command_id
+        == refs["command"].command_id
+    )
+
+    restarted_store = DurableTaskStore(
+        db_path,
+        clock=_Clock(),
+        reconciliation_proof_verifier=Ed25519ReconciliationProofVerifier(
+            {KEY_ID: public_key}
+        ),
+    )
+    restarted_commands = HostCommandRepository(
+        db_path,
+        clock=_Clock(),
+        task_store=restarted_store,
+    )
+    assert (
+        restarted_commands.validate_ingress_claim_result(
+            refs["command"].command_id
+        )["command"].command_id
+        == refs["command"].command_id
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE task_runtime_idempotency_reservation
+            SET receipt_ref = ?
+            WHERE reservation_id = ?
+            """,
+            (
+                "provider-receipt://internal/precheckpoint/tampered",
+                refs["reservation_id"],
+            ),
+        )
+    with pytest.raises(TaskStoreError):
+        restarted_store.resolve_internal_agent_precheckpoint_cancellation_terminal(
+            refs["attempt_id"]
+        )
+    with pytest.raises(HostCommandRepositoryError) as rejected:
+        restarted_commands.validate_ingress_claim_result(
+            refs["command"].command_id
+        )
+    assert rejected.value.reason_code == HOST_COMMAND_INGRESS_CONFLICT
+
+
+def test_confirmed_side_effect_restart_cleans_real_git_workspace_after_claim(
+    tmp_path: Path,
+) -> None:
+    (
+        db_path,
+        task_store,
+        command_repository,
+        refs,
+        _private_key,
+        _public_key,
+    ) = _cancelled_runtime(
+        tmp_path,
+        reconciliation_action="COMMIT",
+    )
+    terminal = (
+        task_store.resolve_internal_agent_precheckpoint_cancellation_terminal(
+            refs["attempt_id"]
+        )
+    )
+    lease = terminal["lease"]
+    source = _source_repository(tmp_path)
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    workspace_repository = WorkspaceRepository(db_path, clock=_Clock())
+    workspace_runtime = DurableWorkspaceRuntime(
+        repository=workspace_repository,
+        allocator=WorkspaceAllocator(
+            repository=workspace_repository,
+            managed_roots={
+                "unknown-effect-worktrees": ManagedWorkspaceRoot(
+                    root_ref="unknown-effect-worktrees",
+                    path=managed,
+                    isolation_modes=frozenset({"DIRECTORY_FENCE"}),
+                )
+            },
+            git_sources={
+                "unknown-effect-source": ManagedGitSource(
+                    source_key="unknown-effect-source",
+                    source_ref_prefix="git-worktree://unknown-effect-source",
+                    repository=source,
+                )
+            },
+        ),
+        runtime_owner_id="worker-internal-cancel",
+        managed_root_ref="unknown-effect-worktrees",
+        git_source_key="unknown-effect-source",
+        lease_ms=60_000,
+        heartbeat_interval_ms=1_000,
+        token_secret=b"u" * 48,
+    )
+    workspace_id = DurableWorkspaceRuntime.workspace_id_for(
+        graph_id=refs["command"].graph_id,
+        graph_revision=refs["command"].graph_revision,
+    )
+    authority = {
+        "root_work_order_id": refs["work_order"].root_work_order_id,
+        "graph_id": refs["command"].graph_id,
+        "graph_revision": refs["command"].graph_revision,
+        "node_id": refs["work_order"].task_node_id,
+        "attempt_id": refs["attempt_id"],
+        "lease_id": refs["lease_id"],
+        "command_id": refs["command"].command_id,
+        "principal_id": refs["command"].principal_id,
+        "lease_owner_id": str(lease["owner_id"]),
+        "fencing_token": int(lease["fencing_token"]),
+    }
+    resolution = WorkspacePolicy(
+        workspace_allocator=workspace_runtime.allocator,
+        workspace_lease_provider=lambda order, candidate_workspace_id: (
+            workspace_runtime.lease_for_order(
+                order,
+                candidate_workspace_id,
+                execution_authority=authority,
+            )
+        ),
+    ).resolve(refs["work_order"])
+    workspace_path = resolution.path
+    assert workspace_path.is_dir()
+    artifacts = AgentArtifactStore(tmp_path / "agent-runs")
+    stage = artifacts.prepare_governed_stage(
+        workspace_id=workspace_id,
+        execution_authority=authority,
+    )
+    assert stage.stage_dir.is_dir()
+    claim_store = SQLiteSecureIngressStore(db_path)
+    try:
+        reports = InternalArtifactTerminalReconciler(
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            task_store=task_store,
+            command_repository=command_repository,
+            projection_store=WorkerProjectionStore(db_path, clock=_Clock()),
+            claim_result_store=claim_store,
+        ).run_once()
+    finally:
+        claim_store.close()
+
+    assert reports[0]["action"] == "UNSEALED_CLEANED"
+    assert not workspace_path.exists()
+    assert not stage.stage_dir.exists()
+    assert workspace_repository.get(workspace_id).status == "CLEANED"
+    assert (
+        command_repository.validate_ingress_claim_result(
+            refs["command"].command_id
+        )["command"].command_id
+        == refs["command"].command_id
+    )
+    assert (source / "baseline.txt").read_text(encoding="utf-8") == "baseline\n"

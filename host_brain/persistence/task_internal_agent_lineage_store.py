@@ -20,6 +20,9 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetExceededAction,
 )
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.internal_precheckpoint_cancellation_claim_result import (
+    normalize_internal_precheckpoint_cancellation_terminal,
+)
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.persistence.task_store_types import (
@@ -65,6 +68,23 @@ _NONACCEPTANCE_TERMINAL_STATES = {
 }
 
 
+def _is_exact_precheckpoint_cancellation_operation(
+    reservation: Mapping[str, Any],
+) -> bool:
+    """Accept only the two signed terminal outcomes owned by reconciliation."""
+
+    try:
+        normalize_internal_precheckpoint_cancellation_terminal(
+            operation_status=reservation.get("status"),
+            reconciliation_action=reservation.get("reconciliation_action"),
+            reconciliation_outcome=reservation.get("reconciliation_outcome"),
+            downstream_receipt_ref=reservation.get("receipt_ref"),
+        )
+    except ValueError:
+        return False
+    return True
+
+
 class TaskInternalAgentLineageStoreMixin:
     """Exact Internal Agent direct/takeover Lease lineage authority."""
 
@@ -72,13 +92,13 @@ class TaskInternalAgentLineageStoreMixin:
         self,
         attempt_id: str,
     ) -> dict[str, Any]:
-        """Reopen one exact no-effect cancellation before worker checkpoint.
+        """Reopen one exact reconciled cancellation before worker checkpoint.
 
         This authority deliberately excludes committed projections, Acceptance
         effects and unknown external outcomes.  The only eligible operation is
-        a single RELEASED reservation whose signed reconciliation proof says
-        ``RELEASE`` + ``NO_SIDE_EFFECT`` and whose graph cancellation has a
-        trusted final ``CANCELLED`` decision.
+        either signed ``RELEASE + NO_SIDE_EFFECT`` or signed
+        ``COMMIT + SIDE_EFFECT_CONFIRMED + durable receipt``.  Both require the
+        trusted final ``CANCELLED`` graph decision.
         """
 
         attempt_ref = self._nonacceptance_attempt_ref(attempt_id)
@@ -252,11 +272,7 @@ class TaskInternalAgentLineageStoreMixin:
             and int(attempt["graph_revision"]) == graph_revision
             and str(attempt["node_id"]) == node_id
             and str(lease["attempt_id"]) == attempt_id
-            and str(reservation.get("status") or "") == "RELEASED"
-            and str(reservation.get("reconciliation_action") or "") == "RELEASE"
-            and str(reservation.get("reconciliation_outcome") or "")
-            == "NO_SIDE_EFFECT"
-            and not str(reservation.get("receipt_ref") or "")
+            and _is_exact_precheckpoint_cancellation_operation(reservation)
             and str(reservation.get("attempt_id") or "") == attempt_id
             and str(reservation.get("lease_id") or "") == str(lease["lease_id"])
             and str(reservation.get("owner_id") or "") == str(lease["owner_id"])

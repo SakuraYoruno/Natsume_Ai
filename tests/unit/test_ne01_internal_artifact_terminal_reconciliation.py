@@ -253,6 +253,7 @@ class _TaskStore:
         self.seal: _Seal | None = None
         self.cancellation_status: str | None = "FINALIZED"
         self.root_work_order_id = "work-order-root"
+        self.precheckpoint_side_effect_confirmed = False
 
     def get_graph(self, graph_id: str, revision: int) -> dict[str, Any]:
         return {
@@ -384,13 +385,18 @@ class _TaskStore:
         self,
         attempt_id: str,
     ) -> dict[str, Any]:
+        expected_operation_status = (
+            "COMMITTED"
+            if self.precheckpoint_side_effect_confirmed
+            else "RELEASED"
+        )
         if (
             attempt_id != "attempt-raw"
             or self.graph_status != "CANCELLED"
             or self.node_status != "CANCELLED"
             or self.attempt_status != "CANCELLED"
             or self.lease_status != "CANCELLED"
-            or self.operation_status != "RELEASED"
+            or self.operation_status != expected_operation_status
             or self.cancellation_status != "FINALIZED"
         ):
             raise RuntimeError("pre-checkpoint cancellation authority drifted")
@@ -410,10 +416,22 @@ class _TaskStore:
             "lease": self.get_lease("lease-agent"),
             "operation_reservation": {
                 **self.get_operation_reservation("reservation-agent"),
-                "status": "RELEASED",
-                "receipt_ref": None,
-                "reconciliation_action": "RELEASE",
-                "reconciliation_outcome": "NO_SIDE_EFFECT",
+                "status": expected_operation_status,
+                "receipt_ref": (
+                    "provider-receipt://internal/confirmed-side-effect"
+                    if self.precheckpoint_side_effect_confirmed
+                    else None
+                ),
+                "reconciliation_action": (
+                    "COMMIT"
+                    if self.precheckpoint_side_effect_confirmed
+                    else "RELEASE"
+                ),
+                "reconciliation_outcome": (
+                    "SIDE_EFFECT_CONFIRMED"
+                    if self.precheckpoint_side_effect_confirmed
+                    else "NO_SIDE_EFFECT"
+                ),
                 "reconciliation_proof_ref": (
                     "operation-proof://internal/no-side-effect"
                 ),
@@ -579,6 +597,31 @@ def test_exact_cancelled_unsealed_stage_is_cleaned_without_worker_rerun() -> Non
     assert claims.completed[0]["result_ref"].startswith(
         INTERNAL_PRECHECKPOINT_CANCELLATION_RESULT_REF_PREFIX
     )
+
+
+def test_confirmed_side_effect_cancellation_closes_claim_before_cleanup() -> None:
+    stage = _Stage()
+    claims = _ClaimStore()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage,
+        claim_store=claims,
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+    tasks.operation_status = "COMMITTED"
+    tasks.precheckpoint_side_effect_confirmed = True
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "UNSEALED_CLEANED"
+    assert len(claims.completed) == 1
+    assert claims.completed[0]["result_ref"].startswith(
+        INTERNAL_PRECHECKPOINT_CANCELLATION_RESULT_REF_PREFIX
+    )
+    assert workspaces.unsealed_cleanup_calls == [stage.workspace_id]
+    assert artifacts.discarded == [stage.stage_ref]
 
 
 def test_unsealed_claim_failure_preserves_workspace_and_stage() -> None:
