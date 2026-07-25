@@ -195,9 +195,33 @@ class AcceptedOperationReconciliationHandler:
         operation = (
             dict(operation_raw) if isinstance(operation_raw, Mapping) else {}
         )
+        terminal_raw = result.get("terminal")
+        terminal = (
+            dict(terminal_raw)
+            if isinstance(terminal_raw, Mapping)
+            else None
+        )
+        terminal_failure = (
+            request["action"] == "RELEASE"
+            and request["intent_ref"] is None
+        )
+        if terminal_failure and (
+            terminal is None
+            or str(terminal.get("authority_kind") or "")
+            != "RECONCILED_OPERATION_TERMINAL_FAILURE"
+            or str(terminal.get("graph_status") or "") != "FAILED"
+            or str(terminal.get("node_status") or "") != "FAILED"
+            or str(terminal.get("attempt_status") or "") != "FAILED"
+            or str(terminal.get("budget_status") or "") != "RELEASED"
+            or str(terminal.get("lease_status") or "") != "EXPIRED"
+        ):
+            raise AcceptanceEffectOutcomeUnknown(
+                "reconciled terminal failure has no exact Task settlement"
+            )
         receipt_ref = operation_reconciliation_handler_receipt_ref(
             request=request,
             operation=operation,
+            terminal=terminal,
         )
         return {
             "receipt_ref": receipt_ref,
@@ -208,6 +232,7 @@ class AcceptedOperationReconciliationHandler:
             "operation_status": str(operation.get("status") or "").upper(),
             "operation_status_version": operation.get("status_version"),
             "target_continuation": continuation,
+            "target_terminal": terminal,
             "exact_replay": bool(result.get("replayed")),
         }
 
@@ -216,16 +241,25 @@ def operation_reconciliation_handler_receipt_ref(
     *,
     request: Mapping[str, Any],
     operation: Mapping[str, Any],
+    terminal: Mapping[str, Any] | None = None,
 ) -> str:
     checkpoint_commit = (
         str(request.get("action") or "").strip().upper() == "COMMIT"
+        and not str(request.get("intent_ref") or "").strip()
+    )
+    terminal_failure = (
+        str(request.get("action") or "").strip().upper() == "RELEASE"
         and not str(request.get("intent_ref") or "").strip()
     )
     material: dict[str, Any] = {
         "schema_version": (
             "Natsume.task.operation_reconciliation_receipt.v2"
             if checkpoint_commit
-            else "Natsume.task.operation_reconciliation_receipt.v1"
+            else (
+                "Natsume.task.operation_reconciliation_receipt.v3"
+                if terminal_failure
+                else "Natsume.task.operation_reconciliation_receipt.v1"
+            )
         ),
         "reservation_id": str(request.get("reservation_id") or "").strip(),
         "expected_version": request.get("expected_version"),
@@ -262,6 +296,51 @@ def operation_reconciliation_handler_receipt_ref(
                 .upper(),
             }
         )
+    if terminal_failure:
+        terminal_record = dict(terminal or {})
+        required_terminal = {
+            "authority_kind": str(
+                terminal_record.get("authority_kind") or ""
+            ),
+            "graph_status": str(
+                terminal_record.get("graph_status") or ""
+            ),
+            "node_status": str(
+                terminal_record.get("node_status") or ""
+            ),
+            "attempt_status": str(
+                terminal_record.get("attempt_status") or ""
+            ),
+            "budget_status": str(
+                terminal_record.get("budget_status") or ""
+            ),
+            "lease_status": str(
+                terminal_record.get("lease_status") or ""
+            ),
+            "failure_reason_code": str(
+                terminal_record.get("failure_reason_code") or ""
+            ),
+            "error_ref": str(
+                terminal_record.get("error_ref") or ""
+            ),
+        }
+        if (
+            required_terminal["authority_kind"]
+            != "RECONCILED_OPERATION_TERMINAL_FAILURE"
+            or required_terminal["graph_status"] != "FAILED"
+            or required_terminal["node_status"] != "FAILED"
+            or required_terminal["attempt_status"] != "FAILED"
+            or required_terminal["budget_status"] != "RELEASED"
+            or required_terminal["lease_status"] != "EXPIRED"
+            or not required_terminal["failure_reason_code"]
+            or not required_terminal["error_ref"].startswith(
+                "taskerror://operation-failure/sha256/"
+            )
+        ):
+            raise ValueError(
+                "terminal failure reconciliation receipt is incomplete"
+            )
+        material["terminal_failure"] = required_terminal
     encoded = json.dumps(
         material,
         ensure_ascii=False,

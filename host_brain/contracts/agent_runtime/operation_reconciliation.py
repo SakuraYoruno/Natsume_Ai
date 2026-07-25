@@ -8,6 +8,7 @@ transport/database failure after a mutation may have committed.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 import json
 import re
 
@@ -107,9 +108,56 @@ def build_reconciliation_attestation_binding(
     ).encode("utf-8")
 
 
+def build_operation_failure_outbox_identity(
+    *,
+    reservation_id: str,
+    recovery_version: int,
+    reconciler_actor_id: str,
+    attestation_ref: str,
+    attestation_key_id: str,
+) -> tuple[str, str]:
+    """Return the canonical Outbox id and idempotency key for raw failure."""
+
+    values = (
+        str(reservation_id or "").strip(),
+        recovery_version,
+        str(reconciler_actor_id or "").strip(),
+        str(attestation_ref or "").strip(),
+        str(attestation_key_id or "").strip(),
+    )
+    if (
+        not values[0]
+        or isinstance(recovery_version, bool)
+        or not isinstance(recovery_version, int)
+        or recovery_version < 0
+        or not values[2]
+        or not _DURABLE_REFERENCE_PATTERN.fullmatch(values[3])
+        or not values[4]
+    ):
+        raise OperationReconciliationContractError(
+            "operation failure Outbox identity fields are invalid"
+        )
+    material = "\n".join(
+        (
+            values[0],
+            str(recovery_version),
+            values[2],
+            values[3],
+            values[4],
+            "TERMINAL_FAILURE",
+        )
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return (
+        f"outbox::operation-failure-reconciliation::{digest}",
+        f"operation-failure-reconciliation:{digest}",
+    )
+
+
 __all__ = [
     "OperationReconciliationContractError",
     "GraphCancellationOperationStoreRejected",
     "OperationReconciliationStoreRejected",
+    "build_operation_failure_outbox_identity",
     "build_reconciliation_attestation_binding",
 ]

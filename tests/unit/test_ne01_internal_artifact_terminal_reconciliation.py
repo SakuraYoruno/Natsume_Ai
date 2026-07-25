@@ -442,6 +442,13 @@ class _TaskStore:
             "cancellation_decision": decision,
         }
 
+    def try_resolve_internal_agent_raw_failure_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any] | None:
+        del attempt_id
+        return None
+
     def get_graph_cancellation_for_graph(
         self,
         graph_id: str,

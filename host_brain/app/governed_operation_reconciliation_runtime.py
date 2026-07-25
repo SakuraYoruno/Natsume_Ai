@@ -440,9 +440,35 @@ def require_durable_operation_reconciliation_outcome(
         if evidence["action"] == "COMMIT"
         else "NO_SIDE_EFFECT"
     )
+    terminal_failure = (
+        evidence["action"] == "RELEASE"
+        and not str(evidence.get("intent_ref") or "").strip()
+    )
+    terminal = (
+        task_store.resolve_reconciled_operation_failure(
+            evidence["reservation_id"]
+        )
+        if terminal_failure
+        else None
+    )
+    terminal_projection = (
+        {
+            "authority_kind": terminal.get("authority_kind"),
+            "graph_status": terminal.get("graph", {}).get("status"),
+            "node_status": terminal.get("node", {}).get("status"),
+            "attempt_status": terminal.get("attempt", {}).get("status"),
+            "budget_status": terminal.get("budget", {}).get("status"),
+            "lease_status": terminal.get("lease", {}).get("status"),
+            "failure_reason_code": terminal.get("failure_reason_code"),
+            "error_ref": terminal.get("error_ref"),
+        }
+        if isinstance(terminal, Mapping)
+        else None
+    )
     expected_receipt_ref = operation_reconciliation_handler_receipt_ref(
         request=evidence,
         operation=operation_record,
+        terminal=terminal_projection,
     )
     if (
         not expected_payload["request_id"]
@@ -483,6 +509,7 @@ def require_durable_operation_reconciliation_outcome(
         "handler_receipt_ref": expected_receipt_ref,
         "reservation_id": evidence["reservation_id"],
         "operation_status": expected_status,
+        "target_terminal": terminal_projection,
         "exact_replay": receipt.get("replayed") is True,
     }
 
@@ -608,7 +635,6 @@ def _normalize_request(
             action == "REACQUIRE"
             and request["downstream_receipt_ref"] is not None
         )
-        or (action == "RELEASE" and request["intent_ref"] is None)
         or (action == "COMMIT" and request["downstream_receipt_ref"] is None)
         or (
             action == "COMMIT"

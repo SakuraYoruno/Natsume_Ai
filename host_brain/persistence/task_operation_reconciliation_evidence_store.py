@@ -357,7 +357,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
             or (normalized_action == "REACQUIRE" and receipt is not None)
             or (
                 normalized_action == "RELEASE"
-                and not _DURABLE_REFERENCE_PATTERN.fullmatch(intent or "")
+                and intent is not None
+                and not _DURABLE_REFERENCE_PATTERN.fullmatch(intent)
             )
             or (
                 normalized_action == "COMMIT"

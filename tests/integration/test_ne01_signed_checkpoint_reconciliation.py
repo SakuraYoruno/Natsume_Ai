@@ -288,6 +288,7 @@ async def test_signed_checkpoint_commit_resumes_without_worker_reexecution(
         cancellation_service=object(),  # unreachable for no-intent COMMIT
         reacquisition_service=object(),  # unreachable for no-intent COMMIT
         checkpoint_service=service,
+        failure_service=object(),  # unreachable for no-intent COMMIT
     )
     handler = AcceptedOperationReconciliationHandler(
         service=command_service,

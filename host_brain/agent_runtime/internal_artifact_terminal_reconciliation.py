@@ -29,6 +29,9 @@ from host_brain.contracts.agent_runtime.internal_precheckpoint_cancellation_clai
     build_internal_precheckpoint_cancellation_result_ref,
     normalize_internal_precheckpoint_cancellation_terminal,
 )
+from host_brain.contracts.agent_runtime.internal_raw_failure_claim_result import (
+    build_internal_raw_failure_result_ref,
+)
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
@@ -104,6 +107,10 @@ class InternalArtifactTerminalReconciler:
                 task_store,
                 "resolve_internal_agent_precheckpoint_cancellation_terminal",
             ),
+            (
+                task_store,
+                "try_resolve_internal_agent_raw_failure_terminal",
+            ),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -158,7 +165,10 @@ class InternalArtifactTerminalReconciler:
                         )
                     )
                     continue
-                self._complete_unsealed_cancellation_claim(stage)
+                if reason == "TERMINAL_WORKER_FAILED_UNSEALED":
+                    self._complete_unsealed_raw_failure_claim(stage)
+                else:
+                    self._complete_unsealed_cancellation_claim(stage)
                 cleanup = self._workspaces.cleanup(str(stage.workspace_id))
                 receipt_ref = str(getattr(cleanup, "receipt_ref", "") or "")
                 if "://" not in receipt_ref:
@@ -620,6 +630,141 @@ class InternalArtifactTerminalReconciler:
             ) from exc
         claims.complete_claim(claim_ref=claim_ref, result_ref=result_ref)
 
+    def _complete_unsealed_raw_failure_claim(self, stage: Any) -> None:
+        """Close the exact Internal claim before deleting failed raw state."""
+
+        authority = dict(
+            getattr(stage, "execution_authority", {}) or {}
+        )
+        attempt_id = str(
+            authority.get("attempt_id") or ""
+        ).strip()
+        graph_id = str(authority.get("graph_id") or "").strip()
+        node_id = str(authority.get("node_id") or "").strip()
+        lease_id = str(authority.get("lease_id") or "").strip()
+        revision = authority.get("graph_revision")
+        if (
+            not all((attempt_id, graph_id, node_id, lease_id))
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 1
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed raw failure claim authority is invalid"
+            )
+        terminal = (
+            self._tasks.try_resolve_internal_agent_raw_failure_terminal(
+                attempt_id
+            )
+        )
+        if not isinstance(terminal, Mapping):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed raw failure terminal authority is incomplete"
+            )
+        graph = terminal.get("graph")
+        node = terminal.get("node")
+        attempt = terminal.get("attempt")
+        lease = terminal.get("lease")
+        reservation = terminal.get("operation")
+        budget = terminal.get("budget")
+        if not all(
+            isinstance(value, Mapping)
+            for value in (
+                graph,
+                node,
+                attempt,
+                lease,
+                reservation,
+                budget,
+            )
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed raw failure terminal lineage is incomplete"
+            )
+        if (
+            str(terminal.get("authority_kind") or "")
+            != "INTERNAL_AGENT_RAW_FAILURE_TERMINAL"
+            or str(graph.get("graph_id") or "") != graph_id
+            or int(graph.get("revision") or 0) != revision
+            or str(graph.get("status") or "") != "FAILED"
+            or str(node.get("node_id") or "") != node_id
+            or str(node.get("status") or "") != "FAILED"
+            or str(attempt.get("attempt_id") or "") != attempt_id
+            or str(attempt.get("status") or "") != "FAILED"
+            or str(lease.get("lease_id") or "") != lease_id
+            or str(lease.get("status") or "") != "EXPIRED"
+            or str(reservation.get("attempt_id") or "") != attempt_id
+            or str(reservation.get("lease_id") or "") != lease_id
+            or str(reservation.get("status") or "") != "RELEASED"
+            or str(reservation.get("reconciliation_action") or "")
+            != "RELEASE"
+            or str(reservation.get("reconciliation_outcome") or "")
+            != "NO_SIDE_EFFECT"
+            or reservation.get("receipt_ref") is not None
+            or str(budget.get("status") or "") != "RELEASED"
+        ):
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed raw failure terminal lineage drifted"
+            )
+        record = self._commands.get_by_graph(
+            graph_id=graph_id,
+            graph_revision=revision,
+        )
+        frozen = {
+            **authority,
+            "route": "delegate",
+            "target_id": "agent_runtime",
+        }
+        self._assert_internal_admission(record, frozen=frozen)
+        command = (
+            record.get("command")
+            if isinstance(record, Mapping)
+            else None
+        )
+        claim_ref = str(
+            getattr(command, "ingress_claim_ref", "") or ""
+        ).strip()
+        if not claim_ref:
+            return
+        claims = self._claim_results
+        if claims is None:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed raw failure claim store is unavailable"
+            )
+        try:
+            result_ref = build_internal_raw_failure_result_ref(
+                command_id=str(
+                    getattr(command, "command_id", "") or ""
+                ),
+                ingress_claim_ref=claim_ref,
+                graph_id=graph_id,
+                graph_revision=revision,
+                node_id=node_id,
+                attempt_id=attempt_id,
+                lease_id=lease_id,
+                reservation_id=str(
+                    reservation.get("reservation_id") or ""
+                ),
+                reconciliation_proof_ref=str(
+                    reservation.get("reconciliation_proof_ref") or ""
+                ),
+                reconciliation_proof_digest=str(
+                    reservation.get("reconciliation_proof_digest") or ""
+                ),
+                failure_reason_code=str(
+                    terminal.get("failure_reason_code") or ""
+                ),
+                error_ref=str(terminal.get("error_ref") or ""),
+            )
+        except ValueError as exc:
+            raise InternalArtifactTerminalReconciliationError(
+                "unsealed raw failure claim result identity is invalid"
+            ) from exc
+        claims.complete_claim(
+            claim_ref=claim_ref,
+            result_ref=result_ref,
+        )
+
     def _complete_nonacceptance_claim(
         self,
         seal: Any,
@@ -867,12 +1012,12 @@ class InternalArtifactTerminalReconciler:
         return terminal
 
     def _unsealed_cancellation_reason(self, stage: Any) -> str | None:
-        """Allow destructive cleanup only after finalized graph cancellation.
+        """Allow cleanup only after exact signed failure or cancellation.
 
         An unsealed directory has no projection envelope, so it is never
-        eligible for accepted promotion or failure abandonment.  The only
-        safe recovery in this slice is the exact cancellation matrix, backed
-        by the canonical finalized cancellation decision.
+        eligible for accepted promotion.  Failure cleanup requires a signed
+        no-side-effect RELEASE whose Task terminalized atomically; cancellation
+        cleanup keeps requiring the canonical finalized cancellation decision.
         """
 
         authority = dict(getattr(stage, "execution_authority", {}) or {})
@@ -918,6 +1063,36 @@ class InternalArtifactTerminalReconciler:
             attempt=attempt,
             lease=lease,
         )
+        if (
+            str(graph.get("status") or "") == "FAILED"
+            and str(node.get("status") or "") == "FAILED"
+            and str(attempt.get("status") or "") == "FAILED"
+            and str(lease.get("status") or "") == "EXPIRED"
+        ):
+            terminal = (
+                self._tasks.try_resolve_internal_agent_raw_failure_terminal(
+                    attempt_id
+                )
+            )
+            if not isinstance(terminal, Mapping):
+                raise InternalArtifactTerminalReconciliationError(
+                    "failed unsealed artifact has no signed terminal authority"
+                )
+            terminal_lease = terminal.get("lease")
+            terminal_operation = terminal.get("operation")
+            if (
+                str(terminal.get("authority_kind") or "")
+                != "INTERNAL_AGENT_RAW_FAILURE_TERMINAL"
+                or not isinstance(terminal_lease, Mapping)
+                or not isinstance(terminal_operation, Mapping)
+                or str(terminal_lease.get("lease_id") or "") != lease_id
+                or str(terminal_operation.get("attempt_id") or "")
+                != attempt_id
+            ):
+                raise InternalArtifactTerminalReconciliationError(
+                    "failed unsealed artifact terminal authority drifted"
+                )
+            return "TERMINAL_WORKER_FAILED_UNSEALED"
         if (
             str(graph.get("status") or "") != "CANCELLED"
             or str(node.get("status") or "") != "CANCELLED"

@@ -69,6 +69,9 @@ from host_brain.task_runtime.operation_reacquisition import (
 from host_brain.task_runtime.operation_checkpoint_reconciliation import (
     OperationCheckpointReconciliationService,
 )
+from host_brain.task_runtime.operation_failure_reconciliation import (
+    OperationFailureReconciliationService,
+)
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
@@ -932,10 +935,15 @@ def build_process_task_runtime_container(
                 clock_ms=now_ms,
             )
         )
+        operation_failure_service = OperationFailureReconciliationService(
+            task_store=task_store,
+            outbox_factory=OutboxMessage,
+        )
         operation_reconciliation_service = OperationReconciliationCommandService(
             cancellation_service=operation_cancellation_service,
             reacquisition_service=operation_reacquisition_service,
             checkpoint_service=operation_checkpoint_service,
+            failure_service=operation_failure_service,
         )
         effect_reconciliation_service = GraphCancellationEffectReconciliationService(
             task_store=task_store,
