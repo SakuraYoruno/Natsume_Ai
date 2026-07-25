@@ -15,6 +15,8 @@
 
 Host composition 通过 fresh `ProcessApplicationPorts` 与 frozen Host/Agent/Context/Startup ports 注入依赖；ASGI/CLI 都显式持有该 bundle，Host builder 不回读全局状态。生产 locator consumer/import/module/field/lock/ref 全为 0，旧测试桥仅在 pytest 安装。`HostAuthorityRuntimeOwner` 在 migration-first 后固定 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime。ResourceManager status 已由 0123 Host-fenced journal 持久化；外部 Chroma/Neo4j namespace、Token/MCP durable restart 和其它外部资源恢复仍未闭环。locator 与 status 文件 authority 退役不代表事务化 Chat、完整 Worker/Obs Composition 或 NE-01 完成。
 
+情感运行面不再是进程共享 singleton。Host root 通过 construction factory 创建一个 `HostEmotionRuntime`，Input 与 Tribe 的 admission resolver 取得同一 Host-scoped identity，Lifecycle 的画像读取也指向该实例；只读归一化不触碰它。回复形态决策器则由每个 Input composition 独占，并在一个锁内完成语音额度检查与消费。该分层隔离了重叠 Host/Input 对象图，但没有提供跨进程持久恢复或 NE-06 人格演化 authority。
+
 Edge 指令不再由 Host lifespan 创建一个进程共享客户端。Tribe Agent 只提交计划或观察，内部/Obs 兼容入口只返回 fail-closed 状态；`EdgeCommandPusher` 是不可发现的低层 adapter，只有显式 TaskGraph 执行边界持有 exact Preview proof 时才能调用。当前正向 issuer 尚缺，因此结构上清除了第二 authority，但没有把具身执行定级为完成。
 
 Tribe compatibility 面也不再发布一个进程级 active Host。每个 `TribeRuntimeScope` 持有独立 state registry、Host registry、event bus 与 23-Agent catalog；lifespan 为启动/后台 execution、HTTP middleware 为每个请求激活 execution-local `ContextVar`。旧 shared-state/cross-Agent getter 与显式 Agent ports 只能读取当前 execution 的 exact scope；跨 scope 激活、active execution 解绑和 scope 释放后的 stale inherited context 都失败关闭。23 个 Agent backing singleton/setter、state registry、Host registry 与 event bus 的无上下文 fallback 已物理删除，缺 exact context 统一拒绝。两个本地重叠 Tribe scope 已证明 identity 隔离，但这不是完整 Host multi-app production canary；易失 EventBus 仍是待清理边界。

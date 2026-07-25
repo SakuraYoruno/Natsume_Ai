@@ -36,12 +36,12 @@ class ProcessApplicationPorts:
     distillation_engine_factory: Factory
     semantic_recaller_factory: Factory
     episodic_store_adapter_factory: Factory
+    emotion_runtime_factory: Factory
     probe_edge_rpc_health: Callable[..., Any]
     build_edge_dependency_probe_statuses: Callable[..., Any]
     collect_dependency_probes: Callable[..., Any]
     collect_dependency_probes_sync: Callable[..., Any]
     life_snapshot_reader: Callable[[], Any]
-    user_emotion_profile: Callable[[], Any]
 
 __all__ = [
     "GraphHandlerBinding",

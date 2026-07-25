@@ -2,8 +2,8 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_TASK_GRAPH_AND_ACCEPTANCE_EFFECT_SQL_AUTHORITIES_WITH_HOST_SURFACE_RECOVERY_INVENTORY_WORKTREE_OVER_ORIGIN_DEV_C347135F3",
-  "current_document_slice": "NE01_OBS_PROJECTION_APP_LOCAL_SUPERVISION_THIS_DOCUMENT_COMMIT_OVER_ORIGIN_DEV_5C8BD7D70",
+  "evaluated_source": "NE01_HOST_AFFECT_RUNTIME_SCOPE_OVER_OBS_PROJECTION_SUPERVISION_AND_TASK_GRAPH_ACCEPTANCE_EFFECT_SQL_AUTHORITIES",
+  "current_document_slice": "NE01_HOST_AFFECT_RUNTIME_SCOPE_THIS_DOCUMENT_COMMIT_OVER_ORIGIN_DEV_1183E433B",
   "evidence_binding": {
     "evaluated_commit_sha": "c347135f3dbd16e43bb5efd46598204da375217c",
     "migration_head": "0125_task_acceptance_effect_staging_authority.sql"
@@ -851,6 +851,43 @@
         "docker_full_stack": "NOT_RUN_NE07",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
         "boundary": "APP_LOCAL_IN_MEMORY_SUPERVISION_ONLY_NOT_DURABLE_CROSS_PROCESS_SLO_OR_NE01_COMPLETION"
+      },
+      "host_affect_runtime_app_local": {
+        "status": "APP_LOCAL_OWNER_WIRED_LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
+        "host_owner": "ONE_LAZY_HOST_EMOTION_RUNTIME_PER_HOST_ROOT_SHARED_BY_INPUT_TRIBE_AND_LIFECYCLE",
+        "input_owner": "ONE_RESPONSE_FORM_DECIDER_PER_INPUT_COMPOSITION",
+        "retired_module_global_authorities": [
+          "_global_emotion_timeline",
+          "_global_emotion_vector",
+          "_global_prev_emotion_tag",
+          "_user_emotion_profile",
+          "get_user_emotion_profile",
+          "update_user_emotion_profile",
+          "_decider",
+          "get_reply_form_decider",
+          "get_response_form_decider"
+        ],
+        "replay_boundary": "NORMALIZE_WITHOUT_RUNTIME_IS_PURE_ONLY_EXACT_HOST_ADMISSION_INGESTS",
+        "concurrency_boundary": "VOICE_QUOTA_CHECK_AND_RECORD_ATOMIC_UNDER_ONE_INPUT_OWNED_LOCK",
+        "focused_validation": [
+          "81_PASSED_IN_16_61_SECONDS_AFFECT_COMPOSITION_PREFRONTAL_POST_REBASE",
+          "119_PASSED_IN_89_26_SECONDS_ASGI_INPUT_NE03_POST_REBASE",
+          "51_PASSED_IN_23_26_SECONDS_DOCUMENTATION_MACHINE_STATE_POST_REBASE",
+          "190_PASSED_IN_98_58_SECONDS_LATEST_DEV_REPLACEMENT_CONSOLIDATED_AFFECTED",
+          "39_PASSED_IN_11_27_SECONDS_LATEST_DEV_REPLACEMENT_DOCUMENTATION_METADATA",
+          "39_PASSED_IN_12_81_SECONDS_LATEST_DEV_REPLACEMENT_DOCUMENTATION_METADATA_FINAL_REFRESH"
+        ],
+        "unified_static_scan": "PASS_NO_FAILURES",
+        "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
+        "test_batches_combined": false,
+        "migration": "NONE",
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_multi_host_canary": "NOT_RUN",
+        "durable_emotion_profile": "NOT_IMPLEMENTED_RUNTIME_EPOCH_LOCAL_ONLY",
+        "ne06_feedback_identity_activation": "NOT_IMPLEMENTED",
+        "ne07_full_stack": "NOT_RUN_NE07",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "boundary": "OBJECT_OWNERSHIP_REPLAY_PURITY_AND_IN_PROCESS_CONCURRENCY_ONLY_NOT_DURABLE_AFFECT_LONG_TERM_PERSONA_MULTI_PROCESS_ISOLATION_NE01_OR_FULL_ARCHITECTURE_COMPLETION"
       },
       "edge_command_process_global_authority": {
         "status": "RETIRED_FAIL_CLOSED_POSITIVE_PATH_MISSING",

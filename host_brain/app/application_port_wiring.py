@@ -40,7 +40,7 @@ def build_process_application_ports(
     from host_brain.app.handlers.surface_reply_handler import surface_reply_handler
     from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
     from host_brain.app.llm.routing_matrix import RoutingMatrix
-    from host_brain.app.emotion_context import get_user_emotion_profile
+    from host_brain.app.emotion_context import HostEmotionRuntime
     from host_brain.app.memory.distillation_engine import DistillationEngine
     from host_brain.app.memory.episodic_store import EpisodicStore
     from host_brain.app.memory.memory_guard import MemoryGuard
@@ -123,11 +123,11 @@ def build_process_application_ports(
         distillation_engine_factory=DistillationEngine,
         semantic_recaller_factory=SemanticRecaller,
         episodic_store_adapter_factory=EpisodicStore,
+        emotion_runtime_factory=HostEmotionRuntime,
         probe_edge_rpc_health=probe_edge_rpc_health,
         build_edge_dependency_probe_statuses=build_edge_dependency_probe_statuses,
         collect_dependency_probes=collect_dependency_probes,
         collect_dependency_probes_sync=collect_dependency_probes_sync,
         life_snapshot_reader=life_snapshot_reader,
-        user_emotion_profile=get_user_emotion_profile,
     )
 __all__ = ["build_process_application_ports"]
