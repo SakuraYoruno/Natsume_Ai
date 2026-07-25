@@ -7,6 +7,14 @@
 维护日期：2026-07-25
 状态：当前证据
 
+## NE-01 Obs 投影 app-local 监督当前切片
+
+- `ObsApplicationContainer.health_snapshot()` 把它精确持有的 `ProjectionJobDaemon` 监督快照接入真实 Obs `/health`；健康输出包含 lifecycle/running/generation/wave、连续失败、opaque incident、错误类型和恢复标记，不包含异常正文。
+- 普通 projection job、leader lease acquire/renew 故障保持后台线程存活并进入 `DEGRADED`；后续成功波清零连续失败。`SystemExit` 等进程控制异常令生命周期进入 `FAILED`，显式 `close/stop` 前拒绝重启。
+- 新合同与单测首批为 `6 passed in 13.13s`。首次受影响回归为 `67 passed, 1 failed in 169.29s`，唯一失败是旧 Host route 隔离 fixture 未进入 ASGI lifespan；修正 fixture 后单 case `1 passed in 22.08s`，最终受影响集合 `68 passed in 211.30s`。各批次存在重叠，禁止相加。
+- 文档 authority/freshness/交付元数据与 coverage 合同 `51 passed in 14.19s`；`compileall`、机器状态 JSON 解析、`git diff --check`、统一静态扫描均通过，fresh architecture Gate 1～14 为 `PASS`、`failed_gates=[]`。
+- 本切片没有 migration；durable SLO journal、Guardian acknowledgement、部署多实例 canary、NE-01 wave integration 与 NE-07 Docker/真实附属服务均未运行。程序状态保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 Edge 指令首条正向 governed 切片
 
 - 旧 `EdgeCommandPusher` 进程 owner、startup 注册与 Tribe/内部直推仍保持为 0；Obs `edge.command.push` 现在只允许 `target_agent=edge.somatic`、`command_type=emotion_state_command` 与 `emotion_tag/intensity` 白名单，其他 command 在 HostCommand admission 前失败关闭。

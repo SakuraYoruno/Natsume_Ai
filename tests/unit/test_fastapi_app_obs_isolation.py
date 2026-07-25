@@ -20,19 +20,18 @@ def test_host_main_does_not_mount_obs_or_monitor_routes() -> None:
 
 
 def test_host_main_rejects_monitor_and_obs_requests_without_redirecting() -> None:
-    client = TestClient(host_app)
-
-    for path in (
-        "/obs/runtime-snapshot?window_minutes=60",
-        "/obs/codex-bio-ops",
-        "/api/ui/search-requests",
-        "/monitor/index.html",
-        "/static/monitor/index.html",
-        "/panel",
-    ):
-        response = client.get(path, follow_redirects=False)
-        assert response.status_code == 404
-        assert "location" not in response.headers
+    with TestClient(host_app) as client:
+        for path in (
+            "/obs/runtime-snapshot?window_minutes=60",
+            "/obs/codex-bio-ops",
+            "/api/ui/search-requests",
+            "/monitor/index.html",
+            "/static/monitor/index.html",
+            "/panel",
+        ):
+            response = client.get(path, follow_redirects=False)
+            assert response.status_code == 404
+            assert "location" not in response.headers
 
 
 def test_obs_side_owns_observability_and_monitor_api_routes() -> None:

@@ -3,6 +3,7 @@
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
   "evaluated_source": "NE01_TASK_GRAPH_AND_ACCEPTANCE_EFFECT_SQL_AUTHORITIES_WITH_HOST_SURFACE_RECOVERY_INVENTORY_WORKTREE_OVER_ORIGIN_DEV_C347135F3",
+  "current_document_slice": "NE01_OBS_PROJECTION_APP_LOCAL_SUPERVISION_THIS_DOCUMENT_COMMIT_OVER_ORIGIN_DEV_5C8BD7D70",
   "evidence_binding": {
     "evaluated_commit_sha": "c347135f3dbd16e43bb5efd46598204da375217c",
     "migration_head": "0125_task_acceptance_effect_staging_authority.sql"
@@ -826,6 +827,30 @@
         "process_service_container_total_fields": 0,
         "process_service_container_lock_fields": 0,
         "process_service_container_mutable_service_references_excluding_locks_and_application_ports": 0
+      },
+      "obs_projection_supervision_app_local": {
+        "status": "APP_LOCAL_SUPERVISION_WIRED_DURABLE_SLO_AND_CANARY_MISSING_NE01_IN_PROGRESS",
+        "owner": "ONE_PROJECTION_JOB_DAEMON_PER_OBS_APPLICATION_CONTAINER_AND_ASGI_LIFESPAN",
+        "health_surface": "REAL_OBS_GET_HEALTH_READS_EXACT_CONTAINER_DAEMON_SNAPSHOT",
+        "ordinary_failure_behavior": "JOB_AND_LEASE_ACQUIRE_OR_RENEW_ERRORS_ARE_TYPE_ONLY_SECRET_FREE_AND_BACKGROUND_LOOP_CONTINUES",
+        "recovery_behavior": "NEXT_SUCCESSFUL_WAVE_CLEARS_CONSECUTIVE_FAILURES_AND_MARKS_RECOVERED",
+        "fatal_failure_behavior": "PROCESS_CONTROL_BASE_EXCEPTION_TRANSITIONS_TO_FAILED_AND_RESTART_REQUIRES_EXPLICIT_CLOSE",
+        "new_contract_and_unit_validation": "6_PASSED_IN_13_13_SECONDS",
+        "transparent_first_affected_run": "67_PASSED_1_FAILED_IN_169_29_SECONDS_STALE_HOST_TEST_FIXTURE_DID_NOT_ENTER_ASGI_LIFESPAN",
+        "fixture_repair_validation": "1_PASSED_IN_22_08_SECONDS",
+        "final_affected_validation": "68_PASSED_IN_211_30_SECONDS_OVERLAPS_PRIOR_BATCHES_DO_NOT_SUM",
+        "documentation_and_machine_state_validation": "51_PASSED_IN_14_19_SECONDS",
+        "compile_json_diff_checks": "PASS",
+        "unified_static_scan": "PASS",
+        "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
+        "migration": "NONE",
+        "durable_slo_journal": "NOT_IMPLEMENTED",
+        "guardian_acknowledgement": "NOT_WIRED",
+        "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+        "production_canary": "NOT_RUN",
+        "docker_full_stack": "NOT_RUN_NE07",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "boundary": "APP_LOCAL_IN_MEMORY_SUPERVISION_ONLY_NOT_DURABLE_CROSS_PROCESS_SLO_OR_NE01_COMPLETION"
       },
       "edge_command_process_global_authority": {
         "status": "RETIRED_FAIL_CLOSED_POSITIVE_PATH_MISSING",
