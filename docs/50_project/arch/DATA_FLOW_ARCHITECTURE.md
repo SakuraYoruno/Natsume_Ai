@@ -50,7 +50,7 @@ flowchart LR
 
 Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Secure Ingress → immutable `BLOCKED` cancellation intent → trusted `CANCELLED` final decision → restart terminal worker → deterministic nonacceptance claim → tombstone/Workspace cleanup。intent 不能冒充 final decision，任何 lineage 漂移均 fail-closed；该流不处理一般取消、多节点或 unknown effect。
 
-Internal 前置 checkpoint 取消现在另有一条更窄的可恢复数据流：只有签名 reconciliation proof 明确给出 `RELEASE + NO_SIDE_EFFECT`，并且 Graph/Node/Attempt/Lease 已由同一 trusted cancellation decision 收敛为 `CANCELLED` 时，terminal worker 才能先提交 deterministic Secure Ingress claim result，再清理 Workspace 和未 sealed stage。普通失败、unknown effect、缺 proof、proof 篡改或任一 lineage 漂移都会保留现场并失败关闭。
+Internal 前置 checkpoint 取消现在另有一条更窄的可恢复数据流：共享中立合同只接受 `RELEASED + RELEASE + NO_SIDE_EFFECT + no receipt`，或 `COMMITTED + COMMIT + SIDE_EFFECT_CONFIRMED + durable receipt`；Graph/Node/Attempt/Lease 还必须由同一 trusted cancellation decision 收敛为 `CANCELLED`。terminal worker 先提交 deterministic Secure Ingress claim result，再清理 Workspace 和未 sealed stage。无副作用 result 保持 v1 digest 兼容，confirmed-effect result 使用 v2 绑定 action/outcome/receipt；后者不等于 Agent result 或 Acceptance。普通失败、一般 unknown effect、混合终态、缺 proof、proof/receipt 篡改或任一 lineage 漂移都会保留现场并失败关闭。
 
 Operation 预留后的已知执行中断现在先进入一个不做副作用归因的持久分类流。exact live fence 校验、状态 mutation 与 Outbox 在同一个 canonical SQLite UoW 中完成；marker 成功后 Runtime 才继续 Budget metering 和 recovery receipt。调用方取消不会被转成普通失败，而是标记后继续向上传播。
 
@@ -60,7 +60,7 @@ flowchart LR
     F --> M["Operation RECOVERY_REQUIRED + unique Outbox"]
     M --> H["durable hold；不重跑 worker"]
     H --> S["signed Operation reconciliation"]
-    S -->|COMMIT| C["已发生副作用的可信证据"]
+    S -->|COMMIT + SIDE_EFFECT_CONFIRMED + receipt| C["已发生副作用的可信证据"]
     S -->|RELEASE + NO_SIDE_EFFECT| R["释放 Operation / cancellation continuation"]
 ```
 
@@ -257,7 +257,7 @@ flowchart LR
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。0117 在 occurrence admission 的同一 `BEGIN IMMEDIATE` 中把 live DUE retry row 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前 renew、运行中 heartbeat，过期 lease 不能自我复活，第二实例/stale fence不能 dispatch/clear/defer，backoff 取真实失败时刻。该 Clock 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因和 canary 仍未完成。
-- Internal 状态为 `PARTIAL / INTERNAL_SEALED_CHECKPOINT_PERIODIC_CONTINUATION`。外部入口只接受未准入的 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，canonical lineage 才使用 V3；准入后的 frozen worker、Agent executor、prompt、review 和 Workspace 直接消费同一个 `WorkOrderV3`，不再由 V3 回投 v2，且顶层 graph/node/revision 与 legacy metadata 漂移失败关闭。worker 将 raw material写入exact-inventory protected stage，公共projection只含ref/digest与摘要。首次 activation 与生命周期 supervisor 周期扫描受治理Internal单节点sealed checkpoint，重开seal-bound recovery envelope、历史Lease→更高fence completion Lease与Operation/Budget/Preview/Grant/Task lineage，重建唯一projection并继续Verification→Acceptance→Effect→claim→clean/no-change promotion，Agent不重跑。数据提交依次经过三个独立原子边界：A=`WorkerProjection + Operation COMMITTED + Operation Outbox`，B=`rejected BudgetUsage + Budget EXCEEDED + Budget Outbox`，C=`重验A/B + Graph/Node/Attempt/Lease/Budget terminal + 5 Outbox`。它们由显式checkpoint UoW和durable continuation衔接，不是单一整链事务；response loss只读重开。终态worker处理精确sealed abandon/cleanup，并只对 signed no-effect pre-checkpoint cancellation 执行 claim-before-unsealed-cleanup。raw failure、unknown effect、其它 crash-left/取消 closeout、general `settle_worker` crash bundle仍缺；一般write、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
+- Internal 状态为 `PARTIAL / INTERNAL_SEALED_CHECKPOINT_PERIODIC_CONTINUATION`。外部入口只接受未准入的 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，canonical lineage 才使用 V3；准入后的 frozen worker、Agent executor、prompt、review 和 Workspace 直接消费同一个 `WorkOrderV3`，不再由 V3 回投 v2，且顶层 graph/node/revision 与 legacy metadata 漂移失败关闭。worker 将 raw material写入exact-inventory protected stage，公共projection只含ref/digest与摘要。首次 activation 与生命周期 supervisor 周期扫描受治理Internal单节点sealed checkpoint，重开seal-bound recovery envelope、历史Lease→更高fence completion Lease与Operation/Budget/Preview/Grant/Task lineage，重建唯一projection并继续Verification→Acceptance→Effect→claim→clean/no-change promotion，Agent不重跑。数据提交依次经过三个独立原子边界：A=`WorkerProjection + Operation COMMITTED + Operation Outbox`，B=`rejected BudgetUsage + Budget EXCEEDED + Budget Outbox`，C=`重验A/B + Graph/Node/Attempt/Lease/Budget terminal + 5 Outbox`。它们由显式checkpoint UoW和durable continuation衔接，不是单一整链事务；response loss只读重开。终态worker处理精确sealed abandon/cleanup，并只对两类 exact signed pre-checkpoint cancellation terminal 执行 claim-before-unsealed-cleanup；v1 no-effect digest兼容，v2绑定confirmed-effect receipt。raw failure、一般 unknown effect、其它 crash-left/取消 closeout、general `settle_worker` crash bundle仍缺；一般write、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
 - post-COMMIT settlement 流程为：`Operation COMMITTED → BudgetUsage write/read identity 不确定 → RECOVERY_REQUIRED（不附加 lifecycle/finalization mutation）→ Lease 自然到期 → higher-fence committed checkpoint takeover → EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT → ACCEPTED、BUDGET_BLOCKED 或 fail-closed`。hold 不覆盖可能已提交的 usage/`EXCEEDED`，进程控制异常不会被转换成业务失败。共享 Budget 已被 sibling 推进为 `EXCEEDED` 时，`MISSING` 只能在同一 scheduler snapshot 精确证明唯一 winner 后补写为 version-stable、共享 winner Outbox/dimensions 的 `ALREADY_EXCEEDED`；补写响应与首次读取再次丢失后，下一 owner 仍只读重开，证据漂移在新 Lease 前失败关闭。受限正向流现覆盖双 checkpoint `accepted+accepted=COMPLETED/CONSUMED`、双 checkpoint `accepted+rejected=BLOCKED/RELEASED`，以及四根节点 `accepted + accepted + winner + ALREADY_EXCEEDED sibling → BLOCKED/RELEASED`。任意图形/规模、`CONFLICT`、`RESERVED`、取消交叉和 unknown effect recovery 仍缺。
 
 ```mermaid
@@ -723,12 +723,16 @@ authenticated Internal ingress
 ```mermaid
 flowchart LR
     T["TaskGraph / Node / Attempt / Lease = CANCELLED"] --> P["签名 reconciliation proof"]
-    P --> R["Operation reservation = RELEASED<br/>action = RELEASE<br/>outcome = NO_SIDE_EFFECT"]
-    R --> D["trusted cancellation intent + final decision"]
+    P --> R{"exact terminal matrix"}
+    R --> N["RELEASED / RELEASE<br/>NO_SIDE_EFFECT / no receipt"]
+    R --> E["COMMITTED / COMMIT<br/>SIDE_EFFECT_CONFIRMED / durable receipt"]
+    N --> D["trusted cancellation intent + final decision"]
+    E --> D
     D --> C["deterministic Secure Ingress claim COMMITTED"]
     C --> W["Workspace cleanup receipt"]
     W --> S["discard unsealed protected stage"]
-    P -. "缺失 / 篡改 / unknown effect" .-> H["保留 Workspace 与 stage，失败关闭"]
+    P -. "缺失 / 篡改 / 一般 unknown effect" .-> H["保留 Workspace 与 stage，失败关闭"]
+    R -. "混合 / 缺 receipt" .-> H
 ```
 
 前置 Review 不执行 handler，且在尚无 worker receipt 时保持 ingress claim result 未绑定；内部 acceptance decision 不是 `ACCEPT` 时不允许进入 canonical result commit。`artifact_store_read_model.py` 只重开/校验 seal inventory、promotion、recovery envelope 与 tombstone；`internal_startup_checkpoint_continuation.py` 只续接 exact admission；`periodic_durable_continuation.py` 只提供 lifecycle cadence/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 在精确 lineage 与更高 fence 下重建唯一 WorkerProjection；`node_worker_stream.py` 只归一化 stream 与中断心跳；`operation_recovery_checkpoint_loader.py` 只校验、接管并加载 COMMITTED checkpoint。上述 continuation/recovery 流均禁止 supervisor 自行调用 Agent/worker。当前周期切片以 Host 真实 SQLite 持久 Lease 到期在线重入、Internal lifecycle 重扫和既有 SQLite+Git checkpoint 恢复为证据；最终定向数量以本提交测试报告为准。一般 crash-left unsealed cleanup、raw worker failure、unknown effect、其它取消、多节点/批处理、handle-level TOCTOU、一般 write、OS/container isolation 与七路线验收仍未删除；外部 v2 ingress compatibility 不拥有 Internal worker execution authority。NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
@@ -1285,7 +1289,7 @@ All ingress sources
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
 10. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
-11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 路线执行 `server-derived workspace_id → source commit freeze → lease/worktree → worker protected stage → sealed checkpoint → activation/periodic projection recovery → Acceptance → real TaskStore evidence → clean/no-change HEAD capture → 0116 ACTIVE→ACCEPTED→PROMOTED`；终态 worker 另行处理 sealed abandon/cleanup。精确的签名 `RELEASE + NO_SIDE_EFFECT` 前置取消已能先提交 claim 再清理 unsealed stage，但该正向路径仍只覆盖 no-change inspect。一般 write promotion、一般 crash-left unsealed cleanup、raw failure/unknown-effect/其它 cancel claim closeout、general `settle_worker` crash bundle、逐操作 fence/强杀、handle-level 原子 TOCTOU 与 OS/container/tenant 隔离仍未解决。
+11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 路线执行 `server-derived workspace_id → source commit freeze → lease/worktree → worker protected stage → sealed checkpoint → activation/periodic projection recovery → Acceptance → real TaskStore evidence → clean/no-change HEAD capture → 0116 ACTIVE→ACCEPTED→PROMOTED`；终态 worker 另行处理 sealed abandon/cleanup。两种 exact signed pre-checkpoint cancellation terminal 已能先提交 claim 再清理 unsealed stage，真实 SQLite+Git 证明 confirmed-effect receipt 跨重启重开和source repository不变，但该正向路径仍只覆盖 no-change inspect。一般 write promotion、一般 crash-left unsealed cleanup、raw failure/一般 unknown-effect/其它 cancel claim closeout、general `settle_worker` crash bundle、逐操作 fence/强杀、handle-level 原子 TOCTOU 与 OS/container/tenant 隔离仍未解决。
 
 ## 13. 代码证据索引
 

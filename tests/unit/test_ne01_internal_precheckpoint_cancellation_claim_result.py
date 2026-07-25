@@ -5,6 +5,7 @@ import pytest
 from host_brain.contracts.agent_runtime.internal_precheckpoint_cancellation_claim_result import (
     INTERNAL_PRECHECKPOINT_CANCELLATION_RESULT_REF_PREFIX,
     build_internal_precheckpoint_cancellation_result_ref,
+    normalize_internal_precheckpoint_cancellation_terminal,
 )
 
 
@@ -48,6 +49,121 @@ def test_result_ref_is_deterministic_and_binds_every_terminal_authority() -> Non
         assert (
             build_internal_precheckpoint_cancellation_result_ref(**changed)
             != first
+        )
+
+
+def test_no_effect_terminal_keeps_the_v1_digest_for_durable_replay() -> None:
+    values = _values()
+
+    legacy = build_internal_precheckpoint_cancellation_result_ref(**values)
+    explicit = build_internal_precheckpoint_cancellation_result_ref(
+        **values,
+        reconciliation_action="RELEASE",
+        reconciliation_outcome="NO_SIDE_EFFECT",
+        downstream_receipt_ref=None,
+    )
+
+    assert explicit == legacy
+
+
+def test_confirmed_side_effect_terminal_binds_receipt_and_outcome() -> None:
+    values = _values()
+    receipt = "provider-receipt://internal/cancelled-side-effect"
+    result = build_internal_precheckpoint_cancellation_result_ref(
+        **values,
+        reconciliation_action="COMMIT",
+        reconciliation_outcome="SIDE_EFFECT_CONFIRMED",
+        downstream_receipt_ref=receipt,
+    )
+
+    assert result.startswith(INTERNAL_PRECHECKPOINT_CANCELLATION_RESULT_REF_PREFIX)
+    assert result != build_internal_precheckpoint_cancellation_result_ref(**values)
+    assert result != build_internal_precheckpoint_cancellation_result_ref(
+        **values,
+        reconciliation_action="COMMIT",
+        reconciliation_outcome="SIDE_EFFECT_CONFIRMED",
+        downstream_receipt_ref=receipt + "/other",
+    )
+
+
+@pytest.mark.parametrize(
+    ("status", "action", "outcome", "receipt"),
+    (
+        ("RELEASED", "RELEASE", "NO_SIDE_EFFECT", None),
+        (
+            "COMMITTED",
+            "COMMIT",
+            "SIDE_EFFECT_CONFIRMED",
+            "provider-receipt://internal/effect",
+        ),
+    ),
+)
+def test_shared_terminal_contract_accepts_only_exact_status_matrix(
+    status: str,
+    action: str,
+    outcome: str,
+    receipt: str | None,
+) -> None:
+    terminal = normalize_internal_precheckpoint_cancellation_terminal(
+        operation_status=status,
+        reconciliation_action=action,
+        reconciliation_outcome=outcome,
+        downstream_receipt_ref=receipt,
+    )
+
+    assert terminal.operation_status == status
+    assert terminal.reconciliation_action == action
+    assert terminal.reconciliation_outcome == outcome
+    assert terminal.downstream_receipt_ref == receipt
+
+
+@pytest.mark.parametrize(
+    ("status", "action", "outcome", "receipt"),
+    (
+        ("COMMITTED", "RELEASE", "NO_SIDE_EFFECT", None),
+        (
+            "RELEASED",
+            "COMMIT",
+            "SIDE_EFFECT_CONFIRMED",
+            "provider-receipt://internal/effect",
+        ),
+    ),
+)
+def test_shared_terminal_contract_rejects_status_action_drift(
+    status: str,
+    action: str,
+    outcome: str,
+    receipt: str | None,
+) -> None:
+    with pytest.raises(ValueError):
+        normalize_internal_precheckpoint_cancellation_terminal(
+            operation_status=status,
+            reconciliation_action=action,
+            reconciliation_outcome=outcome,
+            downstream_receipt_ref=receipt,
+        )
+
+
+@pytest.mark.parametrize(
+    ("action", "outcome", "receipt"),
+    (
+        ("COMMIT", "SIDE_EFFECT_CONFIRMED", None),
+        ("COMMIT", "NO_SIDE_EFFECT", "provider-receipt://internal/effect"),
+        ("RELEASE", "NO_SIDE_EFFECT", "provider-receipt://internal/effect"),
+        ("RELEASE", "SIDE_EFFECT_CONFIRMED", None),
+    ),
+)
+def test_result_ref_rejects_inconsistent_reconciliation_terminal(
+    action: str,
+    outcome: str,
+    receipt: str | None,
+) -> None:
+    with pytest.raises(ValueError):
+        build_internal_precheckpoint_cancellation_result_ref(
+            **_values(),
+            reconciliation_action=action,
+            reconciliation_outcome=outcome,
+            downstream_receipt_ref=receipt,
         )
 
 

@@ -27,6 +27,7 @@ from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result impo
 )
 from host_brain.contracts.agent_runtime.internal_precheckpoint_cancellation_claim_result import (
     build_internal_precheckpoint_cancellation_result_ref,
+    normalize_internal_precheckpoint_cancellation_terminal,
 )
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
@@ -537,6 +538,21 @@ class InternalArtifactTerminalReconciler:
             raise InternalArtifactTerminalReconciliationError(
                 "unsealed cancellation terminal lineage is incomplete"
             )
+        try:
+            operation_terminal = (
+                normalize_internal_precheckpoint_cancellation_terminal(
+                    operation_status=reservation.get("status"),
+                    reconciliation_action=reservation.get(
+                        "reconciliation_action"
+                    ),
+                    reconciliation_outcome=reservation.get(
+                        "reconciliation_outcome"
+                    ),
+                    downstream_receipt_ref=reservation.get("receipt_ref"),
+                )
+            )
+        except ValueError:
+            operation_terminal = None
         if (
             str(terminal.get("authority_kind") or "")
             != "INTERNAL_AGENT_PRECHECKPOINT_CANCELLATION_TERMINAL"
@@ -547,10 +563,7 @@ class InternalArtifactTerminalReconciler:
             or str(lease.get("lease_id") or "") != lease_id
             or str(reservation.get("attempt_id") or "") != attempt_id
             or str(reservation.get("lease_id") or "") != lease_id
-            or str(reservation.get("status") or "") != "RELEASED"
-            or str(reservation.get("reconciliation_action") or "") != "RELEASE"
-            or str(reservation.get("reconciliation_outcome") or "")
-            != "NO_SIDE_EFFECT"
+            or operation_terminal is None
             or str(intent.get("status") or "") != "FINALIZED"
             or str(decision.get("intent_ref") or "")
             != str(intent.get("intent_ref") or "")
@@ -591,6 +604,15 @@ class InternalArtifactTerminalReconciler:
                 ),
                 cancellation_intent_ref=str(intent.get("intent_ref") or ""),
                 cancellation_decision_ref=str(decision.get("decision_ref") or ""),
+                reconciliation_action=(
+                    operation_terminal.reconciliation_action
+                ),
+                reconciliation_outcome=(
+                    operation_terminal.reconciliation_outcome
+                ),
+                downstream_receipt_ref=(
+                    operation_terminal.downstream_receipt_ref
+                ),
             )
         except ValueError as exc:
             raise InternalArtifactTerminalReconciliationError(
