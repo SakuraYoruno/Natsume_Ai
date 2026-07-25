@@ -48,6 +48,10 @@ from host_brain.persistence.workspace_repository import (
     WorkspaceRepository,
     WorkspaceRepositoryError,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 class MutableClock:
@@ -96,6 +100,33 @@ def _source_repository(tmp_path: Path) -> Path:
     return source.resolve()
 
 
+def _insert_test_graph(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    root_work_order_id: str,
+    ts_ms: int,
+) -> None:
+    register_task_graph_admission_authority(conn)
+    with canonical_task_graph_admission_scope(graph_id, 1):
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref,
+                status, status_version, graph_json, source_kind,
+                created_ts_ms, updated_ts_ms
+            ) VALUES (?, 1, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', ?, ?)
+            """,
+            (
+                graph_id,
+                root_work_order_id,
+                f"planner://workspace-w2/{graph_id}",
+                ts_ms,
+                ts_ms,
+            ),
+        )
+
+
 def _database(tmp_path: Path, *, graph_id: str, root_work_order_id: str) -> Path:
     db_path = tmp_path / "workspace-w2.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -104,15 +135,11 @@ def _database(tmp_path: Path, *, graph_id: str, root_work_order_id: str) -> Path
     )
     assert migrated.success is True, migrated.as_dict()
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref,
-                status, status_version, graph_json, source_kind,
-                created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', 1, 1)
-            """,
-            (graph_id, root_work_order_id, f"planner://workspace-w2/{graph_id}"),
+        _insert_test_graph(
+            conn,
+            graph_id=graph_id,
+            root_work_order_id=root_work_order_id,
+            ts_ms=1,
         )
     return db_path
 
@@ -256,6 +283,7 @@ def test_internal_admission_replaces_caller_workspace_with_server_graph_id() -> 
             "ingress_audit_ref": "audit://workspace-w2/admission",
             "input_sha256": "sha256:" + ("a" * 64),
         },
+        frozen_runtime_context={},
     )
     assert canonical.workspace == {
         "strategy": "durable_workspace",
@@ -328,9 +356,8 @@ def test_production_executor_blocks_write_before_legacy_agent_worktree(
     assert not (source / "generated.txt").exists()
     assert (source / "baseline.txt").read_text(encoding="utf-8") == "main baseline\n"
     assert _git(source, "branch", "--show-current") == "main"
-    serialized_order = (tmp_path / "runs" / root_order / "work_order.json").read_text(encoding="utf-8")
-    assert "workspace-lease-" not in serialized_order
-    assert "lease_token" not in serialized_order
+    work_order_artifact = tmp_path / "runs" / root_order / "work_order.json"
+    assert not work_order_artifact.exists()
     with sqlite3.connect(db_path) as conn:
         workspace_rows = conn.execute(
             "SELECT COUNT(*) FROM agent_workspace_authority"
@@ -1612,19 +1639,11 @@ def test_builder_recovers_one_pending_workspace_then_worker_continues_rest(
         root_work_order_id=first_root,
     )
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref,
-                status, status_version, graph_json, source_kind,
-                created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, ?, ?, 'ACTIVE', 0, '{}', 'CANONICAL', 2, 2)
-            """,
-            (
-                second_graph,
-                second_root,
-                f"planner://workspace-w2/{second_graph}",
-            ),
+        _insert_test_graph(
+            conn,
+            graph_id=second_graph,
+            root_work_order_id=second_root,
+            ts_ms=2,
         )
 
     managed_root = tmp_path / "managed"

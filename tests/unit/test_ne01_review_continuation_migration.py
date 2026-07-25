@@ -10,6 +10,10 @@ from host_brain.persistence.review_continuation_store import (
     ReviewContinuationStore,
     ReviewContinuationStoreError,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 def test_0096_fresh_schema_is_coordination_only_and_checksum_replays(tmp_path) -> None:
@@ -20,7 +24,7 @@ def test_0096_fresh_schema_is_coordination_only_and_checksum_replays(tmp_path) -
     )
 
     assert first.success is True, first.as_dict()
-    assert first.summary["current_version"] == 97
+    assert first.summary["current_version"] == 125
     assert any(
         record.migration_id == "0096_task_runtime_review_continuation"
         for record in first.records
@@ -80,7 +84,7 @@ def test_0096_fresh_schema_is_coordination_only_and_checksum_replays(tmp_path) -
         ts_ms=1_001,
     )
     assert replay.success is True, replay.as_dict()
-    assert replay.summary["current_version"] == 97
+    assert replay.summary["current_version"] == 125
 
 
 def test_0096_rejects_partial_claim_and_fence_attempt_mismatch(tmp_path) -> None:
@@ -92,26 +96,28 @@ def test_0096_rejects_partial_claim_and_fence_attempt_mismatch(tmp_path) -> None
     assert result.success is True, result.as_dict()
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref, status,
-                status_version, graph_json, source_kind, source_ref,
-                legacy_snapshot_json, created_ts_ms, updated_ts_ms
-            ) VALUES ('graph-guard', 1, 'work-guard', 'planner://guard',
-                      'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO task_runtime_node(
-                graph_id, graph_revision, node_id, status, status_version,
-                node_json, cancellation_requested_ts_ms,
-                created_ts_ms, updated_ts_ms
-            ) VALUES ('graph-guard', 1, 'node-guard', 'WAITING_APPROVAL',
-                      1, '{}', NULL, 1000, 1000)
-            """
-        )
+        register_task_graph_admission_authority(conn)
+        with canonical_task_graph_admission_scope("graph-guard", 1):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref, status,
+                    status_version, graph_json, source_kind, source_ref,
+                    legacy_snapshot_json, created_ts_ms, updated_ts_ms
+                ) VALUES ('graph-guard', 1, 'work-guard', 'planner://guard',
+                          'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO task_runtime_node(
+                    graph_id, graph_revision, node_id, status, status_version,
+                    node_json, cancellation_requested_ts_ms,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES ('graph-guard', 1, 'node-guard', 'WAITING_APPROVAL',
+                          1, '{}', NULL, 1000, 1000)
+                """
+            )
         conn.execute(
             """
             INSERT INTO agent_runtime_review(

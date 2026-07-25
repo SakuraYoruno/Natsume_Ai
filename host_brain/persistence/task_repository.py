@@ -68,6 +68,12 @@ from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
     validate_worker_projection_record,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    register_task_graph_admission_authority,
+)
+from host_brain.persistence.task_acceptance_effect_staging_authority import (
+    register_task_acceptance_effect_staging_authority,
+)
 from host_brain.persistence.task_store_types import (
     AcceptanceEffectCommitScope,
     AcceptanceEffectIntentSpec,
@@ -487,6 +493,8 @@ class DurableTaskStore(
             isolation_level=None,
         )
         conn.row_factory = sqlite3.Row
+        register_task_graph_admission_authority(conn)
+        register_task_acceptance_effect_staging_authority(conn)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(f"PRAGMA busy_timeout = {self._timeout_ms}")
         return conn

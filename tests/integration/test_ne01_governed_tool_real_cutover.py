@@ -37,6 +37,10 @@ from host_brain.composition.task_runtime import build_process_task_runtime_conta
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.persistence.task_store_types import TaskStoreError
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 from host_brain.runtime.degradation_authority import (
     LegacyModuleGlobalDegradationAdapter,
 )
@@ -234,41 +238,43 @@ def _seed_live_tool_authority(db_path: Path, *, case_id: str) -> dict[str, objec
     }
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
+        register_task_graph_admission_authority(conn)
         now_value = int(
             conn.execute("SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000").fetchone()[
                 0
             ]
         )
         expires_at = now_value + 600_000
-        conn.execute(
-            """
-            INSERT INTO task_runtime_graph(
-                graph_id, revision, root_work_order_id, planner_ref, status,
-                status_version, graph_json, source_kind, created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, ?, ?, 'ACTIVE', 1, '{}', 'CANONICAL', ?, ?)
-            """,
-            (
-                identity["graph_id"],
-                f"work-order::{case_id}",
-                f"planner://live-tool/{case_id}",
-                now_value,
-                now_value,
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO task_runtime_node(
-                graph_id, graph_revision, node_id, status, status_version,
-                node_json, created_ts_ms, updated_ts_ms
-            ) VALUES (?, 1, ?, 'RUNNING', 4, '{}', ?, ?)
-            """,
-            (
-                identity["graph_id"],
-                identity["node_id"],
-                now_value,
-                now_value,
-            ),
-        )
+        with canonical_task_graph_admission_scope(identity["graph_id"], 1):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_graph(
+                    graph_id, revision, root_work_order_id, planner_ref, status,
+                    status_version, graph_json, source_kind, created_ts_ms, updated_ts_ms
+                ) VALUES (?, 1, ?, ?, 'ACTIVE', 1, '{}', 'CANONICAL', ?, ?)
+                """,
+                (
+                    identity["graph_id"],
+                    f"work-order::{case_id}",
+                    f"planner://live-tool/{case_id}",
+                    now_value,
+                    now_value,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO task_runtime_node(
+                    graph_id, graph_revision, node_id, status, status_version,
+                    node_json, created_ts_ms, updated_ts_ms
+                ) VALUES (?, 1, ?, 'RUNNING', 4, '{}', ?, ?)
+                """,
+                (
+                    identity["graph_id"],
+                    identity["node_id"],
+                    now_value,
+                    now_value,
+                ),
+            )
         conn.execute(
             """
             INSERT INTO task_runtime_attempt(

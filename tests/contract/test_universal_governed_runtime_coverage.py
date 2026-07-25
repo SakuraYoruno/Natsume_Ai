@@ -24,8 +24,8 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "a836fb1fcfc3206a8c90e72b37e5c489e9c2f9e0"
-    assert report.migration_head == "0123_resource_manager_status_journal.sql"
+    assert report.evaluated_commit_sha == "c347135f3dbd16e43bb5efd46598204da375217c"
+    assert report.migration_head == "0125_task_acceptance_effect_staging_authority.sql"
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
         "chat": "INCOMPLETE",

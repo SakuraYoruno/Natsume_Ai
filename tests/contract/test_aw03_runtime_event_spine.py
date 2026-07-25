@@ -25,6 +25,10 @@ from host_brain.persistence.runtime_event_repository import (
     RUNTIME_CONTEXT_AUTHORITY_MIGRATION_ASSET_KEY,
     RUNTIME_CONTEXT_AUTHORITY_MIGRATION_SHA256,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -389,26 +393,28 @@ def test_aw03_exact_revision_query_recovers_only_its_legacy_graph_timeline(
     db_path = _migrated_db(tmp_path)
     graph_id = "graph-aw03-legacy-revisions"
     with sqlite3.connect(str(db_path)) as conn:
+        register_task_graph_admission_authority(conn)
         for revision in (1, 2):
-            conn.execute(
-                """
-                INSERT INTO task_runtime_graph(
-                    graph_id, revision, root_work_order_id, planner_ref,
-                    status, status_version, graph_json, source_kind,
-                    source_ref, legacy_snapshot_json, created_ts_ms,
-                    updated_ts_ms
-                ) VALUES (?, ?, ?, ?, 'CREATED', 0, '{}', 'CANONICAL',
-                          NULL, NULL, ?, ?)
-                """,
-                (
-                    graph_id,
-                    revision,
-                    f"work-order::{graph_id}",
-                    f"planner://aw03/{graph_id}/{revision}",
-                    NOW,
-                    NOW,
-                ),
-            )
+            with canonical_task_graph_admission_scope(graph_id, revision):
+                conn.execute(
+                    """
+                    INSERT INTO task_runtime_graph(
+                        graph_id, revision, root_work_order_id, planner_ref,
+                        status, status_version, graph_json, source_kind,
+                        source_ref, legacy_snapshot_json, created_ts_ms,
+                        updated_ts_ms
+                    ) VALUES (?, ?, ?, ?, 'CREATED', 0, '{}', 'CANONICAL',
+                              NULL, NULL, ?, ?)
+                    """,
+                    (
+                        graph_id,
+                        revision,
+                        f"work-order::{graph_id}",
+                        f"planner://aw03/{graph_id}/{revision}",
+                        NOW,
+                        NOW,
+                    ),
+                )
             conn.execute(
                 """
                 INSERT INTO task_runtime_outbox(

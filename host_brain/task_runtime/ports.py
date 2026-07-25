@@ -23,6 +23,13 @@ class CommandRepositoryPort(Protocol):
         graph_revision: int,
     ) -> Mapping[str, Any] | None: ...
 
+    def list_nonterminal_admissions(
+        self,
+        *,
+        surfaces: Sequence[str],
+        limit: int = 100,
+    ) -> Sequence[Mapping[str, Any]]: ...
+
     def admit(
         self,
         command: Any,

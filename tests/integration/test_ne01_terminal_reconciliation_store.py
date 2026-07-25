@@ -152,27 +152,53 @@ def _prepare_atomic_case(
     budget_status: str | None,
 ) -> tuple[DurableTaskStore, dict[str, Any]]:
     store, context = _running_store(tmp_path)
+    failure_budget: dict[str, object] = {}
     if budget_status is not None:
-        budget_id = f"budget://terminal-reconciliation/{budget_status.lower()}"
-        budget = _attach_budget(
-            store,
-            budget_id=budget_id,
-            exceed=budget_status == "EXCEEDED",
-        )
-        if budget_status == "RELEASED":
-            store.transition_budget(
+        budget_id = "budget-terminal-reconciliation"
+        budget = store.reconcile_budget(budget_id)
+        if budget_status == "EXCEEDED":
+            usage_id = "budget-usage://terminal-reconciliation/exceeded"
+            exceeded = store.consume_budget_once(
                 budget_id,
+                usage_id=usage_id,
+                charge_kind="WORKER_USAGE",
+                graph_id=GRAPH_ID,
+                graph_revision=1,
+                node_id=NODE_ID,
+                attempt_id=ATTEMPT_ID,
+                delta=BudgetAmount(token_count=101),
                 expected_version=int(budget["status_version"]),
-                target_status=BudgetReservationStatus.RELEASED,
                 outbox=_event(
+                    "BUDGET_RESERVATION",
+                    budget_id,
+                    int(budget["status_version"]) + 1,
+                    "BUDGET_EXCEEDED",
+                    attempt_id=ATTEMPT_ID,
+                    evidence_refs=(usage_id,),
+                    identity=f"{budget_id}:exceeded",
+                ),
+            )
+            assert exceeded.reason_code == TASK_STORE_BUDGET_EXCEEDED
+        elif budget_status == "RELEASED":
+            failure_budget = {
+                "budget_id": budget_id,
+                "expected_budget_version": int(budget["status_version"]),
+                "budget_outbox": _event(
                     "BUDGET_RESERVATION",
                     budget_id,
                     int(budget["status_version"]) + 1,
                     "BUDGET_RESERVATION_RELEASED",
                     identity=f"{budget_id}:released",
                 ),
-            )
-    _fail(store, context["lease"], graph_target_status=graph_status)
+            }
+        else:
+            assert budget_status == "ACTIVE"
+    _fail(
+        store,
+        context["lease"],
+        graph_target_status=graph_status,
+        **failure_budget,
+    )
     inventory = store.inventory_terminal_reconciliation_cases()
     assert inventory["inserted_count"] == 1
     case = inventory["cases"][0]

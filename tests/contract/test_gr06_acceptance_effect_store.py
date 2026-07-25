@@ -38,6 +38,10 @@ from host_brain.persistence.task_repository import (
     TaskStoreError,
     build_outbox_payload_ref,
 )
+from host_brain.persistence.task_acceptance_effect_staging_authority import (
+    canonical_task_acceptance_effect_staging_scope,
+    register_task_acceptance_effect_staging_authority,
+)
 from tests.task_runtime_authority_fixtures import (
     seed_active_graph_budget_for_test,
     seed_raw_acceptance_effect_for_test,
@@ -129,28 +133,6 @@ def _store(
         migrated.summary["current_version"]
         == migrated.summary["latest_version"]
     )
-    store = DurableTaskStore(db_path, clock=clock or MutableClock())
-    store.assert_acceptance_effect_intent_ready()
-    return store
-
-
-def _store_before_0098(
-    tmp_path: Path,
-    *,
-    clock: MutableClock | BlockingSampleClock | None = None,
-) -> DurableTaskStore:
-    migrations = tmp_path / "migrations-through-0097"
-    migrations.mkdir()
-    for source in MIGRATIONS.glob("*.sql"):
-        if int(source.name.split("_", 1)[0]) <= 97:
-            shutil.copy2(source, migrations / source.name)
-    db_path = tmp_path / "gr06-effects-before-0098.sqlite3"
-    migrated = SQLiteMigrationRunner(
-        db_path=db_path,
-        migrations_dir=migrations,
-    ).apply_migrations(request_id="gr06-effect-before-0098")
-    assert migrated.success is True, migrated.as_dict()
-    assert migrated.summary["current_version"] == 97
     store = DurableTaskStore(db_path, clock=clock or MutableClock())
     store.assert_acceptance_effect_intent_ready()
     return store
@@ -564,6 +546,167 @@ def _effect_spec(
     }
 
 
+def _insert_raw_effect(
+    conn: sqlite3.Connection,
+    spec: dict[str, object],
+    *,
+    status: str = "PENDING",
+) -> None:
+    payload_json = json.dumps(
+        spec["payload"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    conn.execute(
+        """
+        INSERT INTO task_runtime_acceptance_effect_intent(
+            effect_id, graph_id, graph_revision, node_id, attempt_id,
+            commit_scope, effect_type, payload_ref, payload_json,
+            payload_sha256, idempotency_key, status, available_ts_ms,
+            fencing_token, attempt_count, status_version,
+            created_ts_ms, updated_ts_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10000,
+                  0, 0, 0, 10000, 10000)
+        """,
+        (
+            spec["effect_id"],
+            spec["graph_id"],
+            spec["graph_revision"],
+            spec["node_id"],
+            spec["attempt_id"],
+            str(spec["commit_scope"].value),
+            spec["effect_type"],
+            spec["payload_ref"],
+            payload_json,
+            spec["payload_sha256"],
+            spec["idempotency_key"],
+            status,
+        ),
+    )
+
+
+def test_gr06_0125_effect_staging_requires_exact_scope_and_initial_state(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _seed_attempt(store)
+    spec = _effect_spec(
+        effect_id="acceptance-effect://gr06/0125-authority",
+        idempotency_key="gr06:0125-authority",
+    )
+
+    with sqlite3.connect(store.db_path) as plain:
+        with pytest.raises(
+            sqlite3.OperationalError,
+            match="no such function: natsume_task_acceptance_effect_staging_authorized",
+        ):
+            _insert_raw_effect(plain, spec)
+
+    with store._transaction() as conn:
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="TASK_ACCEPTANCE_EFFECT_STAGING_AUTHORITY_REQUIRED",
+        ):
+            _insert_raw_effect(conn, spec)
+        with canonical_task_acceptance_effect_staging_scope(
+            effect_id="acceptance-effect://gr06/wrong",
+            graph_id=spec["graph_id"],
+            graph_revision=spec["graph_revision"],
+            node_id=spec["node_id"],
+            attempt_id=spec["attempt_id"],
+            commit_scope=spec["commit_scope"],
+            idempotency_key=spec["idempotency_key"],
+        ):
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match="TASK_ACCEPTANCE_EFFECT_STAGING_AUTHORITY_REQUIRED",
+            ):
+                _insert_raw_effect(conn, spec)
+        with canonical_task_acceptance_effect_staging_scope(
+            effect_id=spec["effect_id"],
+            graph_id=spec["graph_id"],
+            graph_revision=spec["graph_revision"],
+            node_id=spec["node_id"],
+            attempt_id=spec["attempt_id"],
+            commit_scope=spec["commit_scope"],
+            idempotency_key=spec["idempotency_key"],
+        ):
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match="TASK_ACCEPTANCE_EFFECT_INITIAL_STATE_REQUIRED",
+            ):
+                _insert_raw_effect(conn, spec, status="CLAIMED")
+
+    judgement = _prepare_node_acceptance(store)
+    outbox = _event(
+        "TASK_NODE",
+        "graph-gr06@1/node-gr06",
+        7,
+        "TASK_NODE_ACCEPTED",
+        attempt_id="attempt-gr06",
+        evidence_refs=judgement.evidence_refs,
+    )
+    created = store.commit_node_acceptance(
+        "graph-gr06",
+        1,
+        "node-gr06",
+        expected_version=6,
+        outbox=outbox,
+        acceptance_judgement=judgement,
+        attempt_id="attempt-gr06",
+        receipt_ref=GR06_RECEIPT_REF,
+        worker_output={"result_text": "effect staged"},
+        effect_intents=(spec,),
+    )
+    replayed = store.commit_node_acceptance(
+        "graph-gr06",
+        1,
+        "node-gr06",
+        expected_version=6,
+        outbox=outbox,
+        acceptance_judgement=judgement,
+        attempt_id="attempt-gr06",
+        receipt_ref=GR06_RECEIPT_REF,
+        worker_output={"result_text": "effect staged"},
+        effect_intents=(spec,),
+    )
+    assert created["replayed"] is False
+    assert replayed["replayed"] is True
+    assert [item["effect_id"] for item in replayed["effect_intents"]] == [
+        spec["effect_id"]
+    ]
+
+
+def test_gr06_0125_trigger_tamper_fails_schema_readiness(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    with sqlite3.connect(store.db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name = 'trg_task_runtime_acceptance_effect_staging_authority_insert'
+            """
+        ).fetchone()
+        assert row is not None
+        tampered = str(row[0]).replace(
+            ") <> 1 THEN",
+            ") <> 1 AND 1 = 0 THEN",
+            1,
+        )
+        conn.execute(
+            "DROP TRIGGER "
+            "trg_task_runtime_acceptance_effect_staging_authority_insert"
+        )
+        conn.execute(tampered)
+        conn.commit()
+
+    with pytest.raises(TaskStoreError) as captured:
+        store.assert_acceptance_effect_intent_ready()
+    assert captured.value.reason_code == TASK_STORE_SCHEMA_NOT_READY
+    assert "trigger SQL drifted" in str(captured.value)
+
+
 def test_gr06_migration_0087_is_forward_owned_and_fails_closed_when_missing(
     tmp_path: Path,
 ) -> None:
@@ -845,34 +988,48 @@ def test_gr06_claim_requires_the_exact_attempt_that_materialized_the_artifact(
                 "sha256:" + ("b" * 64),
             ),
         )
-        # Deliberately model a direct-SQL/application bypass.  The dispatcher
-        # must still fence it because no exact 0102 artifact belongs to this
-        # otherwise successful Attempt.
-        conn.execute(
-            """
-            INSERT INTO task_runtime_acceptance_effect_intent(
-                effect_id, graph_id, graph_revision, node_id, attempt_id,
-                commit_scope, effect_type, payload_ref, payload_json,
-                payload_sha256, idempotency_key, status, available_ts_ms,
-                fencing_token, attempt_count, status_version,
-                created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 10000,
-                      0, 0, 0, 10000, 10000)
-            """,
-            (
-                spec["effect_id"],
-                spec["graph_id"],
-                spec["graph_revision"],
-                spec["node_id"],
-                spec["attempt_id"],
-                commit_scope.value,
-                spec["effect_type"],
-                spec["payload_ref"],
-                payload_json,
-                spec["payload_sha256"],
-                spec["idempotency_key"],
-            ),
+        insert_sql = """
+                INSERT INTO task_runtime_acceptance_effect_intent(
+                    effect_id, graph_id, graph_revision, node_id, attempt_id,
+                    commit_scope, effect_type, payload_ref, payload_json,
+                    payload_sha256, idempotency_key, status, available_ts_ms,
+                    fencing_token, attempt_count, status_version,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 10000,
+                          0, 0, 0, 10000, 10000)
+                """
+        insert_values = (
+            spec["effect_id"],
+            spec["graph_id"],
+            spec["graph_revision"],
+            spec["node_id"],
+            spec["attempt_id"],
+            commit_scope.value,
+            spec["effect_type"],
+            spec["payload_ref"],
+            payload_json,
+            spec["payload_sha256"],
+            spec["idempotency_key"],
         )
+        with pytest.raises(
+            sqlite3.OperationalError,
+            match="no such function: natsume_task_acceptance_effect_staging_authorized",
+        ):
+            conn.execute(insert_sql, insert_values)
+
+        # Explicit test-only authority models a historical row that cannot be
+        # produced by a plain production connection after migration 0125.
+        register_task_acceptance_effect_staging_authority(conn)
+        with canonical_task_acceptance_effect_staging_scope(
+            effect_id=spec["effect_id"],
+            graph_id=spec["graph_id"],
+            graph_revision=spec["graph_revision"],
+            node_id=spec["node_id"],
+            attempt_id=spec["attempt_id"],
+            commit_scope=commit_scope.value,
+            idempotency_key=spec["idempotency_key"],
+        ):
+            conn.execute(insert_sql, insert_values)
         conn.commit()
 
     if commit_scope is AcceptanceEffectCommitScope.GRAPH:
@@ -951,57 +1108,27 @@ def test_gr06_claim_revalidates_artifact_content_before_dispatch(
     assert tampered.value.reason_code == TASK_STORE_DURABLE_DATA_INVALID
 
 
-def test_gr06_delivery_mutations_remain_compatible_before_0098(
+def test_gr06_delivery_mutations_fail_closed_without_0125_authority(
     tmp_path: Path,
 ) -> None:
-    store = _store_before_0098(tmp_path)
-    _seed_attempt(store)
-    _accept_node(store)
+    migrations = tmp_path / "migrations-through-0124"
+    migrations.mkdir()
+    for source in MIGRATIONS.glob("*.sql"):
+        if int(source.name.split("_", 1)[0]) <= 124:
+            shutil.copy2(source, migrations / source.name)
+    db_path = tmp_path / "gr06-effects-before-0125.sqlite3"
+    migrated = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=migrations,
+    ).apply_migrations(request_id="gr06-effect-before-0125")
+    assert migrated.success is True, migrated.as_dict()
+    assert migrated.summary["current_version"] == 124
 
-    outcomes: dict[str, str] = {}
-    for mutation in ("commit", "fail", "reschedule"):
-        effect_id = f"acceptance-effect://gr06/pre-0098-{mutation}"
-        created = _stage(
-            store,
-            effect_id=effect_id,
-            idempotency_key=f"gr06:pre-0098:{mutation}",
-        )
-        claimed = store.claim_acceptance_effect_intent(
-            owner_id=f"dispatcher-pre-0098-{mutation}",
-            effect_id=str(created["effect_id"]),
-        )
-        assert claimed is not None
-        if mutation == "commit":
-            result = store.commit_acceptance_effect_intent(
-                effect_id,
-                owner_id="dispatcher-pre-0098-commit",
-                fencing_token=int(claimed["fencing_token"]),
-                receipt_ref="conversation-receipt://gr06/pre-0098",
-            )
-        elif mutation == "fail":
-            result = store.fail_acceptance_effect_intent(
-                effect_id,
-                owner_id="dispatcher-pre-0098-fail",
-                fencing_token=int(claimed["fencing_token"]),
-                reason_code="DELIVERY_REJECTED",
-                detail="pre-0098 compatibility failure",
-            )
-        else:
-            result = store.reschedule_acceptance_effect_intent(
-                effect_id,
-                owner_id="dispatcher-pre-0098-reschedule",
-                fencing_token=int(claimed["fencing_token"]),
-                reason_code="DELIVERY_RETRY",
-                detail="pre-0098 compatibility retry",
-                delay_ms=0,
-            )
-        outcomes[mutation] = str(result["status"])
-
-    assert outcomes == {
-        "commit": AcceptanceEffectStatus.COMMITTED.value,
-        "fail": AcceptanceEffectStatus.FAILED.value,
-        "reschedule": AcceptanceEffectStatus.PENDING.value,
-    }
+    store = DurableTaskStore(db_path, clock=MutableClock())
+    with pytest.raises(TaskStoreError) as missing:
+        store.assert_acceptance_effect_intent_ready()
+    assert missing.value.reason_code == TASK_STORE_SCHEMA_NOT_READY
+    assert "migration 0125 is missing" in str(missing.value)
 
 
 @pytest.mark.parametrize("mutation", ("commit", "fail", "reschedule"))

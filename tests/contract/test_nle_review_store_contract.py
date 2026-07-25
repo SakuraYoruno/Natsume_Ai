@@ -28,6 +28,10 @@ from host_brain.persistence.review_repository import (
     ReviewStore,
     ReviewStoreError,
 )
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.agent_runtime.workspace_policy import WorkspacePolicy, WorkspaceResolution
@@ -72,6 +76,19 @@ def _store_with_cancellation_schema(
     return ReviewStore(db_path, clock=clock or MutableClock())
 
 
+def _execute_task_admission_insert(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    graph_revision: int,
+    sql: str,
+    parameters: tuple[object, ...],
+) -> None:
+    register_task_graph_admission_authority(conn)
+    with canonical_task_graph_admission_scope(graph_id, graph_revision):
+        conn.execute(sql, parameters)
+
+
 def _insert_graph_cancellation(
     store: ReviewStore,
     *,
@@ -89,15 +106,18 @@ def _insert_graph_cancellation(
     payload_sha256 = "sha256:" + hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
     with sqlite3.connect(str(store.db_path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
+        _execute_task_admission_insert(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            sql="""
             INSERT OR IGNORE INTO task_runtime_graph(
                 graph_id, revision, root_work_order_id, planner_ref,
                 status, status_version, graph_json, source_kind, source_ref,
                 legacy_snapshot_json, created_ts_ms, updated_ts_ms
             ) VALUES (?, ?, ?, ?, 'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL, 1000, 1000)
             """,
-            (
+            parameters=(
                 graph_id,
                 graph_revision,
                 f"work-order-{graph_id}-{graph_revision}",
@@ -159,8 +179,11 @@ def _insert_review_checkpoint(
 ) -> None:
     with sqlite3.connect(str(store.db_path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(
-            """
+        _execute_task_admission_insert(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            sql="""
             INSERT OR IGNORE INTO task_runtime_graph(
                 graph_id, revision, root_work_order_id, planner_ref,
                 status, status_version, graph_json, source_kind, source_ref,
@@ -168,15 +191,18 @@ def _insert_review_checkpoint(
             ) VALUES (?, ?, ?, ?, 'BLOCKED', 1, '{}', 'CANONICAL', NULL, NULL,
                       1000, 1000)
             """,
-            (
+            parameters=(
                 graph_id,
                 graph_revision,
                 f"work-order-{graph_id}-{graph_revision}",
                 "planner://review/checkpoint",
             ),
         )
-        conn.execute(
-            """
+        _execute_task_admission_insert(
+            conn,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            sql="""
             INSERT INTO task_runtime_node(
                 graph_id, graph_revision, node_id, status, status_version,
                 node_json, cancellation_requested_ts_ms,
@@ -184,7 +210,7 @@ def _insert_review_checkpoint(
             ) VALUES (?, ?, 'node-1', 'WAITING_APPROVAL', 0, '{}', NULL,
                       1000, 1000)
             """,
-            (graph_id, graph_revision),
+            parameters=(graph_id, graph_revision),
         )
 
 

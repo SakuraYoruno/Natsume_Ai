@@ -7,6 +7,10 @@ from typing import Any
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.persistence.task_graph_admission_authority import (
+    canonical_task_graph_admission_scope,
+    register_task_graph_admission_authority,
+)
 
 
 CASE_TABLE = "task_runtime_terminal_reconciliation_case"
@@ -49,6 +53,7 @@ def _migrated_db(tmp_path, name: str) -> tuple[SQLiteMigrationRunner, Any]:
 def _connect(db_path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    register_task_graph_admission_authority(conn)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -60,22 +65,23 @@ def _insert_graph(
     status: str,
     version: int,
 ) -> None:
-    conn.execute(
-        """
-        INSERT INTO task_runtime_graph(
-            graph_id, revision, root_work_order_id, planner_ref,
-            status, status_version, graph_json, source_kind,
-            created_ts_ms, updated_ts_ms
-        ) VALUES (?, 1, ?, ?, ?, ?, '{}', 'CANONICAL', 1, 1)
-        """,
-        (
-            graph_id,
-            f"work-order-{graph_id}",
-            f"planner://{graph_id}",
-            status,
-            version,
-        ),
-    )
+    with canonical_task_graph_admission_scope(graph_id, 1):
+        conn.execute(
+            """
+            INSERT INTO task_runtime_graph(
+                graph_id, revision, root_work_order_id, planner_ref,
+                status, status_version, graph_json, source_kind,
+                created_ts_ms, updated_ts_ms
+            ) VALUES (?, 1, ?, ?, ?, ?, '{}', 'CANONICAL', 1, 1)
+            """,
+            (
+                graph_id,
+                f"work-order-{graph_id}",
+                f"planner://{graph_id}",
+                status,
+                version,
+            ),
+        )
 
 
 def _insert_budget(
@@ -106,15 +112,16 @@ def _insert_failed_node_attempt(
     node_id: str,
     attempt_id: str,
 ) -> None:
-    conn.execute(
-        """
-        INSERT INTO task_runtime_node(
-            graph_id, graph_revision, node_id, status, status_version,
-            node_json, created_ts_ms, updated_ts_ms
-        ) VALUES (?, 1, ?, 'FAILED', 1, '{}', 1, 1)
-        """,
-        (graph_id, node_id),
-    )
+    with canonical_task_graph_admission_scope(graph_id, 1):
+        conn.execute(
+            """
+            INSERT INTO task_runtime_node(
+                graph_id, graph_revision, node_id, status, status_version,
+                node_json, created_ts_ms, updated_ts_ms
+            ) VALUES (?, 1, ?, 'FAILED', 1, '{}', 1, 1)
+            """,
+            (graph_id, node_id),
+        )
     conn.execute(
         """
         INSERT INTO task_runtime_attempt(

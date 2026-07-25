@@ -97,6 +97,17 @@ async def test_host_startup_continuation_reads_exact_sqlite_admission(
     assert [(item["graph_id"], item["revision"], item["status"]) for item in inventory] == [
         (graph.graph_id, graph.revision, TaskGraphStatus.CREATED.value)
     ]
+    host_inventory = commands.list_nonterminal_admissions(
+        surfaces=(HostCommandSurface.CHAT.value,),
+        limit=1,
+    )
+    assert len(host_inventory) == 1
+    assert host_inventory[0]["command"] == admitted["command"]
+    assert host_inventory[0]["runtime_graph_status"] == "CREATED"
+    assert commands.list_nonterminal_admissions(
+        surfaces=(HostCommandSurface.SCHEDULER.value,),
+        limit=1,
+    ) == []
 
     application = _CapturingApplication()
     runtime = GovernedHostRuntime(

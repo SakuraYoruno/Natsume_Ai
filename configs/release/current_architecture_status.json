@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-25",
   "source_baseline": {
-    "dev_commit": "99ae35ca4d86680b93645f91460f08a92abe5da1",
+    "dev_commit": "c347135f3dbd16e43bb5efd46598204da375217c",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "THIS_DOCUMENT_COMMIT_NE01_FIRST_GOVERNED_EDGE_EXPRESSION_SLICE"
+    "evaluated_source": "NE01_TASK_GRAPH_AND_ACCEPTANCE_EFFECT_SQL_AUTHORITIES_WITH_HOST_SURFACE_RECOVERY_INVENTORY_WORKTREE_OVER_ORIGIN_DEV_C347135F3"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "HOST_AND_EDGE_RUNTIME_AUTHORITY_CONSOLIDATED_ON_DEV_99AE35CA4_PRODUCTION_PROCESS_LOCATOR_AND_TRIBE_NO_CONTEXT_FALLBACKS_RETIRED_RESOURCE_MANAGER_STATUS_DURABLE_RESEARCH_LEDGER_RESPONSIBILITIES_SPLIT_SHARED_RUNTIME_CONTRACTS_NEUTRALIZED_EDGE_PROCESS_GLOBAL_DIRECT_PUSH_RETIRED_FIRST_GOVERNED_EDGE_EXPRESSION_TASKGRAPH_REVIEW_ACCEPTANCE_OUTBOX_AND_READ_ONLY_RECONCILIATION_SLICE_LOCAL_SQLITE_PASS_UNIFIED_STATIC_SCAN_AND_FULL_GATES_1_TO_14_LOCAL_PASS_PROGRAM_INCOMPLETE_REMAINING_33_OPERATOR_COMMANDS_REAL_EDGE_GATEWAY_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_EXTERNAL_NAMESPACES_CANCELLATION_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "MIGRATION_HEAD_0125_TASK_ACCEPTANCE_EFFECT_STAGING_AUTHORITY_RESOURCE_MANAGER_STATUS_DURABLE_PRODUCTION_LOCATOR_RETIRED_APPLICATION_SQL_ADMISSION_AND_EFFECT_STAGING_INSERT_AUTHORITIES_SEALED_EXISTING_ROWS_UNCHANGED_OTHER_RUNTIME_MUTATIONS_OUT_OF_SCOPE_GATE_1_TO_14_STATIC_PASS_HOST_STARTUP_EXACT_NONTERMINAL_ADMISSION_CONTINUATION_SURFACE_FILTERED_SINGLE_READ_TRANSACTION_EXACT_LIMIT_ACCEPTED_TRUE_OVERFLOW_FAIL_CLOSED_LOCAL_SQLITE_PASS_PROGRAM_INCOMPLETE_REMAINING_33_OPERATOR_COMMANDS_REAL_EDGE_GATEWAY_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_EXTERNAL_NAMESPACES_CANCELLATION_OPERATION_EFFECT_TERMINAL_RECONCILIATION_BOUNDED_FANOUT_GENERAL_MULTI_NODE_UNKNOWN_EFFECT_WORKSPACE_TRANSACTIONAL_CHAT_GENERIC_DELEGATE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,10 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "FIRST_GOVERNED_EDGE_EXPRESSION_SLICE_LOCAL_PASS_PROGRAM_INCOMPLETE",
+    "status": "TASK_GRAPH_AND_ACCEPTANCE_EFFECT_SQL_AUTHORITIES_LOCAL_PASS_PROGRAM_INCOMPLETE",
     "commit_binding": "THIS_DOCUMENT_COMMIT_WITH_POST_COMMIT_ARTIFACTS_LOCAL_GATES_MATCHING_SHA",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_FIRST_GOVERNED_EDGE_EXPRESSION_SLICE",
+    "slice": "NE01_TASK_GRAPH_AND_ACCEPTANCE_EFFECT_SQL_AUTHORITIES",
     "resource_manager_status_current_validation": {
       "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
       "migration": "0123_resource_manager_status_journal.sql",
@@ -66,6 +66,51 @@
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "boundary": "RESOURCE_MANAGER_STATUS_AUTHORITY_ONLY_OTHER_RESOURCE_RECOVERY_EXTERNAL_NAMESPACES_COMPLETE_TYPED_WORKER_OBS_COMPOSITION_AND_NE01_REMAIN_INCOMPLETE"
+    },
+    "task_graph_sql_admission_authority": {
+      "status": "LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
+      "migration": "0124_task_graph_admission_authority.sql",
+      "production_scope_owner": "HostCommandRepository._admit_normalized",
+      "connection_registration_owners": [
+        "HostCommandRepository._connect",
+        "DurableTaskStore._connect"
+      ],
+      "trigger_count": 3,
+      "exact_identity": "graph_id_plus_graph_revision",
+      "plain_sqlite": "FAIL_CLOSED_MISSING_UDF",
+      "unscoped_task_store": "FAIL_CLOSED",
+      "late_node": "FAIL_CLOSED_AFTER_HOST_COMMAND_ADMISSION",
+      "raw_host_command": "FAIL_CLOSED",
+      "schema_tamper": "HOST_COMMAND_SCHEMA_NOT_READY",
+      "existing_rows": "UNCHANGED",
+      "acceptance_effect_and_other_runtime_mutations": "OUT_OF_SCOPE",
+      "current_code_tests": "27_PASSED",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+    },
+    "task_acceptance_effect_sql_staging_authority": {
+      "status": "LOCAL_AFFECTED_PASS_PROGRAM_INCOMPLETE",
+      "migration": "0125_task_acceptance_effect_staging_authority.sql",
+      "production_scope_owner": "DurableTaskStore._stage_acceptance_effect_intent_in_transaction",
+      "connection_registration_owner": "DurableTaskStore._connect",
+      "trigger_count": 1,
+      "exact_identity": "effect_id_plus_graph_id_plus_graph_revision_plus_node_id_plus_attempt_id_plus_commit_scope_plus_idempotency_key",
+      "canonical_initial_state": "PENDING_ZERO_CLAIM_FENCE_ATTEMPT_VERSION_EQUAL_CREATED_AVAILABLE_UPDATED_NO_RECEIPT_REASON_ERROR_TERMINAL_TIME",
+      "plain_sqlite": "FAIL_CLOSED_MISSING_UDF",
+      "wrong_or_unscoped_task_store": "FAIL_CLOSED",
+      "exact_replay": "READ_ONLY_NO_SCOPE_REENTRY",
+      "schema_tamper": "TASK_STORE_SCHEMA_NOT_READY",
+      "existing_rows": "UNCHANGED",
+      "other_runtime_mutations": "OUT_OF_SCOPE",
+      "final_affected_validation": "99_PASSED_IN_245_03_SECONDS",
+      "documentation_gate": "45_PASSED_IN_12_71_SECONDS",
+      "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_TASK_REPOSITORY_4593_BELOW_4600",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
     },
     "research_shadow_ledger_split_current_validation": {
       "status": "LOCAL_TARGETED_PASS_GATE_3_PASS_NE01_IN_PROGRESS",
@@ -758,12 +803,12 @@
     "host_startup_graph_continuation_current_validation": {
       "status": "LOCAL_TARGETED_PASS_BOOT_SCOPED_HOST_CONTINUATION_PROGRAM_INCOMPLETE",
       "production_wiring": "ACTIVATE_INTERNAL_RUNTIME_CALLS_RECOVER_STARTUP_GRAPHS_AFTER_TASK_RUNTIME_RUNTIME_GROUP_AND_SHARED_ACCEPTANCE_EFFECT_OWNER_ACTIVATION_AND_BEFORE_SCHEDULER_CLOCK",
-      "inventory": "READ_ONLY_CREATED_ACTIVE_BLOCKED_GRAPH_INVENTORY_MAX_100_REACHING_BOUND_FAILS_CLOSED",
-      "authority": "CANONICAL_GET_BY_GRAPH_EXACT_HOSTCOMMAND_WORKORDERV3_ASSIGNMENT_TASKGRAPH_ONLY_NO_INGRESS_GOVERNOR_OR_PLAN_RECONSTRUCTION",
-      "surface_scope": "CHAT_HOST_INPUT_TOOL_GATEWAY_ONLY_FOREIGN_SURFACE_SKIPPED_AFTER_COMMAND_IDENTITY_CHECK",
+      "inventory": "HOSTCOMMAND_PLUS_TASKGRAPH_SINGLE_READ_TRANSACTION_CREATED_ACTIVE_BLOCKED_SURFACE_FILTERED_LIMIT_PLUS_ONE_EXACT_LIMIT_ACCEPTED_TRUE_OVERFLOW_FAILS_CLOSED",
+      "authority": "CANONICAL_LIST_NONTERMINAL_ADMISSIONS_EXACT_HOSTCOMMAND_WORKORDERV3_ASSIGNMENT_TASKGRAPH_ONLY_NO_INGRESS_GOVERNOR_OR_PLAN_RECONSTRUCTION",
+      "surface_scope": "CHAT_HOST_INPUT_TOOL_GATEWAY_FILTERED_IN_SQL_FOREIGN_SURFACES_CANNOT_CONSUME_HOST_BOUND",
       "live_execution": "ACTIVE_LEASE_OR_GOVERNED_EXECUTION_IN_PROGRESS_DEFERRED_ZERO_SCANNER_WORKER_REPLAY",
       "sqlite_durable_admission_inventory": "PASSED_WITH_EXACT_DURABLE_TUPLE_CAPTURE",
-      "targeted_batch": "71_PASSED_IN_6_60_SECONDS_HOST_STARTUP_CONTINUATION_AND_AFFECTED_ASGI_RUNTIME_BOUNDARIES",
+      "targeted_batch": "20_PASSED_HOST_STARTUP_UNIT_SQLITE_DURABLE_ADMISSION_AND_HOSTCOMMAND_CONTRACT",
       "static_analysis": "PYTHON_COMPILEALL_PASS_RUFF_NOT_RUN_TOOL_NOT_INSTALLED",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "docker_full_stack": "NOT_RUN_NE07",
@@ -1391,6 +1436,7 @@
     "completed_large_file_splits": [
       "host_brain/app/governed_task_adapter.py",
       "host_brain/persistence/host_command_repository.py",
+      "host_brain/persistence/host_command_recovery_inventory.py",
       "host_brain/persistence/review_continuation_store.py",
       "host_brain/scheduler/governed_runtime.py",
       "host_brain/app/obs_routes_stats_input_humanoid.py",
@@ -1446,7 +1492,8 @@
       "host_brain/app/tribe_composition.py": 225,
       "host_brain/app/tribe_runtime_scope.py": 182,
       "host_brain/core/resource_manager.py": 1229,
-      "host_brain/persistence/host_command_repository.py": 1387,
+      "host_brain/persistence/host_command_repository.py": 1434,
+      "host_brain/persistence/host_command_recovery_inventory.py": 102,
       "host_brain/persistence/host_command_claim_result_validation.py": 440,
       "host_brain/persistence/scheduler_repository.py": 2942,
       "host_brain/persistence/scheduler_clock_retry_store.py": 540,
@@ -1711,8 +1758,8 @@
       ]
     },
     "task_store_application_write_authority": {
-      "status": "APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED",
-      "physical_database_boundary": "SQL_DIRECT_BYPASS_PRESENT",
+      "status": "APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED",
+      "physical_database_boundary": "GRAPH_NODE_HOST_COMMAND_AND_ACCEPTANCE_EFFECT_INSERTS_FENCED_OTHER_MUTATIONS_OUT_OF_SCOPE",
       "removed_public_durable_task_store_methods": [
         "create_graph",
         "insert_graph_in_transaction",
@@ -1739,10 +1786,17 @@
       },
       "test_fixture_boundary": "tests/task_runtime_authority_fixtures.py builds explicit raw/orphan Store state without host_command_journal and is forbidden in production imports",
       "sqlite_boundary": {
-        "orphan_and_raw_sql": "PRESENT",
-        "migration_added_this_slice": false,
-        "trigger_added_this_slice": false,
-        "physical_single_writer_claim": "NOT_MADE"
+        "admission_migration": "0124_task_graph_admission_authority.sql",
+        "acceptance_effect_migration": "0125_task_acceptance_effect_staging_authority.sql",
+        "trigger_count": 4,
+        "admission_exact_scope": "graph_id_plus_graph_revision",
+        "acceptance_effect_exact_scope": "effect_graph_revision_node_attempt_commit_scope_idempotency",
+        "graph_node_host_command_insert_bypass": "SEALED_FAIL_CLOSED",
+        "acceptance_effect_insert_bypass": "SEALED_FAIL_CLOSED",
+        "acceptance_effect_initial_state": "CANONICAL_PENDING_ONLY",
+        "existing_rows": "UNCHANGED",
+        "other_runtime_mutations": "OUT_OF_SCOPE",
+        "physical_single_writer_claim": "ADMISSION_AND_ACCEPTANCE_EFFECT_STAGING_INSERTS_ONLY"
       },
       "validation": {
         "authority_and_structure_passed": 19,
@@ -1757,12 +1811,15 @@
         "terminal_passed": 32,
         "third_fixture_node_risk_level": "REPRODUCIBLE_ON_ORIGIN_DEV_AND_FIXED",
         "final_key_regression_passed": 26,
+        "sql_admission_authority_passed": 27,
+        "final_sql_authority_affected_batch": "99_PASSED_IN_245_03_SECONDS",
+        "documentation_gate": "45_PASSED_IN_12_71_SECONDS",
+        "full_architecture_static_gate_current": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_TASK_REPOSITORY_4593_BELOW_4600",
         "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
         "task_store_slice_static_gate": "FAIL_GATES_1_6_10",
-        "full_architecture_static_gate_at_slice_completion": "FAIL_GATES_1_6_10_NOT_PASS",
-        "full_architecture_static_gate_current": "PASS"
+        "full_architecture_static_gate_at_slice_completion": "FAIL_GATES_1_6_10_NOT_PASS"
       },
-      "boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_ONLY_SQLITE_ORPHAN_RAW_SQL_REMAINS_NE01_IN_PROGRESS"
+      "boundary": "APPLICATION_SQL_ADMISSION_AND_ACCEPTANCE_EFFECT_STAGING_INSERT_AUTHORITIES_ONLY_OTHER_RUNTIME_MUTATIONS_REMAIN_NE01_IN_PROGRESS"
     },
     "business_sqlite_boundary": {
       "status": "GATE_10_PASS_NE01_STILL_IN_PROGRESS",
@@ -2192,8 +2249,8 @@
       "scope": ["chat", "skill", "plan", "delegate", "scheduler", "internal", "operator"],
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
-        "evaluated_commit_sha": "a836fb1fcfc3206a8c90e72b37e5c489e9c2f9e0",
-        "migration_head": "0123_resource_manager_status_journal.sql",
+        "evaluated_commit_sha": "c347135f3dbd16e43bb5efd46598204da375217c",
+        "migration_head": "0125_task_acceptance_effect_staging_authority.sql",
         "route_status": "ALL_SEVEN_INCOMPLETE",
         "commit_bound_acceptance": "MISSING_ALL_SEVEN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
@@ -2580,8 +2637,8 @@
       "host_startup_graph_continuation": {
         "status": "PARTIAL_BOOT_SCOPED_EXACT_HOST_REENTRY",
         "owner": "GOVERNED_HOST_RUNTIME_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION",
-        "durable_inventory": "TASK_STORE_LIST_NONTERMINAL_GRAPHS_CREATED_ACTIVE_BLOCKED_MAX_100",
-        "canonical_reentry": "HOST_COMMAND_REPOSITORY_GET_BY_GRAPH_EXACT_COMMAND_WORKORDER_ASSIGNMENT_GRAPH",
+        "durable_inventory": "HOST_COMMAND_REPOSITORY_SURFACE_FILTERED_LIST_NONTERMINAL_ADMISSIONS_SINGLE_READ_TRANSACTION_CREATED_ACTIVE_BLOCKED_LIMIT_PLUS_ONE",
+        "canonical_reentry": "HOST_COMMAND_REPOSITORY_EXACT_COMMAND_WORKORDER_ASSIGNMENT_GRAPH_RECORD",
         "allowed_surfaces": [
           "CHAT",
           "HOST_INPUT",
@@ -2589,8 +2646,8 @@
           "GATEWAY"
         ],
         "live_lease_or_execution": "DEFERRED_NO_LEASE_TAKEOVER_NO_SCANNER_WORKER_REPLAY",
-        "fail_closed": "BOUND_REACHED_OR_COMMAND_GRAPH_SNAPSHOT_RECEIPT_IDENTITY_DRIFT",
-        "validated": "71_PASSED_HOST_STARTUP_UNIT_SQLITE_DURABLE_ADMISSION_AND_AFFECTED_ASGI_RUNTIME_BOUNDARIES",
+        "fail_closed": "TRUE_OVERFLOW_OR_FOREIGN_SURFACE_OR_COMMAND_GRAPH_SNAPSHOT_RECEIPT_IDENTITY_DRIFT_EXACT_BOUND_ACCEPTED",
+        "validated": "20_PASSED_HOST_STARTUP_UNIT_SQLITE_DURABLE_ADMISSION_AND_HOSTCOMMAND_CONTRACT",
         "not_claimed": [
           "periodic_survivor_continuation",
           "lease_expiry_rescan",
@@ -2754,7 +2811,7 @@
       "terminal_reconciliation_boundary": "WIRED_DEFAULT_OFF_CANARY_NOT_RUN. Migration 0099 is schema-only and append-only. Readiness compares canonical sqlite_master SQL for exactly 3 tables, 4 indexes, and 10 triggers; Python validators independently recheck case/subject/proof semantics. Startup scans at most 10,000 terminal Graphs. Classification requires one graph-scope Budget, exactly one canonical 0090 decision, complete 0091/0092 validators, exact Graph/Node/Review/Attempt/Lease state, and canonical failure Outbox payload refs; unsafe ambiguity is quarantined. Any unresolved current case is a graph-wide fence for ordinary TaskGraph transitions, cancellation requests, and Budget transition/consume/usage/retry writers; only the 0099 proof UoW explicitly bypasses it. Historical chains must terminate at a trusted proof. Automatic exact processing uses immutable case created_ts_ms for cross-process-stable proof identity and reports side_effects_may_have_run after partial commits. TERMINAL_HEALTHY_CLOSURE is generated only for an unresolved historical case plus a healthy current classifier, requires SIGNED_OPERATOR + NONE, writes no Graph/Budget/Outbox state, and appends replacement/supersession on drift. Main Host and independent Obs use physical query-only readers. Operator and auto remain default OFF; external inventory, key lifecycle, and canary remain UNKNOWN/NOT_RUN; general, multi-node, and pre-budget recovery remain INCOMPLETE.",
       "cancellation_continuation_boundary": "Migration 0094 is coordination only. ProcessTaskRuntimeContainer owns a boot-scoped GraphCancellationContinuationWorker and one process-shared LocalGraphExecutionRegistry injected into Host, Internal, Scheduler, and worker cancellation runtimes; the registry proves only local quiescence and is not durable authority. The worker scans pending 0092 intents, claims with owner/token/expiry/fence/version authority, heartbeats while re-entering the existing GraphCancellationRuntime, durably defers stable errors or unresolved reconciliation, and permits expired takeover. Claim, heartbeat, defer, and complete sample time after BEGIN IMMEDIATE acquires the writer transaction. It reconstructs the exact command, work order, assignment, Graph, and replayed admission from HostCommandRepository for the claimed Graph revision. If local_pending is not explicitly supplied, the Runtime performs cancel_and_join; nonempty local pending blocks advance/finalize and yields durable defer. Coordination completes only after the canonical 0092 intent is FINALIZED and its decision exists. Worker-start failure attempts reverse worker stop/join and coordinator close, but unbind happens only after full rollback succeeds; otherwise the bound handle remains for aclose retry, and GovernedRuntimeGroup likewise retains failed-close children. Shutdown uses bounded grace then cancellation; if cancellation is suppressed it fails closed and keeps Task/Command stores open for retry. The 0094 table never copies cancellation business status, never creates reconciliation proof, and never replaces the 0092 intent/decision authority.",
       "review_continuation_boundary": "Migration 0096 is coordination only. ReviewStore atomically enqueues terminal task-bound Review decisions and remains the sole status/token/checkpoint authority. Create-time binding, committed expiry, poison-row isolation and per-candidate claim transactions are enforced. A composition-owned worker claims with owner/token/expiry/fence/version authority, routes by immutable HostCommand surface, and completes only after the exact Node leaves its waiting checkpoint. PRE uses attempt_id null; POST reuses the SUCCEEDED Attempt without rerunning the worker. Secret-free fixed-field authority is checked inside READY Attempt/Lease creation and again at first worker entry with exact owner/fence. The credential covers budget time plus child TTL up to 24 hours, but cannot replace the live hand-off. After first worker verification the Task lease owns an already-started blocking call; losing the Review heartbeat cannot revoke external side effects and cannot authorize stale completion. Review decisions require review.operator/review:decide; denial refs and legacy POST claim repair are exact. An exact REJECTED/EXPIRED/CANCELLED continuation enters the scheduler only with graph/revision/node identity and no worker grant; it must still find the same waiting node, no active sibling, and a re-opened REVIEW_DENIED gate before terminalization, otherwise it fails closed. This narrow denial terminalization does not enable general Review or multi-node recovery. Real production canary and Operator deployment remain NOT_RUN.",
-      "node_artifact_boundary": "APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED / SQL_DIRECT_BYPASS_PRESENT. Migration 0102 and TaskNodeArtifactStoreMixin retain the canonical Node Acceptance UoW for normal, committed-checkpoint and Review-approved paths: the exact optional NODE Effect set, immutable output artifact, Node ACCEPTED transition and Attempt-bound Node Outbox commit or roll back together. DurableTaskStore no longer exposes public create_graph, insert_graph_in_transaction, or stage_acceptance_effect_intent. Production Graph admission has exactly one private write hook call from HostCommandRepository._admit_normalized in the same UoW; Graph and Node INSERT SQL exist only in that hook. The three canonical Acceptance UoWs call one private Effect hook six times in total with their current connection; Effect INSERT SQL exists only in that hook. Tests use an explicit raw/orphan fixture without host_command_journal. SQLite still permits direct SQL and orphan construction because this slice adds no migration or trigger, so physical single-writer authority is not claimed. This slice is not general recovery or production fan-out enablement.",
+      "node_artifact_boundary": "APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED. Migration 0102 and TaskNodeArtifactStoreMixin retain the canonical Node Acceptance UoW for normal, committed-checkpoint and Review-approved paths: the exact optional NODE Effect set, immutable output artifact, Node ACCEPTED transition and Attempt-bound Node Outbox commit or roll back together. DurableTaskStore no longer exposes public create_graph, insert_graph_in_transaction, or stage_acceptance_effect_intent. Production Graph admission has exactly one private write hook call from HostCommandRepository._admit_normalized in the same UoW; the three canonical Acceptance UoWs call one private Effect hook six times total. Migration 0124 requires Graph, Node, and HostCommand INSERTs to use the exact graph/revision scope and three canonical triggers. Migration 0125 requires Acceptance Effect INSERTs to use the exact seven-field scope and canonical initial state; exact replay does not reacquire write scope. Plain SQLite, wrong or missing scope, late Nodes, raw HostCommands, noncanonical Effect initial state, and trigger drift fail closed. Existing rows are unchanged. Other runtime mutations remain outside this physical claim; general recovery and production fan-out are not enabled.",
       "outbox_delivery_boundary": "Migration 0093 closes the canonical Task Runtime Outbox cross-process delivery authority. Migration 0095 adds exact TaskGraph revision identity while preserving the old governed outbox_id and idempotency_key, so response-loss replay is not broken. TASK_GRAPH rows bind an existing positive revision; migration 0098 additionally permits GRAPH_CANCELLATION_EFFECT_RECONCILIATION to bind the positive revision of its immutable case, while every other aggregate keeps revision null. Backfill uses decision/intent/attempt/unique-revision authority, immutable HostCommand evidence for CREATED, or deterministic natsume_sha256_hex recomputation of the revision-bound command's legacy governed Outbox ID/key for ACTIVE and other non-attempt transitions; an unresolved custom producer aborts the whole migration. New Graph payload_ref is taskstore://event/TASK_GRAPH/{graph_id}@{revision}/{version}; only durable codec/replay accepts legacy payload refs, while new insert/update triggers reject them. Readiness and receipt replay freeze graph_revision physical shape, revision/payload triggers, delivery index, the unique partial Runtime Event source_ref index, and persisted bindings. Migration 0098 replaces the revision triggers with a narrow two-type allowlist and requires each Effect proof Outbox revision and payload ref to match its immutable reconciliation case. Claims persist owner, token, expiry, attempt count, and a monotonically increasing fencing token; expired claims can be taken over with a new token/fence, and stale owners fail closed. One aggregate_type + aggregate_id + graph_revision stream is delivered strictly in version/creation/id order, while different Graph revisions progress independently. New Runtime Events use graph_id@revision; immutable pre-0095 journal rows are not rewritten and exact-revision queries resolve them through the source Outbox. The unique partial TASK_STORE_OUTBOX source_ref fence makes one Outbox project to one journal row; retry after legacy append but before Outbox confirmation accepts only an exactly reconstructable legacy event and never duplicates projection. Operator reads one exact revision, ReviewStore filters canonical task-node subject_ref by revision, and taskbatch marker scans cover multi-revision histories. RuntimeOutboxPublisher processes one claim at a time through idempotent append and fenced completion; append failures release the live claim with durable backoff and last_error. Composition binds the publisher owner to the current boot/construction recovery id and starts a closeable background delivery worker after startup publication. The worker waits for the earliest aggregate-head available/claim-expiry time with a bounded polling fallback, so an unexpired abandoned claim is taken over after expiry without requiring a new command. Publisher close linearizes with foreground publication and waits for an entered publish critical section before stores close. DRAINED is legal if and only if canonical total_pending is zero; blocked, claimed, or backed-off rows yield DEFERRED. list_pending_outbox remains full PENDING inventory, while delivery eligibility belongs only to the aggregate-head claim/backlog APIs. Readiness is a cached mode on each Store instance after construction or explicit assertion; hot-path settlement does not rescan schema/full-table state, while explicit diagnostic force_revalidate remains available. Migration 0094 implements separate cancellation-continuation coordination and does not reuse Outbox claims or authority; migration 0098 adds only append-only signed Effect evidence and its revision-bound Outbox.",
       "startup_recovery_boundary": "Startup is ordered migration and 0093/0094/0095/0096/0097/0098/0099/0102 readiness -> task_store.recover_startup -> explicit 0099 terminal inventory -> optional default-off exact reconciliation -> publisher construction -> recovery outbox publication -> Outbox worker -> surface runtime activation -> cancellation and Review continuation workers. 0102 readiness rejects active legacy nonterminal nodes with empty output contracts, accepted nodes without immutable artifacts, and deliverable terminal legacy Effects without an exact artifact before recovery or route activation, then caches the verified Store mode. Recovery exceptions fail closed before route activation. ASGI derives construction-scoped execution and worker owners from the configured logical owner and recovery id. Worker-start failure attempts reverse activation; only a complete rollback unbinds the coordinator, while rollback failure retains the handle for aclose retry and failed-close runtime-group children remain registered. Any incomplete activation rollback or aclose quiescence returns TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED, rejects bind and activate, and allows only aclose retry. Coordinator admission close, drain, or aclose failure leaves all Stores open. Outbox drain and infrastructure close start only after the coordinator and both continuation workers are quiescent. Cancellation coordination durably defers unresolved business facts; Review continuation does not create cancellation evidence. When cancellation is enabled, startup additionally rejects unresolved persisted 0098 Effect inventory and unresolved 0099 terminal inventory. Repository tests cannot establish whether external deployment databases contain such rows.",
       "evidence_refs": [
@@ -2794,6 +2851,13 @@
         "host_brain/persistence/terminal_reconciliation_query_repository.py",
         "host_brain/persistence/review_continuation_store.py",
         "host_brain/persistence/host_command_repository.py",
+        "host_brain/persistence/host_command_recovery_inventory.py",
+        "host_brain/persistence/task_graph_admission_authority.py",
+        "host_brain/audit/migrations/0124_task_graph_admission_authority.sql",
+        "host_brain/persistence/task_acceptance_effect_staging_authority.py",
+        "host_brain/audit/migrations/0125_task_acceptance_effect_staging_authority.sql",
+        "tests/integration/test_ne01_task_graph_sql_admission_authority.py",
+        "tests/integration/test_ne01_task_acceptance_effect_sql_staging_authority.py",
         "host_brain/persistence/graph_revision_supersession_schema.py",
         "host_brain/persistence/task_parallel_success_store.py",
         "host_brain/persistence/task_parallel_settlement_store.py",
@@ -3204,20 +3268,26 @@
       "node_acceptance_uow": "APPLICATION_STORE_UNIFIED_ARTIFACT_EFFECT_NODE_OUTBOX",
       "node_acceptance_outbox_lineage": "EXACT_ATTEMPT_BOUND",
       "delivery_guard": "EXACT_VALIDATED_ARTIFACT_ATTEMPT_REQUIRED",
-      "application_python_write_authority": "APPLICATION_PYTHON_WRITE_AUTHORITY_SEALED",
-      "direct_sql_bypass": "PRESENT_NO_PHYSICAL_CROSS_TABLE_TRIGGER",
+      "application_python_write_authority": "APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED",
+      "direct_sql_bypass": "GRAPH_NODE_HOST_COMMAND_AND_ACCEPTANCE_EFFECT_INSERTS_SEALED_OTHER_MUTATIONS_OUT_OF_SCOPE",
       "public_low_level_graph_create": "REMOVED",
       "public_standalone_effect_stage": "REMOVED",
       "raw_orphan_test_fixture": "EXPLICIT_NO_HOST_COMMAND_JOURNAL_NOT_CANONICAL_ADMISSION",
-      "physical_sql_enforcement_added_this_slice": "NONE_NO_MIGRATION_NO_TRIGGER",
+      "physical_sql_enforcement_added_this_slice": "0124_GRAPH_NODE_HOST_COMMAND_EXACT_SCOPE_THREE_TRIGGERS_PLUS_0125_ACCEPTANCE_EFFECT_EXACT_SCOPE_CANONICAL_INITIAL_STATE_TRIGGER",
       "accepted_restart_recovery": "SINGLE_NODE_EXACT_COMMITTED_CHECKPOINT_PROVEN",
       "accepted_restart_boundary": "An ACTIVE graph whose node is already ACCEPTED can rebuild the exact SUCCEEDED canonical projection and atomically stage Graph Effects plus COMPLETED without worker replay. Historical COMPLETED half-states and general recovery remain incomplete.",
       "evidence_refs": [
         "host_brain/persistence/task_node_artifact_store.py",
+        "host_brain/persistence/task_graph_admission_authority.py",
+        "host_brain/audit/migrations/0124_task_graph_admission_authority.sql",
+        "host_brain/persistence/task_acceptance_effect_staging_authority.py",
+        "host_brain/audit/migrations/0125_task_acceptance_effect_staging_authority.sql",
         "host_brain/persistence/task_acceptance_effect_staging.py",
         "host_brain/persistence/task_acceptance_effect_delivery.py",
         "tests/contract/test_gr06_acceptance_effect_store.py",
         "tests/integration/test_ne01_durable_node_artifacts.py",
+        "tests/integration/test_ne01_task_graph_sql_admission_authority.py",
+        "tests/integration/test_ne01_task_acceptance_effect_sql_staging_authority.py",
         "host_brain/task_runtime/accepted_graph_finalization.py",
         "tests/integration/test_ne01_accepted_effect_finalization_recovery.py"
       ]

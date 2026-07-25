@@ -43,6 +43,10 @@ from host_brain.persistence.task_node_artifact_store import (
     TASK_NODE_ARTIFACT_MIGRATION_ASSET_KEY,
     TASK_NODE_ARTIFACT_MIGRATION_SHA256,
 )
+from host_brain.persistence.task_acceptance_effect_staging_authority import (
+    canonical_task_acceptance_effect_staging_scope,
+    register_task_acceptance_effect_staging_authority,
+)
 from tests.task_runtime_authority_fixtures import seed_raw_task_graph_for_test
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from natsume_contracts.task import HostCommandSurface, build_host_command
@@ -773,6 +777,7 @@ def test_upgraded_terminal_effect_without_exact_artifact_is_quarantined(
     )
     with sqlite3.connect(store.db_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
+        register_task_acceptance_effect_staging_authority(conn)
         conn.execute(
             """
             INSERT INTO task_runtime_attempt(
@@ -794,30 +799,43 @@ def test_upgraded_terminal_effect_without_exact_artifact_is_quarantined(
                 NOW + 1,
             ),
         )
-        conn.execute(
-            """
-            INSERT INTO task_runtime_acceptance_effect_intent(
-                effect_id, graph_id, graph_revision, node_id, attempt_id,
-                commit_scope, effect_type, payload_ref, payload_json,
-                payload_sha256, idempotency_key, status, available_ts_ms,
-                fencing_token, attempt_count, status_version,
-                created_ts_ms, updated_ts_ms
-            ) VALUES ('acceptance-effect://node-artifact/legacy-terminal', ?, 1,
-                      'node-terminal-effect', ?, 'GRAPH',
-                      'conversation.assistant_turn',
-                      'effect-payload://node-artifact/legacy-terminal', ?, ?,
-                      'node-artifact:legacy-terminal', 'PENDING', ?, 0, 0, 0, ?, ?)
-            """,
-            (
-                graph.graph_id,
-                attempt_id,
-                payload_json,
-                "sha256:" + hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
-                NOW,
-                NOW,
-                NOW,
-            ),
-        )
+        effect_id = "acceptance-effect://node-artifact/legacy-terminal"
+        idempotency_key = "node-artifact:legacy-terminal"
+        with canonical_task_acceptance_effect_staging_scope(
+            effect_id=effect_id,
+            graph_id=graph.graph_id,
+            graph_revision=1,
+            node_id="node-terminal-effect",
+            attempt_id=attempt_id,
+            commit_scope="GRAPH",
+            idempotency_key=idempotency_key,
+        ):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_acceptance_effect_intent(
+                    effect_id, graph_id, graph_revision, node_id, attempt_id,
+                    commit_scope, effect_type, payload_ref, payload_json,
+                    payload_sha256, idempotency_key, status, available_ts_ms,
+                    fencing_token, attempt_count, status_version,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, 1, 'node-terminal-effect', ?, 'GRAPH',
+                          'conversation.assistant_turn',
+                          'effect-payload://node-artifact/legacy-terminal', ?, ?,
+                          ?, 'PENDING', ?, 0, 0, 0, ?, ?)
+                """,
+                (
+                    effect_id,
+                    graph.graph_id,
+                    attempt_id,
+                    payload_json,
+                    "sha256:"
+                    + hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
+                    idempotency_key,
+                    NOW,
+                    NOW,
+                    NOW,
+                ),
+            )
         conn.commit()
 
     with pytest.raises(TaskStoreError) as legacy:
@@ -989,12 +1007,15 @@ async def test_frozen_successor_worker_receives_resolved_durable_artifact(
                 "node_risk_level": 1,
                 "worker_route": "chat:child",
                 "node_input_refs": [artifact_ref],
-                "node_input_artifacts": artifacts,
-                "node_grant_ref": "governor-grant://artifact/child",
-                "budget": durable_budget,
-            },
-        )
-    ]
+                    "node_input_artifacts": artifacts,
+                    "node_grant_ref": "governor-grant://artifact/child",
+                    "budget": durable_budget,
+                    "reservation_id": "reservation-artifact-child",
+                    "business_scope": order.business_idempotency_scope,
+                    "operation_fingerprint": order.operation_fingerprint,
+                },
+            )
+        ]
 
     durable_budget["remaining"]["token_count"] = 1
     assert events[-1]["decision"] == "APPROVE"
