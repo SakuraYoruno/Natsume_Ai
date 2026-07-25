@@ -190,6 +190,9 @@ async def takeover_committed_checkpoint(
         graph_id=admitted.graph_id,
         graph_revision=admitted.graph_revision,
         node_id=admitted.node_id,
+        admitted_node_ids=frozenset(
+            binding.node_id for binding in admitted.nodes
+        ),
     )
     if budget_usage.state is WorkerBudgetUsageCheckpointState.CONFLICT:
         _blocked("committed checkpoint worker BudgetUsage conflicts")
@@ -210,7 +213,10 @@ async def takeover_committed_checkpoint(
         if (
             len(admitted.nodes) == 1
             or budget_usage.state
-            is not WorkerBudgetUsageCheckpointState.EXACT_ACCEPTED
+            not in {
+                WorkerBudgetUsageCheckpointState.EXACT_ACCEPTED,
+                WorkerBudgetUsageCheckpointState.MISSING,
+            }
         ):
             _blocked(
                 "committed checkpoint BudgetUsage outcome and reservation status differ"
@@ -354,7 +360,7 @@ def _assert_exact_sibling_budget_rejection(
     budget_id: str,
     current_attempt_id: str,
 ) -> None:
-    """Prove why an accepted node may coexist with an EXCEEDED graph Budget."""
+    """Prove why a non-winning node may coexist with an EXCEEDED graph Budget."""
 
     raw_attempts = snapshot.get("attempts")
     raw_usages = snapshot.get("budget_usage")
@@ -418,7 +424,7 @@ def _assert_exact_sibling_budget_rejection(
         ):
             return
     _blocked(
-        "accepted checkpoint under an EXCEEDED graph Budget has no exact "
+        "non-winning checkpoint under an EXCEEDED graph Budget has no exact "
         "sibling rejection"
     )
 

@@ -9,6 +9,10 @@ import hashlib
 from typing import Any
 
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
+from host_brain.persistence.task_store_types import (
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
+    TASK_STORE_BUDGET_EXCEEDED,
+)
 from natsume_contracts.task.v1 import HostCommand
 
 from .admission import AdmittedExecution
@@ -43,13 +47,15 @@ def classify_worker_budget_usage(
     graph_id: str | None = None,
     graph_revision: int | None = None,
     node_id: str | None = None,
+    admitted_node_ids: frozenset[str] | None = None,
 ) -> WorkerBudgetUsageCheckpoint:
     """Classify, without mutating, the worker settlement for one checkpoint.
 
     Precharge and retry rows are deliberately outside this classification.
-    Any worker-kind row with a different identity, a rejected result, or
-    drifted lineage is a conflict rather than evidence that settlement is
-    absent.
+    Any worker-kind row with a different identity or drifted lineage is a
+    conflict rather than evidence that settlement is absent.  A rejected row
+    is exact only when it is either the unique EXCEEDED winner or a
+    version-stable ALREADY_EXCEEDED sibling bound to that winner.
     """
 
     if not isinstance(snapshot, Mapping):
@@ -138,15 +144,35 @@ def classify_worker_budget_usage(
             expected_usage_id,
             candidate,
         )
-    if (
-        candidate.get("accepted") is False
-        and _text(candidate.get("reason_code")) == "TASK_STORE_BUDGET_EXCEEDED"
-        and isinstance(candidate.get("exceeded_dimensions"), list)
-        and bool(candidate.get("exceeded_dimensions"))
-        and type(candidate.get("reservation_version_before")) is int
+    reason_code = _text(candidate.get("reason_code"))
+    rejected_dimensions = candidate.get("exceeded_dimensions")
+    rejected_versions_are_int = (
+        type(candidate.get("reservation_version_before")) is int
         and type(candidate.get("reservation_version_after")) is int
+    )
+    exact_exceeded_winner = bool(
+        reason_code == TASK_STORE_BUDGET_EXCEEDED
+        and isinstance(rejected_dimensions, list)
+        and rejected_dimensions
+        and rejected_versions_are_int
         and int(candidate["reservation_version_after"])
         == int(candidate["reservation_version_before"]) + 1
+    )
+    exact_already_exceeded_sibling = bool(
+        reason_code == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+        and isinstance(rejected_dimensions, list)
+        and rejected_dimensions
+        and rejected_versions_are_int
+        and _has_exact_exceeded_winner(
+            candidate,
+            records=records,
+            attempts=snapshot.get("attempts"),
+            admitted_node_ids=admitted_node_ids,
+        )
+    )
+    if (
+        candidate.get("accepted") is False
+        and (exact_exceeded_winner or exact_already_exceeded_sibling)
     ):
         return WorkerBudgetUsageCheckpoint(
             WorkerBudgetUsageCheckpointState.EXACT_REJECTED,
@@ -157,6 +183,97 @@ def classify_worker_budget_usage(
         WorkerBudgetUsageCheckpointState.CONFLICT,
         expected_usage_id,
     )
+
+
+def _has_exact_exceeded_winner(
+    candidate: Mapping[str, Any],
+    *,
+    records: list[Mapping[str, Any]],
+    attempts: Any,
+    admitted_node_ids: frozenset[str] | None,
+) -> bool:
+    """Bind one ALREADY_EXCEEDED usage to the unique admitted winner."""
+
+    version_before = candidate.get("reservation_version_before")
+    version_after = candidate.get("reservation_version_after")
+    exceeded_dimensions = candidate.get("exceeded_dimensions")
+    outbox_id = _text(candidate.get("outbox_id"))
+    candidate_usage_id = _text(candidate.get("usage_id"))
+    candidate_node_id = _text(candidate.get("node_id"))
+    candidate_attempt_id = _text(candidate.get("attempt_id"))
+    if (
+        type(version_before) is not int
+        or type(version_after) is not int
+        or version_before < 1
+        or version_before != version_after
+        or not isinstance(exceeded_dimensions, list)
+        or not exceeded_dimensions
+        or not outbox_id
+        or not candidate_usage_id
+        or not candidate_node_id
+        or not candidate_attempt_id
+        or not admitted_node_ids
+        or candidate_node_id not in admitted_node_ids
+        or not isinstance(attempts, list)
+    ):
+        return False
+
+    attempt_records: dict[str, Mapping[str, Any]] = {}
+    for raw_attempt in attempts:
+        if not isinstance(raw_attempt, Mapping):
+            return False
+        attempt_id = _text(raw_attempt.get("attempt_id"))
+        if not attempt_id or attempt_id in attempt_records:
+            return False
+        attempt_records[attempt_id] = raw_attempt
+
+    winners: list[Mapping[str, Any]] = []
+    for raw in records:
+        winner = dict(raw)
+        winner_kind = _text(winner.get("charge_kind")).upper()
+        winner_dimensions = winner.get("exceeded_dimensions")
+        winner_before = winner.get("reservation_version_before")
+        winner_after = winner.get("reservation_version_after")
+        winner_node_id = _text(winner.get("node_id"))
+        winner_attempt_id = _text(winner.get("attempt_id"))
+        winner_attempt = attempt_records.get(winner_attempt_id)
+        if (
+            _text(winner.get("usage_id")) != candidate_usage_id
+            and _text(winner.get("budget_id"))
+            == _text(candidate.get("budget_id"))
+            and _text(winner.get("graph_id"))
+            == _text(candidate.get("graph_id"))
+            and type(winner.get("graph_revision")) is int
+            and winner.get("graph_revision")
+            == candidate.get("graph_revision")
+            and winner_node_id in admitted_node_ids
+            and winner_node_id != candidate_node_id
+            and winner_attempt_id != candidate_attempt_id
+            and isinstance(winner_attempt, Mapping)
+            and _text(winner_attempt.get("graph_id"))
+            == _text(candidate.get("graph_id"))
+            and type(winner_attempt.get("graph_revision")) is int
+            and winner_attempt.get("graph_revision")
+            == candidate.get("graph_revision")
+            and _text(winner_attempt.get("node_id")) == winner_node_id
+            and (
+                winner_kind.startswith("WORKER_USAGE")
+                or winner_kind == "WORKER_ELAPSED"
+            )
+            and winner.get("accepted") is False
+            and _text(winner.get("reason_code"))
+            == TASK_STORE_BUDGET_EXCEEDED
+            and isinstance(winner_dimensions, list)
+            and winner_dimensions == exceeded_dimensions
+            and type(winner_before) is int
+            and type(winner_after) is int
+            and winner_before >= 1
+            and winner_after == winner_before + 1
+            and winner_after == version_after
+            and _text(winner.get("outbox_id")) == outbox_id
+        ):
+            winners.append(winner)
+    return len(winners) == 1
 
 
 def assert_active_checkpoint_budget(

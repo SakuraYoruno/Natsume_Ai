@@ -14,6 +14,11 @@ from host_brain.contracts.agent_runtime.task_graph import (
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.task_repository import DurableTaskStore
+from host_brain.persistence.task_store_types import (
+    TASK_STORE_BUDGET_ALREADY_EXCEEDED,
+    TASK_STORE_BUDGET_EXCEEDED,
+    TASK_STORE_CAS_CONFLICT,
+)
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.task_runtime import AdmittedExecution
 from tests.integration.test_gr03a_governed_durable_dag import (
@@ -99,10 +104,12 @@ class _ParallelCommittedCheckpointDoubleLossStore:
         *,
         node_ids: set[str],
         consume_order: tuple[str, ...] = (),
+        missing_usage_nodes: set[str] | None = None,
     ) -> None:
         self._delegate = delegate
         self._node_ids = frozenset(node_ids)
         self._consume_order = tuple(consume_order)
+        self._missing_usage_nodes = frozenset(missing_usage_nodes or set())
         self._committed_nodes: set[str] = set()
         self._all_committed = asyncio.Event()
         self._consumed_events = {
@@ -146,8 +153,19 @@ class _ParallelCommittedCheckpointDoubleLossStore:
             and str(kwargs.get("charge_kind") or "").startswith("WORKER_USAGE")
         ):
             self.consume_failed_nodes.add(node_id)
-            self._delegate.consume_budget_once(*args, **kwargs)
             event = self._consumed_events.get(node_id)
+            if node_id in self._missing_usage_nodes:
+                if event is not None:
+                    event.set()
+                raise TimeoutError(
+                    f"simulated pre-persistence worker BudgetUsage loss for {node_id}"
+                )
+            try:
+                self._delegate.consume_budget_once(*args, **kwargs)
+            except Exception as exc:
+                if getattr(exc, "reason_code", None) == TASK_STORE_CAS_CONFLICT:
+                    self.consume_failed_nodes.remove(node_id)
+                raise
             if event is not None:
                 event.set()
             raise TimeoutError(
@@ -244,6 +262,47 @@ class _SnapshotWithoutSiblingRejectionStore:
             dict(row)
             for row in snapshot["budget_usage"]
             if row.get("accepted") is not False
+        ]
+        return snapshot
+
+
+class _SnapshotWithDriftedBudgetWinnerStore:
+    """Break the immutable winner/sibling Outbox binding on a read snapshot."""
+
+    def __init__(self, delegate: DurableTaskStore, *, drift: str) -> None:
+        self._delegate = delegate
+        self._drift = drift
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
+
+    def read_scheduler_snapshot(
+        self,
+        graph_id: str,
+        graph_revision: int,
+    ) -> dict[str, Any]:
+        snapshot = dict(
+            self._delegate.read_scheduler_snapshot(
+                graph_id,
+                graph_revision,
+            )
+        )
+        snapshot["budget_usage"] = [
+            {
+                **dict(row),
+                **(
+                    (
+                        {"outbox_id": "outbox://tampered/budget-winner"}
+                        if self._drift == "outbox"
+                        else {"node_id": "foreign-root"}
+                    )
+                    if (
+                        row.get("reason_code") == TASK_STORE_BUDGET_EXCEEDED
+                    )
+                    else {}
+                ),
+            }
+            for row in snapshot["budget_usage"]
         ]
         return snapshot
 
@@ -805,4 +864,331 @@ async def test_two_committed_checkpoints_recover_in_deterministic_graph_order(
 
     replay = await _events(resumed_a, contracts)
     assert replay[-1]["execution_receipt"]["status"] == expected_terminal_status
+    assert sorted(calls) == ["root-a", "root-b"]
+
+
+@pytest.mark.asyncio
+async def test_four_committed_checkpoints_recover_one_shared_budget_decision(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    node_ids = ("root-a", "root-b", "root-c", "root-d")
+    contracts = _contracts(
+        tuple((node_id, ()) for node_id in node_ids),
+        concurrency=4,
+        token_limit=25,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
+    )
+    contracts = (
+        replace(
+            contracts[0],
+            governor_grant_ref="governor-grant://checkpoint/parent",
+        ),
+        *contracts[1:],
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ProjectedWorker(
+        projections=projections,
+        calls=calls,
+        delay_seconds=0.01,
+    )
+    durable = DurableTaskStore(db_path, clock=clock)
+    uncertain = _ParallelCommittedCheckpointDoubleLossStore(
+        durable,
+        node_ids=set(node_ids),
+        consume_order=node_ids,
+    )
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=uncertain,
+            projections=projections,
+            worker=worker,
+            owner_id="four-checkpoints-owner-a",
+            bounded_fanout_enabled=True,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_CheckpointNodeGrantVerifier(),
+        ),
+        node_grant_service=_CheckpointNodeGrantService(),
+    )
+
+    first = await _events(first_app, contracts)
+
+    assert first[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+    assert set(calls) == set(node_ids)
+    assert uncertain.consume_failed_nodes == set(node_ids)
+    assert uncertain.read_failed_nodes == set(node_ids)
+    held = durable.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+    worker_usages = [
+        row
+        for row in held["budget_usage"]
+        if str(row["charge_kind"]).startswith("WORKER_USAGE")
+    ]
+    assert len(worker_usages) == 4
+    assert sum(row["accepted"] is True for row in worker_usages) == 2
+    assert sum(
+        row["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+        for row in worker_usages
+    ) == 1
+    assert sum(
+        row["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+        for row in worker_usages
+    ) == 1
+
+    clock.advance(25)
+    reopened = DurableTaskStore(db_path, clock=clock)
+    recovered_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=reopened,
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=worker,
+            owner_id="four-checkpoints-owner-b",
+            bounded_fanout_enabled=True,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_CheckpointNodeGrantVerifier(),
+        ),
+        node_grant_service=_CheckpointNodeGrantService(),
+    )
+
+    recovered = await _events(recovered_app, contracts)
+
+    assert recovered[-1]["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+    assert sorted(calls) == sorted(node_ids)
+    final = reopened.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+    assert final["graph_record"]["status"] == "BLOCKED"
+    assert final["budgets"][0]["status"] == "RELEASED"
+    assert final["active_leases"] == []
+    assert {
+        node_id: reopened.get_node(
+            admitted.graph_id,
+            admitted.graph_revision,
+            node_id,
+        )["status"]
+        for node_id in node_ids
+    } == {
+        "root-a": "ACCEPTED",
+        "root-b": "ACCEPTED",
+        "root-c": "FAILED",
+        "root-d": "FAILED",
+    }
+
+    replay = await _events(recovered_app, contracts)
+    assert replay[-1]["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+    assert sorted(calls) == sorted(node_ids)
+
+
+@pytest.mark.asyncio
+async def test_missing_checkpoint_after_sibling_budget_exceeded_is_fenced_and_exactly_replayed(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("root-a", ()), ("root-b", ())),
+        concurrency=2,
+        token_limit=5,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
+    )
+    contracts = (
+        replace(
+            contracts[0],
+            governor_grant_ref="governor-grant://checkpoint/parent",
+        ),
+        *contracts[1:],
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _ElapsedProjectedWorker(
+        clock=clock,
+        projections=projections,
+        calls=calls,
+        delay_seconds=0.01,
+    )
+    durable = DurableTaskStore(db_path, clock=clock)
+    initial_loss = _ParallelCommittedCheckpointDoubleLossStore(
+        durable,
+        node_ids={"root-a", "root-b"},
+        consume_order=("root-b", "root-a"),
+        missing_usage_nodes={"root-a"},
+    )
+    first_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=initial_loss,
+            projections=projections,
+            worker=worker,
+            owner_id="missing-after-exceeded-owner-a",
+            lease_ttl_ms=100,
+            bounded_fanout_enabled=True,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_CheckpointNodeGrantVerifier(),
+        ),
+        node_grant_service=_CheckpointNodeGrantService(),
+    )
+
+    first = await _events(first_app, contracts)
+
+    assert first[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+    assert set(calls) == {"root-a", "root-b"}
+    assert initial_loss.consume_failed_nodes == {"root-a", "root-b"}
+    assert initial_loss.read_failed_nodes == {"root-a", "root-b"}
+    held = durable.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+    worker_usages = [
+        row
+        for row in held["budget_usage"]
+        if str(row["charge_kind"]).startswith("WORKER_USAGE")
+    ]
+    assert held["budgets"][0]["status"] == "EXCEEDED"
+    assert len(worker_usages) == 1
+    assert worker_usages[0]["node_id"] == "root-b"
+    assert worker_usages[0]["reason_code"] == TASK_STORE_BUDGET_EXCEEDED
+
+    clock.advance(125)
+    second_durable = DurableTaskStore(db_path, clock=clock)
+    second_loss = _SelectedBudgetSettlementDoubleLossStore(
+        second_durable,
+        node_id="root-a",
+    )
+    second_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=second_loss,
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=worker,
+            owner_id="missing-after-exceeded-owner-b",
+            lease_ttl_ms=100,
+            bounded_fanout_enabled=True,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_CheckpointNodeGrantVerifier(),
+        ),
+        node_grant_service=_CheckpointNodeGrantService(),
+    )
+
+    second = await _events(second_app, contracts)
+
+    assert second[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+    assert second_loss.consume_failed is True
+    assert second_loss.read_failed is True
+    after_delayed_charge = second_durable.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+    delayed_usage = next(
+        row
+        for row in after_delayed_charge["budget_usage"]
+        if row["node_id"] == "root-a"
+        and str(row["charge_kind"]).startswith("WORKER_USAGE")
+    )
+    winner_usage = next(
+        row
+        for row in after_delayed_charge["budget_usage"]
+        if row["node_id"] == "root-b"
+        and str(row["charge_kind"]).startswith("WORKER_USAGE")
+    )
+    assert delayed_usage["accepted"] is False
+    assert delayed_usage["reason_code"] == TASK_STORE_BUDGET_ALREADY_EXCEEDED
+    assert (
+        delayed_usage["reservation_version_before"]
+        == delayed_usage["reservation_version_after"]
+        == winner_usage["reservation_version_after"]
+    )
+    assert delayed_usage["outbox_id"] == winner_usage["outbox_id"]
+
+    clock.advance(125)
+    for drift in ("outbox", "node"):
+        tampered_owner = f"missing-after-exceeded-tampered-{drift}"
+        tampered_store = _SnapshotWithDriftedBudgetWinnerStore(
+            DurableTaskStore(db_path, clock=clock),
+            drift=drift,
+        )
+        tampered_app = GovernedCommandApplication(
+            command_repository=HostCommandRepository(db_path, clock=clock),
+            coordinator=_coordinator(
+                store=tampered_store,
+                projections=WorkerProjectionStore(db_path, clock=clock),
+                worker=worker,
+                owner_id=tampered_owner,
+                lease_ttl_ms=100,
+                bounded_fanout_enabled=True,
+                atomic_graph_success_enabled=True,
+                node_grant_verifier=_CheckpointNodeGrantVerifier(),
+            ),
+            node_grant_service=_CheckpointNodeGrantService(),
+        )
+
+        tampered = await _events(tampered_app, contracts)
+
+        assert tampered[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+        with second_durable._connect() as connection:
+            assert (
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM task_runtime_lease
+                    WHERE owner_id = ?
+                    """,
+                    (tampered_owner,),
+                ).fetchone()[0]
+                == 0
+            )
+
+    reopened = DurableTaskStore(db_path, clock=clock)
+    final_app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=reopened,
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=worker,
+            owner_id="missing-after-exceeded-owner-c",
+            lease_ttl_ms=100,
+            bounded_fanout_enabled=True,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_CheckpointNodeGrantVerifier(),
+        ),
+        node_grant_service=_CheckpointNodeGrantService(),
+    )
+
+    recovered = await _events(final_app, contracts)
+
+    assert recovered[-1]["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+    assert sorted(calls) == ["root-a", "root-b"]
+    final = reopened.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+    assert final["graph_record"]["status"] == "BLOCKED"
+    assert final["budgets"][0]["status"] == "RELEASED"
+    assert final["active_leases"] == []
+    assert {
+        reopened.get_node(
+            admitted.graph_id,
+            admitted.graph_revision,
+            node_id,
+        )["status"]
+        for node_id in ("root-a", "root-b")
+    } == {"FAILED"}
+
+    replay = await _events(final_app, contracts)
+    assert replay[-1]["execution_receipt"]["status"] == "BUDGET_BLOCKED"
     assert sorted(calls) == ["root-a", "root-b"]
