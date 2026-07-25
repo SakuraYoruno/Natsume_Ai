@@ -98,6 +98,7 @@ class HostCommandRepository(
         verify_schema: bool = True,
         fault_injector: Callable[[str], None] | None = None,
         authenticated_outcome_lookup: Callable[[str], Any | None] | None = None,
+        task_store: DurableTaskStore | None = None,
     ) -> None:
         raw_path = str(db_path or "").strip()
         if not raw_path or raw_path == ":memory:" or raw_path.lower().startswith("file:"):
@@ -112,12 +113,21 @@ class HostCommandRepository(
         self._timeout_ms = max(1, int(timeout_ms))
         self._fault_injector = fault_injector
         self._authenticated_outcome_lookup = authenticated_outcome_lookup
-        self._task_store = DurableTaskStore(
-            self.db_path,
-            clock=clock,
-            timeout_ms=self._timeout_ms,
-            verify_schema=False,
-        )
+        if task_store is not None:
+            task_store_path = Path(task_store.db_path).expanduser().resolve()
+            if task_store_path != self.db_path:
+                raise HostCommandRepositoryError(
+                    HOST_COMMAND_INVALID,
+                    "HostCommandRepository and TaskStore paths differ",
+                )
+            self._task_store = task_store
+        else:
+            self._task_store = DurableTaskStore(
+                self.db_path,
+                clock=clock,
+                timeout_ms=self._timeout_ms,
+                verify_schema=False,
+            )
         if verify_schema:
             self.assert_schema_ready()
 

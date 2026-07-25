@@ -841,13 +841,16 @@ def build_process_task_runtime_container(
         constructed.append(
             ("internal_agent_checkpoint_uow", internal_agent_checkpoint_uow)
         )
-        command_repository = (
-            command_repository_builder(
-                canonical,
-                authenticated_outcome_lookup=authenticated_outcome_lookup,
+        command_repository_options: dict[str, Any] = {
+            "task_store": task_store,
+        }
+        if authenticated_outcome_lookup is not None:
+            command_repository_options["authenticated_outcome_lookup"] = (
+                authenticated_outcome_lookup
             )
-            if authenticated_outcome_lookup is not None
-            else command_repository_builder(canonical)
+        command_repository = command_repository_builder(
+            canonical,
+            **command_repository_options,
         )
         constructed.append(("command_repository", command_repository))
         agent_result_repository = agent_result_repository_builder(canonical)

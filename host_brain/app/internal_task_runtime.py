@@ -227,6 +227,10 @@ class GovernedInternalRuntime:
         terminal_claim_methods = (
             "resolve_internal_agent_budget_rejection_terminal",
             "try_resolve_internal_agent_nonacceptance_checkpoint_terminal",
+            (
+                "try_resolve_internal_agent_"
+                "precheckpoint_cancellation_terminal"
+            ),
             "get_graph_cancellation_for_graph",
             "get_graph_cancellation_decision_for_intent",
         )

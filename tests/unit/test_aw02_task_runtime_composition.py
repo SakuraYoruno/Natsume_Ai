@@ -204,8 +204,10 @@ def _build_fake_container(
         db_path: str,
         *,
         authenticated_outcome_lookup: Any | None = None,
+        task_store: Any,
     ) -> _Closeable:
         assert db_path == str(path.resolve())
+        assert task_store is not None
         if authenticated_outcome_lookup is not None:
             events.append("repository:outcome-lookup-bound")
         events.append("repository:build")
@@ -467,7 +469,7 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
         events.append("task-store:build")
         return _TaskStore(events)
 
-    def fail_repository(_path: str) -> Any:
+    def fail_repository(_path: str, **_kwargs: Any) -> Any:
         events.append("repository:build")
         raise OSError("unstable platform detail")
 

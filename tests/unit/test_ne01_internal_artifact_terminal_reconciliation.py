@@ -17,6 +17,9 @@ from host_brain.contracts.agent_runtime.workspace_lifecycle import (
 from host_brain.contracts.agent_runtime.internal_nonacceptance_claim_result import (
     INTERNAL_NONACCEPTANCE_RESULT_REF_PREFIX,
 )
+from host_brain.contracts.agent_runtime.internal_precheckpoint_cancellation_claim_result import (
+    INTERNAL_PRECHECKPOINT_CANCELLATION_RESULT_REF_PREFIX,
+)
 
 
 def _authority(*, attempt_id: str = "attempt-raw") -> dict[str, Any]:
@@ -377,6 +380,50 @@ class _TaskStore:
             },
         }
 
+    def resolve_internal_agent_precheckpoint_cancellation_terminal(
+        self,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        if (
+            attempt_id != "attempt-raw"
+            or self.graph_status != "CANCELLED"
+            or self.node_status != "CANCELLED"
+            or self.attempt_status != "CANCELLED"
+            or self.lease_status != "CANCELLED"
+            or self.operation_status != "RELEASED"
+            or self.cancellation_status != "FINALIZED"
+        ):
+            raise RuntimeError("pre-checkpoint cancellation authority drifted")
+        intent = self.get_graph_cancellation_for_graph("graph-internal", 1)
+        assert intent is not None
+        decision = self.get_graph_cancellation_decision_for_intent(
+            str(intent["intent_ref"])
+        )
+        assert decision is not None
+        return {
+            "authority_kind": (
+                "INTERNAL_AGENT_PRECHECKPOINT_CANCELLATION_TERMINAL"
+            ),
+            "graph": self.get_graph("graph-internal", 1),
+            "node": self.get_node("graph-internal", 1, "node-agent"),
+            "attempt": self.get_attempt(attempt_id),
+            "lease": self.get_lease("lease-agent"),
+            "operation_reservation": {
+                **self.get_operation_reservation("reservation-agent"),
+                "status": "RELEASED",
+                "receipt_ref": None,
+                "reconciliation_action": "RELEASE",
+                "reconciliation_outcome": "NO_SIDE_EFFECT",
+                "reconciliation_proof_ref": (
+                    "operation-proof://internal/no-side-effect"
+                ),
+                "reconciliation_proof_digest": "sha256:" + ("c" * 64),
+            },
+            "command": {"command_id": "command-agent"},
+            "cancellation_intent": intent,
+            "cancellation_decision": decision,
+        }
+
     def get_graph_cancellation_for_graph(
         self,
         graph_id: str,
@@ -399,6 +446,7 @@ class _TaskStore:
             return None
         assert intent_ref == "taskcancel-intent://sha256/" + "a" * 64
         return {
+            "decision_ref": "taskcancel-decision://sha256/" + "b" * 64,
             "intent_ref": intent_ref,
             "payload": {
                 "graph_id": "graph-internal",
@@ -502,13 +550,16 @@ def test_waiting_acceptance_review_is_held_without_abandonment() -> None:
 
 def test_exact_cancelled_unsealed_stage_is_cleaned_without_worker_rerun() -> None:
     stage = _Stage()
+    claims = _ClaimStore()
     reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
-        unsealed=stage
+        unsealed=stage,
+        claim_store=claims,
     )
     tasks.graph_status = "CANCELLED"
     tasks.node_status = "CANCELLED"
     tasks.attempt_status = "CANCELLED"
     tasks.lease_status = "CANCELLED"
+    tasks.operation_status = "RELEASED"
 
     report = reconciler.run_once()
 
@@ -524,6 +575,37 @@ def test_exact_cancelled_unsealed_stage_is_cleaned_without_worker_rerun() -> Non
     assert artifacts.discarded == [stage.stage_ref]
     assert artifacts.unsealed == []
     assert workspaces.unsealed_cleanup_calls == [stage.workspace_id]
+    assert len(claims.completed) == 1
+    assert claims.completed[0]["result_ref"].startswith(
+        INTERNAL_PRECHECKPOINT_CANCELLATION_RESULT_REF_PREFIX
+    )
+
+
+def test_unsealed_claim_failure_preserves_workspace_and_stage() -> None:
+    class _FailingClaimStore(_ClaimStore):
+        def complete_claim(self, **values: Any) -> None:
+            self.completed.append(dict(values))
+            raise RuntimeError("claim persistence failed")
+
+    stage = _Stage()
+    claims = _FailingClaimStore()
+    reconciler, artifacts, workspaces, _repository, tasks = _reconciler(
+        unsealed=stage,
+        claim_store=claims,
+    )
+    tasks.graph_status = "CANCELLED"
+    tasks.node_status = "CANCELLED"
+    tasks.attempt_status = "CANCELLED"
+    tasks.lease_status = "CANCELLED"
+    tasks.operation_status = "RELEASED"
+
+    report = reconciler.run_once()
+
+    assert report[0]["action"] == "BLOCKED"
+    assert len(claims.completed) == 1
+    assert workspaces.unsealed_cleanup_calls == []
+    assert artifacts.discarded == []
+    assert artifacts.unsealed == [stage]
 
 
 def test_unsealed_stage_without_finalized_cancellation_is_preserved() -> None:

@@ -7,12 +7,21 @@
 维护日期：2026-07-25
 状态：当前证据
 
-## NE-01 Host 情感与回复形态 app-local authority 当前切片
+## NE-01 Internal pre-checkpoint 无副作用取消收口当前切片
+
+- 新 deterministic result 绑定 command/claim、graph revision、node/attempt/lease、Operation reservation、reconciliation proof digest、cancellation intent 与 final decision；任一字段漂移都会产生不同身份或失败关闭。
+- canonical TaskStore 只接受单节点 Internal `delegate:agent_runtime`、Graph/Node/Attempt/Lease 全部 `CANCELLED`、唯一 Operation 已验签为 `RELEASE + NO_SIDE_EFFECT`，并确认 WorkerProjection、Acceptance Effect 与 Agent result 均为 0。`RECOVERY_REQUIRED` 不会被推断为无副作用。
+- terminal reconciler 的破坏性顺序固定为 Secure Ingress claim durable commit → Workspace cleanup receipt → stage discard；claim 写失败时 Workspace 与 stage 都保留。HostCommand Repository 复用 Process Task Runtime 的同一验签 TaskStore，重启后可重新验证 result，proof signature 篡改会令 replay 拒绝。
+- 当前定向集合为 composition/unit/contract/integration `44 passed in 5.40s`，另有 Internal Runtime 单元 `8 passed in 0.57s`；两组不相加。真实 SQLite 集成覆盖签名 proof、unknown-effect hold、claim exact replay、进程对象重建与篡改拒绝。
+- 最终受影响 Gate 将上述运行时集合与 HostCommand repository/contract、Universal Runtime coverage、提交元数据及文档 freshness 合并为 `115 passed in 51.41s`；`compileall` 成功，静态架构 Gate 1～14 全部 `PASS`、`failed_gates=[]`。该 115 项包含前述测试，不得与 44/8 相加。
+- 该切片没有 migration，也不证明 raw worker failure、一般 unknown-effect attribution、其它取消、多节点恢复、周期 survivor、NE-01 wave integration 或 NE-07 Docker 全栈。NE-01 保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Host 情感与回复形态 app-local authority 已合并切片
 
 - 每个 Host root 通过 `emotion_runtime_factory` 惰性持有一个 `HostEmotionRuntime`；Input、Tribe 与 Lifecycle 解析同一实例，两个重叠 Host root 的连续向量、Timeline 与用户画像互不共享。
 - 不带 runtime 的 `normalize_chat_emotion_context()` 是 replay/render 纯路径；只有 `resolve_chat_emotion_context(..., runtime=...)` 可以推进连续向量、前一标签、Timeline 与画像。缺失或错误 runtime 以 `HOST_EMOTION_RUNTIME_NOT_INJECTED` 失败关闭。
 - `ResponseFormDecider` 由每个 Input composition 独占，旧 `_decider/get_reply_form_decider/get_response_form_decider` 不存在；并发语音额度在一个锁内完成检查和记账。
-- 原 #119 分支在 #118 后的互不相加历史批次为：情感/Composition/Prefrontal `81 passed in 16.61s`，ASGI/Input/NE-03 `119 passed in 89.26s`，文档/机器状态 `51 passed in 23.26s`。以已合并 #120 的最新 `dev@1183e433b` 建立替代分支后，合并受影响集合为 `190 passed in 98.58s`，文档/机器状态与交付元数据初跑为 `39 passed in 11.27s`、证据刷新后为 `39 passed in 12.81s`；`compileall` 通过，完整架构静态 Gate 1～14 为 `PASS`、`failed_gates=[]`。历史与替代批次不得相加；这些结果只证明本地定向边界，不是波次 integration、真实多 Host server canary、情感 durability、NE-06 或 NE-07 全栈证据。
+- 原 #119 分支在 #118 后的互不相加历史批次为：情感/Composition/Prefrontal `81 passed in 16.61s`，ASGI/Input/NE-03 `119 passed in 89.26s`，文档/机器状态 `51 passed in 23.26s`。以已合并 #120 的 `dev@1183e433b` 建立替代分支后，合并受影响集合为 `190 passed in 98.58s`，文档/机器状态与交付元数据初跑为 `39 passed in 11.27s`、证据刷新后为 `39 passed in 12.81s`；`compileall` 通过，完整架构静态 Gate 1～14 为 `PASS`、`failed_gates=[]`。历史与替代批次不得相加；这些结果只证明本地定向边界，不是波次 integration、真实多 Host server canary、情感 durability、NE-06 或 NE-07 全栈证据。
 - 无 migration；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
 
 ## NE-01 Obs 投影 app-local 监督已合并切片
