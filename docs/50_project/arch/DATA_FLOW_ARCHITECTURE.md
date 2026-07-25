@@ -214,7 +214,7 @@ flowchart LR
 - pre-Operation Attempt 流程为：`Node/Attempt RUNNING 且 Operation 不存在 → 单一 scheduler snapshot 校验 latest Attempt、过期 Lease、ACTIVE/EXCEEDED graph Budget 与 canonical PRECHARGE → TaskLeaseTakeoverAuthorityMixin 借用 TaskStore BEGIN IMMEDIATE 重验 deterministic reservation id + scope/fingerprint 均不存在 → Attempt/owner/TTL/version/mode/reservation 生成确定性 Lease+初始 Heartbeat identity → 同 Attempt、更高 fence Lease → worker 首次调用`。响应丢失重入必须在同一事务核对exact Lease、唯一初始Heartbeat、历史fence+1、未过期TTL和Outbox；参数或行漂移零写拒绝。mixin与纯identity模块都不创建连接、事务或第二 writer。普通Attempt/Lease/Operation authority先要求唯一ACTIVE graph Budget。任一 sibling live owner 先返回 `GOVERNED_EXECUTION_IN_PROGRESS`；Operation 在 absence 检查窗口出现则进入 `RECOVERY_REQUIRED`，不得启动或重放 worker。Operation 已预留后的异常只保留 reconciliation authority，不转普通失败。
 - Acceptance 只在同一事务中生成 effect intents；下游副作用使用持久队列最终一致，不是全局单事务。
 - TaskStore 生产写流已收窄到两个 private hook：Graph/Node 只能由 `HostCommandRepository._admit_normalized() → _insert_graph_from_host_command_in_transaction()` 在同一 admission UoW 写入，生产调用数为 1；Effect 只能由 `transition_graph_and_stage_acceptance_effects`、`commit_node_acceptance`、`complete_parallel_graph_success` 三个 canonical UoW 通过 `_stage_acceptance_effect_intent_in_transaction()` 写入，共 6 个调用点。对应 Graph/Node/Effect INSERT SQL 也各自只在这两个 hook 中。public `create_graph`、`insert_graph_in_transaction`、`stage_acceptance_effect_intent` 已删除。
-- 0124 将这条流提升为窄范围的 `APPLICATION_AND_SQL_ADMISSION_WRITE_AUTHORITY_SEALED`。Graph、Node 与 HostCommand 新 INSERT 必须同时命中已注册 SQLite 函数和 exact `graph_id + revision` scope；scope 只由 `HostCommandRepository._admit_normalized()` 持有，Node 在 HostCommand 落盘后即封口。plain SQLite、unscoped TaskStore、raw HostCommand、late Node 与 trigger drift 均失败关闭。既有行不重写，`tests/task_runtime_authority_fixtures.py` 只能显式进入 test-only scope；这不封闭 Effect 或其它运行期 mutation。wave integration `NOT_RUN_PER_WAVE_POLICY`，NE-01 仍 `IN_PROGRESS`。
+- 0124/0125 将这条流提升为窄范围的 `APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED`。Graph、Node 与 HostCommand 新 INSERT 必须命中 exact `graph_id + revision` scope；Effect 新 INSERT 必须命中 exact effect/graph/revision/node/attempt/commit-scope/idempotency scope，并满足规范初始状态。scope 分别只由 `HostCommandRepository._admit_normalized()` 与 Effect 私有 staging hook 的实际 INSERT 持有；exact replay 不取得写 scope。plain SQLite、unscoped/wrong scope、raw HostCommand、late Node、非规范 Effect 与 trigger drift 均失败关闭。既有行不重写；其它运行期 mutation、wave integration 与 NE-01 仍未完成。
 
 Host lifecycle 的当前数据流为：
 
@@ -588,7 +588,7 @@ claim runnable node
 | Resume | 消费 token 后由 composition worker 按原 HostCommand surface 自动重调度；PRE 无伪 Attempt，POST 不重跑 worker | `WIRED_0096` |
 | B0/B1 调度决策 | Coordinator 从 durable snapshot 消费稳定 READY/fan-in/retry due 决策 | `WIRED_PARTIAL_RUNTIME` |
 | 原子 claim | ACTIVE graph + Budget concurrency 下原子写 Attempt/Node/Lease/Heartbeat/Outbox，并支持 exact replay | `WIRED` |
-| Node Acceptance / result artifact | 0102+GR06 将 production normal/checkpoint/Review 的 exact NODE Effect set、`ACCEPTED`、artifact 与 Attempt-bound Node Outbox 放入一个 UoW；response loss 只能 exact replay，Effect claim 必须重验同 lineage artifact。后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs。新 admission 拒绝空合同，startup 隔离 active legacy 空合同/缺 artifact和缺 exact artifact 的可投递 terminal legacy Effect。public Graph create/transaction insert 与 standalone Effect stage 已删除；生产 Graph/Effect 只能经过各自私有 canonical UoW hook。0124 物理封闭 Graph/Node/HostCommand 新准入 INSERT，既有行及其它 mutation 不在该声明内 | `UNIFIED_APPLICATION_STORE_UOW_WIRED / APPLICATION_AND_SQL_ADMISSION_WRITE_AUTHORITY_SEALED` |
+| Node Acceptance / result artifact | 0102+GR06 将 production normal/checkpoint/Review 的 exact NODE Effect set、`ACCEPTED`、artifact 与 Attempt-bound Node Outbox 放入一个 UoW；response loss 只能 exact replay，Effect claim 必须重验同 lineage artifact。后继只消费 compiler-owned、同 graph/revision 的全部前驱 refs。新 admission 拒绝空合同，startup 隔离 active legacy 空合同/缺 artifact和缺 exact artifact 的可投递 terminal legacy Effect。public Graph create/transaction insert 与 standalone Effect stage 已删除；生产 Graph/Effect 只能经过各自私有 canonical UoW hook。0124 物理封闭 Graph/Node/HostCommand 新准入 INSERT，0125 封闭 Effect 新 INSERT 与非规范初始状态；既有行及其它 mutation 不在该声明内 | `UNIFIED_APPLICATION_STORE_UOW_WIRED / APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED` |
 | Completion policy | TaskGraph v1 可选 `ATOMIC_GRAPH_SUCCESS_V1` 必须显式 sink result；新生产 builder 与新 PlanningGraph 默认 atomic，失败重规划继承 previous revision，历史 legacy 多 sink 无 result | `ATOMIC_DEFAULT_LEGACY_COMPAT` |
 | DAG 并发 | `atomic_graph_success_enabled` 对生产默认 ON，Scheduler/Internal/Operator显式 ON；`bounded_fanout_enabled` 独立默认 OFF。atomic 可单节点/串行 outer 封口；bounded 才允许 ready sibling 实际有界并发 | `ATOMIC_DEFAULT_FANOUT_OFF` |
 | 并行合流 | progress 用 `fanout_event_buffer_size` 个 semaphore slot（默认 32、非正值拒绝）限制在途事件，并为每个 child 预留独立 control 容量；size=1 慢消费者仍会反压 child，自发 `CancelledError` 也不会因 progress 满而丢失监督信号。fan-in 只在依赖 `ACCEPTED` 后执行 | `SHADOW_BOUNDED_FLOW` |
@@ -1238,7 +1238,7 @@ All ingress sources
 ```text
 Host canonical four-route data flow        WIRED
 Durable TaskGraph execution                PARTIAL
-TaskStore application write authority      SEALED / SQL DIRECT BYPASS PRESENT
+TaskStore admission/effect staging authority SEALED / OTHER MUTATIONS INCOMPLETE
 Scheduler governed admission               WIRED
 Internal governed admission                WIRED
 Conversation effects                       POST_ACCEPTANCE_DURABLE_EVENTUAL

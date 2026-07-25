@@ -21,6 +21,9 @@ EFFECT_STAGE_HOOK = "_stage_acceptance_effect_intent_in_transaction"
 ADMISSION_AUTHORITY_MODULE = (
     "host_brain.persistence.task_graph_admission_authority"
 )
+EFFECT_STAGING_AUTHORITY_MODULE = (
+    "host_brain.persistence.task_acceptance_effect_staging_authority"
+)
 
 
 class _AttributeCallVisitor(ast.NodeVisitor):
@@ -144,6 +147,29 @@ def _production_admission_authority_imports(
     return sorted(imports)
 
 
+def _production_effect_staging_authority_imports(
+) -> list[tuple[Path, str, str | None]]:
+    imports: list[tuple[Path, str, str | None]] = []
+    for path, tree in _production_syntax_trees():
+        relative = path.relative_to(ROOT)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == EFFECT_STAGING_AUTHORITY_MODULE
+            ):
+                imports.extend(
+                    (relative, alias.name, alias.asname)
+                    for alias in node.names
+                )
+            elif isinstance(node, ast.Import):
+                imports.extend(
+                    (relative, alias.name, alias.asname)
+                    for alias in node.names
+                    if alias.name == EFFECT_STAGING_AUTHORITY_MODULE
+                )
+    return sorted(imports)
+
+
 def test_task_store_exposes_no_standalone_graph_or_effect_staging_authority() -> None:
     assert not hasattr(DurableTaskStore, "create_graph")
     assert not hasattr(DurableTaskStore, "insert_graph_in_transaction")
@@ -262,6 +288,60 @@ def test_effect_insert_hook_remains_inside_canonical_acceptance_uows() -> None:
         ),
     }
     assert len(_production_attribute_calls(EFFECT_STAGE_HOOK)) == 6
+
+
+def test_effect_staging_scope_and_registration_have_single_production_owners() -> None:
+    assert _production_effect_staging_authority_imports() == [
+        (
+            Path("host_brain/persistence/task_acceptance_effect_delivery.py"),
+            "TaskAcceptanceEffectStagingAuthoritySchemaError",
+            None,
+        ),
+        (
+            Path("host_brain/persistence/task_acceptance_effect_delivery.py"),
+            "assert_task_acceptance_effect_staging_authority_schema",
+            None,
+        ),
+        (
+            Path("host_brain/persistence/task_acceptance_effect_staging.py"),
+            "canonical_task_acceptance_effect_staging_scope",
+            None,
+        ),
+        (
+            Path("host_brain/persistence/task_repository.py"),
+            "register_task_acceptance_effect_staging_authority",
+            None,
+        ),
+    ]
+    assert _production_attribute_calls(
+        "canonical_task_acceptance_effect_staging_scope"
+    ) == []
+    assert _production_attribute_calls(
+        "register_task_acceptance_effect_staging_authority"
+    ) == []
+
+    assert [
+        (path, owner)
+        for path, _line, owner in _production_named_calls(
+            "canonical_task_acceptance_effect_staging_scope"
+        )
+    ] == [
+        (
+            Path("host_brain/persistence/task_acceptance_effect_staging.py"),
+            EFFECT_STAGE_HOOK,
+        )
+    ]
+    assert [
+        (path, owner)
+        for path, _line, owner in _production_named_calls(
+            "register_task_acceptance_effect_staging_authority"
+        )
+    ] == [
+        (
+            Path("host_brain/persistence/task_repository.py"),
+            "_connect",
+        )
+    ]
 
 
 def test_private_write_hooks_borrow_the_owner_transaction() -> None:

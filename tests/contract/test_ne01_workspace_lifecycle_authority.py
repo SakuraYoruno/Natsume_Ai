@@ -77,7 +77,7 @@ def _migrated_runtime(
     assert result.success is True, result.as_dict()
     # The fixture always migrates through the current catalog head; 0116 is
     # verified below as an immutable historical asset, not as the latest head.
-    assert result.summary["current_version"] == 124
+    assert result.summary["current_version"] == 125
     with sqlite3.connect(db_path) as conn:
         _execute_task_admission_insert(
             conn,

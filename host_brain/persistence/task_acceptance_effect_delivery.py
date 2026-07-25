@@ -15,6 +15,10 @@ from host_brain.persistence.task_record_codec import (
     _acceptance_effect_record,
     _acceptance_effect_text,
 )
+from host_brain.persistence.task_acceptance_effect_staging_authority import (
+    TaskAcceptanceEffectStagingAuthoritySchemaError,
+    assert_task_acceptance_effect_staging_authority_schema,
+)
 from host_brain.persistence.task_store_types import (
     AcceptanceEffectStatus,
     TASK_STORE_CANCELLATION_CONFLICT,
@@ -81,6 +85,13 @@ class TaskAcceptanceEffectDeliveryMixin:
                     "PRAGMA table_info(task_runtime_acceptance_effect_intent)"
                 ).fetchall()
             }
+            try:
+                assert_task_acceptance_effect_staging_authority_schema(conn)
+            except TaskAcceptanceEffectStagingAuthoritySchemaError as exc:
+                raise TaskStoreError(
+                    TASK_STORE_SCHEMA_NOT_READY,
+                    str(exc),
+                ) from exc
         finally:
             conn.close()
         missing = sorted(_ACCEPTANCE_EFFECT_INTENT_REQUIRED_COLUMNS - columns)

@@ -23,6 +23,9 @@ from host_brain.persistence.task_record_codec import (
     _parallel_success_decision_record,
     build_acceptance_effect_payload_digest,
 )
+from host_brain.persistence.task_acceptance_effect_staging_authority import (
+    canonical_task_acceptance_effect_staging_scope,
+)
 from host_brain.persistence.task_store_types import (
     AcceptanceEffectCommitScope,
     AcceptanceEffectIntentSpec,
@@ -488,33 +491,42 @@ class TaskAcceptanceEffectStagingMixin:
                 f"parallel success is missing its frozen effect intent: {spec.effect_id}",
             )
 
-        conn.execute(
-            """
-            INSERT INTO task_runtime_acceptance_effect_intent(
-                effect_id, graph_id, graph_revision, node_id, attempt_id,
-                commit_scope, effect_type, payload_ref, payload_json,
-                payload_sha256, idempotency_key,
-                status, available_ts_ms, fencing_token, attempt_count,
-                status_version, created_ts_ms, updated_ts_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, 0, 0, ?, ?)
-            """,
-            (
-                spec.effect_id,
-                spec.graph_id,
-                spec.graph_revision,
-                spec.node_id,
-                spec.attempt_id,
-                spec.commit_scope.value,
-                spec.effect_type,
-                spec.payload_ref,
-                payload_json,
-                spec.payload_sha256,
-                spec.idempotency_key,
-                int(ts_ms),
-                int(ts_ms),
-                int(ts_ms),
-            ),
-        )
+        with canonical_task_acceptance_effect_staging_scope(
+            effect_id=spec.effect_id,
+            graph_id=spec.graph_id,
+            graph_revision=spec.graph_revision,
+            node_id=spec.node_id,
+            attempt_id=spec.attempt_id,
+            commit_scope=spec.commit_scope.value,
+            idempotency_key=spec.idempotency_key,
+        ):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_acceptance_effect_intent(
+                    effect_id, graph_id, graph_revision, node_id, attempt_id,
+                    commit_scope, effect_type, payload_ref, payload_json,
+                    payload_sha256, idempotency_key,
+                    status, available_ts_ms, fencing_token, attempt_count,
+                    status_version, created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, 0, 0, ?, ?)
+                """,
+                (
+                    spec.effect_id,
+                    spec.graph_id,
+                    spec.graph_revision,
+                    spec.node_id,
+                    spec.attempt_id,
+                    spec.commit_scope.value,
+                    spec.effect_type,
+                    spec.payload_ref,
+                    payload_json,
+                    spec.payload_sha256,
+                    spec.idempotency_key,
+                    int(ts_ms),
+                    int(ts_ms),
+                    int(ts_ms),
+                ),
+            )
         created = _acceptance_effect_record(
             self._require_acceptance_effect_intent(conn, spec.effect_id)
         )

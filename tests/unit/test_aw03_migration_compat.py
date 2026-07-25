@@ -49,15 +49,16 @@ def _migration_catalog_through(tmp_path: Path, version: int) -> Path:
     return target
 
 
-def _drop_post_0122_task_graph_admission_triggers(
+def _drop_post_0123_task_authority_triggers(
     conn: sqlite3.Connection,
 ) -> None:
-    """Reconstruct a genuine pre-0123 schema after a full-head test seed."""
+    """Remove 0124/0125 Task Runtime authority triggers from legacy seeds."""
 
     for trigger in (
         "trg_task_runtime_graph_admission_authority_insert",
         "trg_task_runtime_node_admission_authority_insert",
         "trg_host_command_journal_admission_authority_insert",
+        "trg_task_runtime_acceptance_effect_staging_authority_insert",
     ):
         conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
 
@@ -371,7 +372,7 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DROP TABLE task_runtime_acceptance_effect_intent")
         conn.execute("DROP TABLE task_runtime_worker_projection")
         conn.execute("DROP TABLE task_runtime_budget_usage")
@@ -445,7 +446,7 @@ def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) 
         # Rewind the catalog consistently from 0089. Leaving later receipts
         # behind would create an impossible migration-history gap rather than
         # exercising the checksum-bound 0089 replay compatibility path.
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 89")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 89")
         conn.commit()
@@ -515,7 +516,7 @@ def test_0094_receipt_loss_replay_is_idempotent_and_keeps_one_continuation_shape
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 94")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 94")
         conn.commit()
@@ -1186,7 +1187,7 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DROP TABLE task_runtime_parallel_success_decision")
         conn.execute("DROP TABLE task_runtime_parallel_settlement_decision")
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 90")
@@ -1295,7 +1296,7 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DROP TABLE task_runtime_parallel_success_decision")
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 91")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 91")
@@ -1450,7 +1451,7 @@ def test_platform_registry_draft_is_repaired_once_then_strictly_validated(
     with sqlite3.connect(db_path) as conn:
         # Rewind to the pre-repair catalog. Later AW-03 migrations must be
         # replayed after 0075 instead of leaving an impossible history gap.
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 75")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 75")
         conn.execute(
@@ -1503,7 +1504,7 @@ def test_platform_registry_strict_postcondition_rolls_back_wash_and_receipt(
     seeded = runner.apply_migrations(request_id="aw03-seed-postcondition", ts_ms=14)
     assert seeded.success is True, seeded.as_dict()
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 75")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 75")
         conn.execute(
@@ -1585,7 +1586,7 @@ def test_platform_registry_draft_repair_rejects_incomplete_physical_schema(
     assert seeded.success is True, seeded.as_dict()
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0122_task_graph_admission_triggers(conn)
+        _drop_post_0123_task_authority_triggers(conn)
         conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 75")
         conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 75")
         conn.execute(

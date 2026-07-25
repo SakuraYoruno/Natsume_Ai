@@ -86,7 +86,8 @@
 
 - migration 0124 为 `task_runtime_graph`、`task_runtime_node` 与 `host_command_journal` 的未来 INSERT 安装三条 fail-closed trigger；连接必须注册准入函数并进入 exact `graph_id + graph_revision` scope，且 scope 仅由 `HostCommandRepository._admit_normalized()` 持有。
 - 真实 SQLite 覆盖 plain connection 缺 UDF、unscoped/wrong scope、legacy source、late Node、raw HostCommand、trigger drift、中途迁移回滚、恢复后 exact retry、既有行不改写与 canonical replay。authority/HostCommand 定向集合为 `27 passed`。
-- 该证据只支持 `APPLICATION_AND_SQL_ADMISSION_WRITE_AUTHORITY_SEALED` 的准入窄边界；Acceptance Effect、其它运行期 mutation、波次集成、production canary 与 NE-01 总体仍未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- migration 0125 为 `task_runtime_acceptance_effect_intent` 的未来 INSERT 增加 exact 七字段 scope 和规范初始状态 trigger；exact replay 不进入写 scope，plain SQLite、unscoped/wrong scope、非规范初始状态与 trigger drift 均失败关闭。包含 Graph/Effect authority、迁移兼容、artifact/recovery/dispatcher 的最终受影响去重批次为 `99 passed in 245.03s`。
+- 该证据只支持 `APPLICATION_AND_SQL_ADMISSION_AND_EFFECT_STAGING_WRITE_AUTHORITIES_SEALED` 的窄边界；其它 UPDATE/DELETE mutation、波次集成、production canary 与 NE-01 总体仍未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## Governed Runtime
 

@@ -57,7 +57,7 @@ def _migrated_db(tmp_path: Path) -> Path:
         ts_ms=NOW,
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 124
+    assert result.summary["current_version"] == 125
     return db_path
 
 
@@ -401,5 +401,5 @@ def test_migration_0124_partial_failure_rolls_back_and_exact_retry_succeeds(
         ts_ms=NOW + 2,
     )
     assert retried.success is True, retried.as_dict()
-    assert retried.summary["current_version"] == 124
+    assert retried.summary["current_version"] == 125
     HostCommandRepository(db_path).assert_schema_ready()
