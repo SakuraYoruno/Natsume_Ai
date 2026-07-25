@@ -785,6 +785,7 @@ def _coordinator(
     checkpoint_uow: Any | None = None,
     worker_resolver: Any | None = None,
     acceptance: Any | None = None,
+    node_grant_verifier: Any | None = None,
 ) -> GovernedTaskCoordinator:
     durable_store = store
     while type(durable_store) is not DurableTaskStore:
@@ -808,6 +809,8 @@ def _coordinator(
         verifier=verifier or _Verifier(),
         acceptance=acceptance if acceptance is not None else _Acceptance("ACCEPT"),
         projection_reader=projections,
+        node_grant_verifier=node_grant_verifier,
+        acceptance_effects_enabled=atomic_graph_success_enabled,
         owner_id=owner_id,
         lease_ttl_ms=lease_ttl_ms,
         operation_ttl_ms=lease_ttl_ms,

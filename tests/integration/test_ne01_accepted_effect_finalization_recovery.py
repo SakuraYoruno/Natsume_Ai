@@ -158,6 +158,11 @@ class _NodeGrantService:
         )
 
 
+class _NodeGrantVerifier:
+    def verify_for_claim(self, **kwargs: Any) -> dict[str, Any]:
+        return dict(kwargs)
+
+
 def _runtime(
     db_path: Path,
     *,
@@ -181,6 +186,7 @@ def _runtime(
         verifier=_Verifier(),
         acceptance=_Acceptance(),
         projection_reader=projection_store,
+        node_grant_verifier=_NodeGrantVerifier(),
         acceptance_effects_enabled=True,
         owner_id="accepted-effect-worker",
     )

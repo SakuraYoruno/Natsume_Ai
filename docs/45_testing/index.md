@@ -7,6 +7,18 @@
 维护日期：2026-07-26
 状态：当前证据
 
+## NE-01 双 COMMITTED checkpoint 共享 Budget 恢复当前切片
+
+- 真实 SQLite 构造两个无依赖根节点、`ATOMIC_GRAPH_SUCCESS_V1` 和并发度 2；两个 worker 都先提交 canonical WorkerProjection 与 `COMMITTED` Operation，再分别提交 worker BudgetUsage，同时模拟写响应与首次 exact read 双重丢失。初始 owner 只能返回 `RECOVERY_REQUIRED`，不得写伪终态或重跑 worker。
+- 旧 Lease 到期后同时启动两个使用独立 Store/owner 的 scheduler。TaskStore CAS 只允许有效 higher-fence takeover，恢复顺序固定为 immutable graph order `root-a → root-b`；竞争 loser 只能看到 terminal replay 或 `RECOVERY_REQUIRED`。
+- token limit 100 覆盖 accepted+accepted，最终 Graph=`COMPLETED`、Budget=`CONSUMED`、两 Node=`ACCEPTED`；token limit 15 覆盖 root-a accepted、root-b exact rejected，最终 Graph=`BLOCKED`、Budget=`RELEASED`、Node=`ACCEPTED/FAILED`，复用既有 parallel settlement。
+- 修复后的 checkpoint loader 不再错误要求每个 accepted usage 都与 graph Budget 的最终 `EXCEEDED` 状态相等。它只在同一 canonical scheduler snapshot 可证明 admitted sibling 的 `TASK_STORE_BUDGET_EXCEEDED` worker usage、对应 Attempt、相同 graph/revision/Budget、非空 exceeded dimensions 和连续 Reservation version 时允许 accepted checkpoint 继续；测试删除 sibling rejection 后确认零 takeover Lease、状态保持 `RECOVERY_REQUIRED`。
+- 双场景首轮为 `2 passed in 7.16s`；包含既有三项同文件回归的最终文件为 `5 passed in 23.40s`。online takeover 完整文件为 `23 passed in 71.29s`，恢复/Budget 单元为 `28 passed in 0.94s`，结构与 coverage 为 `27 passed in 2.58s`；这些集合与后续宽回归可能重叠，禁止相加成伪全量数字。
+- parallel/settlement 宽回归首轮为 `67 passed + 8 failed`，8 项均是已合并合同后的旧测试而非本次生产修复失败：4 项仍期待 known interruption 的 Operation=`RESERVED`、2 项 monkeypatch 未透传 `execution_segment`、1 项仍尝试 UPDATE 0127 已物理冻结的 WorkerProjection、1 项仍在原子 Graph/Budget settlement 之外注入已删除的独立 Budget release 窗口。修正为生产形状后 8 项 selector=`8 passed in 22.14s`。
+- 宽回归最终完整文件为 `74 passed + 1 timing assertion failed in 221.13s`。该项错误地把 best-effort heartbeat-loss marker 强制为 `RECOVERY_REQUIRED`；实际合同允许在旧 Lease 已过期时保持 `RESERVED`，但必须公开 `UNKNOWN + marker failure` 且零 `OPERATION_COMMITTED`。改为逐分支核对 Reservation、projection 和唯一/零 recovery Outbox 后，同一 selector 三次独立运行均为 `1 passed`。因此当前 75 个 case 均已有最终代码上的通过证据，但没有伪造一条“完整命令 75 passed”输出。
+- 另有 checkpoint/parallel structure `20 passed in 38.41s`、accepted-effect restart 与 Budget contention `4 passed in 11.51s`、文档/release/coverage `54 passed in 13.45s`。测试夹具补齐 production-required node Grant verifier；目标模块 `compileall`、统一 static scan、doc gate、JSON 解析与 `git diff --check` 均通过。静态 Gate `failures=[]`，未扩大 allowlist。
+- 该切片不解决共享 `EXCEEDED` 下的 `MISSING` 顺序、`CONFLICT`、`RESERVED`、任意 N 节点批次、取消交叉、未知 external effect、部署 fan-out canary 或七路线波次验收。状态为 `TWO_COMMITTED_CHECKPOINT_MIXED_BUDGET_RECOVERY_LOCAL_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE`；migration head 仍为 0127，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 signed WorkerProjection checkpoint COMMIT 当前切片
 
 - `task_operation.reconcile` 在没有 cancellation intent 时只允许 `COMMIT + worker-projection://.../<sha256>`；任意 transport receipt、普通 `RELEASE` 或非 canonical projection 在 admission/handler/Store 边界失败关闭。

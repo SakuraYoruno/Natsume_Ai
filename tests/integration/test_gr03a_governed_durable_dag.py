@@ -538,21 +538,6 @@ class _FailingHeartbeatStore:
         return self._delegate.heartbeat_lease(*args, **kwargs)
 
 
-class _FailingExceededBudgetReleaseStore:
-    def __init__(self, delegate: DurableTaskStore) -> None:
-        self._delegate = delegate
-        self.release_calls = 0
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._delegate, name)
-
-    def transition_budget(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        if str(kwargs.get("target_status") or "") == "RELEASED":
-            self.release_calls += 1
-            raise TimeoutError("simulated crash before exceeded Budget release")
-        return self._delegate.transition_budget(*args, **kwargs)
-
-
 class _Resolver:
     def __init__(self, calls: list[str], fail_nodes: set[str] | None = None) -> None:
         self._worker = _Worker(calls, fail_nodes or set())
@@ -1124,7 +1109,7 @@ async def test_ne01_parallel_post_reservation_failure_stays_recovery_required(
     assert first_receipt["node_id"] == "right"
     assert first_receipt["status"] == "RECOVERY_REQUIRED"
     assert first_receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
-    assert first_receipt["projection"]["reservation_status"] == "RESERVED"
+    assert first_receipt["projection"]["reservation_status"] == "RECOVERY_REQUIRED"
 
     store = DurableTaskStore(db_path, clock=lambda: NOW)
     assert store.get_node("graph-gr03a", 1, "left")["status"] == "RUNNING"
@@ -1144,7 +1129,7 @@ async def test_ne01_parallel_post_reservation_failure_stays_recovery_required(
             graph=durable_command["graph"],
         ).for_node("right").reservation_id
     )
-    assert right_reservation["status"] == "RESERVED"
+    assert right_reservation["status"] == "RECOVERY_REQUIRED"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """
@@ -1942,6 +1927,7 @@ async def test_ne01_b4_parallel_budget_selects_rejected_usage_not_admission_orde
         node_id: str,
         attempt_id: str,
         tool_call_count: int = 1,
+        execution_segment: str | None = None,
     ) -> Any:
         if node_id == "left":
             precharge_order.append("left:waiting")
@@ -1952,6 +1938,7 @@ async def test_ne01_b4_parallel_budget_selects_rejected_usage_not_admission_orde
                 node_id=node_id,
                 attempt_id=attempt_id,
                 tool_call_count=tool_call_count,
+                execution_segment=execution_segment,
             )
         assert node_id == "right"
         precharge_order.append("right:charging")
@@ -1961,6 +1948,7 @@ async def test_ne01_b4_parallel_budget_selects_rejected_usage_not_admission_orde
                 node_id=node_id,
                 attempt_id=attempt_id,
                 tool_call_count=tool_call_count,
+                execution_segment=execution_segment,
             )
             assert charge.accepted is False
             precharge_order.append("right:rejected")
@@ -2085,6 +2073,7 @@ async def test_ne01_b4_right_first_budget_decision_is_stable_across_crash_reentr
         node_id: str,
         attempt_id: str,
         tool_call_count: int = 1,
+        execution_segment: str | None = None,
     ) -> Any:
         if node_id == "left":
             precharge_order.append("left:waiting")
@@ -2095,6 +2084,7 @@ async def test_ne01_b4_right_first_budget_decision_is_stable_across_crash_reentr
                 node_id=node_id,
                 attempt_id=attempt_id,
                 tool_call_count=tool_call_count,
+                execution_segment=execution_segment,
             )
         assert node_id == "right"
         precharge_order.append("right:charging")
@@ -2104,6 +2094,7 @@ async def test_ne01_b4_right_first_budget_decision_is_stable_across_crash_reentr
                 node_id=node_id,
                 attempt_id=attempt_id,
                 tool_call_count=tool_call_count,
+                execution_segment=execution_segment,
             )
             assert charge.accepted is False
             precharge_order.append("right:rejected")
@@ -3759,7 +3750,7 @@ async def test_ne01_parallel_self_cancellation_reaches_supervisor_without_hang(
             WHERE attempt.node_id = ?
             """,
             ("left",),
-        ).fetchone()[0] == "RESERVED"
+        ).fetchone()[0] == "RECOVERY_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -3955,7 +3946,20 @@ async def test_ne01_coordinator_heartbeat_loss_blocks_operation_commit(
             WHERE event_type = 'OPERATION_COMMITTED'
             """
         ).fetchone()[0]
-    assert reservation_status == "RESERVED"
+        recovery_marker_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type = 'OPERATION_RECOVERY_REQUIRED'
+            """
+        ).fetchone()[0]
+    assert reservation_status in {"RESERVED", "RECOVERY_REQUIRED"}
+    if reservation_status == "RECOVERY_REQUIRED":
+        assert receipt["projection"]["reservation_status"] == "RECOVERY_REQUIRED"
+        assert recovery_marker_count == 1
+    else:
+        assert receipt["projection"]["reservation_status"] == "UNKNOWN"
+        assert receipt["projection"]["recovery_marker_reason_code"]
+        assert recovery_marker_count == 0
     assert commit_count == 0
 
 
@@ -4012,7 +4016,7 @@ async def test_gr03a_unknown_failed_dependency_never_executes_descendant(
     ).for_node("failed")
     assert store.get_operation_reservation(failed_admission.reservation_id)[
         "status"
-    ] == "RESERVED"
+    ] == "RECOVERY_REQUIRED"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """
@@ -4074,7 +4078,7 @@ async def test_gr03b_precharge_exceeded_blocks_before_worker_and_releases_budget
 
 
 @pytest.mark.asyncio
-async def test_ne01_terminal_reentry_does_not_silently_release_blocked_budget(
+async def test_ne01_terminal_budget_block_and_release_are_one_atomic_settlement(
     tmp_path: Path,
 ) -> None:
     db_path = _migrated_db(tmp_path)
@@ -4098,52 +4102,48 @@ async def test_ne01_terminal_reentry_does_not_silently_release_blocked_budget(
         graph=record["graph"],
     )
     durable = DurableTaskStore(db_path, clock=lambda: NOW)
-    crashing = _FailingExceededBudgetReleaseStore(durable)
-
-    with pytest.raises(GovernedRuntimeError):
-        _ = [
-            event
-            async for event in _coordinator(
-                db_path,
-                [],
-                task_store=crashing,
-            ).execute_stream(
-                admitted=admitted,
-                command=record["command"],
-                work_order=record["work_order"],
-            )
-        ]
-    assert crashing.release_calls == 1
-    crashed = durable.read_scheduler_snapshot(graph.graph_id, graph.revision)
-    assert crashed["graph_record"]["status"] == "BLOCKED"
-    assert crashed["graph_record"]["nodes"][0]["status"] == "FAILED"
-    assert crashed["budgets"][0]["status"] == "EXCEEDED"
+    events = [
+        event
+        async for event in _coordinator(
+            db_path,
+            [],
+            task_store=durable,
+        ).execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+    assert events[-1]["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+    settled = durable.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert settled["graph_record"]["status"] == "BLOCKED"
+    assert settled["graph_record"]["nodes"][0]["status"] == "FAILED"
+    assert settled["budgets"][0]["status"] == "RELEASED"
     outbox_count = len(durable.list_pending_outbox(limit=100))
 
-    with pytest.raises(GovernedRuntimeError) as rejected:
-        _ = [
-            event
-            async for event in _coordinator(
-                db_path,
-                [],
-                task_store=durable,
-            ).execute_stream(
-                admitted=admitted,
-                command=record["command"],
-                work_order=record["work_order"],
-            )
-        ]
-
-    assert rejected.value.reason_code == "GOVERNED_DURABLE_STATE_CONFLICT"
-    assert "terminal reconciliation is required" in rejected.value.detail
+    replay = [
+        event
+        async for event in _coordinator(
+            db_path,
+            [],
+            task_store=durable,
+        ).execute_stream(
+            admitted=admitted,
+            command=record["command"],
+            work_order=record["work_order"],
+        )
+    ]
+    assert replay[-1]["execution_receipt"]["status"] == "BUDGET_BLOCKED"
+    assert replay[-1]["execution_receipt"]["reason_code"] == "GOVERNED_BUDGET_EXCEEDED"
     unchanged = durable.read_scheduler_snapshot(graph.graph_id, graph.revision)
     assert unchanged["graph_record"]["status"] == "BLOCKED"
-    assert unchanged["budgets"][0]["status"] == "EXCEEDED"
+    assert unchanged["budgets"][0]["status"] == "RELEASED"
     assert len(durable.list_pending_outbox(limit=100)) == outbox_count
     inventory = durable.inventory_terminal_reconciliation_cases()
     assert inventory["discovered_count"] == 1
     assert inventory["inserted_count"] == 1
     assert inventory["cases"][0]["classification"] == "SIGNED_REPAIR_REQUIRED"
+    assert inventory["cases"][0]["recommended_action"] == "FAIL_GRAPH"
 
 
 @pytest.mark.parametrize(
@@ -5270,7 +5270,9 @@ async def test_ne01_b2_post_reservation_worker_failure_is_never_auto_retried(
             ORDER BY reservation_id
             """
         ).fetchall()
-    assert reservations == [(snapshot["attempts"][0]["attempt_id"], "RESERVED")]
+    assert reservations == [
+        (snapshot["attempts"][0]["attempt_id"], "RECOVERY_REQUIRED")
+    ]
 
 
 @pytest.mark.asyncio
