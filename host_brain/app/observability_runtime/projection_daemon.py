@@ -7,13 +7,17 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from copy import deepcopy
+from typing import TYPE_CHECKING, Mapping
 
 if TYPE_CHECKING:
     from host_brain.observability.projection_store import ProjectionLeaderLease, QueryProjectionStore
 
 
 logger = logging.getLogger("Natsume.obs.projection")
+
+_RESULT_OK = "OK"
+_RESULT_SKIPPED_PREFIX = "SKIPPED_"
 
 
 class ProjectionJobDaemon:
@@ -31,6 +35,7 @@ class ProjectionJobDaemon:
         *,
         owner_id: str | None = None,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock_ms: Callable[[], int] | None = None,
     ) -> None:
         self._jobs: dict[str, tuple[Callable[[], object], int]] = {}
         self._last_started: dict[str, float] = {}
@@ -42,14 +47,58 @@ class ProjectionJobDaemon:
         self._lifecycle_state = "READY"
         self._owner_id = str(owner_id or f"projection-daemon:{uuid.uuid4().hex}")
         self._clock = clock
+        self._wall_clock_ms = wall_clock_ms or (lambda: int(time.time() * 1000))
         self._active_store: QueryProjectionStore | None = None
         self._active_lease: ProjectionLeaderLease | None = None
+        self._generation = 0
+        self._wave_in_flight = False
+        self._wave_count = 0
+        self._consecutive_failure_waves = 0
+        self._last_wave: dict[str, object] | None = None
+        self._last_failure: dict[str, object] | None = None
+        self._last_success_ts_ms: int | None = None
+        self._last_success_wave_count: int | None = None
+        self._last_failure_wave_count: int | None = None
 
     @property
     def running(self) -> bool:
         with self._lifecycle_lock:
             thread = self._thread
             return bool(thread is not None and thread.is_alive())
+
+    def health_snapshot(self) -> dict[str, object]:
+        """Return a secret-free app-local supervision snapshot."""
+
+        with self._lifecycle_lock:
+            thread = self._thread
+            running = bool(thread is not None and thread.is_alive())
+            lifecycle_state = self._lifecycle_state
+            if lifecycle_state == "RUNNING" and not running:
+                status = "FAILED"
+            elif lifecycle_state == "RUNNING" and self._consecutive_failure_waves > 0:
+                status = "DEGRADED"
+            else:
+                status = lifecycle_state
+            last_failure = deepcopy(self._last_failure)
+            last_wave = deepcopy(self._last_wave)
+            return {
+                "status": status,
+                "lifecycle_state": lifecycle_state,
+                "running": running,
+                "generation": self._generation,
+                "wave_in_flight": self._wave_in_flight,
+                "wave_count": self._wave_count,
+                "consecutive_failure_waves": self._consecutive_failure_waves,
+                "last_success_ts_ms": self._last_success_ts_ms,
+                "recovered_after_last_failure": bool(
+                    self._last_failure_wave_count is not None
+                    and self._last_success_wave_count is not None
+                    and self._last_success_wave_count
+                    > self._last_failure_wave_count
+                ),
+                "last_wave": last_wave,
+                "last_failure": last_failure,
+            }
 
     def register(
         self,
@@ -93,11 +142,23 @@ class ProjectionJobDaemon:
                 state = self._lifecycle_state
             if state in {"STOPPING", "STOPPED"}:
                 return {name: f"SKIPPED_{state}" for name in names}
-            return self._run_jobs_once(
-                store=store,
-                owner_id=owner_id,
-                lease_ms=lease_ms,
-            )
+            with self._lifecycle_lock:
+                self._wave_in_flight = True
+            try:
+                results = self._run_jobs_once(
+                    store=store,
+                    owner_id=owner_id,
+                    lease_ms=lease_ms,
+                )
+            except BaseException as exc:
+                self._record_unexpected_wave_failure(exc)
+                raise
+            else:
+                self._record_wave_results(results)
+                return results
+            finally:
+                with self._lifecycle_lock:
+                    self._wave_in_flight = False
         finally:
             self._run_lock.release()
 
@@ -134,8 +195,11 @@ class ProjectionJobDaemon:
                 lease_ms=lease_ms,
             )
         except Exception as exc:
-            detail = f"LEASE_ERROR: {type(exc).__name__}: {exc}"
-            logger.warning("projection leader lease failed: error=%s", exc)
+            detail = f"LEASE_ACQUIRE_ERROR: {type(exc).__name__}"
+            logger.warning(
+                "projection leader lease failed: error_type=%s",
+                type(exc).__name__,
+            )
             results.update({name: detail for name, _callback in due_jobs})
             return results
         if lease is None:
@@ -146,7 +210,16 @@ class ProjectionJobDaemon:
         self._active_store = store
         self._active_lease = lease
         for name, callback in due_jobs:
-            renewed = store.renew_leader_lease(lease, lease_ms=lease_ms)
+            try:
+                renewed = store.renew_leader_lease(lease, lease_ms=lease_ms)
+            except Exception as exc:
+                results[name] = f"LEASE_RENEW_ERROR: {type(exc).__name__}"
+                logger.warning(
+                    "projection leader lease renew failed: job=%s error_type=%s",
+                    name,
+                    type(exc).__name__,
+                )
+                continue
             if renewed is None:
                 results[name] = "SKIPPED_LEASE_LOST"
                 continue
@@ -157,11 +230,110 @@ class ProjectionJobDaemon:
             try:
                 with store.bind_leader_lease(renewed):
                     callback()
-                results[name] = "OK"
+                results[name] = _RESULT_OK
             except Exception as exc:
-                results[name] = f"{type(exc).__name__}: {exc}"
-                logger.warning("projection refresh job failed: job=%s error=%s", name, exc)
+                results[name] = f"JOB_ERROR: {type(exc).__name__}"
+                logger.warning(
+                    "projection refresh job failed: job=%s error_type=%s",
+                    name,
+                    type(exc).__name__,
+                )
         return results
+
+    @staticmethod
+    def _result_error_type(result: str) -> str:
+        parts = [
+            part.strip()
+            for part in str(result or "").split(":")
+            if part.strip()
+        ]
+        if len(parts) >= 2:
+            return parts[-1]
+        return "ProjectionJobError"
+
+    @staticmethod
+    def _summarize_results(results: Mapping[str, str]) -> dict[str, object]:
+        ok_jobs: list[str] = []
+        skipped_jobs: list[str] = []
+        failed_jobs: list[str] = []
+        error_types: set[str] = set()
+        for name, raw_result in results.items():
+            result = str(raw_result or "")
+            if result == _RESULT_OK:
+                ok_jobs.append(str(name))
+            elif result.startswith(_RESULT_SKIPPED_PREFIX):
+                skipped_jobs.append(str(name))
+            else:
+                failed_jobs.append(str(name))
+                error_types.add(ProjectionJobDaemon._result_error_type(result))
+        return {
+            "status": (
+                "FAILED"
+                if failed_jobs
+                else "SUCCESS"
+                if ok_jobs
+                else "SKIPPED"
+            ),
+            "job_count": len(results),
+            "ok_count": len(ok_jobs),
+            "skipped_count": len(skipped_jobs),
+            "failed_count": len(failed_jobs),
+            "failed_jobs": sorted(failed_jobs),
+            "error_types": sorted(error_types),
+        }
+
+    def _record_wave_results(self, results: Mapping[str, str]) -> None:
+        summary = self._summarize_results(results)
+        observed_ts_ms = int(self._wall_clock_ms())
+        summary["observed_ts_ms"] = observed_ts_ms
+        with self._lifecycle_lock:
+            self._wave_count += 1
+            summary["wave_sequence"] = self._wave_count
+            self._last_wave = summary
+            failed_count = int(summary["failed_count"])
+            ok_count = int(summary["ok_count"])
+            if failed_count > 0:
+                self._consecutive_failure_waves += 1
+                self._last_failure_wave_count = self._wave_count
+                self._last_failure = {
+                    "reason_code": "OBS_PROJECTION_WAVE_FAILED",
+                    "incident_id": f"obs-projection:{uuid.uuid4().hex}",
+                    "observed_ts_ms": observed_ts_ms,
+                    "wave_sequence": self._wave_count,
+                    "failed_jobs": list(summary["failed_jobs"]),
+                    "error_types": list(summary["error_types"]),
+                }
+            elif ok_count > 0:
+                self._consecutive_failure_waves = 0
+                self._last_success_ts_ms = observed_ts_ms
+                self._last_success_wave_count = self._wave_count
+
+    def _record_unexpected_wave_failure(self, exc: BaseException) -> None:
+        observed_ts_ms = int(self._wall_clock_ms())
+        error_type = type(exc).__name__
+        with self._lifecycle_lock:
+            self._wave_count += 1
+            self._consecutive_failure_waves += 1
+            self._last_failure_wave_count = self._wave_count
+            self._last_wave = {
+                "status": "FAILED",
+                "job_count": 0,
+                "ok_count": 0,
+                "skipped_count": 0,
+                "failed_count": 1,
+                "failed_jobs": [],
+                "error_types": [error_type],
+                "observed_ts_ms": observed_ts_ms,
+                "wave_sequence": self._wave_count,
+            }
+            self._last_failure = {
+                "reason_code": "OBS_PROJECTION_WAVE_EXCEPTION",
+                "incident_id": f"obs-projection:{uuid.uuid4().hex}",
+                "observed_ts_ms": observed_ts_ms,
+                "wave_sequence": self._wave_count,
+                "failed_jobs": [],
+                "error_types": [error_type],
+            }
 
     def start(
         self,
@@ -180,8 +352,15 @@ class ProjectionJobDaemon:
                     "running": False,
                     "reason_code": "OBS_PROJECTION_STOP_IN_PROGRESS",
                 }
+            if self._lifecycle_state == "FAILED":
+                return {
+                    "started": False,
+                    "running": False,
+                    "reason_code": "OBS_PROJECTION_FAILED_REQUIRES_CLOSE",
+                }
             self._stop.clear()
             self._lifecycle_state = "RUNNING"
+            self._generation += 1
 
             def loop() -> None:
                 interval_s = max(0.1, int(interval_ms) / 1000.0)
@@ -189,12 +368,33 @@ class ProjectionJobDaemon:
                 # construction.  The first bounded wait makes immediate
                 # shutdown quiescent and leaves readiness free to report
                 # REBUILDING until the first scheduled refresh.
-                while not self._stop.wait(interval_s):
-                    self.run_once(
-                        store=store,
-                        owner_id=owner_id,
-                        lease_ms=max(int(lease_ms), int(interval_ms) * 3),
-                    )
+                try:
+                    while not self._stop.wait(interval_s):
+                        try:
+                            self.run_once(
+                                store=store,
+                                owner_id=owner_id,
+                                lease_ms=max(
+                                    int(lease_ms),
+                                    int(interval_ms) * 3,
+                                ),
+                            )
+                        except Exception as exc:
+                            logger.error(
+                                "projection daemon wave raised unexpectedly: "
+                                "error_type=%s",
+                                type(exc).__name__,
+                            )
+                            continue
+                        except BaseException:
+                            return
+                finally:
+                    with self._lifecycle_lock:
+                        if (
+                            self._lifecycle_state == "RUNNING"
+                            and not self._stop.is_set()
+                        ):
+                            self._lifecycle_state = "FAILED"
 
             thread = threading.Thread(
                 target=loop,
@@ -204,10 +404,11 @@ class ProjectionJobDaemon:
             self._thread = thread
             try:
                 thread.start()
-            except BaseException:
+            except BaseException as exc:
                 self._thread = None
                 self._stop.set()
-                self._lifecycle_state = "STOPPED"
+                self._lifecycle_state = "FAILED"
+                self._record_unexpected_wave_failure(exc)
                 raise
             return {"started": True, "running": True}
 

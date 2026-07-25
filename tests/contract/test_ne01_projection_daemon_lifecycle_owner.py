@@ -67,6 +67,7 @@ def test_obs_container_exposes_no_ambiguous_generic_start_authority() -> None:
 
     assert "start_projection_jobs" in methods
     assert "start" not in methods
+    assert "health_snapshot" in methods
     assert "close" in methods
 
     ports = next(
@@ -84,6 +85,7 @@ def test_obs_container_exposes_no_ambiguous_generic_start_authority() -> None:
     lifespan_source = LIFESPAN_PATH.read_text(encoding="utf-8-sig")
     assert "ports_consumption_lock" not in lifespan_source
     assert "consumed_ports" not in lifespan_source
+    assert "container.health_snapshot()" in lifespan_source
 
 
 def test_obs_lifespan_starts_before_yield_and_closes_in_finally() -> None:
