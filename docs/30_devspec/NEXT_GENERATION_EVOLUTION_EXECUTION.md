@@ -5,14 +5,14 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal；外部 namespace、Token/MCP durable restart、其它外部资源恢复、事务化 Chat commit、通用 Delegate、七路线和完整 Composition 仍未完成。
 
-版本：v3.1
+版本：v3.2
 日期：2026-07-26
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 修订执行基线：最新 `origin/dev`，本文件所在提交作为切片证据。第 5、6 条 governed Operator vertical slice `task_operation.reconcile` 与 `task_effect.reconcile` 继续把原始 Ed25519 证据隔离在 0126/0128 append-only evidence ledger，TaskGraph 只携带 ref/digest；其受限恢复结论不变。Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：Scheduler Secure Ingress 冻结 method/path/body/definition head，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，经过节点治理、Review/Verification/Acceptance、terminal Preview 后，唯一 `operator.state_control` Effect 才写 canonical repository。不可变 admin operation receipt 先于 claim completion；该崩溃窗口由新实例精确重开，路由中的直接 Scheduler writer 调用为 0。trigger 保持既有 governed occurrence 入口，list/get/health 保持只读。
 
-Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；Operator 当前仍为 `14/37`，其余 `23/37` 继续失败关闭，Scheduler surface 不计入该库存。当前连续 migration head 为 0129。唯一受影响代码批次为 `34 passed in 139.12s`，不与历史数字相加；Gate 3 首轮发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般多节点/批次、事务化 Chat 或 NE-01 完成。
+Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；Operator 当前仍为 `14/37`，其余 `23/37` 继续失败关闭，Scheduler surface 不计入该库存。当前连续 migration head 为 0130。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
 
-当前后续切片以最新 `origin/dev` 为动态基线，不再把任何历史提交号当固定 Goal authority。多节点恢复已从两个并行根节点的 accepted+accepted / accepted+rejected 子集，扩展到共享 `EXCEEDED` 下的 `MISSING` checkpoint 和有界四根节点批次：缺失 usage 只能在同一 scheduler snapshot 精确证明唯一 sibling `TASK_STORE_BUDGET_EXCEEDED` winner 后由更高 fence owner补写，结果必须是 version-stable、与 winner 共用 Outbox/dimensions 的 `ALREADY_EXCEEDED`；补写响应和首次读回再次丢失后，下一 owner 仍只读精确重开，winner 绑定漂移则在新 Lease 前失败关闭。四根节点两 accepted + 一个 winner + 一个 terminal sibling 由 immutable graph order 收口 `BLOCKED/RELEASED`，worker 各调用一次；既有双 checkpoint `COMPLETED/CONSUMED` 证据保留。状态提升为 `SHARED_EXCEEDED_MISSING_CHECKPOINT_RECOVERY_LOCAL_PROVEN / BOUNDED_FOUR_NODE_SHARED_BUDGET_RECOVERY_LOCAL_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE`，不改变 NE-01=`IN_PROGRESS`、wave integration=`NOT_RUN`、Docker full stack=`NOT_RUN_NE07` 或 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+当前后续切片以最新 `origin/dev` 为动态基线，不再把任何历史提交号当固定 Goal authority。多节点恢复在既有双 checkpoint、共享 `EXCEEDED` 缺失落账与 four-root mixed settlement 之上，新增五节点 `root → (left,right) → join → tail` 菱形图和八个并行根节点的真实 SQLite 重启恢复：精确 `COMMITTED` checkpoint 只按不可变图序续接，依赖满足后才释放后继，每个 worker 调用一次，不存在固定四节点恢复上限。0130 同时把 `UNKNOWN_SIDE_EFFECT`、`CANCELLATION_CROSSING`、checkpoint Budget/authority `CONFLICT` 冻结为 exact Graph/Node/Attempt/Operation/Budget/cancellation/active-Lease 版本绑定的 append-only case，并在同一 UoW 写唯一 Outbox；前两类仍须各自签名对账，冲突保持 quarantine 且不得取得 takeover Lease。当前受影响集成为 `37 passed in 145.68s`，状态为 `GENERAL_SHAPE_COMMITTED_CHECKPOINT_RECOVERY_LOCAL_PROVEN / DURABLE_UNKNOWN_CANCELLATION_CONFLICT_HOLD_LOCAL_PROVEN / GENERAL_RECOVERY_INCOMPLETE`。它不改变 NE-01=`IN_PROGRESS`、wave integration=`NOT_RUN`、Docker full stack=`NOT_RUN_NE07` 或 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 目标架构：[TARGET_ARCHITECTURE.md](../50_project/arch/TARGET_ARCHITECTURE.md)
 当前事实：[CURRENT_CODE_ARCHITECTURE.md](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 差距矩阵：[ARCHITECTURE_GAP_MATRIX.md](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
@@ -498,7 +498,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0129_host_mode_policy_journal.sql`：0115～0128 保留为连续历史资产，0129 为 Host auto-rules、last-interaction 与 mode-event outcome 增加 runtime-fenced append-only event/head。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0130_task_operation_recovery_hold.sql`：0115～0129 保留为连续历史资产，0130 只为未决 Operation 增加版本绑定的 append-only recovery hold 与同事务 Outbox，不创建新的 Effect attribution authority。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 

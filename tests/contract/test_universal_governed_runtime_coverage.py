@@ -24,9 +24,9 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "6995582dfbbd79744bc614c3282078d3d6acd3a6"
+    assert report.evaluated_commit_sha == "52e657b96800effae78c2bbc8912eabdc54ec64a"
     assert report.migration_head == (
-        "0129_host_mode_policy_journal.sql"
+        "0130_task_operation_recovery_hold.sql"
     )
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {

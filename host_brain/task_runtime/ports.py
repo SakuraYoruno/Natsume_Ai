@@ -558,6 +558,31 @@ class TaskStorePort(Protocol):
         reason_code: str,
     ) -> Mapping[str, Any]: ...
 
+    def record_operation_recovery_hold(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        reservation_id: str,
+        budget_id: str,
+        reason_code: str,
+        checkpoint_state: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def get_operation_recovery_hold(
+        self,
+        case_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def list_current_operation_recovery_holds(
+        self,
+        *,
+        graph_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[Mapping[str, Any], ...]: ...
+
     def transition_attempt(
         self,
         attempt_id: str,

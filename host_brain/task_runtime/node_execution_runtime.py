@@ -286,6 +286,12 @@ class DurableNodeExecutionRuntime:
             existing_reservation = existing_resolution.reservation
             latest_attempt = existing_resolution.latest_attempt
             if existing_resolution.kind == "BLOCKED":
+                blocked_projection = dict(
+                    existing_resolution.blocked_projection or {}
+                )
+                recovery_case_ref = _text(
+                    blocked_projection.get("recovery_case_ref")
+                )
                 receipt = build_execution_receipt(
                     admitted,
                     attempt_id=_required_record_text(latest_attempt, "attempt_id"),
@@ -293,7 +299,10 @@ class DurableNodeExecutionRuntime:
                     verification_status="NOT_RUN",
                     accepted=False,
                     reason_code=GOVERNED_OPERATION_RECOVERY_REQUIRED,
-                    projection=dict(existing_resolution.blocked_projection or {}),
+                    evidence_refs=(
+                        (recovery_case_ref,) if recovery_case_ref else ()
+                    ),
+                    projection=blocked_projection,
                 )
                 yield terminal_event(receipt)
                 return

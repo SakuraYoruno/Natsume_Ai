@@ -19,6 +19,7 @@ from .coordinator_records import (
     _text,
 )
 from .errors import (
+    GOVERNED_CHECKPOINT_BUDGET_CONFLICT,
     GOVERNED_OPERATION_RECOVERY_REQUIRED,
     GovernedRuntimeError,
 )
@@ -29,6 +30,7 @@ from .operation_recovery_runtime import (
     CommittedOperationCheckpoint,
     DurableOperationRecoveryRuntime,
 )
+from .operation_recovery_hold import persist_operation_recovery_hold
 from .ports import (
     GovernedWorkerResolverPort,
     InternalAgentCheckpointUnitOfWorkPort,
@@ -146,6 +148,20 @@ async def resolve_existing_operation(
         active_lease = await _maybe_await(
             task_store.get_active_lease(_required_record_text(attempt, "attempt_id"))
         )
+        recovery_case: dict[str, Any] | None = None
+        if status in {"RESERVED", "RECOVERY_REQUIRED"} and not (
+            status == "RESERVED" and active_lease is not None
+        ):
+            recovery_case = await persist_operation_recovery_hold(
+                task_store=task_store,
+                admitted=admitted,
+                budget=budget,
+                attempt_id=_required_record_text(attempt, "attempt_id"),
+                reason_code=(
+                    _text(refreshed.get("recovery_reason_code"))
+                    or GOVERNED_OPERATION_RECOVERY_REQUIRED
+                ),
+            )
         projection = {
             **operation_recovery.unresolved_projection(refreshed),
             "online_takeover_state": (
@@ -154,6 +170,15 @@ async def resolve_existing_operation(
                 else "SIGNED_RECONCILIATION_REQUIRED"
             ),
             "budget": budget.execution_payload(),
+            "recovery_case_ref": (
+                recovery_case.get("case_ref") if recovery_case else None
+            ),
+            "recovery_case_digest": (
+                recovery_case.get("subject_sha256") if recovery_case else None
+            ),
+            "recovery_case_kind": (
+                recovery_case.get("case_kind") if recovery_case else None
+            ),
         }
         if sealed_detail:
             projection["sealed_checkpoint_state"] = "INVALID"
@@ -191,6 +216,19 @@ async def resolve_existing_operation(
         )
     except GovernedRuntimeError as exc:
         _logger.warning("Committed checkpoint takeover was rejected: %s", exc)
+        checkpoint_state = (
+            "CONFLICT"
+            if exc.reason_code == GOVERNED_CHECKPOINT_BUDGET_CONFLICT
+            else "INVALID"
+        )
+        recovery_case = await persist_operation_recovery_hold(
+            task_store=task_store,
+            admitted=admitted,
+            budget=budget,
+            attempt_id=_required_record_text(attempt, "attempt_id"),
+            reason_code=exc.reason_code,
+            checkpoint_state=checkpoint_state,
+        )
         return ExistingOperationResolution(
             kind="BLOCKED",
             reservation=dict(refreshed),
@@ -207,6 +245,9 @@ async def resolve_existing_operation(
                 ),
                 "worker_replayed": False,
                 "budget": budget.execution_payload(),
+                "recovery_case_ref": recovery_case["case_ref"],
+                "recovery_case_digest": recovery_case["subject_sha256"],
+                "recovery_case_kind": recovery_case["case_kind"],
             },
         )
     return ExistingOperationResolution(

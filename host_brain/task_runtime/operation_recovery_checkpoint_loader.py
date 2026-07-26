@@ -16,7 +16,11 @@ from host_brain.persistence.worker_projection_repository import (
 from .admission import AdmittedExecution
 from .coordinator_receipts import _digest_from_receipt_ref, _worker_receipt_ref
 from .coordinator_records import _status, _text
-from .errors import GOVERNED_OPERATION_RECOVERY_REQUIRED, GovernedRuntimeError
+from .errors import (
+    GOVERNED_CHECKPOINT_BUDGET_CONFLICT,
+    GOVERNED_OPERATION_RECOVERY_REQUIRED,
+    GovernedRuntimeError,
+)
 from .node_execution_records import _is_terminal_commit
 from .operation_checkpoint_validation import (
     WorkerBudgetUsageCheckpointState,
@@ -195,7 +199,10 @@ async def takeover_committed_checkpoint(
         ),
     )
     if budget_usage.state is WorkerBudgetUsageCheckpointState.CONFLICT:
-        _blocked("committed checkpoint worker BudgetUsage conflicts")
+        raise GovernedRuntimeError(
+            GOVERNED_CHECKPOINT_BUDGET_CONFLICT,
+            "committed checkpoint worker BudgetUsage conflicts",
+        )
     budget_status = _status(checkpoint_budget)
     if (
         budget_usage.state

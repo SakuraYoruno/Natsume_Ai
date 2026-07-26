@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.4
+版本：v3.5
 
 核对日期：2026-07-26
 
@@ -14,6 +14,25 @@
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
 当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
+
+当前 Operation 恢复分流为：
+
+```mermaid
+flowchart LR
+    S["新 owner 重开 scheduler snapshot"] --> C{"canonical 状态可精确证明？"}
+    C -->|"COMMITTED checkpoint 一致"| R["同 Attempt / higher fence 续接\n按 immutable graph order"]
+    R --> D["依赖满足后释放后继\nworker 不重跑"]
+    C -->|"未知副作用"| H["0130 append-only hold + Outbox"]
+    C -->|"与 cancellation 交叉"| H
+    C -->|"Budget / authority 冲突"| Q["0130 quarantine hold + Outbox\n不创建 takeover Lease"]
+    H --> X{"case kind"}
+    X -->|"UNKNOWN_SIDE_EFFECT"| O["签名 Operation reconciliation"]
+    X -->|"CANCELLATION_CROSSING"| K["取消绑定签名 reconciliation"]
+    O --> V["重开 exact version subject 后处置"]
+    K --> V
+```
+
+0130 case 的 ref/digest 是可恢复的停机事实，不是 `NO_SIDE_EFFECT` 证明。case/outbox 的 exact replay、版本新鲜度与 active Lease 都由 canonical Store 复验；任何漂移都要求重新扫描和重新分类，不能直接消费旧 case。已验证图形包括五节点菱形和八个并行根节点，但不据此外推为无限规模或所有 failure/cancellation 类别。
 
 Scheduler 管理写流已统一为：
 
@@ -303,7 +322,7 @@ flowchart LR
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。0117 在 occurrence admission 的同一 `BEGIN IMMEDIATE` 中把 live DUE retry row 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前 renew、运行中 heartbeat，过期 lease 不能自我复活，第二实例/stale fence不能 dispatch/clear/defer，backoff 取真实失败时刻。该 Clock 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因和 canary 仍未完成。
 - Internal 状态为 `PARTIAL / INTERNAL_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`。外部入口只接受未准入的 v2 描述，准入后的 worker、Agent executor、Review 和 Workspace 直接消费同一个 `WorkOrderV3`。raw material 进入 exact-inventory protected stage，公共 projection 只含 ref/digest 与摘要。首次 activation 与生命周期 supervisor 周期扫描 sealed checkpoint，以更高 fence 重建唯一 projection 并继续原图，Agent 不重跑；A/B/C 仍是三个独立原子边界。terminal worker 处理精确 sealed abandon/cleanup与两类 signed cancellation。当前 no-intent signed raw failure 另由一个 SQLite UoW 写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal 必须先提交独立 deterministic claim，才清理未 sealed Git Workspace/stage，claim outage 时现场不动。一般 unknown effect、其它 crash-left/failure/cancellation closeout、general `settle_worker` crash bundle仍缺；一般write、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
-- post-COMMIT settlement 流程为：`Operation COMMITTED → BudgetUsage write/read identity 不确定 → RECOVERY_REQUIRED（不附加 lifecycle/finalization mutation）→ Lease 自然到期 → higher-fence committed checkpoint takeover → EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT → ACCEPTED、BUDGET_BLOCKED 或 fail-closed`。hold 不覆盖可能已提交的 usage/`EXCEEDED`，进程控制异常不会被转换成业务失败。共享 Budget 已被 sibling 推进为 `EXCEEDED` 时，`MISSING` 只能在同一 scheduler snapshot 精确证明唯一 winner 后补写为 version-stable、共享 winner Outbox/dimensions 的 `ALREADY_EXCEEDED`；补写响应与首次读取再次丢失后，下一 owner 仍只读重开，证据漂移在新 Lease 前失败关闭。受限正向流现覆盖双 checkpoint `accepted+accepted=COMPLETED/CONSUMED`、双 checkpoint `accepted+rejected=BLOCKED/RELEASED`，以及四根节点 `accepted + accepted + winner + ALREADY_EXCEEDED sibling → BLOCKED/RELEASED`。任意图形/规模、`CONFLICT`、`RESERVED`、取消交叉和 unknown effect recovery 仍缺。
+- post-COMMIT settlement 流程为：`Operation COMMITTED → BudgetUsage identity 不确定 → RECOVERY_REQUIRED → Lease 到期 → higher-fence checkpoint takeover → EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT`。共享 `EXCEEDED` 下的 `MISSING` 只能在同一 snapshot 证明唯一 winner 后补写为 version-stable、共享 winner Outbox/dimensions 的 `ALREADY_EXCEEDED`。正向流现覆盖双 checkpoint、four-root mixed settlement、五节点菱形与八个并行根节点；依赖只在前驱 accepted 后释放，worker 不重跑。`CONFLICT`、unknown `RESERVED/RECOVERY_REQUIRED` 与 cancellation crossing 会在新 Lease 前写 0130 exact hold + Outbox：conflict quarantine，后两类进入各自 signed reconciliation。无限规模、其它 failure/cancellation、自动归因和部署 fan-out仍缺。
 
 ```mermaid
 flowchart LR
@@ -705,7 +724,7 @@ claim runnable node
 | Schema 前置门禁 | Budget/worker 前验证 `0090` 与 `0092`；atomic policy 还验证 `0091` | `B5C_FAIL_FAST_WIRED` |
 | 共享终态 authority | live/re-entry 从 durable Node/Attempt/Reservation/BudgetUsage 重建同一 payload/ref；outcomes 全量覆盖 admitted Graph durable terminal Nodes/latest stable Attempts（含非 selected `RETRY_PENDING`），当前 batch 仅定优先级/selected。ownership/CAS 后 active ownership 映射 `IN_PROGRESS`，纯 CAS为 conflict | `B4_LIVE_AND_REENTRY_OUTER_WIRED` |
 | 并行终态证据 | pre-reservation failure、Budget overrun、post-review、Review denial ref fence 与 crash re-entry failure-over-review/live authority preservation 均有集成证据，包含结算提交响应丢失 exact replay；伪 receipt/旧 Attempt lineage、digest/payload/Outbox/replay 漂移被拒绝 | `INTEGRATION_AND_STORE_CONTRACT_PROVEN` |
-| 未决副作用与执行恢复 | post-COMMIT continuation 接受 exact canonical checkpoint：COMMITTED Reservation + 唯一 COMMITTED Outbox + 原 Attempt/历史 Lease/fence + hash receipt + canonical WorkerProjection + 唯一 graph Budget，并按 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT` 收口且不重跑 worker。单节点直接续接；多节点只有 outer DAG scheduler 在所有 live owner fence 清除后可授权同 Attempt、更高 fence的 exact continuation。共享 `EXCEEDED` 下的 `MISSING` 仅在唯一 sibling winner authority 可证时补写 `ALREADY_EXCEEDED`；同 Outbox/version/dimensions 绑定在下一次重启仍须重验。双 checkpoint 两种终态与四根节点 bounded mixed settlement 已按 graph order 本地证明，证据缺失或漂移零 Lease。独立的 pre-Operation 窄窗只接受尚无 Operation、latest Attempt/过期 Lease/唯一 graph Budget/canonical PRECHARGE 完全一致的 persisted Attempt；TaskStore 在同一写事务重验 reservation id 与 scope/fingerprint absence 后复用同 Attempt、签发更高 fence，随后才首次调用 worker。Lease请求的TTL/mode/reservation等全部进入确定性identity，提交后response loss只能exact重开未续租Lease、初始Heartbeat、连续fence与同Outbox。普通execution authority没有唯一ACTIVE Budget时直接阻断。任一 live owner、并发 Operation 或identity/行漂移都先失败关闭。未知外部副作用、`RESERVED`/`CONFLICT`、取消交叉、任意图形/规模和该窄窗之外的 general batch/multi-node settlement仍不具备自动恢复 | `BOUNDED_MULTI_CHECKPOINT_BUDGET_RECOVERY_LOCAL_PROVEN / CANONICAL_PRE_OPERATION_ATTEMPT_TAKEOVER_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE` |
+| 未决副作用与执行恢复 | post-COMMIT continuation 接受 exact Reservation/Outbox/Attempt/历史 Lease/WorkerProjection/graph Budget，按 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING` 收口且不重跑 worker。双 checkpoint、four-root、五节点菱形与八根节点已按 graph order 证明；pre-Operation 窄窗仍要求 Operation absence 后才复用同 Attempt、签发 higher fence。未知外部副作用、取消交叉和 `CONFLICT` 不自动恢复：0130 在新 Lease 前冻结 current-version hold + Outbox，分别进入 signed reconciliation 或 quarantine。无限规模、其它 failure/cancellation、Workspace 终态和部署 fan-out仍缺 | `GENERAL_SHAPE_COMMITTED_CHECKPOINT_RECOVERY_LOCAL_PROVEN / DURABLE_UNKNOWN_CANCELLATION_CONFLICT_HOLD_LOCAL_PROVEN / GENERAL_RECOVERY_INCOMPLETE` |
 | crash/re-entry 终态 | `ACTIVE` 多节点 Graph 从 durable Node/latest Attempt 复原 outcomes；`BLOCKED/FAILED/CANCELLED/COMPLETED + 未结 Budget` 不由 Runtime 重入静默修复，改由 0099 immutable case/proof/supersession authority 分类 | `B4_ACTIVE_REENTRY_WIRED_TERMINAL_REPAIR_EXPLICIT` |
 | 0099 历史终态对账 | schema-only migration；readiness 比较 3 table/4 index/10 trigger canonical SQL 并做 Python case/subject/proof 复核；`recover_startup` 后单次最多 inventory 10,000 个 terminal Graph。仅 `FAILED + exact atomic failure bundle + 唯一 graph-scope ACTIVE/EXCEEDED Budget` 可由默认开启的 system auto 精确处理；child/missing/multi Budget、PENDING/CONSUMED 或 Graph/Node/Review/Attempt/Lease/并行终态不一致只 quarantine。0090 唯一且 0091/0092 完整验证；未决 case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，只有 0099 UoW bypass；每个历史 case 的 supersession chain 最终须可信 proof，healthy closure 只能 signed `NONE` 且零业务写 | `AUTO_EXACT_ON / OPERATOR_OFF / CANARY_NOT_RUN` |
 | 决策记录 | canonical payload 与 Graph、可选 Budget、Outbox 同事务写 `0090`。selected `BUDGET_BLOCKED` 绑定 rejected usage；共享超额后的被动 blocked sibling 不要求本地 rejected usage。每个 row 读取校验 digest、精确 Graph/可选 Budget Outbox 与 Attempt，BUDGET 另校验 usage；terminal replay 还校验 Graph target/version | `B4_CANONICAL_DECISION_JOURNAL_WIRED` |
