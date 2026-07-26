@@ -3,7 +3,7 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.10
+版本：v3.11
 核对日期：2026-07-26
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag worker 执行和进程内任务 registry 已删除，且 Executive 内的 Forge route override call 已移除。纯 SkillDag adapter 仅作零生产调用的兼容合同；独立 Forge `runtime-match` 仍是待退役边界。
@@ -120,6 +120,23 @@ flowchart LR
 authority；普通 Skill 的 typed port 也遵守同一限制。缺失 usage、缓存、重复
 measurement 或 lineage 漂移会停止下一次模型调用。未声明的普通 Skill 不
 取得裸模型端口。该子流不代表 program-wide Budget 或 NE-01 已完成。
+
+### 只读 Delegate 零用量证明
+
+```mermaid
+flowchart LR
+    TB["Task Budget"] --> OD["outer Delegate dispatch\nprecharge tool_call=1"]
+    OD --> PA["pentest_agent\nPORT_FREE_READ_ONLY"]
+    PA --> ZA["exact-zero attestation\ntoken/tool/retry/cost=0"]
+    ZA --> RV["revalidate Task + grant + invocation"]
+    RV --> BU["WorkerBudgetUsage"]
+    BU --> DS["durable settlement"]
+```
+
+这里的零不是缺失 measurement 的默认值。adapter 没有模型、工具、nested
+dispatch 或 Effect port，dispatcher 仍须生成 digest-bound attestation；任一
+非零、缺失或 lineage drift 在 COMMIT 前失败。该证明只适用于当前启用的
+`pentest_agent`，不能给未来一般 Delegate 复用。
 
 ## Graph revision
 

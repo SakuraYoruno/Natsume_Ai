@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.38
+版本：v5.39
 核对日期：2026-07-26
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,8 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
+
+当前普通 Delegate 只准入 `pentest_agent` 的 `PORT_FREE_READ_ONLY` adapter。它不持有模型、工具、嵌套派发或 Effect port；dispatcher 必须产生 digest-bound `ReadonlyDelegateUsageAttestationV1`，绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation，并明确证明内部 token/tool/retry/model-cost 为零。Task Runtime 仍按真实外层动作预扣一次 canonical Delegate dispatch；冻结执行器不再从 `intent_agent_trace/repair_agent_trace` 推测用量。缺失、非零、篡改或 binding 漂移均在 COMMIT 前失败关闭，真实 SQLite 的 WorkerProjection 与 BudgetUsage 保存同一 attestation ref。当前启用 target 的 `budget_enforcement=PASS`，不外推到一般 Delegate、Review/restart、program-wide Budget、commit-bound acceptance 或 NE-01。
 
 当前启用的通用 worker 不再各自伪造验收结果。`governed_worker_evidence.py` 是 Chat/Skill/Delegate/Plan/Tool/Operator 的共享独立证据 owner：Verifier 与 Acceptance 通过同一只读接口但分别重开 durable WorkerProjection，复验完整执行身份、node grant、WorkOrder/context、receipt digest、COMMIT 与输出合同；任意未知语义条件返回 `REVIEW`。Skill 的 terminal COMMIT 现在完整镜像 canonical projection，不再丢失 graph/node/attempt/grant 字段。Plan 的 final Chat 从 canonical TaskResult artifacts 构造唯一输入证据集和 bundle attestation，已声明但未消费的依赖不再通过验收。当前 Delegate/Plan 的 verification 控制为 `PASS`，两条路线及 NE-01 总状态仍为 `INCOMPLETE / IN_PROGRESS`。
 
@@ -307,7 +309,7 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 ### 4.2 Budget
 
-`host_brain/task_runtime/budget_runtime.py` 和 TaskStore usage ledger 已为 Host 四路线、Scheduler 与 Internal Agent 建立 graph/node 预算预留及可用的 usage 结算边界；时间、dispatch、显式 provider token/cost、ModelAttempt retry 与工具步数只有在对应 worker 上报 canonical measurement 时才进入账本。Internal post-admission worker 已原生传递 V3；Chat、Internal/Agent Skill 多轮模型和显式声明模型预算的普通 governed Skill 已有 task-bound guard，但它尚未覆盖入场前 Chat 模型、Delegate 子 Agent、Scheduler handler、legacy 非 governed 调用及所有外部工具，因此七路线 Gate 的 `budget_enforcement` 仍保持 `PARTIAL`。
+`host_brain/task_runtime/budget_runtime.py` 和 TaskStore usage ledger 已为 Host 四路线、Scheduler 与 Internal Agent 建立 graph/node 预算预留及可用的 usage 结算边界；时间、dispatch、显式 provider token/cost、ModelAttempt retry 与工具步数只有在对应 worker 上报 canonical measurement 时才进入账本。Internal post-admission worker 已原生传递 V3；Chat、Internal/Agent Skill 多轮模型和显式声明模型预算的普通 governed Skill 已有 task-bound guard。当前唯一启用的只读 Delegate 还以 exact-zero attestation 关闭了自身内部用量缺口，但入场前 Chat 模型、未来有端口的一般 Delegate、Scheduler handler、legacy 非 governed 调用及所有外部工具仍未覆盖，因此 program-wide 七路线 Gate 的 `budget_enforcement` 继续保持 `PARTIAL`。
 
 D11 只收紧一条已 admission 的 Host `chat` 垂线：`FrozenNodeInput` 的 active Budget remaining 被投影为不可扩张的 node-bound `ModelBudgetGuard`，再由 `FrozenChatRouteExecutor → Surface main-chain → ModelAttemptService` 消费。该调用禁用 cache 和 streaming，按冻结剩余值限制 deadline、provider attempt、总 token、输出 token 与 `model_cost_micros`；provider 必须返回 `token_count / completion_tokens / model_cost_micros` 三项 canonical 整数。量测缺失、超限、timeout 或 provider 失败都会终止当前 guarded call，不再 retry/fallback；Surface 不会把它降级成 `APPROVE`，并跳过额外的 Spark judge。成功 trace 才会被投影为该 chat worker 的 budget observation。
 

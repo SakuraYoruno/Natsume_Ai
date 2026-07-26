@@ -25,6 +25,10 @@ from host_brain.core.trace_redaction import (
     read_decision_summary,
     read_public_agent_output,
 )
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    READONLY_DELEGATE_EXECUTION_MODE,
+    build_readonly_delegate_usage_attestation,
+)
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
@@ -205,6 +209,7 @@ class GovernedDelegateTarget:
     target_id: str
     handler: ReadOnlyDelegateHandler
     adapter_id: str
+    execution_mode: str
 
 
 class GovernedDelegateDispatcher:
@@ -225,6 +230,10 @@ class GovernedDelegateDispatcher:
                 raise ValueError("delegate target registry values must be GovernedDelegateTarget")
             if target.target_id != resolved or not callable(target.handler):
                 raise ValueError("delegate target registry binding is invalid")
+            if target.execution_mode != READONLY_DELEGATE_EXECUTION_MODE:
+                raise ValueError(
+                    "delegate target must declare the port-free read-only execution mode"
+                )
             normalized[resolved] = target
         self._node_grants = node_grants
         self._targets = normalized
@@ -282,6 +291,7 @@ def build_governed_delegate_dispatcher(
                 target_id=AGENT_ID_PENTEST,
                 handler=pentest_agent_handler,
                 adapter_id="readonly_pentest_domain_handoff.v1",
+                execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
             )
         },
     )
@@ -405,8 +415,21 @@ def _project_readonly_outcome(
         audit_refs={
             "delegate_invocation_ref": invocation.invocation_ref,
             "delegate_adapter": target.adapter_id,
-            "delegate_execution_mode": "READ_ONLY_HANDOFF",
+            "delegate_execution_mode": target.execution_mode,
             "side_effects_executed": False,
+            "delegate_runtime_usage_attestation": (
+                build_readonly_delegate_usage_attestation(
+                    command_id=invocation.command_id,
+                    graph_id=invocation.graph_id,
+                    graph_revision=invocation.graph_revision,
+                    node_id=invocation.node_id,
+                    attempt_id=invocation.attempt_id,
+                    node_grant_ref=invocation.node_grant_ref,
+                    target_id=invocation.target_id,
+                    adapter_id=target.adapter_id,
+                    invocation_ref=invocation.invocation_ref,
+                )
+            ),
             "handler_reason_code": str(trace.get("reason_code") or "").strip(),
             "handler_audit": {
                 "domain_pack": audit.get("domain_pack"),

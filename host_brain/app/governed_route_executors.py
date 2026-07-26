@@ -21,8 +21,13 @@ from host_brain.model_runtime.governed_budget import (
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 from host_brain.contracts.agent_runtime.worker_budget_usage import (
+    WorkerBudgetUsage,
     build_worker_budget_usage,
     stable_worker_usage_id,
+)
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    ReadonlyDelegateUsageAttestationError,
+    validate_readonly_delegate_usage_attestation,
 )
 from host_brain.contracts.agent_runtime.node_input_attestation import (
     NodeInputArtifactAttestationError,
@@ -118,10 +123,9 @@ class FrozenDelegateRouteExecutor:
             narrative=narrative,
             reason_code=reason_code,
             audit_refs=audit_refs,
-            budget_usage=_worker_budget_payload(
+            budget_usage=_readonly_delegate_budget_payload(
                 frozen,
-                observations=_delegate_budget_observations(audit_refs),
-                include_agent_tool_calls=True,
+                audit_refs=audit_refs,
             ),
         )
 
@@ -637,27 +641,64 @@ def _chat_budget_observations(terminal: Mapping[str, Any]) -> dict[str, Any]:
     return {"model_budget_measurements": measurements}
 
 
-def _delegate_budget_observations(audit_refs: Mapping[str, Any]) -> dict[str, Any]:
-    """Project explicit sub-agent measurements without scanning agent context."""
+def _readonly_delegate_budget_payload(
+    frozen: FrozenNodeInput,
+    *,
+    audit_refs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Require a task-bound exact-zero proof from the registered Delegate.
 
-    measurements: list[dict[str, Any]] = []
-    for trace_key in ("intent_agent_trace", "repair_agent_trace"):
-        trace = _mapping_child(audit_refs, trace_key)
-        _append_model_budget_measurement(
-            measurements,
-            _mapping_child(trace, "model_attempt"),
+    The production Delegate does not receive a model, tool, nested-dispatch or
+    effect port.  Missing observations therefore cannot silently mean zero:
+    the composition-owned dispatcher must attest that exact port-free boundary
+    and bind it to this command/graph/node/attempt/grant tuple.
+    """
+
+    raw = audit_refs.get("delegate_runtime_usage_attestation")
+    try:
+        attestation = validate_readonly_delegate_usage_attestation(
+            raw if isinstance(raw, Mapping) else {},
         )
-
-    projected: dict[str, Any] = {"model_budget_measurements": measurements}
-    agent_trace = audit_refs.get("agent_execution_trace")
-    if (
-        isinstance(agent_trace, Mapping)
-        and agent_trace.get("schema_version") == "nle.trace.redacted.v1"
-    ):
-        # This is an internal, redacted execution trace.  Do not accept a trace
-        # from agent_context or subgraph payloads, which can include user data.
-        projected["agent_execution_trace"] = dict(agent_trace)
-    return projected
+    except ReadonlyDelegateUsageAttestationError as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            f"delegate runtime usage attestation is invalid: {exc}",
+        ) from exc
+    expected = {
+        "command_id": frozen.command_id,
+        "graph_id": frozen.graph_id,
+        "graph_revision": frozen.graph_revision,
+        "node_id": frozen.node_id,
+        "attempt_id": frozen.attempt_id,
+        "node_grant_ref": frozen.node_grant_ref,
+        "target_id": frozen.target_id,
+        "adapter_id": str(audit_refs.get("delegate_adapter") or "").strip(),
+        "invocation_ref": str(
+            audit_refs.get("delegate_invocation_ref") or ""
+        ).strip(),
+        "execution_mode": str(
+            audit_refs.get("delegate_execution_mode") or ""
+        ).strip(),
+    }
+    if {key: attestation.get(key) for key in expected} != expected:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "delegate runtime usage attestation drifted from frozen authority",
+        )
+    return WorkerBudgetUsage(
+        usage_id=stable_worker_usage_id(
+            graph_id=frozen.graph_id,
+            graph_revision=frozen.graph_revision,
+            node_id=frozen.node_id,
+            attempt_id=frozen.attempt_id,
+            route=frozen.route,
+        ),
+        measurements={
+            str(key): int(value)
+            for key, value in dict(attestation["measurements"]).items()
+        },
+        evidence_refs=(str(attestation["attestation_ref"]),),
+    ).to_payload()
 
 
 def _append_model_budget_measurement(

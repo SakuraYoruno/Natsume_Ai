@@ -79,6 +79,16 @@ _BUDGETS = {
         model_cost_micros=0,
     ),
 }
+_PORT_FREE_DELEGATE_BUDGET = BudgetAmount(
+    token_count=0,
+    # One canonical dispatch is precharged by the Task Runtime.  The inner
+    # adapter attestation must still prove zero model and zero tool calls.
+    tool_call_count=1,
+    time_ms=300_000,
+    concurrency=1,
+    retry_count=1,
+    model_cost_micros=0,
+)
 
 
 class HostRouteContractError(RuntimeError):
@@ -288,14 +298,27 @@ def build_direct_host_route_contracts(
         "worker_route": route,
         "target_id": target,
     }
+    port_free_delegate = route == "delegate" and target == "pentest_agent"
     budget = BudgetPolicy(
         scope=f"work-order:{root_id}",
-        limits=_BUDGETS[route],
+        limits=(
+            _PORT_FREE_DELEGATE_BUDGET
+            if port_free_delegate
+            else _BUDGETS[route]
+        ),
         on_exceeded=BudgetExceededAction.BLOCK,
         metadata={
             "policy": f"governed_direct_{route}_default",
             "policy_version": f"governed_direct_{route}_budget.v1",
             "fail_closed": True,
+            **(
+                {
+                    "measurement_mode": "PORT_FREE_READ_ONLY_ATTESTED_ZERO",
+                    "enabled_target": "pentest_agent",
+                }
+                if port_free_delegate
+                else {}
+            ),
         },
     )
     budget.validate()

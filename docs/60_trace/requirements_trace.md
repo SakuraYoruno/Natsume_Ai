@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：TRACE-EXEC-08～08AL 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.1
+版本：v5.2
 核对日期：2026-07-26
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -208,6 +208,8 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 - `docs/30_devspec/evidence/m48b/**`：M48-B 固定范围证据。
 
 新增证据必须绑定 source commit、环境、route、dataset、预算、失败尝试和原始 receipt；禁止只写总结性 PASS。
+
+TRACE-NE01-DELEGATE-BUDGET-01（只读 Delegate 预算证明，当前切片）：生产唯一启用 target `pentest_agent` 必须登记为 `PORT_FREE_READ_ONLY`，不得取得模型、工具、嵌套派发或 Effect port。外层 Task Runtime 预扣一次 canonical Delegate dispatch；dispatcher 必须产生 digest-bound `ReadonlyDelegateUsageAttestationV1`，绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation，并明确证明内部 token/tool/retry/model-cost 为零。Frozen executor 只接受该证明，不再相信 legacy intent/repair Agent trace；缺失、非零、篡改或 lineage 漂移必须在 COMMIT 前失败关闭。真实 SQLite 必须同时重开 WorkerProjection 与 durable BudgetUsage 验证 attestation ref。当前定向证据为 `56 passed in 19.61s`；该 FR 的 enabled-target budget control 为 `PASS`，Delegate 路线、一般 Review/restart、commit-bound acceptance、program-wide Budget 与 NE-01 仍未完成。
 
 TRACE-NE01-AGENT-BUDGET-01（Agent 多轮模型预算，当前切片）：Internal
 `FrozenNodeInput` 与 governed Agent Skill sealed authority 必须把同一

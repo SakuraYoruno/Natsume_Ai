@@ -5,10 +5,12 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、commit-bound Chat 验收、通用 Delegate、七路线和完整 Composition 仍未完成。
 
-版本：v3.8
+版本：v3.9
 日期：2026-07-26
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 修订执行基线：最新 `origin/dev`，本文件所在提交作为切片证据。第 5、6 条 governed Operator vertical slice `task_operation.reconcile` 与 `task_effect.reconcile` 继续把原始 Ed25519 证据隔离在 0126/0128 append-only evidence ledger，TaskGraph 只携带 ref/digest；其受限恢复结论不变。Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：Scheduler Secure Ingress 冻结 method/path/body/definition head，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，经过节点治理、Review/Verification/Acceptance、terminal Preview 后，唯一 `operator.state_control` Effect 才写 canonical repository。不可变 admin operation receipt 先于 claim completion；该崩溃窗口由新实例精确重开，路由中的直接 Scheduler writer 调用为 0。trigger 保持既有 governed occurrence 入口，list/get/health 保持只读。
+
+当前只读 Delegate 预算切片限定于生产唯一允许的 `pentest_agent`。Registry 要求该 target 声明 `PORT_FREE_READ_ONLY`，adapter 不取得模型、工具、嵌套派发或 Effect 端口；dispatcher 生成 `ReadonlyDelegateUsageAttestationV1`，精确绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation。Task Runtime 为 canonical Delegate dispatch 预扣一个工具调用，adapter 内部 token/tool/retry/model-cost 必须由该 attestation 明确证明为零；冻结执行器不再相信 legacy intent/repair Agent trace。缺失、非零、篡改或 lineage 漂移在 Worker COMMIT 前拒绝。该范围的 `budget_enforcement=PASS`，但一般 Delegate、Review/restart、commit-bound acceptance、七路线 program-wide Budget 与 NE-01 保持未完成。
 
 本轮 NE-01 删除通用 worker 的无条件验收兼容实现。Chat、Skill、Delegate、Plan、Tool 与 Operator 节点统一由 route-neutral verifier/acceptance 两次独立重开 durable WorkerProjection；command、graph revision、node、attempt、route/target、grant、WorkOrder/context、receipt digest、完整 COMMIT 与输出合同任一漂移都失败关闭。固定结构策略可由明确 predicate 验证，任意自然语言标准只能进入 durable Review。Plan 的 final Chat 必须收到 canonical TaskResult artifact bundle attestation，并只把已验收前驱结果作为合成证据。当前启用 Delegate/Plan 路线的 verification 控制可记为 `PASS`，但这不改变两条路线和 NE-01 的 `INCOMPLETE / IN_PROGRESS` 总状态。
 

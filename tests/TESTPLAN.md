@@ -1,10 +1,19 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.18
+版本：v0.19
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-READONLY-DELEGATE-BUDGET
+
+- T-NE01-DELEGATE-BUDGET-01：生产唯一正向 Delegate target 必须是登记为 `PORT_FREE_READ_ONLY` 的 `pentest_agent`；未登记 target 在 admission 前拒绝。
+- T-NE01-DELEGATE-BUDGET-02：只读 adapter 不得导入或取得模型、工具、网络进程、嵌套派发或 Effect runtime。
+- T-NE01-DELEGATE-BUDGET-03：usage attestation 必须精确绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation，且 token/tool/retry/model-cost 全为零；shape、digest、非零或 lineage drift 均拒绝。
+- T-NE01-DELEGATE-BUDGET-04：Task Runtime 必须为外层 canonical Delegate dispatch 预扣恰好一次工具调用；adapter 内部零工具调用不能抵消该真实动作。
+- T-NE01-DELEGATE-BUDGET-05：Frozen Delegate executor 不得读取 `intent_agent_trace` 或 `repair_agent_trace` 作为预算 measurement；缺少新 attestation 时必须在 COMMIT 前失败关闭。
+- T-NE01-DELEGATE-BUDGET-06：真实 SQLite WorkerProjection 与 durable BudgetUsage 必须保存相同 attestation ref，并证明内部 token/tool/retry/model-cost exact zero、elapsed time 可测。
 
 ## T-NE01-GOVERNED-SKILL-MODEL-BUDGET
 

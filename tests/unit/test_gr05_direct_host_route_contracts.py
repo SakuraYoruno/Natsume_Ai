@@ -100,6 +100,26 @@ def test_direct_chat_and_delegate_compile_same_governed_contracts(
     assert "approval::private" not in json.dumps(first.work_order.to_dict(), sort_keys=True)
 
 
+def test_enabled_readonly_pentest_delegate_receives_no_model_or_tool_authority() -> None:
+    contracts = _build("delegate", "pentest_agent")
+    policy = contracts.work_order.budget_policy
+
+    assert policy is not None
+    assert policy.limits.to_dict() == {
+        "token_count": 0,
+        "tool_call_count": 1,
+        "time_ms": 300_000,
+        "concurrency": 1,
+        "retry_count": 1,
+        "model_cost_micros": 0,
+    }
+    assert (
+        policy.metadata["measurement_mode"]
+        == "PORT_FREE_READ_ONLY_ATTESTED_ZERO"
+    )
+    assert policy.metadata["enabled_target"] == "pentest_agent"
+
+
 @pytest.mark.parametrize(("route", "target"), [("chat", ""), ("delegate", "intent_agent")])
 def test_operation_fingerprint_is_stable_for_request_replay_but_not_cross_request(
     route: str,
