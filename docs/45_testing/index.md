@@ -3,11 +3,21 @@
 
 # 测试与验收目录
 
-版本：v2.9
+版本：v2.10
 维护日期：2026-07-26
 状态：当前证据
 
-## NE-01 Operator 状态控制当前切片
+## NE-01 Scheduler 管理命令切流当前切片
+
+- `/scheduler` 与 `/host-scheduler` 的 create/update/delete/enable/disable 必须调用 app-local Scheduler 管理 runtime；路由直接调用 `publish_definition/set_enabled/delete_definition` 的测试替身会立即报错，证明两个前缀都没有生产 writer 旁路。
+- 每个写请求必须经过 Scheduler Secure Ingress → typed Governor → `HostCommand(surface=SCHEDULER)` → immutable `TaskGraph` → Attempt/Lease/Grant/Budget/Review/Verification/Acceptance → terminal Preview → `operator.state_control` Effect。list/get/health 保持只读，trigger 继续走既有 governed occurrence。
+- 真实 SQLite 集成覆盖 publish、update、disable、delete/retire、Review continuation 与 exact replay；Acceptance 后已提交的 `scheduler_admin_operation_result` 若在 HTTP claim completion 前发生崩溃，新 service 实例必须只重开同一 receipt 并补齐 claim，definition head 保持 1。
+- 当前唯一受影响代码批次为 `34 passed in 139.12s`，取代开发过程中的 32 项和结构修复前的 127.26 秒结果，不与历史 Scheduler/Operator 批次相加。
+- Scheduler durable UoW、accepted effect、derived Preview、production cutover 与 dispatcher 的扩展回归为 `57 passed in 54.81s`。它修复了旧 production fixture 未显式声明 `internal_agent_checkpoint_uow` 的漂移；该组与 34 项存在语义重叠，禁止相加。
+- 首次 fresh Gate 3 如实发现 `acceptance_effects.py` 为 1511 行；未扩白名单，将 state-control route predicate 下沉到专用 compiler 后主 owner 为 1500 行。最终 Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。
+- 该切片清零的是 Scheduler 管理 HTTP 的直接生产 authority，不改变 Operator `14/37` 库存，也不证明 mutable batch freezing、一般多节点/unknown-effect 恢复、完整 Host 进程重启、部署凭据、真实 HTTP/network canary、NE-01 波次 integration 或 NE-07 Docker 全栈。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
+
+## NE-01 Operator 状态控制历史切片
 
 - `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 经过独立 Secure Ingress → Governor → `HostCommand` → 不可变 `TaskGraph` → Attempt/Lease/Grant/Budget/Review/Verification/Acceptance → terminal Preview → `operator.state_control` Effect；Review 前 canonical Scheduler/mode-policy 写入为 0。
 - 0129 为 Host mode-policy 建立 runtime scope/owner/lease/fence 绑定的 append-only event/head。同 operation 精确重放不追加事件；1001 条分页重启恢复、append 故障全回滚、released fence 和 tamper 均由真实 SQLite 验证。
@@ -15,7 +25,7 @@
 - 当前不重叠代码回归为 `175 passed`：mode-policy SQLite 3 项、Operator 集成 5 项、unit/contract 167 项，均为 0 fail。最终 0129 SQLite、migration、coverage、文档与交付合同为 `59 passed in 100.78s`，它与前述集合有重叠，不相加。
 - 首轮 Core Architecture Gate 3 如实发现主 `governed_operator_runtime.py` 达 1538 行；未扩白名单，而是把 mode receipt reopen/current-mode 责任移入专用 state-control runtime。拆分后主文件 1344 行、专用文件 650 行，相关回归 7 项通过，fresh Gate 1～14=`PASS`、`failed_gates=[]`、Gate 3 未分类文件为 0。
 - 最终统一静态扫描=`passed / failures=[]`；changed Python compile、三份 JSON 和 `git diff --check` 通过。
-- Operator inventory 为 `14/37` governed、`23/37` blocked。旧 Obs sys-mode mutation helper 已删除；独立 Scheduler CRUD HTTP 仍直接调用 command service，故 Scheduler 唯一 authority、完整 Host 进程重启、部署凭据、HTTP/network canary、NE-01 波次 integration 与 NE-07 Docker 全栈仍未完成。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
+- Operator inventory 为 `14/37` governed、`23/37` blocked。旧 Obs sys-mode mutation helper 已删除。后续 Scheduler 管理 HTTP 切流已关闭当时记录的独立 CRUD direct-authority 缺口，但不改变本历史批次的测试边界；完整 Host 进程重启、部署凭据、真实 HTTP/network canary、NE-01 波次 integration 与 NE-07 Docker 全栈仍未完成。
 
 ## NE-01 Operator Task/Review 控制历史切片
 

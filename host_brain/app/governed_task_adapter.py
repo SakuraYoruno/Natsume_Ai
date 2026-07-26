@@ -457,6 +457,7 @@ class GovernedHostRuntime:
                     HostCommandSurface.TOOL,
                     HostCommandSurface.GATEWAY,
                     HostCommandSurface.OPERATOR,
+                    HostCommandSurface.SCHEDULER,
                 }
             ):
                 raise GovernedHostAdapterError(
@@ -788,6 +789,7 @@ class GovernedHostRuntime:
                     HostCommandSurface.TOOL,
                     HostCommandSurface.GATEWAY,
                     HostCommandSurface.OPERATOR,
+                    HostCommandSurface.SCHEDULER,
                 }
                 or not isinstance(work_order, WorkOrderV3)
                 or assignment is None
@@ -844,6 +846,7 @@ class GovernedHostRuntime:
                     HostCommandSurface.TOOL,
                     HostCommandSurface.GATEWAY,
                     HostCommandSurface.OPERATOR,
+                    HostCommandSurface.SCHEDULER,
                 }
                 or not isinstance(work_order, WorkOrderV3)
                 or assignment is None

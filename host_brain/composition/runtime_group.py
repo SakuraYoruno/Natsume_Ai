@@ -57,8 +57,10 @@ _TASK_CANCEL_INTENT_REF = re.compile(r"^taskcancel-intent://sha256/[0-9a-f]{64}$
 
 
 def _runtime_name_for_command(command: HostCommand) -> str | None:
+    target = str(command.target_id or "").strip()
+    if target in _OPERATOR_RUNTIME_TARGETS:
+        return _OPERATOR_RUNTIME_TARGETS[target]
     if command.surface is HostCommandSurface.OPERATOR:
-        target = str(command.target_id or "").strip()
         return _OPERATOR_RUNTIME_TARGETS.get(target, "scheduler")
     return _SURFACE_RUNTIME.get(command.surface.value)
 
@@ -759,6 +761,39 @@ class GovernedRuntimeGroup:
         group is permitted to close the ingress claim.
         """
 
+        if (
+            command.surface is HostCommandSurface.SCHEDULER
+            and command.target_id == "operator_state_control"
+        ):
+            scheduler_ref = str(
+                continuation_result.get(
+                    "scheduler_operation_receipt_ref"
+                )
+                or ""
+            ).strip()
+            effect_raw = continuation_result.get(
+                "acceptance_effect_receipt"
+            )
+            effect = (
+                dict(effect_raw)
+                if isinstance(effect_raw, Mapping)
+                else {}
+            )
+            public_raw = effect.get("public_result")
+            public = (
+                dict(public_raw)
+                if isinstance(public_raw, Mapping)
+                else {}
+            )
+            if (
+                not scheduler_ref
+                or public.get("scheduler_operation_receipt_ref")
+                != scheduler_ref
+            ):
+                raise RuntimeError(
+                    "REVIEW_CONTINUATION_SCHEDULER_ADMIN_RESULT_MISSING"
+                )
+            return scheduler_ref
         if command.surface is not HostCommandSurface.INTERNAL:
             return fallback_result_ref
         receipt_raw = continuation_result.get("execution_receipt")

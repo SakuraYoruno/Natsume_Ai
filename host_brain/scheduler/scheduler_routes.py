@@ -46,7 +46,6 @@ def build_scheduler_router(*, prefix: str) -> APIRouter:
 
     @router.post("/tasks", status_code=status.HTTP_201_CREATED)
     async def create_task(request: Request, body: TaskCreateRequest) -> dict[str, Any]:
-        service, authority, received_at_ms = _request_context(request)
         definition = body.model_dump(
             exclude={"expected_head_version", "next_scheduled_at_ms"}
         )
@@ -55,17 +54,15 @@ def build_scheduler_router(*, prefix: str) -> APIRouter:
             "max_attempts": body.max_consecutive_failures,
             "retry_backoff_ms": 0,
         }
-        return _as_dict(
-            await _invoke(
-                service.publish_definition(
-                    task_id=body.task_id,
-                    definition=definition,
-                    authority=authority,
-                    expected_head_version=body.expected_head_version,
-                    next_scheduled_at_ms=body.next_scheduled_at_ms,
-                    received_at_ms=received_at_ms,
-                )
-            )
+        return await _execute_admin_control(
+            request=request,
+            command_id="scheduler.task.publish",
+            payload={
+                "task_id": body.task_id,
+                "definition": definition,
+                "expected_head_version": body.expected_head_version,
+                "next_scheduled_at_ms": body.next_scheduled_at_ms,
+            },
         )
 
     @router.get("/tasks")
@@ -88,7 +85,7 @@ def build_scheduler_router(*, prefix: str) -> APIRouter:
         request: Request,
         body: TaskPatchRequest,
     ) -> dict[str, Any]:
-        service, authority, received_at_ms = _request_context(request)
+        service, _authority, _received_at_ms = _request_context(request)
         current_raw = await _invoke(service.get_definition(task_id))
         if current_raw is None:
             raise HTTPException(status_code=404, detail="SCHEDULER_DEFINITION_NOT_FOUND")
@@ -107,21 +104,19 @@ def build_scheduler_router(*, prefix: str) -> APIRouter:
             retry_policy.setdefault("retry_backoff_ms", 0)
             definition["retry_policy"] = retry_policy
         expected = body.expected_head_version or int(current.get("head_version") or 0)
-        return _as_dict(
-            await _invoke(
-                service.publish_definition(
-                    task_id=task_id,
-                    definition=definition,
-                    authority=authority,
-                    expected_head_version=expected,
-                    next_scheduled_at_ms=(
-                        body.next_scheduled_at_ms
-                        if body.next_scheduled_at_ms is not None
-                        else current.get("next_scheduled_at_ms")
-                    ),
-                    received_at_ms=received_at_ms,
-                )
-            )
+        return await _execute_admin_control(
+            request=request,
+            command_id="scheduler.task.publish",
+            payload={
+                "task_id": task_id,
+                "definition": definition,
+                "expected_head_version": expected,
+                "next_scheduled_at_ms": (
+                    body.next_scheduled_at_ms
+                    if body.next_scheduled_at_ms is not None
+                    else current.get("next_scheduled_at_ms")
+                ),
+            },
         )
 
     @router.delete("/tasks/{task_id}")
@@ -130,21 +125,19 @@ def build_scheduler_router(*, prefix: str) -> APIRouter:
         request: Request,
         expected_head_version: int | None = None,
     ) -> dict[str, Any]:
-        service, authority, received_at_ms = _request_context(request)
+        service, _authority, _received_at_ms = _request_context(request)
         expected = await _expected_head_version(
             service,
             task_id=task_id,
             supplied=expected_head_version,
         )
-        return _as_dict(
-            await _invoke(
-                service.delete_definition(
-                    task_id=task_id,
-                    authority=authority,
-                    expected_head_version=expected,
-                    received_at_ms=received_at_ms,
-                )
-            )
+        return await _execute_admin_control(
+            request=request,
+            command_id="scheduler.task.delete",
+            payload={
+                "task_id": task_id,
+                "expected_head_version": expected,
+            },
         )
 
     @router.post("/tasks/{task_id}/enable")
@@ -206,20 +199,63 @@ async def _set_enabled(
     enabled: bool,
     expected_head_version: int | None,
 ) -> dict[str, Any]:
-    service, authority, received_at_ms = _request_context(request)
+    service, _authority, _received_at_ms = _request_context(request)
     expected = await _expected_head_version(
         service,
         task_id=task_id,
         supplied=expected_head_version,
     )
+    return await _execute_admin_control(
+        request=request,
+        command_id=(
+            "scheduler.task.enable"
+            if enabled
+            else "scheduler.task.disable"
+        ),
+        payload={
+            "task_id": task_id,
+            "expected_head_version": expected,
+        },
+    )
+
+
+async def _execute_admin_control(
+    *,
+    request: Request,
+    command_id: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    _service, authority, _received_at_ms = _request_context(request)
+    runtime = getattr(request.state, "scheduler_admin_runtime", None)
+    execute = getattr(runtime, "execute_scheduler_admin_control", None)
+    if not callable(execute):
+        raise HTTPException(
+            status_code=503,
+            detail="SCHEDULER_ADMIN_RUNTIME_UNAVAILABLE",
+        )
+    request_id = str(
+        getattr(authority, "request_id", None)
+        or (
+            authority.get("request_id")
+            if isinstance(authority, Mapping)
+            else ""
+        )
+        or ""
+    ).strip()
+    if not request_id:
+        raise HTTPException(
+            status_code=403,
+            detail="SCHEDULER_COMMAND_AUTHORITY_REQUIRED",
+        )
     return _as_dict(
         await _invoke(
-            service.set_enabled(
-                task_id=task_id,
-                enabled=enabled,
+            execute(
+                command_id=command_id,
+                payload=dict(payload),
                 authority=authority,
-                expected_head_version=expected,
-                received_at_ms=received_at_ms,
+                request_id=request_id,
+                method=str(request.method).upper(),
+                normalized_path=str(request.url.path),
             )
         )
     )

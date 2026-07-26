@@ -326,6 +326,15 @@ async def test_admin_commit_to_claim_crash_gap_recovers_exact_result_without_rem
         suffix="admin-crash-gap",
         body_material="admin-crash-gap",
     )
+    accepted_authority = {
+        **authority,
+        "ingress_surface": "scheduler.admin",
+        "operator_command_id": "scheduler.task.publish",
+        "action": "scheduler:admin",
+        "required_scopes": ("scheduler:admin",),
+        "method": "POST",
+        "normalized_path": "/api/scheduler/tasks",
+    }
     fail_once = _FailFirstCompletion(claim_store)
     service = _service(
         definitions=definitions,
@@ -333,13 +342,17 @@ async def test_admin_commit_to_claim_crash_gap_recovers_exact_result_without_rem
         intent_engine=SimpleNamespace(evaluate_intent=lambda **_: {}),
     )
     try:
+        operation = service.apply_accepted_publish_definition(
+            task_id="scheduler.admin.crash",
+            definition=_definition(),
+            authority=accepted_authority,
+            expected_head_version=0,
+            next_scheduled_at_ms=NOW + 60_000,
+        )
         with pytest.raises(GovernedSchedulerRuntimeError) as failure:
-            await service.publish_definition(
-                task_id="scheduler.admin.crash",
-                definition=_definition(),
-                authority=authority,
-                expected_head_version=0,
-                next_scheduled_at_ms=NOW + 60_000,
+            await service.complete_accepted_admin_claim(
+                authority=accepted_authority,
+                result_ref=str(operation["receipt_ref"]),
                 received_at_ms=NOW,
             )
         assert failure.value.reason_code == SCHEDULER_RUNTIME_INGRESS_COMPLETION_FAILED
@@ -365,31 +378,34 @@ async def test_admin_commit_to_claim_crash_gap_recovers_exact_result_without_rem
         assert journal is not None
         assert claim_result == (None,)
 
-        duplicate = {
-            **authority,
-            "allowed": False,
-            "duplicate": True,
-            "existing_result_ref": None,
-        }
-        recovered = await service.publish_definition(
+        restarted_service = _service(
+            definitions=SchedulerDefinitionRepository(db_path),
+            claims=claim_store,
+            intent_engine=SimpleNamespace(evaluate_intent=lambda **_: {}),
+        )
+        recovered = restarted_service.resolve_accepted_publish_definition(
             task_id="scheduler.admin.crash",
             definition=_definition(),
-            authority=duplicate,
+            authority=accepted_authority,
             expected_head_version=0,
             next_scheduled_at_ms=NOW + 60_000,
+        )
+        replayed = restarted_service.apply_accepted_publish_definition(
+            task_id="scheduler.admin.crash",
+            definition=_definition(),
+            authority=accepted_authority,
+            expected_head_version=0,
+            next_scheduled_at_ms=NOW + 60_000,
+        )
+        assert recovered is not None
+        assert recovered == replayed
+        assert recovered["result"]["head_version"] == 1
+        assert definitions.get("scheduler.admin.crash")["head_version"] == 1
+        await restarted_service.complete_accepted_admin_claim(
+            authority=accepted_authority,
+            result_ref=str(recovered["receipt_ref"]),
             received_at_ms=NOW + 1_000,
         )
-        replayed = await service.publish_definition(
-            task_id="scheduler.admin.crash",
-            definition=_definition(),
-            authority={**duplicate, "existing_result_ref": journal[0]},
-            expected_head_version=0,
-            next_scheduled_at_ms=NOW + 60_000,
-            received_at_ms=NOW + 2_000,
-        )
-        assert recovered == replayed
-        assert recovered["head_version"] == 1
-        assert definitions.get("scheduler.admin.crash")["head_version"] == 1
         with sqlite3.connect(str(db_path)) as conn:
             claim_result = conn.execute(
                 """

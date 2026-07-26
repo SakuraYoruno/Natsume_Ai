@@ -297,6 +297,9 @@ def create_app(
         current = scheduler_container
         return current.command_service if current is not None else None
 
+    def scheduler_admin_runtime_provider() -> Any | None:
+        return governed_operator_runtime
+
     def read_host_obs_tribe_state() -> Mapping[str, Any]:
         reader = host_obs_tribe_state_reader
         if reader is None:
@@ -1358,6 +1361,7 @@ def create_app(
         ),
         scheduler_command_ingress_provider=scheduler_command_ingress_provider,
         scheduler_command_service_provider=scheduler_command_service_provider,
+        scheduler_admin_runtime_provider=scheduler_admin_runtime_provider,
         degradation_state_provider=(
             lambda: host_obs_degradation_state_provider()
         ),

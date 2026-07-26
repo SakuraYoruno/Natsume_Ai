@@ -745,6 +745,96 @@ def _matches_authenticated_operator_outcome(
     )
 
 
+def _matches_scheduler_admin_operation(
+    conn: sqlite3.Connection,
+    *,
+    result_ref: str,
+    command: Mapping[str, Any],
+    claim_ref: str,
+    audit_ref: str,
+    action: str,
+    required_scopes_json: str,
+) -> bool:
+    work_order = command.get("work_order")
+    metadata = getattr(work_order, "metadata", None)
+    metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    command_id = str(
+        metadata.get("operator_command_id") or ""
+    ).strip()
+    if (
+        str(command.get("target_id") or "") != "operator_state_control"
+        or command_id
+        not in {
+            "scheduler.task.publish",
+            "scheduler.task.delete",
+            "scheduler.task.enable",
+            "scheduler.task.disable",
+        }
+    ):
+        return False
+    try:
+        required_scopes = tuple(
+            sorted(
+                str(item)
+                for item in json.loads(required_scopes_json)
+            )
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if (
+        str(action or "") != "scheduler:admin"
+        or required_scopes != ("scheduler:admin",)
+    ):
+        return False
+    try:
+        row = conn.execute(
+            """
+            SELECT request_id, principal_id, ingress_claim_ref,
+                   ingress_audit_ref, body_sha256
+            FROM scheduler_admin_operation_result
+            WHERE receipt_ref = ?
+            LIMIT 1
+            """,
+            (result_ref,),
+        ).fetchone()
+        journal = conn.execute(
+            """
+            SELECT 1 FROM host_command_journal
+            WHERE command_id = ? AND request_id = ?
+              AND surface = 'scheduler'
+              AND ingress_claim_ref = ? AND ingress_audit_ref = ?
+            LIMIT 1
+            """,
+            (
+                str(command.get("command_id") or ""),
+                str(command.get("request_id") or ""),
+                claim_ref,
+                audit_ref,
+            ),
+        ).fetchone()
+    except sqlite3.DatabaseError:
+        return False
+    if row is None or journal is None:
+        return False
+    try:
+        operation_body = normalize_external_sha256(
+            row["body_sha256"],
+            field_name="scheduler_admin_operation_result.body_sha256",
+        )
+    except HostCommandRepositoryError:
+        return False
+    return all(
+        (
+            str(row["request_id"]) == str(command.get("request_id") or ""),
+            str(row["principal_id"])
+            == str(command.get("principal_id") or ""),
+            str(row["ingress_claim_ref"]) == claim_ref,
+            str(row["ingress_audit_ref"]) == audit_ref,
+            operation_body == str(command.get("input_sha256") or ""),
+        )
+    )
+
+
 class HostCommandClaimResultValidationMixin:
     """Connection-neutral claim validation behavior for HostCommandRepository."""
 
@@ -872,6 +962,20 @@ class HostCommandClaimResultValidationMixin:
                 ).fetchone()
                 is not None
             )
+            if not terminal_result_matches:
+                terminal_result_matches = _matches_scheduler_admin_operation(
+                    conn,
+                    result_ref=actual_result,
+                    command=normalized,
+                    claim_ref=claim_ref,
+                    audit_ref=str(
+                        normalized.get("ingress_audit_ref") or ""
+                    ),
+                    action=str(row["action"] or ""),
+                    required_scopes_json=str(
+                        row["required_scopes_json"] or ""
+                    ),
+                )
             if not terminal_result_matches:
                 terminal_result_matches = matches_review_decision_result(
                     conn,

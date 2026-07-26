@@ -20,18 +20,26 @@ from host_brain.runtime.action_preview_resolver import (
     action_preview_scene_identity,
 )
 from host_brain.task_runtime.operator_state_control_support import (
-    OPERATOR_STATE_CONTROL_COMMAND_IDS,
     OPERATOR_STATE_CONTROL_EFFECT_TYPE,
     OPERATOR_STATE_CONTROL_TARGET_ID,
+    STATE_CONTROL_COMMAND_IDS,
     operator_state_control_action_kind,
     operator_state_control_operation_id,
     operator_state_control_target,
     validate_operator_state_control_args,
 )
-from natsume_contracts.task import HostCommand
+from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def is_operator_state_control_command(command: HostCommand) -> bool:
+    return (
+        command.target_id == OPERATOR_STATE_CONTROL_TARGET_ID
+        and command.surface
+        in {HostCommandSurface.OPERATOR, HostCommandSurface.SCHEDULER}
+    )
 
 
 def compile_operator_state_control_acceptance_effect(
@@ -75,8 +83,8 @@ def compile_operator_state_control_acceptance_effect(
         "Operator state-control args",
     )
     command_id = str(proposed.get("operator_command_id") or "").strip()
-    if command_id not in OPERATOR_STATE_CONTROL_COMMAND_IDS:
-        raise _error("Operator state-control command is unsupported")
+    if command_id not in STATE_CONTROL_COMMAND_IDS:
+        raise _error("state-control command is unsupported")
     expected_operation = operator_state_control_operation_id(
         request_id=command.request_id,
         command_id=command_id,

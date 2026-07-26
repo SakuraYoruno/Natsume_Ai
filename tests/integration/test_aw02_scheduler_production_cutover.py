@@ -258,6 +258,7 @@ async def test_clock_to_task_runtime_to_durable_result_is_one_real_chain(
         scheduler_definition_repository=definitions,
         scheduler_result_repository=results,
         worker_projection_store=WorkerProjectionStore(db_path, clock=lambda: NOW),
+        internal_agent_checkpoint_uow=None,
     )
     worker_calls: list[str] = []
     worker_contexts: list[dict] = []

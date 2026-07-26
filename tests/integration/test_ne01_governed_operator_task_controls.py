@@ -51,7 +51,11 @@ from host_brain.persistence.host_mode_policy_journal import (
 from host_brain.persistence.secure_ingress_repository import (
     SQLiteSecureIngressStore,
 )
-from host_brain.secure_ingress import ClaimStatus, IngressAuditEvent
+from host_brain.secure_ingress import (
+    ClaimStatus,
+    IngressAuditEvent,
+    SecureIngressAuthority,
+)
 from host_brain.secure_ingress.graph_cancellation_authority import (
     SecureIngressGraphCancellationAuthorityVerifier,
 )
@@ -186,6 +190,82 @@ def _operator_envelope(
             correlation_id=f"correlation:{request_id}",
         ),
         raw_body,
+    )
+
+
+def _scheduler_admin_authority(
+    *,
+    store: SQLiteSecureIngressStore,
+    request_id: str,
+    method: str,
+    path: str,
+    payload: dict[str, Any],
+) -> SecureIngressAuthority:
+    raw_body = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    body_sha256 = hashlib.sha256(raw_body).hexdigest()
+    now = int(time.time() * 1_000)
+    claim = store.try_claim(
+        principal_id=_PRINCIPAL,
+        surface="scheduler.admin",
+        action="scheduler:admin",
+        required_scopes=("scheduler:admin",),
+        idempotency_key=f"idempotency:{request_id}",
+        nonce=f"nonce:{request_id}",
+        body_sha256=body_sha256,
+        request_id=request_id,
+        at_ms=now,
+        expires_at_ms=now + 600_000,
+    )
+    assert claim.status is ClaimStatus.NEW
+    assert claim.claim_ref is not None
+    audit_ref = store.commit_with_audit(
+        claim_ref=claim.claim_ref,
+        event=IngressAuditEvent(
+            request_id=request_id,
+            correlation_id=f"correlation:{request_id}",
+            surface="scheduler.admin",
+            action="scheduler:admin",
+            method=method,
+            normalized_path=path,
+            principal_id=_PRINCIPAL,
+            tenant_id=_TENANT,
+            key_id="scheduler-admin-key",
+            credential_kind="hmac-sha256",
+            credential_ref_digest="sha256:" + "3" * 64,
+            requested_scopes=("scheduler:admin",),
+            required_scopes=("scheduler:admin",),
+            body_sha256=body_sha256,
+            idempotency_digest="sha256:" + hashlib.sha256(
+                f"idempotency:{request_id}".encode("utf-8")
+            ).hexdigest(),
+            nonce_digest="sha256:" + hashlib.sha256(
+                f"nonce:{request_id}".encode("utf-8")
+            ).hexdigest(),
+            transport_key_digest="sha256:" + "4" * 64,
+            decision="ALLOW",
+            reason_code="SECURE_INGRESS_ALLOWED",
+            stage="COMPLETE",
+            claim_ref=claim.claim_ref,
+            rate_snapshot={"backend": "sqlite", "current_count": 1},
+            side_effects_executed=False,
+            ts_ms=now,
+        ),
+    )
+    return SecureIngressAuthority(
+        allowed=True,
+        duplicate=False,
+        reason_code="SECURE_INGRESS_ALLOWED",
+        request_id=request_id,
+        principal_id=_PRINCIPAL,
+        claim_ref=str(claim.claim_ref),
+        audit_ref=str(audit_ref),
+        body_sha256=body_sha256,
     )
 
 
@@ -644,6 +724,11 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
             registry=build_agent_runtime_skill_registry(),
         )
         ingress_store = SQLiteSecureIngressStore(db_path, rate_limit=200)
+        scheduler_workers = SchedulerWorkerRegistry()
+        scheduler_workers.register(
+            "operator_state_worker",
+            lambda **_kwargs: {"status": "SUCCEEDED"},
+        )
         scheduler_service = SchedulerCommandService(
             runtime=SimpleNamespace(),
             intent_engine=intent_engine,
@@ -652,7 +737,7 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
             policy_evaluator=SchedulerDefinitionPolicyEvaluator(
                 current_mode=lambda: "normal"
             ),
-            worker_registry=SchedulerWorkerRegistry(),
+            worker_registry=scheduler_workers,
         )
         composition = build_governed_operator_composition(
             task_runtime_container=container,
@@ -788,6 +873,179 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
             raise AssertionError(
                 f"state control did not complete: {command_id}"
             )
+
+        async def accepted_scheduler_admin(
+            *,
+            command_id: str,
+            payload: dict[str, Any],
+            request_id: str,
+            method: str,
+            path: str,
+        ) -> tuple[SecureIngressAuthority, dict[str, Any]]:
+            authority = _scheduler_admin_authority(
+                store=ingress_store,
+                request_id=request_id,
+                method=method,
+                path=path,
+                payload=payload,
+            )
+
+            async def invoke() -> dict[str, Any]:
+                return dict(
+                    await composition.runtime.execute_scheduler_admin_control(
+                        command_id=command_id,
+                        payload=payload,
+                        authority=authority,
+                        request_id=request_id,
+                        method=method,
+                        normalized_path=path,
+                    )
+                )
+
+            initial = await invoke()
+            if initial.get("status") != "WAITING_REVIEW":
+                assert initial["success"] is True
+                return authority, initial
+            review = dict(initial["reviews"][0])
+            _, _, approved = await execute_new(
+                "task_review.approve",
+                {
+                    "review_id": review["review_id"],
+                    "subject_ref": review["subject_ref"],
+                    "subject_version": review["subject_version"],
+                    "resume_phase": review["resume_phase"],
+                    "checkpoint_id": review["checkpoint_id"],
+                },
+                f"{request_id}-approve",
+            )
+            public_token = str(
+                approved.result["output"]["resume_token_ref"]
+            )
+            _, _, resumed = await execute_new(
+                "task_review.resume",
+                {
+                    "review_id": review["review_id"],
+                    "resume_token_ref": public_token,
+                    "subject_ref": review["subject_ref"],
+                    "subject_version": review["subject_version"],
+                    "resume_phase": review["resume_phase"],
+                    "checkpoint_id": review["checkpoint_id"],
+                },
+                f"{request_id}-resume",
+            )
+            assert resumed.result["output"]["review_status"] == "CONSUMED"
+            final = await _eventually(
+                lambda: ingress_store.resolve_committed_authority_by_audit(
+                    audit_ref=str(authority.audit_ref)
+                ),
+                accepted=lambda value: bool(
+                    isinstance(value, dict)
+                    and value.get("claim_result_ref")
+                ),
+            )
+            assert final["claim_result_ref"]
+            replayed = await invoke()
+            assert replayed["exact_replay"] is True
+            return authority, replayed
+
+        publish_definition = {
+            "trigger_mode": "interval",
+            "trigger_config": {"seconds": 120},
+            "intent_template": {
+                "skill_name": "operator_state_worker",
+                "args": {},
+            },
+            "worker_key": "operator_state_worker",
+            "priority": "HIGH",
+            "mode_allowlist": ["normal"],
+            "resource_profile": {},
+            "retry_policy": {
+                "max_attempts": 1,
+                "retry_backoff_ms": 0,
+            },
+            "risk_level": 3,
+            "enabled": True,
+        }
+        publish_payload = {
+            "task_id": "scheduler_http_governed",
+            "definition": publish_definition,
+            "expected_head_version": 0,
+            "next_scheduled_at_ms": now + 120_000,
+        }
+        publish_authority, published = await accepted_scheduler_admin(
+            command_id="scheduler.task.publish",
+            payload=publish_payload,
+            request_id="request-ne01-scheduler-http-publish",
+            method="POST",
+            path="/scheduler/tasks",
+        )
+        assert published["task_id"] == "scheduler_http_governed"
+        assert published["definition"]["task_id"] == (
+            "scheduler_http_governed"
+        )
+        published_head = definitions.get("scheduler_http_governed")
+        assert published_head["head_version"] == published["head_version"]
+        publish_record = container.command_repository.get_by_request(
+            surface=HostCommandSurface.SCHEDULER.value,
+            request_id=str(publish_authority.request_id),
+        )
+        assert publish_record is not None
+        assert publish_record["command"].target_id == (
+            "operator_state_control"
+        )
+
+        updated_definition = {
+            **publish_definition,
+            "description": "governed Scheduler PATCH",
+        }
+        _, updated = await accepted_scheduler_admin(
+            command_id="scheduler.task.publish",
+            payload={
+                "task_id": "scheduler_http_governed",
+                "definition": updated_definition,
+                "expected_head_version": published["head_version"],
+                "next_scheduled_at_ms": now + 180_000,
+            },
+            request_id="request-ne01-scheduler-http-update",
+            method="PATCH",
+            path="/host-scheduler/tasks/scheduler_http_governed",
+        )
+        assert updated["definition"]["description"] == (
+            "governed Scheduler PATCH"
+        )
+
+        _, disabled_http = await accepted_scheduler_admin(
+            command_id="scheduler.task.disable",
+            payload={
+                "task_id": "scheduler_http_governed",
+                "expected_head_version": updated["head_version"],
+            },
+            request_id="request-ne01-scheduler-http-disable",
+            method="POST",
+            path=(
+                "/scheduler/tasks/scheduler_http_governed/disable"
+            ),
+        )
+        assert disabled_http["enabled"] is False
+
+        delete_authority, deleted = await accepted_scheduler_admin(
+            command_id="scheduler.task.delete",
+            payload={
+                "task_id": "scheduler_http_governed",
+                "expected_head_version": disabled_http["head_version"],
+            },
+            request_id="request-ne01-scheduler-http-delete",
+            method="DELETE",
+            path="/scheduler/tasks/scheduler_http_governed",
+        )
+        assert deleted["deleted"] is True
+        retired_head = definitions.get("scheduler_http_governed")
+        assert retired_head["retired"] is True
+        assert retired_head["enabled"] is False
+        delete_claim = ingress_store.resolve_committed_authority_by_audit(
+            audit_ref=str(delete_authority.audit_ref)
+        )
+        assert delete_claim["claim_result_ref"]
 
         disabled_envelope, disabled_body, disabled_result = await accepted(
             "scheduler.task.disable",

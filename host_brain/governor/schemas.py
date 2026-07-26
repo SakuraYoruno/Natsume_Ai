@@ -223,10 +223,15 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "operator_actor_id": str,
             "observed_at_ms": int,
             "task_id": str,
-            "enabled": bool,
             "expected_head_version": int,
         },
-        "optional": {},
+        "optional": {
+            "enabled": bool,
+            "definition": dict,
+            "next_scheduled_at_ms": object,
+            "scheduler_ingress_method": str,
+            "scheduler_ingress_path": str,
+        },
     },
     "operator_host_mode_policy_control": {
         "required": {

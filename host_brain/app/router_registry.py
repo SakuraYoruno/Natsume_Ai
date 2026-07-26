@@ -69,6 +69,7 @@ def register_host_routers(
     internal_agent_command_service_provider: Callable[[], Any | None] | None = None,
     scheduler_command_ingress_provider: Callable[[], Any | None] | None = None,
     scheduler_command_service_provider: Callable[[], Any | None] | None = None,
+    scheduler_admin_runtime_provider: Callable[[], Any | None] | None = None,
     host_obs_read_ports: HostObsReadPorts | None = None,
     degradation_state_provider: DegradationStateProvider | None = None,
     health_ledger_provider: HealthLedgerProvider | None = None,
@@ -155,10 +156,20 @@ def register_host_routers(
         request.state.scheduler_command_service = service
         return service
 
+    async def bind_scheduler_admin_runtime(request: Request) -> Any:
+        runtime = (
+            scheduler_admin_runtime_provider()
+            if scheduler_admin_runtime_provider is not None
+            else None
+        )
+        request.state.scheduler_admin_runtime = runtime
+        return runtime
+
     app.include_router(create_canon_router(route_ports))
     scheduler_dependencies = [
         Depends(require_scheduler_authority),
         Depends(bind_scheduler_service),
+        Depends(bind_scheduler_admin_runtime),
     ]
     app.include_router(scheduler_router, dependencies=scheduler_dependencies)
     app.include_router(
