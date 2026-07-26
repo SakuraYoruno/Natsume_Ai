@@ -646,6 +646,9 @@ class GovernedHostRuntime:
                     yield event
                 return
             if route == "skill":
+                skill_risk_level, skill_requires_review = (
+                    self._direct_skill_execution_policy(intent_draft)
+                )
                 candidate_command, candidate_work_order, candidate_graph = _build_contracts(
                     request_body=request_body,
                     request_id=request_id,
@@ -659,6 +662,8 @@ class GovernedHostRuntime:
                     render_target_lang=render_target_lang,
                     command_authority=command_authority,
                     frozen_context=frozen_context,
+                    skill_risk_level=skill_risk_level,
+                    skill_requires_durable_review=skill_requires_review,
                 )
             else:
                 if route == "delegate":
@@ -759,6 +764,37 @@ class GovernedHostRuntime:
                 if self._in_flight == 0:
                     self._lifecycle.notify_all()
             self.wake_survivor_continuation()
+
+    def _direct_skill_execution_policy(
+        self,
+        intent_draft: Mapping[str, Any],
+    ) -> tuple[int, bool]:
+        registry = self._planning_skill_registry
+        require = getattr(registry, "require", None)
+        target = str(
+            intent_draft.get("target_id") or intent_draft.get("skill_id") or ""
+        ).strip()
+        if not callable(require) or not target:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "direct Skill admission has no app-local SkillRegistry policy",
+            )
+        try:
+            metadata = require(target)
+            risk_level = int(getattr(metadata, "risk_level"))
+        except Exception as exc:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "direct Skill admission could not freeze canonical risk metadata",
+            ) from exc
+        if not 1 <= risk_level <= 5:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "direct Skill canonical risk level is invalid",
+            )
+        return risk_level, bool(
+            getattr(metadata, "require_confirm", False) or risk_level >= 4
+        )
 
     async def continue_review_admission(
         self,
@@ -1097,6 +1133,8 @@ def build_governed_host_runtime(
     resource_manager: Any | None,
     episodic_store: Any | None,
     semantic_recaller: Any | None,
+    agent_artifact_store: Any | None = None,
+    agent_workspace_runtime: Any | None = None,
     tool_binding_resolver: Any | None = None,
     tool_execution_port_factory: Any | None = None,
     tool_catalog: Any | None = None,
@@ -1155,6 +1193,8 @@ def build_governed_host_runtime(
         resource_manager=resource_manager,
         episodic_store=episodic_store,
         semantic_recaller=semantic_recaller,
+        agent_artifact_store=agent_artifact_store,
+        agent_workspace_runtime=agent_workspace_runtime,
         degradation_capability_port=degradation_capability_port,
     )
     if action_preview_service is None and runtime_context_application is not None:
@@ -1170,6 +1210,7 @@ def build_governed_host_runtime(
         node_grant_verifier=node_grant_verifier,
         projections=projection_store,
         action_preview_service=action_preview_service,
+        review_store=getattr(task_runtime_container, "review_store", None),
     )
     chat_worker = None
     delegate_worker = None

@@ -57,6 +57,7 @@ def build_production_acceptance_effect_handlers(
     scheduler_command_service_provider: Callable[[], Any] | None = None,
     scheduler_operation_handler: Callable[[Mapping[str, Any]], Any] | None = None,
     internal_result_commit_handler: Callable[[Mapping[str, Any]], Any] | None = None,
+    agent_workspace_artifact_handler: Callable[[Mapping[str, Any]], Any] | None = None,
     conversation_turn_reader: Any | None = None,
     conversation_event_reader: Any | None = None,
     preference_store: Any | None = None,
@@ -165,6 +166,14 @@ def build_production_acceptance_effect_handlers(
         if not callable(internal_result_commit_handler):
             raise TypeError("internal_result_commit_handler must be callable")
         handlers["internal.agent.result_commit"] = internal_result_commit_handler
+    if agent_workspace_artifact_handler is not None:
+        if not callable(agent_workspace_artifact_handler):
+            raise TypeError(
+                "agent_workspace_artifact_handler must be callable"
+            )
+        handlers["agent.workspace_artifact_promote"] = (
+            agent_workspace_artifact_handler
+        )
     if terminal_reconciliation_service is not None:
         handlers["task.terminal_reconciliation"] = (
             AcceptedTerminalReconciliationHandler(

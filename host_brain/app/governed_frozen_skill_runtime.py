@@ -32,12 +32,23 @@ from host_brain.app.governed_task_authority import (
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.agent_runtime.production_studio import AGENT_PRODUCTION_SKILL_IDS
+from host_brain.agent_runtime.governed_skill_work_order import (
+    WRITE_AGENT_RUNTIME_SKILL_IDS,
+)
+from host_brain.agent_runtime.workspace_artifact_effect import (
+    AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+    AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA,
+    canonical_workspace_artifact_digest,
+)
 from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernorGrantError,
 )
 from host_brain.orchestration.node_grants import DurableNodeGrantVerifier
+from host_brain.persistence.review_continuation_binding import (
+    parse_task_review_subject,
+)
 from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
     context_pack_digest_from_work_order,
@@ -160,12 +171,14 @@ class _FrozenSkillWorker:
         node_grant_verifier: DurableNodeGrantVerifier,
         projections: Any | None = None,
         action_preview_service: Any | None = None,
+        review_store: Any | None = None,
     ) -> None:
         self._ledger = ledger
         self._execution_ports = execution_ports
         self._node_grant_verifier = node_grant_verifier
         self._projections = projections
         self._action_preview_service = action_preview_service
+        self._review_store = review_store
 
     async def execute_stream(
         self,
@@ -184,6 +197,7 @@ class _FrozenSkillWorker:
         binding = _planning_node_binding(work_order, node_id=node_id)
         target = str(binding.get("target_id") or "").strip()
         route = str(binding.get("worker_route") or "").strip().lower()
+        execution_context = dict(execution_context)
         direct_intent = _mapping(pack.get("intent_draft"))
         if route == "skill" and str(direct_intent.get("route") or "").strip().lower() == "skill":
             intent_draft = direct_intent
@@ -248,6 +262,29 @@ class _FrozenSkillWorker:
             raise GovernedHostAdapterError(
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "durable verifier returned a different node grant",
+            )
+        admitted_risk_level = int(work_order.risk_level)
+        review_policy = dict(work_order.review_policy or {})
+        review_required = bool(
+            review_policy.get("review_required")
+            or review_policy.get("durable_review_required")
+        )
+        if (
+            admitted_risk_level >= 4
+            or target in WRITE_AGENT_RUNTIME_SKILL_IDS
+        ) and not review_required:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "high-risk Skill admission lacks durable Review policy",
+            )
+        if review_required:
+            execution_context["pre_execution_review_ref"] = (
+                self._consumed_pre_execution_review_ref(
+                    command=command,
+                    work_order=work_order,
+                    node_id=node_id,
+                    risk_level=admitted_risk_level,
+                )
             )
         governor_result = _load_governor_grant(
             ledger=self._ledger,
@@ -371,6 +408,57 @@ class _FrozenSkillWorker:
                 ),
             },
         }
+        raw_agent_result = payload.get("result")
+        protected_stage = (
+            raw_agent_result.get("_protected_stage")
+            if isinstance(raw_agent_result, Mapping)
+            else None
+        )
+        if success and target in WRITE_AGENT_RUNTIME_SKILL_IDS:
+            if not isinstance(protected_stage, Mapping):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "accepted Agent write has no sealed protected artifact",
+                )
+            protected = dict(protected_stage)
+            if (
+                set(protected) != {"schema_version", "ref", "digest"}
+                or protected.get("schema_version")
+                != "Natsume.agent.governed_artifact_stage.v1"
+            ):
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    "accepted Agent protected artifact descriptor drifted",
+                )
+            public_agent_result = dict(raw_agent_result)
+            public_agent_result.pop("_protected_stage", None)
+            commit["acceptance_effect_intents"] = [
+                {
+                    "effect_type": AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+                    "commit_scope": "NODE",
+                    "payload": {
+                        "schema_version": (
+                            AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA
+                        ),
+                        "work_order_id": work_order.work_order_id,
+                        "target_id": target,
+                        "operation_fingerprint": (
+                            work_order.operation_fingerprint
+                        ),
+                        "protected_artifact": protected,
+                        "result_digest": (
+                            canonical_workspace_artifact_digest(
+                                public_agent_result
+                            )
+                        ),
+                    },
+                }
+            ]
+        elif protected_stage is not None:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "non-accepted Agent execution attempted to transfer a protected artifact",
+            )
         worker_budget = build_worker_budget_usage(
             usage_id=stable_worker_usage_id(
                 graph_id=str(execution_context.get("graph_id") or ""),
@@ -418,6 +506,63 @@ class _FrozenSkillWorker:
                 )
             commit["receipt_ref"] = projection_id
         yield commit
+
+    def _consumed_pre_execution_review_ref(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        node_id: str,
+        risk_level: int,
+    ) -> str:
+        list_reviews = getattr(self._review_store, "list_reviews", None)
+        if not callable(list_reviews):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "high-risk Skill has no app-local durable Review authority",
+            )
+        rows = list_reviews(
+            task_graph_id=command.graph_id,
+            graph_revision=command.graph_revision,
+            work_order_id=work_order.work_order_id,
+            limit=100,
+        )
+        matches: list[dict[str, Any]] = []
+        for raw in tuple(rows or ()):
+            record = dict(raw) if isinstance(raw, Mapping) else {}
+            review_raw = record.get("review")
+            review = dict(review_raw) if isinstance(review_raw, Mapping) else {}
+            subject = parse_task_review_subject(review.get("subject_ref"))
+            if (
+                record.get("task_graph_id") == command.graph_id
+                and record.get("work_order_id") == work_order.work_order_id
+                and record.get("task_node_id") == node_id
+                and subject is not None
+                and subject.graph_id == command.graph_id
+                and subject.graph_revision == command.graph_revision
+                and subject.node_id == node_id
+                and subject.attempt_id is None
+                and review.get("review_type") == "PRE_EXECUTION_APPROVAL"
+                and review.get("resume_phase") == "PRE_EXECUTION"
+                and review.get("status") == "CONSUMED"
+                and review.get("requester") == command.principal_id
+                and review.get("risk_level") == int(risk_level)
+                and review.get("side_effects")
+                == list(work_order.allowed_actions)
+                and int(review.get("resume_count") or 0) == 1
+                and str(review.get("decision_actor") or "").strip()
+                and str(review.get("token_ref") or "").startswith(
+                    "review-token://"
+                )
+                and str(review.get("resume_result_ref") or "").strip()
+            ):
+                matches.append(review)
+        if len(matches) != 1:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "high-risk Skill requires one exact consumed pre-execution Review",
+            )
+        return f"review://{str(matches[0]['review_id']).strip()}"
 
     def _preview_effectful_skill(
         self,

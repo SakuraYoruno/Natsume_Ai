@@ -275,6 +275,8 @@ def _build_contracts(
     render_target_lang: str,
     command_authority: Mapping[str, Any] | None,
     frozen_context: Mapping[str, Any] | None = None,
+    skill_risk_level: int = 1,
+    skill_requires_durable_review: bool = False,
 ) -> tuple[HostCommand, WorkOrderV3, TaskGraph]:
     authority = dict(command_authority or {})
     ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
@@ -323,7 +325,24 @@ def _build_contracts(
         }
     )
     business_scope = f"host-skill:{target_ref}"
-    review_ref = f"review-waiver://governor-grant/{suffix}"
+    try:
+        canonical_risk_level = int(skill_risk_level)
+    except (TypeError, ValueError) as exc:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Skill risk level is invalid",
+        ) from exc
+    if not 1 <= canonical_risk_level <= 5:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "Skill risk level must be between 1 and 5",
+        )
+    durable_review_required = bool(skill_requires_durable_review)
+    review_ref = (
+        f"review-policy://task-node/{suffix}"
+        if durable_review_required
+        else f"review-waiver://governor-grant/{suffix}"
+    )
     output_contract = {
         "type": "host_skill_commit",
         "required": ["decision", "narrative", "receipt_ref"],
@@ -400,13 +419,23 @@ def _build_contracts(
             "governor_grant_ref": grant_ref,
             "on_missing": "BLOCK",
         },
-        review_policy={
-            "review_required": False,
-            "mode": "governor_grant_review_waiver",
-            "reason": "separate_review_waived_by_approved_governor_grant",
-            "waiver_authority": "governor_grant",
-            "review_ref": review_ref,
-        },
+        review_policy=(
+            {
+                "review_required": True,
+                "durable_review_required": True,
+                "mode": "task_node_pre_execution_review",
+                "reason": "skill_requires_durable_confirmation",
+                "review_ref": review_ref,
+            }
+            if durable_review_required
+            else {
+                "review_required": False,
+                "mode": "governor_grant_review_waiver",
+                "reason": "separate_review_waived_by_approved_governor_grant",
+                "waiver_authority": "governor_grant",
+                "review_ref": review_ref,
+            }
+        ),
         metadata={
             "surface": surface.value,
             "graph_id": graph_id,
@@ -448,7 +477,7 @@ def _build_contracts(
         graph_revision=1,
         attempt=0,
         capability_requirements=capability_requirements,
-        risk_level=1,
+        risk_level=canonical_risk_level,
         input_refs=(input_ref, grant_ref),
         output_contract=output_contract,
         budget_policy=budget_policy,
@@ -467,7 +496,7 @@ def _build_contracts(
         input_refs=(input_ref, grant_ref),
         output_contract=output_contract,
         retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
-        risk_level=1,
+        risk_level=canonical_risk_level,
         acceptance_criteria=(_ACCEPTANCE_CRITERION,),
         status=TaskNodeStatus.READY,
         status_version=0,

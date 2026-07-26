@@ -112,6 +112,8 @@ class GovernedHostToolRuntimeComposition:
         acceptance_effect_dispatcher: AcceptanceEffectDispatcher,
         episodic_store: Any | None,
         semantic_recaller: Any | None,
+        agent_artifact_store: Any | None = None,
+        agent_workspace_runtime: Any | None = None,
         surface_runtime_ports: Any | None = None,
     ) -> GovernedHostRuntime:
         context = runtime_context_application.composition
@@ -184,6 +186,8 @@ class GovernedHostToolRuntimeComposition:
             resource_manager=dependencies.resource_manager(create_if_missing=False),
             episodic_store=episodic_store,
             semantic_recaller=semantic_recaller,
+            agent_artifact_store=agent_artifact_store,
+            agent_workspace_runtime=agent_workspace_runtime,
             tool_binding_resolver=broker.resolve_execution_binding,
             tool_execution_port_factory=boundary.bind_execution_port,
             tool_catalog=catalog,

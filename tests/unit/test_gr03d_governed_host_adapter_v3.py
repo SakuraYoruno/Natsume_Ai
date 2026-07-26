@@ -348,6 +348,22 @@ def test_universal_runtime_supports_only_registered_frozen_routes() -> None:
     assert runtime.supports({"route": "skill"}) is False
     assert runtime.supports({"route": "chat"}) is True
     assert runtime.supports({"route": "delegate", "target_id": "intent_agent"}) is True
-    assert runtime.supports({"route": "plan", "planned_steps": [{"step": 1}]}) is True
+    assert runtime.supports({"route": "plan", "planned_steps": [{"step": 1}]}) is False
     assert runtime.supports({"route": "plan"}) is False
     assert runtime.supports({"route": "task", "target_id": "echo_skill"}) is False
+
+    searched = GovernedHostRuntime(
+        application=SimpleNamespace(),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=SimpleNamespace(),
+        supported_routes=frozenset({"chat", "skill", "delegate"}),
+        planning_enabled=True,
+        planning_skill_registry=SimpleNamespace(),
+    )
+    assert searched.supports(
+        {
+            "route": "plan",
+            "target_id": "planning_search",
+            "args": {"planning_mode": "CAPABILITY_SEARCH_V1"},
+        }
+    ) is True

@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.10
+版本：v2.11
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -43,6 +43,12 @@
 - replay / render / projection：只做纯归一化，不推进画像、时间线、额度或任何持久事实。
 
 长期人格和用户偏好不能从上述易失运行时直接“长出来”。它们必须在 NE-06 经 Feedback Proposal、Lab、Review 和版本激活进入独立权威链；运行期情感上下文只是当前响应的输入，不是人格写 authority。
+
+### 1.4 写能力必须由运行时重建 authority
+
+Skill、Agent 或模型产生的 WorkOrder 只能表达目标、输入和候选动作，不能携带可执行的 Workspace、Grant、Review、Budget、Lease 或 Artifact owner。真正的写 WorkOrder 必须由受治理运行时从已准入的 HostCommand、不可变 TaskGraph、当前 Attempt/Lease、节点授权、风险策略和已消费 Review 重新构造；缺少任一事实时失败关闭。这样即使模型输出了形似 V3 的字段，它也只是一段不可信数据，不能把自己提升成执行 authority。
+
+写入完成也不等于副作用已经被接受。worker 只能把密封工件的 content-addressed ref/digest 作为提案交给 Acceptance；真正的提升 handler 必须重新打开原 admission、终态节点、Attempt/Lease、Verification、Acceptance Effect、terminal Preview 和 sealed bytes，之后才能推进 Workspace 生命周期。工件提升应先于可见对话、长期状态投影和外部 delivery；若提升结果未知，后续可见 Effect 必须停止并进入 reconciliation。这个顺序保证“回复说完成”永远不会早于真实工件成为受验收事实。
 
 ### 1.4 工作区里的变更不是已验收产物
 

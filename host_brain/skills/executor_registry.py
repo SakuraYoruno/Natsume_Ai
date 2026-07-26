@@ -134,6 +134,8 @@ def _execute_agent_runtime_with_context(payload: dict[str, Any]) -> Any:
     sealed = context.get("_skill_execution_authority")
     governed = context.get("_governed_execution_context")
     model_attempt_service = context.get("model_attempt_service")
+    artifact_store = context.get("agent_artifact_store")
+    workspace_runtime = context.get("agent_workspace_runtime")
     # ``_execute_skill`` composes only the ModelAttemptService into the
     # governed context.  Its prompt registry is part of that same immutable
     # model-runtime composition; never trust a separately caller-shaped
@@ -153,6 +155,9 @@ def _execute_agent_runtime_with_context(payload: dict[str, Any]) -> Any:
         payload,
         model_attempt_service=model_attempt_service,
         prompt_registry=prompt_registry,
+        artifact_store=artifact_store,
+        workspace_runtime=workspace_runtime,
+        governed_execution_context=governed,
     )
 
 
@@ -223,7 +228,8 @@ class BoundSkillExecutionAuthority:
         "work_order_id", "graph_id", "graph_revision", "node_id",
         "attempt_id", "lease_id", "fencing_token", "intent_id", "session_id", "seq",
         "reservation_id", "node_grant_ref", "parent_grant_ref", "lease_owner_id",
-        "business_scope", "operation_fingerprint",
+        "business_scope", "operation_fingerprint", "node_risk_level",
+        "pre_execution_review_ref",
         "payload_digest", "expires_at_ms", "validated_by", "durable_ledger",
         "durable_db_path", "_seal",
     )
@@ -347,6 +353,8 @@ def bind_validated_skill_authority(
     lease_owner_id = ""
     business_scope = ""
     operation_fingerprint = ""
+    node_risk_level = 0
+    pre_execution_review_ref = ""
     authority_expires_at_ms = int(time.time() * 1000) + max(1, int(ttl_ms))
     canonical_ledger = _canonical_authority_ledger(durable_ledger)
     if governed_execution_context is not None:
@@ -364,9 +372,16 @@ def bind_validated_skill_authority(
         lease_owner_id = str(governed.get("lease_owner_id") or "").strip()
         business_scope = str(governed.get("business_scope") or "").strip()
         operation_fingerprint = str(governed.get("operation_fingerprint") or "").strip()
+        pre_execution_review_ref = str(
+            governed.get("pre_execution_review_ref") or ""
+        ).strip()
         try:
             graph_revision = int(governed.get("graph_revision") or 0)
             fencing_token = int(governed.get("fencing_token") or 0)
+            # Older read-only governed callers did not persist this field.
+            # Keep them least-privileged at risk 1; write-capable Agent
+            # binding later requires the explicit admitted risk to be >= 4.
+            node_risk_level = int(governed.get("node_risk_level") or 1)
         except (TypeError, ValueError) as exc:
             raise ValueError("governed Task authority graph/fencing identity is invalid") from exc
         raw_work_order = payload.get("work_order")
@@ -398,6 +413,7 @@ def bind_validated_skill_authority(
             or not lease_owner_id
             or not business_scope
             or not operation_fingerprint
+            or not 1 <= node_risk_level <= 5
             or not str(session_id or "").strip()
         ):
             raise ValueError("governed Task authority identity does not match the dispatch binding")
@@ -443,6 +459,8 @@ def bind_validated_skill_authority(
         "lease_owner_id": lease_owner_id,
         "business_scope": business_scope,
         "operation_fingerprint": operation_fingerprint,
+        "node_risk_level": node_risk_level,
+        "pre_execution_review_ref": pre_execution_review_ref,
         "intent_id": str(intent_id or ""),
         "session_id": str(session_id or ""),
         "seq": int(seq),
@@ -478,6 +496,12 @@ def bind_validated_skill_authority(
     object.__setattr__(authority, "lease_owner_id", lease_owner_id)
     object.__setattr__(authority, "business_scope", business_scope)
     object.__setattr__(authority, "operation_fingerprint", operation_fingerprint)
+    object.__setattr__(authority, "node_risk_level", node_risk_level)
+    object.__setattr__(
+        authority,
+        "pre_execution_review_ref",
+        pre_execution_review_ref,
+    )
     object.__setattr__(authority, "intent_id", str(intent_id or ""))
     object.__setattr__(authority, "session_id", str(session_id or ""))
     object.__setattr__(authority, "seq", int(seq))
@@ -768,6 +792,8 @@ def _broker_executor_adapter(request: CapabilityRequest, grant: Any) -> Any:
             "lease_owner_id": authority.lease_owner_id,
             "business_scope": authority.business_scope,
             "operation_fingerprint": authority.operation_fingerprint,
+            "node_risk_level": authority.node_risk_level,
+            "pre_execution_review_ref": authority.pre_execution_review_ref,
             "expires_at_ms": min(
                 authority.expires_at_ms,
                 int(getattr(grant, "expires_at_ms", authority.expires_at_ms)),
@@ -794,6 +820,10 @@ def _broker_executor_adapter(request: CapabilityRequest, grant: Any) -> Any:
                 "parent_grant_ref": authority.parent_grant_ref,
                 "business_scope": authority.business_scope,
                 "operation_fingerprint": authority.operation_fingerprint,
+                "node_risk_level": authority.node_risk_level,
+                "pre_execution_review_ref": (
+                    authority.pre_execution_review_ref
+                ),
             }
         payload["_context"] = context
     return _BUILTIN_EXECUTOR_REGISTRY._dispatch_unchecked(payload)

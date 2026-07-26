@@ -20,6 +20,11 @@ from host_brain.agent_runtime.agent_tools import (
     AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
 )
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime.governed_skill_work_order import (
+    GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
+    GovernedAgentWorkOrderBindingError,
+    bind_governed_agent_write_order,
+)
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
 from host_brain.contracts.agent_runtime.projection_recovery import (
     WORKER_TIMING_SCHEMA_VERSION,
@@ -590,6 +595,9 @@ def execute_agent_runtime_payload(
     *,
     model_attempt_service: Any = None,
     prompt_registry: Any = None,
+    artifact_store: AgentArtifactStore | None = None,
+    workspace_runtime: DurableWorkspaceRuntime | None = None,
+    governed_execution_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a normalized payload with ports supplied only by trusted wiring.
 
@@ -634,10 +642,60 @@ def execute_agent_runtime_payload(
             "review_policy": {"review_required": False},
             "metadata": {"request_id": data.get("request_id")},
         }
+    if (artifact_store is None) != (workspace_runtime is None):
+        raise GovernedAgentWorkOrderBindingError(
+            GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
+            "Agent artifact store and Workspace runtime must be composed together",
+        )
+    compatibility_order = AgentWorkOrder.from_mapping(raw_order)
+    compatibility_order.validate()
+    write_authority: dict[str, Any] | None = None
+    execution_order: Mapping[str, Any] | WorkOrderV3 = raw_order
+    if compatibility_order.requires_write:
+        if (
+            artifact_store is None
+            or workspace_runtime is None
+            or not isinstance(governed_execution_context, Mapping)
+        ):
+            raise GovernedAgentWorkOrderBindingError(
+                GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
+                "write-capable Agent Skill has no app-local governed Workspace authority",
+            )
+        governed_authority = dict(governed_execution_context)
+        execution_order = bind_governed_agent_write_order(
+            raw_order,
+            governed_execution_context=governed_authority,
+            workspace_runtime=workspace_runtime,
+        )
+        # Workspace/artifact ownership accepts one exact minimal authority
+        # shape.  Derive it only after the server-side V3 binding succeeds;
+        # none of the compatibility payload or auxiliary Task context crosses
+        # into the sealed owner record.
+        write_authority = {
+            "root_work_order_id": execution_order.root_work_order_id,
+            "graph_id": execution_order.task_graph_id,
+            "graph_revision": execution_order.graph_revision,
+            "node_id": execution_order.task_node_id,
+            "attempt_id": str(governed_authority["attempt_id"]).strip(),
+            "lease_id": str(governed_authority["lease_id"]).strip(),
+            "command_id": str(governed_authority["command_id"]).strip(),
+            "principal_id": str(
+                governed_authority["principal_id"]
+            ).strip(),
+            "lease_owner_id": str(
+                governed_authority["lease_owner_id"]
+            ).strip(),
+            "fencing_token": int(governed_authority["fencing_token"]),
+        }
     return AgentRuntimeExecutor(
         model_attempt_service=model_attempt_service,
         prompt_registry=prompt_registry,
-    ).execute(raw_order)
+        artifact_store=artifact_store,
+        workspace_runtime=workspace_runtime,
+    ).execute(
+        execution_order,
+        workspace_execution_authority=write_authority,
+    )
 
 
 __all__ = ["AgentRuntimeExecutor", "execute_agent_runtime_payload"]
