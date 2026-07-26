@@ -1,10 +1,20 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.12
+版本：v0.13
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-WORKSPACE-WRITE-PROMOTION
+
+- T-NE01-WORKSPACE-WRITE-PROMOTION-01：write-capable WorkOrder 缺少 exact server-owned execution authority 时必须保持 proposal-only，零 Agent 执行；Governed Internal authority 必须精确匹配 root WorkOrder、Graph/revision、Node、Attempt、Task Lease/fence、command、principal 与 runtime owner。
+- T-NE01-WORKSPACE-WRITE-PROMOTION-02：Worker delta 必须相对首次 allocation 冻结的 base commit 捕获为 canonical UTF-8 path manifest 与 binary full-index patch；二者共同进入 protected artifact seal。路径超过 1000、patch 或当前文件超过 32 MiB、秘密路径、symlink/Git link、`.git` 或 allow-list 越界均失败关闭。
+- T-NE01-WORKSPACE-WRITE-PROMOTION-03：Acceptance 必须在 live Workspace fence 内逐字重算 sealed patch，使用 frozen base 作为唯一 parent 生成 deterministic accepted commit，并保持配置源分支 ref 和工作树内容不变。
+- T-NE01-WORKSPACE-WRITE-PROMOTION-04：0116 顺序固定为 `ACTIVE→ACCEPTED→PROMOTED`；artifact promotion 之后才允许 terminal cleanup。exact replay 返回同一 accepted HEAD、artifact ref 与 Workspace receipt，不得重跑 Agent。
+- T-NE01-WORKSPACE-WRITE-PROMOTION-05：seal 后修改 worktree 必须在 lifecycle 仍为 ACTIVE 时拒绝，artifact promoter 调用数为 0。commit object 已生成但 lifecycle INSERT fault 导致事务回滚时，新 Runtime 实例在旧 Workspace Lease 到期后必须复算出同一 commit 并完成 0116。
+- T-NE01-WORKSPACE-WRITE-PROMOTION-06：真实 cleanup 必须删除 exact worktree 与 `natsume-agent/<workspace_id>` 临时 branch，而 accepted artifact 中的 sealed patch 保持可读；该操作不得被描述为自动合并用户源分支。
+- 当前 focused integration 为 `3 passed in 15.82s`，受影响回归为 `78 passed, 3 existing Windows symlink privilege skips in 55.52s`。当前只证明 Governed Internal write；跨路线 write、OS/container tenant、handle-level TOCTOU、wave integration 和 NE-07 未覆盖。
 
 ## T-NE01-SIGNED-MULTINODE-OPERATION-FAILURE
 

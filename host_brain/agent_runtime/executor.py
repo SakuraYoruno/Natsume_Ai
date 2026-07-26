@@ -230,11 +230,12 @@ class AgentRuntimeExecutor:
         ts = now_ms()
         run_dir: Path | None = None
         governed_stage = None
+        workspace_write_candidate = None
         recovery_envelope: dict[str, Any] | None = None
 
         try:
             order.validate()
-            if order.requires_write:
+            if order.requires_write and workspace_execution_authority is None:
                 result = blocked_result(
                     work_order_id=order.work_order_id,
                     summary=(
@@ -456,6 +457,26 @@ class AgentRuntimeExecutor:
                     intent_id=event_id,
                     work_order_id=order.work_order_id,
                 )
+                if (
+                    workspace_scope is not None
+                    and self.workspace_runtime is not None
+                    and order.requires_write
+                ):
+                    workspace_scope.assert_can_start_action(
+                        "Workspace write candidate sealing"
+                    )
+                    workspace_write_candidate = (
+                        self.workspace_runtime.capture_write_candidate(
+                            resolution
+                        )
+                    )
+                    if workspace_write_candidate is not None:
+                        git_summary["changed_files"] = list(
+                            workspace_write_candidate.changed_paths
+                        )
+                        git_summary["current_changed_files"] = list(
+                            workspace_write_candidate.changed_paths
+                        )
         except DurableWorkspaceRuntimeError as exc:
             failure = _opaque_executor_failure(exc)
             logger.error(
@@ -527,6 +548,15 @@ class AgentRuntimeExecutor:
             self.artifact_store.write_json(
                 run_dir / "projection_recovery.json",
                 recovery_envelope,
+            )
+        if workspace_write_candidate is not None:
+            self.artifact_store.write_json(
+                run_dir / "workspace_write_manifest.json",
+                workspace_write_candidate.manifest(),
+            )
+            self.artifact_store.write_bytes(
+                run_dir / "workspace_write.patch",
+                workspace_write_candidate.patch_bytes,
             )
         self._persist_result(run_dir, result, order=order, event_id=event_id, ts_ms=ts)
         payload = result.to_dict()

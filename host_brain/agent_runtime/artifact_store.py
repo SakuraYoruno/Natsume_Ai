@@ -55,6 +55,10 @@ _SEALED_FILES = (
     "verification.json",
 )
 _PROJECTION_RECOVERY_FILE = "projection_recovery.json"
+_WORKSPACE_WRITE_FILES = (
+    "workspace_write_manifest.json",
+    "workspace_write.patch",
+)
 
 
 class GovernedAgentArtifactError(RuntimeError):
@@ -257,9 +261,19 @@ class AgentArtifactStore:
         recovery_exists = _path_lexists(
             stage.stage_dir / _PROJECTION_RECOVERY_FILE
         )
+        write_presence = tuple(
+            _path_lexists(stage.stage_dir / relative)
+            for relative in _WORKSPACE_WRITE_FILES
+        )
+        if any(write_presence) and not all(write_presence):
+            raise GovernedAgentArtifactError(
+                "Workspace write candidate inventory is incomplete"
+            )
+        write_exists = all(write_presence)
         sealed_files = (
             *_SEALED_FILES,
             *((_PROJECTION_RECOVERY_FILE,) if recovery_exists else ()),
+            *(_WORKSPACE_WRITE_FILES if write_exists else ()),
         )
         _require_exact_inventory(
             stage.stage_dir,
@@ -325,7 +339,12 @@ class AgentArtifactStore:
             raise GovernedAgentArtifactError("sealed stage cannot be discarded")
         self._discard_stale_metadata_temp(stage.stage_dir)
         entries = list(stage.stage_dir.iterdir())
-        allowed = {"owner.json", *_SEALED_FILES, _PROJECTION_RECOVERY_FILE}
+        allowed = {
+            "owner.json",
+            *_SEALED_FILES,
+            _PROJECTION_RECOVERY_FILE,
+            *_WORKSPACE_WRITE_FILES,
+        }
         for entry in entries:
             if entry.name not in allowed or not _is_regular_file_without_reparse(entry):
                 raise GovernedAgentArtifactError(
@@ -359,7 +378,22 @@ class AgentArtifactStore:
         recoverable_files = tuple(
             sorted((*_SEALED_FILES, _PROJECTION_RECOVERY_FILE))
         )
-        if actual_files not in {base_files, recoverable_files}:
+        write_files = tuple(sorted((*_SEALED_FILES, *_WORKSPACE_WRITE_FILES)))
+        recoverable_write_files = tuple(
+            sorted(
+                (
+                    *_SEALED_FILES,
+                    _PROJECTION_RECOVERY_FILE,
+                    *_WORKSPACE_WRITE_FILES,
+                )
+            )
+        )
+        if actual_files not in {
+            base_files,
+            recoverable_files,
+            write_files,
+            recoverable_write_files,
+        }:
             raise GovernedAgentArtifactError("stage sealed file inventory drifted")
         _require_exact_inventory(
             stage.stage_dir,
@@ -479,6 +513,53 @@ class AgentArtifactStore:
         """Read one fixed protected JSON member after revalidating the seal."""
 
         return _read_model.read_sealed_json(self, seal, relative)
+
+    def read_sealed_bytes(
+        self,
+        seal: GovernedAgentArtifactSeal,
+        relative: str,
+    ) -> bytes:
+        """Read one fixed protected binary member after seal verification."""
+
+        if relative not in _WORKSPACE_WRITE_FILES:
+            raise GovernedAgentArtifactError(
+                "sealed binary member is not an approved Workspace artifact"
+            )
+        reopened = self.inspect_governed_stage(
+            stage_ref=seal.stage_ref,
+            seal_digest=seal.seal_digest,
+        )
+        path = reopened.stage_dir / relative
+        _require_regular_file(path, root=reopened.stage_dir)
+        return path.read_bytes()
+
+    def read_workspace_write_candidate(
+        self,
+        seal: GovernedAgentArtifactSeal,
+    ) -> tuple[dict[str, Any], bytes] | None:
+        """Return the exact optional manifest/patch pair bound by the seal."""
+
+        reopened = self.inspect_governed_stage(
+            stage_ref=seal.stage_ref,
+            seal_digest=seal.seal_digest,
+        )
+        manifest_path = reopened.stage_dir / _WORKSPACE_WRITE_FILES[0]
+        patch_path = reopened.stage_dir / _WORKSPACE_WRITE_FILES[1]
+        manifest_exists = _path_lexists(manifest_path)
+        patch_exists = _path_lexists(patch_path)
+        if not manifest_exists and not patch_exists:
+            return None
+        if not manifest_exists or not patch_exists:
+            raise GovernedAgentArtifactError(
+                "sealed Workspace write candidate is incomplete"
+            )
+        return (
+            _read_json_object(
+                manifest_path,
+                field="Workspace write manifest",
+            ),
+            patch_path.read_bytes(),
+        )
 
     def _sealed_digest_for_ref(self, stage_ref: str) -> str:
         return _read_model.sealed_digest_for_ref(self, stage_ref)
@@ -826,6 +907,15 @@ class AgentArtifactStore:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(str(text or ""), encoding="utf-8", errors="replace")
+
+    def write_bytes(self, path: Path, payload: bytes) -> None:
+        if not isinstance(payload, bytes):
+            raise GovernedAgentArtifactError("binary artifact payload must be bytes")
+        if self._is_governed_target(path):
+            self._write_governed_raw(path, payload)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
 
     def write_json(self, path: Path, payload: Any) -> None:
         if self._is_governed_target(path):

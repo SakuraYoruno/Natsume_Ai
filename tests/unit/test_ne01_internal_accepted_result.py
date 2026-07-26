@@ -56,6 +56,80 @@ class _SensitiveCommitFailureRepository:
         raise RuntimeError("password=do-not-persist bearer=private-value")
 
 
+def test_accepted_result_dispatches_sealed_write_candidate_to_write_promotion() -> None:
+    manifest = {
+        "schema_version": "Natsume.agent.workspace_write_candidate.v1",
+        "workspace_id": "workspace-write",
+        "base_commit": "a" * 40,
+        "changed_paths": ["src/generated.txt"],
+        "diff_digest": "sha256:" + ("b" * 64),
+        "patch_size": 12,
+        "receipt_ref": "workspace-write-candidate://sha256/" + ("c" * 64),
+    }
+    patch = b"sealed patch"
+    promoted: dict[str, Any] = {}
+
+    class Artifacts:
+        def read_workspace_write_candidate(self, _seal):  # noqa: ANN001, ANN202
+            return manifest, patch
+
+        def promote_governed_stage(self, **kwargs):  # noqa: ANN003, ANN202
+            promoted["artifact"] = kwargs
+            return "agent-artifact://workspace/write"
+
+    class Workspace:
+        def promote_no_change_artifact(self, **_kwargs):  # noqa: ANN003, ANN202
+            raise AssertionError("write candidate used no-change promotion")
+
+        def promote_write_artifact(self, **kwargs):  # noqa: ANN003, ANN202
+            promoted["workspace"] = kwargs
+            return SimpleNamespace(artifact_ref=kwargs["artifact_promoter"]())
+
+    dummy = type(
+        "Dummy",
+        (),
+        {
+            "get": lambda *_args: None,
+            "load": lambda *_args: None,
+            "get_by_command": lambda *_args: None,
+            "append": lambda *_args, **_kwargs: None,
+            "get_node": lambda *_args: None,
+            "get_attempt": lambda *_args: None,
+            "get_lease": lambda *_args: None,
+            "get_node_artifact": lambda *_args: None,
+            "get_acceptance_effect_intent": lambda *_args: None,
+            "resolve_internal_agent_completion_lineage": lambda *_args, **_kwargs: None,
+        },
+    )()
+    handler = InternalAcceptedResultHandler(
+        command_repository=dummy,
+        projection_store=dummy,
+        result_repository=dummy,
+        artifact_store=Artifacts(),  # type: ignore[arg-type]
+        workspace_runtime=Workspace(),  # type: ignore[arg-type]
+        task_store=dummy,
+    )
+    seal = SimpleNamespace(
+        workspace_id="workspace-write",
+        stage_ref="agent-stage://workspace/write",
+        seal_digest="sha256:" + ("d" * 64),
+    )
+    receipt = handler._promote_sealed_workspace_artifact(
+        seal=seal,
+        authority={"graph_id": "graph-write"},
+        verification_ref="verification://workspace/write",
+        acceptance_ref="acceptance://workspace/write",
+        effect_ref="acceptance-effect://workspace/write",
+        allow_start=True,
+    )
+
+    assert receipt.artifact_ref == "agent-artifact://workspace/write"
+    assert promoted["workspace"]["write_manifest"] == manifest
+    assert promoted["workspace"]["write_patch"] == patch
+    assert promoted["workspace"]["allow_start"] is True
+    assert promoted["artifact"]["stage_ref"] == seal.stage_ref
+
+
 @pytest.mark.asyncio
 async def test_unknown_result_commit_redacts_sensitive_exception_detail(
     monkeypatch: pytest.MonkeyPatch,

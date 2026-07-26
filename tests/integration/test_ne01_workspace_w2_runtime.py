@@ -296,7 +296,7 @@ def test_internal_admission_replaces_caller_workspace_with_server_graph_id() -> 
     assert "caller" not in str(canonical.workspace).lower()
 
 
-def test_production_executor_blocks_write_before_legacy_agent_worktree(
+def test_production_executor_blocks_write_without_governed_workspace_authority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -315,12 +315,6 @@ def test_production_executor_blocks_write_before_legacy_agent_worktree(
         secret_byte=b"a",
     )
     order = _order(graph_id=graph_id, root_work_order_id=root_order)
-    authority = _authority(
-        graph_id=graph_id,
-        root_work_order_id=root_order,
-        runtime_owner=runtime_owner,
-    )
-
     executor_calls = 0
 
     class FakeAgentExecutor:
@@ -344,7 +338,7 @@ def test_production_executor_blocks_write_before_legacy_agent_worktree(
         workspace_runtime=runtime,
         model_attempt_service=object(),
         prompt_registry=object(),
-    ).execute(order, workspace_execution_authority=dict(authority))
+    ).execute(order)
 
     assert result["status"] == "BLOCKED"
     assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
@@ -457,14 +451,7 @@ def test_proposal_only_write_does_not_start_heartbeat_or_verification(
         verification_policy=verification,  # type: ignore[arg-type]
         model_attempt_service=object(),
         prompt_registry=object(),
-    ).execute(
-        _order(graph_id=graph_id, root_work_order_id=root_order),
-        workspace_execution_authority=_authority(
-            graph_id=graph_id,
-            root_work_order_id=root_order,
-            runtime_owner=runtime_owner,
-        ),
-    )
+    ).execute(_order(graph_id=graph_id, root_work_order_id=root_order))
 
     assert result["status"] == "BLOCKED"
     assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
