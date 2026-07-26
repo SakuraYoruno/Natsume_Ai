@@ -27,9 +27,11 @@ TRACE-EXEC-08AQ（Skill 唯一执行 authority）：已经准入的 frozen Skill
 metadata 入口只能失败关闭。缺 exact node grant/Task context 必须在 registry
 前拒绝，receipt 写失败必须向上游传播。证据入口为
 `test_ne01_skill_authority_single_owner.py`、Loader/legacy authority 合同、
-GR05 真实 Universal Host Runtime 与机械 AST inventory。当前结论为
-`LOCAL_PROVEN / CLEAN_SHA_RECEIPT_PENDING`；Budget 与 transactional
-side-effects 仍是 Skill 独立缺口，因此路线及 NE-01 均保持 `INCOMPLETE`。
+GR05 真实 Universal Host Runtime 与机械 AST inventory。干净提交
+`3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 的 `209 passed`、真实
+GR05、static/doc 与交付元数据 Gate 将结论固化为
+`CANONICAL_EXECUTION_AUTHORITY_PASS`；Budget 与 transactional side-effects
+仍是 Skill 独立缺口，因此路线及 NE-01 均保持 `INCOMPLETE`。
 
 ## 2. 当前核心产品能力
 

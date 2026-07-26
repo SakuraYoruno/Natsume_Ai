@@ -17,12 +17,13 @@ authority、进入 Capability Broker，并把结果交回 Task Runtime。
 [`skills/loader.py`](../../../host_brain/skills/loader.py) 只是迁移兼容 facade，
 所有 `execute()` 都以 `GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED` 拒绝；
 Executive executor 已删除，Scheduler 也不得直接调用 Skill metadata。
-该模块当前为 `LOCAL_PROVEN / CLEAN_SHA_RECEIPT_PENDING`，预算和事务副作用
-仍由后续切片处理。
+干净提交 `3d68bd1e` 的定向、真实 GR05、static/doc 与交付元数据证据使
+该模块的 canonical execution authority 为 `PASS`；预算和事务副作用仍由
+后续切片处理。
 
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound acceptance 已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、路线其余控制与 NE-01 仍未闭环。
 
-Route Acceptance 模块分为三个只读责任：`persistence/universal_route_acceptance_reader.py` 只负责从一个真实 SQLite snapshot 重开 bounded facts；`release/universal_route_acceptance.py` 只负责 Git/migration 绑定、七路判定、隐私字段白名单和 digest；`scripts/runtime/collect_universal_runtime_acceptance.py` 只负责参数解析与原子写出本地证据。它们都没有 Task、Budget、Review、Effect 或 Outbox writer。Coverage Gate 只接受可通过 v3 validator 的真实收据结构；当前正式收据绑定干净提交 `c15f88d9`、migration 0135 和七路 PASS，使七个提交绑定控制及 Chat model budget 均为 `PASS`。Chat 因此完整，但不会覆盖其余路线控制。
+Route Acceptance 模块分为三个只读责任：`persistence/universal_route_acceptance_reader.py` 只负责从一个真实 SQLite snapshot 重开 bounded facts；`release/universal_route_acceptance.py` 只负责 Git/migration 绑定、七路判定、隐私字段白名单和 digest；`scripts/runtime/collect_universal_runtime_acceptance.py` 只负责参数解析与原子写出本地证据。它们都没有 Task、Budget、Review、Effect 或 Outbox writer。Coverage Gate 只接受可通过 v3 validator 的真实收据结构；当前正式收据绑定干净提交 `3d68bd1e`、migration 0135 和七路 PASS，使七个提交绑定控制及 Chat model budget 均为 `PASS`。Chat 因此完整，但不会覆盖其余路线控制。
 
 Model Budget Evidence 模块不新增 writer。`ModelAttemptService` 和 ledger audit 仍拥有 provider 调用生命周期，Surface 只把成功调用的 identity 与 measurement 放入 WorkerProjection，Task Runtime 的 Budget owner 继续原子写 parent/child usage；`UniversalRouteAcceptanceReader` 只抽取隐私有界证据，release validator 只做跨表等值和生命周期校验。`governed_model_budget` 是执行期 guard，不属于 Life/Effect payload；executor 的 audit path 属于 executor，不得被 worker wrapper 覆盖。当前 GR05 只替换 terminal provider transport，证明模块接线和 replay，不证明外部模型质量。
 

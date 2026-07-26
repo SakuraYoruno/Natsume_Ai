@@ -1,12 +1,12 @@
 {
-  "commit_sha": "c15f88d9e201552ec9e3a589cda93b305818f5ef",
+  "commit_sha": "3d68bd1eca69ad1593454634c2999d07b4d4f2f5",
   "database_evidence": {
     "database_kind": "FILE_BACKED_CANONICAL_SQLITE",
     "read_mode": "SQLITE_MODE_RO_QUERY_ONLY_SINGLE_TRANSACTION",
-    "snapshot_digest": "sha256:203e201fe63a4a857a8098da122f52fa23861984bdaf6a0b38347eb802e82d88"
+    "snapshot_digest": "sha256:2bcef686e18629483364fe59b9bcfce9576fc51b33d13801908e0bd0ec10333c"
   },
   "evidence_kind": "REAL_CANONICAL_SQLITE_READ_ONLY_SNAPSHOT",
-  "generated_at_ms": 1785103026159,
+  "generated_at_ms": 1785106487525,
   "migration_head": "0135_task_review_denial_settlement.sql",
   "overall_status": "PASS",
   "privacy": {
@@ -15,7 +15,7 @@
     "contains_user_text": false,
     "identifiers_are_digested": true
   },
-  "receipt_digest": "sha256:06b2c93c0550708cdc5aecd6f5672e479f433c9951e8ddac7dcfe7cf184bbd14",
+  "receipt_digest": "sha256:10d1a8f8be608a65d5246a6820771d820b3f6e547d8c4f2c8cb80dac41904477",
   "route_acceptance": {
     "chat": {
       "evidence_counts": {
@@ -41,7 +41,7 @@
         "worker_model_budgets": 1,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:b81bdf251b28e59e76824ad108757102c2ab41b1ea077a741506e97fed76b02d",
+      "evidence_digest": "sha256:413a711142a573b6b83775a8f1290cea5986d4d3ba065fa3eb3030e6f2223b01",
       "reason_codes": [],
       "request_ref": "request://sha256/3074dd7f9150c059bd9d98f5d68c421d528fee6601085153c64d38e06a5561b3",
       "status": "PASS"
@@ -70,7 +70,7 @@
         "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:cdafbdbb4c102b64015a1dd6b9e067533b3d17e9c3e75651ae1c6d592ada1a2c",
+      "evidence_digest": "sha256:fbee76fc85c8eed516121d42ce76fd421db497b41f845c62952416fb455b96a4",
       "reason_codes": [],
       "request_ref": "request://sha256/49ed9607aaedcd117764f64b131981124deef83bc7d1805ec4a0322a31775cfb",
       "status": "PASS"
@@ -99,7 +99,7 @@
         "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:4635687ae18f1863e40b71e766e7068ce01ac144b1072ca06d1041759fca8bae",
+      "evidence_digest": "sha256:a39991637e6260a3ed8f8cfb35b977eae7f731ede11d489823cf18db2e61c112",
       "reason_codes": [],
       "request_ref": "request://sha256/b696dfb20909094f071fd3b8504ce5936391f86f515c9c529c40bdf451ab53ac",
       "status": "PASS"
@@ -128,7 +128,7 @@
         "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:5a7520d6360c4b825608b196d4223af79c77ee7895531df7b479a3edb10ac49b",
+      "evidence_digest": "sha256:cb3b7f8c487e9407e28f778aafca25ac452090ede0c729e910596eb50affc580",
       "reason_codes": [],
       "request_ref": "request://sha256/19180c2acffdae823dcd5150bb1e19b3fd2c057c803cb284ab1dda8763455a40",
       "status": "PASS"
@@ -157,7 +157,7 @@
         "worker_model_budgets": 1,
         "worker_projections": 3
       },
-      "evidence_digest": "sha256:3232fd433c3f7169ccbfe03f31ae66acf52e940bf55058d5685b0992248190e3",
+      "evidence_digest": "sha256:51bdde124d8e9004aba9f7439b2ade8334e0c587efd144657b6ad63c23c66879",
       "reason_codes": [],
       "request_ref": "request://sha256/584b8de611e01a7cddf3e8a26ae6de77bebb525005922eb851f21a754bdc97b7",
       "status": "PASS"
@@ -186,7 +186,7 @@
         "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:3b70413759e84d005c5c50c0a7b53fec3a1a2a961fe3957928258e3d5f52258c",
+      "evidence_digest": "sha256:b8d5951ad6135cc4b7768b84c9ee776b950e9db8c45f85bcb4b1ceb7f1086fd7",
       "reason_codes": [],
       "request_ref": "request://sha256/ed8d6c3db753640e0b7f819988f8dab922ce5f23cae2ee7a48fb3c65729b3030",
       "status": "PASS"
@@ -215,12 +215,12 @@
         "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:85eb44a943f5f839a310b2fa5d9a112e05d16b0e3d702dfe0c7cbd1cfae04969",
+      "evidence_digest": "sha256:1cb507b157c551b443958b66b9c1bd0fec59edffe4c48c7c7e5a427c6400b7f5",
       "reason_codes": [],
       "request_ref": "request://sha256/5baa28012b4f6f7c9ab62551f281c46ea3c2898f22f637336007c1538924d45a",
       "status": "PASS"
     }
   },
-  "run_id": "universal-runtime-acceptance://sha256/bbc30ce7dd92a0cbe752323c51c8821660fddc95267c493a0a179c99b7ebacec",
+  "run_id": "universal-runtime-acceptance://sha256/eb7f4b25441b3d8b8856d15bd50356005688495d9328efb17bc7744ddc44fbc6",
   "schema_version": "natsume.universal-runtime-route-acceptance.v3"
 }
