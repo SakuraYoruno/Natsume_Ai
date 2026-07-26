@@ -93,10 +93,14 @@ class _FakeTaskStore:
         self.reservation: dict[str, Any] | None = None
         self.budget: dict[str, Any] | None = None
         self.budget_usage: dict[str, _BudgetResult] = {}
+        self.node_budgets: dict[str, dict[str, Any]] = {}
         self.reservation_acquired = bool(reservation_acquired)
         self.initial_time_consumed_ms = int(initial_time_consumed_ms)
 
     def assert_budget_usage_ready(self) -> None:
+        return None
+
+    def assert_node_budget_ready(self) -> None:
         return None
 
     def assert_dag_scheduling_ready(self) -> None:
@@ -197,6 +201,51 @@ class _FakeTaskStore:
         }
         return {**self.budget, "remaining": remaining, "balanced": True}
 
+    def get_node_budget_reservation(
+        self,
+        *,
+        parent_budget_id: str,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        record = dict(self.node_budgets[attempt_id])
+        attempt = self.attempts[attempt_id]
+        record["attempt_status"] = attempt["status"]
+        record["status"] = (
+            "CONSUMED" if attempt["status"] == "SUCCEEDED" else "ACTIVE"
+        )
+        record["remaining"] = {
+            key: record["reserved"][key] - record["consumed"][key]
+            for key in record["reserved"]
+        }
+        return record
+
+    def _bind_node_budget(self, attempt: dict[str, Any]) -> None:
+        assert self.budget is not None
+        remaining = {
+            key: self.budget["reserved"][key] - self.budget["consumed"][key]
+            for key in self.budget["reserved"]
+        }
+        remaining["concurrency"] = 1
+        self.node_budgets[attempt["attempt_id"]] = {
+            "schema_version": "Natsume.task_runtime.node_budget_reservation.v1",
+            "node_budget_id": f"node-budget::{attempt['attempt_id']}",
+            "parent_budget_id": self.budget["budget_id"],
+            "graph_id": attempt["graph_id"],
+            "graph_revision": attempt["graph_revision"],
+            "node_id": attempt["node_id"],
+            "attempt_id": attempt["attempt_id"],
+            "scope": self.budget["scope"],
+            "limits": dict(self.budget["limits"]),
+            "reserved": remaining,
+            "consumed": {key: 0 for key in remaining},
+            "attempted_consumed": {key: 0 for key in remaining},
+            "usage_version": 0,
+            "parent_version_at_claim": self.budget["status_version"],
+            "claim_origin": "ATOMIC_READY_CLAIM",
+            "attempt_status": attempt["status"],
+            "status": "ACTIVE",
+        }
+
     def consume_budget_once(self, budget_id: str, **kwargs: Any) -> _BudgetResult:
         usage_id = kwargs["usage_id"]
         if usage_id in self.budget_usage:
@@ -218,6 +267,17 @@ class _FakeTaskStore:
             self.budget["status"] = "EXCEEDED"
             self.budget["exceeded_dimensions"] = list(dimensions)
         self.budget["status_version"] += 1
+        child = self.node_budgets[kwargs["attempt_id"]]
+        if accepted:
+            child["consumed"] = {
+                key: child["consumed"][key] + delta[key]
+                for key in child["consumed"]
+            }
+        child["attempted_consumed"] = {
+            key: child["attempted_consumed"][key] + delta[key]
+            for key in child["attempted_consumed"]
+        }
+        child["usage_version"] += 1
         result = _BudgetResult(accepted, dict(self.budget), dimensions)
         self.budget_usage[usage_id] = result
         return result
@@ -297,6 +357,7 @@ class _FakeTaskStore:
             "status_version": 0,
         }
         self.attempts[attempt["attempt_id"]] = attempt
+        self._bind_node_budget(attempt)
         return dict(attempt)
 
     def claim_ready_node(self, **kwargs: Any) -> dict[str, Any]:
@@ -314,6 +375,7 @@ class _FakeTaskStore:
             "status_version": 1,
         }
         self.attempts[attempt["attempt_id"]] = attempt
+        self._bind_node_budget(attempt)
         self.calls.append("attempt:LEASED")
         self.node["status"] = "LEASED"
         self.node["status_version"] += 1

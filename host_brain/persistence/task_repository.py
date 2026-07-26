@@ -232,6 +232,9 @@ from host_brain.persistence.task_outbox_delivery_store import (
 from host_brain.persistence.task_budget_usage_store import (
     TaskBudgetUsageStoreMixin,
 )
+from host_brain.persistence.task_node_budget_store import (
+    TaskNodeBudgetStoreMixin,
+)
 from host_brain.persistence.task_terminal_reconciliation_store import (
     TaskTerminalReconciliationStoreMixin,
 )
@@ -395,6 +398,7 @@ class DurableTaskStore(
     TaskTerminalReconciliationStoreMixin,
     TaskNodeArtifactStoreMixin,
     TaskLeaseTakeoverAuthorityMixin,
+    TaskNodeBudgetStoreMixin,
     TaskBudgetUsageStoreMixin,
     TaskDagStateStoreMixin,
     TaskReadyClaimStoreMixin,
@@ -1495,6 +1499,40 @@ class DurableTaskStore(
                 expected_event_type="TASK_ATTEMPT_CREATED",
                 expected_attempt_id=attempt_ref,
             )
+            # The legacy low-level constructor remains for contract fixtures
+            # and migration compatibility.  When a graph budget already
+            # exists it must still establish the same attempt-bound child
+            # authority as the production atomic READY claim.
+            budget_rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_budget_reservation
+                WHERE graph_id = ? AND graph_revision = ?
+                  AND node_id IS NULL AND attempt_id IS NULL
+                  AND status IN ('PENDING', 'ACTIVE')
+                ORDER BY budget_id
+                """,
+                (str(graph_id), int(graph_revision)),
+            ).fetchall()
+            if len(budget_rows) > 1:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "Attempt creation found multiple graph BudgetReservations",
+                )
+            node_budget_ready = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_node_budget_reservation'
+                """
+            ).fetchone()
+            if budget_rows and node_budget_ready is not None:
+                self._reserve_node_budget_in_transaction(
+                    conn,
+                    parent_budget=budget_rows[0],
+                    attempt=self._require_attempt(conn, attempt_ref),
+                    claim_origin="LEGACY_CREATE_ATTEMPT",
+                    ts_ms=ts_ms,
+                )
         return self.get_attempt(attempt_ref)
 
     def get_attempt(self, attempt_id: str) -> dict[str, Any]:
