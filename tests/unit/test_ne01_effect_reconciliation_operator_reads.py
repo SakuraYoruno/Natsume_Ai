@@ -7,7 +7,9 @@ import json
 import pytest
 
 from host_brain.app.obs_routes_task_runtime import (
+    get_task_acceptance_effect_reconciliation_challenge,
     get_task_effect_reconciliation_challenge,
+    list_task_acceptance_effect_reconciliation_candidates,
     list_task_effect_reconciliation_candidates,
     list_task_effect_reconciliation_cases,
 )
@@ -132,6 +134,92 @@ class _Store:
         assert (intent_ref, effect_id) == ("cancel-intent://one", "effect://one")
         return self.aggregate
 
+    def list_acceptance_effect_reconciliation_candidates(self, *, limit):  # noqa: ANN001
+        assert limit == 9
+        return (self._general_aggregate(),)
+
+    def read_acceptance_effect_reconciliation(self, effect_id, *, case_id):  # noqa: ANN001
+        assert (effect_id, case_id) == (
+            "effect://general",
+            "effect-recon-case://general",
+        )
+        return self._general_aggregate()
+
+    @staticmethod
+    def _general_aggregate() -> dict:
+        return {
+            "case": {
+                "schema_version": "case.v2",
+                "case_id": "effect-recon-case://general",
+                "purpose": "GENERAL_UNKNOWN_EFFECT",
+                "case_kind": "GENERAL_UNKNOWN_EFFECT",
+                "classification": "REPAIRABLE_SIGNED",
+                "effect_id": "effect://general",
+                "graph_id": "graph-general",
+                "graph_revision": 4,
+                "node_id": "node-general",
+                "attempt_id": "attempt-general",
+                "snapshot_sha256": "sha256:" + "1" * 64,
+                "snapshot_json": "PRIVATE_SNAPSHOT_MUST_NOT_LEAK",
+            },
+            "effect": {
+                "effect_id": "effect://general",
+                "commit_scope": "NODE",
+                "effect_type": "surface.reply_delivery",
+                "payload_ref": "payload://general",
+                "payload_sha256": "sha256:" + "2" * 64,
+                "idempotency_key": "idempotency-general",
+                "status": "FAILED",
+                "status_version": 2,
+                "available_ts_ms": 1,
+                "lease_owner": "dispatcher-general",
+                "lease_expires_ts_ms": None,
+                "fencing_token": 1,
+                "attempt_count": 1,
+                "receipt_ref": None,
+                "reason_code": "HANDLER_FAILED",
+                "last_error_sha256": "sha256:" + "3" * 64,
+                "created_ts_ms": 1,
+                "updated_ts_ms": 2,
+                "committed_ts_ms": None,
+                "failed_ts_ms": 2,
+                "payload": "RAW_PAYLOAD_MUST_NOT_LEAK",
+                "last_error": "RAW_ERROR_MUST_NOT_LEAK",
+            },
+            "task": {
+                "graph_id": "graph-general",
+                "graph_revision": 4,
+                "graph_status": "COMPLETED",
+                "graph_status_version": 3,
+                "node_id": "node-general",
+                "node_status": "ACCEPTED",
+                "node_status_version": 2,
+                "attempt_id": "attempt-general",
+                "attempt_status": "SUCCEEDED",
+                "attempt_status_version": 1,
+            },
+            "subject_snapshot_sha256": "sha256:" + "4" * 64,
+            "proof": {
+                "proof_id": "effect-recon-proof://general",
+                "case_id": "effect-recon-case://general",
+                "effect_id": "effect://general",
+                "outcome": "SIDE_EFFECT_CONFIRMED",
+                "target_effect_status": "COMMITTED",
+                "receipt_ref": "gateway-receipt://general",
+                "executor_quiescence_ref": "quiescence://general",
+                "reconciler_actor_id": "PRIVATE_ACTOR_MUST_NOT_LEAK",
+                "attestation_ref": "attestation://general",
+                "attestation_key_id": "key-general",
+                "issued_ts_ms": 3,
+                "proof_digest": "sha256:" + "5" * 64,
+                "outbox_id": "outbox-general",
+                "created_ts_ms": 4,
+                "attestation_signature": "SIGNATURE_MUST_NOT_LEAK",
+                "proof_binding_json": "BINDING_MUST_NOT_LEAK",
+                "subject_snapshot_json": "SUBJECT_MUST_NOT_LEAK",
+            },
+        }
+
 
 def test_operator_reads_expose_exact_digests_without_raw_proof_or_error(
     monkeypatch: pytest.MonkeyPatch,
@@ -209,6 +297,52 @@ def test_operator_reads_expose_exact_digests_without_raw_proof_or_error(
         "RAW_ERROR_MUST_NOT_LEAK",
         "SIGNATURE_MUST_NOT_LEAK",
         "BINDING_MUST_NOT_LEAK",
+        "PRIVATE_ACTOR_MUST_NOT_LEAK",
+    ):
+        assert secret not in serialized
+    get_core_settings.cache_clear()
+
+
+def test_general_effect_operator_reads_are_minimized_and_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOST_NLE_OPERATOR_VIEWS_ENABLED", "true")
+    get_core_settings.cache_clear()
+    store = _Store()
+
+    candidates = asyncio.run(
+        list_task_acceptance_effect_reconciliation_candidates(
+            limit=9,
+            store=store,
+        )
+    )
+    challenge = asyncio.run(
+        get_task_acceptance_effect_reconciliation_challenge(
+            effect_id="effect://general",
+            case_id="effect-recon-case://general",
+            store=store,
+        )
+    )
+
+    assert candidates["count"] == 1
+    assert candidates["read_only"] is True
+    assert challenge["read_only"] is True
+    assert challenge["case"]["case_id"] == "effect-recon-case://general"
+    signing_subject = json.loads(
+        base64.urlsafe_b64decode(
+            challenge["signing_material"]["payload_b64"].encode("ascii")
+        )
+    )
+    assert signing_subject["effect"]["payload_ref"] == "payload://general"
+    assert signing_subject["task"]["graph_revision"] == 4
+    serialized = repr((candidates, challenge))
+    for secret in (
+        "PRIVATE_SNAPSHOT_MUST_NOT_LEAK",
+        "RAW_PAYLOAD_MUST_NOT_LEAK",
+        "RAW_ERROR_MUST_NOT_LEAK",
+        "SIGNATURE_MUST_NOT_LEAK",
+        "BINDING_MUST_NOT_LEAK",
+        "SUBJECT_MUST_NOT_LEAK",
         "PRIVATE_ACTOR_MUST_NOT_LEAK",
     ):
         assert secret not in serialized

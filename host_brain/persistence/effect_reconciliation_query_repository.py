@@ -10,12 +10,19 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
+import time
 
 from host_brain.persistence.reconciliation_proof_verifier import (
     ReconciliationProofVerifier,
 )
 from host_brain.persistence.task_effect_reconciliation_read_store import (
     TaskEffectReconciliationReadMixin,
+)
+from host_brain.persistence.task_acceptance_effect_reconciliation_store import (
+    TaskAcceptanceEffectReconciliationStoreMixin,
+)
+from host_brain.persistence.task_acceptance_effect_reconciliation_evidence_store import (
+    TaskAcceptanceEffectReconciliationEvidenceStoreMixin,
 )
 from host_brain.persistence.task_store_types import (
     TASK_STORE_INVALID,
@@ -24,7 +31,11 @@ from host_brain.persistence.task_store_types import (
 )
 
 
-class EffectReconciliationQueryRepository(TaskEffectReconciliationReadMixin):
+class EffectReconciliationQueryRepository(
+    TaskAcceptanceEffectReconciliationEvidenceStoreMixin,
+    TaskAcceptanceEffectReconciliationStoreMixin,
+    TaskEffectReconciliationReadMixin,
+):
     """Narrow, query-only view over the canonical Task Runtime database."""
 
     def __init__(
@@ -51,6 +62,7 @@ class EffectReconciliationQueryRepository(TaskEffectReconciliationReadMixin):
             )
         try:
             self.assert_effect_reconciliation_ready()
+            self.assert_acceptance_effect_reconciliation_ready()
         except TaskStoreError:
             raise
         except sqlite3.DatabaseError as exc:
@@ -58,6 +70,21 @@ class EffectReconciliationQueryRepository(TaskEffectReconciliationReadMixin):
                 TASK_STORE_SCHEMA_NOT_READY,
                 "Effect reconciliation query schema is unavailable",
             ) from exc
+
+    @staticmethod
+    def _now() -> int:
+        return time.time_ns() // 1_000_000
+
+    def record_acceptance_effect_reconciliation_proof(
+        self,
+        effect_id: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        del effect_id, kwargs
+        raise TaskStoreError(
+            TASK_STORE_INVALID,
+            "Effect reconciliation query repository is read-only",
+        )
 
     def _connect(self) -> sqlite3.Connection:
         """Open one operation-scoped connection with SQLite-enforced read-only authority."""

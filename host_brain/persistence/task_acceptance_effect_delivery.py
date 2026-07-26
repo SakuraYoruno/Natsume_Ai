@@ -69,6 +69,9 @@ _PENDING_CANCELLATION_RECONCILIATION_PURPOSE = "PENDING_CANCELLATION"
 _ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED = (
     "ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED"
 )
+_ACCEPTANCE_EFFECT_RECONCILED_NO_SIDE_EFFECT = (
+    "ACCEPTANCE_EFFECT_RECONCILED_NO_SIDE_EFFECT"
+)
 
 
 class TaskAcceptanceEffectDeliveryMixin:
@@ -317,6 +320,11 @@ class TaskAcceptanceEffectDeliveryMixin:
             ).fetchone()
             if row is None:
                 return None
+            self._assert_signed_general_effect_retry(
+                conn,
+                effect_id=str(row["effect_id"]),
+                reason_code=str(row["reason_code"] or ""),
+            )
             if artifact_schema is not None:
                 self._require_valid_node_artifact(
                     conn,
@@ -372,6 +380,36 @@ class TaskAcceptanceEffectDeliveryMixin:
                 == _ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED
             )
             return claimed
+
+    @staticmethod
+    def _assert_signed_general_effect_retry(
+        conn: sqlite3.Connection,
+        *,
+        effect_id: str,
+        reason_code: str,
+    ) -> None:
+        """Require the immutable 0128 proof before replaying a known-safe Effect."""
+
+        if reason_code != _ACCEPTANCE_EFFECT_RECONCILED_NO_SIDE_EFFECT:
+            return
+        row = conn.execute(
+            """
+            SELECT proof_id
+            FROM task_runtime_acceptance_effect_reconciliation_proof
+            WHERE effect_id = ?
+              AND purpose = 'GENERAL_UNKNOWN_EFFECT'
+              AND outcome = 'NO_SIDE_EFFECT'
+              AND target_effect_status = 'PENDING'
+            ORDER BY created_ts_ms DESC, proof_id DESC
+            LIMIT 1
+            """,
+            (effect_id,),
+        ).fetchone()
+        if row is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "signed Acceptance Effect retry proof is missing",
+            )
 
     def commit_acceptance_effect_intent(
         self,

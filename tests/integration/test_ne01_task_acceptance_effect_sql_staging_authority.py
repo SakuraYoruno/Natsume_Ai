@@ -12,6 +12,9 @@ from host_brain.persistence.task_repository import DurableTaskStore
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "host_brain" / "audit" / "migrations"
+CURRENT_MIGRATION = max(
+    int(path.name.split("_", 1)[0]) for path in MIGRATIONS.glob("*.sql")
+)
 NOW = 1_900_000_000_000
 
 
@@ -144,7 +147,7 @@ def test_0125_failure_rolls_back_trigger_and_retry_preserves_existing_rows(
         ts_ms=NOW + 2,
     )
     assert retried.success is True, retried.as_dict()
-    assert retried.summary["current_version"] == 125
+    assert retried.summary["current_version"] == CURRENT_MIGRATION
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """

@@ -592,7 +592,16 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-TERMINAL-OPERATOR-02：0119 必须拒绝 request rebinding、payload drift、UPDATE/DELETE 与物理列/JSON/digest 篡改；exact replay 只重开同一行。Task Runtime composition 必须从 canonical SQLite 与 migration readiness 构造唯一 store。
 - T-NE01-TERMINAL-OPERATOR-03：该动作以风险 4 进入 durable Review；风险 5 继续作为永久阻断。Review 前不得写 0099 proof 或释放目标 Budget；一次性 continuation 后，Worker 只能生成 `task.terminal_reconciliation` proposal，Acceptance dispatcher 必须重开 exact Graph/Node/Attempt/Grant/Context/Scene/Guardian 的 Action Preview，Accepted handler 再从 0119 重开完整签名命令并调用既有 0099 authority。
 - T-NE01-TERMINAL-OPERATOR-04：response loss、Review 续发 grant 与重复请求必须重开同一 Graph、Effect、proof 和 0119 行，不能重复执行修复；COMPLETED replay 使用 frozen projection grant，不得因一次性 continuation 更新 current grant 后错误冲突。
-- 当前本地证据包含真实 SQLite、临时 Ed25519 key、真实 Secure Ingress authority、Host runtime context、durable Review、Action Preview、Acceptance Effect 与 0099 proof/Budget 变化。功能默认关闭；HTTP/network canary、NE-01 波次 integration、真实模型与 NE-07 服务栈均未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。Operator 当前为 3/37，剩余 34 个写命令仍失败关闭。
+- 当前本地证据包含真实 SQLite、临时 Ed25519 key、真实 Secure Ingress authority、Host runtime context、durable Review、Action Preview、Acceptance Effect 与 0099 proof/Budget 变化。功能默认关闭；HTTP/network canary、NE-01 波次 integration、真实模型与 NE-07 服务栈均未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。该段的 3/37 是提交绑定历史；计入后续 Operation、Edge 与 general Effect 切片后的现行库存为 6/37，剩余 31 个写命令仍失败关闭。
+
+### NE-01 通用 Acceptance Effect 签名对账进入受治理 TaskGraph
+
+- T-NE01-GENERAL-EFFECT-01：`task_effect.reconcile` 的 `GENERAL_UNKNOWN_EFFECT` 请求必须先由 Secure Ingress 验证 actor、request/body 和 Ed25519 签名，再写入 0128 append-only evidence sidecar；WorkOrder、TaskGraph、Review 与外层 Acceptance Effect 不得出现原始 signature、key ID 或完整 subject snapshot。
+- T-NE01-GENERAL-EFFECT-02：0128 readiness 必须精确验证 evidence/case/proof 三表、索引和 trigger SQL；evidence/case/proof UPDATE/DELETE、同 request payload drift、subject snapshot 漂移、proof/outbox identity 漂移全部失败关闭。
+- T-NE01-GENERAL-EFFECT-03：该命令以风险 4 进入 durable Review。Review 前不得写 inner proof 或改变目标 Effect；Review continuation 后必须经过 Action Preview、Verification 和外层 Acceptance，Accepted handler 才可重开 evidence、重新验签并调用 canonical reconciliation UoW。
+- T-NE01-GENERAL-EFFECT-04：`NO_SIDE_EFFECT` 必须携带 executor quiescence、无 downstream receipt，并将目标 Effect 置为可重试 `PENDING`；`SIDE_EFFECT_CONFIRMED` 必须携带 durable downstream receipt，并将目标 Effect置为 `COMMITTED`。proof、target Effect 与 Outbox 必须同事务，提交响应丢失只 exact reopen。
+- T-NE01-GENERAL-EFFECT-05：外层 handler receipt 必须同时绑定 durable projection、evidence digest、inner proof/effect/outbox 和 outer Acceptance payload；重复 Secure Ingress 请求不得重复进入 target reconciliation mutation。
+- 当前主受影响集合为 `63 passed in 52.65s`，handler/结构集合为 `52 passed in 1.94s`；迁移与合同按不重叠文件分区为 `32 + 37 + 5` 全绿，0126 增量 readiness 修复另有 `8 + 2 targeted` 全绿。这些集合不累加为伪总数。`compileall`、本批 JSON、`git diff --check`、生成 Operator client、文档 Gate 与架构静态 Gate 1～14 均通过且未扩白名单。功能默认关闭，使用本地临时 key，cancellation-bound modes 仍分离，HTTP/network/deployed-key canary、NE-01 波次 integration 与 NE-07 全栈均未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ### NE-01 Host 路由 Service Locator 切流
 

@@ -67,6 +67,16 @@ EXPECTED_EFFECT_RECONCILIATION_QUERY_ROUTES = {
     HttpRouteKey("GET", "/obs/task-runtime/effect-reconciliation/cases"),
     HttpRouteKey("GET", "/obs/task-runtime/effect-reconciliation/challenge"),
 }
+EXPECTED_ACCEPTANCE_EFFECT_RECONCILIATION_QUERY_ROUTES = {
+    HttpRouteKey(
+        "GET",
+        "/obs/task-runtime/acceptance-effect-reconciliation/candidates",
+    ),
+    HttpRouteKey(
+        "GET",
+        "/obs/task-runtime/acceptance-effect-reconciliation/challenge",
+    ),
+}
 EXPECTED_TERMINAL_RECONCILIATION_QUERY_ROUTES = {
     HttpRouteKey("GET", "/obs/task-runtime/terminal-reconciliation/candidates"),
     HttpRouteKey("GET", "/obs/task-runtime/terminal-reconciliation/cases"),
@@ -87,9 +97,12 @@ def test_actual_obs_fastapi_route_entries_are_query_only_after_writer_detach() -
     audit = audit_fastapi_route_entries(obs_app)
 
     # Each query route has one canonical owner after the split-router cutover.
-    assert audit.entry_count == 110
-    assert audit.unique_route_count == 110
+    assert audit.entry_count == 112
+    assert audit.unique_route_count == 112
     assert EXPECTED_EFFECT_RECONCILIATION_QUERY_ROUTES <= {
+        entry.key for entry in audit.entries
+    }
+    assert EXPECTED_ACCEPTANCE_EFFECT_RECONCILIATION_QUERY_ROUTES <= {
         entry.key for entry in audit.entries
     }
     assert EXPECTED_TERMINAL_RECONCILIATION_QUERY_ROUTES <= {

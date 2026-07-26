@@ -148,6 +148,12 @@ from host_brain.persistence.task_decision_integrity import (
 from host_brain.persistence.task_acceptance_effect_delivery import (
     TaskAcceptanceEffectDeliveryMixin,
 )
+from host_brain.persistence.task_acceptance_effect_reconciliation_store import (
+    TaskAcceptanceEffectReconciliationStoreMixin,
+)
+from host_brain.persistence.task_acceptance_effect_reconciliation_evidence_store import (
+    TaskAcceptanceEffectReconciliationEvidenceStoreMixin,
+)
 from host_brain.persistence.task_acceptance_effect_staging import (
     TaskAcceptanceEffectStagingMixin,
 )
@@ -243,7 +249,6 @@ TASK_RUNTIME_TABLES = frozenset(
         "task_runtime_idempotency_reservation",
         "task_runtime_budget_reservation",
         "task_runtime_outbox",
-        "task_runtime_operation_reconciliation_evidence",
     }
 )
 _TASK_RUNTIME_REQUIRED_COLUMNS = {
@@ -366,6 +371,8 @@ class DurableTaskStore(
     TaskOutboxDeliveryStoreMixin,
     TaskGraphCancellationContinuationStoreMixin,
     TaskAcceptanceEffectStagingMixin,
+    TaskAcceptanceEffectReconciliationEvidenceStoreMixin,
+    TaskAcceptanceEffectReconciliationStoreMixin,
     TaskAcceptanceEffectDeliveryMixin,
     TaskParallelSuccessStoreMixin,
     TaskParallelSettlementStoreMixin,

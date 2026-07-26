@@ -111,6 +111,32 @@ class TaskStorePort(Protocol):
         evidence_ref: str,
     ) -> Mapping[str, Any]: ...
 
+    def stage_acceptance_effect_reconciliation_evidence(
+        self,
+        *,
+        request_id: str,
+        ingress_audit_ref: str,
+        body_sha256: str,
+        effect_id: str,
+        case_id: str,
+        expected_case_snapshot_sha256: str,
+        expected_subject_snapshot_sha256: str,
+        purpose: str,
+        outcome: str,
+        reconciler_actor_id: str,
+        issued_ts_ms: int,
+        downstream_receipt_ref: str | None,
+        executor_quiescence_ref: str | None,
+        attestation_ref: str,
+        attestation_key_id: str,
+        attestation_signature: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_acceptance_effect_reconciliation_evidence(
+        self,
+        evidence_ref: str,
+    ) -> Mapping[str, Any]: ...
+
     def resolve_internal_agent_budget_rejection_terminal(
         self,
         attempt_id: str,

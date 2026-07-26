@@ -26,6 +26,9 @@ from host_brain.composition.runtime_group import GraphCancellationOperatorError
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationError,
 )
+from host_brain.task_runtime.acceptance_effect_reconciliation import (
+    AcceptanceEffectReconciliationError,
+)
 from host_brain.observability.operator_command_gateway import operator_runtime_value
 from host_brain.runtime.degradation_authority import (
     DegradationCapabilityPort,
@@ -56,6 +59,7 @@ GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
     "edge.command.push",
     "scheduler.task.trigger",
     "sys_mode.switch",
+    "task_effect.reconcile",
     "task_operation.reconcile",
     "task_terminal.reconcile",
 })
@@ -65,7 +69,7 @@ BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 32
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 31
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -680,56 +684,31 @@ async def _task_operation_reconcile(
 
 async def _task_effect_reconcile(
     payload: Mapping[str, Any],
-    _request_id: str,
+    request_id: str,
 ) -> Any:
-    del _request_id
-    service = operator_runtime_value("task_effect_reconciliation_command_service")
-    reconcile = getattr(service, "reconcile_graph_cancellation_effect", None)
+    if operator_runtime_value(
+        "task_effect_reconciliation_operator_enabled"
+    ) is not True:
+        raise ObsDomainCommandError(
+            "OBS_TASK_EFFECT_RECONCILIATION_DISABLED"
+        )
+    runtime = operator_runtime_value("governed_operator_runtime")
+    reconcile = getattr(runtime, "execute_effect_reconciliation", None)
     if not callable(reconcile):
         raise ObsDomainCommandError("OBS_TASK_EFFECT_RECONCILIATION_UNAVAILABLE")
     try:
-        result = reconcile(
-            intent_ref=_required_text(payload, "intent_ref"),
-            effect_id=_required_text(payload, "effect_id"),
-            case_id=_required_text(payload, "case_id"),
-            expected_case_snapshot_sha256=_required_text(
-                payload,
-                "expected_case_snapshot_sha256",
-            ),
-            expected_subject_snapshot_sha256=_required_text(
-                payload,
-                "expected_subject_snapshot_sha256",
-            ),
-            purpose=_required_text(payload, "purpose").upper(),
-            outcome=_required_text(payload, "outcome").upper(),
-            reconciler_actor_id=_required_text(payload, "reconciler_actor_id"),
-            issued_ts_ms=int(payload["issued_ts_ms"]),
-            downstream_receipt_ref=_optional_text(
-                payload,
-                "downstream_receipt_ref",
-            ),
-            executor_quiescence_ref=_optional_text(
-                payload,
-                "executor_quiescence_ref",
-            ),
-            attestation_ref=_required_text(payload, "attestation_ref"),
-            attestation_key_id=_required_text(payload, "attestation_key_id"),
-            attestation_signature=_required_text(payload, "attestation_signature"),
-        )
-        if inspect.isawaitable(result):
-            result = await result
-    except GraphCancellationEffectReconciliationError as exc:
+        result = await reconcile(payload, request_id)
+    except (
+        GraphCancellationEffectReconciliationError,
+        AcceptanceEffectReconciliationError,
+    ) as exc:
         raise ObsCommandPortExecutionError(
             exc.reason_code,
             side_effects_may_have_run=exc.side_effects_may_have_run,
         ) from exc
     if not isinstance(result, Mapping):
         raise ObsDomainCommandError("OBS_TASK_EFFECT_RECONCILIATION_RESULT_INVALID")
-    return {
-        "success": True,
-        "side_effects_executed": True,
-        "reconciliation": dict(result),
-    }
+    return dict(result)
 
 
 async def _task_terminal_reconcile(

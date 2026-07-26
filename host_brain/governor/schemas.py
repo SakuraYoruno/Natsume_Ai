@@ -34,6 +34,7 @@ ACTION_ALLOWLIST = {
     "operator_edge_command_push",
     "operator_task_terminal_reconciliation",
     "operator_task_operation_reconciliation",
+    "operator_task_effect_reconciliation",
     "work_code",
     "work_translate",
 }
@@ -41,6 +42,7 @@ TARGET_ALLOWLIST = {"edge", "host", "memory", "system", "task_runtime"}
 ACTION_TARGET_RULES = {
     "operator_edge_command_push": "edge",
     "operator_task_operation_reconciliation": "task_runtime",
+    "operator_task_effect_reconciliation": "task_runtime",
 }
 
 REQUIRED_FIELDS: dict[str, type] = {
@@ -143,6 +145,22 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "reservation_id": str,
             "expected_version": int,
             "action": str,
+            "reconciler_actor_id": str,
+        },
+        "optional": {},
+    },
+    "operator_task_effect_reconciliation": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "evidence_ref": str,
+            "evidence_digest": str,
+            "effect_id": str,
+            "case_id": str,
+            "purpose": str,
+            "outcome": str,
             "reconciler_actor_id": str,
         },
         "optional": {},

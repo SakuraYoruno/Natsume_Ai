@@ -16,6 +16,10 @@ from host_brain.app.governed_operation_reconciliation_runtime import (
     OPERATION_RECONCILIATION_TARGET_ID,
     operation_reconciliation_commit_event,
 )
+from host_brain.app.governed_effect_reconciliation_runtime import (
+    EFFECT_RECONCILIATION_TARGET_ID,
+    effect_reconciliation_commit_event,
+)
 from host_brain.app.governed_terminal_reconciliation_runtime import (
     TERMINAL_TARGET_ID,
     terminal_reconciliation_commit_event,
@@ -60,6 +64,12 @@ class FrozenSysModeSwitchExecutor:
             and frozen.target_id == OPERATION_RECONCILIATION_TARGET_ID
         ):
             yield operation_reconciliation_commit_event(frozen)
+            return
+        if (
+            frozen.route == "delegate"
+            and frozen.target_id == EFFECT_RECONCILIATION_TARGET_ID
+        ):
+            yield effect_reconciliation_commit_event(frozen)
             return
         if frozen.route == "delegate" and frozen.target_id == EDGE_TARGET_ID:
             yield compile_frozen_edge_command(

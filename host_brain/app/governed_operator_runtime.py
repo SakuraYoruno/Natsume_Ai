@@ -65,6 +65,15 @@ from host_brain.app.governed_operation_reconciliation_runtime import (
 from host_brain.app.accepted_operation_reconciliation_handler import (
     OPERATION_RECONCILIATION_EFFECT_TYPE,
 )
+from host_brain.app.accepted_effect_reconciliation_handler import (
+    EFFECT_RECONCILIATION_EFFECT_TYPE,
+)
+from host_brain.app.governed_effect_reconciliation_runtime import (
+    EFFECT_RECONCILIATION_TARGET_ID,
+    GovernedEffectReconciliationMixin,
+    effect_reconciliation_request_from_args,
+    require_durable_effect_reconciliation_outcome,
+)
 from host_brain.app.governed_task_adapter import GovernedHostRuntime
 from host_brain.app.user_preference_store import UserPreferenceStore
 from host_brain.channels.edge_transport import query_gateway_reply_delivery
@@ -106,6 +115,7 @@ class GovernedOperatorComposition:
 
 
 class GovernedOperatorRuntime(
+    GovernedEffectReconciliationMixin,
     GovernedOperationReconciliationMixin,
     GovernedTerminalReconciliationMixin,
 ):
@@ -228,6 +238,15 @@ class GovernedOperatorRuntime(
                 task_store=self._task_store,
                 execution_receipt=receipt,
                 request=operation_reconciliation_request_from_args(args),
+            )
+            bound["acceptance_effect_receipt"] = outcome
+            bound["historical_side_effects_executed"] = True
+            return bound
+        if operator_command_id == "task_effect.reconcile":
+            outcome = require_durable_effect_reconciliation_outcome(
+                task_store=self._task_store,
+                execution_receipt=receipt,
+                request=effect_reconciliation_request_from_args(args),
             )
             bound["acceptance_effect_receipt"] = outcome
             bound["historical_side_effects_executed"] = True
@@ -839,6 +858,7 @@ def build_governed_operator_runtime(
                 _EDGE_EFFECT_TYPE,
                 TERMINAL_EFFECT_TYPE,
                 OPERATION_RECONCILIATION_EFFECT_TYPE,
+                EFFECT_RECONCILIATION_EFFECT_TYPE,
             }
         ),
     )
@@ -946,6 +966,12 @@ def build_governed_operator_composition(
             operation_reconciliation_service=(
                 task_runtime_container.operation_reconciliation_service
             ),
+            effect_reconciliation_service=(
+                task_runtime_container.effect_reconciliation_service
+            ),
+            effect_reconciliation_evidence_store=(
+                task_runtime_container.task_store
+            ),
             operation_reconciliation_evidence_store=(
                 task_runtime_container.task_store
             ),
@@ -1010,6 +1036,7 @@ def _require_operator_target(target_id: str) -> str:
         _EDGE_TARGET_ID,
         TERMINAL_TARGET_ID,
         OPERATION_RECONCILIATION_TARGET_ID,
+        EFFECT_RECONCILIATION_TARGET_ID,
     }:
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,

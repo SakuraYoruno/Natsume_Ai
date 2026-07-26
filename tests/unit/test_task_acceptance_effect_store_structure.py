@@ -19,6 +19,12 @@ from host_brain.persistence.task_acceptance_effect_delivery import (
 from host_brain.persistence.task_acceptance_effect_staging import (
     TaskAcceptanceEffectStagingMixin,
 )
+from host_brain.persistence.task_acceptance_effect_reconciliation_store import (
+    TaskAcceptanceEffectReconciliationStoreMixin,
+)
+from host_brain.persistence.task_acceptance_effect_reconciliation_evidence_store import (
+    TaskAcceptanceEffectReconciliationEvidenceStoreMixin,
+)
 from host_brain.persistence.task_graph_cancellation_continuation_store import (
     TaskGraphCancellationContinuationStoreMixin,
 )
@@ -48,6 +54,9 @@ from host_brain.persistence.task_atomic_failure_store import (
 )
 from host_brain.persistence.task_operation_reconciliation_store import (
     TaskOperationReconciliationStoreMixin,
+)
+from host_brain.persistence.task_operation_failure_reconciliation_store import (
+    TaskOperationFailureReconciliationStoreMixin,
 )
 from host_brain.persistence.task_operation_reconciliation_evidence_store import (
     TaskOperationReconciliationEvidenceStoreMixin,
@@ -170,6 +179,8 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskOutboxDeliveryStoreMixin,
         TaskGraphCancellationContinuationStoreMixin,
         TaskAcceptanceEffectStagingMixin,
+        TaskAcceptanceEffectReconciliationEvidenceStoreMixin,
+        TaskAcceptanceEffectReconciliationStoreMixin,
         TaskAcceptanceEffectDeliveryMixin,
         TaskParallelSuccessStoreMixin,
         TaskParallelSettlementStoreMixin,
@@ -184,6 +195,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskOperationReconciliationEvidenceStoreMixin,
         TaskOperationCheckpointReconciliationStoreMixin,
         TaskOperationReconciliationStoreMixin,
+        TaskOperationFailureReconciliationStoreMixin,
         TaskEffectReconciliationStoreMixin,
         TaskGraphCancellationEffectOverlayMixin,
         TaskTerminalReconciliationStoreMixin,
