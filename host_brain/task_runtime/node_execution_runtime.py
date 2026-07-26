@@ -263,6 +263,14 @@ class DurableNodeExecutionRuntime:
                     "existing operation reservation has no durable Attempt",
                 )
             latest_attempt = attempts[-1]
+            budget = await self._budgets.bind_node_attempt(
+                budget,
+                node_id=admitted.node_id,
+                attempt_id=_required_record_text(
+                    latest_attempt,
+                    "attempt_id",
+                ),
+            )
             existing_resolution = await resolve_existing_operation(
                 task_store=self._store,
                 checkpoint_uow=self._checkpoint_uow,
@@ -466,6 +474,11 @@ class DurableNodeExecutionRuntime:
             attempt = _mapping(claimed.get("attempt"), field_name="atomic READY claim attempt")
             lease = _mapping(claimed.get("lease"), field_name="atomic READY claim lease")
             node = _mapping(claimed.get("node"), field_name="atomic READY claim node")
+        budget = await self._budgets.bind_node_attempt(
+            budget,
+            node_id=admitted.node_id,
+            attempt_id=attempt_id,
+        )
         lease_id = _required_record_text(lease, "lease_id")
         fencing_token = _record_positive_int(lease, "fencing_token")
         if _status(node) == "LEASED":

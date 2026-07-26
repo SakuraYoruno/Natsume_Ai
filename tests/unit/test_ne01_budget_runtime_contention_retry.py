@@ -45,6 +45,15 @@ class _ContendedStore:
         assert (budget_id, usage_id) == ("budget-1", "budget-usage://accepted/1")
         return None
 
+    def get_node_budget_reservation(
+        self,
+        *,
+        parent_budget_id: str,
+        attempt_id: str,
+    ) -> dict[str, Any]:
+        assert (parent_budget_id, attempt_id) == ("budget-1", "attempt-1")
+        return _node_budget_record()
+
     def consume_budget_once(self, budget_id: str, **_: Any) -> Any:
         assert budget_id == "budget-1"
         self.calls += 1
@@ -67,6 +76,30 @@ class _OutboxFactory:
         return dict(kwargs)
 
 
+def _node_budget_record() -> dict[str, Any]:
+    amount = BudgetAmount(token_count=100, concurrency=1).to_dict()
+    return {
+        "schema_version": "Natsume.task_runtime.node_budget_reservation.v1",
+        "node_budget_id": "node-budget::attempt-1",
+        "parent_budget_id": "budget-1",
+        "graph_id": "graph-1",
+        "graph_revision": 1,
+        "node_id": "node-1",
+        "attempt_id": "attempt-1",
+        "scope": "test",
+        "limits": BudgetAmount(token_count=100, concurrency=8).to_dict(),
+        "reserved": amount,
+        "consumed": BudgetAmount().to_dict(),
+        "attempted_consumed": BudgetAmount().to_dict(),
+        "remaining": amount,
+        "usage_version": 1,
+        "parent_version_at_claim": 7,
+        "claim_origin": "ATOMIC_READY_CLAIM",
+        "attempt_status": "RUNNING",
+        "status": "ACTIVE",
+    }
+
+
 @pytest.mark.asyncio
 async def test_budget_charge_cas_attempts_scale_with_admitted_concurrency() -> None:
     store = _ContendedStore(conflicts=8)
@@ -81,6 +114,7 @@ async def test_budget_charge_cas_attempts_scale_with_admitted_concurrency() -> N
         graph_revision=1,
         policy=policy,
         record=dict(store.record),
+        node_record=_node_budget_record(),
     )
     runtime = DurableBudgetRuntime(
         task_store=store,

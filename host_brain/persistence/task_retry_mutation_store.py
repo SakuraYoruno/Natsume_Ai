@@ -459,10 +459,38 @@ class TaskRetryMutationStoreMixin:
                 field_name="budget.reserved_json",
             )
             attempted_consumed = _add_amounts(consumed, retry_delta)
-            exceeded_dimensions = tuple(
+            parent_exceeded_dimensions = tuple(
                 key
                 for key, value in attempted_consumed.to_dict().items()
                 if value > reserved.to_dict()[key]
+            )
+            node_budget_ready = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_node_budget_reservation'
+                """
+            ).fetchone() is not None
+            child_exceeded_dimensions: tuple[str, ...] = ()
+            if node_budget_ready:
+                child_budget = self._require_node_budget(
+                    conn,
+                    parent_budget_id=budget_ref,
+                    attempt_id=str(attempt_id),
+                )
+                child_exceeded_dimensions = (
+                    self._node_budget_exceeded_dimensions(
+                        child_budget,
+                        retry_delta,
+                    )
+                )
+            exceeded_dimensions = tuple(
+                key
+                for key in reserved.to_dict()
+                if key in {
+                    *parent_exceeded_dimensions,
+                    *child_exceeded_dimensions,
+                }
             )
             retry_accepted = not exceeded_dimensions
             next_budget_status = (
@@ -557,6 +585,18 @@ class TaskRetryMutationStoreMixin:
                 ),
                 expected_attempt_id=str(attempt_id),
             )
+            if node_budget_ready:
+                self._apply_node_budget_usage_in_transaction(
+                    conn,
+                    parent_budget=budget,
+                    attempt_id=str(attempt_id),
+                    usage_id=retry_usage_id,
+                    delta=retry_delta,
+                    accepted=retry_accepted,
+                    exceeded_dimensions=exceeded_dimensions,
+                    parent_outbox_id=budget_outbox.outbox_id,
+                    ts_ms=ts_ms,
+                )
 
             retry_not_before_ms = (
                 ts_ms + int(retry_policy["retry_backoff_ms"])
@@ -727,7 +767,7 @@ class TaskRetryMutationStoreMixin:
                 expected_event_type="TASK_LEASE_RELEASED",
                 expected_attempt_id=str(attempt_id),
             )
-            return {
+            result = {
                 "accepted": retry_accepted,
                 "reason_code": budget_reason_code,
                 "exceeded_dimensions": exceeded_dimensions,
@@ -775,3 +815,13 @@ class TaskRetryMutationStoreMixin:
                 ),
                 "retry_not_before_ms": retry_not_before_ms,
             }
+            if node_budget_ready:
+                result["node_budget"] = self._node_budget_record(
+                    conn,
+                    self._require_node_budget(
+                        conn,
+                        parent_budget_id=budget_ref,
+                        attempt_id=str(attempt_id),
+                    ),
+                )
+            return result

@@ -18,6 +18,10 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetReservation,
     BudgetReservationStatus,
 )
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.node_budget_reservation import (
+    NodeBudgetReservationV1,
+)
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
 from .admission import AdmittedExecution
@@ -49,6 +53,7 @@ class BudgetRuntimeContext:
     graph_revision: int
     policy: BudgetPolicy
     record: dict[str, Any]
+    node_record: dict[str, Any] | None = None
 
     @property
     def status(self) -> str:
@@ -61,8 +66,20 @@ class BudgetRuntimeContext:
     def refreshed(self, record: Mapping[str, Any]) -> "BudgetRuntimeContext":
         return replace(self, record=dict(record))
 
+    def bound_to_node(
+        self,
+        record: Mapping[str, Any],
+    ) -> "BudgetRuntimeContext":
+        return replace(self, node_record=dict(record))
+
+    @property
+    def node_budget_id(self) -> str | None:
+        if self.node_record is None:
+            return None
+        return str(self.node_record.get("node_budget_id") or "").strip() or None
+
     def execution_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "budget_id": self.budget_id,
             "scope": self.policy.scope,
             "status": self.status,
@@ -72,6 +89,20 @@ class BudgetRuntimeContext:
             "consumed": dict(self.record.get("consumed") or {}),
             "remaining": dict(self.record.get("remaining") or {}),
         }
+        if self.node_record is not None:
+            payload["node_reservation"] = {
+                "schema_version": self.node_record.get("schema_version"),
+                "node_budget_id": self.node_record.get("node_budget_id"),
+                "parent_budget_id": self.node_record.get("parent_budget_id"),
+                "node_id": self.node_record.get("node_id"),
+                "attempt_id": self.node_record.get("attempt_id"),
+                "status": self.node_record.get("status"),
+                "usage_version": self.node_record.get("usage_version"),
+                "reserved": dict(self.node_record.get("reserved") or {}),
+                "consumed": dict(self.node_record.get("consumed") or {}),
+                "remaining": dict(self.node_record.get("remaining") or {}),
+            }
+        return payload
 
     def remaining_execution_time_ms(self) -> int | None:
         """Return the durable worker deadline, if this graph budgets wall time.
@@ -103,7 +134,26 @@ class BudgetRuntimeContext:
                 GOVERNED_BUDGET_STATE_CONFLICT,
                 "durable remaining time budget is outside its configured limit",
             )
-        return value
+        if self.node_record is None:
+            return value
+        node_remaining = self.node_record.get("remaining")
+        if not isinstance(node_remaining, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "node BudgetReservation has no durable remaining projection",
+            )
+        node_value = node_remaining.get("time_ms")
+        if isinstance(node_value, bool) or not isinstance(node_value, int):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "node remaining time budget is not an integer",
+            )
+        if node_value < 0 or node_value > configured_limit:
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "node remaining time budget is outside its configured limit",
+            )
+        return min(value, node_value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +189,7 @@ class DurableBudgetRuntime:
         policy = _required_policy(admitted, work_order)
         budget_id = _budget_id(admitted, policy)
         await _maybe_await(self._store.assert_budget_usage_ready())
+        await _maybe_await(self._store.assert_node_budget_ready())
         snapshot = await _maybe_await(
             self._store.read_scheduler_snapshot(admitted.graph_id, admitted.graph_revision)
         )
@@ -246,6 +297,55 @@ class DurableBudgetRuntime:
             policy=policy,
             record=record,
         )
+
+    async def bind_node_attempt(
+        self,
+        context: BudgetRuntimeContext,
+        *,
+        node_id: str,
+        attempt_id: str,
+    ) -> BudgetRuntimeContext:
+        value = await _maybe_await(
+            self._store.get_node_budget_reservation(
+                parent_budget_id=context.budget_id,
+                attempt_id=attempt_id,
+            )
+        )
+        if not isinstance(value, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "node BudgetReservation reader returned an invalid record",
+            )
+        record = dict(value)
+        try:
+            NodeBudgetReservationV1.from_mapping(record)
+        except ContractViolation as exc:
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                f"node BudgetReservation contract is invalid: {exc.detail}",
+            ) from exc
+        if (
+            str(record.get("parent_budget_id") or "") != context.budget_id
+            or str(record.get("graph_id") or "") != context.graph_id
+            or int(record.get("graph_revision") or 0)
+            != context.graph_revision
+            or str(record.get("node_id") or "") != str(node_id)
+            or str(record.get("attempt_id") or "") != str(attempt_id)
+            or not str(record.get("node_budget_id") or "").strip()
+            or str(record.get("status") or "")
+            not in {
+                "ACTIVE",
+                "CONSUMED",
+                "RELEASED",
+                "EXCEEDED",
+                "CANCEL_REQUESTED",
+            }
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "node BudgetReservation differs from the claimed Attempt",
+            )
+        return context.bound_to_node(record)
 
     async def precharge(
         self,
@@ -440,8 +540,11 @@ class DurableBudgetRuntime:
                 base_delta=base_delta,
             )
             updated = await self._required_reconcile(context.budget_id)
+            refreshed_context = await self._refresh_node_binding(
+                context.refreshed(updated)
+            )
             return BudgetCharge(
-                context=context.refreshed(updated),
+                context=refreshed_context,
                 accepted=bool(existing.get("accepted")),
                 usage_id=usage_id,
                 replayed=True,
@@ -521,8 +624,11 @@ class DurableBudgetRuntime:
                 base_delta=base_delta,
             )
         updated = await self._required_reconcile(context.budget_id)
+        refreshed_context = await self._refresh_node_binding(
+            context.refreshed(updated)
+        )
         return BudgetCharge(
-            context=context.refreshed(updated),
+            context=refreshed_context,
             accepted=bool(existing.get("accepted")),
             usage_id=usage_id,
             replayed=True,
@@ -546,7 +652,9 @@ class DurableBudgetRuntime:
         record = await self._required_reconcile(context.budget_id)
         status = _status(record)
         if status == target_status.value:
-            return context.refreshed(record)
+            return await self._refresh_node_binding(
+                context.refreshed(record)
+            )
         if status == BudgetReservationStatus.EXCEEDED.value:
             target_status = BudgetReservationStatus.RELEASED
         elif status != BudgetReservationStatus.ACTIVE.value:
@@ -575,10 +683,16 @@ class DurableBudgetRuntime:
                     f"BudgetReservation finalization failed: {_reason(exc)}",
                 ) from exc
             updated = current
-        return context.refreshed(await self._required_reconcile(str(updated["budget_id"])))
+        refreshed = context.refreshed(
+            await self._required_reconcile(str(updated["budget_id"]))
+        )
+        return await self._refresh_node_binding(refreshed)
 
     async def refresh(self, context: BudgetRuntimeContext) -> BudgetRuntimeContext:
-        return context.refreshed(await self._required_reconcile(context.budget_id))
+        refreshed = context.refreshed(
+            await self._required_reconcile(context.budget_id)
+        )
+        return await self._refresh_node_binding(refreshed)
 
     def build_finalization_outbox(
         self,
@@ -620,6 +734,11 @@ class DurableBudgetRuntime:
         attempt_id: str,
         delta: BudgetAmount,
     ) -> BudgetCharge:
+        self._assert_node_charge_binding(
+            context,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        )
         last_exc: BaseException | None = None
         # READY claims cap simultaneous writers at the policy concurrency.
         # Size the CAS budget to that admitted fan-out instead of the old
@@ -657,9 +776,12 @@ class DurableBudgetRuntime:
                     )
                 )
                 updated = await self._required_reconcile(context.budget_id)
+                refreshed_context = await self._refresh_node_binding(
+                    context.refreshed(updated)
+                )
                 dimensions = tuple(str(item) for item in result.exceeded_dimensions)
                 return BudgetCharge(
-                    context=context.refreshed(updated),
+                    context=refreshed_context,
                     accepted=bool(result.accepted),
                     usage_id=usage_id,
                     replayed=bool(getattr(result, "replayed", False)),
@@ -686,8 +808,11 @@ class DurableBudgetRuntime:
                         delta=delta,
                     )
                     updated = await self._required_reconcile(context.budget_id)
+                    refreshed_context = await self._refresh_node_binding(
+                        context.refreshed(updated)
+                    )
                     return BudgetCharge(
-                        context=context.refreshed(updated),
+                        context=refreshed_context,
                         accepted=bool(replay.get("accepted")),
                         usage_id=usage_id,
                         replayed=True,
@@ -709,6 +834,39 @@ class DurableBudgetRuntime:
             GOVERNED_BUDGET_STATE_CONFLICT,
             f"durable budget CAS did not converge: {_reason(last_exc)}",
         ) from last_exc
+
+    async def _refresh_node_binding(
+        self,
+        context: BudgetRuntimeContext,
+    ) -> BudgetRuntimeContext:
+        if context.node_record is None:
+            return context
+        return await self.bind_node_attempt(
+            context,
+            node_id=str(context.node_record.get("node_id") or ""),
+            attempt_id=str(context.node_record.get("attempt_id") or ""),
+        )
+
+    @staticmethod
+    def _assert_node_charge_binding(
+        context: BudgetRuntimeContext,
+        *,
+        node_id: str,
+        attempt_id: str,
+    ) -> None:
+        record = context.node_record
+        if (
+            not isinstance(record, Mapping)
+            or not context.node_budget_id
+            or str(record.get("parent_budget_id") or "") != context.budget_id
+            or str(record.get("node_id") or "") != str(node_id)
+            or str(record.get("attempt_id") or "") != str(attempt_id)
+            or str(record.get("status") or "") not in {"ACTIVE", "EXCEEDED"}
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_BUDGET_STATE_CONFLICT,
+                "budget charge requires the exact active node BudgetReservation",
+            )
 
     async def _try_reconcile(self, budget_id: str) -> dict[str, Any] | None:
         try:

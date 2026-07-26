@@ -362,6 +362,22 @@ class TaskRetryReplayStoreMixin:
             expected_event_type=budget_event_type,
             expected_attempt_id=attempt_id,
         )
+        node_budget_ready = conn.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_node_budget_reservation'
+            """
+        ).fetchone() is not None
+        if node_budget_ready:
+            self._assert_node_budget_usage_replay_in_transaction(
+                conn,
+                parent_budget_id=budget_ref,
+                attempt_id=attempt_id,
+                usage_id=retry_usage_id,
+                accepted=retry_accepted,
+                parent_outbox_id=budget_outbox.outbox_id,
+            )
 
         graph_nodes = conn.execute(
             """
@@ -370,7 +386,7 @@ class TaskRetryReplayStoreMixin:
             """,
             (graph_id, graph_revision),
         ).fetchall()
-        return {
+        result = {
             "accepted": retry_accepted,
             "reason_code": budget_reason_code,
             "exceeded_dimensions": exceeded_dimensions,
@@ -384,3 +400,13 @@ class TaskRetryReplayStoreMixin:
             "usage": usage_record,
             "retry_not_before_ms": retry_not_before_ms,
         }
+        if node_budget_ready:
+            result["node_budget"] = self._node_budget_record(
+                conn,
+                self._require_node_budget(
+                    conn,
+                    parent_budget_id=budget_ref,
+                    attempt_id=attempt_id,
+                ),
+            )
+        return result

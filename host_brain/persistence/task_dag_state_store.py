@@ -471,6 +471,39 @@ class TaskDagStateStoreMixin:
                 if usage_ready is not None
                 else []
             )
+            node_budget_ready = conn.execute(
+                """SELECT 1 FROM sqlite_master
+                   WHERE type = 'table'
+                     AND name = 'task_runtime_node_budget_reservation'"""
+            ).fetchone()
+            node_budget_rows = (
+                conn.execute(
+                    """
+                    SELECT * FROM task_runtime_node_budget_reservation
+                    WHERE graph_id = ? AND graph_revision = ?
+                    ORDER BY node_id, attempt_id, node_budget_id
+                    """,
+                    (str(graph_id), int(revision)),
+                ).fetchall()
+                if node_budget_ready is not None
+                else []
+            )
+            node_budget_usage_rows = (
+                conn.execute(
+                    """
+                    SELECT * FROM task_runtime_node_budget_usage
+                    WHERE node_budget_id IN (
+                        SELECT node_budget_id
+                        FROM task_runtime_node_budget_reservation
+                        WHERE graph_id = ? AND graph_revision = ?
+                    )
+                    ORDER BY created_ts_ms, node_budget_id, usage_id
+                    """,
+                    (str(graph_id), int(revision)),
+                ).fetchall()
+                if node_budget_ready is not None
+                else []
+            )
             snapshot = {
                 "observed_ts_ms": observed_ts_ms,
                 "graph_record": _graph_record(graph_row, node_rows),
@@ -478,6 +511,17 @@ class TaskDagStateStoreMixin:
                 "active_leases": [dict(row) for row in lease_rows],
                 "budgets": [self._budget_record(row) for row in budget_rows],
                 "budget_usage": [_budget_usage_record(row) for row in budget_usage_rows],
+                "node_budgets": [
+                    self._node_budget_record(conn, row)
+                    for row in node_budget_rows
+                ],
+                "node_budget_usage": [
+                    {
+                        **dict(row),
+                        "accepted": bool(row["accepted"]),
+                    }
+                    for row in node_budget_usage_rows
+                ],
             }
             if include_graph_outboxes:
                 snapshot["graph_outboxes"] = [

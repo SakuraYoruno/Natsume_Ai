@@ -74,6 +74,7 @@ class TaskReadyClaimStoreMixin:
         """
 
         self.assert_dag_scheduling_ready()
+        self.assert_node_budget_ready()
         attempt_ref = str(attempt_id or "").strip()
         owner = str(owner_id or "").strip()
         budget_ref = str(budget_id or "").strip()
@@ -173,6 +174,13 @@ class TaskReadyClaimStoreMixin:
                     )
                 expected_node_version = retry_ready_version
             if existing_attempt is not None:
+                child_budget = self._reserve_node_budget_in_transaction(
+                    conn,
+                    parent_budget=budget_row,
+                    attempt=existing_attempt,
+                    claim_origin="ATOMIC_READY_CLAIM",
+                    ts_ms=ts_ms,
+                )
                 replayed = self._replay_ready_node_claim(
                     conn,
                     attempt=existing_attempt,
@@ -202,6 +210,10 @@ class TaskReadyClaimStoreMixin:
                         expected_event_type="TASK_NODE_READY",
                         expected_attempt_id=None,
                     )
+                replayed["node_budget"] = self._node_budget_record(
+                    conn,
+                    child_budget,
+                )
                 return replayed
             self._require_version(
                 node,
@@ -306,6 +318,13 @@ class TaskReadyClaimStoreMixin:
                 expected_event_type="TASK_ATTEMPT_CREATED",
                 expected_attempt_id=attempt_ref,
             )
+            child_budget = self._reserve_node_budget_in_transaction(
+                conn,
+                parent_budget=budget_row,
+                attempt=self._require_attempt(conn, attempt_ref),
+                claim_origin="ATOMIC_READY_CLAIM",
+                ts_ms=ts_ms,
+            )
 
             attempt_cursor = conn.execute(
                 """
@@ -402,6 +421,7 @@ class TaskReadyClaimStoreMixin:
                 "node": _node_record(
                     self._require_node(conn, graph_id, graph_revision, node_id)
                 ),
+                "node_budget": self._node_budget_record(conn, child_budget),
                 "replayed": False,
             }
             if retry_ready_outbox is not None:

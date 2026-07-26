@@ -35,6 +35,15 @@ from host_brain.persistence.task_store_types import (
     TaskStoreError,
     _DURABLE_REFERENCE_PATTERN,
 )
+from host_brain.persistence.task_node_budget_usage_bridge import (
+    apply_node_budget_usage,
+    assert_node_budget_usage_replay,
+    node_budget_exceeded_dimensions,
+    node_budget_ready,
+)
+from host_brain.persistence.task_budget_terminal_sibling import (
+    record_already_exceeded_usage,
+)
 
 
 class TaskBudgetUsageStoreMixin:
@@ -88,6 +97,7 @@ class TaskBudgetUsageStoreMixin:
         ts_ms = self._now()
 
         with self._transaction() as conn:
+            child_ledger_enabled = node_budget_ready(conn)
             self._assert_graph_not_cancelling(
                 conn,
                 graph_id=graph_ref,
@@ -167,7 +177,27 @@ class TaskBudgetUsageStoreMixin:
             consumed = _amount_from_json(row["consumed_json"], field_name="consumed_json")
             reserved = _amount_from_json(row["reserved_json"], field_name="reserved_json")
             attempted = _add_amounts(consumed, normalized_delta)
-            exceeded_dimensions = self._exceeded_dimensions(attempted, reserved)
+            parent_exceeded_dimensions = self._exceeded_dimensions(
+                attempted,
+                reserved,
+            )
+            child_exceeded_dimensions: tuple[str, ...] = ()
+            if child_ledger_enabled:
+                child_exceeded_dimensions = node_budget_exceeded_dimensions(
+                    self,
+                    conn,
+                    parent_budget_id=budget_ref,
+                    attempt_id=attempt_ref,
+                    delta=normalized_delta,
+                )
+            exceeded_dimensions = tuple(
+                key
+                for key in reserved.to_dict()
+                if key in {
+                    *parent_exceeded_dimensions,
+                    *child_exceeded_dimensions,
+                }
+            )
             accepted = not exceeded_dimensions
             target_status = (
                 BudgetReservationStatus.ACTIVE.value
@@ -233,6 +263,19 @@ class TaskBudgetUsageStoreMixin:
                 expected_event_type=("BUDGET_CONSUMED" if accepted else "BUDGET_EXCEEDED"),
                 expected_attempt_id=attempt_ref,
             )
+            if child_ledger_enabled:
+                apply_node_budget_usage(
+                    self,
+                    conn,
+                    parent_budget=row,
+                    attempt_id=attempt_ref,
+                    usage_id=usage_ref,
+                    delta=normalized_delta,
+                    accepted=accepted,
+                    exceeded_dimensions=exceeded_dimensions,
+                    parent_outbox_id=outbox.outbox_id,
+                    ts_ms=ts_ms,
+                )
             updated = self._budget_record(self._require_budget(conn, budget_ref))
             usage_row = conn.execute(
                 """
@@ -411,6 +454,16 @@ class TaskBudgetUsageStoreMixin:
                 TASK_STORE_OUTBOX_CONFLICT,
                 f"budget usage replay drift: {usage_ref}",
             )
+        if node_budget_ready(conn):
+            assert_node_budget_usage_replay(
+                self,
+                conn,
+                parent_budget_id=budget_ref,
+                attempt_id=attempt_ref,
+                usage_id=usage_ref,
+                accepted=bool(existing["accepted"]),
+                parent_outbox_id=str(existing["outbox_id"]),
+            )
         budget_row = self._require_budget(conn, budget_ref)
         reservation = self._budget_record(budget_row)
         usage = _budget_usage_record(existing)
@@ -452,69 +505,22 @@ class TaskBudgetUsageStoreMixin:
         outbox: OutboxMessage,
         ts_ms: int,
     ) -> BudgetConsumptionResult:
-        terminal_version = int(row["status_version"])
-        winner, dimensions = self._terminal_budget_authority(
+        return record_already_exceeded_usage(
+            self,
             conn,
-            budget_row=row,
-            terminal_version=terminal_version,
-        )
-        consumed = _amount_from_json(row["consumed_json"], field_name="consumed_json")
-        reserved = _amount_from_json(row["reserved_json"], field_name="reserved_json")
-        candidate_dimensions = self._exceeded_dimensions(
-            _add_amounts(consumed, normalized_delta),
-            reserved,
-        )
-        self._validate_terminal_sibling_outbox(
-            outbox,
+            row=row,
             budget_ref=budget_ref,
-            terminal_version=terminal_version,
-            attempt_ref=attempt_ref,
             usage_ref=usage_ref,
-            would_exceed=bool(candidate_dimensions),
-        )
-        conn.execute(
-            """
-            INSERT INTO task_runtime_budget_usage(
-                budget_id, usage_id, graph_id, graph_revision, node_id,
-                attempt_id, charge_kind, delta_json, delta_digest, accepted,
-                reason_code, exceeded_dimensions_json,
-                reservation_version_before, reservation_version_after,
-                outbox_id, created_ts_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                budget_ref,
-                usage_ref,
-                graph_ref,
-                graph_revision,
-                node_ref,
-                attempt_ref,
-                kind,
-                delta_json,
-                delta_digest,
-                TASK_STORE_BUDGET_ALREADY_EXCEEDED,
-                _dumps(list(dimensions)),
-                terminal_version,
-                terminal_version,
-                str(winner["outbox_id"]),
-                ts_ms,
-            ),
-        )
-        usage_row = conn.execute(
-            """
-            SELECT * FROM task_runtime_budget_usage
-            WHERE budget_id = ? AND usage_id = ?
-            """,
-            (budget_ref, usage_ref),
-        ).fetchone()
-        return BudgetConsumptionResult(
-            accepted=False,
-            reason_code=TASK_STORE_BUDGET_ALREADY_EXCEEDED,
-            reservation=self._budget_record(row),
-            exceeded_dimensions=dimensions,
-            usage_id=usage_ref,
-            replayed=False,
-            usage=_budget_usage_record(usage_row),
+            kind=kind,
+            graph_ref=graph_ref,
+            graph_revision=graph_revision,
+            node_ref=node_ref,
+            attempt_ref=attempt_ref,
+            normalized_delta=normalized_delta,
+            delta_json=delta_json,
+            delta_digest=delta_digest,
+            outbox=outbox,
+            ts_ms=ts_ms,
         )
 
     @staticmethod
