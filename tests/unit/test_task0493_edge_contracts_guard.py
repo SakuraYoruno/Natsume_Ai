@@ -7,7 +7,7 @@ import pytest
 
 from tools.architecture import edge_contracts_guard as guard
 from tools.static_scan import run_all
-from host_brain.executive_runtime.skill_execution import _flatten_result_text
+from host_brain.skills.governed_execution_support import flatten_result_text
 
 
 def _write(root: Path, relative: str, source: str) -> Path:
@@ -18,7 +18,7 @@ def _write(root: Path, relative: str, source: str) -> Path:
 
 
 def test_preexisting_host_syntax_debt_is_repaired_for_complete_reverse_scan() -> None:
-    assert _flatten_result_text(["first", {"result": "second"}, None]) == (
+    assert flatten_result_text(["first", {"result": "second"}, None]) == (
         "first\nsecond"
     )
 

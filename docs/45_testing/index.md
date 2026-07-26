@@ -3,9 +3,32 @@
 
 # 测试与验收目录
 
-版本：v2.26
+版本：v2.27
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Skill 唯一执行 authority 当前切片
+
+- 生产 AST inventory 要求 `SkillMeta.handler`、
+  `bind_validated_skill_authority`、`dispatch_executor_payload` 各只有
+  `host_brain/app/governed_skill_execution.py` 一个调用者；旧 Executive
+  executor 文件必须不存在。
+- `SkillLoader.execute()` 在读取 registry、验证 token、调用 handler/Broker
+  或产生外部 I/O 前返回
+  `GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED`；Scheduler 的 Codex/Personality
+  metadata 入口同样失败关闭。
+- 缺 node authority 在 registry 前拒绝；canonical Skill receipt 落库失败
+  必须传播，不能伪造成功。
+- 最终受影响代码与合同集合合并运行得到 `204 passed in 17.42s`；
+  真实 `test_gr05_universal_host_runtime.py` 为 `1 passed in 26.15s`，
+  证明 Chat/Skill/Delegate/Plan 主链未因 authority 迁移退化。扩大 D7B
+  集合的一个 `RECOVERY_REQUIRED`/`FAILED` 断言在干净
+  `origin/dev@a984edb71` 同样失败，不计本切片回归或 PASS；旧 HTTP smoke
+  受当前 admission Review 和未启动外部 Chroma 阻断，也不计生产证据。
+- 本节尚未绑定干净实现提交，状态为
+  `LOCAL_PROVEN / CLEAN_SHA_RECEIPT_PENDING`。Skill 的预算全覆盖、领域
+  副作用 post-Acceptance 化、波次集成和 NE-07 均未完成；
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Chat 真实模型预算持久链当前切片
 

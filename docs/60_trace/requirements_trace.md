@@ -5,8 +5,8 @@
 
 > 当前库存纠偏：TRACE-EXEC-08～08AP 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.5
-核对日期：2026-07-26
+版本：v5.6
+核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
@@ -19,6 +19,17 @@
 4. 自动化测试证明其覆盖的行为，不能单独把 `PARTIAL` 提升为 `WIRED`。
 5. 历史 receipt 只对固定 commit、route 和环境成立。
 6. 执行顺序只来自 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+TRACE-EXEC-08AQ（Skill 唯一执行 authority）：已经准入的 frozen Skill node
+只能由 `app/governed_skill_execution.py` 执行；该模块是
+`SkillMeta.handler`、sealed authority binding 与 Broker dispatch 的唯一
+生产调用者。Executive executor 必须物理不存在，`SkillLoader` 和 Scheduler
+metadata 入口只能失败关闭。缺 exact node grant/Task context 必须在 registry
+前拒绝，receipt 写失败必须向上游传播。证据入口为
+`test_ne01_skill_authority_single_owner.py`、Loader/legacy authority 合同、
+GR05 真实 Universal Host Runtime 与机械 AST inventory。当前结论为
+`LOCAL_PROVEN / CLEAN_SHA_RECEIPT_PENDING`；Budget 与 transactional
+side-effects 仍是 Skill 独立缺口，因此路线及 NE-01 均保持 `INCOMPLETE`。
 
 ## 2. 当前核心产品能力
 
@@ -243,7 +254,7 @@ graph/revision/node/attempt guard，下一次请求只能消费扣减后的额�
 前重验全部 identity。缺 usage、cache、重复/incomplete measurement、越界或
 lineage drift 均失败关闭。生产代码入口为
 `host_brain/model_runtime/governed_skill_budget.py`、
-`host_brain/executive_runtime/skill_execution.py`、
+`host_brain/app/governed_skill_execution.py`、
 `host_brain/app/governed_frozen_skill_runtime.py` 与
 `host_brain/skills/registry.py`；机械证据入口为
 `tests/unit/test_ne01_governed_skill_model_budget.py` 及受影响

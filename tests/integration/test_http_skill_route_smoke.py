@@ -232,7 +232,7 @@ def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch, tmp_
         }
 
     monkeypatch.setattr(
-        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
+        "host_brain.app.governed_skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:
@@ -282,7 +282,7 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         }
 
     monkeypatch.setattr(
-        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
+        "host_brain.app.governed_skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:
@@ -324,7 +324,7 @@ def test_http_chat_route_infers_agent_self_heal_task(monkeypatch, tmp_path: Path
         }
 
     monkeypatch.setattr(
-        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
+        "host_brain.app.governed_skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:
@@ -505,7 +505,7 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         }
 
     monkeypatch.setattr(
-        "host_brain.executive_runtime.skill_execution.dispatch_executor_payload",
+        "host_brain.app.governed_skill_execution.dispatch_executor_payload",
         _fake_dispatch,
     )
     try:

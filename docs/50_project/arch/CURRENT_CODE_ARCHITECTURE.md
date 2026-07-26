@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.48
+版本：v5.49
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,17 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat 当前为 `COMPLETE`，其余六路为 `INCOMPLETE`。
+
+Skill 的生产执行 owner 已从 Executive 兼容层迁到 app-local
+`governed_skill_execution.py`。代码仓中 `SkillMeta.handler`、
+`bind_validated_skill_authority` 与 `dispatch_executor_payload` 的 Skill
+调用者各只有这一个模块；它要求 exact governed context、verified node
+grant、durable ledger 和显式 ports 后才接触 registry。旧 Executive executor
+已删除，`SkillLoader` 与 Scheduler metadata 分支只能返回
+`GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED`，不能消费 token、调用 handler 或
+进入 Broker；canonical receipt 写失败会向上抛出。本地定向和真实 GR05
+运行通过，但当前实现提交尚待生成干净 SHA 机器收据，因此该控制仍按
+`LOCAL_PROVEN / CLEAN_SHA_RECEIPT_PENDING` 记录，不能提前升级 Skill 路线。
 
 Chat 与 Plan 合成的模型预算校准现在使用真实生产等价调用链。GR05 构造真实 prompt registry、route policy、`ModelAttemptService`、ledger audit 与 Surface ports，只控制 terminal provider transport；两个新请求各自生成 canonical `started → succeeded` Attempt，provider token/cost measurement 进入不可变 WorkerProjection，再以稳定 usage id 同时落入 Graph parent 与 Attempt-bound child Budget。exact replay 只重开既有结果，不再次调用 provider。只读验收会关联这四组事实并拒绝缓存、孤儿 Attempt、身份和测量漂移。
 

@@ -281,6 +281,7 @@ def test_governed_adapter_imports_independent_route_ports_only() -> None:
             "_stream_chat_with_context",
         ),
         ("host_brain.executive_runtime.skill_execution", "_dispatch_to_sub_agent"),
+        ("host_brain.app.governed_skill_execution", "_dispatch_to_sub_agent"),
     }
     imported = {
         (str(node.module or ""), alias.name)

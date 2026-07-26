@@ -3,7 +3,10 @@ import unittest
 from pathlib import Path
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.core.errors import TRACE_MISSING_INTENT
+from host_brain.core.errors import (
+    GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+    TRACE_MISSING_INTENT,
+)
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.skills.loader import SkillLoader
@@ -71,7 +74,11 @@ class TestAuditTriptychContract(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", skill_result.status)
+        self.assertEqual("REJECTED", skill_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            skill_result.result_code,
+        )
 
         trace = self.ledger.trace_request(request_id)
         self.assertEqual("COMPLETE", trace["status"])
@@ -81,6 +88,10 @@ class TestAuditTriptychContract(unittest.TestCase):
         self.assertEqual(intent["id"], trace["intent_log"][0]["intent_id"])
         self.assertEqual(intent["id"], trace["governor_log"][0]["intent_id"])
         self.assertEqual(intent["id"], trace["skill_exec_log"][0]["intent_id"])
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            trace["skill_exec_log"][0]["result_code"],
+        )
 
     def test_trace_missing_intent_is_diagnosable(self) -> None:
         trace = self.ledger.trace_request("req_missing_001")

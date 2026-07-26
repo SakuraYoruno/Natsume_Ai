@@ -5,9 +5,20 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.18
+版本：v3.19
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前 Skill authority 切片的交付合同是“一个生产执行 owner，所有兼容入口
+失败关闭”。`host_brain/app/governed_skill_execution.py` 是唯一允许调用
+`SkillMeta.handler`、`bind_validated_skill_authority` 和
+`dispatch_executor_payload` 的生产模块；它只能由 frozen Skill worker 在
+exact TaskGraph node authority 下调用。Executive 执行文件必须不存在，
+`SkillLoader` 不得解析 registry/token/handler/Broker，Scheduler 的 Codex
+和 Personality metadata 路径不得直接执行 Skill。AST inventory、缺 authority
+前置拒绝、receipt 写失败传播和真实 Universal Host Runtime 都是 Ready 前
+强制证据。该切片完成后仍不得把 Skill 标为 COMPLETE：program-wide Budget
+和 post-Acceptance transactional side effects 必须分别封板。
 
 当前 Chat 模型预算切片移除了 GR05 对 `stream_governed_chat_with_context` 的伪造输出，普通 Chat 和 Plan 合成现在都经真实 frozen route、Surface runtime、canonical `ModelAttemptService` 与父子 Budget ledger；测试只替换 terminal provider transport，并要求两个新请求、两个成功 ModelAttempt、精确 token/cost、同一 WorkerProjection/parent/child usage，以及 replay 后 provider 调用数不增加。只读七路线采集器能够重新关联模型生命周期、Worker 预算证明和父子 usage，任何缓存、孤儿 Attempt、身份或测量漂移都失败关闭。干净提交 `c15f88d9` 的正式 v3 收据已证明该链，Chat `budget_enforcement=PASS` 且路线状态为 `COMPLETE`；受控 provider 仍不属于真实模型质量或 NE-07 证据。
 

@@ -10,6 +10,9 @@ from typing import Any
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.channels.wechat import receive_wechat_event
+from host_brain.core.errors import (
+    GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+)
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.skills.loader import SkillLoader
@@ -136,7 +139,11 @@ class TestWeChatVtsVoiceRpcE2E(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", exec_result.status)
+        self.assertEqual("REJECTED", exec_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
 
         reporter = EdgeEventReporter(
             transport_fn=self._http_transport,

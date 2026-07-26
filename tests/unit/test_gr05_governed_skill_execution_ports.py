@@ -196,13 +196,12 @@ def test_low_level_skill_executor_receives_only_explicit_governed_collaborators(
         return expected
 
     monkeypatch.setattr(
-        "host_brain.executive_runtime.skill_execution._execute_skill",
+        "host_brain.app.governed_skill_execution_ports.execute_governed_skill",
         fake_execute_skill,
     )
     result = execute_frozen_governed_skill(
         ports=ports,
         durable_authority_ledger=ledger,
-        request_body={"args": {}},
         request_id="request-gr05-narrow-skill",
         session_id="session-gr05-narrow-skill",
         person_id="person-gr05",
@@ -225,17 +224,13 @@ def test_low_level_skill_executor_receives_only_explicit_governed_collaborators(
 
     assert result is expected
     assert captured["ports"] is ports
-    assert captured["skill_registry"] is ports.skill_registry
-    assert captured["capability_broker_override"] is ports.capability_broker
-    assert captured["model_attempt_service_override"] is ports.model_attempt_service
-    assert captured["production_authority_verifier"] is ports.production_authority_verifier
     assert captured["durable_authority_ledger"] is ledger
-    assert captured["ledger"] is False
+    assert captured["execution_args"] == {"content": "admitted"}
     assert captured["frozen_executor_payload"] == {
         "schema_version": "Natsume.governed.production_executor_payload.v1",
         "tool": "codex_production",
     }
-    assert "token_service_override" not in captured
+    assert "token_service" not in captured
 
 
 def test_frozen_executor_payload_skips_post_admission_skill_normalization(
@@ -243,7 +238,7 @@ def test_frozen_executor_payload_skips_post_admission_skill_normalization(
 ) -> None:
     """A governed worker must dispatch the payload frozen with its TaskGraph."""
 
-    from host_brain.executive_runtime import skill_execution
+    from host_brain.app import governed_skill_execution
 
     dispatched: dict = {}
 
@@ -261,17 +256,17 @@ def test_frozen_executor_payload_skips_post_admission_skill_normalization(
         )
     )
     monkeypatch.setattr(
-        skill_execution,
+        governed_skill_execution,
         "_governed_node_grant_error",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        skill_execution,
+        governed_skill_execution,
         "bind_validated_skill_authority",
         lambda **_kwargs: {"authority_id": "authority://frozen-payload"},
     )
     monkeypatch.setattr(
-        skill_execution,
+        governed_skill_execution,
         "dispatch_executor_payload",
         lambda payload, **_kwargs: (
             dispatched.update(payload) or {
@@ -280,11 +275,15 @@ def test_frozen_executor_payload_skips_post_admission_skill_normalization(
             }
         ),
     )
-    monkeypatch.setattr(skill_execution, "_log_skill_exec_row", lambda **_kwargs: None)
-
-    result = skill_execution._execute_skill(
-        ports=SimpleNamespace(),
-        request_body={"args": {"task": "must not be normalized"}},
+    result = governed_skill_execution.execute_governed_skill(
+        ports=SimpleNamespace(
+            skill_registry=registry,
+            capability_broker=object(),
+            model_attempt_service=object(),
+            production_authority_verifier=lambda *_args, **_kwargs: True,
+            agent_artifact_store=None,
+            agent_workspace_runtime=None,
+        ),
         request_id="request-frozen-payload",
         session_id="session-frozen-payload",
         person_id="person-frozen-payload",
@@ -296,17 +295,12 @@ def test_frozen_executor_payload_skips_post_admission_skill_normalization(
         intent_draft={"route": "skill", "target_id": "agent_memory_curator"},
         emotion_context={},
         render_target_lang="zh",
-        skill_registry=registry,
-        ledger=False,
         durable_authority_ledger=object(),
-        capability_broker_override=object(),
-        model_attempt_service_override=object(),
-        production_authority_verifier=lambda *_args: None,
         governed_execution_context={
             "execution_mode": "governed_task_runtime",
             "target_id": "agent_memory_curator",
         },
-        execution_args_override={"task": "must not be normalized"},
+        execution_args={"task": "must not be normalized"},
         verified_node_grant={"grant_ref": "grant://node/frozen-payload"},
         frozen_executor_payload={
             "schema_version": "Natsume.governed.production_executor_payload.v1",

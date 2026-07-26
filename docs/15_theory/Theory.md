@@ -3,12 +3,20 @@
 
 # Natsume AI 核心理论
 
-版本：v2.24
+版本：v2.25
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
+
+Skill 的 registry metadata、旧 token 和 Scheduler 持久 intent 都不是执行
+authority。合法执行必须先冻结为 TaskGraph 节点，再由同一个 app-local
+executor 重开 exact node grant、Attempt、Lease、Budget 和运行期 ports；
+只有这个 executor 可以调用 handler、绑定 sealed authority 和进入 Broker。
+兼容 Loader 可以保留迁移审计，但只能失败关闭，不能因为 token 有效就恢复
+第二条执行路径。执行结果的 receipt 也是终态因果链的一部分：写入失败必须
+向 Task Runtime 暴露为失败或待对账，而不能为了返回“成功”而吞掉异常。
 
 跨路线完成性遵循“同一提交、同一数据库快照、逐路线完整证据”的不变量。代码、单测或某几条路线成功都不能外推为通用 Runtime 完成；验收者必须以只读事务独立重开真实持久事实，并把 Git HEAD、仓库与数据库 migration head、Command/Graph/Node/Attempt/Lease/Operation、父子 Budget、Verification、Acceptance、Artifact、Effect/Outbox/Receipt 串成不可替换的证据链。一个 request 只能证明一条路线，未运行路线必须显式保留 `NOT_RUN`。收据只能暴露完成判断需要的标识、状态、版本与 digest，不能复制用户正文、模型输出、secret 或执行 payload。这样，“能够验收”与“已经七路验收通过”才不会被混为一谈。
 

@@ -5,9 +5,9 @@ from pathlib import Path
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     EXPIRED_INTENT,
+    GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
     REPLAY_DETECTED,
     SERVICE_UNAVAILABLE_COLD_START,
-    SKILL_TOKEN_MISSING,
     TRUST_LOW,
 )
 from host_brain.governor.decision import IntentDecisionEngine
@@ -87,15 +87,22 @@ class TestGovernorSkillGatewayE2E(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", exec_result.status)
-        self.assertTrue(exec_result.evidence_ref and exec_result.evidence_ref.startswith("evidence::"))
+        self.assertEqual("REJECTED", exec_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
+        self.assertIsNone(exec_result.evidence_ref)
 
         trace = self.ledger.trace_request(request_id)
         self.assertEqual("COMPLETE", trace["status"])
         self.assertEqual(1, len(trace["intent_log"]))
         self.assertEqual(1, len(trace["governor_log"]))
         self.assertEqual(1, len(trace["skill_exec_log"]))
-        self.assertEqual("SUCCESS", trace["skill_exec_log"][0]["result_status"])
+        self.assertEqual(
+            "REJECTED",
+            trace["skill_exec_log"][0]["result_status"],
+        )
 
     def test_e2e_replay_is_rejected(self) -> None:
         intent = self._new_intent(seq=1, intent_id="intent_e2e_002", nonce="nonce_e2e_002")
@@ -129,7 +136,10 @@ class TestGovernorSkillGatewayE2E(unittest.TestCase):
             now_ts_ms=self.now_ms,
         )
         self.assertEqual("REJECTED", exec_result.status)
-        self.assertEqual(SKILL_TOKEN_MISSING, exec_result.result_code)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
         self.assertIsNone(exec_result.evidence_ref)
 
     def test_e2e_governor_gate_reject_blocks_execution(self) -> None:
@@ -152,7 +162,10 @@ class TestGovernorSkillGatewayE2E(unittest.TestCase):
             now_ts_ms=self.now_ms,
         )
         self.assertEqual("REJECTED", exec_result.status)
-        self.assertEqual("GOVERNOR_REJECTED", exec_result.result_code)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
 
     def test_e2e_degraded_gateway_path_is_still_json(self) -> None:
         prompt_payload = _load_json(PROMPT_FIX)

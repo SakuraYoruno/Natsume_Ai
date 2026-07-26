@@ -9,6 +9,20 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+NE-01 当前正在收口 Skill 的唯一执行 authority。生产代码只允许
+[`host_brain/app/governed_skill_execution.py`](host_brain/app/governed_skill_execution.py)
+在已经准入的 TaskGraph 节点、有效 node-bound grant、Attempt/Lease/Budget
+上下文和 app-local ports 下调用 `SkillMeta.handler`、绑定 sealed execution
+authority 并进入 Capability Broker。旧
+`host_brain/executive_runtime/skill_execution.py` 已物理删除；
+`SkillLoader.execute()` 只保留可观测的失败关闭，Scheduler 也不能再把
+Skill metadata 解释成第二条直接执行路径。机械 AST 清点要求三类敏感调用
+各自只有上述 app-local owner；Skill receipt 持久化失败不得吞掉。本切片
+已完成本地定向、兼容回归和真实 Universal Host Runtime 验证，但干净提交
+收据尚未生成，所以 Skill 的 `canonical_execution_authority` 在机器矩阵中
+暂仍为 `PARTIAL / CLEAN_SHA_RECEIPT_PENDING`；预算全覆盖和验收前领域副作用
+仍是独立缺口，Skill 路线与 NE-01 都没有封板。
+
 NE-01 已把 Chat 模型预算从“存在合同”推进为可由持久账本独立验收的生产链。GR05 不再伪造 `surface_model_attempt`，而是经真实 `Surface Runtime → ModelAttemptService → Provider adapter → WorkerProjection → 父子 Budget ledger` 执行普通 Chat 与 Plan 最终合成；只有最末端 provider transport 使用受控 adapter。provider 返回的 token、重试和模型成本必须同时匹配 canonical `model_attempt_log`、不可变 WorkerProjection、Graph Budget usage 与 Attempt-bound child usage，exact replay 不得再次调用 provider。干净提交 `c15f88d9e201552ec9e3a589cda93b305818f5ef` 的正式收据已重开并验证该 lineage，因此 Chat 的 `budget_enforcement` 升为 `PASS`，Chat 成为七路中第一条 `COMPLETE` 路线。该受控链证明治理和计量，不证明外部 provider 质量、PlanningSearch 收益或 NE-07 实栈。
 
 真实调用同时暴露并修复了两个先前被假数据遮蔽的问题：内部 `governed_model_budget` guard 不再泄漏进 Life acceptance payload，只有实际测量可以持久化；Task Runtime 也不再覆盖 Surface executor 已提交的 audit path，瞬时 COMMIT 与 durable WorkerProjection 因此保持同一来源身份。验收采集器新增隐私有界的模型生命周期与 Worker 预算证据，只输出标识、digest 和用量，不输出 prompt、模型回复或 secret。

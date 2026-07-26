@@ -3,17 +3,6 @@
 from ._shared import *  # noqa: F403
 from .ports import LifecycleRuntimeApplicationPorts
 
-def _scheduler_skill_authority_inputs(
-    system_intent: Mapping[str, Any],
-) -> tuple[str | None, dict[str, Any] | None] | None:
-    # Scheduler intents are persisted data, not an authority boundary. Raw
-    # token/command strings in that document must never mint an execution
-    # attestation. Scheduler Skill execution must re-enter through Governor or
-    # the governed Task adapter; this legacy direct route therefore fails shut.
-    del system_intent
-    return None
-
-
 def _run_codex_production_scheduler_skill(
     *,
     system_intent: dict[str, Any],
@@ -32,61 +21,15 @@ def _run_codex_production_scheduler_skill(
     if skill_name not in AGENT_PRODUCTION_SKILL_IDS:
         return None
 
-    authority_inputs = _scheduler_skill_authority_inputs(system_intent)
-    if authority_inputs is None:
-        return {
-            "status": "REJECTED",
-            "reason_code": "SKILL_AUTHORITY_MISSING",
-            "skill_name": skill_name,
-            "scheduler_driver": "natsume_scheduler",
-        }
-
-    try:
-        from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_registry  # noqa: PLC0415
-
-        args = dict(system_intent.get("args") or {})
-        registry = build_agent_runtime_skill_registry()
-        meta = registry.require(skill_name)
-        payload = meta.handler(
-            args,
-            {
-                "request_id": str(system_intent.get("request_id") or "").strip(),
-                "intent_id": str(system_intent.get("intent_id") or "").strip(),
-                "task_id": str(system_intent.get("task_id") or "").strip(),
-                "proposer_node_id": str(system_intent.get("proposer_node_id") or "scheduler").strip(),
-                "scheduler_driver": "natsume_scheduler",
-            },
-        )
-        if isinstance(payload, dict):
-            payload.setdefault("start_background", True)
-            payload.setdefault("scheduler_driver", "natsume_scheduler")
-        if not isinstance(payload, dict):
-            raise ValueError("production skill handler returned no executor payload")
-        del payload, authority_inputs
-        result = {
-            "status": "REJECTED",
-            "reason_code": "SKILL_AUTHORITY_MISSING",
-        }
-        if isinstance(result, dict):
-            result.setdefault("scheduler_driver", "natsume_scheduler")
-            result.setdefault("skill_name", skill_name)
-            return result
-        return {
-            "status": "OK",
-            "reason_code": None,
-            "skill_name": skill_name,
-            "scheduler_driver": "natsume_scheduler",
-            "result": result,
-        }
-    except Exception as exc:
-        logger.warning("Codex production scheduler dispatch failed: skill=%s err=%s", skill_name, exc)
-        return {
-            "status": "FAILED",
-            "reason_code": "CODEX_PRODUCTION_SCHEDULER_DISPATCH_FAILED",
-            "skill_name": skill_name,
-            "detail": str(exc),
-            "scheduler_driver": "natsume_scheduler",
-        }
+    # The accepted Scheduler effect may invoke its registered worker, but it
+    # may not reinterpret a SkillMeta handler as a second execution authority.
+    # A Codex production Skill must be admitted as its own immutable Skill node.
+    return {
+        "status": "REJECTED",
+        "reason_code": "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED",
+        "skill_name": skill_name,
+        "scheduler_driver": "natsume_scheduler",
+    }
 
 
 def _compact_scheduler_text(value: Any, *, limit: int = 240) -> str:
@@ -443,111 +386,13 @@ def _run_personality_scheduler_skill(
             "skill_name": skill_name,
         }
 
-    authority_inputs = _scheduler_skill_authority_inputs(system_intent)
-    if authority_inputs is None:
-        return {
-            "status": "REJECTED",
-            "reason_code": "SKILL_AUTHORITY_MISSING",
-            "skill_name": skill_name,
-        }
-
-    emotion_context = {
-        "emotion_tag": str(system_intent.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
-        "mood_state": str(system_intent.get("mood_state") or "steady").strip().lower() or "steady",
-        "triggered_emotions": list(system_intent.get("triggered_emotions") or []),
-    }
-    args = dict(system_intent.get("args") or {})
-    resolved_sys_mode = str(
-        system_intent.get("sys_mode")
-        or args.get("sys_mode")
-        or "normal"
-    ).strip().lower() or "normal"
-    last_interaction_ts = _load_last_interaction_ts(get_ledger=get_ledger)
-    try:
-        idle_threshold_ms = int(args.get("idle_threshold_ms") or 90 * 60 * 1000)
-    except (TypeError, ValueError):
-        idle_threshold_ms = 90 * 60 * 1000
-    current_ts = int(_time.time() * 1000)
-    is_idle = resolved_sys_mode == "sleep" or (
-        last_interaction_ts is not None
-        and current_ts - int(last_interaction_ts) >= max(0, idle_threshold_ms)
+    del ports, get_ledger, ui_pusher, llm_generator_override
+    logger.debug(
+        "Scheduler refused legacy personality Skill dispatch: %s",
+        skill_name,
     )
-
-    bond_summary: dict[str, Any] = {}
-    try:
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-
-        bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(session_id="default")
-    except Exception as exc:
-        logger.debug("personality skill bond summary unavailable: %s", exc)
-
-    context = {
-        "request_id": system_intent.get("request_id"),
-        "intent_id": system_intent.get("intent_id"),
-        "task_id": system_intent.get("task_id"),
+    return {
+        "status": "REJECTED",
+        "reason_code": "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED",
         "skill_name": skill_name,
-        "sys_mode": resolved_sys_mode,
-        "idle": is_idle,
-        "last_interaction_ts": last_interaction_ts,
-        "logger": logger,
-        "get_ledger": get_ledger,
-        "ui_pusher": ui_pusher,
-        "system_intent": dict(system_intent),
-        "bond_summary": bond_summary,
-        "emotion_context": emotion_context,
-        "llm_generator": llm_generator_override or _build_scheduler_narrative_llm_generator(
-            ports=ports,
-            logger=logger,
-        ),
-        "audit_reader": _build_scheduler_audit_reader(get_ledger=get_ledger, logger=logger),
-        "episodic_reader": _build_scheduler_episodic_reader(get_ledger=get_ledger, logger=logger),
-        "episodic_writer": _build_scheduler_episodic_writer(
-            ports=ports,
-            request_id=str(system_intent.get("request_id") or "").strip() or None,
-            intent_id=str(system_intent.get("intent_id") or "").strip() or None,
-            emotion_context=emotion_context,
-        ),
-        "scene_awareness": system_intent.get("scene_awareness") or {},
     }
-    try:
-        context["ledger"] = get_ledger()
-    except Exception:
-        pass
-
-    if not str(args.get("user_id") or context.get("user_id") or "").strip():
-        try:
-            from host_brain.persona.identity import get_canonical_persona_self_id  # noqa: PLC0415
-
-            context["user_id"] = get_canonical_persona_self_id()
-        except Exception:
-            context["user_id"] = "natsume_ai"
-    try:
-        result = meta.handler(args, context)
-    except Exception as exc:
-        logger.warning("Personality scheduler skill failed: skill=%s err=%s", skill_name, exc)
-        return {
-            "status": "FAILED",
-            "reason_code": "PERSONALITY_SKILL_FAILED",
-            "skill_name": skill_name,
-            "detail": str(exc),
-        }
-
-    if not isinstance(result, dict):
-        return {
-            "status": "FAILED",
-            "reason_code": "PERSONALITY_SKILL_INVALID_RESULT",
-            "skill_name": skill_name,
-            "detail": f"expected dict result, got {type(result).__name__}",
-        }
-
-    if str(result.get("tool") or "").strip():
-        return {
-            "status": "REJECTED",
-            "reason_code": "SKILL_AUTHORITY_MISSING",
-            "skill_name": skill_name,
-        }
-
-    payload = dict(result)
-    payload.setdefault("status", "OK")
-    payload.setdefault("skill_name", skill_name)
-    return payload

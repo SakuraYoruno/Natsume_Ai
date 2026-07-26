@@ -3,12 +3,22 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.28
+版本：v2.29
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Skill Execution 模块的唯一生产 owner 是
+[`app/governed_skill_execution.py`](../../../host_brain/app/governed_skill_execution.py)：
+它消费 frozen node authority、调用 `SkillMeta.handler`、绑定 sealed
+authority、进入 Capability Broker，并把结果交回 Task Runtime。
+[`skills/loader.py`](../../../host_brain/skills/loader.py) 只是迁移兼容 facade，
+所有 `execute()` 都以 `GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED` 拒绝；
+Executive executor 已删除，Scheduler 也不得直接调用 Skill metadata。
+该模块当前为 `LOCAL_PROVEN / CLEAN_SHA_RECEIPT_PENDING`，预算和事务副作用
+仍由后续切片处理。
 
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound acceptance 已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、路线其余控制与 NE-01 仍未闭环。
 

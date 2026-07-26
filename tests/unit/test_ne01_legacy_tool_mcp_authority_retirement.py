@@ -5,12 +5,14 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+import pytest
+
 from host_brain.composition import process_services
 from host_brain.composition.host_governance_runtime import (
     HostGovernanceRuntimeOwner,
     load_host_governance_runtime_settings,
 )
-from host_brain.executive_runtime import skill_execution
+from host_brain.app import governed_skill_execution
 from host_brain.app import governed_frozen_skill_runtime
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.skills import mcp_skill_bridge
@@ -137,11 +139,15 @@ def test_raw_tool_broker_cannot_cross_the_app_local_execution_port() -> None:
 
 
 def test_stale_mcp_skill_is_rejected_before_registry_lookup() -> None:
-    source = inspect.getsource(skill_execution._execute_skill)
+    source = inspect.getsource(
+        governed_skill_execution.execute_governed_skill
+    )
     guard = 'startswith("mcp::")'
 
     assert guard in source
-    assert source.index(guard) < source.index("registry.require(skill_id)")
+    assert source.index(guard) < source.index(
+        "registry.require(skill_name)"
+    )
     assert "MCP_TASK_AUTHORITY_REQUIRED" in source
 
     worker_source = inspect.getsource(
@@ -155,30 +161,34 @@ def test_stale_mcp_skill_is_rejected_before_registry_lookup() -> None:
 
 
 def test_stale_mcp_skill_runtime_returns_exact_rejection_without_registry_access() -> None:
-    class _FailIfReadRegistry:
-        def require(self, _skill_id: str) -> None:
-            raise AssertionError("stale MCP target must be rejected before registry lookup")
+    class _FailIfReadPorts:
+        @property
+        def skill_registry(self) -> None:
+            raise AssertionError(
+                "stale MCP target must be rejected before registry lookup"
+            )
 
-    outcome = skill_execution._execute_skill(
-        ports=object(),
-        request_body={},
-        request_id="request-stale-mcp",
-        session_id="session-stale-mcp",
-        person_id="person-stale-mcp",
-        intent_id="intent-stale-mcp",
-        skill_id="mcp::cursor::open_path",
-        task_text="open path",
-        user_message="open path",
-        governor_result={"tokens": {"approval_token_ref": "legacy-mcp-token"}},
-        intent_draft={},
-        emotion_context={},
-        render_target_lang="zh",
-        skill_registry=_FailIfReadRegistry(),
-        ledger=False,
-    )
-
-    assert outcome.success is False
-    assert outcome.error_text == "MCP_TASK_AUTHORITY_REQUIRED"
-    assert outcome.payload["approval_token_ref"] is None
-    assert "legacy-mcp-token" not in repr(outcome.payload)
-    assert outcome.payload["fallback_policy"] == "strict_fail"
+    with pytest.raises(
+        PermissionError,
+        match="MCP_TASK_AUTHORITY_REQUIRED",
+    ):
+        governed_skill_execution.execute_governed_skill(
+            ports=_FailIfReadPorts(),
+            durable_authority_ledger=object(),
+            request_id="request-stale-mcp",
+            session_id="session-stale-mcp",
+            person_id="person-stale-mcp",
+            intent_id="intent-stale-mcp",
+            skill_id="mcp::cursor::open_path",
+            task_text="open path",
+            user_message="open path",
+            governor_result={
+                "tokens": {"approval_token_ref": "legacy-mcp-token"}
+            },
+            intent_draft={},
+            emotion_context={},
+            render_target_lang="zh",
+            governed_execution_context={},
+            execution_args={},
+            verified_node_grant={},
+        )

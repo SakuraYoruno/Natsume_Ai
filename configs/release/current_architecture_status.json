@@ -3088,6 +3088,44 @@
         "tests/unit/test_aw05_production_provider_route.py"
       ]
     },
+    "governed_skill_execution_authority": {
+      "status": "LOCAL_PROVEN_CLEAN_SHA_RECEIPT_PENDING",
+      "scope": [
+        "already-admitted governed Skill TaskNode",
+        "SkillMeta handler invocation",
+        "sealed Skill execution authority binding",
+        "Capability Broker dispatch"
+      ],
+      "implemented": "host_brain/app/governed_skill_execution.py is the only production caller of SkillMeta.handler, bind_validated_skill_authority and dispatch_executor_payload. It rejects before registry access unless an exact durable TaskGraph node context, verified node grant, durable ledger and app-local ports are present. The Executive Skill executor is physically removed. SkillLoader remains importable only as a fail-closed migration audit facade, and Scheduler Codex/Personality metadata can no longer invoke Skill handlers. Canonical Skill receipt persistence failures propagate instead of being swallowed.",
+      "mechanical_inventory": {
+        "skill_meta_handler_callers": 1,
+        "sealed_authority_binding_callers": 1,
+        "broker_dispatch_callers": 1,
+        "owner": "host_brain/app/governed_skill_execution.py",
+        "executive_skill_executor_present": false,
+        "skill_loader_execution_authority": false,
+        "scheduler_metadata_execution_authority": false
+      },
+      "local_validation": "Final affected code and contract batch: 204 passed in 17.42 seconds. Real tests/integration/test_gr05_universal_host_runtime.py: 1 passed in 26.15 seconds. Static scan and doc gate both passed with zero failures. One expanded D7B RECOVERY_REQUIRED-versus-FAILED assertion reproduces on clean origin/dev@a984edb71 and is not counted as this slice PASS or regression. The stale HTTP smoke is blocked by current admission Review and an unavailable external Chroma service and is not production evidence.",
+      "not_completed": [
+        "clean implementation SHA receipt and control promotion",
+        "program-wide Skill Budget coverage",
+        "post-Acceptance transactional domain side effects",
+        "NE-01 wave integration",
+        "NE-07 real service stack"
+      ],
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "evidence_refs": [
+        "host_brain/app/governed_skill_execution.py",
+        "host_brain/app/governed_skill_execution_ports.py",
+        "host_brain/app/governed_frozen_skill_runtime.py",
+        "host_brain/skills/governed_execution_support.py",
+        "host_brain/skills/loader.py",
+        "host_brain/lifecycle_runtime/scheduler_handlers.py",
+        "tests/unit/test_ne01_skill_authority_single_owner.py",
+        "tests/integration/test_gr05_universal_host_runtime.py"
+      ]
+    },
     "governed_non_agent_skill_model_budget": {
       "status": "PARTIAL_DECLARED_MODEL_SKILL_TYPED_PORT_WIRED",
       "scope": [
@@ -3111,7 +3149,7 @@
         "host_brain/model_runtime/governed_skill_budget.py",
         "host_brain/model_runtime/invocation.py",
         "host_brain/skills/registry.py",
-        "host_brain/executive_runtime/skill_execution.py",
+        "host_brain/app/governed_skill_execution.py",
         "host_brain/app/governed_frozen_skill_runtime.py",
         "host_brain/skills/impl/emergent_growth_skill.py",
         "tests/unit/test_ne01_governed_skill_model_budget.py"
@@ -3170,7 +3208,7 @@
         "host_brain/agent_runtime/executor.py",
         "host_brain/agent_runtime/agent_executor.py",
         "host_brain/agent_runtime/agent_tools.py",
-        "host_brain/executive_runtime/skill_execution.py",
+        "host_brain/app/governed_skill_execution.py",
         "tests/unit/test_d15_governed_agent_runtime_model_bridge.py",
         "tests/unit/test_ne01_react_tool_authority_cutover.py"
       ]

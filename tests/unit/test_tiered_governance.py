@@ -445,8 +445,8 @@ class TestTieredGovernanceAuditM42(unittest.TestCase):
         tier = _extract_audit_tier(None)
         self.assertEqual(AuditTier.STANDARD, tier)
 
-    def test_skill_exec_log_light_has_basic_fields(self) -> None:
-        """LIGHT 级审计：skill_exec_log 包含基础字段，不含 result_digest/evidence_ref。"""
+    def test_retired_loader_tier_cannot_restore_execution_authority(self) -> None:
+        """旧审计 tier 只能被读取，不能恢复 token-only Skill 执行。"""
         ledger = SQLiteLedger(db_path=":memory:")
         tokens = TokenService(approval_ttl_ms=60_000, confirm_ttl_ms=60_000, undo_ttl_ms=60_000)
         registry = SkillRegistry()
@@ -477,50 +477,12 @@ class TestTieredGovernanceAuditM42(unittest.TestCase):
             },
         }
         result = loader.execute(intent=intent, governor_output=gov_output, now_ts_ms=now)
-        self.assertEqual("SUCCESS", result.status)
-        # LIGHT 级：detail 不含 result_digest（基础字段）
-        self.assertNotIn("result_digest", result.detail)
-
-    def test_skill_exec_log_full_audit_has_audit_tier_field(self) -> None:
-        """FULL_AUDIT 级审计：skill_exec_log 包含 audit_tier='full_audit' 标记。"""
-        ledger = SQLiteLedger(db_path=":memory:")
-        tokens = TokenService(approval_ttl_ms=60_000, confirm_ttl_ms=60_000, undo_ttl_ms=60_000)
-        registry = SkillRegistry()
-        registry.register(_make_meta(skill_name="airlock_skill", risk_level=5, require_confirm=True))
-        loader = SkillLoader(registry=registry, token_service=tokens, ledger=ledger)
-
-        now = now_ms()
-        intent = _make_intent(skill_name="airlock_skill", seq=1, session_id="session::airlock::1")
-        intent["request_id"] = "req::airlock::1"
-
-        approval_ref = tokens.issue_approval_token(
-            intent_id=intent["id"],
-            skill_name="airlock_skill",
-            session_id=intent["session_id"],
-            seq=1,
-            now_ts_ms=now,
+        self.assertEqual("REJECTED", result.status)
+        self.assertEqual(
+            "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED",
+            result.result_code,
         )
-        confirm_ref = tokens.issue_confirm_token(
-            intent_id=intent["id"],
-            skill_name="airlock_skill",
-            session_id=intent["session_id"],
-            seq=1,
-            now_ts_ms=now,
-        )
-        gov_output = {
-            "decision": "APPROVE",
-            "tokens": {"approval_token_ref": approval_ref, "confirm_token_ref": confirm_ref},
-            "committed_route_token": {
-                "token": "GOV_AIRLOCK_REVIEW",
-                "reason_code": "AIRLOCK_REQUIRED",
-                "committed_at_ms": now,
-                "proposer_node_id": "governor",
-                "approval_tier": "airlock",
-            },
-        }
-        result = loader.execute(intent=intent, governor_output=gov_output, now_ts_ms=now)
-        self.assertEqual("SUCCESS", result.status)
-        self.assertEqual("full_audit", result.detail.get("audit_tier"))
+        self.assertFalse(result.runtime_payload["side_effects_executed"])
 
 
 if __name__ == "__main__":
