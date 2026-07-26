@@ -5,7 +5,7 @@
     "dev_commit": "8aa4f31882e3046b0631df3ee8ef52a131ce6aee",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_GENERAL_ACCEPTANCE_EFFECT_RECONCILIATION_PRECOMMIT_OVER_ORIGIN_DEV_8AA4F31882"
+    "evaluated_source": "NE01_GENERAL_ACCEPTANCE_EFFECT_RECONCILIATION_CODE_COMMIT_001CD953C71B_OVER_ORIGIN_DEV_8AA4F31882"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
@@ -27,7 +27,7 @@
   },
   "active_wave_local_validation": {
     "status": "SIGNED_GENERAL_ACCEPTANCE_EFFECT_RECONCILIATION_LOCAL_TARGETED_PASS_PROGRAM_INCOMPLETE",
-    "commit_binding": "PRECOMMIT_EVALUATED_CODE_COMMIT_8AA4F31882E3046B0631DF3EE8EF52A131CE6AEE_POST_COMMIT_EVIDENCE_UPDATE_REQUIRED",
+    "commit_binding": "EVALUATED_CODE_COMMIT_001CD953C71BAB3D7BFD2D51F213B74A072F1D64_WITH_POST_COMMIT_EVIDENCE_UPDATE",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "slice": "NE01_SIGNED_GENERAL_ACCEPTANCE_EFFECT_RECONCILIATION",
     "signed_general_acceptance_effect_reconciliation_current_validation": {
@@ -2534,7 +2534,7 @@
       "scope": ["chat", "skill", "plan", "delegate", "scheduler", "internal", "operator"],
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
-        "evaluated_commit_sha": "8aa4f31882e3046b0631df3ee8ef52a131ce6aee",
+        "evaluated_commit_sha": "001cd953c71bab3d7bfd2d51f213b74a072f1d64",
         "migration_head": "0128_acceptance_effect_general_reconciliation.sql",
         "route_status": "ALL_SEVEN_INCOMPLETE",
         "commit_bound_acceptance": "MISSING_ALL_SEVEN",
