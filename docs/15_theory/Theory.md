@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.13
+版本：v2.14
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -13,6 +13,8 @@
 恢复治理遵循“先持久化不确定性，再由精确证据消解”的不变量。未知副作用不能被 timeout、异常类型或操作者意图直接解释为未发生；运行时必须先冻结当前 Graph/Node/Attempt/Operation/Budget/Lease 与取消事实，再让签名证据精确绑定该 recovery case。证据只能收紧既有 authority，不能创建新的执行权；对账完成后还必须证明同一 case 已退出 current projection。无法证明时继续隔离，绝不盲目重放 worker。
 
 可见副作用还必须遵循“本地事实先于外部表达”的因果屏障。一个领域命令的 durable receipt 只证明命令和 intent 已被接受，不能证明所有本地投影已经完成；只有当 exact command 生成的完整投影集合都拥有 payload-bound durable receipt，后续外部 delivery 才可取得执行权。对于对话，assistant turn 与 LifeMemory admission 是回复发送前的本地前置事实。跨服务发送不必伪装成单一数据库事务，但必须通过有序 Effect、幂等 Outbox 与只读 reconciliation 保证：本地结果未知时绝不先对用户宣称成功。
+
+验证与验收必须与执行者分离。worker 的 COMMIT 是待验证主张，不是事实本身；Verifier 必须从独立持久投影重建不可变身份和输出合同，Acceptance 还要再次独立打开证据，不能复用调用者对象或把任意文字条件直接标成 `PASS`。机器无法证明的语义条件应进入显式 Review。多节点计划的依赖也必须是数据依赖：后继节点要绑定并实际消费前驱已验收 artifact 的 ref、receipt 与 digest，而不是仅凭图上存在一条边推断信息已经传递。
 
 ---
 

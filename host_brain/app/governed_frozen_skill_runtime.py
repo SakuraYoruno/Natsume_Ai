@@ -7,9 +7,9 @@ from collections.abc import AsyncIterator, Mapping
 import time
 from typing import Any
 
-from host_brain.app.governed_host_contracts import (
-    _ACCEPTANCE_CRITERION,
-    _stable_id,
+from host_brain.app.governed_worker_evidence import (
+    DurableWorkerCommitAcceptance as _WorkerCommitAcceptance,
+    DurableWorkerCommitVerifier as _WorkerCommitVerifier,
 )
 from host_brain.agent_runtime.governed_production_payload import (
     FROZEN_NODE_EXECUTOR_PAYLOADS_KEY as _FROZEN_NODE_EXECUTOR_PAYLOADS_KEY,
@@ -504,7 +504,13 @@ class _FrozenSkillWorker:
                     GOVERNED_HOST_AUTHORITY_INVALID,
                     "skill result could not be frozen in the canonical worker projection journal",
                 )
-            commit["receipt_ref"] = projection_id
+            # The public COMMIT mirrors the exact canonical projection body.
+            # The coordinator must never receive an identity-weaker Skill
+            # event and infer graph/node/attempt/grant fields on its behalf.
+            commit = {
+                **projection_body,
+                "receipt_ref": projection_id,
+            }
         yield commit
 
     def _consumed_pre_execution_review_ref(
@@ -740,93 +746,6 @@ class _CompositeProjectionReader:
             value = self._workers.load(ref)
             return dict(value) if isinstance(value, Mapping) else None
         return self._skill.load(ref)
-
-
-class _WorkerCommitVerifier:
-    def verify(
-        self,
-        *,
-        command: HostCommand,
-        execution_context: Mapping[str, Any],
-        worker_commit: Mapping[str, Any],
-        evidence_refs: tuple[str, ...] | list[str],
-        **_: Any,
-    ) -> dict[str, Any]:
-        accepted = (
-            str(worker_commit.get("decision") or "").strip().upper() == "APPROVE"
-            and str(worker_commit.get("target_id") or "").strip()
-            == str(execution_context.get("target_id") or command.target_id).strip()
-            and bool(str(worker_commit.get("receipt_ref") or "").strip())
-            and bool(str(worker_commit.get("narrative") or "").strip())
-        )
-        reason = None if accepted else "GOVERNED_WORKER_PROJECTION_INVALID"
-        return {
-            "schema_version": "Natsume.agent.verification_result.v1",
-            "verification_id": _stable_id("verify", command.command_id),
-            "work_order_id": execution_context["work_order_id"],
-            "task_graph_id": execution_context["graph_id"],
-            "task_node_id": execution_context["node_id"],
-            "attempt_id": execution_context["attempt_id"],
-            "required": True,
-            "status": "PASS" if accepted else "FAIL",
-            "reason_code": reason,
-            "evidence_refs": list(evidence_refs),
-            "checks": [{
-                "check_id": "durable-worker-projection",
-                "status": "PASS" if accepted else "FAIL",
-                "reason_code": reason,
-            }],
-            "started_at_ms": command.created_at_ms,
-            "finished_at_ms": command.created_at_ms,
-        }
-
-
-class _WorkerCommitAcceptance:
-    def judge(
-        self,
-        *,
-        command: HostCommand,
-        execution_context: Mapping[str, Any],
-        evidence_refs: tuple[str, ...] | list[str],
-        **_: Any,
-    ) -> dict[str, Any]:
-        refs = list(evidence_refs)
-        raw_criteria = execution_context.get("node_acceptance_criteria")
-        criteria_texts = tuple(
-            str(value or "").strip()
-            for value in (
-                raw_criteria
-                if isinstance(raw_criteria, (list, tuple))
-                else (_ACCEPTANCE_CRITERION,)
-            )
-            if str(value or "").strip()
-        ) or (_ACCEPTANCE_CRITERION,)
-        return {
-            "schema_version": "Natsume.agent.acceptance_judgement.v1",
-            "judgement_id": _stable_id("accept", command.command_id),
-            "work_order_id": execution_context["work_order_id"],
-            "task_graph_id": execution_context["graph_id"],
-            "task_node_id": execution_context["node_id"],
-            "attempt_id": execution_context["attempt_id"],
-            "decision": "ACCEPT",
-            "reason_code": None,
-            "evidence_refs": refs,
-            "criteria": [
-                {
-                    "criterion_id": f"criterion-governed-durable-projection-{index}",
-                    "criterion_text": criterion_text,
-                    "verdict": "PASS",
-                    "evidence_refs": refs,
-                    "deterministic": True,
-                    "reason_code": None,
-                    "critic_verdict": None,
-                }
-                for index, criterion_text in enumerate(criteria_texts, start=1)
-            ],
-            "critic_candidate": None,
-            "started_at_ms": command.created_at_ms,
-            "finished_at_ms": command.created_at_ms,
-        }
 
 
 def _load_governor_grant(

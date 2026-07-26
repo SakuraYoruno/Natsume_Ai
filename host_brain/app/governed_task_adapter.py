@@ -1278,6 +1278,10 @@ def build_governed_host_runtime(
         delegate=delegate_worker,
         tool=tool_worker,
     )
+    projection_reader = _CompositeProjectionReader(
+        skill=_DurableSkillProjectionReader(ledger),
+        workers=projection_store,
+    )
     coordinator = GovernedTaskCoordinator(
         task_store=task_runtime_container.task_store,
         internal_agent_checkpoint_uow=(
@@ -1286,12 +1290,11 @@ def build_governed_host_runtime(
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
         worker_resolver=worker_registry,
-        verifier=_WorkerCommitVerifier(),
-        acceptance=_WorkerCommitAcceptance(),
-        projection_reader=_CompositeProjectionReader(
-            skill=_DurableSkillProjectionReader(ledger),
-            workers=projection_store,
+        verifier=_WorkerCommitVerifier(projection_reader=projection_reader),
+        acceptance=_WorkerCommitAcceptance(
+            projection_reader=projection_reader
         ),
+        projection_reader=projection_reader,
         review_runtime=(
             TaskNodeReviewRuntime(task_runtime_container.review_store)
             if getattr(task_runtime_container, "review_store", None) is not None

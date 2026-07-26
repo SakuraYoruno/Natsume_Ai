@@ -926,8 +926,10 @@ def build_governed_operator_runtime(
         outbox_publisher=task_runtime_container.outbox_publisher,
         outbox_factory=OutboxMessage,
         worker_resolver=GovernedWorkerRegistry(delegate=worker),
-        verifier=_WorkerCommitVerifier(),
-        acceptance=_WorkerCommitAcceptance(),
+        verifier=_WorkerCommitVerifier(projection_reader=projection_store),
+        acceptance=_WorkerCommitAcceptance(
+            projection_reader=projection_store
+        ),
         projection_reader=projection_store,
         review_runtime=TaskNodeReviewRuntime(review_store),
         node_grant_verifier=node_grant_verifier,

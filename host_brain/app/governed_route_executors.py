@@ -24,6 +24,10 @@ from host_brain.contracts.agent_runtime.worker_budget_usage import (
     build_worker_budget_usage,
     stable_worker_usage_id,
 )
+from host_brain.contracts.agent_runtime.node_input_attestation import (
+    NodeInputArtifactAttestationError,
+    build_node_input_artifact_attestation,
+)
 
 
 GOVERNED_ROUTE_INPUT_INVALID = "GOVERNED_ROUTE_INPUT_INVALID"
@@ -285,6 +289,24 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         "pii_ingress_stats": _safe_mapping(input_pack.get("pii_ingress_stats")),
         "motive_state": _safe_mapping(input_pack.get("motive_state")),
     }
+    accepted_artifact_items: list[dict[str, Any]] = []
+    input_artifacts = frozen.input_artifacts
+    if input_artifacts:
+        try:
+            artifact_attestation = build_node_input_artifact_attestation(
+                input_artifacts
+            )
+        except NodeInputArtifactAttestationError as exc:
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_INPUT_INVALID,
+                str(exc),
+            ) from exc
+        trace_stage_meta["node_input_artifact_attestation"] = (
+            artifact_attestation
+        )
+        accepted_artifact_items = _accepted_artifact_evidence_items(
+            input_artifacts
+        )
     guarded_budget = _governed_model_budget(frozen)
     if guarded_budget is not None:
         trace_stage_meta["governed_model_budget"] = guarded_budget
@@ -309,11 +331,21 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         ),
         "emotion_snapshot": _safe_mapping(input_pack.get("emotion_snapshot")),
         "bond_summary": _safe_mapping(input_pack.get("bond_summary")),
-        "retrieval_evidence_items": [
-            _safe_mapping(item)
-            for item in _safe_sequence(input_pack.get("retrieval_evidence_items"))
-            if isinstance(item, Mapping)
-        ],
+        # A data-dependent Plan synthesis node receives only its accepted
+        # predecessor artifacts as retrieval evidence.  Ordinary memory
+        # retrieval is intentionally excluded so the declared dependency
+        # contract cannot be diluted by unrelated context.
+        "retrieval_evidence_items": (
+            accepted_artifact_items
+            if accepted_artifact_items
+            else [
+                _safe_mapping(item)
+                for item in _safe_sequence(
+                    input_pack.get("retrieval_evidence_items")
+                )
+                if isinstance(item, Mapping)
+            ]
+        ),
         "retrieval_summary": _safe_mapping(input_pack.get("retrieval_summary")),
         "render_target_lang": str(
             input_pack.get("render_target_lang")
@@ -330,6 +362,58 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         # manufactures delivery authority from an APPROVE decision.
         "governor_result": {},
     }
+
+
+def _accepted_artifact_evidence_items(
+    artifacts: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        payload = artifact.get("payload")
+        if not isinstance(payload, Mapping):
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_INPUT_INVALID,
+                "accepted input artifact has no public payload",
+            )
+        snippet = str(
+            payload.get("narrative")
+            or payload.get("result_text")
+            or payload.get("summary")
+            or ""
+        ).strip()
+        if not snippet:
+            try:
+                snippet = json.dumps(
+                    dict(payload),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+            except (TypeError, ValueError) as exc:
+                raise GovernedRouteExecutorError(
+                    GOVERNED_ROUTE_INPUT_INVALID,
+                    "accepted input artifact payload is not finite JSON",
+                ) from exc
+        values.append(
+            {
+                "source_ref": str(artifact.get("artifact_ref") or "").strip(),
+                "evidence_ref": str(
+                    artifact.get("receipt_ref") or ""
+                ).strip(),
+                "snippet": snippet[:4_000],
+                "score": 1.0,
+                "confidence": 1.0,
+                "store_id": "task_result_artifact",
+                "metadata": {
+                    "store_id": "task_result_artifact",
+                    "payload_sha256": str(
+                        artifact.get("payload_sha256") or ""
+                    ).strip(),
+                },
+            }
+        )
+    return values
 
 
 def _governed_model_budget(frozen: FrozenNodeInput) -> dict[str, Any] | None:

@@ -14,6 +14,10 @@ from host_brain.app.governed_route_executors import (
     FrozenDelegateRouteExecutor,
     GovernedRouteExecutorError,
 )
+from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
+from host_brain.contracts.agent_runtime.node_input_attestation import (
+    build_node_input_artifact_attestation,
+)
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
@@ -58,8 +62,14 @@ def _frozen(
     route: str,
     target_id: str,
     input_pack: dict[str, Any] | None = None,
+    input_artifacts: list[dict[str, Any]] | None = None,
     budget: dict[str, Any] | None = None,
 ) -> FrozenNodeInput:
+    artifacts = list(input_artifacts or [])
+    artifact_refs = tuple(
+        str(item.get("artifact_ref") or "").strip()
+        for item in artifacts
+    )
     return FrozenNodeInput(
         command_id="command-frozen-route",
         request_id="request-frozen-route",
@@ -78,9 +88,9 @@ def _frozen(
         route=route,
         target_id=target_id,
         objective="answer only this frozen objective",
-        input_refs=("artifact://frozen/input",),
+        input_refs=artifact_refs or ("artifact://frozen/input",),
         _input_pack_json=json.dumps(input_pack or {"user_message": "hello"}),
-        _input_artifacts_json=json.dumps([]),
+        _input_artifacts_json=json.dumps(artifacts),
         node_grant_ref="governor-grant://child/frozen-route",
         parent_grant_ref="governor-grant://parent/frozen-route",
         _budget_json=json.dumps(budget or {}, sort_keys=True),
@@ -264,6 +274,91 @@ async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative
     assert guard["max_output_tokens"] == 60
     assert events[0]["budget_usage"]["measurements"]["token_count"] == 18
     assert events[0]["budget_usage"]["measurements"]["model_cost_micros"] == 27
+
+
+@pytest.mark.asyncio
+async def test_plan_chat_consumes_only_digest_bound_dependency_artifacts() -> None:
+    captured: dict[str, Any] = {}
+    artifact_ref = (
+        "artifact://task-result/graph-frozen-route/revisions/1/"
+        "nodes/node-predecessor"
+    )
+    receipt_ref = "worker-projection://predecessor/" + "a" * 64
+    payload = {
+        "receipt_ref": receipt_ref,
+        "narrative": "accepted predecessor result",
+    }
+    artifact = {
+        "artifact_ref": artifact_ref,
+        "receipt_ref": receipt_ref,
+        "payload": payload,
+        "payload_sha256": artifact_digest(payload),
+    }
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "synthesized result",
+            "audit_refs": {
+                "trace_stage_meta": _approved_trace(
+                    kwargs["trace_stage_meta"]
+                ),
+            },
+        }
+
+    executor = FrozenChatRouteExecutor(
+        ports=object(),
+        stream_chat_with_context=stream,
+    )
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                input_pack={
+                    "user_message": "synthesize accepted results",
+                    "retrieval_evidence_items": [
+                        {
+                            "source_ref": "memory://unrelated",
+                            "snippet": "must not enter Plan synthesis",
+                        }
+                    ],
+                },
+                input_artifacts=[artifact],
+                budget=_active_budget(),
+            )
+        )
+    ]
+
+    assert captured["retrieval_evidence_items"] == [
+        {
+            "source_ref": artifact_ref,
+            "evidence_ref": receipt_ref,
+            "snippet": "accepted predecessor result",
+            "score": 1.0,
+            "confidence": 1.0,
+            "store_id": "task_result_artifact",
+            "metadata": {
+                "store_id": "task_result_artifact",
+                "payload_sha256": artifact["payload_sha256"],
+            },
+        }
+    ]
+    expected = build_node_input_artifact_attestation([artifact])
+    assert (
+        captured["trace_stage_meta"]["node_input_artifact_attestation"]
+        == expected
+    )
+    assert (
+        events[0]["audit_refs"]["trace_stage_meta"][
+            "node_input_artifact_attestation"
+        ]
+        == expected
+    )
 
 
 @pytest.mark.asyncio

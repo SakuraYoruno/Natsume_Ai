@@ -690,6 +690,35 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         assert all(call["governor_result"] == {} for call in chat_calls)
         assert all(call["request_body"].suppress_edge_tts is True for call in chat_calls)
         assert all(call["request_body"].suppress_edge_vts is True for call in chat_calls)
+        direct_chat_call, plan_synthesis_call = chat_calls
+        assert direct_chat_call["retrieval_evidence_items"] == []
+        assert (
+            "node_input_artifact_attestation"
+            not in direct_chat_call["trace_stage_meta"]
+        )
+        plan_evidence = plan_synthesis_call["retrieval_evidence_items"]
+        assert len(plan_evidence) == 2
+        assert {
+            item["store_id"] for item in plan_evidence
+        } == {"task_result_artifact"}
+        assert all(
+            item["source_ref"].startswith(
+                "artifact://task-result/"
+            )
+            and item["evidence_ref"].startswith(
+                "worker-projection://"
+            )
+            and item["metadata"]["payload_sha256"]
+            for item in plan_evidence
+        )
+        plan_attestation = plan_synthesis_call["trace_stage_meta"][
+            "node_input_artifact_attestation"
+        ]
+        assert plan_attestation["schema_version"] == (
+            "Natsume.task_runtime.node_input_artifact_attestation.v1"
+        )
+        assert len(plan_attestation["artifacts"]) == 2
+        assert plan_attestation["bundle_digest"].startswith("sha256:")
 
         # Each accepted Life effect now drains only its own exact local
         # projection intents before the dispatcher may advance to outward

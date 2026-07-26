@@ -3,8 +3,8 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.8
-核对日期：2026-07-22
+版本：v3.9
+核对日期：2026-07-26
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag worker 执行和进程内任务 registry 已删除，且 Executive 内的 Forge route override call 已移除。纯 SkillDag adapter 仅作零生产调用的兼容合同；独立 Forge `runtime-match` 仍是待退役边界。
 
@@ -23,8 +23,10 @@ flowchart TD
         TR["GovernedTaskCoordinator"]
         SHADOW["atomic success production default\nbounded fan-out independent default OFF"]
         WK["Frozen worker"]
-        AC["Verification / Acceptance"]
-        HS --> GC --> GATE --> AD --> TR --> WK --> AC
+        WP["Durable WorkerProjection"]
+        AC["Independent Verification / Acceptance"]
+        ART["Accepted TaskResult artifact"]
+        HS --> GC --> GATE --> AD --> TR --> WK --> WP --> AC --> ART
         TR -.-> SHADOW -.-> WK
     end
 
@@ -43,6 +45,8 @@ flowchart TD
 ```
 
 `agent_runtime/cortex_runtime.py` 不再持有 Executive application port。执行 route 只能进入 Governed Runtime，读取 route 只能进入 durable projection，未知 route fail closed。Cortex 的 contextual-session/style、clarification、LLM unavailable 与 async post-process direct-reply branch 已物理删除；它只把冻结上下文交给 TaskGraph。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只保留不可达的拒绝边界；任何 stale import 都不能重建 Executive application port。
+
+`AC` 不是 worker 内部判断：Verifier 与 Acceptance 各自重开 durable projection。Plan 的 final Chat 还要从 `ART` 获得 digest-bound predecessor bundle；因此 TaskGraph 边既是调度约束，也是可验证的数据输入合同。当前规则只覆盖已启用 capability-plan 的固定结构政策，通用候选生成与语义收益仍属于 NE-02。
 
 ## Planning Search 分层
 

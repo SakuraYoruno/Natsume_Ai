@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.16
+版本：v2.17
 核对日期：2026-07-26
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -11,6 +11,8 @@
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、七路线 commit-bound acceptance 与 NE-01 仍未闭环。
+
+Worker Evidence 模块只负责对 durable WorkerProjection 做独立验证与验收，不执行 worker、不写 Task 状态，也不拥有领域语义。它复验 route-neutral immutable identity、grant、WorkOrder/context、receipt/COMMIT 与输出合同，并把未知语义标准交给 Review。Node Input Attestation 合同只规范前驱 TaskResult artifact 的 ref、receipt 与 payload digest；Plan Chat adapter 负责将这组已验收产物转换为唯一合成证据，不能混入普通 Memory retrieval。Task Runtime 仍是 Attempt/Lease/Budget/Review/Acceptance 的唯一状态 owner。
 
 Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskStore 负责有序 Effect staging，Digital Life command repository 负责 command/event/intent 原子入账，`LifeProjectionDispatcher + life_projection_barrier` 负责 exact intent 执行与回执集合校验。`surface.post_process` 继续调用真实 app-local AgentRuntime ports，只有 assistant turn 和 LifeMemory admission 均持久成功才可完成 projection。Gateway transport仍由后序 delivery Effect 拥有，任何本地投影 UNKNOWN 都会阻断它；这样没有新增第二个 Conversation writer，也没有让 Life command receipt越权成为投影成功证明。
 
