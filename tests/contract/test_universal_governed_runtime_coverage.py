@@ -24,7 +24,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "607fde42dba1218b361786a3c3e33d665aca1504"
+    assert report.evaluated_commit_sha == "59527b1210e16b62e243dda616c190ec45d8ebe3"
     assert report.migration_head == (
         "0135_task_review_denial_settlement.sql"
     )
@@ -41,37 +41,31 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert report.missing_route_controls == {
         "chat": (
             "budget_enforcement",
-            "commit_bound_acceptance",
         ),
         "skill": (
             "canonical_execution_authority",
             "budget_enforcement",
             "transactional_side_effects",
-            "commit_bound_acceptance",
         ),
         "plan": (
             "canonical_execution_authority",
             "budget_enforcement",
             "transactional_side_effects",
-            "commit_bound_acceptance",
         ),
         "delegate": (
             "review_resume",
             "transactional_side_effects",
-            "commit_bound_acceptance",
         ),
         "scheduler": (
             "canonical_execution_authority",
             "budget_enforcement",
             "verification",
             "transactional_side_effects",
-            "commit_bound_acceptance",
         ),
         "internal": (
             "canonical_execution_authority",
             "budget_enforcement",
             "transactional_side_effects",
-            "commit_bound_acceptance",
         ),
         "operator": (
             "host_command",
@@ -85,7 +79,6 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
             "acceptance",
             "receipt",
             "transactional_side_effects",
-            "commit_bound_acceptance",
         ),
     }
     assert report.missing_architecture_controls == (
@@ -121,6 +114,14 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert "tests/integration/test_ne01_plan_node_review_runtime.py" in payload[
         "routes"
     ]["plan"]["evidence_refs"]
+    assert all(
+        route["controls"]["commit_bound_acceptance"] == "PASS"
+        for route in payload["routes"].values()
+    )
+    assert (
+        "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
+        in report.evidence_refs
+    )
 
 
 def test_full_architecture_gate_fails_closed_while_any_route_is_missing() -> None:
@@ -200,6 +201,7 @@ def test_route_cannot_pass_commit_bound_acceptance_without_receipt_binding(
     payload["routes"]["chat"]["controls"]["transactional_side_effects"] = "PASS"
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"
     payload["routes"]["chat"]["status"] = "COMPLETE"
+    payload["routes"]["chat"].pop("acceptance_binding")
     candidate = tmp_path / "coverage.json"
     candidate.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -211,12 +213,11 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     tmp_path: Path,
 ) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    receipt = json.loads(
-        (
-            ROOT
-            / "tests/fixtures/release/universal_runtime_acceptance_v3.json"
-        ).read_text(encoding="utf-8")
+    receipt_ref = (
+        "docs/45_testing/test_reports/"
+        "ne01_universal_route_acceptance_20260727.json"
     )
+    receipt = json.loads((ROOT / receipt_ref).read_text(encoding="utf-8"))
     payload["evidence_binding"]["evaluated_commit_sha"] = receipt["commit_sha"]
     payload["evidence_binding"]["migration_head"] = receipt["migration_head"]
     payload["routes"]["chat"]["controls"]["budget_enforcement"] = "PASS"
@@ -224,7 +225,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"
     payload["routes"]["chat"]["status"] = "COMPLETE"
     payload["routes"]["chat"]["acceptance_binding"] = {
-        "receipt_ref": "tests/fixtures/release/universal_runtime_acceptance_v3.json"
+        "receipt_ref": receipt_ref
     }
     candidate = tmp_path / "coverage.json"
     candidate.write_text(json.dumps(payload), encoding="utf-8")
@@ -233,8 +234,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
 
     assert report.route_statuses["chat"] == "COMPLETE"
     assert (
-        "tests/fixtures/release/universal_runtime_acceptance_v3.json"
-        in report.evidence_refs
+        receipt_ref in report.evidence_refs
     )
 
 

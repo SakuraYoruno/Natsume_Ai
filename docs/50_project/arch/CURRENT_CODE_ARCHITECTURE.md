@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.45
+版本：v5.47
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -14,7 +14,9 @@
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
 
-Universal Runtime 现在有一套独立的提交绑定判定器，但还没有七路正式 PASS 收据。Persistence reader 以 SQLite URI `mode=ro` 和 `query_only=ON` 在单一事务重开运行事实；Release builder 将事实约束为 `natsume.universal-runtime-route-acceptance.v3`，绑定干净 Git HEAD、仓库与数据库 migration head，并逐节点核对 Attempt/Lease/Operation、父子 Budget usage lineage、Verification/Acceptance、Artifact/WorkerProjection、Effect/Outbox/Receipt。输出只保留 bounded identifier、状态、版本和 digest；原始 Command/WorkOrder/Graph/Effect payload、用户正文和模型输出不能进入收据。当前真实 GR05 运行仅校准 Chat、Delegate、Plan，机器矩阵仍把七路 `commit_bound_acceptance` 全部保留为 `MISSING`。
+Universal Runtime 现在有一套独立的提交绑定判定器和七路正式 PASS 收据。Persistence reader 以 SQLite URI `mode=ro` 和 `query_only=ON` 在单一事务重开运行事实；Release builder 将事实约束为 `natsume.universal-runtime-route-acceptance.v3`，绑定干净 Git HEAD、仓库与数据库 migration head，并逐节点核对 Attempt/Lease/Operation、父子 Budget usage lineage、Verification/Acceptance、Artifact/WorkerProjection、Effect/Outbox/Receipt。输出只保留 bounded identifier、状态、版本和 digest；原始 Command/WorkOrder/Graph/Effect payload、用户正文和模型输出不能进入收据。
+
+当前本地验收 composition 已覆盖七路：GR05 共同运行 Chat、Direct Skill、Delegate 与多节点 Plan；`tools/acceptance/universal_remaining_routes.py` 对同一数据库调用真实 Scheduler、Internal 和 Operator application boundaries。Scheduler Effect 在节点验收后执行，Internal result commit 由正式 handler 持久化，Operator 经过 durable Review continuation 后才切换 HardState，并由 outer outcome 完成 Secure Ingress claim。干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 的串联运行得到七路 PASS，正式收据使机器矩阵中七路 `commit_bound_acceptance` 全部为 `PASS`；路线仍因其它控制部分完成而保持 `INCOMPLETE`。
 
 Review 拒绝现在有独立持久终态。0135 的 append-only settlement 精确绑定 terminal Review 状态/版本/digest、Graph revision、Node、graph Budget、三条 Outbox，以及 POST Review 的 0134 Acceptance、`SUCCEEDED` Attempt 和可选已有多节点 `BLOCKED` decision。PRE Review 仅在零 Attempt 时原子取消 Node/Graph 并释放 Budget；POST Review 原子失败 Node/Graph 并释放 Budget。Scheduler 或 Review continuation 在提交响应丢失后只重开同一 settlement；不会创建 Attempt、签发 Grant 或重跑 Worker。Store reader 会重新验证 Review、aggregate、Acceptance、blocking decision 和三条 Outbox，任一漂移失败关闭。
 

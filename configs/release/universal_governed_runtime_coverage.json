@@ -2,16 +2,16 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_ROUTE_ACCEPTANCE_LEDGER_V3_PRECOMMIT_OVER_ORIGIN_DEV_D03DE2118",
-  "current_document_slice": "NE01_ROUTE_ACCEPTANCE_LEDGER_V3_PRECOMMIT",
+  "evaluated_source": "NE01_SEVEN_ROUTE_FORMAL_CLEAN_SHA_SHARED_SQLITE_ACCEPTANCE_OVER_ORIGIN_DEV_37BC71055",
+  "current_document_slice": "NE01_SEVEN_ROUTE_FORMAL_CLEAN_SHA_SHARED_SQLITE_ACCEPTANCE",
   "evidence_binding": {
-    "evaluated_commit_sha": "607fde42dba1218b361786a3c3e33d665aca1504",
+    "evaluated_commit_sha": "59527b1210e16b62e243dda616c190ec45d8ebe3",
     "migration_head": "0135_task_review_denial_settlement.sql"
   },
-  "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real v3 acceptance receipt binds one clean evaluated Git HEAD, the exact repository/applied migration head and route PASS result. The v3 collector now reads one real file-backed SQLite snapshot in query-only mode and verifies command, graph, nodes, attempts, leases, operations, parent/child budgets, verification, acceptance, artifacts, worker projections, effects, outboxes and absence of current recovery/cancellation facts. Source files, tests, fixtures, an outer admitted graph, a synthetic receipt or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. The calibrated GR05 execution proves chat, delegate and plan only; skill, scheduler, internal and operator remain NOT_RUN, so every route commit_bound_acceptance remains MISSING until one clean-commit seven-route run is collected. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
+  "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real v3 acceptance receipt binds one clean evaluated Git HEAD, the exact repository/applied migration head and route PASS result. The v3 collector reads one real file-backed SQLite snapshot in query-only mode and verifies command, graph, nodes, attempts, leases, operations, parent/child budgets, verification, acceptance, artifacts, worker projections, effects, outboxes and absence of current recovery/cancellation facts. Source files, tests, fixtures, an outer admitted graph, a synthetic receipt or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. On clean Git HEAD 59527b1210e16b62e243dda616c190ec45d8ebe3, GR05 invoked real Chat, Skill, Delegate and Plan Host Runtime boundaries, then the remaining-route driver invoked real Scheduler, Internal and reviewed Operator application boundaries against the same canonical file-backed SQLite. The query-only collector produced one privacy-safe v3 receipt with all seven routes PASS and exact repository/applied migration head 0135; therefore every commit_bound_acceptance control is PASS. Bounded deterministic workers prove runtime governance only and are not real-provider, PlanningSearch-benefit or NE-07 evidence. Other PARTIAL controls keep every route and the NE-01 program INCOMPLETE. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
     "atomic_graph_success": "ENABLED_FOR_NEW_PRODUCTION_GRAPHS",
-    "commit_bound_acceptance_collector": "CODE_COMPLETE_V3_QUERY_ONLY_REAL_SQLITE_CLEAN_GIT_AND_EXACT_MIGRATION_BOUND_TAMPER_AND_PRIVACY_FAIL_CLOSED_CALIBRATED_CHAT_DELEGATE_PLAN_PASS_ONLY_SEVEN_ROUTE_RUN_NOT_RUN_ALL_ROUTE_CONTROLS_REMAIN_MISSING",
+    "commit_bound_acceptance_collector": "PASS_V3_QUERY_ONLY_REAL_FILE_BACKED_CANONICAL_SQLITE_CLEAN_GIT_59527B1210E16B62E243DDA616C190EC45D8EBE3_EXACT_MIGRATION_0135_TAMPER_AND_PRIVACY_FAIL_CLOSED_ALL_SEVEN_ROUTES_PASS_BOUNDED_RUNTIME_GOVERNANCE_ONLY_REAL_PROVIDER_PLANNINGSEARCH_BENEFIT_AND_NE07_NOT_PROVEN",
     "bounded_fanout": "OFF_SIGNED_DURABLE_CANARY_REQUIRED_NE07_NOT_RUN",
     "graph_enablement_gate": "ATOMIC_FAIL_CLOSED_CAPABILITY_CHECK_SIGNED_DURABLE_BOUNDED_FANOUT_RECEIPT_EXACT_BUILD_MIGRATION_CONFIGURATION_REQUIRED",
     "durable_cancellation": "GOVERNED_OPERATOR_CONTROL_LOCAL_REAL_SQLITE_PASS_DEFAULT_OFF_COMPLETE_PROCESS_RESTART_HTTP_NETWORK_CANARY_NOT_RUN",
@@ -87,7 +87,10 @@
         "acceptance": "PASS",
         "receipt": "PASS",
         "transactional_side_effects": "PASS",
-        "commit_bound_acceptance": "MISSING"
+        "commit_bound_acceptance": "PASS"
+      },
+      "acceptance_binding": {
+        "receipt_ref": "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
       }
     },
     "skill": {
@@ -117,7 +120,10 @@
         "acceptance": "PASS",
         "receipt": "PASS",
         "transactional_side_effects": "PARTIAL",
-        "commit_bound_acceptance": "MISSING"
+        "commit_bound_acceptance": "PASS"
+      },
+      "acceptance_binding": {
+        "receipt_ref": "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
       }
     },
     "delegate": {
@@ -155,7 +161,10 @@
         "acceptance": "PASS",
         "receipt": "PASS",
         "transactional_side_effects": "PARTIAL",
-        "commit_bound_acceptance": "MISSING"
+        "commit_bound_acceptance": "PASS"
+      },
+      "acceptance_binding": {
+        "receipt_ref": "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
       }
     },
     "plan": {
@@ -198,7 +207,10 @@
         "acceptance": "PASS",
         "receipt": "PASS",
         "transactional_side_effects": "PARTIAL",
-        "commit_bound_acceptance": "MISSING"
+        "commit_bound_acceptance": "PASS"
+      },
+      "acceptance_binding": {
+        "receipt_ref": "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
       }
     },
     "scheduler": {
@@ -247,7 +259,10 @@
         "acceptance": "PASS",
         "receipt": "PASS",
         "transactional_side_effects": "PARTIAL",
-        "commit_bound_acceptance": "MISSING"
+        "commit_bound_acceptance": "PASS"
+      },
+      "acceptance_binding": {
+        "receipt_ref": "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
       }
     },
     "internal": {
@@ -365,7 +380,10 @@
         "acceptance": "PASS",
         "receipt": "PASS",
         "transactional_side_effects": "PARTIAL",
-        "commit_bound_acceptance": "MISSING"
+        "commit_bound_acceptance": "PASS"
+      },
+      "acceptance_binding": {
+        "receipt_ref": "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
       }
     },
     "operator": {
@@ -476,7 +494,10 @@
         "acceptance": "PARTIAL",
         "receipt": "PARTIAL",
         "transactional_side_effects": "PARTIAL",
-        "commit_bound_acceptance": "MISSING"
+        "commit_bound_acceptance": "PASS"
+      },
+      "acceptance_binding": {
+        "receipt_ref": "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
       }
     }
   },

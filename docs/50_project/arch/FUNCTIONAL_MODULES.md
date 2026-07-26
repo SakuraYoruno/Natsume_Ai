@@ -3,16 +3,18 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.25
+版本：v2.27
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、七路线 commit-bound acceptance 与 NE-01 仍未闭环。
+当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound acceptance 已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、路线其余控制与 NE-01 仍未闭环。
 
-Route Acceptance 模块分为三个只读责任：`persistence/universal_route_acceptance_reader.py` 只负责从一个真实 SQLite snapshot 重开 bounded facts；`release/universal_route_acceptance.py` 只负责 Git/migration 绑定、七路判定、隐私字段白名单和 digest；`scripts/runtime/collect_universal_runtime_acceptance.py` 只负责参数解析与原子写出本地证据。它们都没有 Task、Budget、Review、Effect 或 Outbox writer。Coverage Gate 只接受可通过 v3 validator 的真实收据结构；fixture 与部分路线校准不能升级生产状态。
+Route Acceptance 模块分为三个只读责任：`persistence/universal_route_acceptance_reader.py` 只负责从一个真实 SQLite snapshot 重开 bounded facts；`release/universal_route_acceptance.py` 只负责 Git/migration 绑定、七路判定、隐私字段白名单和 digest；`scripts/runtime/collect_universal_runtime_acceptance.py` 只负责参数解析与原子写出本地证据。它们都没有 Task、Budget、Review、Effect 或 Outbox writer。Coverage Gate 只接受可通过 v3 validator 的真实收据结构；当前正式收据绑定干净提交 `59527b12`、migration 0135 和七路 PASS，使七个提交绑定控制均为 `PASS`，但不会覆盖各路线其余控制。
+
+Local Acceptance Driver 不属于 Host 生产 composition。`tools/acceptance/universal_remaining_routes.py` 只在显式验收命令中构造 app-local Scheduler/Internal/Operator Runtime，写入调用者指定的隔离 SQLite；`scripts/runtime/run_universal_remaining_route_acceptance.py` 负责 CLI 和 request map。Scheduler、Internal、Operator 仍使用各自正式 CommandService、Task coordinator、Preview、Effect 和 claim owner；确定性 worker 有显式 `bounded_local_acceptance` 标识，不能被 Model/PlanningSearch/NE-07 Gate 消费。
 
 Node Budget 模块把总额度所有权与节点执行归因分开。`task_budget_usage_store.py` 继续拥有 Graph Budget 的 aggregate CAS、首个 EXCEEDED winner 与 terminal observation；`task_node_budget_store.py` 只在同一 TaskStore UoW 内创建和读取 Attempt-bound child reservation，`task_node_budget_usage_bridge.py` 负责把每次父级 usage 精确映射到 child append-only ledger，`task_budget_terminal_sibling.py` 隔离共享终态 observation。`BudgetRuntimeContext.bind_node_attempt()` 在 worker 取得执行权前要求 exact child，`node_execution_runtime.py` 在新 claim、Operation continuation与 retry 三条入口都完成绑定。child 终态由 Attempt/parent 状态派生，不拥有独立 Graph 终结权；0132 缺失、身份漂移或父子落账不原子时失败关闭。
 

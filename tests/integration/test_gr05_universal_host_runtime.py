@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from pathlib import Path
 from types import SimpleNamespace
 import sqlite3
 import time
@@ -299,7 +301,7 @@ def _gateway_ingress_authority(
 
 
 @pytest.mark.asyncio
-async def test_chat_delegate_and_plan_share_real_governed_runtime(
+async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -421,7 +423,17 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         frozen_gateway_transport,
     )
 
-    db_path = tmp_path / "universal-host-runtime.sqlite3"
+    configured_database = str(
+        os.environ.get("NATSUME_UNIVERSAL_ACCEPTANCE_DATABASE") or ""
+    ).strip()
+    db_path = (
+        Path(configured_database).expanduser().resolve()
+        if configured_database
+        else tmp_path / "universal-host-runtime.sqlite3"
+    )
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if configured_database and db_path.exists():
+        db_path.unlink()
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
     authority_verifier = build_durable_production_authority_verifier(
         ledger_provider=lambda: ledger,
@@ -567,10 +579,18 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             target_id="surface_reply",
             task="reply through governed chat",
         )
+        skill = _intent(
+            request_id="request-gr05-skill",
+            session_id="session-gr05-universal",
+            seq=2,
+            route="skill",
+            target_id="agent_workbench_brief",
+            task="build a bounded governed work brief",
+        )
         delegate = _intent(
             request_id="request-gr05-delegate",
             session_id="session-gr05-universal",
-            seq=2,
+            seq=3,
             route="delegate",
             target_id="pentest_agent",
             task="prepare a read-only threat model for example.test",
@@ -578,7 +598,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         plan = _intent(
             request_id="request-gr05-plan",
             session_id="session-gr05-universal",
-            seq=3,
+            seq=4,
             route="plan",
             target_id="planning_search",
             task="select and synthesize a bounded production capability plan",
@@ -592,7 +612,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
 
         results: dict[str, list[dict]] = {}
         governors: dict[str, dict] = {}
-        for value in (chat, delegate, plan):
+        for value in (chat, skill, delegate, plan):
             # The real Host Input pipeline freezes the authenticated Secure
             # Ingress principal into the intent *before* Governor admission.
             # Keep this direct-runtime test on that same side of the boundary:
@@ -637,7 +657,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         mismatched_plan = _intent(
             request_id="request-gr05-plan-principal-drift",
             session_id="session-gr05-universal",
-            seq=4,
+            seq=5,
             route="plan",
             target_id="planning_search",
             task="reject mismatched planning principal before admission",
@@ -674,13 +694,14 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         assert command_count_after_drift == command_count_before_drift
 
         assert results["chat"][-1]["execution_receipt"]["status"] == "ACCEPTED"
+        assert results["skill"][-1]["execution_receipt"]["status"] == "ACCEPTED"
         assert results["delegate"][-1]["execution_receipt"]["status"] == "ACCEPTED"
         assert results["plan"][-1]["execution_receipt"]["status"] == "ACCEPTED"
         assert plan_replay[-1]["execution_receipt"]["command_id"] == (
             results["plan"][-1]["execution_receipt"]["command_id"]
         )
         assert len(chat_calls) == 2
-        assert len(skill_calls) == 2
+        assert len(skill_calls) == 3
         assert all(skill_id for skill_id in skill_calls)
         assert len(delivered_replies) == 1
         assert delivered_replies[0]["request_id"] == chat["request_id"]
@@ -817,17 +838,22 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 """,
                 (chat["session_id"],),
             ).fetchall()
-        assert sorted(row[0] for row in routes) == ["chat", "delegate", "plan"]
+        assert sorted(row[0] for row in routes) == [
+            "chat",
+            "delegate",
+            "plan",
+            "skill",
+        ]
         assert plan_graph[2] == HostCommandSurface.GATEWAY.value
         assert plan_graph[3] == plan_authority["principal_id"]
         assert plan_graph[4] == plan_authority["claim_ref"]
         assert plan_graph[5] == plan_authority["audit_ref"]
         assert plan_graph[6] == "sha256:" + plan_authority["body_sha256"]
-        assert attempts == 5
+        assert attempts == 6
         # Chat/delegate already froze worker projections; the plan's skill
         # node now does so as well, giving every accepted route the same B5
         # result-authority journal.
-        assert projections == 5
+        assert projections == 6
         assert len(chat_projection_payloads) == 2
         assert all(
             "governed_model_budget"
@@ -876,10 +902,10 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         assert delegate_budget_usage[2] == 1
         assert legacy_delegate_logs == 0
         assert acceptance_effects == [
-            ("conversation.preference_signal", "GRAPH", "COMMITTED", 3),
-            ("conversation.user_turn", "GRAPH", "COMMITTED", 3),
-            ("life.conversation_turn_recorded", "GRAPH", "COMMITTED", 3),
-            ("life.foreground_completed", "GRAPH", "COMMITTED", 3),
+            ("conversation.preference_signal", "GRAPH", "COMMITTED", 4),
+            ("conversation.user_turn", "GRAPH", "COMMITTED", 4),
+            ("life.conversation_turn_recorded", "GRAPH", "COMMITTED", 4),
+            ("life.foreground_completed", "GRAPH", "COMMITTED", 4),
             ("surface.reply_delivery", "GRAPH", "COMMITTED", 1),
         ]
         assert results["chat"][-1]["audit_refs"]["acceptance_effects"] == {
@@ -900,14 +926,15 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                 "recovery_pending": 0,
                 "dispatch_status": "COMMITTED",
             }
-            for route in ("delegate", "plan")
+            for route in ("skill", "delegate", "plan")
         )
         assert {row[0] for row in assistant_turns} == {
             chat["request_id"],
+            skill["request_id"],
             delegate["request_id"],
             plan["request_id"],
         }
-        assert len(assistant_turns) == 3
+        assert len(assistant_turns) == 4
         graph = container.task_store.get_graph(plan_graph[0], plan_graph[1])
         assert graph["status"] == TaskGraphStatus.COMPLETED.value
         assert [node["status"] for node in graph["nodes"]] == [
@@ -917,6 +944,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
         ]
         acceptance_request_ids = {
             "chat": chat["request_id"],
+            "skill": skill["request_id"],
             "delegate": delegate["request_id"],
             "plan": plan["request_id"],
         }
@@ -943,7 +971,7 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             ].items()
         } == {
             "chat": "PASS",
-            "skill": "NOT_RUN",
+            "skill": "PASS",
             "plan": "PASS",
             "delegate": "PASS",
             "scheduler": "NOT_RUN",
