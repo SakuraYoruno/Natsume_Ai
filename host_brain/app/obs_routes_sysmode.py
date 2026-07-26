@@ -1,6 +1,7 @@
 """obs_routes_sysmode.py — 系统运行模式管理（从 obs_routes.py 拆分）。
 
-包含：GET/POST /obs/sys-mode / history / auto-rules / event
+只包含系统模式只读投影；全部写命令由 Host Secure Operator ingress
+进入 Governed TaskGraph。
 """
 from __future__ import annotations
 
@@ -28,8 +29,6 @@ from host_brain.app.observability_runtime.process_state_projection import (
 )
 from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 
-from typing import Literal
-
 from .obs_routes_core import router, _now_ms
 
 
@@ -51,25 +50,6 @@ class SysModeStatusResponse(BaseModel):
     projection: Dict[str, Any] = Field(default_factory=dict)
 
 
-class SysModeSwitchRequest(BaseModel):
-    target_mode: Literal["normal", "focus", "gaming", "sleep", "maintenance", "locked"] = Field(
-        ..., description="目标模式: normal/focus/gaming/sleep/maintenance/locked"
-    )
-    reason: str = Field("", description="切换原因说明")
-    source: str = Field("manual", description="切换来源: manual/auto_gaming/auto_idle/auto_wakeup/skill")
-
-
-class SysModeSwitchResponse(BaseModel):
-    success: bool
-    from_mode: Optional[str] = None
-    to_mode: Optional[str] = None
-    source: Optional[str] = None
-    reason: Optional[str] = None
-    event_id: Optional[str] = None
-    error: Optional[str] = None
-    ts_ms: int
-
-
 class SysModeHistoryItem(BaseModel):
     event_id: str
     from_mode: str
@@ -86,10 +66,6 @@ class SysModeHistoryResponse(BaseModel):
     total: int
     timestamp: int
     projection: Dict[str, Any] = Field(default_factory=dict)
-
-
-class AutoRulesUpdateRequest(BaseModel):
-    rules: Dict[str, bool] = Field(..., description="自动切换规则开关")
 
 
 class DigitalLifeRuntimeSnapshotResponse(BaseModel):
@@ -248,54 +224,6 @@ def get_digital_life_runtime_snapshot(
     return DigitalLifeRuntimeSnapshotResponse(**payload)
 
 
-def _require_mode_transition_service(service: Any, *methods: str) -> Any:
-    if service is None or any(not callable(getattr(service, name, None)) for name in methods):
-        raise RuntimeError("OBS_SYS_MODE_COMMAND_AUTHORITY_UNAVAILABLE")
-    return service
-
-
-def switch_sys_mode(
-    body: SysModeSwitchRequest,
-    *,
-    mode_transition_service: Any,
-):
-    """切换系统运行模式（手动 / API 触发）。"""
-    service = _require_mode_transition_service(
-        mode_transition_service,
-        "switch_mode",
-    )
-
-    # 映射 source 字符串到枚举
-    try:
-        from host_brain.core.mode_transition import TransitionSource
-        source_enum = TransitionSource(body.source)
-    except (ValueError, ImportError):
-        source_enum = None
-
-    if source_enum:
-        result = service.switch_mode(
-            body.target_mode,
-            source=source_enum,
-            reason=body.reason,
-        )
-    else:
-        result = service.switch_mode(
-            body.target_mode,
-            reason=body.reason,
-        )
-
-    return SysModeSwitchResponse(
-        success=result.get("success", False),
-        from_mode=result.get("from_mode"),
-        to_mode=result.get("to_mode"),
-        source=result.get("source"),
-        reason=result.get("reason"),
-        event_id=result.get("event_id"),
-        error=result.get("error"),
-        ts_ms=result.get("ts_ms", _now_ms()),
-    )
-
-
 @router.get("/sys-mode/history", response_model=SysModeHistoryResponse)
 def get_sys_mode_history(
     request: Request,
@@ -317,53 +245,3 @@ def get_sys_mode_history(
         timestamp=int((payload or {}).get("timestamp") or _now_ms()),
         projection=projection,
     )
-
-
-def update_auto_rules(
-    body: AutoRulesUpdateRequest,
-    *,
-    mode_transition_service: Any,
-):
-    """更新自动切换规则开关。"""
-    service = _require_mode_transition_service(
-        mode_transition_service,
-        "update_auto_rules",
-    )
-    updated = service.update_auto_rules(body.rules)
-    return {
-        "auto_rules": updated,
-        "timestamp": _now_ms(),
-    }
-
-
-def post_sys_mode_event(
-    event_type: str = Query(..., description="事件类型"),
-    *,
-    mode_transition_service: Any,
-):
-    """发送模式切换事件（供 Edge 端调用）。
-
-    支持的 event_type：
-    - gaming_process_detected: 检测到游戏进程
-    - gaming_process_exited: 游戏进程退出
-    - user_message_received: 收到用户消息
-    - idle_check: 空闲检查
-    - morning_check: 早间唤醒检查
-    """
-    service = _require_mode_transition_service(
-        mode_transition_service,
-        "on_event",
-    )
-    result = service.on_event(event_type)
-    if result is None:
-        return {
-            "triggered": False,
-            "event_type": event_type,
-            "timestamp": _now_ms(),
-        }
-    return {
-        "triggered": True,
-        "event_type": event_type,
-        "result": result,
-        "timestamp": _now_ms(),
-    }

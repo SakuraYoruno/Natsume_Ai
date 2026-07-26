@@ -92,7 +92,11 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset(
         {
             "edge.command.push",
+            "scheduler.task.disable",
+            "scheduler.task.enable",
             "scheduler.task.trigger",
+            "sys_mode.auto_rules.update",
+            "sys_mode.event.submit",
             "sys_mode.switch",
             "task_effect.reconcile",
             "task_graph.cancel",
@@ -103,7 +107,7 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
             "task_terminal.reconcile",
         }
     )
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 27
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 23
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
         expected
     )

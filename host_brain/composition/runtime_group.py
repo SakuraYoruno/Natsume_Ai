@@ -40,6 +40,7 @@ _OPERATOR_RUNTIME_TARGETS = {
     "operator_task_operation_reconcile": "operator",
     "operator_task_effect_reconcile": "operator",
     "operator_task_control": "operator",
+    "operator_state_control": "operator",
 }
 _CLAIM_COMPLETION_SURFACES = frozenset(
     {

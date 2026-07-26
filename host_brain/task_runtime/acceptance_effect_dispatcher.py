@@ -42,6 +42,7 @@ AcceptanceEffectRecoveryObserver = Callable[[Mapping[str, Any]], Any]
 
 _EFFECT_TYPE_ORDER = {
     "host.sys_mode_transition": 0,
+    "host.operator_state_control": 0,
     "task.operator_control": 0,
     "edge.embodiment_enqueue": 1,
     "conversation.user_turn": 2,
@@ -305,6 +306,7 @@ class AcceptanceEffectDispatcher:
             "task.operation_reconciliation": 4,
             "task.acceptance_effect_reconciliation": 4,
             "task.operator_control": 4,
+            "host.operator_state_control": 4,
             "conversation.user_turn": 1,
             "conversation.preference_signal": 1,
             "life.conversation_turn_recorded": 2,

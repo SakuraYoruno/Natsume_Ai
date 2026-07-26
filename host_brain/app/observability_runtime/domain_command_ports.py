@@ -56,7 +56,11 @@ DomainHandler = Callable[[Mapping[str, Any], str], Any]
 # fail-closed until NE-01 gives each command a Governed Operator route.
 GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
     "edge.command.push",
+    "scheduler.task.disable",
+    "scheduler.task.enable",
     "scheduler.task.trigger",
+    "sys_mode.auto_rules.update",
+    "sys_mode.event.submit",
     "sys_mode.switch",
     "task_effect.reconcile",
     "task_graph.cancel",
@@ -72,7 +76,7 @@ BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 27
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 23
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -377,19 +381,6 @@ async def _avatar_behavior(payload: Mapping[str, Any], request_id: str) -> Any:
     }
 
 
-def _sysmode_service(route_ports: HostRoutePorts, *methods: str) -> Any:
-    provider = route_ports.mode_transition_service_provider
-    try:
-        service = provider() if provider is not None else None
-    except Exception as exc:
-        raise ObsDomainCommandError("OBS_SYS_MODE_DOMAIN_UNAVAILABLE") from exc
-    if service is None or any(
-        not callable(getattr(service, method, None)) for method in methods
-    ):
-        raise ObsDomainCommandError("OBS_SYS_MODE_DOMAIN_UNAVAILABLE")
-    return service
-
-
 async def _sysmode_switch(
     payload: Mapping[str, Any],
     request_id: str,
@@ -415,32 +406,24 @@ async def _edge_command_push(
     return await execute(payload, request_id)
 
 
-def _sysmode_auto_rules(
+async def _sysmode_auto_rules(
     payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
+    request_id: str,
 ) -> Any:
-    updated = _sysmode_service(route_ports, "update_auto_rules").update_auto_rules(
-        dict(payload.get("rules") or {})
+    return await _execute_governed_operator_state_control(
+        payload,
+        request_id,
     )
-    return {"success": True, "auto_rules": updated}
 
 
-def _sysmode_event(
+async def _sysmode_event(
     payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
+    request_id: str,
 ) -> Any:
-    event_type = _required_text(payload, "event_type")
-    result = _sysmode_service(route_ports, "on_event").on_event(event_type)
-    return {
-        "success": True,
-        "triggered": result is not None,
-        "event_type": event_type,
-        "result": _result_mapping(result) if result is not None else None,
-    }
+    return await _execute_governed_operator_state_control(
+        payload,
+        request_id,
+    )
 
 
 def _forge_runtime_match(
@@ -484,33 +467,18 @@ def _scheduler_authority(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return dict(authority)
 
 
-async def _scheduler_set_enabled(payload: Mapping[str, Any], *, enabled: bool) -> Any:
-    service = _scheduler_service()
-    task_id = _required_text(payload, "task_id")
-    expected = payload.get("expected_head_version")
-    if expected is None:
-        current = service.get_definition(task_id)
-        if inspect.isawaitable(current):
-            current = await current
-        if not isinstance(current, Mapping):
-            raise ObsDomainCommandError("SCHEDULER_DEFINITION_NOT_FOUND")
-        expected = int(current.get("head_version") or 0)
-    output = service.set_enabled(
-        task_id=task_id,
-        enabled=enabled,
-        authority=_scheduler_authority(payload),
-        expected_head_version=int(expected),
-        received_at_ms=int(__import__("time").time() * 1000),
+async def _scheduler_enable(payload: Mapping[str, Any], request_id: str) -> Any:
+    return await _execute_governed_operator_state_control(
+        payload,
+        request_id,
     )
-    return await output if inspect.isawaitable(output) else output
 
 
-async def _scheduler_enable(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return await _scheduler_set_enabled(payload, enabled=True)
-
-
-async def _scheduler_disable(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return await _scheduler_set_enabled(payload, enabled=False)
+async def _scheduler_disable(payload: Mapping[str, Any], request_id: str) -> Any:
+    return await _execute_governed_operator_state_control(
+        payload,
+        request_id,
+    )
 
 
 async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> Any:
@@ -766,6 +734,26 @@ async def _execute_governed_operator_control(
     return dict(result)
 
 
+async def _execute_governed_operator_state_control(
+    payload: Mapping[str, Any],
+    request_id: str,
+) -> Any:
+    runtime = operator_runtime_value("governed_operator_runtime")
+    execute = getattr(runtime, "execute_operator_state_control", None)
+    if not callable(execute):
+        raise ObsDomainCommandError(
+            "OBS_OPERATOR_STATE_CONTROL_RUNTIME_UNAVAILABLE"
+        )
+    result = execute(payload, request_id)
+    if inspect.isawaitable(result):
+        result = await result
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError(
+            "OBS_OPERATOR_STATE_CONTROL_RESULT_INVALID"
+        )
+    return dict(result)
+
+
 _HANDLERS: Mapping[str, DomainHandler] = {
     "bio.daily_cycle.run": _bio_daily_cycle,
     "bio.adoption.accept": _bio_adoption_accept,
@@ -815,8 +803,6 @@ _ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
     "tool.execute": _tool_execute,
     "bond.event.submit": _bond_event,
     "sys_mode.switch": _sysmode_switch,
-    "sys_mode.auto_rules.update": _sysmode_auto_rules,
-    "sys_mode.event.submit": _sysmode_event,
     "security.hunt.run_once": _security_hunt,
 }
 

@@ -37,16 +37,26 @@ ACTION_ALLOWLIST = {
     "operator_task_effect_reconciliation",
     "operator_task_graph_cancellation",
     "operator_task_review_control",
+    "operator_scheduler_state_control",
+    "operator_host_mode_policy_control",
     "work_code",
     "work_translate",
 }
-TARGET_ALLOWLIST = {"edge", "host", "memory", "system", "task_runtime"}
+TARGET_ALLOWLIST = {
+    "edge",
+    "host",
+    "memory",
+    "system",
+    "task_runtime",
+}
 ACTION_TARGET_RULES = {
     "operator_edge_command_push": "edge",
     "operator_task_operation_reconciliation": "task_runtime",
     "operator_task_effect_reconciliation": "task_runtime",
     "operator_task_graph_cancellation": "task_runtime",
     "operator_task_review_control": "task_runtime",
+    "operator_scheduler_state_control": "system",
+    "operator_host_mode_policy_control": "system",
 }
 
 REQUIRED_FIELDS: dict[str, type] = {
@@ -201,6 +211,37 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "checkpoint_id": str,
             "resume_binding_sha256": str,
             "resume_result_ref": str,
+        },
+    },
+    "operator_scheduler_state_control": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "request_id": str,
+            "operator_actor_id": str,
+            "observed_at_ms": int,
+            "task_id": str,
+            "enabled": bool,
+            "expected_head_version": int,
+        },
+        "optional": {},
+    },
+    "operator_host_mode_policy_control": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "request_id": str,
+            "operator_actor_id": str,
+            "observed_at_ms": int,
+            "expected_policy_revision": int,
+        },
+        "optional": {
+            "rules": dict,
+            "event_type": str,
         },
     },
     "work_code": {"required": {"text": str}, "optional": {}},

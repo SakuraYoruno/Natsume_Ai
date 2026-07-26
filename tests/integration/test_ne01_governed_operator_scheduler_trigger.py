@@ -688,6 +688,10 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
     assert GOVERNED_OPERATOR_COMMAND_IDS == {
         COMMAND_ID,
         "edge.command.push",
+        "scheduler.task.disable",
+        "scheduler.task.enable",
+        "sys_mode.auto_rules.update",
+        "sys_mode.event.submit",
         "sys_mode.switch",
         "task_effect.reconcile",
         "task_graph.cancel",
@@ -697,7 +701,7 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
         "task_review.resume",
         "task_terminal.reconcile",
     }
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 27
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 23
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == manifest
 
 

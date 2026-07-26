@@ -49,6 +49,9 @@ SCHEDULER_COMMAND_REPLAY = "SCHEDULER_COMMAND_REPLAY"
 _OPERATOR_TRIGGER_COMMAND_ID = "scheduler.task.trigger"
 _OPERATOR_TRIGGER_ACTION = "obs:command:scheduler.task.trigger"
 _OPERATOR_TRIGGER_SCOPES = frozenset({"obs:write", "scheduler:write"})
+_OPERATOR_ADMIN_COMMAND_IDS = frozenset(
+    {"scheduler.task.enable", "scheduler.task.disable"}
+)
 
 _SHA256_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 
@@ -370,6 +373,87 @@ class SchedulerCommandService:
             received_at_ms=received_at_ms,
         )
         return snapshot.to_dict()
+
+    def apply_accepted_set_enabled(
+        self,
+        *,
+        task_id: str,
+        enabled: bool,
+        authority: SecureIngressAuthority | Mapping[str, Any],
+        expected_head_version: int,
+    ) -> dict[str, Any]:
+        """Commit an accepted Operator mutation without settling its outer claim."""
+
+        auth = _require_authority(authority)
+        command_id = (
+            "scheduler.task.enable"
+            if enabled is True
+            else "scheduler.task.disable"
+            if enabled is False
+            else ""
+        )
+        _bind_scheduler_admin_operator_authority(
+            auth,
+            command_id=command_id,
+        )
+        operation_request = _set_enabled_operation_request(
+            task_id=task_id,
+            enabled=enabled,
+            expected_head_version=expected_head_version,
+        )
+        replay = self._admin_replay(
+            auth,
+            task_id=str(operation_request["task_id"]),
+            operation_kind="SET_ENABLED",
+            operation_request=operation_request,
+        )
+        if replay is not None:
+            return dict(replay)
+        return dict(
+            self._definitions.set_enabled_operation(
+                task_id=str(operation_request["task_id"]),
+                enabled=bool(operation_request["enabled"]),
+                expected_head_version=int(
+                    operation_request["expected_head_version"]
+                ),
+                authority=auth,
+            )
+        )
+
+    def resolve_accepted_set_enabled(
+        self,
+        *,
+        task_id: str,
+        enabled: bool,
+        authority: SecureIngressAuthority | Mapping[str, Any],
+        expected_head_version: int,
+    ) -> dict[str, Any] | None:
+        """Read and validate one immutable accepted Operator admin operation."""
+
+        auth = _require_authority(authority)
+        command_id = (
+            "scheduler.task.enable"
+            if enabled is True
+            else "scheduler.task.disable"
+            if enabled is False
+            else ""
+        )
+        _bind_scheduler_admin_operator_authority(
+            auth,
+            command_id=command_id,
+        )
+        operation_request = _set_enabled_operation_request(
+            task_id=task_id,
+            enabled=enabled,
+            expected_head_version=expected_head_version,
+        )
+        resolved = self._definitions.resolve_admin_operation(
+            operation_kind="SET_ENABLED",
+            task_id=str(operation_request["task_id"]),
+            operation_request=operation_request,
+            authority=auth,
+        )
+        return dict(resolved) if isinstance(resolved, Mapping) else None
 
     async def delete_definition(
         self,
@@ -869,6 +953,62 @@ def _bind_scheduler_command_surface(
             SCHEDULER_RUNTIME_AUTHORITY_INVALID,
             "Operator scheduler trigger lacks its exact OBS authority binding",
         )
+
+
+def _bind_scheduler_admin_operator_authority(
+    authority: dict[str, Any],
+    *,
+    command_id: str,
+) -> None:
+    command = str(command_id or "").strip()
+    raw_scopes = authority.get("required_scopes")
+    scopes = (
+        frozenset(str(item).strip() for item in raw_scopes if str(item).strip())
+        if isinstance(raw_scopes, (tuple, list, set, frozenset))
+        else frozenset()
+    )
+    if (
+        command not in _OPERATOR_ADMIN_COMMAND_IDS
+        or str(authority.get("ingress_surface") or "").strip()
+        != "obs.command"
+        or str(authority.get("operator_command_id") or "").strip() != command
+        or str(authority.get("action") or "").strip()
+        != f"obs:command:{command}"
+        or scopes != _OPERATOR_TRIGGER_SCOPES
+    ):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "Operator scheduler state control lacks exact OBS authority",
+        )
+    authority["command_surface"] = HostCommandSurface.OPERATOR.value
+    authority["operator_command_id"] = command
+    authority["action"] = f"obs:command:{command}"
+    authority["required_scopes"] = tuple(sorted(scopes))
+
+
+def _set_enabled_operation_request(
+    *,
+    task_id: str,
+    enabled: bool,
+    expected_head_version: int,
+) -> dict[str, Any]:
+    task_ref = str(task_id or "").strip()
+    if (
+        not task_ref
+        or type(enabled) is not bool
+        or isinstance(expected_head_version, bool)
+        or type(expected_head_version) is not int
+        or expected_head_version < 1
+    ):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "accepted scheduler state-control input is invalid",
+        )
+    return {
+        "task_id": task_ref,
+        "enabled": enabled,
+        "expected_head_version": expected_head_version,
+    }
 
 
 def _assert_occurrence_authority(

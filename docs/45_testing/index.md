@@ -3,17 +3,27 @@
 
 # 测试与验收目录
 
-版本：v2.8
+版本：v2.9
 维护日期：2026-07-26
 状态：当前证据
 
-## NE-01 Operator Task/Review 控制当前切片
+## NE-01 Operator 状态控制当前切片
+
+- `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 经过独立 Secure Ingress → Governor → `HostCommand` → 不可变 `TaskGraph` → Attempt/Lease/Grant/Budget/Review/Verification/Acceptance → terminal Preview → `operator.state_control` Effect；Review 前 canonical Scheduler/mode-policy 写入为 0。
+- 0129 为 Host mode-policy 建立 runtime scope/owner/lease/fence 绑定的 append-only event/head。同 operation 精确重放不追加事件；1001 条分页重启恢复、append 故障全回滚、released fence 和 tamper 均由真实 SQLite 验证。
+- 休眠 Scene 的 `PROACTIVE_ACTION_BLOCKED` 对通用 Intent 为 `RESTRICT`，对 Proactive projection 仍为 `BLOCK`；签名 Operator 唤醒事件因此不能绕过 Review，也不会被错误永久阻断。
+- 当前不重叠代码回归为 `175 passed`：mode-policy SQLite 3 项、Operator 集成 5 项、unit/contract 167 项，均为 0 fail。最终 0129 SQLite、migration、coverage、文档与交付合同为 `59 passed in 100.78s`，它与前述集合有重叠，不相加。
+- 首轮 Core Architecture Gate 3 如实发现主 `governed_operator_runtime.py` 达 1538 行；未扩白名单，而是把 mode receipt reopen/current-mode 责任移入专用 state-control runtime。拆分后主文件 1344 行、专用文件 650 行，相关回归 7 项通过，fresh Gate 1～14=`PASS`、`failed_gates=[]`、Gate 3 未分类文件为 0。
+- 最终统一静态扫描=`passed / failures=[]`；changed Python compile、三份 JSON 和 `git diff --check` 通过。
+- Operator inventory 为 `14/37` governed、`23/37` blocked。旧 Obs sys-mode mutation helper 已删除；独立 Scheduler CRUD HTTP 仍直接调用 command service，故 Scheduler 唯一 authority、完整 Host 进程重启、部署凭据、HTTP/network canary、NE-01 波次 integration 与 NE-07 Docker 全栈仍未完成。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
+
+## NE-01 Operator Task/Review 控制历史切片
 
 - `task_graph.cancel`、`task_review.approve/reject/resume` 已从 Obs 直接 writer 改为独立的 Secure Ingress → Governor → `HostCommand` → 不可变 `TaskGraph` → 节点 Attempt/Lease/Grant/Budget/Review/Verification/Acceptance → terminal Preview → `task.operator_control` Effect。只有 post-Acceptance handler 可以调用原 Task/Review owner；Graph cancellation 默认仍为关闭。
 - Review approve 不公开 `review_resume::` bearer，只返回不可供普通 API 使用的 `review-token://...` 引用。真实 SQLite 合同会关闭并重开 `ReviewStore`，随后证明该引用仍严格绑定 task/subject/version/checkpoint、只能消费一次，且 bearer 不进入 WorkOrder、数据库或公开响应。
 - 主定向集合为 `78 passed in 19.77s`。Acceptance/Review 生命周期文件为 `80 passed in 41.69s`，独立 Graph cancellation routing 文件为 `12 passed in 0.29s`；这些集合有重叠，不相加为伪总数。此前两个超过 60 秒并被工具终止的组合命令不计 PASS，也不计失败。
 - changed-module `compileall`、JSON 与 diff-check 通过；统一 static scan=`passed / failures=[]`，文档 authority/freshness、delivery metadata 和 coverage 为 `39 passed in 9.23s`。fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`，通过中立合同、schema probe 与 worker-authority guard 拆分消除了反向依赖和未分类巨石，没有扩大 allowlist。
-- 本切片没有 migration。完整 Host 进程重启、部署凭据、真实 HTTP/network canary、NE-01 波次 integration 与 NE-07 Docker 全栈均未运行；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。Operator inventory 为 `10/37` governed、`27/37` blocked，NE-01 保持 `IN_PROGRESS`。
+- 该切片自身没有 migration；其 `10/37` governed、`27/37` blocked 是提交绑定历史，现行 inventory 见上一节。完整 Host 进程重启、部署凭据、真实 HTTP/network canary、NE-01 波次 integration 与 NE-07 Docker 全栈均未运行；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 general Acceptance Effect 签名对账当前切片
 
@@ -35,7 +45,7 @@
 - 另有 checkpoint/parallel structure `20 passed in 38.41s`、accepted-effect restart 与 Budget contention `4 passed in 11.51s`、文档/release/coverage `54 passed in 13.45s`。测试夹具补齐 production-required node Grant verifier；目标模块 `compileall`、统一 static scan、doc gate、JSON 解析与 `git diff --check` 均通过。静态 Gate `failures=[]`，未扩大 allowlist。
 - authority 加固后的两个新增场景为 `2 passed in 8.81s`，包含既有五项回归的完整模块为 `7 passed in 25.59s`；它们与后续宽回归可能重叠，禁止相加。
 - 当前提交的受影响代码集合（多 checkpoint、online takeover、Budget contention、checkpoint recovery、parallel winner 与 Node projection）为 `56 passed in 126.52s`；文档 authority/freshness、coverage、release、NLE boundary 与 import-order 合同为 `45 passed in 94.67s`，其中 11 条既存转义 DeprecationWarning 不构成失败。Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`、Gate 3 `issues=[] / new_mixed_over_800=[]`；compileall、规则降级扫描、JSON 与 diff-check 均通过。56/45 与前述 focused 集合可能重叠，不相加。
-- 该切片不解决 `CONFLICT`、`RESERVED`、超出当前 four-root proof 的任意图形/规模、取消交叉、未知 external effect、部署 fan-out canary 或七路线波次验收。状态为 `SHARED_EXCEEDED_MISSING_CHECKPOINT_RECOVERY_LOCAL_PROVEN / BOUNDED_FOUR_NODE_SHARED_BUDGET_RECOVERY_LOCAL_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE`；该子集自身不新增 migration，仓库现行 head 已推进到 0128，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该切片不解决 `CONFLICT`、`RESERVED`、超出当前 four-root proof 的任意图形/规模、取消交叉、未知 external effect、部署 fan-out canary 或七路线波次验收。状态为 `SHARED_EXCEEDED_MISSING_CHECKPOINT_RECOVERY_LOCAL_PROVEN / BOUNDED_FOUR_NODE_SHARED_BUDGET_RECOVERY_LOCAL_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE`；该子集自身不新增 migration，仓库现行 head 已推进到 0129，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 signed WorkerProjection checkpoint COMMIT 当前切片
 
@@ -63,7 +73,7 @@
 - marker 只保存有界大写原因码，不保存异常正文；caller cancellation 原样向上传播。marker、运行时 helper 与 Store mixin 均没有 Attempt/Node/Graph/Budget/Lease terminal authority，也不能 `COMMIT/RELEASE` Operation。
 - 跨进程集成从该 marker 开始，用临时 Ed25519 key 生成 `RELEASE + NO_SIDE_EFFECT` proof，重建 Store 后运行 `GraphCancellationContinuationWorker`；Graph/Node/Attempt 为 `CANCELLED`，Operation 为 `RELEASED`，第二次重启零工作，`OPERATION_RECOVERY_REQUIRED`、`OPERATION_RECOVERY_RELEASE`、`TASK_GRAPH_CANCELLED` Outbox 各一条，worker 没有重跑。
 - 当前 runtime/store/structure/cancellation 定向集合为 `133 passed in 91.94s`。随后把文档 authority/freshness、机器 coverage、metadata、Obs 合同与受影响 Runtime 合并复核为 `147 passed in 140.38s`；它包含或重叠前述测试，不相加。目标模块 `compileall`、两份 JSON、doc-only delivery gate、统一 static scan 与 `git diff --check` 均通过；fresh architecture Gate 1～14 为 `PASS`、`failed_gates=[]`，`task_repository.py` 4597 行、`node_execution_runtime.py` 1495 行，未扩大 policy。
-- 该历史切片自身没有 migration；当时仓库 head 为 0126，现行 head 已推进到 0128。测试 key 是进程内临时验签材料，不是部署凭据；Operation/Effect Operator 仍默认关闭，HTTP/key lifecycle/canary 未运行。general Effect 的签名人工归因后来已形成独立本地切片，但自动归因、其它 cancellation、general multi-node/batch、Workspace 一般写、七路线验收、波次 integration 与 NE-07 Docker 全栈仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史切片自身没有 migration；当时仓库 head 为 0126，现行 head 已推进到 0129。测试 key 是进程内临时验签材料，不是部署凭据；Operation/Effect Operator 仍默认关闭，HTTP/key lifecycle/canary 未运行。general Effect 的签名人工归因后来已形成独立本地切片，但自动归因、其它 cancellation、general multi-node/batch、Workspace 一般写、七路线验收、波次 integration 与 NE-07 Docker 全栈仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Host/Internal 周期 survivor 当前切片
 

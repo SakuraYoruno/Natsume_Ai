@@ -14,6 +14,9 @@ from host_brain.app.resource_manager_status_journal import (
     RuntimeEventResourceManagerStatusJournal,
 )
 from host_brain.persistence.hard_state_journal import SQLiteHardStateJournal
+from host_brain.persistence.host_mode_policy_journal import (
+    SQLiteHostModePolicyJournal,
+)
 from host_brain.persistence.world_observation_journal import (
     SQLiteWorldObservationJournal,
 )
@@ -230,7 +233,22 @@ def bind_host_hard_state_runtime(
     result = bind(journal)
     if not isinstance(result, Mapping):
         raise RuntimeError("HOST_HARD_STATE_BIND_RESULT_INVALID")
-    return dict(result)
+    policy_journal = SQLiteHostModePolicyJournal(
+        task_runtime.canonical_db_path,
+        runtime_scope_id=runtime_scope_id,
+        runtime_authority_provider=runtime_authority_provider,
+    )
+    bind_policy = getattr(host_lifecycle, "bind_mode_policy_journal", None)
+    if not callable(bind_policy):
+        raise RuntimeError("HOST_MODE_POLICY_COMPOSITION_UNAVAILABLE")
+    policy_result = bind_policy(policy_journal)
+    if not isinstance(policy_result, Mapping):
+        raise RuntimeError("HOST_MODE_POLICY_BIND_RESULT_INVALID")
+    return {
+        **dict(result),
+        "mode_policy_revision": policy_result.get("revision"),
+        "mode_policy_event_digest": policy_result.get("event_digest"),
+    }
 
 
 def compose_resource_manager_status_journal(

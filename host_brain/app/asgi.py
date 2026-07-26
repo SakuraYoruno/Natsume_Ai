@@ -922,6 +922,13 @@ def create_app(
                     episodic_projection_store=episodic_projection_store,
                     semantic_recaller=host_obs_semantic_recaller,
                     mode_transition_service_provider=host_lifecycle.get_mode_transition_service,
+                    scheduler_command_service_provider=(
+                        lambda: (
+                            scheduler_container.command_service
+                            if scheduler_container is not None
+                            else None
+                        )
+                    ),
                     life_receipt_reader_provider=(
                         lambda: life_command_authority_provider(ledger)[1]
                     ),
@@ -1224,6 +1231,10 @@ def create_app(
                         acceptance_effect_dispatcher
                     ),
                 )
+                # Publish the app-local Scheduler provider before runtime-group
+                # activation. Startup Acceptance-Effect reconciliation may
+                # need to reopen a previously accepted Scheduler operation.
+                scheduler_container = scheduler
                 activated_internal = await _activate_internal_runtime(
                     application=application,
                     task_runtime=task_runtime,
@@ -1259,7 +1270,6 @@ def create_app(
                 command_ingress_container = command_ingress
                 memory_container = memory
                 internal_agent_ingress = internal_ingress
-                scheduler_container = scheduler
                 yield
             finally:
                 if service_health_heartbeat is not None:

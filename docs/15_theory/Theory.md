@@ -285,7 +285,9 @@ Event
 - 重启先验证完整 revision/digest chain，再恢复 head，不能重新采用 bootstrap 默认值覆盖历史；
 - 成功 transition 只留下一个 canonical durable audit；exact replay 返回已有事实但不重复追加内存 history、兼容日志或第二审计，payload drift、并发 stale head、失效 lease、旧 fence 和篡改都失败关闭。
 
-这类 journal 证明的是“模式为何从 A 变成 B，以及重启后仍是 B”。自动规则、last-interaction、健康推断等派生输入若仍是易失状态，就必须单独标明，不能借 mode head 已持久化而宣称整个生命周期系统已可恢复。当前代码对应 [HardState contracts](../../host_brain/contracts/host_hard_state.py) 与 [SQLite journal](../../host_brain/persistence/hard_state_journal.py)；其生产完成度仍以当前架构事实为准。
+这类 journal 证明的是“模式为何从 A 变成 B，以及重启后仍是 B”。模式值与模式策略是两个不同聚合：0115 的 HardState journal 保存离散 mode transition；0129 的 Host mode-policy journal 保存自动规则、last-interaction 与输入事件的确定性结果。两者共享 Host runtime scope/owner/lease/fence，但各自拥有独立 revision、digest chain、expected-head CAS 和 exact operation replay，不能用其中一个 head 代替另一个。只有 immutable next-state 与 canonical head 在同一事务提交后，app-local owner 才能替换内存快照。
+
+“休眠禁止主动动作”也不能编码成对所有 Intent 的全局阻断。正确语义是：Scene 给出 consumer-scoped `PROACTIVE_ACTION_BLOCKED` 限制；Proactive consumer 将它投影为硬阻断，显式用户或经认证 Operator 命令仍保留原目标，但必须受低打扰约束、高风险 Review、Preview 和 Grant 限制。这样既不会让主动系统在休眠中打扰用户，也不会锁死用户唤醒或管理员恢复入口。当前代码对应 [HardState contracts](../../host_brain/contracts/host_hard_state.py)、[HardState journal](../../host_brain/persistence/hard_state_journal.py)、[mode-policy contracts](../../host_brain/contracts/host_mode_policy.py) 与 [mode-policy journal](../../host_brain/persistence/host_mode_policy_journal.py)；其生产完成度仍以当前架构事实为准。
 
 ---
 

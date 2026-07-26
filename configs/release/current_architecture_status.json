@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-26",
   "source_baseline": {
-    "dev_commit": "e18365a8c58f8945b915c4d59324742432e9e771",
+    "dev_commit": "ccdfaea4a4fc1e14ca8f0889b0dba5b2dc4490f6",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_GOVERNED_OPERATOR_TASK_REVIEW_CONTROLS_PRECOMMIT_OVER_ORIGIN_DEV_E18365A8C"
+    "evaluated_source": "NE01_GOVERNED_OPERATOR_STATE_CONTROLS_PRECOMMIT_OVER_ORIGIN_DEV_CCDFaEA4A"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "GOVERNED_OPERATOR_TASK_GRAPH_CANCEL_AND_REVIEW_APPROVE_REJECT_RESUME_LOCAL_REAL_SQLITE_TARGETED_PASS_DIRECT_OBS_WRITERS_REMOVED_EACH_COMMAND_OWNS_HOSTCOMMAND_IMMUTABLE_TASKGRAPH_ATTEMPT_LEASE_GRANT_BUDGET_REVIEW_VERIFICATION_ACCEPTANCE_PREVIEW_AND_TASK_OPERATOR_CONTROL_EFFECT_PUBLIC_REVIEW_TOKEN_REF_SEPARATED_FROM_BEARER_EXACT_REPLAY_TARGET_REENTRY_ZERO_OPERATOR_10_OF_37_GRAPH_CANCELLATION_DEFAULT_OFF_COMPLETE_PROCESS_RESTART_DEPLOYED_CREDENTIAL_HTTP_NETWORK_CANARY_GENERAL_MULTI_NODE_BATCH_WORKSPACE_GENERAL_WRITE_TRANSACTIONAL_CHAT_SEVEN_ROUTE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "GOVERNED_OPERATOR_SCHEDULER_ENABLE_DISABLE_AND_HOST_MODE_AUTO_RULE_EVENT_LOCAL_REAL_SQLITE_TARGETED_PASS_0129_RUNTIME_FENCED_APPEND_ONLY_MODE_POLICY_JOURNAL_1001_EVENT_RESTART_EXACT_REPLAY_FAULT_TAMPER_AND_RELEASED_FENCE_PROVEN_DIRECT_OBS_SYS_MODE_WRITERS_REMOVED_EACH_COMMAND_OWNS_HOSTCOMMAND_IMMUTABLE_TASKGRAPH_ATTEMPT_LEASE_GRANT_BUDGET_REVIEW_VERIFICATION_ACCEPTANCE_PREVIEW_AND_OPERATOR_STATE_CONTROL_EFFECT_OPERATOR_14_OF_37_BLOCKED_23_OF_37_STANDALONE_SCHEDULER_CRUD_HTTP_REMAINS_NE01_GAP_COMPLETE_PROCESS_RESTART_DEPLOYED_CREDENTIAL_HTTP_NETWORK_CANARY_GENERAL_MULTI_NODE_BATCH_WORKSPACE_GENERAL_WRITE_TRANSACTIONAL_CHAT_SEVEN_ROUTE_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,40 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "GOVERNED_OPERATOR_TASK_REVIEW_CONTROLS_LOCAL_REAL_SQLITE_TARGETED_PASS_PROGRAM_INCOMPLETE_PRECOMMIT",
-    "commit_binding": "PRECOMMIT_LOCAL_SLICE_BASED_ON_ORIGIN_DEV_E18365A8C58F8945B915C4D59324742432E9E771",
+    "status": "GOVERNED_OPERATOR_STATE_CONTROLS_LOCAL_REAL_SQLITE_TARGETED_PASS_PROGRAM_INCOMPLETE_PRECOMMIT",
+    "commit_binding": "PRECOMMIT_LOCAL_SLICE_BASED_ON_ORIGIN_DEV_CCDFaEA4A4FC1E14CA8F0889B0DBA5B2DC4490F6",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_GOVERNED_OPERATOR_TASK_REVIEW_CONTROLS",
+    "slice": "NE01_GOVERNED_OPERATOR_STATE_CONTROLS",
+    "governed_operator_state_control_current_validation": {
+      "status": "LOCAL_REAL_SQLITE_TARGETED_PASS_NE01_IN_PROGRESS",
+      "migration": "0129_host_mode_policy_journal.sql",
+      "operator_commands": [
+        "scheduler.task.enable",
+        "scheduler.task.disable",
+        "sys_mode.auto_rules.update",
+        "sys_mode.event.submit"
+      ],
+      "operator_inventory": "GOVERNED_14_OF_37_BLOCKED_23_OF_37",
+      "removed_old_paths": "OBS_SYS_MODE_MUTATION_HELPERS_AND_OPERATOR_DOMAIN_DIRECT_STATE_WRITERS_REMOVED",
+      "governed_chain": "SECURE_INGRESS_TO_TYPED_GOVERNOR_TO_OPERATOR_HOSTCOMMAND_TO_IMMUTABLE_TASKGRAPH_TO_NODE_ATTEMPT_LEASE_GRANT_BUDGET_REVIEW_VERIFICATION_ACCEPTANCE_TO_TERMINAL_ACTION_PREVIEW_TO_OPERATOR_STATE_CONTROL_ACCEPTANCE_EFFECT",
+      "mode_policy_boundary": "0129_EVENT_AND_HEAD_ONE_SQLITE_UOW_RUNTIME_SCOPE_OWNER_LEASE_FENCE_AND_EXPIRY_BOUND_EXPECTED_REVISION_CAS_COMPLETE_DIGEST_CHAIN_REPLAY",
+      "scheduler_boundary": "ACCEPTED_EFFECT_USES_EXACT_OPERATION_ID_EXPECTED_HEAD_VERSION_AND_COMMITTED_OPERATOR_AUTHORITY_RESULT_RECONCILIATION_IS_READ_ONLY",
+      "scene_boundary": "SLEEP_PROACTIVE_BLOCK_IS_CONSUMER_SCOPED_EXPLICIT_OPERATOR_OR_USER_INTENT_REMAINS_RESTRICTED_AND_REVIEWED_PROACTIVE_PROJECTION_REMAINS_BLOCKED",
+      "exact_replay_boundary": "DURABLE_WORKORDER_AND_FROZEN_ARGS_REOPENED_HISTORICAL_MODE_OR_SCHEDULER_OPERATION_REPLAYS_WITH_ZERO_TARGET_WRITER_REENTRY",
+      "restart_boundary": "REAL_SQLITE_1001_EVENT_PAGED_REPLAY_APPEND_FAILURE_ATOMIC_ROLLBACK_RELEASED_FENCE_AND_TAMPER_FAIL_CLOSED_COMPLETE_HOST_PROCESS_RESTART_CANARY_NOT_RUN",
+      "focused_real_sqlite_validation": "8_PASSED_ACROSS_HOST_MODE_JOURNAL_AND_GOVERNED_OPERATOR_INTEGRATION_FILES",
+      "focused_contract_unit_regression": "167_PASSED_IN_52_41_SECONDS_ZERO_FAIL",
+      "current_disjoint_code_regression": "175_PASSED_ZERO_FAIL",
+      "operator_runtime_structure": "INITIAL_GATE3_FAIL_GOVERNED_OPERATOR_RUNTIME_1538_LINES_FIXED_WITHOUT_ALLOWLIST_EXPANSION_MAIN_RUNTIME_1344_LINES_STATE_CONTROL_RUNTIME_650_LINES_RELATED_7_PASSED_FRESH_GATES_1_TO_14_PASS_FAILED_GATES_EMPTY",
+      "final_local_gates": "0129_SQLITE_MIGRATION_COVERAGE_DOCUMENTATION_AND_DELIVERY_59_PASSED_IN_100_78_SECONDS_UNIFIED_STATIC_SCAN_PASS_FAILURES_EMPTY_CORE_ARCHITECTURE_GATES_1_TO_14_PASS_FAILED_GATES_EMPTY_CHANGED_PYTHON_COMPILE_JSON_AND_DIFF_CHECK_PASS",
+      "standalone_scheduler_http_boundary": "CREATE_UPDATE_DELETE_ENABLE_DISABLE_TRIGGER_ROUTES_REMAIN_DIRECT_SCHEDULER_COMMAND_SERVICE_NE01_GAP_NO_UNIQUE_SCHEDULER_AUTHORITY_CLAIM",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_canary": "NOT_RUN",
+      "complete_process_restart": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "LOCAL_SQLITE_AND_REPOSITORY_REOPEN_ONLY_NO_DEPLOYED_CREDENTIAL_HTTP_NETWORK_CANARY_NO_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_NO_FULL_STACK"
+    },
     "governed_operator_task_controls_current_validation": {
       "status": "LOCAL_REAL_SQLITE_TARGETED_PASS_GRAPH_CANCELLATION_DEFAULT_OFF_NE01_IN_PROGRESS",
       "migration": "SLICE_NONE_CURRENT_REPOSITORY_HEAD_0128",
@@ -39,7 +69,7 @@
         "task_review.reject",
         "task_review.resume"
       ],
-      "operator_inventory": "GOVERNED_10_OF_37_BLOCKED_27_OF_37",
+      "operator_inventory": "HISTORICAL_SLICE_GOVERNED_10_OF_37_BLOCKED_27_OF_37_CURRENT_INVENTORY_14_OF_37",
       "removed_old_paths": "OBS_TASK_GRAPH_CANCELLATION_AND_REVIEW_COMMAND_HANDLERS_NO_LONGER_CALL_DOMAIN_WRITERS_DIRECTLY",
       "governed_chain": "SECURE_INGRESS_TO_TYPED_GOVERNOR_TO_OPERATOR_HOSTCOMMAND_TO_IMMUTABLE_TASKGRAPH_TO_NODE_ATTEMPT_LEASE_GRANT_BUDGET_REVIEW_VERIFICATION_ACCEPTANCE_TO_TERMINAL_ACTION_PREVIEW_TO_TASK_OPERATOR_CONTROL_ACCEPTANCE_EFFECT",
       "cancellation_boundary": "OUTER_EFFECT_COMMITS_ONLY_AFTER_EXACT_TARGET_GRAPH_REVISION_CANCELLATION_REACHES_FINALIZED_AND_GRAPH_CANCELLED_REQUESTED_READY_NODES_TRANSITION_VIA_CANCEL_REQUESTED_NOT_DIRECT_CANCELLED",
@@ -2052,9 +2082,9 @@
       "hard_state_fake_writers": "LIMBIC_AND_PREFRONTAL_ZERO",
       "http_hooks_process_service_locator_imports": 0,
       "known_boundaries": [
-        "ModeTransitionService auto-rule configuration and last-interaction timestamp remain process-local inputs outside the canonical mode journal",
+        "ModeTransitionService auto-rule configuration and last-interaction timestamp are canonical in the runtime-fenced 0129 Host mode-policy journal; Endocrine event buffers remain transient",
         "HardState production deployment canary is NOT_RUN",
-        "sys_mode.switch and task_terminal.reconcile are the second and third governed Operator vertical slices; the remaining 34 audited write commands are still blocked before handlers",
+        "fourteen of 37 audited Operator commands are governed; the remaining 23 are blocked before handlers, while standalone Scheduler CRUD HTTP remains a separate direct command-service gap",
         "Operator commit-bound acceptance, NE-01 wave integration and production canary are NOT_RUN",
         "RECOVERY_PENDING effect ownership must defer the Review continuation and outer claim; CANCELLED Review requires durable terminal evidence; neither may be projected as terminal success",
         "Endocrine event buffers and last-state projection are Host-scope Agent memory but remain transient across restart",
@@ -2566,7 +2596,7 @@
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
         "evaluated_commit_sha": "001cd953c71bab3d7bfd2d51f213b74a072f1d64",
-        "migration_head": "0128_acceptance_effect_general_reconciliation.sql",
+        "migration_head": "0129_host_mode_policy_journal.sql",
         "route_status": "ALL_SEVEN_INCOMPLETE",
         "commit_bound_acceptance": "MISSING_ALL_SEVEN",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
@@ -3944,7 +3974,7 @@
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "hard_state_receipt_boundary": "PERMANENT_HISTORICAL_LOOKUP_MUTATING_REVISION_MODE_EXACT_CAS_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE",
-      "hard_state_operator_boundary": "SCHEDULER_SYS_MODE_TERMINAL_RECONCILIATION_GOVERNED_VERTICAL_SLICES_WIRED_3_OF_37_OPERATOR_COMMANDS_COMMIT_BOUND_ACCEPTANCE_MISSING_HTTP_NETWORK_CANARY_NOT_RUN",
+      "hard_state_operator_boundary": "SYS_MODE_SWITCH_AUTO_RULES_EVENT_AND_SCHEDULER_ENABLE_DISABLE_GOVERNED_VERTICAL_SLICES_WIRED_OPERATOR_14_OF_37_COMMIT_BOUND_ACCEPTANCE_MISSING_HTTP_NETWORK_CANARY_NOT_RUN",
       "mixed_file_gate": "GREEN_ISSUES_EMPTY_WITHOUT_POLICY_EXPANSION",
       "mixed_file_gate_findings": [],
       "effect_slice_structure_boundary": "The second NE-01 split moved ASGI lifecycle wiring, Obs response models, immutable Degradation policy, Node Grant and Planning codecs, Intent Review continuation, and Guardian contracts/commands into focused modules. The original authority owners remain the only lifecycle, connection, RuntimeEvent append, or journal-store owners. All eleven former findings are within the 1,500-line or pre-existing cohesive ceiling and the fresh repository gate returns no issues without adding or widening an allowlist. Service Locator, old execution bypasses, general recovery, and production enablement remain incomplete.",
