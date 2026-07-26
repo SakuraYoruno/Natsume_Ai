@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.19
+版本：v2.20
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -19,6 +19,8 @@
 验证与验收必须与执行者分离。worker 的 COMMIT 是待验证主张，不是事实本身；Verifier 必须从独立持久投影重建不可变身份和输出合同，Acceptance 还要再次独立打开证据，不能复用调用者对象或把任意文字条件直接标成 `PASS`。机器无法证明的语义条件应进入显式 Review。多节点计划的依赖也必须是数据依赖：后继节点要绑定并实际消费前驱已验收 artifact 的 ref、receipt 与 digest，而不是仅凭图上存在一条边推断信息已经传递。
 
 Verification 通过也不能替代持久 Acceptance。自动接纳必须把 Acceptance decision、Artifact、可选 Effect、Node transition 与 Outbox 放进同一个原子提交；需要人工判断时，非接纳 decision、等待节点、ReviewItem，以及该路径需要的 Graph block/Outbox 也必须同成同败。Review 是该 decision 的可恢复检查点投影，不是对未落库判断的事后补写。任何“节点已等待但 Review 不存在”或“Review 已存在但 Acceptance decision 不存在”的状态都不是合法恢复点；重启只能重开同一 decision，不能再次调用 judge 来伪造相同历史。
+
+Review 的终态同样必须是一个不可分割事实。拒绝、过期或取消不能先改 Review，再用数个独立事务逐步关闭 Node、Graph 和 Budget；否则任一进程崩溃都会制造“人已经拒绝但任务仍可运行”或“预算已释放而 Graph 仍活动”的半状态。合法实现必须把 exact Review 版本与 digest、Node/Graph/graph Budget、相关 Outbox，以及 POST Review 的 Acceptance/Attempt 一次性绑定。响应丢失后只能重开该 settlement，不得再签发 Grant、创建 Attempt 或重跑 Worker；PRE Review 尚未取得执行 authority 时才允许直接取消节点，POST Review 则必须保留已经发生的 Worker/Acceptance 证据并以失败终结。
 
 审批属于节点 authority，而不是整张图的模糊布尔开关。规划搜索可以发现需要人工确认的能力，但必须把该要求连同来源冻结进候选，再由编译器绑定到不可变 TaskNode ID；每个节点都要有显式策略，缺失不能继承“无需审批”。长时间审批会使旧 grant 过期，因此续跑可续签尚未执行节点的时限，但不能改写审批前已经提交的 projection authority，也不能重跑已验收 worker。续签解决的是时间围栏，不是扩大目标、风险或能力。
 

@@ -38,6 +38,9 @@ from host_brain.persistence.internal_agent_checkpoint_uow import (
     DurableInternalAgentCheckpointUnitOfWork,
 )
 from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.review_continuation_store import (
+    ReviewContinuationStore,
+)
 from host_brain.persistence.task_repository import (
     TASK_STORE_BUDGET_ALREADY_EXCEEDED,
     TASK_STORE_BUDGET_EXCEEDED,
@@ -801,6 +804,97 @@ async def test_gr03_pre_execution_review_resumes_without_early_worker_effect(
     ]
     assert resumed[-1]["execution_receipt"]["status"] == "ACCEPTED"
     assert calls == ["root"]
+
+
+@pytest.mark.asyncio
+async def test_ne01_pre_execution_review_denial_closes_one_terminal_uow(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),), review_required=True)
+    calls: list[str] = []
+    review_store = ReviewStore(db_path, clock=lambda: NOW)
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            review_runtime=TaskNodeReviewRuntime(review_store, clock=lambda: NOW),
+        ),
+    )
+
+    waiting = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ][-1]["execution_receipt"]
+    assert waiting["status"] == "WAITING_APPROVAL"
+    review = waiting["projection"]["review"]
+    rejected = review_store.reject_review(
+        review["review_id"],
+        actor_id="gr03-reviewer",
+    )
+    assert rejected["status_version"] == 1
+
+    denied = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ][-1]["execution_receipt"]
+    assert denied["status"] == "REVIEW_DENIED"
+    assert denied["attempt_id"] is None
+    settlement = denied["projection"]["review_denial_settlement"]
+    assert settlement["resume_phase"] == "PRE_EXECUTION"
+    assert settlement["review_status"] == "REJECTED"
+    assert settlement["node_target_status"] == "CANCELLED"
+    assert settlement["graph_target_status"] == "CANCELLED"
+    assert settlement["acceptance_ref"] is None
+    assert settlement["attempt_id"] is None
+    assert settlement["blocking_decision_ref"].startswith(
+        "taskbatch://sha256/"
+    )
+    assert settlement["settlement_ref"] in denied["evidence_refs"]
+    store = DurableTaskStore(db_path, clock=lambda: NOW + 1)
+    assert store.get_node("graph-gr03a", 1, "root")["status"] == "CANCELLED"
+    assert store.get_graph("graph-gr03a", 1)["status"] == "CANCELLED"
+    snapshot = store.read_scheduler_snapshot("graph-gr03a", 1)
+    assert snapshot["budgets"][0]["status"] == "RELEASED"
+    assert snapshot["review_denial_settlements"] == [settlement]
+    assert calls == []
+
+    continuation_store = ReviewContinuationStore(
+        db_path,
+        clock=lambda: NOW + 1,
+    )
+    claim = continuation_store.claim_pending_review_continuations(
+        worker_id="gr03-review-denial-restart",
+        lease_ms=30_000,
+        limit=1,
+    )[0]
+    authority = continuation_store.validate_review_continuation_authority(
+        continuation_store.validate_review_continuation_claim(claim)
+    )
+    restarted = await app.execute_review_continuation(
+        command=contracts[0],
+        work_order=contracts[1],
+        assignment=contracts[2],
+        graph=contracts[3],
+        continuation_claim=authority,
+    )
+    replay = restarted["execution_receipt"]
+    assert replay["status"] == "REVIEW_DENIED"
+    assert replay["replayed"] is True
+    assert replay["projection"]["review_denial_settlement"] == settlement
+    assert settlement["settlement_ref"] in replay["evidence_refs"]
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -2726,7 +2820,19 @@ async def test_ne01_parallel_review_blocks_graph_after_all_node_outcomes(
     assert denied_receipt["status"] == "REVIEW_DENIED"
     assert denied_receipt["node_id"] == "right"
     assert "parallel_settlement" not in denied_receipt["projection"]
-    assert decision_ref not in denied_receipt["evidence_refs"]
+    denial_settlement = denied_receipt["projection"][
+        "review_denial_settlement"
+    ]
+    assert denial_settlement["resume_phase"] == "POST_EXECUTION_ACCEPTANCE"
+    assert denial_settlement["review_status"] == "REJECTED"
+    assert denial_settlement["node_target_status"] == "FAILED"
+    assert denial_settlement["graph_target_status"] == "FAILED"
+    assert denial_settlement["acceptance_ref"].startswith(
+        "task-acceptance://sha256/"
+    )
+    assert denial_settlement["attempt_id"] == denied_receipt["attempt_id"]
+    assert denial_settlement["blocking_decision_ref"] == decision_ref
+    assert denial_settlement["settlement_ref"] in denied_receipt["evidence_refs"]
     assert store.get_graph("graph-gr03a", 1)["status"] == "FAILED"
     assert store.get_node("graph-gr03a", 1, "right")["status"] == "FAILED"
     assert store.read_scheduler_snapshot("graph-gr03a", 1)["budgets"][0][

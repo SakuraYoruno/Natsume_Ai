@@ -115,6 +115,7 @@ class TaskNodeReviewGate:
     subject_ref: str | None
     subject_version: int | None
     checkpoint_id: str | None
+    review_status_version: int | None = None
     replay_side_effects: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -128,6 +129,7 @@ class TaskNodeReviewGate:
             "subject_ref": self.subject_ref,
             "subject_version": self.subject_version,
             "checkpoint_id": self.checkpoint_id,
+            "review_status_version": self.review_status_version,
             "replay_side_effects": self.replay_side_effects,
         }
 
@@ -473,6 +475,7 @@ def _gate_from_record(record: Mapping[str, Any]) -> TaskNodeReviewGate:
         subject_ref=_text(review.get("subject_ref")) or None,
         subject_version=int(review.get("subject_version", 0)),
         checkpoint_id=_text(review.get("checkpoint_id")) or None,
+        review_status_version=int(record.get("status_version", 0)),
         replay_side_effects=False,
     )
 

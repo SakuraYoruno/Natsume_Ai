@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.16
+版本：v3.17
 
 核对日期：2026-07-26
 
@@ -27,9 +27,12 @@ flowchart TD
     B --> P
     S --> P
     P --> X["restart exact reopen\n不重跑 worker / judge"]
+    P --> T["terminal Review\nREJECTED / EXPIRED / CANCELLED"]
+    T --> D["0135 同一 UoW\nNode + Graph + graph Budget\n+ 3 Outbox + denial settlement"]
+    D --> Q["response-loss restart\n只重开 settlement\n不创建 Attempt / 不重跑 Worker"]
 ```
 
-ReviewStore 与 TaskStore 通过 `review_pending_uow.py` 共用唯一 pending INSERT writer；Node 等待、Review 和 Acceptance decision 不允许分开落账。自动接受路径也不允许先提交 Node 再补 artifact/decision。响应丢失只重开相同 node version、Attempt、judgement、Outbox 和 Review/Graph identity。Review 拒绝后的完整终态 bundle 仍由后续切片收口。
+ReviewStore 与 TaskStore 通过 `review_pending_uow.py` 共用唯一 pending INSERT writer；Node 等待、Review 和 Acceptance decision 不允许分开落账。自动接受路径也不允许先提交 Node 再补 artifact/decision。0135 的 terminal writer 重新打开 exact Review version/digest 和所有相关聚合：PRE Review 只有零 Attempt 才能取消，POST Review 必须绑定 0134 Acceptance 与 `SUCCEEDED` Attempt；任一 Outbox 或已有 `BLOCKED` decision 漂移都会阻断。响应丢失只重开相同 settlement，不重新取得执行 authority。
 
 节点验证的当前持久流为：
 

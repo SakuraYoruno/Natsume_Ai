@@ -395,6 +395,37 @@ class TaskStorePort(Protocol):
         graph_outbox: Any | None = None,
     ) -> Mapping[str, Any]: ...
 
+    def settle_review_denial(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        settlement_ref: str,
+        review_id: str,
+        expected_node_version: int,
+        expected_graph_version: int,
+        budget_id: str,
+        expected_budget_version: int,
+        node_outbox: Any,
+        graph_outbox: Any,
+        budget_outbox: Any,
+        acceptance_ref: str | None = None,
+        attempt_id: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def get_review_denial_settlement(
+        self,
+        settlement_ref: str,
+    ) -> Mapping[str, Any]: ...
+
+    def get_review_denial_settlement_for_node(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+    ) -> Mapping[str, Any]: ...
+
     def transition_node_and_stage_acceptance_effects(
         self,
         graph_id: str,

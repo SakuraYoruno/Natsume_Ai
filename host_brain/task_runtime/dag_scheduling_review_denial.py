@@ -8,6 +8,7 @@ guards; it never issues authority or transitions durable state.
 from __future__ import annotations
 
 from collections.abc import Mapping, Set
+from typing import Any
 
 from .errors import GOVERNED_DURABLE_STATE_CONFLICT, GovernedRuntimeError
 
@@ -76,8 +77,26 @@ def assert_denied_review_gate(
         )
 
 
+def build_review_terminal_projection(
+    *,
+    gate: Any,
+    budget: Any,
+    settlement: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Render the same receipt projection for waiting and terminal decisions."""
+
+    projection = {
+        "review": gate.to_dict(),
+        "budget": budget.execution_payload(),
+    }
+    if settlement is not None:
+        projection["review_denial_settlement"] = dict(settlement)
+    return projection
+
+
 __all__ = [
     "assert_denied_review_gate",
     "assert_denied_review_waiting_node",
+    "build_review_terminal_projection",
     "normalize_denied_review_node",
 ]

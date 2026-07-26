@@ -1,10 +1,20 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.23
+版本：v0.24
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-REVIEW-DENIAL-TERMINAL
+
+- T-NE01-REVIEW-DENIAL-01：terminal Review、Node、Graph、graph Budget、三条 Outbox 和 append-only settlement 必须在一个 `BEGIN IMMEDIATE` UoW 中提交；任一 CAS/INSERT/Outbox 故障必须整体回滚。
+- T-NE01-REVIEW-DENIAL-02：settlement 必须绑定 exact Review status/version/digest、Graph revision、Node/Graph/Budget before/after version；POST Review 还必须绑定 0134 Acceptance、`SUCCEEDED` Attempt 和可选已有 `BLOCKED` decision。
+- T-NE01-REVIEW-DENIAL-03：PRE Review 拒绝只允许零 Attempt 的 `WAITING_APPROVAL → CANCELLED`；POST Review 拒绝只允许 `WAITING_ACCEPTANCE_REVIEW → FAILED`。两者均不得签发 Grant 或执行 Worker。
+- T-NE01-REVIEW-DENIAL-04：响应丢失和进程重启只能重开同一 settlement/worker receipt 并返回 `replayed=true`；不得创建第二个 Attempt、重复 Outbox 或重跑 Worker。
+- T-NE01-REVIEW-DENIAL-05：settlement/settled Review UPDATE/DELETE、Review digest、Acceptance/Attempt、blocking decision、aggregate 和 Outbox lineage 漂移必须失败关闭。
+- T-NE01-REVIEW-DENIAL-06：fresh 0001→0135、真实 0134→0135、canonical composition readiness、PRE/POST/parallel Graph 和 response-loss continuation 必须覆盖。该合同不提升一般 cancellation/recovery、七路线 commit-bound receipt 或 NE-01 状态。
+- 当前证据入口为 `test_ne01_review_denial_terminal_uow.py`、`test_gr03a_governed_durable_dag.py`、`test_task_review_denial_store_structure.py` 与 `test_aw03_migration_compat.py`。最终受影响集合为 `58 passed in 39.48s`；完整架构 Gate 1～14、统一 `static_scan,doc_gate`、changed-module `compileall`、JSON 和 `git diff --check` 均通过。波次集成、真实模型和 NE-07 Docker 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-DURABLE-NODE-ACCEPTANCE
 
@@ -13,7 +23,7 @@
 - T-NE01-ACCEPT-03：ReviewStore 与 TaskStore 必须通过同一个 pending Review SQL writer；源码不得出现第二个 `INSERT INTO agent_runtime_review` authority。
 - T-NE01-ACCEPT-04：进程重启、response loss 与 Scheduler continuation 必须按 exact node version 重开 durable decision/Review；不得重跑 worker 或 Acceptance judge。scheduler snapshot 必须投影 `node_acceptances`。
 - T-NE01-ACCEPT-05：decision UPDATE/DELETE、judgement/Attempt/Outbox/Review/Graph version 漂移必须失败关闭；decision INSERT 后注入异常必须证明 Node、Graph、Review、decision 与 Outbox 全部未提交。
-- T-NE01-ACCEPT-06：fresh 0001→0134、真实 0133→0134 升级、canonical composition readiness 和 accepted/review 两条生产入口必须覆盖。本合同不提升 Review denial terminal bundle、一般 cancellation/recovery、七路线 commit-bound receipt 或 NE-01 状态。
+- T-NE01-ACCEPT-06：fresh 0001→0134、真实 0133→0134 升级、canonical composition readiness 和 accepted/review 两条生产入口必须覆盖。Review denial terminal bundle 由后续 0135 合同关闭；本合同不提升一般 cancellation/recovery、七路线 commit-bound receipt 或 NE-01 状态。
 - 当前证据由 `test_ne01_durable_acceptance_review.py`、`test_ne01_durable_node_artifacts.py`、`test_gr03a_governed_durable_dag.py`、`test_task_node_acceptance_store_structure.py`、ReviewStore contract 与 migration/release contracts 共同组成。六个互不重叠批次分别为 25/34/20/20/6/2，合计 `107 passed`，pytest 时间合计 `87.59s`；不得写成一次未实际运行的合并命令。文档/发布合同另为 `45 passed in 10.42s`，与 release 子集重叠；统一 `static_scan,doc_gate` 和完整架构 Gate 1～14 均通过且无失败项。NE-01 wave integration、真实模型和 NE-07 Docker 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-DURABLE-NODE-VERIFICATION
@@ -590,7 +600,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
 - T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0134，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0135，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 

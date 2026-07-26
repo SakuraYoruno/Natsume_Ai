@@ -28,6 +28,9 @@ from host_brain.persistence.task_record_codec import (
     _node_record,
     _outbox_record,
 )
+from host_brain.persistence.task_review_denial_validation import (
+    validated_review_denial_record,
+)
 from host_brain.persistence.task_store_types import (
     OutboxMessage,
     TASK_STORE_CAS_CONFLICT,
@@ -542,6 +545,25 @@ class TaskDagStateStoreMixin:
                 if node_acceptance_ready is not None
                 else []
             )
+            review_denial_ready = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_review_denial_settlement'
+                """
+            ).fetchone()
+            review_denial_rows = (
+                conn.execute(
+                    """
+                    SELECT * FROM task_runtime_review_denial_settlement
+                    WHERE graph_id = ? AND graph_revision = ?
+                    ORDER BY node_id, node_version_after, settlement_ref
+                    """,
+                    (str(graph_id), int(revision)),
+                ).fetchall()
+                if review_denial_ready is not None
+                else []
+            )
             snapshot = {
                 "observed_ts_ms": observed_ts_ms,
                 "graph_record": _graph_record(graph_row, node_rows),
@@ -567,6 +589,10 @@ class TaskDagStateStoreMixin:
                 "node_acceptances": [
                     self._node_acceptance_record(conn, row)
                     for row in node_acceptance_rows
+                ],
+                "review_denial_settlements": [
+                    validated_review_denial_record(self, conn, row)
+                    for row in review_denial_rows
                 ],
             }
             if include_graph_outboxes:

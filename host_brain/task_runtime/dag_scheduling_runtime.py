@@ -53,6 +53,7 @@ from .dag_scheduling_preflight import prepare_dag_scheduling_preflight
 from .dag_scheduling_review_denial import (
     assert_denied_review_gate,
     assert_denied_review_waiting_node,
+    build_review_terminal_projection,
 )
 from .dag_scheduling_acceptance_review import (
     reopen_post_execution_acceptance_review,
@@ -62,6 +63,7 @@ from .dag_scheduling_completion_replay import (
     is_completed_internal_checkpoint_without_parallel_decision,
 )
 from .dag_scheduling_settlement import settle_waiting_approval
+from .review_denial_lifecycle import reopen_denied_review_terminal, settle_denied_review
 from .errors import (
     GOVERNED_BUDGET_EXCEEDED,
     GOVERNED_BUDGET_STATE_CONFLICT,
@@ -232,6 +234,18 @@ class DurableDagSchedulingRuntime:
                 node_id: _status(node)
                 for node_id, node in durable_nodes.items()
             }
+            if (
+                denied_review_node
+                and statuses[denied_review_node]
+                not in {"WAITING_APPROVAL", "WAITING_ACCEPTANCE_REVIEW"}
+            ):
+                yield await reopen_denied_review_terminal(
+                    store=self._store,
+                    projection=self._node_execution_projection,
+                    admitted=admitted.for_node(denied_review_node),
+                    budget=budget,
+                )
+                return
             if restore_prior_parallel_success_authority:
                 await restore_prior_parallel_success_grants(
                     admitted=admitted,
@@ -526,6 +540,7 @@ class DurableDagSchedulingRuntime:
                 pre_review_refs = tuple(
                     dict.fromkeys((*_record_evidence_refs(review_node), *review_refs))
                 )
+                denial_settlement: Mapping[str, Any] | None = None
                 if gate.allowed:
                     await self._node_lifecycle.transition_node(
                         review_admission,
@@ -542,26 +557,23 @@ class DurableDagSchedulingRuntime:
                     await self._runtime_outbox.publish_pending()
                     continue
                 if gate.disposition == "REVIEW_DENIED":
-                    await self._node_lifecycle.cancel_waiting_review_node(
-                        review_admission,
-                        review_node,
-                        evidence_refs=pre_review_refs,
+                    denied = await settle_denied_review(
+                        store=self._store, runtime_outbox=self._runtime_outbox,
+                        admitted=review_admission, node=review_node, graph=graph,
+                        budget=budget, gate=gate, evidence_refs=pre_review_refs,
                     )
-                    if graph_status in {"ACTIVE", "BLOCKED"}:
-                        await self._node_lifecycle.transition_graph(
-                            review_admission,
-                            graph,
-                            "CANCELLED",
-                        )
-                    budget = await self._budgets.finalize(
-                        budget, target_status=BudgetReservationStatus.RELEASED
-                    )
+                    graph = denied["graph"]
+                    graph_status = _status(graph)
+                    budget = denied["budget"]
+                    pre_review_refs = tuple(denied["evidence_refs"])
+                    denial_settlement = denied["settlement"]
                     reason_code = GOVERNED_REVIEW_DENIED
                     status = "REVIEW_DENIED"
                 else:
                     reason_code = GOVERNED_REVIEW_REQUIRED
                     status = "WAITING_APPROVAL"
                 await self._runtime_outbox.publish_pending()
+                projection = build_review_terminal_projection(gate=gate, budget=budget, settlement=denial_settlement)
                 receipt = build_execution_receipt(
                     review_admission,
                     attempt_id=None,
@@ -570,10 +582,7 @@ class DurableDagSchedulingRuntime:
                     accepted=False,
                     reason_code=reason_code,
                     evidence_refs=pre_review_refs,
-                    projection={
-                        "review": gate.to_dict(),
-                        "budget": budget.execution_payload(),
-                    },
+                    projection=projection,
                 )
                 waiting_event = terminal_event(receipt)
                 if status == "WAITING_APPROVAL" and graph_status == "ACTIVE":
@@ -629,6 +638,7 @@ class DurableDagSchedulingRuntime:
                     review_admission.reservation_id
                 )
                 receipt_ref = _text((reservation or {}).get("receipt_ref")) or None
+                denial_settlement = None
                 if gate.allowed:
                     acceptance_judgement = {
                         "schema_version": "Natsume.agent.acceptance_judgement.v1",
@@ -713,22 +723,18 @@ class DurableDagSchedulingRuntime:
                     await self._runtime_outbox.publish_pending()
                     continue
                 if gate.disposition == "REVIEW_DENIED":
-                    await self._node_lifecycle.transition_node(
-                        review_admission,
-                        review_node,
-                        "FAILED",
-                        evidence_refs=post_review_refs,
+                    denied = await settle_denied_review(
+                        store=self._store, runtime_outbox=self._runtime_outbox,
+                        admitted=review_admission, node=review_node, graph=graph,
+                        budget=budget, gate=gate, evidence_refs=post_review_refs,
+                        acceptance_decision=acceptance_decision,
+                        attempt_id=attempt_id,
                     )
-                    if graph_status == "BLOCKED":
-                        graph = await self._node_lifecycle.transition_graph(
-                            review_admission,
-                            graph,
-                            "FAILED",
-                        )
-                        graph_status = _status(graph)
-                    budget = await self._budgets.finalize(
-                        budget, target_status=BudgetReservationStatus.RELEASED
-                    )
+                    graph = denied["graph"]
+                    graph_status = _status(graph)
+                    budget = denied["budget"]
+                    post_review_refs = tuple(denied["evidence_refs"])
+                    denial_settlement = denied["settlement"]
                     reason_code = GOVERNED_REVIEW_DENIED
                     status = "REVIEW_DENIED"
                 else:
@@ -748,10 +754,7 @@ class DurableDagSchedulingRuntime:
                             "parallel review replay selected a different TaskNode",
                         )
                     decision_ref = _required_record_text(decision, "decision_ref")
-                projection: dict[str, Any] = {
-                    "review": gate.to_dict(),
-                    "budget": budget.execution_payload(),
-                }
+                projection = build_review_terminal_projection(gate=gate, budget=budget, settlement=denial_settlement)
                 if decision_ref is not None:
                     projection["parallel_settlement"] = {
                         "graph_status": graph_status,
@@ -1494,4 +1497,3 @@ async def _maybe_await(value: Any) -> Any:
 
 
 __all__ = ["DurableDagSchedulingRuntime"]
-# End of module.
