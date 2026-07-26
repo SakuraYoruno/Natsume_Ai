@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.36
+版本：v5.37
 核对日期：2026-07-26
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,8 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
+
+当前启用的通用 worker 不再各自伪造验收结果。`governed_worker_evidence.py` 是 Chat/Skill/Delegate/Plan/Tool/Operator 的共享独立证据 owner：Verifier 与 Acceptance 通过同一只读接口但分别重开 durable WorkerProjection，复验完整执行身份、node grant、WorkOrder/context、receipt digest、COMMIT 与输出合同；任意未知语义条件返回 `REVIEW`。Skill 的 terminal COMMIT 现在完整镜像 canonical projection，不再丢失 graph/node/attempt/grant 字段。Plan 的 final Chat 从 canonical TaskResult artifacts 构造唯一输入证据集和 bundle attestation，已声明但未消费的依赖不再通过验收。当前 Delegate/Plan 的 verification 控制为 `PASS`，两条路线及 NE-01 总状态仍为 `INCOMPLETE / IN_PROGRESS`。
 
 Chat 路线的一个真实正确性缺口已经关闭：`life.conversation_turn_recorded` 与 `life.foreground_completed` 不再仅凭 Life command receipt 提交 Task Effect。生产 ASGI 把同一 `LifeProjectionDispatcher` 注入 Acceptance handlers；handler 重建并核对 exact command 的 projection-intent 全集，只领取自己的 intent，并在每个 payload-bound durable receipt 完整后生成 content-addressed barrier receipt。`surface.post_process` 的 durable mode要求 visible assistant turn 与 LifeMemory admission 成功，否则 projection 不产生 receipt，后序 `surface.reply_delivery` 也不会运行。response loss、restart、failed projection、receipt tamper 和 GR05 实际顺序均有本地 SQLite 证据。该控制项为 `transactional_side_effects=PASS`，但 external delivery 仍为 eventual，`commit_bound_acceptance=MISSING`，所以 Chat 与 NE-01 没有完成。
 

@@ -3,10 +3,12 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.7
+版本：v3.8
 核对日期：2026-07-26
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+通用 worker 的假验收缺口已经从当前启用路径移除：一个 route-neutral verifier/acceptance 组合分别重开 durable projection，并校验 immutable authority、receipt/COMMIT、WorkOrder/context 与输出合同。未知自然语言条件进入 Review；Plan 合成节点还必须消费 digest-bound 前驱 artifacts。Delegate/Plan 的 `verification` 原子控制因此为 `PASS`，但它们的 Budget、一般 Review/recovery、事务副作用、commit-bound acceptance 以及 Plan 的通用候选生成仍为 `PARTIAL/MISSING`，路线总状态不升级。
 
 最新 locator inventory（2026-07-25）为生产 consumer/import/module/field/lock/ref 全 0。container、facade、environment 与旧 wiring 已物理删除；ASGI/CLI fresh 构造 ports 并显式传入 Host root，pytest-only bridge 不进入生产对象图。`HostAuthorityRuntimeOwner` 继续持有 canonical ledger、Memory、Model 与 Capability 图；ResourceManager status 已由 0123 Host-fenced Runtime Event journal 持久化。`TribeRuntimeScope` fresh 持有 state registry、Host registry、event bus 与 23-Agent catalog。scope bind 不再发布进程级 active context；lifespan/background execution 与 HTTP request 通过 `ContextVar` 选择 exact owner，两个重叠 Tribe execution 返回不同 Agent/registry，同 execution 跨 scope、active execution 解绑与 stale inherited context 均失败关闭。23 个 Agent backing singleton/setter 与三类 shared runtime fallback 已物理归零；无 exact context 稳定拒绝。Chat 的本地 assistant/LifeMemory 投影屏障已经清零，但 bus、完整 Host multi-app canary、外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、commit-bound acceptance 与跨服务 delivery 验收仍未清零，不能据此证明通用 Delegate 或 NE-01 已完成。
 

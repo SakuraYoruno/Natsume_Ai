@@ -3,11 +3,13 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.15
+版本：v2.16
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+通用执行层新增一个 route-neutral 证据边界，而不是第二套 Runtime。Chat、Skill、Delegate、Plan、Tool 与 Operator worker 仍由原 Task Runtime 调度；其 terminal COMMIT 只被视为主张。Verifier 与 Acceptance 分别通过 projection reader 重开同一 durable evidence，任何身份、grant、digest、COMMIT 或输出合同漂移都阻断。Plan 的 successor artifact 由 canonical TaskStore 解析并经 `NodeInputArtifactAttestation` 绑定后才进入 final Chat；该 attestation 不赋予新的执行权。
 
 当前分支的独立 Gate 1～14 已全部 `PASS`、`failed_gates=[]`。最后两条回环通过中立合同层关闭：`SQLiteTaskRuntimeFeatureCanaryReceiptStore → contracts/task_runtime_feature_canary`，`composition/host_application → contracts/host_lifecycle`；旧 Task Runtime 与 App lifecycle 路径只重导出 canonical 对象，类型 identity 不分叉。Gate 1 的 issues/SCC 均为空，Gate 3 继续由 Research ledger 的 1271 行 repository owner、512 行 canonical codec 与 108 行 typed projection 保持通过，未扩白名单。该结果是当前工作树的静态分层证据，不是 Universal Runtime、NE-01 或完整架构项目封板；NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 

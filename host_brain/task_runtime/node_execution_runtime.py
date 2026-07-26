@@ -27,6 +27,7 @@ from .coordinator_records import (
     _evidence_refs,
     _exception_reason,
     _mapping,
+    _node_output_contract,
     _record_non_negative_int,
     _record_positive_int,
     _required_record_text,
@@ -884,6 +885,7 @@ class DurableNodeExecutionRuntime:
             "budget": budget.execution_payload(),
             "node_input_refs": list(node_input_refs),
             "node_input_artifacts": input_artifacts,
+            "node_output_contract": _node_output_contract(node),
             "node_acceptance_criteria": list(admitted.active_node.acceptance_criteria),
             "node_risk_level": int(admitted.active_node.risk_level),
         }

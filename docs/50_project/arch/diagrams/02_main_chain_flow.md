@@ -3,8 +3,8 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.8
-核对日期：2026-07-18
+版本：v2.9
+核对日期：2026-07-26
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
 
@@ -28,8 +28,9 @@ flowchart TD
     TASK["GovernedTaskCoordinator"]
     NODE["Node + Attempt + Lease + Budget + Grant"]
     WORK["Frozen worker"]
-    VERIFY["Verification"]
-    ACCEPT["Acceptance"]
+    PROJECTION["Durable WorkerProjection"]
+    VERIFY["Independent Verification\nreopen durable projection"]
+    ACCEPT["Independent Acceptance\nreopen again or Review"]
     EFFECT["Durable effect intents"]
     DISPATCH["AcceptanceEffectDispatcher"]
     SSE["SSE / reply projection"]
@@ -40,7 +41,7 @@ flowchart TD
     SUPPORT -->|"yes"| GR --> BUILD --> PLAN
     PLAN -->|"yes"| SEARCH --> ADMIT
     PLAN -->|"no"| DIRECT --> ADMIT
-    ADMIT --> TASK --> NODE --> WORK --> VERIFY --> ACCEPT --> EFFECT --> DISPATCH --> SSE
+    ADMIT --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> EFFECT --> DISPATCH --> SSE
     SUPPORT -->|"read route"| READ --> SSE
     SUPPORT -->|"unsupported"| REJECT
 
@@ -49,6 +50,8 @@ flowchart TD
     style READ fill:#d7f5df,stroke:#22863a
     style REJECT fill:#ffd9d9,stroke:#b31d28
 ```
+
+Plan 的合成节点还有一条不能省略的数据边：已验收 predecessor Node 先生成 canonical TaskResult artifact，TaskStore 解析其 payload，`NodeInputArtifactAttestation` 再绑定 artifact/receipt/payload digest bundle，final Chat 只消费这组证据。仅有拓扑依赖而没有该数据流不能通过固定结构验收。任意未被固定 predicate 覆盖的自然语言验收条件进入 durable Review，不会自动写成 `PASS`。
 
 ## Task 节点时序
 

@@ -1,10 +1,21 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.16
+版本：v0.17
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-INDEPENDENT-WORKER-EVIDENCE
+
+- T-NE01-WORKER-EVIDENCE-01：Verifier 必须通过只读 projection reader 重开 durable WorkerProjection；缺失、不可读、schema/digest/receipt、command/request、graph revision、node、attempt、route/target、grant、WorkOrder/context 或完整 COMMIT 漂移均失败。
+- T-NE01-WORKER-EVIDENCE-02：Verifier 必须用 frozen `TaskNode.output_contract` 重建 canonical artifact payload；required 字段或类型不满足时不能生成 PASS。
+- T-NE01-WORKER-EVIDENCE-03：Acceptance 必须进行第二次独立 projection reopen，并复验 VerificationResult 的 validation/graph/node/attempt/receipt identity；不能复用 verifier 的进程内对象冒充独立验收。
+- T-NE01-WORKER-EVIDENCE-04：固定且有实现 predicate 的结构标准可自动 PASS；其它自然语言标准必须为 REVIEW。不得为未知语义批量生成 PASS。
+- T-NE01-WORKER-EVIDENCE-05：Skill worker terminal COMMIT 必须完整镜像已 stage 的 canonical projection，包含 command/graph revision/node/attempt/node grant，不得只提交 narrative。
+- T-NE01-PLAN-ARTIFACT-01：Plan final Chat 必须只消费已验收 predecessor TaskResult artifacts；每项绑定 canonical artifact ref、worker receipt 和 payload digest，bundle attestation digest 可重算。普通 Chat 不携带该 attestation。
+- T-NE01-PLAN-ARTIFACT-02：artifact receipt/digest 漂移、重复 ref、payload 非对象或未绑定自身 receipt 时，在调用模型前失败关闭。
+- 当前定向单测 `50 passed`；Tool/Operator 真实 SQLite 集成 `9 passed`；Universal Host 两 Skill 节点到 final Chat 的真实 SQLite 集成 `1 passed in 20.71s`。三组分开记录。波次 integration、真实 provider、commit-bound acceptance 与 NE-07 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-TRANSACTIONAL-CHAT-PROJECTION-BARRIER
 

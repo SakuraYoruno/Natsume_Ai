@@ -3,9 +3,16 @@
 
 # 测试与验收目录
 
-版本：v2.14
+版本：v2.15
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 独立 Worker 证据与 Plan 产物流当前切片
+
+- 通用 Verifier 在 worker 结束后通过独立 reader 重开 WorkerProjection，复验 immutable authority、receipt digest、完整 COMMIT 与 `TaskNode.output_contract`；Acceptance 使用第二次独立读取并复验 verification identity。
+- 固定结构策略才允许自动 `PASS`；无法由 durable evidence 判断的自然语言标准稳定返回 `REVIEW`。projection 缺失、digest/COMMIT/grant/identity 漂移和输出合同错误均失败关闭。
+- Plan final Chat 只消费两个已验收前驱 TaskResult artifacts，并把 artifact ref、worker receipt、payload digest 与 bundle digest 写入 trace attestation；普通 Chat 不携带该证明，也不会被 Plan artifact 污染。
+- 当前定向单测 `50 passed`；Tool/Operator 真实 SQLite 集成 `9 passed`；Universal Host Chat/Delegate/两 Skill 节点/最终 Chat/replay/principal-drift 集成 `1 passed`。三个集合分别报告，不相加。波次 integration、真实模型、commit-bound acceptance 与 NE-07 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Chat 本地事务投影屏障当前切片
 
