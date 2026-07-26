@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.39
+版本：v5.40
 核对日期：2026-07-26
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,8 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
+
+Plan 的当前生产窄路径不再把 `SkillMeta.require_confirm=true` 的能力静默排除。`capability_plan_search` 把它冻结为 `PlanningCapability.requires_review`，domain search 将 catalog provenance 带入候选，compiler 再将其重绑定为覆盖整图实际 TaskNode ID 的 node review policy。Scheduler 逐节点检查该 policy；只有目标节点等待 Review，其前驱和后继不会共享一个图级审批布尔值。Review continuation 仍由 0096 owner 协调并由 NodeBoundGrantService 生成 claim-fenced batch；本次续跑前已 accepted 的节点从 immutable WorkerProjection 恢复原 grant，当前新执行节点必须匹配续签 grant。真实 SQLite 三节点图证明只运行一次并原子完成。机器矩阵因此只把 Plan 当前启用路径的 `node_bound_grant` 与 `review_resume` 提升为 `PASS`，不改变 graph-scope Budget、一般搜索/恢复、事务副作用、commit-bound acceptance 和 NE-01 的未完成结论。
 
 当前普通 Delegate 只准入 `pentest_agent` 的 `PORT_FREE_READ_ONLY` adapter。它不持有模型、工具、嵌套派发或 Effect port；dispatcher 必须产生 digest-bound `ReadonlyDelegateUsageAttestationV1`，绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation，并明确证明内部 token/tool/retry/model-cost 为零。Task Runtime 仍按真实外层动作预扣一次 canonical Delegate dispatch；冻结执行器不再从 `intent_agent_trace/repair_agent_trace` 推测用量。缺失、非零、篡改或 binding 漂移均在 COMMIT 前失败关闭，真实 SQLite 的 WorkerProjection 与 BudgetUsage 保存同一 attestation ref。当前启用 target 的 `budget_enforcement=PASS`，不外推到一般 Delegate、Review/restart、program-wide Budget、commit-bound acceptance 或 NE-01。
 

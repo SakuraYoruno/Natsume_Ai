@@ -18,9 +18,11 @@ from host_brain.contracts.agent_runtime.review_policy import (
     ReviewType,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
-from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.review_continuation_binding import (
+    REVIEW_CONTINUATION_CONFLICT,
+)
+from host_brain.persistence.review_repository import ReviewStore, ReviewStoreError
 from host_brain.task_runtime.review_runtime import (
-    TASK_NODE_REVIEW_BINDING_CONFLICT,
     TASK_NODE_REVIEW_INVALID,
     TaskNodeReviewContext,
     TaskNodeReviewError,
@@ -205,7 +207,9 @@ def test_inconsistent_waiver_and_review_requirement_fails_closed(tmp_path: Path)
     assert raised.value.reason_code == TASK_NODE_REVIEW_INVALID
 
 
-def test_forged_existing_review_binding_is_rejected(tmp_path: Path) -> None:
+def test_forged_existing_review_binding_is_rejected_at_persistence_boundary(
+    tmp_path: Path,
+) -> None:
     clock = Clock()
     store = _store(tmp_path, clock)
     runtime = TaskNodeReviewRuntime(store, clock=clock)
@@ -230,17 +234,15 @@ def test_forged_existing_review_binding_is_rejected(tmp_path: Path) -> None:
         diff_ref=context.diff_ref,
         checkpoint_id="task-checkpoint://forged/3/node/post",
     )
-    store.create_review(
-        forged,
-        work_order_id=context.work_order_id,
-        task_graph_id=context.graph_id,
-        task_node_id=context.node_id,
-    )
+    with pytest.raises(ReviewStoreError) as raised:
+        store.create_review(
+            forged,
+            work_order_id=context.work_order_id,
+            task_graph_id=context.graph_id,
+            task_node_id=context.node_id,
+        )
 
-    with pytest.raises(TaskNodeReviewError) as raised:
-        runtime.post_execution_acceptance_gate(context=context)
-
-    assert raised.value.reason_code == TASK_NODE_REVIEW_BINDING_CONFLICT
+    assert raised.value.reason_code == REVIEW_CONTINUATION_CONFLICT
 
 
 def test_post_acceptance_review_requires_attempt_id(tmp_path: Path) -> None:

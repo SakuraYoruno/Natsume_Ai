@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.19
+版本：v2.20
 核对日期：2026-07-26
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -11,6 +11,8 @@
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、七路线 commit-bound acceptance 与 NE-01 仍未闭环。
+
+Plan Review Policy 模块的职责分为三层：Capability adapter 只从 registry 冻结 `requires_review`，Planning domain 只携带候选级来源，Graph compiler 独占 candidate→TaskNode ID 重绑定。`review_policy.py` 负责合同解析和完整覆盖失败关闭，`TaskNodeReviewRuntime`/Scheduler 负责逐节点门禁，ReviewStore 与 0096 worker 仍分别拥有决定和续跑协调。`ParallelSuccessRuntime` 不修改审批，而只核对 WorkerProjection 中冻结的历史/续签 grant authority。Budget、搜索算法和 worker 都不能自行关闭审批。
 
 Delegate Dispatch 模块当前只有一个正向生产 target：只读 `pentest_agent`。Registry 负责冻结 `PORT_FREE_READ_ONLY` execution mode，dispatcher 负责调用 effect-free Domain Pack/SecureRun adapter 并签发完整 lineage-bound usage attestation；Frozen Route Executor 只负责重验 attestation 并转换为 WorkerBudgetUsage。模型、工具、嵌套派发与 Effect port 不属于该 adapter，legacy Agent trace 也不属于预算 authority。未来任何有资源消耗的 Delegate 必须新增受治理 target 合同与实际 measurement，不能复用该零用量证明。
 

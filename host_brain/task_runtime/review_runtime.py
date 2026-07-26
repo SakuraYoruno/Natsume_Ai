@@ -22,7 +22,9 @@ from host_brain.contracts.agent_runtime.review_policy import (
     ReviewResumePhase,
     ReviewStatus,
     ReviewType,
+    pre_execution_review_required,
 )
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
 from host_brain.persistence.review_repository import (
@@ -158,7 +160,10 @@ class TaskNodeReviewRuntime:
             else WorkOrderV3.from_mapping(work_order)
         )
         order.validate()
-        required = _pre_execution_review_required(order)
+        required = _pre_execution_review_required(
+            order,
+            node_id=context.node_id,
+        )
         if not required:
             return TaskNodeReviewGate(
                 disposition="NOT_REQUIRED",
@@ -179,6 +184,8 @@ class TaskNodeReviewRuntime:
     @staticmethod
     def pre_execution_required(
         work_order: WorkOrderV3 | Mapping[str, Any],
+        *,
+        node_id: str | None = None,
     ) -> bool:
         order = (
             work_order
@@ -186,7 +193,25 @@ class TaskNodeReviewRuntime:
             else WorkOrderV3.from_mapping(work_order)
         )
         order.validate()
-        return _pre_execution_review_required(order)
+        return _pre_execution_review_required(order, node_id=node_id)
+
+    @staticmethod
+    def pre_execution_required_nodes(
+        work_order: WorkOrderV3 | Mapping[str, Any],
+        *,
+        node_ids: Sequence[str],
+    ) -> frozenset[str]:
+        order = (
+            work_order
+            if isinstance(work_order, WorkOrderV3)
+            else WorkOrderV3.from_mapping(work_order)
+        )
+        order.validate()
+        return frozenset(
+            node_id
+            for node_id in node_ids
+            if _pre_execution_review_required(order, node_id=node_id)
+        )
 
     def post_execution_acceptance_gate(
         self,
@@ -301,16 +326,19 @@ class TaskNodeReviewRuntime:
             )
 
 
-def _pre_execution_review_required(order: WorkOrderV3) -> bool:
+def _pre_execution_review_required(
+    order: WorkOrderV3,
+    *,
+    node_id: str | None = None,
+) -> bool:
     review_policy = dict(order.review_policy or {})
-    approval_policy = dict(order.approval_policy or {})
-    explicit = (
-        bool(review_policy.get("review_required"))
-        or bool(review_policy.get("durable_review_required"))
-        or bool(review_policy.get("require_durable_review"))
-        or bool(approval_policy.get("require_review_token"))
-        or bool(approval_policy.get("review_id"))
-    )
+    try:
+        explicit = pre_execution_review_required(order, node_id=node_id)
+    except ContractViolation as exc:
+        raise TaskNodeReviewError(
+            TASK_NODE_REVIEW_INVALID,
+            str(exc),
+        ) from exc
     waiver_mode = _text(review_policy.get("mode")) == "governor_grant_review_waiver"
     if waiver_mode and explicit:
         raise TaskNodeReviewError(

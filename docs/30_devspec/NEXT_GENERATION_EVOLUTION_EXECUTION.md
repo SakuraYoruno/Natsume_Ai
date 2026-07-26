@@ -5,10 +5,12 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、commit-bound Chat 验收、通用 Delegate、七路线和完整 Composition 仍未完成。
 
-版本：v3.9
+版本：v3.10
 日期：2026-07-26
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 修订执行基线：最新 `origin/dev`，本文件所在提交作为切片证据。第 5、6 条 governed Operator vertical slice `task_operation.reconcile` 与 `task_effect.reconcile` 继续把原始 Ed25519 证据隔离在 0126/0128 append-only evidence ledger，TaskGraph 只携带 ref/digest；其受限恢复结论不变。Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：Scheduler Secure Ingress 冻结 method/path/body/definition head，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，经过节点治理、Review/Verification/Acceptance、terminal Preview 后，唯一 `operator.state_control` Effect 才写 canonical repository。不可变 admin operation receipt 先于 claim completion；该崩溃窗口由新实例精确重开，路由中的直接 Scheduler writer 调用为 0。trigger 保持既有 governed occurrence 入口，list/get/health 保持只读。
+
+当前 Plan 节点审批切片允许 composed SkillRegistry 中 `require_confirm=true` 的合法能力参与竞争，但不允许它绕过 Review。Capability snapshot 冻结 `requires_review`；搜索结果只携带 candidate-bound policy；`PlanningGraphCompiler` 必须删除 candidate key 并生成覆盖全部实际 node ID 的 `Natsume.agent.node_review_policy.v1`。Task Runtime 对每个 claimable node 单独计算审批门，缺 entry、非布尔值或无 catalog provenance 均失败关闭。Continuation 续签所有仍需运行的 exact node grant，但 atomic-success closeout 对进入本次续跑前已 `ACCEPTED` 的节点使用 immutable WorkerProjection 中的历史 grant，对本次新执行节点继续核对续签 grant。该边界已经用真实 SQLite `skill → skill → chat`、一次 confirm Review、自动 continuation 和 exactly-once worker 证明；Plan 当前启用路径的 `node_bound_grant/review_resume=PASS`。Budget 仍为 graph-scope，Plan 总状态与 NE-01 仍为 `INCOMPLETE / IN_PROGRESS`。
 
 当前只读 Delegate 预算切片限定于生产唯一允许的 `pentest_agent`。Registry 要求该 target 声明 `PORT_FREE_READ_ONLY`，adapter 不取得模型、工具、嵌套派发或 Effect 端口；dispatcher 生成 `ReadonlyDelegateUsageAttestationV1`，精确绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation。Task Runtime 为 canonical Delegate dispatch 预扣一个工具调用，adapter 内部 token/tool/retry/model-cost 必须由该 attestation 明确证明为零；冻结执行器不再相信 legacy intent/repair Agent trace。缺失、非零、篡改或 lineage 漂移在 Worker COMMIT 前拒绝。该范围的 `budget_enforcement=PASS`，但一般 Delegate、Review/restart、commit-bound acceptance、七路线 program-wide Budget 与 NE-01 保持未完成。
 

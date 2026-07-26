@@ -184,6 +184,7 @@ class CapabilitySuccessorCatalog:
                 "estimated_relevance": _rounded(relevance),
                 "estimated_risk": _rounded(risk),
                 "estimated_cost": _rounded(capability.estimated_cost),
+                "requires_review": capability.requires_review,
                 "depends_on_candidate_ids": list(dependency_candidate_ids),
                 "requires_lookahead": True,
             },
@@ -429,6 +430,7 @@ def bind_selected_capability_inputs(
     current = resolved_state
     prefix: tuple[SearchCandidate, ...] = ()
     approved: dict[str, dict[str, Any]] = {}
+    candidate_review_policies: dict[str, dict[str, Any]] = {}
     selected_actions: list[str] = []
     for index, candidate in enumerate(decision.result.selected_path):
         allowed = {
@@ -450,6 +452,28 @@ def bind_selected_capability_inputs(
             snapshot=snapshot,
             candidate=expected,
         )
+        requires_review = False
+        if str(expected.payload.get("capability_action") or "").strip() == "execute":
+            capability_id = str(
+                expected.payload.get("capability_id") or ""
+            ).strip()
+            capability = {
+                item.capability_id: item for item in snapshot.capabilities
+            }.get(capability_id)
+            if capability is None:
+                raise CapabilityPlanningError(
+                    "selected capability disappeared from the frozen snapshot"
+                )
+            requires_review = capability.requires_review
+        candidate_review_policies[expected.candidate_id] = {
+            "review_required": requires_review,
+            "reason_code": (
+                "SKILL_REGISTRY_CONFIRM_REQUIRED"
+                if requires_review
+                else "SKILL_REGISTRY_CONFIRM_NOT_REQUIRED"
+            ),
+            "source_ref": snapshot.catalog_ref,
+        }
         route = str(expected.payload.get("worker_route") or "").strip()
         target = str(expected.payload.get("target_id") or "").strip()
         selected_actions.append(
@@ -480,6 +504,15 @@ def bind_selected_capability_inputs(
         "max_risk_level": snapshot.max_risk_level,
         "execution_steps": CAPABILITY_PLANNING_EXECUTION_STEPS,
     }
+    review_policy = _thaw(base_context.review_policy)
+    if (
+        "candidate_review_policies" in review_policy
+        or "node_review_policies" in review_policy
+    ):
+        raise CapabilityPlanningError(
+            "base compilation context cannot pre-authorize node Review policy"
+        )
+    review_policy["candidate_review_policies"] = candidate_review_policies
     return PlanningCompilationContext(
         domain=base_context.domain,
         run_mode=base_context.run_mode,
@@ -488,7 +521,7 @@ def bind_selected_capability_inputs(
         forbidden_actions=base_context.forbidden_actions,
         verification_plan=_thaw(base_context.verification_plan),
         approval_policy=_thaw(base_context.approval_policy),
-        review_policy=_thaw(base_context.review_policy),
+        review_policy=review_policy,
         budget_policy=_thaw(base_context.budget_policy),
         business_idempotency_scope=base_context.business_idempotency_scope,
         approval_ref=base_context.approval_ref,

@@ -77,6 +77,7 @@ from .node_execution_records import build_review_context
 from .node_execution_runtime import DurableNodeExecutionRuntime
 from .node_lifecycle_runtime import DurableNodeLifecycleRuntime
 from .parallel_settlement_runtime import ParallelSettlementRuntime
+from .parallel_success_grant_reentry import restore_prior_parallel_success_grants
 from .parallel_success_runtime import ParallelSuccessRuntime
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
 from .preoperation_attempt_recovery import (
@@ -189,12 +190,9 @@ class DurableDagSchedulingRuntime:
             supports_completion_policy=self.supports_completion_policy,
         )
         grant_refs = preflight.grant_refs
-        # A consumed POST Review renews a short-lived execution credential but
-        # must accept the already committed worker checkpoint, not replay it.
-        # Keep the normal live grant batch for every new worker execution and
-        # replace only the exact reviewed node with its reopened historical
-        # projection grant before the all-node success finalizer validates it.
+        # POST Review renews live grants; committed projections retain theirs.
         parallel_success_grant_refs = preflight.parallel_success_grant_refs
+        restore_prior_parallel_success_authority = preflight.parallel_success_enabled
         denied_review_node = preflight.denied_review_node
         parallel_success_enabled = preflight.parallel_success_enabled
         if preflight.cancellation_event is not None:
@@ -231,6 +229,15 @@ class DurableDagSchedulingRuntime:
                 node_id: _status(node)
                 for node_id, node in durable_nodes.items()
             }
+            if restore_prior_parallel_success_authority:
+                await restore_prior_parallel_success_grants(
+                    admitted=admitted,
+                    statuses=statuses,
+                    grant_refs=parallel_success_grant_refs,
+                    node_execution_projection=self._node_execution_projection,
+                    projection_reader=self._projection_reader
+                )
+                restore_prior_parallel_success_authority = False
             assert_denied_review_waiting_node(denied_review_node, statuses=statuses)
             final_admission = admitted.for_node(
                 admitted.result_node_id or admitted.nodes[-1].node_id
@@ -1147,9 +1154,12 @@ class DurableDagSchedulingRuntime:
                     "no READY TaskNode has all dependencies ACCEPTED",
                 )
 
-            review_required = TaskNodeReviewRuntime.pre_execution_required(work_order)
-            if review_required and retry_due_claim_node_ids:
-                for node_id in sorted(retry_due_claim_node_ids):
+            review_required_node_ids = TaskNodeReviewRuntime.pre_execution_required_nodes(
+                work_order, node_ids=tuple(binding.node_id for binding in claimable)
+            )
+            review_retry_node_ids = review_required_node_ids & retry_due_claim_node_ids
+            if review_retry_node_ids:
+                for node_id in sorted(review_retry_node_ids):
                     node_admission = admitted.for_node(node_id)
                     node = durable_nodes[node_id]
                     await _maybe_await(
@@ -1176,8 +1186,9 @@ class DurableDagSchedulingRuntime:
                 candidate
                 for candidate in claimable
                 if candidate.node_id not in preoperation_recovery_node_ids
+                and candidate.node_id in review_required_node_ids
             ]
-            if review_required and review_candidates:
+            if review_candidates:
                 if self._reviews is None:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,

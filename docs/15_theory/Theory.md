@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.15
+版本：v2.16
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -15,6 +15,8 @@
 可见副作用还必须遵循“本地事实先于外部表达”的因果屏障。一个领域命令的 durable receipt 只证明命令和 intent 已被接受，不能证明所有本地投影已经完成；只有当 exact command 生成的完整投影集合都拥有 payload-bound durable receipt，后续外部 delivery 才可取得执行权。对于对话，assistant turn 与 LifeMemory admission 是回复发送前的本地前置事实。跨服务发送不必伪装成单一数据库事务，但必须通过有序 Effect、幂等 Outbox 与只读 reconciliation 保证：本地结果未知时绝不先对用户宣称成功。
 
 验证与验收必须与执行者分离。worker 的 COMMIT 是待验证主张，不是事实本身；Verifier 必须从独立持久投影重建不可变身份和输出合同，Acceptance 还要再次独立打开证据，不能复用调用者对象或把任意文字条件直接标成 `PASS`。机器无法证明的语义条件应进入显式 Review。多节点计划的依赖也必须是数据依赖：后继节点要绑定并实际消费前驱已验收 artifact 的 ref、receipt 与 digest，而不是仅凭图上存在一条边推断信息已经传递。
+
+审批属于节点 authority，而不是整张图的模糊布尔开关。规划搜索可以发现需要人工确认的能力，但必须把该要求连同来源冻结进候选，再由编译器绑定到不可变 TaskNode ID；每个节点都要有显式策略，缺失不能继承“无需审批”。长时间审批会使旧 grant 过期，因此续跑可续签尚未执行节点的时限，但不能改写审批前已经提交的 projection authority，也不能重跑已验收 worker。续签解决的是时间围栏，不是扩大目标、风险或能力。
 
 零用量也是需要证明的事实，不能从 measurement 缺失推断。对于被限制为只读、无端口的执行 adapter，外层 runtime 可以预先记账 canonical dispatch，但 adapter 内部的 token、工具、重试和成本必须由 server 生成、digest-bound 且绑定完整 Task lineage 的 attestation 明确证明为零；缺失、非零或身份漂移都应失败关闭。未使用的 authority 也不能因此预授予：只读 Delegate 没有模型、工具、嵌套派发或 Effect 端口，未来需要这些能力时必须形成新的受治理图和预算边界。
 

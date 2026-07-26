@@ -17,6 +17,8 @@ from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder, WorkOr
 
 
 REVIEW_ITEM_SCHEMA_VERSION = "Natsume.agent.review_item.v1"
+NODE_REVIEW_POLICY_SCHEMA_VERSION = "Natsume.agent.node_review_policy.v1"
+NODE_REVIEW_POLICIES_KEY = "node_review_policies"
 
 
 class ReviewType(StrEnum):
@@ -224,7 +226,14 @@ class ReviewPolicy:
             return True
         return False
 
-    def review_required(self, work_order: AgentWorkOrder | WorkOrderV3) -> bool:
+    def review_required(
+        self,
+        work_order: AgentWorkOrder | WorkOrderV3,
+        *,
+        node_id: str | None = None,
+    ) -> bool:
+        if isinstance(work_order, WorkOrderV3):
+            return pre_execution_review_required(work_order, node_id=node_id)
         if "review_required" in work_order.review_policy:
             return bool(work_order.review_policy.get("review_required"))
         if self.durable_review_required(work_order):
@@ -232,12 +241,114 @@ class ReviewPolicy:
         return bool(work_order.requires_write)
 
 
+def pre_execution_review_required(
+    work_order: WorkOrderV3,
+    *,
+    node_id: str | None = None,
+) -> bool:
+    """Resolve graph-wide and immutable per-node pre-execution Review policy.
+
+    Existing WorkOrders keep their graph-wide semantics.  A planning compiler
+    may additionally freeze ``node_review_policies`` for every node in one
+    immutable graph revision.  Once that map exists, a missing node entry or
+    malformed boolean fails closed instead of silently inheriting a waiver.
+    """
+
+    if not isinstance(work_order, WorkOrderV3):
+        raise ContractViolation(
+            REVIEW_ITEM_INVALID,
+            "node-scoped Review policy requires WorkOrderV3",
+        )
+    policy = dict(work_order.review_policy or {})
+    approval = dict(work_order.approval_policy or {})
+    graph_required = any(
+        _exact_policy_flag(policy, field_name)
+        for field_name in (
+            "review_required",
+            "durable_review_required",
+            "require_durable_review",
+        )
+        if field_name in policy
+    ) or any(
+        _exact_policy_flag(approval, field_name)
+        for field_name in ("require_review_token",)
+        if field_name in approval
+    )
+    if "review_id" in approval:
+        review_id = approval.get("review_id")
+        if not isinstance(review_id, str) or not review_id.strip():
+            raise ContractViolation(
+                REVIEW_ITEM_INVALID,
+                "review_id must be a non-empty string",
+            )
+        graph_required = True
+    raw_node_policies = policy.get(NODE_REVIEW_POLICIES_KEY)
+    if raw_node_policies is None:
+        return graph_required
+    if not isinstance(raw_node_policies, Mapping) or not raw_node_policies:
+        raise ContractViolation(
+            REVIEW_ITEM_INVALID,
+            f"{NODE_REVIEW_POLICIES_KEY} must be a non-empty object",
+        )
+    if node_id is None:
+        return graph_required or any(
+            _node_policy_required(value, node_id=str(key or "").strip())
+            for key, value in raw_node_policies.items()
+        )
+    resolved_node_id = str(node_id or "").strip()
+    if not resolved_node_id or resolved_node_id not in raw_node_policies:
+        raise ContractViolation(
+            REVIEW_ITEM_INVALID,
+            "node-scoped Review policy does not cover the requested TaskNode",
+        )
+    return graph_required or _node_policy_required(
+        raw_node_policies[resolved_node_id],
+        node_id=resolved_node_id,
+    )
+
+
+def _node_policy_required(value: Any, *, node_id: str) -> bool:
+    if not node_id or not isinstance(value, Mapping):
+        raise ContractViolation(
+            REVIEW_ITEM_INVALID,
+            "node Review policy entry is invalid",
+        )
+    entry = dict(value)
+    if entry.get("schema_version") != NODE_REVIEW_POLICY_SCHEMA_VERSION:
+        raise ContractViolation(
+            REVIEW_ITEM_INVALID,
+            f"TaskNode {node_id} has an unsupported Review policy schema",
+        )
+    required = _exact_policy_flag(entry, "review_required")
+    reason_code = str(entry.get("reason_code") or "").strip()
+    source_ref = str(entry.get("source_ref") or "").strip()
+    if not reason_code or "://" not in source_ref:
+        raise ContractViolation(
+            REVIEW_ITEM_INVALID,
+            f"TaskNode {node_id} Review policy lacks immutable provenance",
+        )
+    return required
+
+
+def _exact_policy_flag(policy: Mapping[str, Any], field_name: str) -> bool:
+    value = policy.get(field_name)
+    if not isinstance(value, bool):
+        raise ContractViolation(
+            REVIEW_ITEM_INVALID,
+            f"{field_name} must be a boolean",
+        )
+    return value
+
+
 __all__ = [
+    "NODE_REVIEW_POLICIES_KEY",
+    "NODE_REVIEW_POLICY_SCHEMA_VERSION",
     "REVIEW_ITEM_SCHEMA_VERSION",
     "ReviewItem",
     "ReviewPolicy",
     "ReviewResumePhase",
     "ReviewStatus",
     "ReviewType",
+    "pre_execution_review_required",
     "validate_review_transition",
 ]

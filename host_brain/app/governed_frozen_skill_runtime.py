@@ -31,6 +31,9 @@ from host_brain.app.governed_task_authority import (
     require_fail_closed_governed_work_order as _require_fail_closed_governed_work_order,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.review_policy import (
+    pre_execution_review_required,
+)
 from host_brain.agent_runtime.production_studio import AGENT_PRODUCTION_SKILL_IDS
 from host_brain.agent_runtime.governed_skill_work_order import (
     WRITE_AGENT_RUNTIME_SKILL_IDS,
@@ -263,11 +266,12 @@ class _FrozenSkillWorker:
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "durable verifier returned a different node grant",
             )
-        admitted_risk_level = int(work_order.risk_level)
-        review_policy = dict(work_order.review_policy or {})
-        review_required = bool(
-            review_policy.get("review_required")
-            or review_policy.get("durable_review_required")
+        admitted_risk_level = int(
+            execution_context.get("node_risk_level") or 0
+        )
+        review_required = pre_execution_review_required(
+            work_order,
+            node_id=node_id,
         )
         if (
             admitted_risk_level >= 4

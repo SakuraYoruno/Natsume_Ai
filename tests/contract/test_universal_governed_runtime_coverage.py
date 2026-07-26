@@ -24,7 +24,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "0adc0847ed2ea1e8c9b8139d05d3c7d7d6e8b444"
+    assert report.evaluated_commit_sha == "e34e3ab14d1124ec802bd5d3aaefff7274889d11"
     assert report.migration_head == (
         "0131_task_operation_recovery_hold_binding.sql"
     )
@@ -51,9 +51,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
         ),
         "plan": (
             "canonical_execution_authority",
-            "node_bound_grant",
             "budget_enforcement",
-            "review_resume",
             "transactional_side_effects",
             "commit_bound_acceptance",
         ),
@@ -117,6 +115,12 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert "host_brain/app/life_projection_barrier.py" in payload[
         "routes"
     ]["chat"]["evidence_refs"]
+    assert payload["routes"]["plan"]["controls"]["node_bound_grant"] == "PASS"
+    assert payload["routes"]["plan"]["controls"]["review_resume"] == "PASS"
+    assert payload["routes"]["plan"]["status"] == "INCOMPLETE"
+    assert "tests/integration/test_ne01_plan_node_review_runtime.py" in payload[
+        "routes"
+    ]["plan"]["evidence_refs"]
 
 
 def test_full_architecture_gate_fails_closed_while_any_route_is_missing() -> None:

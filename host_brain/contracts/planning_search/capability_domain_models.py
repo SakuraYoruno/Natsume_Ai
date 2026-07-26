@@ -50,6 +50,7 @@ class PlanningCapability:
     reversible: bool
     parallelizable: bool
     estimated_cost: float
+    requires_review: bool = False
 
     def __post_init__(self) -> None:
         capability_id = _identifier(self.capability_id, field_name="capability_id")
@@ -60,8 +61,14 @@ class PlanningCapability:
         risk_level = int(self.risk_level)
         if not 1 <= risk_level <= 5:
             raise CapabilityPlanningError("risk_level must be between 1 and 5")
-        if not isinstance(self.reversible, bool) or not isinstance(self.parallelizable, bool):
-            raise CapabilityPlanningError("reversible and parallelizable must be booleans")
+        if (
+            not isinstance(self.reversible, bool)
+            or not isinstance(self.parallelizable, bool)
+            or not isinstance(self.requires_review, bool)
+        ):
+            raise CapabilityPlanningError(
+                "reversible, parallelizable and requires_review must be booleans"
+            )
         estimated_cost = _unit_interval(
             self.estimated_cost,
             field_name="estimated_cost",
@@ -81,6 +88,7 @@ class PlanningCapability:
             "reversible": self.reversible,
             "parallelizable": self.parallelizable,
             "estimated_cost": _rounded(self.estimated_cost),
+            "requires_review": self.requires_review,
         }
 
 
