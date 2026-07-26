@@ -94,6 +94,7 @@ class _FakeTaskStore:
         self.budget: dict[str, Any] | None = None
         self.budget_usage: dict[str, _BudgetResult] = {}
         self.node_budgets: dict[str, dict[str, Any]] = {}
+        self.verification_decision: dict[str, Any] | None = None
         self.reservation_acquired = bool(reservation_acquired)
         self.initial_time_consumed_ms = int(initial_time_consumed_ms)
 
@@ -101,6 +102,9 @@ class _FakeTaskStore:
         return None
 
     def assert_node_budget_ready(self) -> None:
+        return None
+
+    def assert_node_verification_ready(self) -> None:
         return None
 
     def assert_dag_scheduling_ready(self) -> None:
@@ -481,6 +485,82 @@ class _FakeTaskStore:
         attempt["status"] = target_status
         attempt["status_version"] += 1
         return dict(attempt)
+
+    def commit_node_verification(
+        self,
+        graph_id: str,
+        revision: int,
+        node_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        target = str(kwargs["target_status"])
+        node = self.transition_node(
+            graph_id,
+            revision,
+            node_id,
+            expected_version=kwargs["expected_node_version"],
+            target_status=target,
+            outbox=kwargs["node_outbox"],
+            verification_result=kwargs["verification_result"],
+        )
+        self.verification_decision = {
+            "verification_ref": "task-verification://fake/current",
+            "graph_id": graph_id,
+            "graph_revision": revision,
+            "node_id": node_id,
+            "attempt_id": kwargs["attempt_id"],
+            "node_version_after": node["status_version"],
+            "target_status": target,
+            "verification_result": dict(kwargs["verification_result"]),
+        }
+        return {
+            "node": node,
+            "decision": dict(self.verification_decision),
+            "replayed": False,
+        }
+
+    def get_node_verification_decision(
+        self,
+        graph_id: str,
+        revision: int,
+        node_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        del graph_id, revision, node_id, kwargs
+        assert self.verification_decision is not None
+        return dict(self.verification_decision)
+
+    def finalize_node_verification_failure(
+        self,
+        graph_id: str,
+        revision: int,
+        node_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        committed = self.commit_node_verification(
+            graph_id,
+            revision,
+            node_id,
+            attempt_id=kwargs["attempt_id"],
+            reservation_id=kwargs["reservation_id"],
+            expected_node_version=kwargs["expected_node_version"],
+            target_status="VERIFICATION_FAILED",
+            verification_result=kwargs["verification_result"],
+            node_outbox=kwargs["node_outbox"],
+        )
+        assert self.budget is not None
+        assert kwargs["expected_budget_version"] == self.budget["status_version"]
+        self.budget["status"] = "RELEASED"
+        self.budget["status_version"] += 1
+        assert kwargs["expected_graph_version"] == self.graph["status_version"]
+        self.calls.append("graph:FAILED")
+        self.graph["status"] = "FAILED"
+        self.graph["status_version"] += 1
+        return {
+            **committed,
+            "graph": dict(self.graph),
+            "budget": dict(self.budget),
+        }
 
     def fail_running_attempt_bundle(self, attempt_id: str, **kwargs: Any) -> dict[str, Any]:
         attempt = self.attempts[attempt_id]

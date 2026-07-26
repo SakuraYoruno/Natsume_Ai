@@ -566,6 +566,9 @@ class _RetryOnceResolver:
 
 
 class _Verifier:
+    def __init__(self, status: str = "PASS") -> None:
+        self._status = status
+
     def verify(
         self,
         *,
@@ -581,8 +584,12 @@ class _Verifier:
             "task_node_id": execution_context["node_id"],
             "attempt_id": execution_context["attempt_id"],
             "required": True,
-            "status": "PASS",
-            "reason_code": None,
+            "status": self._status,
+            "reason_code": (
+                None
+                if self._status == "PASS"
+                else "WORKER_OUTPUT_REJECTED"
+            ),
             "evidence_refs": list(evidence_refs),
             "checks": [],
             "started_at_ms": NOW,
@@ -648,6 +655,7 @@ def _coordinator(
     outbox_publisher: Any = None,
     node_grant_verifier: Any = None,
     projection_reader: Any = None,
+    verifier: Any = None,
 ) -> GovernedTaskCoordinator:
     resolved_clock = clock if clock is not None else (lambda: NOW)
     durable_store = DurableTaskStore(db_path, clock=resolved_clock)
@@ -670,7 +678,7 @@ def _coordinator(
             if worker_resolver is not None
             else _Resolver(calls, fail_nodes)
         ),
-        verifier=_Verifier(),
+        verifier=verifier if verifier is not None else _Verifier(),
         acceptance=(
             acceptance if acceptance is not None else _Acceptance(acceptance_decision)
         ),
@@ -844,6 +852,49 @@ async def test_gr03_post_acceptance_review_resumes_without_worker_reexecution(
     ]
     assert resumed[-1]["execution_receipt"]["status"] == "ACCEPTED"
     assert resumed[-1]["replayed"] is True
+    assert calls == ["root"]
+
+
+@pytest.mark.asyncio
+async def test_ne01_direct_verification_rejection_closes_terminal_bundle(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    calls: list[str] = []
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=lambda: NOW),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            verifier=_Verifier("FAIL"),
+        ),
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=contracts[0],
+            work_order=contracts[1],
+            assignment=contracts[2],
+            graph=contracts[3],
+        )
+    ]
+
+    assert [event["phase"] for event in events] == ["TERMINAL"]
+    assert events[-1]["execution_receipt"]["status"] == "VERIFICATION_FAILED"
+    snapshot = DurableTaskStore(
+        db_path,
+        clock=lambda: NOW + 10,
+    ).read_scheduler_snapshot("graph-gr03a", 1)
+    assert snapshot["graph_record"]["status"] == "FAILED"
+    assert snapshot["graph_record"]["nodes"][0]["status"] == (
+        "VERIFICATION_FAILED"
+    )
+    assert snapshot["budgets"][0]["status"] == "RELEASED"
+    assert snapshot["node_verifications"][0]["target_status"] == (
+        "VERIFICATION_FAILED"
+    )
     assert calls == ["root"]
 
 

@@ -3,7 +3,7 @@
 
 # Natsume AI 架构文档目录
 
-版本：v4.4
+版本：v4.5
 维护日期：2026-07-26
 状态：`CURRENT_ARCHITECTURE_CATALOG`
 
@@ -14,6 +14,8 @@
 当前 Operation 恢复边界：0130 持久化 exact hold，0131 要求 governed signed reconciliation 精确绑定该 current case，并在既有 Operation/Outbox UoW 后确认 case 已退出 current projection。UNKNOWN/CANCELLATION 已有本地真实 SQLite 证据；checkpoint conflict 继续 quarantine。该项不等于自动副作用归因、一般恢复或 NE-01 完成。
 
 当前节点预算边界：0132 在 READY claim 的同一事务内为每个 Attempt 创建 child Budget Reservation，Graph reservation 仍是唯一 aggregate ceiling；普通 charge、EXCEEDED winner、terminal sibling observation 与 retry 同时写父子 usage。真实 SQLite 已覆盖双根、竞争、重启、篡改和升级回填。全部 cancellation/release、七路线 policy、波次集成与 NE-01 仍未完成。
+
+当前节点验证边界：0133 在 Node transition 同一事务内追加 exact Attempt-bound Verification decision；VERIFIED checkpoint 只读重开该决定。直接拒绝同时终结 Node、Graph 与 graph Budget，多节点拒绝仍复用 0090 settlement。真实 SQLite 已覆盖进程重开、exact replay、篡改回滚和 0132→0133 升级；一般恢复、七路线 commit-bound receipt 与 NE-01 仍未完成。
 
 当前 Chat 提交边界：Acceptance Effect 顺序要求 exact Life projection barrier 先于 external reply；foreground projection receipt 只有在 assistant turn 与 LifeMemory admission 均持久成功后成立。外部 delivery 保持幂等 eventual，commit-bound 七路线验收仍缺，因此该项是 Chat 单控制收口，不是 NE-01 完成。
 

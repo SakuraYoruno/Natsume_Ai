@@ -1,10 +1,20 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.21
+版本：v0.22
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-DURABLE-NODE-VERIFICATION
+
+- T-NE01-VERIFY-01：`VERIFYING → VERIFIED/VERIFICATION_FAILED` 必须在同一 SQLite UoW 写 Node transition、append-only decision 与 exact Node Outbox；decision 必须绑定 Graph revision、Node、Attempt、规范结果 digest 和 evidence。
+- T-NE01-VERIFY-02：进程在 VERIFIED 后丢失时，Continuation 必须按 node version 重开 durable decision；不得读取临时 `node.verification_result`，也不得重新运行 verifier 冒充同一决定。
+- T-NE01-VERIFY-03：直接单节点拒绝必须在一个 UoW 同时提交 `VERIFICATION_FAILED` Node、`FAILED` Graph、`RELEASED` graph Budget 和三个 Outbox；任一 CAS、identity 或 Outbox drift 必须整体回滚。
+- T-NE01-VERIFY-04：首次提交后响应丢失必须用相同参数 exact replay，且重新验证 latest Attempt、COMMITTED Operation、worker receipt 和 Outbox lineage；不同结果或身份必须拒绝。
+- T-NE01-VERIFY-05：多节点拒绝只由 0133 固化节点决定，Graph/Budget 继续交给 0090 唯一 settlement authority；不得新增第二个共享终态 writer。
+- T-NE01-VERIFY-06：fresh 0001→0133、真实 0132→0133 升级、UPDATE/DELETE tamper、snapshot read 与 canonical composition readiness 都必须覆盖。本合同不提升一般 cancellation/recovery、七路线 commit-bound acceptance 或 NE-01 状态。
+- 当前唯一去重 Store/Runtime/migration/release/doc 合同批次为 `156 passed in 91.22s`；真实 SQLite DAG/Review/直接验证拒绝/restart 五项 `5 passed in 17.09s` 与 checkpoint-budget 九项 `9 passed in 0.42s` 分别报告，不相加。统一 `static_scan,doc_gate`、完整架构 Gate 1～14、compileall、JSON 和 diff check 均通过；Gate 3 未扩白名单。NE-01 wave integration、真实模型和 NE-07 Docker 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-NODE-BUDGET-RESERVATION
 
@@ -570,7 +580,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
 - T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0132，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0133，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 

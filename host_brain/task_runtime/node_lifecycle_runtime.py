@@ -110,6 +110,184 @@ class DurableNodeLifecycleRuntime:
             )
         )
 
+    async def commit_node_verification(
+        self,
+        admitted: AdmittedExecution,
+        node: Mapping[str, Any],
+        *,
+        attempt_id: str,
+        reservation_id: str,
+        target_status: str,
+        evidence_refs: Sequence[str],
+        verification_result: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Persist a verification decision and Node state in one UoW."""
+
+        version = _version(node)
+        node_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
+            aggregate_type="TASK_NODE",
+            aggregate_id=(
+                f"{admitted.graph_id}@{admitted.graph_revision}/"
+                f"{admitted.node_id}"
+            ),
+            aggregate_version=version + 1,
+            event_type=f"TASK_NODE_{target_status}",
+            attempt_id=attempt_id,
+            evidence_refs=evidence_refs,
+        )
+        arguments = {
+            "attempt_id": attempt_id,
+            "reservation_id": reservation_id,
+            "expected_node_version": version,
+            "target_status": target_status,
+            "verification_result": verification_result,
+            "node_outbox": node_outbox,
+        }
+        try:
+            raw = await _maybe_await(
+                self._store.commit_node_verification(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    admitted.node_id,
+                    **arguments,
+                )
+            )
+        except Exception:
+            # The first transaction may have committed before its response was
+            # lost.  The Store owns exact replay validation.
+            raw = await _maybe_await(
+                self._store.commit_node_verification(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    admitted.node_id,
+                    **arguments,
+                )
+            )
+        result = _mapping(raw, field_name="durable node verification")
+        committed_node = result.get("node")
+        decision = result.get("decision")
+        if (
+            not isinstance(committed_node, Mapping)
+            or not isinstance(decision, Mapping)
+            or _status(committed_node) != target_status
+            or _required_record_text(decision, "attempt_id") != attempt_id
+            or _required_record_text(decision, "target_status") != target_status
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable node verification returned different lineage",
+            )
+        return dict(committed_node)
+
+    async def finalize_verification_failure(
+        self,
+        admitted: AdmittedExecution,
+        *,
+        node: Mapping[str, Any],
+        graph: Mapping[str, Any],
+        budget: BudgetRuntimeContext,
+        attempt_id: str,
+        reservation_id: str,
+        evidence_refs: Sequence[str],
+        verification_result: Mapping[str, Any],
+        defer_shared_terminal: bool,
+    ) -> tuple[dict[str, Any], dict[str, Any], BudgetRuntimeContext]:
+        """Persist verification rejection and direct terminal state atomically."""
+
+        if defer_shared_terminal:
+            failed_node = await self.commit_node_verification(
+                admitted,
+                node,
+                attempt_id=attempt_id,
+                reservation_id=reservation_id,
+                target_status="VERIFICATION_FAILED",
+                evidence_refs=evidence_refs,
+                verification_result=verification_result,
+            )
+            return failed_node, dict(graph), await self._budgets.refresh(budget)
+
+        node_version = _version(node)
+        graph_version = _version(graph)
+        node_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
+            aggregate_type="TASK_NODE",
+            aggregate_id=(
+                f"{admitted.graph_id}@{admitted.graph_revision}/"
+                f"{admitted.node_id}"
+            ),
+            aggregate_version=node_version + 1,
+            event_type="TASK_NODE_VERIFICATION_FAILED",
+            attempt_id=attempt_id,
+            evidence_refs=evidence_refs,
+        )
+        graph_outbox = self._runtime_outbox.build(
+            command_id=admitted.command_id,
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
+            aggregate_version=graph_version + 1,
+            event_type="TASK_GRAPH_FAILED",
+        )
+        budget_outbox = self._budgets.build_finalization_outbox(
+            budget,
+            target_status=BudgetReservationStatus.RELEASED,
+            expected_version=budget.version,
+        )
+        arguments = {
+            "attempt_id": attempt_id,
+            "reservation_id": reservation_id,
+            "budget_id": budget.budget_id,
+            "expected_node_version": node_version,
+            "expected_graph_version": graph_version,
+            "expected_budget_version": budget.version,
+            "verification_result": verification_result,
+            "node_outbox": node_outbox,
+            "graph_outbox": graph_outbox,
+            "budget_outbox": budget_outbox,
+        }
+        try:
+            raw = await _maybe_await(
+                self._store.finalize_node_verification_failure(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    admitted.node_id,
+                    **arguments,
+                )
+            )
+        except Exception:
+            raw = await _maybe_await(
+                self._store.finalize_node_verification_failure(
+                    admitted.graph_id,
+                    admitted.graph_revision,
+                    admitted.node_id,
+                    **arguments,
+                )
+            )
+        result = _mapping(
+            raw,
+            field_name="atomic verification failure terminal",
+        )
+        failed_node = result.get("node")
+        failed_graph = result.get("graph")
+        released_budget = result.get("budget")
+        if (
+            not isinstance(failed_node, Mapping)
+            or not isinstance(failed_graph, Mapping)
+            or not isinstance(released_budget, Mapping)
+            or _status(failed_node) != "VERIFICATION_FAILED"
+            or _status(failed_graph) != "FAILED"
+            or _status(released_budget) != BudgetReservationStatus.RELEASED.value
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "atomic verification failure returned different terminal state",
+            )
+        refreshed_budget = await self._budgets.refresh(
+            budget.refreshed(released_budget)
+        )
+        return dict(failed_node), dict(failed_graph), refreshed_budget
+
     async def accept_node_output(
         self,
         admitted: AdmittedExecution,

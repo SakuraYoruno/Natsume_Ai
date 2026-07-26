@@ -5,10 +5,12 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、commit-bound Chat 验收、通用 Delegate、七路线和完整 Composition 仍未完成。
 
-版本：v3.11
+版本：v3.12
 日期：2026-07-26
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 修订执行基线：最新 `origin/dev`，本文件所在提交作为切片证据。第 5、6 条 governed Operator vertical slice `task_operation.reconcile` 与 `task_effect.reconcile` 继续把原始 Ed25519 证据隔离在 0126/0128 append-only evidence ledger，TaskGraph 只携带 ref/digest；其受限恢复结论不变。Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：Scheduler Secure Ingress 冻结 method/path/body/definition head，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，经过节点治理、Review/Verification/Acceptance、terminal Preview 后，唯一 `operator.state_control` Effect 才写 canonical repository。不可变 admin operation receipt 先于 claim completion；该崩溃窗口由新实例精确重开，路由中的直接 Scheduler writer 调用为 0。trigger 保持既有 governed occurrence 入口，list/get/health 保持只读。
+
+当前验证终态切片把 0133 作为 next-free migration：每次 `VERIFYING → VERIFIED/VERIFICATION_FAILED` 必须把 exact Graph revision、Node、Attempt、规范 VerificationResult digest、evidence 与 Node Outbox写成同事务 append-only decision。Checkpoint continuation 对 VERIFIED 状态只能重开该 decision。直接单节点拒绝必须在一个 Store UoW 同时推进 Node、Graph、graph Budget 和三条 Outbox；多节点拒绝只提交 node decision，继续由 0090 settlement 唯一关闭共享终态。生产 `node_execution_runtime` 与 committed-checkpoint continuation 不得再调用通用 `transition_node()` 提交验证结论。该切片仍不提升七路线、一般 recovery 或 NE-01 总状态。
 
 当前 Plan 节点审批切片允许 composed SkillRegistry 中 `require_confirm=true` 的合法能力参与竞争，但不允许它绕过 Review。Capability snapshot 冻结 `requires_review`；搜索结果只携带 candidate-bound policy；`PlanningGraphCompiler` 必须删除 candidate key 并生成覆盖全部实际 node ID 的 `Natsume.agent.node_review_policy.v1`。Task Runtime 对每个 claimable node 单独计算审批门，缺 entry、非布尔值或无 catalog provenance 均失败关闭。Continuation 续签所有仍需运行的 exact node grant，但 atomic-success closeout 对进入本次续跑前已 `ACCEPTED` 的节点使用 immutable WorkerProjection 中的历史 grant，对本次新执行节点继续核对续签 grant。该边界已经用真实 SQLite `skill → skill → chat`、一次 confirm Review、自动 continuation 和 exactly-once worker 证明；Plan 当前启用路径的 `node_bound_grant/review_resume=PASS`。0132 已为每个 Attempt 增加 child Budget Reservation，同时保留 Graph Budget 作为唯一总额度；全部 cancellation/release 组合、一般恢复与七路线 policy 尚未闭合，因此 Plan 总状态与 NE-01 仍为 `INCOMPLETE / IN_PROGRESS`。
 
@@ -20,7 +22,7 @@
 
 本轮 Chat 收口把 `transactional_side_effects` 从 `PARTIAL` 提升为单控制项 `PASS`：两个 Life Acceptance Effect 必须在 exact command 的完整 projection-intent 集合和 durable receipts全部吻合后才能 COMMIT；foreground 的 `surface.post_process` receipt又要求 visible assistant turn 与 LifeMemory admission 已持久成功。有序 Effect dispatcher 因而不会先执行 external reply。首次 response loss 可重开 command 后执行 exact intent，reclaimed recovery 只读；缺失、失败、篡改或漂移保持 UNKNOWN。外部 Gateway delivery仍是幂等 eventual delivery，不属于同一 SQL transaction。受影响集合为 `106 passed in 117.58s`；Chat status 仍 `INCOMPLETE`，因为 commit-bound acceptance、完整 Budget、波次集成、真实网络/模型和 NE-07 未运行。
 
-Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；Operator 当前仍为 `14/37`，其余 `23/37` 继续失败关闭，Scheduler surface 不计入该库存。当前连续 migration head 为 0132；0132 只新增节点预算边界，不改写 Scheduler authority。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
+Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；Operator 当前仍为 `14/37`，其余 `23/37` 继续失败关闭，Scheduler surface 不计入该库存。当前连续 migration head 为 0133；0133 只新增持久节点验证与直接失败终态，不改写 Scheduler authority。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
 
 当前后续切片以最新 `origin/dev` 为动态基线，不再把任何历史提交号当固定 Goal authority。多节点恢复在既有双 checkpoint、共享 `EXCEEDED` 缺失落账与 four-root mixed settlement 之上，新增五节点 `root → (left,right) → join → tail` 菱形图和八个并行根节点的真实 SQLite 重启恢复：精确 `COMMITTED` checkpoint 只按不可变图序续接，依赖满足后才释放后继，每个 worker 调用一次，不存在固定四节点恢复上限。0130 同时把 `UNKNOWN_SIDE_EFFECT`、`CANCELLATION_CROSSING`、checkpoint Budget/authority `CONFLICT` 冻结为 exact Graph/Node/Attempt/Operation/Budget/cancellation/active-Lease 版本绑定的 append-only case，并在同一 UoW 写唯一 Outbox；前两类仍须各自签名对账，冲突保持 quarantine 且不得取得 takeover Lease。当前受影响集成为 `37 passed in 145.68s`，状态为 `GENERAL_SHAPE_COMMITTED_CHECKPOINT_RECOVERY_LOCAL_PROVEN / DURABLE_UNKNOWN_CANCELLATION_CONFLICT_HOLD_LOCAL_PROVEN / GENERAL_RECOVERY_INCOMPLETE`。它不改变 NE-01=`IN_PROGRESS`、wave integration=`NOT_RUN`、Docker full stack=`NOT_RUN_NE07` 或 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -538,7 +540,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0132_task_node_budget_reservation.sql`：0115～0131 保留为连续历史资产，0132 只增加 Attempt-bound child Budget Reservation、父子 usage binding 与升级回填，不创建第二总额度或终态 authority。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0133_task_node_verification_decision.sql`：0115～0132 保留为连续历史资产，0133 只增加持久节点验证 decision 与直接拒绝原子终态，不创建第二 Graph settlement authority。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 

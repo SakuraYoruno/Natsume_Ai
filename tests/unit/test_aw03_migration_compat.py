@@ -22,6 +22,7 @@ from host_brain.core.errors import MIGRATION_SCHEMA_DRIFT
 from host_brain.audit.migration_guard import SQLiteMigrationVersionGuard
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.persistence.task_graph_admission_authority import (
     canonical_task_graph_admission_scope,
     register_task_graph_admission_authority,
@@ -364,27 +365,21 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "head-83.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
-    seeded = runner.apply_migrations(
+    prefix_catalog = _migration_catalog_through(tmp_path, 83)
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=prefix_catalog,
+    ).apply_migrations(
         request_id="aw03-capability-forge-seed",
         ts_ms=1_800_000_000_000,
     )
     assert seeded.success is True, seeded.as_dict()
-
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DROP TABLE task_runtime_acceptance_effect_intent")
-        conn.execute("DROP TABLE task_runtime_worker_projection")
-        conn.execute("DROP TABLE task_runtime_budget_usage")
-        conn.execute("DROP TABLE capability_forge_proposal_log")
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 84")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 84")
-        conn.commit()
         assert conn.execute(
             "SELECT MAX(migration_id) FROM schema_migrations"
         ).fetchone() == (83,)
 
-    upgraded = runner.apply_migrations(
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="aw03-capability-forge-upgrade",
         ts_ms=1_800_000_000_001,
     )
@@ -436,40 +431,53 @@ def test_governed_runtime_migrations_upgrade_an_existing_head_83_database(
         ).fetchone() == ("task_runtime_parallel_success_decision",)
 
 
+def test_0133_verification_decision_upgrades_the_real_head_132(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "head-132-to-133.sqlite3"
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 132),
+    ).apply_migrations(request_id="0133-seed-head-132", ts_ms=19)
+    assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 132
+
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0133-upgrade",
+        ts_ms=20,
+    )
+
+    assert upgraded.success is True, upgraded.as_dict()
+    assert upgraded.summary["current_version"] == 133
+    assert upgraded.records[-1].migration_id == (
+        "0133_task_node_verification_decision"
+    )
+    assert upgraded.records[-1].status == "APPLIED"
+    DurableTaskStore(db_path).assert_node_verification_ready()
+
+
 def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) -> None:
     db_path = tmp_path / "0089-receipt-loss.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
+    catalog = _migration_catalog_through(tmp_path, 89)
+    runner = SQLiteMigrationRunner(db_path=db_path, migrations_dir=catalog)
     seeded = runner.apply_migrations(request_id="0089-seed", ts_ms=20)
     assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 89
 
     with sqlite3.connect(db_path) as conn:
-        # Rewind the catalog consistently from 0089. Leaving later receipts
-        # behind would create an impossible migration-history gap rather than
-        # exercising the checksum-bound 0089 replay compatibility path.
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 89")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 89")
+        # Simulate loss of the 0089 receipt while preserving the exact physical
+        # schema that 0089 had committed. Future migrations are deliberately
+        # absent; deleting only their receipts from a current-head database is
+        # not a real historical state.
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 89")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 89")
         conn.commit()
 
     repaired = runner.apply_migrations(request_id="0089-receipt-repair", ts_ms=21)
     assert repaired.success is True, repaired.as_dict()
-    repaired_ids = [record.migration_id for record in repaired.records]
-    start_0090 = repaired_ids.index(
-        "0090_task_runtime_parallel_settlement_decision"
-    )
-    assert repaired_ids[start_0090 : start_0090 + 11] == [
-        "0090_task_runtime_parallel_settlement_decision",
-        "0091_task_runtime_parallel_success_decision",
-        "0092_task_runtime_graph_cancellation",
-        "0093_task_runtime_outbox_claim",
-        "0094_task_runtime_graph_cancellation_continuation",
-        "0095_task_runtime_revisioned_graph_outbox",
-        "0096_task_runtime_review_continuation",
-        "0097_node_grant_batch_uniqueness",
-        "0098_task_runtime_effect_reconciliation",
-        "0099_task_runtime_terminal_reconciliation",
-        "0100_task_runtime_graph_revision_supersession",
-    ]
+    assert repaired.summary["current_version"] == 89
+    assert repaired.records[-1].migration_id == "0089_task_runtime_dag_scheduling"
+    assert repaired.records[-1].status == "APPLIED"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             "SELECT disposition FROM schema_migration_assets WHERE migration_id = 89"
@@ -511,23 +519,25 @@ def test_0094_receipt_loss_replay_is_idempotent_and_keeps_one_continuation_shape
     tmp_path,
 ) -> None:
     db_path = tmp_path / "0094-receipt-loss.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
+    catalog = _migration_catalog_through(tmp_path, 94)
+    runner = SQLiteMigrationRunner(db_path=db_path, migrations_dir=catalog)
     seeded = runner.apply_migrations(request_id="0094-seed", ts_ms=23)
     assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 94
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 94")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 94")
+        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id = 94")
+        conn.execute("DELETE FROM schema_migrations WHERE migration_id = 94")
         conn.commit()
 
     replayed = runner.apply_migrations(request_id="0094-receipt-replay", ts_ms=24)
 
     assert replayed.success is True, replayed.as_dict()
-    assert replayed.summary["current_version"] >= 102
-    assert "0102_task_runtime_node_artifact" in {
-        record.migration_id for record in replayed.records
-    }
+    assert replayed.summary["current_version"] == 94
+    assert replayed.records[-1].migration_id == (
+        "0094_task_runtime_graph_cancellation_continuation"
+    )
+    assert replayed.records[-1].status == "APPLIED"
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
             """
@@ -1182,16 +1192,14 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "head-89-to-90.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
-    seeded = runner.apply_migrations(request_id="0090-seed", ts_ms=30)
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 89),
+    ).apply_migrations(request_id="0090-seed", ts_ms=30)
     assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 89
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DROP TABLE task_runtime_parallel_success_decision")
-        conn.execute("DROP TABLE task_runtime_parallel_settlement_decision")
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 90")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 90")
         conn.execute(
             """
             INSERT INTO task_runtime_graph(
@@ -1237,7 +1245,10 @@ def test_0090_parallel_settlement_decision_upgrades_head_89_without_data_loss(
             "SELECT MAX(migration_id) FROM schema_migrations"
         ).fetchone() == (89,)
 
-    upgraded = runner.apply_migrations(request_id="0090-upgrade", ts_ms=31)
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0090-upgrade",
+        ts_ms=31,
+    )
 
     assert upgraded.success is True, upgraded.as_dict()
     assert upgraded.summary["current_version"] >= 102
@@ -1291,15 +1302,14 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "head-90-to-91.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
-    seeded = runner.apply_migrations(request_id="0091-seed", ts_ms=40)
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 90),
+    ).apply_migrations(request_id="0091-seed", ts_ms=40)
     assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 90
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DROP TABLE task_runtime_parallel_success_decision")
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 91")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 91")
         conn.execute(
             """
             INSERT INTO task_runtime_graph(
@@ -1326,7 +1336,10 @@ def test_0091_parallel_success_decision_upgrades_head_90_without_data_loss(
             "SELECT MAX(migration_id) FROM schema_migrations"
         ).fetchone() == (90,)
 
-    upgraded = runner.apply_migrations(request_id="0091-upgrade", ts_ms=41)
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0091-upgrade",
+        ts_ms=41,
+    )
 
     assert upgraded.success is True, upgraded.as_dict()
     assert upgraded.summary["current_version"] >= 102
@@ -1444,16 +1457,14 @@ def test_platform_registry_draft_is_repaired_once_then_strictly_validated(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "platform-registry-draft.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
-    seeded = runner.apply_migrations(request_id="aw03-seed-final", ts_ms=10)
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 74),
+    ).apply_migrations(request_id="aw03-seed-final", ts_ms=10)
     assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 74
 
     with sqlite3.connect(db_path) as conn:
-        # Rewind to the pre-repair catalog. Later AW-03 migrations must be
-        # replayed after 0075 instead of leaving an impossible history gap.
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 75")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 75")
         conn.execute(
             "UPDATE schema_migrations SET checksum = ? WHERE migration_id = 72",
             (PLATFORM_REGISTRY_DRAFT_CHECKSUM,),
@@ -1467,6 +1478,7 @@ def test_platform_registry_draft_is_repaired_once_then_strictly_validated(
         )
         conn.commit()
 
+    runner = SQLiteMigrationRunner(db_path=db_path)
     repaired = runner.apply_migrations(request_id="aw03-repair-draft", ts_ms=11)
     assert repaired.success is True, repaired.as_dict()
     with sqlite3.connect(db_path) as conn:
@@ -1500,13 +1512,13 @@ def test_platform_registry_strict_postcondition_rolls_back_wash_and_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / "platform-registry-postcondition.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
-    seeded = runner.apply_migrations(request_id="aw03-seed-postcondition", ts_ms=14)
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 74),
+    ).apply_migrations(request_id="aw03-seed-postcondition", ts_ms=14)
     assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 74
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 75")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 75")
         conn.execute(
             "UPDATE schema_migrations SET checksum = ? WHERE migration_id = 72",
             (PLATFORM_REGISTRY_DRAFT_CHECKSUM,),
@@ -1539,7 +1551,7 @@ def test_platform_registry_strict_postcondition_rolls_back_wash_and_receipt(
         "platform_registry_schema_postcondition_holds",
         fail_strict_postcondition,
     )
-    rejected = runner.apply_migrations(
+    rejected = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="aw03-fail-strict-postcondition",
         ts_ms=15,
     )
@@ -1581,14 +1593,14 @@ def test_platform_registry_draft_repair_rejects_incomplete_physical_schema(
     damage_sql: str,
 ) -> None:
     db_path = tmp_path / "platform-registry-incomplete.sqlite3"
-    runner = SQLiteMigrationRunner(db_path=db_path)
-    seeded = runner.apply_migrations(request_id="aw03-seed-incomplete", ts_ms=20)
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 74),
+    ).apply_migrations(request_id="aw03-seed-incomplete", ts_ms=20)
     assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 74
 
     with sqlite3.connect(db_path) as conn:
-        _drop_post_0123_task_authority_triggers(conn)
-        conn.execute("DELETE FROM schema_migration_assets WHERE migration_id >= 75")
-        conn.execute("DELETE FROM schema_migrations WHERE migration_id >= 75")
         conn.execute(
             "UPDATE schema_migrations SET checksum = ? WHERE migration_id = 72",
             (PLATFORM_REGISTRY_DRAFT_CHECKSUM,),
@@ -1603,7 +1615,7 @@ def test_platform_registry_draft_repair_rejects_incomplete_physical_schema(
         conn.execute(damage_sql)
         conn.commit()
 
-    rejected = runner.apply_migrations(
+    rejected = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="aw03-reject-incomplete",
         ts_ms=21,
     )
