@@ -241,6 +241,9 @@ from host_brain.persistence.task_node_verification_store import (
 from host_brain.persistence.task_node_verification_terminal_store import (
     TaskNodeVerificationTerminalStoreMixin,
 )
+from host_brain.persistence.task_node_acceptance_store import (
+    TaskNodeAcceptanceStoreMixin,
+)
 from host_brain.persistence.task_terminal_reconciliation_store import (
     TaskTerminalReconciliationStoreMixin,
 )
@@ -314,6 +317,7 @@ class DurableTaskStore(
     TaskGraphCancellationEffectOverlayMixin,
     TaskTerminalReconciliationStoreMixin,
     TaskNodeArtifactStoreMixin,
+    TaskNodeAcceptanceStoreMixin,
     TaskLeaseTakeoverAuthorityMixin,
     TaskNodeVerificationTerminalStoreMixin,
     TaskNodeVerificationStoreMixin,

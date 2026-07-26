@@ -423,6 +423,9 @@ def test_node_acceptance_and_artifact_are_atomic_and_exactly_replayable(
     assert first["replayed"] is False
     assert replay["replayed"] is True
     assert replay["artifact"] == first["artifact"]
+    assert replay["decision"] == first["decision"]
+    assert first["decision"]["target_status"] == "ACCEPTED"
+    assert first["decision"]["attempt_id"] == ATTEMPT_ID
     assert first["node"]["status"] == "ACCEPTED"
     assert first["artifact"]["payload"] == {
         "receipt_ref": RECEIPT_REF,
@@ -441,6 +444,19 @@ def test_node_acceptance_and_artifact_are_atomic_and_exactly_replayable(
             """
         ).fetchone()
     assert acceptance_lineage == (ATTEMPT_ID,)
+    reopened = DurableTaskStore(store.db_path, clock=lambda: NOW + 10)
+    decision = reopened.get_node_acceptance_decision(
+        graph.graph_id,
+        graph.revision,
+        ROOT_NODE_ID,
+        node_version_after=4,
+    )
+    assert decision == first["decision"]
+    snapshot = reopened.read_scheduler_snapshot(
+        graph.graph_id,
+        graph.revision,
+    )
+    assert snapshot["node_acceptances"] == [decision]
 
     with pytest.raises(TaskStoreError) as drift:
         _commit_artifact(store, graph, worker_output={"result": "different"})
@@ -624,6 +640,9 @@ def test_lost_acceptance_response_replays_exact_artifact_without_second_write(
         ).fetchone()[0] == 1
         assert conn.execute(
             "SELECT COUNT(*) FROM task_runtime_acceptance_effect_intent"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_runtime_node_acceptance_decision"
         ).fetchone()[0] == 1
         assert conn.execute(
             """

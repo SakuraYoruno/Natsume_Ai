@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.15
+版本：v3.16
 
 核对日期：2026-07-26
 
@@ -12,6 +12,24 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+节点 Acceptance/Review 的当前持久流为：
+
+```mermaid
+flowchart TD
+    V["0133 Verification PASS\nNode VERIFIED"] --> J["独立 Acceptance judge\n重开 durable projection"]
+    J -->|ACCEPT| A["0134 同一 UoW\nAcceptance decision + Artifact\n+ optional Effects + Node ACCEPTED + Outbox"]
+    J -->|REVIEW / non-ACCEPT| R["准备未持久 ReviewItem"]
+    R --> U["0134 同一 UoW\nAcceptance decision + Node WAITING\n+ ReviewItem + Node Outbox"]
+    U -->|direct single-node| B["同事务 Graph BLOCKED\n+ Graph Outbox"]
+    U -->|multi-node| S["共享 Graph settlement\n仍由既有外层 authority 持有"]
+    A --> P["scheduler snapshot\nnode_acceptances"]
+    B --> P
+    S --> P
+    P --> X["restart exact reopen\n不重跑 worker / judge"]
+```
+
+ReviewStore 与 TaskStore 通过 `review_pending_uow.py` 共用唯一 pending INSERT writer；Node 等待、Review 和 Acceptance decision 不允许分开落账。自动接受路径也不允许先提交 Node 再补 artifact/decision。响应丢失只重开相同 node version、Attempt、judgement、Outbox 和 Review/Graph identity。Review 拒绝后的完整终态 bundle 仍由后续切片收口。
 
 节点验证的当前持久流为：
 

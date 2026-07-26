@@ -3,10 +3,12 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.13
+版本：v3.14
 核对日期：2026-07-26
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+节点 Acceptance 的“判断存在但没有持久决策”断点已经关闭：0134 把 exact Graph revision、Node、Attempt、规范 judgement digest、evidence 与 Outbox 写成 append-only decision。自动接纳的 decision、artifact、可选 Effect 和 `ACCEPTED` Node 原子提交；需要人工判断时，decision、等待 Node、ReviewItem 与 Node Outbox 原子提交，直接单节点图还同事务进入 `BLOCKED`。重启按 node version 重开该事实，Scheduler snapshot 也暴露它；pending Review INSERT 只有一个共享 SQL owner。尚未清零的是 Review 拒绝后的完整终态 bundle、一般 cancellation/recovery、七路线 commit-bound receipt 与波次集成，因此该项不改变 NE-01 总状态。
 
 节点 Verification 的持久化断点已经关闭：0133 把 exact Graph revision、Node、Attempt、规范结果 digest、evidence 与 Node Outbox 写成 append-only decision，Node transition 同事务提交；`VERIFIED` checkpoint 重入只读重开该事实。直接拒绝的 Node、Graph、graph Budget 和 Outbox 也由一个 UoW 收口，响应丢失 exact replay 与终态 identity drift rollback 已用真实 SQLite 证明。多节点拒绝仍交给 0090 唯一 Graph settlement，不形成第二 writer。尚未清零的是一般 failure/cancellation/reconciliation、低层兼容 API 删除、七路线 commit-bound receipt 与 NE-01 wave integration。
 
@@ -20,7 +22,7 @@ Host 情感连续状态和回复形态额度的 module-global authority 也已�
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 
-当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0133_task_node_verification_decision.sql`。0132 的 Attempt-bound child Budget 语义保持不变；0133 只增加 durable Verification decision 与直接拒绝原子终态。0130/0131 的 unknown/cancellation/conflict hold 与 signed reconciliation 语义保持不变。五节点菱形与八根节点已证明精确 `COMMITTED` checkpoint 的依赖释放和跨 owner 恢复，worker 各调用一次；无限规模、其它 failure/cancellation 组合、自动归因、Workspace 终态和部署 fan-out 仍未完成。
+当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0134_task_node_acceptance_decision.sql`。0132 的 Attempt-bound child Budget 语义保持不变；0133 增加 durable Verification decision 与直接拒绝原子终态，0134 增加 durable Acceptance decision 与 Acceptance/Review 原子提交。0130/0131 的 unknown/cancellation/conflict hold 与 signed reconciliation 语义保持不变。五节点菱形与八根节点已证明精确 `COMMITTED` checkpoint 的依赖释放和跨 owner 恢复，worker 各调用一次；无限规模、其它 failure/cancellation 组合、自动归因、Workspace 终态和部署 fan-out 仍未完成。
 
 Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：每个写请求冻结 Secure Ingress method/path/body、definition head 和 claim，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，只有 post-Acceptance `operator.state_control` Effect 可以写 canonical repository；不可变 admin operation receipt 与 claim 之间的崩溃可由新实例精确恢复。路由中的直接 Scheduler writer 为 0，read 路由保持只读，trigger 保持既有 governed occurrence。
 

@@ -53,7 +53,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "de7fada0e654b578ee87d83ae48ccadec362ff17c84974bf46c4fb742d9c9354"
+    "3c11a970af7b59056514099923da28ce1ef1126f19dbb5f2769ecf5da6ecddf4"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
@@ -63,7 +63,7 @@ _PROJECTION_BASELINE_SHA256 = {
     "try_operation": "6896d47dd8bef7b3ac99547aabe3be258af6f74ab434b3dfd68f250f368714e6",
 }
 _RECORD_BASELINE_SHA256 = {
-    "build_review_context": "b3399d6f775c82ee0b9ca05833f2bc76b1b248990264d7bea77bd561b9e97f3d",
+    "build_review_context": "d243e711596d0d34cb2a7af8cb776b944ea14be4093410a83a20a284215050e0",
     "_retry_attempt_available": "b2c446b13cadb9bdb91e2668bc0cd58aa16b938f96366d4bab69ea632c508d44",
     "_retry_usage_id": "690d02038aef3385e2f478787ed624458c2ae7b4d75d04176d06654f92788261",
     "_payload_digest": "866a85d838ae44c0ffbd6ca0ddd33042734b9cdbc2c0de7e3c602b4cab7d3cd0",
@@ -433,20 +433,24 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "refresh": 1,
         },
         "_node_lifecycle": {
-                "transition_graph": 2,
-                "transition_node": 4,
-                "commit_node_verification": 1,
-                "finalize_verification_failure": 1,
+            "transition_graph": 1,
+            "transition_node": 3,
+            "commit_node_verification": 1,
+            "finalize_verification_failure": 1,
             "accept_node_output": 1,
+            "commit_node_acceptance_review": 1,
             "transition_attempt": 2,
-                "finalize_node_budget": 4,
+            "finalize_node_budget": 4,
             "reject_budget_charge": 3,
             "mark_pre_reservation_failure": 4,
         },
         "_workers": {"resolve": 1},
         "_verifier": {"verify": 1},
         "_acceptance": {"judge": 1},
-        "_reviews": {"post_execution_acceptance_gate": 1},
+        "_reviews": {
+            "prepare_post_execution_acceptance_review": 1,
+            "gate_from_record": 1,
+        },
         "_projection": {
             "terminal_replay": 1,
             "attempts_for_node": 1,

@@ -442,7 +442,10 @@ def test_0133_verification_decision_upgrades_the_real_head_132(
     assert seeded.success is True, seeded.as_dict()
     assert seeded.summary["current_version"] == 132
 
-    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+    upgraded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 133),
+    ).apply_migrations(
         request_id="0133-upgrade",
         ts_ms=20,
     )
@@ -454,6 +457,31 @@ def test_0133_verification_decision_upgrades_the_real_head_132(
     )
     assert upgraded.records[-1].status == "APPLIED"
     DurableTaskStore(db_path).assert_node_verification_ready()
+
+
+def test_0134_acceptance_decision_upgrades_the_real_head_133(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "head-133-to-134.sqlite3"
+    seeded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 133),
+    ).apply_migrations(request_id="0134-seed-head-133", ts_ms=21)
+    assert seeded.success is True, seeded.as_dict()
+    assert seeded.summary["current_version"] == 133
+
+    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0134-upgrade",
+        ts_ms=22,
+    )
+
+    assert upgraded.success is True, upgraded.as_dict()
+    assert upgraded.summary["current_version"] == 134
+    assert upgraded.records[-1].migration_id == (
+        "0134_task_node_acceptance_decision"
+    )
+    assert upgraded.records[-1].status == "APPLIED"
+    DurableTaskStore(db_path).assert_node_acceptance_ready()
 
 
 def test_0089_receipt_loss_replay_requires_the_complete_frozen_schema(tmp_path) -> None:

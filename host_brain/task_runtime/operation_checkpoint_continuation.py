@@ -28,6 +28,7 @@ from .coordinator_records import (
     _review_evidence_refs,
     _status,
     _text,
+    _version,
 )
 from .errors import (
     GOVERNED_ACCEPTANCE_FAILED,
@@ -52,7 +53,7 @@ from .operation_checkpoint_verification import reopen_durable_verification
 from .operation_recovery_runtime import CommittedOperationCheckpoint
 from .ports import AcceptancePort, InternalAgentCheckpointUnitOfWorkPort
 from .ports import TaskStorePort, VerificationPort
-from .review_runtime import TaskNodeReviewGate, TaskNodeReviewRuntime
+from .review_runtime import TaskNodeReviewRuntime
 from .runtime_outbox import RuntimeOutbox
 
 
@@ -403,39 +404,45 @@ class CommittedCheckpointContinuation:
             acceptance_refs = _evidence_refs(acceptance)
 
         if not accepted:
-            current_node = await self._node_lifecycle.transition_node(
-                admitted,
-                current_node,
-                "WAITING_ACCEPTANCE_REVIEW",
-                evidence_refs=acceptance_refs or verification_refs,
+            if self._reviews is None:
+                raise GovernedRuntimeError(
+                    GOVERNED_OPERATION_RECOVERY_REQUIRED,
+                    "Acceptance review requires the durable Review Runtime",
+                )
+            review_context = build_review_context(
+                admitted=admitted,
+                command=command,
+                work_order=work_order,
+                node=current_node,
+                node_status_version=_version(current_node) + 1,
+                attempt_id=attempt_id,
+                reason=(
+                    "Acceptance policy requires durable post-execution review"
+                ),
+                additional_evidence_refs=acceptance_refs or verification_refs,
             )
-            if not defer_shared_terminal:
-                graph = await self._node_lifecycle.transition_graph(
+            review_item = (
+                self._reviews.prepare_post_execution_acceptance_review(
+                    context=review_context,
+                )
+            )
+            current_node, graph, review_record = (
+                await self._node_lifecycle.commit_node_acceptance_review(
                     admitted,
-                    graph,
-                    "BLOCKED",
+                    node=current_node,
+                    graph=graph,
+                    attempt_id=attempt_id,
+                    evidence_refs=acceptance_refs or verification_refs,
+                    acceptance_judgement=acceptance,
+                    review_item=review_item,
+                    defer_shared_terminal=defer_shared_terminal,
                 )
-            review_gate: TaskNodeReviewGate | None = None
-            review_refs: tuple[str, ...] = ()
-            if self._reviews is not None:
-                review_gate = self._reviews.post_execution_acceptance_gate(
-                    context=build_review_context(
-                        admitted=admitted,
-                        command=command,
-                        work_order=work_order,
-                        node=current_node,
-                        attempt_id=attempt_id,
-                        reason=(
-                            "Acceptance policy requires durable "
-                            "post-execution review"
-                        ),
-                    )
-                )
-                review_refs = _review_evidence_refs(review_gate)
+            )
+            review_gate = self._reviews.gate_from_record(review_record)
+            review_refs = _review_evidence_refs(review_gate)
             await self._runtime_outbox.publish_pending()
             projection = dict(receipt_projection)
-            if review_gate is not None:
-                projection["review"] = review_gate.to_dict()
+            projection["review"] = review_gate.to_dict()
             yield terminal_event(
                 build_execution_receipt(
                     admitted,
@@ -445,12 +452,7 @@ class CommittedCheckpointContinuation:
                     status="WAITING_ACCEPTANCE_REVIEW",
                     verification_status="PASS",
                     accepted=False,
-                    reason_code=(
-                        GOVERNED_REVIEW_REQUIRED
-                        if review_gate is not None
-                        else _text(acceptance.get("reason_code"))
-                        or GOVERNED_ACCEPTANCE_FAILED
-                    ),
+                    reason_code=GOVERNED_REVIEW_REQUIRED,
                     evidence_refs=tuple(
                         dict.fromkeys(
                             (*(acceptance_refs or verification_refs), *review_refs)
