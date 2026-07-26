@@ -24,13 +24,13 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "59527b1210e16b62e243dda616c190ec45d8ebe3"
+    assert report.evaluated_commit_sha == "c15f88d9e201552ec9e3a589cda93b305818f5ef"
     assert report.migration_head == (
         "0135_task_review_denial_settlement.sql"
     )
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
-        "chat": "INCOMPLETE",
+        "chat": "COMPLETE",
         "skill": "INCOMPLETE",
         "plan": "INCOMPLETE",
         "delegate": "INCOMPLETE",
@@ -39,9 +39,6 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
         "operator": "INCOMPLETE",
     }
     assert report.missing_route_controls == {
-        "chat": (
-            "budget_enforcement",
-        ),
         "skill": (
             "canonical_execution_authority",
             "budget_enforcement",
@@ -105,6 +102,8 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert payload["routes"]["chat"]["controls"][
         "transactional_side_effects"
     ] == "PASS"
+    assert payload["routes"]["chat"]["controls"]["budget_enforcement"] == "PASS"
+    assert payload["routes"]["chat"]["status"] == "COMPLETE"
     assert "host_brain/app/life_projection_barrier.py" in payload[
         "routes"
     ]["chat"]["evidence_refs"]

@@ -14,7 +14,7 @@
 - T-NE01-CMB-04：exact replay 不得新增 provider 调用、ModelAttempt 或 Budget usage；缓存结果、孤儿 lifecycle、身份/测量/账本漂移必须使验收失败关闭。
 - T-NE01-CMB-05：内部 `governed_model_budget` guard 不得进入 Life acceptance payload、Worker 公共投影或 receipt；模型 prompt、回复和 secret 不得进入跨路线收据。
 - T-NE01-CMB-06：worker wrapper 必须保留 executor 已提交的 audit path，瞬时 COMMIT 与 durable WorkerProjection path 必须一致。
-- 当前定向证据为 GR05 `1 passed`、七路线合同 `19 passed`、Worker/Life 单元集合 `24 passed`，分别报告、不相加。正式干净 SHA 收据和真实 provider 尚未运行，状态为 `CODE_COMPLETE_LOCAL / BUDGET_PARTIAL`，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 当前受影响代码集合为 `44 passed in 31.44s`；干净 SHA GR05 为 `1 passed in 26.37s`；release/coverage/doc/metadata 集合为 `94 passed in 14.31s`，分别报告、不相加。正式 `c15f88d9` 收据已验证模型预算 lineage；完整架构 Gate 1～14 与统一 `static_scan,doc_gate` 均通过且失败清单为空。Chat 为 `BUDGET_PASS / ROUTE_COMPLETE`；真实外部 provider 尚未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-UNIVERSAL-ROUTE-ACCEPTANCE-V3
 
@@ -25,7 +25,7 @@
 - T-NE01-URA-05：请求标识只输出 digest；用户正文、模型输出、secret、Command/WorkOrder/Graph/Effect payload 及额外字段均不得进入收据；篡改总 digest 必须拒绝。
 - T-NE01-URA-06：GR05 必须在同一 Host Runtime/SQLite 完成 Chat、Direct Skill、Delegate 和 Plan；Direct Skill 不得用 Plan 节点间接代替。
 - T-NE01-URA-07：Scheduler、Internal、Operator 必须写入同一 canonical SQLite；三路分别经过正式 CommandService/Effect、Internal result commit、Operator durable Review/HardState/outer outcome，所有 Secure Ingress claim 都必须 terminal COMMITTED 且有 result ref。
-- 当前合同与 coverage Gate 为 `30 passed`；Host 四路集成和剩余三路集成分别为 `1 passed`。正式串联运行绑定干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3`、migration 0135 和同一文件型 SQLite，七路均为 PASS、reason code 全空；收据为 `docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json`，七路 `commit_bound_acceptance=PASS`。其它路线控制和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 正式串联运行绑定干净提交 `c15f88d9e201552ec9e3a589cda93b305818f5ef`、migration 0135 和同一文件型 SQLite，GR05 为 `1 passed in 26.37s`，剩余三路 CLI 为 `PASS`，七路 reason code 全空；收据为 `docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json`。七路 `commit_bound_acceptance=PASS`，Chat 的模型预算与路线状态为 `PASS / COMPLETE`；其它六路和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-ATOMIC-INTERRUPTION-RECOVERY-HOLD
 
@@ -682,7 +682,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-LEGACY-EXECUTIVE-PLANNING-RETIRED-01：`route_planning.py`、`skill_routing.py`、`conversation_execution.py`、Executive application `composition.py`、application port wiring 与 legacy diagnostic direct-skill matrix 必须物理不存在；runtime/app guards 不得重建 Executive application ports，canonical route 固定 fail closed。Executive 内的自动 gap synthesis/replan、Forge route override call 与 legacy SkillDag worker dispatch 不得回归；保留的纯 SkillDag adapter 只能作为零生产调用者的兼容合同。独立 Forge `runtime-match` 另列 NE-05 缺口，不能被此测试掩盖。该负向收口不证明竞争候选搜索、MCTS、通用多节点恢复、全路线验收或 NE-01 完成。
 - T-NE01-CORTEX-DIRECT-COMPAT-RETIRED-01：canonical `chat/skill/delegate/plan` 若无 Governed Runtime 支持必须在可见对话写入前拒绝；若受支持，Cortex 只传递冻结上下文。contextual-session/style、clarification、LLM unavailable 与 async post-process direct-reply hooks，以及 Surface `schedule_async_post_process()` 均必须物理不存在；定向测试还必须证明 governed result 不经过旧 direct audit path。该负向收口不证明 conversation effect 的完整事务、全路线 receipt 或 NE-01 完成。
 - T-NE01-HOST-AFFECT-RUNTIME-01：每个 production Host root 必须通过 construction-only factory 惰性拥有一个 `HostEmotionRuntime`；Input、Tribe、Lifecycle 与用户画像端口必须解析同一 identity，两个重叠 root 的 vector/timeline/profile 必须隔离。`_global_emotion_timeline/_global_emotion_vector/_global_prev_emotion_tag/_user_emotion_profile` 及其 getter/update helper 必须不存在。`normalize_chat_emotion_context()` 在未注入 runtime 时不得推进任何状态；production admission 必须注入 exact runtime，错误类型以 `HOST_EMOTION_RUNTIME_NOT_INJECTED` 失败关闭。每个 Input composition 必须拥有独立 `ResponseFormDecider`，module-global `_decider` 与两个 getter 必须不存在；并发语音额度检查和计数必须原子。该 Gate 不证明 durable emotion/profile、NE-06 Persona/Feedback、真实多 Host server canary、波次 integration 或 NE-01 完成。
-- 当前七路均为 `INCOMPLETE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`；Gate 定向合同通过不代表波次 integration、生产 canary 或 NE-01 完成。
+- 当前 Chat 为 `COMPLETE`，其余六路为 `INCOMPLETE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`；Gate 定向合同通过不代表波次 integration、生产 canary 或 NE-01 完成。
 
 ## T-ARCH（完整架构发布 Gate）
 

@@ -1,12 +1,12 @@
 {
-  "commit_sha": "59527b1210e16b62e243dda616c190ec45d8ebe3",
+  "commit_sha": "c15f88d9e201552ec9e3a589cda93b305818f5ef",
   "database_evidence": {
     "database_kind": "FILE_BACKED_CANONICAL_SQLITE",
     "read_mode": "SQLITE_MODE_RO_QUERY_ONLY_SINGLE_TRANSACTION",
-    "snapshot_digest": "sha256:290dab8731c03f1df6c32f8b2a41592c4b35be055b8277967d5f2411d6fff43a"
+    "snapshot_digest": "sha256:203e201fe63a4a857a8098da122f52fa23861984bdaf6a0b38347eb802e82d88"
   },
   "evidence_kind": "REAL_CANONICAL_SQLITE_READ_ONLY_SNAPSHOT",
-  "generated_at_ms": 1785100770583,
+  "generated_at_ms": 1785103026159,
   "migration_head": "0135_task_review_denial_settlement.sql",
   "overall_status": "PASS",
   "privacy": {
@@ -15,7 +15,7 @@
     "contains_user_text": false,
     "identifiers_are_digested": true
   },
-  "receipt_digest": "sha256:4264c695c1b6fdd90fc2da0659b1a77e559eb58d7d2353f2eefdc285a1bd4720",
+  "receipt_digest": "sha256:06b2c93c0550708cdc5aecd6f5672e479f433c9951e8ddac7dcfe7cf184bbd14",
   "route_acceptance": {
     "chat": {
       "evidence_counts": {
@@ -31,15 +31,17 @@
         "graph_budgets": 1,
         "graphs": 1,
         "leases": 1,
+        "model_attempts": 2,
         "node_budget_usage": 2,
         "node_budgets": 1,
         "nodes": 1,
         "operations": 1,
         "outboxes": 16,
         "verifications": 1,
+        "worker_model_budgets": 1,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:3afe24b19c84212c851259e7a6c15ce783b07c03828b7ba90a6c3cfafc47a0e3",
+      "evidence_digest": "sha256:b81bdf251b28e59e76824ad108757102c2ab41b1ea077a741506e97fed76b02d",
       "reason_codes": [],
       "request_ref": "request://sha256/3074dd7f9150c059bd9d98f5d68c421d528fee6601085153c64d38e06a5561b3",
       "status": "PASS"
@@ -58,15 +60,17 @@
         "graph_budgets": 1,
         "graphs": 1,
         "leases": 1,
+        "model_attempts": 0,
         "node_budget_usage": 2,
         "node_budgets": 1,
         "nodes": 1,
         "operations": 1,
         "outboxes": 16,
         "verifications": 1,
+        "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:f0a59bea6d8fbd833b2ffa99ba665bd671e32f3cbe3c22b4b21a61d4680394d5",
+      "evidence_digest": "sha256:cdafbdbb4c102b64015a1dd6b9e067533b3d17e9c3e75651ae1c6d592ada1a2c",
       "reason_codes": [],
       "request_ref": "request://sha256/49ed9607aaedcd117764f64b131981124deef83bc7d1805ec4a0322a31775cfb",
       "status": "PASS"
@@ -85,15 +89,17 @@
         "graph_budgets": 1,
         "graphs": 1,
         "leases": 1,
+        "model_attempts": 0,
         "node_budget_usage": 2,
         "node_budgets": 1,
         "nodes": 1,
         "operations": 1,
         "outboxes": 16,
         "verifications": 1,
+        "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:73ea6e030ac77d319e06e3817966c1bc87bf755852d24d6153318aa4280de2e8",
+      "evidence_digest": "sha256:4635687ae18f1863e40b71e766e7068ce01ac144b1072ca06d1041759fca8bae",
       "reason_codes": [],
       "request_ref": "request://sha256/b696dfb20909094f071fd3b8504ce5936391f86f515c9c529c40bdf451ab53ac",
       "status": "PASS"
@@ -112,15 +118,17 @@
         "graph_budgets": 1,
         "graphs": 1,
         "leases": 1,
+        "model_attempts": 0,
         "node_budget_usage": 2,
         "node_budgets": 1,
         "nodes": 1,
         "operations": 1,
         "outboxes": 16,
         "verifications": 1,
+        "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:14ded8ccdb375e7419aeae213af2cf9b4a59406027f3dd158d1fe6a7d22c3082",
+      "evidence_digest": "sha256:5a7520d6360c4b825608b196d4223af79c77ee7895531df7b479a3edb10ac49b",
       "reason_codes": [],
       "request_ref": "request://sha256/19180c2acffdae823dcd5150bb1e19b3fd2c057c803cb284ab1dda8763455a40",
       "status": "PASS"
@@ -139,15 +147,17 @@
         "graph_budgets": 1,
         "graphs": 1,
         "leases": 3,
+        "model_attempts": 2,
         "node_budget_usage": 6,
         "node_budgets": 3,
         "nodes": 3,
         "operations": 3,
         "outboxes": 42,
         "verifications": 3,
+        "worker_model_budgets": 1,
         "worker_projections": 3
       },
-      "evidence_digest": "sha256:247dc1075f3d3c24e7295e10be49a17fef497b0d74968b0096953cc825908afc",
+      "evidence_digest": "sha256:3232fd433c3f7169ccbfe03f31ae66acf52e940bf55058d5685b0992248190e3",
       "reason_codes": [],
       "request_ref": "request://sha256/584b8de611e01a7cddf3e8a26ae6de77bebb525005922eb851f21a754bdc97b7",
       "status": "PASS"
@@ -166,15 +176,17 @@
         "graph_budgets": 1,
         "graphs": 1,
         "leases": 1,
+        "model_attempts": 0,
         "node_budget_usage": 2,
         "node_budgets": 1,
         "nodes": 1,
         "operations": 1,
         "outboxes": 16,
         "verifications": 1,
+        "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:3f9a08f23b7cd6746aaf11e7fac0f9a90f9475bd970d82bb0a5bbd1035d5f1fb",
+      "evidence_digest": "sha256:3b70413759e84d005c5c50c0a7b53fec3a1a2a961fe3957928258e3d5f52258c",
       "reason_codes": [],
       "request_ref": "request://sha256/ed8d6c3db753640e0b7f819988f8dab922ce5f23cae2ee7a48fb3c65729b3030",
       "status": "PASS"
@@ -193,20 +205,22 @@
         "graph_budgets": 1,
         "graphs": 1,
         "leases": 1,
+        "model_attempts": 0,
         "node_budget_usage": 2,
         "node_budgets": 1,
         "nodes": 1,
         "operations": 1,
         "outboxes": 16,
         "verifications": 1,
+        "worker_model_budgets": 0,
         "worker_projections": 1
       },
-      "evidence_digest": "sha256:5b9bb07e9813230b3ca06034a4bb3a1e8f3fce0fa5e5f9d7d6b9a19c2b5d24ab",
+      "evidence_digest": "sha256:85eb44a943f5f839a310b2fa5d9a112e05d16b0e3d702dfe0c7cbd1cfae04969",
       "reason_codes": [],
       "request_ref": "request://sha256/5baa28012b4f6f7c9ab62551f281c46ea3c2898f22f637336007c1538924d45a",
       "status": "PASS"
     }
   },
-  "run_id": "universal-runtime-acceptance://sha256/ee132f72c8d2e91f51699b11a329ceb60210a4dd21ba78ef5905c3eafd850bcc",
+  "run_id": "universal-runtime-acceptance://sha256/bbc30ce7dd92a0cbe752323c51c8821660fddc95267c493a0a179c99b7ebacec",
   "schema_version": "natsume.universal-runtime-route-acceptance.v3"
 }
