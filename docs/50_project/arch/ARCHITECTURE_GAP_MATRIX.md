@@ -3,10 +3,12 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.15
-核对日期：2026-07-26
+版本：v3.16
+核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+七路线缺少同一提交、同一真实数据库的完成证据这一断点，现在已有可执行但尚未跑满的 v3 验收账本。只读采集器严格绑定干净 Git HEAD、实际 migration head 和一笔真实 SQLite 快照，逐路验证 Command、Graph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact/Projection、Effect/Outbox/Receipt 与恢复空集，并对隐私字段和篡改失败关闭。GR05 只校准了 Chat、Delegate、Plan；Skill、Scheduler、Internal、Operator 未运行，因此七路 `commit_bound_acceptance` 仍全为 `MISSING`。剩余工作从“没有可信判定器”收敛为“补齐四路生产运行及同一干净提交下的七路正式采集”，但不能据此提前升级 NE-01。
 
 Review 拒绝后的“多个事务逐步关闭终态”断点已经关闭：0135 把 exact terminal Review status/version/digest、Node、Graph、graph Budget、三条 Outbox、可选 0134 Acceptance/Attempt 与已有 `BLOCKED` decision 写成 append-only settlement。PRE Review 必须零 Attempt，POST Review 必须绑定 `SUCCEEDED` Attempt；提交故障整体回滚，响应丢失或重启只重放 settlement 且 Worker 调用保持不变。尚未清零的是一般 cancellation/recovery、七路线 commit-bound receipt 与波次集成，因此 NE-01 总状态仍不改变。
 

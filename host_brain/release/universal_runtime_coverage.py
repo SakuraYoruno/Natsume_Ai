@@ -15,6 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from host_brain.release.universal_route_acceptance import (
+    UniversalRouteAcceptanceError,
+    validate_universal_route_acceptance_receipt,
+)
+
 
 COVERAGE_SCHEMA_VERSION = "natsume.universal-governed-runtime-coverage.v2"
 PROGRAM_COMPLETE = "COMPLETE"
@@ -382,10 +387,12 @@ def _validate_route_acceptance_binding(
         raise UniversalRuntimeCoverageError(
             f"route {route} acceptance receipt is unavailable: {receipt_ref}"
         ) from exc
-    if not isinstance(receipt, Mapping):
+    try:
+        receipt = validate_universal_route_acceptance_receipt(receipt)
+    except UniversalRouteAcceptanceError as exc:
         raise UniversalRuntimeCoverageError(
-            f"route {route} acceptance receipt must be an object"
-        )
+            f"route {route} acceptance receipt is invalid: {exc.reason_code}"
+        ) from exc
     if str(receipt.get("commit_sha") or "").strip() != evaluated_commit_sha:
         raise UniversalRuntimeCoverageError(
             f"route {route} acceptance receipt commit SHA does not match evidence_binding"

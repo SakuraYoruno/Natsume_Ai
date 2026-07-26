@@ -1,10 +1,19 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.24
-日期：2026-07-26
+版本：v0.25
+日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-UNIVERSAL-ROUTE-ACCEPTANCE-V3
+
+- T-NE01-URA-01：只允许真实文件型 SQLite；Reader 必须在一个 query-only 事务读取七路线证据，缺表、缺列、内存数据库或读取漂移失败关闭。
+- T-NE01-URA-02：每条 PASS 路线必须恰好一个匹配 Command、一个 `COMPLETED` Graph、全部 `ACCEPTED` Node，以及逐节点 terminal Attempt、`RELEASED` Lease、`COMMITTED` Operation、父子 Budget、`VERIFIED`/`ACCEPTED` 决策、Artifact、WorkerProjection、Effect receipt 和已发布 Outbox。
+- T-NE01-URA-03：current recovery hold、effect reconciliation、cancellation、预算超限、缺失 child usage、未发布 Outbox 或任一 identity/digest 漂移均使路线失败关闭。
+- T-NE01-URA-04：收据必须绑定干净 Git HEAD、仓库/数据库相同 migration head；同一 request 不得证明两条路线，未提供路线必须是 `NOT_RUN`。
+- T-NE01-URA-05：请求标识只输出 digest；用户正文、模型输出、secret、Command/WorkOrder/Graph/Effect payload 及额外字段均不得进入收据；篡改总 digest 必须拒绝。
+- 当前合同与 coverage Gate 为 `30 passed`；真实 GR05 校准为 `1 passed`，只覆盖 Chat、Delegate、Plan。该测试不把四条未运行路线或七路 `commit_bound_acceptance` 标为完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-ATOMIC-INTERRUPTION-RECOVERY-HOLD
 

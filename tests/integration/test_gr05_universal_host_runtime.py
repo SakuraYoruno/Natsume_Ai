@@ -48,8 +48,14 @@ from host_brain.persistence.embodiment_outbox_repository import (
 from host_brain.persistence.context_memory_repository import MemoryEventRepository
 from host_brain.persistence.context_repository import ContextRepository
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
+from host_brain.persistence.universal_route_acceptance_reader import (
+    UniversalRouteAcceptanceReader,
+)
 from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
 from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
+from host_brain.release.universal_route_acceptance import (
+    build_universal_route_acceptance_receipt,
+)
 from host_brain.runtime.action_preview_resolver import (
     ProductionActionPreviewAuthorityResolver,
 )
@@ -909,6 +915,48 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             "ACCEPTED",
             "ACCEPTED",
         ]
+        acceptance_request_ids = {
+            "chat": chat["request_id"],
+            "delegate": delegate["request_id"],
+            "plan": plan["request_id"],
+        }
+        acceptance_snapshot = UniversalRouteAcceptanceReader(db_path).capture(
+            acceptance_request_ids
+        )
+        applied = acceptance_snapshot["migration"]
+        acceptance_receipt = build_universal_route_acceptance_receipt(
+            source_binding={
+                "commit_sha": "a" * 40,
+                "migration_head": (
+                    f"{int(applied['migration_id']):04d}_{applied['name']}.sql"
+                ),
+                "repository_clean": True,
+            },
+            snapshot=acceptance_snapshot,
+            request_ids=acceptance_request_ids,
+            generated_at_ms=int(time.time() * 1000),
+        )
+        assert {
+            route: record["status"]
+            for route, record in acceptance_receipt[
+                "route_acceptance"
+            ].items()
+        } == {
+            "chat": "PASS",
+            "skill": "NOT_RUN",
+            "plan": "PASS",
+            "delegate": "PASS",
+            "scheduler": "NOT_RUN",
+            "internal": "NOT_RUN",
+            "operator": "NOT_RUN",
+        }
+        assert acceptance_receipt["overall_status"] == "INCOMPLETE"
+        assert acceptance_receipt["privacy"] == {
+            "contains_user_text": False,
+            "contains_model_output": False,
+            "contains_secrets": False,
+            "identifiers_are_digested": True,
+        }
     finally:
         if mismatch_ingress_store is not None:
             mismatch_ingress_store.close()

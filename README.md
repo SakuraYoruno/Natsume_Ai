@@ -9,6 +9,23 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+NE-01 新增了七路线提交绑定验收账本 v3，但尚未把七条路线判为完成。只读采集器在一个事务中打开真实文件型 SQLite，核对 HostCommand、不可变 TaskGraph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox，以及当前 recovery/cancellation 空集；收据同时绑定干净 Git HEAD、仓库 migration head 和数据库已应用 migration head。请求标识只输出摘要，禁止用户正文、模型输出、secret 和原始 payload。真实 GR05 校准目前只证明 `chat/delegate/plan=PASS`，其余四路为 `NOT_RUN`，因此七路 `commit_bound_acceptance` 仍全部是 `MISSING`，NE-01 继续 `IN_PROGRESS`。
+
+本地采集入口如下；必须为每条路线传入同一真实运行数据库中的 request id，且采集时 tracked worktree 必须干净：
+
+```powershell
+python scripts/runtime/collect_universal_runtime_acceptance.py `
+  --database <runtime.sqlite3> `
+  --route chat=<request-id> `
+  --route skill=<request-id> `
+  --route plan=<request-id> `
+  --route delegate=<request-id> `
+  --route scheduler=<request-id> `
+  --route internal=<request-id> `
+  --route operator=<request-id> `
+  --output artifacts/local-gates/<commit>/universal-route-acceptance.json
+```
+
 NE-01 已把 Review 拒绝后的分散终态写入收为一个 canonical SQLite UoW。`0135_task_review_denial_settlement.sql` 追加不可变 settlement，精确绑定 terminal Review 状态、版本和 digest、Graph revision、Node、graph Budget、三条 Outbox，以及 POST Review 的 Acceptance/Attempt 和已有多节点 `BLOCKED` decision。PRE Review 拒绝只允许在零 Attempt 时将 Node/Graph 置为 `CANCELLED`；POST Review 拒绝必须重开 0134 Acceptance 与 `SUCCEEDED` Attempt 后将 Node/Graph 置为 `FAILED`；两条路径都在同一事务释放 graph Budget。提交中途故障会整体回滚，响应丢失或进程重启只重放同一 settlement，不创建 Attempt、Grant 或再次运行 Worker。真实 SQLite 已覆盖 PRE/POST、并行 Graph、exact replay、整体回滚和不可变篡改保护。一般取消/恢复、七路线 commit-bound receipt、波次集成和 NE-07 仍未收口，NE-01 保持 `IN_PROGRESS`。
 
 NE-01 现在把节点 Acceptance 从调用栈里的瞬时判断提升为第二个独立持久事实。`0134_task_node_acceptance_decision.sql` 追加不可变 decision，精确绑定 Graph revision、Node、Attempt、规范化 `AcceptanceJudgement` digest、evidence、Node Outbox，以及可选的 Review、Graph 版本和 Graph Outbox。自动接受时，decision、TaskResult artifact、可选 Effect intents、`ACCEPTED` Node 与 Node Outbox 在同一个 SQLite UoW 中提交；需要人工判断时，非 `ACCEPT` decision、`WAITING_ACCEPTANCE_REVIEW` Node、`ReviewItem`、Node Outbox，以及直接单节点图的 `BLOCKED` Graph/Outbox 同成同败。进程重启从 decision 重开 Acceptance 和 Review identity，不重新运行 judge 或 worker；Scheduler snapshot 也投影 `node_acceptances`。ReviewStore 与 TaskStore 共用唯一 pending Review SQL writer。真实 SQLite 已覆盖 exact replay、重启、篡改和 decision 写入后的故障回滚；后续拒绝终态由 0135 单一 settlement authority 收口。
