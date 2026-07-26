@@ -130,6 +130,8 @@ def compose_internal_runtime(
         acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         episodic_store=episodic_projection_store,
         semantic_recaller=semantic_recaller,
+        agent_artifact_store=artifact_store,
+        agent_workspace_runtime=workspace_runtime,
         surface_runtime_ports=surface_runtime_ports,
     )
     executor_kwargs: dict[str, Any] = {

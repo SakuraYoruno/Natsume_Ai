@@ -179,6 +179,18 @@ class TaskStorePort(Protocol):
         historical_fencing_token: int,
     ) -> Mapping[str, Any]: ...
 
+    def resolve_agent_completion_lineage(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        attempt_id: str,
+        historical_lease_id: str,
+        historical_lease_owner: str,
+        historical_fencing_token: int,
+    ) -> Mapping[str, Any]: ...
+
     def resolve_internal_agent_takeover_lineage(
         self,
         *,

@@ -42,6 +42,8 @@ def test_governed_skill_ports_are_immutable_and_authority_minimal() -> None:
         "episodic_store",
         "semantic_recaller",
         "degradation_capability_port",
+        "agent_artifact_store",
+        "agent_workspace_runtime",
     }
     with pytest.raises(FrozenInstanceError):
         ports.skill_registry = object()  # type: ignore[misc]

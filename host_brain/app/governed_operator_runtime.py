@@ -11,6 +11,9 @@ from typing import Any
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.accepted_result import InternalAcceptedResultHandler
+from host_brain.agent_runtime.accepted_workspace_artifact import (
+    AcceptedAgentWorkspaceArtifactHandler,
+)
 from host_brain.app.acceptance_effect_handlers import (
     build_production_acceptance_effect_handlers,
 )
@@ -1051,6 +1054,22 @@ def build_governed_operator_composition(
                 artifact_store=internal_agent_artifact_store,
                 workspace_runtime=internal_agent_workspace_runtime,
                 task_store=task_runtime_container.task_store,
+            ),
+            agent_workspace_artifact_handler=(
+                AcceptedAgentWorkspaceArtifactHandler(
+                    command_repository=(
+                        task_runtime_container.command_repository
+                    ),
+                    projection_store=(
+                        task_runtime_container.worker_projection_store
+                    ),
+                    artifact_store=internal_agent_artifact_store,
+                    workspace_runtime=internal_agent_workspace_runtime,
+                    task_store=task_runtime_container.task_store,
+                )
+                if internal_agent_artifact_store is not None
+                and internal_agent_workspace_runtime is not None
+                else None
             ),
             conversation_turn_reader=ContextRepository.from_ledger(ledger),
             conversation_event_reader=MemoryEventRepository.from_ledger(ledger),

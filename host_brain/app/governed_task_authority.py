@@ -173,6 +173,21 @@ def assert_work_order_command_binding(
     review_policy_ref = str(
         review_policy.get("review_ref") or review_policy.get("waiver_ref") or ""
     ).strip()
+    review_binding_valid = bool(
+        (
+            expected_review_ref.startswith("review-waiver://")
+            and review_policy.get("review_required") is False
+            and review_policy.get("mode")
+            == "governor_grant_review_waiver"
+        )
+        or (
+            expected_review_ref.startswith("review-policy://task-node/")
+            and review_policy.get("review_required") is True
+            and review_policy.get("durable_review_required") is True
+            and review_policy.get("mode")
+            == "task_node_pre_execution_review"
+        )
+    )
     node_binding = planning_node_binding(
         work_order,
         node_id=str(work_order.task_node_id or "").strip(),
@@ -184,7 +199,7 @@ def assert_work_order_command_binding(
         or work_order.business_idempotency_scope != command.business_scope
         or work_order.operation_fingerprint != command.operation_fingerprint
         or work_order.approval_ref != expected_grant_ref
-        or not expected_review_ref.startswith("review-waiver://")
+        or not review_binding_valid
         or expected_review_ref == expected_grant_ref
         or approval_policy.get("governor_grant_ref") != expected_grant_ref
         or review_policy_ref != expected_review_ref

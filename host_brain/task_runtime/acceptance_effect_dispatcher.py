@@ -12,6 +12,10 @@ import secrets
 from typing import Any
 
 from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
+from host_brain.agent_runtime.workspace_artifact_effect import (
+    AGENT_WORKSPACE_ACTION_PREVIEW_CONTEXT_SCHEMA,
+    AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+)
 
 
 logger = logging.getLogger("Natsume.acceptance_effect_recovery")
@@ -32,8 +36,15 @@ _INTERNAL_RESULT_COMMIT_EFFECT_TYPE = "internal.agent.result_commit"
 _INTERNAL_DERIVED_CONTEXT_SCHEMA = (
     "Natsume.internal.action_preview_context.v2"
 )
+_NODE_DERIVED_CONTEXT_SCHEMAS = {
+    _SCHEDULER_OPERATION_EFFECT_TYPE: _SCHEDULER_DERIVED_CONTEXT_SCHEMA,
+    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: _INTERNAL_DERIVED_CONTEXT_SCHEMA,
+    AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE: (
+        AGENT_WORKSPACE_ACTION_PREVIEW_CONTEXT_SCHEMA
+    ),
+}
 _NODE_RISK_EFFECT_TYPES = frozenset(
-    {_SCHEDULER_OPERATION_EFFECT_TYPE, _INTERNAL_RESULT_COMMIT_EFFECT_TYPE}
+    _NODE_DERIVED_CONTEXT_SCHEMAS
 )
 
 AcceptanceEffectHandler = Callable[[Mapping[str, Any]], Mapping[str, Any] | str | Awaitable[Any]]
@@ -44,6 +55,7 @@ _EFFECT_TYPE_ORDER = {
     "host.sys_mode_transition": 0,
     "host.operator_state_control": 0,
     "task.operator_control": 0,
+    AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE: 1,
     "edge.embodiment_enqueue": 1,
     "conversation.user_turn": 2,
     "conversation.preference_signal": 3,
@@ -178,9 +190,7 @@ class AcceptanceEffectDispatcher:
                     # fence into replayable authority after COMMIT/expiry.
                     handler_payload["_action_preview_context"] = {
                         "schema_version": (
-                            _SCHEDULER_DERIVED_CONTEXT_SCHEMA
-                            if effect_type == _SCHEDULER_OPERATION_EFFECT_TYPE
-                            else _INTERNAL_DERIVED_CONTEXT_SCHEMA
+                            _NODE_DERIVED_CONTEXT_SCHEMAS[effect_type]
                         ),
                         "origin_authority_kind": "ACCEPTANCE_EFFECT",
                         "origin_event_id": str(preview["event_id"]),

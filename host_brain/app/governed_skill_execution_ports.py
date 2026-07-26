@@ -32,6 +32,8 @@ class GovernedSkillExecutionPorts:
     episodic_store: Any | None
     semantic_recaller: Any | None
     degradation_capability_port: DegradationCapabilityPort
+    agent_artifact_store: Any | None = None
+    agent_workspace_runtime: Any | None = None
 
     def __post_init__(self) -> None:
         if not callable(self.production_authority_verifier):
@@ -41,6 +43,12 @@ class GovernedSkillExecutionPorts:
             DegradationCapabilityPort,
         ):
             raise TypeError("degradation_capability_port must be injected")
+        if (self.agent_artifact_store is None) != (
+            self.agent_workspace_runtime is None
+        ):
+            raise TypeError(
+                "Agent artifact store and Workspace runtime must be composed together"
+            )
 
     # These method names are the structural subset consumed by the shared
     # low-level executor for resource and memory Skills.
@@ -65,6 +73,8 @@ def build_governed_skill_execution_ports(
     episodic_store: Any | None,
     semantic_recaller: Any | None,
     degradation_capability_port: DegradationCapabilityPort,
+    agent_artifact_store: Any | None = None,
+    agent_workspace_runtime: Any | None = None,
 ) -> GovernedSkillExecutionPorts:
     """Compose only services usable after Skill route admission is complete."""
 
@@ -76,6 +86,8 @@ def build_governed_skill_execution_ports(
         resource_manager=resource_manager,
         episodic_store=episodic_store,
         semantic_recaller=semantic_recaller,
+        agent_artifact_store=agent_artifact_store,
+        agent_workspace_runtime=agent_workspace_runtime,
         degradation_capability_port=degradation_capability_port,
     )
 
@@ -126,6 +138,8 @@ def execute_frozen_governed_skill(
         durable_authority_ledger=durable_authority_ledger,
         capability_broker_override=ports.capability_broker,
         model_attempt_service_override=ports.model_attempt_service,
+        agent_artifact_store_override=ports.agent_artifact_store,
+        agent_workspace_runtime_override=ports.agent_workspace_runtime,
         production_authority_verifier=ports.production_authority_verifier,
         governed_execution_context=governed_execution_context,
         execution_args_override=execution_args_override,

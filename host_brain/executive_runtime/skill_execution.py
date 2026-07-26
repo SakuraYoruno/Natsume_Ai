@@ -210,6 +210,8 @@ def _execute_skill(
     durable_authority_ledger: Any | None = None,
     capability_broker_override: Any | None = None,
     model_attempt_service_override: Any | None = None,
+    agent_artifact_store_override: Any | None = None,
+    agent_workspace_runtime_override: Any | None = None,
     production_authority_verifier: Any | None = None,
     governed_execution_context: Mapping[str, Any] | None = None,
     execution_args_override: Mapping[str, Any] | None = None,
@@ -275,7 +277,9 @@ def _execute_skill(
         if grant_error:
             raise PermissionError(grant_error)
         governed_node_verified = True
-        if bool(skill_meta.require_confirm):
+        if bool(skill_meta.require_confirm) and not str(
+            governed_execution_context.get("pre_execution_review_ref") or ""
+        ).startswith("review://"):
             raise PermissionError("GOVERNED_DURABLE_CONFIRM_REVIEW_REQUIRED")
 
     if _normalize_text(dict(governor_result or {}).get("decision"), lower=True) not in {"", "approve"}:
@@ -472,6 +476,15 @@ def _execute_skill(
             exec_context["capability_broker"] = capability_broker_override
         if model_attempt_service_override is not None:
             exec_context["model_attempt_service"] = model_attempt_service_override
+        if (agent_artifact_store_override is None) != (
+            agent_workspace_runtime_override is None
+        ):
+            raise PermissionError("AGENT_RUNTIME_WORKSPACE_PORTS_INCOMPLETE")
+        if agent_artifact_store_override is not None:
+            exec_context["agent_artifact_store"] = agent_artifact_store_override
+            exec_context["agent_workspace_runtime"] = (
+                agent_workspace_runtime_override
+            )
         if callable(production_authority_verifier):
             exec_context["production_authority_verifier"] = production_authority_verifier
     if action_arbiter_decision is not None:

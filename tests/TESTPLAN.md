@@ -1,10 +1,20 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.13
+版本：v0.14
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE
+
+- T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE-01：Direct Skill admission 必须从 app-local SkillRegistry 冻结 risk/confirm；`agent_worker/self_heal/self_evolve` 固定 risk 4 并要求 durable pre-execution Review。frozen worker 只接受唯一 `CONSUMED`、task/graph revision/node/principal/risk/allowed-actions 全匹配且 resume_count=1 的 Review；缺失、多条、伪 ref 或 subject drift 都在 Agent/Workspace 前失败关闭。
+- T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE-02：公共兼容 WorkOrder 不得提交 V3、graph/node/attempt、Grant、Budget、Review、Workspace id、Lease/fence 或 app-local ports。server 必须从 sealed governed context 重建 WorkOrderV3；Workspace runtime owner 与 Task lease owner 必须一致，写目标只能是登记的三条 Agent Skill。
+- T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE-03：写 worker 成功必须产生一个 exact-inventory protected stage；公开结果不得泄漏私有 stage 路径。WorkerProjection 只允许一个 NODE-scope `agent.workspace_artifact_promote` proposal，并绑定 WorkOrder、target、operation fingerprint、stage ref/digest 与 canonical public-result digest；任一漂移由 Acceptance compiler 拒绝。
+- T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE-04：Graph Acceptance 必须把 proposal 编译为 graph-scope Effect，并排在 conversation、Life 和 delivery 之前。Accepted handler 必须重新打开 typed HostCommand/WorkOrderV3/TaskGraph、WorkerProjection、ACCEPTED Node、SUCCEEDED Attempt、released/historical Lease、NodeArtifact、claimed/committed Effect、terminal Preview 和 sealed WorkOrder/result 后，才调用共享 WorkspaceRuntime。
+- T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE-05：真实 migrated SQLite + Git worktree 必须证明 `codex_runtime` 写入先形成 protected stage，Acceptance 后生成与 frozen base 不同的 accepted HEAD，源 `main` 与源文件保持不变；Runtime/Repository 重建后 lifecycle 仍为 `PROMOTED`。既有 shared-owner exact replay、post-seal tamper 和 lifecycle rollback 测试继续通过。
+- T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE-06：Domain Pack 和缺少 app-local ArtifactStore/WorkspaceRuntime 的写入口必须继续失败关闭；不能因 Skill 正向切流恢复 Domain/legacy 直写。
+- 当前核心受影响集为 `141 passed in 39.23s`，包含新 binder、Review、compiler、composition、dispatcher/handler、结构门禁和真实 SQLite+Git production-path integration。另一个既有 Workspace/Domain/Internal 回归为 `22 passed in 21.42s`，与核心集合不相加。Agent proposal 校验已拆为 231 行 pure module，canonical `acceptance_effects.py` 为 1499 行，不扩大 mixed-file allowlist。`compileall` 与 `git diff --check` 通过；NE-01 波次 integration、HTTP/network canary、NE-07 Docker 和远程 CI 均未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。该 Gate 只证明已登记 Agent Skill 的受审核写产物提升，不证明 Domain Pack、任意 Skill、一般恢复、强租户隔离或 NE-01 完成。
 
 ## T-NE01-WORKSPACE-WRITE-PROMOTION
 

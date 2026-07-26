@@ -40,10 +40,9 @@ from host_brain.task_runtime.operator_state_control_acceptance_effect import (
     compile_operator_state_control_acceptance_effect,
     is_operator_state_control_command,
 )
-from host_brain.task_runtime.worker_authority_guard import (
-    forbidden_worker_authority_path,
-)
-
+from host_brain.task_runtime.worker_authority_guard import forbidden_worker_authority_path
+from host_brain.task_runtime import agent_workspace_acceptance_effect as agent_workspace_effects
+from host_brain.agent_runtime.workspace_artifact_effect import AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
 
 ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
 _EFFECT_TYPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
@@ -163,9 +162,19 @@ def compile_graph_acceptance_effects(
     )
     bond_summary = _json_mapping(pack.get("bond_summary"), field_name="bond_summary")
 
-    descriptors = _worker_descriptors(commit)
+    try:
+        descriptors = agent_workspace_effects.validated_worker_effect_descriptors(
+            commit
+        )
+    except agent_workspace_effects.AgentWorkspaceAcceptanceEffectError as exc:
+        raise AcceptanceEffectCompileError(str(exc)) from exc
+    foreground_descriptors = tuple(
+        descriptor
+        for descriptor in descriptors
+        if descriptor["effect_type"] == "life.foreground_completed"
+    )
     foreground = _trusted_foreground_command(
-        descriptors=descriptors,
+        descriptors=foreground_descriptors,
         command=command,
         surface_message=surface_message,
         narrative=narrative,
@@ -194,7 +203,25 @@ def compile_graph_acceptance_effects(
             "source": "governed_task_acceptance",
         },
     }
-    payloads: list[tuple[str, Mapping[str, Any]]] = [
+    payloads: list[tuple[str, Mapping[str, Any]]] = []
+    try:
+        agent_workspace_effect = (
+            agent_workspace_effects.compile_agent_workspace_artifact_effect(
+            descriptors=descriptors,
+            command=command,
+            work_order=work_order,
+            node_id=node_ref,
+            attempt_id=attempt_ref,
+            worker_commit=commit,
+            )
+        )
+    except agent_workspace_effects.AgentWorkspaceAcceptanceEffectError as exc:
+        raise AcceptanceEffectCompileError(str(exc)) from exc
+    if agent_workspace_effect is not None:
+        payloads.append(
+            (AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE, agent_workspace_effect)
+        )
+    payloads.extend([
         ("conversation.user_turn", user_turn),
         (
             "conversation.preference_signal",
@@ -219,7 +246,7 @@ def compile_graph_acceptance_effects(
             },
         ),
         ("life.foreground_completed", foreground),
-    ]
+    ])
     reply_channel = str(delivery_context.get("reply_channel") or "").strip()
     reply_target = str(delivery_context.get("reply_target") or "").strip()
     if reply_channel and reply_target:
@@ -1291,32 +1318,6 @@ def _action_preview_context(
     }
 
 
-def _worker_descriptors(commit: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
-    raw = commit.get("acceptance_effect_intents")
-    if raw in (None, (), []):
-        return ()
-    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
-        raise AcceptanceEffectCompileError("worker effect descriptors must be a sequence")
-    descriptors: list[dict[str, Any]] = []
-    for item in raw:
-        descriptor = _json_mapping(item, field_name="worker effect descriptor")
-        if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
-            raise AcceptanceEffectCompileError(
-                "worker descriptor may contain only effect_type, commit_scope and payload"
-            )
-        if (
-            descriptor.get("effect_type") != "life.foreground_completed"
-            or str(descriptor.get("commit_scope") or "").upper() != "NODE"
-        ):
-            raise AcceptanceEffectCompileError("worker proposed an unsupported effect")
-        payload = _json_mapping(descriptor.get("payload"), field_name="worker effect payload")
-        _reject_worker_authority(payload)
-        descriptors.append({**descriptor, "payload": payload})
-    if len(descriptors) > 1:
-        raise AcceptanceEffectCompileError("worker proposed duplicate foreground effects")
-    return tuple(descriptors)
-
-
 def _trusted_foreground_command(
     *,
     descriptors: Sequence[Mapping[str, Any]],
@@ -1460,9 +1461,7 @@ def _spec(
 def _reject_worker_authority(value: Any, *, path: str = "payload") -> None:
     forbidden = forbidden_worker_authority_path(value, path=path)
     if forbidden is not None:
-        raise AcceptanceEffectCompileError(
-            f"worker effect contains forbidden authority field: {forbidden}"
-        )
+        raise AcceptanceEffectCompileError(f"worker effect contains forbidden authority field: {forbidden}")
 
 
 def _json_mapping(value: Any, *, field_name: str) -> dict[str, Any]:

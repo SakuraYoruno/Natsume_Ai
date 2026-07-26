@@ -384,7 +384,7 @@ class TaskInternalAgentLineageStoreMixin:
         finally:
             conn.close()
 
-    def resolve_internal_agent_completion_lineage(
+    def resolve_agent_completion_lineage(
         self,
         *,
         graph_id: str,
@@ -395,7 +395,7 @@ class TaskInternalAgentLineageStoreMixin:
         historical_lease_owner: str,
         historical_fencing_token: int,
     ) -> dict[str, Any]:
-        """Reopen the exact direct-or-takeover lineage of an accepted result."""
+        """Reopen the exact direct-or-takeover lineage of an accepted node."""
 
         return self._resolve_internal_agent_terminal_lineage(
             graph_id=graph_id,
@@ -410,6 +410,14 @@ class TaskInternalAgentLineageStoreMixin:
             expected_attempt_status="SUCCEEDED",
             require_takeover=False,
         )
+
+    def resolve_internal_agent_completion_lineage(
+        self,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Compatibility alias for the former Internal-only authority name."""
+
+        return self.resolve_agent_completion_lineage(**kwargs)
 
     @staticmethod
     def _nonacceptance_attempt_ref(value: object) -> str:

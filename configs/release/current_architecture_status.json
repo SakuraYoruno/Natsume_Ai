@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-26",
   "source_baseline": {
-    "dev_commit": "7950a0047e059a4017d2034f404af02731b256ff",
+    "dev_commit": "0ea34750e103980da19d7f5ebe3ec4f1887b801f",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_INTERNAL_WORKSPACE_WRITE_PROMOTION_PRECOMMIT_OVER_ORIGIN_DEV_7950A0047"
+    "evaluated_source": "NE01_REVIEWED_AGENT_SKILL_WORKSPACE_PROMOTION_PRECOMMIT_OVER_ORIGIN_DEV_0EA34750E"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "GOVERNED_INTERNAL_WRITE_WORKORDER_NOW_EXECUTES_ONLY_WITH_EXACT_TASK_WORKSPACE_AUTHORITY_SEALS_A_BOUNDED_BINARY_GIT_PATCH_AND_PATH_MANIFEST_MATERIALIZES_ONE_DETERMINISTIC_ACCEPTED_HEAD_AFTER_ACCEPTANCE_ADVANCES_0116_ACTIVE_ACCEPTED_PROMOTED_PRESERVES_SOURCE_BRANCH_REJECTS_POST_SEAL_TAMPER_AND_REUSES_THE_SAME_COMMIT_AFTER_PROCESS_RUNTIME_RECONSTRUCTION_AND_LIFECYCLE_TRANSACTION_ROLLBACK_INTERNAL_ROUTE_ONLY_DOMAIN_SKILL_CODEX_OS_CONTAINER_HANDLE_LEVEL_TOCTOU_OTHER_FAILURE_CANCELLATION_COMMIT_BOUND_SEVEN_ROUTE_COMPLETE_PROCESS_HOST_RESTART_DEPLOYED_CREDENTIAL_REAL_HTTP_NETWORK_CANARY_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "GOVERNED_INTERNAL_AND_THREE_REGISTERED_RISK4_DIRECT_AGENT_SKILLS_NOW_SHARE_ONE_APP_LOCAL_WORKSPACE_AND_ARTIFACT_OWNER_SKILL_PAYLOAD_CANNOT_INJECT_V3_WORKSPACE_REVIEW_GRANT_BUDGET_LEASE_OR_FENCE_SERVER_REBUILDS_WORKORDERV3_FROM_FROZEN_TASK_AUTHORITY_REQUIRES_ONE_EXACT_CONSUMED_REVIEW_SEALS_THE_WRITE_STAGE_AND_COMPILES_ONE_GRAPH_ACCEPTANCE_PROMOTION_EFFECT_BEFORE_VISIBLE_EFFECTS_ACCEPTED_HANDLER_REOPENS_COMMAND_GRAPH_PROJECTION_NODE_ATTEMPT_LEASE_ARTIFACT_PREVIEW_EFFECT_AND_SEALED_BYTES_BEFORE_0116_ACTIVE_ACCEPTED_PROMOTED_DOMAIN_PACK_OTHER_SKILLS_OS_CONTAINER_HANDLE_LEVEL_TOCTOU_OTHER_FAILURE_CANCELLATION_COMMIT_BOUND_SEVEN_ROUTE_COMPLETE_PROCESS_HOST_RESTART_DEPLOYED_CREDENTIAL_REAL_HTTP_NETWORK_CANARY_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,39 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "INTERNAL_WORKSPACE_WRITE_PROMOTION_LOCAL_REAL_SQLITE_GIT_TARGETED_PASS_PROGRAM_INCOMPLETE_PRECOMMIT",
-    "commit_binding": "PRECOMMIT_LOCAL_SLICE_BASED_ON_ORIGIN_DEV_7950A0047E059A4017D2034F404AF02731B256FF",
+    "status": "REVIEWED_AGENT_SKILL_WORKSPACE_PROMOTION_LOCAL_REAL_SQLITE_GIT_TARGETED_PASS_PROGRAM_INCOMPLETE_PRECOMMIT",
+    "commit_binding": "PRECOMMIT_LOCAL_SLICE_BASED_ON_ORIGIN_DEV_0EA34750E103980DA19D7F5EBE3EC4F1887B801F",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_INTERNAL_WORKSPACE_WRITE_PROMOTION",
+    "slice": "NE01_REVIEWED_AGENT_SKILL_WORKSPACE_PROMOTION",
+    "reviewed_agent_skill_workspace_promotion_current_validation": {
+      "status": "LOCAL_REAL_SQLITE_GIT_TARGETED_PASS_NE01_IN_PROGRESS",
+      "migration": "SLICE_NONE_REUSES_0101_AGENT_WORKSPACE_AUTHORITY_AND_0116_AGENT_WORKSPACE_LIFECYCLE_CURRENT_REPOSITORY_HEAD_0130",
+      "production_targets": [
+        "agent_worker",
+        "agent_self_heal",
+        "agent_self_evolve"
+      ],
+      "admission_boundary": "APP_LOCAL_SKILL_REGISTRY_FREEZES_RISK4_AND_DURABLE_REVIEW_POLICY_CALLER_CANNOT_SELECT_RISK_OR_REVIEW_MODE",
+      "review_boundary": "EXACTLY_ONE_CONSUMED_PRE_EXECUTION_REVIEW_BOUND_TO_TASK_GRAPH_REVISION_NODE_PRINCIPAL_RISK_AND_ALLOWED_ACTIONS_REQUIRED_BEFORE_AGENT_OR_WORKSPACE",
+      "work_order_boundary": "PUBLIC_COMPATIBILITY_PAYLOAD_CANNOT_SUBMIT_V3_GRAPH_NODE_ATTEMPT_GRANT_BUDGET_REVIEW_WORKSPACE_LEASE_FENCE_OR_APP_LOCAL_PORTS_SERVER_REBUILDS_WORKORDERV3_FROM_VERIFIED_TASK_CONTEXT",
+      "composition_boundary": "CODEX_RUNTIME_RECEIVES_THE_SAME_APP_LOCAL_ARTIFACT_STORE_AND_DURABLE_WORKSPACE_RUNTIME_ONLY_INSIDE_SEALED_CAPABILITYBROKER_DISPATCH",
+      "proposal_boundary": "WORKER_PUBLIC_RESULT_STRIPS_PRIVATE_STAGE_AND_IMMUTABLE_WORKER_PROJECTION_CARRIES_ONE_NODE_SCOPE_PROTECTED_STAGE_REF_DIGEST_PROPOSAL",
+      "acceptance_boundary": "GRAPH_ACCEPTANCE_COMPILES_AGENT_WORKSPACE_ARTIFACT_PROMOTE_BEFORE_CONVERSATION_LIFE_AND_DELIVERY_EFFECTS",
+      "handler_boundary": "ACCEPTED_HANDLER_REOPENS_TYPED_ADMISSION_WORKER_PROJECTION_ACCEPTED_NODE_SUCCEEDED_ATTEMPT_RELEASED_OR_HISTORICAL_LEASE_NODE_ARTIFACT_CLAIMED_OR_COMMITTED_EFFECT_TERMINAL_PREVIEW_SEALED_WORKORDER_AND_RESULT_BEFORE_PROMOTION",
+      "structure_boundary": "AGENT_WORKSPACE_PROPOSAL_VALIDATION_IS_A_231_LINE_PURE_MODULE_CANONICAL_ACCEPTANCE_EFFECTS_OWNER_IS_1499_LINES_NO_ALLOWLIST_EXPANSION",
+      "source_integrity": "REAL_GIT_SOURCE_MAIN_AND_SOURCE_FILES_REMAIN_UNCHANGED_ACCEPTED_HEAD_IS_PERSISTED_IN_THE_ISOLATED_WORKSPACE_LIFECYCLE",
+      "restart_boundary": "RECONSTRUCTED_WORKSPACE_REPOSITORY_REOPENS_THE_SAME_PROMOTED_LIFECYCLE_AND_ACCEPTED_HEAD",
+      "focused_affected_regression": "141_PASSED_IN_39_23_SECONDS_ZERO_FAIL_INCLUDES_BINDER_REVIEW_COMPILER_COMPOSITION_DISPATCH_HANDLER_STRUCTURE_GATES_AND_REAL_SQLITE_GIT_PRODUCTION_PATH",
+      "separate_workspace_domain_internal_regression": "22_PASSED_IN_21_42_SECONDS_ZERO_FAIL_NOT_ADDED_TO_THE_137_TEST_SET",
+      "compileall": "PASS_CHANGED_MODULES",
+      "git_diff_check": "PASS",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "production_http_network_canary": "NOT_RUN",
+      "complete_host_process_restart": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "THIS_CLOSES_ONLY_REVIEWED_DIRECT_AGENT_SKILL_WRITE_ARTIFACT_PROMOTION_NOT_DOMAIN_PACK_OTHER_SKILLS_GENERAL_FAILURE_CANCELLATION_OS_CONTAINER_TENANT_HANDLE_LEVEL_ATOMIC_TOCTOU_SEVEN_ROUTE_ACCEPTANCE_OR_NE01"
+    },
     "workspace_write_promotion_current_validation": {
       "status": "LOCAL_REAL_SQLITE_GIT_TARGETED_PASS_NE01_IN_PROGRESS",
       "migration": "SLICE_NONE_REUSES_0101_AGENT_WORKSPACE_AUTHORITY_AND_0116_AGENT_WORKSPACE_LIFECYCLE_CURRENT_REPOSITORY_HEAD_0130",
@@ -2683,7 +2712,7 @@
     "terminal_reconciliation_auto": "ENABLED_EXACT_REPAIRABLE_ONLY",
     "review_continuation": "WIRED_TASK_BOUND_CANARY_NOT_RUN",
     "failure_replan": "PARTIAL_DURABLE_SUPERSESSION_SAFE_SUBSET",
-    "workspace_write": "PARTIAL_W2_GOVERNED_INTERNAL_WRITE_PATCH_ACCEPTED_HEAD_PROMOTION_AND_CLEAN_NO_CHANGE_PLUS_EXACT_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_DOMAIN_SKILL_CODEX_GENERAL_WRITE_INCOMPLETE_EXPLICIT_SECRET_REQUIRED_DEFAULT_FAIL_CLOSED_CANARY_NOT_RUN",
+    "workspace_write": "PARTIAL_W2_GOVERNED_INTERNAL_AND_THREE_REVIEWED_RISK4_AGENT_SKILL_WRITE_PATCH_ACCEPTED_HEAD_PROMOTION_PLUS_INTERNAL_CLEAN_NO_CHANGE_AND_EXACT_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_DOMAIN_PACK_OTHER_SKILLS_GENERAL_WRITE_INCOMPLETE_EXPLICIT_SECRET_REQUIRED_DEFAULT_FAIL_CLOSED_CANARY_NOT_RUN",
     "budget": "PARTIAL_CONTENTION_PROVEN",
     "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_SYS_MODE_OPERATOR_VERTICAL_SLICE_PARTIAL_COMMIT_BOUND_ACCEPTANCE_MISSING_CANARY_NOT_RUN",
     "production_canary": "TERMINAL_EXACT_LOCAL_SQLITE_PASS_FULL_RUNTIME_NOT_RUN"
@@ -2754,6 +2783,39 @@
         "host_brain/model_runtime/production_provider_adapters.py",
         "tests/unit/test_aw05_model_attempt_service.py",
         "tests/unit/test_aw05_production_provider_route.py"
+      ]
+    },
+    "governed_agent_skill_workspace_promotion": {
+      "status": "PARTIAL_REVIEWED_DIRECT_AGENT_SKILL_WORKSPACE_PROMOTION_LOCAL_PROVEN",
+      "scope": [
+        "agent_worker",
+        "agent_self_heal",
+        "agent_self_evolve"
+      ],
+      "implemented": "Direct Skill admission freezes app-local registry risk and confirmation policy. Risk-4 execution requires one exact consumed durable Review. The server rebuilds WorkOrderV3 from verified Task authority, sealed codex_runtime dispatch receives app-local ArtifactStore and DurableWorkspaceRuntime, WorkerProjection exposes only a protected descriptor, and Graph Acceptance compiles one promotion Effect before visible conversation, Life and delivery Effects. The Accepted handler reopens immutable admission, projection, terminal lineage, Preview, Effect and sealed bytes before advancing the existing 0116 lifecycle.",
+      "fail_closed": "Caller-submitted V3, Workspace id, ArtifactStore, Review ref, Grant, Budget, Lease, fence or durable owner is rejected. Domain Pack, unregistered Skills and write execution without the paired app-local ports remain blocked.",
+      "local_validation": "141 passed in 39.23 seconds for the focused affected set including structure gates. A separate overlapping Workspace Domain and Internal regression is 22 passed in 21.42 seconds and is not added. Real migrated SQLite and real Git prove source-main preservation and restart-persistent promoted accepted HEAD.",
+      "not_completed": [
+        "Domain Pack and other Skill write routes",
+        "general failure cancellation and unknown-effect recovery",
+        "OS container tenant and handle-level atomic TOCTOU isolation",
+        "complete Host process restart and HTTP network production canary",
+        "seven-route commit-bound acceptance and NE-01 wave integration"
+      ],
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "evidence_refs": [
+        "host_brain/agent_runtime/governed_skill_work_order.py",
+        "host_brain/agent_runtime/accepted_workspace_artifact.py",
+        "host_brain/agent_runtime/workspace_artifact_effect.py",
+        "host_brain/task_runtime/agent_workspace_acceptance_effect.py",
+        "host_brain/agent_runtime/executor.py",
+        "host_brain/app/governed_frozen_skill_runtime.py",
+        "host_brain/task_runtime/acceptance_effects.py",
+        "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "tests/unit/test_ne01_governed_agent_work_order.py",
+        "tests/integration/test_ne01_governed_agent_workspace_acceptance.py",
+        "tests/integration/test_ne01_workspace_write_promotion.py",
+        "tests/unit/test_aw05_domain_pack_adapters.py"
       ]
     },
     "governed_agent_runtime_model_ports": {
@@ -2875,7 +2937,7 @@
       "pre_projection_crash_boundary": "For one governed Internal single-node sealed checkpoint, the mandatory activation scan and lifecycle-owned periodic survivor both reuse the same exact continuation before any client retry. They reopen the seal-bound recovery envelope and exact Operation, Budget, Preview, Grant, Task and historical Lease lineage, acquire only the already-authorized strictly higher-fence completion Lease, reconstruct the unique WorkerProjection and continue Verification, Acceptance, Effect, Secure Ingress claim completion, canonical result, clean/no-change promotion and cleanup without rerunning Agent. The supervisor owns cadence only and does not provide general recovery.",
       "budget_rejection_boundary": "The explicit composition-owned checkpoint UoW is the only public mutation authority and WorkerProjection has one physical INSERT owner. Boundary A atomically commits the unique WorkerProjection, Operation COMMITTED and its Outbox. Boundary B separately atomically commits the rejected BudgetUsage, Budget ACTIVE-to-EXCEEDED transition and BUDGET_EXCEEDED Outbox. Boundary C revalidates A and B, then atomically commits Graph BLOCKED, Node and Attempt FAILED, Lease and Budget RELEASED plus five terminal Outboxes. Internal and canonical single-node checkpoints share that exact SQL transaction with separate strict authority modes. Canonical mode binds the durable HostCommand, TaskNode route and WorkerProjection and rejects any Internal Agent marker instead of permitting authority downgrade. Five injected faults prove rollback only inside C; A, B and C are not one transaction. Response loss, later duplicate HostCommand replay and terminal reconciliation consume one read-only exact internal/canonical terminal authority; identity drift is fail-closed.",
       "terminal_artifact_boundary": "The terminal worker reconciles exact sealed artifacts through abandon and cleanup. For one unsealed signed raw failure it first reopens the six-aggregate terminal authority, commits a deterministic Internal raw-failure Secure Ingress result, and only then removes the real Git worktree and stage. Claim outage leaves both intact. A separate app-local async survivor periodically re-enters only exact live sealed checkpoints; neither worker acquires the other's authority.",
-      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace. A write-capable order without exact server-owned execution authority remains proposal-only and blocked; the newly enabled writer is limited to the governed Internal route. Known post-reservation interruptions first mark the exact Operation RECOVERY_REQUIRED with one Outbox. A no-cancellation signed RELEASE plus NO_SIDE_EFFECT and no receipt may then close only an ACTIVE single-node Graph with a nonterminal Attempt and Node, expired former Lease, exactly one graph Budget and zero WorkerProjection, Acceptance Effect and cancellation facts; one SQLite UoW terminalizes Operation, Attempt, Node, Graph, Lease and Budget. The two signed pre-checkpoint cancellation terminals remain separate. General unknown effects, other failure or cancellation claim closeout, arbitrary multi-node or batch settlement, Domain/Skill/codex_runtime write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
+      "compatibility_boundary": "AgentWorkOrder remains only a pre-admission external ingress description. The admitted frozen Internal worker passes its durable WorkOrderV3 directly to AgentRuntimeExecutor, prompt, review and Workspace. A write-capable order without exact server-owned execution authority remains proposal-only and blocked. This Internal route alone owns its sealed-checkpoint survivor and signed terminal cleanup; the separate reviewed Direct Agent Skill promotion capability does not inherit them. Known post-reservation interruptions first mark the exact Operation RECOVERY_REQUIRED with one Outbox. A no-cancellation signed RELEASE plus NO_SIDE_EFFECT and no receipt may then close only an ACTIVE single-node Graph with a nonterminal Attempt and Node, expired former Lease, exactly one graph Budget and zero WorkerProjection, Acceptance Effect and cancellation facts; one SQLite UoW terminalizes Operation, Attempt, Node, Graph, Lease and Budget. The two signed pre-checkpoint cancellation terminals remain separate. General unknown effects, other failure or cancellation claim closeout, arbitrary multi-node or batch settlement, Domain Pack and other Skill write promotion, handle-level TOCTOU and OS/container isolation remain incomplete.",
       "claim_boundary": "Accepted startup continuation, exact Budget rejection, exact verification/post-review nonacceptance, exact signed cancellation and exact signed raw failure each prove their own deterministic Secure Ingress result completion. Raw failure uses task-terminal://internal-raw-failure and must commit before cleanup. General unknown effect and other failure or cancellation claim closeout remain incomplete and must not be inferred from the initial interruption marker.",
       "precheckpoint_no_effect_cancellation_validation": "One shared neutral contract accepts only RELEASED plus RELEASE plus NO_SIDE_EFFECT with no receipt, or COMMITTED plus COMMIT plus SIDE_EFFECT_CONFIRMED with a durable receipt. The no-effect path retains its byte-compatible v1 digest; the confirmed-effect path uses v2 and binds action, outcome and receipt. Real SQLite, a real Git worktree and ephemeral Ed25519 proofs demonstrate pre-proof hold, both terminal matrices, claim-before-cleanup, Store reconstruction, exact replay, source repository preservation and proof or receipt tamper rejection. The focused deduplicated batch is 83 passed in 78.94 seconds. The 40-test core rerun after shared-contract and status-matrix tests is included in the 83-test set and must not be added.",
       "local_validation": "The current signed raw-failure precommit affected set is 69 passed in 89.91 seconds over real migrated SQLite, ephemeral Ed25519, exact response-loss reopen, real Internal Secure Ingress, real Git worktree, claim outage, restart validation and tamper rejection. Compileall, git diff check and fresh static architecture Gates 1 through 14 pass with failed_gates empty and no allowlist widening. Earlier cancellation, checkpoint, worker-interruption and bounded multi-node batches remain historical and are not added. General unknown-effect attribution, other failure or cancellation claim closeout and general recovery remain incomplete. Overall NE-01 remains incomplete and remote CI is NOT_RUN_ACCOUNT_QUOTA.",
@@ -4430,22 +4492,22 @@
       ]
     },
     "workspace_isolation": {
-      "status": "PARTIAL",
-      "path_safety": "D0_WIRED_PLUS_INTERNAL_ARTIFACT_FULL_COMPONENT_LSTAT_SYMLINK_REPARSE_JUNCTION_REJECTION_AND_CRITICAL_IO_REVALIDATION_HANDLE_LEVEL_TOCTOU_INCOMPLETE",
+      "status": "PARTIAL_INTERNAL_AND_REVIEWED_AGENT_SKILL_PROMOTION",
+      "path_safety": "D0_WIRED_PLUS_INTERNAL_AND_REVIEWED_AGENT_SKILL_ARTIFACT_FULL_COMPONENT_LSTAT_SYMLINK_REPARSE_JUNCTION_REJECTION_AND_CRITICAL_IO_REVALIDATION_HANDLE_LEVEL_TOCTOU_INCOMPLETE",
       "write_fuse": "FAIL_CLOSED_W0_STOPGAP",
-      "durable_authority": "PARTIAL_W2_INTERNAL_WRITE_AND_NO_CHANGE_PROMOTION_PLUS_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_CROSS_ROUTE_GENERAL_WRITE_INCOMPLETE",
+      "durable_authority": "PARTIAL_W2_INTERNAL_AND_THREE_REVIEWED_RISK4_AGENT_SKILL_WRITE_PROMOTION_PLUS_INTERNAL_NO_CHANGE_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_DOMAIN_PACK_OTHER_SKILLS_GENERAL_WRITE_INCOMPLETE",
       "migration": "0101_agent_workspace_authority + 0116_agent_workspace_lifecycle",
-      "durable_lifecycle": "INTERNAL_CLEAN_NO_CHANGE_AND_SEALED_WRITE_PATCH_PATHS_REAL_TASKSTORE_EVIDENCE_DETERMINISTIC_ACCEPTED_HEAD_ACTIVE_ACCEPTED_PROMOTED_EXACT_RECONCILIATION_AND_SIGNED_SINGLE_NODE_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_CROSS_ROUTE_WRITE_AND_OTHER_FAILURE_CANCEL_CONTINUATION_INCOMPLETE",
+      "durable_lifecycle": "INTERNAL_CLEAN_NO_CHANGE_AND_INTERNAL_PLUS_REVIEWED_AGENT_SKILL_SEALED_WRITE_PATCH_REAL_TASKSTORE_EVIDENCE_DETERMINISTIC_ACCEPTED_HEAD_ACTIVE_ACCEPTED_PROMOTED_EXACT_RECONCILIATION_AND_INTERNAL_SIGNED_SINGLE_NODE_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_DOMAIN_PACK_OTHER_SKILLS_AND_OTHER_FAILURE_CANCEL_CONTINUATION_INCOMPLETE",
       "physical_root_authority": "PROCESS_CONFIGURATION_ONLY",
       "work_order_lease_payload": "SERVER_DERIVED_LOGICAL_WORKSPACE_ID_ONLY",
-      "production_scope": "GOVERNED_INTERNAL_INSPECT_AND_WRITE_PROTECTED_ARTIFACT_POST_ACCEPTANCE_PROMOTION_ONLY",
+      "production_scope": "GOVERNED_INTERNAL_INSPECT_AND_WRITE_PLUS_AGENT_WORKER_AGENT_SELF_HEAL_AGENT_SELF_EVOLVE_REVIEWED_DIRECT_SKILL_PROTECTED_ARTIFACT_POST_ACCEPTANCE_PROMOTION_ONLY",
       "production_default": "FAIL_CLOSED_WITHOUT_HOST_AGENT_WORKSPACE_HMAC_SECRET",
       "production_canary": "NOT_RUN",
       "source_freeze": "EXACT_CONFIGURED_GIT_COMMIT_FIRST_ALLOCATION",
       "physical_workspace": "NAMESPACE_GIT_WORKTREE_UNDER_CONFIGURED_ROOT",
       "lease_fencing": "BOOT_OWNER_RUNTIME_INSTANCE_PID_TOKEN_DIGEST_EXPIRY_MONOTONIC_FENCE",
       "execution_scope": "PROCESS_LOCAL_EXCLUSIVE_WITH_CROSS_RUNTIME_LIVE_LEASE_CONFLICT",
-      "heartbeat": "W2_LEASE_ASSET_WIRED_FOR_INTERNAL_INSPECT_AND_WRITE_PATH_FUTURE_PER_OPERATION_FENCE_AND_PREEMPTION_REQUIRED",
+      "heartbeat": "W2_LEASE_ASSET_WIRED_FOR_INTERNAL_AND_REVIEWED_AGENT_SKILL_WRITE_PATH_FUTURE_PER_OPERATION_FENCE_AND_PREEMPTION_REQUIRED",
       "external_operation_fencing": "PROVISIONING_ALLOCATOR_CLEANUP_ONLY__WORKSPACE_THEN_SOURCE_CROSS_PROCESS_LOCK_SINGLE_DEADLINE_PRE_POST_EXACT_AUTHORITY",
       "sqlite_external_io": "REMOVED_FROM_TRANSACTION_HEARTBEAT_CONCURRENT",
       "postcheck_semantics": "FENCE_STATUS_EXPIRY_DRIFT_NEVER_RETURNS_CALLBACK_RESULT_SIDE_EFFECT_MAY_REQUIRE_RECONCILIATION",
@@ -4462,6 +4524,9 @@
         "host_brain/agent_runtime/workspace_runtime_contracts.py",
         "host_brain/agent_runtime/workspace_runtime.py",
         "host_brain/agent_runtime/artifact_store.py",
+        "host_brain/agent_runtime/governed_skill_work_order.py",
+        "host_brain/agent_runtime/accepted_workspace_artifact.py",
+        "host_brain/agent_runtime/workspace_artifact_effect.py",
         "host_brain/agent_runtime/accepted_result.py",
         "host_brain/agent_runtime/internal_artifact_terminal_reconciliation.py",
         "host_brain/contracts/agent_runtime/internal_raw_failure_claim_result.py",
@@ -4482,6 +4547,8 @@
         "tests/unit/test_ne01_workspace_w1_authority.py",
         "tests/integration/test_ne01_workspace_w2_runtime.py",
         "tests/integration/test_ne01_workspace_write_promotion.py",
+        "tests/integration/test_ne01_governed_agent_workspace_acceptance.py",
+        "tests/unit/test_ne01_governed_agent_work_order.py",
         "tests/integration/test_aw02_internal_agent_runtime_cutover.py",
         "tests/integration/test_ne01_signed_operation_failure.py",
         "tests/unit/test_ne01_internal_artifact_stage.py",
@@ -4498,16 +4565,16 @@
         "runtime_repo retirement for read-only inspection",
         "new graph-revision Tool node binding exact node Grant and WorkspaceRuntime",
         "per-operation durable fence and lease-loss preemption for future governed Tool execution",
-        "Domain/Skill/codex_runtime write promotion beyond the governed Internal slice",
+        "Domain Pack and Skill write promotion beyond the three reviewed Direct Agent Skills",
         "general crash-left unsealed partial inventory and cleanup outside the two exact signed cancellation terminals and the exact signed raw-failure terminal",
         "other failure/cancel/budget Secure Ingress claim closeout",
         "multi-node and batch post-COMMIT Budget settlement recovery",
-        "Domain Pack and codex_runtime durable-workspace injection",
+        "Domain Pack and other Skill durable-workspace injection",
         "cleanup worker health route and automatic shutdown retry orchestration",
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal write execution now seals an exact bounded path manifest plus binary patch, revalidates it after Acceptance, creates a deterministic accepted HEAD without moving the configured source branch, persists 0116 ACTIVE→ACCEPTED→PROMOTED and survives a lifecycle transaction rollback through Runtime reconstruction. Clean/no-change, sealed checkpoint continuation and the exact signed terminal paths retain their existing authorities. This remains partial: general crash-left unsealed cleanup, general unknown effect, other failure or cancellation and arbitrary multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, per-operation preemption, Domain/Skill/codex_runtime write injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
+      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal and three reviewed risk-4 Direct Agent Skills seal an exact bounded path manifest plus binary patch, revalidate it after Graph Acceptance, create a deterministic accepted HEAD without moving the configured source branch and persist 0116 ACTIVE→ACCEPTED→PROMOTED. Direct Skill payload cannot inject V3, Workspace, Review, Grant, Budget, Lease or fence authority; promotion reopens the exact Task, projection, terminal lineage, Preview, Effect and seal. Internal clean/no-change, sealed checkpoint continuation and exact signed terminal paths retain their existing authorities and are not granted to Skill. This remains partial: general crash-left unsealed cleanup, general unknown effect, other failure or cancellation and arbitrary multi-node/batch settlement recovery are missing. Handle-level atomic TOCTOU, per-operation preemption, Domain Pack and other Skill injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
       "status": "PARTIAL_V2_CODE_BOUNDARY_NO_PRODUCTION_CALLER",
