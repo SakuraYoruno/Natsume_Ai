@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from natsume_contracts.task.v1 import HostCommand
@@ -34,6 +34,7 @@ def build_review_context(
     attempt_id: str | None,
     reason: str,
     node_status_version: int | None = None,
+    additional_evidence_refs: Sequence[str] = (),
 ) -> TaskNodeReviewContext:
     node_payload = _nested_mapping(node, "node")
     side_effects = tuple(
@@ -47,7 +48,17 @@ def build_review_context(
         if _text(item)
     )
     evidence_refs = tuple(
-        dict.fromkeys((*input_refs, *_record_evidence_refs(node)))
+        dict.fromkeys(
+            (
+                *input_refs,
+                *_record_evidence_refs(node),
+                *(
+                    _text(item)
+                    for item in additional_evidence_refs
+                    if _text(item)
+                ),
+            )
+        )
     )
     review_policy = getattr(work_order, "review_policy", {})
     review_policy = dict(review_policy) if isinstance(review_policy, Mapping) else {}

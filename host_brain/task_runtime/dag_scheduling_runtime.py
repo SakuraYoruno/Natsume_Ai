@@ -54,6 +54,9 @@ from .dag_scheduling_review_denial import (
     assert_denied_review_gate,
     assert_denied_review_waiting_node,
 )
+from .dag_scheduling_acceptance_review import (
+    reopen_post_execution_acceptance_review,
+)
 from .dag_scheduling_reentry import reconstruct_parallel_outcomes
 from .dag_scheduling_completion_replay import (
     is_completed_internal_checkpoint_without_parallel_decision,
@@ -602,21 +605,15 @@ class DurableDagSchedulingRuntime:
                 if graph_status == "ACTIVE":
                     graph = await self._node_lifecycle.transition_graph(review_admission, graph, "BLOCKED")
                     graph_status = _status(graph)
-                attempts = await self._node_execution_projection.attempts_for_node(review_admission)
-                if not attempts:
-                    raise GovernedRuntimeError(
-                        GOVERNED_DURABLE_STATE_CONFLICT,
-                        "post-execution review has no durable TaskAttempt",
-                    )
-                attempt_id = _required_record_text(attempts[-1], "attempt_id")
-                gate = self._reviews.post_execution_acceptance_gate(
-                    context=build_review_context(
+                attempt_id, acceptance_decision, gate = (
+                    await reopen_post_execution_acceptance_review(
+                        store=self._store,
+                        reviews=self._reviews,
+                        projection=self._node_execution_projection,
                         admitted=review_admission,
+                        node=review_node,
                         command=command,
                         work_order=work_order,
-                        node=review_node,
-                        attempt_id=attempt_id,
-                        reason="Acceptance policy requires durable post-execution review",
                     )
                 )
                 assert_denied_review_gate(

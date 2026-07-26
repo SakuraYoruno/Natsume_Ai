@@ -56,6 +56,8 @@ class TaskStorePort(Protocol):
 
     def assert_node_verification_ready(self) -> None: ...
 
+    def assert_node_acceptance_ready(self) -> None: ...
+
     def assert_dag_scheduling_ready(self) -> None: ...
 
     def assert_parallel_settlement_decision_ready(self) -> None: ...
@@ -366,6 +368,31 @@ class TaskStorePort(Protocol):
         receipt_ref: str,
         worker_output: Mapping[str, Any],
         effect_intents: Sequence[Mapping[str, Any] | Any] = (),
+    ) -> Mapping[str, Any]: ...
+
+    def get_node_acceptance_decision(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        node_version_after: int | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def commit_node_acceptance_review(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        attempt_id: str,
+        expected_node_version: int,
+        acceptance_judgement: Mapping[str, Any] | Any,
+        node_outbox: Any,
+        review_item: Any,
+        work_order_id: str,
+        expected_graph_version: int | None = None,
+        graph_outbox: Any | None = None,
     ) -> Mapping[str, Any]: ...
 
     def transition_node_and_stage_acceptance_effects(

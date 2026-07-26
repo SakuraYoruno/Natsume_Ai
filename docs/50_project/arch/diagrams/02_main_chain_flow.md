@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.12
+版本：v2.13
 核对日期：2026-07-26
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -30,7 +30,9 @@ flowchart TD
     WORK["Frozen worker"]
     PROJECTION["Durable WorkerProjection"]
     VERIFY["Independent Verification\nreopen durable projection"]
-    ACCEPT["Independent Acceptance\nreopen again or Review"]
+    ACCEPT["Independent Acceptance\nreopen durable projection"]
+    ADEC["0134 durable Acceptance decision"]
+    REVIEW["Atomic waiting Node + ReviewItem\n+ direct Graph block"]
     EFFECT["Durable effect intents"]
     DISPATCH["AcceptanceEffectDispatcher"]
     SSE["SSE / reply projection"]
@@ -41,7 +43,9 @@ flowchart TD
     SUPPORT -->|"yes"| GR --> BUILD --> PLAN
     PLAN -->|"yes"| SEARCH --> ADMIT
     PLAN -->|"no"| DIRECT --> ADMIT
-    ADMIT --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> EFFECT --> DISPATCH --> SSE
+    ADMIT --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> ADEC
+    ADEC -->|"ACCEPT"| EFFECT --> DISPATCH --> SSE
+    ADEC -->|"non-ACCEPT"| REVIEW
     SUPPORT -->|"read route"| READ --> SSE
     SUPPORT -->|"unsupported"| REJECT
 
@@ -99,12 +103,16 @@ sequenceDiagram
             C->>T: COMMIT with latest Reservation version
             C->>C: verify(result)
             alt verified and accepted
-                C->>T: commit Acceptance + effect intents
+                C->>T: atomic Acceptance decision + artifact + effect intents + Node
                 C-->>H: accepted execution receipt
                 H->>E: dispatch_graph(graph_id, revision)
                 E->>T: commit or retain retryable effect receipt
             else review required
-                C->>T: persist checkpoint + WAITING_REVIEW
+                C->>T: atomic Acceptance decision + WAITING node + ReviewItem
+                opt direct single-node graph
+                    C->>T: same UoW Graph BLOCKED + Graph Outbox
+                end
+                C-->>H: durable Review gate
             end
         end
     end

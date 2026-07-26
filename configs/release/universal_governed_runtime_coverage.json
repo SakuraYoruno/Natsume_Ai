@@ -2,11 +2,11 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_DURABLE_NODE_VERIFICATION_TERMINAL_PRECOMMIT_OVER_ORIGIN_DEV_D50FAD7B0",
-  "current_document_slice": "NE01_DURABLE_NODE_VERIFICATION_TERMINAL_PRECOMMIT",
+  "evaluated_source": "NE01_DURABLE_NODE_ACCEPTANCE_REVIEW_PRECOMMIT_OVER_ORIGIN_DEV_81D3D2D9D",
+  "current_document_slice": "NE01_DURABLE_NODE_ACCEPTANCE_REVIEW_PRECOMMIT",
   "evidence_binding": {
-    "evaluated_commit_sha": "d50fad7b0f51236dffad9eefd9ef663f6ebc8753",
-    "migration_head": "0133_task_node_verification_decision.sql"
+    "evaluated_commit_sha": "81d3d2d9d2d70b8ef3caa905f1da82bf687daa99",
+    "migration_head": "0134_task_node_acceptance_decision.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
@@ -25,6 +25,7 @@
     "plan_node_review_continuation": "ENABLED_CAPABILITY_PLAN_REQUIRE_CONFIRM_FROZEN_TO_EXACT_NODE_POLICY_FULL_GRAPH_COVERAGE_FAIL_CLOSED_PRE_REVIEW_ACCEPTED_PROJECTIONS_KEEP_HISTORICAL_GRANT_NEW_EXECUTIONS_USE_CLAIM_FENCED_RENEWED_GRANT_REAL_SQLITE_EXACTLY_ONCE_PASS_ATTEMPT_BOUND_CHILD_BUDGET_ENABLED_GENERAL_PLAN_RECOVERY_INCOMPLETE",
     "independent_worker_evidence": "ENABLED_GENERIC_CHAT_SKILL_DELEGATE_PLAN_TOOL_AND_OPERATOR_WORKERS_USE_ONE_ROUTE_NEUTRAL_VERIFIER_AND_ACCEPTANCE_OWNER_VERIFICATION_AND_ACCEPTANCE_EACH_REOPEN_THE_DURABLE_PROJECTION_AND_REVALIDATE_COMMAND_GRAPH_REVISION_NODE_ATTEMPT_ROUTE_TARGET_GRANT_WORKORDER_CONTEXT_RECEIPT_DIGEST_COMMIT_AND_OUTPUT_CONTRACT_UNKNOWN_NATURAL_LANGUAGE_CRITERIA_REQUIRE_DURABLE_REVIEW_PLAN_FINAL_CHAT_CONSUMES_ONLY_DIGEST_BOUND_ACCEPTED_PREDECESSOR_ARTIFACTS",
     "durable_node_verification": "ENABLED_0133_APPEND_ONLY_DECISION_BINDS_GRAPH_REVISION_NODE_ATTEMPT_RESULT_DIGEST_EVIDENCE_AND_NODE_OUTBOX_IN_ONE_SQLITE_UOW_VERIFIED_CHECKPOINT_REOPENS_DURABLE_RESULT_DIRECT_VERIFICATION_FAILURE_ATOMICALLY_CLOSES_NODE_GRAPH_AND_GRAPH_BUDGET_RESPONSE_LOSS_EXACT_REPLAY_AND_TAMPER_ROLLBACK_LOCAL_SQLITE_PROVEN_MULTINODE_FAILURE_CONTINUES_THROUGH_EXISTING_0090_SETTLEMENT_GENERAL_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_AND_WAVE_INTEGRATION_INCOMPLETE",
+    "durable_node_acceptance": "ENABLED_0134_APPEND_ONLY_DECISION_BINDS_GRAPH_REVISION_NODE_ATTEMPT_JUDGEMENT_DIGEST_EVIDENCE_NODE_OUTBOX_AND_OPTIONAL_REVIEW_GRAPH_OUTBOX_ACCEPTED_ARTIFACT_EFFECT_AND_DECISION_SHARE_ONE_SQLITE_UOW_REVIEW_DECISION_NODE_WAIT_REVIEWITEM_AND_DIRECT_GRAPH_BLOCK_SHARE_ONE_SQLITE_UOW_RESPONSE_LOSS_RESTART_TAMPER_AND_FAULT_ROLLBACK_LOCAL_SQLITE_PROVEN_REVIEW_DENIAL_TERMINAL_BUNDLE_GENERAL_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_AND_WAVE_INTEGRATION_INCOMPLETE",
     "direct_production_skill_payload": "PARTIAL_DIRECT_AND_APPROVED_PLAN_NODE_ADMISSION_FROZEN_PAYLOAD_DIGEST_AND_CANONICAL_LINEAGE_REVALIDATED_BEFORE_BROKER_DISPATCH_PLAN_REQUIRES_APPROVED_CANDIDATE_INPUT_AND_IMMUTABLE_NODE_BINDING_CALLER_PAYLOAD_REJECTED_REPLAN_REGENERATES_REVISION_BOUND_PAYLOAD_REPLAY_NORMALIZES_ONLY_NESTED_ROTATING_AUTHORITY_REFS_AND_DERIVED_DIGEST_RUNTIME_CONSUMES_DURABLE_FIRST_ADMISSION_PAYLOAD_GENERAL_MULTI_NODE_RECOVERY_AND_COMMIT_BOUND_ACCEPTANCE_MISSING",
     "prompt_intelligence_legacy_execution": "RETIRED_PROPOSAL_ONLY_NO_PLANNING_AGENT_EXECUTE_PLAN_SKILL_COMPOSER_EXECUTE_SKILL_REGISTRY_OR_HANDLER_CALLS",
     "legacy_executive_planning_authority": "PARTIAL_RETIRED_FAIL_CLOSED_NO_ROUTE_PLANNING_LEGACY_SKILL_ROUTING_CONVERSATION_EXECUTION_APPLICATION_COMPOSITION_APPLICATION_PORT_WIRING_LEGACY_DIAGNOSTIC_DIRECT_SKILL_MATRIX_OR_LEGACY_SKILL_DAG_WORKER_DISPATCH_EXECUTIVE_FORGE_OVERRIDE_CALL_REMOVED_PURE_SKILL_DAG_COMPATIBILITY_ADAPTER_ZERO_PRODUCTION_CALLERS_INDEPENDENT_FORGE_RUNTIME_MATCH_REMAINS_NE05_GAP",
@@ -397,8 +398,13 @@
         "host_brain/audit/migrations/0131_task_operation_recovery_hold_binding.sql",
         "host_brain/audit/migrations/0132_task_node_budget_reservation.sql",
         "host_brain/audit/migrations/0133_task_node_verification_decision.sql",
+        "host_brain/audit/migrations/0134_task_node_acceptance_decision.sql",
         "host_brain/contracts/agent_runtime/node_budget_reservation.py",
         "host_brain/persistence/task_node_budget_store.py",
+        "host_brain/persistence/task_node_acceptance_store.py",
+        "host_brain/persistence/review_pending_uow.py",
+        "host_brain/task_runtime/node_acceptance_lifecycle.py",
+        "host_brain/task_runtime/dag_scheduling_acceptance_review.py",
         "host_brain/persistence/task_node_budget_usage_bridge.py",
         "host_brain/persistence/task_budget_terminal_sibling.py",
         "host_brain/task_runtime/operation_reconciliation_acceptance_effect.py",

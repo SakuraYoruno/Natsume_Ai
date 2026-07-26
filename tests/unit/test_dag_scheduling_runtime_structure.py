@@ -20,7 +20,7 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 # The current baseline also permits one exact denied Review to terminalize
 # without minting a worker grant, while retaining fail-closed durable guards.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "4842863e08a50966cc5c5b33f02be5dc11d8bc94384a0e946f80db6c5c7882ef"
+    "1d1495052c8515903120afab171d21b02368847da86211f78bcf18da24e589d9"
 )
 _PREFLIGHT_BASELINE_SHA256 = (
     "0808b13ad9b97bb5b116c44d195f7a09c3b3a591bb92c15eda3c2df3cd7ff1bd"
@@ -238,23 +238,22 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
             "cancel_waiting_review_node": 1,
         },
         "_accepted_graph_finalization": {"complete": 1},
-        "_node_execution_projection": {
-            "try_operation": 3,
-            "attempts_for_node": 2,
-            "matching_parallel_decision": 4,
-            "selected_parallel_decision_outcome": 4,
-        },
+            "_node_execution_projection": {
+                "try_operation": 3,
+                "attempts_for_node": 1,
+                "matching_parallel_decision": 4,
+                "selected_parallel_decision_outcome": 4,
+            },
         "_node_execution": {"execute_stream": 8},
         "_parallel_settlement": {
             "assert_parallel_reentry_idle": 1,
             "resolve_parallel_outcomes": 3,
         },
         "_parallel_success": {"complete": 1},
-        "_reviews": {
-            "pre_execution_gate": 2,
-            "post_execution_acceptance_gate": 1,
-            "lookup_pre_execution_gate": 1,
-        },
+            "_reviews": {
+                "pre_execution_gate": 2,
+                "lookup_pre_execution_gate": 1,
+            },
         "_runtime_outbox": {"build": 1, "publish_pending": 7},
     }
     for dependency, matrix in expected.items():

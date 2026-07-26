@@ -9,7 +9,10 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from host_brain.contracts.agent_runtime.acceptance_judge import AcceptanceGate
+from host_brain.contracts.agent_runtime.acceptance_judge import (
+    AcceptanceGate,
+    AcceptanceJudgement,
+)
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.node_artifact import (
     NODE_ARTIFACT_SCHEMA_VERSION,
@@ -167,6 +170,7 @@ class TaskNodeArtifactStoreMixin:
         """
 
         self.assert_node_artifact_ready()
+        self.assert_node_acceptance_ready()
         specs = self._normalize_optional_node_acceptance_effects(effect_intents)
         if specs:
             self.assert_acceptance_effect_intent_ready()
@@ -231,7 +235,7 @@ class TaskNodeArtifactStoreMixin:
                 int(current["status_version"]) == int(expected_version) + 1
                 and str(current["status"]) == TaskNodeStatus.ACCEPTED.value
             ):
-                self._validate_acceptance_judgement(
+                judgement = self._validate_acceptance_judgement(
                     conn,
                     graph_id=graph_ref,
                     graph_revision=graph_revision,
@@ -239,6 +243,33 @@ class TaskNodeArtifactStoreMixin:
                     node_payload=node_payload,
                     acceptance_judgement=acceptance_judgement,
                     outbox=outbox,
+                )
+                if judgement.attempt_id != attempt_ref:
+                    raise TaskStoreError(
+                        TASK_STORE_INVALID,
+                        "AcceptanceJudgement must bind the exact Attempt",
+                    )
+                decision_row = self._find_node_acceptance_decision(
+                    conn,
+                    graph_id=graph_ref,
+                    graph_revision=graph_revision,
+                    node_id=node_ref,
+                    node_version_after=int(expected_version) + 1,
+                )
+                if decision_row is None:
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "ACCEPTED TaskNode has no durable Acceptance decision",
+                    )
+                decision = self._node_acceptance_record(conn, decision_row)
+                self._assert_acceptance_replay(
+                    decision,
+                    judgement=judgement,
+                    target=TaskNodeStatus.ACCEPTED,
+                    attempt_id=attempt_ref,
+                    node_outbox=outbox,
+                    review_id=None,
+                    graph_outbox=None,
                 )
                 self._assert_mutation_outbox_replay(
                     conn,
@@ -283,9 +314,24 @@ class TaskNodeArtifactStoreMixin:
                     "node": _node_record(current),
                     "artifact": artifact,
                     "effect_intents": staged,
+                    "decision": decision,
                     "replayed": True,
                 }
 
+            judgement = self._validate_acceptance_judgement(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+                node_id=node_ref,
+                node_payload=node_payload,
+                acceptance_judgement=acceptance_judgement,
+                outbox=outbox,
+            )
+            if judgement.attempt_id != attempt_ref:
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "AcceptanceJudgement must bind the exact Attempt",
+                )
             staged = tuple(
                 self._stage_acceptance_effect_intent_in_transaction(
                     conn,
@@ -324,6 +370,22 @@ class TaskNodeArtifactStoreMixin:
                 ts_ms=ts_ms,
                 outbox_attempt_id=attempt_ref,
             )
+            decision = self._insert_node_acceptance_decision_in_transaction(
+                conn,
+                graph_id=graph_ref,
+                graph_revision=graph_revision,
+                node_id=node_ref,
+                attempt_id=attempt_ref,
+                node_version_before=int(expected_version),
+                target=TaskNodeStatus.ACCEPTED,
+                judgement=judgement,
+                node_outbox=outbox,
+                review_id=None,
+                graph_version_before=None,
+                graph_version_after=None,
+                graph_outbox_id=None,
+                ts_ms=ts_ms,
+            )
             artifact = self._require_valid_node_artifact(
                 conn,
                 graph_id=graph_ref,
@@ -346,6 +408,7 @@ class TaskNodeArtifactStoreMixin:
                 "node": node,
                 "artifact": artifact,
                 "effect_intents": staged,
+                "decision": decision,
                 "replayed": False,
             }
 
@@ -381,7 +444,7 @@ class TaskNodeArtifactStoreMixin:
         output_contract: Mapping[str, Any],
         artifact_payload: Mapping[str, Any],
         ts_ms: int,
-    ) -> None:
+    ) -> AcceptanceJudgement:
         artifact_ref = build_task_result_artifact_ref(
             graph_id,
             graph_revision,
@@ -808,7 +871,7 @@ class TaskNodeArtifactStoreMixin:
     ) -> None:
         graph = self._require_graph(conn, graph_id, graph_revision)
         try:
-            AcceptanceGate.validate_node_transition(
+            validated = AcceptanceGate.validate_node_transition(
                 acceptance_judgement,
                 target_status=TaskNodeStatus.ACCEPTED.value,
                 graph_id=graph_id,
@@ -821,6 +884,12 @@ class TaskNodeArtifactStoreMixin:
             )
         except ContractViolation as exc:
             raise TaskStoreError(exc.reason_code, exc.detail) from exc
+        if validated is None:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "ACCEPTED transition lost its AcceptanceJudgement",
+            )
+        return validated
 
     @staticmethod
     def _assert_artifact_attempt_and_receipt(

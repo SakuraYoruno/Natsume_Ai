@@ -110,7 +110,7 @@ from .preoperation_attempt_recovery import (
     PreOperationRecoveryCandidate,
     acquire_preoperation_takeover_lease,
 )
-from .review_runtime import TaskNodeReviewGate, TaskNodeReviewRuntime
+from .review_runtime import TaskNodeReviewRuntime
 from .runtime_outbox import RuntimeOutbox
 from .worker_registry import GovernedWorkerRoute
 
@@ -1325,32 +1325,43 @@ class DurableNodeExecutionRuntime:
             acceptance_refs = _evidence_refs(acceptance)
 
         if not accepted:
-            node = await self._node_lifecycle.transition_node(
-                admitted,
-                node,
-                "WAITING_ACCEPTANCE_REVIEW",
-                evidence_refs=acceptance_refs or verification_refs,
-            )
-            if not defer_shared_terminal:
-                graph = await self._node_lifecycle.transition_graph(admitted, graph, "BLOCKED")
-            review_gate: TaskNodeReviewGate | None = None
-            review_refs: tuple[str, ...] = ()
-            if self._reviews is not None:
-                review_gate = self._reviews.post_execution_acceptance_gate(
-                    context=build_review_context(
-                        admitted=admitted,
-                        command=command,
-                        work_order=work_order,
-                        node=node,
-                        attempt_id=attempt_id,
-                        reason="Acceptance policy requires durable post-execution review",
-                    )
+            if self._reviews is None:
+                raise GovernedRuntimeError(
+                    GOVERNED_DURABLE_STATE_CONFLICT,
+                    "Acceptance review requires the durable Review Runtime",
                 )
-                review_refs = _review_evidence_refs(review_gate)
+            review_context = build_review_context(
+                admitted=admitted,
+                command=command,
+                work_order=work_order,
+                node=node,
+                node_status_version=_version(node) + 1,
+                attempt_id=attempt_id,
+                reason="Acceptance policy requires durable post-execution review",
+                additional_evidence_refs=acceptance_refs or verification_refs,
+            )
+            review_item = (
+                self._reviews.prepare_post_execution_acceptance_review(
+                    context=review_context,
+                )
+            )
+            node, graph, review_record = (
+                await self._node_lifecycle.commit_node_acceptance_review(
+                    admitted,
+                    node=node,
+                    graph=graph,
+                    attempt_id=attempt_id,
+                    evidence_refs=acceptance_refs or verification_refs,
+                    acceptance_judgement=acceptance,
+                    review_item=review_item,
+                    defer_shared_terminal=defer_shared_terminal,
+                )
+            )
+            review_gate = self._reviews.gate_from_record(review_record)
+            review_refs = _review_evidence_refs(review_gate)
             await self._runtime_outbox.publish_pending()
             review_projection = dict(worker_commit)
-            if review_gate is not None:
-                review_projection["review"] = review_gate.to_dict()
+            review_projection["review"] = review_gate.to_dict()
             receipt = build_execution_receipt(
                 admitted,
                 attempt_id=attempt_id,
@@ -1359,11 +1370,7 @@ class DurableNodeExecutionRuntime:
                 status="WAITING_ACCEPTANCE_REVIEW",
                 verification_status="PASS",
                 accepted=False,
-                reason_code=(
-                    GOVERNED_REVIEW_REQUIRED
-                    if review_gate is not None
-                    else _text(acceptance.get("reason_code")) or GOVERNED_ACCEPTANCE_FAILED
-                ),
+                reason_code=GOVERNED_REVIEW_REQUIRED,
                 evidence_refs=tuple(
                     dict.fromkeys((*(acceptance_refs or verification_refs), *review_refs))
                 ),

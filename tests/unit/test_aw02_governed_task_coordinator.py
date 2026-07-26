@@ -20,6 +20,7 @@ from host_brain.task_runtime import (
     GovernedRuntimeError,
     GovernedTaskCoordinator,
 )
+from host_brain.task_runtime.review_runtime import TaskNodeReviewGate
 from natsume_contracts.task.v1 import (
     ExecutorAssignment,
     HostCommandSurface,
@@ -90,6 +91,7 @@ class _FakeTaskStore:
             "node": node.to_dict(),
         }
         self.attempts: dict[str, dict[str, Any]] = {}
+        self.acceptance_decisions: dict[int, dict[str, Any]] = {}
         self.reservation: dict[str, Any] | None = None
         self.budget: dict[str, Any] | None = None
         self.budget_usage: dict[str, _BudgetResult] = {}
@@ -346,8 +348,104 @@ class _FakeTaskStore:
                 "receipt_ref": receipt_ref,
             },
             "effect_intents": tuple(effect_intents),
+            "decision": {
+                "acceptance_ref": f"task-acceptance://fake/{attempt_id}",
+                "target_status": "ACCEPTED",
+                "attempt_id": attempt_id,
+                "node_version_before": expected_version,
+                "node_version_after": expected_version + 1,
+                "review_id": None,
+                "graph_outbox_id": None,
+            },
             "replayed": False,
         }
+
+    def commit_node_acceptance_review(
+        self,
+        graph_id: str,
+        revision: int,
+        node_id: str,
+        *,
+        attempt_id: str,
+        expected_node_version: int,
+        acceptance_judgement: Any,
+        node_outbox: Any,
+        review_item: Any,
+        work_order_id: str,
+        expected_graph_version: int | None = None,
+        graph_outbox: Any = None,
+    ) -> dict[str, Any]:
+        del acceptance_judgement, node_outbox, work_order_id
+        node = self.transition_node(
+            graph_id,
+            revision,
+            node_id,
+            expected_version=expected_node_version,
+            target_status="WAITING_ACCEPTANCE_REVIEW",
+            outbox=None,
+        )
+        if expected_graph_version is not None:
+            graph = self.transition_graph(
+                graph_id,
+                revision,
+                expected_version=expected_graph_version,
+                target_status="BLOCKED",
+                outbox=graph_outbox,
+            )
+        else:
+            graph = dict(self.graph)
+        decision = {
+            "acceptance_ref": f"task-acceptance://fake/{attempt_id}/review",
+            "target_status": "WAITING_ACCEPTANCE_REVIEW",
+            "attempt_id": attempt_id,
+            "node_version_before": expected_node_version,
+            "node_version_after": expected_node_version + 1,
+            "review_id": review_item.review_id,
+            "graph_outbox_id": (
+                "fake-graph-outbox"
+                if expected_graph_version is not None
+                else None
+            ),
+            "evidence_refs": tuple(
+                getattr(review_item, "evidence_refs", ())
+            ),
+        }
+        self.acceptance_decisions[expected_node_version + 1] = decision
+        review = {
+            "review": {
+                "review_id": review_item.review_id,
+                "review_type": "POST_EXECUTION_ACCEPTANCE",
+                "resume_phase": "POST_EXECUTION_ACCEPTANCE",
+                "subject_ref": review_item.subject_ref,
+                "subject_version": review_item.subject_version,
+                "checkpoint_id": review_item.checkpoint_id,
+                "status": "PENDING",
+            }
+        }
+        return {
+            "node": node,
+            "graph": graph,
+            "review": review,
+            "decision": decision,
+            "replayed": False,
+        }
+
+    def get_node_acceptance_decision(
+        self,
+        graph_id: str,
+        revision: int,
+        node_id: str,
+        *,
+        node_version_after: int | None = None,
+    ) -> dict[str, Any]:
+        del graph_id, revision, node_id
+        version = (
+            int(node_version_after)
+            if node_version_after is not None
+            else max(self.acceptance_decisions)
+        )
+        return dict(self.acceptance_decisions[version])
+
 
     def create_attempt(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append("attempt:CREATED")
@@ -612,6 +710,79 @@ class _FakeTaskStore:
         return dict(self.reservation)
 
 
+class _FakeReviewRuntime:
+    @staticmethod
+    def pre_execution_required_nodes(
+        work_order: Any,
+        *,
+        node_ids: Any,
+    ) -> frozenset[str]:
+        del work_order, node_ids
+        return frozenset()
+
+    @staticmethod
+    def prepare_post_execution_acceptance_review(
+        *,
+        context: Any,
+    ) -> Any:
+        return type(
+            "_PreparedReview",
+            (),
+            {
+                "review_id": "task_review_fake_acceptance",
+                "subject_ref": (
+                    f"task-node://{context.graph_id}/"
+                    f"{context.graph_revision}/{context.node_id}"
+                    f"?attempt={context.attempt_id}"
+                ),
+                "subject_version": context.node_status_version,
+                "checkpoint_id": (
+                    f"task-checkpoint://{context.graph_id}/"
+                    f"{context.graph_revision}/{context.node_id}/"
+                    "post_execution_acceptance"
+                ),
+                "evidence_refs": context.evidence_refs,
+            },
+        )()
+
+    @staticmethod
+    def gate_from_record(record: Any) -> TaskNodeReviewGate:
+        review = dict(record["review"])
+        return TaskNodeReviewGate(
+            disposition="WAITING_REVIEW",
+            allowed=False,
+            review_id=review["review_id"],
+            review_status=review["status"],
+            review_type=review["review_type"],
+            resume_phase=review["resume_phase"],
+            subject_ref=review["subject_ref"],
+            subject_version=int(review["subject_version"]),
+            checkpoint_id=review["checkpoint_id"],
+        )
+
+    def post_execution_acceptance_gate(
+        self,
+        *,
+        context: Any,
+    ) -> TaskNodeReviewGate:
+        prepared = self.prepare_post_execution_acceptance_review(
+            context=context,
+        )
+        return self.gate_from_record(
+            {
+                "review": {
+                    "review_id": prepared.review_id,
+                    "status": "PENDING",
+                    "review_type": "POST_EXECUTION_ACCEPTANCE",
+                    "resume_phase": "POST_EXECUTION_ACCEPTANCE",
+                    "subject_ref": prepared.subject_ref,
+                    "subject_version": prepared.subject_version,
+                    "checkpoint_id": prepared.checkpoint_id,
+                }
+            }
+        )
+
+
 class _Repository:
     def __init__(self, *, replayed: bool = False) -> None:
         self.replayed = replayed
@@ -829,6 +1000,11 @@ def _application(
         worker_resolver=_Resolver(calls),
         verifier=_Verifier(verification_status),
         acceptance=_Acceptance(acceptance_decision),
+        review_runtime=(
+            _FakeReviewRuntime()
+            if acceptance_decision == "REVIEW"
+            else None
+        ),
         owner_id="worker-one",
     )
     return GovernedCommandApplication(command_repository=_Repository(), coordinator=coordinator)
@@ -1711,7 +1887,7 @@ async def test_failed_verification_never_emits_commit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_acceptance_review_replays_committed_receipt_without_reexecution() -> None:
+async def test_acceptance_review_reopens_durable_gate_without_reexecution() -> None:
     command, work_order, assignment, graph = _contracts(
         executor=TaskExecutor.CANONICAL
     )
@@ -1748,7 +1924,7 @@ async def test_acceptance_review_replays_committed_receipt_without_reexecution()
     assert first[-1]["decision"] == "REJECT"
     assert first_receipt["status"] == "WAITING_ACCEPTANCE_REVIEW"
     assert replay[-1]["decision"] == "REJECT"
-    assert replay[-1]["replayed"] is True
+    assert replay[-1]["replayed"] is False
     assert replay_receipt["status"] == "WAITING_ACCEPTANCE_REVIEW"
     assert replay_receipt["verification_status"] == "PASS"
     assert replay_receipt["accepted"] is False

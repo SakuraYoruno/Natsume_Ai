@@ -30,9 +30,12 @@ from host_brain.contracts.agent_runtime.review_token_contract import (
 )
 from host_brain.persistence.review_continuation_store import (
     ReviewContinuationStoreError,
-    continuation_table_exists,
     enqueue_task_review_continuation_in_transaction,
-    validate_task_review_admission_in_transaction,
+)
+from host_brain.persistence.review_pending_uow import (
+    ReviewPendingUowError,
+    insert_pending_review_in_transaction,
+    review_record_from_row,
 )
 
 
@@ -327,70 +330,19 @@ class ReviewStore:
         task_node_id: str | None = None,
     ) -> dict[str, Any]:
         item = review if isinstance(review, ReviewItem) else ReviewItem.from_mapping(review)
-        item.validate()
-        if item.status is not ReviewStatus.PENDING:
-            raise ReviewStoreError(REVIEW_STATUS_CONFLICT, "new ReviewItem must be PENDING")
-        checkpoint_id = _durable_ref(item.checkpoint_id, field_name="checkpoint_id")
-        diff_ref = _durable_ref(item.diff_ref, field_name="diff_ref", required=False)
         ts_ms = self._now()
-        if int(item.expires_at) <= ts_ms:
-            raise ReviewStoreError(REVIEW_TOKEN_EXPIRED, "ReviewItem expires_at is already expired")
         with self._transaction() as conn:
-            self._assert_task_node_not_cancelling(
-                conn,
-                subject_ref=item.subject_ref,
-            )
             try:
-                validate_task_review_admission_in_transaction(
+                return insert_pending_review_in_transaction(
                     conn,
                     review=item,
+                    work_order_id=work_order_id,
                     task_graph_id=task_graph_id,
                     task_node_id=task_node_id,
-                    require_schema=continuation_table_exists(conn),
+                    ts_ms=ts_ms,
                 )
-            except ReviewContinuationStoreError as exc:
+            except ReviewPendingUowError as exc:
                 raise ReviewStoreError(exc.reason_code, exc.detail) from exc
-            conn.execute(
-                """
-                INSERT INTO agent_runtime_review(
-                    review_id, schema_version, review_type, subject_ref,
-                    subject_version, requester, reason, risk_level,
-                    side_effects_json, evidence_refs_json, status, status_version,
-                    expires_at, resume_phase, diff_ref, checkpoint_id,
-                    decision_actor, token_ref, resume_count, resume_result_ref,
-                    work_order_id, task_graph_id, task_node_id, review_json,
-                    created_ts_ms, updated_ts_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item.review_id,
-                    item.schema_version,
-                    item.review_type.value,
-                    item.subject_ref,
-                    item.subject_version,
-                    item.requester,
-                    item.reason,
-                    item.risk_level,
-                    _dumps(list(item.side_effects)),
-                    _dumps(list(item.evidence_refs)),
-                    item.status.value,
-                    item.expires_at,
-                    item.resume_phase.value,
-                    diff_ref,
-                    checkpoint_id,
-                    item.decision_actor,
-                    item.token_ref,
-                    item.resume_count,
-                    item.resume_result_ref,
-                    _text(work_order_id) or None,
-                    _text(task_graph_id) or None,
-                    _text(task_node_id) or None,
-                    _dumps(item.to_dict()),
-                    ts_ms,
-                    ts_ms,
-                ),
-            )
-            return self._record_from_row(self._require_review(conn, item.review_id))
 
     def get_review(self, review_id: str) -> dict[str, Any]:
         conn = self._connect()
@@ -895,18 +847,10 @@ class ReviewStore:
             ) from exc
 
     def _record_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
-        item = self._item_from_row(row)
-        return {
-            "review": item.to_dict(),
-            "status_version": int(row["status_version"]),
-            "work_order_id": row["work_order_id"],
-            "task_graph_id": row["task_graph_id"],
-            "task_node_id": row["task_node_id"],
-            "side_effects": _loads_list(row["side_effects_json"], field_name="side_effects_json"),
-            "evidence_refs": _loads_list(row["evidence_refs_json"], field_name="evidence_refs_json"),
-            "created_ts_ms": int(row["created_ts_ms"]),
-            "updated_ts_ms": int(row["updated_ts_ms"]),
-        }
+        try:
+            return review_record_from_row(row)
+        except ReviewPendingUowError as exc:
+            raise ReviewStoreError(exc.reason_code, exc.detail) from exc
 
     def _update_review_item(
         self,

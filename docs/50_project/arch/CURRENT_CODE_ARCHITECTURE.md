@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.42
+版本：v5.43
 核对日期：2026-07-26
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,8 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
+
+节点 Acceptance 现在也有独立持久事实。0134 的 append-only decision 精确绑定 Graph revision、Node、Attempt、规范 `AcceptanceJudgement`、evidence、Node Outbox，以及可选 Review/Graph block lineage。自动接受由一个 TaskStore 事务共同提交 decision、TaskResult artifact、可选 Effect intents 与 `ACCEPTED` Node；非 `ACCEPT` judgement 由一个事务共同提交 decision、`WAITING_ACCEPTANCE_REVIEW` Node、pending ReviewItem 与 Outbox，直接单节点图还共同进入 `BLOCKED`。Scheduler snapshot 投影该 decision，Continuation 只按 exact node version 重开，worker 与 judge 均不重跑。pending Review SQL writer 已收敛为一个共享 owner。Review 拒绝后的完整 Node/Graph/Budget/claim 终态尚未并入这个 UoW，因此本切片只关闭 Acceptance/Review 的创建断点。
 
 节点 Verification 已有独立持久事实。0133 的 append-only decision 精确绑定 Graph revision、Node、Attempt、规范 `VerificationResult`、evidence 与 Node Outbox；Node transition 和 decision 共用一个 TaskStore UoW。Committed checkpoint 在 `VERIFIED` 后重入时从 decision 取回结果，不再读取从未落库的 `node.verification_result`。直接单节点拒绝由一个事务同时写 `VERIFICATION_FAILED` Node、`FAILED` Graph、`RELEASED` graph Budget 及各自 Outbox；响应丢失走 exact replay，伪造 Graph Outbox 会使整个事务回滚。多节点拒绝只先记录节点决定，再由 0090 唯一 settlement owner 关闭 Graph/Budget。generic `transition_node()` 仍作为低层兼容 API 存在，但生产 verifier/continuation 调用点已迁移；一般 failure/cancellation 和七路线 commit-bound evidence 尚未完成。
 
@@ -26,7 +28,7 @@ Chat 路线的一个真实正确性缺口已经关闭：`life.conversation_turn_
 
 Direct Agent Skill 写入不再停在 proposal-only。`agent_worker`、`agent_self_heal`、`agent_self_evolve` 的 Host admission 从 app-local SkillRegistry 冻结 risk 4 与 durable Review policy；frozen worker 必须重开唯一已消费的 task/node-bound Review。兼容 payload 中的 V3、Graph、Workspace、Grant、Budget、Review、Lease/fence authority 会被拒绝，`governed_skill_work_order.py` 从已验证 Task context 重建 WorkOrderV3。sealed broker dispatch 才能给 `codex_runtime` 注入同一 app-local ArtifactStore/WorkspaceRuntime。写结果先成为 protected stage 和 immutable WorkerProjection proposal，Graph Acceptance 再编译先于 visible Effects 的 `agent.workspace_artifact_promote`；Accepted handler 重开 admission、projection、Node/Attempt/Lease/NodeArtifact、Preview、Effect 和 sealed bytes 后推进 0116。真实 SQLite+Git 已证明 source `main` 不动和重建 Runtime 后 accepted HEAD 仍持久可读。Domain Pack、其它 Skill、一般恢复与强租户隔离仍未完成，NE-01 仍是 `IN_PROGRESS`。
 
-当前连续 migration head 为 `0133_task_node_verification_decision.sql`。0132 在 Attempt/Lease/READY claim 的同一 `BEGIN IMMEDIATE` 中创建 immutable child Budget Reservation；Graph Budget 保持唯一 aggregate ceiling。0133 在 Verification transition 同一 UoW 固化 exact decision，并为直接拒绝提供 Node/Graph/Budget 原子终态。0130/0131 的 recovery hold 与签名 reconciliation、0132 的父子预算语义均保持不变。该局部证据仍不覆盖其它 failure/cancellation、自动副作用归因、Workspace 全终态、部署 fan-out 或七路线验收。
+当前连续 migration head 为 `0134_task_node_acceptance_decision.sql`。0132 在 Attempt/Lease/READY claim 的同一 `BEGIN IMMEDIATE` 中创建 immutable child Budget Reservation；Graph Budget 保持唯一 aggregate ceiling。0133 在 Verification transition 同一 UoW 固化 exact decision，并为直接拒绝提供 Node/Graph/Budget 原子终态；0134 在 Acceptance transition 同一 UoW 固化 exact decision，并原子提交 artifact/effect 或 Review waiting bundle。0130/0131 的 recovery hold 与签名 reconciliation、0132 的父子预算语义均保持不变。该局部证据仍不覆盖其它 failure/cancellation、Review 拒绝终态、自动副作用归因、Workspace 全终态、部署 fan-out或七路线验收。
 
 无 cancellation intent 的 signed `RELEASE + NO_SIDE_EFFECT` 已从单节点整图终态扩展为通用节点终态。`TaskOperationFailureReconciliationStoreMixin` 的第一事务只释放 Operation、失败目标 Attempt/Node、过期原 Lease并写四条 Outbox；只有单节点兼容路径在同一事务关闭 Graph/Budget。多节点 Graph/Budget 保持 ACTIVE，重启后的 `DurableDagSchedulingRuntime` 先重建 failed outcome，再让现有 0090 writer 原子提交 Graph/Budget 失败终态。Acceptance v4 receipt 不摘要会变化的 Graph settlement 字段，因此 `PENDING→COMMITTED` 后仍精确重放；0090 decision 或 Graph/Budget Outbox 漂移会失败关闭。双根、并发额度1的真实 SQLite 测试证明 READY sibling 未执行；并发额度2的双失败测试证明非 selected 失败节点仍由同一 decision outcome 精确覆盖并可重开。该链不自动判定副作用，也不覆盖其它 failure/cancellation。
 
@@ -48,7 +50,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
-| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0133_task_node_verification_decision.sql`。0126～0132 的 Operation、Effect、mode-policy、recovery 与节点预算边界保持不变；0133 增加 append-only Verification decision 和直接拒绝原子终态。这些资产都不代表七路线或 NE-01 已生产封板 |
+| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0134_task_node_acceptance_decision.sql`。0126～0132 的 Operation、Effect、mode-policy、recovery 与节点预算边界保持不变；0133 增加 append-only Verification decision 和直接拒绝原子终态，0134 增加 append-only Acceptance decision 与 Acceptance/Review 原子提交。这些资产都不代表七路线或 NE-01 已生产封板 |
 | Universal Runtime 七路线 | `INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。Chat/Skill 缺当前提交和 migration head 绑定的真实 receipt；Plan/Delegate 存在节点治理缺口。Scheduler occurrence 与管理 HTTP 都已把真实 writer 移至 Acceptance 后，双前缀 CRUD 直接 authority 为 0；Internal 仍是窄恢复切片。Operator 目前 `14/37`，其余 `23/37` 继续阻断。局部 Scheduler/Operator 证据和旧 GR-06 历史证据都不能替代七路线 commit-bound acceptance |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`workspace_write_promotion.py` 密封 bounded safe-path manifest 与 binary patch并确定性生成 accepted HEAD；源 branch 不移动。`internal_startup_checkpoint_continuation.py` 提供 exact scan，`periodic_durable_continuation.py` 只托管 timer/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 仍以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 除精确 sealed abandon/cleanup 外，只对 finalized cancellation 且符合共享中立合同两类 exact signed terminal 的未封存单节点先关闭 claim、再 cleanup/discard；失败顺序不会删除证据。一般 unknown effect、其它 crash-left/取消 closeout 与 general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、OS/container isolation、canary与七路线验收也未完成 |

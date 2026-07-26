@@ -839,6 +839,17 @@ async def test_gr03_post_acceptance_review_resumes_without_worker_reexecution(
     assert calls == ["root"]
     review = first_receipt["projection"]["review"]
     assert review["resume_phase"] == ReviewResumePhase.POST_EXECUTION_ACCEPTANCE.value
+    waiting_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    waiting_node = waiting_store.get_node("graph-gr03a", 1, "root")
+    waiting_decision = waiting_store.get_node_acceptance_decision(
+        "graph-gr03a",
+        1,
+        "root",
+        node_version_after=int(waiting_node["status_version"]),
+    )
+    assert waiting_decision["target_status"] == "WAITING_ACCEPTANCE_REVIEW"
+    assert waiting_decision["review_id"] == review["review_id"]
+    assert waiting_decision["graph_outbox_id"] is not None
     _consume_review(review_store, review)
 
     resumed = [
@@ -853,6 +864,15 @@ async def test_gr03_post_acceptance_review_resumes_without_worker_reexecution(
     assert resumed[-1]["execution_receipt"]["status"] == "ACCEPTED"
     assert resumed[-1]["replayed"] is True
     assert calls == ["root"]
+    accepted_decision = waiting_store.get_node_acceptance_decision(
+        "graph-gr03a",
+        1,
+        "root",
+    )
+    assert accepted_decision["target_status"] == "ACCEPTED"
+    assert accepted_decision["node_version_before"] == (
+        waiting_decision["node_version_after"]
+    )
 
 
 @pytest.mark.asyncio
@@ -2756,11 +2776,16 @@ async def test_ne01_b4_crash_reentry_failure_beats_review_and_persists_decision(
         node_delays={"left": 0.05},
     )
     acceptance = _Acceptance(decisions_by_node={"left": "REVIEW"})
+    review_runtime = TaskNodeReviewRuntime(
+        ReviewStore(db_path, clock=lambda: NOW),
+        clock=lambda: NOW,
+    )
     first_runtime = _coordinator(
         db_path,
         calls,
         worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
         acceptance=acceptance,
+        review_runtime=review_runtime,
         bounded_fanout_enabled=True,
     )
     first_settlement_calls = 0
@@ -2810,15 +2835,22 @@ async def test_ne01_b4_crash_reentry_failure_beats_review_and_persists_decision(
         "WAITING_ACCEPTANCE_REVIEW"
     )
     assert crashed_store.get_node("graph-gr03a", 1, "right")["status"] == "FAILED"
-    assert crashed_store.read_scheduler_snapshot("graph-gr03a", 1)["budgets"][0][
-        "status"
-    ] == "ACTIVE"
+    crashed_snapshot = crashed_store.read_scheduler_snapshot("graph-gr03a", 1)
+    assert crashed_snapshot["budgets"][0]["status"] == "ACTIVE"
+    assert len(crashed_snapshot["node_acceptances"]) == 1
+    assert crashed_snapshot["node_acceptances"][0]["target_status"] == (
+        "WAITING_ACCEPTANCE_REVIEW"
+    )
 
     reentry_runtime = _coordinator(
         db_path,
         calls,
         worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
         acceptance=acceptance,
+        review_runtime=TaskNodeReviewRuntime(
+            ReviewStore(db_path, clock=lambda: NOW),
+            clock=lambda: NOW,
+        ),
         bounded_fanout_enabled=True,
     )
     committed_settlement = reentry_runtime._store.settle_parallel_graph_budget  # noqa: SLF001

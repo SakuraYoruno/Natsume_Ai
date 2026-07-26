@@ -223,6 +223,31 @@ class TaskNodeReviewRuntime:
             review_type=ReviewType.POST_EXECUTION_ACCEPTANCE,
         )
 
+    def prepare_post_execution_acceptance_review(
+        self,
+        *,
+        context: TaskNodeReviewContext,
+    ) -> ReviewItem:
+        """Build, but do not persist, the ReviewItem for the TaskStore UoW."""
+
+        review_type = ReviewType.POST_EXECUTION_ACCEPTANCE
+        context.validate(review_type=review_type)
+        binding = _binding(context, review_type=review_type)
+        return _new_review_item(
+            context,
+            binding=binding,
+            review_type=review_type,
+            expires_at=int(self._clock()) + self._review_ttl_ms,
+        )
+
+    @staticmethod
+    def gate_from_record(
+        record: Mapping[str, Any],
+    ) -> TaskNodeReviewGate:
+        """Validate a TaskStore-committed Review record for coordinator use."""
+
+        return _gate_from_record(record)
+
     def lookup_pre_execution_gate(
         self,
         *,

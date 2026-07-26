@@ -9,6 +9,7 @@ from collections import Counter
 from host_brain.task_runtime import coordinator
 from host_brain.task_runtime import accepted_graph_finalization
 from host_brain.task_runtime import dag_scheduling_runtime
+from host_brain.task_runtime import node_acceptance_lifecycle
 from host_brain.task_runtime import node_execution_runtime
 from host_brain.task_runtime import node_lifecycle_runtime
 from host_brain.task_runtime.node_lifecycle_runtime import (
@@ -22,6 +23,7 @@ _MIGRATED_METHODS = (
     "commit_node_verification",
     "finalize_verification_failure",
     "accept_node_output",
+    "commit_node_acceptance_review",
     "transition_graph_with_acceptance_effects",
     "cancel_waiting_review_node",
     "transition_attempt",
@@ -32,11 +34,12 @@ _MIGRATED_METHODS = (
 )
 
 _COORDINATOR_CALL_MATRIX = {
-    "transition_graph": 14,
-    "transition_node": 8,
+    "transition_graph": 13,
+    "transition_node": 7,
     "commit_node_verification": 1,
     "finalize_verification_failure": 1,
     "accept_node_output": 2,
+    "commit_node_acceptance_review": 1,
     "transition_graph_with_acceptance_effects": 1,
     "cancel_waiting_review_node": 1,
     "transition_attempt": 2,
@@ -46,11 +49,12 @@ _COORDINATOR_CALL_MATRIX = {
 }
 
 _NODE_EXECUTION_CALL_MATRIX = {
-    "transition_graph": 2,
-    "transition_node": 4,
+    "transition_graph": 1,
+    "transition_node": 3,
     "commit_node_verification": 1,
     "finalize_verification_failure": 1,
     "accept_node_output": 1,
+    "commit_node_acceptance_review": 1,
     "transition_attempt": 2,
     "finalize_node_budget": 4,
     "reject_budget_charge": 3,
@@ -74,7 +78,8 @@ _MIGRATED_AST_DIGESTS = {
     "transition_node": "ccb86a617fdddff46bcf9edc4d1749cc6ec83bd898714d3390d29792ee5aad3b",
     "commit_node_verification": "bd4eae0cda1f586db164d529ea8c5563e3593a78090bf0978008b3154da13eda",
     "finalize_verification_failure": "714e02f28f9cbc8c82d8d4901eae4f093ca61d6de10565a7fe3fa0a51fe9f681",
-    "accept_node_output": "72eb047db97543272758ae104ebb124fa18ccb0956856b50107f2a89d6c9c4f2",
+    "accept_node_output": "e7f5a06bc0a9d53a969e513ac65726f5637953d0b05075cc3ed64a77c4253c5e",
+    "commit_node_acceptance_review": "6ab10c0f48946d1ddbe688b227347d07f9449855f454bbb1bd2d7e879da11880",
     "transition_graph_with_acceptance_effects": "3af921eec7ad0ad9b6e018d51c4f643bf70ad4150b12b539db16c5c776b4eb30",
     "cancel_waiting_review_node": "92af122b371ccd0c827d23782c7d19a6c5319d78b5ad2200d1d439ff1f38db73",
     "transition_attempt": "c3f562d32a665baaad442255a70d3531cb6d3c73efb39f6afaa18e03ea69c683",
@@ -258,7 +263,7 @@ def test_node_lifecycle_runtime_is_one_narrow_real_boundary() -> None:
     )
 
 
-def test_all_twelve_method_bodies_match_the_frozen_coordinator_baseline() -> None:
+def test_all_thirteen_method_bodies_match_the_frozen_coordinator_baseline() -> None:
     owner = _class(node_lifecycle_runtime, "DurableNodeLifecycleRuntime")
     actual: dict[str, str] = {}
     for name in _MIGRATED_METHODS:
@@ -357,7 +362,7 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
     assert dag_matrix + node_execution_matrix + finalizer_matrix == Counter(
         _COORDINATOR_CALL_MATRIX
     )
-    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 41
+    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 40
 
 
 def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:
@@ -367,7 +372,6 @@ def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:
         {
             "transition_graph": 1,
             "transition_node": 1,
-            "commit_node_acceptance": 1,
             "transition_graph_and_stage_acceptance_effects": 1,
             "request_cancel_node": 1,
             "transition_attempt": 1,
@@ -378,7 +382,7 @@ def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:
             "get_graph": 1,
         }
     )
-    assert len(store_calls) == 13
+    assert len(store_calls) == 12
 
     failure = _method(owner, "mark_pre_reservation_failure")
     selectors = [
@@ -438,7 +442,7 @@ def test_outbox_matrix_and_best_effort_boundary_are_frozen() -> None:
     owner = _class(node_lifecycle_runtime, "DurableNodeLifecycleRuntime")
     outbox_calls = _self_dependency_calls(owner, "_runtime_outbox")
     assert Counter(call.func.attr for call in outbox_calls) == Counter(
-        {"build": 10, "publish_pending": 3}
+        {"build": 9, "publish_pending": 3}
     )
 
     publishes = [
@@ -467,3 +471,41 @@ def test_outbox_matrix_and_best_effort_boundary_are_frozen() -> None:
         and any(_contains(statement, best_effort[0]) for statement in node.finalbody)
         for node in ast.walk(worker_failure)
     )
+
+
+def test_focused_acceptance_lifecycle_owns_exact_replay_and_no_state() -> None:
+    tree = _tree(node_acceptance_lifecycle)
+    assert not [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    assert len(inspect.getsource(node_acceptance_lifecycle).splitlines()) < 260
+
+    named_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+    ]
+    assert Counter(
+        node.func.attr
+        for node in named_calls
+        if node.func.value.id == "store"
+    ) == Counter(
+        {
+            "commit_node_acceptance": 1,
+            "commit_node_acceptance_review": 1,
+        }
+    )
+    replay = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "_response_loss_exact_replay"
+    )
+    operation_calls = [
+        node
+        for node in ast.walk(replay)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "operation"
+    ]
+    assert len(operation_calls) == 2
