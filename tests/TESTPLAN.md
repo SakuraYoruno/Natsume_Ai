@@ -702,3 +702,25 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - 本切片扩大 Composition/ASGI 定向集合最终为 `100 passed / 8 existing warning emissions`。首跑 `96 passed + 4 failed` 均来自 `test_dependencies_mcp_skill_bridge.py` 仍手写访问早已退役的 `obs_metrics_collector` slot；夹具改用 `clear_service_references()` 后精确复跑 `5 passed`，完整组再跑为 100 项全绿。该修正不恢复旧 slot，也不把测试夹具清理写成生产能力。
 - 当前文档、authority、freshness、metadata 与 coverage 合同集合最终复跑为 `39 passed`，统一 delivery `doc_gate` 为 `PASS / failures=[]`；远程 CI 仍只记 `NOT_RUN_ACCOUNT_QUOTA`。
 - 统一 static scan 必须如实保留 `host_application.py → HostLifecycleApplicationPorts / emotion_context` 两条既有 `NLE_BOUNDARY_UNLISTED_DEPENDENCY`；`origin/dev...HEAD` 对该文件只新增 provider 映射，不新增 import，因此本切片新增失败为 0。它与完整架构 Gate `FAIL [1,3]` 分开记录，均不得伪装为 PASS。
+
+### NE-01 Agent 多轮模型预算
+
+- T-NE01-AGENT-BUDGET-01：Chat、Internal 与 governed Agent Skill 必须从
+  ACTIVE durable remaining 构造 exact graph/revision/node/attempt guard；
+  非 ACTIVE、零 Token/时间/成本或绑定漂移在模型调用前拒绝。
+- T-NE01-AGENT-BUDGET-02：一个 Agent loop 的所有模型请求共享同一余额；
+  每条 canonical trace 必须 fresh、非缓存、usage 完整且 measurement ref
+  只消费一次。下一请求的 Token、provider retry、成本与 deadline 必须严格
+  不大于前一请求扣减后的余额。
+- T-NE01-AGENT-BUDGET-03：Skill capability authority 必须把 Budget 作为
+  sealed canonical JSON 绑定 identity，再恢复到私有执行 context；payload
+  与 nested `governed_lineage` 不能注入或扩张预算。
+- T-NE01-AGENT-BUDGET-04：只读 Agent Skill 的 V2 语义必须由 trusted Task
+  context 重建成 WorkOrderV3；Internal 必须从 FrozenNodeInput 直接注入
+  guard。缺失 Budget、usage 或 exact binding 不能回退环境
+  `max_steps/timeout`。
+- 当前定向证据：相关单元 91 项；真实 SQLite Internal
+  budget/recovery/Workspace 3 项；真实 SQLite+Git Agent Skill Workspace
+  1 项。三组分别记录且不相加为 wave integration。真实 provider、完整
+  NE-01 integration 与 NE-07 服务栈均未运行，远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`。

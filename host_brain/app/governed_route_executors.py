@@ -15,7 +15,10 @@ import json
 import re
 from typing import Any, Protocol
 
-from host_brain.model_runtime.contracts import ModelBudgetGuard
+from host_brain.model_runtime.governed_budget import (
+    GovernedModelBudgetError,
+    build_governed_model_budget_guard,
+)
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 from host_brain.contracts.agent_runtime.worker_budget_usage import (
     build_worker_budget_usage,
@@ -337,47 +340,18 @@ def _governed_model_budget(frozen: FrozenNodeInput) -> dict[str, Any] | None:
         # Direct construction is retained for narrow executor tests. Production
         # frozen workers reject an absent budget before reaching this adapter.
         return None
-    remaining = _mapping_child(budget, "remaining")
     try:
-        deadline_ms = int(remaining.get("time_ms"))
-        retry_count = int(remaining.get("retry_count"))
-        token_count = int(remaining.get("token_count"))
-        model_cost_micros = int(remaining.get("model_cost_micros"))
-    except (TypeError, ValueError) as exc:
-        raise GovernedRouteExecutorError(
-            GOVERNED_ROUTE_INPUT_INVALID,
-            "frozen durable budget has invalid model limits",
-        ) from exc
-    max_provider_attempts = retry_count + 1
-    max_output_tokens = token_count // max_provider_attempts
-    if (
-        deadline_ms <= 0
-        or retry_count < 0
-        or token_count <= 0
-        or max_output_tokens <= 0
-        or model_cost_micros <= 0
-    ):
-        raise GovernedRouteExecutorError(
-            GOVERNED_ROUTE_INPUT_INVALID,
-            "frozen durable budget cannot admit another model call",
-        )
-    try:
-        guard = ModelBudgetGuard(
-            budget_id=str(budget.get("budget_id") or ""),
+        guard = build_governed_model_budget_guard(
+            budget=budget,
             graph_id=frozen.graph_id,
             graph_revision=frozen.graph_revision,
             node_id=frozen.node_id,
             attempt_id=frozen.attempt_id,
-            deadline_ms=deadline_ms,
-            max_provider_attempts=max_provider_attempts,
-            max_token_count=token_count,
-            max_output_tokens=max_output_tokens,
-            max_model_cost_micros=model_cost_micros,
         )
-    except (TypeError, ValueError) as exc:
+    except GovernedModelBudgetError as exc:
         raise GovernedRouteExecutorError(
             GOVERNED_ROUTE_INPUT_INVALID,
-            "frozen durable budget cannot form a model guard",
+            exc.detail,
         ) from exc
     return guard.as_dict()
 

@@ -537,9 +537,14 @@ async def test_governed_agent_acceptance_promotes_real_sqlite_git_artifact(
             *,
             workspace: Path,
             cancelled=None,
+            model_budget_guard=None,
         ) -> AgentResult:
             assert callable(cancelled)
             assert not cancelled()
+            assert model_budget_guard is not None
+            assert model_budget_guard.graph_id == graph.graph_id
+            assert model_budget_guard.node_id == node.node_id
+            assert model_budget_guard.attempt_id == ATTEMPT_ID
             (workspace / "src" / "generated.txt").write_text(
                 "accepted governed write\n",
                 encoding="utf-8",
@@ -584,6 +589,19 @@ async def test_governed_agent_acceptance_promotes_real_sqlite_git_artifact(
         "pre_execution_review_ref": (
             "review://review-governed-agent-workspace"
         ),
+        "budget": {
+            "budget_id": "budget-governed-agent-workspace",
+            "status": "ACTIVE",
+            "status_version": 1,
+            "remaining": {
+                "token_count": 4_096,
+                "tool_call_count": 8,
+                "time_ms": 60_000,
+                "concurrency": 1,
+                "retry_count": 1,
+                "model_cost_micros": 250_000,
+            },
+        },
     }
     raw_order = {
         "schema_version": "Natsume.agent.work_order.v2",

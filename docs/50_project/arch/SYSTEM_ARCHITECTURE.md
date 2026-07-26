@@ -562,6 +562,28 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 
 生产代码、production composition 和 machine status 永远高于本文；发现不一致时先修正文档和门禁，不得用文档覆盖代码事实。
 
+## 13. Task-bound Agent 模型预算
+
+```mermaid
+flowchart LR
+    B["Durable Task Budget remaining"] --> G["Node / Attempt-bound ModelBudgetGuard"]
+    G --> I["Internal Agent"]
+    G --> S["Sealed Agent Skill authority"]
+    S --> A["Canonical Agent loop"]
+    I --> A
+    A --> M["Canonical ModelAttempt measurement"]
+    M --> R["In-process strict remainder"]
+    R -->|next step| A
+    M --> T["Task Runtime durable usage settlement"]
+```
+
+`R` 不是第二个预算 writer，只是同一 Attempt 内防止多次模型请求重复获得
+完整额度。持久 reservation、超限裁决和最终结算仍由 Task Runtime 所有。
+任何缺失 measurement、缓存结果、重复 ref 或 lineage 漂移都会停止后续
+调用；Agent 自身的 `max_steps/timeout` 只能进一步收紧，不能扩张 Task
+额度。当前该链覆盖 Chat、Internal 与受治理 Agent Skill，完整七路线和
+生产 canary 仍待 NE-01/NE-07。
+
 ### 当前终态恢复边界
 
 Host 启动时默认运行的 terminal exact-auto 只处理 `EXACT_REPAIRABLE`。隔离真实 SQLite restart canary 已证明：canonical FAILED 半状态只释放绑定预算并写确定性 proof/Outbox，不创建 Attempt、Lease 或重进 worker；同库的 signed-required CANCELLED 半状态保持不变并阻断 readiness。Operator HTTP 签名链、部署存量和 Operation/Effect 对账仍未完成，因此取消生产开关继续关闭。

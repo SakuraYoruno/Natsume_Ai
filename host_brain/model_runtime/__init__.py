@@ -116,6 +116,15 @@ from host_brain.model_runtime.graph_semantics import (
     graph_model_semantic,
     graph_model_semantic_ids,
 )
+from host_brain.model_runtime.governed_budget import (
+    GOVERNED_MODEL_BUDGET_EXHAUSTED,
+    GOVERNED_MODEL_BUDGET_INVALID,
+    GOVERNED_MODEL_BUDGET_MEASUREMENT_INVALID,
+    GovernedAgentModelBudget,
+    GovernedModelBudgetError,
+    build_governed_model_budget_guard,
+    require_guard_matches_work_order,
+)
 from host_brain.model_runtime.provider_adapters import (
     CallableProviderAdapter,
     DuplicateProviderAdapterError,
@@ -164,6 +173,11 @@ __all__ = [
     "GRAPH_NODE_PROMPT_IDS",
     "TRIBE_PROMPT_IDS",
     "GraphModelSemantic",
+    "GOVERNED_MODEL_BUDGET_EXHAUSTED",
+    "GOVERNED_MODEL_BUDGET_INVALID",
+    "GOVERNED_MODEL_BUDGET_MEASUREMENT_INVALID",
+    "GovernedAgentModelBudget",
+    "GovernedModelBudgetError",
     "HIPPOCAMPUS_RECALL_PROMPT_ID",
     "INNER_WORLD_MONOLOGUE_PROMPT_ID",
     "LIFE_PROACTIVE_COMPOSE_PROMPT_ID",
@@ -255,6 +269,7 @@ __all__ = [
     "UnknownProviderAdapterError",
     "VaultBackedSingleAttemptAdapter",
     "build_default_production_model_runtime",
+    "build_governed_model_budget_guard",
     "build_live_production_prompt_registry",
     "build_model_runtime_composition",
     "compiled_prompt_request",
@@ -273,6 +288,7 @@ __all__ = [
     "production_prompt_catalog_digest",
     "production_prompt_catalog_inventory",
     "register_live_prompt_bindings",
+    "require_guard_matches_work_order",
     "route_decision_from_graph_runtime",
     "validate_output_contract",
 ]

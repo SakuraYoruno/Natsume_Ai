@@ -506,3 +506,17 @@ PR/推送的 freshness workflow 会把 Git 变更集传入门禁：只要生产�
 - 不提交 `.env`、密钥、`runtime/`、`artifacts/`、模型文件或本地服务数据。
 - 修改生产架构时同步更新 Current、Gap、机器状态、执行合同和相应数据流图。
 - 删除或移动文档时同步更新目录索引与文档门禁策略。
+
+## 当前 NE-01 边界：Agent 多轮模型预算
+
+截至 2026-07-26，Chat、Internal Agent 与受治理 Agent Skill 已共用同一
+Task-bound `ModelBudgetGuard` 构造规则。Internal 与只读 Agent Skill 的
+ReAct 多轮请求不再按自身 `max_steps/timeout` 获得一组新的隐式额度：
+每次请求前都会从冻结的 graph/node/attempt 剩余额度扣除已测得 Token、
+provider retry、模型成本和经过时间；缺失 usage、重复 measurement、缓存
+结果、绑定漂移或额度耗尽都会在下一次模型调用前失败关闭。
+
+这只关闭了 Internal/Agent Skill 的多轮模型预算旁路。七路线
+`commit_bound_acceptance`、program-wide Budget 策略、一般多节点恢复、
+生产真实模型 canary、波次集成和 NE-07 Docker 全栈仍未完成，因此
+NE-01 保持 `IN_PROGRESS`。

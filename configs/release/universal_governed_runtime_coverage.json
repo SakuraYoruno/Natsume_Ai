@@ -2,10 +2,10 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_TRANSACTIONAL_CHAT_PROJECTION_BARRIER_PRECOMMIT_OVER_ORIGIN_DEV_D5B15BE19",
-  "current_document_slice": "NE01_TRANSACTIONAL_CHAT_PROJECTION_BARRIER_PRECOMMIT_OVER_ORIGIN_DEV_D5B15BE19",
+  "evaluated_source": "NE01_AGENT_MODEL_MULTICALL_BUDGET_PRECOMMIT_OVER_ORIGIN_DEV_804DB7D53",
+  "current_document_slice": "NE01_AGENT_MODEL_MULTICALL_BUDGET_PRECOMMIT_OVER_ORIGIN_DEV_804DB7D53",
   "evidence_binding": {
-    "evaluated_commit_sha": "d5b15be1950b7805991a5041e410c2a0eb8549e4",
+    "evaluated_commit_sha": "804db7d5381f60a8216bd2da37ce3c0a435c548e",
     "migration_head": "0131_task_operation_recovery_hold_binding.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
@@ -90,8 +90,15 @@
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_skill_execution_ports.py",
+        "host_brain/model_runtime/governed_budget.py",
+        "host_brain/agent_runtime/governed_skill_work_order.py",
+        "host_brain/skills/executor_registry.py",
+        "tests/unit/test_ne01_governed_agent_model_budget.py",
+        "tests/unit/test_ne01_governed_agent_work_order.py",
+        "tests/integration/test_ne01_governed_agent_workspace_acceptance.py",
         "tests/integration/test_aw0203_governed_host_cutover.py"
       ],
+      "model_budget_boundary": "PARTIAL_TASK_BOUND_AGENT_MULTICALL_WIRED: the frozen ACTIVE Task Budget crosses the sealed capability authority as canonical JSON; read-only V2 Agent semantics are rebuilt server-side as graph/node-bound WorkOrderV3; each Agent model request consumes the previous canonical token/retry/cost/elapsed measurement before another call. Missing, cached, duplicate, incomplete or over-limit measurements fail closed. Other Skills, program-wide policy, real provider canary, wave integration and commit-bound acceptance remain missing.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
@@ -216,6 +223,7 @@
     "internal": {
       "status": "INCOMPLETE",
       "production_boundary": "PARTIAL / INTERNAL_GOVERNED_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP. External ingress remains pre-admission v2 compatibility and admitted execution consumes WorkOrderV3. A write-capable order stays blocked without exact server-owned execution authority; the governed Internal path now seals a bounded path manifest and binary base-relative Git patch, revalidates it after Acceptance, creates a deterministic accepted HEAD without moving the configured source branch, and persists 0116 ACTIVE→ACCEPTED→PROMOTED before cleanup. Post-seal drift fails closed, and Runtime reconstruction after a lifecycle transaction rollback reuses the same commit. Sealed checkpoint continuation does not replay Agent. Known interruptions first write RECOVERY_REQUIRED plus one Outbox. A later signed no-cancellation RELEASE with NO_SIDE_EFFECT and no receipt may close only an ACTIVE single-node Graph with nonterminal Node and Attempt, expired former Lease, exactly one graph Budget and zero WorkerProjection, Acceptance Effect and cancellation facts. Internal then commits a deterministic raw-failure Secure Ingress result before real Git cleanup; response loss exactly reopens and claim outage preserves the worktree and stage. Signed cancellation terminals remain separate. General unknown-effect attribution, other failure or cancellation claim closeout, arbitrary multi-node/batch settlement, Domain/Skill/codex_runtime write injection, handle-level TOCTOU, OS/container isolation and commit-bound seven-route acceptance remain incomplete. REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA.",
+      "model_budget_boundary": "PARTIAL_TASK_BOUND_AGENT_MULTICALL_WIRED: Internal builds the canonical model guard only from FrozenNodeInput.budget and exact graph/revision/node/attempt identity. One Agent loop shares measured token/retry/cost/time remainder across every request; missing or over-limit evidence stops the next call. Durable Task Budget settlement remains the only persistent authority. Program-wide Budget, general recovery, real provider canary, wave integration and seven-route commit-bound acceptance remain missing.",
       "post_review_approval_boundary": "EXECUTED plus inner REVIEW or review_required=true is structurally verified, remains WAITING_ACCEPTANCE_REVIEW with the Secure Ingress claim open, and is approved only by an exact task-bound continuation. The continuation preserves the original SUCCEEDED Attempt and sealed WorkerProjection, emits durable PASS evidence for frozen criteria, rechecks the historical projection grant, commits internal.agent.result_commit and exact-reopens the matching agentresult receipt before RuntimeGroup completes the claim. worker-projection receipts are never successful claim results. This proves exact single-node approval; unknown-effect and multi-node recovery remain incomplete.",
       "post_review_cancellation_boundary": "A real Operator Secure Ingress audit and claim now initiates 0092 cancellation, revokes the Review and one-shot resume token, persists an immutable BLOCKED intent and a separately bound trusted FINALIZED CANCELLED decision, and permits restart recovery to close the deterministic nonacceptance claim before tombstone and Workspace cleanup without rerunning the Agent. Terminal inventory accepts only one trusted version-adjacent 0090 BLOCKED predecessor leading into that cancellation chain; extra, parallel or malformed decisions remain quarantined. This is an exact Internal single-node terminal path, not general cancellation recovery.",
       "precheckpoint_cancellation_boundary": "A real SQLite restart path reopens one Internal single-node command, graph, node, attempt, lease and operation reservation. One shared neutral contract accepts only RELEASED/RELEASE/NO_SIDE_EFFECT/no receipt or COMMITTED/COMMIT/SIDE_EFFECT_CONFIRMED/durable receipt; both require trusted Ed25519 proof, zero WorkerProjection/Acceptance Effect/Agent result and a finalized trusted cancellation intent/decision. The no-effect result keeps its byte-compatible v1 digest and the confirmed-effect v2 result binds action, outcome and receipt. It commits the deterministic claim before Workspace cleanup and stage discard. Missing, mixed, tampered or generally unknown proof preserves the Workspace and stage and fails closed.",

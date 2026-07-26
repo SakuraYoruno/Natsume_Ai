@@ -23,6 +23,7 @@ from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.governed_skill_work_order import (
     GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
     GovernedAgentWorkOrderBindingError,
+    bind_governed_agent_read_order,
     bind_governed_agent_write_order,
 )
 from host_brain.agent_runtime.prompt_profiles import build_agent_prompt, prompt_profile_name
@@ -51,6 +52,11 @@ from host_brain.core.ids import new_event_id, now_ms
 from host_brain.core.subprocess_utils import run as _subprocess_run
 from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.evolution_lab import validate_evolution_branch
+from host_brain.model_runtime import (
+    ModelBudgetGuard,
+    build_governed_model_budget_guard,
+    require_guard_matches_work_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +218,7 @@ class AgentRuntimeExecutor:
         *,
         workspace_execution_authority: dict[str, Any] | None = None,
         projection_recovery_context: dict[str, Any] | None = None,
+        model_budget_guard: ModelBudgetGuard | None = None,
     ) -> dict[str, Any]:
         try:
             order = canonicalize_work_order(work_order)
@@ -233,6 +240,13 @@ class AgentRuntimeExecutor:
             return result.to_dict()
         event_id = new_event_id()
         ts = now_ms()
+        if model_budget_guard is not None:
+            require_guard_matches_work_order(
+                model_budget_guard,
+                graph_id=order.task_graph_id,
+                graph_revision=order.graph_revision,
+                node_id=order.task_node_id,
+            )
         run_dir: Path | None = None
         governed_stage = None
         workspace_write_candidate = None
@@ -403,17 +417,25 @@ class AgentRuntimeExecutor:
                 try:
                     if self.model_attempt_service is None or self.prompt_registry is None:
                         raise RuntimeError("AGENT_MODEL_RUNTIME_NOT_COMPOSED")
-                    result = AgentExecutor(
+                    agent_executor = AgentExecutor(
                         model_attempt_service=self.model_attempt_service,
                         prompt_registry=self.prompt_registry,
-                    ).execute(
-                        order,
-                        workspace=resolution.path,
-                        cancelled=(
+                    )
+                    agent_execute_kwargs: dict[str, Any] = {
+                        "workspace": resolution.path,
+                        "cancelled": (
                             workspace_scope.cancelled
                             if workspace_scope is not None
                             else None
                         ),
+                    }
+                    if model_budget_guard is not None:
+                        agent_execute_kwargs["model_budget_guard"] = (
+                            model_budget_guard
+                        )
+                    result = agent_executor.execute(
+                        order,
+                        **agent_execute_kwargs,
                     )
                 except Exception as exc:
                     failure = _opaque_executor_failure(exc)
@@ -651,6 +673,7 @@ def execute_agent_runtime_payload(
     compatibility_order.validate()
     write_authority: dict[str, Any] | None = None
     execution_order: Mapping[str, Any] | WorkOrderV3 = raw_order
+    model_budget_guard: ModelBudgetGuard | None = None
     if compatibility_order.requires_write:
         if (
             artifact_store is None
@@ -687,6 +710,29 @@ def execute_agent_runtime_payload(
             ).strip(),
             "fencing_token": int(governed_authority["fencing_token"]),
         }
+    elif isinstance(governed_execution_context, Mapping):
+        governed_authority = dict(governed_execution_context)
+        execution_order = bind_governed_agent_read_order(
+            raw_order,
+            governed_execution_context=governed_authority,
+        )
+    if isinstance(governed_execution_context, Mapping):
+        governed_authority = dict(governed_execution_context)
+        model_budget_guard = build_governed_model_budget_guard(
+            budget=(
+                governed_authority.get("budget")
+                if isinstance(governed_authority.get("budget"), Mapping)
+                else {}
+            ),
+            graph_id=str(governed_authority.get("graph_id") or ""),
+            graph_revision=int(
+                governed_authority.get("graph_revision") or 0
+            ),
+            node_id=str(governed_authority.get("node_id") or ""),
+            attempt_id=str(
+                governed_authority.get("attempt_id") or ""
+            ),
+        )
     return AgentRuntimeExecutor(
         model_attempt_service=model_attempt_service,
         prompt_registry=prompt_registry,
@@ -695,6 +741,7 @@ def execute_agent_runtime_payload(
     ).execute(
         execution_order,
         workspace_execution_authority=write_authority,
+        model_budget_guard=model_budget_guard,
     )
 
 

@@ -467,6 +467,22 @@ FAIL
 
 不得用“测试很多”“diff 很大”“历史 22/22”替代最终 Gate。
 
+### NE-01 当前切片：Agent 多轮模型预算闭环（2026-07-26）
+
+- `GovernedModelBudget` 从冻结的 ACTIVE Task Budget 构造 exact
+  graph/revision/node/attempt guard，Chat 不再维护第二份构造逻辑。
+- Internal Agent 在调用 canonical `AgentRuntimeExecutor` 前必须提供该
+  guard；Agent Skill 的预算必须穿过 sealed capability authority，不能在
+  Broker adapter 重建时丢失。
+- 只读兼容 WorkOrder 必须由 server-side Task authority 重建为
+  WorkOrderV3；调用方提交的 `governed_lineage` 不能成为执行 authority。
+- Agent loop 的每个新模型请求都消费前序 canonical measurement 后的剩余
+  Token、retry、成本和时间；缺 measurement、cache、重复 ref 或越界均
+  fail closed。
+- 本切片保持 `budget_enforcement=PARTIAL`、NE-01=`IN_PROGRESS`。尚缺
+  program-wide concurrency/DEGRADE/REVIEW、一般多节点恢复、波次集成、
+  commit-bound 七路线 receipt、真实 provider canary 与 NE-07 全栈。
+
 ## 5. 测试与效率合同
 
 遵守以下节奏，避免再次把数小时花在每个小工作片上：

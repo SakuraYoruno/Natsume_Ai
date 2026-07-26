@@ -85,6 +85,10 @@ flowchart TD
 - Capability Planning authority：Research/Frontend 的 `CAPABILITY_SEARCH_V1` 候选上限必须同时满足 intent 请求和 Governor approved binding，effective risk 为二者最小值；冻结目录强制选择两项不同 Skill，再以 `skill → skill → chat` 编译图，grant ref 与步数进入 virtual-state lineage；缺失/畸形 binding risk 失败关闭。该本地定向证据不提升 NE-02 或收益状态。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
 - 长期演化程序：作为整体尚未实现。
+- Agent 模型预算：Chat、Internal 与 governed Agent Skill 已共享
+  graph/node/attempt-bound guard；Skill sealed authority 会保留 canonical
+  Budget JSON，Agent 多轮请求逐次扣减真实 measurement。该项只关闭局部
+  超支旁路，Budget/NE-01 仍为 `PARTIAL / IN_PROGRESS`。
 
 机器状态：[current_architecture_status.json](../../configs/release/current_architecture_status.json)。摘要变化时必须先更新机器状态、Current 和 Gap，不能只改本地图。
 

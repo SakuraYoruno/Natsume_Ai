@@ -206,3 +206,19 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 - `docs/30_devspec/evidence/m48b/**`：M48-B 固定范围证据。
 
 新增证据必须绑定 source commit、环境、route、dataset、预算、失败尝试和原始 receipt；禁止只写总结性 PASS。
+
+TRACE-NE01-AGENT-BUDGET-01（Agent 多轮模型预算，当前切片）：Internal
+`FrozenNodeInput` 与 governed Agent Skill sealed authority 必须把同一
+ACTIVE Task Budget remaining 绑定到 graph/revision/node/attempt；
+`AgentRuntimeExecutor` 只接受匹配其 WorkOrderV3 lineage 的 guard。
+AgentExecutor 的每条 ModelAttempt trace 必须提供 fresh、完整、exact-once
+Token/retry/cost measurement，下一步只可使用扣减后的 guard。read-only V2
+Skill payload 由 server-side context 重建为 V3，caller `governed_lineage`
+不拥有 authority。证据入口为
+`tests/unit/test_ne01_governed_agent_model_budget.py`、
+`tests/unit/test_ne01_governed_agent_work_order.py`、
+`tests/unit/test_aw05_skill_executor_broker_cutover.py`、
+`tests/integration/test_aw02_internal_agent_runtime_cutover.py` 与
+`tests/integration/test_ne01_governed_agent_workspace_acceptance.py`。当前只
+证明局部 budget bypass 关闭；program-wide Budget、真实 provider、波次
+集成、七路线 commit-bound receipt 与 NE-07 均未完成。

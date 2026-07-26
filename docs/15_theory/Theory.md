@@ -994,3 +994,30 @@ Natsume 的“生命感”不应建立在模型更会表演上，而应建立在
 任何一层脱离其它层独自膨胀，都会产生结构性风险：情感越权、记忆污染、人格漂移、规划空转或执行伪完成。下一代架构的核心不是继续堆模块，而是让这些层通过明确 authority、证据和单向数据流形成一个可长期运行的整体。
 
 终态恢复同样遵守“证据先于动作”。只有可由 canonical Graph、Attempt、Lease、Budget 和 Outbox 唯一重建的失败半状态，才允许系统证据自动修复；需要人类归因的取消或未知副作用必须继续围栏，不能因为重启而猜测成功或盲目重放。当前真实 SQLite canary 已验证这两类状态在同一次恢复中分流，但签名 Operator 与外部 Effect 仍须独立验收。
+
+---
+
+## 20. 多轮模型调用必须共享一个任务预算
+
+模型预算不是每次 API 请求各自拥有的“最大值”，而是一个冻结 TaskGraph
+节点在某次 Attempt 中可消费的总额度。对于 ReAct、Agent loop 或其它会
+连续调用模型的 worker，正确的数据方向是：
+
+```text
+durable Budget remaining
+→ node/attempt-bound guard
+→ 第 1 次真实 measurement
+→ 严格缩小后的 guard
+→ 第 2 次真实 measurement
+→ Task Runtime 持久结算
+```
+
+执行器不得在每一步重新读取环境变量生成完整额度，也不得把 provider
+缺失的 usage 估算成“已测量”。缓存结果、重复 measurement ref、缺少
+Token/成本维度或 graph/node/attempt 漂移都意味着证据不足，必须停止后续
+模型调用。Task Runtime 仍是持久预算 authority；进程内 remainder 只是把
+同一 durable allowance 投影到连续请求，不能扩张额度或自行宣告预算结算。
+
+当前代码已将这一原则用于 Chat、Internal Agent 和受治理 Agent Skill 的
+模型路径，但 program-wide Budget、七路线最终 receipt 与真实 provider
+验收仍是 NE-01/NE-07 的未完成条件。

@@ -1473,3 +1473,28 @@ flowchart LR
 ```
 
 本切片只证明本地 exact-auto 的机械恢复和非 exact 围栏；它没有执行签名 Operator HTTP、外部 Effect reconciliation、真实 Gateway/Edge 或 Docker 服务栈。
+
+### Agent 多轮模型预算流（2026-07-26）
+
+```mermaid
+flowchart TD
+    F["FrozenNodeInput.budget"] --> G["build_governed_model_budget_guard"]
+    G --> C["Chat single model request"]
+    G --> I["Internal AgentRuntimeExecutor"]
+    F --> SA["sealed Skill authority budget_json"]
+    SA --> V3["server-bound WorkOrderV3"]
+    V3 --> A["AgentExecutor ReAct loop"]
+    I --> A
+    A --> R["ModelAttemptResult trace"]
+    R --> X{"fresh + complete + exact-once?"}
+    X -->|no| STOP["fail closed; no next call"]
+    X -->|yes| REM["subtract token / retry / cost / elapsed"]
+    REM -->|remaining| A
+    R --> U["typed WorkerBudgetUsage"]
+    U --> D["Durable Task Budget settlement"]
+```
+
+sealed Skill authority 只携带 canonical Budget JSON，不接收 payload 自证；
+Internal 直接消费 frozen projection。两条路径最终共享相同 guard 和
+measurement validator。该图不表示持久预算已 program-wide 完成，也不表示
+七路线 acceptance 或真实 provider canary 已通过。
