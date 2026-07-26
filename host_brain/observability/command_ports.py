@@ -665,7 +665,12 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
                 "attestation_key_id",
                 "attestation_signature",
             ),
-            optional=("intent_ref", "downstream_receipt_ref"),
+            optional=(
+                "intent_ref",
+                "downstream_receipt_ref",
+                "recovery_case_ref",
+                "recovery_case_subject_sha256",
+            ),
             strings=(
                 "intent_ref",
                 "reservation_id",
@@ -674,6 +679,8 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
                 "attestation_key_id",
                 "attestation_signature",
                 "downstream_receipt_ref",
+                "recovery_case_ref",
+                "recovery_case_subject_sha256",
             ),
             integers=("expected_version",),
         ),

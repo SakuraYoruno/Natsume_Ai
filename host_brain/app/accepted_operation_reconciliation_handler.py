@@ -79,7 +79,7 @@ class AcceptedOperationReconciliationHandler:
             raise ValueError(
                 "operation reconciliation evidence binding drifted"
             )
-        request = {
+        service_request = {
             key: evidence.get(key)
             for key in (
                 "intent_ref",
@@ -94,7 +94,9 @@ class AcceptedOperationReconciliationHandler:
             )
         }
         try:
-            reconciliation_raw = self._service.reconcile_operation(**request)
+            reconciliation_raw = self._service.reconcile_operation(
+                **service_request
+            )
             reconciliation = (
                 await reconciliation_raw
                 if inspect.isawaitable(reconciliation_raw)
@@ -117,13 +119,13 @@ class AcceptedOperationReconciliationHandler:
             else {}
         )
         reacquisition_continuation = (
-            request["action"] == "REACQUIRE"
+            service_request["action"] == "REACQUIRE"
             and str(initial_operation.get("status") or "").upper()
             != "COMMITTED"
         )
         checkpoint_continuation = (
-            request["action"] == "COMMIT"
-            and request["intent_ref"] is None
+            service_request["action"] == "COMMIT"
+            and service_request["intent_ref"] is None
             and str(initial_operation.get("status") or "").upper()
             == "COMMITTED"
         )
@@ -176,7 +178,9 @@ class AcceptedOperationReconciliationHandler:
                 )
             if reacquisition_continuation:
                 try:
-                    settled_raw = self._service.reconcile_operation(**request)
+                    settled_raw = self._service.reconcile_operation(
+                        **service_request
+                    )
                     settled = (
                         await settled_raw
                         if inspect.isawaitable(settled_raw)
@@ -202,8 +206,8 @@ class AcceptedOperationReconciliationHandler:
             else None
         )
         terminal_failure = (
-            request["action"] == "RELEASE"
-            and request["intent_ref"] is None
+            service_request["action"] == "RELEASE"
+            and service_request["intent_ref"] is None
         )
         if terminal_failure:
             try:
@@ -212,21 +216,26 @@ class AcceptedOperationReconciliationHandler:
                 raise AcceptanceEffectOutcomeUnknown(
                     "reconciled terminal failure has no exact Task settlement"
                 ) from exc
+        resolved_recovery_case = _resolved_recovery_case(
+            evidence_store=self._evidence_store,
+            evidence=evidence,
+        )
         receipt_ref = operation_reconciliation_handler_receipt_ref(
-            request=request,
+            request=evidence,
             operation=operation,
             terminal=terminal,
         )
         return {
             "receipt_ref": receipt_ref,
             "status": "COMMITTED",
-            "reservation_id": request["reservation_id"],
-            "action": request["action"],
+            "reservation_id": service_request["reservation_id"],
+            "action": service_request["action"],
             "evidence_ref": durable_request["evidence_ref"],
             "operation_status": str(operation.get("status") or "").upper(),
             "operation_status_version": operation.get("status_version"),
             "target_continuation": continuation,
             "target_terminal": terminal,
+            "recovery_case": resolved_recovery_case,
             "exact_replay": bool(result.get("replayed")),
         }
 
@@ -255,18 +264,25 @@ def operation_reconciliation_handler_receipt_ref(
         and terminal_failure_record["authority_kind"]
         == "RECONCILED_OPERATION_NODE_FAILURE"
     )
+    recovery_case_ref = str(
+        request.get("recovery_case_ref") or ""
+    ).strip() or None
     material: dict[str, Any] = {
         "schema_version": (
-            "Natsume.task.operation_reconciliation_receipt.v2"
-            if checkpoint_commit
+            "Natsume.task.operation_reconciliation_receipt.v5"
+            if recovery_case_ref is not None
             else (
-                (
-                    "Natsume.task.operation_reconciliation_receipt.v4"
-                    if node_failure
-                    else "Natsume.task.operation_reconciliation_receipt.v3"
+                "Natsume.task.operation_reconciliation_receipt.v2"
+                if checkpoint_commit
+                else (
+                    (
+                        "Natsume.task.operation_reconciliation_receipt.v4"
+                        if node_failure
+                        else "Natsume.task.operation_reconciliation_receipt.v3"
+                    )
+                    if terminal_failure
+                    else "Natsume.task.operation_reconciliation_receipt.v1"
                 )
-                if terminal_failure
-                else "Natsume.task.operation_reconciliation_receipt.v1"
             )
         ),
         "reservation_id": str(request.get("reservation_id") or "").strip(),
@@ -306,6 +322,13 @@ def operation_reconciliation_handler_receipt_ref(
         )
     if terminal_failure:
         material["terminal_failure"] = terminal_failure_record
+    if recovery_case_ref is not None:
+        material["recovery_case"] = {
+            "case_ref": recovery_case_ref,
+            "subject_sha256": str(
+                request.get("recovery_case_subject_sha256") or ""
+            ),
+        }
     encoded = json.dumps(
         material,
         ensure_ascii=False,
@@ -445,6 +468,12 @@ def _request(payload: Mapping[str, Any]) -> dict[str, Any]:
             value.get("reconciler_actor_id") or ""
         ).strip(),
     }
+    recovery_case_ref = str(
+        value.get("recovery_case_ref") or ""
+    ).strip() or None
+    recovery_case_digest = str(
+        value.get("recovery_case_subject_sha256") or ""
+    ).strip().lower() or None
     if (
         str(value.get("operator_command_id") or "").strip()
         != "task_operation.reconcile"
@@ -460,15 +489,34 @@ def _request(payload: Mapping[str, Any]) -> dict[str, Any]:
         or expected_version < 0
         or request["action"] not in {"COMMIT", "RELEASE", "REACQUIRE"}
         or not request["reconciler_actor_id"]
+        or ((recovery_case_ref is None) != (recovery_case_digest is None))
+        or (
+            recovery_case_ref is not None
+            and (
+                not recovery_case_ref.startswith(
+                    "operation-recovery-hold://sha256/"
+                )
+                or len(recovery_case_ref.rsplit("/", 1)[-1]) != 64
+                or any(
+                    char not in "0123456789abcdef"
+                    for char in recovery_case_ref.rsplit("/", 1)[-1]
+                )
+                or recovery_case_digest
+                != "sha256:" + recovery_case_ref.rsplit("/", 1)[-1]
+            )
+        )
     ):
         raise ValueError("operation reconciliation effect payload is invalid")
+    if recovery_case_ref is not None:
+        request["recovery_case_ref"] = recovery_case_ref
+        request["recovery_case_subject_sha256"] = recovery_case_digest
     return request
 
 
 def _durable_request_from_evidence(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
-    return {
+    request = {
         "request_id": str(value.get("request_id") or "").strip(),
         "evidence_ref": str(value.get("evidence_ref") or "").strip(),
         "evidence_digest": str(
@@ -480,6 +528,57 @@ def _durable_request_from_evidence(
         "reconciler_actor_id": str(
             value.get("reconciler_actor_id") or ""
         ).strip(),
+    }
+    recovery_case_ref = str(
+        value.get("recovery_case_ref") or ""
+    ).strip() or None
+    if recovery_case_ref is not None:
+        request["recovery_case_ref"] = recovery_case_ref
+        request["recovery_case_subject_sha256"] = str(
+            value.get("recovery_case_subject_sha256") or ""
+        ).strip().lower()
+    return request
+
+
+def _resolved_recovery_case(
+    *,
+    evidence_store: Any,
+    evidence: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    case_ref = str(evidence.get("recovery_case_ref") or "").strip()
+    if not case_ref:
+        return None
+    reopen = getattr(evidence_store, "get_operation_recovery_hold", None)
+    if not callable(reopen):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Operation recovery case reader is unavailable"
+        )
+    try:
+        raw = reopen(case_ref)
+    except Exception as exc:
+        raise AcceptanceEffectOutcomeUnknown(
+            "Operation recovery case outcome cannot be reopened"
+        ) from exc
+    case = dict(raw) if isinstance(raw, Mapping) else {}
+    if (
+        case.get("current") is not False
+        or str(case.get("case_ref") or "") != case_ref
+        or str(case.get("subject_sha256") or "")
+        != str(evidence.get("recovery_case_subject_sha256") or "")
+        or str(case.get("reservation_id") or "")
+        != str(evidence.get("reservation_id") or "")
+        or case.get("operation_status_version")
+        != evidence.get("expected_version")
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Operation reconciliation recovery case remains unresolved"
+        )
+    return {
+        "case_ref": case_ref,
+        "case_kind": str(case.get("case_kind") or ""),
+        "classification": str(case.get("classification") or ""),
+        "subject_sha256": str(case.get("subject_sha256") or ""),
+        "current": False,
     }
 
 

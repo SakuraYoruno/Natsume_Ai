@@ -32,7 +32,7 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0130_task_operation_recovery_hold.sql"
+        "0131_task_operation_recovery_hold_binding.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
     assert (
@@ -110,6 +110,11 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     )
     assert (
         "host_brain/audit/migrations/0130_task_operation_recovery_hold.sql"
+        in migration_files
+    )
+    assert (
+        "host_brain/audit/migrations/"
+        "0131_task_operation_recovery_hold_binding.sql"
         in migration_files
     )
     assert "host_brain/audit/migrations/0103_retire_llm_node_call_log.sql" in migration_files

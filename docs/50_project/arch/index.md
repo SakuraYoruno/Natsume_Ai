@@ -3,13 +3,15 @@
 
 # Natsume AI 架构文档目录
 
-版本：v4.1
+版本：v4.2
 维护日期：2026-07-26
 状态：`CURRENT_ARCHITECTURE_CATALOG`
 
 本目录只保留当前结构说明、稳定目标、差距、专项架构和可维护图册。旧路线图、混写完成报告、旧 Agentic RAG/Gateway 方案和按文件行数生成的模块快照已删除；Git 历史承担追溯。
 
 当前 Workspace 写边界：Governed Internal 与三条已登记 risk-4 Direct Agent Skill 都从 frozen source 密封 manifest/binary patch，并只在 Acceptance 后经 0116 晋升；Skill 路径要求 exact consumed Review、server-bound V3 和先于可见 Effect 的 promotion handler，调用方 source branch 不移动。Domain Pack、其它 Skill、一般恢复、handle-level TOCTOU、OS/container tenant 与跨路线 canary 仍为未完成项。
+
+当前 Operation 恢复边界：0130 持久化 exact hold，0131 要求 governed signed reconciliation 精确绑定该 current case，并在既有 Operation/Outbox UoW 后确认 case 已退出 current projection。UNKNOWN/CANCELLATION 已有本地真实 SQLite 证据；checkpoint conflict 继续 quarantine。该项不等于自动副作用归因、一般恢复或 NE-01 完成。
 
 ## 推荐阅读顺序
 

@@ -34,6 +34,10 @@ _OPERATION_EVIDENCE_DIGEST = "sha256:" + "d" * 64
 _OPERATION_EVIDENCE_REF = (
     "operation-reconcile-evidence://sha256/" + "d" * 64
 )
+_OPERATION_RECOVERY_CASE_REF = (
+    "operation-recovery-hold://sha256/" + "9" * 64
+)
+_OPERATION_RECOVERY_CASE_DIGEST = "sha256:" + "9" * 64
 
 
 def _contracts():
@@ -269,7 +273,7 @@ def _edge_operator_commit():
     }
 
 
-def _operation_reconciliation_contracts():
+def _operation_reconciliation_contracts(*, recovery_case: bool = False):
     fact = WorldFactV2(
         workspace_id="workspace-operation-reconcile",
         subject_id="principal-operation-reconcile",
@@ -286,6 +290,24 @@ def _operation_reconciliation_contracts():
         revision=1,
         facts=(fact,),
     )
+    args = {
+        "operator_command_id": "task_operation.reconcile",
+        "evidence_ref": _OPERATION_EVIDENCE_REF,
+        "evidence_digest": _OPERATION_EVIDENCE_DIGEST,
+        "reservation_id": "reservation-gr06-reacquire",
+        "expected_version": 2,
+        "action": "REACQUIRE",
+        "reconciler_actor_id": fact.subject_id,
+    }
+    if recovery_case:
+        args.update(
+            {
+                "recovery_case_ref": _OPERATION_RECOVERY_CASE_REF,
+                "recovery_case_subject_sha256": (
+                    _OPERATION_RECOVERY_CASE_DIGEST
+                ),
+            }
+        )
     return build_direct_host_route_contracts(
         surface=HostCommandSurface.OPERATOR,
         request_id=_OPERATION_REQUEST_ID,
@@ -300,15 +322,7 @@ def _operation_reconciliation_contracts():
             "action": "operator_task_operation_reconciliation",
             "target": "task_runtime",
             "task": "reacquire one signed operation",
-            "args": {
-                "operator_command_id": "task_operation.reconcile",
-                "evidence_ref": _OPERATION_EVIDENCE_REF,
-                "evidence_digest": _OPERATION_EVIDENCE_DIGEST,
-                "reservation_id": "reservation-gr06-reacquire",
-                "expected_version": 2,
-                "action": "REACQUIRE",
-                "reconciler_actor_id": fact.subject_id,
-            },
+            "args": args,
         },
         governor_result={
             "request_id": _OPERATION_REQUEST_ID,
@@ -337,7 +351,26 @@ def _operation_reconciliation_contracts():
     )
 
 
-def _operation_reconciliation_commit():
+def _operation_reconciliation_commit(*, recovery_case: bool = False):
+    payload = {
+        "operator_command_id": "task_operation.reconcile",
+        "request_id": _OPERATION_REQUEST_ID,
+        "evidence_ref": _OPERATION_EVIDENCE_REF,
+        "evidence_digest": _OPERATION_EVIDENCE_DIGEST,
+        "reservation_id": "reservation-gr06-reacquire",
+        "expected_version": 2,
+        "action": "REACQUIRE",
+        "reconciler_actor_id": "principal-operation-reconcile",
+    }
+    if recovery_case:
+        payload.update(
+            {
+                "recovery_case_ref": _OPERATION_RECOVERY_CASE_REF,
+                "recovery_case_subject_sha256": (
+                    _OPERATION_RECOVERY_CASE_DIGEST
+                ),
+            }
+        )
     return {
         "decision": "APPROVE",
         "request_id": _OPERATION_REQUEST_ID,
@@ -352,16 +385,7 @@ def _operation_reconciliation_commit():
             {
                 "effect_type": "task.operation_reconciliation",
                 "commit_scope": "NODE",
-                "payload": {
-                    "operator_command_id": "task_operation.reconcile",
-                    "request_id": _OPERATION_REQUEST_ID,
-                    "evidence_ref": _OPERATION_EVIDENCE_REF,
-                    "evidence_digest": _OPERATION_EVIDENCE_DIGEST,
-                    "reservation_id": "reservation-gr06-reacquire",
-                    "expected_version": 2,
-                    "action": "REACQUIRE",
-                    "reconciler_actor_id": "principal-operation-reconcile",
-                },
+                "payload": payload,
             }
         ],
     }
@@ -740,3 +764,34 @@ def test_operator_compiler_rejects_forged_operation_reconciler() -> None:
         )
 
     assert raised.value.reason_code == ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID
+
+
+def test_operator_compiler_binds_complete_operation_recovery_case() -> None:
+    contracts = _operation_reconciliation_contracts(recovery_case=True)
+    commit = _operation_reconciliation_commit(recovery_case=True)
+    effects = compile_graph_acceptance_effects(
+        command=contracts.command,
+        work_order=contracts.work_order,
+        node_id=contracts.graph.nodes[0].node_id,
+        attempt_id="attempt-gr06-operation-recovery-case",
+        worker_commit=commit,
+    )
+    assert effects[0].payload["recovery_case_ref"] == (
+        _OPERATION_RECOVERY_CASE_REF
+    )
+    assert effects[0].payload["recovery_case_subject_sha256"] == (
+        _OPERATION_RECOVERY_CASE_DIGEST
+    )
+
+    incomplete = deepcopy(commit)
+    incomplete["acceptance_effect_intents"][0]["payload"].pop(
+        "recovery_case_subject_sha256"
+    )
+    with pytest.raises(AcceptanceEffectCompileError):
+        compile_graph_acceptance_effects(
+            command=contracts.command,
+            work_order=contracts.work_order,
+            node_id=contracts.graph.nodes[0].node_id,
+            attempt_id="attempt-gr06-operation-recovery-case-incomplete",
+            worker_commit=incomplete,
+        )

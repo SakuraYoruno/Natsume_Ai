@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.13
+版本：v2.14
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -14,6 +14,8 @@
 直接 Agent Skill 写入现在复用 Internal composition 已拥有的 ArtifactStore、DurableWorkspaceRuntime 和 0101/0116 lifecycle，而不创建可从 payload 发现的服务。Host 在 admission 时从 app-local SkillRegistry 冻结风险与 Review policy；frozen worker 先验证 child grant，再从 durable ReviewStore 重开唯一已消费的 task/node-bound Review。`governed_skill_work_order.py` 只复制兼容 WorkOrder 的语义字段，所有 Graph/Attempt/Lease/Grant/Budget/Review/Workspace authority 均从受信执行上下文重建。`codex_runtime` adapter 取得的 ports 只存在于 sealed broker dispatch context。写结果的 protected descriptor 进入 immutable WorkerProjection；231 行纯模块 `agent_workspace_acceptance_effect.py` 负责 descriptor canonicalization/lineage 校验，1499 行 canonical `acceptance_effects.py` 只编排 graph-scope Effect，未扩大巨石白名单。共享 dispatcher 以 terminal Preview/fence 调用 `AcceptedAgentWorkspaceArtifactHandler`，该 handler 重新验证 admission、projection、Node/Attempt/Lease/NodeArtifact、Effect payload/digest 与 sealed bytes，才推进 Workspace。promotion 的 Effect 排在 conversation、Life 与 delivery 之前，未知结果进入 Effect reconciliation，不允许后续可见副作用越过。该结构仅覆盖三条已登记 risk-4 Agent Skill，不代表 Domain Pack、任意 Skill 或一般恢复完成。
 
 Task Runtime 的恢复架构新增一个持久“停机面”，而不是第二执行器。scheduler 在重开 Operation 时，只有 exact `COMMITTED` checkpoint、完整 Budget authority 和当前版本链一致，才可沿原 immutable graph 取得 higher-fence continuation；五节点菱形与八根节点已证明依赖释放和每个 worker 单次执行。其它未知效果、取消交叉或 checkpoint conflict 由 0130 在 canonical Store 同一事务写 append-only hold 与 Outbox。hold 读取会复验 Graph/Node/Attempt/Operation/Budget/cancellation/active Lease 的当前版本；unknown/cancellation 进入各自签名 reconciliation，conflict 保持 quarantine 且零 takeover Lease。它没有自动归因，也没有替代 DAG scheduler、Effect reconciliation 或 terminal finalizer。
+
+0131 没有新增 mutation authority，而是在既有 0126 evidence 与 0130 hold 之间增加数据库级精确绑定。当前 UNKNOWN/CANCELLATION hold 的 ref 与 subject digest 必须从 Secure Ingress 一路冻结到 Acceptance Effect；Accepted handler 调用原 Operation/Outbox 单事务 owner 后，再重开同一 hold 并验证 `current=false`。每 case 唯一 evidence、case 字段不可变、响应丢失 exact replay 和进程重启均由 durable ledger保证。checkpoint conflict 不具备合法动作矩阵，继续留在 quarantine。
 
 Scheduler 管理写入口由 Host ASGI composition 显式注入一个 app-local runtime。两个公开前缀的 create/update/delete/enable/disable 都编译为 `HostCommand(surface=SCHEDULER)` 和不可变 TaskGraph；route 只持 runtime provider，不持 repository writer。Acceptance Effect 与 Operator 状态控制复用同一 canonical handler，但 Scheduler 请求额外绑定原 HTTP method/path/body、definition head 与 Scheduler claim。operation journal 先于 claim completion，重启恢复只补齐同一 receipt。read 路由与 trigger 分别保持 query-only 和既有 governed occurrence 边界。
 
@@ -311,7 +313,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0130_task_operation_recovery_hold.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0129 继续封闭各自既有边界；0130 只为未决 Operation 增加 append-only hold 与同事务 Outbox，并不定义副作用结论或执行准许。它不提供部署 key、Operator credential、完整 Host 进程重启、所有恢复类别或七路线验收，因此不代表 Chat、Universal Runtime 或 NE-01 完成。
+当前连续 SQLite migration head 为 `0131_task_operation_recovery_hold_binding.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0129 继续封闭各自既有边界；0130 为未决 Operation 增加 append-only hold 与同事务 Outbox，0131 只增加 exact current-case evidence binding，并不定义副作用结论或执行准许。它不提供部署 key、Operator credential、完整 Host 进程重启、所有恢复类别或七路线验收，因此不代表 Chat、Universal Runtime 或 NE-01 完成。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -451,7 +453,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0130_task_operation_recovery_hold.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0129 保持各自既有窄 authority；0130 只定义未决 Operation hold/inventory，不定义副作用归因或执行准许。它们都不改变七路线总体 `INCOMPLETE`。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0131_task_operation_recovery_hold_binding.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0129 保持各自既有窄 authority；0130 定义未决 Operation hold/inventory，0131 定义 current-case evidence binding，均不定义副作用归因或执行准许。它们都不改变七路线总体 `INCOMPLETE`。
 
 ## 7. 数字生命状态模型
 

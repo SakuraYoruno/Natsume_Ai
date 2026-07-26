@@ -40,6 +40,9 @@ from host_brain.task_runtime.operator_state_control_acceptance_effect import (
     compile_operator_state_control_acceptance_effect,
     is_operator_state_control_command,
 )
+from host_brain.task_runtime.operation_reconciliation_acceptance_effect import (
+    validate_operation_reconciliation_proposal,
+)
 from host_brain.task_runtime.worker_authority_guard import forbidden_worker_authority_path
 from host_brain.task_runtime import agent_workspace_acceptance_effect as agent_workspace_effects
 from host_brain.agent_runtime.workspace_artifact_effect import AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
@@ -1042,94 +1045,22 @@ def _compile_operator_operation_reconciliation_effect(
     commit: Mapping[str, Any],
     pack: Mapping[str, Any],
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
-    raw = commit.get("acceptance_effect_intents")
-    if not isinstance(raw, Sequence) or isinstance(
-        raw,
-        (str, bytes, bytearray),
-    ):
-        raise AcceptanceEffectCompileError(
-            "Operation reconciliation Operator must propose one effect"
-        )
-    if len(raw) != 1:
-        raise AcceptanceEffectCompileError(
-            "Operation reconciliation Operator must propose exactly one effect"
-        )
-    descriptor = _json_mapping(
-        raw[0],
-        field_name="Operation reconciliation effect descriptor",
-    )
-    if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
-        raise AcceptanceEffectCompileError(
-            "Operation reconciliation descriptor fields drifted"
-        )
-    if (
-        descriptor.get("effect_type")
-        != _OPERATOR_OPERATION_RECONCILIATION_EFFECT
-        or str(descriptor.get("commit_scope") or "").strip().upper() != "NODE"
-    ):
-        raise AcceptanceEffectCompileError(
-            "Operation reconciliation proposed an unsupported effect"
-        )
-    payload = _json_mapping(
-        descriptor.get("payload"),
-        field_name="Operation reconciliation effect payload",
-    )
-    _reject_worker_authority(payload)
     intent = _json_mapping(pack.get("intent_draft"), field_name="intent_draft")
     args = _json_mapping(intent.get("args"), field_name="intent_draft.args")
-    request_fields = {
-        "evidence_ref",
-        "evidence_digest",
-        "reservation_id",
-        "expected_version",
-        "action",
-        "reconciler_actor_id",
-    }
-    required_keys = {
-        "operator_command_id",
-        "request_id",
-        *request_fields,
-    }
-    expected = {
-        "operator_command_id": "task_operation.reconcile",
-        "request_id": command.request_id,
-        **{field: args.get(field) for field in request_fields},
-    }
-    action = str(expected.get("action") or "").strip().upper()
-    expected_version = expected.get("expected_version")
-    if (
-        set(payload) != required_keys
-        or payload != expected
-        or not str(expected.get("reservation_id") or "").strip()
-        or type(expected_version) is not int
-        or expected_version < 0
-        or action not in {"COMMIT", "RELEASE", "REACQUIRE"}
-        or not str(expected.get("reconciler_actor_id") or "").strip()
-        or not re.fullmatch(
-            r"operation-reconcile-evidence://sha256/[0-9a-f]{64}",
-            str(expected.get("evidence_ref") or ""),
-        )
-        or str(expected.get("evidence_digest") or "")
-        != "sha256:"
-        + str(expected.get("evidence_ref") or "").rsplit("/", 1)[-1]
-        or str(intent.get("action") or "").strip()
-        != "operator_task_operation_reconciliation"
-        or str(intent.get("target") or "").strip().lower() != "task_runtime"
-        or str(intent.get("route") or "").strip().lower() != "delegate"
-        or str(intent.get("target_id") or "").strip()
-        != _OPERATOR_OPERATION_RECONCILIATION_TARGET
-        or str(
-            _json_mapping(
+    try:
+        payload = validate_operation_reconciliation_proposal(
+            raw_effects=commit.get("acceptance_effect_intents"),
+            frozen_intent=intent,
+            frozen_args=args,
+            work_order_metadata=_json_mapping(
                 getattr(work_order, "metadata", {}),
                 field_name="work_order.metadata",
-            ).get("operator_command_id")
-            or ""
-        ).strip()
-        != "task_operation.reconcile"
-    ):
-        raise AcceptanceEffectCompileError(
-            "Operation reconciliation effect differs from frozen intent"
+            ),
+            request_id=command.request_id,
         )
+    except ValueError as exc:
+        raise AcceptanceEffectCompileError(str(exc)) from exc
+    _reject_worker_authority(payload)
     preview_context = _action_preview_context(
         command=command,
         work_order=work_order,

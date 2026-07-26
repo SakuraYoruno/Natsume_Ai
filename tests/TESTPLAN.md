@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.14
+版本：v0.15
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -37,6 +37,10 @@
 ## T-NE01-OPERATION-RECOVERY-HOLD
 
 - T-NE01-OPERATION-RECOVERY-HOLD-01：`UNKNOWN_SIDE_EFFECT`、`CANCELLATION_CROSSING`、`CHECKPOINT_BUDGET_CONFLICT` 与 `CHECKPOINT_AUTHORITY_CONFLICT` 必须写入 0130 append-only case，并在同一 TaskStore UoW 写唯一 `OPERATION_RECOVERY_HOLD_RECORDED` Outbox；任一写入故障必须整笔回滚。
+- T-NE01-OPERATION-RECOVERY-HOLD-05：存在唯一 current UNKNOWN/CANCELLATION hold 时，0126 evidence stage 必须携带 exact 0131 `recovery_case_ref + recovery_case_subject_sha256`；缺失、单边字段、错误 digest、过时 reservation/version 或 subject 漂移全部失败关闭。
+- T-NE01-OPERATION-RECOVERY-HOLD-06：UNKNOWN case 必须没有 cancellation intent；CANCELLATION case 必须绑定 exact intent，且只允许 `COMMIT/RELEASE`。checkpoint Budget/authority conflict 不得生成可执行 reconciliation evidence，必须继续 quarantine。
+- T-NE01-OPERATION-RECOVERY-HOLD-07：同一 case 最多一份 append-only evidence；无 case 的历史 v1 material/digest 保持 byte-compatible，有 case 使用 v2 digest。request response 丢失、进程重建与重复 staging 只能重开同一 evidence；UPDATE/DELETE 与 case 字段篡改由 trigger 阻断。
+- T-NE01-OPERATION-RECOVERY-HOLD-08：完整 Operator Secure Ingress → Review → Acceptance 后复用既有 Operation/Outbox UoW；Accepted handler 必须重开 exact hold 并确认 `current=false` 才提交 v5 receipt。mutation 后无法证明关闭时必须返回 UNKNOWN，不能伪造成功；exact replay 不再次调用 mutation runtime。
 - T-NE01-OPERATION-RECOVERY-HOLD-02：case subject 必须精确绑定 Graph/revision、Node/version、Attempt/version、Operation/version、graph Budget/version、cancellation intent/version 和写入时 active Lease/version。current projection 遇到任一版本漂移或新的 live Lease 必须排除旧 case并要求重新扫描。
 - T-NE01-OPERATION-RECOVERY-HOLD-03：相同 deterministic case exact replay 必须返回原 case/outbox；reason、classification、subject、digest 或 Outbox 漂移失败关闭。数据库 UPDATE/DELETE 必须由 trigger 拒绝。
 - T-NE01-OPERATION-RECOVERY-HOLD-04：unknown 与 cancellation case 只返回对应的签名 reconciliation 分类，不能形成 `NO_SIDE_EFFECT`、Effect receipt 或 worker authority；checkpoint conflict 只能 quarantine，且在创建 takeover Lease 之前停止。
@@ -508,7 +512,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
 - T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0130，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0131，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 

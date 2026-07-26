@@ -575,6 +575,158 @@ def test_cancellation_crossing_operation_hold_is_durable_and_immutable(
             )
 
 
+def test_signed_cancellation_reconciliation_consumes_exact_recovery_hold(
+    tmp_path: Path,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    db_path, intent_ref = _seed_requested_intent(
+        tmp_path,
+        reconciliation_private_key=private_key,
+        reconcile_worker_interruption=False,
+    )
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    key_id = "reconciler-cross-process-v1"
+    store = DurableTaskStore(
+        db_path,
+        clock=_Clock(NOW),
+        reconciliation_proof_verifier=Ed25519ReconciliationProofVerifier(
+            {key_id: public_key}
+        ),
+    )
+    hold = store.record_operation_recovery_hold(
+        graph_id="graph-cross-process-cancel",
+        graph_revision=1,
+        node_id="node-1",
+        attempt_id="attempt-cross-process-interrupted",
+        reservation_id="reservation-cross-process-interrupted",
+        budget_id="budget-cross-process-interrupted",
+        reason_code="GOVERNED_WORKER_FAILED",
+    )
+    operation = store.get_operation_reservation(
+        "reservation-cross-process-interrupted"
+    )
+    actor_id = "reconciler://operator/cross-process-hold"
+    attestation_ref = "proof://graph-cancellation/cross-process-hold-release"
+    binding = build_reconciliation_attestation_binding(
+        reservation_id=operation["reservation_id"],
+        business_scope=operation["business_scope"],
+        operation_fingerprint=operation["operation_fingerprint"],
+        recovery_version=operation["status_version"],
+        reconciler_actor_id=actor_id,
+        attestation_ref=attestation_ref,
+        recovery_action="RELEASE",
+        reconciliation_outcome="NO_SIDE_EFFECT",
+    )
+    signature = "ed25519:" + base64.urlsafe_b64encode(
+        private_key.sign(binding)
+    ).decode("ascii")
+    evidence_fields = {
+        "request_id": "request-cross-process-hold-release",
+        "ingress_audit_ref": "secure-ingress-audit://operation/hold-release",
+        "body_sha256": "a" * 64,
+        "reservation_id": operation["reservation_id"],
+        "expected_version": operation["status_version"],
+        "action": "RELEASE",
+        "intent_ref": intent_ref,
+        "reconciler_actor_id": actor_id,
+        "downstream_receipt_ref": None,
+        "attestation_ref": attestation_ref,
+        "attestation_key_id": key_id,
+        "attestation_signature": signature,
+    }
+    with pytest.raises(
+        TaskStoreError,
+        match="one exact current recovery case",
+    ):
+        store.stage_operation_reconciliation_evidence(**evidence_fields)
+    with pytest.raises(
+        TaskStoreError,
+        match="Operation reconciliation evidence fields are invalid",
+    ):
+        store.stage_operation_reconciliation_evidence(
+            **evidence_fields,
+            recovery_case_ref=hold["case_ref"],
+            recovery_case_subject_sha256="sha256:" + "f" * 63,
+        )
+
+    evidence = store.stage_operation_reconciliation_evidence(
+        **evidence_fields,
+        recovery_case_ref=hold["case_ref"],
+        recovery_case_subject_sha256=hold["subject_sha256"],
+    )
+    assert evidence["exact_replay"] is False
+    assert evidence["recovery_case_ref"] == hold["case_ref"]
+    assert evidence["recovery_case_subject_sha256"] == hold["subject_sha256"]
+    with pytest.raises(
+        TaskStoreError,
+        match="evidence identity conflict",
+    ):
+        store.stage_operation_reconciliation_evidence(
+            **{
+                **evidence_fields,
+                "request_id": "request-cross-process-hold-release-duplicate",
+            },
+            recovery_case_ref=hold["case_ref"],
+            recovery_case_subject_sha256=hold["subject_sha256"],
+        )
+
+    service = GraphCancellationOperationReconciliationService(
+        task_store=store,
+        outbox_factory=OutboxMessage,
+        wake_cancellation=lambda: None,
+    )
+    settled = service.reconcile_graph_cancellation_operation(
+        intent_ref=intent_ref,
+        reservation_id=operation["reservation_id"],
+        expected_version=operation["status_version"],
+        action="RELEASE",
+        reconciler_actor_id=actor_id,
+        downstream_receipt_ref=None,
+        attestation_ref=attestation_ref,
+        attestation_key_id=key_id,
+        attestation_signature=signature,
+    )
+    assert settled["operation"]["status"] == "RELEASED"
+    assert store.get_operation_recovery_hold(hold["case_ref"])[
+        "current"
+    ] is False
+    assert store.list_current_operation_recovery_holds(
+        graph_id="graph-cross-process-cancel"
+    ) == ()
+
+    reopened = DurableTaskStore(
+        db_path,
+        clock=_Clock(NOW),
+        reconciliation_proof_verifier=Ed25519ReconciliationProofVerifier(
+            {key_id: public_key}
+        ),
+    )
+    replay = reopened.get_operation_reconciliation_evidence(
+        evidence["evidence_ref"]
+    )
+    assert replay["evidence_digest"] == evidence["evidence_digest"]
+    assert replay["recovery_case_ref"] == hold["case_ref"]
+    assert reopened.get_operation_recovery_hold(hold["case_ref"])[
+        "current"
+    ] is False
+    with reopened._connect() as conn:
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="TASK_OPERATION_RECONCILIATION_EVIDENCE_IMMUTABLE",
+        ):
+            conn.execute(
+                """
+                UPDATE task_runtime_operation_reconciliation_evidence
+                SET recovery_case_subject_sha256 = ?
+                WHERE evidence_ref = ?
+                """,
+                ("sha256:" + "0" * 64, evidence["evidence_ref"]),
+            )
+
+
 def _claim_in_process(
     db_path: str,
     worker_id: str,

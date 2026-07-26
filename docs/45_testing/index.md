@@ -3,9 +3,16 @@
 
 # 测试与验收目录
 
-版本：v2.12
+版本：v2.13
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 Operation recovery case-bound reconciliation 当前切片
+
+- 0131 为 0126 evidence 增加可空但不可拆分的 `recovery_case_ref/recovery_case_subject_sha256`，并以唯一 partial index 保证一个 recovery case 只有一份 evidence。存在唯一 current 0130 hold 时，不携带 exact case 身份、绑定过时版本或分类/动作矩阵不符均在 evidence stage 失败。
+- UNKNOWN case 不允许 cancellation intent；CANCELLATION case 必须精确绑定 intent 且只接受 `COMMIT/RELEASE`。checkpoint Budget/authority conflict 无合法正向动作，继续 quarantine，零 takeover Lease。
+- Governed Operator 路线将 case identity 冻结到 Secure Ingress、WorkOrder、TaskGraph、risk-4 Review 与 Acceptance Effect。Accepted handler 复用既有 Operation/Outbox UoW 后重新打开 exact hold；只有 `current=false` 才提交 v5 receipt。响应丢失与重启只重开同一 evidence/receipt，不重复 mutation。
+- 最终受影响集合为 `129 passed in 146.40s`，覆盖真实 SQLite UNKNOWN reacquire、cancellation release、missing/tampered case、唯一 evidence、重启、trigger 不可变、checkpoint quarantine、compiler、Acceptance handler/dispatcher 与 migration/coverage contracts。部署 key/HTTP/network canary、一般自动归因、其它恢复类别、NE-01 波次与 NE-07 全栈未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Governed Internal Workspace 写入晋升当前切片
 
@@ -92,7 +99,7 @@
 - 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
 - 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
 - Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
-- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0130。该证据使用本地临时 key、单节点和进程内 route continuation；0130 的多节点/hold 证据由本文首节单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0131。该证据使用本地临时 key、单节点和进程内 route continuation；0130 的多节点/hold 与 0131 的 case-bound reconciliation 证据由本文当前切片单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 

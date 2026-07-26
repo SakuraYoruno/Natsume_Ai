@@ -161,7 +161,10 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "action": str,
             "reconciler_actor_id": str,
         },
-        "optional": {},
+        "optional": {
+            "recovery_case_ref": str,
+            "recovery_case_subject_sha256": str,
+        },
     },
     "operator_task_effect_reconciliation": {
         "required": {
