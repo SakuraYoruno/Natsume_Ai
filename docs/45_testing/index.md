@@ -3,9 +3,18 @@
 
 # 测试与验收目录
 
-版本：v2.16
+版本：v2.17
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 只读 Delegate 预算证明当前切片
+
+- `host_brain/contracts/agent_runtime/delegate_usage_attestation.py` 冻结只读 Delegate 的 exact-zero usage attestation；绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation，digest/字段/非零漂移均失败关闭。
+- `tests/unit/test_ne01_governed_delegate_dispatch.py` 验证生产唯一目标 `pentest_agent` 的 port-free 注册、无模型/工具/网络/进程 runtime import、完整绑定、篡改与非零拒绝。
+- `tests/unit/test_gr05_frozen_route_executors.py` 与 `tests/unit/test_gr05_worker_budget_usage.py` 验证执行器只消费新 attestation，忽略 legacy intent/repair Agent trace，并在缺失、attempt drift 或非零时阻断 COMMIT。
+- `tests/integration/test_gr05_universal_host_runtime.py` 在真实 SQLite 中验证外层 canonical Delegate dispatch 预扣一次工具调用，adapter 内部 token/tool/retry/model-cost 为零，并由 WorkerProjection 与 durable BudgetUsage 共同保存 attestation ref。
+- 定向集合为 `56 passed in 19.61s`，0 fail。没有 migration、真实 provider、波次 integration 或 NE-07 Docker 全栈；当前启用 Delegate 预算控制为 `PASS`，Delegate 路线与 NE-01 仍为 `INCOMPLETE / IN_PROGRESS`，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 文档/发布合同为 `78 passed in 10.90s`；audience、authority、20 条 freshness 规则、Core Architecture Gate 1～14、统一 static scan、changed-module compileall、机器状态 JSON 与 `git diff --check` 均通过。Ruff 在当前环境未安装，记为 `NOT_RUN_TOOL_UNAVAILABLE`。
 
 ## NE-01 普通受治理 Skill 模型预算当前切片
 

@@ -15,6 +15,12 @@ from host_brain.app.governed_delegate_dispatch import (
     GovernedDelegateDispatcher,
     build_governed_delegate_dispatcher,
 )
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    READONLY_DELEGATE_EXECUTION_MODE,
+    ReadonlyDelegateUsageAttestationError,
+    build_readonly_delegate_usage_attestation,
+    validate_readonly_delegate_usage_attestation,
+)
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
@@ -87,8 +93,27 @@ async def test_readonly_pentest_delegate_revalidates_the_full_frozen_authority_t
 
     assert outcome.success is True
     assert outcome.target_id == "pentest_agent"
-    assert outcome.audit_refs["delegate_execution_mode"] == "READ_ONLY_HANDOFF"
+    assert outcome.audit_refs["delegate_execution_mode"] == "PORT_FREE_READ_ONLY"
     assert outcome.audit_refs["side_effects_executed"] is False
+    usage = validate_readonly_delegate_usage_attestation(
+        outcome.audit_refs["delegate_runtime_usage_attestation"]
+    )
+    assert usage["command_id"] == invocation.command_id
+    assert usage["graph_id"] == invocation.graph_id
+    assert usage["graph_revision"] == invocation.graph_revision
+    assert usage["node_id"] == invocation.node_id
+    assert usage["attempt_id"] == invocation.attempt_id
+    assert usage["node_grant_ref"] == invocation.node_grant_ref
+    assert usage["target_id"] == invocation.target_id
+    assert usage["adapter_id"] == outcome.audit_refs["delegate_adapter"]
+    assert usage["execution_mode"] == outcome.audit_refs["delegate_execution_mode"]
+    assert usage["invocation_ref"] == invocation.invocation_ref
+    assert usage["measurements"] == {
+        "model_cost_micros": 0,
+        "retry_count": 0,
+        "token_count": 0,
+        "tool_call_count": 0,
+    }
     assert len(verifier.calls) == 1
     assert verifier.calls[0] == {
         "grant_ref": invocation.node_grant_ref,
@@ -159,6 +184,7 @@ async def test_authority_drift_never_reaches_a_registered_delegate_handler(drift
                 target_id="pentest_agent",
                 handler=handler,
                 adapter_id="test-readonly",
+                execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
             )
         },
     )
@@ -192,3 +218,83 @@ def test_inner_delegate_module_has_no_legacy_dispatcher_or_thread_timeout_depend
     assert "host_brain.app.sub_agent_protocol" not in imported_modules
     assert "host_brain.app.agent_runtime_shared" not in imported_modules
     assert "asyncio" not in imported_names
+
+
+def test_production_pentest_adapter_imports_no_model_tool_network_or_process_runtime() -> None:
+    source_path = ROOT / "host_brain/app/handlers/pentest_agent_handler.py"
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    imported_modules = {
+        str(node.module or "")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    }
+    imported_names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    forbidden_prefixes = (
+        "host_brain.model_runtime",
+        "host_brain.tools",
+        "host_brain.agent_runtime",
+        "host_brain.channels",
+        "host_brain.pentest.tools",
+    )
+    assert not any(
+        module == prefix or module.startswith(prefix + ".")
+        for module in imported_modules
+        for prefix in forbidden_prefixes
+    )
+    assert imported_names.isdisjoint(
+        {"asyncio", "httpx", "requests", "socket", "subprocess"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("attempt_id", "attempt-drifted"),
+        ("execution_mode", "MODEL_ENABLED"),
+        ("side_effects_executed", True),
+    ),
+)
+def test_readonly_delegate_usage_attestation_rejects_tamper(
+    field: str,
+    value: object,
+) -> None:
+    frozen = _frozen()
+    attestation = build_readonly_delegate_usage_attestation(
+        command_id=frozen.command_id,
+        graph_id=frozen.graph_id,
+        graph_revision=frozen.graph_revision,
+        node_id=frozen.node_id,
+        attempt_id=frozen.attempt_id,
+        node_grant_ref=frozen.node_grant_ref,
+        target_id=frozen.target_id,
+        adapter_id="readonly_pentest_domain_handoff.v1",
+        invocation_ref="governed-delegate://sha256/" + "e" * 64,
+    )
+    attestation[field] = value
+
+    with pytest.raises(ReadonlyDelegateUsageAttestationError):
+        validate_readonly_delegate_usage_attestation(attestation)
+
+
+def test_readonly_delegate_usage_attestation_rejects_nonzero_measurement() -> None:
+    frozen = _frozen()
+    attestation = build_readonly_delegate_usage_attestation(
+        command_id=frozen.command_id,
+        graph_id=frozen.graph_id,
+        graph_revision=frozen.graph_revision,
+        node_id=frozen.node_id,
+        attempt_id=frozen.attempt_id,
+        node_grant_ref=frozen.node_grant_ref,
+        target_id=frozen.target_id,
+        adapter_id="readonly_pentest_domain_handoff.v1",
+        invocation_ref="governed-delegate://sha256/" + "f" * 64,
+    )
+    attestation["measurements"]["tool_call_count"] = 1
+
+    with pytest.raises(ReadonlyDelegateUsageAttestationError):
+        validate_readonly_delegate_usage_attestation(attestation)

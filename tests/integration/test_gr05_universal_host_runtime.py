@@ -754,6 +754,29 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
                     """
                 ).fetchall()
             ]
+            delegate_projection_payloads = [
+                json.loads(row[0])
+                for row in conn.execute(
+                    """
+                    SELECT projection_json
+                    FROM task_runtime_worker_projection
+                    WHERE route_type = 'delegate'
+                    ORDER BY created_ts_ms, projection_id
+                    """
+                ).fetchall()
+            ]
+            assert len(delegate_projection_payloads) == 1
+            delegate_usage_id = delegate_projection_payloads[0][
+                "budget_usage"
+            ]["usage_id"]
+            delegate_budget_usage = conn.execute(
+                """
+                SELECT charge_kind, delta_json, accepted
+                FROM task_runtime_budget_usage
+                WHERE usage_id = ?
+                """,
+                (delegate_usage_id,),
+            ).fetchone()
             legacy_delegate_logs = conn.execute(
                 """
                 SELECT COUNT(*) FROM skill_exec_log
@@ -814,6 +837,37 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             }
             for projection in chat_projection_payloads
         )
+        assert delegate_projection_payloads[0]["budget_usage"][
+            "measurements"
+        ] == {
+            "model_cost_micros": 0,
+            "retry_count": 0,
+            "token_count": 0,
+            "tool_call_count": 0,
+        }
+        delegate_attestation = delegate_projection_payloads[0]["audit_refs"][
+            "delegate_runtime_usage_attestation"
+        ]
+        assert delegate_attestation["target_id"] == "pentest_agent"
+        assert delegate_attestation["attestation_ref"].startswith(
+            "delegate-usage://sha256/"
+        )
+        assert delegate_budget_usage is not None
+        assert delegate_budget_usage[0] == (
+            "WORKER_USAGE:COST+RETRY+TIME+TOKEN+TOOL"
+        )
+        assert {
+            key: value
+            for key, value in json.loads(delegate_budget_usage[1]).items()
+            if key != "time_ms"
+        } == {
+            "concurrency": 0,
+            "model_cost_micros": 0,
+            "retry_count": 0,
+            "token_count": 0,
+            "tool_call_count": 0,
+        }
+        assert delegate_budget_usage[2] == 1
         assert legacy_delegate_logs == 0
         assert acceptance_effects == [
             ("conversation.preference_signal", "GRAPH", "COMMITTED", 3),

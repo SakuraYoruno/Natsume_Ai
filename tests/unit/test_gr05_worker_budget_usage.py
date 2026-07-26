@@ -25,6 +25,9 @@ from host_brain.model_runtime import (
     model_attempt_result_trace,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    build_readonly_delegate_usage_attestation,
+)
 from host_brain.task_runtime.node_execution_records import _precharged_tool_call_count
 from host_brain.task_runtime.worker_budget_usage import (
     MODEL_BUDGET_MEASUREMENT_SCHEMA_VERSION,
@@ -360,7 +363,7 @@ async def test_frozen_chat_rejects_retired_secondary_model_measurement() -> None
 
 
 @pytest.mark.asyncio
-async def test_frozen_delegate_budget_projection_ignores_large_agent_context() -> None:
+async def test_frozen_delegate_budget_projection_trusts_only_bound_zero_attestation() -> None:
     trusted = {
         "schema_version": MODEL_BUDGET_MEASUREMENT_SCHEMA_VERSION,
         "measurement_ref": "model-budget://delegate-trusted",
@@ -375,14 +378,31 @@ async def test_frozen_delegate_budget_projection_ignores_large_agent_context() -
     }
 
     async def dispatch(**kwargs):  # noqa: ANN003
-        del kwargs
+        frozen = kwargs["frozen"]
+        invocation_ref = "governed-delegate://sha256/" + "a" * 64
         return {
             "route_type": "delegate",
             "target_id": "intent_agent",
             "success": True,
             "result_text": "delegated answer",
             "payload": {
-                "audit_refs": {
+                    "audit_refs": {
+                        "delegate_invocation_ref": invocation_ref,
+                        "delegate_adapter": "test-port-free-readonly.v1",
+                        "delegate_execution_mode": "PORT_FREE_READ_ONLY",
+                        "delegate_runtime_usage_attestation": (
+                        build_readonly_delegate_usage_attestation(
+                            command_id=frozen.command_id,
+                            graph_id=frozen.graph_id,
+                            graph_revision=frozen.graph_revision,
+                            node_id=frozen.node_id,
+                            attempt_id=frozen.attempt_id,
+                            node_grant_ref=frozen.node_grant_ref,
+                            target_id=frozen.target_id,
+                            adapter_id="test-port-free-readonly.v1",
+                            invocation_ref=invocation_ref,
+                        )
+                    ),
                     "intent_agent_trace": {
                         "model_attempt": {"budget_measurement": trusted}
                     },
@@ -408,8 +428,14 @@ async def test_frozen_delegate_budget_projection_ignores_large_agent_context() -
     ]
 
     usage = WorkerBudgetUsage.from_payload(events[0]["budget_usage"])
-    assert usage.measurements == {"retry_count": 0, "token_count": 13}
-    assert usage.evidence_refs == ("model-budget://delegate-trusted",)
+    assert usage.measurements == {
+        "model_cost_micros": 0,
+        "retry_count": 0,
+        "token_count": 0,
+        "tool_call_count": 0,
+    }
+    assert len(usage.evidence_refs) == 1
+    assert usage.evidence_refs[0].startswith("delegate-usage://sha256/")
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,9 @@ from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
 from host_brain.contracts.agent_runtime.node_input_attestation import (
     build_node_input_artifact_attestation,
 )
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    build_readonly_delegate_usage_attestation,
+)
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
@@ -97,6 +100,33 @@ def _frozen(
     )
 
 
+def _readonly_delegate_audit(
+    frozen: FrozenNodeInput,
+    **extra: Any,
+) -> dict[str, Any]:
+    invocation_ref = "governed-delegate://sha256/" + "d" * 64
+    return {
+        **extra,
+        "delegate_invocation_ref": invocation_ref,
+        "delegate_adapter": "test-port-free-readonly.v1",
+        "delegate_execution_mode": "PORT_FREE_READ_ONLY",
+        "side_effects_executed": False,
+        "delegate_runtime_usage_attestation": (
+            build_readonly_delegate_usage_attestation(
+                command_id=frozen.command_id,
+                graph_id=frozen.graph_id,
+                graph_revision=frozen.graph_revision,
+                node_id=frozen.node_id,
+                attempt_id=frozen.attempt_id,
+                node_grant_ref=frozen.node_grant_ref,
+                target_id=frozen.target_id,
+                adapter_id="test-port-free-readonly.v1",
+                invocation_ref=invocation_ref,
+            )
+        ),
+    }
+
+
 @pytest.mark.asyncio
 async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit() -> None:
     calls: list[dict[str, Any]] = []
@@ -109,7 +139,12 @@ async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit()
             success=True,
             result_text="frozen research result",
             error_text="",
-            payload={"audit_refs": {"dispatch_receipt": "receipt://delegate/1"}},
+            payload={
+                "audit_refs": _readonly_delegate_audit(
+                    kwargs["frozen"],
+                    dispatch_receipt="receipt://delegate/1",
+                )
+            },
         )
 
     executor = FrozenDelegateRouteExecutor(ports=object(), dispatch_to_sub_agent=dispatch)
@@ -133,7 +168,18 @@ async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit()
     ]
 
     assert len(events) == 1
-    assert events[0] == {
+    assert {
+        key: events[0][key]
+        for key in (
+            "phase",
+            "done",
+            "decision",
+            "reason_code",
+            "narrative",
+            "route_type",
+            "target_id",
+        )
+    } == {
         "phase": "COMMIT",
         "done": True,
         "decision": "APPROVE",
@@ -141,11 +187,15 @@ async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit()
         "narrative": "frozen research result",
         "route_type": "delegate",
         "target_id": "research_agent",
-        "audit_refs": {
-            "dispatch_receipt": "receipt://delegate/1",
-            "governed_frozen_route": True,
-            "delivery_authorized": False,
-        },
+    }
+    assert events[0]["audit_refs"]["dispatch_receipt"] == "receipt://delegate/1"
+    assert events[0]["audit_refs"]["governed_frozen_route"] is True
+    assert events[0]["audit_refs"]["delivery_authorized"] is False
+    assert events[0]["budget_usage"]["measurements"] == {
+        "model_cost_micros": 0,
+        "retry_count": 0,
+        "token_count": 0,
+        "tool_call_count": 0,
     }
     assert calls[0]["target_id"] == "research_agent"
     assert calls[0]["task_text"] == "answer only this frozen objective"
@@ -155,10 +205,65 @@ async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode",
+    (
+        "missing",
+        "nonzero",
+        "attempt_drift",
+        "adapter_drift",
+        "execution_mode_drift",
+    ),
+)
+async def test_delegate_executor_rejects_missing_or_drifted_usage_attestation(
+    mode: str,
+) -> None:
+    async def dispatch(**kwargs):  # noqa: ANN003
+        audit = _readonly_delegate_audit(kwargs["frozen"])
+        if mode == "missing":
+            audit.pop("delegate_runtime_usage_attestation")
+        elif mode == "nonzero":
+            audit["delegate_runtime_usage_attestation"]["measurements"][
+                "token_count"
+            ] = 1
+        elif mode == "attempt_drift":
+            audit["delegate_runtime_usage_attestation"]["attempt_id"] = (
+                "attempt-drifted"
+            )
+        elif mode == "adapter_drift":
+            audit["delegate_adapter"] = "other-port-free-readonly.v1"
+        else:
+            audit["delegate_execution_mode"] = "READ_ONLY_HANDOFF"
+        return {
+            "route_type": "delegate",
+            "target_id": "research_agent",
+            "success": True,
+            "result_text": "must not commit",
+            "audit_refs": audit,
+        }
+
+    executor = FrozenDelegateRouteExecutor(
+        ports=object(),
+        dispatch_to_sub_agent=dispatch,
+    )
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(route="delegate", target_id="research_agent")
+            )
+        ]
+    assert (
+        raised.value.reason_code
+        == GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED
+    )
+
+
+@pytest.mark.asyncio
 async def test_delegate_executor_normalizes_failure_to_reject_without_recovery_route() -> None:
     calls = 0
 
-    async def dispatch(**_kwargs):  # noqa: ANN003
+    async def dispatch(**kwargs):  # noqa: ANN003
         nonlocal calls
         calls += 1
         return {
@@ -167,6 +272,7 @@ async def test_delegate_executor_normalizes_failure_to_reject_without_recovery_r
             "success": False,
             "result_text": "",
             "error_text": "SUB_AGENT_TIMEOUT: frozen dispatch expired",
+            "audit_refs": _readonly_delegate_audit(kwargs["frozen"]),
         }
 
     executor = FrozenDelegateRouteExecutor(ports=object(), dispatch_to_sub_agent=dispatch)
@@ -185,7 +291,7 @@ async def test_delegate_executor_normalizes_failure_to_reject_without_recovery_r
 
 @pytest.mark.asyncio
 async def test_delegate_executor_removes_context_authority_from_public_audit() -> None:
-    async def dispatch(**_kwargs):  # noqa: ANN003
+    async def dispatch(**kwargs):  # noqa: ANN003
         return {
             "route_type": "delegate",
             "target_id": "intent_agent",
@@ -193,6 +299,7 @@ async def test_delegate_executor_removes_context_authority_from_public_audit() -
             "result_text": "safe delegate result",
             "payload": {
                 "audit_refs": {
+                    **_readonly_delegate_audit(kwargs["frozen"]),
                     "agent_context": {
                         "context_authorization": {"authorized_ref_count": 5},
                         "runtime_event_summary": {

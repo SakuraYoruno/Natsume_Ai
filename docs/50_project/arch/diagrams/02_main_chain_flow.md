@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.10
+版本：v2.11
 核对日期：2026-07-26
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -58,6 +58,8 @@ Plan 的合成节点还有一条不能省略的数据边：已验收 predecessor
 typed model port；每次调用产生 canonical measurement，外层重验
 request/Budget/Graph/Node/Attempt-bound attestation 后才写 `WorkerBudgetUsage`。
 未声明的 Skill 不得到裸模型服务，因而不能绕开 Task Budget。
+
+只读 Delegate 的预算边界与模型 Skill 不同：Task Runtime 先为 canonical Delegate dispatch 预扣一次工具调用；当前唯一 `pentest_agent` adapter 不取得任何模型、工具、嵌套派发或 Effect port，并返回完整 lineage-bound exact-zero usage attestation。Frozen worker 重验 command、graph/revision、node、attempt、node grant、target、adapter 和 invocation 后，才把内部零用量写入 `WorkerBudgetUsage`。字段缺失不能代替零证明，legacy Agent trace 也不进入结算。
 
 ## Task 节点时序
 

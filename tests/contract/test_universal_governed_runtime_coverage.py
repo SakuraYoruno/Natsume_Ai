@@ -24,7 +24,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "d5b15be1950b7805991a5041e410c2a0eb8549e4"
+    assert report.evaluated_commit_sha == "0adc0847ed2ea1e8c9b8139d05d3c7d7d6e8b444"
     assert report.migration_head == (
         "0131_task_operation_recovery_hold_binding.sql"
     )
@@ -54,14 +54,11 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
             "node_bound_grant",
             "budget_enforcement",
             "review_resume",
-            "verification",
             "transactional_side_effects",
             "commit_bound_acceptance",
         ),
         "delegate": (
-            "budget_enforcement",
             "review_resume",
-            "verification",
             "transactional_side_effects",
             "commit_bound_acceptance",
         ),

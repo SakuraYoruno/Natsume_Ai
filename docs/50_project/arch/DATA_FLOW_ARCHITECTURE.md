@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.11
+版本：v3.12
 
 核对日期：2026-07-26
 
@@ -14,6 +14,8 @@
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
 当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
+
+只读 Delegate 的预算数据流为：`canonical Delegate dispatch 预扣 1 次工具调用 → port-free pentest adapter → server 生成 exact-zero usage attestation → frozen executor 重验完整 Task/Grant/Invocation lineage → WorkerBudgetUsage → durable Budget settlement`。adapter 不接收可消费资源的 port，因此零 token/tool/retry/model-cost 是可验证的正向声明，不是从字段缺失推断；旧 intent/repair Agent trace 不进入这条流。任一非零、digest 或 lineage 漂移都会在 WorkerProjection COMMIT 前停止。
 
 当前通用 worker 证据流为：
 

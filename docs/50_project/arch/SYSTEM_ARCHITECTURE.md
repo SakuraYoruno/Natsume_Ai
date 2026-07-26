@@ -3,13 +3,15 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.17
+版本：v2.18
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
 
 通用执行层新增一个 route-neutral 证据边界，而不是第二套 Runtime。Chat、Skill、Delegate、Plan、Tool 与 Operator worker 仍由原 Task Runtime 调度；其 terminal COMMIT 只被视为主张。Verifier 与 Acceptance 分别通过 projection reader 重开同一 durable evidence，任何身份、grant、digest、COMMIT 或输出合同漂移都阻断。Plan 的 successor artifact 由 canonical TaskStore 解析并经 `NodeInputArtifactAttestation` 绑定后才进入 final Chat；该 attestation 不赋予新的执行权。
+
+Delegate 也没有建立第二套预算账本。Task Runtime 对外层 canonical dispatch 记一次工具调用；当前唯一 target `pentest_agent` 是无模型/工具/嵌套派发/Effect port 的只读 adapter，由 dispatcher 生成 `ReadonlyDelegateUsageAttestationV1` 明确证明内部四类用量为零。Frozen executor 在进入共享 WorkerBudgetUsage/settlement 前重验完整 Task lineage、node grant 与 invocation digest，缺失或漂移失败关闭。该结构只证明当前 target，不授权一般 Delegate。
 
 模型调用 authority 也沿同一 Task 边界收口。普通受治理 Skill 只有在 `SkillMeta.model_budget_required=true` 时才会获得 [`GovernedSkillModelBudgetRuntime`](../../../host_brain/model_runtime/governed_skill_budget.py)；它从当前 Task Budget 派生不可扩张的 node/attempt guard，逐次消费 canonical provider measurement，并生成不含 secret 的 usage attestation。未声明的普通 Skill 不再得到裸 `ModelAttemptService`，外层 frozen worker 必须重验 attestation 的 request/Budget/Graph/Node/Attempt 绑定后才能构造 `WorkerBudgetUsage`。Agent Skill 保留独立 sealed model runtime；两条路径最终都由 Task Runtime 持久结算，而不是由 Skill 自报成功。
 
