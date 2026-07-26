@@ -13,14 +13,15 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
 )
 from host_brain.task_runtime.operator_state_control_support import (
-    OPERATOR_STATE_CONTROL_COMMAND_IDS,
     OPERATOR_STATE_CONTROL_EFFECT_TYPE,
+    SCHEDULER_ADMIN_CONTROL_COMMAND_IDS,
+    STATE_CONTROL_COMMAND_IDS,
     operator_state_control_ingress_requirements,
     operator_state_control_operation_id,
 )
 
 
-_SCHEDULER_COMMAND_IDS = frozenset(
+_SET_ENABLED_COMMAND_IDS = frozenset(
     {"scheduler.task.enable", "scheduler.task.disable"}
 )
 
@@ -58,7 +59,10 @@ class AcceptedOperatorStateControlHandler:
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         value = _accepted_operator_state_control_request(payload)
         try:
-            if value["operator_command_id"] in _SCHEDULER_COMMAND_IDS:
+            if (
+                value["operator_command_id"]
+                in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS
+            ):
                 await self._apply_scheduler(value)
             else:
                 self._apply_mode_policy(value)
@@ -87,19 +91,45 @@ class AcceptedOperatorStateControlHandler:
     async def _apply_scheduler(self, value: Mapping[str, Any]) -> None:
         args = dict(value["state_args"])
         service = self._scheduler_service()
-        apply = getattr(service, "apply_accepted_set_enabled", None)
+        command_id = str(value["operator_command_id"])
+        if command_id == "scheduler.task.publish":
+            method = "apply_accepted_publish_definition"
+            kwargs = {
+                "task_id": str(args["task_id"]),
+                "definition": dict(args["definition"]),
+                "expected_head_version": int(
+                    args["expected_head_version"]
+                ),
+                "next_scheduled_at_ms": args["next_scheduled_at_ms"],
+            }
+        elif command_id == "scheduler.task.delete":
+            method = "apply_accepted_delete_definition"
+            kwargs = {
+                "task_id": str(args["task_id"]),
+                "expected_head_version": int(
+                    args["expected_head_version"]
+                ),
+            }
+        else:
+            method = "apply_accepted_set_enabled"
+            kwargs = {
+                "task_id": str(args["task_id"]),
+                "enabled": bool(args["enabled"]),
+                "expected_head_version": int(
+                    args["expected_head_version"]
+                ),
+            }
+        apply = getattr(service, method, None)
         if not callable(apply):
             raise RuntimeError(
                 "APP_LOCAL_SCHEDULER_STATE_CONTROL_UNAVAILABLE"
             )
         result = apply(
-            task_id=str(args["task_id"]),
-            enabled=bool(args["enabled"]),
             authority=_reopen_authority(
                 value,
                 resolver=self._authority_resolver,
             ),
-            expected_head_version=int(args["expected_head_version"]),
+            **kwargs,
         )
         if inspect.isawaitable(result):
             await result
@@ -161,21 +191,46 @@ async def resolve_operator_state_control_outcome(
     payload = dict(value or {})
     command_id = str(payload.get("operator_command_id") or "")
     args = dict(payload.get("state_args") or {})
-    if command_id in _SCHEDULER_COMMAND_IDS:
+    if command_id in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
         service = scheduler_command_service_provider()
-        resolver = getattr(service, "resolve_accepted_set_enabled", None)
+        if command_id == "scheduler.task.publish":
+            method = "resolve_accepted_publish_definition"
+            kwargs = {
+                "task_id": str(args["task_id"]),
+                "definition": dict(args["definition"]),
+                "expected_head_version": int(
+                    args["expected_head_version"]
+                ),
+                "next_scheduled_at_ms": args["next_scheduled_at_ms"],
+            }
+        elif command_id == "scheduler.task.delete":
+            method = "resolve_accepted_delete_definition"
+            kwargs = {
+                "task_id": str(args["task_id"]),
+                "expected_head_version": int(
+                    args["expected_head_version"]
+                ),
+            }
+        else:
+            method = "resolve_accepted_set_enabled"
+            kwargs = {
+                "task_id": str(args["task_id"]),
+                "enabled": bool(args["enabled"]),
+                "expected_head_version": int(
+                    args["expected_head_version"]
+                ),
+            }
+        resolver = getattr(service, method, None)
         if not callable(resolver):
             raise AcceptanceEffectOutcomeUnknown(
                 "Scheduler accepted-operation reader is unavailable"
             )
         operation = resolver(
-            task_id=str(args["task_id"]),
-            enabled=bool(args["enabled"]),
             authority=_reopen_authority(
                 payload,
                 resolver=secure_ingress_authority_resolver,
             ),
-            expected_head_version=int(args["expected_head_version"]),
+            **kwargs,
         )
         if inspect.isawaitable(operation):
             operation = await operation
@@ -246,7 +301,9 @@ def _scheduler_operation_identity(
     )
     if (
         operation.get("request_id") != value.get("request_id")
-        or operation.get("operation_kind") != "SET_ENABLED"
+        or operation.get("operation_kind") != _scheduler_operation_kind(
+            str(value.get("operator_command_id") or "")
+        )
         or operation.get("task_id") != args.get("task_id")
         or operation.get("principal_id") != value.get("principal_id")
         or operation.get("ingress_claim_ref")
@@ -255,14 +312,8 @@ def _scheduler_operation_identity(
         != value.get("ingress_audit_ref")
         or str(operation.get("body_sha256") or "").removeprefix("sha256:")
         != str(value.get("input_sha256") or "").removeprefix("sha256:")
-        or request
-        != {
-            "task_id": args.get("task_id"),
-            "enabled": args.get("enabled"),
-            "expected_head_version": args.get("expected_head_version"),
-        }
+        or request != _scheduler_operation_request(value)
         or result.get("task_id") != args.get("task_id")
-        or result.get("enabled") != args.get("enabled")
         or not str(operation.get("receipt_ref") or "").strip()
         or not str(operation.get("result_digest") or "").startswith(
             "sha256:"
@@ -271,20 +322,103 @@ def _scheduler_operation_identity(
         raise AcceptanceEffectOutcomeUnknown(
             "Scheduler state-control durable operation drifted"
         )
-    identity = {
+    command_id = str(value.get("operator_command_id") or "")
+    if command_id in _SET_ENABLED_COMMAND_IDS and (
+        result.get("enabled") != args.get("enabled")
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Scheduler state-control durable result drifted"
+        )
+    if command_id == "scheduler.task.publish" and (
+        dict(result.get("definition") or {})
+        != dict(request.get("definition") or {})
+        or bool(result.get("retired"))
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Scheduler publish durable result drifted"
+        )
+    if command_id == "scheduler.task.delete" and (
+        result.get("deleted") is not True
+        or result.get("retired") is not True
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Scheduler delete durable result drifted"
+        )
+    identity: dict[str, Any] = {
         "receipt_ref": str(operation["receipt_ref"]),
         "result_digest": str(operation["result_digest"]),
+        "operation_kind": str(operation["operation_kind"]),
         "task_id": str(result["task_id"]),
         "head_version": int(result.get("head_version") or 0),
-        "enabled": bool(result["enabled"]),
     }
-    return identity, {
+    public: dict[str, Any] = {
         "scheduler_operation_receipt_ref": identity["receipt_ref"],
         "scheduler_result_digest": identity["result_digest"],
         "task_id": identity["task_id"],
         "head_version": identity["head_version"],
-        "enabled": identity["enabled"],
     }
+    if command_id in _SET_ENABLED_COMMAND_IDS:
+        identity["enabled"] = bool(result["enabled"])
+        public["enabled"] = identity["enabled"]
+    elif command_id == "scheduler.task.publish":
+        identity["definition_revision"] = int(
+            result.get("definition_revision") or 0
+        )
+        identity["definition"] = dict(result["definition"])
+        public.update(
+            {
+                "definition_revision": identity["definition_revision"],
+                "definition": identity["definition"],
+                "enabled": bool(result.get("enabled")),
+                "next_scheduled_at_ms": result.get(
+                    "next_scheduled_at_ms"
+                ),
+            }
+        )
+    else:
+        identity["deleted"] = True
+        public.update({"deleted": True, "retired": True})
+    return identity, public
+
+
+def _scheduler_operation_kind(command_id: str) -> str:
+    if command_id == "scheduler.task.publish":
+        return "PUBLISH"
+    if command_id == "scheduler.task.delete":
+        return "DELETE"
+    if command_id in _SET_ENABLED_COMMAND_IDS:
+        return "SET_ENABLED"
+    raise AcceptanceEffectOutcomeUnknown(
+        "Scheduler state-control command is unsupported"
+    )
+
+
+def _scheduler_operation_request(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    args = dict(value["state_args"])
+    command_id = str(value["operator_command_id"])
+    common = {
+        "task_id": args["task_id"],
+        "expected_head_version": args["expected_head_version"],
+    }
+    if command_id == "scheduler.task.publish":
+        return {
+            "task_id": args["task_id"],
+            "definition": {
+                **dict(args["definition"]),
+                "task_id": args["task_id"],
+            },
+            "expected_head_version": args["expected_head_version"],
+            "next_scheduled_at_ms": args["next_scheduled_at_ms"],
+        }
+    if command_id in _SET_ENABLED_COMMAND_IDS:
+        return {
+            "task_id": args["task_id"],
+            "enabled": args["enabled"],
+            "expected_head_version": args["expected_head_version"],
+        }
+    return common
 
 
 def _mode_operation_identity(
@@ -399,7 +533,7 @@ def _accepted_operator_state_control_request(
     )
     if (
         set(value) != required
-        or command_id not in OPERATOR_STATE_CONTROL_COMMAND_IDS
+        or command_id not in STATE_CONTROL_COMMAND_IDS
         or value.get("operation_id")
         != operator_state_control_operation_id(
             request_id=str(value.get("request_id") or ""),
@@ -478,9 +612,25 @@ def _reopen_authority(
     raw = resolver.resolve_committed_authority_by_audit(audit_ref=audit_ref)
     record = dict(raw) if isinstance(raw, Mapping) else {}
     command_id = str(value.get("operator_command_id") or "").strip()
-    action, path, scopes = operator_state_control_ingress_requirements(
-        command_id
+    args = dict(value.get("state_args") or {})
+    scheduler_http = (
+        command_id in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS
+        and "scheduler_ingress_method" in args
     )
+    if scheduler_http:
+        action = "scheduler:admin"
+        path = str(args.get("scheduler_ingress_path") or "").strip()
+        method = str(
+            args.get("scheduler_ingress_method") or ""
+        ).strip().upper()
+        scopes = ("scheduler:admin",)
+        surface = "scheduler.admin"
+    else:
+        action, path, scopes = operator_state_control_ingress_requirements(
+            command_id
+        )
+        method = "POST"
+        surface = "obs.command"
     body_digest = str(record.get("body_sha256") or "").strip().lower()
     expected_digest = str(value.get("input_sha256") or "").lower().removeprefix(
         "sha256:"
@@ -495,17 +645,18 @@ def _reopen_authority(
         != str(value.get("principal_id") or "").strip()
         or body_digest != expected_digest
         or str(record.get("action") or "").strip() != action
+        or str(record.get("surface") or "").strip() != surface
+        or str(record.get("method") or "").strip().upper() != method
         or str(record.get("normalized_path") or "").strip() != path
         or tuple(sorted(record.get("required_scopes") or ()))
         != tuple(sorted(scopes))
-        or record.get("claim_result_ref") is not None
     ):
         raise ValueError(
             "Operator state-control Secure Ingress binding drifted"
         )
     return {
         "allowed": True,
-        "duplicate": False,
+        "duplicate": bool(record.get("claim_result_ref")),
         "audit_ref": audit_ref,
         "claim_ref": str(record["claim_ref"]),
         "request_id": str(record["request_id"]),
@@ -514,7 +665,9 @@ def _reopen_authority(
         "body_sha256": body_digest,
         "action": action,
         "required_scopes": tuple(scopes),
-        "ingress_surface": "obs.command",
+        "ingress_surface": surface,
+        "method": method,
+        "normalized_path": path,
         "operator_command_id": command_id,
     }
 

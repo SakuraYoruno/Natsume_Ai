@@ -164,7 +164,10 @@ def build_direct_host_route_contracts(
             "Tool contracts require the TOOL surface and exact Secure Ingress claim/audit",
         )
     operator_command = _text(operator_command_id)
-    if surface is HostCommandSurface.OPERATOR:
+    if surface in {
+        HostCommandSurface.OPERATOR,
+        HostCommandSurface.SCHEDULER,
+    }:
         intent_command = _text(
             dict(intent_draft.get("args") or {}).get("operator_command_id")
         )
@@ -175,7 +178,7 @@ def build_direct_host_route_contracts(
         ):
             raise HostRouteContractError(
                 HOST_ROUTE_AUTHORITY_INVALID,
-                "Operator contracts require one exact authenticated command ID",
+                "governed control contracts require one exact authenticated command ID",
             )
         operator_command = _identifier(
             operator_command,
@@ -184,7 +187,7 @@ def build_direct_host_route_contracts(
     elif operator_command:
         raise HostRouteContractError(
             HOST_ROUTE_AUTHORITY_INVALID,
-            "operator_command_id is restricted to the OPERATOR surface",
+            "authenticated command ID is restricted to a governed control surface",
         )
     target_id = (
         "surface_reply"

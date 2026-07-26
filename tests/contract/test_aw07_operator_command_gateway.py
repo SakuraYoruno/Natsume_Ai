@@ -21,6 +21,7 @@ from host_brain.observability.command_ports import (
     bind_server_authority,
 )
 from host_brain.app.observability_runtime.domain_command_ports import (
+    ObsDomainCommandError,
     build_default_obs_domain_command_registry,
 )
 from host_brain.app.observability_runtime import domain_command_ports
@@ -103,7 +104,7 @@ def _envelope(command_id: str, payload: dict[str, object]) -> ObsCommandEnvelope
     )
 
 
-def test_scheduler_mutation_fails_closed_before_legacy_service_execution() -> None:
+def test_scheduler_mutation_fails_closed_without_governed_runtime() -> None:
     captured: dict[str, object] = {}
 
     class _SchedulerService:
@@ -124,12 +125,13 @@ def test_scheduler_mutation_fails_closed_before_legacy_service_execution() -> No
         scheduler_container=SimpleNamespace(command_service=_SchedulerService())
     )
     with bind_operator_command_runtime(state):
-        with pytest.raises(ObsCommandPortExecutionError) as blocked:
+        with pytest.raises(ObsDomainCommandError) as blocked:
             asyncio.run(port.execute(_envelope(
                 "scheduler.task.enable",
                 {"task_id": "clock.daily"},
             )))
 
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
+    assert str(blocked.value) == (
+        "OBS_OPERATOR_STATE_CONTROL_RUNTIME_UNAVAILABLE"
+    )
     assert captured == {}

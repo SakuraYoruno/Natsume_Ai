@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.3
+版本：v3.4
 
 核对日期：2026-07-26
 
@@ -14,6 +14,22 @@
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
 当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
+
+Scheduler 管理写流已统一为：
+
+```mermaid
+flowchart LR
+    H["/scheduler 或 /host-scheduler\ncreate/update/delete/enable/disable"] --> I["Scheduler Secure Ingress\n冻结 method/path/body/claim"]
+    I --> G["typed Governor\nHostCommand surface=SCHEDULER"]
+    G --> T["immutable TaskGraph\nAttempt / Lease / Grant / Budget"]
+    T --> R["Review / Verification / Acceptance\nterminal Preview"]
+    R --> E["operator.state_control Effect"]
+    E --> O["scheduler_admin_operation_result\ncanonical definition head"]
+    O --> C["完成原 HTTP claim"]
+    C -. "崩溃重启只读重开同一 receipt" .-> O
+```
+
+list/get/health 不进入写流；trigger 沿既有 governed occurrence 流。operation receipt 已提交而 claim 尚未完成时，恢复只能补齐同一 claim，不能再次调用 definition mutation。
 
 签名 Operation reconciliation 的当前数据流把秘密材料和执行图物理分离：
 
@@ -717,7 +733,7 @@ Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED
 
 [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py) 已构造 `WorkOrderV3 + BudgetPolicy`，以 `delegate:<worker_key>` 冻结 TaskNode。`operation_plan.py` 的 worker 在 durable child grant、occurrence、definition 和 fingerprint 全部重验后只生成 `scheduler.operation.execute` descriptor，不调用领域 handler；canonical WorkerProjection 是 Acceptance 前的 plan checkpoint。Graph Verification/Acceptance 与 Effect staging 使用同一 TaskStore UoW。提交后，共享 app-local dispatcher 才派生 exact Preview 并交给 `accepted_operation.py` 调用真实 handler；实际结果写原有 immutable result repository，native claim 只凭该 result receipt 收口；Operator 外层继续持有独立的 checksum-chained outcome receipt，并只在实际结果可归因后收口。
 
-Review 前 handler 调用数为 0，Effect commit 后为 1；duplicate 只读重放实际 result。过期 claim 或 handler 调用后的响应丢失必须先按 operation/result authority 对账，不能盲目再次执行。该切流不覆盖 Scheduler definition/admin direct authority、mutable batch/clock retry、一般未知外部效果人工归因、wave integration 或 canary。
+Review 前 handler 调用数为 0，Effect commit 后为 1；duplicate 只读重放实际 result。过期 claim 或 handler 调用后的响应丢失必须先按 operation/result authority 对账，不能盲目再次执行。后续 Scheduler admin 切片已关闭 definition/admin 的 route-local direct authority；mutable batch、一般未知外部效果人工归因、wave integration 与 canary 仍不在该 occurrence 流证明范围。
 
 Clock 的 occurrence admission 不再经历“清 DUE claim→另行领取 occurrence claim”的空窗：repository 在同一事务校验 live DUE owner/fence、插入 immutable occurrence、推进 definition head，并把 retry row 的 key/type 原子转成 occurrence/`OCCURRENCE`，保持同 owner/fence 后续租。Clock 仅接受返回的 exact occurrence claim。dispatch 前和执行中 heartbeat 续租；lease 已过期的 owner不能自我续活，clear/defer 也必须使用当前实际时间与 exact owner/fence。故慢执行不会被第二实例重复 dispatch，异常退避也不再基于旧 tick timestamp。
 
@@ -923,7 +939,7 @@ Host lifespan
 
 Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode transition history 由 0115 journal 持久化；auto-rules、last-interaction 与 mode-event outcome 由 0129 policy journal 持久化，二者都绑定同一 Host runtime authority。Organ 指标仍是易失派生状态，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0；后续切片又物理删除生产 locator container/facade/environment/wiring，让 Tribe shared state/registry/bus/23-Agent catalog 归 Host scope，并退役无上下文 fallback；Obs Organ registry 现在只保存 Agent ID/族名，不再保存已删除的模块单例名。现行生产 inventory 为 consumer/import/module/field/lock/ref 全 0。0123 又把 ResourceManager shared status file 改成 Host-fenced Runtime Event journal，Obs 只读 canonical head。当前十四条 governed Operator 命令仍不覆盖其余 `23/37` 条命令、独立 Scheduler CRUD HTTP、commit-bound acceptance、事务化 Chat、真实 workspace-bound executor、易失 Endocrine 事件缓冲/last state、易失 bus、其它资源恢复和完整 Host/Worker/Obs composition；Edge、Task/Review 与状态控制链都只有本地 SQLite 证据。Query Plane、Composition 与 NE-01 继续 partial/in-progress，HTTP/network canary 与 wave integration 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0；后续切片又物理删除生产 locator container/facade/environment/wiring，让 Tribe shared state/registry/bus/23-Agent catalog 归 Host scope，并退役无上下文 fallback；Obs Organ registry 现在只保存 Agent ID/族名，不再保存已删除的模块单例名。现行生产 inventory 为 consumer/import/module/field/lock/ref 全 0。0123 又把 ResourceManager shared status file 改成 Host-fenced Runtime Event journal，Obs 只读 canonical head。当前十四条 governed Operator 命令仍不覆盖其余 `23/37` 条命令、commit-bound acceptance、事务化 Chat、真实 workspace-bound executor、易失 Endocrine 事件缓冲/last state、易失 bus、其它资源恢复和完整 Host/Worker/Obs composition；Scheduler CRUD HTTP 已切流但也只有本地 SQLite 证据。Query Plane、Composition 与 NE-01 继续 partial/in-progress，HTTP/network canary 与 wave integration 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 
@@ -1259,7 +1275,7 @@ flowchart LR
     J --> H["Host runtime-fenced snapshot"]
 ```
 
-production owner 在 bind 前拒绝写入。0115 与 0129 的 trigger/repository 都验证 exact lease/fence；各自 event/head 同事务，故 append 或 head 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest chain，再采用 durable head；不同 bootstrap state 不能覆盖已提交事实。成功 mutation 只由 canonical journal 形成审计；exact operation replay 返回原结果且不重复写入，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch`、`sys_mode.auto_rules.update/event.submit` 与 `scheduler.task.enable/disable` 已进入 governed Operator vertical slice；Effect terminal proof 精确绑定 boundary/authority。当前 Operator 共覆盖 `14/37`，旧 Obs sys-mode writer 已删除，但独立 Scheduler CRUD HTTP 仍是直接 authority。完整 Host 进程重启、commit-bound acceptance、production canary 和 NE-01 wave integration仍未完成。
+production owner 在 bind 前拒绝写入。0115 与 0129 的 trigger/repository 都验证 exact lease/fence；各自 event/head 同事务，故 append 或 head 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest chain，再采用 durable head；不同 bootstrap state 不能覆盖已提交事实。成功 mutation 只由 canonical journal 形成审计；exact operation replay 返回原结果且不重复写入，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch`、`sys_mode.auto_rules.update/event.submit` 与 Operator `scheduler.task.enable/disable` 已进入 governed vertical slice；Scheduler CRUD HTTP 另以 `SCHEDULER` surface 使用相同 accepted effect，双前缀 direct writer 已归零。当前 Operator 共覆盖 `14/37`。完整 Host 进程重启、commit-bound acceptance、production canary 和 NE-01 wave integration仍未完成。
 
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|

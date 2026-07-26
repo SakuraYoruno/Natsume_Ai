@@ -334,8 +334,21 @@ def _node_goal(work_order: WorkOrderV3, node: TaskNode) -> str:
 
 def _origin(command: HostCommand, input_pack: Mapping[str, Any]) -> str:
     declared = str(input_pack.get("intent_origin") or "").strip().upper()
+    intent = _optional_mapping(input_pack.get("intent_draft"))
+    args = _optional_mapping(intent.get("args"))
+    scheduler_admin = (
+        command.surface is HostCommandSurface.SCHEDULER
+        and command.target_id == "operator_state_control"
+        and str(args.get("scheduler_ingress_method") or "").strip().upper()
+        in {"POST", "PATCH", "DELETE"}
+        and str(args.get("scheduler_ingress_path") or "").strip().startswith(
+            "/"
+        )
+    )
     derived = (
-        "SCHEDULED"
+        "EXPLICIT_USER"
+        if scheduler_admin
+        else "SCHEDULED"
         if command.surface is HostCommandSurface.SCHEDULER
         else "DELEGATED"
         if command.surface is HostCommandSurface.INTERNAL

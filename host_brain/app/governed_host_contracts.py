@@ -155,6 +155,8 @@ def _resolve_host_command_surface(
         return HostCommandSurface.TOOL
     if source == "OPERATOR":
         return HostCommandSurface.OPERATOR
+    if source == "SCHEDULER":
+        return HostCommandSurface.SCHEDULER
     return (
         HostCommandSurface.GATEWAY
         if source == "GATEWAY"

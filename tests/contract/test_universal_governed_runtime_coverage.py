@@ -24,7 +24,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "ccdfaea4a4fc1e14ca8f0889b0dba5b2dc4490f6"
+    assert report.evaluated_commit_sha == "6995582dfbbd79744bc614c3282078d3d6acd3a6"
     assert report.migration_head == (
         "0129_host_mode_policy_journal.sql"
     )
@@ -101,6 +101,20 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
         "revision_plus_one_replan",
         "composition_without_global_service_locator",
     )
+    payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    assert payload["production_enablement"][
+        "scheduler_admin_governed_cutover"
+    ].startswith("BOTH_HTTP_PREFIXES_CREATE_UPDATE_DELETE_ENABLE_DISABLE_")
+    assert (
+        "route calls to publish_definition, set_enabled or delete_definition are zero"
+        in payload["routes"]["scheduler"]["production_boundary"].lower()
+    )
+    assert "tests/unit/test_aw02_scheduler_route_cutover.py" in payload[
+        "routes"
+    ]["scheduler"]["evidence_refs"]
+    assert "tests/unit/test_aw03_scheduler_durable_uow.py" in payload[
+        "routes"
+    ]["scheduler"]["evidence_refs"]
 
 
 def test_full_architecture_gate_fails_closed_while_any_route_is_missing() -> None:

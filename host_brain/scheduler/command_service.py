@@ -52,6 +52,14 @@ _OPERATOR_TRIGGER_SCOPES = frozenset({"obs:write", "scheduler:write"})
 _OPERATOR_ADMIN_COMMAND_IDS = frozenset(
     {"scheduler.task.enable", "scheduler.task.disable"}
 )
+_SCHEDULER_ADMIN_COMMAND_IDS = frozenset(
+    {
+        "scheduler.task.publish",
+        "scheduler.task.delete",
+        "scheduler.task.enable",
+        "scheduler.task.disable",
+    }
+)
 
 _SHA256_RE = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 
@@ -392,7 +400,7 @@ class SchedulerCommandService:
             if enabled is False
             else ""
         )
-        _bind_scheduler_admin_operator_authority(
+        _bind_scheduler_admin_state_authority(
             auth,
             command_id=command_id,
         )
@@ -438,7 +446,7 @@ class SchedulerCommandService:
             if enabled is False
             else ""
         )
-        _bind_scheduler_admin_operator_authority(
+        _bind_scheduler_admin_state_authority(
             auth,
             command_id=command_id,
         )
@@ -454,6 +462,171 @@ class SchedulerCommandService:
             authority=auth,
         )
         return dict(resolved) if isinstance(resolved, Mapping) else None
+
+    def apply_accepted_publish_definition(
+        self,
+        *,
+        task_id: str,
+        definition: Mapping[str, Any],
+        authority: SecureIngressAuthority | Mapping[str, Any],
+        expected_head_version: int,
+        next_scheduled_at_ms: int | None,
+    ) -> dict[str, Any]:
+        """Commit one accepted publish without settling its outer HTTP claim."""
+
+        auth = _require_authority(authority)
+        _bind_scheduler_admin_state_authority(
+            auth,
+            command_id="scheduler.task.publish",
+        )
+        operation_request = _publish_operation_request(
+            task_id=task_id,
+            definition=definition,
+            expected_head_version=expected_head_version,
+            next_scheduled_at_ms=next_scheduled_at_ms,
+        )
+        self._require_registered_worker(
+            SchedulerDefinitionSnapshot(
+                task_id=str(operation_request["task_id"]),
+                definition_revision=1,
+                head_version=max(
+                    1,
+                    int(operation_request["expected_head_version"]) + 1,
+                ),
+                enabled=bool(
+                    dict(operation_request["definition"]).get(
+                        "enabled",
+                        True,
+                    )
+                ),
+                definition=dict(operation_request["definition"]),
+            )
+        )
+        replay = self._admin_replay(
+            auth,
+            task_id=str(operation_request["task_id"]),
+            operation_kind="PUBLISH",
+            operation_request=operation_request,
+        )
+        if replay is not None:
+            return dict(replay)
+        return dict(
+            self._definitions.publish_definition_operation(
+                task_id=str(operation_request["task_id"]),
+                definition=dict(operation_request["definition"]),
+                expected_head_version=int(
+                    operation_request["expected_head_version"]
+                ),
+                next_scheduled_at_ms=operation_request[
+                    "next_scheduled_at_ms"
+                ],
+                authority=auth,
+            )
+        )
+
+    def resolve_accepted_publish_definition(
+        self,
+        *,
+        task_id: str,
+        definition: Mapping[str, Any],
+        authority: SecureIngressAuthority | Mapping[str, Any],
+        expected_head_version: int,
+        next_scheduled_at_ms: int | None,
+    ) -> dict[str, Any] | None:
+        auth = _require_authority(authority)
+        _bind_scheduler_admin_state_authority(
+            auth,
+            command_id="scheduler.task.publish",
+        )
+        operation_request = _publish_operation_request(
+            task_id=task_id,
+            definition=definition,
+            expected_head_version=expected_head_version,
+            next_scheduled_at_ms=next_scheduled_at_ms,
+        )
+        resolved = self._definitions.resolve_admin_operation(
+            operation_kind="PUBLISH",
+            task_id=str(operation_request["task_id"]),
+            operation_request=operation_request,
+            authority=auth,
+        )
+        return dict(resolved) if isinstance(resolved, Mapping) else None
+
+    def apply_accepted_delete_definition(
+        self,
+        *,
+        task_id: str,
+        authority: SecureIngressAuthority | Mapping[str, Any],
+        expected_head_version: int,
+    ) -> dict[str, Any]:
+        """Commit one accepted delete without settling its outer HTTP claim."""
+
+        auth = _require_authority(authority)
+        _bind_scheduler_admin_state_authority(
+            auth,
+            command_id="scheduler.task.delete",
+        )
+        operation_request = _delete_operation_request(
+            task_id=task_id,
+            expected_head_version=expected_head_version,
+        )
+        replay = self._admin_replay(
+            auth,
+            task_id=str(operation_request["task_id"]),
+            operation_kind="DELETE",
+            operation_request=operation_request,
+        )
+        if replay is not None:
+            return dict(replay)
+        return dict(
+            self._definitions.delete_definition_operation(
+                task_id=str(operation_request["task_id"]),
+                expected_head_version=int(
+                    operation_request["expected_head_version"]
+                ),
+                authority=auth,
+            )
+        )
+
+    def resolve_accepted_delete_definition(
+        self,
+        *,
+        task_id: str,
+        authority: SecureIngressAuthority | Mapping[str, Any],
+        expected_head_version: int,
+    ) -> dict[str, Any] | None:
+        auth = _require_authority(authority)
+        _bind_scheduler_admin_state_authority(
+            auth,
+            command_id="scheduler.task.delete",
+        )
+        operation_request = _delete_operation_request(
+            task_id=task_id,
+            expected_head_version=expected_head_version,
+        )
+        resolved = self._definitions.resolve_admin_operation(
+            operation_kind="DELETE",
+            task_id=str(operation_request["task_id"]),
+            operation_request=operation_request,
+            authority=auth,
+        )
+        return dict(resolved) if isinstance(resolved, Mapping) else None
+
+    async def complete_accepted_admin_claim(
+        self,
+        *,
+        authority: SecureIngressAuthority | Mapping[str, Any],
+        result_ref: str,
+        received_at_ms: int,
+    ) -> None:
+        """Settle the Scheduler HTTP claim after TaskGraph Acceptance."""
+
+        auth = _require_authority(authority)
+        await self._complete_claim(
+            auth,
+            result_ref=str(result_ref or "").strip(),
+            received_at_ms=int(received_at_ms),
+        )
 
     async def delete_definition(
         self,
@@ -955,7 +1128,7 @@ def _bind_scheduler_command_surface(
         )
 
 
-def _bind_scheduler_admin_operator_authority(
+def _bind_scheduler_admin_state_authority(
     authority: dict[str, Any],
     *,
     command_id: str,
@@ -967,22 +1140,45 @@ def _bind_scheduler_admin_operator_authority(
         if isinstance(raw_scopes, (tuple, list, set, frozenset))
         else frozenset()
     )
-    if (
-        command not in _OPERATOR_ADMIN_COMMAND_IDS
-        or str(authority.get("ingress_surface") or "").strip()
-        != "obs.command"
-        or str(authority.get("operator_command_id") or "").strip() != command
-        or str(authority.get("action") or "").strip()
-        != f"obs:command:{command}"
-        or scopes != _OPERATOR_TRIGGER_SCOPES
-    ):
+    surface = str(authority.get("ingress_surface") or "").strip()
+    if surface == "obs.command":
+        valid = (
+            command in _OPERATOR_ADMIN_COMMAND_IDS
+            and str(authority.get("operator_command_id") or "").strip()
+            == command
+            and str(authority.get("action") or "").strip()
+            == f"obs:command:{command}"
+            and scopes == _OPERATOR_TRIGGER_SCOPES
+        )
+        command_surface = HostCommandSurface.OPERATOR
+    else:
+        valid = (
+            surface == "scheduler.admin"
+            and command in _SCHEDULER_ADMIN_COMMAND_IDS
+            and str(authority.get("operator_command_id") or "").strip()
+            == command
+            and str(authority.get("action") or "").strip()
+            == "scheduler:admin"
+            and scopes == frozenset({"scheduler:admin"})
+            and str(authority.get("method") or "").strip().upper()
+            in {"POST", "PATCH", "DELETE"}
+            and str(authority.get("normalized_path") or "").strip().startswith(
+                "/"
+            )
+        )
+        command_surface = HostCommandSurface.SCHEDULER
+    if not valid:
         raise GovernedSchedulerRuntimeError(
             SCHEDULER_RUNTIME_AUTHORITY_INVALID,
-            "Operator scheduler state control lacks exact OBS authority",
+            "scheduler state control lacks exact ingress authority",
         )
-    authority["command_surface"] = HostCommandSurface.OPERATOR.value
+    authority["command_surface"] = command_surface.value
     authority["operator_command_id"] = command
-    authority["action"] = f"obs:command:{command}"
+    authority["action"] = (
+        f"obs:command:{command}"
+        if command_surface is HostCommandSurface.OPERATOR
+        else "scheduler:admin"
+    )
     authority["required_scopes"] = tuple(sorted(scopes))
 
 
@@ -1007,6 +1203,71 @@ def _set_enabled_operation_request(
     return {
         "task_id": task_ref,
         "enabled": enabled,
+        "expected_head_version": expected_head_version,
+    }
+
+
+def _publish_operation_request(
+    *,
+    task_id: str,
+    definition: Mapping[str, Any],
+    expected_head_version: int,
+    next_scheduled_at_ms: int | None,
+) -> dict[str, Any]:
+    task_ref = str(task_id or "").strip()
+    if (
+        not task_ref
+        or isinstance(expected_head_version, bool)
+        or type(expected_head_version) is not int
+        or expected_head_version < 0
+        or (
+            next_scheduled_at_ms is not None
+            and (
+                isinstance(next_scheduled_at_ms, bool)
+                or type(next_scheduled_at_ms) is not int
+                or next_scheduled_at_ms < 0
+            )
+        )
+    ):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "accepted scheduler publish input is invalid",
+        )
+    payload = validate_definition_payload(
+        task_id=task_ref,
+        definition=definition,
+    )
+    payload = {**payload, "task_id": task_ref}
+    payload["trigger_mode"] = str(
+        payload.get("trigger_mode") or ""
+    ).strip().lower()
+    payload["enabled"] = bool(payload.get("enabled", True))
+    return {
+        "task_id": task_ref,
+        "definition": payload,
+        "expected_head_version": expected_head_version,
+        "next_scheduled_at_ms": next_scheduled_at_ms,
+    }
+
+
+def _delete_operation_request(
+    *,
+    task_id: str,
+    expected_head_version: int,
+) -> dict[str, Any]:
+    task_ref = str(task_id or "").strip()
+    if (
+        not task_ref
+        or isinstance(expected_head_version, bool)
+        or type(expected_head_version) is not int
+        or expected_head_version < 1
+    ):
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            "accepted scheduler delete input is invalid",
+        )
+    return {
+        "task_id": task_ref,
         "expected_head_version": expected_head_version,
     }
 

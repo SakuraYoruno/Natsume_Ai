@@ -2,10 +2,10 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_GOVERNED_OPERATOR_STATE_CONTROLS_PRECOMMIT_OVER_ORIGIN_DEV_CCDFaEA4A",
-  "current_document_slice": "NE01_GOVERNED_OPERATOR_STATE_CONTROLS_PRECOMMIT_OVER_ORIGIN_DEV_CCDFaEA4A",
+  "evaluated_source": "NE01_SCHEDULER_ADMIN_GOVERNED_CUTOVER_PRECOMMIT_OVER_ORIGIN_DEV_6995582DF",
+  "current_document_slice": "NE01_SCHEDULER_ADMIN_GOVERNED_CUTOVER_PRECOMMIT_OVER_ORIGIN_DEV_6995582DF",
   "evidence_binding": {
-    "evaluated_commit_sha": "ccdfaea4a4fc1e14ca8f0889b0dba5b2dc4490f6",
+    "evaluated_commit_sha": "6995582dfbbd79744bc614c3282078d3d6acd3a6",
     "migration_head": "0129_host_mode_policy_journal.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
@@ -32,6 +32,7 @@
     "preoperation_attempt_takeover": "CANONICAL_OPERATION_FREE_PERSISTED_ATTEMPT_SAME_ATTEMPT_HIGHER_FENCE_PROVEN_POST_RESERVATION_KNOWN_INTERRUPTION_IMMEDIATE_RECOVERY_REQUIRED_PLUS_OUTBOX_GENERAL_UNKNOWN_EFFECT_AND_MULTI_NODE_RECOVERY_INCOMPLETE",
     "host_startup_graph_continuation": "PARTIAL_LIFECYCLE_SURVIVOR_EXACT_HOST_ADMISSION_REENTRY_SURFACE_FILTERED_SINGLE_READ_TRANSACTION_EXACT_BOUND_ACCEPTED_TRUE_OVERFLOW_FAIL_CLOSED_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION_MANDATORY_BOOT_THEN_PERIODIC_TIMER_OR_WAKE_LIVE_LEASE_OR_EXECUTION_DEFERRED_EXPIRED_LEASE_ONLINE_REEVALUATED_NO_WORKER_AUTHORITY_GENERAL_RECOVERY_INCOMPLETE",
     "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_MODE_POLICY_0129_DURABLE_RUNTIME_FENCED_OPERATOR_STATE_CONTROLS_LOCAL_SQLITE_PROVEN_HTTP_NETWORK_CANARY_NOT_RUN",
+    "scheduler_admin_governed_cutover": "BOTH_HTTP_PREFIXES_CREATE_UPDATE_DELETE_ENABLE_DISABLE_SCHEDULER_HOSTCOMMAND_TASKGRAPH_ACCEPTANCE_EFFECT_ADMIN_OPERATION_RECEIPT_AND_CLAIM_GAP_RESTART_LOCAL_REAL_SQLITE_PROVEN_DIRECT_ROUTE_WRITER_ZERO_REAL_HTTP_NETWORK_CANARY_NOT_RUN",
     "production_canary": "TERMINAL_EXACT_LOCAL_SQLITE_PASS_FULL_RUNTIME_NOT_RUN",
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -158,9 +159,11 @@
     },
     "scheduler": {
       "status": "INCOMPLETE",
-      "production_boundary": "Scheduler governed occurrences enter HostCommand and a single-node immutable TaskGraph. The worker emits only an immutable scheduler.operation.execute plan; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW, and the real handler runs after Acceptance. Migration 0117 atomically validates the live DUE owner/fence, inserts the occurrence, advances the definition head and converts the same retry row to an occurrence-bound claim in one BEGIN IMMEDIATE transaction. Dispatch renews first and an execution lifecycle heartbeat renews while running; expired owners cannot self-revive, a second owner cannot dispatch, and clear/defer require the exact live fence and actual call time. Thirty-seven Scheduler, migration and coverage tests succeeded; the 19-test atomic fence subset in 47.53 seconds overlaps that scope and is not added. The route remains INCOMPLETE because definition/admin direct authority, mutable batch freezing, general unknown-effect human attribution, program-wide Budget measurement, commit-bound acceptance, wave integration and production canary remain missing.",
+      "production_boundary": "Scheduler occurrences and administrative writes now share the governed execution boundary. Occurrence workers emit only immutable scheduler.operation.execute plans; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW, and the real handler runs after Acceptance. Migration 0117 keeps DUE owner/fence conversion and heartbeat durable. Administrative create/update/delete/enable/disable under both /scheduler and /host-scheduler prefixes now freeze Scheduler Secure Ingress method/path/body/claim and definition head, create a SCHEDULER HostCommand plus immutable TaskGraph, and mutate the canonical repository only through the post-Acceptance operator.state_control effect. The immutable scheduler_admin_operation_result is committed before outer claim completion; a restarted repository/service resolves the exact receipt and completes the original claim without remutation. Route calls to publish_definition, set_enabled or delete_definition are zero. The current affected code batch is 34 passed in 139.12 seconds and supersedes the development 32-test and pre-structure-fix 127.26-second results. Gate 3 initially rejected acceptance_effects.py at 1511 lines; the state-control route predicate moved to its focused compiler, restoring the owner to 1500 lines with no allowlist expansion and final Gates 1-14 PASS. The route remains INCOMPLETE because mutable batch freezing, general multi-node and unknown-effect recovery, program-wide Budget measurement, commit-bound acceptance, complete process restart, real HTTP/network canary, wave integration and production canary remain missing.",
       "evidence_refs": [
         "host_brain/scheduler/governed_runtime.py",
+        "host_brain/scheduler/scheduler_routes.py",
+        "host_brain/scheduler/command_service.py",
         "host_brain/scheduler/operation_plan.py",
         "host_brain/scheduler/accepted_operation.py",
         "host_brain/scheduler/accepted_effect_runtime.py",
@@ -169,6 +172,12 @@
         "host_brain/persistence/scheduler_repository.py",
         "host_brain/audit/migrations/0117_scheduler_clock_retry_authority.sql",
         "host_brain/task_runtime/acceptance_effect_dispatcher.py",
+        "host_brain/app/governed_operator_state_control_runtime.py",
+        "host_brain/app/accepted_operator_state_control_handler.py",
+        "host_brain/task_runtime/operator_state_control_support.py",
+        "host_brain/persistence/host_command_claim_result_validation.py",
+        "tests/unit/test_aw02_scheduler_route_cutover.py",
+        "tests/unit/test_aw03_scheduler_durable_uow.py",
         "tests/unit/test_ne01_scheduler_operation_plan.py",
         "tests/unit/test_ne01_scheduler_accepted_operation.py",
         "tests/unit/test_ne01_scheduler_accepted_effect_runtime.py",
@@ -310,7 +319,7 @@
     },
     "operator": {
       "status": "INCOMPLETE",
-      "production_boundary": "Fourteen of 37 audited Operator write commands now cross Secure Ingress, typed OPERATOR HostCommand, immutable TaskGraph and the governed runtime; the other 23 remain deliberately blocked. The latest four routes are scheduler.task.enable/disable and sys_mode.auto_rules.update/event.submit. Each freezes the current Scheduler head or Host mode-policy revision before admission and owns independent Attempt, Lease, node grant, Budget, Review, Verification, Acceptance and terminal Preview lineage. Only the operator.state_control Acceptance Effect may reopen committed Secure Ingress authority and invoke the original canonical owner. Migration 0129 stores Host auto-rules, last-interaction and submitted-event outcome in a runtime-scope/owner/lease/fence-bound append-only journal plus canonical head; exact replay, 1001-event pagination, append rollback, released fence and tamper fail closed. Sleep's proactive-action constraint is now consumer-scoped: explicit user/Operator work remains restricted and reviewed, while the Proactive projection remains blocked. Legacy Obs sys-mode mutation helpers are physically removed. Gate 3 initially rejected the 1538-line main Operator runtime; mode receipt reopen was split into the focused state-control runtime, leaving 1344/650 lines and fresh Gates 1-14 PASS without an allowlist expansion. Standalone Scheduler CRUD HTTP still calls SchedulerCommandService directly, so Scheduler has not reached one execution authority. Complete Host process restart, deployed credentials, HTTP/network canary, universal Operator migration and commit-bound live route acceptance are not run.",
+      "production_boundary": "Fourteen of 37 audited Operator write commands cross Secure Ingress, typed OPERATOR HostCommand, immutable TaskGraph and the governed runtime; the other 23 remain deliberately blocked. Scheduler enable/disable and sys_mode.auto_rules.update/event.submit freeze the current Scheduler head or Host mode-policy revision and own independent Attempt, Lease, node grant, Budget, Review, Verification, Acceptance and terminal Preview lineage. Only the operator.state_control Acceptance Effect may reopen committed authority and invoke the canonical owner. Migration 0129 keeps Host mode policy runtime-fenced and replayable. Standalone Scheduler CRUD HTTP now uses the same accepted effect through a separate SCHEDULER HostCommand surface; its create/update/delete/enable/disable route writer count is zero and it does not change the Operator inventory. Complete Host process restart, deployed credentials, real HTTP/network canary, universal Operator migration and commit-bound live route acceptance are not run.",
       "evidence_refs": [
         "host_brain/app/observability_runtime/domain_command_ports.py",
         "host_brain/app/governed_operator_runtime.py",
@@ -385,7 +394,7 @@
       "side_effect_boundary": "APPLIED and REPLAYED use status-specific runtime-scope-bound handler receipts and require the exact durable HardState or Host mode-policy event. NO_CHANGE uses its own status-specific receipt, requires no event and reports side_effects_executed=false. Scheduler enable/disable binds the exact accepted operation ID and expected definition head. Response loss or attribution failure must first reopen the canonical operation; an existing commit becomes exact replay and an uncertain read remains PENDING with reconciliation required. Historical replay never re-executes the effect, including after more than 1000 newer events.",
       "startup_recovery_boundary": "Governed admission activates only after the shared Acceptance Effect owner drains recovery work and proves no PENDING or CLAIMED effect remains.",
       "shutdown_boundary": "Operator ingress drains first, then Scheduler producers stop, Task Runtime closes the shared Acceptance Effect owner, Workspace quiesces, mode-transition dependencies stop, command/security stores close, and app references clear last. A live OBS, Scheduler or Task Runtime close failure preserves dependencies and published references and returns a stable retry-required error.",
-      "validation_boundary": "The current disjoint code regression is 175 passed with zero failures: 3 real-SQLite Host mode-policy restart/fault/tamper tests, 5 governed Operator integration tests, and 167 unit/contract regressions. It covers Scheduler enable/disable, auto-rule update, sleep wake event, Review continuation, exact WorkOrder replay, 1001-event paging and Scene proactive scoping. Historical Operator evidence remains scope-bound and is not added. Standalone Scheduler CRUD HTTP, complete Host process restart, NE-01 wave integration, commit-bound acceptance, deployed HTTP/network canary and NE-07 full stack remain NOT_RUN or MISSING; REMOTE_CI remains NOT_RUN_ACCOUNT_QUOTA.",
+      "validation_boundary": "The historical disjoint Operator state-control regression is 175 passed with zero failures and remains scope-bound. The current Scheduler Admin cutover uses a separate 34-test affected batch in 139.12 seconds covering both route prefixes, real SQLite TaskGraph/Review/Acceptance, exact replay and the accepted-operation-to-claim crash gap; it supersedes the development 32-test and pre-structure-fix 127.26-second results. A secondary 57-test Scheduler occurrence, dispatcher, Preview and durable-UoW regression passed in 54.81 seconds after the production fixture explicitly declared its unused Internal checkpoint dependency. The 34 and 57 groups semantically overlap and are not added to each other or historical Operator evidence. Complete Host process restart, NE-01 wave integration, commit-bound acceptance, deployed real HTTP/network canary and NE-07 full stack remain NOT_RUN or MISSING; REMOTE_CI remains NOT_RUN_ACCOUNT_QUOTA.",
       "controls": {
         "host_command": "PARTIAL",
         "immutable_task_graph": "PARTIAL",
@@ -2092,7 +2101,7 @@
     "boundary": "FRESH_AST_CURRENT_0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_AND_0_PRODUCTION_PROCESS_LOCATOR_MODULES_FIELDS_LOCKS_OR_MUTABLE_REFS_TEST_ONLY_COMPATIBILITY_BRIDGE_CANNOT_LOAD_IN_FRESH_PRODUCTION_PROCESS_THIRTY_FIVE_HOST_WRAPPER_STATE_RUNTIME_PUBLICATION_AUTHORITY_OWNERS_APP_LOCAL_HOST_AUTHORITY_LEDGER_MEMORY_MODEL_CAPABILITY_EXACT_OWNER_BOUND_HOST_GOVERNANCE_AND_LIFE_ACTION_PREVIEW_APP_LOCAL_GUARDIAN_FAIL_CLOSED_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_RESOURCE_MANAGER_STATUS_0123_HOST_FENCED_DURABLE_SHARED_JSON_AUTHORITY_ZERO_TRIBE_RUNTIME_SCOPE_OWNS_PORT_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_STATE_READER_TRIBE_CONTEXT_IS_EXECUTION_LOCAL_AND_NO_CONTEXT_FALLBACKS_ARE_RETIRED_EXTERNAL_CHROMA_NEO4J_NAMESPACES_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_DURABLE_TRIBE_EVENTS_FULL_HOST_MULTI_APP_CANARY_WORKER_OBS_TYPED_CONTAINER_TRANSACTIONAL_CHAT_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_REMAIN_INCOMPLETE_HARD_STATE_0115_DURABLE_RESTART_FENCE_WIRED_FULL_STATIC_FAIL_BASELINE_GATES_1_3_GATE_2_AND_GATE_11_PASS_CURRENT_SLICE_ADDED_FAILURES_ZERO_NE01_IN_PROGRESS",
       "agent_runtime_scope_boundary": "HOST_LIFESPAN_SCOPE_IS_A_LOCAL_DEPENDENCY_PUBLICATION_SLICE_ONLY_GENERIC_DELEGATE_MULTINODE_TASKGRAPH_AND_WAVE_INTEGRATION_REMAIN_UNPROVEN",
       "hard_state_receipt_boundary": "PERMANENT_HISTORICAL_LOOKUP_MUTATING_REVISION_MODE_EXACT_CAS_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE",
-      "hard_state_operator_boundary": "SYS_MODE_SWITCH_AUTO_RULE_AND_EVENT_GOVERNED_LOCAL_SQLITE_PROVEN_0129_DURABLE_POLICY_DEPLOYED_HTTP_NETWORK_CANARY_NOT_RUN",
+      "hard_state_operator_boundary": "SYS_MODE_SWITCH_AUTO_RULE_AND_EVENT_GOVERNED_LOCAL_SQLITE_PROVEN_0129_DURABLE_POLICY_SCHEDULER_ADMIN_BOTH_HTTP_PREFIXES_GOVERNED_LOCAL_REAL_SQLITE_DIRECT_ROUTE_WRITER_ZERO_DEPLOYED_HTTP_NETWORK_CANARY_NOT_RUN",
       "evidence_refs": [
         "host_brain/app/host_lifecycle_composition.py",
         "host_brain/composition/host_application.py",

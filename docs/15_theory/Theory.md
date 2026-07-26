@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.7
+版本：v2.8
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -140,6 +140,8 @@ worker 返回的结果先被验证和验收，再由可信编译器生成 effect
 当前代码中的对应边界是 [Acceptance Effect compiler](../../host_brain/task_runtime/acceptance_effects.py) 与 [durable dispatcher](../../host_brain/task_runtime/acceptance_effect_dispatcher.py)。
 
 Acceptance 后仍可能出现“外部动作已发生，但本地回执没有确定落账”的窗口。这里不能把超时、异常类型或重试次数当成副作用事实，也不能把原始签名塞入通用 TaskGraph 变成可转交的执行权限。正确模型是把完整签名与 subject snapshot 隔离到 append-only evidence sidecar，图中只传播 ref/digest；人工或可信 reconciler 给出精确归因后，仍须经过 Review、Preview、Verification 和外层 Acceptance，再重开并重新验签 evidence，最后在 canonical UoW 中共同提交 proof、目标 Effect 状态与 Outbox。`NO_SIDE_EFFECT` 还需要可验证的 executor quiescence，`SIDE_EFFECT_CONFIRMED` 则需要 durable downstream receipt。取消绑定的恢复与不依赖取消的 general Effect 归因必须使用不同 purpose/合同，不能因共享命令名而混合 authority。
+
+管理 HTTP 也服从同一不变量。认证路由只能冻结 method、path、body、目标 revision 与 claim identity，并把它们交给受治理图；它不能因为被称为“后台管理”就在路由层直接改 canonical store。Acceptance 后的状态操作必须先形成不可变 operation receipt，再封口外层 ingress claim。若进程在两次提交之间崩溃，恢复只能重开同一 receipt 并补齐 claim，不能把重复 HTTP 请求当成再次执行状态变更的权限。
 
 外部传输客户端本身也不能成为 authority。即使它在调用点校验 Preview，只要业务模块可以通过进程单例、getter 或启动期全局注册随时取得它，系统仍保留了一条与 TaskGraph 并列的执行真相。正确边界是：业务模块只生成观测或提案；受治理节点在 Acceptance 后显式取得 proof-bound transport；没有 Task/Node/Attempt/Lease/Grant/Preview 身份时，传输对象不可发现、旧入口必须在 I/O 前失败关闭。删除全局客户端只证明旁路退役，不证明正向设备能力已经完成。
 

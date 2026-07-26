@@ -38,6 +38,7 @@ from host_brain.task_runtime.operator_control_acceptance_effect import (
 )
 from host_brain.task_runtime.operator_state_control_acceptance_effect import (
     compile_operator_state_control_acceptance_effect,
+    is_operator_state_control_command,
 )
 from host_brain.task_runtime.worker_authority_guard import (
     forbidden_worker_authority_path,
@@ -65,7 +66,6 @@ _OPERATOR_EFFECT_RECONCILIATION_EFFECT = (
     "task.acceptance_effect_reconciliation"
 )
 _OPERATOR_CONTROL_TARGET = "operator_task_control"
-_OPERATOR_STATE_CONTROL_TARGET = "operator_state_control"
 _SCHEDULER_OPERATION_EFFECT = "scheduler.operation.execute"
 _SCHEDULER_PLAN_SCHEMA = "Natsume.scheduler.operation_plan.v1"
 _SCHEDULER_EFFECT_SCHEMA = "Natsume.scheduler.accepted_operation.v1"
@@ -107,6 +107,11 @@ def compile_graph_acceptance_effects(
         raise AcceptanceEffectCompileError("worker projection request_id drifted")
 
     pack = _json_mapping(getattr(work_order, "input_pack", {}), field_name="work_order.input_pack")
+    if is_operator_state_control_command(command):
+        return _compile_operator_effects(
+            command=command, work_order=work_order, node_id=node_ref,
+            attempt_id=attempt_ref, commit=commit, pack=pack,
+        )
     if command.surface is HostCommandSurface.SCHEDULER or _proposes_scheduler_operation(
         commit
     ):
@@ -588,7 +593,7 @@ def _compile_operator_effects(
             commit=commit,
             pack=pack,
         )
-    if command.target_id == _OPERATOR_STATE_CONTROL_TARGET:
+    if is_operator_state_control_command(command):
         return compile_operator_state_control_acceptance_effect(
             command=command,
             work_order=work_order,

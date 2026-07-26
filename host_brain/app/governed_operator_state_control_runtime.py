@@ -33,11 +33,13 @@ from host_brain.runtime.intent_admission_contracts import (
 )
 from host_brain.task_runtime import GovernedRuntimeError
 from host_brain.task_runtime.operator_state_control_support import (
-    OPERATOR_STATE_CONTROL_COMMAND_IDS,
     OPERATOR_STATE_CONTROL_EFFECT_TYPE,
     OPERATOR_STATE_CONTROL_TARGET_ID,
+    SCHEDULER_ADMIN_CONTROL_COMMAND_IDS,
+    STATE_CONTROL_COMMAND_IDS,
     build_operator_state_control_governor_intent,
     normalize_operator_state_control_args,
+    normalize_scheduler_admin_control_args,
     operator_state_control_action_kind,
     operator_state_control_ingress_requirements,
     operator_state_control_operation_id,
@@ -45,11 +47,6 @@ from host_brain.task_runtime.operator_state_control_support import (
     validate_operator_state_control_args,
 )
 from natsume_contracts.task import HostCommand, HostCommandSurface
-
-
-_SCHEDULER_COMMAND_IDS = frozenset(
-    {"scheduler.task.enable", "scheduler.task.disable"}
-)
 
 
 class GovernedOperatorStateControlMixin:
@@ -82,6 +79,76 @@ class GovernedOperatorStateControlMixin:
             ingress_path=ingress_path,
             required_scopes=required_scopes,
         )
+        return await self._execute_state_control(
+            payload=value,
+            request_id=request_ref,
+            command_id=command_id,
+            authority=authority,
+            surface=HostCommandSurface.OPERATOR,
+            existing=existing,
+            proposer_node_id="obs_secure_operator_ingress",
+            model_snapshot="server-owned-operator-state-control",
+            prompt_profile_id="operator-state-control-v1",
+        )
+
+    async def execute_scheduler_admin_control(
+        self,
+        *,
+        command_id: str,
+        payload: Mapping[str, Any],
+        authority: Any,
+        request_id: str,
+        method: str,
+        normalized_path: str,
+    ) -> dict[str, Any]:
+        """Admit one Scheduler HTTP mutation into the shared TaskGraph spine."""
+
+        command = str(command_id or "").strip()
+        if command not in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
+            raise _invalid("Scheduler admin command is unsupported")
+        request_ref = str(request_id or "").strip()
+        if not request_ref:
+            raise _invalid("Scheduler admin request_id is required")
+        existing = self._commands.get_by_request(
+            surface=HostCommandSurface.SCHEDULER.value,
+            request_id=request_ref,
+        )
+        verified = _verify_durable_scheduler_admin_authority(
+            authority,
+            resolver=self._secure_ingress_authority_resolver,
+            request_id=request_ref,
+            method=method,
+            normalized_path=normalized_path,
+            command_id=command,
+            allow_settled_replay=isinstance(existing, Mapping),
+        )
+        return await self._execute_state_control(
+            payload=dict(payload or {}),
+            request_id=request_ref,
+            command_id=command,
+            authority=verified,
+            surface=HostCommandSurface.SCHEDULER,
+            existing=existing,
+            proposer_node_id="scheduler_secure_admin_ingress",
+            model_snapshot="server-owned-scheduler-admin-control",
+            prompt_profile_id="scheduler-admin-control-v1",
+        )
+
+    async def _execute_state_control(
+        self,
+        *,
+        payload: Mapping[str, Any],
+        request_id: str,
+        command_id: str,
+        authority: Mapping[str, Any],
+        surface: HostCommandSurface,
+        existing: Mapping[str, Any] | None,
+        proposer_node_id: str,
+        model_snapshot: str,
+        prompt_profile_id: str,
+    ) -> dict[str, Any]:
+        value = dict(payload or {})
+        request_ref = str(request_id)
         principal_id = str(authority["principal_id"])
         received_at_ms = now_ms()
         if isinstance(existing, Mapping):
@@ -89,6 +156,7 @@ class GovernedOperatorStateControlMixin:
             work_order = existing.get("work_order")
             if (
                 not isinstance(command, HostCommand)
+                or command.surface is not surface
                 or not isinstance(work_order, WorkOrderV3)
                 or str(
                     dict(work_order.metadata or {}).get("operator_command_id")
@@ -113,12 +181,14 @@ class GovernedOperatorStateControlMixin:
             )
             received_at_ms = int(command.created_at_ms)
         else:
-            args = await self._freeze_operator_state_args(
+            args = await self._freeze_state_control_args(
                 value,
                 request_id=request_ref,
                 principal_id=principal_id,
                 command_id=command_id,
                 observed_at_ms=received_at_ms,
+                surface=surface,
+                authority=authority,
             )
             decision = dict(
                 self._intent_engine.evaluate_intent(
@@ -127,12 +197,17 @@ class GovernedOperatorStateControlMixin:
                         principal_id=principal_id,
                         ts_ms=received_at_ms,
                         args=args,
+                        session_id=(
+                            f"scheduler-admin-{request_ref}"
+                            if surface is HostCommandSurface.SCHEDULER
+                            else f"operator-{request_ref}"
+                        ),
                     ),
                     request_id=request_ref,
                     current_ms=received_at_ms,
-                    proposer_node_id="obs_secure_operator_ingress",
-                    model_snapshot="server-owned-operator-state-control",
-                    prompt_profile_id="operator-state-control-v1",
+                    proposer_node_id=proposer_node_id,
+                    model_snapshot=model_snapshot,
+                    prompt_profile_id=prompt_profile_id,
                 )
                 or {}
             )
@@ -160,9 +235,13 @@ class GovernedOperatorStateControlMixin:
         terminal: dict[str, Any] | None = None
         try:
             async for raw in self._runtime.execute_stream(
-                request_body={"input_source": "OPERATOR"},
+                request_body={"input_source": surface.value},
                 request_id=request_ref,
-                session_id=f"operator-{request_ref}",
+                session_id=(
+                    f"scheduler-admin-{request_ref}"
+                    if surface is HostCommandSurface.SCHEDULER
+                    else f"operator-{request_ref}"
+                ),
                 ts_ms=received_at_ms,
                 intent_draft=intent_draft,
                 governor_result=decision,
@@ -179,6 +258,7 @@ class GovernedOperatorStateControlMixin:
             return self._pending_operator_state_control_review(
                 request_id=request_ref,
                 command_id=command_id,
+                surface=surface,
             )
         if terminal is None:
             raise _invalid(
@@ -206,6 +286,12 @@ class GovernedOperatorStateControlMixin:
         )
         replayed = receipt.get("replayed") is True
         success = bool(accepted and outcome["committed"])
+        if success and surface is HostCommandSurface.SCHEDULER:
+            await self._complete_scheduler_admin_claim(
+                authority=authority,
+                outcome=outcome,
+                received_at_ms=received_at_ms,
+            )
         return {
             "success": success,
             "side_effects_executed": bool(success and not replayed),
@@ -220,7 +306,7 @@ class GovernedOperatorStateControlMixin:
             **dict(outcome.get("public_result") or {}),
         }
 
-    async def _freeze_operator_state_args(
+    async def _freeze_state_control_args(
         self,
         payload: Mapping[str, Any],
         *,
@@ -228,22 +314,72 @@ class GovernedOperatorStateControlMixin:
         principal_id: str,
         command_id: str,
         observed_at_ms: int,
+        surface: HostCommandSurface,
+        authority: Mapping[str, Any],
     ) -> dict[str, Any]:
         scheduler_version: int | None = None
         policy_revision: int | None = None
-        if command_id in _SCHEDULER_COMMAND_IDS:
+        if command_id in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
             service = self._scheduler_command_service_provider()
             reader = getattr(service, "get_definition", None)
             if not callable(reader):
                 raise _invalid(
                     "app-local Scheduler definition reader is unavailable"
                 )
-            current = reader(str(payload.get("task_id") or "").strip())
+            task_id = str(payload.get("task_id") or "").strip()
+            current = reader(task_id)
             if inspect.isawaitable(current):
                 current = await current
-            if not isinstance(current, Mapping):
+            if (
+                command_id != "scheduler.task.publish"
+                and not isinstance(current, Mapping)
+            ):
                 raise _invalid("Scheduler definition is unavailable")
-            scheduler_version = int(current.get("head_version") or 0)
+            scheduler_version = (
+                int(current.get("head_version") or 0)
+                if isinstance(current, Mapping)
+                else None
+            )
+            if surface is HostCommandSurface.SCHEDULER:
+                args = normalize_scheduler_admin_control_args(
+                    payload,
+                    command_id=command_id,
+                    request_id=request_id,
+                    principal_id=principal_id,
+                    observed_at_ms=observed_at_ms,
+                    ingress_method=str(authority["method"]),
+                    ingress_path=str(authority["normalized_path"]),
+                    scheduler_head_version=scheduler_version,
+                )
+                if command_id == "scheduler.task.publish":
+                    preflight = getattr(service, "preflight_definition", None)
+                    if not callable(preflight):
+                        raise _invalid(
+                            "app-local Scheduler preflight is unavailable"
+                        )
+                    result = preflight(
+                        {
+                            "task_id": args["task_id"],
+                            "definition_revision": 1,
+                            "head_version": max(
+                                1,
+                                int(args["expected_head_version"]) + 1,
+                            ),
+                            "enabled": bool(
+                                dict(args["definition"]).get(
+                                    "enabled",
+                                    True,
+                                )
+                            ),
+                            "next_scheduled_at_ms": args[
+                                "next_scheduled_at_ms"
+                            ],
+                            "definition": dict(args["definition"]),
+                        }
+                    )
+                    if inspect.isawaitable(result):
+                        await result
+                return args
         else:
             service = self._mode_transition_service_provider()
             reader = getattr(service, "get_current_status", None)
@@ -266,14 +402,45 @@ class GovernedOperatorStateControlMixin:
             policy_revision=policy_revision,
         )
 
+    async def _complete_scheduler_admin_claim(
+        self,
+        *,
+        authority: Mapping[str, Any],
+        outcome: Mapping[str, Any],
+        received_at_ms: int,
+    ) -> None:
+        if str(authority.get("claim_result_ref") or "").strip():
+            return
+        public_raw = outcome.get("public_result")
+        public = (
+            dict(public_raw) if isinstance(public_raw, Mapping) else {}
+        )
+        result_ref = str(
+            public.get("scheduler_operation_receipt_ref") or ""
+        ).strip()
+        service = self._scheduler_command_service_provider()
+        complete = getattr(service, "complete_accepted_admin_claim", None)
+        if not result_ref or not callable(complete):
+            raise _invalid(
+                "Scheduler admin Acceptance claim completion is unavailable"
+            )
+        result = complete(
+            authority=authority,
+            result_ref=result_ref,
+            received_at_ms=received_at_ms,
+        )
+        if inspect.isawaitable(result):
+            await result
+
     def _pending_operator_state_control_review(
         self,
         *,
         request_id: str,
         command_id: str,
+        surface: HostCommandSurface = HostCommandSurface.OPERATOR,
     ) -> dict[str, Any]:
         durable = self._commands.get_by_request(
-            surface=HostCommandSurface.OPERATOR.value,
+            surface=surface.value,
             request_id=request_id,
         )
         command = durable.get("command") if isinstance(durable, Mapping) else None
@@ -306,7 +473,7 @@ class GovernedOperatorStateControlMixin:
         args: Mapping[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any] | None:
-        if command_id not in OPERATOR_STATE_CONTROL_COMMAND_IDS:
+        if command_id not in STATE_CONTROL_COMMAND_IDS:
             return None
         outcome = await require_durable_operator_state_control_outcome(
             task_store=self._task_store,
@@ -612,7 +779,28 @@ def _validate_replay_payload(
     supplied: Mapping[str, Any],
     frozen: Mapping[str, Any],
 ) -> None:
-    if command_id in _SCHEDULER_COMMAND_IDS:
+    if command_id == "scheduler.task.publish":
+        raw_definition = supplied.get("definition")
+        definition = (
+            dict(raw_definition) if isinstance(raw_definition, Mapping) else {}
+        )
+        definition["task_id"] = str(
+            supplied.get("task_id") or ""
+        ).strip()
+        definition["trigger_mode"] = str(
+            definition.get("trigger_mode") or ""
+        ).strip().lower()
+        definition["enabled"] = bool(definition.get("enabled", True))
+        if (
+            definition != dict(frozen.get("definition") or {})
+            or supplied.get("expected_head_version")
+            != frozen.get("expected_head_version")
+            or supplied.get("next_scheduled_at_ms")
+            != frozen.get("next_scheduled_at_ms")
+        ):
+            raise _invalid("Scheduler publish replay input drifted")
+        return
+    if command_id in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
         expected = supplied.get("expected_head_version")
         if (
             str(supplied.get("task_id") or "").strip()
@@ -633,6 +821,129 @@ def _validate_replay_payload(
         != str(frozen.get("event_type") or "")
     ):
         raise _invalid("Host mode event replay input drifted")
+
+
+def _verify_durable_scheduler_admin_authority(
+    authority: Any,
+    *,
+    resolver: Any,
+    request_id: str,
+    method: str,
+    normalized_path: str,
+    command_id: str,
+    allow_settled_replay: bool,
+) -> dict[str, Any]:
+    to_dict = getattr(authority, "to_dict", None)
+    supplied = (
+        dict(authority)
+        if isinstance(authority, Mapping)
+        else dict(to_dict())
+        if callable(to_dict)
+        else {}
+    )
+    request_ref = str(request_id or "").strip()
+    method_value = str(method or "").strip().upper()
+    path = str(normalized_path or "").strip()
+    command = str(command_id or "").strip()
+    if (
+        command not in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS
+        or method_value not in {"POST", "PATCH", "DELETE"}
+        or not path.startswith("/")
+        or not bool(supplied.get("allowed") or supplied.get("duplicate"))
+        or bool(supplied.get("duplicate")) and not allow_settled_replay
+    ):
+        raise _invalid("Scheduler admin Secure Ingress authority is invalid")
+    audit_ref = _authority_field(supplied, "audit_ref")
+    durable_raw = resolver.resolve_committed_authority_by_audit(
+        audit_ref=audit_ref,
+    )
+    if not isinstance(durable_raw, Mapping):
+        raise _invalid(
+            "Scheduler admin Secure Ingress claim/audit is not durable"
+        )
+    durable = dict(durable_raw)
+    supplied_body = _authority_digest(supplied.get("body_sha256"))
+    durable_body = _authority_digest(durable.get("body_sha256"))
+    expected_scopes = ("scheduler:admin",)
+    claim_result_ref = str(
+        durable.get("claim_result_ref") or ""
+    ).strip()
+    valid = all(
+        (
+            _authority_field(supplied, "request_id") == request_ref,
+            _authority_field(durable, "request_id") == request_ref,
+            _authority_field(supplied, "claim_ref")
+            == _authority_field(durable, "claim_ref"),
+            audit_ref == _authority_field(durable, "audit_ref"),
+            _authority_field(supplied, "principal_id")
+            == _authority_field(durable, "principal_id"),
+            _authority_field(durable, "surface") == "scheduler.admin",
+            _authority_field(durable, "action") == "scheduler:admin",
+            _authority_field(durable, "method").upper() == method_value,
+            _authority_field(durable, "normalized_path") == path,
+            _authority_scopes(durable.get("required_scopes"))
+            == expected_scopes,
+            set(expected_scopes).issubset(
+                _authority_scopes(durable.get("requested_scopes"))
+            ),
+            _authority_field(durable, "decision").upper() == "ALLOW",
+            _authority_field(durable, "reason_code")
+            == "SECURE_INGRESS_ALLOWED",
+            _authority_field(durable, "stage").upper() == "COMPLETE",
+            durable.get("side_effects_executed") is False,
+            _authority_field(durable, "claim_status").upper()
+            == "COMMITTED",
+            not claim_result_ref or allow_settled_replay,
+        )
+    )
+    if not valid or not hmac.compare_digest(supplied_body, durable_body):
+        raise _invalid("Scheduler admin Secure Ingress binding drifted")
+    return {
+        "allowed": True,
+        "duplicate": bool(claim_result_ref),
+        "request_id": request_ref,
+        "principal_id": _authority_field(durable, "principal_id"),
+        "tenant_id": _authority_field(durable, "tenant_id"),
+        "claim_ref": _authority_field(durable, "claim_ref"),
+        "audit_ref": audit_ref,
+        "body_sha256": durable_body,
+        "action": "scheduler:admin",
+        "required_scopes": expected_scopes,
+        "ingress_surface": "scheduler.admin",
+        "method": method_value,
+        "normalized_path": path,
+        "operator_command_id": command,
+        "ingress_claim_ref": _authority_field(durable, "claim_ref"),
+        "ingress_audit_ref": audit_ref,
+        "claim_result_ref": claim_result_ref or None,
+    }
+
+
+def _authority_field(value: Mapping[str, Any], field: str) -> str:
+    text = str(value.get(field) or "").strip()
+    if not text or any(
+        ord(character) < 32 or ord(character) == 127
+        for character in text
+    ):
+        raise _invalid(f"Scheduler authority field {field} is invalid")
+    return text
+
+
+def _authority_digest(value: Any) -> str:
+    digest = str(value or "").strip().lower().removeprefix("sha256:")
+    if len(digest) != 64 or any(
+        character not in "0123456789abcdef" for character in digest
+    ):
+        raise _invalid("Scheduler authority body digest is invalid")
+    return digest
+
+
+def _authority_scopes(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (tuple, list)) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise _invalid("Scheduler authority scopes are invalid")
+    return tuple(sorted(set(item.strip() for item in value)))
 
 
 def _invalid(detail: str) -> GovernedOperatorRuntimeError:
