@@ -3,13 +3,15 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.14
+版本：v2.15
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
 
 当前分支的独立 Gate 1～14 已全部 `PASS`、`failed_gates=[]`。最后两条回环通过中立合同层关闭：`SQLiteTaskRuntimeFeatureCanaryReceiptStore → contracts/task_runtime_feature_canary`，`composition/host_application → contracts/host_lifecycle`；旧 Task Runtime 与 App lifecycle 路径只重导出 canonical 对象，类型 identity 不分叉。Gate 1 的 issues/SCC 均为空，Gate 3 继续由 Research ledger 的 1271 行 repository owner、512 行 canonical codec 与 108 行 typed projection 保持通过，未扩白名单。该结果是当前工作树的静态分层证据，不是 Universal Runtime、NE-01 或完整架构项目封板；NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+Chat 的本地提交边界现由同一个 app-local `LifeProjectionDispatcher` 与新 `life_projection_barrier` 组成。Acceptance 先原子生成有序 Effect；Life handler 提交或重开 exact command 后，只领取该 command 的 intent id，并对 intent 全集、payload digest、target、result 和完成时间逐项复验。`surface.post_process` 的 durable projection mode 会把 assistant turn 与 LifeMemory admission 的失败向上抛出，所以它的 receipt 是外部 reply delivery 的必要前置条件。启动后的 reclaimed Effect 只读对账，普通后台 Life worker仍可完成 crash-left intent；屏障完成后 Task Effect 才能转为 `COMMITTED`。这是 durable saga 顺序，不是跨 Gateway、Host 和多个数据库的全局事务。
 
 直接 Agent Skill 写入现在复用 Internal composition 已拥有的 ArtifactStore、DurableWorkspaceRuntime 和 0101/0116 lifecycle，而不创建可从 payload 发现的服务。Host 在 admission 时从 app-local SkillRegistry 冻结风险与 Review policy；frozen worker 先验证 child grant，再从 durable ReviewStore 重开唯一已消费的 task/node-bound Review。`governed_skill_work_order.py` 只复制兼容 WorkOrder 的语义字段，所有 Graph/Attempt/Lease/Grant/Budget/Review/Workspace authority 均从受信执行上下文重建。`codex_runtime` adapter 取得的 ports 只存在于 sealed broker dispatch context。写结果的 protected descriptor 进入 immutable WorkerProjection；231 行纯模块 `agent_workspace_acceptance_effect.py` 负责 descriptor canonicalization/lineage 校验，1499 行 canonical `acceptance_effects.py` 只编排 graph-scope Effect，未扩大巨石白名单。共享 dispatcher 以 terminal Preview/fence 调用 `AcceptedAgentWorkspaceArtifactHandler`，该 handler 重新验证 admission、projection、Node/Attempt/Lease/NodeArtifact、Effect payload/digest 与 sealed bytes，才推进 Workspace。promotion 的 Effect 排在 conversation、Life 与 delivery 之前，未知结果进入 Effect reconciliation，不允许后续可见副作用越过。该结构仅覆盖三条已登记 risk-4 Agent Skill，不代表 Domain Pack、任意 Skill 或一般恢复完成。
 

@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.3
+版本：v9.4
 维护日期：2026-07-26
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -20,6 +20,8 @@
 README、理论、系统总览、模块地图和数据流负责解释系统，但不能覆盖上述状态 authority。历史 `DONE/PASS` 只对固定提交、环境和声明范围成立。
 
 当前恢复文档基线为 migration head `0131_task_operation_recovery_hold_binding.sql`：0130 负责持久化未决 Operation hold，0131 负责将 UNKNOWN/CANCELLATION current case 精确绑定到 governed signed reconciliation，并要求 Acceptance 后确认 case 已关闭。checkpoint conflict 继续隔离；一般恢复、自动归因和 NE-01 仍未完成。
+
+当前 Chat 文档基线为 exact Life projection barrier：assistant turn 与 LifeMemory admission 的 durable receipts是 external reply的必要前置条件；首次调用可完成 exact pending intent，reclaimed reconciliation只读。该项只关闭 Chat 的 `transactional_side_effects` 控制，不改变七路线 `INCOMPLETE`、external eventual delivery、wave integration或 NE-07状态。
 
 ## 2. 文档信息架构
 

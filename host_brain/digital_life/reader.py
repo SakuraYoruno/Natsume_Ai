@@ -5,6 +5,8 @@ from __future__ import annotations
 from natsume_contracts.life import (
     LifeCommandReceipt,
     LifeEvent,
+    LifeProjectionIntent,
+    LifeProjectionReceipt,
     LifeSnapshot,
 )
 from host_brain.digital_life.repository_port import LifeCommandRepositoryPort
@@ -32,6 +34,18 @@ class LifeSnapshotReader:
 
     def get_receipt(self, command_id: str) -> LifeCommandReceipt | None:
         return self.repository.get_receipt(command_id)
+
+    def list_projection_intents(
+        self,
+        command_id: str,
+    ) -> list[LifeProjectionIntent]:
+        return self.repository.list_projection_intents(command_id)
+
+    def get_projection_receipt(
+        self,
+        intent_id: str,
+    ) -> LifeProjectionReceipt | None:
+        return self.repository.get_projection_receipt(intent_id)
 
     def list_unadopted_projection_person_ids(self, *, limit: int = 1_000) -> list[str]:
         return self.repository.list_unadopted_projection_person_ids(limit=limit)

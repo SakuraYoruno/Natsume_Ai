@@ -358,12 +358,32 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
     )
 
     async def frozen_gateway_transport(*, path, payload, timeout_ms):  # noqa: ANN001
+        request_id = str(payload.get("request_id") or "")
+        with sqlite3.connect(db_path) as conn:
+            assistant_turn_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM conversation_turn
+                WHERE request_id = ? AND role = 'assistant'
+                """,
+                (request_id,),
+            ).fetchone()[0]
+            memory_receipt_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM life_memory_admission_receipt
+                WHERE request_id = ?
+                """,
+                (request_id,),
+            ).fetchone()[0]
+        assert assistant_turn_count == 1
+        assert memory_receipt_count == 1
         delivered_replies.append(
             {
-                "request_id": str(payload.get("request_id") or ""),
+                "request_id": request_id,
                 "payload": dict(payload),
                 "path": path,
                 "timeout_ms": timeout_ms,
+                "assistant_turn_count_before_delivery": assistant_turn_count,
+                "memory_receipt_count_before_delivery": memory_receipt_count,
             }
         )
         surface_value = {
@@ -490,17 +510,24 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             life=life,
             life_memory_service=memory.service,
         )
+        projection_dispatcher, _outbox_dispatcher = compose_life_dispatchers(
+            ledger,
+            embodiment_runtime=embodiment_runtime,
+            action_preview_service=action_preview_service,
+            agent_runtime_ports=agent_runtime_ports,
+        )
         acceptance_effect_dispatcher = AcceptanceEffectDispatcher(
             task_store=container.task_store,
-                handlers=build_production_acceptance_effect_handlers(
-                    conversation_turn_reader=ContextRepository.from_ledger(ledger),
-                    conversation_event_reader=MemoryEventRepository.from_ledger(
-                        ledger
-                    ),
-                    preference_store=UserPreferenceStore(ledger=ledger),
-                    life_receipt_reader_provider=lambda: life.snapshot_reader,
-                    agent_runtime_ports=agent_runtime_ports,
+            handlers=build_production_acceptance_effect_handlers(
+                conversation_turn_reader=ContextRepository.from_ledger(ledger),
+                conversation_event_reader=MemoryEventRepository.from_ledger(
+                    ledger
                 ),
+                preference_store=UserPreferenceStore(ledger=ledger),
+                life_receipt_reader_provider=lambda: life.snapshot_reader,
+                life_projection_dispatcher=projection_dispatcher,
+                agent_runtime_ports=agent_runtime_ports,
+            ),
             owner_id="gr05-universal-acceptance-effects",
             action_preview_service=action_preview_service,
         )
@@ -656,27 +683,25 @@ async def test_chat_delegate_and_plan_share_real_governed_runtime(
             delivered_replies[0]["payload"]["conversation_id"]
             == "qq_dm_gr05_universal"
         )
+        assert (
+            delivered_replies[0]["assistant_turn_count_before_delivery"],
+            delivered_replies[0]["memory_receipt_count_before_delivery"],
+        ) == (1, 1)
         assert all(call["governor_result"] == {} for call in chat_calls)
         assert all(call["request_body"].suppress_edge_tts is True for call in chat_calls)
         assert all(call["request_body"].suppress_edge_vts is True for call in chat_calls)
 
-        # Acceptance only commits the immutable foreground command.  The
-        # production Life I/O worker must subsequently drain its durable
-        # projection intent to persist the visible assistant turn and Memory
-        # admission.  Do not replace this with a direct conversation writer:
-        # that would bypass the exact queue/replay boundary operated by Host.
-        projection_dispatcher, _outbox_dispatcher = compose_life_dispatchers(
-            ledger,
-            embodiment_runtime=embodiment_runtime,
-            action_preview_service=action_preview_service,
-            agent_runtime_ports=agent_runtime_ports,
-        )
+        # Each accepted Life effect now drains only its own exact local
+        # projection intents before the dispatcher may advance to outward
+        # reply delivery.  The ordinary background worker must therefore find
+        # no stranded local projection after all three graphs complete.
         projection = await projection_dispatcher.dispatch_pending_async(limit=100)
         projection_replay = await projection_dispatcher.dispatch_pending_async(
             limit=100
         )
         assert projection.failed == 0
-        assert projection.delivered >= 3
+        assert projection.claimed == 0
+        assert projection.delivered == 0
         assert projection_replay.claimed == 0
 
         with sqlite3.connect(db_path) as conn:

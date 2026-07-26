@@ -33,6 +33,7 @@ from natsume_contracts.life import (
     LifeEvent,
     LifeIntentKind,
     LifeOutboxMessage,
+    LifeProjectionIntent,
     LifeProjectionMessage,
     LifeProjectionReceipt,
     LifeSnapshot,
@@ -725,6 +726,22 @@ class LifeCommandRepository:
 
     # -- Projection intent dispatcher --------------------------------
 
+    def list_projection_intents(
+        self,
+        command_id: str,
+    ) -> list[LifeProjectionIntent]:
+        command = _required_text(command_id, "command_id")
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM life_projection_intent
+                WHERE command_id = ?
+                ORDER BY created_at_ms ASC, intent_id ASC
+                """,
+                (command,),
+            ).fetchall()
+            return [_projection_intent_from_row(row) for row in rows]
+
     def claim_projection_intents(
         self,
         *,
@@ -732,13 +749,26 @@ class LifeCommandRepository:
         now_ms: int,
         lease_ms: int,
         limit: int,
+        intent_id: str | None = None,
     ) -> list[LifeProjectionMessage]:
         owner = _required_text(owner_token, "owner_token")
         now_value = max(0, int(now_ms))
         expires = now_value + max(1, int(lease_ms))
+        exact_intent = (
+            _required_text(intent_id, "intent_id")
+            if intent_id is not None
+            else None
+        )
+        exact_filter = (
+            "AND intent.intent_id = ?" if exact_intent is not None else ""
+        )
+        parameters: list[Any] = [now_value, now_value]
+        if exact_intent is not None:
+            parameters.append(exact_intent)
+        parameters.append(max(1, min(int(limit), 1_000)))
         with self._operation(write=True) as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT intent.*, claim.status, claim.available_at_ms,
                        claim.attempt_count, claim.fencing_token,
                        claim.claim_expires_at_ms
@@ -755,11 +785,12 @@ class LifeCommandRepository:
                     OR claim.status = 'CLAIMED'
                     AND COALESCE(claim.claim_expires_at_ms, 0) <= ?
                   )
+                  {exact_filter}
                 ORDER BY claim.available_at_ms ASC,
                          intent.created_at_ms ASC, intent.intent_id ASC
                 LIMIT ?
                 """,
-                (now_value, now_value, max(1, min(int(limit), 1_000))),
+                tuple(parameters),
             ).fetchall()
             claimed: list[LifeProjectionMessage] = []
             for row in rows:
@@ -1762,6 +1793,34 @@ def _projection_receipt_from_row(row: Mapping[str, Any]) -> LifeProjectionReceip
         payload_digest=str(row["payload_digest"]),
         result=_json_object(row["result_json"], "result_json"),
         completed_at_ms=int(row["completed_at_ms"]),
+    )
+
+
+def _projection_intent_from_row(row: Mapping[str, Any]) -> LifeProjectionIntent:
+    payload = _json_object(row["payload_json"], "payload_json")
+    payload_digest = str(row["payload_digest"])
+    if digest_json(payload) != payload_digest:
+        raise LifeCommandRepositoryError(
+            LIFE_COMMAND_DURABLE_DATA_INVALID,
+            "projection intent payload digest drift",
+        )
+    try:
+        intent_kind = LifeIntentKind(str(row["intent_kind"]))
+    except ValueError as exc:
+        raise LifeCommandRepositoryError(
+            LIFE_COMMAND_DURABLE_DATA_INVALID,
+            "projection intent kind is invalid",
+        ) from exc
+    return LifeProjectionIntent(
+        intent_id=str(row["intent_id"]),
+        event_id=str(row["event_id"]),
+        command_id=str(row["command_id"]),
+        person_id=str(row["person_id"]),
+        intent_kind=intent_kind,
+        target=str(row["target"]),
+        payload=payload,
+        payload_digest=payload_digest,
+        created_at_ms=int(row["created_at_ms"]),
     )
 
 

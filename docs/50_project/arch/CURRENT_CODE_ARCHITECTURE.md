@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.35
+版本：v5.36
 核对日期：2026-07-26
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,8 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
+
+Chat 路线的一个真实正确性缺口已经关闭：`life.conversation_turn_recorded` 与 `life.foreground_completed` 不再仅凭 Life command receipt 提交 Task Effect。生产 ASGI 把同一 `LifeProjectionDispatcher` 注入 Acceptance handlers；handler 重建并核对 exact command 的 projection-intent 全集，只领取自己的 intent，并在每个 payload-bound durable receipt 完整后生成 content-addressed barrier receipt。`surface.post_process` 的 durable mode要求 visible assistant turn 与 LifeMemory admission 成功，否则 projection 不产生 receipt，后序 `surface.reply_delivery` 也不会运行。response loss、restart、failed projection、receipt tamper 和 GR05 实际顺序均有本地 SQLite 证据。该控制项为 `transactional_side_effects=PASS`，但 external delivery 仍为 eventual，`commit_bound_acceptance=MISSING`，所以 Chat 与 NE-01 没有完成。
 
 Direct Agent Skill 写入不再停在 proposal-only。`agent_worker`、`agent_self_heal`、`agent_self_evolve` 的 Host admission 从 app-local SkillRegistry 冻结 risk 4 与 durable Review policy；frozen worker 必须重开唯一已消费的 task/node-bound Review。兼容 payload 中的 V3、Graph、Workspace、Grant、Budget、Review、Lease/fence authority 会被拒绝，`governed_skill_work_order.py` 从已验证 Task context 重建 WorkOrderV3。sealed broker dispatch 才能给 `codex_runtime` 注入同一 app-local ArtifactStore/WorkspaceRuntime。写结果先成为 protected stage 和 immutable WorkerProjection proposal，Graph Acceptance 再编译先于 visible Effects 的 `agent.workspace_artifact_promote`；Accepted handler 重开 admission、projection、Node/Attempt/Lease/NodeArtifact、Preview、Effect 和 sealed bytes 后推进 0116。真实 SQLite+Git 已证明 source `main` 不动和重建 Runtime 后 accepted HEAD 仍持久可读。Domain Pack、其它 Skill、一般恢复与强租户隔离仍未完成，NE-01 仍是 `IN_PROGRESS`。
 

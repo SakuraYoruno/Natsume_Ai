@@ -1003,6 +1003,7 @@ def build_governed_operator_composition(
     runtime_owner_id: str,
     scheduler_operation_handler: Any | None = None,
     life_receipt_reader_provider: Any | None = None,
+    life_projection_dispatcher: Any | None = None,
     gateway_reply_query_port: Any | None = None,
     internal_agent_artifact_store: Any | None = None,
     internal_agent_workspace_runtime: Any | None = None,
@@ -1075,6 +1076,7 @@ def build_governed_operator_composition(
             conversation_event_reader=MemoryEventRepository.from_ledger(ledger),
             preference_store=UserPreferenceStore(ledger=ledger),
             life_receipt_reader_provider=life_receipt_reader_provider,
+            life_projection_dispatcher=life_projection_dispatcher,
             gateway_reply_query_port=(
                 gateway_reply_query_port or query_gateway_reply_delivery
             ),

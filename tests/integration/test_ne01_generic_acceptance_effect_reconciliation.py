@@ -19,6 +19,7 @@ from host_brain.composition.life import (
 )
 from host_brain.conversation.memory_spine import append_visible_conversation_turn
 from host_brain.digital_life.application_boundary import submit_life_command
+from host_brain.digital_life.projection import LifeProjectionDispatcher
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.persistence.context_memory_repository import MemoryEventRepository
 from host_brain.persistence.context_repository import ContextRepository
@@ -105,7 +106,14 @@ def _life_payload() -> dict[str, Any]:
             "state_patch": {},
             "emotion_context": {},
             "bond_summary": {},
-            "projection_intents": [],
+            "projection_intents": [
+                {
+                    "projection_id": "surface.post_process",
+                    "payload": {
+                        "request_id": "request-ne01-life-response-loss",
+                    },
+                }
+            ],
             "deliveries": [],
         },
         "created_at_ms": 1_725_000_002_000,
@@ -115,6 +123,15 @@ def _life_payload() -> dict[str, Any]:
             "reply_persistable": True,
             "delivery_authorized": False,
         },
+    }
+
+
+def _ack_surface_projection(message) -> dict[str, Any]:  # noqa: ANN001
+    return {
+        "status": "APPLIED",
+        "target": message.target,
+        "intent_id": message.intent_id,
+        "request_id": str(message.payload.get("request_id") or ""),
     }
 
 
@@ -330,7 +347,8 @@ def test_conversation_invalid_payload_fails_before_writer(drift) -> None:
     assert calls == 0
 
 
-def test_life_response_loss_reopens_command_receipt_after_restart(
+@pytest.mark.asyncio
+async def test_life_response_loss_reopens_projection_barrier_after_restart(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -357,15 +375,25 @@ def test_life_response_loss_reopens_command_receipt_after_restart(
         "submit_life_command",
         write_then_lose_response,
     )
+    projection_dispatcher = LifeProjectionDispatcher(
+        life.repository,
+        _ack_surface_projection,
+    )
     handler = build_production_acceptance_effect_handlers(
         life_receipt_reader_provider=lambda: life.snapshot_reader,
+        life_projection_dispatcher=projection_dispatcher,
     )["life.foreground_completed"]
 
-    recovered = handler(payload)
+    recovered = await handler(payload)
 
     assert recovered["status"] == "APPLIED"
     assert recovered["replayed"] is True
-    assert recovered["receipt_ref"].startswith("life-event://id/life_evt_")
+    assert recovered["receipt_ref"].startswith(
+        "life-projection-barrier://sha256/"
+    )
+    assert recovered["projection_receipts"][0]["result"]["target"] == (
+        "surface.post_process"
+    )
     assert _receipt_ref(recovered) == recovered["receipt_ref"]
     assert writer_calls == 1
     first_receipt_ref = recovered["receipt_ref"]
@@ -382,6 +410,53 @@ def test_life_response_loss_reopens_command_receipt_after_restart(
     assert exact["receipt_ref"] == first_receipt_ref
     assert exact["replayed"] is True
     assert writer_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_life_projection_failure_stays_unknown_across_restart(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "life-projection-failure.sqlite3"
+    ledger = _migrated_ledger(db_path)
+    life = build_process_life_container(ledger=ledger, adopted_at_ms=1)
+    payload = _life_payload()
+    projection_calls = 0
+
+    async def fail_projection(_message):  # noqa: ANN001
+        nonlocal projection_calls
+        projection_calls += 1
+        raise RuntimeError("private local projection failure")
+
+    monkeypatch.setattr(PROCESS_LIFE_PROVIDER, "require", lambda: life)
+    handler = build_production_acceptance_effect_handlers(
+        life_receipt_reader_provider=lambda: life.snapshot_reader,
+        life_projection_dispatcher=LifeProjectionDispatcher(
+            life.repository,
+            fail_projection,
+            base_retry_ms=60_000,
+        ),
+    )["life.foreground_completed"]
+
+    with pytest.raises(AcceptanceEffectOutcomeUnknown) as uncertain:
+        await handler(payload)
+
+    assert "private local projection failure" not in uncertain.value.detail
+    assert projection_calls == 1
+    assert life.snapshot_reader.get_receipt(payload["command_id"]) is not None
+    intent = life.snapshot_reader.list_projection_intents(
+        payload["command_id"]
+    )[0]
+    assert life.snapshot_reader.get_projection_receipt(intent.intent_id) is None
+    ledger.close()
+
+    restarted_reader = LifeSnapshotReader(LifeCommandRepository(db_path))
+    restarted = build_production_acceptance_effect_handlers(
+        life_receipt_reader_provider=lambda: restarted_reader,
+    )["life.foreground_completed"]
+    with pytest.raises(AcceptanceEffectOutcomeUnknown):
+        restarted.reconcile(payload)
+    assert projection_calls == 1
 
 
 @pytest.mark.asyncio

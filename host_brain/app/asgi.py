@@ -935,6 +935,7 @@ def create_app(
                     life_receipt_reader_provider=(
                         lambda: life_command_authority_provider(ledger)[1]
                     ),
+                    life_projection_dispatcher=life_dispatchers[0],
                     life_authority_provider=(
                         lambda: life_command_authority_provider(ledger)
                     ),

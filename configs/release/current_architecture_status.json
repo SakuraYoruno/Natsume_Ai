@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-26",
   "source_baseline": {
-    "dev_commit": "b9b29b457f397c11a04aa8d96c7e8edd6d076268",
+    "dev_commit": "d5b15be1950b7805991a5041e410c2a0eb8549e4",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_OPERATION_RECOVERY_CASE_BOUND_RECONCILIATION_PRECOMMIT_OVER_ORIGIN_DEV_B9B29B457"
+    "evaluated_source": "NE01_TRANSACTIONAL_CHAT_PROJECTION_BARRIER_PRECOMMIT_OVER_ORIGIN_DEV_D5B15BE19"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "0130_DURABLE_OPERATION_RECOVERY_HOLD_IS_NOW_EXACTLY_BOUND_BY_0131_TO_ONE_APPEND_ONLY_SIGNED_OPERATION_RECONCILIATION_EVIDENCE_SECURE_INGRESS_WORKORDER_TASKGRAPH_RISK4_REVIEW_ACCEPTANCE_EFFECT_AND_V5_HANDLER_RECEIPT_FREEZE_THE_SAME_CASE_IDENTITY_EXISTING_OPERATION_OUTBOX_SQLITE_UOW_REMAINS_THE_ONLY_MUTATION_AUTHORITY_HANDLER_REOPENS_THE_CASE_AND_REQUIRES_CURRENT_FALSE_UNKNOWN_AND_CANCELLATION_HAVE_DISTINCT_FAIL_CLOSED_ACTION_MATRICES_CHECKPOINT_CONFLICT_REMAINS_QUARANTINED_GENERAL_AUTO_ATTRIBUTION_OTHER_FAILURE_CANCELLATION_WORKSPACE_TERMINALS_COMMIT_BOUND_SEVEN_ROUTE_COMPLETE_PROCESS_HOST_RESTART_DEPLOYED_CREDENTIAL_REAL_HTTP_NETWORK_CANARY_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "CHAT_ACCEPTANCE_NOW_REQUIRES_EXACT_COMMAND_BOUND_LIFE_PROJECTION_INTENT_AND_DURABLE_RECEIPT_BARRIERS_BEFORE_SURFACE_REPLY_DELIVERY_SURFACE_POST_PROCESS_PROVES_ASSISTANT_TURN_AND_LIFEMEMORY_LOCAL_WRITES_RESPONSE_LOSS_RESTART_FAILURE_AND_TAMPER_FAIL_CLOSED_EXTERNAL_DELIVERY_REMAINS_IDEMPOTENT_EVENTUAL_NOT_A_GLOBAL_SQL_TRANSACTION_OTHER_ROUTES_BUDGET_GENERAL_RECOVERY_WORKSPACE_TERMINALS_COMMIT_BOUND_SEVEN_ROUTE_COMPLETE_PROCESS_HOST_RESTART_DEPLOYED_CREDENTIAL_REAL_HTTP_NETWORK_CANARY_WAVE_INTEGRATION_REAL_MODEL_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,10 +26,28 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
-    "status": "OPERATION_RECOVERY_CASE_BOUND_RECONCILIATION_LOCAL_REAL_SQLITE_TARGETED_PASS_PROGRAM_INCOMPLETE_PRECOMMIT",
-    "commit_binding": "PRECOMMIT_LOCAL_SLICE_BASED_ON_ORIGIN_DEV_B9B29B457F397C11A04AA8D96C7E8EDD6D076268",
+    "status": "TRANSACTIONAL_CHAT_LOCAL_PROJECTION_BARRIER_REAL_SQLITE_TARGETED_PASS_PROGRAM_INCOMPLETE_PRECOMMIT",
+    "commit_binding": "PRECOMMIT_LOCAL_SLICE_BASED_ON_ORIGIN_DEV_D5B15BE1950B7805991A5041E410C2A0EB8549E4",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_OPERATION_RECOVERY_CASE_BOUND_RECONCILIATION",
+    "slice": "NE01_TRANSACTIONAL_CHAT_PROJECTION_BARRIER",
+    "transactional_chat_projection_barrier_current_validation": {
+      "status": "LOCAL_REAL_SQLITE_TARGETED_PASS_CHAT_TRANSACTIONAL_SIDE_EFFECT_CONTROL_PASS_NE01_IN_PROGRESS",
+      "migration": "SLICE_NONE_REUSES_0079_LIFE_COMMAND_FOUNDATION_0118_CONVERSATION_ACCEPTANCE_EFFECTS_CURRENT_HEAD_0131",
+      "effect_order": "USER_TURN_THEN_PREFERENCE_THEN_LIFE_CONVERSATION_THEN_LIFE_FOREGROUND_THEN_EXTERNAL_REPLY",
+      "projection_identity": "EXACT_COMMAND_EVENT_PERSON_KIND_TARGET_PAYLOAD_DIGEST_AND_CREATED_TIME_SET_MUST_MATCH",
+      "local_commit_barrier": "SURFACE_POST_PROCESS_RECEIPT_EXISTS_ONLY_AFTER_VISIBLE_ASSISTANT_TURN_AND_LIFEMEMORY_ADMISSION_ARE_DURABLE",
+      "response_loss": "FIRST_INVOCATION_REOPENS_EXACT_COMMAND_AND_MAY_DISPATCH_ONLY_ITS_OWN_INTENTS",
+      "restart_reconciliation": "READ_ONLY_REOPENS_EXACT_COMMAND_INTENT_SET_AND_PROJECTION_RECEIPTS_NO_BLIND_REPLAY",
+      "failure_boundary": "MISSING_FAILED_TAMPERED_OR_DRIFTED_PROJECTION_STAYS_UNKNOWN_AND_BLOCKS_LATER_DELIVERY",
+      "external_delivery": "IDEMPOTENT_EVENTUAL_WITH_AUTHENTICATED_READ_ONLY_GATEWAY_RECONCILIATION",
+      "global_transaction_claim": "NOT_CLAIMED",
+      "affected_regression": "106_PASSED_IN_117_58_SECONDS_ZERO_FAIL",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "real_model": "NOT_RUN",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "CHAT_TRANSACTIONAL_LOCAL_PROJECTION_CONTROL_ONLY_COMMIT_BOUND_ACCEPTANCE_AND_OTHER_SIX_ROUTES_REMAIN_INCOMPLETE"
+    },
     "reviewed_agent_skill_workspace_promotion_current_validation": {
       "status": "LOCAL_REAL_SQLITE_GIT_TARGETED_PASS_NE01_IN_PROGRESS",
       "migration": "SLICE_NONE_REUSES_0101_AGENT_WORKSPACE_AUTHORITY_AND_0116_AGENT_WORKSPACE_LIFECYCLE_CURRENT_REPOSITORY_HEAD_0131",
@@ -1393,11 +1411,11 @@
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY"
     },
     "conversation_gateway_current_validation": {
-      "fresh_consolidated_passed": 65,
-      "fresh_consolidated_duration_seconds": 118.52,
-      "scope": "CONVERSATION_GATEWAY_GR05_GR06_AND_AFFECTED_ROUTES_SINGLE_COMMAND",
-      "evidence_binding": "PRE_COMMIT_LOCAL_COMMIT_BOUND_IGNORED_RECEIPT_PENDING_AFTER_COMMIT",
-      "count_boundary": "EARLIER_FOCUSED_GROUPS_ARE_SUPERSEDED_HISTORY_DO_NOT_ADD",
+      "fresh_consolidated_passed": 106,
+      "fresh_consolidated_duration_seconds": 117.58,
+      "scope": "LIFE_COMMAND_PROJECTION_REPOSITORY_CONVERSATION_EFFECT_RECONCILIATION_GR05_PRODUCTION_ORDERING_AND_ASGI_COMPOSITION",
+      "evidence_binding": "PRECOMMIT_LOCAL_SLICE_OVER_ORIGIN_DEV_D5B15BE1950B7805991A5041E410C2A0EB8549E4",
+      "count_boundary": "THIS_AFFECTED_BATCH_SUPERSEDES_EARLIER_CONVERSATION_FOCUSED_TOTALS_DO_NOT_ADD",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "real_model": "NOT_RUN",
       "docker_full_stack": "NOT_RUN_NE07",
@@ -2903,12 +2921,12 @@
       ]
     },
     "generic_acceptance_effect_reconciliation": {
-      "status": "PARTIAL_INDEPENDENT_CONVERSATION_EFFECTS_AUTHENTICATED_SURFACE_QUERY_AND_SIGNED_GENERAL_UNKNOWN_EFFECT",
-      "conversation": "The visible turn, Preference evaluation and Life projection are independent post-Acceptance effects. A missing or non-boolean store privacy-gate contract fails closed with zero writes. Explicit false or malformed environment configuration is conservatively parsed to boolean false and writes only a DISABLED receipt with zero events/current profiles/0118 child versions. Enabled mode commits event bindings, append-only child profile versions and the evaluation receipt in one SQLite UoW; a parent-sealed trigger plus full-set reconciliation rejects appended or tampered children, and NO_SIGNAL is durable. Recommendation feedback uses the admitted timestamp as an upper bound, exact person/conversation/session binding and a canonical full-delivery digest. Life reopens the exact deterministic command receipt.",
-      "life": "Life conversation projection failure reopens the exact deterministic command identity, state/version and durable receipt without resubmitting the command.",
+      "status": "PARTIAL_CHAT_LOCAL_PROJECTION_BARRIER_PASS_AUTHENTICATED_SURFACE_QUERY_AND_SIGNED_GENERAL_UNKNOWN_EFFECT",
+      "conversation": "Graph Acceptance stages visible user turn, Preference evaluation, two Life effects and external reply in a fixed semantic order. Each Life effect now remains non-COMMITTED until the exact command-bound projection intent set has matching durable receipts. The foreground surface projection receipt can exist only after durable projection mode has committed the visible assistant turn and LifeMemory admission. The dispatcher therefore cannot advance to external reply first. Preference privacy and atomic profile-receipt boundaries remain unchanged.",
+      "life": "First invocation may reopen a response-lost exact Life command and dispatch only its own exact projection intents. Reclaimed reconciliation is read-only. Missing, failed, tampered or drifted projection receipts remain UNKNOWN and block later effects across restart.",
       "surface": "Initial HTTP errors, malformed or missing fields and response loss stay UNKNOWN. Restart uses the existing internal_reply HMAC, timestamp and nonce channel for an authenticated read-only Gateway query. Gateway reopens one SQLite outbox snapshot and validates effect_id from its canonical persisted payload; Host re-derives delivery and payload identity from the original Effect. NOT_FOUND or any drift stays UNKNOWN and never proves NO_SIDE_EFFECT.",
       "guardian": "Startup and background recovery failure/recovery are projected into an app-local RuntimeGuardian durable SLO. Durable evidence and logs retain an opaque random incident and error type only, not exception text or traceback.",
-      "local_validation": "Current evidence is recorded as four separate potentially overlapping groups: Conversation/migration 0118 primary targeted 15, Conversation affected combination 52, Gateway primary 31, and independent read-only review 3. They are never added, and early overlapping exploration groups are not repeated as current totals.",
+      "local_validation": "The current affected batch is 106 passed in 117.58 seconds and supersedes earlier Conversation-focused totals. It covers exact intent claim isolation, response loss, restart, failed projection hold, receipt tamper and production-equivalent GR05 ordering. Remote CI is NOT_RUN_ACCOUNT_QUOTA.",
       "remaining": [
         "deployed-key HTTP/network canary for signed general Effect attribution",
         "commit-bound consolidated evidence",
@@ -2916,6 +2934,9 @@
       ],
       "evidence_refs": [
         "host_brain/app/acceptance_effect_handlers.py",
+        "host_brain/app/life_projection_barrier.py",
+        "host_brain/digital_life/projection.py",
+        "host_brain/persistence/life_command_repository.py",
         "host_brain/contracts/conversation_acceptance_effects.py",
         "host_brain/audit/migrations/0118_conversation_acceptance_effects.sql",
         "edge_client/gateway/delivery_runtime.py",
@@ -3804,9 +3825,13 @@
       ]
     },
     "conversation_effects": {
-      "status": "PARTIAL",
-      "semantics": "POST_ACCEPTANCE_DURABLE_EVENTUAL",
+      "status": "PARTIAL_CHAT_LOCAL_PROJECTION_BARRIER_PASS",
+      "semantics": "POST_ACCEPTANCE_DURABLE_LOCAL_PROJECTION_BARRIER_EXTERNAL_DELIVERY_EVENTUAL",
       "single_global_transaction": false,
+      "chat_transactional_side_effect_control": "PASS",
+      "local_projection_barrier": "EXACT_LIFE_COMMAND_INTENT_SET_AND_DURABLE_RESULT_RECEIPTS_REQUIRED_BEFORE_SURFACE_REPLY_DELIVERY",
+      "assistant_memory_boundary": "SURFACE_POST_PROCESS_RECEIPT_PROVES_VISIBLE_ASSISTANT_TURN_AND_LIFEMEMORY_ADMISSION_DURABLE",
+      "unknown_boundary": "MISSING_FAILED_TAMPERED_OR_DRIFTED_LOCAL_PROJECTION_REMAINS_RECONCILIATION_REQUIRED",
       "node_acceptance_uow": "APPLICATION_STORE_UNIFIED_ARTIFACT_EFFECT_NODE_OUTBOX",
       "node_acceptance_outbox_lineage": "EXACT_ATTEMPT_BOUND",
       "delivery_guard": "EXACT_VALIDATED_ARTIFACT_ATTEMPT_REQUIRED",
@@ -3826,10 +3851,16 @@
         "host_brain/audit/migrations/0125_task_acceptance_effect_staging_authority.sql",
         "host_brain/persistence/task_acceptance_effect_staging.py",
         "host_brain/persistence/task_acceptance_effect_delivery.py",
+        "host_brain/app/life_projection_barrier.py",
+        "host_brain/digital_life/projection.py",
+        "host_brain/persistence/life_command_repository.py",
         "tests/contract/test_gr06_acceptance_effect_store.py",
         "tests/integration/test_ne01_durable_node_artifacts.py",
         "tests/integration/test_ne01_task_graph_sql_admission_authority.py",
         "tests/integration/test_ne01_task_acceptance_effect_sql_staging_authority.py",
+        "tests/integration/test_ne01_conversation_atomic_effects.py",
+        "tests/integration/test_ne01_generic_acceptance_effect_reconciliation.py",
+        "tests/integration/test_gr05_universal_host_runtime.py",
         "host_brain/task_runtime/accepted_graph_finalization.py",
         "tests/integration/test_ne01_accepted_effect_finalization_recovery.py"
       ]

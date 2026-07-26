@@ -1,10 +1,20 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.15
+版本：v0.16
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-TRANSACTIONAL-CHAT-PROJECTION-BARRIER
+
+- T-NE01-CHAT-BARRIER-01：Life command receipt只能证明 command/event/intent 原子入账，不能直接提交 `life.conversation_turn_recorded` 或 `life.foreground_completed` Acceptance Effect。handler 必须重建 exact command 的完整 intent 集合，并逐项验证 event、command、person、kind、target、payload digest 与 created time。
+- T-NE01-CHAT-BARRIER-02：app-local dispatcher 的精确入口只能领取指定 intent id，不得先消费同队列的其它 intent；已存在 receipt 时必须原样重开。
+- T-NE01-CHAT-BARRIER-03：`surface.post_process` receipt必须绑定同一 request，并且只能在 durable projection mode 已提交 visible assistant turn 和 `COMMITTED/SKIPPED` LifeMemory admission 后产生；在 receipt出现前，`surface.reply_delivery` 调用次数必须为 0。
+- T-NE01-CHAT-BARRIER-04：command 写成功但响应丢失时，首次 invocation可重开 exact command 并执行其 intents；reclaimed Effect 的 `reconcile()` 必须只读。进程重启后 exact barrier receipt保持同一 content-addressed identity，不能重提 command或盲重放 projection。
+- T-NE01-CHAT-BARRIER-05：projection handler失败、receipt缺失、intent/payload/result/request drift 或 SQLite tamper必须返回 `ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED`，并阻断后续 external delivery。
+- T-NE01-CHAT-BARRIER-06：Gateway发送仍通过独立幂等 eventual delivery 和 authenticated read-only reconciliation；测试与文档不得把本地 projection barrier 宣称为跨服务全局 SQL transaction、commit-bound 七路线验收或 NE-01 完成。
+- 当前受影响集合为 `106 passed in 117.58s`，覆盖 Life repository/dispatcher、Conversation handlers、response loss、restart、failure hold、tamper、ASGI composition 与生产等价 GR05 顺序。波次集成、真实模型/网络与 NE-07 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-GOVERNED-AGENT-SKILL-WORKSPACE
 
