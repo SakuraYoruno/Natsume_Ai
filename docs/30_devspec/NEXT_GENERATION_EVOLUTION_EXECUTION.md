@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、commit-bound Chat 验收、通用 Delegate、七路线和完整 Composition 仍未完成。
 
-版本：v3.7
+版本：v3.8
 日期：2026-07-26
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 修订执行基线：最新 `origin/dev`，本文件所在提交作为切片证据。第 5、6 条 governed Operator vertical slice `task_operation.reconcile` 与 `task_effect.reconcile` 继续把原始 Ed25519 证据隔离在 0126/0128 append-only evidence ledger，TaskGraph 只携带 ref/digest；其受限恢复结论不变。Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：Scheduler Secure Ingress 冻结 method/path/body/definition head，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，经过节点治理、Review/Verification/Acceptance、terminal Preview 后，唯一 `operator.state_control` Effect 才写 canonical repository。不可变 admin operation receipt 先于 claim completion；该崩溃窗口由新实例精确重开，路由中的直接 Scheduler writer 调用为 0。trigger 保持既有 governed occurrence 入口，list/get/health 保持只读。
@@ -514,6 +514,15 @@ FAIL
 
 正文中“atomic/fan-out/cancellation 均默认关闭”的句子属于对应历史切片的 commit-bound 状态，不代表当前生产对象图。当前新生产 Graph 已默认声明并执行 `ATOMIC_GRAPH_SUCCESS_V1`；0090/0091 分别原子收口失败/成功。`bounded_fanout_enabled`、durable cancellation 和 reconciliation 仍默认关闭，wave integration 与真实 canary 尚未执行。
 
+### 当前普通 Skill 模型预算 authority 切片（2026-07-26）
+
+- 普通 governed Skill 不再默认取得裸 `ModelAttemptService`。Registry 必须显式声明 `model_budget_required`，执行层才从 exact ACTIVE Task Budget 派生 graph/revision/node/attempt-bound `GovernedSkillModelBudgetRuntime`。
+- typed runtime 对连续模型调用逐次扣减 canonical Token、retry、成本和 elapsed measurement；cache、缺 usage、重复/incomplete measurement、越界或 provider identity 不足均停止后续调用。
+- Skill 返回的 usage attestation 由 server 生成，只携带 measurement 和 Task lineage；frozen worker 重新绑定 request/Budget/Graph/Node/Attempt 后才构造 `WorkerBudgetUsage`，attestation 本身没有持久写 authority。
+- 当前正向接线为 `emergent_growth_weekly`。它只关闭普通 governed Skill 的模型预算旁路，不把 Persona Growth 升级为可生产演化；proposal-only、Lab/Review/version activation 属于 NE-06。
+- 受影响去重定向集合为 `60 passed in 31.84s`。Skill registry/loader 兼容集为 `78 passed, 4 failed`；4 项已在纯 `origin/dev@632810516` 重现为相同 `DEGRADATION_STATE_UNAVAILABLE`，属于既存基线，不能冒充当前切片失败或 PASS。
+- 本切片无 migration；真实 provider、wave integration、七路线 commit-bound acceptance 与 NE-07 Docker 全栈均未运行，NE-01 保持 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## 7. 停止与回滚
 
 仅在以下情况停止当前 wave：
@@ -530,5 +539,5 @@ FAIL
 文档验收后创建的 Goal 应使用以下目标，不附带微任务数量：
 
 ```text
-按 NEXT_GENERATION_EVOLUTION_EXECUTION.md v3.1 完成 NE-03、NE-01、NE-02、NE-04～NE-07：先重做 #84 并完成 World/Scene/Intent/Guardian 生产切流，再封板通用执行、真实 PlanningSearch 和受治理演化闭环；最终构建 Monitor UI，启动真实 Docker Neo4j/Chroma/Redis、Host、Obs、Nginx Monitor、完整 Edge 与 Unified Gateway 做全量网络、数据、重启、故障和回滚验收。全过程使用中文提交/PR、每提交同步文档并推送，远程 CI 额度缺失只记 NOT_RUN_ACCOUNT_QUOTA。
+按 NEXT_GENERATION_EVOLUTION_EXECUTION.md v3.8 完成 NE-01、NE-02、NE-04～NE-07，并持续守护已合入的 NE-03：封板通用执行、真实 PlanningSearch 和受治理演化闭环；最终构建 Monitor UI，启动真实 Docker Neo4j/Chroma/Redis、Host、Obs、Nginx Monitor、完整 Edge 与 Unified Gateway 做全量网络、数据、重启、故障和回滚验收。全过程使用中文提交/PR、每提交同步文档并推送，远程 CI 额度缺失只记 NOT_RUN_ACCOUNT_QUOTA。
 ```

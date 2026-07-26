@@ -209,6 +209,7 @@ _AUTHORITY_SEAL = object()
 _UNTRUSTED_AUTHORITY_KEYS = frozenset({
     "_capability_authority",
     "_governed_execution_context",
+    "_governed_skill_model_budget_runtime",
     "_skill_execution_authority",
     "approval_token_ref",
     "authority",

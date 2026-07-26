@@ -1020,6 +1020,10 @@ Token/成本维度或 graph/node/attempt 漂移都意味着证据不足，必须
 模型调用。Task Runtime 仍是持久预算 authority；进程内 remainder 只是把
 同一 durable allowance 投影到连续请求，不能扩张额度或自行宣告预算结算。
 
-当前代码已将这一原则用于 Chat、Internal Agent 和受治理 Agent Skill 的
-模型路径，但 program-wide Budget、七路线最终 receipt 与真实 provider
-验收仍是 NE-01/NE-07 的未完成条件。
+该原则不只适用于 Agent loop。任何声明会调用模型的受治理 Skill 都只能
+得到 graph/revision/node/attempt-bound 的 typed model port，不能得到可自行
+构造无界请求的裸模型 authority；其逐次 measurement 必须由外层 Task Runtime
+按同一 lineage 重验后再持久结算。当前代码已把这一原则用于 Chat、Internal
+Agent、受治理 Agent Skill，以及显式声明模型预算的普通受治理 Skill；但
+program-wide Budget、七路线最终 receipt 与真实 provider 验收仍是
+NE-01/NE-07 的未完成条件。

@@ -3,7 +3,7 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.9
+版本：v3.10
 核对日期：2026-07-26
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag worker 执行和进程内任务 registry 已删除，且 Executive 内的 Forge route override call 已移除。纯 SkillDag adapter 仅作零生产调用的兼容合同；独立 Forge `runtime-match` 仍是待退役边界。
@@ -102,17 +102,24 @@ flowchart LR
     B["Frozen Task Budget"] --> G["graph/node/attempt guard"]
     G --> I["Internal Agent"]
     G --> S["sealed Agent Skill authority"]
+    G --> NS["declared non-Agent Skill typed port"]
     I --> A["Agent loop"]
     S --> A
+    NS --> SM["Skill model call"]
     A --> M["canonical measurement"]
+    SM --> M
     M --> R["strict remainder"]
     R --> A
+    R --> SM
+    M --> AT["task-bound attestation"]
+    AT --> D
     M --> D["durable Budget settlement"]
 ```
 
 `strict remainder` 只在同一 Agent loop 内防止额度重置，不拥有持久写
-authority。缺失 usage、缓存、重复 measurement 或 lineage 漂移会停止下一
-次模型调用。该子流不代表 program-wide Budget 或 NE-01 已完成。
+authority；普通 Skill 的 typed port 也遵守同一限制。缺失 usage、缓存、重复
+measurement 或 lineage 漂移会停止下一次模型调用。未声明的普通 Skill 不
+取得裸模型端口。该子流不代表 program-wide Budget 或 NE-01 已完成。
 
 ## Graph revision
 

@@ -1,10 +1,20 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.17
+版本：v0.18
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-GOVERNED-SKILL-MODEL-BUDGET
+
+- T-NE01-SKILL-MODEL-BUDGET-01：`ModelAttemptRequest` 只接受 typed `ModelBudgetGuard`；Mapping 或 caller 自报额度必须拒绝。
+- T-NE01-SKILL-MODEL-BUDGET-02：同一普通 Skill Attempt 的第二次模型调用必须使用扣除第一次 canonical Token、retry、成本和 elapsed measurement 后的 guard。
+- T-NE01-SKILL-MODEL-BUDGET-03：缺 usage、cache、重复 measurement、超限或不完整 measurement 必须失败关闭，且不得生成可结算 attestation。
+- T-NE01-SKILL-MODEL-BUDGET-04：attestation 必须精确绑定 request、Budget、Graph revision、Node 与 Attempt；任一 drift 在构造 `WorkerBudgetUsage` 前拒绝。
+- T-NE01-SKILL-MODEL-BUDGET-05：普通 governed Skill 不得获得裸 `ModelAttemptService`；只有 registry 明确声明 `model_budget_required` 才注入 typed runtime。
+- T-NE01-SKILL-MODEL-BUDGET-06：声明模型预算且执行成功的 Skill 若未产生 canonical measurement，必须以稳定 reason 失败，不能提交成功 WorkerProjection。
+- T-NE01-SKILL-MODEL-BUDGET-07：`emergent_growth_weekly` 在 governed context 中缺 typed runtime 必须拒绝；legacy 非 governed 兼容路径不据此计入生产闭环。
 
 ## T-NE01-INDEPENDENT-WORKER-EVIDENCE
 

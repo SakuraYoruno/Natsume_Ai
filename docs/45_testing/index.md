@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.15
+版本：v2.16
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 普通受治理 Skill 模型预算当前切片
+
+- `tests/unit/test_ne01_governed_skill_model_budget.py` 覆盖 typed guard、连续调用剩余额度、缺 usage、attestation drift、普通 Skill 裸端口隔离、`emergent_growth_weekly` governed fail-closed 与外层 WorkerBudgetUsage 结算。
+- ModelAttempt、Emergent Growth、Skill Broker 和 frozen route 的去重定向集合为 `60 passed in 31.84s`。
+- Skill registry/loader 兼容集合为 `78 passed, 4 failed`；4 项在纯 `origin/dev@632810516` 上以相同 `DEGRADATION_STATE_UNAVAILABLE` 失败，确认为既存基线，不冒充本切片 PASS，也不在本切片修改。
+- changed module `compileall`、机器状态解析、`git diff --check`、文档 audience/authority/freshness Gate 与统一静态扫描均通过；发布/文档合同另为 `65 passed in 10.85s`，不与代码集合相加。Ruff 在当前环境不可用，记为 `NOT_RUN_TOOL_UNAVAILABLE`。
+- 本切片没有 migration，不运行真实 provider、波次 integration 或 NE-07 Docker 全栈；Program 状态保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 独立 Worker 证据与 Plan 产物流当前切片
 

@@ -467,7 +467,10 @@ class _FrozenSkillWorker:
                 attempt_id=str(execution_context.get("attempt_id") or ""),
                 route="skill",
             ),
-            observations=_trusted_skill_budget_observations(payload.get("result")),
+            observations=_trusted_skill_budget_observations(
+                payload,
+                execution_context=execution_context,
+            ),
             include_agent_tool_calls=True,
             evidence_refs=((receipt_ref,) if receipt_ref else ()),
         )
@@ -693,19 +696,97 @@ def _frozen_memory_search_scope(args: Mapping[str, Any]) -> str:
     return "recent_episode"
 
 
-def _trusted_skill_budget_observations(value: Any) -> Mapping[str, Any]:
-    result = value if isinstance(value, Mapping) else {}
+def _trusted_skill_budget_observations(
+    value: Any,
+    *,
+    execution_context: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    payload = value if isinstance(value, Mapping) else {}
+    result = payload.get("result") if isinstance(payload, Mapping) else {}
     metadata = result.get("metadata") if isinstance(result, Mapping) else None
-    if not isinstance(metadata, Mapping):
-        return {}
-    if str(metadata.get("execution_authority") or "").strip() != "canonical_agent_executor":
-        return {}
-    return {
-        "model_attempts": list(metadata.get("model_attempts") or []),
-        "trace": dict(metadata.get("trace") or {})
-        if isinstance(metadata.get("trace"), Mapping)
-        else {},
+    observations: dict[str, Any] = {}
+    if (
+        isinstance(metadata, Mapping)
+        and str(metadata.get("execution_authority") or "").strip()
+        == "canonical_agent_executor"
+    ):
+        observations = {
+            "model_attempts": list(metadata.get("model_attempts") or []),
+            "trace": dict(metadata.get("trace") or {})
+            if isinstance(metadata.get("trace"), Mapping)
+            else {},
+        }
+
+    attestation = payload.get(
+        "governed_skill_model_budget_attestation"
+    )
+    if attestation is None:
+        return observations
+    from host_brain.model_runtime.governed_skill_budget import (  # noqa: PLC0415
+        GOVERNED_SKILL_MODEL_BUDGET_ATTESTATION_SCHEMA_VERSION,
+    )
+
+    if not isinstance(attestation, Mapping):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "governed Skill model budget attestation is not an object",
+        )
+    proof = dict(attestation)
+    expected_keys = {
+        "schema_version",
+        "task_request_id",
+        "budget_id",
+        "graph_id",
+        "graph_revision",
+        "node_id",
+        "attempt_id",
+        "model_attempts",
     }
+    budget = execution_context.get("budget")
+    budget_id = (
+        str(budget.get("budget_id") or "").strip()
+        if isinstance(budget, Mapping)
+        else ""
+    )
+    model_attempts = proof.get("model_attempts")
+    try:
+        proof_revision = int(proof.get("graph_revision") or 0)
+        context_revision = int(
+            execution_context.get("graph_revision") or 0
+        )
+    except (TypeError, ValueError) as exc:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "governed Skill model budget attestation revision is invalid",
+        ) from exc
+    if (
+        set(proof) != expected_keys
+        or proof.get("schema_version")
+        != GOVERNED_SKILL_MODEL_BUDGET_ATTESTATION_SCHEMA_VERSION
+        or str(proof.get("task_request_id") or "").strip()
+        != str(execution_context.get("request_id") or "").strip()
+        or str(proof.get("budget_id") or "").strip() != budget_id
+        or str(proof.get("graph_id") or "").strip()
+        != str(execution_context.get("graph_id") or "").strip()
+        or proof_revision != context_revision
+        or str(proof.get("node_id") or "").strip()
+        != str(execution_context.get("node_id") or "").strip()
+        or str(proof.get("attempt_id") or "").strip()
+        != str(execution_context.get("attempt_id") or "").strip()
+        or not isinstance(model_attempts, list)
+        or not model_attempts
+        or any(not isinstance(item, Mapping) for item in model_attempts)
+    ):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "governed Skill model budget attestation binding drifted",
+        )
+    existing = list(observations.get("model_attempts") or [])
+    observations["model_attempts"] = [
+        *existing,
+        *(dict(item) for item in model_attempts),
+    ]
+    return observations
 
 
 class _DurableSkillProjectionReader:

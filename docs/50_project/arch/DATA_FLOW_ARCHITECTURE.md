@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.10
+版本：v3.11
 
 核对日期：2026-07-26
 
@@ -1441,6 +1441,7 @@ All ingress sources
 | TaskNode result artifact | [node_artifact.py](../../../host_brain/contracts/agent_runtime/node_artifact.py)，[task_node_artifact_store.py](../../../host_brain/persistence/task_node_artifact_store.py)，[node_execution_runtime.py](../../../host_brain/task_runtime/node_execution_runtime.py)，[governed_workers.py](../../../host_brain/task_runtime/governed_workers.py) |
 | 0099 historical terminal reconciliation | [terminal_state_reconciliation.py](../../../host_brain/task_runtime/terminal_state_reconciliation.py)，[task_terminal_reconciliation_store.py](../../../host_brain/persistence/task_terminal_reconciliation_store.py)，[terminal_reconciliation_query_repository.py](../../../host_brain/persistence/terminal_reconciliation_query_repository.py) |
 | Budget contention / narrow recovery | [task_budget_usage_store.py](../../../host_brain/persistence/task_budget_usage_store.py)，[task_operation_checkpoint_store.py](../../../host_brain/persistence/task_operation_checkpoint_store.py)，[operation_recovery_runtime.py](../../../host_brain/task_runtime/operation_recovery_runtime.py)，[accepted_graph_finalization.py](../../../host_brain/task_runtime/accepted_graph_finalization.py) |
+| Governed Skill model budget | [governed_skill_budget.py](../../../host_brain/model_runtime/governed_skill_budget.py)，[skill_execution.py](../../../host_brain/executive_runtime/skill_execution.py)，[governed_frozen_skill_runtime.py](../../../host_brain/app/governed_frozen_skill_runtime.py)，[registry.py](../../../host_brain/skills/registry.py) |
 | Plan search/compiler | [plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py)，[planning_execution.py](../../../host_brain/orchestration/planning_execution.py)，[planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py) |
 | Scheduler/Internal | [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py)，[scheduler/command_service.py](../../../host_brain/scheduler/command_service.py)，[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py)（occurrence/internal 已接通 canonical admission；Scheduler 管理命令仍是 NE-01 待迁移边界） |
 | Read projection / Executive retirement | [read_routes.py](../../../host_brain/agent_runtime/read_routes.py)，[cortex_runtime.py](../../../host_brain/agent_runtime/cortex_runtime.py)，[runtime.py](../../../host_brain/executive_runtime/runtime.py) |
@@ -1515,3 +1516,26 @@ sealed Skill authority 只携带 canonical Budget JSON，不接收 payload 自�
 Internal 直接消费 frozen projection。两条路径最终共享相同 guard 和
 measurement validator。该图不表示持久预算已 program-wide 完成，也不表示
 七路线 acceptance 或真实 provider canary 已通过。
+
+### 普通受治理 Skill 模型预算流（2026-07-26）
+
+```mermaid
+flowchart LR
+    META["SkillMeta.model_budget_required"] --> TASK["ACTIVE Task Budget"]
+    TASK --> PORT["GovernedSkillModelBudgetRuntime"]
+    PORT --> CALL["canonical ModelAttempt"]
+    CALL --> MEASURE{"fresh complete exact measurement?"}
+    MEASURE -->|"no"| BLOCK["fail closed"]
+    MEASURE -->|"yes"| REM["strict remaining guard"]
+    REM --> PORT
+    MEASURE --> ATTEST["server usage attestation"]
+    ATTEST --> REOPEN["frozen worker reopens Task lineage"]
+    REOPEN --> USAGE["typed WorkerBudgetUsage"]
+    USAGE --> SETTLE["durable Budget settlement"]
+```
+
+未声明的普通 Skill 不获得裸 `ModelAttemptService`。attestation 必须精确绑定
+request、Budget、Graph revision、Node 与 Attempt，且只承载 canonical
+measurement；它本身不拥有预算写 authority。当前只证明这一普通 Skill 模型
+旁路被关闭，不代表 Delegate、外部工具、所有 legacy 调用或跨 route 累计成本
+已经 program-wide 收口。

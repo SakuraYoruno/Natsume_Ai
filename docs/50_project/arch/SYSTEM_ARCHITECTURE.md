@@ -3,13 +3,15 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.16
+版本：v2.17
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
 
 通用执行层新增一个 route-neutral 证据边界，而不是第二套 Runtime。Chat、Skill、Delegate、Plan、Tool 与 Operator worker 仍由原 Task Runtime 调度；其 terminal COMMIT 只被视为主张。Verifier 与 Acceptance 分别通过 projection reader 重开同一 durable evidence，任何身份、grant、digest、COMMIT 或输出合同漂移都阻断。Plan 的 successor artifact 由 canonical TaskStore 解析并经 `NodeInputArtifactAttestation` 绑定后才进入 final Chat；该 attestation 不赋予新的执行权。
+
+模型调用 authority 也沿同一 Task 边界收口。普通受治理 Skill 只有在 `SkillMeta.model_budget_required=true` 时才会获得 [`GovernedSkillModelBudgetRuntime`](../../../host_brain/model_runtime/governed_skill_budget.py)；它从当前 Task Budget 派生不可扩张的 node/attempt guard，逐次消费 canonical provider measurement，并生成不含 secret 的 usage attestation。未声明的普通 Skill 不再得到裸 `ModelAttemptService`，外层 frozen worker 必须重验 attestation 的 request/Budget/Graph/Node/Attempt 绑定后才能构造 `WorkerBudgetUsage`。Agent Skill 保留独立 sealed model runtime；两条路径最终都由 Task Runtime 持久结算，而不是由 Skill 自报成功。
 
 当前分支的独立 Gate 1～14 已全部 `PASS`、`failed_gates=[]`。最后两条回环通过中立合同层关闭：`SQLiteTaskRuntimeFeatureCanaryReceiptStore → contracts/task_runtime_feature_canary`，`composition/host_application → contracts/host_lifecycle`；旧 Task Runtime 与 App lifecycle 路径只重导出 canonical 对象，类型 identity 不分叉。Gate 1 的 issues/SCC 均为空，Gate 3 继续由 Research ledger 的 1271 行 repository owner、512 行 canonical codec 与 108 行 typed projection 保持通过，未扩白名单。该结果是当前工作树的静态分层证据，不是 Universal Runtime、NE-01 或完整架构项目封板；NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -197,6 +199,7 @@ Host 现有两条 Plan 入口：遗留 `planned_steps/steps` 只校验并拓扑�
 - `host_brain/task_runtime/local_graph_execution_registry.py`：graph revision 级本地 task tracking 与 bounded cancel/join；只作 durable cancellation 的进程内加速器。
 - `host_brain/task_runtime/dag_scheduler.py`：稳定 READY/fan-in/retry due 纯调度决策。
 - `host_brain/task_runtime/budget_runtime.py`：预算预留、计量和结算。
+- `host_brain/model_runtime/governed_skill_budget.py`：普通受治理模型 Skill 的 task-bound typed model port、逐次剩余额度与无 authority usage attestation；不持有 durable Budget writer。
 - `host_brain/task_runtime/review_runtime.py`：PRE/POST Review 与 continuation 材料。
 - `host_brain/task_runtime/acceptance_effects.py`：Acceptance effect intent 构造。
 - `host_brain/task_runtime/acceptance_effect_dispatcher.py`：验收后副作用投递；visible turn、Preference 与 Life projection 是三个独立 Effect。Preference store gate 缺失/非 `bool` 失败关闭且零写，配置 false/malformed env 保守映射为 disabled并只写零 event/profile 的 `DISABLED` receipt；0118 将 event、append-only profile child version、evaluation receipt 原子提交并封闭 child 全集。Surface 以 `internal_reply` HMAC/timestamp/nonce 只读查询 exact Gateway outbox；Gateway 从同一 SQLite payload 精确校验 `effect_id`，`NOT_FOUND` 保持 `UNKNOWN`。
