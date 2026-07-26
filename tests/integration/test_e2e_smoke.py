@@ -12,6 +12,7 @@ from pathlib import Path
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     EXPIRED_INTENT,
+    GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
     REPLAY_DETECTED,
     SERVICE_UNAVAILABLE_COLD_START,
     TRUST_LOW,
@@ -103,7 +104,11 @@ class TestE2ESmokeM26(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", exec_result.status)
+        self.assertEqual("REJECTED", exec_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
 
         # 审计链可串联
         trace = self.ledger.trace_request(request_id)
@@ -142,14 +147,19 @@ class TestE2ESmokeM26(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", exec_result.status)
-        # evidence_ref 可追溯
-        self.assertIsNotNone(exec_result.evidence_ref)
-        self.assertTrue(exec_result.evidence_ref.startswith("evidence::"))
+        self.assertEqual("REJECTED", exec_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
+        self.assertIsNone(exec_result.evidence_ref)
 
         trace = self.ledger.trace_request(request_id)
         self.assertEqual("COMPLETE", trace["status"])
-        self.assertEqual("SUCCESS", trace["skill_exec_log"][0]["result_status"])
+        self.assertEqual(
+            "REJECTED",
+            trace["skill_exec_log"][0]["result_status"],
+        )
 
     # ------------------------------------------------------------------
     # T-E2E-SMOKE-03：拒绝链路（REJECT + reason_code）完整走通
@@ -176,7 +186,10 @@ class TestE2ESmokeM26(unittest.TestCase):
             now_ts_ms=self.now_ms,
         )
         self.assertEqual("REJECTED", exec_result.status)
-        self.assertEqual("GOVERNOR_REJECTED", exec_result.result_code)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
         # 拒绝时无 evidence_ref
         self.assertIsNone(exec_result.evidence_ref)
 

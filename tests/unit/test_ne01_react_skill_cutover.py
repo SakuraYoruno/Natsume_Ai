@@ -59,7 +59,7 @@ def test_injected_skill_proposal_stops_before_legacy_runtime() -> None:
 
     with (
         patch(
-            "host_brain.executive_runtime.skill_execution._execute_skill"
+            "host_brain.app.governed_skill_execution.execute_governed_skill"
         ) as execute_skill,
     ):
         result = run_react_loop(

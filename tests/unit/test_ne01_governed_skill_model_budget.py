@@ -311,7 +311,7 @@ def test_emergent_growth_uses_bound_runtime_and_emits_canonical_trace() -> None:
 def test_governed_skill_execution_wires_attestation_into_worker_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from host_brain.executive_runtime import skill_execution
+    from host_brain.app import governed_skill_execution
 
     composition, requests = _composition(
         usage={
@@ -352,29 +352,35 @@ def test_governed_skill_execution_wires_attestation_into_worker_payload(
         },
     )()
     monkeypatch.setattr(
-        skill_execution,
+        governed_skill_execution,
         "_governed_node_grant_error",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        skill_execution,
+        governed_skill_execution,
         "bind_validated_skill_authority",
         lambda **_kwargs: object(),
     )
     monkeypatch.setattr(
-        skill_execution,
+        governed_skill_execution,
         "dispatch_executor_payload",
         lambda payload, **_kwargs: dict(payload["result"]),
     )
-    monkeypatch.setattr(
-        skill_execution,
-        "_log_skill_exec_row",
-        lambda **_kwargs: None,
-    )
-
-    outcome = skill_execution._execute_skill(
-        ports=object(),
-        request_body={"args": {}},
+    outcome = governed_skill_execution.execute_governed_skill(
+        ports=type(
+            "Ports",
+            (),
+            {
+                "skill_registry": registry,
+                "capability_broker": object(),
+                "model_attempt_service": composition.attempt_service,
+                "production_authority_verifier": staticmethod(
+                    lambda *_args, **_kwargs: True
+                ),
+                "agent_artifact_store": None,
+                "agent_workspace_runtime": None,
+            },
+        )(),
         request_id="request-governed-skill-model",
         session_id="session-governed-skill-model",
         person_id="person-governed-skill-model",
@@ -386,11 +392,7 @@ def test_governed_skill_execution_wires_attestation_into_worker_payload(
         intent_draft={"route": "skill", "target_id": "governed_model_skill"},
         emotion_context={},
         render_target_lang="zh",
-        skill_registry=registry,
-        ledger=False,
         durable_authority_ledger=object(),
-        capability_broker_override=object(),
-        model_attempt_service_override=composition.attempt_service,
         governed_execution_context={
             "execution_mode": "governed_task_runtime",
             "request_id": "request-governed-skill-model",
@@ -410,7 +412,7 @@ def test_governed_skill_execution_wires_attestation_into_worker_payload(
                 },
             },
         },
-        execution_args_override={},
+        execution_args={},
         verified_node_grant={"grant_ref": "grant://governed-model-skill"},
     )
 

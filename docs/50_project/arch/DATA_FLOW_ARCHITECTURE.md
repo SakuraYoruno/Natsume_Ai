@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.21
+版本：v3.22
 
 核对日期：2026-07-27
 
@@ -12,6 +12,26 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+Skill 的当前唯一执行流如下；虚线兼容入口只能拒绝，不能进入 handler：
+
+```mermaid
+flowchart LR
+    HC["HostCommand"] --> TG["Immutable TaskGraph node"]
+    TG --> FW["Frozen Skill worker"]
+    FW --> GE["App-local governed Skill executor"]
+    GE --> H["SkillMeta.handler"]
+    H --> SA["Sealed authority"]
+    SA --> CB["Capability Broker"]
+    CB --> WP["WorkerProjection / receipt"]
+    WP --> VA["Verification / Acceptance"]
+    L["Token-only SkillLoader"] -. "fail closed" .-> X["拒绝审计"]
+    S["Scheduler Skill metadata"] -. "fail closed" .-> X
+```
+
+缺 governed context、node grant、durable ledger 或 app-local ports 时，流程在
+接触 registry 前拒绝；receipt 写失败也不能返回成功。此图只描述 execution
+authority，不表示 Skill 领域副作用已经全部移到 Acceptance 后。
 
 Chat/Plan 模型预算的当前生产等价数据流如下：
 
@@ -48,7 +68,7 @@ flowchart LR
     C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
 ```
 
-Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `c15f88d9e201552ec9e3a589cda93b305818f5ef` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat 的最后一个控制；其它路线仍可独立保持 `PARTIAL / INCOMPLETE`。
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat 的最后一个控制；其它路线仍可独立保持 `PARTIAL / INCOMPLETE`。
 
 当前本地七路数据生成流已经在干净提交上形成正式收据：
 
@@ -59,7 +79,7 @@ flowchart TD
     I["Internal CommandService\nResult commit"] --> DB
     O["Operator OBS authority\nReview + HardState Effect + outer outcome"] --> DB
     DB --> R["query-only v3 Reader"]
-    R --> V["七路正式 PASS\ncommit c15f88d9 + migration 0135"]
+    R --> V["七路正式 PASS\ncommit 3d68bd1e + migration 0135"]
     V --> X["仓库内隐私安全收据\ncommit-bound controls = PASS"]
 ```
 
@@ -1551,7 +1571,7 @@ All ingress sources
 | TaskNode result artifact | [node_artifact.py](../../../host_brain/contracts/agent_runtime/node_artifact.py)，[task_node_artifact_store.py](../../../host_brain/persistence/task_node_artifact_store.py)，[node_execution_runtime.py](../../../host_brain/task_runtime/node_execution_runtime.py)，[governed_workers.py](../../../host_brain/task_runtime/governed_workers.py) |
 | 0099 historical terminal reconciliation | [terminal_state_reconciliation.py](../../../host_brain/task_runtime/terminal_state_reconciliation.py)，[task_terminal_reconciliation_store.py](../../../host_brain/persistence/task_terminal_reconciliation_store.py)，[terminal_reconciliation_query_repository.py](../../../host_brain/persistence/terminal_reconciliation_query_repository.py) |
 | Budget contention / narrow recovery | [task_budget_usage_store.py](../../../host_brain/persistence/task_budget_usage_store.py)，[task_operation_checkpoint_store.py](../../../host_brain/persistence/task_operation_checkpoint_store.py)，[operation_recovery_runtime.py](../../../host_brain/task_runtime/operation_recovery_runtime.py)，[accepted_graph_finalization.py](../../../host_brain/task_runtime/accepted_graph_finalization.py) |
-| Governed Skill model budget | [governed_skill_budget.py](../../../host_brain/model_runtime/governed_skill_budget.py)，[skill_execution.py](../../../host_brain/executive_runtime/skill_execution.py)，[governed_frozen_skill_runtime.py](../../../host_brain/app/governed_frozen_skill_runtime.py)，[registry.py](../../../host_brain/skills/registry.py) |
+| Governed Skill model budget | [governed_skill_budget.py](../../../host_brain/model_runtime/governed_skill_budget.py)，[governed_skill_execution.py](../../../host_brain/app/governed_skill_execution.py)，[governed_frozen_skill_runtime.py](../../../host_brain/app/governed_frozen_skill_runtime.py)，[registry.py](../../../host_brain/skills/registry.py) |
 | Plan search/compiler | [plan_intent_search.py](../../../host_brain/orchestration/plan_intent_search.py)，[planning_execution.py](../../../host_brain/orchestration/planning_execution.py)，[planning_graph_compiler.py](../../../host_brain/orchestration/planning_graph_compiler.py) |
 | Scheduler/Internal | [scheduler/governed_runtime.py](../../../host_brain/scheduler/governed_runtime.py)，[scheduler/command_service.py](../../../host_brain/scheduler/command_service.py)，[internal_task_runtime.py](../../../host_brain/app/internal_task_runtime.py)（occurrence/internal 已接通 canonical admission；Scheduler 管理命令仍是 NE-01 待迁移边界） |
 | Read projection / Executive retirement | [read_routes.py](../../../host_brain/agent_runtime/read_routes.py)，[cortex_runtime.py](../../../host_brain/agent_runtime/cortex_runtime.py)，[runtime.py](../../../host_brain/executive_runtime/runtime.py) |

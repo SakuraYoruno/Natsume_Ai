@@ -331,7 +331,6 @@ class _FrozenSkillWorker:
             execute_frozen_governed_skill,
             ports=self._execution_ports,
             durable_authority_ledger=self._ledger,
-            request_body={"args": execution_args},
             request_id=command.request_id,
             session_id=command.session_id,
             person_id=str(pack.get("person_id") or command.principal_id),

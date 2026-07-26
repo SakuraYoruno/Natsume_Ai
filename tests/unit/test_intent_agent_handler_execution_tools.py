@@ -47,7 +47,9 @@ def _planned_payload(*, tool_id: str) -> dict[str, object]:
 
 
 def test_run_skill_request_is_handoff_not_direct_execution() -> None:
-    with patch("host_brain.executive_runtime.skill_execution._execute_skill") as execute_skill:
+    with patch(
+        "host_brain.app.governed_skill_execution.execute_governed_skill"
+    ) as execute_skill:
         result = intent_agent_handler(_planned_payload(tool_id="run_skill"))
 
     execute_skill.assert_not_called()

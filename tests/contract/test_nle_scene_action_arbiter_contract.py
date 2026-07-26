@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-import time
-from types import SimpleNamespace
-
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.capability_plane.journal import SQLiteCapabilityExecutionJournal
-from host_brain.capability_plane.production_composition import (
-    build_production_capability_runtime,
-)
 from host_brain.governor.action_arbiter import (
     ACTION_ARBITER_SCHEMA_VERSION,
     ARBITER_ALLOW,
@@ -25,10 +17,6 @@ from host_brain.governor.action_preview import (
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.surface_runtime.eligibility import _surface_scene_guardrails
-from host_brain.executive_runtime.skill_execution import (
-    _execute_skill as _execute_skill_impl,
-)
-from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.persona.proactive_voice import (
     SCENE_MORNING_GREET,
     SCENE_TOPIC_FOLLOWUP,
@@ -65,34 +53,6 @@ class ActionArbiter(_ActionArbiter):
             enabled=enabled,
             degradation_capability_port=_LEGACY_DEGRADATION_PORT,
         )
-
-
-def _execute_skill(**kwargs):  # type: ignore[no-untyped-def]
-    kwargs.setdefault(
-        "degradation_capability_port",
-        _LEGACY_DEGRADATION_PORT,
-    )
-    return _execute_skill_impl(**kwargs)
-
-
-def _skill_execution_test_ports(
-    *,
-    registry,
-    ledger,
-    token_service,
-    capability_broker,
-):  # type: ignore[no-untyped-def]
-    """Inject the low-level worker collaborators without reviving app wiring."""
-
-    return SimpleNamespace(
-        get_skill_registry=lambda: registry,
-        get_ledger=lambda: ledger,
-        get_token_service=lambda: token_service,
-        get_resource_manager=lambda *args, **kwargs: None,
-        get_episodic_store=lambda: None,
-        get_semantic_recaller=lambda: None,
-        get_capability_broker=lambda: capability_broker,
-    )
 
 
 NOW = 1_800_100_000_000
@@ -463,101 +423,6 @@ def test_t_nle_17_cross_intent_action_scope_and_risk_reuse_fail_closed() -> None
     assert "ARBITER_SCOPE_MISMATCH" in wrong_scope["reason_codes"]
     assert lowered_risk["decision"] == ARBITER_ALLOW
     assert lowered_risk["effective_risk_level"] == 5
-
-
-def test_t_nle_17_real_skill_execution_consumes_bound_token_only_after_arbiter(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    registry = build_builtin_skill_registry()
-    meta = registry.require("session_summary")
-    token_service = TokenService(approval_ttl_ms=120_000)
-    now = int(time.time() * 1000)
-    envelope = {
-        "schema_version": "Natsume.intent.v1",
-        "id": "intent_exec_bound_1",
-        "ts_ms": now,
-        "session_id": "session_exec_bound_1",
-        "seq": 7,
-        "type": "skill_call",
-        "action": "session_summary",
-        "target": meta.scope,
-        "args": {"user_message": "summarize the approved session"},
-        "nonce": "nonce_exec_bound_1",
-        "person_id": "person_exec_bound_1",
-        "principal_id": "person_exec_bound_1",
-    }
-    token_ref = token_service.issue_approval_token(
-        intent_id=envelope["id"],
-        skill_name=envelope["action"],
-        session_id=envelope["session_id"],
-        seq=envelope["seq"],
-        now_ts_ms=now,
-    )
-    governor = _approved(
-        intent=envelope,
-        token_ref=token_ref,
-        risk_level=meta.risk_level,
-    )
-    # _approved uses the deterministic contract clock; replace with a live binding.
-    governor["approved_action_binding"] = build_governed_action_binding(
-        intent_envelope=envelope,
-        approval_token_ref=token_ref,
-        risk_level=meta.risk_level,
-        issued_at_ms=now,
-        expires_at_ms=now + 120_000,
-    )
-    monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
-    ledger = SQLiteLedger(tmp_path / "nle-scene-skill.sqlite3")
-    capability_broker = build_production_capability_runtime(
-        execution_journal=SQLiteCapabilityExecutionJournal(ledger),
-    ).broker
-    governor.update(
-        {
-            "request_id": "req_exec_bound_1",
-            "stage": "S_INTENT_OK",
-            "ts_ms": now,
-        }
-    )
-    ledger.log_governor(governor)
-
-    kwargs = {
-        "ports": _skill_execution_test_ports(
-            registry=registry,
-            ledger=ledger,
-            token_service=token_service,
-            capability_broker=capability_broker,
-        ),
-        "request_body": {},
-        "request_id": "req_exec_bound_1",
-        "session_id": envelope["session_id"],
-        "person_id": "person_exec_bound_1",
-        "intent_id": envelope["id"],
-        "skill_id": envelope["action"],
-        "task_text": "summarize the approved session",
-        "user_message": "summarize the approved session",
-        "governor_result": governor,
-        "intent_draft": envelope,
-        "emotion_context": {"mood_state": "CALM", "emotion_tag": "FOCUSED"},
-        "render_target_lang": "zh-CN",
-        "ledger": ledger,
-        "durable_authority_ledger": ledger,
-        "capability_broker_override": capability_broker,
-    }
-    missing_scene = _execute_skill(**kwargs)
-    frozen_scene, frozen_scene_identity = _scene_v2()
-    envelope["scene_decision_v2"] = frozen_scene
-    envelope["scene_identity_v2"] = frozen_scene_identity
-    first = _execute_skill(**kwargs)
-    replay = _execute_skill(**kwargs)
-
-    assert missing_scene.success is False
-    assert missing_scene.error_text == "SCENE_DECISION_V2_REQUIRED"
-    assert first.success is True, (first.error_text, first.payload)
-    assert first.payload["approval_token_ref"] == token_ref
-    assert replay.success is False
-    assert replay.error_text == "TOKEN_INVALID"
-    ledger.close()
 
 
 class _EventStore:

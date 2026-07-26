@@ -23,6 +23,7 @@ def test_legacy_executive_planning_modules_are_physically_retired() -> None:
         "host_brain/executive_runtime/conversation_execution.py",
         "host_brain/executive_runtime/route_planning.py",
         "host_brain/executive_runtime/skill_routing.py",
+        "host_brain/executive_runtime/skill_execution.py",
         "host_brain/executive_runtime/ports.py",
         "host_brain/app/runtime_port_wiring.py",
         "host_brain/app/tool_execution_matrix.py",
@@ -33,7 +34,7 @@ def test_legacy_executive_planning_modules_are_physically_retired() -> None:
 def test_retired_executive_namespace_has_no_composition_or_override_authority() -> None:
     package_source = _source("host_brain/executive_runtime/__init__.py")
     app_source = _source("host_brain/app/executive_runtime.py")
-    skill_source = _source("host_brain/executive_runtime/skill_execution.py")
+    skill_source = _source("host_brain/app/governed_skill_execution.py")
     forbidden = (
         "build_executive_runtime_application_ports",
         "get_runtime_route_override",
@@ -44,6 +45,8 @@ def test_retired_executive_namespace_has_no_composition_or_override_authority() 
     assert "from . import composition" not in package_source
     assert all(marker not in app_source for marker in forbidden)
     assert all(marker not in skill_source for marker in forbidden[1:])
+    assert "token_service" not in skill_source
+    assert "action_arbiter" not in skill_source
 
 
 def test_governed_adapter_uses_planning_search_not_executive_planning() -> None:

@@ -136,7 +136,7 @@ def _execute_agent_runtime_with_context(payload: dict[str, Any]) -> Any:
     model_attempt_service = context.get("model_attempt_service")
     artifact_store = context.get("agent_artifact_store")
     workspace_runtime = context.get("agent_workspace_runtime")
-    # ``_execute_skill`` composes only the ModelAttemptService into the
+    # The governed Skill executor composes only the ModelAttemptService into the
     # governed context.  Its prompt registry is part of that same immutable
     # model-runtime composition; never trust a separately caller-shaped
     # ``_context.prompt_registry`` value.

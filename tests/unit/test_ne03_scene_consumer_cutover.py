@@ -136,7 +136,7 @@ def test_production_scene_consumers_do_not_rebuild_legacy_scene() -> None:
     production_consumers = (
         repository_root / "host_brain/surface_runtime/eligibility.py",
         repository_root / "host_brain/persona/proactive_voice.py",
-        repository_root / "host_brain/executive_runtime/skill_execution.py",
+        repository_root / "host_brain/app/governed_skill_execution.py",
     )
 
     for path in production_consumers:

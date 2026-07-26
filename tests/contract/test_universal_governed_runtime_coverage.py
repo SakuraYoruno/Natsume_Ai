@@ -24,7 +24,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "c15f88d9e201552ec9e3a589cda93b305818f5ef"
+    assert report.evaluated_commit_sha == "3d68bd1eca69ad1593454634c2999d07b4d4f2f5"
     assert report.migration_head == (
         "0135_task_review_denial_settlement.sql"
     )
@@ -40,7 +40,6 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     }
     assert report.missing_route_controls == {
         "skill": (
-            "canonical_execution_authority",
             "budget_enforcement",
             "transactional_side_effects",
         ),

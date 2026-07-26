@@ -39,6 +39,7 @@ from host_brain.channels.vts import (
 )
 from host_brain.core.errors import (
     AVATAR_TAG_INVALID,
+    GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
     TRUST_LOW,
     VTS_CONNECTION_FAILED,
     VTS_DEGRADED_FALLBACK,
@@ -151,8 +152,8 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
         self.assertEqual("APPROVE", governor["decision"])
         self.assertIn("approval_token_ref", governor.get("tokens", {}))
 
-    def test_03_normal_path_full_chain_with_vts_and_voice(self) -> None:
-        """T-E2E-WeChat-01.3: 正常路径全链路——微信→Governor→Skill→VTS→语音→审计。"""
+    def test_03_legacy_skill_blocked_before_adapter_fixture(self) -> None:
+        """旧 SkillLoader 被阻断；VTS/语音仅作独立适配器回归。"""
         fix = _load_json(FIXTURE_DIR / "wechat_vts_voice_normal.json")
         request_id = "req_e2e_wc_003"
 
@@ -177,7 +178,7 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
         )
         self.assertEqual("APPROVE", governor["decision"])
 
-        # Step 3: Skill 执行
+        # Step 3: 旧 SkillLoader 必须在任何 handler / Broker I/O 前阻断。
         run_intent = dict(intent)
         run_intent.update({
             "request_id": request_id,
@@ -189,7 +190,11 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", exec_result.status)
+        self.assertEqual("REJECTED", exec_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
 
         # Step 4: VTS 表情驱动
         vts_talk = request_talk_gate(
@@ -386,7 +391,10 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
             now_ts_ms=self.now_ms,
         )
         self.assertEqual("REJECTED", exec_result.status)
-        self.assertEqual("GOVERNOR_REJECTED", exec_result.result_code)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
 
     def test_07_reject_path_no_vts_no_voice(self) -> None:
         """T-E2E-WeChat-01.7: 拒绝路径不触发 VTS/语音（由调用方控制）。"""
@@ -454,8 +462,8 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
     # 路径 3：降级路径（VTS/语音不可用）
     # ─────────────────────────────────────────────
 
-    def test_09_degraded_path_vts_unavailable_fallback_text(self) -> None:
-        """T-E2E-WeChat-01.9: VTS 不可用时表情驱动降级但审计仍完整。"""
+    def test_09_legacy_skill_blocked_and_adapters_degrade(self) -> None:
+        """旧 SkillLoader 被阻断；独立 VTS/TTS 适配器仍记录降级。"""
         fix = _load_json(FIXTURE_DIR / "wechat_vts_voice_degraded.json")
         request_id = "req_e2e_wc_009"
 
@@ -477,7 +485,7 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
         )
         self.assertEqual("APPROVE", governor["decision"])
 
-        # Skill 执行
+        # 旧 Skill 执行边界固定拒绝。
         run_intent = dict(intent)
         run_intent.update({
             "request_id": request_id,
@@ -488,7 +496,11 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
             governor_output=governor,
             now_ts_ms=self.now_ms,
         )
-        self.assertEqual("SUCCESS", exec_result.status)
+        self.assertEqual("REJECTED", exec_result.status)
+        self.assertEqual(
+            GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
+            exec_result.result_code,
+        )
 
         # VTS 降级：模拟表情设置但使用无效 tag 表示不可用降级
         # （真实场景中 Edge 端 VTubeStudioDriver 会返回 VTS_CONNECTION_FAILED，

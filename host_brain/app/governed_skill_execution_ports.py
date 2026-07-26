@@ -5,10 +5,8 @@ is entered.  Consequently these ports contain only collaborators that can
 execute the frozen Skill payload; they deliberately expose no router, planner,
 replan service, task registry, or reply-delivery authority.
 
-The legacy low-level Skill executor remains shared while Executive compatibility
-routes still exist.  Its private entry points are hidden behind the functions in
-this module so the governed adapter never has to compose the full Executive
-object graph.
+The execution implementation is app-local and accepts only a live governed
+TaskGraph node.  No Executive or token-only compatibility executor is exposed.
 """
 
 from __future__ import annotations
@@ -17,6 +15,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.app.governed_skill_execution import (
+    execute_governed_skill,
+    record_governed_skill_execution as _record_governed_skill_execution,
+)
 from host_brain.runtime.degradation_authority import DegradationCapabilityPort
 
 
@@ -96,7 +98,6 @@ def execute_frozen_governed_skill(
     *,
     ports: GovernedSkillExecutionPorts,
     durable_authority_ledger: Any,
-    request_body: Any,
     request_id: str,
     session_id: str,
     person_id: str,
@@ -113,15 +114,10 @@ def execute_frozen_governed_skill(
     verified_node_grant: Mapping[str, Any],
     frozen_executor_payload: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Run one frozen Skill without constructing Executive application ports."""
+    """Run one frozen Skill under exact durable node authority."""
 
-    from host_brain.executive_runtime.skill_execution import (  # noqa: PLC0415
-        _execute_skill,
-    )
-
-    return _execute_skill(
+    return execute_governed_skill(
         ports=ports,
-        request_body=request_body,
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
@@ -133,19 +129,11 @@ def execute_frozen_governed_skill(
         intent_draft=intent_draft,
         emotion_context=emotion_context,
         render_target_lang=render_target_lang,
-        skill_registry=ports.skill_registry,
-        ledger=False,
         durable_authority_ledger=durable_authority_ledger,
-        capability_broker_override=ports.capability_broker,
-        model_attempt_service_override=ports.model_attempt_service,
-        agent_artifact_store_override=ports.agent_artifact_store,
-        agent_workspace_runtime_override=ports.agent_workspace_runtime,
-        production_authority_verifier=ports.production_authority_verifier,
         governed_execution_context=governed_execution_context,
-        execution_args_override=execution_args_override,
+        execution_args=execution_args_override,
         verified_node_grant=verified_node_grant,
         frozen_executor_payload=frozen_executor_payload,
-        degradation_capability_port=ports.degradation_capability_port,
     )
 
 
@@ -164,11 +152,7 @@ def record_governed_skill_execution(
 ) -> None:
     """Persist the worker-thread result on the ledger-owning event-loop thread."""
 
-    from host_brain.executive_runtime.skill_execution import (  # noqa: PLC0415
-        _log_skill_exec_row,
-    )
-
-    _log_skill_exec_row(
+    _record_governed_skill_execution(
         request_id=request_id,
         intent_id=intent_id,
         skill_name=skill_name,
