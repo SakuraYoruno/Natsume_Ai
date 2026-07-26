@@ -38,6 +38,22 @@ class TaskReviewCommandService:
         self._store = review_store
         self._wake_continuation = wake_continuation
 
+    def bind_wake_continuation(self, wake_continuation: Callable[[], None]) -> None:
+        """Bind the app-local continuation wake port exactly once.
+
+        Composition constructs this command service before the Runtime Group so
+        Acceptance Effect handlers and HTTP adapters share one mutation
+        boundary.  Activation then supplies the group's latency hint without
+        replacing the service or its canonical ReviewStore.
+        """
+
+        if not callable(wake_continuation):
+            raise TypeError("wake_continuation must be callable")
+        current = self._wake_continuation
+        if current is not None and current != wake_continuation:
+            raise RuntimeError("review continuation wake port is already bound")
+        self._wake_continuation = wake_continuation
+
     @property
     def review_store(self) -> ReviewStore:
         return self._store
@@ -71,6 +87,24 @@ class TaskReviewCommandService:
 
     def resume_review(self, review_id: str, **kwargs: Any) -> dict[str, Any]:
         result = dict(self._store.resume_review(review_id, **kwargs))
+        self._wake()
+        return result
+
+    def resume_review_by_operator_token_ref(
+        self,
+        review_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Consume one public token identity behind authenticated Operator authority."""
+
+        resume = getattr(
+            self._store,
+            "resume_review_by_operator_token_ref",
+            None,
+        )
+        if not callable(resume):
+            raise RuntimeError("operator Review resume is unavailable")
+        result = dict(resume(review_id, **kwargs))
         self._wake()
         return result
 

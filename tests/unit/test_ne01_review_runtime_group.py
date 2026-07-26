@@ -706,12 +706,13 @@ async def test_operator_review_recovery_defers_before_later_effect_commit(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("subject_query", "before_status"),
+    ("subject_query", "before_status", "after_status"),
     [
-        ("", "WAITING_APPROVAL"),
+        ("", "WAITING_APPROVAL", "CANCELLED"),
         (
             "?attempt=not-started&authority=intent-admission&initial_status=BLOCKED",
             "BLOCKED",
+            "CANCEL_REQUESTED",
         ),
     ],
     ids=("ordinary-review", "intent-admission-review"),
@@ -719,6 +720,7 @@ async def test_operator_review_recovery_defers_before_later_effect_commit(
 async def test_operator_cancelled_review_requires_exact_durable_cancellation_receipt(
     subject_query: str,
     before_status: str,
+    after_status: str,
 ) -> None:
     log: list[str] = []
     operator = _Runtime("operator", log)
@@ -795,12 +797,12 @@ async def test_operator_cancelled_review_requires_exact_durable_cancellation_rec
                     "status_version": 1,
                 }
             },
-            "node_states_after": {
-                "review-group-node": {
-                    "status": "CANCELLED",
-                    "status_version": 2,
-                }
-            },
+                "node_states_after": {
+                    "review-group-node": {
+                        "status": after_status,
+                        "status_version": 2,
+                    }
+                },
         },
     }
     await group.continue_review_continuation(claim)

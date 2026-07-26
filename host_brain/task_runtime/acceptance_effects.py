@@ -33,25 +33,16 @@ from host_brain.runtime.action_preview_authority import (
     context_pack_digest_from_work_order,
 )
 from host_brain.runtime.action_preview_resolver import action_preview_scene_identity
+from host_brain.task_runtime.operator_control_acceptance_effect import (
+    compile_operator_control_acceptance_effect,
+)
+from host_brain.task_runtime.worker_authority_guard import (
+    forbidden_worker_authority_path,
+)
 
 
 ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
 _EFFECT_TYPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
-_FORBIDDEN_WORKER_NON_TOKEN_KEY = re.compile(
-    r"(?:^|_)(?:authorization|governor_grant|approval|credentials?|secret)(?:$|_)",
-    re.IGNORECASE,
-)
-_TOKEN_FIELD = re.compile(r"(?:^|_)tokens?(?:$|_)", re.IGNORECASE)
-_SAFE_TOKEN_METADATA = re.compile(
-    r"^(?:"
-    r"token_(?:count|budget|limit|usage)|"
-    r"(?:prompt|completion|input|output|total|cached|reasoning|actual|estimated|budget|context)_tokens?|"
-    r"(?:max|min)(?:_context)?_tokens|"
-    r"(?:enforce_)?context_token_budget|context_token_estimator|token_budget_tokens|"
-    r"(?:first_token|time_to_first_token|stream_after_first_token)(?:_latency)?_ms"
-    r")$",
-    re.IGNORECASE,
-)
 _OPERATOR_SYS_MODE_TARGET = "operator_sys_mode_switch"
 _OPERATOR_SYS_MODE_EFFECT = "host.sys_mode_transition"
 _OPERATOR_EDGE_TARGET = "operator_edge_command_push"
@@ -70,6 +61,7 @@ _OPERATOR_EFFECT_RECONCILIATION_TARGET = (
 _OPERATOR_EFFECT_RECONCILIATION_EFFECT = (
     "task.acceptance_effect_reconciliation"
 )
+_OPERATOR_CONTROL_TARGET = "operator_task_control"
 _SCHEDULER_OPERATION_EFFECT = "scheduler.operation.execute"
 _SCHEDULER_PLAN_SCHEMA = "Natsume.scheduler.operation_plan.v1"
 _SCHEDULER_EFFECT_SCHEMA = "Natsume.scheduler.accepted_operation.v1"
@@ -583,6 +575,15 @@ def _compile_operator_effects(
 ) -> tuple[AcceptanceEffectIntentSpec, ...]:
     if command.route_type != "delegate":
         raise AcceptanceEffectCompileError("unsupported governed Operator route")
+    if command.target_id == _OPERATOR_CONTROL_TARGET:
+        return compile_operator_control_acceptance_effect(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            commit=commit,
+            pack=pack,
+        )
     if command.target_id == _OPERATOR_TERMINAL_TARGET:
         return _compile_operator_terminal_effect(
             command=command,
@@ -1439,30 +1440,11 @@ def _spec(
 
 
 def _reject_worker_authority(value: Any, *, path: str = "payload") -> None:
-    if isinstance(value, Mapping):
-        for raw_key, child in value.items():
-            key = str(raw_key)
-            if _is_forbidden_worker_key(key):
-                raise AcceptanceEffectCompileError(
-                    f"worker effect contains forbidden authority field: {path}.{key}"
-                )
-            _reject_worker_authority(child, path=f"{path}.{key}")
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            _reject_worker_authority(child, path=f"{path}[{index}]")
-
-
-def _is_forbidden_worker_key(key: str) -> bool:
-    """Separate credential tokens from harmless model-usage metadata."""
-
-    normalized = str(key or "").strip().lower()
-    if not normalized:
-        return False
-    if _FORBIDDEN_WORKER_NON_TOKEN_KEY.search(normalized):
-        return True
-    if _TOKEN_FIELD.search(normalized):
-        return _SAFE_TOKEN_METADATA.fullmatch(normalized) is None
-    return False
+    forbidden = forbidden_worker_authority_path(value, path=path)
+    if forbidden is not None:
+        raise AcceptanceEffectCompileError(
+            f"worker effect contains forbidden authority field: {forbidden}"
+        )
 
 
 def _json_mapping(value: Any, *, field_name: str) -> dict[str, Any]:

@@ -24,7 +24,6 @@ from host_brain.observability.command_router import (
     ObsCommandRouter,
     ObsCommandRoutingError,
 )
-from host_brain.composition.runtime_group import GraphCancellationOperatorError
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationError,
 )
@@ -96,11 +95,15 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
             "scheduler.task.trigger",
             "sys_mode.switch",
             "task_effect.reconcile",
+            "task_graph.cancel",
             "task_operation.reconcile",
+            "task_review.approve",
+            "task_review.reject",
+            "task_review.resume",
             "task_terminal.reconcile",
         }
     )
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 31
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 27
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
         expected
     )
@@ -382,61 +385,109 @@ def test_task_graph_cancel_manifest_owns_scope_and_denies_caller_authority() -> 
     assert "request_identity" not in bound
 
 
-def test_task_graph_cancel_passes_authenticated_authority_and_marks_pending_intent_committed() -> None:
-    captured: dict[str, object] = {}
+@pytest.mark.parametrize(
+    ("command_id", "payload"),
+    (
+        (
+            "task_graph.cancel",
+            {
+                "graph_id": "graph-cancel-2",
+                "graph_revision": 7,
+                "reason_code": "OPERATOR_REQUESTED",
+            },
+        ),
+        (
+            "task_review.approve",
+            {
+                "review_id": "review-approve",
+                "subject_ref": "task-node://graph/1/node",
+                "subject_version": 1,
+                "resume_phase": "PRE_EXECUTION",
+                "checkpoint_id": "checkpoint://review/approve",
+            },
+        ),
+        (
+            "task_review.reject",
+            {"review_id": "review-reject"},
+        ),
+        (
+            "task_review.resume",
+            {
+                "review_id": "review-resume",
+                "resume_token_ref": "review-token://" + "a" * 64,
+                "subject_ref": "task-node://graph/1/node",
+                "subject_version": 1,
+                "resume_phase": "PRE_EXECUTION",
+                "checkpoint_id": "checkpoint://review/resume",
+            },
+        ),
+    ),
+)
+def test_task_controls_enter_request_bound_governed_operator_runtime(
+    command_id: str,
+    payload: dict[str, object],
+) -> None:
+    calls: list[dict[str, object]] = []
 
-    class _CancellationService:
+    class _GovernedRuntime:
         @staticmethod
-        async def request_graph_cancellation(**kwargs):  # noqa: ANN003
-            captured.update(kwargs)
+        async def execute_operator_control(bound, request_id):  # noqa: ANN001
+            calls.append({"payload": dict(bound), "request_id": request_id})
             return {
-                "graph_id": kwargs["graph_id"],
-                "graph_revision": kwargs["graph_revision"],
-                "status": "PENDING",
+                "success": True,
+                "side_effects_executed": False,
+                "status": "WAITING_REVIEW",
             }
 
+    class _AllowReviewResume:
+        legacy_test_only = True
+
+        @staticmethod
+        def evaluate_capability(**_kwargs):  # noqa: ANN003
+            return {"allowed": True}
+
+    registry = build_default_obs_domain_command_registry(
+        degradation_capability_port_provider=(
+            (lambda: _AllowReviewResume())
+            if command_id == "task_review.resume"
+            else None
+        )
+    )
+    port = registry.resolve_port(command_id)
+    assert port is not None
+    envelope = _envelope(
+        command_id,
+        payload,
+        principal_id="principal.authenticated",
+        body_sha256="a" * 64,
+    )
+    state = SimpleNamespace(
+        governed_operator_runtime=_GovernedRuntime(),
+        task_graph_cancellation_operator_enabled=True,
+    )
+    with bind_operator_command_runtime(state, raw_body=b"trusted-body"):
+        result = asyncio.run(port.execute(envelope))
+
+    assert result.success is True
+    assert result.side_effects_executed is False
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["request_id"] == envelope.authority.request_id
+    bound = call["payload"]
+    assert isinstance(bound, dict)
+    assert bound["principal_id"] == "principal.authenticated"
+    authority = bound["_operator_authority"]
+    assert isinstance(authority, dict)
+    assert authority["operator_command_id"] == command_id
+    assert authority["principal_id"] == "principal.authenticated"
+    assert authority["claim_ref"] == envelope.claim_ref
+    assert authority["audit_ref"] == envelope.audit_ref
+
+
+def test_task_control_without_governed_runtime_fails_before_direct_writer() -> None:
     registry = build_default_obs_domain_command_registry()
     port = registry.resolve_port("task_graph.cancel")
     assert port is not None
-    authenticated_body_sha256 = "a" * 64
-    envelope = _envelope(
-        "task_graph.cancel",
-        {
-            "graph_id": "graph-cancel-2",
-            "graph_revision": 7,
-            "reason_code": "operator_requested",
-            "principal_id": "principal.caller-forged",
-        },
-        principal_id="principal.authenticated",
-        body_sha256=authenticated_body_sha256,
-    )
-    state = SimpleNamespace(
-        task_graph_cancellation_command_service=_CancellationService(),
-    )
-    with bind_operator_command_runtime(
-        state,
-        raw_body=b"different-untrusted-runtime-fallback",
-    ):
-        with pytest.raises(ObsCommandPortExecutionError) as blocked:
-            asyncio.run(port.execute(envelope))
-
-    assert envelope.payload["principal_id"] == "principal.authenticated"
-    assert envelope.body_sha256 == authenticated_body_sha256
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-    assert captured == {}
-
-
-def test_task_graph_cancel_translates_only_trusted_runtime_certainty() -> None:
-    class _CancellationService:
-        @staticmethod
-        async def request_graph_cancellation(**_kwargs):  # noqa: ANN003
-            raise GraphCancellationOperatorError(
-                "GRAPH_CANCELLATION_REJECTED",
-                side_effects_may_have_run=False,
-            )
-
-    registry = build_default_obs_domain_command_registry()
     envelope = _envelope(
         "task_graph.cancel",
         {
@@ -445,15 +496,37 @@ def test_task_graph_cancel_translates_only_trusted_runtime_certainty() -> None:
             "reason_code": "OPERATOR_REQUESTED",
         },
     )
+    with bind_operator_command_runtime(
+        SimpleNamespace(task_graph_cancellation_operator_enabled=True),
+        raw_body=b"trusted-body",
+    ):
+        with pytest.raises(ObsDomainCommandError) as raised:
+            asyncio.run(port.execute(envelope))
+
+    assert raised.value.reason_code == "OBS_TASK_CONTROL_RUNTIME_UNAVAILABLE"
+
+
+def test_task_graph_cancel_disabled_fails_before_governed_admission() -> None:
+    registry = build_default_obs_domain_command_registry()
+    port = registry.resolve_port("task_graph.cancel")
+    assert port is not None
+    envelope = _envelope(
+        "task_graph.cancel",
+        {
+            "graph_id": "graph-cancel-disabled",
+            "graph_revision": 1,
+            "reason_code": "OPERATOR_REQUESTED",
+        },
+    )
     state = SimpleNamespace(
-        task_graph_cancellation_command_service=_CancellationService(),
+        governed_operator_runtime=object(),
+        task_graph_cancellation_operator_enabled=False,
     )
     with bind_operator_command_runtime(state, raw_body=b"trusted-body"):
-        with pytest.raises(ObsCommandRoutingError) as raised:
-            asyncio.run(ObsCommandRouter(registry).route(envelope))
+        with pytest.raises(ObsDomainCommandError) as raised:
+            asyncio.run(port.execute(envelope))
 
-    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert raised.value.side_effects_may_have_run is False
+    assert raised.value.reason_code == "OBS_TASK_GRAPH_CANCELLATION_DISABLED"
 
 
 def test_task_operation_reconcile_binds_actor_and_forwards_signed_proof() -> None:

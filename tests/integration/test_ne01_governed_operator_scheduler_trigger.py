@@ -688,12 +688,16 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
     assert GOVERNED_OPERATOR_COMMAND_IDS == {
         COMMAND_ID,
         "edge.command.push",
-            "sys_mode.switch",
-            "task_effect.reconcile",
-            "task_operation.reconcile",
+        "sys_mode.switch",
+        "task_effect.reconcile",
+        "task_graph.cancel",
+        "task_operation.reconcile",
+        "task_review.approve",
+        "task_review.reject",
+        "task_review.resume",
         "task_terminal.reconcile",
     }
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 31
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 27
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == manifest
 
 

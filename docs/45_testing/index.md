@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.6
+版本：v2.8
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 Operator Task/Review 控制当前切片
+
+- `task_graph.cancel`、`task_review.approve/reject/resume` 已从 Obs 直接 writer 改为独立的 Secure Ingress → Governor → `HostCommand` → 不可变 `TaskGraph` → 节点 Attempt/Lease/Grant/Budget/Review/Verification/Acceptance → terminal Preview → `task.operator_control` Effect。只有 post-Acceptance handler 可以调用原 Task/Review owner；Graph cancellation 默认仍为关闭。
+- Review approve 不公开 `review_resume::` bearer，只返回不可供普通 API 使用的 `review-token://...` 引用。真实 SQLite 合同会关闭并重开 `ReviewStore`，随后证明该引用仍严格绑定 task/subject/version/checkpoint、只能消费一次，且 bearer 不进入 WorkOrder、数据库或公开响应。
+- 主定向集合为 `78 passed in 19.77s`。Acceptance/Review 生命周期文件为 `80 passed in 41.69s`，独立 Graph cancellation routing 文件为 `12 passed in 0.29s`；这些集合有重叠，不相加为伪总数。此前两个超过 60 秒并被工具终止的组合命令不计 PASS，也不计失败。
+- changed-module `compileall`、JSON 与 diff-check 通过；统一 static scan=`passed / failures=[]`，文档 authority/freshness、delivery metadata 和 coverage 为 `39 passed in 9.23s`。fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`，通过中立合同、schema probe 与 worker-authority guard 拆分消除了反向依赖和未分类巨石，没有扩大 allowlist。
+- 本切片没有 migration。完整 Host 进程重启、部署凭据、真实 HTTP/network canary、NE-01 波次 integration 与 NE-07 Docker 全栈均未运行；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。Operator inventory 为 `10/37` governed、`27/37` blocked，NE-01 保持 `IN_PROGRESS`。
 
 ## NE-01 general Acceptance Effect 签名对账当前切片
 

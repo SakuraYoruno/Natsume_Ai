@@ -575,6 +575,14 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             events.append("operator-runtime-closed")
 
     operator_runtime = OperatorRuntime()
+    class ReviewCommands:
+        def __init__(self) -> None:
+            self.wake = None
+
+        def bind_wake_continuation(self, wake):  # noqa: ANN001
+            self.wake = wake
+
+    review_commands = ReviewCommands()
     internal_runtime = object()
     scheduler_runtime = object()
     intent_admission_verifier = object()
@@ -987,6 +995,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             runtime=operator_runtime,
             acceptance_effect_dispatcher=acceptance_effect_dispatcher,
             acceptance_effect_runtime=acceptance_effect_runtime,
+            review_command_service=review_commands,
         )
 
     def fake_build_command_ingress(**kwargs):
@@ -1396,6 +1405,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             assert application.state.governed_internal_runtime is internal_runtime
             assert application.state.governed_scheduler_runtime is scheduler_runtime
             assert application.state.governed_operator_runtime is operator_runtime
+            assert application.state.task_review_command_service is review_commands
+            assert review_commands.wake is runtime_group.wake_review_continuation
             assert application.state.memory_service_container is memory_container
             assert application.state.agent_workspace_container is workspace_container
             assert application.state.canon_container is canon_container
