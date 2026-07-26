@@ -461,6 +461,13 @@ def require_durable_operation_reconciliation_outcome(
             "lease_status": terminal.get("lease", {}).get("status"),
             "failure_reason_code": terminal.get("failure_reason_code"),
             "error_ref": terminal.get("error_ref"),
+            "settlement_scope": terminal.get("settlement_scope"),
+            "graph_settlement_status": terminal.get(
+                "graph_settlement_status"
+            ),
+            "parallel_settlement_ref": terminal.get(
+                "parallel_settlement_ref"
+            ),
         }
         if isinstance(terminal, Mapping)
         else None

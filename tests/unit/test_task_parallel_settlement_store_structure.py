@@ -30,7 +30,10 @@ SETTLEMENT_METHODS = (
 
 
 def test_parallel_settlement_mixin_borrows_one_owner_transaction() -> None:
-    assert task_repository.DurableTaskStore.__bases__[5] is TaskParallelSettlementStoreMixin
+    assert (
+        TaskParallelSettlementStoreMixin
+        in task_repository.DurableTaskStore.__bases__
+    )
     for name in SETTLEMENT_METHODS:
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskParallelSettlementStoreMixin,

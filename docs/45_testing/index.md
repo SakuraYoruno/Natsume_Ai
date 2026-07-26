@@ -7,6 +7,16 @@
 维护日期：2026-07-26
 状态：当前证据
 
+## NE-01 签名多节点 Operation 失败恢复当前切片
+
+- 真实 SQLite 两根节点 Graph 使用 `ATOMIC_GRAPH_SUCCESS_V1`、并发上限 1；left worker 在 Operation 预留后失败，right 保持 `READY` 且从未取得执行机会。旧 Lease 到期后，受信 Ed25519 `RELEASE + NO_SIDE_EFFECT` 只在同一 UoW 关闭 exact Operation、Attempt、Node、Lease，并写四条对应 Outbox；Graph 与共享 Budget 在第一阶段必须继续保持 `ACTIVE`，不得由节点级 authority 抢占。
+- 重建 Coordinator 后，既有 0090 Parallel Settlement Runtime 必须先读取 durable `FAILED` 节点，再原子提交 Graph `FAILED`、Budget `RELEASED`、append-only settlement decision 及 Graph/Budget Outbox；right worker 调用数仍为 0。第一阶段与第二阶段之间重启、重复扫描和提交响应丢失只能重开同一 durable 结果。
+- Accepted handler 为节点级结算生成 v4 receipt，只绑定不可变节点失败事实；因此 0090 将 Graph/Budget 从 `ACTIVE` 推进到终态前后，receipt 字节身份保持不变。历史单节点 Graph 仍使用 byte-compatible v3 receipt 和六聚合终态，不得被新合同改写。
+- committed reopen 必须验证全部历史 0090 decision、选中的最新 Graph 失败 decision、Attempt lineage 与 Graph/Budget Outbox。删除 0090 Budget Outbox、伪造 decision、版本漂移或重复非历史 decision 均失败关闭。
+- 并发上限 2 的同一双根 Graph 还证明两名 worker 都在 Operation 预留后失败时，两个独立签名节点终态先完成；0090 可只选择一个失败节点作为 Graph 终结代表，但 decision outcomes 必须覆盖另一个失败节点，使其 receipt 在终结后仍可精确重开。
+- 当前去重受影响批次为 `32 passed in 77.00s`，覆盖签名单/多节点失败、一般多节点 checkpoint 恢复、共享 Budget settlement、accepted receipt 与 0090 结构合同。该数字不与开发中的小批次相加；`compileall`、JSON、文档与静态 Gate 结果以本提交机器状态为准。
+- 当前结论为 `SIGNED_MULTINODE_NODE_FAILURE_AND_0090_SETTLEMENT_LOCAL_PROVEN / GENERAL_RECOVERY_INCOMPLETE`。它不自动归因 unknown effect，不覆盖其它 failure/cancellation、Workspace 终态、部署 key/HTTP canary、NE-01 波次 integration 或 NE-07 Docker 全栈；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 一般形状 checkpoint 恢复与 0130 hold 当前切片
 
 - 真实 SQLite 五节点菱形图 `root → (left,right) → join → tail` 在中间并发 wave 的两个 canonical `COMMITTED` checkpoint 响应丢失后，由新 owner 按 immutable graph order 精确续接；只有两个前驱均 accepted 后才释放 join，随后释放 tail。八个并行根节点另行证明恢复器没有固定四节点上限；所有已测试 worker 调用次数均为 1。

@@ -3,8 +3,8 @@
 
 # Natsume AI Monitor UI 当前架构
 
-版本：v1.0
-维护日期：2026-07-15
+版本：v1.1
+维护日期：2026-07-26
 事实基线：当前仓库的 production source、Vite 配置、Nginx 启动脚本与测试
 文档职责：解释 Monitor UI 现在如何启动、导航、查询、发送 Operator 命令和展示 Task Runtime，不承诺尚未接线的能力。
 
@@ -25,6 +25,7 @@ Monitor UI 是 Natsume AI 的浏览器端 Operator 界面，不是业务权威�
 | 观测与业务读模型 | `WIRED / PARTIAL` | 共享 query 层已建立，但尚未覆盖所有页面和 schema |
 | Operator Command 通道 | `WIRED` | 浏览器不持有签名凭据，命令经同源 BFF |
 | Task Runtime 读模型 | `WIRED` | 只读投影、DAG、Attempt、Budget、Verification、Review 和 timeline 已展示 |
+| System Mode / Runtime Snapshot | `READ-ONLY / PARTIAL` | Obs 只读取 app-local lifecycle ports；runtime snapshot 可叠加 Host `/scheduler/health`，单个 slot 故障以 degradation 元数据呈现，不构造 mode writer |
 | Review resume | `TRANSPORT WIRED / UI FLOW BROKEN` | 底层可消费绑定 token，但当前 approve/reject 在浏览器侧先失败，正常 UI 流程拿不到一次性 token |
 | Review approve/reject | `BROKEN / FAIL-CLOSED` | 当前 UI 传入服务端保留的 `actor_id`，生成合同会在发网络请求前拒绝 |
 | 路由级依赖与风险门禁 | `DECLARED ONLY` | `serviceDeps` 和 `riskLevel` 已声明，暂无生产消费者 |
@@ -173,6 +174,12 @@ Page 可以组装 feature，但新的 schema normalization、command payload 和
 | [`endpointClient.js`](../../../host_brain/app/monitor_ui/src/shared/api/endpointClient.js) | 校验 registry entry，把读分流至 Obs/Host，把命令分流至 Operator Command gateway |
 
 前端不应依据页面所在分组猜测后端进程；实际所有者以 endpoint registry 和反向代理命名空间为准。
+
+### 5.4 System Mode 与 Runtime Snapshot
+
+[`obs_routes_sysmode.py`](../../../host_brain/app/obs_routes_sysmode.py) 只通过注入的 `LifecycleRuntimeApplicationPorts` 读取当前 mode、历史 transition 和数字生命 runtime snapshot。它不会在 Obs 进程中懒构造 writer-capable mode service；读取不可用时返回 `unknown/degraded` 以及 secret-free slot 状态，而不是伪造健康。
+
+runtime snapshot 会以有界超时向 Host 查询 `/scheduler/health`，成功时把真实 Scheduler 状态叠加到后台运行投影；Host 不可达或 overlay 失败只降级对应 slot，其余读模型继续可用。Monitor UI 因而展示的是跨进程只读组合结果，不是浏览器、Nginx 或 Obs 自己维护的 Scheduler/System Mode 真相。真正的 enable/disable、mode switch 和 policy 更新仍必须走 Operator Command → Governed Task Runtime → durable domain authority。
 
 ### 5.3 Query cache
 
