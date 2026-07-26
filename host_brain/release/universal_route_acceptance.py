@@ -458,6 +458,12 @@ def _evaluate_route(
         attempts=attempts,
         reasons=reasons,
     )
+    if "model_attempts" in raw or "worker_model_budgets" in raw:
+        _evaluate_model_budget_lineage(
+            raw=raw,
+            request_id=request_id,
+            reasons=reasons,
+        )
     _evaluate_node_decisions(
         raw=raw,
         command=command,
@@ -672,6 +678,171 @@ def _evaluate_node_decisions(
                 reasons.add("WORKER_PROJECTION_BINDING_INVALID")
 
 
+def _evaluate_model_budget_lineage(
+    *,
+    raw: Mapping[str, Any],
+    request_id: str,
+    reasons: set[str],
+) -> None:
+    """Reopen Chat provider usage and bind it to Task/Node budget journals."""
+
+    bindings = _records(raw, "worker_model_budgets")
+    model_rows = _records(raw, "model_attempts")
+    if not bindings:
+        # Routes without a Chat node have no Surface model budget to prove.
+        return
+    parent_usage = {
+        str(item.get("usage_id") or ""): item
+        for item in _records(raw, "budget_usage")
+    }
+    child_usage = {
+        str(item.get("usage_id") or ""): item
+        for item in _records(raw, "node_budget_usage")
+    }
+    referenced_model_attempt_ids: set[str] = set()
+    for binding in bindings:
+        if (
+            binding.get("binding_valid") is not True
+            or binding.get("success") is not True
+            or binding.get("cached") is not False
+            or str(binding.get("request_id") or "") != request_id
+        ):
+            reasons.add("MODEL_BUDGET_BINDING_INVALID")
+            continue
+        route_decision_id = str(
+            binding.get("route_decision_id") or ""
+        )
+        adapter_id = str(binding.get("final_adapter_id") or "")
+        provider = str(binding.get("final_provider") or "")
+        model_id = str(binding.get("final_model") or "")
+        task_attempt_id = str(binding.get("task_attempt_id") or "")
+        node_id = str(binding.get("node_id") or "")
+        model_attempt_ids = binding.get("model_attempt_ids")
+        measurement = binding.get("measurement")
+        usage_measurements = binding.get("usage_measurements")
+        measurement_ref = str(binding.get("measurement_ref") or "")
+        usage_id = str(binding.get("usage_id") or "")
+        usage_refs = binding.get("usage_evidence_refs")
+        if (
+            not route_decision_id
+            or not adapter_id
+            or not provider
+            or not model_id
+            or not task_attempt_id
+            or not node_id
+            or not isinstance(model_attempt_ids, list)
+            or not model_attempt_ids
+            or len(set(str(value) for value in model_attempt_ids))
+            != len(model_attempt_ids)
+            or not isinstance(measurement, Mapping)
+            or not isinstance(usage_measurements, Mapping)
+            or not measurement_ref.startswith("model-budget://")
+            or usage_refs != [measurement_ref]
+            or not usage_id.startswith("worker-budget://")
+        ):
+            reasons.add("MODEL_BUDGET_BINDING_INVALID")
+            continue
+        expected_measurements = {
+            "token_count": measurement.get("token_count"),
+            "retry_count": measurement.get("retry_count"),
+            "model_cost_micros": measurement.get("model_cost_micros"),
+        }
+        if (
+            set(measurement)
+            != {
+                "attempt_count",
+                "retry_count",
+                "token_count",
+                "model_cost_micros",
+            }
+            or any(
+                type(value) is not int or value < 0
+                for value in measurement.values()
+            )
+            or int(measurement["attempt_count"]) != len(model_attempt_ids)
+            or int(measurement["retry_count"])
+            != len(model_attempt_ids) - 1
+            or dict(usage_measurements) != expected_measurements
+        ):
+            reasons.add("MODEL_BUDGET_MEASUREMENT_INVALID")
+        usage = parent_usage.get(usage_id)
+        child = child_usage.get(usage_id)
+        delta = usage.get("delta") if isinstance(usage, Mapping) else None
+        if (
+            usage is None
+            or child is None
+            or int(usage.get("accepted") or 0) != 1
+            or int(child.get("accepted") or 0) != 1
+            or str(usage.get("attempt_id") or "") != task_attempt_id
+            or str(child.get("attempt_id") or "") != task_attempt_id
+            or not isinstance(delta, Mapping)
+            or {
+                key: delta.get(key)
+                for key in (
+                    "token_count",
+                    "retry_count",
+                    "model_cost_micros",
+                )
+            }
+            != expected_measurements
+            or int(delta.get("concurrency") or 0) != 0
+            or int(delta.get("tool_call_count") or 0) != 0
+            or type(delta.get("time_ms")) is not int
+            or int(delta.get("time_ms") or 0) < 0
+        ):
+            reasons.add("MODEL_BUDGET_LEDGER_DRIFT")
+        for model_attempt_id in model_attempt_ids:
+            normalized_id = str(model_attempt_id or "")
+            lifecycle = [
+                item
+                for item in model_rows
+                if str(item.get("model_attempt_id") or "")
+                == normalized_id
+            ]
+            referenced_model_attempt_ids.add(normalized_id)
+            terminal = [
+                item
+                for item in lifecycle
+                if str(item.get("status") or "") == "succeeded"
+            ]
+            statuses = [str(item.get("status") or "") for item in lifecycle]
+            final = terminal[0] if len(terminal) == 1 else {}
+            provider_measurements = final.get(
+                "provider_budget_measurements"
+            )
+            if (
+                statuses != ["started", "succeeded"]
+                or str(final.get("request_id") or "") != request_id
+                or str(final.get("route_decision_id") or "")
+                != route_decision_id
+                or str(final.get("adapter_id") or "") != adapter_id
+                or str(final.get("provider") or "") != provider
+                or str(final.get("model_id") or "") != model_id
+                or str(final.get("model_node_id") or "") != node_id
+                or _RAW_SHA256_RE.fullmatch(
+                    str(final.get("prompt_digest") or "")
+                )
+                is None
+                or _RAW_SHA256_RE.fullmatch(
+                    str(final.get("output_digest") or "")
+                )
+                is None
+                or not isinstance(provider_measurements, Mapping)
+                or provider_measurements.get("token_count")
+                != expected_measurements["token_count"]
+                or provider_measurements.get("model_cost_micros")
+                != expected_measurements["model_cost_micros"]
+            ):
+                reasons.add("MODEL_ATTEMPT_AUDIT_DRIFT")
+    terminal_ids = {
+        str(item.get("model_attempt_id") or "")
+        for item in model_rows
+        if str(item.get("status") or "") != "started"
+    }
+    if terminal_ids != referenced_model_attempt_ids:
+        reasons.add("MODEL_ATTEMPT_REPLAY_OR_ORPHAN_DRIFT")
+
+
 def _require_referenced_outboxes(
     *,
     raw: Mapping[str, Any],
@@ -724,6 +895,8 @@ def _route_record(
             "acceptances",
             "artifacts",
             "worker_projections",
+            "model_attempts",
+            "worker_model_budgets",
             "effects",
             "outboxes",
             "current_recovery_holds",
@@ -858,6 +1031,47 @@ def _privacy_bounded_evidence(raw: Mapping[str, Any]) -> dict[str, Any]:
             "route_type",
             "decision",
             "payload_digest",
+        ),
+        "model_attempts": (
+            "model_attempt_id",
+            "request_id",
+            "route_decision_id",
+            "attempt_index",
+            "status",
+            "adapter_id",
+            "provider",
+            "model_id",
+            "prompt_id",
+            "prompt_version",
+            "prompt_digest",
+            "started_at_ms",
+            "ended_at_ms",
+            "latency_ms",
+            "output_digest",
+            "error_code",
+            "model_node_id",
+            "scene_type",
+            "cognitive_tier",
+            "provider_budget_measurements",
+        ),
+        "worker_model_budgets": (
+            "projection_id",
+            "request_id",
+            "node_id",
+            "task_attempt_id",
+            "binding_valid",
+            "success",
+            "cached",
+            "route_decision_id",
+            "final_adapter_id",
+            "final_provider",
+            "final_model",
+            "model_attempt_ids",
+            "measurement_ref",
+            "measurement",
+            "usage_id",
+            "usage_evidence_refs",
+            "usage_measurements",
         ),
         "effects": (
             "effect_id",

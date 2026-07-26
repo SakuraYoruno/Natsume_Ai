@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.20
+版本：v3.21
 
 核对日期：2026-07-27
 
@@ -12,6 +12,27 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+Chat/Plan 模型预算的当前生产等价数据流如下：
+
+```mermaid
+flowchart LR
+    F["Frozen Chat route"] --> S["Surface runtime"]
+    S --> M["Canonical ModelAttemptService"]
+    M --> P["受控 terminal provider"]
+    P --> A["model_attempt_log\nstarted → succeeded"]
+    S --> W["Immutable WorkerProjection\nmeasurement + attempt ids"]
+    W --> B["Graph Budget usage"]
+    W --> C["Attempt-bound child usage"]
+    A --> V["Query-only acceptance validator"]
+    W --> V
+    B --> V
+    C --> V
+    V -->|"精确相等"| O["模型预算 lineage 可验收"]
+    V -->|"缓存/孤儿/漂移"| X["FAIL CLOSED"]
+```
+
+内部额度 guard 只在 Surface 调用期间存在，不进入 Life acceptance trace、Effect 或公开 receipt；公开证据只保留 provider/model/route 标识、digest 和用量。Direct Chat 与 Plan synthesis 使用不同的新请求，replay 只能重开同一 durable lineage，不能再次调用 provider。受控 provider 不等同于真实外部模型验收。
 
 七路线提交绑定验收是完全只读的数据流，不取得 Task Runtime 写 authority：
 
@@ -27,7 +48,7 @@ flowchart LR
     C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
 ```
 
-Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 的正式同库收据使七路 Gate 均走 `PASS` 分支；其它路线控制仍可独立保持 `PARTIAL / INCOMPLETE`。
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `c15f88d9e201552ec9e3a589cda93b305818f5ef` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat 的最后一个控制；其它路线仍可独立保持 `PARTIAL / INCOMPLETE`。
 
 当前本地七路数据生成流已经在干净提交上形成正式收据：
 
@@ -38,7 +59,7 @@ flowchart TD
     I["Internal CommandService\nResult commit"] --> DB
     O["Operator OBS authority\nReview + HardState Effect + outer outcome"] --> DB
     DB --> R["query-only v3 Reader"]
-    R --> V["七路正式 PASS\ncommit 59527b12 + migration 0135"]
+    R --> V["七路正式 PASS\ncommit c15f88d9 + migration 0135"]
     V --> X["仓库内隐私安全收据\ncommit-bound controls = PASS"]
 ```
 

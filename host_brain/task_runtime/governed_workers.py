@@ -524,15 +524,22 @@ class GovernedFrozenNodeWorker:
             "payload_digest": f"sha256:{payload_digest}",
             "schema_version": "Natsume.task_runtime.worker_projection.v1",
         }
+        commit_audit_refs = {
+            **normalized["audit_refs"],
+            "worker_projection_ref": projection_id,
+            "node_grant_ref": frozen.node_grant_ref,
+        }
+        # Preserve an executor-owned source path when it is part of the
+        # immutable projection.  Overwriting it only in the transient COMMIT
+        # makes independent Verification correctly report commit drift.
+        commit_audit_refs.setdefault(
+            "path",
+            "governed_task_runtime:frozen_node",
+        )
         worker_commit = {
             **normalized,
             "receipt_ref": projection_id,
-            "audit_refs": {
-                **normalized["audit_refs"],
-                "path": "governed_task_runtime:frozen_node",
-                "worker_projection_ref": projection_id,
-                "node_grant_ref": frozen.node_grant_ref,
-            },
+            "audit_refs": commit_audit_refs,
         }
         return projection, worker_commit
 

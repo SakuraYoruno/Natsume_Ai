@@ -164,8 +164,17 @@ def _submit_surface_foreground_completed(
         "completed_at_ms": completed_at_ms,
     }
     delegated_agents = _delegated_agents_from_sub_agent_context(agent_input)
+    # The frozen model budget is an execution authority.  The Chat executor
+    # verifies it against the durable node budget and separately persists only
+    # the measured usage.  Copying the guard into a Life projection would both
+    # leak max_*_tokens authority fields and make the projection secret gate
+    # fail after the provider call has already completed.
     post_process_trace = {
-        **dict(trace_stage_meta or {}),
+        **{
+            str(key): value
+            for key, value in dict(trace_stage_meta or {}).items()
+            if str(key) != "governed_model_budget"
+        },
         "surface_main_chain_used": True,
         "surface_reply_used": True,
         "reply_source": "surface_main_chain",

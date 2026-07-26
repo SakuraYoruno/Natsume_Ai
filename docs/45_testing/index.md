@@ -3,17 +3,25 @@
 
 # 测试与验收目录
 
-版本：v2.25
+版本：v2.26
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Chat 真实模型预算持久链当前切片
+
+- GR05 不再 monkeypatch Surface 调用或构造假的 `surface_model_attempt`；Direct Chat 与 Plan final Chat 经过真实 prompt registry、route policy、`ModelAttemptService`、ledger audit 和 Surface runtime，只在 terminal provider adapter 返回受控的 18 tokens / 27 micros 测量。
+- 两次新请求各产生 `started → succeeded` canonical ModelAttempt；WorkerProjection 的 route/provider/model/attempt/measurement 必须与父级 `task_runtime_budget_usage`、child `task_runtime_node_budget_usage` 精确相等。Direct Chat 与 Plan replay 不产生第三次 provider 调用。
+- 七路线 reader 新增隐私有界的 `model_attempts` 与 `worker_model_budgets`；validator 会拒绝缓存结果、生命周期缺失、孤儿/重放 Attempt、provider identity 漂移、测量漂移或父子账本漂移。
+- 真实执行发现并修复内部预算 guard 泄漏进 Life acceptance payload，以及 Task Runtime 覆盖 Surface audit path 两个生产缺陷；相应回归覆盖 payload 白名单和 COMMIT/Projection path 一致性。
+- 当前受影响代码集合为 `44 passed in 31.44s`；干净 SHA GR05 为 `1 passed in 26.37s`；release/coverage/doc/metadata 集合为 `94 passed in 14.31s`，三者存在覆盖且分别报告、不相加。正式同库收据已验证 Chat/Plan 模型 lineage，完整架构静态 Gate 1～14 为 `PASS / failed_gates=[]`，统一 `static_scan,doc_gate` 为 `PASS / failures=[]`。Chat 为 `BUDGET_PASS / ROUTE_COMPLETE`；真实外部 provider、波次 integration 与 NE-07 尚未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 七路线提交绑定验收账本 v3
 
 - `UniversalRouteAcceptanceReader` 只读打开真实文件型 SQLite，在一个事务中读取 Command、Graph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox、recovery、reconciliation 与 cancellation 投影；内存数据库、缺表/缺列和迁移不一致均失败关闭。
 - `UniversalRouteAcceptanceBuilder` 要求干净 Git HEAD、仓库/数据库 migration head 一致、每个 request 只证明一条路线，并输出经过字段白名单和总 receipt digest 保护的隐私边界收据。
 - GR05 已加入 Direct Skill，真实 Host Runtime 的单项集成 `1 passed`，共同证明 Chat、Skill、Delegate、Plan。`test_ne01_universal_remaining_route_acceptance.py` 另以同一真实 SQLite 运行 Scheduler、Internal 和带 Review/outer outcome 的 Operator，单项集成 `1 passed`。
-- 两段已在干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 上串联，GR05 单项为 `1 passed in 22.95s`；剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 得到七路全部 `PASS`、reason code 全空，migration head 为 0135。正式收据为 [ne01_universal_route_acceptance_20260727.json](test_reports/ne01_universal_route_acceptance_20260727.json)，receipt digest=`sha256:4264c695c1b6fdd90fc2da0659b1a77e559eb58d7d2353f2eefdc285a1bd4720`。
-- 机器矩阵中七路 `commit_bound_acceptance` 已全部为 `PASS`；其它 `PARTIAL` 控制仍使七条路线和 NE-01 保持 `INCOMPLETE / IN_PROGRESS`。确定性 worker 不具备真实 provider、PlanningSearch 收益或 NE-07 资格，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 两段已在干净提交 `c15f88d9e201552ec9e3a589cda93b305818f5ef` 上串联，GR05 单项为 `1 passed in 26.37s`；剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 得到七路全部 `PASS`、reason code 全空，migration head 为 0135。正式收据为 [ne01_universal_route_acceptance_20260727.json](test_reports/ne01_universal_route_acceptance_20260727.json)，receipt digest=`sha256:06b2c93c0550708cdc5aecd6f5672e479f433c9951e8ddac7dcfe7cf184bbd14`。
+- 机器矩阵中七路 `commit_bound_acceptance` 已全部为 `PASS`；Chat 的模型预算控制也为 `PASS`，因此 Chat 首先达到 `COMPLETE`。其它 `PARTIAL` 控制仍使其余六路和 NE-01 保持 `INCOMPLETE / IN_PROGRESS`。受控 terminal provider 不具备真实 provider 质量、PlanningSearch 收益或 NE-07 资格，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Review 拒绝原子终态当前切片
 

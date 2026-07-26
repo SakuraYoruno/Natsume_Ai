@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.23
+版本：v2.24
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -14,7 +14,9 @@
 
 跨路线验收可以使用确定性的本地 worker 检查调度、授权、预算、Review、验收和副作用原子性，但收据必须标明其证据边界。确定性 worker 不能证明真实模型质量、外部 provider attestation、PlanningSearch 收益或真实网络/设备可用性；这些结论只能由后续各自的独立验收合同给出。换言之，同库七路 PASS 是 Runtime 治理证据，不是整个智能系统的 PASS。
 
-当前正式实例已在干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。这关闭的是“跨路线没有同库提交证据”的缺口，不会把仍为 `PARTIAL` 的 program-wide Budget、一般恢复、事务副作用、真实模型或全栈 canary 推导为完成。
+模型预算不能由 worker 自报一个总数。一次可验收调用必须从 canonical ModelAttempt 生命周期重开 provider、model、route、prompt/output digest 和 provider usage，再把它与不可变 WorkerProjection 中的测量证明、Graph aggregate usage 和 Attempt-bound child usage 做精确等值校验。执行所需的额度 guard 属于瞬时内部 authority，不能流入 Life、Memory、Effect 或公开收据；对外只允许暴露经白名单约束的标识、digest 和实际用量。exact replay 只能重开原有用量与结果，不能再请求 provider 或二次扣费。受控 terminal transport 可以证明这条治理链，但不能替代真实外部 provider、质量和成本收益验收。
+
+当前正式实例已在干净提交 `c15f88d9e201552ec9e3a589cda93b305818f5ef` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，Chat/Plan 的模型预算 lineage 也被独立重开，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。Chat 因所有声明控制均为 `PASS` 成为第一条 `COMPLETE` 路线；这不会把其余六路、真实模型质量或全栈 canary 推导为完成。
 
 恢复治理遵循“先持久化不确定性，再由精确证据消解”的不变量。未知副作用不能被 timeout、异常类型或操作者意图直接解释为未发生；Operation 首次进入待恢复状态时，状态 mutation、恢复 case 与各自 Outbox 必须同成同败，不能把 case 留给下一次请求补写。运行时冻结当前 Graph/Node/Attempt/Operation/Budget/Lease 与取消事实后，再让签名证据精确绑定该 recovery case。未决 case 的存续应跟随真正待消解的 Operation version 与取消身份，不能因后续预算计量、租约到期或生命周期围栏而从恢复清单意外消失；这些变化仍保留在不可变 subject 中供审计。证据只能收紧既有 authority，不能创建新的执行权；对账完成后还必须证明同一 case 已退出 current projection。无法证明时继续隔离，绝不盲目重放 worker。
 
