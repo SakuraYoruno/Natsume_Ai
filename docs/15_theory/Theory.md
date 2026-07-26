@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.23
+版本：v2.24
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -13,6 +13,8 @@
 跨路线完成性遵循“同一提交、同一数据库快照、逐路线完整证据”的不变量。代码、单测或某几条路线成功都不能外推为通用 Runtime 完成；验收者必须以只读事务独立重开真实持久事实，并把 Git HEAD、仓库与数据库 migration head、Command/Graph/Node/Attempt/Lease/Operation、父子 Budget、Verification、Acceptance、Artifact、Effect/Outbox/Receipt 串成不可替换的证据链。一个 request 只能证明一条路线，未运行路线必须显式保留 `NOT_RUN`。收据只能暴露完成判断需要的标识、状态、版本与 digest，不能复制用户正文、模型输出、secret 或执行 payload。这样，“能够验收”与“已经七路验收通过”才不会被混为一谈。
 
 跨路线验收可以使用确定性的本地 worker 检查调度、授权、预算、Review、验收和副作用原子性，但收据必须标明其证据边界。确定性 worker 不能证明真实模型质量、外部 provider attestation、PlanningSearch 收益或真实网络/设备可用性；这些结论只能由后续各自的独立验收合同给出。换言之，同库七路 PASS 是 Runtime 治理证据，不是整个智能系统的 PASS。
+
+模型预算不能由 worker 自报一个总数。一次可验收调用必须从 canonical ModelAttempt 生命周期重开 provider、model、route、prompt/output digest 和 provider usage，再把它与不可变 WorkerProjection 中的测量证明、Graph aggregate usage 和 Attempt-bound child usage 做精确等值校验。执行所需的额度 guard 属于瞬时内部 authority，不能流入 Life、Memory、Effect 或公开收据；对外只允许暴露经白名单约束的标识、digest 和实际用量。exact replay 只能重开原有用量与结果，不能再请求 provider 或二次扣费。受控 terminal transport 可以证明这条治理链，但不能替代真实外部 provider、质量和成本收益验收。
 
 当前正式实例已在干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。这关闭的是“跨路线没有同库提交证据”的缺口，不会把仍为 `PARTIAL` 的 program-wide Budget、一般恢复、事务副作用、真实模型或全栈 canary 推导为完成。
 

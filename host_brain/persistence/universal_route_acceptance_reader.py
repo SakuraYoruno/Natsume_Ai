@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+import json
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -175,6 +176,27 @@ _REQUIRED_TABLE_COLUMNS: Mapping[str, frozenset[str]] = {
             "route_type",
             "decision",
             "payload_digest",
+        }
+    ),
+    "model_attempt_log": frozenset(
+        {
+            "attempt_id",
+            "request_id",
+            "route_decision_id",
+            "attempt_index",
+            "status",
+            "adapter_id",
+            "provider",
+            "model_id",
+            "prompt_id",
+            "prompt_version",
+            "prompt_digest",
+            "started_at_ms",
+            "ended_at_ms",
+            "latency_ms",
+            "output_digest",
+            "error_code",
+            "metadata",
         }
     ),
     "task_runtime_acceptance_effect_intent": frozenset(
@@ -579,6 +601,15 @@ class UniversalRouteAcceptanceReader:
                 """,
                 (graph_id, revision),
             ),
+            "model_attempts": _capture_model_attempts(
+                connection,
+                request_id=request_id,
+            ),
+            "worker_model_budgets": _capture_worker_model_budgets(
+                connection,
+                graph_id=graph_id,
+                graph_revision=revision,
+            ),
             "effects": _rows(
                 connection,
                 """
@@ -690,6 +721,193 @@ def _request_id_mapping(value: Mapping[str, str]) -> dict[str, str]:
     return normalized
 
 
+def _capture_model_attempts(
+    connection: sqlite3.Connection,
+    *,
+    request_id: str,
+) -> list[dict[str, Any]]:
+    """Return bounded model lifecycle facts without prompt or output content."""
+
+    rows = _rows(
+        connection,
+        """
+        SELECT attempt_id AS model_attempt_id, request_id,
+               route_decision_id, attempt_index, status, adapter_id,
+               provider, model_id, prompt_id, prompt_version, prompt_digest,
+               started_at_ms, ended_at_ms, latency_ms, output_digest,
+               error_code, metadata AS metadata_json
+        FROM model_attempt_log
+        WHERE request_id = ?
+        ORDER BY started_at_ms, attempt_index, id
+        """,
+        (request_id,),
+        json_fields={"metadata_json"},
+    )
+    bounded: list[dict[str, Any]] = []
+    for row in rows:
+        metadata = row.pop("metadata")
+        if not isinstance(metadata, Mapping):
+            raise UniversalRouteAcceptanceReadError(
+                UNIVERSAL_ROUTE_ACCEPTANCE_SCHEMA_NOT_READY,
+                "model attempt metadata must be an object",
+            )
+        measurements = metadata.get("provider_budget_measurements")
+        bounded.append(
+            {
+                **row,
+                "model_node_id": str(metadata.get("model_node_id") or ""),
+                "scene_type": str(metadata.get("scene_type") or ""),
+                "cognitive_tier": str(metadata.get("cognitive_tier") or ""),
+                "provider_budget_measurements": (
+                    {
+                        str(key): int(value)
+                        for key, value in dict(measurements).items()
+                        if str(key)
+                        in {
+                            "prompt_tokens",
+                            "completion_tokens",
+                            "token_count",
+                            "model_cost_micros",
+                        }
+                        and type(value) is int
+                        and value >= 0
+                    }
+                    if isinstance(measurements, Mapping)
+                    else {}
+                ),
+            }
+        )
+    return bounded
+
+
+def _capture_worker_model_budgets(
+    connection: sqlite3.Connection,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> list[dict[str, Any]]:
+    """Extract only typed Chat budget bindings from immutable projections."""
+
+    rows = connection.execute(
+        """
+        SELECT projection_id, request_id, node_id, attempt_id,
+               projection_json
+        FROM task_runtime_worker_projection
+        WHERE graph_id = ? AND graph_revision = ? AND route_type = 'chat'
+        ORDER BY node_id, projection_id
+        """,
+        (graph_id, graph_revision),
+    ).fetchall()
+    bindings: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            projection = json.loads(str(row["projection_json"]))
+        except (TypeError, ValueError) as exc:
+            raise UniversalRouteAcceptanceReadError(
+                UNIVERSAL_ROUTE_ACCEPTANCE_SCHEMA_NOT_READY,
+                "worker projection contains invalid JSON",
+            ) from exc
+        if not isinstance(projection, Mapping):
+            raise UniversalRouteAcceptanceReadError(
+                UNIVERSAL_ROUTE_ACCEPTANCE_SCHEMA_NOT_READY,
+                "worker projection must be an object",
+            )
+        audit_refs = projection.get("audit_refs")
+        trace = (
+            dict(audit_refs).get("trace_stage_meta")
+            if isinstance(audit_refs, Mapping)
+            else None
+        )
+        model_attempt = (
+            dict(trace).get("surface_model_attempt")
+            if isinstance(trace, Mapping)
+            else None
+        )
+        usage = projection.get("budget_usage")
+        if not isinstance(model_attempt, Mapping) or not isinstance(
+            usage,
+            Mapping,
+        ):
+            bindings.append(
+                {
+                    "projection_id": str(row["projection_id"]),
+                    "request_id": str(row["request_id"]),
+                    "node_id": str(row["node_id"]),
+                    "task_attempt_id": str(row["attempt_id"]),
+                    "binding_valid": False,
+                }
+            )
+            continue
+        measurement = model_attempt.get("budget_measurement")
+        measurements = usage.get("measurements")
+        evidence_refs = usage.get("evidence_refs")
+        attempt_ids = model_attempt.get("attempt_ids")
+        bindings.append(
+            {
+                "projection_id": str(row["projection_id"]),
+                "request_id": str(row["request_id"]),
+                "node_id": str(row["node_id"]),
+                "task_attempt_id": str(row["attempt_id"]),
+                "binding_valid": True,
+                "success": model_attempt.get("success") is True,
+                "cached": model_attempt.get("cached") is True,
+                "route_decision_id": str(
+                    model_attempt.get("route_decision_id") or ""
+                ),
+                "final_adapter_id": str(
+                    model_attempt.get("final_adapter_id") or ""
+                ),
+                "final_provider": str(
+                    model_attempt.get("final_provider") or ""
+                ),
+                "final_model": str(model_attempt.get("final_model") or ""),
+                "model_attempt_ids": (
+                    [str(value) for value in attempt_ids]
+                    if isinstance(attempt_ids, list)
+                    else []
+                ),
+                "measurement_ref": (
+                    str(measurement.get("measurement_ref") or "")
+                    if isinstance(measurement, Mapping)
+                    else ""
+                ),
+                "measurement": (
+                    {
+                        str(key): int(value)
+                        for key, value in dict(measurement).items()
+                        if str(key)
+                        in {
+                            "attempt_count",
+                            "retry_count",
+                            "token_count",
+                            "model_cost_micros",
+                        }
+                        and type(value) is int
+                        and value >= 0
+                    }
+                    if isinstance(measurement, Mapping)
+                    else {}
+                ),
+                "usage_id": str(usage.get("usage_id") or ""),
+                "usage_evidence_refs": (
+                    [str(value) for value in evidence_refs]
+                    if isinstance(evidence_refs, list)
+                    else []
+                ),
+                "usage_measurements": (
+                    {
+                        str(key): int(value)
+                        for key, value in dict(measurements).items()
+                        if type(value) is int and value >= 0
+                    }
+                    if isinstance(measurements, Mapping)
+                    else {}
+                ),
+            }
+        )
+    return bindings
+
+
 def _rows(
     connection: sqlite3.Connection,
     sql: str,
@@ -703,8 +921,6 @@ def _rows(
         for field in json_fields:
             raw = item.get(field)
             try:
-                import json
-
                 item[field.removesuffix("_json")] = json.loads(str(raw))
             except (TypeError, ValueError) as exc:
                 raise UniversalRouteAcceptanceReadError(

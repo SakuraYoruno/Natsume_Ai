@@ -1,10 +1,20 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.27
+版本：v0.28
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-CHAT-MODEL-BUDGET-LINEAGE
+
+- T-NE01-CMB-01：Direct Chat 与 Plan final Chat 必须经真实 Surface ports 和 canonical `ModelAttemptService`；测试只允许控制 terminal provider transport，不得 monkeypatch Surface 结果或自造 model-attempt trace。
+- T-NE01-CMB-02：每个新请求必须有唯一 `started → succeeded` ModelAttempt，且 route/provider/model/node、prompt/output digest、token/cost 与 WorkerProjection 精确一致。
+- T-NE01-CMB-03：WorkerProjection 的稳定 usage id 必须在 Graph parent 与 Attempt-bound child ledger 各出现一次并被接受；token/retry/cost 相等，time 非负，Chat 模型调用不得伪造 tool/concurrency 用量。
+- T-NE01-CMB-04：exact replay 不得新增 provider 调用、ModelAttempt 或 Budget usage；缓存结果、孤儿 lifecycle、身份/测量/账本漂移必须使验收失败关闭。
+- T-NE01-CMB-05：内部 `governed_model_budget` guard 不得进入 Life acceptance payload、Worker 公共投影或 receipt；模型 prompt、回复和 secret 不得进入跨路线收据。
+- T-NE01-CMB-06：worker wrapper 必须保留 executor 已提交的 audit path，瞬时 COMMIT 与 durable WorkerProjection path 必须一致。
+- 当前定向证据为 GR05 `1 passed`、七路线合同 `19 passed`、Worker/Life 单元集合 `24 passed`，分别报告、不相加。正式干净 SHA 收据和真实 provider 尚未运行，状态为 `CODE_COMPLETE_LOCAL / BUDGET_PARTIAL`，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-UNIVERSAL-ROUTE-ACCEPTANCE-V3
 

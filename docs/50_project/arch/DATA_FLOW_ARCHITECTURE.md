@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.20
+版本：v3.21
 
 核对日期：2026-07-27
 
@@ -12,6 +12,27 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+Chat/Plan 模型预算的当前生产等价数据流如下：
+
+```mermaid
+flowchart LR
+    F["Frozen Chat route"] --> S["Surface runtime"]
+    S --> M["Canonical ModelAttemptService"]
+    M --> P["受控 terminal provider"]
+    P --> A["model_attempt_log\nstarted → succeeded"]
+    S --> W["Immutable WorkerProjection\nmeasurement + attempt ids"]
+    W --> B["Graph Budget usage"]
+    W --> C["Attempt-bound child usage"]
+    A --> V["Query-only acceptance validator"]
+    W --> V
+    B --> V
+    C --> V
+    V -->|"精确相等"| O["模型预算 lineage 可验收"]
+    V -->|"缓存/孤儿/漂移"| X["FAIL CLOSED"]
+```
+
+内部额度 guard 只在 Surface 调用期间存在，不进入 Life acceptance trace、Effect 或公开 receipt；公开证据只保留 provider/model/route 标识、digest 和用量。Direct Chat 与 Plan synthesis 使用不同的新请求，replay 只能重开同一 durable lineage，不能再次调用 provider。受控 provider 不等同于真实外部模型验收。
 
 七路线提交绑定验收是完全只读的数据流，不取得 Task Runtime 写 authority：
 

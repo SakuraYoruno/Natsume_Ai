@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.25
+版本：v2.26
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Chat 真实模型预算持久链当前切片
+
+- GR05 不再 monkeypatch Surface 调用或构造假的 `surface_model_attempt`；Direct Chat 与 Plan final Chat 经过真实 prompt registry、route policy、`ModelAttemptService`、ledger audit 和 Surface runtime，只在 terminal provider adapter 返回受控的 18 tokens / 27 micros 测量。
+- 两次新请求各产生 `started → succeeded` canonical ModelAttempt；WorkerProjection 的 route/provider/model/attempt/measurement 必须与父级 `task_runtime_budget_usage`、child `task_runtime_node_budget_usage` 精确相等。Direct Chat 与 Plan replay 不产生第三次 provider 调用。
+- 七路线 reader 新增隐私有界的 `model_attempts` 与 `worker_model_budgets`；validator 会拒绝缓存结果、生命周期缺失、孤儿/重放 Attempt、provider identity 漂移、测量漂移或父子账本漂移。
+- 真实执行发现并修复内部预算 guard 泄漏进 Life acceptance payload，以及 Task Runtime 覆盖 Surface audit path 两个生产缺陷；相应回归覆盖 payload 白名单和 COMMIT/Projection path 一致性。
+- 当前定向结果：GR05 `1 passed`，七路线合同 `19 passed`，Worker/Life 单元集合 `24 passed`；这些集合分别报告、不相加。干净 SHA 正式收据、真实外部 provider、波次 integration 与 NE-07 尚未运行，所以当前仅为 `CHAT_MODEL_BUDGET_CODE_COMPLETE_LOCAL / CHAT_BUDGET_PARTIAL`，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 七路线提交绑定验收账本 v3
 

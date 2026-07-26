@@ -3,10 +3,12 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.18
+版本：v3.19
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+Chat 的模型用量已经从 GR05 假投影改为真实生产等价调用链：frozen route 调用 Surface runtime，Surface 调用 canonical `ModelAttemptService`，terminal provider 返回 usage，Task Runtime 再把同一测量原子记入 Graph aggregate 与 Attempt-bound child ledger。只读验收新增 ModelAttempt→WorkerProjection→parent/child usage 的逐字段校验，replay 也必须保持 provider 调用数不变。真实链路暴露的预算 guard 泄漏和 COMMIT audit path 漂移已经修复。尚未清零的是干净 SHA 正式收据和外部 provider canary，因此本切片只把实现推进到 `CODE_COMPLETE_LOCAL`，Chat 的 `budget_enforcement` 仍为 `PARTIAL`。
 
 七路线缺少同一提交、同一真实数据库完成证据的断点已经关闭。GR05 在同一 Host Runtime 运行 Chat、Skill、Delegate、Plan；剩余驱动顺序调用真实 Scheduler、Internal 和 Operator 应用边界，并让 Operator 完成风险 Review、HardState Effect 与 outer outcome/claim settlement。二者已在干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 上串联，查询同一文件型 SQLite 的 v3 validator 判定七路全部 PASS、migration head=0135，并形成仓库内正式收据。七路 `commit_bound_acceptance` 控制均已清零；确定性 worker 仍不证明真实模型、PlanningSearch 收益或 NE-07 服务栈，其它 `PARTIAL` 控制继续使路线和 NE-01 总状态保持 `INCOMPLETE`。
 

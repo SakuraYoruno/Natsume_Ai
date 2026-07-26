@@ -296,6 +296,112 @@ def test_valid_route_is_pass_but_unrun_routes_keep_program_incomplete() -> None:
     assert "request://sha256/" in raw
 
 
+def test_chat_model_budget_lineage_reopens_provider_and_child_ledgers() -> None:
+    snapshot, request_ids = _snapshot()
+    route = snapshot["routes"]["chat"]
+    usage_id = "worker-budget://chat-contract"
+    measured = {
+        "concurrency": 0,
+        "model_cost_micros": 25,
+        "retry_count": 0,
+        "time_ms": 20,
+        "token_count": 12,
+        "tool_call_count": 0,
+    }
+    for key in (
+        "consumed",
+        "attempted_consumed",
+    ):
+        route["graph_budgets"][0][key] = dict(measured)
+        route["node_budgets"][0][key] = dict(measured)
+    route["budget_usage"][0].update(
+        usage_id=usage_id,
+        delta=dict(measured),
+    )
+    route["node_budget_usage"][0]["usage_id"] = usage_id
+    route["worker_model_budgets"] = [
+        {
+            "projection_id": "projection-chat",
+            "request_id": "private-request-value",
+            "node_id": "node-chat",
+            "task_attempt_id": "attempt-chat",
+            "binding_valid": True,
+            "success": True,
+            "cached": False,
+            "route_decision_id": "route-chat",
+            "final_adapter_id": "adapter-chat",
+            "final_provider": "provider-chat",
+            "final_model": "model-chat",
+            "model_attempt_ids": ["model-attempt-chat"],
+            "measurement_ref": "model-budget://chat-contract",
+            "measurement": {
+                "attempt_count": 1,
+                "retry_count": 0,
+                "token_count": 12,
+                "model_cost_micros": 25,
+            },
+            "usage_id": usage_id,
+            "usage_evidence_refs": ["model-budget://chat-contract"],
+            "usage_measurements": {
+                "retry_count": 0,
+                "token_count": 12,
+                "model_cost_micros": 25,
+            },
+        }
+    ]
+    common_model = {
+        "model_attempt_id": "model-attempt-chat",
+        "request_id": "private-request-value",
+        "route_decision_id": "route-chat",
+        "attempt_index": 1,
+        "adapter_id": "adapter-chat",
+        "provider": "provider-chat",
+        "model_id": "model-chat",
+        "prompt_id": "surface.main_chain.live.text",
+        "prompt_version": "v1.0.0",
+        "prompt_digest": "1" * 64,
+        "started_at_ms": NOW,
+        "latency_ms": 1,
+        "error_code": None,
+        "model_node_id": "node-chat",
+        "scene_type": "CHAT_SURFACE",
+        "cognitive_tier": "A",
+    }
+    route["model_attempts"] = [
+        {
+            **common_model,
+            "status": "started",
+            "ended_at_ms": None,
+            "output_digest": None,
+            "provider_budget_measurements": {},
+        },
+        {
+            **common_model,
+            "status": "succeeded",
+            "ended_at_ms": NOW + 1,
+            "output_digest": "2" * 64,
+            "provider_budget_measurements": {
+                "prompt_tokens": 8,
+                "completion_tokens": 4,
+                "token_count": 12,
+                "model_cost_micros": 25,
+            },
+        },
+    ]
+
+    receipt = _receipt(snapshot, request_ids)
+    assert receipt["route_acceptance"]["chat"]["status"] == ROUTE_PASS
+
+    route["worker_model_budgets"][0]["usage_measurements"][
+        "token_count"
+    ] = 11
+    tampered = _receipt(snapshot, request_ids)
+    assert tampered["route_acceptance"]["chat"]["status"] == ROUTE_FAIL
+    assert "MODEL_BUDGET_MEASUREMENT_INVALID" in tampered[
+        "route_acceptance"
+    ]["chat"]["reason_codes"]
+
+
 @pytest.mark.parametrize(
     ("mutate", "reason"),
     [

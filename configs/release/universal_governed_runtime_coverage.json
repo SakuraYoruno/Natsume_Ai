@@ -54,6 +54,7 @@
     "chat": {
       "status": "INCOMPLETE",
       "production_boundary": "Graph Acceptance atomically stages ordered conversation.user_turn, conversation.preference_signal, life.conversation_turn_recorded, life.foreground_completed and surface.reply_delivery effects. Each accepted Life handler now validates the exact immutable command, reconstructs and compares the full command-bound projection-intent set, dispatches only the exact intent ids through the app-local LifeProjectionDispatcher, and requires durable payload-bound projection receipts before the effect can COMMIT. surface.post_process is acknowledged only after the durable projection mode has committed the visible assistant turn and a COMMITTED or SKIPPED LifeMemory admission receipt; therefore the ordered dispatcher cannot invoke external reply delivery first. Response loss can reopen the command then complete exact local intents, while reclaimed reconciliation is read-only. Missing receipts, payload/result drift, tamper or projection failure remain UNKNOWN and block later effects. External Gateway delivery remains idempotent eventual delivery with authenticated read-only reconciliation; this is not a global cross-service SQL transaction. The current affected batch is 106 passed in 117.58 seconds, including exact-intent claim isolation, response loss, restart, failure hold, receipt tamper and the production-equivalent GR05 ordering assertion. Wave integration, real model and NE-07 Docker full stack are not run.",
+      "model_budget_boundary": "CODE_COMPLETE_LOCAL_FORMAL_CLEAN_SHA_RECEIPT_PENDING: Direct Chat and Plan final Chat now use the real frozen route, Surface runtime, prompt registry, route policy, canonical ModelAttemptService and ledger audit; only terminal provider transport is controlled. Each new request persists started/succeeded model lifecycle, provider token/cost measurement, immutable WorkerProjection and exact Graph parent plus Attempt-bound child usage. Exact replay performs no additional provider call. The query-only acceptance validator rejects cache, orphan/replayed attempt, identity, measurement and parent/child ledger drift. Internal governed_model_budget is excluded from Life acceptance payload and the worker wrapper preserves the executor-owned Surface audit path. This proves governance, not external-provider quality or NE-07; budget_enforcement remains PARTIAL until a clean-SHA formal receipt is tracked.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -63,6 +64,11 @@
         "host_brain/audit/migrations/0118_conversation_acceptance_effects.sql",
         "host_brain/app/acceptance_effect_handlers.py",
         "host_brain/app/life_projection_barrier.py",
+        "host_brain/model_runtime/service.py",
+        "host_brain/persistence/universal_route_acceptance_reader.py",
+        "host_brain/release/universal_route_acceptance.py",
+        "host_brain/surface_runtime/delivery_audit.py",
+        "host_brain/task_runtime/governed_workers.py",
         "host_brain/digital_life/projection.py",
         "host_brain/persistence/life_command_repository.py",
         "edge_client/gateway/delivery_runtime.py",
@@ -73,6 +79,9 @@
         "tests/integration/test_ne01_generic_acceptance_effect_reconciliation.py",
         "tests/integration/test_ne01_gateway_reply_query.py",
         "tests/unit/test_ne01_gateway_reply_query_client.py",
+        "tests/unit/test_aw04_app_life_boundary.py",
+        "tests/unit/test_gr05_governed_frozen_workers.py",
+        "tests/contract/test_universal_route_acceptance.py",
         "tests/integration/test_gr05_universal_host_runtime.py"
       ],
       "controls": {

@@ -5,9 +5,13 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.17
+版本：v3.18
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前 Chat 模型预算切片移除了 GR05 对 `stream_governed_chat_with_context` 的伪造输出，普通 Chat 和 Plan 合成现在都经真实 frozen route、Surface runtime、canonical `ModelAttemptService` 与父子 Budget ledger；测试只替换 terminal provider transport，并要求两个新请求、两个成功 ModelAttempt、精确 token/cost、同一 WorkerProjection/parent/child usage，以及 replay 后 provider 调用数不增加。只读七路线采集器能够重新关联模型生命周期、Worker 预算证明和父子 usage，任何缓存、孤儿 Attempt、身份或测量漂移都失败关闭。该代码切片尚未生成干净 SHA 的正式 v3 收据，因此 Chat `budget_enforcement` 暂不升级；受控 provider 也不属于真实模型或 NE-07 证据。
+
+真实链路校准还修复两个生产边界：`surface.post_process` 不再把内部 `governed_model_budget` guard 复制到 Life acceptance trace；`GovernedFrozenNodeWorker` 保留 executor 自己的 audit path，不再用 Task Runtime fallback path 覆盖它。前者防止内部预算 authority 泄漏并触发 secret gate，后者防止瞬时 COMMIT 与 durable WorkerProjection 出现来源漂移。
 
 当前七路线验收切片建立 `natsume.universal-runtime-route-acceptance.v3`。采集器只能以 `mode=ro`、`query_only=ON` 在单一事务读取真实文件型 SQLite；它必须把每条 request 映射到唯一 Chat、Skill、Plan、Delegate、Scheduler、Internal 或 Operator 路线，并验证完整 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 链，同时证明没有当前 recovery hold、effect reconciliation 或 cancellation 历史。收据绑定干净 Git HEAD、仓库 migration head 与数据库 applied head，request id 只输出 digest，字段集合与 receipt digest 均防篡改。正式运行绑定提交 `59527b1210e16b62e243dda616c190ec45d8ebe3`、migration 0135 和同一文件型 SQLite，七条路线均为 `PASS`；覆盖矩阵中的七个 `commit_bound_acceptance` 控制因此均为 `PASS`。
 

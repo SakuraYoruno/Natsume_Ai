@@ -169,6 +169,9 @@ async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_comm
             "narrative": "hello from frozen chat",
             "route_type": "chat",
             "target_id": "surface_reply",
+            "audit_refs": {
+                "path": "surface_reply:surface_main_chain",
+            },
             "acceptance_effect_intents": [
                 {
                     "effect_type": "life.foreground_completed",
@@ -202,6 +205,7 @@ async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_comm
     assert projections.rows[terminal["receipt_ref"]]["narrative"] == "hello from frozen chat"
     assert terminal["acceptance_effect_intents"][0]["effect_type"] == "life.foreground_completed"
     assert terminal["audit_refs"]["buffered_pre_acceptance_events"] == 1
+    assert terminal["audit_refs"]["path"] == "surface_reply:surface_main_chain"
     assert executor.inputs[0].objective == "answer from frozen input"
     assert executor.inputs[0].input_refs == ("artifact://input/one",)
     assert executor.inputs[0].node_risk_level == 3

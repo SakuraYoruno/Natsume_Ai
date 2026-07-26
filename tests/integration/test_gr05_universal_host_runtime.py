@@ -37,6 +37,7 @@ from host_brain.app.model_provider_composition import ApplicationModelAttemptSer
 from host_brain.app.production_authority import (
     build_durable_production_authority_verifier,
 )
+from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.task_runtime import build_process_task_runtime_container
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
@@ -52,6 +53,15 @@ from host_brain.persistence.context_repository import ContextRepository
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.persistence.universal_route_acceptance_reader import (
     UniversalRouteAcceptanceReader,
+)
+from host_brain.model_runtime import (
+    CallableProviderAdapter,
+    ProviderResponse,
+    ProviderTarget,
+    RouteDecision,
+    StaticRoutePolicy,
+    build_live_production_prompt_registry,
+    build_model_runtime_composition,
 )
 from host_brain.persona.context.tactic_ledger import SessionTacticLedgerStore
 from host_brain.persona.context.topic_ledger import SessionTopicLedgerStore
@@ -124,6 +134,7 @@ def _production_acceptance_effect_ports(
     ledger,
     life,
     life_memory_service,
+    model_attempt_service,
 ) -> AgentRuntimeApplicationPorts:  # noqa: ANN001
     """Bind the same durable conversation writer used by Host composition.
 
@@ -177,7 +188,7 @@ def _production_acceptance_effect_ports(
         life_memory_service=lambda: life_memory_service,
         audit_ledger=lambda: ledger,
         prompt_registry=lambda: None,
-        model_attempt_service=lambda: None,
+        model_attempt_service=lambda: model_attempt_service,
         context_read_ports=ConversationContextReadPorts(
             conversation_history=lambda: None,
             conversation_turn_store=lambda: None,
@@ -305,51 +316,41 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
     tmp_path,
     monkeypatch,
 ) -> None:
-    chat_calls: list[dict] = []
+    provider_calls: list[object] = []
     skill_calls: list[str] = []
     delivered_replies: list[dict] = []
 
-    async def frozen_chat(**kwargs):  # noqa: ANN003
-        chat_calls.append(dict(kwargs))
-        trace_stage_meta = dict(kwargs["trace_stage_meta"])
-        model_guard = dict(trace_stage_meta.get("governed_model_budget") or {})
-        assert model_guard
-        measurement_identity = hashlib.sha256(
-            (
-                str(model_guard["budget_id"])
-                + "|"
-                + str(model_guard["attempt_id"])
-            ).encode("utf-8")
-        ).hexdigest()
-        trace_stage_meta["surface_model_attempt"] = {
-            "success": True,
-            "attempt_ids": [
-                f"model-attempt://sha256/{measurement_identity}"
-            ],
-            "budget_measurement": {
-                "schema_version": "Natsume.model_runtime.budget_measurement.v1",
-                "measurement_ref": f"model-budget://sha256/{measurement_identity}",
-                "attempt_count": 1,
-                "retry_count": 0,
-                "token_count": 18,
+    async def controlled_provider(attempt):  # noqa: ANN001, ANN202
+        """Replace only the terminal provider transport, never the model runtime."""
+
+        provider_calls.append(attempt)
+        reply_text = (
+            "已根据两项已验收执行结果完成汇总。"
+            if "plan" in str(attempt.request_id)
+            else "先固定目标和边界，再执行下一步。"
+        )
+        return ProviderResponse(
+            content=json.dumps(
+                {
+                    "reply_text": reply_text,
+                    "natsume_emotion_tag": "NEUTRAL",
+                    "user_emotion_tag": "NEUTRAL",
+                    "emotion_confidence": 0.2,
+                },
+                ensure_ascii=False,
+            ),
+            finish_reason="stop",
+            usage={
+                "prompt_tokens": 12,
+                "completion_tokens": 6,
+                "total_tokens": 18,
                 "model_cost_micros": 27,
             },
-        }
-        yield {"phase": "DELTA", "done": False, "delta": "buffered"}
-        yield {
-            "phase": "COMMIT",
-            "done": True,
-            "decision": "APPROVE",
-            "narrative": f"chat:{kwargs['sanitized_message']}",
-            "route_type": "chat",
-            "target_id": "surface_reply",
-            "audit_refs": {"trace_stage_meta": trace_stage_meta},
-        }
-
-    monkeypatch.setattr(
-        "host_brain.app.route_execution_ports.stream_governed_chat_with_context",
-        frozen_chat,
-    )
+            metadata={
+                "transport_identity": "controlled-provider://gr05/chat-budget",
+                "cache_hit": False,
+            },
+        )
 
     def frozen_skill_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
         skill_calls.append(str(_order.metadata.get("skill_id") or ""))
@@ -435,6 +436,34 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
     if configured_database and db_path.exists():
         db_path.unlink()
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    model_composition = build_model_runtime_composition(
+        prompt_registry=build_live_production_prompt_registry(),
+        route_policy=StaticRoutePolicy(
+            RouteDecision(
+                decision_id="gr05-controlled-surface-route",
+                targets=(
+                    ProviderTarget(
+                        adapter_id="gr05.controlled-provider",
+                        provider="controlled-provider",
+                        model_id="controlled-chat-model",
+                        timeout_ms=5_000,
+                    ),
+                ),
+                reason="GR05_TERMINAL_TRANSPORT_ONLY",
+                max_attempts=2,
+            )
+        ),
+        provider_adapters=(
+            CallableProviderAdapter(
+                "gr05.controlled-provider",
+                complete_fn=controlled_provider,
+            ),
+        ),
+        ledger=ledger,
+    )
+    model_attempt_port = ApplicationModelAttemptServicePort(
+        service_provider=lambda: model_composition.attempt_service,
+    )
     authority_verifier = build_durable_production_authority_verifier(
         ledger_provider=lambda: ledger,
     )
@@ -527,6 +556,14 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             ledger=ledger,
             life=life,
             life_memory_service=memory.service,
+            model_attempt_service=model_composition.attempt_service,
+        )
+        surface_runtime_ports = build_surface_runtime_ports(
+            agent_runtime_ports=agent_runtime_ports,
+            life_authority_provider=lambda: (
+                life.command_service,
+                life.snapshot_reader,
+            ),
         )
         projection_dispatcher, _outbox_dispatcher = compose_life_dispatchers(
             ledger,
@@ -555,7 +592,7 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             skill_registry=registry,
             token_service=token_service,
             capability_broker=dependencies.get_capability_broker(),
-            model_attempt_service=ApplicationModelAttemptServicePort(),
+            model_attempt_service=model_attempt_port,
             production_authority_verifier=authority_verifier,
             resource_manager=None,
             episodic_store=None,
@@ -568,6 +605,7 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             ),
             action_preview_service=action_preview_service,
             acceptance_effect_dispatcher=acceptance_effect_dispatcher,
+            surface_runtime_ports=surface_runtime_ports,
         )
         await runtime.activate()
 
@@ -649,6 +687,11 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             request_body=SimpleNamespace(input_source="GATEWAY"),
             command_authority=plan_authority,
         )
+        chat_replay = await _execute(
+            runtime,
+            intent=chat,
+            governor=governors["chat"],
+        )
 
         # A direct caller that skips Cortex keeps the conversational principal
         # in its Governor grant while presenting an authenticated service
@@ -700,7 +743,10 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         assert plan_replay[-1]["execution_receipt"]["command_id"] == (
             results["plan"][-1]["execution_receipt"]["command_id"]
         )
-        assert len(chat_calls) == 2
+        assert chat_replay[-1]["execution_receipt"]["command_id"] == (
+            results["chat"][-1]["execution_receipt"]["command_id"]
+        )
+        assert len(provider_calls) == 2
         assert len(skill_calls) == 3
         assert all(skill_id for skill_id in skill_calls)
         assert len(delivered_replies) == 1
@@ -714,38 +760,10 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             delivered_replies[0]["assistant_turn_count_before_delivery"],
             delivered_replies[0]["memory_receipt_count_before_delivery"],
         ) == (1, 1)
-        assert all(call["governor_result"] == {} for call in chat_calls)
-        assert all(call["request_body"].suppress_edge_tts is True for call in chat_calls)
-        assert all(call["request_body"].suppress_edge_vts is True for call in chat_calls)
-        direct_chat_call, plan_synthesis_call = chat_calls
-        assert direct_chat_call["retrieval_evidence_items"] == []
-        assert (
-            "node_input_artifact_attestation"
-            not in direct_chat_call["trace_stage_meta"]
-        )
-        plan_evidence = plan_synthesis_call["retrieval_evidence_items"]
-        assert len(plan_evidence) == 2
-        assert {
-            item["store_id"] for item in plan_evidence
-        } == {"task_result_artifact"}
         assert all(
-            item["source_ref"].startswith(
-                "artifact://task-result/"
-            )
-            and item["evidence_ref"].startswith(
-                "worker-projection://"
-            )
-            and item["metadata"]["payload_sha256"]
-            for item in plan_evidence
+            attempt.model_budget_guard is not None
+            for attempt in provider_calls
         )
-        plan_attestation = plan_synthesis_call["trace_stage_meta"][
-            "node_input_artifact_attestation"
-        ]
-        assert plan_attestation["schema_version"] == (
-            "Natsume.task_runtime.node_input_artifact_attestation.v1"
-        )
-        assert len(plan_attestation["artifacts"]) == 2
-        assert plan_attestation["bundle_digest"].startswith("sha256:")
 
         # Each accepted Life effect now drains only its own exact local
         # projection intents before the dispatcher may advance to outward
@@ -792,6 +810,42 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                     """
                 ).fetchall()
             ]
+            chat_usage_ids = [
+                projection["budget_usage"]["usage_id"]
+                for projection in chat_projection_payloads
+            ]
+            chat_budget_usage_rows = [
+                conn.execute(
+                    """
+                    SELECT attempt_id, charge_kind, delta_json, accepted
+                    FROM task_runtime_budget_usage
+                    WHERE usage_id = ?
+                    """,
+                    (usage_id,),
+                ).fetchone()
+                for usage_id in chat_usage_ids
+            ]
+            chat_node_usage_rows = [
+                conn.execute(
+                    """
+                    SELECT attempt_id, accepted
+                    FROM task_runtime_node_budget_usage
+                    WHERE usage_id = ?
+                    """,
+                    (usage_id,),
+                ).fetchone()
+                for usage_id in chat_usage_ids
+            ]
+            model_attempt_rows = conn.execute(
+                """
+                SELECT attempt_id, request_id, route_decision_id, status,
+                       adapter_id, provider, model_id, prompt_digest,
+                       output_digest, metadata
+                FROM model_attempt_log
+                WHERE status = 'succeeded'
+                ORDER BY request_id, attempt_id
+                """
+            ).fetchall()
             assert len(delegate_projection_payloads) == 1
             delegate_usage_id = delegate_projection_payloads[0][
                 "budget_usage"
@@ -869,6 +923,88 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             }
             for projection in chat_projection_payloads
         )
+        assert all(
+            projection["budget_usage"]["evidence_refs"]
+            == [
+                projection["audit_refs"]["trace_stage_meta"][
+                    "surface_model_attempt"
+                ]["budget_measurement"]["measurement_ref"]
+            ]
+            for projection in chat_projection_payloads
+        )
+        assert all(
+            projection["audit_refs"]["trace_stage_meta"][
+                "surface_model_attempt"
+            ]["cached"]
+            is False
+            and projection["audit_refs"]["trace_stage_meta"][
+                "surface_model_attempt"
+            ]["success"]
+            is True
+            for projection in chat_projection_payloads
+        )
+        assert all(row is not None for row in chat_budget_usage_rows)
+        assert all(row is not None for row in chat_node_usage_rows)
+        for projection, budget_row, child_row in zip(
+            chat_projection_payloads,
+            chat_budget_usage_rows,
+            chat_node_usage_rows,
+            strict=True,
+        ):
+            assert budget_row[0] == projection["attempt_id"]
+            assert budget_row[1] == "WORKER_USAGE:COST+RETRY+TIME+TOKEN"
+            delta = json.loads(budget_row[2])
+            assert {
+                key: delta[key]
+                for key in (
+                    "concurrency",
+                    "model_cost_micros",
+                    "retry_count",
+                    "token_count",
+                    "tool_call_count",
+                )
+            } == {
+                "concurrency": 0,
+                "model_cost_micros": 27,
+                "retry_count": 0,
+                "token_count": 18,
+                "tool_call_count": 0,
+            }
+            assert type(delta["time_ms"]) is int and delta["time_ms"] >= 0
+            assert budget_row[3] == 1
+            assert child_row == (projection["attempt_id"], 1)
+        assert len(model_attempt_rows) == 2
+        projected_model_attempt_ids = {
+            attempt_id
+            for projection in chat_projection_payloads
+            for attempt_id in projection["audit_refs"]["trace_stage_meta"][
+                "surface_model_attempt"
+            ]["attempt_ids"]
+        }
+        assert {row[0] for row in model_attempt_rows} == (
+            projected_model_attempt_ids
+        )
+        assert {row[1] for row in model_attempt_rows} == {
+            chat["request_id"],
+            plan["request_id"],
+        }
+        for row in model_attempt_rows:
+            assert row[2:7] == (
+                "gr05-controlled-surface-route",
+                "succeeded",
+                "gr05.controlled-provider",
+                "controlled-provider",
+                "controlled-chat-model",
+            )
+            assert len(row[7]) == 64
+            assert len(row[8]) == 64
+            metadata = json.loads(row[9])
+            assert metadata["provider_budget_measurements"] == {
+                "completion_tokens": 6,
+                "model_cost_micros": 27,
+                "prompt_tokens": 12,
+                "token_count": 18,
+            }
         assert delegate_projection_payloads[0]["budget_usage"][
             "measurements"
         ] == {
@@ -979,6 +1115,18 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             "operator": "NOT_RUN",
         }
         assert acceptance_receipt["overall_status"] == "INCOMPLETE"
+        assert acceptance_receipt["route_acceptance"]["chat"][
+            "evidence_counts"
+        ]["model_attempts"] == 2
+        assert acceptance_receipt["route_acceptance"]["chat"][
+            "evidence_counts"
+        ]["worker_model_budgets"] == 1
+        assert acceptance_receipt["route_acceptance"]["plan"][
+            "evidence_counts"
+        ]["model_attempts"] == 2
+        assert acceptance_receipt["route_acceptance"]["plan"][
+            "evidence_counts"
+        ]["worker_model_budgets"] == 1
         assert acceptance_receipt["privacy"] == {
             "contains_user_text": False,
             "contains_model_output": False,

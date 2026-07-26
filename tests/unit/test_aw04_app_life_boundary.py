@@ -705,7 +705,20 @@ def test_frozen_surface_defers_complete_life_command_until_task_acceptance(
         result=result,
         envelope=ReplyEnvelope.final_reply(text="已完成", source="surface_main_chain"),
         narrative="已完成",
-        trace_stage_meta={},
+        trace_stage_meta={
+            "governed_model_budget": {
+                "budget_id": "budget::deferred",
+                "max_output_tokens": 32,
+            },
+            "surface_model_attempt": {
+                "attempt_ids": ["attempt::deferred"],
+                "budget_measurement": {
+                    "measurement_ref": "model-budget://deferred",
+                    "token_count": 18,
+                    "model_cost_micros": 27,
+                },
+            },
+        },
         timings_ms={"surface_main_chain_ms": 5},
         total_latency_ms=5,
         llm_latency_ms=4,
@@ -718,7 +731,13 @@ def test_frozen_surface_defers_complete_life_command_until_task_acceptance(
     assert effect["effect_type"] == "life.foreground_completed"
     assert effect["commit_scope"] == "NODE"
     assert effect["payload"]["command_id"] == "life::foreground_completed::req-deferred"
-    assert effect["payload"]["payload"]["projection_intents"][0]["target"] == "surface.post_process"
+    projection = effect["payload"]["payload"]["projection_intents"][0]
+    assert projection["target"] == "surface.post_process"
+    projected_trace = projection["payload"]["trace_stage_meta"]
+    assert "governed_model_budget" not in projected_trace
+    assert projected_trace["surface_model_attempt"]["attempt_ids"] == [
+        "attempt::deferred"
+    ]
 
 
 def test_app_life_paths_have_no_legacy_mutator_or_surface_create_task() -> None:

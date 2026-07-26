@@ -9,6 +9,10 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+NE-01 当前正在把 Chat 模型预算从“存在合同”推进为可由持久账本独立验收的生产链。GR05 不再伪造 `surface_model_attempt`，而是经真实 `Surface Runtime → ModelAttemptService → Provider adapter → WorkerProjection → 父子 Budget ledger` 执行普通 Chat 与 Plan 最终合成；只有最末端 provider transport 使用受控 adapter。provider 返回的 token、重试和模型成本必须同时匹配 canonical `model_attempt_log`、不可变 WorkerProjection、Graph Budget usage 与 Attempt-bound child usage，exact replay 不得再次调用 provider。该受控链证明治理和计量，不证明外部 provider 质量、PlanningSearch 收益或 NE-07 实栈；在干净提交绑定收据产生前，Chat 的 `budget_enforcement` 仍保持 `PARTIAL`。
+
+真实调用同时暴露并修复了两个先前被假数据遮蔽的问题：内部 `governed_model_budget` guard 不再泄漏进 Life acceptance payload，只有实际测量可以持久化；Task Runtime 也不再覆盖 Surface executor 已提交的 audit path，瞬时 COMMIT 与 durable WorkerProjection 因此保持同一来源身份。验收采集器新增隐私有界的模型生命周期与 Worker 预算证据，只输出标识、digest 和用量，不输出 prompt、模型回复或 secret。
+
 NE-01 新增了七路线提交绑定验收账本 v3，但尚未把七条路线判为完成。只读采集器在一个事务中打开真实文件型 SQLite，核对 HostCommand、不可变 TaskGraph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox，以及当前 recovery/cancellation 空集；收据同时绑定干净 Git HEAD、仓库 migration head 和数据库已应用 migration head。请求标识只输出摘要，禁止用户正文、模型输出、secret 和原始 payload。GR05 当前已把 Direct Skill 纳入同一 Host Runtime，使 `chat/skill/delegate/plan` 四路在真实 SQLite 上共同通过。
 
 本地剩余路线驱动器又通过真实 Scheduler CommandService、Internal CommandService 和带 Review/HardState Effect/外层 outcome 的 Operator Runtime，把三路终态顺序写入同一个 canonical SQLite。它与 GR05 已在干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 上串联运行，仓库与数据库 migration head 均为 `0135_task_review_denial_settlement.sql`；只读 validator 得到七路全部 `PASS`、reason code 全空。正式隐私安全收据见 [ne01_universal_route_acceptance_20260727.json](docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json)，因此七路 `commit_bound_acceptance` 控制均已提升为 `PASS`。驱动器使用有明确标识的 bounded deterministic worker，只证明治理与持久语义，不冒充真实模型、PlanningSearch 收益或 NE-07 全栈证据；其它 `PARTIAL` 控制仍使七条路线及 NE-01 保持 `INCOMPLETE / IN_PROGRESS`。

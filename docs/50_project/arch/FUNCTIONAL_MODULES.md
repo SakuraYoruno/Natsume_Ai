@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.27
+版本：v2.28
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -13,6 +13,8 @@
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound acceptance 已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、路线其余控制与 NE-01 仍未闭环。
 
 Route Acceptance 模块分为三个只读责任：`persistence/universal_route_acceptance_reader.py` 只负责从一个真实 SQLite snapshot 重开 bounded facts；`release/universal_route_acceptance.py` 只负责 Git/migration 绑定、七路判定、隐私字段白名单和 digest；`scripts/runtime/collect_universal_runtime_acceptance.py` 只负责参数解析与原子写出本地证据。它们都没有 Task、Budget、Review、Effect 或 Outbox writer。Coverage Gate 只接受可通过 v3 validator 的真实收据结构；当前正式收据绑定干净提交 `59527b12`、migration 0135 和七路 PASS，使七个提交绑定控制均为 `PASS`，但不会覆盖各路线其余控制。
+
+Model Budget Evidence 模块不新增 writer。`ModelAttemptService` 和 ledger audit 仍拥有 provider 调用生命周期，Surface 只把成功调用的 identity 与 measurement 放入 WorkerProjection，Task Runtime 的 Budget owner 继续原子写 parent/child usage；`UniversalRouteAcceptanceReader` 只抽取隐私有界证据，release validator 只做跨表等值和生命周期校验。`governed_model_budget` 是执行期 guard，不属于 Life/Effect payload；executor 的 audit path 属于 executor，不得被 worker wrapper 覆盖。当前 GR05 只替换 terminal provider transport，证明模块接线和 replay，不证明外部模型质量。
 
 Local Acceptance Driver 不属于 Host 生产 composition。`tools/acceptance/universal_remaining_routes.py` 只在显式验收命令中构造 app-local Scheduler/Internal/Operator Runtime，写入调用者指定的隔离 SQLite；`scripts/runtime/run_universal_remaining_route_acceptance.py` 负责 CLI 和 request map。Scheduler、Internal、Operator 仍使用各自正式 CommandService、Task coordinator、Preview、Effect 和 claim owner；确定性 worker 有显式 `bounded_local_acceptance` 标识，不能被 Model/PlanningSearch/NE-07 Gate 消费。
 

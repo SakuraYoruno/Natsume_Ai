@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.47
+版本：v5.48
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,10 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线，当前七路均为 `INCOMPLETE`。
+
+Chat 与 Plan 合成的模型预算校准现在使用真实生产等价调用链。GR05 构造真实 prompt registry、route policy、`ModelAttemptService`、ledger audit 与 Surface ports，只控制 terminal provider transport；两个新请求各自生成 canonical `started → succeeded` Attempt，provider token/cost measurement 进入不可变 WorkerProjection，再以稳定 usage id 同时落入 Graph parent 与 Attempt-bound child Budget。exact replay 只重开既有结果，不再次调用 provider。只读验收会关联这四组事实并拒绝缓存、孤儿 Attempt、身份和测量漂移。
+
+该校准修复了两个运行时错误。`surface.post_process` 构造 Life trace 时过滤内部 `governed_model_budget`，避免把执行 guard 当成可持久业务数据；`GovernedFrozenNodeWorker` 只在 executor 未提供 path 时写 fallback，保留 Surface COMMIT 与 durable projection 的同一来源身份。当前只是受控 terminal transport 的本地代码证据；干净提交收据与真实 provider 尚未运行，所以 Chat budget 控制未升级。
 
 Universal Runtime 现在有一套独立的提交绑定判定器和七路正式 PASS 收据。Persistence reader 以 SQLite URI `mode=ro` 和 `query_only=ON` 在单一事务重开运行事实；Release builder 将事实约束为 `natsume.universal-runtime-route-acceptance.v3`，绑定干净 Git HEAD、仓库与数据库 migration head，并逐节点核对 Attempt/Lease/Operation、父子 Budget usage lineage、Verification/Acceptance、Artifact/WorkerProjection、Effect/Outbox/Receipt。输出只保留 bounded identifier、状态、版本和 digest；原始 Command/WorkOrder/Graph/Effect payload、用户正文和模型输出不能进入收据。
 
