@@ -95,11 +95,12 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
             "edge.command.push",
             "scheduler.task.trigger",
             "sys_mode.switch",
+            "task_effect.reconcile",
             "task_operation.reconcile",
             "task_terminal.reconcile",
         }
     )
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 32
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 31
     assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
         expected
     )
@@ -533,14 +534,14 @@ def test_task_operation_reconcile_is_fail_closed_when_feature_is_disabled() -> N
 def test_task_effect_reconcile_binds_actor_and_forwards_exact_signed_snapshot() -> None:
     captured: dict[str, object] = {}
 
-    class _ReconciliationService:
+    class _GovernedRuntime:
         @staticmethod
-        async def reconcile_graph_cancellation_effect(**kwargs):  # noqa: ANN003
-            captured.update(kwargs)
+        async def execute_effect_reconciliation(payload, request_id):  # noqa: ANN001
+            captured.update(payload)
+            captured["request_id"] = request_id
             return {
-                "intent_ref": kwargs["intent_ref"],
-                "status": "PROOF_RECORDED",
-                "effect": {"effect_id": kwargs["effect_id"]},
+                "success": True,
+                "status": "RECONCILED",
             }
 
     registry = build_default_obs_domain_command_registry()
@@ -567,24 +568,29 @@ def test_task_effect_reconcile_binds_actor_and_forwards_exact_signed_snapshot() 
         principal_id="reconciler.authenticated",
     )
     state = SimpleNamespace(
-        task_effect_reconciliation_command_service=_ReconciliationService(),
+        task_effect_reconciliation_operator_enabled=True,
+        governed_operator_runtime=_GovernedRuntime(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-effect-proof"):
-        with pytest.raises(ObsCommandPortExecutionError) as blocked:
-            asyncio.run(registry.resolve_port("task_effect.reconcile").execute(envelope))
+        result = asyncio.run(
+            registry.resolve_port("task_effect.reconcile").execute(envelope)
+        )
 
     assert envelope.payload["reconciler_actor_id"] == "reconciler.authenticated"
     assert envelope.payload["expected_case_snapshot_sha256"] == case_digest
     assert envelope.payload["expected_subject_snapshot_sha256"] == subject_digest
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-    assert captured == {}
+    assert result.success is True
+    assert captured["reconciler_actor_id"] == "reconciler.authenticated"
+    assert captured["request_id"] == "request-task_effect.reconcile"
+    assert captured["_operator_authority"]["operator_command_id"] == (
+        "task_effect.reconcile"
+    )
 
 
 def test_task_effect_reconcile_preserves_unknown_write_certainty() -> None:
-    class _ReconciliationService:
+    class _GovernedRuntime:
         @staticmethod
-        def reconcile_graph_cancellation_effect(**_kwargs):  # noqa: ANN003
+        async def execute_effect_reconciliation(_payload, _request_id):  # noqa: ANN001
             raise GraphCancellationEffectReconciliationError(
                 "EFFECT_RECONCILIATION_UNCERTAIN",
                 "response lost",
@@ -609,14 +615,15 @@ def test_task_effect_reconcile_preserves_unknown_write_certainty() -> None:
         },
     )
     state = SimpleNamespace(
-        task_effect_reconciliation_command_service=_ReconciliationService(),
+        task_effect_reconciliation_operator_enabled=True,
+        governed_operator_runtime=_GovernedRuntime(),
     )
     with bind_operator_command_runtime(state, raw_body=b"signed-effect-proof"):
         with pytest.raises(ObsCommandRoutingError) as raised:
             asyncio.run(ObsCommandRouter(registry).route(envelope))
 
-    assert raised.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert raised.value.side_effects_may_have_run is False
+    assert raised.value.reason_code == "EFFECT_RECONCILIATION_UNCERTAIN"
+    assert raised.value.side_effects_may_have_run is True
 
 
 def test_task_terminal_reconcile_binds_actor_and_forwards_signed_targets() -> None:

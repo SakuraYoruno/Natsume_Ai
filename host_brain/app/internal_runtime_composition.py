@@ -250,10 +250,16 @@ async def activate_internal_runtime(
         if operation_reconciliation_operator_enabled
         else None
     )
+    application.state.task_operation_reconciliation_operator_enabled = bool(
+        operation_reconciliation_operator_enabled
+    )
     application.state.task_effect_reconciliation_command_service = (
         task_runtime.effect_reconciliation_service
         if effect_reconciliation_operator_enabled
         else None
+    )
+    application.state.task_effect_reconciliation_operator_enabled = bool(
+        effect_reconciliation_operator_enabled
     )
     application.state.task_terminal_reconciliation_operator_enabled = bool(
         terminal_reconciliation_operator_enabled

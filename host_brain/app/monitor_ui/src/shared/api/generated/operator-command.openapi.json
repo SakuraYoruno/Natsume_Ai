@@ -3938,7 +3938,6 @@
                       }
                     },
                     "required": [
-                      "intent_ref",
                       "effect_id",
                       "case_id",
                       "expected_case_snapshot_sha256",

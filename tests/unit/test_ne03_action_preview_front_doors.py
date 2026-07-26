@@ -1015,7 +1015,7 @@ async def test_legacy_operator_and_retired_edge_actuators_fail_before_side_effec
 
 
 @pytest.mark.asyncio
-async def test_all_32_legacy_obs_direct_commands_fail_before_handler() -> None:
+async def test_all_31_legacy_obs_direct_commands_fail_before_handler() -> None:
     calls: list[str] = []
     authority = ObsCommandAuthority.bind(
         principal_id="operator-preview",
@@ -1023,13 +1023,13 @@ async def test_all_32_legacy_obs_direct_commands_fail_before_handler() -> None:
         request_id="request-preview-all-obs",
     )
     assert len(DEFAULT_OBS_COMMAND_SPECS) == 37
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 32
+    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 31
     blocked_specs = tuple(
         spec
         for spec in DEFAULT_OBS_COMMAND_SPECS
         if spec.command_id in BLOCKED_OPERATOR_COMMAND_IDS
     )
-    assert len(blocked_specs) == 32
+    assert len(blocked_specs) == 31
     for spec in blocked_specs:
         port = _DomainCommandPort(
             command_id=spec.command_id,

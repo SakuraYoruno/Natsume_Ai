@@ -124,6 +124,53 @@ _EFFECT_PUBLIC_FIELDS = (
     "last_error_sha256",
     "updated_ts_ms",
 )
+_GENERAL_EFFECT_CASE_FIELDS = (
+    "schema_version",
+    "case_id",
+    "purpose",
+    "case_kind",
+    "classification",
+    "effect_id",
+    "graph_id",
+    "graph_revision",
+    "node_id",
+    "attempt_id",
+    "snapshot_sha256",
+)
+_GENERAL_EFFECT_FIELDS = (
+    "effect_id",
+    "commit_scope",
+    "effect_type",
+    "payload_ref",
+    "payload_sha256",
+    "idempotency_key",
+    "status",
+    "status_version",
+    "available_ts_ms",
+    "lease_owner",
+    "lease_expires_ts_ms",
+    "fencing_token",
+    "attempt_count",
+    "receipt_ref",
+    "reason_code",
+    "last_error_sha256",
+    "created_ts_ms",
+    "updated_ts_ms",
+    "committed_ts_ms",
+    "failed_ts_ms",
+)
+_GENERAL_EFFECT_TASK_FIELDS = (
+    "graph_id",
+    "graph_revision",
+    "graph_status",
+    "graph_status_version",
+    "node_id",
+    "node_status",
+    "node_status_version",
+    "attempt_id",
+    "attempt_status",
+    "attempt_status_version",
+)
 _EFFECT_FENCE_FIELDS = (
     "effect_id",
     "intent_ref",
@@ -355,6 +402,66 @@ def _effect_reconciliation_challenge(value: Any) -> dict[str, Any]:
     }
 
 
+def _general_effect_reconciliation_challenge(value: Any) -> dict[str, Any]:
+    source = dict(value) if isinstance(value, dict) else dict(value or {})
+    subject = {
+        "case": _selected(
+            source.get("case"),
+            _GENERAL_EFFECT_CASE_FIELDS,
+        ),
+        "effect": _selected(
+            source.get("effect"),
+            _GENERAL_EFFECT_FIELDS,
+        ),
+        "task": _selected(
+            source.get("task"),
+            _GENERAL_EFFECT_TASK_FIELDS,
+        ),
+        "subject_snapshot_sha256": _text(
+            source.get("subject_snapshot_sha256")
+        ),
+    }
+    encoded = json.dumps(
+        subject,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    proof = source.get("proof")
+    settlement = None
+    if isinstance(proof, dict):
+        settlement = _selected(
+            proof,
+            (
+                "proof_id",
+                "case_id",
+                "effect_id",
+                "outcome",
+                "target_effect_status",
+                "receipt_ref",
+                "executor_quiescence_ref",
+                "attestation_ref",
+                "attestation_key_id",
+                "issued_ts_ms",
+                "proof_digest",
+                "outbox_id",
+                "created_ts_ms",
+            ),
+        )
+    return {
+        **subject,
+        "signing_material": {
+            "encoding": "base64url-canonical-json",
+            "payload_b64": base64.urlsafe_b64encode(encoded).decode("ascii"),
+            "payload_sha256": (
+                "sha256:" + hashlib.sha256(encoded).hexdigest()
+            ),
+        },
+        "settlement": settlement,
+    }
+
+
 def _terminal_case_summary(value: Any) -> dict[str, Any]:
     return _selected(value, _TERMINAL_CASE_LIST_FIELDS)
 
@@ -556,6 +663,75 @@ async def get_task_effect_reconciliation_challenge(
         _raise_read_model_error(exc)
 
 
+@router.get("/task-runtime/acceptance-effect-reconciliation/candidates")
+async def list_task_acceptance_effect_reconciliation_candidates(
+    limit: int = Query(100, ge=1, le=500),
+    store: Any = Depends(_get_effect_reconciliation_store),
+) -> dict[str, Any]:
+    """List cancellation-independent unknown Effect signing subjects."""
+
+    _require_operator_views_enabled()
+    reader = getattr(
+        store,
+        "list_acceptance_effect_reconciliation_candidates",
+        None,
+    )
+    if not callable(reader):
+        raise HTTPException(
+            status_code=503,
+            detail="Acceptance Effect reconciliation read authority unavailable",
+        )
+    try:
+        candidates = reader(limit=limit)
+        return {
+            "schema_version": (
+                "Natsume.operator."
+                "acceptance_effect_reconciliation_candidates.v2"
+            ),
+            "read_only": True,
+            "count": len(candidates),
+            "candidates": [
+                _general_effect_reconciliation_challenge(item)
+                for item in candidates
+            ],
+        }
+    except TaskStoreError as exc:
+        _raise_read_model_error(exc)
+
+
+@router.get("/task-runtime/acceptance-effect-reconciliation/challenge")
+async def get_task_acceptance_effect_reconciliation_challenge(
+    effect_id: str = Query(..., min_length=1, max_length=512),
+    case_id: str | None = Query(None, min_length=1, max_length=512),
+    store: Any = Depends(_get_effect_reconciliation_store),
+) -> dict[str, Any]:
+    """Read one exact general Effect subject without payload or raw error."""
+
+    _require_operator_views_enabled()
+    reader = getattr(
+        store,
+        "read_acceptance_effect_reconciliation",
+        None,
+    )
+    if not callable(reader):
+        raise HTTPException(
+            status_code=503,
+            detail="Acceptance Effect reconciliation read authority unavailable",
+        )
+    try:
+        aggregate = reader(effect_id, case_id=case_id)
+        return {
+            "schema_version": (
+                "Natsume.operator."
+                "acceptance_effect_reconciliation_challenge.v2"
+            ),
+            "read_only": True,
+            **_general_effect_reconciliation_challenge(aggregate),
+        }
+    except TaskStoreError as exc:
+        _raise_read_model_error(exc)
+
+
 @router.get("/task-runtime/terminal-reconciliation/candidates")
 async def list_task_terminal_reconciliation_candidates(
     graph_id: str | None = Query(None, min_length=1, max_length=512),
@@ -686,10 +862,12 @@ async def get_task_terminal_reconciliation_challenge(
 
 
 __all__ = [
+    "get_task_acceptance_effect_reconciliation_challenge",
     "get_task_runtime_review_locator",
     "get_task_runtime_execution",
     "get_task_effect_reconciliation_challenge",
     "get_task_terminal_reconciliation_challenge",
+    "list_task_acceptance_effect_reconciliation_candidates",
     "list_task_effect_reconciliation_candidates",
     "list_task_effect_reconciliation_cases",
     "list_task_terminal_reconciliation_candidates",

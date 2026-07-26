@@ -64,6 +64,12 @@ _OPERATOR_OPERATION_RECONCILIATION_TARGET = (
 _OPERATOR_OPERATION_RECONCILIATION_EFFECT = (
     "task.operation_reconciliation"
 )
+_OPERATOR_EFFECT_RECONCILIATION_TARGET = (
+    "operator_task_effect_reconcile"
+)
+_OPERATOR_EFFECT_RECONCILIATION_EFFECT = (
+    "task.acceptance_effect_reconciliation"
+)
 _SCHEDULER_OPERATION_EFFECT = "scheduler.operation.execute"
 _SCHEDULER_PLAN_SCHEMA = "Natsume.scheduler.operation_plan.v1"
 _SCHEDULER_EFFECT_SCHEMA = "Natsume.scheduler.accepted_operation.v1"
@@ -595,6 +601,15 @@ def _compile_operator_effects(
             commit=commit,
             pack=pack,
         )
+    if command.target_id == _OPERATOR_EFFECT_RECONCILIATION_TARGET:
+        return _compile_operator_effect_reconciliation_effect(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            commit=commit,
+            pack=pack,
+        )
     if command.target_id == _OPERATOR_EDGE_TARGET:
         return _compile_operator_edge_effect(
             command=command,
@@ -1082,6 +1097,133 @@ def _compile_operator_operation_reconciliation_effect(
     return (
         _spec(
             effect_type=_OPERATOR_OPERATION_RECONCILIATION_EFFECT,
+            payload={**payload, "_action_preview_context": preview_context},
+            command=command,
+            node_id=node_id,
+            attempt_id=attempt_id,
+        ),
+    )
+
+
+def _compile_operator_effect_reconciliation_effect(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    attempt_id: str,
+    commit: Mapping[str, Any],
+    pack: Mapping[str, Any],
+) -> tuple[AcceptanceEffectIntentSpec, ...]:
+    raw = commit.get("acceptance_effect_intents")
+    if not isinstance(raw, Sequence) or isinstance(
+        raw,
+        (str, bytes, bytearray),
+    ):
+        raise AcceptanceEffectCompileError(
+            "Acceptance Effect reconciliation Operator must propose one effect"
+        )
+    if len(raw) != 1:
+        raise AcceptanceEffectCompileError(
+            "Acceptance Effect reconciliation Operator must propose exactly "
+            "one effect"
+        )
+    descriptor = _json_mapping(
+        raw[0],
+        field_name="Acceptance Effect reconciliation descriptor",
+    )
+    if set(descriptor) != {"effect_type", "commit_scope", "payload"}:
+        raise AcceptanceEffectCompileError(
+            "Acceptance Effect reconciliation descriptor fields drifted"
+        )
+    if (
+        descriptor.get("effect_type")
+        != _OPERATOR_EFFECT_RECONCILIATION_EFFECT
+        or str(descriptor.get("commit_scope") or "").strip().upper()
+        != "NODE"
+    ):
+        raise AcceptanceEffectCompileError(
+            "Acceptance Effect reconciliation proposed an unsupported effect"
+        )
+    payload = _json_mapping(
+        descriptor.get("payload"),
+        field_name="Acceptance Effect reconciliation payload",
+    )
+    _reject_worker_authority(payload)
+    intent = _json_mapping(pack.get("intent_draft"), field_name="intent_draft")
+    args = _json_mapping(intent.get("args"), field_name="intent_draft.args")
+    request_fields = {
+        "evidence_ref",
+        "evidence_digest",
+        "effect_id",
+        "case_id",
+        "purpose",
+        "outcome",
+        "reconciler_actor_id",
+    }
+    required_keys = {
+        "operator_command_id",
+        "request_id",
+        *request_fields,
+    }
+    expected = {
+        "operator_command_id": "task_effect.reconcile",
+        "request_id": command.request_id,
+        **{field: args.get(field) for field in request_fields},
+    }
+    evidence_ref = str(expected.get("evidence_ref") or "")
+    metadata = _json_mapping(
+        getattr(work_order, "metadata", {}),
+        field_name="work_order.metadata",
+    )
+    if (
+        set(payload) != required_keys
+        or payload != expected
+        or not re.fullmatch(
+            r"effect-reconcile-evidence://sha256/[0-9a-f]{64}",
+            evidence_ref,
+        )
+        or str(expected.get("evidence_digest") or "")
+        != "sha256:" + evidence_ref.rsplit("/", 1)[-1]
+        or not re.fullmatch(
+            r"[a-z][a-z0-9+.-]{1,31}://\S+",
+            str(expected.get("effect_id") or ""),
+        )
+        or not re.fullmatch(
+            r"[a-z][a-z0-9+.-]{1,31}://\S+",
+            str(expected.get("case_id") or ""),
+        )
+        or str(expected.get("purpose") or "")
+        != "GENERAL_UNKNOWN_EFFECT"
+        or str(expected.get("outcome") or "")
+        not in {"NO_SIDE_EFFECT", "SIDE_EFFECT_CONFIRMED"}
+        or not str(expected.get("reconciler_actor_id") or "").strip()
+        or str(intent.get("action") or "").strip()
+        != "operator_task_effect_reconciliation"
+        or str(intent.get("target") or "").strip().lower()
+        != "task_runtime"
+        or str(intent.get("route") or "").strip().lower() != "delegate"
+        or str(intent.get("target_id") or "").strip()
+        != _OPERATOR_EFFECT_RECONCILIATION_TARGET
+        or str(metadata.get("operator_command_id") or "").strip()
+        != "task_effect.reconcile"
+    ):
+        raise AcceptanceEffectCompileError(
+            "Acceptance Effect reconciliation differs from frozen intent"
+        )
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_id,
+        worker_commit=commit,
+    )
+    if preview_context is None:
+        raise AcceptanceEffectCompileError(
+            "Acceptance Effect reconciliation has no Runtime Context preview "
+            "binding"
+        )
+    return (
+        _spec(
+            effect_type=_OPERATOR_EFFECT_RECONCILIATION_EFFECT,
             payload={**payload, "_action_preview_context": preview_context},
             command=command,
             node_id=node_id,

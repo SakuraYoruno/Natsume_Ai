@@ -75,6 +75,10 @@ from host_brain.task_runtime.operation_failure_reconciliation import (
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
+from host_brain.task_runtime.acceptance_effect_reconciliation import (
+    AcceptanceEffectReconciliationService,
+    EffectReconciliationCommandService,
+)
 from host_brain.task_runtime.terminal_state_reconciliation import (
     TerminalStateReconciliationService,
 )
@@ -204,7 +208,7 @@ class ProcessTaskRuntimeContainer:
     graph_execution_registry: LocalGraphExecutionRegistry
     cancellation_continuation_worker: GraphCancellationContinuationWorker
     operation_reconciliation_service: OperationReconciliationCommandService
-    effect_reconciliation_service: GraphCancellationEffectReconciliationService
+    effect_reconciliation_service: EffectReconciliationCommandService
     terminal_reconciliation_service: TerminalStateReconciliationService
     terminal_operator_command_store: TerminalOperatorCommandStore
     terminal_reconciliation_inventory: Mapping[str, Any]
@@ -819,6 +823,7 @@ def build_process_task_runtime_container(
         task_store.assert_outbox_delivery_ready()
         task_store.assert_graph_cancellation_continuation_ready()
         task_store.assert_effect_reconciliation_ready()
+        task_store.assert_acceptance_effect_reconciliation_ready()
         task_store.assert_terminal_reconciliation_ready()
         task_store.assert_node_artifact_ready()
         terminal_operator_command_store = terminal_operator_command_store_builder(
@@ -945,11 +950,24 @@ def build_process_task_runtime_container(
             checkpoint_service=operation_checkpoint_service,
             failure_service=operation_failure_service,
         )
-        effect_reconciliation_service = GraphCancellationEffectReconciliationService(
-            task_store=task_store,
-            outbox_factory=OutboxMessage,
-            wake_cancellation=cancellation_continuation_worker.wake,
-            clock_ms=now_ms,
+        cancellation_effect_reconciliation_service = (
+            GraphCancellationEffectReconciliationService(
+                task_store=task_store,
+                outbox_factory=OutboxMessage,
+                wake_cancellation=cancellation_continuation_worker.wake,
+                clock_ms=now_ms,
+            )
+        )
+        general_effect_reconciliation_service = (
+            AcceptanceEffectReconciliationService(
+                task_store=task_store,
+                outbox_factory=OutboxMessage,
+                clock_ms=now_ms,
+            )
+        )
+        effect_reconciliation_service = EffectReconciliationCommandService(
+            cancellation_service=cancellation_effect_reconciliation_service,
+            general_service=general_effect_reconciliation_service,
         )
     except TaskRuntimeContainerConstructionError as exc:
         rollback = _close_constructed_sync(constructed)

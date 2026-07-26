@@ -7,6 +7,12 @@
 维护日期：2026-07-26
 状态：当前证据
 
+## NE-01 general Acceptance Effect 签名对账当前切片
+
+- 新增第 6 条 governed Operator 写路线 `task_effect.reconcile`。`GENERAL_UNKNOWN_EFFECT` 的原始 Ed25519 请求在 Secure Ingress admission 前验证并写入 0128 append-only evidence sidecar；WorkOrder/TaskGraph/Review/外层 Effect 只携带 ref/digest 与最小 subject identity。
+- 风险 4 Review、Action Preview、Verification 和外层 Acceptance 后，Accepted handler 重开并重新验签 evidence；canonical UoW 原子提交 signed proof、target Effect 与 Outbox。cancellation-bound Effect reconciliation 保持独立，不能由该路线静默升级。
+- 当前主受影响集合为 `63 passed in 52.65s`，handler/结构集合为 `52 passed in 1.94s`；迁移与合同按不重叠文件分区为 `32 + 37 + 5` 全绿，0126 增量 readiness 修复另有 `8 + 2 targeted` 全绿。集合不累加为伪总数。`compileall`、本批 JSON、diff check、生成 Operator client、文档 Gate 和 static Gate 1～14 全部通过且未扩白名单。部署 key、HTTP/network canary、NE-01 wave integration 与 NE-07 Docker 全栈均为 `NOT_RUN`，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`，NE-01 保持 `IN_PROGRESS`。
+
 ## NE-01 有界多 checkpoint 共享 Budget 恢复当前切片
 
 - 真实 SQLite 构造两个无依赖根节点、`ATOMIC_GRAPH_SUCCESS_V1` 和并发度 2；两个 worker 都先提交 canonical WorkerProjection 与 `COMMITTED` Operation，再分别提交 worker BudgetUsage，同时模拟写响应与首次 exact read 双重丢失。初始 owner 只能返回 `RECOVERY_REQUIRED`，不得写伪终态或重跑 worker。
@@ -21,7 +27,7 @@
 - 另有 checkpoint/parallel structure `20 passed in 38.41s`、accepted-effect restart 与 Budget contention `4 passed in 11.51s`、文档/release/coverage `54 passed in 13.45s`。测试夹具补齐 production-required node Grant verifier；目标模块 `compileall`、统一 static scan、doc gate、JSON 解析与 `git diff --check` 均通过。静态 Gate `failures=[]`，未扩大 allowlist。
 - authority 加固后的两个新增场景为 `2 passed in 8.81s`，包含既有五项回归的完整模块为 `7 passed in 25.59s`；它们与后续宽回归可能重叠，禁止相加。
 - 当前提交的受影响代码集合（多 checkpoint、online takeover、Budget contention、checkpoint recovery、parallel winner 与 Node projection）为 `56 passed in 126.52s`；文档 authority/freshness、coverage、release、NLE boundary 与 import-order 合同为 `45 passed in 94.67s`，其中 11 条既存转义 DeprecationWarning 不构成失败。Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`、Gate 3 `issues=[] / new_mixed_over_800=[]`；compileall、规则降级扫描、JSON 与 diff-check 均通过。56/45 与前述 focused 集合可能重叠，不相加。
-- 该切片不解决 `CONFLICT`、`RESERVED`、超出当前 four-root proof 的任意图形/规模、取消交叉、未知 external effect、部署 fan-out canary 或七路线波次验收。状态为 `SHARED_EXCEEDED_MISSING_CHECKPOINT_RECOVERY_LOCAL_PROVEN / BOUNDED_FOUR_NODE_SHARED_BUDGET_RECOVERY_LOCAL_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE`；migration head 仍为 0127，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该切片不解决 `CONFLICT`、`RESERVED`、超出当前 four-root proof 的任意图形/规模、取消交叉、未知 external effect、部署 fan-out canary 或七路线波次验收。状态为 `SHARED_EXCEEDED_MISSING_CHECKPOINT_RECOVERY_LOCAL_PROVEN / BOUNDED_FOUR_NODE_SHARED_BUDGET_RECOVERY_LOCAL_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE`；该子集自身不新增 migration，仓库现行 head 已推进到 0128，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 signed WorkerProjection checkpoint COMMIT 当前切片
 
@@ -31,7 +37,7 @@
 - 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
 - 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
 - Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
-- 当前 migration head 为 `0127_worker_projection_immutability.sql`。该证据使用本地临时 key、单节点和进程内 route continuation；部署 key/HTTP/network canary、普通 RELEASE、任意外部效果 receipt、general multi-node/batch、七路线波次与 NE-07 Docker 全栈仍未运行。状态为 `SIGNED_SINGLE_NODE_WORKER_CHECKPOINT_COMMIT_LOCAL_PROVEN / DEFAULT_OFF / GENERAL_RECOVERY_INCOMPLETE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已由 0128 推进。该证据使用本地临时 key、单节点和进程内 route continuation；部署 key/HTTP/network canary、普通 RELEASE、任意外部效果 receipt、general multi-node/batch、七路线波次与 NE-07 Docker 全栈仍未运行。状态为 `SIGNED_SINGLE_NODE_WORKER_CHECKPOINT_COMMIT_LOCAL_PROVEN / DEFAULT_OFF / GENERAL_RECOVERY_INCOMPLETE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 
@@ -49,7 +55,7 @@
 - marker 只保存有界大写原因码，不保存异常正文；caller cancellation 原样向上传播。marker、运行时 helper 与 Store mixin 均没有 Attempt/Node/Graph/Budget/Lease terminal authority，也不能 `COMMIT/RELEASE` Operation。
 - 跨进程集成从该 marker 开始，用临时 Ed25519 key 生成 `RELEASE + NO_SIDE_EFFECT` proof，重建 Store 后运行 `GraphCancellationContinuationWorker`；Graph/Node/Attempt 为 `CANCELLED`，Operation 为 `RELEASED`，第二次重启零工作，`OPERATION_RECOVERY_REQUIRED`、`OPERATION_RECOVERY_RELEASE`、`TASK_GRAPH_CANCELLED` Outbox 各一条，worker 没有重跑。
 - 当前 runtime/store/structure/cancellation 定向集合为 `133 passed in 91.94s`。随后把文档 authority/freshness、机器 coverage、metadata、Obs 合同与受影响 Runtime 合并复核为 `147 passed in 140.38s`；它包含或重叠前述测试，不相加。目标模块 `compileall`、两份 JSON、doc-only delivery gate、统一 static scan 与 `git diff --check` 均通过；fresh architecture Gate 1～14 为 `PASS`、`failed_gates=[]`，`task_repository.py` 4597 行、`node_execution_runtime.py` 1495 行，未扩大 policy。
-- 该历史切片自身没有 migration；仓库当前 head 已为 0126。测试 key 是进程内临时验签材料，不是部署凭据；Operation/Effect Operator 仍默认关闭，HTTP/key lifecycle/canary 未运行。一般 unknown-effect attribution、其它 cancellation、general multi-node/batch、Workspace 一般写、七路线验收、波次 integration 与 NE-07 Docker 全栈仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史切片自身没有 migration；当时仓库 head 为 0126，现行 head 已推进到 0128。测试 key 是进程内临时验签材料，不是部署凭据；Operation/Effect Operator 仍默认关闭，HTTP/key lifecycle/canary 未运行。general Effect 的签名人工归因后来已形成独立本地切片，但自动归因、其它 cancellation、general multi-node/batch、Workspace 一般写、七路线验收、波次 integration 与 NE-07 Docker 全栈仍未完成；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Host/Internal 周期 survivor 当前切片
 
@@ -92,9 +98,9 @@
 - 旧 `EdgeCommandPusher` 进程 owner、startup 注册与 Tribe/内部直推仍保持为 0；Obs `edge.command.push` 现在只允许 `target_agent=edge.somatic`、`command_type=emotion_state_command` 与 `emotion_tag/intensity` 白名单，其他 command 在 HostCommand admission 前失败关闭。
 - 正向链为 `Secure Ingress → typed Governor → OPERATOR HostCommand → immutable TaskGraph → risk-4 Review → Attempt/Lease/Grant/Budget → Verification/Acceptance → edge.embodiment_enqueue → terminal Preview → HostEmbodimentRuntime durable outbox`。首次响应只证明 durable enqueue；物理 dispatch 与回执独立推进。
 - 真实 SQLite 集成覆盖 Review 前 outbox 为 0、Acceptance 后唯一 `PENDING` 行、一次物理 dispatch、请求 exact replay 不重复入队/发送、unsupported command 不创建 HostCommand，以及 claim 失效后的 `IN_DOUBT → read-only receipt query → APPLIED` 且 submit 次数不增加。编译器测试另覆盖确定性 command/idempotency/authority identity 与 worker 伪造 runtime scope 拒绝。
-- Acceptance handler、Operator runtime 和 Edge 绑定 helper 已拆成聚焦模块；`acceptance_effect_handlers.py < 1300`、`governed_operator_runtime.py < 1500`，fresh architecture static Gate 1～14 全部通过且未扩大白名单。
+- Acceptance handler、Operator runtime 和 Edge 绑定 helper 已拆成聚焦模块；`acceptance_effect_handlers.py=966`，sys-mode handler=368，general Effect Store=1426+716，general Effect Runtime=793+88+34，`governed_operator_runtime.py < 1500`。fresh architecture static Gate 1～14 全部通过且未扩大白名单。
 - 最终去重的 Operator/Acceptance/Preview/Edge 受影响集合为 `78 passed in 79.67s`；文档 authority、freshness 和交付元数据为 `27 passed in 10.53s`。目标模块 `py_compile`、机器状态 JSON 解析、`git diff --check` 与 fresh static Gate 均通过，`failed_gates=[]`。
-- 集成中的物理端口是记录型 async adapter，不是真实 Edge/Gateway 进程。波次 integration、production canary、真实网络/设备与 NE-07 Docker 全栈仍为 `NOT_RUN`；计入新的 Operation route 后，其余 32 个 Operator 写命令继续阻断，NE-01 保持 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 集成中的物理端口是记录型 async adapter，不是真实 Edge/Gateway 进程。波次 integration、production canary、真实网络/设备与 NE-07 Docker 全栈仍为 `NOT_RUN`；计入后续 general Effect route 后，其余 31 个 Operator 写命令继续阻断，NE-01 保持 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Runtime 合同分层当前切片
 

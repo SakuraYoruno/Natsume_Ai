@@ -18,6 +18,7 @@ from .task_store_types import (
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
+    TASK_STORE_SCHEMA_NOT_READY,
     TaskStoreError,
     _DURABLE_REFERENCE_PATTERN,
 )
@@ -35,6 +36,56 @@ _TABLE = "task_runtime_operation_reconciliation_evidence"
 class TaskOperationReconciliationEvidenceStoreMixin:
     """Stage verified ingress evidence without exposing it to worker input."""
 
+    def assert_operation_reconciliation_evidence_ready(self) -> None:
+        """Fail closed only when the additive 0126 capability is used."""
+
+        conn = self._connect()
+        try:
+            columns = {
+                str(row["name"])
+                for row in conn.execute(f"PRAGMA table_info({_TABLE})")
+            }
+            indexes = {
+                str(row["name"])
+                for row in conn.execute(f"PRAGMA index_list({_TABLE})")
+            }
+            triggers = {
+                str(row["name"])
+                for row in conn.execute(
+                    """
+                    SELECT name FROM sqlite_master
+                    WHERE type = 'trigger' AND tbl_name = ?
+                    """,
+                    (_TABLE,),
+                )
+            }
+        finally:
+            conn.close()
+        required_columns = {
+            "evidence_ref",
+            "evidence_digest",
+            "request_id",
+            "reservation_id",
+            "expected_version",
+            "action",
+            "attestation_signature",
+            "created_ts_ms",
+        }
+        required_triggers = {
+            "trg_task_operation_reconciliation_evidence_no_update",
+            "trg_task_operation_reconciliation_evidence_no_delete",
+        }
+        if (
+            not required_columns <= columns
+            or "idx_task_operation_reconciliation_evidence_subject"
+            not in indexes
+            or not required_triggers <= triggers
+        ):
+            raise TaskStoreError(
+                TASK_STORE_SCHEMA_NOT_READY,
+                "Operation reconciliation evidence migration 0126 is not ready",
+            )
+
     def stage_operation_reconciliation_evidence(
         self,
         *,
@@ -51,6 +102,7 @@ class TaskOperationReconciliationEvidenceStoreMixin:
         attestation_key_id: str,
         attestation_signature: str,
     ) -> dict[str, Any]:
+        self.assert_operation_reconciliation_evidence_ready()
         request = self._normalize_operation_reconciliation_evidence(
             request_id=request_id,
             ingress_audit_ref=ingress_audit_ref,
@@ -171,6 +223,7 @@ class TaskOperationReconciliationEvidenceStoreMixin:
         self,
         evidence_ref: str,
     ) -> dict[str, Any]:
+        self.assert_operation_reconciliation_evidence_ready()
         reference = str(evidence_ref or "").strip()
         if not _DURABLE_REFERENCE_PATTERN.fullmatch(reference):
             raise TaskStoreError(

@@ -36,6 +36,10 @@ from host_brain.task_runtime.operation_checkpoint_reconciliation import (
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationService,
 )
+from host_brain.task_runtime.acceptance_effect_reconciliation import (
+    AcceptanceEffectReconciliationService,
+    EffectReconciliationCommandService,
+)
 from host_brain.task_runtime.terminal_state_reconciliation import (
     TerminalStateReconciliationService,
 )
@@ -149,6 +153,28 @@ class _TaskStore(_Closeable):
 
     def assert_effect_reconciliation_ready(self) -> None:
         self.events.append("task-store:effect-reconciliation-ready")
+
+    def assert_acceptance_effect_reconciliation_ready(self) -> None:
+        self.events.append(
+            "task-store:acceptance-effect-reconciliation-ready"
+        )
+
+    def read_acceptance_effect_reconciliation(
+        self,
+        effect_id: str,
+        *,
+        case_id: str | None = None,
+    ) -> dict[str, Any]:
+        del effect_id, case_id
+        return {}
+
+    def record_acceptance_effect_reconciliation_proof(
+        self,
+        effect_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        del effect_id, kwargs
+        return {}
 
     def assert_terminal_reconciliation_ready(self) -> None:
         self.events.append("task-store:terminal-reconciliation-ready")
@@ -302,6 +328,7 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "task-store:outbox-ready",
         "task-store:cancellation-continuation-ready",
         "task-store:effect-reconciliation-ready",
+        "task-store:acceptance-effect-reconciliation-ready",
         "task-store:terminal-reconciliation-ready",
         "task-store:node-artifact-ready",
         f"task-store:recover:{container.recovery_id}",
@@ -344,7 +371,15 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
     )
     assert isinstance(
         container.effect_reconciliation_service,
+        EffectReconciliationCommandService,
+    )
+    assert isinstance(
+        container.effect_reconciliation_service._cancellation,
         GraphCancellationEffectReconciliationService,
+    )
+    assert isinstance(
+        container.effect_reconciliation_service._general,
+        AcceptanceEffectReconciliationService,
     )
     assert isinstance(
         container.terminal_reconciliation_service,
@@ -445,7 +480,7 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert "private platform detail" not in caught.value.detail
     assert caught.value.rollback_failures == ()
-    assert len(events) == 10
+    assert len(events) == 11
     assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
@@ -453,10 +488,11 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
     assert events[4] == "task-store:effect-reconciliation-ready"
-    assert events[5] == "task-store:terminal-reconciliation-ready"
-    assert events[6] == "task-store:node-artifact-ready"
-    assert events[7].startswith("task-store:recover:task-runtime-startup::")
-    assert events[8:] == ["task-store:close", "migration:close"]
+    assert events[5] == "task-store:acceptance-effect-reconciliation-ready"
+    assert events[6] == "task-store:terminal-reconciliation-ready"
+    assert events[7] == "task-store:node-artifact-ready"
+    assert events[8].startswith("task-store:recover:task-runtime-startup::")
+    assert events[9:] == ["task-store:close", "migration:close"]
 
 
 def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
@@ -530,11 +566,12 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     assert events[2] == "task-store:outbox-ready"
     assert events[3] == "task-store:cancellation-continuation-ready"
     assert events[4] == "task-store:effect-reconciliation-ready"
-    assert events[5] == "task-store:terminal-reconciliation-ready"
-    assert events[6] == "task-store:node-artifact-ready"
-    assert events[7].startswith("task-store:recover:task-runtime-startup::")
-    assert events[8] == "task-store:terminal-reconciliation-inventory"
-    assert events[9:] == [
+    assert events[5] == "task-store:acceptance-effect-reconciliation-ready"
+    assert events[6] == "task-store:terminal-reconciliation-ready"
+    assert events[7] == "task-store:node-artifact-ready"
+    assert events[8].startswith("task-store:recover:task-runtime-startup::")
+    assert events[9] == "task-store:terminal-reconciliation-inventory"
+    assert events[10:] == [
         "review-store:build",
         "review-continuation-store:build",
         "worker-projection-store:build",
