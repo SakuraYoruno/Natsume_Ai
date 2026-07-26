@@ -504,6 +504,25 @@ class TaskDagStateStoreMixin:
                 if node_budget_ready is not None
                 else []
             )
+            node_verification_ready = conn.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'task_runtime_node_verification_decision'
+                """
+            ).fetchone()
+            node_verification_rows = (
+                conn.execute(
+                    """
+                    SELECT * FROM task_runtime_node_verification_decision
+                    WHERE graph_id = ? AND graph_revision = ?
+                    ORDER BY node_id, node_version_after, verification_ref
+                    """,
+                    (str(graph_id), int(revision)),
+                ).fetchall()
+                if node_verification_ready is not None
+                else []
+            )
             snapshot = {
                 "observed_ts_ms": observed_ts_ms,
                 "graph_record": _graph_record(graph_row, node_rows),
@@ -521,6 +540,10 @@ class TaskDagStateStoreMixin:
                         "accepted": bool(row["accepted"]),
                     }
                     for row in node_budget_usage_rows
+                ],
+                "node_verifications": [
+                    self._node_verification_record(conn, row)
+                    for row in node_verification_rows
                 ],
             }
             if include_graph_outboxes:

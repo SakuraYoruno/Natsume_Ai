@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.14
+版本：v3.15
 
 核对日期：2026-07-26
 
@@ -12,6 +12,21 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+节点验证的当前持久流为：
+
+```mermaid
+flowchart TD
+    O["Operation COMMITTED\nworker receipt"] --> A["Attempt SUCCEEDED\nLease released"]
+    A --> V["Node VERIFYING"]
+    V --> D["0133 append-only verification decision\nGraph revision + Node + Attempt + digest + evidence + Outbox"]
+    D -->|PASS| P["Node VERIFIED\nContinuation 只读重开 decision"]
+    D -->|direct FAIL| F["同一 UoW\nNode VERIFICATION_FAILED\nGraph FAILED\nGraph Budget RELEASED"]
+    D -->|multi-node FAIL| M["Node VERIFICATION_FAILED"]
+    M --> S["0090 唯一 Graph/Budget settlement"]
+```
+
+Node transition 与 decision 不能分开提交。直接失败的三类聚合和 Outbox 任一漂移都会整体回滚；首次事务已提交但响应丢失时，Runtime 用完全相同参数重试，由 Store 校验 exact replay。该流没有改变多节点 Graph 的 0090 terminal authority，也不证明一般 cancellation/recovery 已完成。
 
 Plan 节点审批数据流为：`SkillRegistry.require_confirm → PlanningCapability.requires_review → selected candidate policy + catalog ref → PlanningGraphCompiler 重绑定 actual node_id → WorkOrderV3.node_review_policies → Scheduler per-node Review gate → 0096 continuation claim → renewed node-grant batch`。第一次执行已 accepted 的前驱 projection 保留原 grant；续跑中首次执行的节点使用续签 grant；atomic-success finalizer分别核对两类 immutable authority。candidate key 不会流入最终 WorkOrder，缺失 node coverage 或畸形 policy 在 worker 前阻断。
 

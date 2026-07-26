@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.20
+版本：v2.21
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -28,6 +28,8 @@ Task Runtime 的恢复架构新增一个持久“停机面”，而不是第二�
 0131 没有新增 mutation authority，而是在既有 0126 evidence 与 0130 hold 之间增加数据库级精确绑定。当前 UNKNOWN/CANCELLATION hold 的 ref 与 subject digest 必须从 Secure Ingress 一路冻结到 Acceptance Effect；Accepted handler 调用原 Operation/Outbox 单事务 owner 后，再重开同一 hold 并验证 `current=false`。每 case 唯一 evidence、case 字段不可变、响应丢失 exact replay 和进程重启均由 durable ledger保证。checkpoint conflict 不具备合法动作矩阵，继续留在 quarantine。
 
 0132 也不创建第二个 Budget authority。Graph reservation 继续是唯一 aggregate ceiling；TaskStore 在 `READY → LEASED`、Attempt、Lease 同一事务中创建 Attempt-bound child reservation。worker、retry 和 terminal sibling observation 的用量在一个 UoW 同时推进 parent、child binding 与稳定 Outbox，父级 CAS 仍决定唯一 EXCEEDED winner。child 的 `ACTIVE/CONSUMED/RELEASED/EXCEEDED` 由 durable Attempt 和父级记录投影，不能单独终结 Graph 或释放额度。旧 Attempt 的升级回填继承历史 usage，防止 schema 升级恢复已消费容量。
+
+0133 把 Verification 纳入同一 durable execution spine。Verifier 的规范结果、Graph revision、Node、Attempt、evidence、result digest 与 Node Outbox 被写入 append-only decision；Node 状态和 decision 同事务提交。Continuation 对 `VERIFIED` checkpoint 只读重开该 decision。直接拒绝的 Node、Graph、graph Budget 和三个 Outbox 由一个 Store UoW 共同收口；多节点拒绝保留节点决定并继续复用 0090 graph settlement，因而没有新增第二个 Graph terminal writer。
 
 Scheduler 管理写入口由 Host ASGI composition 显式注入一个 app-local runtime。两个公开前缀的 create/update/delete/enable/disable 都编译为 `HostCommand(surface=SCHEDULER)` 和不可变 TaskGraph；route 只持 runtime provider，不持 repository writer。Acceptance Effect 与 Operator 状态控制复用同一 canonical handler，但 Scheduler 请求额外绑定原 HTTP method/path/body、definition head 与 Scheduler claim。operation journal 先于 claim completion，重启恢复只补齐同一 receipt。read 路由与 trigger 分别保持 query-only 和既有 governed occurrence 边界。
 
@@ -326,7 +328,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0132_task_node_budget_reservation.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0131 继续封闭各自既有边界；0132 只增加 Attempt-bound child Budget Reservation、usage ledger 和不可变约束，Graph Budget 保持唯一总额度。它不提供部署 key、Operator credential、完整 Host 进程重启、所有恢复类别或七路线验收，因此不代表 Chat、Universal Runtime 或 NE-01 完成。
+当前连续 SQLite migration head 为 `0133_task_node_verification_decision.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0132 继续封闭各自既有边界；0133 只增加 append-only Verification decision 与直接拒绝的原子终态。它不提供部署 key、Operator credential、完整 Host 进程重启、所有恢复类别或七路线验收，因此不代表 Chat、Universal Runtime 或 NE-01 完成。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -466,7 +468,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0132_task_node_budget_reservation.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0131 保持各自既有窄 authority；0132 定义 Attempt-bound child Budget Reservation 和父子 usage binding，不定义新的总额度、终态或副作用归因 authority。它不改变七路线总体 `INCOMPLETE`。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0133_task_node_verification_decision.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0132 保持各自既有窄 authority；0133 定义 durable Verification decision 和直接拒绝原子终态，不定义新的 Graph settlement 或副作用归因 authority。它不改变七路线总体 `INCOMPLETE`。
 
 ## 7. 数字生命状态模型
 

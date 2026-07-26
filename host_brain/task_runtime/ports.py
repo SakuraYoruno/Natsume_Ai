@@ -54,6 +54,8 @@ class TaskStorePort(Protocol):
 
     def assert_node_budget_ready(self) -> None: ...
 
+    def assert_node_verification_ready(self) -> None: ...
+
     def assert_dag_scheduling_ready(self) -> None: ...
 
     def assert_parallel_settlement_decision_ready(self) -> None: ...
@@ -609,6 +611,47 @@ class TaskStorePort(Protocol):
         target_status: str,
         outbox: Any,
         error_ref: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def get_node_verification_decision(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        node_version_after: int | None = None,
+    ) -> Mapping[str, Any]: ...
+
+    def commit_node_verification(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        attempt_id: str,
+        reservation_id: str,
+        expected_node_version: int,
+        target_status: str,
+        verification_result: Mapping[str, Any],
+        node_outbox: Any,
+    ) -> Mapping[str, Any]: ...
+
+    def finalize_node_verification_failure(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        *,
+        attempt_id: str,
+        reservation_id: str,
+        budget_id: str,
+        expected_node_version: int,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        verification_result: Mapping[str, Any],
+        node_outbox: Any,
+        graph_outbox: Any,
+        budget_outbox: Any,
     ) -> Mapping[str, Any]: ...
 
     def commit_operation(

@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.19
+版本：v2.20
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 持久 Verification 与直接失败终态当前切片
+
+- `0133_task_node_verification_decision.sql` 新增 append-only decision，绑定 Graph revision、Node、Attempt、VerificationResult digest、evidence 和 Node Outbox；fresh 0001→0133 与真实前缀 0132→0133 均必须通过。
+- `tests/integration/test_ne01_durable_verification_terminal.py` 使用真实 SQLite 验证 PASS decision 跨进程重开、scheduler snapshot、exact replay、不可变 trigger，以及 FAIL 时 Node/Graph/graph Budget 原子收口；伪造 Graph Outbox 后三者保持原状态且 decision 不存在。
+- `tests/unit/test_task_node_verification_store_structure.py` 约束三个 focused persistence owner 的尺寸、canonical Store composition 和每条写路径恰好一个事务；Runtime 结构测试要求 verifier 与 checkpoint continuation 只调用新 authority。
+- Store、Runtime、composition、结构、真实升级、发布与文档合同的唯一去重批次为 `156 passed in 91.22s`。真实 SQLite DAG/Review/直接验证拒绝/重启五项为 `5 passed in 17.09s`，checkpoint-budget 九项为 `9 passed in 0.42s`，两组独立报告且不与 156 相加。changed-module `compileall`、JSON、`git diff --check`、统一 `static_scan,doc_gate` 和完整架构 Gate 1～14 均通过；Gate 3 通过抽离无 I/O schema inventory 将 `task_repository.py` 从 4642 降至 4553 行，未扩大白名单。
+- 本切片只关闭验证事实丢失和直接失败半提交；多节点仍复用 0090 settlement，通用低层 transition 仅保留兼容。一般 cancellation/recovery、七路线 commit-bound acceptance、NE-01 wave integration 和 NE-07 Docker 不在本切片执行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Attempt-bound 节点预算当前切片
 
@@ -147,7 +155,7 @@
 - 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
 - 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
 - Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
-- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0132。该证据使用本地临时 key、单节点和进程内 route continuation；0130/0131 的 hold/reconciliation 与 0132 的 child Budget 证据由各自当前切片单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0133。该证据使用本地临时 key、单节点和进程内 route continuation；0130/0131 的 hold/reconciliation、0132 的 child Budget 与 0133 的 Verification decision 证据由各自当前切片单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 

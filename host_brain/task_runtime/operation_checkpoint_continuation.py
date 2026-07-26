@@ -48,6 +48,7 @@ from .node_worker_stream import _maybe_await
 from .operation_checkpoint_budget_recovery import recover_checkpoint_budget
 from .operation_checkpoint_records import build_checkpoint_execution_context
 from .operation_checkpoint_validation import WorkerBudgetUsageCheckpointState
+from .operation_checkpoint_verification import reopen_durable_verification
 from .operation_recovery_runtime import CommittedOperationCheckpoint
 from .ports import AcceptancePort, InternalAgentCheckpointUnitOfWorkPort
 from .ports import TaskStorePort, VerificationPort
@@ -313,24 +314,19 @@ class CommittedCheckpointContinuation:
                 verification_refs = _evidence_refs(verification)
                 verification_status = "FAIL"
             if verification_status != "PASS":
-                current_node = await self._node_lifecycle.transition_node(
-                    admitted,
-                    current_node,
-                    "VERIFICATION_FAILED",
-                    evidence_refs=verification_refs or evidence_refs,
-                    verification_result=verification,
-                )
-                budget = await self._node_lifecycle.finalize_node_budget(
-                    budget,
-                    target_status=BudgetReservationStatus.RELEASED,
-                    defer_shared_terminal=defer_shared_terminal,
-                )
-                if not defer_shared_terminal:
-                    graph = await self._node_lifecycle.transition_graph(
+                current_node, graph, budget = (
+                    await self._node_lifecycle.finalize_verification_failure(
                         admitted,
-                        graph,
-                        "FAILED",
+                        node=current_node,
+                        graph=graph,
+                        budget=budget,
+                        attempt_id=attempt_id,
+                        reservation_id=admitted.reservation_id,
+                        evidence_refs=verification_refs or evidence_refs,
+                        verification_result=verification,
+                        defer_shared_terminal=defer_shared_terminal,
                     )
+                )
                 await self._runtime_outbox.publish_pending()
                 yield terminal_event(
                     build_execution_receipt(
@@ -350,17 +346,20 @@ class CommittedCheckpointContinuation:
                     )
                 )
                 return
-            current_node = await self._node_lifecycle.transition_node(
+            current_node = await self._node_lifecycle.commit_node_verification(
                 admitted,
                 current_node,
-                "VERIFIED",
+                attempt_id=attempt_id,
+                reservation_id=admitted.reservation_id,
+                target_status="VERIFIED",
                 evidence_refs=verification_refs,
                 verification_result=verification,
             )
         elif node_status == "VERIFIED":
-            verification = _mapping(
-                current_node.get("verification_result"),
-                field_name="durable verification result",
+            verification = await reopen_durable_verification(
+                task_store=self._store,
+                admitted=admitted,
+                current_node=current_node,
             )
             verification_refs = _evidence_refs(verification)
             if (

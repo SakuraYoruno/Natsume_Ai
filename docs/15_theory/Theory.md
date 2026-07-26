@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.17
+版本：v2.18
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -182,6 +182,10 @@ Acceptance 后仍可能出现“外部动作已发生，但本地回执没有确
 ### 3.11 版本化事实必须携带版本身份
 
 当一个语义对象允许保留多个 revision 时，仅有逻辑 ID 不足以标识事件、Outbox、投影或读取范围。任何代表该对象事实的下游记录都必须携带 `id + revision`，或能通过不可变 source authority 唯一解析该身份，并在写入、投递、重放和查询时保持同一归属；不同 revision 可以独立推进，但同一 revision 内必须保持因果顺序。给旧事实补充 revision 不能改变既有幂等 ID/key，否则响应丢失会被误判成新动作；新增维度应与稳定 identity 并存。禁止用时间、事件 version 或“当前最新 revision”猜测历史记录所属版本，也禁止为补字段而重写已经成立的历史 journal；兼容读取应沿一对一 source lineage 精确解析。派生 failure evidence 应优先引用真实 durable source ref，不能仅因新格式看起来更规范，就合成数据库中并不存在的历史证据。
+
+### 3.12 验证决定是事实，不是调用栈里的临时变量
+
+Verification 一旦允许或拒绝状态迁移，就成为执行账本的一部分。它必须与 exact Graph revision、Node、Attempt、输入证据、规范结果摘要和对应 Outbox 在同一持久事务中提交；进程恢复只能重开该决定，不能重新调用 verifier 后假装是同一次判断。直接失败还必须把受影响的 Node、Graph 与共享预算终态原子收口，或显式交给唯一的多节点 settlement authority，不能留下“节点已失败但预算仍可用”的半状态。
 
 ---
 

@@ -53,7 +53,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "0d831436658c3e30fcdef8de88e545df8533fefa8915b47fc3a5674550acde50"
+    "de7fada0e654b578ee87d83ae48ccadec362ff17c84974bf46c4fb742d9c9354"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
@@ -433,11 +433,13 @@ def test_node_execution_runtime_dependency_and_call_matrices_are_frozen() -> Non
             "refresh": 1,
         },
         "_node_lifecycle": {
-            "transition_graph": 3,
-            "transition_node": 6,
+                "transition_graph": 2,
+                "transition_node": 4,
+                "commit_node_verification": 1,
+                "finalize_verification_failure": 1,
             "accept_node_output": 1,
             "transition_attempt": 2,
-            "finalize_node_budget": 5,
+                "finalize_node_budget": 4,
             "reject_budget_charge": 3,
             "mark_pre_reservation_failure": 4,
         },

@@ -1262,20 +1262,19 @@ class DurableNodeExecutionRuntime:
             verification_status = "FAIL"
 
         if verification_status != "PASS":
-            node = await self._node_lifecycle.transition_node(
-                admitted,
-                node,
-                "VERIFICATION_FAILED",
-                evidence_refs=verification_refs or evidence_refs,
-                verification_result=verification,
+            node, graph, budget = (
+                await self._node_lifecycle.finalize_verification_failure(
+                    admitted,
+                    node=node,
+                    graph=graph,
+                    budget=budget,
+                    attempt_id=attempt_id,
+                    reservation_id=admitted.reservation_id,
+                    evidence_refs=verification_refs or evidence_refs,
+                    verification_result=verification,
+                    defer_shared_terminal=defer_shared_terminal,
+                )
             )
-            budget = await self._node_lifecycle.finalize_node_budget(
-                budget,
-                target_status=BudgetReservationStatus.RELEASED,
-                defer_shared_terminal=defer_shared_terminal,
-            )
-            if not defer_shared_terminal:
-                graph = await self._node_lifecycle.transition_graph(admitted, graph, "FAILED")
             await self._runtime_outbox.publish_pending()
             receipt = build_execution_receipt(
                 admitted,
@@ -1292,10 +1291,12 @@ class DurableNodeExecutionRuntime:
             yield terminal_event(receipt)
             return
 
-        node = await self._node_lifecycle.transition_node(
+        node = await self._node_lifecycle.commit_node_verification(
             admitted,
             node,
-            "VERIFIED",
+            attempt_id=attempt_id,
+            reservation_id=admitted.reservation_id,
+            target_status="VERIFIED",
             evidence_refs=verification_refs,
             verification_result=verification,
         )
