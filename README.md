@@ -9,7 +9,9 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
-NE-01 新增了七路线提交绑定验收账本 v3，但尚未把七条路线判为完成。只读采集器在一个事务中打开真实文件型 SQLite，核对 HostCommand、不可变 TaskGraph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox，以及当前 recovery/cancellation 空集；收据同时绑定干净 Git HEAD、仓库 migration head 和数据库已应用 migration head。请求标识只输出摘要，禁止用户正文、模型输出、secret 和原始 payload。真实 GR05 校准目前只证明 `chat/delegate/plan=PASS`，其余四路为 `NOT_RUN`，因此七路 `commit_bound_acceptance` 仍全部是 `MISSING`，NE-01 继续 `IN_PROGRESS`。
+NE-01 新增了七路线提交绑定验收账本 v3，但尚未把七条路线判为完成。只读采集器在一个事务中打开真实文件型 SQLite，核对 HostCommand、不可变 TaskGraph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox，以及当前 recovery/cancellation 空集；收据同时绑定干净 Git HEAD、仓库 migration head 和数据库已应用 migration head。请求标识只输出摘要，禁止用户正文、模型输出、secret 和原始 payload。GR05 当前已把 Direct Skill 纳入同一 Host Runtime，使 `chat/skill/delegate/plan` 四路在真实 SQLite 上共同通过。
+
+本地剩余路线驱动器又通过真实 Scheduler CommandService、Internal CommandService 和带 Review/HardState Effect/外层 outcome 的 Operator Runtime，把三路终态顺序写入同一个 canonical SQLite；与 GR05 串联的 pre-commit 校准得到七路全部 `PASS`。驱动器使用有明确标识的 bounded deterministic worker，只证明治理与持久语义，不冒充真实模型、PlanningSearch 收益或 NE-07 全栈证据。当前工作树尚未产生干净 SHA 绑定的正式收据，因此七路 `commit_bound_acceptance` 仍全部是 `MISSING`，NE-01 继续 `IN_PROGRESS`。
 
 本地采集入口如下；必须为每条路线传入同一真实运行数据库中的 request id，且采集时 tracked worktree 必须干净：
 

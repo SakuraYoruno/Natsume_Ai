@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.23
+版本：v2.24
 维护日期：2026-07-27
 状态：当前证据
 
@@ -11,8 +11,8 @@
 
 - `UniversalRouteAcceptanceReader` 只读打开真实文件型 SQLite，在一个事务中读取 Command、Graph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox、recovery、reconciliation 与 cancellation 投影；内存数据库、缺表/缺列和迁移不一致均失败关闭。
 - `UniversalRouteAcceptanceBuilder` 要求干净 Git HEAD、仓库/数据库 migration head 一致、每个 request 只证明一条路线，并输出经过字段白名单和总 receipt digest 保护的隐私边界收据。
-- 合同回归 `tests/contract/test_universal_route_acceptance.py` 与 coverage Gate 共 `30 passed`；真实 GR05 集成 `1 passed`，只证明 Chat、Delegate、Plan 三路，Skill、Scheduler、Internal、Operator 保持 `NOT_RUN`。
-- 该证据是采集机制与三路校准，不是七路正式验收；机器矩阵中七路 `commit_bound_acceptance` 均保持 `MISSING`，NE-01 保持 `IN_PROGRESS`。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- GR05 已加入 Direct Skill，真实 Host Runtime 的单项集成 `1 passed`，共同证明 Chat、Skill、Delegate、Plan。`test_ne01_universal_remaining_route_acceptance.py` 另以同一真实 SQLite 运行 Scheduler、Internal 和带 Review/outer outcome 的 Operator，单项集成 `1 passed`。
+- 两段串联后的 pre-commit 校准由 v3 validator 得到七路全部 `PASS`、reason code 全空；这仍不是干净 Git SHA 绑定的正式收据。机器矩阵中七路 `commit_bound_acceptance` 暂时保持 `MISSING`，NE-01 保持 `IN_PROGRESS`。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Review 拒绝原子终态当前切片
 

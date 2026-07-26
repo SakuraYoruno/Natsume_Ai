@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.18
+版本：v3.19
 
 核对日期：2026-07-27
 
@@ -27,7 +27,22 @@ flowchart LR
     C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
 ```
 
-Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。它不读取或输出用户正文、模型输出、secret 和原始 payload。当前 GR05 只产生 Chat、Delegate、Plan 三路校准，故 Gate 必须走 `MISSING / INCOMPLETE` 分支。
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。它不读取或输出用户正文、模型输出、secret 和原始 payload。GR05 当前产生 Chat、Skill、Delegate、Plan 四路校准；在正式干净提交收据生成前，Gate 仍必须走 `MISSING / INCOMPLETE` 分支。
+
+当前本地七路数据生成流已经补齐，但仍处于 pre-commit：
+
+```mermaid
+flowchart TD
+    H["GR05 Host Runtime\nChat + Skill + Delegate + Plan"] --> DB["同一 canonical SQLite"]
+    S["Scheduler CommandService\nOccurrence + Effect"] --> DB
+    I["Internal CommandService\nResult commit"] --> DB
+    O["Operator OBS authority\nReview + HardState Effect + outer outcome"] --> DB
+    DB --> R["query-only v3 Reader"]
+    R --> V["七路 pre-commit PASS"]
+    V --> X["仍须干净 SHA 重跑\n才可提升 commit-bound control"]
+```
+
+bounded deterministic worker 只替代业务计算，不替代 CommandService、TaskGraph、Grant、Budget、Review、Verification、Acceptance、Effect、Outbox 或 claim settlement。它不产生真实模型或 PlanningSearch 收益结论。
 
 节点 Acceptance/Review 的当前持久流为：
 
