@@ -24,7 +24,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "b9b29b457f397c11a04aa8d96c7e8edd6d076268"
+    assert report.evaluated_commit_sha == "d5b15be1950b7805991a5041e410c2a0eb8549e4"
     assert report.migration_head == (
         "0131_task_operation_recovery_hold_binding.sql"
     )
@@ -41,7 +41,6 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert report.missing_route_controls == {
         "chat": (
             "budget_enforcement",
-            "transactional_side_effects",
             "commit_bound_acceptance",
         ),
         "skill": (
@@ -115,6 +114,12 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     assert "tests/unit/test_aw03_scheduler_durable_uow.py" in payload[
         "routes"
     ]["scheduler"]["evidence_refs"]
+    assert payload["routes"]["chat"]["controls"][
+        "transactional_side_effects"
+    ] == "PASS"
+    assert "host_brain/app/life_projection_barrier.py" in payload[
+        "routes"
+    ]["chat"]["evidence_refs"]
 
 
 def test_full_architecture_gate_fails_closed_while_any_route_is_missing() -> None:

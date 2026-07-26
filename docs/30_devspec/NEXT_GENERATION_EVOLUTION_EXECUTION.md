@@ -3,12 +3,14 @@
 
 # Natsume AI 下一代演进正式执行合同
 
-> 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal；外部 namespace、Token/MCP durable restart、其它外部资源恢复、事务化 Chat commit、通用 Delegate、七路线和完整 Composition 仍未完成。
+> 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、commit-bound Chat 验收、通用 Delegate、七路线和完整 Composition 仍未完成。
 
-版本：v3.5
+版本：v3.6
 日期：2026-07-26
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 修订执行基线：最新 `origin/dev`，本文件所在提交作为切片证据。第 5、6 条 governed Operator vertical slice `task_operation.reconcile` 与 `task_effect.reconcile` 继续把原始 Ed25519 证据隔离在 0126/0128 append-only evidence ledger，TaskGraph 只携带 ref/digest；其受限恢复结论不变。Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：Scheduler Secure Ingress 冻结 method/path/body/definition head，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，经过节点治理、Review/Verification/Acceptance、terminal Preview 后，唯一 `operator.state_control` Effect 才写 canonical repository。不可变 admin operation receipt 先于 claim completion；该崩溃窗口由新实例精确重开，路由中的直接 Scheduler writer 调用为 0。trigger 保持既有 governed occurrence 入口，list/get/health 保持只读。
+
+本轮 Chat 收口把 `transactional_side_effects` 从 `PARTIAL` 提升为单控制项 `PASS`：两个 Life Acceptance Effect 必须在 exact command 的完整 projection-intent 集合和 durable receipts全部吻合后才能 COMMIT；foreground 的 `surface.post_process` receipt又要求 visible assistant turn 与 LifeMemory admission 已持久成功。有序 Effect dispatcher 因而不会先执行 external reply。首次 response loss 可重开 command 后执行 exact intent，reclaimed recovery 只读；缺失、失败、篡改或漂移保持 UNKNOWN。外部 Gateway delivery仍是幂等 eventual delivery，不属于同一 SQL transaction。受影响集合为 `106 passed in 117.58s`；Chat status 仍 `INCOMPLETE`，因为 commit-bound acceptance、完整 Budget、波次集成、真实网络/模型和 NE-07 未运行。
 
 Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；Operator 当前仍为 `14/37`，其余 `23/37` 继续失败关闭，Scheduler surface 不计入该库存。当前连续 migration head 为 0131。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
 

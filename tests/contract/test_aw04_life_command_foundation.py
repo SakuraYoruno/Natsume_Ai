@@ -380,6 +380,46 @@ def test_async_projection_dispatcher_retries_failed_lease(tmp_path: Path) -> Non
     assert repository.list_projection_claims() == []
 
 
+def test_exact_projection_dispatch_claims_only_the_bound_intent(
+    tmp_path: Path,
+) -> None:
+    _db_path, repository = _repository(tmp_path)
+    LifeCommandService(repository, clock=lambda: NOW).submit(
+        _command("projection-exact", deliveries=False)
+    )
+    reader = LifeSnapshotReader(repository)
+    intents = reader.list_projection_intents("projection-exact")
+    assert len(intents) == 2
+    calls: list[str] = []
+    dispatcher = LifeProjectionDispatcher(
+        repository,
+        lambda message: calls.append(message.intent_id)
+        or {
+            "status": "PROJECTED",
+            "target": message.target,
+            "intent_id": message.intent_id,
+        },
+        owner_id="projection-exact",
+        clock=lambda: NOW,
+    )
+
+    exact = asyncio.run(
+        dispatcher.dispatch_intent_async(
+            intents[1].intent_id,
+            dispatch_at_ms=NOW,
+        )
+    )
+
+    assert exact is not None
+    assert exact.intent_id == intents[1].intent_id
+    assert calls == [intents[1].intent_id]
+    assert reader.get_projection_receipt(intents[0].intent_id) is None
+    assert reader.get_projection_receipt(intents[1].intent_id) == exact
+    assert [
+        row["intent_id"] for row in repository.list_projection_claims()
+    ] == [intents[0].intent_id]
+
+
 def test_async_delivery_dispatcher_completes_and_retries_failed_leases(
     tmp_path: Path,
 ) -> None:

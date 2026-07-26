@@ -3,14 +3,16 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.15
+版本：v2.16
 核对日期：2026-07-26
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal；外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它外部资源恢复、事务化 Chat、完整 Worker/Obs Composition 与 NE-01 仍未闭环。
+当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、七路线 commit-bound acceptance 与 NE-01 仍未闭环。
+
+Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskStore 负责有序 Effect staging，Digital Life command repository 负责 command/event/intent 原子入账，`LifeProjectionDispatcher + life_projection_barrier` 负责 exact intent 执行与回执集合校验。`surface.post_process` 继续调用真实 app-local AgentRuntime ports，只有 assistant turn 和 LifeMemory admission 均持久成功才可完成 projection。Gateway transport仍由后序 delivery Effect 拥有，任何本地投影 UNKNOWN 都会阻断它；这样没有新增第二个 Conversation writer，也没有让 Life command receipt越权成为投影成功证明。
 
 情感上下文模块的当前 owner 是 Host-local `HostEmotionRuntime`：它管理连续情绪向量、前一标签、Timeline、用户画像和日记节流；Input、Tribe 与 Lifecycle 只通过注入端口访问同一实例。`normalize_chat_emotion_context()` 是 replay/render 只读入口，`resolve_chat_emotion_context()` 是要求 exact runtime 的 admission ingest 入口。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。两者均不拥有 Persona/Feedback 的永久写 authority。
 
@@ -67,7 +69,7 @@ Direct Agent Skill Workspace 模块由五个窄 owner 组成：`governed_skill_w
 
 | 功能域 | 外部入口/呈现 | 当前主 owner | 主要下游 | 当前裁决 |
 |---|---|---|---|---|
-| 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 为 `WIRED`；进度/最近轮次走只读投影，Executive 已退出生产路由 |
+| 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 已进入主链；Chat 本地投影屏障为 PASS，但七路线完成状态仍为 INCOMPLETE |
 | 任务、Skill 与 Delegate | Chat 意图、Operator 命令 | `orchestration`、`task_runtime`、`agent_runtime`、`skills` | Model Runtime、Capability Broker、Domain Pack | Host canonical route `WIRED`；0102+GR06 canonical Node Acceptance 已统一 exact Effect/artifact/`ACCEPTED`/Attempt Outbox。public TaskStore graph/effect staging 入口已删除，应用 Python 写 authority 已封口；raw/orphan SQL 仍可绕过，通用恢复与生产并发仍 `PARTIAL` |
 | 视觉桌面自动化兼容入口 | `/v1/agent/run`、`/v1/agent/info`、vision chat `response_format` fence | `app/agent_routes.py`、`app/chat_handler_vision.py` | 无执行下游 | `RETIRED_COMPATIBILITY_ONLY / PRODUCTION_OFF`；raw loop/client 与 Ledger writer 已删除，`run` 只返回固定拒绝，`info` 明示不可用，vision chat 非 `text` 在 handle/model/Memory/Ledger 前拒绝；`ActionPlan` schema/parser 仅 proposal-only。它不是 Delegate `vision_agent`，也不是正向 Visual Agent Runtime |
 | 自动化与定时任务 | Scheduler API、Monitor Automation | `scheduler`、`lifecycle_runtime` | Governed Command、Life、Memory、Security Immune | governed occurrence 的 worker 已改为 immutable operation plan，真实 handler 由共享 Acceptance Effect dispatcher 在验收后执行；0117 已持久化 DUE→OCCURRENCE fence 与 execution heartbeat。definition/admin、mutable batch、一般未知效果归因和 canary 仍为 `PARTIAL` |

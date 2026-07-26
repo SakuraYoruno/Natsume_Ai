@@ -3,9 +3,9 @@
 
 # 当前需求可追溯矩阵
 
-> 当前库存纠偏：TRACE-EXEC-08～08AL 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、事务化 Chat 和完整 Worker/Obs composition 仍未闭环。
+> 当前库存纠偏：TRACE-EXEC-08～08AL 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v4.8
+版本：v4.9
 核对日期：2026-07-26
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -24,7 +24,7 @@
 
 | FR | 工程合同 | 生产落点 | 主要验证 | 当前状态 |
 |---|---|---|---|---|
-| FR-CHAT | DevSpec §2～4 | `host_brain/app/chat_routes.py`、Cortex、Surface | chat/integration、GR-06 固定 receipt | `WIRED_WITH_LIMITS` |
+| FR-CHAT | DevSpec §2～4 | `chat_routes.py`、Cortex、Acceptance handlers、Life projection barrier、Surface | exact intent/restart/tamper、GR05 production-order integration | `LOCAL_PROJECTION_BARRIER_PASS / ROUTE_INCOMPLETE` |
 | FR-INGRESS | DevSpec §2、§8 | Secure Ingress、Host/Gateway/Scheduler/Internal adapters | route-matrix contracts、Scheduler/Internal production integration | `WIRED_WITH_OPERATOR_MATRIX_LIMITS` |
 | FR-SURFACE | DevSpec §4、§11 | Surface/Reply authority、Life projection | surface/life contracts、writer 审计 | `PARTIAL_PERSONA_PROPOSAL_MISSING` |
 | FR-MEMORY、FR-CANON | DevSpec §5 | typed repositories、Canon Apply、recall | memory/canon contracts | `WIRED_WITH_KNOWLEDGE_GAPS` |

@@ -7,7 +7,11 @@ import inspect
 from typing import Any
 
 from host_brain.core.ids import now_ms
-from natsume_contracts.life import LifeDispatchSummary, LifeProjectionMessage
+from natsume_contracts.life import (
+    LifeDispatchSummary,
+    LifeProjectionMessage,
+    LifeProjectionReceipt,
+)
 from host_brain.digital_life.lease_heartbeat import (
     AsyncLifeLeaseHeartbeat,
     LifeLeaseHeartbeatError,
@@ -164,6 +168,67 @@ class LifeProjectionDispatcher:
             delivered += 1
         return LifeDispatchSummary(claimed, delivered, failed)
 
+    async def dispatch_intent_async(
+        self,
+        intent_id: str,
+        *,
+        dispatch_at_ms: int | None = None,
+    ) -> LifeProjectionReceipt | None:
+        """Dispatch one exact intent without draining unrelated queue items."""
+
+        exact_intent = str(intent_id or "").strip()
+        if not exact_intent:
+            raise ValueError("intent_id is required")
+        existing = self.repository.get_projection_receipt(exact_intent)
+        if existing is not None:
+            return existing
+        messages = self._claim(
+            limit=1,
+            dispatch_at_ms=dispatch_at_ms,
+            intent_id=exact_intent,
+        )
+        if not messages:
+            return self.repository.get_projection_receipt(exact_intent)
+        message = messages[0]
+        renew_at = max(
+            int(self._clock()),
+            int(dispatch_at_ms or 0),
+        )
+        self.repository.renew_projection_claim(
+            message,
+            owner_token=self.owner_id,
+            now_ms=renew_at,
+            lease_ms=self.claim_lease_ms,
+        )
+
+        def renew_claim() -> None:
+            self.repository.renew_projection_claim(
+                message,
+                owner_token=self.owner_id,
+                now_ms=max(int(self._clock()), int(dispatch_at_ms or 0)),
+                lease_ms=self.claim_lease_ms,
+            )
+
+        try:
+            async with AsyncLifeLeaseHeartbeat(
+                renew_claim,
+                lease_ms=self.claim_lease_ms,
+            ):
+                result = self.handler(message)
+                if inspect.isawaitable(result):
+                    result = await result
+        except LifeLeaseHeartbeatError:
+            raise
+        except Exception as exc:
+            self._fail(message, exc)
+            raise
+        return self.repository.complete_projection(
+            message,
+            owner_token=self.owner_id,
+            result=dict(result or {}),
+            now_ms=int(self._clock()),
+        )
+
     def retry_projection(
         self,
         intent_id: str,
@@ -180,6 +245,7 @@ class LifeProjectionDispatcher:
         *,
         limit: int,
         dispatch_at_ms: int | None,
+        intent_id: str | None = None,
     ) -> list[LifeProjectionMessage]:
         claimed_at = int(
             dispatch_at_ms if dispatch_at_ms is not None else self._clock()
@@ -189,6 +255,7 @@ class LifeProjectionDispatcher:
             now_ms=claimed_at,
             lease_ms=self.claim_lease_ms,
             limit=max(1, int(limit)),
+            intent_id=intent_id,
         )
 
     def _fail(self, message: LifeProjectionMessage, exc: Exception) -> None:

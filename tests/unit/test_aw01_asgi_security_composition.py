@@ -936,6 +936,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         ]
         assert kwargs["internal_agent_workspace_runtime"] is workspace_runtime
         assert callable(kwargs["life_receipt_reader_provider"])
+        assert kwargs["life_projection_dispatcher"] is (
+            life_projection_dispatcher
+        )
+        assert callable(kwargs["scheduler_command_service_provider"])
         assert kwargs == {
             "task_runtime_container": task_runtime_container,
             "ledger": ledger,
@@ -958,6 +962,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "internal_agent_workspace_runtime": workspace_runtime,
             "life_receipt_reader_provider": kwargs[
                 "life_receipt_reader_provider"
+            ],
+            "life_projection_dispatcher": life_projection_dispatcher,
+            "scheduler_command_service_provider": kwargs[
+                "scheduler_command_service_provider"
             ],
             "embodiment_runtime_provider": kwargs[
                 "embodiment_runtime_provider"
@@ -1085,6 +1093,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         return scheduler_container
 
     action_preview_service = object()
+    life_projection_dispatcher = object()
+    life_outbox_dispatcher = object()
 
     def fake_start_runtime_context_services(**kwargs):
         assert kwargs["task_runtime"] is task_runtime_container
@@ -1169,7 +1179,10 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(
         asgi,
         "_compose_life_dispatchers",
-        lambda current, *, embodiment_runtime, action_preview_service, agent_runtime_ports: (object(), object())
+        lambda current, *, embodiment_runtime, action_preview_service, agent_runtime_ports: (
+            life_projection_dispatcher,
+            life_outbox_dispatcher,
+        )
         if (
             current is ledger
             and embodiment_runtime is not None

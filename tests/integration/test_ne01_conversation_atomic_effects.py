@@ -27,6 +27,7 @@ from host_brain.contracts.conversation_acceptance_effects import (
     preference_operation_id,
 )
 from host_brain.digital_life.application_boundary import submit_life_command
+from host_brain.digital_life.projection import LifeProjectionDispatcher
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.persistence.context_preference_repository import (
     PREFERENCE_EFFECT_MIGRATION_ASSET_KEY,
@@ -90,6 +91,14 @@ def _life_payload(*, request_id: str, content: str) -> dict[str, Any]:
         "schema_version": LIFE_CONVERSATION_PROJECTION_SCHEMA_V1,
         "command_id": conversation_life_command_id(request_id),
         **_turn_fields(request_id=request_id, content=content),
+    }
+
+
+def _ack_life_projection(message) -> dict[str, Any]:  # noqa: ANN001
+    return {
+        "status": "PROJECTED_FROM_LIFE_JOURNAL",
+        "target": message.target,
+        "intent_id": message.intent_id,
     }
 
 
@@ -454,7 +463,8 @@ def test_old_preference_receipt_survives_newer_profile_version(tmp_path) -> None
     ledger.close()
 
 
-def test_life_conversation_response_loss_reopens_exact_command_receipt(
+@pytest.mark.asyncio
+async def test_life_conversation_response_loss_reopens_exact_projection_barrier(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -479,15 +489,26 @@ def test_life_conversation_response_loss_reopens_exact_command_receipt(
         "submit_life_command",
         commit_then_lose,
     )
+    projection_dispatcher = LifeProjectionDispatcher(
+        life.repository,
+        _ack_life_projection,
+    )
     handler = build_production_acceptance_effect_handlers(
         life_receipt_reader_provider=lambda: life.snapshot_reader,
+        life_projection_dispatcher=projection_dispatcher,
     )["life.conversation_turn_recorded"]
 
-    recovered = handler(payload)
+    recovered = await handler(payload)
 
     assert recovered["status"] == "APPLIED"
     assert recovered["command_id"] == payload["command_id"]
-    assert recovered["receipt_ref"].startswith("life-event://id/life_evt_")
+    assert recovered["receipt_ref"].startswith(
+        "life-projection-barrier://sha256/"
+    )
+    assert {
+        receipt["result"]["target"]
+        for receipt in recovered["projection_receipts"]
+    } == {"life.experience", "experience"}
     assert calls == 1
     receipt_ref = recovered["receipt_ref"]
     ledger.close()
@@ -501,3 +522,52 @@ def test_life_conversation_response_loss_reopens_exact_command_receipt(
     assert exact["receipt_ref"] == receipt_ref
     assert exact["command_hash"] == recovered["command_hash"]
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_life_projection_barrier_rejects_durable_receipt_tamper(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path, ledger = _ledger(tmp_path, "life-projection-tamper.sqlite3")
+    life = build_process_life_container(ledger=ledger, adopted_at_ms=1)
+    payload = _life_payload(
+        request_id="request-life-projection-tamper",
+        content="拒绝被篡改的本地投影回执",
+    )
+    monkeypatch.setattr(PROCESS_LIFE_PROVIDER, "require", lambda: life)
+    handler = build_production_acceptance_effect_handlers(
+        life_receipt_reader_provider=lambda: life.snapshot_reader,
+        life_projection_dispatcher=LifeProjectionDispatcher(
+            life.repository,
+            _ack_life_projection,
+        ),
+    )["life.conversation_turn_recorded"]
+    committed = await handler(payload)
+    intent_id = committed["projection_receipts"][0]["intent_id"]
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TRIGGER life_projection_receipt_no_update")
+        conn.execute(
+            """
+            UPDATE life_projection_receipt
+            SET result_json = ?
+            WHERE intent_id = ?
+            """,
+            (
+                json.dumps(
+                    {
+                        "status": "PROJECTED_FROM_LIFE_JOURNAL",
+                        "target": "experience",
+                        "intent_id": "tampered-intent",
+                    },
+                    separators=(",", ":"),
+                ),
+                intent_id,
+            ),
+        )
+        conn.commit()
+
+    with pytest.raises(AcceptanceEffectOutcomeUnknown):
+        handler.reconcile(payload)
+    ledger.close()

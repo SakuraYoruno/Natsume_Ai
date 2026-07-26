@@ -43,6 +43,11 @@ from host_brain.app.accepted_operator_control_handler import (
 from host_brain.app.accepted_operator_state_control_handler import (
     AcceptedOperatorStateControlHandler,
 )
+from host_brain.app.life_projection_barrier import (
+    LifeProjectionBarrierError,
+    dispatch_and_require_life_projection_barrier,
+    require_life_projection_barrier,
+)
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedLifeConversationProjectionV1,
     AcceptedPreferenceSignalV1,
@@ -62,6 +67,7 @@ def build_production_acceptance_effect_handlers(
     conversation_event_reader: Any | None = None,
     preference_store: Any | None = None,
     life_receipt_reader_provider: Callable[[], Any] | None = None,
+    life_projection_dispatcher: Any | None = None,
     gateway_reply_query_port: Callable[..., Any] | None = None,
     terminal_reconciliation_service: Any | None = None,
     terminal_reconciliation_store: Any | None = None,
@@ -94,9 +100,11 @@ def build_production_acceptance_effect_handlers(
         ),
         "life.conversation_turn_recorded": _AcceptedLifeConversationHandler(
             receipt_reader_provider=life_receipt_reader_provider,
+            projection_dispatcher=life_projection_dispatcher,
         ),
         "life.foreground_completed": _AcceptedLifeForegroundHandler(
             receipt_reader_provider=life_receipt_reader_provider,
+            projection_dispatcher=life_projection_dispatcher,
         ),
         "surface.reply_delivery": _AcceptedSurfaceReplyDeliveryHandler(
             query_port=gateway_reply_query_port,
@@ -356,50 +364,60 @@ class _AcceptedLifeConversationHandler:
         self,
         *,
         receipt_reader_provider: Callable[[], Any] | None,
+        projection_dispatcher: Any | None,
     ) -> None:
         self._receipt_reader_provider = receipt_reader_provider
+        self._projection_dispatcher = projection_dispatcher
 
-    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = AcceptedLifeConversationProjectionV1.from_mapping(
             _without_terminal_preview_proof(payload)
         )
+        fields = _life_conversation_command_fields(request)
         try:
-            return _submit_accepted_life_conversation(request)
+            command_receipt = _submit_accepted_life_conversation(request)
+        except Exception as exc:
+            try:
+                command_receipt = self._command_receipt(request)
+            except Exception as reconciliation:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "Life conversation invocation has no exact durable attribution "
+                    f"after {_opaque_failure(exc)}; "
+                    f"{_opaque_failure(reconciliation)}"
+                ) from exc
+        try:
+            return await dispatch_and_require_life_projection_barrier(
+                reader=self._reader(),
+                dispatcher=self._projection_dispatcher,
+                command_receipt=command_receipt,
+                command_payload=fields["payload"],
+                correlation_id=request.conversation.request_id,
+            )
         except Exception as exc:
             try:
                 return self.reconcile(payload)
             except AcceptanceEffectOutcomeUnknown as reconciliation:
                 raise AcceptanceEffectOutcomeUnknown(
-                    "Life conversation invocation has no exact durable attribution "
-                    f"after {_opaque_failure(exc)}; {reconciliation.detail}"
+                    "Life conversation local projection has no exact durable "
+                    f"attribution after {_opaque_failure(exc)}; "
+                    f"{reconciliation.detail}"
                 ) from exc
 
     def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = AcceptedLifeConversationProjectionV1.from_mapping(
             _without_terminal_preview_proof(payload)
         )
-        if not callable(self._receipt_reader_provider):
-            raise AcceptanceEffectOutcomeUnknown(
-                "Life conversation reconciliation requires an app-local receipt reader"
-            )
         try:
-            reader = self._receipt_reader_provider()
-            get_receipt = getattr(reader, "get_receipt", None)
-            if not callable(get_receipt):
-                raise RuntimeError("LIFE_COMMAND_RECEIPT_READER_UNAVAILABLE")
-            receipt = get_receipt(request.command_id)
-            if receipt is None:
-                raise LookupError("exact Life conversation receipt is absent")
-            projected = (
-                dict(receipt)
-                if isinstance(receipt, Mapping)
-                else dict(receipt.as_dict())
-                if callable(getattr(receipt, "as_dict", None))
-                else None
+            reader = self._reader()
+            command_receipt = self._command_receipt(request)
+            return require_life_projection_barrier(
+                reader=reader,
+                command_receipt=command_receipt,
+                command_payload=_life_conversation_command_fields(request)[
+                    "payload"
+                ],
+                correlation_id=request.conversation.request_id,
             )
-            if not isinstance(projected, Mapping):
-                raise TypeError("Life conversation receipt is not mapping-compatible")
-            return _validated_life_conversation_receipt(request, projected)
         except AcceptanceEffectOutcomeUnknown:
             raise
         except Exception as exc:
@@ -408,36 +426,107 @@ class _AcceptedLifeConversationHandler:
                 f"{_opaque_failure(exc)}"
             ) from exc
 
+    def _reader(self) -> Any:
+        if not callable(self._receipt_reader_provider):
+            raise LifeProjectionBarrierError(
+                "Life conversation requires an app-local projection reader"
+            )
+        return self._receipt_reader_provider()
+
+    def _command_receipt(
+        self,
+        request: AcceptedLifeConversationProjectionV1,
+    ) -> dict[str, Any]:
+        reader = self._reader()
+        get_receipt = getattr(reader, "get_receipt", None)
+        if not callable(get_receipt):
+            raise RuntimeError("LIFE_COMMAND_RECEIPT_READER_UNAVAILABLE")
+        receipt = get_receipt(request.command_id)
+        if receipt is None:
+            raise LookupError("exact Life conversation receipt is absent")
+        projected = (
+            dict(receipt)
+            if isinstance(receipt, Mapping)
+            else dict(receipt.as_dict())
+            if callable(getattr(receipt, "as_dict", None))
+            else None
+        )
+        if not isinstance(projected, Mapping):
+            raise TypeError("Life conversation receipt is not mapping-compatible")
+        return _validated_life_conversation_receipt(request, projected)
+
 
 class _AcceptedLifeForegroundHandler:
-    """Submit one Life command and reopen only its immutable command receipt."""
+    """Submit one Life command and require its exact local projection receipts."""
 
     def __init__(
         self,
         *,
         receipt_reader_provider: Callable[[], Any] | None,
+        projection_dispatcher: Any | None,
     ) -> None:
         self._receipt_reader_provider = receipt_reader_provider
+        self._projection_dispatcher = projection_dispatcher
 
-    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        _accepted_life_request(payload)
+    async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        value = _accepted_life_request(payload)
         try:
-            return _submit_accepted_life_foreground(payload)
+            command_receipt = _submit_accepted_life_foreground(payload)
+        except Exception as exc:
+            try:
+                command_receipt = _reconcile_accepted_life_foreground(
+                    payload,
+                    receipt_reader_provider=self._receipt_reader_provider,
+                )
+            except Exception as reconciliation:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "Life foreground invocation has no exact durable attribution "
+                    f"after {_opaque_failure(exc)}; "
+                    f"{_opaque_failure(reconciliation)}"
+                ) from exc
+        try:
+            return await dispatch_and_require_life_projection_barrier(
+                reader=self._reader(),
+                dispatcher=self._projection_dispatcher,
+                command_receipt=command_receipt,
+                command_payload=value["payload"],
+                correlation_id=value["correlation_id"],
+            )
         except Exception as exc:
             try:
                 return self.reconcile(payload)
             except AcceptanceEffectOutcomeUnknown as reconciliation:
                 raise AcceptanceEffectOutcomeUnknown(
-                    "Life foreground invocation has no exact durable attribution "
-                    f"after {_opaque_failure(exc)}; "
+                    "Life foreground local projection has no exact durable "
+                    f"attribution after {_opaque_failure(exc)}; "
                     f"{reconciliation.detail}"
                 ) from exc
 
     def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _reconcile_accepted_life_foreground(
+        value = _accepted_life_request(payload)
+        command_receipt = _reconcile_accepted_life_foreground(
             payload,
             receipt_reader_provider=self._receipt_reader_provider,
         )
+        try:
+            return require_life_projection_barrier(
+                reader=self._reader(),
+                command_receipt=command_receipt,
+                command_payload=value["payload"],
+                correlation_id=value["correlation_id"],
+            )
+        except Exception as exc:
+            raise AcceptanceEffectOutcomeUnknown(
+                "Life foreground requires exact read-only projection "
+                f"reconciliation: {_opaque_failure(exc)}"
+            ) from exc
+
+    def _reader(self) -> Any:
+        if not callable(self._receipt_reader_provider):
+            raise LifeProjectionBarrierError(
+                "Life foreground requires an app-local projection reader"
+            )
+        return self._receipt_reader_provider()
 
 
 

@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.13
+版本：v2.14
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 Chat 本地事务投影屏障当前切片
+
+- Graph Acceptance 仍在 canonical UoW 中生成有序 Conversation/Life/Delivery Effect；两个 Life handler 不再以 command receipt作为完成回执，而是要求 exact command 的完整 projection intent与 durable result receipt集合。
+- foreground `surface.post_process` 使用真实 app-local AgentRuntime ports；assistant turn 或 LifeMemory admission失败会让 projection失败，不产生 barrier receipt，外部 reply Effect因此无法越过。
+- 首次 response loss可重开 exact command 并执行自己的 intents；reclaimed reconciliation只读。缺失/失败/篡改/身份漂移保持 UNKNOWN，后台 worker完成 crash-left intent后才可继续。
+- 当前受影响集合为 `106 passed in 117.58s`，0 fail，覆盖 exact intent claim、response loss、restart、failed projection、receipt tamper、ASGI injection与 GR05 真实 SQLite先本地后外发顺序。该数字替代此前 Conversation focused总数，不相加。
+- 当前结论为 `CHAT_TRANSACTIONAL_SIDE_EFFECT_CONTROL_PASS / CHAT_ROUTE_INCOMPLETE`。外部 Gateway delivery仍为幂等 eventual，commit-bound acceptance、NE-01 wave integration、真实网络/模型和 NE-07未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Operation recovery case-bound reconciliation 当前切片
 

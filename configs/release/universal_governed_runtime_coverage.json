@@ -2,10 +2,10 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_OPERATION_RECOVERY_CASE_BOUND_RECONCILIATION_PRECOMMIT_OVER_ORIGIN_DEV_B9B29B457",
-  "current_document_slice": "NE01_OPERATION_RECOVERY_CASE_BOUND_RECONCILIATION_PRECOMMIT_OVER_ORIGIN_DEV_B9B29B457",
+  "evaluated_source": "NE01_TRANSACTIONAL_CHAT_PROJECTION_BARRIER_PRECOMMIT_OVER_ORIGIN_DEV_D5B15BE19",
+  "current_document_slice": "NE01_TRANSACTIONAL_CHAT_PROJECTION_BARRIER_PRECOMMIT_OVER_ORIGIN_DEV_D5B15BE19",
   "evidence_binding": {
-    "evaluated_commit_sha": "b9b29b457f397c11a04aa8d96c7e8edd6d076268",
+    "evaluated_commit_sha": "d5b15be1950b7805991a5041e410c2a0eb8549e4",
     "migration_head": "0131_task_operation_recovery_hold_binding.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
@@ -35,6 +35,7 @@
     "host_startup_graph_continuation": "PARTIAL_LIFECYCLE_SURVIVOR_EXACT_HOST_ADMISSION_REENTRY_SURFACE_FILTERED_SINGLE_READ_TRANSACTION_EXACT_BOUND_ACCEPTED_TRUE_OVERFLOW_FAIL_CLOSED_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION_MANDATORY_BOOT_THEN_PERIODIC_TIMER_OR_WAKE_LIVE_LEASE_OR_EXECUTION_DEFERRED_EXPIRED_LEASE_ONLINE_REEVALUATED_NO_WORKER_AUTHORITY_GENERAL_RECOVERY_INCOMPLETE",
     "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_MODE_POLICY_0129_DURABLE_RUNTIME_FENCED_OPERATOR_STATE_CONTROLS_LOCAL_SQLITE_PROVEN_HTTP_NETWORK_CANARY_NOT_RUN",
     "scheduler_admin_governed_cutover": "BOTH_HTTP_PREFIXES_CREATE_UPDATE_DELETE_ENABLE_DISABLE_SCHEDULER_HOSTCOMMAND_TASKGRAPH_ACCEPTANCE_EFFECT_ADMIN_OPERATION_RECEIPT_AND_CLAIM_GAP_RESTART_LOCAL_REAL_SQLITE_PROVEN_DIRECT_ROUTE_WRITER_ZERO_REAL_HTTP_NETWORK_CANARY_NOT_RUN",
+    "transactional_chat_projection_barrier": "ENABLED_EXACT_LIFE_COMMAND_PROJECTION_INTENT_SET_AND_DURABLE_RECEIPTS_REQUIRED_BEFORE_SURFACE_REPLY_DELIVERY_ASSISTANT_TURN_AND_LIFEMEMORY_LOCAL_WRITES_PROVEN_EXTERNAL_DELIVERY_REMAINS_IDEMPOTENT_EVENTUAL_GLOBAL_CROSS_SERVICE_SQL_TRANSACTION_NOT_CLAIMED",
     "production_canary": "TERMINAL_EXACT_LOCAL_SQLITE_PASS_FULL_RUNTIME_NOT_RUN",
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -46,7 +47,7 @@
   "routes": {
     "chat": {
       "status": "INCOMPLETE",
-      "production_boundary": "Visible turn, Preference evaluation and Life projection are independent post-Acceptance effects. A missing or non-boolean store privacy-gate contract fails closed with zero writes; explicit false or malformed environment configuration is conservatively parsed to boolean false and writes only a DISABLED receipt with zero events/current profiles/0118 child versions. Enabled mode atomically commits event bindings, append-only child profile versions and the evaluation receipt; parent-sealed plus full-set reconciliation rejects tamper, and NO_SIGNAL is durable. Recommendation feedback is bounded by admitted time, exact person/conversation/session and a canonical full-delivery digest. Surface response loss uses the existing internal_reply HMAC read-only query; Gateway validates effect_id from the same SQLite persisted payload and Host re-derives delivery/payload identity. NOT_FOUND remains UNKNOWN. The current fresh pre-commit local Conversation/Gateway/GR05/GR06 batch reports 65 passed in 118.52 seconds; earlier focused groups are superseded history and are not added. A later focused GR05 production-equivalent SQLite run independently proves that committed foreground Life intents are drained by the real LifeProjectionDispatcher into three visible assistant turns and LifeMemory admissions, then exact replay claims zero; it is non-additive and does not establish seven-route or full-stack acceptance. Wave integration, real model and NE-07 Docker full stack are not run.",
+      "production_boundary": "Graph Acceptance atomically stages ordered conversation.user_turn, conversation.preference_signal, life.conversation_turn_recorded, life.foreground_completed and surface.reply_delivery effects. Each accepted Life handler now validates the exact immutable command, reconstructs and compares the full command-bound projection-intent set, dispatches only the exact intent ids through the app-local LifeProjectionDispatcher, and requires durable payload-bound projection receipts before the effect can COMMIT. surface.post_process is acknowledged only after the durable projection mode has committed the visible assistant turn and a COMMITTED or SKIPPED LifeMemory admission receipt; therefore the ordered dispatcher cannot invoke external reply delivery first. Response loss can reopen the command then complete exact local intents, while reclaimed reconciliation is read-only. Missing receipts, payload/result drift, tamper or projection failure remain UNKNOWN and block later effects. External Gateway delivery remains idempotent eventual delivery with authenticated read-only reconciliation; this is not a global cross-service SQL transaction. The current affected batch is 106 passed in 117.58 seconds, including exact-intent claim isolation, response loss, restart, failure hold, receipt tamper and the production-equivalent GR05 ordering assertion. Wave integration, real model and NE-07 Docker full stack are not run.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -55,11 +56,15 @@
         "host_brain/contracts/conversation_acceptance_effects.py",
         "host_brain/audit/migrations/0118_conversation_acceptance_effects.sql",
         "host_brain/app/acceptance_effect_handlers.py",
+        "host_brain/app/life_projection_barrier.py",
+        "host_brain/digital_life/projection.py",
+        "host_brain/persistence/life_command_repository.py",
         "edge_client/gateway/delivery_runtime.py",
         "edge_client/gateway/server.py",
         "host_brain/channels/edge_transport.py",
         "tests/unit/test_aw02_governed_host_runtime.py",
         "tests/integration/test_ne01_conversation_atomic_effects.py",
+        "tests/integration/test_ne01_generic_acceptance_effect_reconciliation.py",
         "tests/integration/test_ne01_gateway_reply_query.py",
         "tests/unit/test_ne01_gateway_reply_query_client.py",
         "tests/integration/test_gr05_universal_host_runtime.py"
@@ -75,7 +80,7 @@
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PARTIAL",
+        "transactional_side_effects": "PASS",
         "commit_bound_acceptance": "MISSING"
       }
     },

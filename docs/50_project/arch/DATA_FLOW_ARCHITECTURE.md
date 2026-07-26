@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.8
+版本：v3.9
 
 核对日期：2026-07-26
 
@@ -16,6 +16,22 @@
 当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
 
 当前 Operation hold 消解流为：`0130 current hold → Secure Ingress 签名请求与 exact case identity → 0131 append-only evidence → risk-4 Review → immutable TaskGraph/Acceptance Effect → 既有 Operation+Outbox SQLite UoW → case current=false 复验 → v5 handler receipt`。任何 case/digest/intent/version 漂移都在 mutation 前失败；mutation 后若无法证明 case 已关闭则返回 UNKNOWN，不能提交伪成功。checkpoint conflict 没有进入这条正向流，继续隔离。
+
+当前 Chat 本地投影与外部回复流为：
+
+```mermaid
+flowchart LR
+    A["Graph Acceptance\n原子 staging"] --> U["conversation.user_turn"]
+    U --> P["preference receipt"]
+    P --> LC["Life conversation command"]
+    LC --> B1["exact experience intents\n+ durable receipts"]
+    B1 --> LF["Life foreground command"]
+    LF --> B2["surface.post_process receipt\nassistant turn + LifeMemory durable"]
+    B2 --> D["surface.reply_delivery\n幂等 eventual delivery"]
+    D --> Q["Gateway receipt / read-only reconciliation"]
+```
+
+Life command receipt只证明 intent 已写入，不能越过 `B1/B2`。首次调用可领取并执行同一 command 的 exact intent；reclaimed Effect 只读检查回执，后台 worker可在崩溃后完成 pending intent。任一 intent 集合、payload digest、result target/status 或 request identity 漂移都会让 Effect 保持 `UNKNOWN`，有序 dispatcher 因而不会进入 `D`。这条链不把 Gateway 网络发送描述为 Host SQLite 的同一事务。
 
 当前 Direct Agent Skill 写产物流为：
 
