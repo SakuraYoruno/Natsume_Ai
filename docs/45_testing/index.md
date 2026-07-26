@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.21
+版本：v2.22
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 Review 拒绝原子终态当前切片
+
+- `0135_task_review_denial_settlement.sql` 新增 append-only settlement，绑定 exact terminal Review 状态/版本/digest、Graph revision、Node、graph Budget、三条 Outbox，以及可选 Acceptance/Attempt 和已有多节点 `BLOCKED` decision；fresh 0001→0135 与真实前缀 0134→0135 必须通过。
+- `tests/integration/test_ne01_review_denial_terminal_uow.py` 使用真实 SQLite 验证 POST Review 的 Node/Graph/Budget/三 Outbox/settlement 同成同败、响应丢失 exact replay、Review/settlement immutable 和 identity drift 拒绝。
+- `test_gr03a_governed_durable_dag.py` 覆盖 PRE Review 零 Attempt 取消、POST 并行 Graph 拒绝、多节点 blocking decision lineage，以及 continuation 在终态提交后重启只返回同一 `REVIEW_DENIED` receipt、Worker 调用保持 0。
+- `tests/unit/test_task_review_denial_store_structure.py` 约束 canonical Store mixin、focused 文件尺寸、单事务 writer 和 Scheduler 不再组合三个公共写接口；`test_aw03_migration_compat.py` 覆盖真实 0134→0135。
+- 最终受影响集合为 `58 passed in 39.48s`，覆盖 Store/Runtime/Review continuation、0134→0135 真实升级、发布合同和真实 SQLite DAG；完整架构 Gate 1～14 与统一 `static_scan,doc_gate` 均通过，`failed_gates/failures=[]`。本切片只关闭 Review denial terminal bundle；一般 cancellation/recovery、七路线 commit-bound acceptance、NE-01 wave integration 和 NE-07 Docker 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 持久 Acceptance 与 Review 原子边界当前切片
 
@@ -13,7 +21,7 @@
 - `tests/integration/test_ne01_durable_acceptance_review.py` 使用真实 SQLite 验证 ACCEPT 的 decision/artifact/Effect/Node 原子提交，以及 REVIEW 的 decision/Node/Review/直接 Graph block 原子提交；覆盖 restart exact reopen、decision tamper 和 decision INSERT 后故障整体回滚。
 - `tests/integration/test_ne01_durable_node_artifacts.py` 与 `test_gr03a_governed_durable_dag.py` 继续验证 accepted response-loss replay、scheduler snapshot 的 `node_acceptances`、Review continuation 与 worker exactly-once。
 - `tests/unit/test_task_node_acceptance_store_structure.py` 约束 focused Store、唯一 shared pending Review INSERT writer和 canonical composition；`test_aw03_migration_compat.py` 覆盖真实 0133→0134。
-- 当前受影响范围按六个互不重叠批次执行：结构 25、Coordinator/Review 34、migration/release 20、Acceptance/Artifact 20、并发 Review/restart 6、Verification terminal 2，合计 `107 passed`；各批 pytest 时间合计 `87.59s`，不是伪装成一次单命令运行。文档/发布合同另为 `45 passed in 10.42s`，与上述 release 子集重叠，不相加。changed-module `compileall`、三份 JSON、`git diff --check`、完整架构 Gate 1～14，以及统一 `static_scan,doc_gate` 均通过，后两者的 `failed_gates/failures` 均为空。本切片不覆盖 Review denial terminal bundle、一般 cancellation/recovery、七路线 commit-bound acceptance、NE-01 wave integration 或 NE-07 Docker；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 当前受影响范围按六个互不重叠批次执行：结构 25、Coordinator/Review 34、migration/release 20、Acceptance/Artifact 20、并发 Review/restart 6、Verification terminal 2，合计 `107 passed`；各批 pytest 时间合计 `87.59s`，不是伪装成一次单命令运行。文档/发布合同另为 `45 passed in 10.42s`，与上述 release 子集重叠，不相加。changed-module `compileall`、三份 JSON、`git diff --check`、完整架构 Gate 1～14，以及统一 `static_scan,doc_gate` 均通过，后两者的 `failed_gates/failures` 均为空。Review denial terminal bundle 已由后续 0135 切片关闭；一般 cancellation/recovery、七路线 commit-bound acceptance、NE-01 wave integration 或 NE-07 Docker仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 持久 Verification 与直接失败终态前序切片
 
@@ -163,7 +171,7 @@
 - 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
 - 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
 - Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
-- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0134。该证据使用本地临时 key、单节点和进程内 route continuation；0130/0131 的 hold/reconciliation、0132 的 child Budget、0133 的 Verification decision 与 0134 的 Acceptance decision 证据由各自切片单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0135。该证据使用本地临时 key、单节点和进程内 route continuation；0130/0131 的 hold/reconciliation、0132 的 child Budget、0133 的 Verification decision、0134 的 Acceptance decision 与 0135 的 Review denial settlement 证据由各自切片单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 

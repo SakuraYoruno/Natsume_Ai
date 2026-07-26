@@ -3,7 +3,7 @@
 
 # 理论体系目录
 
-版本：v3.1
+版本：v3.2
 维护日期：2026-07-26
 目录状态：`ONE_CANONICAL_THEORY`
 
@@ -32,6 +32,7 @@
 - Governor、Grant、Review、Budget 与 authority lineage；
 - PlanningSearch、不可变 TaskGraph、retry 与 replan；
 - Verification、Acceptance、effect intent 与外部 Receipt；
+- terminal Review 与 Node/Graph/Budget 的单一原子 settlement；
 - 签名证据与执行引用隔离、higher-fence Operation 重获与 exact replay；
 - Feedback、Capability、Knowledge 和 Identity 的长期演化门禁；
 - 故障、降级、恢复、不变量与反模式。

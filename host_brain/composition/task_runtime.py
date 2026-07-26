@@ -828,6 +828,7 @@ def build_process_task_runtime_container(
         task_store.assert_node_artifact_ready()
         task_store.assert_node_verification_ready()
         task_store.assert_node_acceptance_ready()
+        task_store.assert_review_denial_settlement_ready()
         terminal_operator_command_store = terminal_operator_command_store_builder(
             canonical
         )

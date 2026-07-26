@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.13
+版本：v2.14
 核对日期：2026-07-26
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -33,6 +33,7 @@ flowchart TD
     ACCEPT["Independent Acceptance\nreopen durable projection"]
     ADEC["0134 durable Acceptance decision"]
     REVIEW["Atomic waiting Node + ReviewItem\n+ direct Graph block"]
+    DENIAL["0135 atomic denial settlement\nNode + Graph + Budget + 3 Outbox"]
     EFFECT["Durable effect intents"]
     DISPATCH["AcceptanceEffectDispatcher"]
     SSE["SSE / reply projection"]
@@ -46,6 +47,7 @@ flowchart TD
     ADMIT --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> ADEC
     ADEC -->|"ACCEPT"| EFFECT --> DISPATCH --> SSE
     ADEC -->|"non-ACCEPT"| REVIEW
+    REVIEW -->|"REJECTED / EXPIRED / CANCELLED"| DENIAL --> SSE
     SUPPORT -->|"read route"| READ --> SSE
     SUPPORT -->|"unsupported"| REJECT
 
@@ -112,7 +114,12 @@ sequenceDiagram
                 opt direct single-node graph
                     C->>T: same UoW Graph BLOCKED + Graph Outbox
                 end
-                C-->>H: durable Review gate
+                alt Review remains pending
+                    C-->>H: durable Review gate
+                else Review terminal denial
+                    C->>T: 0135 atomic Node + Graph + graph Budget + 3 Outbox + settlement
+                    C-->>H: REVIEW_DENIED; restart exact replay, no Worker re-entry
+                end
             end
         end
     end

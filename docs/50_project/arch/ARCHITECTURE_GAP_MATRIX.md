@@ -3,12 +3,14 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.14
+版本：v3.15
 核对日期：2026-07-26
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
-节点 Acceptance 的“判断存在但没有持久决策”断点已经关闭：0134 把 exact Graph revision、Node、Attempt、规范 judgement digest、evidence 与 Outbox 写成 append-only decision。自动接纳的 decision、artifact、可选 Effect 和 `ACCEPTED` Node 原子提交；需要人工判断时，decision、等待 Node、ReviewItem 与 Node Outbox 原子提交，直接单节点图还同事务进入 `BLOCKED`。重启按 node version 重开该事实，Scheduler snapshot 也暴露它；pending Review INSERT 只有一个共享 SQL owner。尚未清零的是 Review 拒绝后的完整终态 bundle、一般 cancellation/recovery、七路线 commit-bound receipt 与波次集成，因此该项不改变 NE-01 总状态。
+Review 拒绝后的“多个事务逐步关闭终态”断点已经关闭：0135 把 exact terminal Review status/version/digest、Node、Graph、graph Budget、三条 Outbox、可选 0134 Acceptance/Attempt 与已有 `BLOCKED` decision 写成 append-only settlement。PRE Review 必须零 Attempt，POST Review 必须绑定 `SUCCEEDED` Attempt；提交故障整体回滚，响应丢失或重启只重放 settlement 且 Worker 调用保持不变。尚未清零的是一般 cancellation/recovery、七路线 commit-bound receipt 与波次集成，因此 NE-01 总状态仍不改变。
+
+节点 Acceptance 的“判断存在但没有持久决策”断点已经关闭：0134 把 exact Graph revision、Node、Attempt、规范 judgement digest、evidence 与 Outbox 写成 append-only decision。自动接纳的 decision、artifact、可选 Effect 和 `ACCEPTED` Node 原子提交；需要人工判断时，decision、等待 Node、ReviewItem 与 Node Outbox 原子提交，直接单节点图还同事务进入 `BLOCKED`。重启按 node version 重开该事实，Scheduler snapshot 也暴露它；pending Review INSERT 只有一个共享 SQL owner。后续拒绝终态由 0135 唯一收口。
 
 节点 Verification 的持久化断点已经关闭：0133 把 exact Graph revision、Node、Attempt、规范结果 digest、evidence 与 Node Outbox 写成 append-only decision，Node transition 同事务提交；`VERIFIED` checkpoint 重入只读重开该事实。直接拒绝的 Node、Graph、graph Budget 和 Outbox 也由一个 UoW 收口，响应丢失 exact replay 与终态 identity drift rollback 已用真实 SQLite 证明。多节点拒绝仍交给 0090 唯一 Graph settlement，不形成第二 writer。尚未清零的是一般 failure/cancellation/reconciliation、低层兼容 API 删除、七路线 commit-bound receipt 与 NE-01 wave integration。
 
@@ -22,7 +24,7 @@ Host 情感连续状态和回复形态额度的 module-global authority 也已�
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 
-当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0134_task_node_acceptance_decision.sql`。0132 的 Attempt-bound child Budget 语义保持不变；0133 增加 durable Verification decision 与直接拒绝原子终态，0134 增加 durable Acceptance decision 与 Acceptance/Review 原子提交。0130/0131 的 unknown/cancellation/conflict hold 与 signed reconciliation 语义保持不变。五节点菱形与八根节点已证明精确 `COMMITTED` checkpoint 的依赖释放和跨 owner 恢复，worker 各调用一次；无限规模、其它 failure/cancellation 组合、自动归因、Workspace 终态和部署 fan-out 仍未完成。
+当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0135_task_review_denial_settlement.sql`。0132 的 Attempt-bound child Budget 语义保持不变；0133 增加 durable Verification，0134 增加 durable Acceptance/Review 创建，0135 增加 Review denial 原子终态。0130/0131 的 unknown/cancellation/conflict hold 与 signed reconciliation 语义保持不变。五节点菱形与八根节点已证明精确 `COMMITTED` checkpoint 的依赖释放和跨 owner 恢复，worker 各调用一次；无限规模、其它 failure/cancellation 组合、自动归因、Workspace 终态和部署 fan-out 仍未完成。
 
 Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：每个写请求冻结 Secure Ingress method/path/body、definition head 和 claim，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，只有 post-Acceptance `operator.state_control` Effect 可以写 canonical repository；不可变 admin operation receipt 与 claim 之间的崩溃可由新实例精确恢复。路由中的直接 Scheduler writer 为 0，read 路由保持只读，trigger 保持既有 governed occurrence。
 
@@ -76,7 +78,7 @@ Edge command 的旧全局 client owner、startup 注册和 Tribe/内部直推调
 | Operation / Attempt 在线 continuation | `SIGNED_MULTINODE_NODE_FAILURE_LOCAL_PROVEN / GENERAL_SHAPE_CHECKPOINT_RECOVERY / 0131_CASE_BOUND_AMBIGUITY_RESOLUTION / GENERAL_RECOVERY_INCOMPLETE` | failure/checkpoint reconciliation、`dag_scheduling_runtime.py`、0090、0130 hold codec/support/store、0131 binding、governed Operation handler、真实 SQLite/Git integration | 已知中断写 `RECOVERY_REQUIRED + Outbox`；签名 `REACQUIRE/COMMIT/RELEASE` 保持既有 mutation authority。UNKNOWN/CANCELLATION current hold 必须经 0131 exact case-bound evidence、risk-4 Review 与 Acceptance，handler 在 mutation 后确认 case non-current；每 case 唯一 evidence，响应丢失/重启精确重开。五节点菱形与八根节点 checkpoint 可跨 owner 续接。任意未绑定 external receipt、未签名普通 `RELEASE` 仍拒绝；checkpoint conflict quarantine。部署 key/HTTP canary、其它 failure/cancellation、无限规模、Workspace 终态和 wave integration仍缺 | NE-01 |
 | ACCEPTED→Effect restart | `PROVEN_NARROW_FINALIZATION` | `accepted_graph_finalization.py`、`test_ne01_accepted_effect_finalization_recovery.py` | exact checkpoint下原子补写且幂等；不代表跨系统 Effect dispatch 已全局事务化 | NE-01 |
 | 通用 Acceptance Effect 对账 | `PARTIAL / INDEPENDENT_CONVERSATION_EFFECTS_AND_AUTHENTICATED_SURFACE_QUERY` | `acceptance_effect_handlers.py`、0118、Preference repository、Gateway reply query、dispatcher、Guardian observer、tests | store gate缺失/非bool失败关闭零写；配置false/malformed env→bool false→`DISABLED`零event/profile。启用时event/append-only child profile/receipt同UoW，sealed-child trigger + full-set reconcile拒绝篡改；推荐反馈严格按admitted-time、exact conversation/session与canonical delivery digest绑定。Gateway从同SQLite payload校验effect_id，`NOT_FOUND`保持`UNKNOWN`。一般unknown-effect人工归因、commit-bound evidence、wave/canary仍缺 | NE-01 |
-| Review 自动 continuation | `WIRED_TASK_BOUND / CANARY_NOT_RUN` | `review_runtime.py`、ReviewStore、0096、`dag_scheduling_review_denial.py`、surface/ingress/takeover tests | task-bound PRE/POST 已接；拒绝/过期/取消 claim 只传 exact node identity、无 worker grant，scheduler 必须重开等待 checkpoint、排除 active sibling 并复验 `REVIEW_DENIED` 后才终结。single-node canonical COMMITTED Operation takeover 与 operation-free persisted Attempt takeover 是两条独立窄链。真实 canary、Operator credential/UI、pre-Attempt/pre-budget general recovery 与 multi-node/batch 自动 recovery 仍缺 | NE-01 已完成切片 |
+| Review 自动 continuation | `WIRED_TASK_BOUND / ATOMIC_DENIAL_TERMINAL_LOCAL_PROVEN / CANARY_NOT_RUN` | `review_runtime.py`、ReviewStore、0096、0135、`review_denial_lifecycle.py`、`task_review_denial_store.py`、surface/ingress/takeover tests | task-bound PRE/POST 已接；拒绝/过期/取消 claim 只传 exact node identity、无 worker grant。0135 将 Review/Node/Graph/graph Budget/Outbox 原子终结并支持 response-loss exact replay；single-node canonical COMMITTED Operation takeover 与 operation-free persisted Attempt takeover 是两条独立窄链。真实 canary、Operator credential/UI、一般 cancellation/recovery 与 multi-node/batch 自动 recovery 仍缺 | NE-01 当前切片 |
 | 对话全副作用提交 | `PARTIAL / LOCAL_PROJECTION_BARRIER_PASS / EXTERNAL_EVENTUAL` | Acceptance Effect 顺序 + exact Life intent/receipt barrier + Gateway reconciliation | assistant turn 与 LifeMemory 已成为外部 reply 的 durable 前置条件；失败/篡改/重启保持 UNKNOWN。外部 delivery 仍是幂等 eventual，不是跨服务单事务；Chat commit-bound acceptance、波次与真实网络仍缺 | NE-01 |
 | 单一任务真相 | `WIRED` | Durable Task projection + registry absence contract | 进程内 registry 与 accessor 已删除；read route 不创建任务 | NE-01 已完成切片 |
 | Persona 演化单一 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 运行时拒绝、`T-PERSONA-FENCE-01` 全仓扫描、无副作用候选回归 | legacy writer 已归零；proposal、shadow、Review、版本激活与 rollback 替代链尚未实现 | NE-01 围栏已完成；NE-06 全量替换 |
