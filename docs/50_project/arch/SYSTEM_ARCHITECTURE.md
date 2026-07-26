@@ -3,11 +3,13 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.18
+版本：v2.19
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+Plan 的审批 authority 现在贯穿 Registry、Search、Compiler 和 Task Runtime，但每层只拥有一种职责。Registry 是 `require_confirm` 来源，Search 只能选择并携带候选事实，Compiler 独占 immutable TaskNode policy 生成，ReviewStore 独占人类决定，Continuation Worker 只协调已持久决定的 claim，NodeBoundGrantService 只续签时限与原约束。Scheduler 恢复历史 accepted projection grant 与当前 renewed grant，防止长审批把已提交节点误判成 authority drift；它不允许续签改变 graph revision、目标、风险或权限。
 
 通用执行层新增一个 route-neutral 证据边界，而不是第二套 Runtime。Chat、Skill、Delegate、Plan、Tool 与 Operator worker 仍由原 Task Runtime 调度；其 terminal COMMIT 只被视为主张。Verifier 与 Acceptance 分别通过 projection reader 重开同一 durable evidence，任何身份、grant、digest、COMMIT 或输出合同漂移都阻断。Plan 的 successor artifact 由 canonical TaskStore 解析并经 `NodeInputArtifactAttestation` 绑定后才进入 final Chat；该 attestation 不赋予新的执行权。
 

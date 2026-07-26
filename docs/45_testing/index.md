@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.17
+版本：v2.18
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 Plan 节点审批与续跑当前切片
+
+- `tests/unit/test_ne02_capability_plan_search.py` 证明 confirm-required registry capability 可参与竞争，compiler 生成覆盖实际图节点的政策；缺项与字符串布尔失败关闭。
+- `tests/integration/test_ne01_plan_node_review_runtime.py` 使用真实 SQLite、PlanningSearch、Graph compiler、HostCommand admission、Task Runtime、ReviewStore、0096 Continuation Worker、NodeBoundGrantService 和 durable WorkerProjection，证明三节点图只有目标 Skill 等待审批，消费后续跑且三个 worker 各执行一次。
+- 最终回归集合为 `89 passed in 42.96s`；真实 SQLite/生产入口集成为 `10 passed in 59.58s`，两组并行执行且不相加。后者同时覆盖既有 PRE/POST Review、自动 continuation、accepted predecessor 重启、retry Review 及 Chat/Delegate/Plan 共用 Host 主链。
+- 首次 Core Gate 3 因 `dag_scheduling_runtime.py` 超过 1500 行失败；历史 grant 恢复已拆到 `parallel_success_grant_reentry.py`，未增加/扩大白名单，最终 Gate 1～14 `PASS`。发布/文档合同另为 `77 passed in 11.04s`；统一 `static_scan,doc_gate` 无失败。
+- 本切片无 migration、无真实 provider、无 Docker；Plan 当前 enabled route 的 `node_bound_grant/review_resume=PASS`，Budget、一般搜索/恢复、commit-bound acceptance、NE-01 与 full architecture 均未完成。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 只读 Delegate 预算证明当前切片
 

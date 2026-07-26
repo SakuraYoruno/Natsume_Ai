@@ -39,6 +39,10 @@ from host_brain.contracts.agent_runtime.task_graph import (
     validate_task_graph_admission_state,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.review_policy import (
+    NODE_REVIEW_POLICIES_KEY,
+    NODE_REVIEW_POLICY_SCHEMA_VERSION,
+)
 from host_brain.planning_search.contracts import (
     PlanningGoal,
     SearchCandidate,
@@ -127,6 +131,7 @@ _BUDGET_LIMIT_FIELDS = frozenset(
     }
 )
 _DEPENDENCY_CANDIDATE_FIELD = "depends_on_candidate_ids"
+_CANDIDATE_REVIEW_POLICIES_KEY = "candidate_review_policies"
 _CONTEXT_OWNED_FIELDS = _ROOT_REQUIRED_FIELDS | frozenset(
     {"workspace", "input_pack", "metadata", "plan_objective"}
 )
@@ -1226,6 +1231,11 @@ def _compile_work_order(
         else None
     )
     objective = str(root.get("plan_objective") or root["objective"]).strip()
+    review_policy = _compile_node_review_policies(
+        root.get("review_policy"),
+        selected_candidate_ids=selected_candidate_ids,
+        node_ids=node_ids,
+    )
     order = WorkOrderV3(
         work_order_id=graph.root_work_order_id,
         domain=str(root["domain"]).strip().lower(),
@@ -1246,7 +1256,7 @@ def _compile_work_order(
         acceptance_criteria=all_acceptance,
         verification_plan=deepcopy(dict(root["verification_plan"])),
         approval_policy=deepcopy(dict(root["approval_policy"])),
-        review_policy=deepcopy(dict(root["review_policy"])),
+        review_policy=review_policy,
         metadata=metadata,
         root_work_order_id=graph.root_work_order_id,
         parent_work_order_id=None,
@@ -1267,6 +1277,68 @@ def _compile_work_order(
     )
     order.validate()
     return order
+
+
+def _compile_node_review_policies(
+    raw_policy: Any,
+    *,
+    selected_candidate_ids: tuple[str, ...],
+    node_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    if not isinstance(raw_policy, Mapping) or not raw_policy:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "planning Review policy must be a non-empty object",
+        )
+    policy = deepcopy(dict(raw_policy))
+    raw_candidates = policy.pop(_CANDIDATE_REVIEW_POLICIES_KEY, None)
+    if raw_candidates is None:
+        return policy
+    if NODE_REVIEW_POLICIES_KEY in policy:
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "planning context cannot provide compiler-owned node Review policies",
+        )
+    if not isinstance(raw_candidates, Mapping) or set(raw_candidates) != set(
+        selected_candidate_ids
+    ):
+        raise ContractViolation(
+            CONTRACT_FIELD_INVALID,
+            "candidate Review policies must cover the selected path exactly",
+        )
+    node_policies: dict[str, dict[str, Any]] = {}
+    for candidate_id, node_id in zip(
+        selected_candidate_ids,
+        node_ids,
+        strict=True,
+    ):
+        raw_entry = raw_candidates.get(candidate_id)
+        if not isinstance(raw_entry, Mapping):
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID,
+                f"candidate Review policy is invalid: {candidate_id}",
+            )
+        entry = dict(raw_entry)
+        required = entry.get("review_required")
+        reason_code = str(entry.get("reason_code") or "").strip()
+        source_ref = str(entry.get("source_ref") or "").strip()
+        if (
+            not isinstance(required, bool)
+            or not reason_code
+            or "://" not in source_ref
+        ):
+            raise ContractViolation(
+                CONTRACT_FIELD_INVALID,
+                f"candidate Review policy lacks immutable provenance: {candidate_id}",
+            )
+        node_policies[node_id] = {
+            "schema_version": NODE_REVIEW_POLICY_SCHEMA_VERSION,
+            "review_required": required,
+            "reason_code": reason_code,
+            "source_ref": source_ref,
+        }
+    policy[NODE_REVIEW_POLICIES_KEY] = node_policies
+    return policy
 
 
 

@@ -3,7 +3,7 @@
 
 # 图 04：Planning、Task Runtime 与退役 Executive 边界
 
-版本：v3.11
+版本：v3.12
 核对日期：2026-07-26
 
 文件名保留为 `04_executive_layers.md` 以兼容旧链接。当前执行 authority 是 Governed Runtime；Executive 的生产入口、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag worker 执行和进程内任务 registry 已删除，且 Executive 内的 Forge route override call 已移除。纯 SkillDag adapter 仅作零生产调用的兼容合同；独立 Forge `runtime-match` 仍是待退役边界。
@@ -18,7 +18,7 @@ flowchart TD
     subgraph Canonical["Canonical governed path"]
         HS["Host route contracts / Plan search"]
         GC["PlanningGraphCompiler"]
-        GATE["atomic capability + grant\npre-admission gate"]
+        GATE["atomic capability + per-node review/grant\npre-admission gate"]
         AD["Durable admission"]
         TR["GovernedTaskCoordinator"]
         SHADOW["atomic success production default\nbounded fan-out independent default OFF"]
@@ -48,6 +48,8 @@ flowchart TD
 
 `AC` 不是 worker 内部判断：Verifier 与 Acceptance 各自重开 durable projection。Plan 的 final Chat 还要从 `ART` 获得 digest-bound predecessor bundle；因此 TaskGraph 边既是调度约束，也是可验证的数据输入合同。当前规则只覆盖已启用 capability-plan 的固定结构政策，通用候选生成与语义收益仍属于 NE-02。
 
+capability Plan 不再要求候选一律 `require_confirm=false`。该字段被转换为 compiler-owned、覆盖整图 node ID 的 Review policy；续跑只延长 exact grant 的有效期，不把 Review authority交给 Search 或 worker。Plan 当前启用路径的节点 grant/Review 已有真实 SQLite 证据，但 graph-scope Budget 和一般 PlanningSearch 仍未完成。
+
 ## Planning Search 分层
 
 ```mermaid
@@ -69,7 +71,7 @@ flowchart LR
 
 | 领域 | 当前材料来源 | 当前结论 |
 |---|---|---|
-| Host Plan | Governor 已批准的 `planned_steps/steps` | 只做合法拓扑选择，未生成竞争方案 |
+| Host Plan | Governor-bound task/tag/risk + composed SkillRegistry catalog | 窄 Research/Frontend capability route 会生成并排序竞争能力，编译为 `skill → skill → chat`；confirm-required Skill 逐节点 Review。它不是通用目标搜索或收益证明 |
 | Pentest | 授权范围内的 action candidates 与虚拟世界 | L1/L2 接线；L3 强制 shadow-only；0105 durable calibration 仅显式注入时写入，target 在 fingerprint 前收口，库故障只记 unavailable 事件，outcome 仍是未验证运行记录投影 |
 | Research | D20a `ResearchTaskSnapshot` 的公开 task/corpus/source metadata（`source_id/ref/digest` 与有限 authority/relevance/cost hints）；`FrozenResearchCorpusLoader` 仅从可信实验根+manifest 读取 repository-relative 普通文件；D20c adapter 只能使用 canonical `ModelAttemptService` 与 audit lookup | 按虚拟状态动态给出 `query`、`quick-answer`、`primary-source`、`independent-source`、`cross-check`、`resolve-conflict`、`stop` 的 pure-shadow L1/L2；L3 仅冻结 `virtual_transition_ready=true` 时有虚拟 ports。公开 snapshot 没有 dedicated 本机 locator/source-body/answer-key/verifier-decision 字段，constraints 拒绝命名 key，任务文字不是内容级 DLP；公开 receipt 不含路径或正文。loader 在稳定输入中前后核对状态/大小并在读完后核对摘要，拒绝绝对/遍历/ADS colon/case alias/link/reparse/未列来源；D20b 已有 snapshot-manifest-document exact handshake 与 fresh-loader UTF-8 citation span 验证。D20c 在外呼前强制 execution ID 的 canonical audit 为空，已有行或 lookup 故障须 reconciliation；随后才接受一个非缓存成功 canonical attempt 的精确 route/output、token/成本、provider/总延迟，并重开同一 request 的 started/terminal audit pair 后嵌入 attestation；但普通请求仍不能改写 route retry ceiling，且没有真实 credential/provider execution、prompt/workload 或 cohort。它不是生产 route、TaskGraph、Host、BrowserWorker、网页抓取、独立 verifier、收益证明或 OS/tenant/sandbox；Research `ACCEPTANCE_PENDING_EXTERNAL`，benefit `UNPROVEN` |
 | Code | D16 frozen opaque ref/digest + registered patch catalog；D17 trusted-process private bare 双 detached worktree；D18 cleanup-gated 0106 ledger；D19 pre-registered fixed pytest subprocess receipt | D16 动态 pure-shadow `inspect→patch→unit/rollback` 已有单测；D17/D18 证明受信 adapter 的本地 private-bare clone、portable ACL file API、双 arm cleanup 后 source fingerprint 无漂移，且 preregistration/evidence/clean receipt 可跨重启审计；D19 实际拒 paired test-command/wall limit 并保留无路径 command receipt。它不是恶意执行防护、独立 verifier 或 OS/container sandbox，`network_isolation=NOT_ENFORCED`；仍没有真实模型/工具/token/cost budget 或成本收益对照 |

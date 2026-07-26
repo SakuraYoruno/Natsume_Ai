@@ -425,7 +425,7 @@ def _registry_capabilities(
         tags = tuple(dict.fromkeys((*tags, family)))
         if (
             scope != "host"
-            or require_confirm is not False
+            or not isinstance(require_confirm, bool)
             or isinstance(risk_level, bool)
             or not isinstance(risk_level, int)
             or risk_level > max_risk_level
@@ -446,6 +446,7 @@ def _registry_capabilities(
                         reversible=bool(getattr(raw, "reversible", False)),
                         parallelizable=bool(getattr(raw, "parallelizable", False)),
                     ),
+                    requires_review=require_confirm,
                 )
             )
         except CapabilityPlanningError:

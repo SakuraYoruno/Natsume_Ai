@@ -14,6 +14,12 @@ from host_brain.orchestration.capability_plan_search import (
     is_capability_plan_intent,
 )
 from host_brain.orchestration.planning_graph_compiler import PlanningGraphCompiler
+from host_brain.contracts.agent_runtime.review_policy import (
+    NODE_REVIEW_POLICIES_KEY,
+    pre_execution_review_required,
+)
+from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.planning_search.capability_domain import CapabilitySuccessorCatalog
 from host_brain.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_MODE,
@@ -254,6 +260,89 @@ def test_registry_requires_two_non_confirming_eligible_capabilities() -> None:
         )
 
     assert caught.value.reason_code == CAPABILITY_PLAN_SEARCH_NO_COMPETITION
+
+
+def test_confirm_required_registry_capability_compiles_exact_node_review_policy() -> None:
+    intent, _governor = _intent()
+    intent["args"]["planning_max_risk_level"] = 3
+    governor = {
+        "request_id": intent["request_id"],
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "reason_code": "APPROVED",
+        "approved_action_binding": build_governed_action_binding(
+            intent_envelope=intent,
+            approval_token_ref="approval-node-review-policy",
+            risk_level=3,
+            issued_at_ms=1_000,
+            expires_at_ms=61_000,
+        ),
+        "ts_ms": 1_000,
+    }
+    adapter = build_capability_plan_search(
+        intent,
+        governor_result=governor,
+        skill_registry=_registry(include_second=False),
+        input_refs=("input://sha256/" + "7" * 64,),
+    )
+
+    assert {
+        item.capability_id: item.requires_review
+        for item in adapter.snapshot.capabilities
+    } == {
+        "research_confirm_required": True,
+        "research_fast": False,
+    }
+    result = adapter.search(adapter.request)
+    compiled = PlanningGraphCompiler().compile(
+        result,
+        created_at=1_234,
+        compilation_context=adapter.compilation_context_for(result),
+    )
+    node_policies = compiled.work_order.review_policy[NODE_REVIEW_POLICIES_KEY]
+    assert set(node_policies) == {
+        node.node_id for node in compiled.task_graph.nodes
+    }
+    required_nodes = {
+        node.node_id
+        for node in compiled.task_graph.nodes
+        if pre_execution_review_required(
+            compiled.work_order,
+            node_id=node.node_id,
+        )
+    }
+    assert len(required_nodes) == 1
+    required_node = next(
+        node
+        for node in compiled.task_graph.nodes
+        if node.node_id in required_nodes
+    )
+    assert required_node.route == "skill:research_confirm_required"
+    assert all(
+        policy["source_ref"] == adapter.snapshot.catalog_ref
+        for policy in node_policies.values()
+    )
+    assert "candidate_review_policies" not in compiled.work_order.review_policy
+
+    missing_policy = compiled.work_order.to_dict()
+    del missing_policy["review_policy"][NODE_REVIEW_POLICIES_KEY][
+        required_node.node_id
+    ]
+    with pytest.raises(ContractViolation):
+        pre_execution_review_required(
+            WorkOrderV3.from_mapping(missing_policy),
+            node_id=required_node.node_id,
+        )
+
+    malformed_policy = compiled.work_order.to_dict()
+    malformed_policy["review_policy"][NODE_REVIEW_POLICIES_KEY][
+        required_node.node_id
+    ]["review_required"] = "true"
+    with pytest.raises(ContractViolation):
+        pre_execution_review_required(
+            WorkOrderV3.from_mapping(malformed_policy),
+            node_id=required_node.node_id,
+        )
 
 
 def test_governor_risk_ceiling_tightens_the_frozen_candidate_catalog() -> None:

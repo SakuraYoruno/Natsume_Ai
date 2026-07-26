@@ -3,10 +3,12 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.10
+版本：v3.11
 核对日期：2026-07-26
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+Plan 当前启用路径的节点审批缺口已经清零：`require_confirm` 能力不再被候选生成器丢弃，审批要求从 registry snapshot 经 candidate policy 进入 compiler，并最终精确绑定每个 immutable TaskNode ID。Scheduler 只阻塞目标节点；0096 continuation 消费一次性 Review 后续签尚需运行的 exact grant，同时保留审批前已 accepted projection 的历史 grant authority。缺失策略、字符串布尔、catalog provenance 漂移和续跑 grant 混用都失败关闭。该项把 Plan 的 `node_bound_grant/review_resume` 从 `PARTIAL` 提升为当前 enabled route 的 `PASS`，但 Plan 总体仍因 graph-scope Budget、一般搜索/恢复、事务副作用和 commit-bound acceptance 保持 `INCOMPLETE`。
 
 通用 worker 的假验收缺口已经从当前启用路径移除：一个 route-neutral verifier/acceptance 组合分别重开 durable projection，并校验 immutable authority、receipt/COMMIT、WorkOrder/context 与输出合同。未知自然语言条件进入 Review；Plan 合成节点还必须消费 digest-bound 前驱 artifacts。Delegate/Plan 的 `verification` 原子控制因此为 `PASS`。生产唯一启用的 `pentest_agent` 又以无模型/工具/嵌套派发/Effect 端口的只读 adapter 和 exact-zero、完整 Task-lineage-bound usage attestation，把当前目标的 Delegate `budget_enforcement` 提升为 `PASS`；外层一次 canonical dispatch 仍正常预扣。一般 Delegate、Plan Budget、Review/recovery、事务副作用、commit-bound acceptance 以及 Plan 的通用候选生成仍为 `PARTIAL/MISSING`，路线总状态不升级。
 

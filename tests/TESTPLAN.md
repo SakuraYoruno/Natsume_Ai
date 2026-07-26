@@ -1,10 +1,19 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.19
+版本：v0.20
 日期：2026-07-26
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-PLAN-NODE-REVIEW
+
+- T-NE01-PLAN-REVIEW-01：Registry 的 `require_confirm=true` 能力必须可参与合法候选竞争，并在 frozen snapshot 中明确标记 `requires_review`，不能通过过滤候选假装完成审批。
+- T-NE01-PLAN-REVIEW-02：Compiler 必须删除 candidate policy key，并生成覆盖 TaskGraph 全部实际 node ID 的 `Natsume.agent.node_review_policy.v1`；缺项、非布尔或无 durable source ref 均失败关闭。
+- T-NE01-PLAN-REVIEW-03：Scheduler 只为 `review_required=true` 的 claimable node 创建 PRE Review；其它节点不得共享图级等待状态。
+- T-NE01-PLAN-REVIEW-04：消费 Review 后，Continuation Worker 必须重开同一 graph revision；进入续跑前已 accepted 节点保留 WorkerProjection 的历史 grant，当前新执行节点使用续签 grant。
+- T-NE01-PLAN-REVIEW-05：真实 SQLite `skill → skill → chat` 图必须等待一次 Review、每个 worker 恰好执行一次、最终 Graph `COMPLETED`，原始与续签 grant lineage 均可验证。
+- T-NE01-PLAN-REVIEW-06：本合同只提升当前启用 Plan 路径的 `node_bound_grant/review_resume`；graph-scope Budget、一般 PlanningSearch/恢复、commit-bound acceptance 与 NE-01 不得随之升级。
 
 ## T-NE01-READONLY-DELEGATE-BUDGET
 

@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：TRACE-EXEC-08～08AL 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.2
+版本：v5.3
 核对日期：2026-07-26
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -35,6 +35,8 @@
 | FR-PROACTIVE | DevSpec §4、§11 | proactive intent/outbox + Persona feedback paths | proactive contracts、writer 审计 | `PARTIAL_PERSONA_FENCE_WIRED` |
 
 TRACE-EXEC-08AM（通用 Worker 独立证据与 Plan 真实产物流）：Chat/Skill/Delegate/Plan/Tool/Operator 的已启用通用 worker 必须由 route-neutral Verifier 与 Acceptance 分别重开 durable WorkerProjection；command/request、graph revision、node、attempt、route/target、node grant、WorkOrder/context、receipt digest、完整 COMMIT 与 output contract 任一漂移都失败关闭。只有固定结构 predicate 可自动 PASS，任意其它验收文字必须进入 durable Review。Plan final Chat 必须实际消费已验收前驱 TaskResult artifact，并携带 artifact/receipt/payload digest bundle attestation。证据为 `test_ne01_governed_worker_evidence.py`、`test_ne01_node_input_artifact_attestation.py`、`test_gr05_frozen_route_executors.py` 与真实 SQLite `test_gr05_universal_host_runtime.py`；当前定向单测 `50 passed`、路线集成 `9 passed`、Universal Host `1 passed`，集合不相加。结论为 `ENABLED_DELEGATE_PLAN_VERIFICATION_PASS / ROUTES_AND_NE01_INCOMPLETE`。
+
+TRACE-EXEC-08AN（Plan 节点审批与续签 Grant）：Registry 的 `require_confirm` 必须进入 frozen capability snapshot，不能以过滤候选代替治理；Planning compiler 必须将 candidate policy 重绑定为覆盖每个 immutable TaskNode ID 的政策。Scheduler 只阻塞要求审批的节点，缺失/畸形/无来源政策失败关闭。0096 continuation 消费 exact Review 后，已 accepted predecessor 使用 immutable projection 的历史 grant，尚未执行节点使用 claim-fenced 续签 grant，worker 不重跑。`test_ne02_capability_plan_search.py` 与真实 SQLite `test_ne01_plan_node_review_runtime.py` 加上既有自动 continuation/restart/retry/Universal Host 回归证明该边界。结论为 `PLAN_ENABLED_ROUTE_NODE_GRANT_AND_REVIEW_RESUME_PASS / PLAN_AND_NE01_INCOMPLETE`；graph-scope Budget、一般搜索/恢复、事务副作用和 commit-bound acceptance 不升级。
 | FR-AGENT-RUNTIME、FR-PLANNING | DevSpec §3、§6 | Governed Runtime、PlanningSearch | T-GR-RUNTIME-01、T-PLAN-* | `PROGRAM_INCOMPLETE` |
 
 ## 3. Governed Execution
