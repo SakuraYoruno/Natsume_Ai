@@ -1652,10 +1652,11 @@ async def test_conflicting_worker_usage_blocks_before_takeover_lease(
     )
     clock.advance(25)
 
+    reopened = DurableTaskStore(db_path, clock=clock)
     second_app = GovernedCommandApplication(
         command_repository=HostCommandRepository(db_path, clock=clock),
         coordinator=_coordinator(
-            store=DurableTaskStore(db_path, clock=clock),
+            store=reopened,
             projections=WorkerProjectionStore(db_path, clock=clock),
             worker=worker,
             owner_id="budget-conflict-owner-b",
@@ -1665,6 +1666,37 @@ async def test_conflicting_worker_usage_blocks_before_takeover_lease(
 
     assert blocked[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
     assert blocked[-1]["execution_receipt"]["accepted"] is False
+    hold_projection = blocked[-1]["execution_receipt"]["projection"]
+    holds = reopened.list_current_operation_recovery_holds(
+        graph_id="graph-gr03a",
+    )
+    assert len(holds) == 1
+    assert holds[0]["case_kind"] == "CHECKPOINT_BUDGET_CONFLICT"
+    assert holds[0]["classification"] == "QUARANTINED_CHECKPOINT_CONFLICT"
+    assert holds[0]["checkpoint_state"] == "CONFLICT"
+    assert hold_projection["recovery_case_ref"] == holds[0]["case_ref"]
+    assert hold_projection["recovery_case_digest"] == holds[0]["subject_sha256"]
+    assert holds[0]["case_ref"] in blocked[-1]["execution_receipt"][
+        "evidence_refs"
+    ]
+    replayed_hold = reopened.record_operation_recovery_hold(
+        graph_id="graph-gr03a",
+        graph_revision=1,
+        node_id="root",
+        attempt_id=attempt_id,
+        reservation_id=(
+            AdmittedExecution.from_contracts(
+                command=contracts[0],
+                assignment=contracts[2],
+                graph=contracts[3],
+            ).reservation_id
+        ),
+        budget_id=budget["budget_id"],
+        reason_code="GOVERNED_CHECKPOINT_BUDGET_CONFLICT",
+        checkpoint_state="CONFLICT",
+    )
+    assert replayed_hold["exact_replay"] is True
+    assert replayed_hold["case_ref"] == holds[0]["case_ref"]
     assert calls == ["root"]
     with durable._connect() as conn:
         assert conn.execute(
@@ -1814,6 +1846,11 @@ async def test_heartbeat_loss_keeps_unknown_side_effect_blocked_for_signed_recon
 ) -> None:
     db_path = _migrated_db(tmp_path)
     contracts = _contracts((("root", ()),))
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
     clock = _Clock()
     projections = WorkerProjectionStore(db_path, clock=clock)
     calls: list[str] = []
@@ -1861,6 +1898,23 @@ async def test_heartbeat_loss_keeps_unknown_side_effect_blocked_for_signed_recon
         "RELEASE",
         "REACQUIRE",
     ]
+    holds = durable.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id,
+    )
+    assert len(holds) == 1
+    assert holds[0]["case_kind"] == "UNKNOWN_SIDE_EFFECT"
+    assert (
+        holds[0]["classification"]
+        == "SIGNED_OPERATION_RECONCILIATION_REQUIRED"
+    )
+    assert projection["recovery_case_ref"] == holds[0]["case_ref"]
+    assert projection["recovery_case_digest"] == holds[0]["subject_sha256"]
+    assert holds[0]["case_ref"] in second[-1]["execution_receipt"][
+        "evidence_refs"
+    ]
+    assert durable.get_operation_recovery_hold(holds[0]["case_ref"])[
+        "current"
+    ] is True
     assert calls == ["root"]
 
 

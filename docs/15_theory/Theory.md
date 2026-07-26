@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.8
+版本：v2.9
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -124,6 +124,8 @@ flowchart LR
 ### 3.5 不确定性必须保留
 
 推断不能伪装成观测，过期信息不能伪装成当前事实，冲突不能靠最后写入者静默覆盖。来源、置信度、有效期和冲突状态是事实语义的一部分。
+
+同一原则也适用于执行恢复。一次 Operation 已持久预留、worker 响应丢失或 checkpoint 与 Budget authority 冲突时，“当前不能证明发生了什么”本身就是必须持久保存的事实，不能只活在异常对象或一次进程日志中。安全的自动恢复只适用于能够从不可变 checkpoint、完整版本链和当前 fence 精确重开的路径；未知副作用、取消交叉和 authority 冲突必须冻结为 append-only case 与同事务 Outbox。case 只证明系统必须停下并进入明确的 reconciliation 或 quarantine 队列，不证明“没有副作用”，也不授予 worker 重放权。任何后续处置都必须重开原 Graph、Node、Attempt、Operation、Budget、取消与 Lease 版本，版本漂移时重新分类，而不是消费过时判断。
 
 ### 3.6 规划模拟没有真实副作用
 

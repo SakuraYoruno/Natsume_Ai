@@ -189,6 +189,7 @@ from host_brain.persistence.task_operation_checkpoint_reconciliation_store impor
 from host_brain.persistence.task_operation_reconciliation_evidence_store import (
     TaskOperationReconciliationEvidenceStoreMixin,
 )
+from .task_operation_recovery_hold_store import TaskOperationRecoveryHoldStoreMixin
 from host_brain.persistence.task_worker_interruption_store import (
     TaskWorkerInterruptionStoreMixin,
 )
@@ -384,6 +385,7 @@ class DurableTaskStore(
     TaskInternalAgentCheckpointStoreMixin,
     TaskOperationCheckpointStoreMixin,
     TaskWorkerInterruptionStoreMixin,
+    TaskOperationRecoveryHoldStoreMixin,
     TaskOperationReconciliationEvidenceStoreMixin,
     TaskOperationCheckpointReconciliationStoreMixin,
     TaskOperationReconciliationStoreMixin,

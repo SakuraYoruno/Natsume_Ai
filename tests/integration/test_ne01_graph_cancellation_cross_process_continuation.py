@@ -143,6 +143,7 @@ def _seed_requested_intent(
     tmp_path: Path,
     *,
     reconciliation_private_key: Ed25519PrivateKey | None = None,
+    reconcile_worker_interruption: bool = True,
 ) -> tuple[Path, str]:
     db_path = tmp_path / "graph-cancellation-cross-process.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -151,7 +152,7 @@ def _seed_requested_intent(
     )
     assert migrated.success is True, migrated.as_dict()
     private_key = reconciliation_private_key
-    reconciled_worker_interruption = private_key is not None
+    seeded_worker_interruption = private_key is not None
     proof_verifier = None
     if private_key is not None:
         public_key = private_key.public_key().public_bytes(
@@ -277,7 +278,7 @@ def _seed_requested_intent(
     budget_id: str | None = None
     budget_status_before: str | None = None
     budget_status_version_before: int | None = None
-    if reconciled_worker_interruption:
+    if seeded_worker_interruption:
         budget_id = "budget-cross-process-interrupted"
         store.create_budget_reservation(
             BudgetReservation(
@@ -460,7 +461,7 @@ def _seed_requested_intent(
         ),
     )
     assert requested["intent"]["status"] == "REQUESTED"
-    if reconciled_worker_interruption:
+    if seeded_worker_interruption and reconcile_worker_interruption:
         assert private_key is not None
         intent_ref = str(requested["intent"]["intent_ref"])
         recovery_version = int(
@@ -506,6 +507,72 @@ def _seed_requested_intent(
         assert replay["replayed"] is True
         assert first["operation"]["status"] == "RELEASED"
     return db_path, intent.intent_ref
+
+
+def test_cancellation_crossing_operation_hold_is_durable_and_immutable(
+    tmp_path: Path,
+) -> None:
+    db_path, intent_ref = _seed_requested_intent(
+        tmp_path,
+        reconciliation_private_key=Ed25519PrivateKey.generate(),
+        reconcile_worker_interruption=False,
+    )
+    store = DurableTaskStore(db_path, clock=_Clock(NOW))
+
+    first = store.record_operation_recovery_hold(
+        graph_id="graph-cross-process-cancel",
+        graph_revision=1,
+        node_id="node-1",
+        attempt_id="attempt-cross-process-interrupted",
+        reservation_id="reservation-cross-process-interrupted",
+        budget_id="budget-cross-process-interrupted",
+        reason_code="GOVERNED_WORKER_FAILED",
+    )
+    replay = store.record_operation_recovery_hold(
+        graph_id="graph-cross-process-cancel",
+        graph_revision=1,
+        node_id="node-1",
+        attempt_id="attempt-cross-process-interrupted",
+        reservation_id="reservation-cross-process-interrupted",
+        budget_id="budget-cross-process-interrupted",
+        reason_code="GOVERNED_WORKER_FAILED",
+    )
+
+    assert first["exact_replay"] is False
+    assert replay["exact_replay"] is True
+    assert replay["case_ref"] == first["case_ref"]
+    assert first["case_kind"] == "CANCELLATION_CROSSING"
+    assert (
+        first["classification"]
+        == "SIGNED_CANCELLATION_RECONCILIATION_REQUIRED"
+    )
+    assert first["cancellation_intent_ref"] == intent_ref
+    assert first["cancellation_status"] == "REQUESTED"
+    current = store.list_current_operation_recovery_holds(
+        graph_id="graph-cross-process-cancel",
+    )
+    assert len(current) == 1
+    assert current[0]["case_ref"] == first["case_ref"]
+    with store._connect() as conn:
+        outbox_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type = 'OPERATION_RECOVERY_HOLD_RECORDED'
+            """,
+        ).fetchone()[0]
+        assert outbox_count == 1
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="TASK_OPERATION_RECOVERY_HOLD_IMMUTABLE",
+        ):
+            conn.execute(
+                """
+                UPDATE task_runtime_operation_recovery_hold
+                SET reason_code = 'TAMPERED'
+                WHERE case_ref = ?
+                """,
+                (first["case_ref"],),
+            )
 
 
 def _claim_in_process(

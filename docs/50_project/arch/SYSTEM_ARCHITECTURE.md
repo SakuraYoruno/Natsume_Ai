@@ -3,13 +3,15 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.10
+版本：v2.11
 核对日期：2026-07-26
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
 
 当前分支的独立 Gate 1～14 已全部 `PASS`、`failed_gates=[]`。最后两条回环通过中立合同层关闭：`SQLiteTaskRuntimeFeatureCanaryReceiptStore → contracts/task_runtime_feature_canary`，`composition/host_application → contracts/host_lifecycle`；旧 Task Runtime 与 App lifecycle 路径只重导出 canonical 对象，类型 identity 不分叉。Gate 1 的 issues/SCC 均为空，Gate 3 继续由 Research ledger 的 1271 行 repository owner、512 行 canonical codec 与 108 行 typed projection 保持通过，未扩白名单。该结果是当前工作树的静态分层证据，不是 Universal Runtime、NE-01 或完整架构项目封板；NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+Task Runtime 的恢复架构新增一个持久“停机面”，而不是第二执行器。scheduler 在重开 Operation 时，只有 exact `COMMITTED` checkpoint、完整 Budget authority 和当前版本链一致，才可沿原 immutable graph 取得 higher-fence continuation；五节点菱形与八根节点已证明依赖释放和每个 worker 单次执行。其它未知效果、取消交叉或 checkpoint conflict 由 0130 在 canonical Store 同一事务写 append-only hold 与 Outbox。hold 读取会复验 Graph/Node/Attempt/Operation/Budget/cancellation/active Lease 的当前版本；unknown/cancellation 进入各自签名 reconciliation，conflict 保持 quarantine 且零 takeover Lease。它没有自动归因，也没有替代 DAG scheduler、Effect reconciliation 或 terminal finalizer。
 
 Scheduler 管理写入口由 Host ASGI composition 显式注入一个 app-local runtime。两个公开前缀的 create/update/delete/enable/disable 都编译为 `HostCommand(surface=SCHEDULER)` 和不可变 TaskGraph；route 只持 runtime provider，不持 repository writer。Acceptance Effect 与 Operator 状态控制复用同一 canonical handler，但 Scheduler 请求额外绑定原 HTTP method/path/body、definition head 与 Scheduler claim。operation journal 先于 claim completion，重启恢复只补齐同一 receipt。read 路由与 trigger 分别保持 query-only 和既有 governed occurrence 边界。
 
@@ -231,7 +233,7 @@ Scheduler governed occurrence 当前沿同一边界运行：Task worker 只提�
 
 Internal worker 的 raw work order、prompt、metadata、result、changed-files 与 verification 在 Acceptance 前只进入 protected stage；seal 锁定 exact inventory/byte digest。若进程在 seal 后、WorkerProjection 前退出，首次 runtime activation 或周期 survivor 会以严格更高 fence 重建唯一 projection并继续原图；Agent 调用数保持 1。检查点 A/B/C 仍是三个分别原子的持久边界。pre-checkpoint cancellation 只在 exact single-node cancellation lineage 下消费自己的两种签名终态。没有 cancellation intent 的 raw failure 现在由独立 failure service 在单一 UoW 中确认 `NO_SIDE_EFFECT` 并写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal terminal worker 只有在重开该终态后，才先提交 deterministic claim、再清理 Workspace/stage。当前状态为 `PARTIAL / INTERNAL_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`，不是通用 worker crash recovery：其它 failure/cancel/budget claim closeout、一般 unknown effect 与 general `settle_worker` crash bundle仍缺，path revalidation也不是handle-level原子TOCTOU或OS隔离，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
-Operation 已 `COMMITTED` 后的 Budget settlement 采用不确定性 hold：若 BudgetUsage 写响应与首次精确重读都丢失，普通异常只能返回 `RECOVERY_REQUIRED`，不得把 worker 标为失败或释放 Lease/Budget，也不得覆盖可能已经原子提交的 usage/`EXCEEDED`；process-control `BaseException` 原样传播。BudgetUsage 只分为 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT`。Lease 到期后，committed-checkpoint takeover 会在更高 fence 下只读重开前两类、幂等补写 `MISSING`，并对 `CONFLICT` 失败关闭；worker 不重跑。共享 Budget 已 `EXCEEDED` 时，accepted 或 missing checkpoint 必须在同一 scheduler snapshot 证明唯一 sibling winner；missing 补写只能产生与 winner 共用 Outbox/dimensions、版本不再推进的 `ALREADY_EXCEEDED`，重启时再次验证这条绑定。真实 SQLite 已覆盖三 owner 连续响应丢失、winner Outbox 或 admitted-node authority 篡改零 Lease、双 checkpoint 两种终态和四根节点的两 accepted + winner + terminal sibling，最终分别收口 `COMPLETED/CONSUMED` 或 `BLOCKED/RELEASED`，worker 不重跑。当前仍未解决 `CONFLICT`、`RESERVED`、取消交叉、unknown effect、任意图形/规模批次和部署 fan-out canary。
+Operation 已 `COMMITTED` 后的 Budget settlement 采用不确定性 hold：若 BudgetUsage 写响应与首次精确重读都丢失，普通异常只能返回 `RECOVERY_REQUIRED`，不得把 worker 标为失败或释放 Lease/Budget，也不得覆盖可能已经原子提交的 usage/`EXCEEDED`；process-control `BaseException` 原样传播。BudgetUsage 只分为 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT`。Lease 到期后，committed-checkpoint takeover 会在更高 fence 下只读重开前两类、幂等补写 `MISSING`；共享 Budget 已 `EXCEEDED` 时，accepted 或 missing checkpoint 必须证明唯一 sibling winner，missing 只能补写为与 winner 共用 Outbox/dimensions 且不再推进版本的 `ALREADY_EXCEEDED`。真实 SQLite 现覆盖三 owner 连续响应丢失、双 checkpoint、four-root mixed settlement、五节点菱形和八个并行根节点，后继只在依赖满足后释放且 worker 不重跑。`CONFLICT`、`RESERVED/RECOVERY_REQUIRED` unknown effect 与 cancellation crossing 不再只是一次返回：0130 会在新 Lease 前写 exact version-bound append-only hold 与 Outbox；conflict 保持 quarantine，后两类要求各自签名 reconciliation。无限规模、其它 failure/cancellation、自动归因和部署 fan-out canary仍未解决。
 
 TaskStore 的 DAG state、READY claim、中央 mutation Outbox、BudgetUsage contention、Lease takeover authority 与 Operation checkpoint read 均已拆为 focused mixin；Lease acquisition identity/row binding 又拆成 93 行纯模块。当前静态 Gate 记录 `task_repository.py` 4585 行、`task_lease_takeover_authority.py` 230 行，低于既有 4600/250 门禁；`DurableTaskStore` 仍是唯一组合/连接/UoW owner，没有新增 architecture policy 白名单或第二 Store authority。Gate 1～14 全部 `PASS`。repository 余量仍窄，后续继续拆分而不得提高上限。
 
@@ -307,7 +309,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0129_host_mode_policy_journal.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0128 继续封闭各自既有边界；0129 为 auto-rules、last-interaction 与 mode-event outcome 新增 Host runtime-fenced append-only event/head。Secure Ingress、TaskGraph、风险 4 Review、Preview 与外层 Acceptance 后才可经 accepted handler 写入该 owner。它不提供部署 key、Operator credential、完整 Host 进程重启、一般 multi-node recovery 或七路线验收，因此不代表 Chat、Universal Runtime 或 NE-01 完成。
+当前连续 SQLite migration head 为 `0130_task_operation_recovery_hold.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0129 继续封闭各自既有边界；0130 只为未决 Operation 增加 append-only hold 与同事务 Outbox，并不定义副作用结论或执行准许。它不提供部署 key、Operator credential、完整 Host 进程重启、所有恢复类别或七路线验收，因此不代表 Chat、Universal Runtime 或 NE-01 完成。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -447,7 +449,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0129_host_mode_policy_journal.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0128 保持各自既有窄 authority；0129 只定义 Host mode-policy 聚合的持久边界，不定义执行准许。它们都不改变七路线总体 `INCOMPLETE`。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0130_task_operation_recovery_hold.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0129 保持各自既有窄 authority；0130 只定义未决 Operation hold/inventory，不定义副作用归因或执行准许。它们都不改变七路线总体 `INCOMPLETE`。
 
 ## 7. 数字生命状态模型
 
@@ -532,7 +534,7 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 | 新主干 | 待退役/修复 |
 |---|---|
 | Governed Host/Scheduler/Internal routes + durable read projections；Cortex 仅传递冻结上下文，prompt intelligence 仅输出 outline/SkillDag hint；Executive guard fail-closed | Operator/领域兼容入口尚未完成最终 route matrix 验收；Cortex 不再有 direct-reply/post-process compatibility branch，hint 不可调用 Plan/SkillDag/handler，纯 SkillDag adapter 无 worker dispatch，执行仍须重新 admission |
-| Durable TaskStore | 无第二 task registry；0094/0096 coordination、single-node canonical COMMITTED checkpoint、共享 `EXCEEDED` 下 `MISSING → ALREADY_EXCEEDED` 的 exact winner-bound continuation、双 checkpoint 两种终态、四根节点 bounded mixed Budget recovery、exact operation-free persisted Attempt takeover 与 0099 窄终态 reconciliation 已有；`CONFLICT`/`RESERVED`/取消交叉/未知副作用、该窄窗之外的任意图形与规模 multi-node/batch settlement recovery仍缺，外部 deployment inventory/remediation 未知 |
+| Durable TaskStore | 无第二 task registry；0094/0096 coordination、canonical COMMITTED checkpoint、共享 `EXCEEDED` 下 `MISSING → ALREADY_EXCEEDED`、双 checkpoint、four-root mixed settlement、五节点菱形、八根节点 batch、exact operation-free Attempt takeover 与 0099 窄终态 reconciliation 已有。0130 将 `CONFLICT`、unknown `RESERVED/RECOVERY_REQUIRED` 和取消交叉持久化为 version-bound hold + Outbox，但不自动处置；无限规模、其它 failure/cancellation、Workspace 全终态与 deployment inventory/remediation 仍缺 |
 | WorkOrderV3 + BudgetPolicy | Agent executor v2 兼容投影仅允许发生在 child-grant 验证后，不拥有 admission authority |
 | TaskGraph revision + `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS` | 新生产 Graph 的成功/失败已分别切到 0091/0090 原子终态；公开 accepted replay 要求 Graph COMPLETED 与 graph Budget CONSUMED。历史 legacy Graph 继续只读兼容。two-checkpoint mixed Budget 仅为本地窄证明；bounded fan-out 部署门禁/cancellation 仍 OFF，general、unknown-effect 与任意 multi-node/batch recovery、现实 resolver、外部 inventory/凭据/key lifecycle/canary未完成 |
 | Typed task composition；生产 Service Locator 已物理清零；0112 readiness 与 Catalog SQLite 已归 repository，Obs daemon 由 ports claim + 唯一 lifespan 启停并向 `/health` 暴露 app-local secret-free supervision | 外部 namespace、`host_startup.py`/ASGI concrete Catalog wiring、真实 workspace-bound governed executor、daemon durable SLO journal/Guardian acknowledgement/production canary 仍缺 |

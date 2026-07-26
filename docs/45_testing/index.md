@@ -3,9 +3,17 @@
 
 # 测试与验收目录
 
-版本：v2.10
+版本：v2.11
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 一般形状 checkpoint 恢复与 0130 hold 当前切片
+
+- 真实 SQLite 五节点菱形图 `root → (left,right) → join → tail` 在中间并发 wave 的两个 canonical `COMMITTED` checkpoint 响应丢失后，由新 owner 按 immutable graph order 精确续接；只有两个前驱均 accepted 后才释放 join，随后释放 tail。八个并行根节点另行证明恢复器没有固定四节点上限；所有已测试 worker 调用次数均为 1。
+- `0130_task_operation_recovery_hold.sql` 为 `UNKNOWN_SIDE_EFFECT`、`CANCELLATION_CROSSING`、`CHECKPOINT_BUDGET_CONFLICT` 和 `CHECKPOINT_AUTHORITY_CONFLICT` 建立 append-only case。写入与 `OPERATION_RECOVERY_HOLD_RECORDED` Outbox 同属一个 UoW，subject 精确绑定 Graph、Node、Attempt、Operation、graph Budget、取消与 active Lease 版本；exact replay 必须返回同一 case/outbox，UPDATE/DELETE 和绑定漂移失败关闭。
+- unknown/cancellation case 只进入对应的签名 reconciliation 队列；checkpoint conflict 只进入 quarantine，并在 takeover Lease 之前停止。测试不得把 hold 的存在解释为 `NO_SIDE_EFFECT`，也不得把它作为 worker 重放 authority。
+- 五个新核心 case 首轮为 `5 passed in 23.12s`；包含 online takeover、共享 Budget、一般图形与取消跨进程的最终受影响集成为 `37 passed in 145.68s`，0 fail。前者被后者覆盖，不相加。
+- 当前结论是 `GENERAL_SHAPE_COMMITTED_CHECKPOINT_RECOVERY_LOCAL_PROVEN / DURABLE_UNKNOWN_CANCELLATION_CONFLICT_HOLD_LOCAL_PROVEN / GENERAL_RECOVERY_INCOMPLETE`。无限规模、其它 failure/cancellation 组合、Workspace 终态、部署 fan-out、NE-01 波次 integration、真实网络和 NE-07 Docker 全栈均未运行；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Scheduler 管理命令切流当前切片
 
@@ -55,7 +63,7 @@
 - 另有 checkpoint/parallel structure `20 passed in 38.41s`、accepted-effect restart 与 Budget contention `4 passed in 11.51s`、文档/release/coverage `54 passed in 13.45s`。测试夹具补齐 production-required node Grant verifier；目标模块 `compileall`、统一 static scan、doc gate、JSON 解析与 `git diff --check` 均通过。静态 Gate `failures=[]`，未扩大 allowlist。
 - authority 加固后的两个新增场景为 `2 passed in 8.81s`，包含既有五项回归的完整模块为 `7 passed in 25.59s`；它们与后续宽回归可能重叠，禁止相加。
 - 当前提交的受影响代码集合（多 checkpoint、online takeover、Budget contention、checkpoint recovery、parallel winner 与 Node projection）为 `56 passed in 126.52s`；文档 authority/freshness、coverage、release、NLE boundary 与 import-order 合同为 `45 passed in 94.67s`，其中 11 条既存转义 DeprecationWarning 不构成失败。Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`、Gate 3 `issues=[] / new_mixed_over_800=[]`；compileall、规则降级扫描、JSON 与 diff-check 均通过。56/45 与前述 focused 集合可能重叠，不相加。
-- 该切片不解决 `CONFLICT`、`RESERVED`、超出当前 four-root proof 的任意图形/规模、取消交叉、未知 external effect、部署 fan-out canary 或七路线波次验收。状态为 `SHARED_EXCEEDED_MISSING_CHECKPOINT_RECOVERY_LOCAL_PROVEN / BOUNDED_FOUR_NODE_SHARED_BUDGET_RECOVERY_LOCAL_PROVEN / GENERAL_MULTI_NODE_RECOVERY_INCOMPLETE`；该子集自身不新增 migration，仓库现行 head 已推进到 0129，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 这是 0129 时点的历史 four-root 边界：当时不解决 `CONFLICT`、`RESERVED`、超出 four-root 的图形/规模、取消交叉或未知 external effect。本文首节记录的后续 0130 切片已经增加五节点菱形、八根节点和 durable hold，但没有把历史测试数字反写为新证据；部署 fan-out canary、七路线波次验收仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 signed WorkerProjection checkpoint COMMIT 当前切片
 
@@ -65,7 +73,7 @@
 - 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
 - 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
 - Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
-- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已由 0128 推进。该证据使用本地临时 key、单节点和进程内 route continuation；部署 key/HTTP/network canary、普通 RELEASE、任意外部效果 receipt、general multi-node/batch、七路线波次与 NE-07 Docker 全栈仍未运行。状态为 `SIGNED_SINGLE_NODE_WORKER_CHECKPOINT_COMMIT_LOCAL_PROVEN / DEFAULT_OFF / GENERAL_RECOVERY_INCOMPLETE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0130。该证据使用本地临时 key、单节点和进程内 route continuation；0130 的多节点/hold 证据由本文首节单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 
