@@ -14,6 +14,7 @@ from host_brain.contracts.agent_runtime.operation_reconciliation import (
     build_reconciliation_attestation_binding,
 )
 
+from .task_operation_recovery_hold_current import hold_is_current
 from .task_store_types import (
     TASK_STORE_CAS_CONFLICT,
     TASK_STORE_DURABLE_DATA_INVALID,
@@ -69,21 +70,31 @@ class TaskOperationReconciliationEvidenceStoreMixin:
             "expected_version",
             "action",
             "attestation_signature",
+            "recovery_case_ref",
+            "recovery_case_subject_sha256",
             "created_ts_ms",
         }
         required_triggers = {
             "trg_task_operation_reconciliation_evidence_no_update",
             "trg_task_operation_reconciliation_evidence_no_delete",
+            "trg_task_operation_reconciliation_evidence_recovery_case",
         }
         if (
             not required_columns <= columns
-            or "idx_task_operation_reconciliation_evidence_subject"
-            not in indexes
+            or (
+                "idx_task_operation_reconciliation_evidence_subject"
+                not in indexes
+            )
+            or (
+                "idx_task_operation_reconciliation_evidence_recovery_case"
+                not in indexes
+            )
             or not required_triggers <= triggers
         ):
             raise TaskStoreError(
                 TASK_STORE_SCHEMA_NOT_READY,
-                "Operation reconciliation evidence migration 0126 is not ready",
+                "Operation reconciliation evidence migrations 0126/0131 "
+                "are not ready",
             )
 
     def stage_operation_reconciliation_evidence(
@@ -101,6 +112,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
         attestation_ref: str,
         attestation_key_id: str,
         attestation_signature: str,
+        recovery_case_ref: str | None = None,
+        recovery_case_subject_sha256: str | None = None,
     ) -> dict[str, Any]:
         self.assert_operation_reconciliation_evidence_ready()
         request = self._normalize_operation_reconciliation_evidence(
@@ -116,6 +129,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
             attestation_ref=attestation_ref,
             attestation_key_id=attestation_key_id,
             attestation_signature=attestation_signature,
+            recovery_case_ref=recovery_case_ref,
+            recovery_case_subject_sha256=recovery_case_subject_sha256,
         )
         with self._transaction() as conn:
             existing = conn.execute(
@@ -139,6 +154,10 @@ class TaskOperationReconciliationEvidenceStoreMixin:
                 request["reservation_id"],
             )
             operation_record = self._operation_record(operation)
+            self._require_current_recovery_case(
+                conn,
+                request=request,
+            )
             if (
                 str(operation_record.get("status") or "").upper()
                 != "RECOVERY_REQUIRED"
@@ -156,10 +175,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
             )
             binding_digest = "sha256:" + hashlib.sha256(binding).hexdigest()
             material = {
-                "schema_version": (
-                    "Natsume.task.operation_reconciliation_evidence.v1"
-                ),
-                **request,
+                "schema_version": self._evidence_schema_version(request),
+                **self._evidence_material_request(request),
                 "attestation_binding_digest": binding_digest,
             }
             encoded = json.dumps(
@@ -183,8 +200,12 @@ class TaskOperationReconciliationEvidenceStoreMixin:
                         downstream_receipt_ref, reconciler_actor_id,
                         attestation_ref, attestation_key_id,
                         attestation_signature, attestation_binding_digest,
-                        created_ts_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_ts_ms, recovery_case_ref,
+                        recovery_case_subject_sha256
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?
+                    )
                     """,
                     (
                         evidence_ref,
@@ -203,6 +224,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
                         request["attestation_signature"],
                         binding_digest,
                         self._now(),
+                        request["recovery_case_ref"],
+                        request["recovery_case_subject_sha256"],
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -268,10 +291,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
         )
         binding_digest = "sha256:" + hashlib.sha256(binding).hexdigest()
         material = {
-            "schema_version": (
-                "Natsume.task.operation_reconciliation_evidence.v1"
-            ),
-            **request,
+            "schema_version": self._evidence_schema_version(request),
+            **self._evidence_material_request(request),
             "attestation_binding_digest": binding_digest,
         }
         encoded = json.dumps(
@@ -368,6 +389,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
         attestation_ref: str,
         attestation_key_id: str,
         attestation_signature: str,
+        recovery_case_ref: str | None = None,
+        recovery_case_subject_sha256: str | None = None,
     ) -> dict[str, Any]:
         normalized_action = str(action or "").strip().upper()
         intent = str(intent_ref or "").strip() or None
@@ -375,6 +398,10 @@ class TaskOperationReconciliationEvidenceStoreMixin:
         body_digest = str(body_sha256 or "").strip().lower()
         if body_digest.startswith("sha256:"):
             body_digest = body_digest.removeprefix("sha256:")
+        recovery_ref = str(recovery_case_ref or "").strip() or None
+        recovery_digest = (
+            str(recovery_case_subject_sha256 or "").strip().lower() or None
+        )
         request = {
             "request_id": str(request_id or "").strip(),
             "ingress_audit_ref": str(ingress_audit_ref or "").strip(),
@@ -388,6 +415,8 @@ class TaskOperationReconciliationEvidenceStoreMixin:
             "attestation_ref": str(attestation_ref or "").strip(),
             "attestation_key_id": str(attestation_key_id or "").strip(),
             "attestation_signature": str(attestation_signature or "").strip(),
+            "recovery_case_ref": recovery_ref,
+            "recovery_case_subject_sha256": recovery_digest,
         }
         if (
             not request["request_id"]
@@ -428,6 +457,18 @@ class TaskOperationReconciliationEvidenceStoreMixin:
                 and not _DURABLE_REFERENCE_PATTERN.fullmatch(receipt or "")
             )
             or (normalized_action == "RELEASE" and receipt is not None)
+            or ((recovery_ref is None) != (recovery_digest is None))
+            or (
+                recovery_ref is not None
+                and not re.fullmatch(
+                    r"operation-recovery-hold://sha256/[0-9a-f]{64}",
+                    recovery_ref,
+                )
+            )
+            or (
+                recovery_digest is not None
+                and not re.fullmatch(r"sha256:[0-9a-f]{64}", recovery_digest)
+            )
         ):
             raise TaskStoreError(
                 TASK_STORE_INVALID,
@@ -454,8 +495,94 @@ class TaskOperationReconciliationEvidenceStoreMixin:
                 "attestation_ref",
                 "attestation_key_id",
                 "attestation_signature",
+                "recovery_case_ref",
+                "recovery_case_subject_sha256",
             )
         }
+
+    def _require_current_recovery_case(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        request: Mapping[str, Any],
+    ) -> None:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM task_runtime_operation_recovery_hold
+            WHERE reservation_id = ? AND operation_status_version = ?
+            ORDER BY created_ts_ms, case_ref
+            """,
+            (
+                request["reservation_id"],
+                request["expected_version"],
+            ),
+        ).fetchall()
+        current = []
+        for row in rows:
+            record = self._validated_hold_record(conn, row)
+            if hold_is_current(conn, record):
+                current.append(record)
+        recovery_ref = request["recovery_case_ref"]
+        if not current:
+            if recovery_ref is not None:
+                raise TaskStoreError(
+                    TASK_STORE_INVALID,
+                    "Operation reconciliation recovery case is not current",
+                )
+            return
+        if (
+            len(current) != 1
+            or recovery_ref is None
+            or current[0]["case_ref"] != recovery_ref
+            or current[0]["subject_sha256"]
+            != request["recovery_case_subject_sha256"]
+        ):
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Operation reconciliation requires the one exact current "
+                "recovery case",
+            )
+        case = current[0]
+        classification = str(case.get("classification") or "")
+        if classification == "QUARANTINED_CHECKPOINT_CONFLICT":
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Checkpoint conflict recovery cases remain quarantined",
+            )
+        if classification == "SIGNED_OPERATION_RECONCILIATION_REQUIRED":
+            valid = request["intent_ref"] is None
+        elif classification == "SIGNED_CANCELLATION_RECONCILIATION_REQUIRED":
+            valid = (
+                request["action"] in {"COMMIT", "RELEASE"}
+                and request["intent_ref"] == case["cancellation_intent_ref"]
+            )
+        else:
+            valid = False
+        if not valid:
+            raise TaskStoreError(
+                TASK_STORE_INVALID,
+                "Operation reconciliation action does not match recovery "
+                "case classification",
+            )
+
+    @staticmethod
+    def _evidence_schema_version(request: Mapping[str, Any]) -> str:
+        return (
+            "Natsume.task.operation_reconciliation_evidence.v2"
+            if request.get("recovery_case_ref") is not None
+            else "Natsume.task.operation_reconciliation_evidence.v1"
+        )
+
+    @staticmethod
+    def _evidence_material_request(
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        material = dict(request)
+        if material.get("recovery_case_ref") is None:
+            material.pop("recovery_case_ref", None)
+            material.pop("recovery_case_subject_sha256", None)
+        return material
 
 
 __all__ = ["TaskOperationReconciliationEvidenceStoreMixin"]

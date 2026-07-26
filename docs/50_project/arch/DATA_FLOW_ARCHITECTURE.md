@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.7
+版本：v3.8
 
 核对日期：2026-07-26
 
@@ -14,6 +14,8 @@
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
 当前 authority 数据流为：`ASGI/CLI → fresh ProcessApplicationPorts → HostAuthorityRuntimeOwner → frozen Host/Agent/Context/Startup ports → router/runtime`。没有发布或查找全局 ports 的中间步骤，Host builder 缺少显式 ports 时直接失败。生产 locator consumer/import/module/field/lock/ref 全为 0；pytest-only bridge 不进入该图。底层 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime 流由 `HostAuthorityRuntimeOwner` 固定；ResourceManager status 则经 0123 Runtime Event journal 绑定 Host lease/fence。外部 Chroma/Neo4j namespace 与其它外部资源恢复仍未闭环。本文后续更大的 locator 数字只作为历史快照。
+
+当前 Operation hold 消解流为：`0130 current hold → Secure Ingress 签名请求与 exact case identity → 0131 append-only evidence → risk-4 Review → immutable TaskGraph/Acceptance Effect → 既有 Operation+Outbox SQLite UoW → case current=false 复验 → v5 handler receipt`。任何 case/digest/intent/version 漂移都在 mutation 前失败；mutation 后若无法证明 case 已关闭则返回 UNKNOWN，不能提交伪成功。checkpoint conflict 没有进入这条正向流，继续隔离。
 
 当前 Direct Agent Skill 写产物流为：
 
@@ -44,13 +46,14 @@ flowchart LR
     C -->|"与 cancellation 交叉"| H
     C -->|"Budget / authority 冲突"| Q["0130 quarantine hold + Outbox\n不创建 takeover Lease"]
     H --> X{"case kind"}
-    X -->|"UNKNOWN_SIDE_EFFECT"| O["签名 Operation reconciliation"]
-    X -->|"CANCELLATION_CROSSING"| K["取消绑定签名 reconciliation"]
-    O --> V["重开 exact version subject 后处置"]
-    K --> V
+    X -->|"UNKNOWN_SIDE_EFFECT"| O["0131 exact case-bound evidence\n无 cancellation intent"]
+    X -->|"CANCELLATION_CROSSING"| K["0131 exact case+intent evidence\nCOMMIT / RELEASE"]
+    O --> A["risk-4 Review + Acceptance\n既有 Operation/Outbox UoW"]
+    K --> A
+    A --> V["handler 重开 exact case\n必须 current=false"]
 ```
 
-0130 case 的 ref/digest 是可恢复的停机事实，不是 `NO_SIDE_EFFECT` 证明。case/outbox 的 exact replay、版本新鲜度与 active Lease 都由 canonical Store 复验；任何漂移都要求重新扫描和重新分类，不能直接消费旧 case。已验证图形包括五节点菱形和八个并行根节点，但不据此外推为无限规模或所有 failure/cancellation 类别。
+0130 case 的 ref/digest 是可恢复的停机事实，不是 `NO_SIDE_EFFECT` 证明。0131 只允许既有签名 reconciliation 精确消费一个 current UNKNOWN/CANCELLATION case；case/outbox/evidence 的 exact replay、版本新鲜度、动作矩阵与 active Lease 都由 canonical Store/trigger 复验。任何漂移都失败关闭，checkpoint conflict 不进入正向流。已验证图形包括五节点菱形和八个并行根节点，但不据此外推为无限规模或所有 failure/cancellation 类别。
 
 Scheduler 管理写流已统一为：
 

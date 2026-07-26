@@ -260,6 +260,7 @@ class GovernedOperationReconciliationMixin:
             "status": "RECONCILED",
             "reservation_id": request["reservation_id"],
             "action": request["action"],
+            "recovery_case_ref": request.get("recovery_case_ref"),
             "graph_id": receipt.get("graph_id"),
             "graph_revision": receipt.get("graph_revision"),
             "execution_receipt": receipt,
@@ -320,6 +321,7 @@ class GovernedOperationReconciliationMixin:
             "reason_code": INTENT_ADMISSION_REVIEW_REQUIRED,
             "reservation_id": request["reservation_id"],
             "action": request["action"],
+            "recovery_case_ref": request.get("recovery_case_ref"),
             "graph_id": command.graph_id,
             "graph_revision": command.graph_revision,
             "reviews": reviews,
@@ -477,6 +479,10 @@ def require_durable_operation_reconciliation_outcome(
         operation=operation_record,
         terminal=terminal_projection,
     )
+    resolved_recovery_case = _require_resolved_recovery_case(
+        task_store=task_store,
+        evidence=evidence,
+    )
     if (
         not expected_payload["request_id"]
         or comparable_payload != expected_payload
@@ -517,6 +523,7 @@ def require_durable_operation_reconciliation_outcome(
         "reservation_id": evidence["reservation_id"],
         "operation_status": expected_status,
         "target_terminal": terminal_projection,
+        "recovery_case": resolved_recovery_case,
         "exact_replay": receipt.get("replayed") is True,
     }
 
@@ -557,6 +564,12 @@ def operation_reconciliation_request_from_args(
             value.get("reconciler_actor_id") or ""
         ).strip(),
     }
+    recovery_case_ref = str(
+        value.get("recovery_case_ref") or ""
+    ).strip() or None
+    recovery_case_digest = str(
+        value.get("recovery_case_subject_sha256") or ""
+    ).strip().lower() or None
     digest = request["evidence_digest"]
     if digest.startswith("sha256:"):
         digest = digest.removeprefix("sha256:")
@@ -577,12 +590,28 @@ def operation_reconciliation_request_from_args(
         or expected_version < 0
         or request["action"] not in {"COMMIT", "RELEASE", "REACQUIRE"}
         or not request["reconciler_actor_id"]
+        or ((recovery_case_ref is None) != (recovery_case_digest is None))
+        or (
+            recovery_case_ref is not None
+            and not re.fullmatch(
+                r"operation-recovery-hold://sha256/[0-9a-f]{64}",
+                recovery_case_ref,
+            )
+        )
+        or (
+            recovery_case_digest is not None
+            and recovery_case_digest
+            != "sha256:" + recovery_case_ref.rsplit("/", 1)[-1]
+        )
     ):
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,
             "Operation reconciliation evidence binding is invalid",
         )
     request["evidence_digest"] = f"sha256:{digest}"
+    if recovery_case_ref is not None:
+        request["recovery_case_ref"] = recovery_case_ref
+        request["recovery_case_subject_sha256"] = recovery_case_digest
     return request
 
 
@@ -599,6 +628,8 @@ def _durable_request_from_evidence(
                 "expected_version",
                 "action",
                 "reconciler_actor_id",
+                "recovery_case_ref",
+                "recovery_case_subject_sha256",
             )
         }
     )
@@ -627,6 +658,15 @@ def _normalize_request(
         "attestation_signature": str(
             value.get("attestation_signature") or ""
         ).strip(),
+        "recovery_case_ref": (
+            str(value.get("recovery_case_ref") or "").strip() or None
+        ),
+        "recovery_case_subject_sha256": (
+            str(value.get("recovery_case_subject_sha256") or "")
+            .strip()
+            .lower()
+            or None
+        ),
     }
     if (
         not request["reservation_id"]
@@ -654,12 +694,62 @@ def _normalize_request(
             action == "RELEASE"
             and request["downstream_receipt_ref"] is not None
         )
+        or (
+            (request["recovery_case_ref"] is None)
+            != (request["recovery_case_subject_sha256"] is None)
+        )
+        or (
+            request["recovery_case_ref"] is not None
+            and not re.fullmatch(
+                r"operation-recovery-hold://sha256/[0-9a-f]{64}",
+                request["recovery_case_ref"],
+            )
+        )
+        or (
+            request["recovery_case_subject_sha256"] is not None
+            and request["recovery_case_subject_sha256"]
+            != "sha256:"
+            + str(request["recovery_case_ref"]).rsplit("/", 1)[-1]
+        )
     ):
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,
             "Operation reconciliation signed fields or action matrix is invalid",
         )
     return request
+
+
+def _require_resolved_recovery_case(
+    *,
+    task_store: Any,
+    evidence: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    case_ref = str(evidence.get("recovery_case_ref") or "").strip()
+    if not case_ref:
+        return None
+    raw = task_store.get_operation_recovery_hold(case_ref)
+    case = dict(raw) if isinstance(raw, Mapping) else {}
+    if (
+        case.get("current") is not False
+        or str(case.get("case_ref") or "") != case_ref
+        or str(case.get("subject_sha256") or "")
+        != str(evidence.get("recovery_case_subject_sha256") or "")
+        or str(case.get("reservation_id") or "")
+        != str(evidence.get("reservation_id") or "")
+        or case.get("operation_status_version")
+        != evidence.get("expected_version")
+    ):
+        raise GovernedOperatorRuntimeError(
+            GOVERNED_OPERATOR_RUNTIME_INVALID,
+            "Operation reconciliation did not resolve its exact recovery case",
+        )
+    return {
+        "case_ref": case_ref,
+        "case_kind": str(case.get("case_kind") or ""),
+        "classification": str(case.get("classification") or ""),
+        "subject_sha256": str(case.get("subject_sha256") or ""),
+        "current": False,
+    }
 
 
 __all__ = [

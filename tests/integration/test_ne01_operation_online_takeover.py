@@ -1697,6 +1697,34 @@ async def test_conflicting_worker_usage_blocks_before_takeover_lease(
     )
     assert replayed_hold["exact_replay"] is True
     assert replayed_hold["case_ref"] == holds[0]["case_ref"]
+    with pytest.raises(
+        TaskStoreError,
+        match="remain quarantined",
+    ):
+        reopened.stage_operation_reconciliation_evidence(
+            request_id="request-quarantined-checkpoint-conflict",
+            ingress_audit_ref=(
+                "secure-ingress-audit://operation/checkpoint-conflict"
+            ),
+            body_sha256="a" * 64,
+            reservation_id=(
+                AdmittedExecution.from_contracts(
+                    command=contracts[0],
+                    assignment=contracts[2],
+                    graph=contracts[3],
+                ).reservation_id
+            ),
+            expected_version=holds[0]["operation_status_version"],
+            action="RELEASE",
+            intent_ref=None,
+            reconciler_actor_id="operator.checkpoint-conflict",
+            downstream_receipt_ref=None,
+            attestation_ref="proof://operation/checkpoint-conflict",
+            attestation_key_id="checkpoint-conflict-key",
+            attestation_signature="ed25519:" + "A" * 86 + "==",
+            recovery_case_ref=holds[0]["case_ref"],
+            recovery_case_subject_sha256=holds[0]["subject_sha256"],
+        )
     assert calls == ["root"]
     with durable._connect() as conn:
         assert conn.execute(

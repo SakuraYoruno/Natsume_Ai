@@ -104,6 +104,8 @@ class TaskStorePort(Protocol):
         attestation_ref: str,
         attestation_key_id: str,
         attestation_signature: str,
+        recovery_case_ref: str | None = None,
+        recovery_case_subject_sha256: str | None = None,
     ) -> Mapping[str, Any]: ...
 
     def get_operation_reconciliation_evidence(

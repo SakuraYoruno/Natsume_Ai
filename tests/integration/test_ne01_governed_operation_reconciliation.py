@@ -57,6 +57,7 @@ from host_brain.persistence.hard_state_journal import SQLiteHardStateJournal
 from host_brain.persistence.secure_ingress_repository import (
     SQLiteSecureIngressStore,
 )
+from host_brain.persistence.task_store_types import TaskStoreError
 from host_brain.runtime.action_preview_resolver import (
     ProductionActionPreviewAuthorityResolver,
 )
@@ -255,6 +256,27 @@ async def test_governed_operator_reacquires_and_resumes_original_graph_once(
             )
         )
         assert operation["status"] == "RECOVERY_REQUIRED"
+        scheduler_snapshot = container.task_store.read_scheduler_snapshot(
+            admitted.graph_id,
+            admitted.graph_revision,
+        )
+        graph_budgets = [
+            item
+            for item in scheduler_snapshot["budgets"]
+            if item.get("node_id") is None and item.get("attempt_id") is None
+        ]
+        assert len(graph_budgets) == 1
+        recovery_case = container.task_store.record_operation_recovery_hold(
+            graph_id=admitted.graph_id,
+            graph_revision=admitted.graph_revision,
+            node_id=admitted.node_id,
+            attempt_id=operation["attempt_id"],
+            reservation_id=operation["reservation_id"],
+            budget_id=graph_budgets[0]["budget_id"],
+            reason_code="GOVERNED_WORKER_FAILED",
+        )
+        assert recovery_case["case_kind"] == "UNKNOWN_SIDE_EFFECT"
+        assert recovery_case["current"] is True
         resumed_application = GovernedCommandApplication(
             command_repository=container.command_repository,
             coordinator=_coordinator(
@@ -293,7 +315,27 @@ async def test_governed_operator_reacquires_and_resumes_original_graph_once(
             "attestation_key_id": key_id,
             "attestation_signature": "ed25519:"
             + base64.urlsafe_b64encode(private_key.sign(binding)).decode("ascii"),
+            "recovery_case_ref": recovery_case["case_ref"],
+            "recovery_case_subject_sha256": recovery_case["subject_sha256"],
         }
+        with pytest.raises(
+            TaskStoreError,
+            match="one exact current recovery case",
+        ):
+            container.task_store.stage_operation_reconciliation_evidence(
+                request_id="request-operation-reconciliation-without-case",
+                ingress_audit_ref="secure-ingress-audit://operation/missing-case",
+                body_sha256="a" * 64,
+                reservation_id=payload["reservation_id"],
+                expected_version=payload["expected_version"],
+                action=payload["action"],
+                intent_ref=None,
+                reconciler_actor_id=_PRINCIPAL_ID,
+                downstream_receipt_ref=None,
+                attestation_ref=payload["attestation_ref"],
+                attestation_key_id=payload["attestation_key_id"],
+                attestation_signature=payload["attestation_signature"],
+            )
 
         hard_state = HostHardStateOwner.bootstrap(
             initial_sys_mode="normal",
@@ -418,6 +460,10 @@ async def test_governed_operator_reacquires_and_resumes_original_graph_once(
         assert evidence["attestation_signature"] == payload[
             "attestation_signature"
         ]
+        assert evidence["recovery_case_ref"] == recovery_case["case_ref"]
+        assert evidence["recovery_case_subject_sha256"] == (
+            recovery_case["subject_sha256"]
+        )
 
         review = pending["reviews"][0]
         approved = container.review_store.approve_review(
@@ -464,6 +510,22 @@ async def test_governed_operator_reacquires_and_resumes_original_graph_once(
         assert final_operation["status"] == "COMMITTED"
         assert final_operation["reconciliation_action"] == "REACQUIRE"
         assert final_operation["owner_id"] == "operation-target-owner-b"
+        assert continued["acceptance_effect_receipt"]["recovery_case"] == {
+            "case_ref": recovery_case["case_ref"],
+            "case_kind": "UNKNOWN_SIDE_EFFECT",
+            "classification": "SIGNED_OPERATION_RECONCILIATION_REQUIRED",
+            "subject_sha256": recovery_case["subject_sha256"],
+            "current": False,
+        }
+        assert container.task_store.get_operation_recovery_hold(
+            recovery_case["case_ref"]
+        )["current"] is False
+        assert (
+            container.task_store.list_current_operation_recovery_holds(
+                graph_id=admitted.graph_id
+            )
+            == ()
+        )
 
         effects = container.task_store.list_acceptance_effect_intents(
             graph_id=continued["execution_receipt"]["graph_id"],
