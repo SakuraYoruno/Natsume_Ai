@@ -24,6 +24,10 @@ from .errors import (
     GovernedRuntimeError,
 )
 from .heartbeat import DurableExecutionHeartbeat
+from .operation_interruption_case import (
+    interruption_recovery_case_projection,
+    require_interruption_recovery_case,
+)
 from .ports import TaskStorePort
 from .runtime_outbox import RuntimeOutbox
 
@@ -37,6 +41,7 @@ class OperationInterruptionClassification:
     """Safe projection of one attempted durable interruption marker."""
 
     record: dict[str, Any] | None
+    recovery_case: dict[str, Any] | None
     marker_failure_reason_code: str | None
     marker_exception_type: str | None
 
@@ -53,6 +58,7 @@ class OperationInterruptionClassification:
                 self.record,
                 "recovery_reason_code",
             )
+        values.update(interruption_recovery_case_projection(self.recovery_case))
         if self.marker_failure_reason_code is not None:
             values["recovery_marker_reason_code"] = (
                 self.marker_failure_reason_code
@@ -113,9 +119,16 @@ def classify_interrupted_operation(
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "interrupted operation recovery marker returned a drifting identity",
             )
+        recovery_case = require_interruption_recovery_case(
+            store=store,
+            reservation_id=admitted.reservation_id,
+            expected_version=reservation_version + 1,
+            reason_code=reason_code,
+        )
     except Exception as exc:
         return OperationInterruptionClassification(
             record=None,
+            recovery_case=None,
             marker_failure_reason_code=stable_interruption_reason(
                 exc,
                 GOVERNED_DURABLE_STATE_CONFLICT,
@@ -124,6 +137,7 @@ def classify_interrupted_operation(
         )
     return OperationInterruptionClassification(
         record=marked,
+        recovery_case=recovery_case,
         marker_failure_reason_code=None,
         marker_exception_type=None,
     )
@@ -224,7 +238,13 @@ async def build_worker_interruption_receipt(
         },
     )
     settlement_reason: str | None = None
-    evidence_refs: tuple[str, ...] = ()
+    evidence_refs = (
+        (
+            _required_record_text(interruption.recovery_case, "case_ref"),
+        )
+        if interruption.recovery_case is not None
+        else ()
+    )
     try:
         charge = await budgets.settle_interrupted_worker(
             budget,
@@ -236,7 +256,7 @@ async def build_worker_interruption_receipt(
             execution_segment=execution_segment,
         )
         budget = charge.context
-        evidence_refs = (charge.evidence_ref,)
+        evidence_refs = (*evidence_refs, charge.evidence_ref)
     except asyncio.CancelledError:
         raise
     except Exception as exc:

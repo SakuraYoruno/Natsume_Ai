@@ -606,6 +606,7 @@ class TaskGraphCancellationRequestMixin:
                         reservation,
                         reason_code="GRAPH_CANCEL_REQUESTED",
                         ts_ms=ts_ms,
+                        defer_recovery_hold=True,
                     )
 
             # Review approval/resume authority is revoked in the same UoW.
@@ -700,6 +701,27 @@ class TaskGraphCancellationRequestMixin:
                     ts_ms,
                 ),
             )
+            recovery_operations = conn.execute(
+                """
+                SELECT reservation.*
+                FROM task_runtime_idempotency_reservation AS reservation
+                JOIN task_runtime_attempt AS attempt
+                  ON attempt.attempt_id = reservation.attempt_id
+                WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+                  AND reservation.status = 'RECOVERY_REQUIRED'
+                ORDER BY reservation.reservation_id
+                """,
+                (graph_ref, int(revision)),
+            ).fetchall()
+            for recovery_operation in recovery_operations:
+                self._record_operation_recovery_hold_in_transaction(
+                    conn,
+                    reservation_id=str(recovery_operation["reservation_id"]),
+                    reason_code=str(
+                        recovery_operation["recovery_reason_code"]
+                        or "GRAPH_CANCEL_REQUESTED"
+                    ),
+                )
             for cancelled_item, task_graph_id, task_node_id in cancelled_review_items:
                 try:
                     enqueue_task_review_continuation_in_transaction(

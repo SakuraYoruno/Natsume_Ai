@@ -566,6 +566,36 @@ class _FakeTaskStore:
         self.reservation["recovery_reason_code"] = reason_code
         return dict(self.reservation)
 
+    def record_operation_recovery_hold(self, **kwargs: Any) -> dict[str, Any]:
+        assert self.reservation is not None
+        assert kwargs["reservation_id"] == self.reservation["reservation_id"]
+        assert kwargs["attempt_id"] == self.reservation["attempt_id"]
+        assert self.reservation["status"] == "RECOVERY_REQUIRED"
+        digest = "a" * 64
+        return {
+            "case_ref": f"operation-recovery-hold://sha256/{digest}",
+            "subject_sha256": f"sha256:{digest}",
+            "case_kind": "UNKNOWN_SIDE_EFFECT",
+            "current": True,
+            "exact_replay": True,
+        }
+
+    def get_current_operation_recovery_hold_for_reservation(
+        self,
+        reservation_id: str,
+        *,
+        expected_version: int,
+        reason_code: str,
+    ) -> dict[str, Any]:
+        assert self.reservation is not None
+        assert reservation_id == self.reservation["reservation_id"]
+        assert expected_version == self.reservation["status_version"]
+        assert reason_code == self.reservation["recovery_reason_code"]
+        return self.record_operation_recovery_hold(
+            reservation_id=reservation_id,
+            attempt_id=self.reservation["attempt_id"],
+        )
+
     def transition_attempt(
         self,
         attempt_id: str,

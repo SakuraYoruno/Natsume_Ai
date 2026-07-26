@@ -118,6 +118,11 @@ class TaskWorkerInterruptionStoreMixin:
                         expected_event_type="OPERATION_RECOVERY_REQUIRED",
                         expected_attempt_id=attempt_ref,
                     )
+                    self._record_operation_recovery_hold_in_transaction(
+                        conn,
+                        reservation_id=reservation_ref,
+                        reason_code=reason,
+                    )
                     return self._operation_record(row)
                 self._require_version(
                     row,

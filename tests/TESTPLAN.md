@@ -6,6 +6,15 @@
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
+## T-NE01-ATOMIC-INTERRUPTION-RECOVERY-HOLD
+
+- T-NE01-ATOMIC-HOLD-01：已识别 worker/heartbeat/caller interruption 必须在同一个 `BEGIN IMMEDIATE` UoW 提交 `RESERVED → RECOVERY_REQUIRED`、Operation Outbox、0130 append-only recovery case 与 case Outbox；0130 INSERT 故障必须证明四者整体回滚。
+- T-NE01-ATOMIC-HOLD-02：Runtime 只能只读重开 marker 同事务产生的唯一 current case，不能在 marker 返回后另建 recovery authority；reservation、Operation version、原因码或 case identity 漂移必须失败关闭。
+- T-NE01-ATOMIC-HOLD-03：unknown/cancellation case 的未决存活必须绑定 exact Operation version 与 cancellation identity；合法的 Budget settlement、Lease expiry 或 Task lifecycle 前进不能让唯一未决 case 从 current inventory 消失。
+- T-NE01-ATOMIC-HOLD-04：后续 Graph cancellation 必须在 cancellation UoW 内为所有 `RECOVERY_REQUIRED` Operation 追加 intent-bound successor case；历史 unknown case 保持不可变但退出 current，最终必须恰好一个 current case。
+- T-NE01-ATOMIC-HOLD-05：0052/0054-only 历史 Store fixture 保持可读；当前生产 schema 必须具备 0130，且不新增或重写 migration。
+- 当前去重受影响集合为 `114 passed in 184.27s`；完整架构 Gate 1～14、统一 `static_scan,doc_gate`、changed-module `compileall`、JSON 和 `git diff --check` 均通过。该合同不自动归因 unknown effect、不终态化 Task，也不提升一般 recovery、NE-01 波次 integration 或 NE-07 Docker 状态；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## T-NE01-REVIEW-DENIAL-TERMINAL
 
 - T-NE01-REVIEW-DENIAL-01：terminal Review、Node、Graph、graph Budget、三条 Outbox 和 append-only settlement 必须在一个 `BEGIN IMMEDIATE` UoW 中提交；任一 CAS/INSERT/Outbox 故障必须整体回滚。

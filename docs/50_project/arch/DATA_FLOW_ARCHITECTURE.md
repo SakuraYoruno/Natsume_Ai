@@ -224,13 +224,13 @@ Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Se
 
 Internal 前置 checkpoint 取消现在另有一条更窄的可恢复数据流：共享中立合同只接受 `RELEASED + RELEASE + NO_SIDE_EFFECT + no receipt`，或 `COMMITTED + COMMIT + SIDE_EFFECT_CONFIRMED + durable receipt`；Graph/Node/Attempt/Lease 还必须由同一 trusted cancellation decision 收敛为 `CANCELLED`。terminal worker 先提交 deterministic Secure Ingress claim result，再清理 Workspace 和未 sealed stage。无副作用 result 保持 v1 digest 兼容，confirmed-effect result 使用 v2 绑定 action/outcome/receipt；后者不等于 Agent result 或 Acceptance。没有 cancellation intent 的精确 raw failure 不复用该合同，而是从签名六聚合失败终态生成独立 `task-terminal://internal-raw-failure/...` result，并同样执行 claim-before-cleanup。一般 unknown effect、混合终态、缺 proof、proof/receipt 篡改或任一 lineage 漂移都会保留现场并失败关闭。
 
-Operation 预留后的已知执行中断现在先进入一个不做副作用归因的持久分类流。exact live fence 校验、状态 mutation 与 Outbox 在同一个 canonical SQLite UoW 中完成；marker 成功后 Runtime 才继续 Budget metering 和 recovery receipt。调用方取消不会被转成普通失败，而是标记后继续向上传播。
+Operation 预留后的已知执行中断现在先进入一个不做副作用归因的持久分类流。exact live fence 校验、`RESERVED → RECOVERY_REQUIRED` mutation、Operation Outbox、0130 recovery case 与 case Outbox 在同一个 canonical SQLite UoW 中完成；Hold/Outbox 任一步失败都会回滚 marker。marker 成功后 Runtime 只读重开 exact Operation version 对应的唯一 current case，再继续 Budget metering 和 recovery receipt。调用方取消不会被转成普通失败，而是持久标记后继续向上传播。
 
 ```mermaid
 flowchart LR
     I["worker / heartbeat / caller interruption"] --> F["exact Attempt + Lease + owner + fence + Operation version"]
-    F --> M["Operation RECOVERY_REQUIRED + unique Outbox"]
-    M --> H["durable hold；不重跑 worker"]
+    F --> M["同一 SQLite UoW\nRECOVERY_REQUIRED + Operation Outbox + 0130 case + case Outbox"]
+    M --> H["只读重开唯一 current case；不重跑 worker"]
     H --> S["signed Operation reconciliation"]
     S -->|COMMIT + SIDE_EFFECT_CONFIRMED + receipt| C["已发生副作用的可信证据"]
     S -->|RELEASE + cancellation intent| R["释放 Operation / cancellation continuation"]
@@ -240,7 +240,7 @@ flowchart LR
     P --> J["restart re-entry\n0090 Graph/Budget settlement"]
 ```
 
-初始 marker 只把已知中断从 `RESERVED` 立即推进为待对账状态；它本身不关闭 Attempt/Node/Graph/Budget/Lease，不清理 Workspace，也不从异常类型推断外部动作。只有后续签名、无取消、无投影/Effect、过期 Lease、唯一 graph Budget 的 `NO_SIDE_EFFECT` 证据才能终结该精确节点；多节点 Graph/Budget 只能由 0090 fan-in 终结，READY sibling 在裁决前不会执行。其它场景无法取得完整签名证据时必须继续 hold；本地临时密钥证明也不替代默认关闭的 Operator HTTP/key canary。
+初始 marker 只把已知中断从 `RESERVED` 立即推进为待对账状态；它本身不关闭 Attempt/Node/Graph/Budget/Lease，不清理 Workspace，也不从异常类型推断外部动作。unknown/cancellation case 的 current 性只随 exact Operation version 与取消身份变化：后续 Budget 计量、Lease 过期或 Attempt/Node/Graph 围栏仍留在历史 subject 中，但不会让未决 case 从恢复 inventory 消失；后到的 Graph cancellation 会追加 intent-bound successor，并使旧 unknown case退出 current。只有后续签名、无取消、无投影/Effect、过期 Lease、唯一 graph Budget 的 `NO_SIDE_EFFECT` 证据才能终结该精确节点；多节点 Graph/Budget 只能由 0090 fan-in 终结，READY sibling 在裁决前不会执行。其它场景无法取得完整签名证据时必须继续 hold；本地临时密钥证明也不替代默认关闭的 Operator HTTP/key canary。
 
 Edge 下行现在明确分成两条：Tribe 的平台/情绪事件只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。
 

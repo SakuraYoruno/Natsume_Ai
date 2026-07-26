@@ -16,6 +16,7 @@ from host_brain.persistence.host_command_repository import HostCommandRepository
 from host_brain.persistence.internal_agent_checkpoint_uow import (
     DurableInternalAgentCheckpointUnitOfWork,
 )
+from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
@@ -30,6 +31,7 @@ from host_brain.task_runtime import (
     GovernedRuntimeError,
     GovernedTaskCoordinator,
 )
+from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from tests.integration.test_gr03a_governed_durable_dag import (
     NOW,
     _Acceptance,
@@ -157,6 +159,21 @@ class _ProjectedWorker:
             },
         )
         yield {**body, "receipt_ref": projection_id}
+
+
+class _FailingProjectedWorker:
+    def __init__(self, calls: list[str]) -> None:
+        self._calls = calls
+
+    async def execute_stream(
+        self,
+        *,
+        execution_context: dict[str, Any],
+        **_: Any,
+    ):
+        self._calls.append(str(execution_context["node_id"]))
+        raise RuntimeError("selected worker failed after reservation")
+        yield  # pragma: no cover - keeps this an async generator
 
 
 class _CommitFailureStore:
@@ -475,6 +492,29 @@ class _SiblingStateBoundaryStopStore:
             self._sibling_durable.set()
         return result
 
+    def commit_node_acceptance_review(
+        self,
+        graph_id: str,
+        graph_revision: int,
+        node_id: str,
+        **kwargs: Any,
+    ) -> Any:
+        result = self._delegate.commit_node_acceptance_review(
+            graph_id,
+            graph_revision,
+            node_id,
+            **kwargs,
+        )
+        node = result.get("node") if isinstance(result, dict) else None
+        if (
+            self._release_on == "WAITING_ACCEPTANCE_REVIEW"
+            and node_id == self._sibling_node_id
+            and isinstance(node, dict)
+            and node.get("status") == "WAITING_ACCEPTANCE_REVIEW"
+        ):
+            self._sibling_durable.set()
+        return result
+
     def consume_budget_once(self, *args: Any, **kwargs: Any) -> Any:
         result = self._delegate.consume_budget_once(*args, **kwargs)
         if (
@@ -765,6 +805,7 @@ def _budget_usage_for_attempt(
 
 class _ContextVerifier(_Verifier):
     def __init__(self) -> None:
+        super().__init__()
         self.contexts: list[dict[str, Any]] = []
 
     def verify(self, *, execution_context: dict[str, Any], **kwargs: Any):
@@ -1903,6 +1944,12 @@ async def test_heartbeat_loss_keeps_unknown_side_effect_blocked_for_signed_recon
     first = await _events(first_app, contracts)
     assert first[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
     assert calls == ["root"]
+    immediate_holds = durable.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id,
+    )
+    assert len(immediate_holds) == 1
+    assert immediate_holds[0]["case_kind"] == "UNKNOWN_SIDE_EFFECT"
+    assert immediate_holds[0]["operation_status"] == "RECOVERY_REQUIRED"
     clock.advance(31)
 
     second_app = GovernedCommandApplication(
@@ -1930,6 +1977,7 @@ async def test_heartbeat_loss_keeps_unknown_side_effect_blocked_for_signed_recon
         graph_id=admitted.graph_id,
     )
     assert len(holds) == 1
+    assert holds[0]["case_ref"] == immediate_holds[0]["case_ref"]
     assert holds[0]["case_kind"] == "UNKNOWN_SIDE_EFFECT"
     assert (
         holds[0]["classification"]
@@ -1940,6 +1988,129 @@ async def test_heartbeat_loss_keeps_unknown_side_effect_blocked_for_signed_recon
     assert holds[0]["case_ref"] in second[-1]["execution_receipt"][
         "evidence_refs"
     ]
+    assert durable.get_operation_recovery_hold(holds[0]["case_ref"])[
+        "current"
+    ] is True
+    assert calls == ["root"]
+
+
+@pytest.mark.asyncio
+async def test_interruption_marker_rolls_back_when_recovery_hold_cannot_append(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    durable = DurableTaskStore(db_path, clock=clock)
+    with durable._connect() as conn:
+        conn.execute(
+            """
+            CREATE TRIGGER test_reject_operation_recovery_hold
+            BEFORE INSERT ON task_runtime_operation_recovery_hold
+            BEGIN
+                SELECT RAISE(ABORT, 'TEST_RECOVERY_HOLD_APPEND_FAILED');
+            END
+            """
+        )
+    calls: list[str] = []
+    worker = _ProjectedWorker(
+        projections=WorkerProjectionStore(db_path, clock=clock),
+        calls=calls,
+        delay_seconds=0.08,
+    )
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=_FailingHeartbeatStore(durable),
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=worker,
+            owner_id="hold-rollback-owner",
+            lease_ttl_ms=30,
+        ),
+    )
+
+    events = await _events(app, contracts)
+    receipt = events[-1]["execution_receipt"]
+    operation = durable.get_operation_reservation(admitted.reservation_id)
+
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["projection"]["reservation_status"] == "UNKNOWN"
+    assert receipt["projection"]["recovery_marker_reason_code"]
+    assert operation["status"] == "RESERVED"
+    assert operation["status_version"] == 0
+    assert durable.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id,
+    ) == ()
+    with durable._connect() as conn:
+        recovery_outboxes = conn.execute(
+            """
+            SELECT COUNT(*) FROM task_runtime_outbox
+            WHERE event_type IN (
+                'OPERATION_RECOVERY_REQUIRED',
+                'OPERATION_RECOVERY_HOLD_RECORDED'
+            )
+            """
+        ).fetchone()[0]
+    assert recovery_outboxes == 0
+    assert calls == ["root"]
+
+
+@pytest.mark.asyncio
+async def test_worker_failure_keeps_atomic_recovery_hold_current_after_budget_settlement(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts((("root", ()),))
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    durable = DurableTaskStore(db_path, clock=clock)
+    calls: list[str] = []
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=durable,
+            projections=WorkerProjectionStore(db_path, clock=clock),
+            worker=_FailingProjectedWorker(calls),
+            owner_id="worker-failure-hold-owner",
+        ),
+    )
+
+    events = await _events(app, contracts)
+    receipt = events[-1]["execution_receipt"]
+    operation = durable.get_operation_reservation(admitted.reservation_id)
+    holds = durable.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id,
+    )
+    snapshot = durable.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert operation["status"] == "RECOVERY_REQUIRED"
+    assert len(holds) == 1
+    assert holds[0]["case_kind"] == "UNKNOWN_SIDE_EFFECT"
+    assert receipt["projection"]["recovery_case_ref"] == holds[0]["case_ref"]
+    assert receipt["projection"]["recovery_case_digest"] == (
+        holds[0]["subject_sha256"]
+    )
+    assert holds[0]["case_ref"] in receipt["evidence_refs"]
+    assert any(
+        row["charge_kind"] == "WORKER_ELAPSED"
+        for row in snapshot["budget_usage"]
+    )
+    assert snapshot["budgets"][0]["status_version"] > (
+        holds[0]["budget_status_version"]
+    )
     assert durable.get_operation_recovery_hold(holds[0]["case_ref"])[
         "current"
     ] is True
@@ -2706,6 +2877,14 @@ async def test_terminal_sibling_does_not_preempt_operation_free_candidate_recove
             else None
         ),
     )
+    review_runtime = (
+        TaskNodeReviewRuntime(
+            ReviewStore(db_path, clock=clock),
+            clock=clock,
+        )
+        if sibling_mode == "review"
+        else None
+    )
     stopped_store = _SiblingStateBoundaryStopStore(
         durable,
         _ProcessStopped(f"candidate stopped beside {sibling_mode} sibling"),
@@ -2724,6 +2903,7 @@ async def test_terminal_sibling_does_not_preempt_operation_free_candidate_recove
                     worker=worker,
                     worker_resolver=resolver,
                     acceptance=acceptance,
+                    review_runtime=review_runtime,
                     owner_id=f"preoperation-{sibling_mode}-owner-a",
                     bounded_fanout_enabled=True,
                 ),
@@ -2764,6 +2944,7 @@ async def test_terminal_sibling_does_not_preempt_operation_free_candidate_recove
                 worker=worker,
                 worker_resolver=resolver,
                 acceptance=acceptance,
+                review_runtime=review_runtime,
                 owner_id=f"preoperation-{sibling_mode}-owner-b",
                 bounded_fanout_enabled=True,
             ),

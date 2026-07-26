@@ -647,6 +647,14 @@ class TaskStorePort(Protocol):
         checkpoint_state: str | None = None,
     ) -> Mapping[str, Any]: ...
 
+    def get_current_operation_recovery_hold_for_reservation(
+        self,
+        reservation_id: str,
+        *,
+        expected_version: int,
+        reason_code: str,
+    ) -> Mapping[str, Any]: ...
+
     def get_operation_recovery_hold(
         self,
         case_ref: str,
