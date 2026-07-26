@@ -14,6 +14,7 @@ from threading import RLock
 from typing import Any
 
 from host_brain.app.host_hard_state import HostHardStateOwner
+from host_brain.app.host_mode_policy import HostModePolicyOwner
 from host_brain.contracts.host_hard_state import (
     HostHardStateCommitV1,
     HostHardStateJournalPort,
@@ -23,6 +24,8 @@ from host_brain.contracts.host_lifecycle import (
     HostLifecycleScopeError,
     KeywordFactory,
 )
+from host_brain.contracts.host_mode_policy import HostModePolicyJournalPort
+from host_brain.core.ids import now_ms
 
 
 @dataclass(slots=True)
@@ -48,6 +51,7 @@ class HostLifecycleContainer:
     _owned_resource_manager: Any | None = field(default=None, init=False, repr=False)
     _resource_manager: Any | None = field(default=None, init=False, repr=False)
     _hard_state_owner: HostHardStateOwner = field(init=False, repr=False)
+    _mode_policy_owner: HostModePolicyOwner = field(init=False, repr=False)
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -58,6 +62,10 @@ class HostLifecycleContainer:
         if self.endocrine_resolver is not None:
             bootstrap_kwargs["endocrine_resolver"] = self.endocrine_resolver
         self._hard_state_owner = HostHardStateOwner.bootstrap(**bootstrap_kwargs)
+        self._mode_policy_owner = HostModePolicyOwner.bootstrap(
+            initial_last_interaction_ts_ms=now_ms(),
+            require_durable=self.require_durable_hard_state,
+        )
 
     @property
     def epoch(self) -> int:
@@ -110,6 +118,7 @@ class HostLifecycleContainer:
                     set_sys_mode=self.set_sys_mode,
                     history_provider=self.get_sys_mode_history,
                     exact_history_provider=self.reopen_sys_mode_transition,
+                    mode_policy=self._mode_policy_owner,
                     ledger=ledger,
                 )
                 monitor = self.ports.activity_monitor_factory(
@@ -211,6 +220,26 @@ class HostLifecycleContainer:
             "updated_at_ms": snapshot.updated_at_ms,
         }
 
+    def bind_mode_policy_journal(
+        self,
+        journal: HostModePolicyJournalPort,
+    ) -> dict[str, object]:
+        """Bind and recover canonical auto rules before producers start."""
+
+        snapshot = self._mode_policy_owner.bind_durable_journal(journal)
+        return {
+            "runtime_scope_id": snapshot.runtime_scope_id,
+            "revision": snapshot.revision,
+            "auto_rules": dict(snapshot.auto_rules),
+            "last_interaction_ts_ms": snapshot.last_interaction_ts_ms,
+            "operation_id": snapshot.operation_id,
+            "event_digest": snapshot.event_digest,
+            "updated_at_ms": snapshot.updated_at_ms,
+        }
+
+    def get_mode_policy_snapshot(self) -> Any:
+        return self._mode_policy_owner.snapshot()
+
     def get_sys_mode_history(self, *, limit: int = 100) -> list[dict[str, object]]:
         return self._hard_state_owner.durable_history(limit=limit)
 
@@ -268,6 +297,7 @@ class HostLifecycleContainer:
             except Exception as exc:
                 logger.warning("ActivityMonitor 停止失败: %s", exc)
         self._hard_state_owner.unbind_durable_journal()
+        self._mode_policy_owner.unbind_durable_journal()
 
     def stop_resource_manager(self, *, logger: Any) -> None:
         """Stop the status writer while Task Runtime and Host lease are live."""
@@ -299,6 +329,7 @@ class HostLifecycleContainer:
             self._owned_resource_manager = None
             self._resource_manager = None
             self._hard_state_owner.unbind_durable_journal()
+            self._mode_policy_owner.unbind_durable_journal()
         try:
             try:
                 if resource_manager is not None:

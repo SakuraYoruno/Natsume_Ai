@@ -587,6 +587,8 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
         # Their eventual mutation is still risk-4 ActionPreview-bound.
         "operator_task_graph_cancellation": 4,
         "operator_task_review_control": 2,
+        "operator_scheduler_state_control": 4,
+        "operator_host_mode_policy_control": 4,
     }.get(action_name)
     if builtin_risk is not None:
         return builtin_risk

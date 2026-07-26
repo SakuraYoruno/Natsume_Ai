@@ -40,6 +40,9 @@ from host_brain.app.accepted_sys_mode_transition_handler import (
 from host_brain.app.accepted_operator_control_handler import (
     AcceptedOperatorControlHandler,
 )
+from host_brain.app.accepted_operator_state_control_handler import (
+    AcceptedOperatorStateControlHandler,
+)
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedLifeConversationProjectionV1,
     AcceptedPreferenceSignalV1,
@@ -51,6 +54,7 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 def build_production_acceptance_effect_handlers(
     *,
     mode_transition_service_provider: Callable[[], Any] | None = None,
+    scheduler_command_service_provider: Callable[[], Any] | None = None,
     scheduler_operation_handler: Callable[[Mapping[str, Any]], Any] | None = None,
     internal_result_commit_handler: Callable[[Mapping[str, Any]], Any] | None = None,
     conversation_turn_reader: Any | None = None,
@@ -100,6 +104,27 @@ def build_production_acceptance_effect_handlers(
     if mode_transition_service_provider is not None:
         handlers["host.sys_mode_transition"] = AcceptedSysModeTransitionHandler(
             service_provider=mode_transition_service_provider,
+        )
+    if scheduler_command_service_provider is not None:
+        if (
+            mode_transition_service_provider is None
+            or secure_ingress_authority_resolver is None
+        ):
+            raise TypeError(
+                "Operator state control requires all app-local dependencies"
+            )
+        handlers["host.operator_state_control"] = (
+            AcceptedOperatorStateControlHandler(
+                scheduler_command_service_provider=(
+                    scheduler_command_service_provider
+                ),
+                mode_transition_service_provider=(
+                    mode_transition_service_provider
+                ),
+                secure_ingress_authority_resolver=(
+                    secure_ingress_authority_resolver
+                ),
+            )
         )
     operator_control_dependencies = (
         graph_cancellation_service_provider,

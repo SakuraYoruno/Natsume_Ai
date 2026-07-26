@@ -52,6 +52,7 @@ def compose_internal_runtime(
     episodic_projection_store: Any,
     semantic_recaller: Any,
     mode_transition_service_provider: Callable[[], Any],
+    scheduler_command_service_provider: Callable[[], Any],
     life_receipt_reader_provider: Callable[[], Any],
     life_authority_provider: Callable[[], tuple[Any, Any]],
     agent_runtime_ports: Any,
@@ -103,6 +104,9 @@ def compose_internal_runtime(
         runtime_context_application=runtime_context_application,
         action_preview_service=action_preview_service,
         mode_transition_service_provider=mode_transition_service_provider,
+        scheduler_command_service_provider=(
+            scheduler_command_service_provider
+        ),
         cancellation_authority_verifier=cancellation_authority_verifier,
         secure_ingress_authority_resolver=command_ingress.store,
         runtime_owner_id=canonical_owner,

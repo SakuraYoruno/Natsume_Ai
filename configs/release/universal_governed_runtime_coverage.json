@@ -2,11 +2,11 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_GENERAL_ACCEPTANCE_EFFECT_RECONCILIATION_CODE_COMMIT_001CD953C71B_OVER_ORIGIN_DEV_8AA4F31882",
-  "current_document_slice": "NE01_GOVERNED_OPERATOR_TASK_REVIEW_CONTROLS_PRECOMMIT_OVER_ORIGIN_DEV_E18365A8C",
+  "evaluated_source": "NE01_GOVERNED_OPERATOR_STATE_CONTROLS_PRECOMMIT_OVER_ORIGIN_DEV_CCDFaEA4A",
+  "current_document_slice": "NE01_GOVERNED_OPERATOR_STATE_CONTROLS_PRECOMMIT_OVER_ORIGIN_DEV_CCDFaEA4A",
   "evidence_binding": {
-    "evaluated_commit_sha": "001cd953c71bab3d7bfd2d51f213b74a072f1d64",
-    "migration_head": "0128_acceptance_effect_general_reconciliation.sql"
+    "evaluated_commit_sha": "ccdfaea4a4fc1e14ca8f0889b0dba5b2dc4490f6",
+    "migration_head": "0129_host_mode_policy_journal.sql"
   },
   "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real acceptance receipt binds the evaluated Git commit, current migration head and route PASS result. Source files, unit tests, an outer admitted graph or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
   "production_enablement": {
@@ -31,7 +31,7 @@
     "budget": "PARTIAL_CONTENTION_PROVEN_SINGLE_NODE_DURABLE_TIME_GUARD_KNOWN_INTERRUPTION_FIRST_ATOMIC_OPERATION_RECOVERY_MARKER",
     "preoperation_attempt_takeover": "CANONICAL_OPERATION_FREE_PERSISTED_ATTEMPT_SAME_ATTEMPT_HIGHER_FENCE_PROVEN_POST_RESERVATION_KNOWN_INTERRUPTION_IMMEDIATE_RECOVERY_REQUIRED_PLUS_OUTBOX_GENERAL_UNKNOWN_EFFECT_AND_MULTI_NODE_RECOVERY_INCOMPLETE",
     "host_startup_graph_continuation": "PARTIAL_LIFECYCLE_SURVIVOR_EXACT_HOST_ADMISSION_REENTRY_SURFACE_FILTERED_SINGLE_READ_TRANSACTION_EXACT_BOUND_ACCEPTED_TRUE_OVERFLOW_FAIL_CLOSED_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION_MANDATORY_BOOT_THEN_PERIODIC_TIMER_OR_WAKE_LIVE_LEASE_OR_EXECUTION_DEFERRED_EXPIRED_LEASE_ONLINE_REEVALUATED_NO_WORKER_AUTHORITY_GENERAL_RECOVERY_INCOMPLETE",
-    "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_OPERATOR_HTTP_E2E_NOT_PROVEN_CANARY_NOT_RUN",
+    "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_MODE_POLICY_0129_DURABLE_RUNTIME_FENCED_OPERATOR_STATE_CONTROLS_LOCAL_SQLITE_PROVEN_HTTP_NETWORK_CANARY_NOT_RUN",
     "production_canary": "TERMINAL_EXACT_LOCAL_SQLITE_PASS_FULL_RUNTIME_NOT_RUN",
     "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -310,10 +310,18 @@
     },
     "operator": {
       "status": "INCOMPLETE",
-      "production_boundary": "Ten of 37 audited Operator write commands now cross Secure Ingress, typed OPERATOR HostCommand, immutable TaskGraph and the governed runtime; the other 27 remain deliberately blocked. In addition to the existing six routes, task_graph.cancel and task_review.approve/reject/resume no longer call domain writers from Obs handlers. Every control owns an independent TaskGraph with Attempt, Lease, node grant, Budget, Review, Verification, Acceptance and terminal Preview; only the task.operator_control Acceptance Effect may reopen committed Secure Ingress authority and invoke the original Task or Review owner. Cancellation commits the outer Effect only after the exact target graph revision reaches FINALIZED/CANCELLED. Review approval exposes only a review-token public ref; the ordinary review_resume bearer is absent from WorkOrder, SQLite and public output. A reopened ReviewStore proves public-ref one-time resume and duplicate rejection. Real SQLite proves pending Review zero target writes, approve/resume/cancel, reject and historical approve/cancel exact replay with zero target re-entry. Graph cancellation remains default off. Complete process restart, deployed credentials, HTTP/network canary, universal Operator migration and commit-bound live route acceptance are not run.",
+      "production_boundary": "Fourteen of 37 audited Operator write commands now cross Secure Ingress, typed OPERATOR HostCommand, immutable TaskGraph and the governed runtime; the other 23 remain deliberately blocked. The latest four routes are scheduler.task.enable/disable and sys_mode.auto_rules.update/event.submit. Each freezes the current Scheduler head or Host mode-policy revision before admission and owns independent Attempt, Lease, node grant, Budget, Review, Verification, Acceptance and terminal Preview lineage. Only the operator.state_control Acceptance Effect may reopen committed Secure Ingress authority and invoke the original canonical owner. Migration 0129 stores Host auto-rules, last-interaction and submitted-event outcome in a runtime-scope/owner/lease/fence-bound append-only journal plus canonical head; exact replay, 1001-event pagination, append rollback, released fence and tamper fail closed. Sleep's proactive-action constraint is now consumer-scoped: explicit user/Operator work remains restricted and reviewed, while the Proactive projection remains blocked. Legacy Obs sys-mode mutation helpers are physically removed. Gate 3 initially rejected the 1538-line main Operator runtime; mode receipt reopen was split into the focused state-control runtime, leaving 1344/650 lines and fresh Gates 1-14 PASS without an allowlist expansion. Standalone Scheduler CRUD HTTP still calls SchedulerCommandService directly, so Scheduler has not reached one execution authority. Complete Host process restart, deployed credentials, HTTP/network canary, universal Operator migration and commit-bound live route acceptance are not run.",
       "evidence_refs": [
         "host_brain/app/observability_runtime/domain_command_ports.py",
         "host_brain/app/governed_operator_runtime.py",
+        "host_brain/app/governed_operator_state_control_runtime.py",
+        "host_brain/app/accepted_operator_state_control_handler.py",
+        "host_brain/app/host_mode_policy.py",
+        "host_brain/contracts/host_mode_policy.py",
+        "host_brain/persistence/host_mode_policy_journal.py",
+        "host_brain/audit/migrations/0129_host_mode_policy_journal.sql",
+        "host_brain/task_runtime/operator_state_control_support.py",
+        "host_brain/task_runtime/operator_state_control_acceptance_effect.py",
         "host_brain/task_runtime/operator_control_support.py",
         "host_brain/app/governed_operator_control_runtime.py",
         "host_brain/app/accepted_operator_control_handler.py",
@@ -350,6 +358,7 @@
         "tests/integration/test_ne01_general_acceptance_effect_reconciliation.py",
         "tests/integration/test_ne01_governed_general_effect_reconciliation.py",
         "tests/integration/test_ne01_governed_operator_task_controls.py",
+        "tests/integration/test_ne01_host_mode_policy_journal.py",
         "tests/contract/test_nle_review_store_contract.py",
         "tests/unit/test_obs_domain_command_ports.py",
         "tests/contract/test_ne01_terminal_operator_command_store.py",
@@ -357,7 +366,11 @@
       ],
       "governed_commands": [
         "edge.command.push",
+        "scheduler.task.disable",
+        "scheduler.task.enable",
         "scheduler.task.trigger",
+        "sys_mode.auto_rules.update",
+        "sys_mode.event.submit",
         "sys_mode.switch",
         "task_effect.reconcile",
         "task_graph.cancel",
@@ -367,12 +380,12 @@
         "task_review.resume",
         "task_terminal.reconcile"
       ],
-      "blocked_command_count": 27,
+      "blocked_command_count": 23,
       "review_continuation_boundary": "The outer OBS outcome remains WAITING_REVIEW while task-bound Review is pending. Approve, reject and resume are themselves governed Operator TaskGraphs; only their committed task.operator_control effect invokes the one app-local TaskReviewCommandService. Approve discards the ordinary bearer and exposes only a durable public token ref. The ordinary API rejects that ref; the Operator port checks the stored hash and exact subject/version/phase/checkpoint, derives the resume result on the server and consumes once. A reopened Store preserves this boundary. Historical approve replays APPROVED version 1 even after the target Review is CONSUMED. If durable Review admission succeeds but the outer WAL append fails, startup keeps admission closed. Zero bound Reviews conservatively become UNCERTAIN; one exact Review reopens Secure Ingress, HostCommand, TaskNode, ReviewItem and required terminal continuation. Multiple Reviews, binding drift or uncertain Effect ownership fail or defer closed.",
-      "side_effect_boundary": "APPLIED and REPLAYED use status-specific runtime-scope-bound handler receipts and require the exact durable HardState event. NO_CHANGE uses its own status-specific receipt, requires no event and reports side_effects_executed=false. Response loss, success=false or attribution failure after the HardState call must first reopen the exact event: an existing commit becomes REPLAYED, an uncertain read remains PENDING with RECONCILIATION_REQUIRED and UNKNOWN regardless of ordinary max attempts, and only authoritative absence may enter ordinary failure. Historical replay never re-executes the effect, including after more than 1000 newer events.",
+      "side_effect_boundary": "APPLIED and REPLAYED use status-specific runtime-scope-bound handler receipts and require the exact durable HardState or Host mode-policy event. NO_CHANGE uses its own status-specific receipt, requires no event and reports side_effects_executed=false. Scheduler enable/disable binds the exact accepted operation ID and expected definition head. Response loss or attribution failure must first reopen the canonical operation; an existing commit becomes exact replay and an uncertain read remains PENDING with reconciliation required. Historical replay never re-executes the effect, including after more than 1000 newer events.",
       "startup_recovery_boundary": "Governed admission activates only after the shared Acceptance Effect owner drains recovery work and proves no PENDING or CLAIMED effect remains.",
       "shutdown_boundary": "Operator ingress drains first, then Scheduler producers stop, Task Runtime closes the shared Acceptance Effect owner, Workspace quiesces, mode-transition dependencies stop, command/security stores close, and app references clear last. A live OBS, Scheduler or Task Runtime close failure preserves dependencies and published references and returns a stable retry-required error.",
-      "validation_boundary": "The new real-SQLite governed Task/Review control end-to-end test and its focused Review contract, Obs command, ASGI composition and graph-cancellation regression set pass 78 tests in 19.77 seconds with zero failures. Acceptance/Review lifecycle files pass 80 tests in 41.69 seconds and the disjoint Graph cancellation routing file passes 12 tests in 0.29 seconds; these groups overlap the primary set and are not added into a fake total. Documentation authority/freshness, delivery metadata and coverage pass 39 tests in 9.23 seconds. The ReviewStore contract explicitly reopens the database before public-token consumption and again before duplicate rejection; this is not a complete Host process restart canary. Changed-module compileall, JSON/diff checks, the unified static scan with failures empty and fresh Architecture Gates 1 through 14 pass with failed_gates empty and no allowlist expansion. Historical general-Effect and older Operator evidence remains scope-bound and is not added. Graph cancellation stays default off; NE-01 wave integration, commit-bound acceptance, deployed HTTP/network canary and NE-07 full stack remain NOT_RUN or MISSING; REMOTE_CI remains NOT_RUN_ACCOUNT_QUOTA.",
+      "validation_boundary": "The current disjoint code regression is 175 passed with zero failures: 3 real-SQLite Host mode-policy restart/fault/tamper tests, 5 governed Operator integration tests, and 167 unit/contract regressions. It covers Scheduler enable/disable, auto-rule update, sleep wake event, Review continuation, exact WorkOrder replay, 1001-event paging and Scene proactive scoping. Historical Operator evidence remains scope-bound and is not added. Standalone Scheduler CRUD HTTP, complete Host process restart, NE-01 wave integration, commit-bound acceptance, deployed HTTP/network canary and NE-07 full stack remain NOT_RUN or MISSING; REMOTE_CI remains NOT_RUN_ACCOUNT_QUOTA.",
       "controls": {
         "host_command": "PARTIAL",
         "immutable_task_graph": "PARTIAL",
@@ -2005,8 +2018,8 @@
         "hard_state_replay_payload_drift": "FAIL_CLOSED_AND_NEVER_CONVERTED_TO_SUCCESS",
         "hard_state_success_audit": "0115_HARD_STATE_JOURNAL_IS_THE_ONLY_CANONICAL_AUDIT_FOR_SUCCESSFUL_MODE_TRANSITIONS_LEGACY_ERROR_LOG_SUCCESS_WRITES_ZERO",
         "hard_state_exact_replay_projection": "RETURNS_THE_EXISTING_CANONICAL_RECEIPT_WITHOUT_APPENDING_LOCAL_HISTORY_OR_LEGACY_AUDIT",
-        "hard_state_operator_adapter": "BLOCKED_ADAPTER_PREPARES_STABLE_AUTHENTICATED_REQUEST_IDENTITY_AT_CONTRACT_LEVEL_ONLY",
-        "hard_state_operator_http_e2e": "NOT_PROVEN_BLOCKED_BY_EXACT_NODE_BOUND_PREVIEW_RECEIPT_AND_IMMUTABLE_TASKGRAPH_CUTOVER",
+        "hard_state_operator_adapter": "GOVERNED_SYS_MODE_SWITCH_AUTO_RULE_AND_EVENT_CONTROLS_USE_STABLE_AUTHENTICATED_REQUEST_IDENTITY",
+        "hard_state_operator_http_e2e": "LOCAL_SECURE_INGRESS_TASKGRAPH_REVIEW_ACCEPTANCE_EFFECT_SQLITE_PROVEN_DEPLOYED_HTTP_NETWORK_CANARY_NOT_RUN",
         "nle_trusted_call_site_metadata": "EXACT_EXISTING_PATH_SYMBOL_LINES_SYNCHRONIZED_NO_NEW_TRUSTED_SITE_NO_ALLOWLIST_EXPANSION_OPERATOR_REMAINS_BLOCKED",
         "nle_trusted_call_site_regression": "45_PASSED_IN_97_17_SECONDS_NON_ADDITIVE",
         "unified_delivery_static_doc_gate": "PASS_FAILURES_EMPTY",
@@ -2022,9 +2035,9 @@
         "endocrine agent behind the app-local immutable HardState snapshot",
         "Tribe shared state, registry, event bus and 23-Agent production catalog are Host-scope owned; compatibility context is execution-local, overlapping Tribe scopes are isolated, and no-context fallbacks are physically retired; the bus remains transient and full Host multi-app production canary is not run",
         "SystemResourceManager status is Host-fenced and durable; full-stack canary remains NOT_RUN",
-        "ModeTransitionService auto-rule configuration and last-interaction timestamp remain process-local",
+        "ModeTransitionService auto-rule configuration and last-interaction timestamp are canonical in the runtime-fenced 0129 Host mode-policy journal",
         "HardState production deployment canary is NOT_RUN",
-        "Operator and HTTP end-to-end mode switching remain NOT_PROVEN because the legacy adapter is blocked until exact Preview Receipt and TaskGraph authority are wired"
+        "Operator state controls have local Secure Ingress/TaskGraph/Preview/Acceptance SQLite proof; deployed HTTP/network canary remains NOT_RUN"
       ],
       "validation": {
         "final_targeted_regression_passed": 143,
@@ -2079,7 +2092,7 @@
     "boundary": "FRESH_AST_CURRENT_0_NAMED_MODULES_0_NAMES_0_ALL_IMPORT_FORM_CONSUMERS_AND_0_PRODUCTION_PROCESS_LOCATOR_MODULES_FIELDS_LOCKS_OR_MUTABLE_REFS_TEST_ONLY_COMPATIBILITY_BRIDGE_CANNOT_LOAD_IN_FRESH_PRODUCTION_PROCESS_THIRTY_FIVE_HOST_WRAPPER_STATE_RUNTIME_PUBLICATION_AUTHORITY_OWNERS_APP_LOCAL_HOST_AUTHORITY_LEDGER_MEMORY_MODEL_CAPABILITY_EXACT_OWNER_BOUND_HOST_GOVERNANCE_AND_LIFE_ACTION_PREVIEW_APP_LOCAL_GUARDIAN_FAIL_CLOSED_ASGI_AND_HOST_LIFECYCLE_ONLY_CONSUME_FROZEN_HOST_APPLICATION_PORTS_RESOURCE_MANAGER_STATUS_0123_HOST_FENCED_DURABLE_SHARED_JSON_AUTHORITY_ZERO_TRIBE_RUNTIME_SCOPE_OWNS_PORT_BIND_UNBIND_SUBSCRIPTIONS_HANDOFF_AND_OBS_STATE_READER_TRIBE_CONTEXT_IS_EXECUTION_LOCAL_AND_NO_CONTEXT_FALLBACKS_ARE_RETIRED_EXTERNAL_CHROMA_NEO4J_NAMESPACES_OTHER_EXTERNAL_RESOURCE_CRASH_RECOVERY_DURABLE_TRIBE_EVENTS_FULL_HOST_MULTI_APP_CANARY_WORKER_OBS_TYPED_CONTAINER_TRANSACTIONAL_CHAT_AND_LEGACY_EXECUTIVE_GENERIC_DELEGATE_CUTOVER_REMAIN_INCOMPLETE_HARD_STATE_0115_DURABLE_RESTART_FENCE_WIRED_FULL_STATIC_FAIL_BASELINE_GATES_1_3_GATE_2_AND_GATE_11_PASS_CURRENT_SLICE_ADDED_FAILURES_ZERO_NE01_IN_PROGRESS",
       "agent_runtime_scope_boundary": "HOST_LIFESPAN_SCOPE_IS_A_LOCAL_DEPENDENCY_PUBLICATION_SLICE_ONLY_GENERIC_DELEGATE_MULTINODE_TASKGRAPH_AND_WAVE_INTEGRATION_REMAIN_UNPROVEN",
       "hard_state_receipt_boundary": "PERMANENT_HISTORICAL_LOOKUP_MUTATING_REVISION_MODE_EXACT_CAS_NO_CHANGE_NO_FAKE_EVENT_PAYLOAD_DRIFT_FAIL_CLOSED_SUCCESS_JOURNAL_ONLY_CANONICAL_AUDIT_EXACT_REPLAY_NO_LOCAL_OR_LEGACY_DUPLICATE",
-      "hard_state_operator_boundary": "REQUEST_IDENTITY_CONTRACT_PREPARED_ONLY_OPERATOR_HTTP_E2E_NOT_PROVEN_BLOCKED_BY_PREVIEW_AND_TASKGRAPH",
+      "hard_state_operator_boundary": "SYS_MODE_SWITCH_AUTO_RULE_AND_EVENT_GOVERNED_LOCAL_SQLITE_PROVEN_0129_DURABLE_POLICY_DEPLOYED_HTTP_NETWORK_CANARY_NOT_RUN",
       "evidence_refs": [
         "host_brain/app/host_lifecycle_composition.py",
         "host_brain/composition/host_application.py",

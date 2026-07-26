@@ -1,0 +1,526 @@
+"""Post-Acceptance execution for Scheduler and Host mode-policy controls."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+import hashlib
+import inspect
+import json
+from typing import Any
+
+from host_brain.app.acceptance_effect_handler_common import _receipt
+from host_brain.task_runtime.acceptance_effect_dispatcher import (
+    AcceptanceEffectOutcomeUnknown,
+)
+from host_brain.task_runtime.operator_state_control_support import (
+    OPERATOR_STATE_CONTROL_COMMAND_IDS,
+    OPERATOR_STATE_CONTROL_EFFECT_TYPE,
+    operator_state_control_ingress_requirements,
+    operator_state_control_operation_id,
+)
+
+
+_SCHEDULER_COMMAND_IDS = frozenset(
+    {"scheduler.task.enable", "scheduler.task.disable"}
+)
+
+
+class AcceptedOperatorStateControlHandler:
+    """Commit one immutable state control and reconcile from its real owner."""
+
+    def __init__(
+        self,
+        *,
+        scheduler_command_service_provider: Callable[[], Any],
+        mode_transition_service_provider: Callable[[], Any],
+        secure_ingress_authority_resolver: Any,
+    ) -> None:
+        if not callable(scheduler_command_service_provider):
+            raise TypeError(
+                "scheduler_command_service_provider must be callable"
+            )
+        if not callable(mode_transition_service_provider):
+            raise TypeError(
+                "mode_transition_service_provider must be callable"
+            )
+        if not callable(
+            getattr(
+                secure_ingress_authority_resolver,
+                "resolve_committed_authority_by_audit",
+                None,
+            )
+        ):
+            raise TypeError("Secure Ingress authority resolver is required")
+        self._scheduler_provider = scheduler_command_service_provider
+        self._mode_provider = mode_transition_service_provider
+        self._authority_resolver = secure_ingress_authority_resolver
+
+    async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        value = _accepted_operator_state_control_request(payload)
+        try:
+            if value["operator_command_id"] in _SCHEDULER_COMMAND_IDS:
+                await self._apply_scheduler(value)
+            else:
+                self._apply_mode_policy(value)
+        except Exception as exc:
+            try:
+                return await self.reconcile(payload)
+            except AcceptanceEffectOutcomeUnknown:
+                # No canonical operation means the transactional writer did
+                # not cross its durable boundary. Preserve the typed failure
+                # so the dispatcher applies its bounded retry policy.
+                raise exc
+        return await self.reconcile(payload)
+
+    async def reconcile(
+        self,
+        payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        value = _accepted_operator_state_control_request(payload)
+        return await resolve_operator_state_control_outcome(
+            value,
+            scheduler_command_service_provider=self._scheduler_provider,
+            mode_transition_service_provider=self._mode_provider,
+            secure_ingress_authority_resolver=self._authority_resolver,
+        )
+
+    async def _apply_scheduler(self, value: Mapping[str, Any]) -> None:
+        args = dict(value["state_args"])
+        service = self._scheduler_service()
+        apply = getattr(service, "apply_accepted_set_enabled", None)
+        if not callable(apply):
+            raise RuntimeError(
+                "APP_LOCAL_SCHEDULER_STATE_CONTROL_UNAVAILABLE"
+            )
+        result = apply(
+            task_id=str(args["task_id"]),
+            enabled=bool(args["enabled"]),
+            authority=_reopen_authority(
+                value,
+                resolver=self._authority_resolver,
+            ),
+            expected_head_version=int(args["expected_head_version"]),
+        )
+        if inspect.isawaitable(result):
+            await result
+
+    def _apply_mode_policy(self, value: Mapping[str, Any]) -> None:
+        args = dict(value["state_args"])
+        service = self._mode_service()
+        command_id = str(value["operator_command_id"])
+        if command_id == "sys_mode.auto_rules.update":
+            update = getattr(service, "update_auto_rules", None)
+            if not callable(update):
+                raise RuntimeError(
+                    "APP_LOCAL_HOST_MODE_RULE_CONTROL_UNAVAILABLE"
+                )
+            update(
+                dict(args["rules"]),
+                operation_id=str(value["operation_id"]),
+                expected_policy_revision=int(
+                    args["expected_policy_revision"]
+                ),
+                observed_at_ms=int(args["observed_at_ms"]),
+            )
+            return
+        submit = getattr(service, "on_event", None)
+        if not callable(submit):
+            raise RuntimeError(
+                "APP_LOCAL_HOST_MODE_EVENT_CONTROL_UNAVAILABLE"
+            )
+        submit(
+            str(args["event_type"]),
+            {},
+            operation_id=str(value["operation_id"]),
+            expected_policy_revision=int(args["expected_policy_revision"]),
+            observed_at_ms=int(args["observed_at_ms"]),
+        )
+
+    def _scheduler_service(self) -> Any:
+        service = self._scheduler_provider()
+        if service is None:
+            raise RuntimeError("APP_LOCAL_SCHEDULER_SERVICE_UNAVAILABLE")
+        return service
+
+    def _mode_service(self) -> Any:
+        service = self._mode_provider()
+        if service is None:
+            raise RuntimeError("APP_LOCAL_HOST_MODE_SERVICE_UNAVAILABLE")
+        return service
+
+
+async def resolve_operator_state_control_outcome(
+    value: Mapping[str, Any],
+    *,
+    scheduler_command_service_provider: Callable[[], Any],
+    mode_transition_service_provider: Callable[[], Any],
+    secure_ingress_authority_resolver: Any,
+) -> dict[str, Any]:
+    """Read one exact canonical result without invoking its writer."""
+
+    payload = dict(value or {})
+    command_id = str(payload.get("operator_command_id") or "")
+    args = dict(payload.get("state_args") or {})
+    if command_id in _SCHEDULER_COMMAND_IDS:
+        service = scheduler_command_service_provider()
+        resolver = getattr(service, "resolve_accepted_set_enabled", None)
+        if not callable(resolver):
+            raise AcceptanceEffectOutcomeUnknown(
+                "Scheduler accepted-operation reader is unavailable"
+            )
+        operation = resolver(
+            task_id=str(args["task_id"]),
+            enabled=bool(args["enabled"]),
+            authority=_reopen_authority(
+                payload,
+                resolver=secure_ingress_authority_resolver,
+            ),
+            expected_head_version=int(args["expected_head_version"]),
+        )
+        if inspect.isawaitable(operation):
+            operation = await operation
+        if not isinstance(operation, Mapping):
+            raise AcceptanceEffectOutcomeUnknown(
+                "Scheduler state control has no exact durable operation"
+            )
+        identity, public = _scheduler_operation_identity(payload, operation)
+    else:
+        service = mode_transition_service_provider()
+        reader = getattr(service, "get_mode_policy_operation", None)
+        if not callable(reader):
+            raise AcceptanceEffectOutcomeUnknown(
+                "Host mode-policy operation reader is unavailable"
+            )
+        operation = reader(str(payload["operation_id"]))
+        if inspect.isawaitable(operation):
+            operation = await operation
+        if operation is None:
+            raise AcceptanceEffectOutcomeUnknown(
+                "Host mode state control has no exact durable operation"
+            )
+        identity, public = _mode_operation_identity(payload, operation)
+    return {
+        "receipt_ref": operator_state_control_handler_receipt_ref(
+            payload,
+            outcome_identity=identity,
+        ),
+        "operator_command_id": command_id,
+        "operation_id": payload["operation_id"],
+        **public,
+    }
+
+
+def operator_state_control_handler_receipt_ref(
+    payload: Mapping[str, Any],
+    *,
+    outcome_identity: Mapping[str, Any],
+) -> str:
+    value = dict(payload or {})
+    value.pop("_action_preview_context", None)
+    value.pop("_action_preview_terminal_proof", None)
+    return _receipt(
+        "operator-state-control",
+        {
+            "operation_id": value.get("operation_id"),
+            "operator_command_id": value.get("operator_command_id"),
+            "request_id": value.get("request_id"),
+            "outcome_identity": dict(outcome_identity or {}),
+        },
+    )
+
+
+def _scheduler_operation_identity(
+    value: Mapping[str, Any],
+    operation: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    args = dict(value["state_args"])
+    request = (
+        dict(operation.get("request") or {})
+        if isinstance(operation.get("request"), Mapping)
+        else {}
+    )
+    result = (
+        dict(operation.get("result") or {})
+        if isinstance(operation.get("result"), Mapping)
+        else {}
+    )
+    if (
+        operation.get("request_id") != value.get("request_id")
+        or operation.get("operation_kind") != "SET_ENABLED"
+        or operation.get("task_id") != args.get("task_id")
+        or operation.get("principal_id") != value.get("principal_id")
+        or operation.get("ingress_claim_ref")
+        != value.get("ingress_claim_ref")
+        or operation.get("ingress_audit_ref")
+        != value.get("ingress_audit_ref")
+        or str(operation.get("body_sha256") or "").removeprefix("sha256:")
+        != str(value.get("input_sha256") or "").removeprefix("sha256:")
+        or request
+        != {
+            "task_id": args.get("task_id"),
+            "enabled": args.get("enabled"),
+            "expected_head_version": args.get("expected_head_version"),
+        }
+        or result.get("task_id") != args.get("task_id")
+        or result.get("enabled") != args.get("enabled")
+        or not str(operation.get("receipt_ref") or "").strip()
+        or not str(operation.get("result_digest") or "").startswith(
+            "sha256:"
+        )
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Scheduler state-control durable operation drifted"
+        )
+    identity = {
+        "receipt_ref": str(operation["receipt_ref"]),
+        "result_digest": str(operation["result_digest"]),
+        "task_id": str(result["task_id"]),
+        "head_version": int(result.get("head_version") or 0),
+        "enabled": bool(result["enabled"]),
+    }
+    return identity, {
+        "scheduler_operation_receipt_ref": identity["receipt_ref"],
+        "scheduler_result_digest": identity["result_digest"],
+        "task_id": identity["task_id"],
+        "head_version": identity["head_version"],
+        "enabled": identity["enabled"],
+    }
+
+
+def _mode_operation_identity(
+    value: Mapping[str, Any],
+    operation: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    args = dict(value["state_args"])
+    event = _object_mapping(operation)
+    command_id = str(value["operator_command_id"])
+    event_payload = (
+        dict(event.get("event_payload") or {})
+        if isinstance(event.get("event_payload"), Mapping)
+        else {}
+    )
+    expected_kind = (
+        "AUTO_RULES_UPDATED"
+        if command_id == "sys_mode.auto_rules.update"
+        else "EVENT_SUBMITTED"
+    )
+    if (
+        event.get("operation_id") != value.get("operation_id")
+        or event.get("event_kind") != expected_kind
+        or type(event.get("revision")) is not int
+        or int(event["revision"]) < 1
+        or not str(event.get("event_digest") or "").startswith("sha256:")
+        or int(event.get("observed_at_ms") or -1)
+        != int(args["observed_at_ms"])
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "Host mode-policy durable operation drifted"
+        )
+    identity = {
+        "revision": int(event["revision"]),
+        "event_digest": str(event["event_digest"]),
+        "event_kind": str(event["event_kind"]),
+    }
+    if command_id == "sys_mode.auto_rules.update":
+        if event_payload != {"rules": dict(args["rules"])}:
+            raise AcceptanceEffectOutcomeUnknown(
+                "Host mode rules durable operation drifted"
+            )
+        rules = dict(event.get("auto_rules") or {})
+        identity["auto_rules"] = rules
+        return identity, {
+            "policy_revision": identity["revision"],
+            "policy_event_digest": identity["event_digest"],
+            "auto_rules": rules,
+        }
+    expected_input = {"event_type": args["event_type"], "payload": {}}
+    if event_payload.get("input") != expected_input:
+        raise AcceptanceEffectOutcomeUnknown(
+            "Host mode event durable operation drifted"
+        )
+    outcome_raw = event_payload.get("outcome")
+    outcome = dict(outcome_raw) if isinstance(outcome_raw, Mapping) else None
+    identity["event_type"] = str(args["event_type"])
+    identity["outcome"] = outcome
+    return identity, {
+        "policy_revision": identity["revision"],
+        "policy_event_digest": identity["event_digest"],
+        "event_type": identity["event_type"],
+        "triggered": outcome is not None,
+        "result": outcome,
+    }
+
+
+def _object_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    fields = (
+        "runtime_scope_id",
+        "revision",
+        "operation_id",
+        "event_kind",
+        "input_digest",
+        "event_payload",
+        "auto_rules",
+        "last_interaction_ts_ms",
+        "previous_event_digest",
+        "event_digest",
+        "observed_at_ms",
+        "created_at_ms",
+    )
+    return {field: getattr(value, field, None) for field in fields}
+
+
+def _accepted_operator_state_control_request(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    from host_brain.governor.action_preview import (  # noqa: PLC0415
+        ActionPreviewService,
+    )
+
+    value = dict(payload or {})
+    raw_preview = value.pop("_action_preview_terminal_proof", None)
+    preview = dict(raw_preview) if isinstance(raw_preview, Mapping) else {}
+    required = {
+        "operator_command_id",
+        "request_id",
+        "operation_id",
+        "principal_id",
+        "ingress_claim_ref",
+        "ingress_audit_ref",
+        "input_sha256",
+        "state_args",
+    }
+    command_id = str(value.get("operator_command_id") or "").strip()
+    state_args = (
+        dict(value.get("state_args") or {})
+        if isinstance(value.get("state_args"), Mapping)
+        else {}
+    )
+    if (
+        set(value) != required
+        or command_id not in OPERATOR_STATE_CONTROL_COMMAND_IDS
+        or value.get("operation_id")
+        != operator_state_control_operation_id(
+            request_id=str(value.get("request_id") or ""),
+            command_id=command_id,
+        )
+        or state_args.get("operator_command_id") != command_id
+        or state_args.get("request_id") != value.get("request_id")
+        or state_args.get("operator_actor_id") != value.get("principal_id")
+        or set(preview) != {"service", "event_id", "boundary"}
+        or not isinstance(preview.get("service"), ActionPreviewService)
+        or not str(preview.get("event_id") or "").strip()
+        or not isinstance(preview.get("boundary"), Mapping)
+    ):
+        raise ValueError("accepted Operator state-control payload drifted")
+    boundary = dict(preview["boundary"])
+    authority_context = boundary.get("authority_context")
+    scope = str(boundary.get("action_scope") or "").strip()
+    if (
+        str(boundary.get("action_kind") or "")
+        != f"acceptance-effect.{OPERATOR_STATE_CONTROL_EFFECT_TYPE}"
+        or int(boundary.get("risk_level") or 0) != 4
+        or boundary.get("action_args") != value
+        or not isinstance(authority_context, Mapping)
+        or set(authority_context)
+        != {
+            "schema_version",
+            "effect_id",
+            "lease_owner_id",
+            "fencing_token",
+        }
+        or authority_context.get("schema_version")
+        != "Natsume.action_preview.acceptance_effect_authority_request.v1"
+        or str(authority_context.get("effect_id") or "").strip() != scope
+        or not scope
+        or not str(authority_context.get("lease_owner_id") or "").strip()
+        or isinstance(authority_context.get("fencing_token"), bool)
+        or int(authority_context.get("fencing_token") or 0) < 1
+    ):
+        raise ValueError("accepted Operator state-control Preview drifted")
+    reopened = preview["service"].require_execution(
+        event_id=str(preview["event_id"]),
+        **boundary,
+    )
+    preview_payload = getattr(reopened, "payload", None)
+    expected_digest = "sha256:" + hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        not isinstance(preview_payload, Mapping)
+        or preview_payload.get("authority_kind") != "ACCEPTANCE_EFFECT"
+        or preview_payload.get("action_kind")
+        != f"acceptance-effect.{OPERATOR_STATE_CONTROL_EFFECT_TYPE}"
+        or str(preview_payload.get("action_scope") or "") != scope
+        or int(preview_payload.get("risk_level") or 0) != 4
+        or str(preview_payload.get("action_args_digest") or "").lower()
+        != expected_digest
+    ):
+        raise ValueError(
+            "accepted Operator state-control Preview receipt drifted"
+        )
+    return {**value, "state_args": state_args}
+
+
+def _reopen_authority(
+    value: Mapping[str, Any],
+    *,
+    resolver: Any,
+) -> dict[str, Any]:
+    audit_ref = str(value.get("ingress_audit_ref") or "").strip()
+    raw = resolver.resolve_committed_authority_by_audit(audit_ref=audit_ref)
+    record = dict(raw) if isinstance(raw, Mapping) else {}
+    command_id = str(value.get("operator_command_id") or "").strip()
+    action, path, scopes = operator_state_control_ingress_requirements(
+        command_id
+    )
+    body_digest = str(record.get("body_sha256") or "").strip().lower()
+    expected_digest = str(value.get("input_sha256") or "").lower().removeprefix(
+        "sha256:"
+    )
+    if (
+        str(record.get("audit_ref") or "").strip() != audit_ref
+        or str(record.get("claim_ref") or "").strip()
+        != str(value.get("ingress_claim_ref") or "").strip()
+        or str(record.get("request_id") or "").strip()
+        != str(value.get("request_id") or "").strip()
+        or str(record.get("principal_id") or "").strip()
+        != str(value.get("principal_id") or "").strip()
+        or body_digest != expected_digest
+        or str(record.get("action") or "").strip() != action
+        or str(record.get("normalized_path") or "").strip() != path
+        or tuple(sorted(record.get("required_scopes") or ()))
+        != tuple(sorted(scopes))
+        or record.get("claim_result_ref") is not None
+    ):
+        raise ValueError(
+            "Operator state-control Secure Ingress binding drifted"
+        )
+    return {
+        "allowed": True,
+        "duplicate": False,
+        "audit_ref": audit_ref,
+        "claim_ref": str(record["claim_ref"]),
+        "request_id": str(record["request_id"]),
+        "principal_id": str(record["principal_id"]),
+        "tenant_id": str(record["tenant_id"]),
+        "body_sha256": body_digest,
+        "action": action,
+        "required_scopes": tuple(scopes),
+        "ingress_surface": "obs.command",
+        "operator_command_id": command_id,
+    }
+
+
+__all__ = [
+    "AcceptedOperatorStateControlHandler",
+    "operator_state_control_handler_receipt_ref",
+    "resolve_operator_state_control_outcome",
+]

@@ -444,7 +444,6 @@ class ActivityMonitor:
         with self._stats_lock:
             self._last_activity_ts = time.time()
         if self._mode_service:
-            self._mode_service.update_last_interaction()
             result = self._mode_service.on_event("user_message_received", {
                 "channel": "host_interaction",
             })

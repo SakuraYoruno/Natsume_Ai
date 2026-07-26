@@ -36,6 +36,9 @@ from host_brain.runtime.action_preview_resolver import action_preview_scene_iden
 from host_brain.task_runtime.operator_control_acceptance_effect import (
     compile_operator_control_acceptance_effect,
 )
+from host_brain.task_runtime.operator_state_control_acceptance_effect import (
+    compile_operator_state_control_acceptance_effect,
+)
 from host_brain.task_runtime.worker_authority_guard import (
     forbidden_worker_authority_path,
 )
@@ -62,6 +65,7 @@ _OPERATOR_EFFECT_RECONCILIATION_EFFECT = (
     "task.acceptance_effect_reconciliation"
 )
 _OPERATOR_CONTROL_TARGET = "operator_task_control"
+_OPERATOR_STATE_CONTROL_TARGET = "operator_state_control"
 _SCHEDULER_OPERATION_EFFECT = "scheduler.operation.execute"
 _SCHEDULER_PLAN_SCHEMA = "Natsume.scheduler.operation_plan.v1"
 _SCHEDULER_EFFECT_SCHEMA = "Natsume.scheduler.accepted_operation.v1"
@@ -577,6 +581,15 @@ def _compile_operator_effects(
         raise AcceptanceEffectCompileError("unsupported governed Operator route")
     if command.target_id == _OPERATOR_CONTROL_TARGET:
         return compile_operator_control_acceptance_effect(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            commit=commit,
+            pack=pack,
+        )
+    if command.target_id == _OPERATOR_STATE_CONTROL_TARGET:
+        return compile_operator_state_control_acceptance_effect(
             command=command,
             work_order=work_order,
             node_id=node_id,

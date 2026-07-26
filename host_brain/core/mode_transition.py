@@ -18,16 +18,22 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
 import logging
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from host_brain.contracts.host_hard_state import (
     HOST_MODE_TRANSITIONS,
     HostHardStateCommitV1,
+)
+from host_brain.contracts.host_mode_policy import (
+    DEFAULT_HOST_MODE_AUTO_RULES,
+    HostModePolicyPort,
 )
 from host_brain.core.ids import now_ms, new_event_id
 from host_brain.core.metabolism import (
@@ -58,13 +64,7 @@ class TransitionSource(str, Enum):
 VALID_TRANSITIONS = HOST_MODE_TRANSITIONS
 
 # 自动切换规则默认开关
-DEFAULT_AUTO_RULES: dict[str, bool] = {
-    "gaming_detect":   True,   # 检测到游戏进程 → gaming
-    "gaming_exit":     True,   # 游戏进程退出 → normal
-    "idle_to_sleep":   True,   # 长时间空闲 → sleep
-    "wakeup_on_msg":   True,   # 收到消息 → normal（从 sleep）
-    "morning_wakeup":  True,   # 早间首次互动 → normal
-}
+DEFAULT_AUTO_RULES: dict[str, bool] = dict(DEFAULT_HOST_MODE_AUTO_RULES)
 
 # 空闲超时阈值（毫秒）：2 小时
 DEFAULT_IDLE_THRESHOLD_MS = 2 * 60 * 60 * 1000
@@ -72,6 +72,34 @@ DEFAULT_IDLE_THRESHOLD_MS = 2 * 60 * 60 * 1000
 # 深夜时段：23:00 - 06:00
 NIGHT_HOUR_START = 23
 NIGHT_HOUR_END = 6
+
+
+def _mode_policy_operation_id(
+    event_type: str,
+    payload: Mapping[str, Any],
+    *,
+    observed_at_ms: int,
+) -> str:
+    canonical = json.dumps(
+        {
+            "event_type": str(event_type or "").strip(),
+            "observed_at_ms": int(observed_at_ms),
+            "payload": dict(payload or {}),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return "host-mode-policy://sha256/" + hashlib.sha256(
+        canonical.encode("utf-8")
+    ).hexdigest()
+
+
+def _mode_transition_event_id(operation_id: str) -> str:
+    return "host-mode-transition://sha256/" + hashlib.sha256(
+        str(operation_id).encode("utf-8")
+    ).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +165,7 @@ class ModeTransitionService:
         ) = None,
         ledger: Any | None = None,
         auto_rules: dict[str, bool] | None = None,
+        mode_policy: HostModePolicyPort | None = None,
         idle_threshold_ms: int = DEFAULT_IDLE_THRESHOLD_MS,
     ) -> None:
         self._get_hard_state = get_hard_state
@@ -144,6 +173,7 @@ class ModeTransitionService:
         self._ledger = ledger
         self._history_provider = history_provider
         self._exact_history_provider = exact_history_provider
+        self._mode_policy = mode_policy
         self._auto_rules = dict(DEFAULT_AUTO_RULES)
         if auto_rules:
             self._auto_rules.update(auto_rules)
@@ -156,6 +186,12 @@ class ModeTransitionService:
 
         # 上次互动时间（由外部更新）
         self._last_interaction_ts_ms: int = now_ms()
+        if self._mode_policy is not None:
+            snapshot = self._mode_policy.snapshot()
+            self._auto_rules = dict(snapshot.auto_rules)
+            self._last_interaction_ts_ms = int(
+                snapshot.last_interaction_ts_ms
+            )
 
         logger.info(
             "ModeTransitionService initialized (auto_rules=%s, idle_threshold_ms=%d)",
@@ -329,7 +365,15 @@ class ModeTransitionService:
 
     # ── 事件驱动自动切换 ──────────────────────────────────────────────────
 
-    def on_event(self, event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    def on_event(
+        self,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        operation_id: str | None = None,
+        expected_policy_revision: int | None = None,
+        observed_at_ms: int | None = None,
+    ) -> dict[str, Any] | None:
         """处理外部事件，触发自动模式切换。
 
         Args:
@@ -339,83 +383,211 @@ class ModeTransitionService:
         Returns:
             切换结果字典，或 None（不触发切换）
         """
-        payload = payload or {}
-
-        # 更新最后互动时间
-        if event_type in ("user_message_received", "voice_input_received", "wechat_message_received"):
-            self._last_interaction_ts_ms = now_ms()
+        event_name = str(event_type or "").strip()
+        event_payload = dict(payload or {})
+        observation_is_frozen = observed_at_ms is not None
+        observed = int(
+            observed_at_ms if observed_at_ms is not None else now_ms()
+        )
+        operation = str(operation_id or "").strip() or _mode_policy_operation_id(
+            event_name,
+            event_payload,
+            observed_at_ms=observed,
+        )
+        policy_snapshot = (
+            self._mode_policy.snapshot()
+            if self._mode_policy is not None
+            else None
+        )
+        if self._mode_policy is not None:
+            existing = self._mode_policy.get_operation(operation)
+            if existing is not None:
+                stored = dict(existing.event_payload)
+                if (
+                    existing.event_kind != "EVENT_SUBMITTED"
+                    or stored.get("input")
+                    != {
+                        "event_type": event_name,
+                        "payload": event_payload,
+                    }
+                ):
+                    raise RuntimeError("HOST_MODE_POLICY_IDEMPOTENCY_DRIFT")
+                prior = stored.get("outcome")
+                return dict(prior) if isinstance(prior, Mapping) else None
+        rules = (
+            dict(policy_snapshot.auto_rules)
+            if policy_snapshot is not None
+            else dict(self._auto_rules)
+        )
+        prior_interaction = (
+            int(policy_snapshot.last_interaction_ts_ms)
+            if policy_snapshot is not None
+            else int(self._last_interaction_ts_ms)
+        )
+        interaction_events = {
+            "user_message_received",
+            "voice_input_received",
+            "wechat_message_received",
+        }
+        next_interaction = (
+            observed if event_name in interaction_events else prior_interaction
+        )
 
         current_mode = self._get_current_mode()
+        transition: dict[str, Any] | None = None
+        transition_event_id = _mode_transition_event_id(operation)
 
         # ── 游戏进程检测 → gaming ──
-        if event_type == "gaming_process_detected" and self._auto_rules.get("gaming_detect"):
+        if event_name == "gaming_process_detected" and rules.get("gaming_detect"):
             if current_mode == "normal":
-                process_name = payload.get("process_name", "unknown")
-                return self.switch_mode(
+                process_name = event_payload.get("process_name", "unknown")
+                transition = self.switch_mode(
                     "gaming",
                     source=TransitionSource.AUTO_GAMING,
                     reason=f"检测到游戏进程: {process_name}",
+                    event_id=transition_event_id,
                 )
 
         # ── 游戏进程退出 → normal ──
-        if event_type == "gaming_process_exited" and self._auto_rules.get("gaming_exit"):
+        elif event_name == "gaming_process_exited" and rules.get("gaming_exit"):
             if current_mode == "gaming":
-                return self.switch_mode(
+                transition = self.switch_mode(
                     "normal",
                     source=TransitionSource.AUTO_GAMING,
                     reason="游戏进程已退出",
+                    event_id=transition_event_id,
                 )
 
         # ── 收到用户消息 → 从 sleep 唤醒 ──
-        if event_type in ("user_message_received", "voice_input_received", "wechat_message_received"):
-            if current_mode == "sleep" and self._auto_rules.get("wakeup_on_msg"):
-                channel = payload.get("channel", event_type)
-                return self.switch_mode(
+        elif event_name in interaction_events:
+            if current_mode == "sleep" and rules.get("wakeup_on_msg"):
+                channel = event_payload.get("channel", event_name)
+                transition = self.switch_mode(
                     "normal",
                     source=TransitionSource.AUTO_WAKEUP,
                     reason=f"收到用户消息，从 sleep 唤醒 (channel={channel})",
+                    event_id=transition_event_id,
                 )
 
         # ── 空闲超时 → sleep ──
-        if event_type == "idle_check":
-            if current_mode == "normal" and self._auto_rules.get("idle_to_sleep"):
-                idle_ms = now_ms() - self._last_interaction_ts_ms
-                if idle_ms >= self._idle_threshold_ms and self._is_night_time():
-                    return self.switch_mode(
+        elif event_name == "idle_check":
+            if current_mode == "normal" and rules.get("idle_to_sleep"):
+                idle_ms = observed - prior_interaction
+                if (
+                    idle_ms >= self._idle_threshold_ms
+                    and self._is_night_time(
+                        observed_at_ms=(
+                            observed if observation_is_frozen else None
+                        )
+                    )
+                ):
+                    transition = self.switch_mode(
                         "sleep",
                         source=TransitionSource.AUTO_IDLE,
                         reason=f"空闲 {idle_ms // 60000} 分钟 + 深夜时段，自动进入 sleep",
+                        event_id=transition_event_id,
                     )
 
         # ── 早间唤醒 ──
-        if event_type == "morning_check":
-            if current_mode == "sleep" and self._auto_rules.get("morning_wakeup"):
-                now = datetime.datetime.now()
-                if 6 <= now.hour < 10:
-                    return self.switch_mode(
+        elif event_name == "morning_check":
+            if current_mode == "sleep" and rules.get("morning_wakeup"):
+                observed_time = (
+                    datetime.datetime.fromtimestamp(observed / 1000)
+                    if observation_is_frozen
+                    else datetime.datetime.now()
+                )
+                if 6 <= observed_time.hour < 10:
+                    transition = self.switch_mode(
                         "normal",
                         source=TransitionSource.AUTO_WAKEUP,
-                        reason=f"早间唤醒 ({now.strftime('%H:%M')})",
+                        reason=f"早间唤醒 ({observed_time.strftime('%H:%M')})",
+                        event_id=transition_event_id,
                     )
 
-        return None
+        if self._mode_policy is not None:
+            expected = (
+                int(expected_policy_revision)
+                if expected_policy_revision is not None
+                else int(policy_snapshot.revision)
+            )
+            commit = self._mode_policy.record_event(
+                operation_id=operation,
+                expected_revision=expected,
+                event_kind="EVENT_SUBMITTED",
+                input_payload={
+                    "event_type": event_name,
+                    "payload": event_payload,
+                },
+                event_payload={
+                    "input": {
+                        "event_type": event_name,
+                        "payload": event_payload,
+                    },
+                    "outcome": transition,
+                },
+                last_interaction_ts_ms=next_interaction,
+                observed_at_ms=observed,
+            )
+            self._auto_rules = dict(commit.snapshot.auto_rules)
+            self._last_interaction_ts_ms = int(
+                commit.snapshot.last_interaction_ts_ms
+            )
+        else:
+            self._auto_rules = rules
+            self._last_interaction_ts_ms = next_interaction
+        return transition
 
     # ── 查询接口 ─────────────────────────────────────────────────────────
 
     def get_current_status(self) -> dict[str, Any]:
         """获取当前模式状态 + 自动切换规则。"""
         current_mode = self._get_current_mode()
-        idle_ms = now_ms() - self._last_interaction_ts_ms
+        policy_snapshot = (
+            self._mode_policy.snapshot()
+            if self._mode_policy is not None
+            else None
+        )
+        rules = (
+            dict(policy_snapshot.auto_rules)
+            if policy_snapshot is not None
+            else dict(self._auto_rules)
+        )
+        last_interaction = (
+            int(policy_snapshot.last_interaction_ts_ms)
+            if policy_snapshot is not None
+            else int(self._last_interaction_ts_ms)
+        )
+        idle_ms = now_ms() - last_interaction
         return {
             "sys_mode": current_mode,
-            "auto_rules": dict(self._auto_rules),
+            "auto_rules": rules,
             "idle_ms": idle_ms,
             "idle_minutes": round(idle_ms / 60000, 1),
-            "last_interaction_ts_ms": self._last_interaction_ts_ms,
+            "last_interaction_ts_ms": last_interaction,
+            "policy_revision": (
+                policy_snapshot.revision
+                if policy_snapshot is not None
+                else None
+            ),
+            "policy_event_digest": (
+                policy_snapshot.event_digest
+                if policy_snapshot is not None
+                else None
+            ),
             "is_night_time": self._is_night_time(),
             "valid_transitions": list(VALID_TRANSITIONS.get(current_mode, set())),
             "ts_ms": now_ms(),
         }
+
+    def get_mode_policy_operation(self, operation_id: str) -> Any | None:
+        """Reopen one exact durable policy operation for effect reconciliation."""
+
+        operation = str(operation_id or "").strip()
+        if not operation:
+            raise RuntimeError("HOST_MODE_POLICY_OPERATION_ID_INVALID")
+        if self._mode_policy is None:
+            raise RuntimeError("HOST_MODE_POLICY_DURABLE_AUTHORITY_UNAVAILABLE")
+        return self._mode_policy.get_operation(operation)
 
     def get_history(self, limit: int = 20) -> list[dict[str, Any]]:
         """获取最近的模式切换历史。"""
@@ -457,17 +629,82 @@ class ModeTransitionService:
             raise RuntimeError("HARD_STATE_EXACT_HISTORY_INVALID")
         return commit
 
-    def update_auto_rules(self, rules: dict[str, bool]) -> dict[str, bool]:
+    def update_auto_rules(
+        self,
+        rules: dict[str, bool],
+        *,
+        operation_id: str | None = None,
+        expected_policy_revision: int | None = None,
+        observed_at_ms: int | None = None,
+    ) -> dict[str, bool]:
         """更新自动切换规则开关。"""
+        if self._mode_policy is not None:
+            snapshot = self._mode_policy.snapshot()
+            observed = int(
+                observed_at_ms if observed_at_ms is not None else now_ms()
+            )
+            operation = (
+                str(operation_id or "").strip()
+                or _mode_policy_operation_id(
+                    "auto_rules.update",
+                    dict(rules or {}),
+                    observed_at_ms=observed,
+                )
+            )
+            commit = self._mode_policy.update_auto_rules(
+                rules,
+                operation_id=operation,
+                expected_revision=(
+                    int(expected_policy_revision)
+                    if expected_policy_revision is not None
+                    else snapshot.revision
+                ),
+                observed_at_ms=observed,
+            )
+            self._auto_rules = dict(commit.snapshot.auto_rules)
+            self._last_interaction_ts_ms = int(
+                commit.snapshot.last_interaction_ts_ms
+            )
+            return dict(commit.event.auto_rules)
         for key, value in rules.items():
             if key in self._auto_rules:
                 self._auto_rules[key] = bool(value)
                 logger.info("Auto rule updated: %s = %s", key, value)
         return dict(self._auto_rules)
 
-    def update_last_interaction(self, ts_ms: int | None = None) -> None:
+    def update_last_interaction(
+        self,
+        ts_ms: int | None = None,
+        *,
+        operation_id: str | None = None,
+    ) -> None:
         """更新最后互动时间戳。"""
-        self._last_interaction_ts_ms = int(ts_ms or now_ms())
+        observed = int(ts_ms if ts_ms is not None else now_ms())
+        if self._mode_policy is not None:
+            snapshot = self._mode_policy.snapshot()
+            operation = (
+                str(operation_id or "").strip()
+                or _mode_policy_operation_id(
+                    "interaction.record",
+                    {"ts_ms": observed},
+                    observed_at_ms=observed,
+                )
+            )
+            commit = self._mode_policy.record_event(
+                operation_id=operation,
+                expected_revision=snapshot.revision,
+                event_kind="INTERACTION_RECORDED",
+                input_payload={"ts_ms": observed},
+                event_payload={"interaction_recorded": True},
+                last_interaction_ts_ms=observed,
+                observed_at_ms=observed,
+            )
+            self._last_interaction_ts_ms = int(
+                commit.snapshot.last_interaction_ts_ms
+            )
+            self._auto_rules = dict(commit.snapshot.auto_rules)
+            return
+        self._last_interaction_ts_ms = observed
 
     # ── 内部方法 ─────────────────────────────────────────────────────────
 
@@ -479,9 +716,14 @@ class ModeTransitionService:
             logger.error("HardState mode authority unavailable: %s", exc)
             raise RuntimeError("HARD_STATE_MODE_AUTHORITY_UNAVAILABLE") from exc
 
-    def _is_night_time(self) -> bool:
+    def _is_night_time(self, *, observed_at_ms: int | None = None) -> bool:
         """判断当前是否为深夜时段 (23:00 - 06:00)。"""
-        hour = datetime.datetime.now().hour
+        moment = (
+            datetime.datetime.fromtimestamp(int(observed_at_ms) / 1000)
+            if observed_at_ms is not None
+            else datetime.datetime.now()
+        )
+        hour = moment.hour
         return hour >= NIGHT_HOUR_START or hour < NIGHT_HOUR_END
 
     def _record_event(

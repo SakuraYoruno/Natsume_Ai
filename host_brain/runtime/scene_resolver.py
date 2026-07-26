@@ -112,7 +112,7 @@ def _derive_scene(
             ),
             _policy_constraint(
                 "PROACTIVE_ACTION_BLOCKED",
-                "BLOCK",
+                "RESTRICT",
                 scene_id=scene_id,
                 reason="休眠模式禁止主动动作",
             ),
@@ -207,7 +207,7 @@ def _derive_scene(
         derived.append(
             ContextConstraintV1(
                 code="PROACTIVE_ACTION_BLOCKED",
-                disposition="BLOCK",
+                disposition="RESTRICT",
                 origin="GUARDIAN",
                 source_ref=(
                     "guardian://snapshot/sha256/"

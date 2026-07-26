@@ -31,9 +31,7 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
 
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
-    assert manifest["migration_head"].endswith(
-        "0128_acceptance_effect_general_reconciliation.sql"
-    )
+    assert manifest["migration_head"].endswith("0129_host_mode_policy_journal.sql")
     migration_files = manifest["asset_groups"]["migrations"]["files"]
     assert (
         "host_brain/audit/migrations/0104_host_embodiment_runtime_authority.sql"
@@ -102,6 +100,10 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     )
     assert (
         "host_brain/audit/migrations/0128_acceptance_effect_general_reconciliation.sql"
+        in migration_files
+    )
+    assert (
+        "host_brain/audit/migrations/0129_host_mode_policy_journal.sql"
         in migration_files
     )
     assert "host_brain/audit/migrations/0103_retire_llm_node_call_log.sql" in migration_files

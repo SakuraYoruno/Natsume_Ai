@@ -12,6 +12,11 @@ from host_brain.runtime.context_contracts import (
     WorldFactV2,
     WorldSnapshotV2,
 )
+from host_brain.runtime.scene_consumer_projection import (
+    SCENE_PROJECTION_BLOCK,
+    SceneIdentityV2,
+    project_scene_decision_v2,
+)
 from host_brain.runtime.scene_resolver import SceneResolver
 from host_brain.runtime.runtime_guardian import GuardianSnapshotV1
 
@@ -276,7 +281,7 @@ def test_scene_resolver_derives_eight_required_scenarios(
     assert decision.scene_id == expected_scene
 
 
-def test_scene_sleep_activity_blocks_proactive_actions() -> None:
+def test_scene_sleep_activity_restricts_intent_and_blocks_proactive_projection() -> None:
     decision = _resolver(clock=lambda: 500).resolve(
         snapshot=_snapshot(),
         context=_context(activity_state="SLEEP"),
@@ -284,7 +289,12 @@ def test_scene_sleep_activity_blocks_proactive_actions() -> None:
 
     constraints = {item.code: item.disposition for item in decision.constraints}
     assert constraints["LOW_INTERRUPTION"] == "RESTRICT"
-    assert constraints["PROACTIVE_ACTION_BLOCKED"] == "BLOCK"
+    assert constraints["PROACTIVE_ACTION_BLOCKED"] == "RESTRICT"
+    projection = project_scene_decision_v2(
+        decision,
+        expected_identity=SceneIdentityV2.from_decision(decision),
+    )
+    assert projection.proactive_policy == SCENE_PROJECTION_BLOCK
 
 
 @pytest.mark.parametrize(

@@ -13,7 +13,6 @@ from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.accepted_result import InternalAcceptedResultHandler
 from host_brain.app.acceptance_effect_handlers import (
     build_production_acceptance_effect_handlers,
-    sys_mode_transition_handler_receipt_ref,
 )
 from host_brain.app.acceptance_effect_recovery_observer import (
     AcceptanceEffectRecoveryGuardianObserver,
@@ -41,8 +40,17 @@ from host_brain.task_runtime.operator_control_support import (
     OPERATOR_CONTROL_EFFECT_TYPE,
     OPERATOR_CONTROL_TARGET_ID,
 )
+from host_brain.task_runtime.operator_state_control_support import (
+    OPERATOR_STATE_CONTROL_EFFECT_TYPE,
+    OPERATOR_STATE_CONTROL_TARGET_ID,
+)
 from host_brain.app.governed_operator_control_runtime import (
     GovernedOperatorControlMixin,
+)
+from host_brain.app.governed_operator_state_control_runtime import (
+    GovernedOperatorStateControlMixin,
+    current_mode as _current_mode,
+    require_durable_sys_mode_outcome as _require_durable_sys_mode_outcome,
 )
 from host_brain.app.governed_operator_edge_support import (
     EDGE_ACTION_KIND as _EDGE_ACTION_KIND,
@@ -126,6 +134,7 @@ class GovernedOperatorComposition:
 
 
 class GovernedOperatorRuntime(
+    GovernedOperatorStateControlMixin,
     GovernedOperatorControlMixin,
     GovernedEffectReconciliationMixin,
     GovernedOperationReconciliationMixin,
@@ -147,6 +156,7 @@ class GovernedOperatorRuntime(
         secure_ingress_authority_resolver: Any,
         runtime_scope_id: str,
         embodiment_runtime_provider: Any | None = None,
+        scheduler_command_service_provider: Any | None = None,
     ) -> None:
         if not callable(
             getattr(
@@ -166,6 +176,16 @@ class GovernedOperatorRuntime(
         self._task_store = task_store
         self._terminal_operator_command_store = terminal_operator_command_store
         self._mode_transition_service_provider = mode_transition_service_provider
+        if (
+            scheduler_command_service_provider is not None
+            and not callable(scheduler_command_service_provider)
+        ):
+            raise TypeError(
+                "scheduler_command_service_provider must be callable"
+            )
+        self._scheduler_command_service_provider = (
+            scheduler_command_service_provider or (lambda: None)
+        )
         if embodiment_runtime_provider is not None and not callable(
             embodiment_runtime_provider
         ):
@@ -296,6 +316,16 @@ class GovernedOperatorRuntime(
         )
         if control_result is not None:
             return control_result
+        state_control_result = (
+            await self._bind_operator_state_control_review_outcome(
+                command_id=operator_command_id,
+                execution_receipt=receipt,
+                args=args,
+                result=bound,
+            )
+        )
+        if state_control_result is not None:
+            return state_control_result
         target_mode = str(args.get("target_mode") or "").strip().lower()
         reason = str(args.get("reason") or "").strip()
         source = str(args.get("source") or "").strip().lower()
@@ -840,6 +870,7 @@ def build_governed_operator_runtime(
     secure_ingress_authority_resolver: Any,
     owner_id: str,
     embodiment_runtime_provider: Any | None = None,
+    scheduler_command_service_provider: Any | None = None,
 ) -> GovernedOperatorRuntime:
     runtime_scope_id = _runtime_scope_from_context(runtime_context_application)
     embodiment_runtime_scope_id = _embodiment_runtime_scope_id(
@@ -880,6 +911,7 @@ def build_governed_operator_runtime(
                 OPERATION_RECONCILIATION_EFFECT_TYPE,
                 EFFECT_RECONCILIATION_EFFECT_TYPE,
                 OPERATOR_CONTROL_EFFECT_TYPE,
+                OPERATOR_STATE_CONTROL_EFFECT_TYPE,
             }
         ),
     )
@@ -943,6 +975,9 @@ def build_governed_operator_runtime(
             task_runtime_container.terminal_operator_command_store
         ),
         mode_transition_service_provider=mode_transition_service_provider,
+        scheduler_command_service_provider=(
+            scheduler_command_service_provider
+        ),
         secure_ingress_authority_resolver=(
             secure_ingress_authority_resolver
         ),
@@ -970,6 +1005,7 @@ def build_governed_operator_composition(
     internal_agent_workspace_runtime: Any | None = None,
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
     embodiment_runtime_provider: Any | None = None,
+    scheduler_command_service_provider: Any | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
@@ -980,6 +1016,9 @@ def build_governed_operator_composition(
         task_store=task_runtime_container.task_store,
         handlers=build_production_acceptance_effect_handlers(
             mode_transition_service_provider=mode_transition_service_provider,
+            scheduler_command_service_provider=(
+                scheduler_command_service_provider
+            ),
             terminal_reconciliation_service=(
                 task_runtime_container.terminal_reconciliation_service
             ),
@@ -1052,6 +1091,9 @@ def build_governed_operator_composition(
         action_preview_service=action_preview_service,
         acceptance_effect_dispatcher=dispatcher,
         mode_transition_service_provider=mode_transition_service_provider,
+        scheduler_command_service_provider=(
+            scheduler_command_service_provider
+        ),
         cancellation_authority_verifier=cancellation_authority_verifier,
         secure_ingress_authority_resolver=secure_ingress_authority_resolver,
         owner_id=f"{runtime_owner_id}::operator",
@@ -1074,6 +1116,7 @@ def _require_operator_target(target_id: str) -> str:
         OPERATION_RECONCILIATION_TARGET_ID,
         EFFECT_RECONCILIATION_TARGET_ID,
         OPERATOR_CONTROL_TARGET_ID,
+        OPERATOR_STATE_CONTROL_TARGET_ID,
     }:
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,
@@ -1272,183 +1315,6 @@ def _build_governor_intent(
     }
 
 
-def _require_durable_sys_mode_outcome(
-    *,
-    task_store: Any,
-    mode_transition_service_provider: Any,
-    execution_receipt: Mapping[str, Any],
-    request_id: str,
-    target_mode: str,
-    source: str,
-    reason: str,
-    runtime_scope_id: str,
-) -> dict[str, Any]:
-    receipt = dict(execution_receipt or {})
-    graph_id = str(receipt.get("graph_id") or "").strip()
-    node_id = str(receipt.get("node_id") or "").strip()
-    attempt_id = str(receipt.get("attempt_id") or "").strip()
-    try:
-        graph_revision = int(receipt.get("graph_revision") or 0)
-    except (TypeError, ValueError) as exc:
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator execution receipt graph revision is invalid",
-        ) from exc
-    list_effects = getattr(task_store, "list_acceptance_effect_intents", None)
-    if (
-        not graph_id
-        or graph_revision < 1
-        or not node_id
-        or not attempt_id
-        or not callable(list_effects)
-    ):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator execution receipt cannot reopen durable Acceptance Effect",
-        )
-    rows = tuple(
-        list_effects(
-            graph_id=graph_id,
-            graph_revision=graph_revision,
-            node_id=node_id,
-            limit=10,
-        )
-        or ()
-    )
-    effects = [
-        dict(row)
-        for row in rows
-        if isinstance(row, Mapping)
-        and str(row.get("effect_type") or "").strip() == _EFFECT_TYPE
-    ]
-    if len(effects) != 1:
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator execution must bind one durable mode Acceptance Effect",
-        )
-    effect = effects[0]
-    payload_raw = effect.get("payload")
-    payload = dict(payload_raw) if isinstance(payload_raw, Mapping) else {}
-    expected_event_id = (
-        "obs-sys-mode:"
-        + hashlib.sha256(request_id.encode("utf-8")).hexdigest()
-    )
-    expected_payload = {
-        "operator_command_id": "sys_mode.switch",
-        "request_id": request_id,
-        "target_mode": target_mode,
-        "source": source,
-        "reason": reason,
-        "event_id": expected_event_id,
-        "runtime_scope_id": _runtime_scope_id(runtime_scope_id),
-    }
-    business_payload = {
-        key: payload.get(key) for key in expected_payload
-    }
-    expected_handler_receipts = {
-        status: sys_mode_transition_handler_receipt_ref(
-            payload,
-            outcome_status=status,
-        )
-        for status in ("APPLIED", "REPLAYED", "NO_CHANGE")
-    }
-    persisted_receipt = str(effect.get("receipt_ref") or "").strip()
-    persisted_status = next(
-        (
-            status
-            for status, receipt_ref in expected_handler_receipts.items()
-            if hmac.compare_digest(persisted_receipt, receipt_ref)
-        ),
-        None,
-    )
-    if (
-        str(effect.get("status") or "").strip().upper() != "COMMITTED"
-        or str(effect.get("graph_id") or "").strip() != graph_id
-        or int(effect.get("graph_revision") or 0) != graph_revision
-        or str(effect.get("node_id") or "").strip() != node_id
-        or str(effect.get("attempt_id") or "").strip() != attempt_id
-        or business_payload != expected_payload
-        or persisted_status is None
-        or int(effect.get("committed_ts_ms") or 0) <= 0
-    ):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator durable Acceptance Effect receipt binding drifted",
-        )
-
-    service = mode_transition_service_provider()
-    reopen_commit = getattr(service, "reopen_transition_commit", None)
-    if not callable(reopen_commit):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "Operator HardState exact history is unavailable",
-        )
-    commit = reopen_commit(
-        event_id=expected_event_id,
-        target_mode=target_mode,
-        source=source,
-        reason=reason,
-    )
-    hard_state_event: dict[str, Any] | None = None
-    if persisted_status == "NO_CHANGE":
-        if commit is not None:
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "Operator NO_CHANGE receipt conflicts with a durable event",
-            )
-    else:
-        if commit is None:
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "Operator applied receipt lost its durable HardState event",
-            )
-        event = getattr(commit, "event", None)
-        digest = str(getattr(event, "event_digest", "") or "").strip().lower()
-        runtime_scope_id = str(
-            getattr(event, "runtime_scope_id", "") or ""
-        ).strip()
-        if (
-            getattr(commit, "exact_replay", None) is not True
-            or str(getattr(event, "event_id", "") or "").strip()
-            != expected_event_id
-            or str(getattr(event, "event_kind", "") or "").strip()
-            != "MODE_CHANGED"
-            or str(getattr(event, "to_mode", "") or "").strip().lower()
-            != target_mode
-            or str(getattr(event, "source", "") or "").strip().lower() != source
-            or str(getattr(event, "reason", "") or "") != reason
-            or not digest.startswith("sha256:")
-            or len(digest) != 71
-            or runtime_scope_id != expected_payload["runtime_scope_id"]
-            or int(getattr(event, "revision", 0) or 0) < 2
-            or int(getattr(event, "runtime_fencing_token", 0) or 0) < 1
-        ):
-            raise GovernedOperatorRuntimeError(
-                GOVERNED_OPERATOR_RUNTIME_INVALID,
-                "Operator HardState event receipt binding drifted",
-            )
-        hard_state_event = {
-            "event_id": expected_event_id,
-            "event_digest": digest,
-            "revision": int(event.revision),
-            "runtime_scope_id": runtime_scope_id,
-            "from_mode": str(event.from_mode or "").strip().lower(),
-            "to_mode": target_mode,
-            "source": source,
-        }
-
-    return {
-        "committed": True,
-        "effect_id": str(effect.get("effect_id") or ""),
-        "effect_type": _EFFECT_TYPE,
-        "handler_receipt_ref": persisted_receipt,
-        "committed_ts_ms": int(effect["committed_ts_ms"]),
-        "event_id": expected_event_id,
-        "hard_state_event": hard_state_event,
-        "historical_status": persisted_status,
-    }
-
-
 def _runtime_scope_from_context(
     application: RuntimeContextApplicationService,
 ) -> str:
@@ -1464,24 +1330,6 @@ def _runtime_scope_from_context(
         else getattr(authority, "runtime_scope_id", None)
     )
     return _runtime_scope_id(value)
-
-
-def _current_mode(service_provider: Any) -> str:
-    service = service_provider()
-    get_status = getattr(service, "get_current_status", None)
-    if not callable(get_status):
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "app-local mode transition service is unavailable",
-        )
-    status = get_status()
-    mode = str(dict(status or {}).get("sys_mode") or "").strip().lower()
-    if not mode:
-        raise GovernedOperatorRuntimeError(
-            GOVERNED_OPERATOR_RUNTIME_INVALID,
-            "app-local sys_mode projection is unavailable",
-        )
-    return mode
 
 
 __all__ = [

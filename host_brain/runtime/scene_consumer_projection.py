@@ -340,7 +340,9 @@ def project_scene_decision_v2(
         key=rank.__getitem__,
     )
     codes = frozenset(item.code for item in decision.constraints)
-    if disposition in {SCENE_PROJECTION_BLOCK, SCENE_PROJECTION_REVIEW}:
+    if "PROACTIVE_ACTION_BLOCKED" in codes:
+        proactive_policy = SCENE_PROJECTION_BLOCK
+    elif disposition in {SCENE_PROJECTION_BLOCK, SCENE_PROJECTION_REVIEW}:
         proactive_policy = SCENE_PROJECTION_BLOCK
     elif disposition == SCENE_PROJECTION_RESTRICT:
         proactive_policy = "CONTEXTUAL"

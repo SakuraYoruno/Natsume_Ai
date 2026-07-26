@@ -2151,6 +2151,17 @@ class SchedulerDefinitionRepository(
         )
         operator_policy_valid = True
         if command_surface == "operator":
+            command_id = str(
+                authority.get("operator_command_id") or ""
+            ).strip()
+            expected_action = str(authority.get("action") or "").strip()
+            expected_scopes = tuple(
+                sorted(
+                    str(item).strip()
+                    for item in authority.get("required_scopes", ())
+                    if str(item).strip()
+                )
+            )
             try:
                 claim_scopes_raw = json.loads(str(claim["required_scopes_json"]))
                 audit_scopes_raw = json.loads(str(audit["required_scopes_json"]))
@@ -2160,11 +2171,19 @@ class SchedulerDefinitionRepository(
                 operator_policy_valid = False
             else:
                 operator_policy_valid = (
-                    str(claim["action"]) == "obs:command:scheduler.task.trigger"
-                    and str(audit["action"])
-                    == "obs:command:scheduler.task.trigger"
-                    and claim_scopes == ("obs:write", "scheduler:write")
-                    and audit_scopes == ("obs:write", "scheduler:write")
+                    command_id
+                    in {
+                        "scheduler.task.enable",
+                        "scheduler.task.disable",
+                        "scheduler.task.trigger",
+                    }
+                    and expected_action == f"obs:command:{command_id}"
+                    and str(claim["action"]) == expected_action
+                    and str(audit["action"]) == expected_action
+                    and expected_scopes
+                    == ("obs:write", "scheduler:write")
+                    and claim_scopes == expected_scopes
+                    and audit_scopes == expected_scopes
                 )
         elif command_surface != "scheduler":
             operator_policy_valid = False
@@ -2607,10 +2626,40 @@ def _normalize_authority(
     command_surface = str(data.get("command_surface") or "").strip().lower()
     if command_surface:
         normalized["command_surface"] = command_surface
+    if command_surface == "operator":
+        normalized["operator_command_id"] = _required_text(
+            data.get("operator_command_id"),
+            field_name="authority.operator_command_id",
+            limit=160,
+            reason_code=SCHEDULER_OCCURRENCE_INVALID,
+        )
+        normalized["action"] = _required_text(
+            data.get("action"),
+            field_name="authority.action",
+            limit=240,
+            reason_code=SCHEDULER_OCCURRENCE_INVALID,
+        )
+        raw_scopes = data.get("required_scopes")
+        if not isinstance(raw_scopes, (tuple, list, set, frozenset)):
+            raise SchedulerRepositoryError(
+                SCHEDULER_OCCURRENCE_INVALID,
+                "Operator scheduler scopes are invalid",
+            )
+        normalized["required_scopes"] = tuple(
+            sorted(
+                _required_text(
+                    item,
+                    field_name="authority.required_scope",
+                    limit=160,
+                    reason_code=SCHEDULER_OCCURRENCE_INVALID,
+                )
+                for item in raw_scopes
+            )
+        )
     return normalized
 
 
-def _normalize_admin_authority(authority: Mapping[str, Any]) -> dict[str, str]:
+def _normalize_admin_authority(authority: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(authority, Mapping):
         raise SchedulerRepositoryError(
             SCHEDULER_ADMIN_OPERATION_INVALID,
@@ -2622,7 +2671,7 @@ def _normalize_admin_authority(authority: Mapping[str, Any]) -> dict[str, str]:
             SCHEDULER_ADMIN_OPERATION_INVALID,
             "scheduler admin authority is not admissible",
         )
-    return {
+    normalized: dict[str, Any] = {
         "request_id": _required_text(
             data.get("request_id"),
             field_name="authority.request_id",
@@ -2651,6 +2700,40 @@ def _normalize_admin_authority(authority: Mapping[str, Any]) -> dict[str, str]:
             reason_code=SCHEDULER_ADMIN_OPERATION_INVALID,
         ),
     }
+    command_surface = str(data.get("command_surface") or "").strip().lower()
+    if command_surface:
+        normalized["command_surface"] = command_surface
+    if command_surface == "operator":
+        normalized["operator_command_id"] = _required_text(
+            data.get("operator_command_id"),
+            field_name="authority.operator_command_id",
+            limit=160,
+            reason_code=SCHEDULER_ADMIN_OPERATION_INVALID,
+        )
+        normalized["action"] = _required_text(
+            data.get("action"),
+            field_name="authority.action",
+            limit=240,
+            reason_code=SCHEDULER_ADMIN_OPERATION_INVALID,
+        )
+        raw_scopes = data.get("required_scopes")
+        if not isinstance(raw_scopes, (tuple, list, set, frozenset)):
+            raise SchedulerRepositoryError(
+                SCHEDULER_ADMIN_OPERATION_INVALID,
+                "Operator scheduler admin scopes are invalid",
+            )
+        normalized["required_scopes"] = tuple(
+            sorted(
+                _required_text(
+                    item,
+                    field_name="authority.required_scope",
+                    limit=160,
+                    reason_code=SCHEDULER_ADMIN_OPERATION_INVALID,
+                )
+                for item in raw_scopes
+            )
+        )
+    return normalized
 
 
 def _normalize_definition(

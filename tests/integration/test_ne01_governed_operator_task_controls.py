@@ -14,6 +14,7 @@ from host_brain.app.governed_operator_runtime import (
     build_governed_operator_composition,
 )
 from host_brain.app.host_hard_state import HostHardStateOwner
+from host_brain.app.host_mode_policy import HostModePolicyOwner
 from host_brain.app.host_runtime_context_wiring import (
     compose_action_preview_service,
     compose_host_runtime_context,
@@ -44,6 +45,9 @@ from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
 from host_brain.persistence.hard_state_journal import SQLiteHardStateJournal
+from host_brain.persistence.host_mode_policy_journal import (
+    SQLiteHostModePolicyJournal,
+)
 from host_brain.persistence.secure_ingress_repository import (
     SQLiteSecureIngressStore,
 )
@@ -51,6 +55,11 @@ from host_brain.secure_ingress import ClaimStatus, IngressAuditEvent
 from host_brain.secure_ingress.graph_cancellation_authority import (
     SecureIngressGraphCancellationAuthorityVerifier,
 )
+from host_brain.scheduler.governed_runtime import (
+    SchedulerCommandService,
+    SchedulerDefinitionPolicyEvaluator,
+)
+from host_brain.scheduler.worker_registry import SchedulerWorkerRegistry
 from host_brain.skills.agent_runtime_registry import (
     build_agent_runtime_skill_registry,
 )
@@ -519,6 +528,371 @@ async def test_task_controls_cross_governed_acceptance_and_cancel_exact_graph(
     finally:
         if container is not None:
             await container.aclose()
+        if hard_state_owner is not None:
+            hard_state_owner.unbind_durable_journal()
+        if embodiment_runtime is not None:
+            embodiment_runtime.close()
+        ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "governed-operator-state-controls.sqlite3"
+    ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    container = None
+    embodiment_runtime = None
+    hard_state_owner = None
+    mode_policy_owner = None
+    try:
+        container = build_process_task_runtime_container(
+            ledger=ledger,
+            canonical_db_path=db_path,
+        )
+        embodiment_runtime = HostEmbodimentRuntime(
+            repository=EmbodimentOutboxRepository(db_path),
+            worker_id="ne01-operator-state-control-runtime",
+            command_port=_UnusedEmbodimentPort(),
+            authority_lease_ms=600_000,
+        )
+        runtime_authority = lambda: _runtime_authority_provider(
+            embodiment_runtime
+        )
+        hard_state_owner = HostHardStateOwner.bootstrap(
+            initial_sys_mode="normal",
+            endocrine_resolver=lambda **_kwargs: {},
+            require_durable=True,
+        )
+        hard_state_owner.bind_durable_journal(
+            SQLiteHardStateJournal(
+                db_path,
+                runtime_scope_id=embodiment_runtime.runtime_scope_id,
+                runtime_authority_provider=runtime_authority,
+            ),
+            initialization_event_id="operator-state-control-hard-state",
+        )
+        now = int(time.time() * 1_000)
+        mode_policy_owner = HostModePolicyOwner.bootstrap(
+            initial_last_interaction_ts_ms=now,
+            require_durable=True,
+        )
+        mode_policy_owner.bind_durable_journal(
+            SQLiteHostModePolicyJournal(
+                db_path,
+                runtime_scope_id=embodiment_runtime.runtime_scope_id,
+                runtime_authority_provider=runtime_authority,
+                replay_page_size=17,
+            ),
+            initialization_operation_id=(
+                "operator-state-control-mode-policy"
+            ),
+        )
+        mode_service = ModeTransitionService(
+            get_hard_state=hard_state_owner.get_hard_state,
+            set_sys_mode=hard_state_owner.set_sys_mode,
+            history_provider=hard_state_owner.durable_history,
+            exact_history_provider=hard_state_owner.reopen_sys_mode_transition,
+            mode_policy=mode_policy_owner,
+            ledger=ledger,
+        )
+        definitions = container.scheduler_definition_repository
+        definitions.publish_definition(
+            task_id="operator_state_scheduler",
+            definition={
+                "trigger_mode": "interval",
+                "trigger_config": {"seconds": 60},
+                "intent_template": {
+                    "skill_name": "operator_state_worker",
+                    "args": {},
+                },
+                "worker_key": "operator_state_worker",
+                "priority": "HIGH",
+                "mode_allowlist": ["normal"],
+                "resource_profile": {},
+                "retry_policy": {
+                    "max_attempts": 1,
+                    "retry_backoff_ms": 0,
+                },
+                "risk_level": 3,
+                "enabled": True,
+            },
+            expected_head_version=0,
+            next_scheduled_at_ms=now + 60_000,
+        )
+        runtime_context = compose_host_runtime_context(
+            task_runtime=container,
+            ledger=ledger,
+            embodiment_runtime=embodiment_runtime,
+            environment_observation_provider=(
+                runtime_environment_observation_provider(mode_service)
+            ),
+        )
+        action_preview = compose_action_preview_service(
+            task_runtime=container,
+            ledger=ledger,
+            runtime_context_application=runtime_context,
+        )
+        token_service = TokenService(
+            approval_ttl_ms=600_000,
+            confirm_ttl_ms=600_000,
+            undo_ttl_ms=600_000,
+        )
+        intent_engine = IntentDecisionEngine(
+            ledger=ledger,
+            token_service=token_service,
+            registry=build_agent_runtime_skill_registry(),
+        )
+        ingress_store = SQLiteSecureIngressStore(db_path, rate_limit=200)
+        scheduler_service = SchedulerCommandService(
+            runtime=SimpleNamespace(),
+            intent_engine=intent_engine,
+            claim_result_store=ingress_store,
+            definition_repository=definitions,
+            policy_evaluator=SchedulerDefinitionPolicyEvaluator(
+                current_mode=lambda: "normal"
+            ),
+            worker_registry=SchedulerWorkerRegistry(),
+        )
+        composition = build_governed_operator_composition(
+            task_runtime_container=container,
+            ledger=ledger,
+            token_service=token_service,
+            intent_engine=intent_engine,
+            runtime_context_application=runtime_context,
+            action_preview_service=action_preview,
+            mode_transition_service_provider=lambda: mode_service,
+            scheduler_command_service_provider=lambda: scheduler_service,
+            cancellation_authority_verifier=(
+                SecureIngressGraphCancellationAuthorityVerifier(
+                    ingress_store
+                )
+            ),
+            secure_ingress_authority_resolver=ingress_store,
+            runtime_owner_id="ne01-operator-state-control",
+            embodiment_runtime_provider=lambda: embodiment_runtime,
+        )
+        finalizer = _OperatorOutcomeFinalizer()
+        runtime_group = GovernedRuntimeGroup(
+            {"operator": composition.runtime},
+            review_store=container.review_continuation_store,
+            review_decision_store=container.review_store,
+            command_repository=container.command_repository,
+            claim_result_store=ingress_store,
+            operator_outcome_finalizer=finalizer,
+            review_continuation_worker_id=(
+                "ne01-operator-state-control-review-worker"
+            ),
+            acceptance_effect_runtime=composition.acceptance_effect_runtime,
+            operation_reacquisition_owner_id=(
+                "ne01-operator-state-control"
+            ),
+        )
+        composition.review_command_service.bind_wake_continuation(
+            runtime_group.wake_review_continuation
+        )
+        container.bind_runtime(runtime_group)
+        await container.activate_runtime()
+        registry = build_default_obs_domain_command_registry(
+            degradation_capability_port_provider=(
+                lambda: runtime_context.composition.guardian
+            )
+        )
+        app_state = SimpleNamespace(
+            governed_operator_runtime=composition.runtime,
+        )
+
+        async def execute_new(
+            command_id: str,
+            payload: dict[str, Any],
+            request_id: str,
+        ) -> tuple[ObsCommandEnvelope, bytes, Any]:
+            envelope, raw_body = _operator_envelope(
+                store=ingress_store,
+                registry=registry,
+                command_id=command_id,
+                payload=payload,
+                request_id=request_id,
+            )
+            port = registry.resolve_port(command_id)
+            assert port is not None
+            with bind_operator_command_runtime(
+                app_state,
+                raw_body=raw_body,
+            ):
+                result = await port.execute(envelope)
+            return envelope, raw_body, result
+
+        async def replay(
+            command_id: str,
+            envelope: ObsCommandEnvelope,
+            raw_body: bytes,
+        ) -> Any:
+            port = registry.resolve_port(command_id)
+            assert port is not None
+            with bind_operator_command_runtime(
+                app_state,
+                raw_body=raw_body,
+            ):
+                return await port.execute(envelope)
+
+        async def accepted(
+            command_id: str,
+            payload: dict[str, Any],
+            request_id: str,
+        ) -> tuple[ObsCommandEnvelope, bytes, Any]:
+            envelope, raw_body, initial = await execute_new(
+                command_id,
+                payload,
+                request_id,
+            )
+            output = dict(initial.result["output"])
+            if output.get("status") != "WAITING_REVIEW":
+                assert output["success"] is True
+                return envelope, raw_body, initial
+            review = dict(output["reviews"][0])
+            _, _, approved = await execute_new(
+                "task_review.approve",
+                {
+                    "review_id": review["review_id"],
+                    "subject_ref": review["subject_ref"],
+                    "subject_version": review["subject_version"],
+                    "resume_phase": review["resume_phase"],
+                    "checkpoint_id": review["checkpoint_id"],
+                },
+                f"{request_id}-approve",
+            )
+            public_token = str(
+                approved.result["output"]["resume_token_ref"]
+            )
+            _, _, resumed = await execute_new(
+                "task_review.resume",
+                {
+                    "review_id": review["review_id"],
+                    "resume_token_ref": public_token,
+                    "subject_ref": review["subject_ref"],
+                    "subject_version": review["subject_version"],
+                    "resume_phase": review["resume_phase"],
+                    "checkpoint_id": review["checkpoint_id"],
+                },
+                f"{request_id}-resume",
+            )
+            assert resumed.result["output"]["review_status"] == "CONSUMED"
+            deadline = asyncio.get_running_loop().time() + 8
+            while asyncio.get_running_loop().time() < deadline:
+                final = await replay(command_id, envelope, raw_body)
+                if final.result["output"].get("status") != "WAITING_REVIEW":
+                    assert final.result["output"]["success"] is True
+                    return envelope, raw_body, final
+                await asyncio.sleep(0.02)
+            raise AssertionError(
+                f"state control did not complete: {command_id}"
+            )
+
+        disabled_envelope, disabled_body, disabled_result = await accepted(
+            "scheduler.task.disable",
+            {"task_id": "operator_state_scheduler"},
+            "request-ne01-scheduler-disable",
+        )
+        disabled = dict(disabled_result.result["output"])
+        assert disabled["enabled"] is False
+        assert definitions.get("operator_state_scheduler")["enabled"] is False
+        assert disabled_result.side_effects_executed is True
+
+        _, _, enabled_result = await accepted(
+            "scheduler.task.enable",
+            {
+                "task_id": "operator_state_scheduler",
+                "expected_head_version": disabled["head_version"],
+            },
+            "request-ne01-scheduler-enable",
+        )
+        enabled = dict(enabled_result.result["output"])
+        assert enabled["enabled"] is True
+        assert definitions.get("operator_state_scheduler")["enabled"] is True
+
+        rules_before = mode_policy_owner.snapshot()
+        rules_envelope, rules_body, rules_result = await accepted(
+            "sys_mode.auto_rules.update",
+            {"rules": {"idle_to_sleep": False}},
+            "request-ne01-mode-rules",
+        )
+        rules = dict(rules_result.result["output"])
+        assert rules["auto_rules"]["idle_to_sleep"] is False
+        assert rules["policy_revision"] == rules_before.revision + 1
+        assert mode_policy_owner.snapshot().auto_rules["idle_to_sleep"] is False
+
+        hard_state_owner.set_sys_mode(
+            "sleep",
+            expected_from_mode="normal",
+            event_id="state-control-event-precondition",
+            source="skill",
+            reason="prepare governed wakeup event",
+        )
+        event_envelope, event_body, event_result = await accepted(
+            "sys_mode.event.submit",
+            {"event_type": "user_message_received"},
+            "request-ne01-mode-event",
+        )
+        event = dict(event_result.result["output"])
+        assert event["triggered"] is True
+        assert event["result"]["to_mode"] == "normal"
+        assert hard_state_owner.get_hard_state().sys_mode == "normal"
+
+        revisions = (
+            definitions.get("operator_state_scheduler")["head_version"],
+            mode_policy_owner.snapshot().revision,
+        )
+        for command_id, envelope, raw_body in (
+            (
+                "scheduler.task.disable",
+                disabled_envelope,
+                disabled_body,
+            ),
+            (
+                "sys_mode.auto_rules.update",
+                rules_envelope,
+                rules_body,
+            ),
+            (
+                "sys_mode.event.submit",
+                event_envelope,
+                event_body,
+            ),
+        ):
+            replayed = await replay(command_id, envelope, raw_body)
+            output = dict(replayed.result["output"])
+            assert output["exact_replay"] is True
+            assert replayed.side_effects_executed is False
+        assert (
+            definitions.get("operator_state_scheduler")["head_version"],
+            mode_policy_owner.snapshot().revision,
+        ) == revisions
+
+        for request_id in (
+            "request-ne01-scheduler-disable",
+            "request-ne01-scheduler-enable",
+            "request-ne01-mode-rules",
+            "request-ne01-mode-event",
+        ):
+            record = container.command_repository.get_by_request(
+                surface=HostCommandSurface.OPERATOR.value,
+                request_id=request_id,
+            )
+            assert record is not None
+            assert record["command"].target_id == "operator_state_control"
+            assert record["work_order"].metadata["operator_command_id"] in {
+                "scheduler.task.disable",
+                "scheduler.task.enable",
+                "sys_mode.auto_rules.update",
+                "sys_mode.event.submit",
+            }
+        assert finalizer.calls
+    finally:
+        if container is not None:
+            await container.aclose()
+        if mode_policy_owner is not None:
+            mode_policy_owner.unbind_durable_journal()
         if hard_state_owner is not None:
             hard_state_owner.unbind_durable_journal()
         if embodiment_runtime is not None:
