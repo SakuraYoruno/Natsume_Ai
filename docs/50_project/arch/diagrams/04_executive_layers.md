@@ -91,6 +91,25 @@ flowchart LR
 
 Scheduler 与 Internal 已沿同一方向接通。Internal 没有放宽 admission：边界 v2 在清除 caller authority 后编译为完整 WorkOrderV3、TaskGraph、Budget、node grant、Review 和 receipt lineage；既有 executor 只消费授权验证后的兼容投影。
 
+### Agent 模型预算子流
+
+```mermaid
+flowchart LR
+    B["Frozen Task Budget"] --> G["graph/node/attempt guard"]
+    G --> I["Internal Agent"]
+    G --> S["sealed Agent Skill authority"]
+    I --> A["Agent loop"]
+    S --> A
+    A --> M["canonical measurement"]
+    M --> R["strict remainder"]
+    R --> A
+    M --> D["durable Budget settlement"]
+```
+
+`strict remainder` 只在同一 Agent loop 内防止额度重置，不拥有持久写
+authority。缺失 usage、缓存、重复 measurement 或 lineage 漂移会停止下一
+次模型调用。该子流不代表 program-wide Budget 或 NE-01 已完成。
+
 ## Graph revision
 
 ```mermaid

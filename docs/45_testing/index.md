@@ -280,3 +280,19 @@
 - 部署多实例 canary 和 NE-07 真实附属服务全栈尚未执行；远程 CI 保持 `NOT_RUN_ACCOUNT_QUOTA`。
 
 临时开发报告、运行反馈和逐次实测日志不再保存在 `docs/`。长期验收优先提交可重复生成的结构化证据。
+
+## NE-01 Agent 模型预算定向证据
+
+2026-07-26 的当前切片覆盖以下局部合同：
+
+- 91 项 Agent、ModelAttempt、Budget measurement、Skill Broker 与 frozen
+  route 单元回归；
+- 3 项真实 SQLite Internal budget rejection、post-review cancellation
+  与 accepted Workspace 晋升回归；
+- 1 项真实 SQLite+Git governed Agent Skill Workspace 晋升回归。
+
+这些集合分别保存且不相加。它们证明多轮 Agent 模型请求不再重复获得完整
+Task 额度，并证明 Skill sealed authority 不丢失 Budget；不证明真实模型
+provider、NE-01 wave integration、七路线 commit-bound acceptance 或
+NE-07 Docker/前后端全栈。远程 CI 保持
+`NOT_RUN_ACCOUNT_QUOTA`。

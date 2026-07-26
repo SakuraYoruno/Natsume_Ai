@@ -736,6 +736,7 @@ async def test_internal_proposal_supplies_exact_durable_workspace_authority(
             *,
             workspace,
             cancelled=None,
+            model_budget_guard=None,
         ):  # noqa: ANN001, ANN202
             assert isinstance(candidate, WorkOrderV3)
             assert candidate.work_order_id == work_order.work_order_id
@@ -745,6 +746,13 @@ async def test_internal_proposal_supplies_exact_durable_workspace_authority(
             assert candidate.graph_revision == graph.revision
             assert workspace == (managed / workspace_id).resolve()
             assert cancelled is not None and cancelled() is False
+            assert model_budget_guard is not None
+            assert model_budget_guard.graph_id == graph.graph_id
+            assert model_budget_guard.node_id == node.node_id
+            assert (
+                model_budget_guard.attempt_id
+                == "attempt-internal-durable-workspace"
+            )
             return AgentResult(
                 status="EXECUTED",
                 work_order_id=candidate.work_order_id,
@@ -807,6 +815,21 @@ async def test_internal_proposal_supplies_exact_durable_workspace_authority(
         _input_artifacts_json="[]",
         node_grant_ref="node-grant://internal/durable-workspace",
         parent_grant_ref="governor-grant://internal/durable-workspace",
+        _budget_json=json.dumps(
+            {
+                "budget_id": "budget-internal-durable-workspace",
+                "status": "ACTIVE",
+                "status_version": 1,
+                "remaining": {
+                    "token_count": 4_096,
+                    "tool_call_count": 8,
+                    "time_ms": 60_000,
+                    "concurrency": 1,
+                    "retry_count": 1,
+                    "model_cost_micros": 250_000,
+                },
+            }
+        ),
         business_scope=command.business_scope,
         operation_fingerprint=command.operation_fingerprint,
     )
@@ -914,9 +937,17 @@ async def test_internal_accepted_artifact_promotes_with_real_git_and_sqlite(
         def __init__(self, **_kwargs: Any) -> None:
             pass
 
-        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+        def execute(
+            self,
+            candidate,
+            *,
+            workspace,
+            cancelled=None,
+            model_budget_guard=None,
+        ):  # noqa: ANN001, ANN202
             assert workspace == (managed / workspace_id).resolve()
             assert cancelled is not None and cancelled() is False
+            assert model_budget_guard is not None
             agent_calls.append(candidate.work_order_id)
             return AgentResult(
                 status="EXECUTED",
@@ -1615,9 +1646,17 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         def __init__(self, **_kwargs: Any) -> None:
             pass
 
-        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+        def execute(
+            self,
+            candidate,
+            *,
+            workspace,
+            cancelled=None,
+            model_budget_guard=None,
+        ):  # noqa: ANN001, ANN202
             assert workspace == (managed / workspace_id).resolve()
             assert cancelled is not None and cancelled() is False
+            assert model_budget_guard is not None
             agent_calls.append(candidate.work_order_id)
             return AgentResult(
                 status="EXECUTED",
@@ -2085,9 +2124,17 @@ async def test_internal_post_review_cancellation_recovers_sealed_checkpoint_afte
         def __init__(self, **_kwargs: Any) -> None:
             pass
 
-        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+        def execute(
+            self,
+            candidate,
+            *,
+            workspace,
+            cancelled=None,
+            model_budget_guard=None,
+        ):  # noqa: ANN001, ANN202
             assert workspace == (managed / workspace_id).resolve()
             assert cancelled is not None and cancelled() is False
+            assert model_budget_guard is not None
             agent_calls.append(candidate.work_order_id)
             return AgentResult(
                 status="EXECUTED",
@@ -2552,9 +2599,17 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
         def __init__(self, **_kwargs: Any) -> None:
             pass
 
-        def execute(self, candidate, *, workspace, cancelled=None):  # noqa: ANN001, ANN202
+        def execute(
+            self,
+            candidate,
+            *,
+            workspace,
+            cancelled=None,
+            model_budget_guard=None,
+        ):  # noqa: ANN001, ANN202
             assert workspace == (managed / workspace_id).resolve()
             assert cancelled is not None and cancelled() is False
+            assert model_budget_guard is not None
             agent_calls.append(candidate.work_order_id)
             return AgentResult(
                 status="EXECUTED",

@@ -229,7 +229,7 @@ class BoundSkillExecutionAuthority:
         "attempt_id", "lease_id", "fencing_token", "intent_id", "session_id", "seq",
         "reservation_id", "node_grant_ref", "parent_grant_ref", "lease_owner_id",
         "business_scope", "operation_fingerprint", "node_risk_level",
-        "pre_execution_review_ref",
+        "pre_execution_review_ref", "budget_json",
         "payload_digest", "expires_at_ms", "validated_by", "durable_ledger",
         "durable_db_path", "_seal",
     )
@@ -355,6 +355,7 @@ def bind_validated_skill_authority(
     operation_fingerprint = ""
     node_risk_level = 0
     pre_execution_review_ref = ""
+    budget_json = ""
     authority_expires_at_ms = int(time.time() * 1000) + max(1, int(ttl_ms))
     canonical_ledger = _canonical_authority_ledger(durable_ledger)
     if governed_execution_context is not None:
@@ -375,6 +376,24 @@ def bind_validated_skill_authority(
         pre_execution_review_ref = str(
             governed.get("pre_execution_review_ref") or ""
         ).strip()
+        budget = governed.get("budget")
+        if budget is not None:
+            if not isinstance(budget, Mapping):
+                raise ValueError(
+                    "governed Task budget projection must be an object"
+                )
+            try:
+                budget_json = json.dumps(
+                    dict(budget),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "governed Task budget projection is not durable JSON"
+                ) from exc
         try:
             graph_revision = int(governed.get("graph_revision") or 0)
             fencing_token = int(governed.get("fencing_token") or 0)
@@ -461,6 +480,7 @@ def bind_validated_skill_authority(
         "operation_fingerprint": operation_fingerprint,
         "node_risk_level": node_risk_level,
         "pre_execution_review_ref": pre_execution_review_ref,
+        "budget": json.loads(budget_json) if budget_json else None,
         "intent_id": str(intent_id or ""),
         "session_id": str(session_id or ""),
         "seq": int(seq),
@@ -502,6 +522,7 @@ def bind_validated_skill_authority(
         "pre_execution_review_ref",
         pre_execution_review_ref,
     )
+    object.__setattr__(authority, "budget_json", budget_json)
     object.__setattr__(authority, "intent_id", str(intent_id or ""))
     object.__setattr__(authority, "session_id", str(session_id or ""))
     object.__setattr__(authority, "seq", int(seq))
@@ -823,6 +844,11 @@ def _broker_executor_adapter(request: CapabilityRequest, grant: Any) -> Any:
                 "node_risk_level": authority.node_risk_level,
                 "pre_execution_review_ref": (
                     authority.pre_execution_review_ref
+                ),
+                **(
+                    {"budget": json.loads(authority.budget_json)}
+                    if authority.budget_json
+                    else {}
                 ),
             }
         payload["_context"] = context

@@ -130,7 +130,10 @@ def test_runtime_converts_canonical_agent_crash_to_failed_result(monkeypatch, tm
 
     assert result["status"] == "FAILED"
     assert result["reason_code"] == "AGENT_ERROR"
-    assert "boom in" in result["detail"]
+    assert "boom in" not in result["detail"]
+    assert result["detail"].startswith(
+        "error_type=builtins.RuntimeError incident="
+    )
     assert result["metadata"]["execution_authority"] == "canonical_agent_executor"
     assert Path(result["artifacts_dir"]).joinpath("result.json").exists()
 

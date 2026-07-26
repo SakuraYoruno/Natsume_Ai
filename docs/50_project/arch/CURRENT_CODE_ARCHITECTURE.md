@@ -547,3 +547,24 @@ Edge session/owner 不是默认的进程字符串：Host 从 normalized canonica
 9. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
 
 这些缺口的唯一活动执行顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+## 11. Agent 多轮模型预算当前接线
+
+Internal 与受治理 Agent Skill 的 canonical Agent loop 现已消费冻结
+TaskGraph Attempt 的同一剩余模型额度。`model_runtime/governed_budget.py`
+负责把 ACTIVE Budget projection 转为 node-bound guard，并在每个模型
+结果后只接受 fresh、完整、exact-once 的 canonical measurement。下一次
+请求得到的是扣除 Token、provider retry、成本与墙钟时间后的严格剩余额度。
+
+Skill 路径还会把 Budget 的 canonical JSON 纳入 sealed
+`BoundSkillExecutionAuthority` identity，再由 Broker 恢复到私有 governed
+context；只读 V2 Agent WorkOrder 由 server-side authority 重建成绑定当前
+graph/revision/node 的 WorkOrderV3。Internal 路径则直接从
+`FrozenNodeInput.budget` 构造同一 guard。调用方 payload、环境
+`max_steps/timeout` 或嵌套 `governed_lineage` 都不能扩大额度。
+
+本地定向证据为 91 项相关单元回归、3 项真实 SQLite Internal
+预算/取消/晋升回归，以及 1 项真实 SQLite+Git Agent Workspace
+晋升回归；这些集合分别记录，不相加为波次总数。真实模型 provider、
+完整 NE-01 integration、七路线 commit-bound acceptance 和 NE-07 服务栈
+均未运行，故 Budget 与 NE-01 仍为 `PARTIAL / IN_PROGRESS`。

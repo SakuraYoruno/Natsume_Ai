@@ -255,6 +255,15 @@ Code 的 D16 动态 catalog 不接入上图的 Host Plan 实线。它只在纯�
 5. Acceptance effect 是可恢复的最终一致，不是所有外部系统共享一个事务。
 6. 启动按 migration/readiness（含0099）→ `recover_startup` → 0099 单次最多 10,000 个 terminal Graph inventory → 可选 default-off exact auto → recovery outbox publish → outbox worker → surface runtime activation → cancellation/Review workers 排序，异常 fail closed。0099 不扫描并重做 worker；它只处理已终态 Graph 的显式 case/proof/supersession。
 
+### Agent 多轮预算补充
+
+Internal 与 Agent Skill 进入模型执行前必须携带冻结 Task Budget 的
+graph/revision/node/attempt guard。Skill 的 guard 来源先被纳入 sealed
+capability authority；只读 V2 WorkOrder 随后由 server context 重建为 V3。
+每次 ModelAttempt 后只依据 canonical measurement 缩小下一次额度，不能用
+Agent 的环境 `max_steps/timeout` 重置 Task allowance。当前链仍缺真实
+provider canary、波次集成和七路线 commit-bound receipt。
+
 ## 代码锚点
 
 - HTTP 装配：`host_brain/app/app_factory.py`、`host_brain/app/chat_routes.py`、`host_brain/app/chat_handler.py`

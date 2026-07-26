@@ -387,7 +387,7 @@ Composition Root 只负责把两侧构造并连接
 | P1 | 原子终态已切流但尚未 wave canary | 新生产图已默认使用 0090/0091，定向覆盖单节点、串行、篡改、取消传播、重启与响应丢失；bounded fan-out 仍关闭，跨路线 wave integration、general recovery 和真实 canary未完成 | Governed Execution |
 | P0 | B5C 生产启用条件未完成 | Budget contention 与 0099 窄终态分类已有；cancellation gate会阻断 current anomaly、缺失 proof/supersession closure 与 quarantine。0099 仍为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；仍缺目标部署 inventory/remediation、general/multi-node/pre-budget recovery、现实 resolver、部署密钥/凭据、完整 key lifecycle 与真实 canary | Governed Execution |
 | P1 | 0093/0095 Outbox 故障矩阵仍需持续守护 | delivery/identity 已接通；需持续验证 deterministic legacy identity、升级 ID/key 稳定、revisioned/legacy payload 边界、payload/source-index readiness、append-success/complete-loss legacy exact replay、零重复 Event、stale fence、per-revision 顺序与 `DRAINED/DEFERRED` | Durable Outbox Authority |
-| P1 | Budget 完整策略仍未收口 | unique `EXCEEDED` winner/`ALREADY_EXCEEDED` 已通过 8/16/32 线程和跨进程验证；concurrency 维度计量与 `DEGRADE/REVIEW` 仍缺 | Governed Execution |
+| P1 | Budget 完整策略仍未收口 | unique `EXCEEDED` winner/`ALREADY_EXCEEDED` 已通过 8/16/32 线程和跨进程验证；Chat、Internal 与受治理 Agent Skill 已共享 node/attempt-bound 模型 guard，多轮调用扣减 measured Token/retry/成本/时间。concurrency 维度计量、`DEGRADE/REVIEW`、一般多节点恢复和真实 provider canary 仍缺 | Governed Execution |
 | 已关闭 | 生产 ProcessServiceContainer、facade、environment 与全局 ports accessor 已物理删除 | 旧测试暂由 pytest-only bridge 兼容；不得重新进入生产 | Composition Kernel |
 | P1 | Host Plan 不生成竞争路径 | 通用智能规划目标尚未实现 | Planning and Decision |
 | P1 | 核心包依赖图存在大型循环 | 模块无法独立演进、构造和验证 | 各 bounded context + Composition Kernel |
@@ -430,3 +430,17 @@ Composition Root 只负责把两侧构造并连接
 目标不是保留所有当前包，而是在不破坏生产 vertical slice 的前提下，把平行 authority、兼容执行内核、全局 service locator 和双向包依赖逐步删掉。
 
 `scripts/runtime/run_task_terminal_reconciliation_canary.py` 是 NE-01 的隔离验收入口，不是第二套 Runtime。它调用真实 migration、`HostCommandRepository`、`DurableTaskStore` 和 `ProcessTaskRuntimeContainer`，验证 restart inventory、exact-auto 修复、signed-required 围栏及启动依赖束；测试 fixture 不再用 raw Graph 冒充 canonical admission。
+
+## 11. Agent 模型预算模块边界
+
+| 模块 | 唯一职责 | 禁止承担 |
+|---|---|---|
+| `model_runtime/governed_budget.py` | 从 durable remaining 构造 guard；累计一次 Agent loop 的 measured remainder | 持久化 Budget、选择 provider、估算缺失 usage |
+| `agent_runtime/agent_executor.py` | 每个 ReAct step 请求更小 guard，并消费 canonical trace | 重置额度、修改 TaskGraph、执行工具 |
+| `agent_runtime/internal_result_proposal.py` | 将 FrozenNodeInput 的 exact Budget 交给 Internal Agent | 自建环境预算或吞掉预算错误 |
+| `skills/executor_registry.py` | 将 Budget JSON 纳入 sealed governed Skill authority 并原样恢复 | 接受 payload 自证 budget/graph authority |
+| `agent_runtime/governed_skill_work_order.py` | 将只读 V2 语义重建为 server-bound WorkOrderV3 | 信任嵌套 `governed_lineage` 或 caller V3 |
+
+该模块边界只关闭 Internal/Agent Skill 多轮模型超支旁路；Budget 的
+concurrency、DEGRADE/REVIEW、一般多节点恢复和 program-wide coverage
+仍属于 Governed Execution 的 P1 缺口。

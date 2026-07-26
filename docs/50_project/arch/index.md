@@ -15,6 +15,12 @@
 
 当前 Chat 提交边界：Acceptance Effect 顺序要求 exact Life projection barrier 先于 external reply；foreground projection receipt 只有在 assistant turn 与 LifeMemory admission 均持久成功后成立。外部 delivery 保持幂等 eventual，commit-bound 七路线验收仍缺，因此该项是 Chat 单控制收口，不是 NE-01 完成。
 
+当前 Agent 模型预算边界：Internal 与 governed Agent Skill 的多轮模型调用
+已消费同一 frozen Task Budget remainder；Skill sealed authority 会保留
+canonical Budget JSON，只读 V2 WorkOrder 由 server-side context 重建为
+V3。缺 usage、cache、重复 measurement 或绑定漂移会停止下一次调用。
+program-wide Budget、真实 provider canary 与 NE-01 波次验收仍未完成。
+
 ## 推荐阅读顺序
 
 1. [系统架构总览](SYSTEM_ARCHITECTURE.md)：先建立进程、分层、authority 和状态模型。

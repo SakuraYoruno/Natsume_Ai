@@ -5,7 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.agent_runtime.executor import execute_agent_runtime_payload
+from host_brain.agent_runtime.executor import (
+    AgentRuntimeExecutor,
+    execute_agent_runtime_payload,
+)
 from host_brain.agent_runtime.governed_skill_work_order import (
     GOVERNED_AGENT_REVIEW_REQUIRED,
     GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID,
@@ -24,6 +27,7 @@ from host_brain.app.governed_task_adapter import (
     _FrozenSkillWorker,
     _build_contracts,
 )
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.task_runtime.acceptance_effects import (
     AcceptanceEffectCompileError,
     compile_graph_acceptance_effects,
@@ -89,6 +93,19 @@ def _context(**overrides) -> dict:
         "operation_fingerprint": "sha256:" + "3" * 64,
         "node_risk_level": 4,
         "pre_execution_review_ref": "review://task-node/governed-agent",
+        "budget": {
+            "budget_id": "budget-governed-agent",
+            "status": "ACTIVE",
+            "status_version": 1,
+            "remaining": {
+                "token_count": 4_096,
+                "tool_call_count": 4,
+                "time_ms": 60_000,
+                "concurrency": 1,
+                "retry_count": 1,
+                "model_cost_micros": 250_000,
+            },
+        },
     }
     value.update(overrides)
     return value
@@ -219,6 +236,60 @@ def test_public_agent_payload_cannot_inject_app_local_workspace_ports() -> None:
         raised.value.reason_code
         == GOVERNED_AGENT_WORK_ORDER_BINDING_INVALID
     )
+
+
+def test_governed_read_agent_rebuilds_v3_and_receives_exact_model_budget(
+    monkeypatch,
+) -> None:  # noqa: ANN001
+    raw_order = deepcopy(_raw_order())
+    raw_order.update(
+        {
+            "run_mode": "inspect",
+            "allowed_actions": ["read_files", "generate_report"],
+            "review_policy": {"review_required": False},
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_execute(
+        self,
+        work_order,
+        *,
+        workspace_execution_authority=None,
+        projection_recovery_context=None,
+        model_budget_guard=None,
+    ):  # noqa: ANN001, ANN202
+        del self, projection_recovery_context
+        captured["work_order"] = work_order
+        captured["workspace_execution_authority"] = (
+            workspace_execution_authority
+        )
+        captured["model_budget_guard"] = model_budget_guard
+        return {"status": "EXECUTED"}
+
+    monkeypatch.setattr(AgentRuntimeExecutor, "execute", fake_execute)
+
+    result = execute_agent_runtime_payload(
+        {"work_order": raw_order},
+        model_attempt_service=object(),
+        prompt_registry=object(),
+        governed_execution_context=_context(),
+    )
+
+    order = captured["work_order"]
+    guard = captured["model_budget_guard"]
+    assert result == {"status": "EXECUTED"}
+    assert isinstance(order, WorkOrderV3)
+    assert order.task_graph_id == "graph-governed-agent"
+    assert order.task_node_id == "node-governed-agent"
+    assert order.graph_revision == 2
+    assert order.approval_ref == _context()["node_grant_ref"]
+    assert captured["workspace_execution_authority"] is None
+    assert guard.graph_id == order.task_graph_id
+    assert guard.node_id == order.task_node_id
+    assert guard.attempt_id == "attempt-governed-agent"
+    assert guard.max_token_count == 4_096
+    assert guard.max_provider_attempts == 2
 
 
 def test_direct_agent_worker_admission_freezes_risk_and_durable_review() -> None:

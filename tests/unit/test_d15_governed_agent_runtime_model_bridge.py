@@ -21,7 +21,19 @@ def _trusted_context(*, model_attempt_service: object) -> dict[str, object]:
             {"authority_id": "skill-authority://sealed/d15"}
         ),
         "_governed_execution_context": MappingProxyType(
-            {"execution_mode": GOVERNED_PRODUCTION_EXECUTION_MODE}
+            {
+                "execution_mode": GOVERNED_PRODUCTION_EXECUTION_MODE,
+                "budget": {
+                    "budget_id": "budget-d15-agent",
+                    "status": "ACTIVE",
+                    "remaining": {
+                        "token_count": 1_024,
+                        "time_ms": 30_000,
+                        "retry_count": 1,
+                        "model_cost_micros": 100_000,
+                    },
+                },
+            }
         ),
         "model_attempt_service": model_attempt_service,
     }
@@ -34,10 +46,21 @@ def test_governed_codex_runtime_receives_model_ports_only_from_composed_service(
     model_attempt_service = _ModelAttemptService(prompt_registry)
     captured: dict[str, object] = {}
 
-    def fake_execute(payload, *, model_attempt_service, prompt_registry):  # noqa: ANN001
+    def fake_execute(
+        payload,
+        *,
+        model_attempt_service,
+        prompt_registry,
+        artifact_store,
+        workspace_runtime,
+        governed_execution_context,
+    ):  # noqa: ANN001
         captured["payload"] = payload
         captured["model_attempt_service"] = model_attempt_service
         captured["prompt_registry"] = prompt_registry
+        captured["artifact_store"] = artifact_store
+        captured["workspace_runtime"] = workspace_runtime
+        captured["governed_execution_context"] = governed_execution_context
         return {"status": "EXECUTED"}
 
     monkeypatch.setattr(
@@ -55,6 +78,12 @@ def test_governed_codex_runtime_receives_model_ports_only_from_composed_service(
     assert result == {"status": "EXECUTED"}
     assert captured["model_attempt_service"] is model_attempt_service
     assert captured["prompt_registry"] is prompt_registry
+    assert captured["artifact_store"] is None
+    assert captured["workspace_runtime"] is None
+    assert (
+        captured["governed_execution_context"]["budget"]["budget_id"]
+        == "budget-d15-agent"
+    )
 
 
 @pytest.mark.parametrize(

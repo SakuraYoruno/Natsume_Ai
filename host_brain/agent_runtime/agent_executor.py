@@ -40,7 +40,10 @@ from host_brain.core.trace_redaction import (
     trace_input_refs,
 )
 from host_brain.model_runtime import (
+    GovernedAgentModelBudget,
+    GovernedModelBudgetError,
     ModelAttemptRequest,
+    ModelBudgetGuard,
     ProviderAttemptRequest,
     ProviderResponse,
     RetryDirective,
@@ -396,6 +399,7 @@ class AgentExecutor:
         *,
         workspace: Path,
         cancelled: Callable[[], bool] | None = None,
+        model_budget_guard: ModelBudgetGuard | None = None,
     ) -> AgentResult:
         """执行 AgentWorkOrder 并通过 ModelAttemptService 驱动 ReAct 循环。
 
@@ -410,6 +414,11 @@ class AgentExecutor:
             raise TypeError("cancelled must be callable")
 
         work_order = canonicalize_work_order(work_order)
+        model_budget = (
+            GovernedAgentModelBudget(model_budget_guard)
+            if model_budget_guard is not None
+            else None
+        )
 
         start_ts = time.time()
         run_mode = str(work_order.run_mode or "inspect").strip().lower()
@@ -519,6 +528,11 @@ class AgentExecutor:
                     prompt_id=AGENT_REACT_PROMPT_ID,
                     messages=messages,
                 )
+                request_budget_guard = (
+                    model_budget.next_guard()
+                    if model_budget is not None
+                    else None
+                )
                 attempt_result = self._model_attempt_service.complete_sync(
                     ModelAttemptRequest(
                         request_id=f"{request_id}:agent-step:{step_num}",
@@ -535,18 +549,38 @@ class AgentExecutor:
                             "run_mode": run_mode,
                             "step": step_num,
                         },
+                        model_budget_guard=request_budget_guard,
                     )
                 )
                 attempt_trace = model_attempt_result_trace(attempt_result)
                 model_attempt_traces.append(attempt_trace)
                 last_provider = str(attempt_trace.get("final_provider") or "")
                 last_model = str(attempt_trace.get("final_model") or "")
+                if model_budget is not None:
+                    # Preserve the measured attempt in the terminal proposal
+                    # before enforcing the in-loop remainder.  If the call
+                    # itself crossed the limit, the outer durable Budget owner
+                    # still needs this exact usage to persist EXCEEDED instead
+                    # of observing an empty trace.
+                    model_budget.consume_trace(attempt_trace)
                 if not attempt_result.success:
                     raise RuntimeError(
                         f"{attempt_result.error_code or 'MODEL_ATTEMPT_FAILED'}: "
                         f"{attempt_result.error_message or 'model attempt failed'}"
                     )
                 raw_output = attempt_result.content
+            except GovernedModelBudgetError as exc:
+                logger.warning(
+                    "Agent executor model budget stopped step %d: %s",
+                    step_num,
+                    exc.reason_code,
+                )
+                stopped_reason = exc.reason_code
+                risk_flags.append("agent_model_budget")
+                final_answer = (
+                    "Agent model execution stopped at the Task budget boundary."
+                )
+                break
             except Exception as exc:
                 logger.warning("Agent executor model attempt failed (step %d): %s", step_num, exc)
                 stopped_reason = "LLM_ERROR"

@@ -30,6 +30,7 @@ from host_brain.persistence.worker_projection_repository import (
     validate_worker_projection_payload,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
+from host_brain.model_runtime import build_governed_model_budget_guard
 from host_brain.contracts.agent_runtime.worker_budget_usage import (
     build_worker_budget_usage,
     stable_worker_usage_id,
@@ -132,6 +133,15 @@ class InternalAgentProposalExecutor:
         # seal-based recovery merely because this wrapper supplied metadata.
         if isinstance(self._executor, AgentRuntimeExecutor):
             execute_kwargs["projection_recovery_context"] = recovery_context
+            execute_kwargs["model_budget_guard"] = (
+                build_governed_model_budget_guard(
+                    budget=frozen.budget,
+                    graph_id=frozen.graph_id,
+                    graph_revision=frozen.graph_revision,
+                    node_id=frozen.node_id,
+                    attempt_id=frozen.attempt_id,
+                )
+            )
         result = await asyncio.to_thread(
             self._executor.execute,
             work_order,

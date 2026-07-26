@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -230,6 +231,7 @@ def test_governed_authority_separates_command_target_from_plan_node_target(tmp_p
     assert authority.command_target_id == "plan-bound"
     assert authority.target_id == authority.skill_id == "browser_research"
     assert authority.command_target_id != authority.target_id
+    assert json.loads(authority.budget_json)["budget_id"] == "budget-bound"
 
 
 @pytest.mark.parametrize(
@@ -351,6 +353,16 @@ def _governed_context() -> dict:
         "lease_owner_id": "worker-bound",
         "business_scope": "scope-bound",
         "operation_fingerprint": "sha256:" + "b" * 64,
+        "budget": {
+            "budget_id": "budget-bound",
+            "status": "ACTIVE",
+            "remaining": {
+                "token_count": 2_048,
+                "time_ms": 30_000,
+                "retry_count": 1,
+                "model_cost_micros": 100_000,
+            },
+        },
     }
 
 
