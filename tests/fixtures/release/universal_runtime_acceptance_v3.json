@@ -1,0 +1,104 @@
+{
+  "commit_sha": "f379d6dbe34f9ef5946bb812c430467d36c6f86d",
+  "database_evidence": {
+    "database_kind": "FILE_BACKED_CANONICAL_SQLITE",
+    "read_mode": "SQLITE_MODE_RO_QUERY_ONLY_SINGLE_TRANSACTION",
+    "snapshot_digest": "sha256:c61a0c1fa8dca15559af394bbf98ba793d438260b58de8299d2377173da0ade4"
+  },
+  "evidence_kind": "REAL_CANONICAL_SQLITE_READ_ONLY_SNAPSHOT",
+  "generated_at_ms": 1785000000000,
+  "migration_head": "0135_task_review_denial_settlement.sql",
+  "overall_status": "INCOMPLETE",
+  "privacy": {
+    "contains_model_output": false,
+    "contains_secrets": false,
+    "contains_user_text": false,
+    "identifiers_are_digested": true
+  },
+  "receipt_digest": "sha256:5e3b91b17c986888f5bc2fbc627f69ed707693337511009c667231ccfd4f8d9f",
+  "route_acceptance": {
+    "chat": {
+      "evidence_counts": {
+        "acceptances": 1,
+        "artifacts": 1,
+        "attempts": 1,
+        "budget_usage": 1,
+        "cancellation_intents": 0,
+        "commands": 1,
+        "current_recovery_holds": 0,
+        "effect_reconciliation_cases": 0,
+        "effects": 1,
+        "graph_budgets": 1,
+        "graphs": 1,
+        "leases": 1,
+        "node_budget_usage": 1,
+        "node_budgets": 1,
+        "nodes": 1,
+        "operations": 1,
+        "outboxes": 4,
+        "verifications": 1,
+        "worker_projections": 1
+      },
+      "evidence_digest": "sha256:f19872372b78f5b252098bf9969ff7662391c42569f923c96de29bbfa0687adc",
+      "reason_codes": [],
+      "request_ref": "request://sha256/79b544ca2efe0807ef69f4bf6ab4b9bf2c6e741441393a739eaa77736062898f",
+      "status": "PASS"
+    },
+    "delegate": {
+      "evidence_counts": {},
+      "evidence_digest": "sha256:270e1a1eefd626ea9d30af502bd50d9972390ed10b49b998f398e61143c2798e",
+      "reason_codes": [
+        "ROUTE_NOT_SELECTED"
+      ],
+      "request_ref": null,
+      "status": "NOT_RUN"
+    },
+    "internal": {
+      "evidence_counts": {},
+      "evidence_digest": "sha256:270e1a1eefd626ea9d30af502bd50d9972390ed10b49b998f398e61143c2798e",
+      "reason_codes": [
+        "ROUTE_NOT_SELECTED"
+      ],
+      "request_ref": null,
+      "status": "NOT_RUN"
+    },
+    "operator": {
+      "evidence_counts": {},
+      "evidence_digest": "sha256:270e1a1eefd626ea9d30af502bd50d9972390ed10b49b998f398e61143c2798e",
+      "reason_codes": [
+        "ROUTE_NOT_SELECTED"
+      ],
+      "request_ref": null,
+      "status": "NOT_RUN"
+    },
+    "plan": {
+      "evidence_counts": {},
+      "evidence_digest": "sha256:270e1a1eefd626ea9d30af502bd50d9972390ed10b49b998f398e61143c2798e",
+      "reason_codes": [
+        "ROUTE_NOT_SELECTED"
+      ],
+      "request_ref": null,
+      "status": "NOT_RUN"
+    },
+    "scheduler": {
+      "evidence_counts": {},
+      "evidence_digest": "sha256:270e1a1eefd626ea9d30af502bd50d9972390ed10b49b998f398e61143c2798e",
+      "reason_codes": [
+        "ROUTE_NOT_SELECTED"
+      ],
+      "request_ref": null,
+      "status": "NOT_RUN"
+    },
+    "skill": {
+      "evidence_counts": {},
+      "evidence_digest": "sha256:270e1a1eefd626ea9d30af502bd50d9972390ed10b49b998f398e61143c2798e",
+      "reason_codes": [
+        "ROUTE_NOT_SELECTED"
+      ],
+      "request_ref": null,
+      "status": "NOT_RUN"
+    }
+  },
+  "run_id": "universal-runtime-acceptance://sha256/662e376518b72422387b990917b1c1dc46281119bb88f62d56dcb2cca17b9d68",
+  "schema_version": "natsume.universal-runtime-route-acceptance.v3"
+}

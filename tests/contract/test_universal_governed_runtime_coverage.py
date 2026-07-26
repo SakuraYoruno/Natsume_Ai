@@ -214,7 +214,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     receipt = json.loads(
         (
             ROOT
-            / "tests/fixtures/release/universal_runtime_acceptance_v2.json"
+            / "tests/fixtures/release/universal_runtime_acceptance_v3.json"
         ).read_text(encoding="utf-8")
     )
     payload["evidence_binding"]["evaluated_commit_sha"] = receipt["commit_sha"]
@@ -224,7 +224,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"
     payload["routes"]["chat"]["status"] = "COMPLETE"
     payload["routes"]["chat"]["acceptance_binding"] = {
-        "receipt_ref": "tests/fixtures/release/universal_runtime_acceptance_v2.json"
+        "receipt_ref": "tests/fixtures/release/universal_runtime_acceptance_v3.json"
     }
     candidate = tmp_path / "coverage.json"
     candidate.write_text(json.dumps(payload), encoding="utf-8")
@@ -233,7 +233,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
 
     assert report.route_statuses["chat"] == "COMPLETE"
     assert (
-        "tests/fixtures/release/universal_runtime_acceptance_v2.json"
+        "tests/fixtures/release/universal_runtime_acceptance_v3.json"
         in report.evidence_refs
     )
 
@@ -255,7 +255,7 @@ def test_historical_four_route_receipt_cannot_satisfy_current_commit_binding(
     candidate = tmp_path / "coverage.json"
     candidate.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(UniversalRuntimeCoverageError, match="commit SHA does not match"):
+    with pytest.raises(UniversalRuntimeCoverageError, match="receipt is invalid"):
         load_universal_runtime_coverage(ROOT, manifest_path=candidate)
 
 

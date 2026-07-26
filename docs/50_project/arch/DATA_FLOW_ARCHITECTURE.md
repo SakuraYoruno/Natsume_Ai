@@ -3,15 +3,31 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.17
+版本：v3.18
 
-核对日期：2026-07-26
+核对日期：2026-07-27
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+七路线提交绑定验收是完全只读的数据流，不取得 Task Runtime 写 authority：
+
+```mermaid
+flowchart LR
+    G["干净 Git HEAD\n仓库 migration head"] --> B["Route Acceptance Builder"]
+    D["真实文件型 SQLite\n单一 query-only 事务"] --> R["Persistence Reader"]
+    R --> E["七路 bounded evidence\n状态/版本/digest"]
+    E --> B
+    B --> V["v3 receipt\n字段白名单 + receipt digest"]
+    V --> C["Coverage Gate"]
+    C -->|"七路均 PASS"| P["可提升 commit-bound acceptance"]
+    C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
+```
+
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。它不读取或输出用户正文、模型输出、secret 和原始 payload。当前 GR05 只产生 Chat、Delegate、Plan 三路校准，故 Gate 必须走 `MISSING / INCOMPLETE` 分支。
 
 节点 Acceptance/Review 的当前持久流为：
 

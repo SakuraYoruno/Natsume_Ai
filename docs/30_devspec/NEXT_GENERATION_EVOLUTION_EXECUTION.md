@@ -5,9 +5,12 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、commit-bound Chat 验收、通用 Delegate、七路线和完整 Composition 仍未完成。
 
-版本：v3.14
-日期：2026-07-26
+版本：v3.15
+日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前七路线验收切片建立 `natsume.universal-runtime-route-acceptance.v3`。采集器只能以 `mode=ro`、`query_only=ON` 在单一事务读取真实文件型 SQLite；它必须把每条 request 映射到唯一 Chat、Skill、Plan、Delegate、Scheduler、Internal 或 Operator 路线，并验证完整 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 链，同时证明没有当前 recovery hold、effect reconciliation 或 cancellation 历史。收据绑定干净 Git HEAD、仓库 migration head 与数据库 applied head，request id 只输出 digest，字段集合与 receipt digest 均防篡改。当前 GR05 校准仅有 `chat/delegate/plan=PASS`，四路 `NOT_RUN`；这只证明 collector 与三路持久语义相符，不提升任何路线的 `commit_bound_acceptance=MISSING`，更不提升 NE-01。
+
 修订执行基线：最新 `origin/dev`，本文件所在提交作为切片证据。第 5、6 条 governed Operator vertical slice `task_operation.reconcile` 与 `task_effect.reconcile` 继续把原始 Ed25519 证据隔离在 0126/0128 append-only evidence ledger，TaskGraph 只携带 ref/digest；其受限恢复结论不变。Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：Scheduler Secure Ingress 冻结 method/path/body/definition head，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，经过节点治理、Review/Verification/Acceptance、terminal Preview 后，唯一 `operator.state_control` Effect 才写 canonical repository。不可变 admin operation receipt 先于 claim completion；该崩溃窗口由新实例精确重开，路由中的直接 Scheduler writer 调用为 0。trigger 保持既有 governed occurrence 入口，list/get/health 保持只读。
 
 当前 Review denial 终态切片把 0135 作为 next-free migration。terminal Review 的 exact status/version/digest、Node、Graph、graph Budget 和三条 Outbox 必须在一个 Store UoW 中共同提交；POST Review 还必须绑定 0134 Acceptance、`SUCCEEDED` Attempt 和已有的多节点 `BLOCKED` decision。PRE Review 只有在零 Attempt、零 Worker authority 时可直接 `CANCELLED`，POST Review 只能保留已执行证据并进入 `FAILED`。响应丢失或进程重启必须重开同一 settlement，禁止签发 Grant、创建 Attempt 或重跑 Worker；任何 Review、aggregate、Acceptance、decision 或 Outbox 漂移均失败关闭。该切片关闭 Review 拒绝半状态，但不覆盖一般 cancellation/recovery、七路线 commit-bound receipt 或 NE-01 波次集成。
