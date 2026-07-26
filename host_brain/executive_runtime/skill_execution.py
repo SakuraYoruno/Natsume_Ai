@@ -467,6 +467,7 @@ def _execute_skill(
         "emotion_context": dict(emotion_context or {}),
         "skill_family": str(skill_meta.family or "general"),
     }
+    governed_skill_model_budget_runtime = None
     if governed_execution_context is not None:
         exec_context["_governed_execution_context"] = {
             "execution_mode": "governed_task_runtime",
@@ -474,8 +475,48 @@ def _execute_skill(
         }
         if capability_broker_override is not None:
             exec_context["capability_broker"] = capability_broker_override
-        if model_attempt_service_override is not None:
+        if (
+            model_attempt_service_override is not None
+            and is_agent_runtime_skill(skill_id)
+        ):
             exec_context["model_attempt_service"] = model_attempt_service_override
+        if bool(getattr(skill_meta, "model_budget_required", False)):
+            if model_attempt_service_override is None:
+                raise PermissionError(
+                    "GOVERNED_SKILL_MODEL_ATTEMPT_PORT_REQUIRED"
+                )
+            from host_brain.model_runtime.governed_budget import (  # noqa: PLC0415
+                build_governed_model_budget_guard,
+            )
+            from host_brain.model_runtime.governed_skill_budget import (  # noqa: PLC0415
+                GovernedSkillModelBudgetRuntime,
+            )
+
+            model_budget_guard = build_governed_model_budget_guard(
+                budget=governed_execution_context.get("budget"),
+                graph_id=str(
+                    governed_execution_context.get("graph_id") or ""
+                ),
+                graph_revision=int(
+                    governed_execution_context.get("graph_revision") or 0
+                ),
+                node_id=str(
+                    governed_execution_context.get("node_id") or ""
+                ),
+                attempt_id=str(
+                    governed_execution_context.get("attempt_id") or ""
+                ),
+            )
+            governed_skill_model_budget_runtime = (
+                GovernedSkillModelBudgetRuntime(
+                    attempt_service=model_attempt_service_override,
+                    model_budget_guard=model_budget_guard,
+                    task_request_id=request_id,
+                )
+            )
+            exec_context["_governed_skill_model_budget_runtime"] = (
+                governed_skill_model_budget_runtime
+            )
         if (agent_artifact_store_override is None) != (
             agent_workspace_runtime_override is None
         ):
@@ -615,6 +656,19 @@ def _execute_skill(
             raw_result=raw_result,
             result_text=result_text,
         )
+        model_budget_attestation = (
+            governed_skill_model_budget_runtime.attestation()
+            if governed_skill_model_budget_runtime is not None
+            else None
+        )
+        if (
+            success
+            and governed_skill_model_budget_runtime is not None
+            and model_budget_attestation is None
+        ):
+            raise PermissionError(
+                "GOVERNED_SKILL_MODEL_BUDGET_MEASUREMENT_REQUIRED"
+            )
         latency_ms = int((time.time() - started) * 1000)
         _log_skill_exec_row(
             request_id=request_id,
@@ -641,6 +695,15 @@ def _execute_skill(
                 "approval_token_ref": approval_token_ref or None,
                 "fallback_policy": str(skill_meta.fallback_policy or "chat_fallback"),
                 "receipt_ref": skill_receipt_ref,
+                **(
+                    {
+                        "governed_skill_model_budget_attestation": (
+                            model_budget_attestation
+                        )
+                    }
+                    if model_budget_attestation is not None
+                    else {}
+                ),
             },
         )
     except Exception as exc:

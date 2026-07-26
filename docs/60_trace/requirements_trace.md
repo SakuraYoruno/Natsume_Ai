@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：TRACE-EXEC-08～08AL 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.0
+版本：v5.1
 核对日期：2026-07-26
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -224,3 +224,22 @@ Skill payload 由 server-side context 重建为 V3，caller `governed_lineage`
 `tests/integration/test_ne01_governed_agent_workspace_acceptance.py`。当前只
 证明局部 budget bypass 关闭；program-wide Budget、真实 provider、波次
 集成、七路线 commit-bound receipt 与 NE-07 均未完成。
+
+TRACE-NE01-SKILL-MODEL-BUDGET-01（普通受治理 Skill 模型预算，当前切片）：
+普通 Skill 只有在 Registry 明确声明 `model_budget_required` 后，才可由
+governed Task executor 从当前 ACTIVE Budget 派生 typed model runtime；
+未声明 Skill 不得取得裸 `ModelAttemptService`。每次模型请求必须携带 exact
+graph/revision/node/attempt guard，下一次请求只能消费扣减后的额度。server
+生成的 attestation 必须绑定 request、Budget、Graph revision、Node、Attempt
+和非空 canonical model attempts；frozen worker 在构造 `WorkerBudgetUsage`
+前重验全部 identity。缺 usage、cache、重复/incomplete measurement、越界或
+lineage drift 均失败关闭。生产代码入口为
+`host_brain/model_runtime/governed_skill_budget.py`、
+`host_brain/executive_runtime/skill_execution.py`、
+`host_brain/app/governed_frozen_skill_runtime.py` 与
+`host_brain/skills/registry.py`；机械证据入口为
+`tests/unit/test_ne01_governed_skill_model_budget.py` 及受影响
+ModelAttempt/Emergent Growth/Skill Broker/frozen route 回归。当前仅
+`emergent_growth_weekly` 声明该能力；真实 provider、其它模型 Skill
+inventory、legacy 非 governed 调用、program-wide Budget、波次集成和 NE-07
+仍未完成。

@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.37
+版本：v5.38
 核对日期：2026-07-26
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -307,17 +307,19 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 ### 4.2 Budget
 
-`host_brain/task_runtime/budget_runtime.py` 和 TaskStore usage ledger 已为 Host 四路线、Scheduler 与 Internal Agent 建立 graph/node 预算预留及可用的 usage 结算边界；时间、dispatch、显式 provider token/cost、ModelAttempt retry 与工具步数只有在对应 worker 上报 canonical measurement 时才进入账本。Internal post-admission worker 已原生传递 V3，但它尚未覆盖入场前 Chat 模型、legacy Skill 内部调用、Delegate 子 Agent、Scheduler handler 和全部 Internal 模型消耗，因此七路线 Gate 对 Chat/Skill/Scheduler/Internal 的 `budget_enforcement` 仍保持 `PARTIAL`。
+`host_brain/task_runtime/budget_runtime.py` 和 TaskStore usage ledger 已为 Host 四路线、Scheduler 与 Internal Agent 建立 graph/node 预算预留及可用的 usage 结算边界；时间、dispatch、显式 provider token/cost、ModelAttempt retry 与工具步数只有在对应 worker 上报 canonical measurement 时才进入账本。Internal post-admission worker 已原生传递 V3；Chat、Internal/Agent Skill 多轮模型和显式声明模型预算的普通 governed Skill 已有 task-bound guard，但它尚未覆盖入场前 Chat 模型、Delegate 子 Agent、Scheduler handler、legacy 非 governed 调用及所有外部工具，因此七路线 Gate 的 `budget_enforcement` 仍保持 `PARTIAL`。
 
 D11 只收紧一条已 admission 的 Host `chat` 垂线：`FrozenNodeInput` 的 active Budget remaining 被投影为不可扩张的 node-bound `ModelBudgetGuard`，再由 `FrozenChatRouteExecutor → Surface main-chain → ModelAttemptService` 消费。该调用禁用 cache 和 streaming，按冻结剩余值限制 deadline、provider attempt、总 token、输出 token 与 `model_cost_micros`；provider 必须返回 `token_count / completion_tokens / model_cost_micros` 三项 canonical 整数。量测缺失、超限、timeout 或 provider 失败都会终止当前 guarded call，不再 retry/fallback；Surface 不会把它降级成 `APPROVE`，并跳过额外的 Spark judge。成功 trace 才会被投影为该 chat worker 的 budget observation。
 
-这不是全局模型成本预支或通用预算账本完成：Thalamus 的普通意图与 Pentest 目标模型分类已被移出准入前路径，入口只会给出规则或默认 chat seed；但 Cortex 准入前模型、Delegate/子 Agent、其他模型调用、通用外部工具和跨 route 累计成本仍不在此 guard 内。没有 provider 报告 canonical `model_cost_micros` 时，D11 选择 fail closed，而不是推算价格或伪造已结算成本。
+普通受治理 Skill 的旁路也已收紧。Registry 只有显式 `model_budget_required=true` 的 Skill 才会取得 `GovernedSkillModelBudgetRuntime`；执行层从当前 ACTIVE Budget 派生 exact graph/revision/node/attempt guard，不再向任意普通 Skill 注入裸 `ModelAttemptService`。typed runtime 逐次扣减 canonical Token/retry/cost/elapsed measurement，并产生 server attestation；frozen worker 重验 request/Budget/Graph/Node/Attempt 后才将其转换为 `WorkerBudgetUsage`。当前 `emergent_growth_weekly` 使用该路径；缺 runtime、usage、fresh identity 或额度会失败关闭。Agent Skill 继续使用既有 sealed guard。
+
+这不是全局模型成本预支或通用预算账本完成：Thalamus 的普通意图与 Pentest 目标模型分类已被移出准入前路径，入口只会给出规则或默认 chat seed；但 Cortex 准入前模型、Delegate/子 Agent、legacy 非 governed 调用、通用外部工具和跨 route 累计成本仍不在这些 guard 内。没有 provider 报告 canonical `model_cost_micros` 时，guarded 路径选择 fail closed，而不是推算价格或伪造已结算成本。
 
 同一 Reservation 的超限竞争现在有唯一 durable authority：8/16/32 线程及跨进程压力下，只有一个 rejected usage 是 `EXCEEDED` winner并拥有版本 transition/Outbox；其他 sibling 是引用该 Outbox 的 `ALREADY_EXCEEDED` observation，不推进版本，也不参与 terminal winner selection。0090 决策读/replay 会在同一 SQLite snapshot 中重新验证完整 authority，而不是只相信 selected usage ID。
 
 限制：
 
-- 非 D11 路径中 provider 未返回的 token/cost 保持 `UNMEASURED`，不做伪精确估算；D11 guarded Surface 调用则直接拒绝缺少 canonical token/cost 的结果；
+- legacy 非 governed 路径中 provider 未返回的 token/cost 保持 `UNMEASURED`，不做伪精确估算；D11 Surface 与 declared governed Skill 调用则直接拒绝缺少 canonical token/cost 的结果；
 - concurrency 字段没有运行时 charge；
 - 超限后的 `DEGRADE`、`REVIEW` 尚未形成完整分支，当前核心路径主要阻断；
 - Scheduler 与 Internal Agent 已进入该主链；其 program-wide Budget 策略仍受本节其余限制。

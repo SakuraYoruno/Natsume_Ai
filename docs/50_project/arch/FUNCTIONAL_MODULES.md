@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.17
+版本：v2.18
 核对日期：2026-07-26
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -136,6 +136,8 @@ TaskStore 写口封口后，`DurableTaskStore.create_graph`、`insert_graph_in_t
 Terminal reconciliation persistence 以 0099 schema-only migration 建立 append-only case/proof/supersession；migration 不改 Graph/Budget。Readiness 严格比较 3 table/4 index/10 trigger canonical SQL 并以 Python 复核 case/subject/proof。Composition 在 `recover_startup` 后单次最多 inventory 10,000 个 terminal Graph。`TerminalStateReconciliationService` 只允许三分法：`FAILED + exact atomic failure bundle + 唯一 graph-scope ACTIVE/EXCEEDED Budget` 由默认开启的 system auto 精确释放 Budget；`BLOCKED failure` 与 legacy `CANCELLED` 要求 Ed25519；child/missing/multi Budget、PENDING/CONSUMED，或 Graph/Node/Review/Attempt/Lease/并行终态任一不一致只 quarantine。Classifier 要求唯一 0090 decision、完整 0091/0092 validator 与 exact failure Outbox payload refs。Runtime 重入不再静默修复 terminal Graph 的未结 Budget；未决 current case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，只有 0099 proof UoW bypass。System proof 用 immutable case 时间跨进程收敛；healthy closure 只在历史未决 case 且 current healthy 时生成 signed `NONE` 且零业务写。该模块为 `AUTO_EXACT_ON / OPERATOR_OFF / CANARY_NOT_RUN`，不是 general recovery。
 
 Budget contention persistence 由 `TaskBudgetUsageStoreMixin` 唯一拥有：首个 rejected usage 是唯一 `EXCEEDED` winner并拥有 Budget transition/Outbox；随后 sibling 只落 `ALREADY_EXCEEDED` observation并引用 winner。共享 terminal-authority reader 被 0090 decision 写入、读取和 replay复用，并以单一 SQLite snapshot 复核 Reservation 精确版本、sole Outbox、Attempt/Graph lineage与全部 sibling。`DurableBudgetRuntime` 以 `max(configured retries, concurrency + 1)`提供 CAS attempt，concurrency=8/连续 8 次冲突/第 9 次成功已有单测；这不是 concurrency charge。正数 `time_ms` 不能退回 policy 值：runtime 必须从 canonical remaining 读取，零剩余用一个持久 `TIME_GUARD` 使用拒绝启动 Operation/worker；非零值以本地 bounded stream 强制当前单节点 worker 截止，timeout 后强制把用量结算为超过余量、保留 Operation 并交 `RECOVERY_REQUIRED` 对账。`time_ms=0` 仅是历史兼容的无截止，不是零预算。外层 `DurableDagSchedulingRuntime` 在 owner lease 已过期且无 live owner时，可显式授权完整 `COMMITTED` 证据的同一 Attempt 以更高 fence 续接。BudgetUsage 的 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING` 都不重跑 worker；共享 `EXCEEDED` 下 accepted/missing checkpoint 必须证明唯一 sibling winner，missing 只能形成不推进 Reservation version且共享 winner Outbox/dimensions 的 `ALREADY_EXCEEDED`。双 checkpoint、four-root、五节点菱形与八根节点已本地证明。`CONFLICT`、unknown `RESERVED/RECOVERY_REQUIRED` 与取消交叉现由 0130 持久 hold；它们仍不自动恢复，跨节点时间预算、无限规模和其它 failure/cancellation 继续是缺口。
+
+普通受治理 Skill 的模型端口由 `host_brain/model_runtime/governed_skill_budget.py` 负责。`SkillMeta.model_budget_required` 是显式能力声明；执行层只能从 exact ACTIVE Task Budget 生成 typed runtime，普通 Skill 不再收到裸 `ModelAttemptService`。typed runtime 对每次 canonical `ModelAttemptResult` 扣减 Token、retry、成本与时间，并把 server-generated attestation 交给 frozen worker 重验后构造 `WorkerBudgetUsage`。当前正向 Skill 是 `emergent_growth_weekly`；缺端口、缺 measurement、重复/cache、超限或 lineage drift 均失败关闭。该模块没有 durable writer，也不证明 Persona proposal/activation、真实 provider 或 program-wide Budget 完成。
 
 ### 4.3 规划、Agent 和领域能力
 

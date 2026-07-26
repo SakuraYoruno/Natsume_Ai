@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Callable
 
 
@@ -20,9 +21,16 @@ def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> st
 class _EmergentGrowthModelPort:
     canonical_model_attempt_port = True
 
-    def __init__(self, *, request_id: str, attempt_service: Any) -> None:
+    def __init__(
+        self,
+        *,
+        request_id: str,
+        attempt_service: Any | None = None,
+        governed_runtime: Any | None = None,
+    ) -> None:
         self._request_id = str(request_id or "emergent-growth")
         self._attempt_service = attempt_service
+        self._governed_runtime = governed_runtime
         self.last_trace: dict[str, Any] = {}
 
     def __call__(self, prompt: str) -> str:
@@ -32,17 +40,23 @@ class _EmergentGrowthModelPort:
         )
         from host_brain.model_runtime.trace import model_attempt_result_trace  # noqa: PLC0415
 
-        result = complete_compiled_prompt_sync(
-            attempt_service=self._attempt_service,
-            prompt_id=EMERGENT_GROWTH_PATTERN_PROMPT_ID,
-            request_id=self._request_id,
-            scene_type="EMERGENT_GROWTH",
-            cognitive_tier="B",
-            messages=({"role": "user", "content": str(prompt or "")},),
-            deadline_ms=5_000,
-            foreground=False,
-            metadata={"chain": "emergent_growth_pattern"},
-        )
+        request = {
+            "prompt_id": EMERGENT_GROWTH_PATTERN_PROMPT_ID,
+            "scene_type": "EMERGENT_GROWTH",
+            "cognitive_tier": "B",
+            "messages": ({"role": "user", "content": str(prompt or "")},),
+            "deadline_ms": 5_000,
+            "foreground": False,
+            "metadata": {"chain": "emergent_growth_pattern"},
+        }
+        if self._governed_runtime is not None:
+            result = self._governed_runtime.complete_sync(**request)
+        else:
+            result = complete_compiled_prompt_sync(
+                attempt_service=self._attempt_service,
+                request_id=self._request_id,
+                **request,
+            )
         self.last_trace = model_attempt_result_trace(result)
         return str(result.content or "").strip() if result.success else ""
 
@@ -51,6 +65,25 @@ def _resolve_llm_fn(args: dict[str, Any], context: dict[str, Any] | None) -> Cal
     candidate = (context or {}).get("emergent_growth_llm_fn")
     if callable(candidate):
         return candidate
+    governed = (context or {}).get("_governed_execution_context")
+    if isinstance(governed, Mapping):
+        from host_brain.model_runtime.governed_skill_budget import (  # noqa: PLC0415
+            GovernedSkillModelBudgetRuntime,
+        )
+
+        governed_runtime = (context or {}).get(
+            "_governed_skill_model_budget_runtime"
+        )
+        if not isinstance(governed_runtime, GovernedSkillModelBudgetRuntime):
+            raise RuntimeError("GOVERNED_SKILL_MODEL_BUDGET_REQUIRED")
+        user_id = _resolve_user_id(args, context)
+        return _EmergentGrowthModelPort(
+            request_id=str(
+                (context or {}).get("request_id")
+                or f"emergent_growth::{user_id}"
+            ),
+            governed_runtime=governed_runtime,
+        )
     attempt_service = (context or {}).get("model_attempt_service")
     if attempt_service is None:
         return None

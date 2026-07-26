@@ -103,6 +103,7 @@ class SkillMeta:
     capability_tags: tuple[str, ...] = field(default_factory=tuple)
     parallelizable: bool = False
     fallback_policy: str = "chat_fallback"
+    model_budget_required: bool = False
     # 原 ToolMeta 字段（合并自 app/skills/tool_meta.py）
     scheduler_allowed: bool = True
     """是否允许 SCHEDULER 来源调用"""
@@ -143,6 +144,8 @@ class SkillMeta:
                 raise ValueError("capability_tags items must match ^[a-z][a-z0-9_-]{1,63}$")
         if not isinstance(self.parallelizable, bool):
             raise ValueError("parallelizable must be bool")
+        if not isinstance(self.model_budget_required, bool):
+            raise ValueError("model_budget_required must be bool")
         fallback_policy = str(self.fallback_policy or "").strip().lower()
         if fallback_policy not in {"chat_fallback", "same_family", "strict_fail", "retry_once"}:
             raise ValueError("fallback_policy must be one of {'chat_fallback','same_family','strict_fail','retry_once'}")
@@ -170,6 +173,7 @@ class SkillMeta:
             "capability_tags": list(self.capability_tags),
             "parallelizable": self.parallelizable,
             "fallback_policy": self.fallback_policy,
+            "model_budget_required": self.model_budget_required,
             "scheduler_profile": (
                 self.scheduler_profile.to_dict()
                 if isinstance(self.scheduler_profile, SkillSchedulerProfile)
@@ -191,6 +195,7 @@ def skill(
     capability_tags: tuple[str, ...] = (),
     parallelizable: bool = False,
     fallback_policy: str = "chat_fallback",
+    model_budget_required: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to attach SkillMeta config on handler callables."""
 
@@ -214,6 +219,7 @@ def skill(
                 ),
                 "parallelizable": bool(parallelizable),
                 "fallback_policy": str(fallback_policy or "chat_fallback").strip().lower() or "chat_fallback",
+                "model_budget_required": bool(model_budget_required),
             },
         )
         return handler
@@ -324,6 +330,9 @@ class SkillRegistry:
                 ),
                 parallelizable=bool(cfg.get("parallelizable", False)),
                 fallback_policy=str(cfg.get("fallback_policy") or "chat_fallback").strip().lower() or "chat_fallback",
+                model_budget_required=bool(
+                    cfg.get("model_budget_required", False)
+                ),
             )
             self.register(meta)
             count += 1

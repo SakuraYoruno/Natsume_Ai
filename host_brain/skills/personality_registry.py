@@ -566,6 +566,7 @@ def _register_emergent_growth_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_emergent_growth_weekly,
+            model_budget_required=True,
             description=(
                 "涌现式成长周期（Phase XIX）：每周日 03:00 由调度器调用，"
                 "分析近期对话模式 → LLM/关键词归纳特质变化建议 → 安全门控 → 应用特质微调。"

@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.9
+版本：v2.10
 核对日期：2026-07-26
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -52,6 +52,12 @@ flowchart TD
 ```
 
 Plan 的合成节点还有一条不能省略的数据边：已验收 predecessor Node 先生成 canonical TaskResult artifact，TaskStore 解析其 payload，`NodeInputArtifactAttestation` 再绑定 artifact/receipt/payload digest bundle，final Chat 只消费这组证据。仅有拓扑依赖而没有该数据流不能通过固定结构验收。任意未被固定 predicate 覆盖的自然语言验收条件进入 durable Review，不会自动写成 `PASS`。
+
+需要模型的普通 Skill 还有一条预算数据边：Registry 的显式
+`model_budget_required` 声明使 Task Runtime 从当前 Node/Attempt Budget 派生
+typed model port；每次调用产生 canonical measurement，外层重验
+request/Budget/Graph/Node/Attempt-bound attestation 后才写 `WorkerBudgetUsage`。
+未声明的 Skill 不得到裸模型服务，因而不能绕开 Task Budget。
 
 ## Task 节点时序
 

@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.model_runtime.contracts import (
+    ModelBudgetGuard,
     ModelAttemptRequest,
     ModelAttemptResult,
     PromptRef,
@@ -31,6 +32,7 @@ def compiled_prompt_request(
     foreground: bool = True,
     retry_evaluator: RetryEvaluator | None = None,
     metadata: Mapping[str, Any] | None = None,
+    model_budget_guard: ModelBudgetGuard | None = None,
 ) -> ModelAttemptRequest:
     """Build the canonical request for a registered compiled-message prompt."""
 
@@ -44,6 +46,7 @@ def compiled_prompt_request(
         foreground=foreground,
         retry_evaluator=retry_evaluator,
         metadata=dict(metadata or {}),
+        model_budget_guard=model_budget_guard,
     )
 
 
@@ -59,6 +62,7 @@ async def complete_compiled_prompt(
     foreground: bool = True,
     retry_evaluator: RetryEvaluator | None = None,
     metadata: Mapping[str, Any] | None = None,
+    model_budget_guard: ModelBudgetGuard | None = None,
 ) -> ModelAttemptResult:
     """Invoke a compiled prompt through the sole asynchronous model authority."""
 
@@ -72,6 +76,7 @@ async def complete_compiled_prompt(
         foreground=foreground,
         retry_evaluator=retry_evaluator,
         metadata=metadata,
+        model_budget_guard=model_budget_guard,
     )
     return await attempt_service.complete(request)
 
@@ -88,6 +93,7 @@ def complete_compiled_prompt_sync(
     foreground: bool = True,
     retry_evaluator: RetryEvaluator | None = None,
     metadata: Mapping[str, Any] | None = None,
+    model_budget_guard: ModelBudgetGuard | None = None,
 ) -> ModelAttemptResult:
     """Invoke a compiled prompt through the sole synchronous model authority."""
 
@@ -101,6 +107,7 @@ def complete_compiled_prompt_sync(
         foreground=foreground,
         retry_evaluator=retry_evaluator,
         metadata=metadata,
+        model_budget_guard=model_budget_guard,
     )
     return attempt_service.complete_sync(request)
 
