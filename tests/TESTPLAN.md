@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.26
+版本：v0.27
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -15,7 +15,7 @@
 - T-NE01-URA-05：请求标识只输出 digest；用户正文、模型输出、secret、Command/WorkOrder/Graph/Effect payload 及额外字段均不得进入收据；篡改总 digest 必须拒绝。
 - T-NE01-URA-06：GR05 必须在同一 Host Runtime/SQLite 完成 Chat、Direct Skill、Delegate 和 Plan；Direct Skill 不得用 Plan 节点间接代替。
 - T-NE01-URA-07：Scheduler、Internal、Operator 必须写入同一 canonical SQLite；三路分别经过正式 CommandService/Effect、Internal result commit、Operator durable Review/HardState/outer outcome，所有 Secure Ingress claim 都必须 terminal COMMITTED 且有 result ref。
-- 当前合同与 coverage Gate 为 `30 passed`；Host 四路集成和剩余三路集成分别为 `1 passed`。串联 pre-commit validator 得到七路 PASS，但正式 commit-bound 状态必须等待干净 SHA 收据，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 当前合同与 coverage Gate 为 `30 passed`；Host 四路集成和剩余三路集成分别为 `1 passed`。正式串联运行绑定干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3`、migration 0135 和同一文件型 SQLite，七路均为 PASS、reason code 全空；收据为 `docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json`，七路 `commit_bound_acceptance=PASS`。其它路线控制和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-ATOMIC-INTERRUPTION-RECOVERY-HOLD
 

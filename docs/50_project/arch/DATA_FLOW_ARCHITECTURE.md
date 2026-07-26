@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.19
+版本：v3.20
 
 核对日期：2026-07-27
 
@@ -23,13 +23,13 @@ flowchart LR
     E --> B
     B --> V["v3 receipt\n字段白名单 + receipt digest"]
     V --> C["Coverage Gate"]
-    C -->|"七路均 PASS"| P["可提升 commit-bound acceptance"]
+    C -->|"七路均 PASS"| P["commit-bound acceptance = PASS"]
     C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
 ```
 
-Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。它不读取或输出用户正文、模型输出、secret 和原始 payload。GR05 当前产生 Chat、Skill、Delegate、Plan 四路校准；在正式干净提交收据生成前，Gate 仍必须走 `MISSING / INCOMPLETE` 分支。
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `59527b1210e16b62e243dda616c190ec45d8ebe3` 的正式同库收据使七路 Gate 均走 `PASS` 分支；其它路线控制仍可独立保持 `PARTIAL / INCOMPLETE`。
 
-当前本地七路数据生成流已经补齐，但仍处于 pre-commit：
+当前本地七路数据生成流已经在干净提交上形成正式收据：
 
 ```mermaid
 flowchart TD
@@ -38,8 +38,8 @@ flowchart TD
     I["Internal CommandService\nResult commit"] --> DB
     O["Operator OBS authority\nReview + HardState Effect + outer outcome"] --> DB
     DB --> R["query-only v3 Reader"]
-    R --> V["七路 pre-commit PASS"]
-    V --> X["仍须干净 SHA 重跑\n才可提升 commit-bound control"]
+    R --> V["七路正式 PASS\ncommit 59527b12 + migration 0135"]
+    V --> X["仓库内隐私安全收据\ncommit-bound controls = PASS"]
 ```
 
 bounded deterministic worker 只替代业务计算，不替代 CommandService、TaskGraph、Grant、Budget、Review、Verification、Acceptance、Effect、Outbox 或 claim settlement。它不产生真实模型或 PlanningSearch 收益结论。
