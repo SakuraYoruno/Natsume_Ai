@@ -519,6 +519,10 @@ def test_cancellation_crossing_operation_hold_is_durable_and_immutable(
     )
     store = DurableTaskStore(db_path, clock=_Clock(NOW))
 
+    recorded_during_cancellation = store.list_current_operation_recovery_holds(
+        graph_id="graph-cross-process-cancel",
+    )
+    assert len(recorded_during_cancellation) == 1
     first = store.record_operation_recovery_hold(
         graph_id="graph-cross-process-cancel",
         graph_revision=1,
@@ -538,8 +542,9 @@ def test_cancellation_crossing_operation_hold_is_durable_and_immutable(
         reason_code="GOVERNED_WORKER_FAILED",
     )
 
-    assert first["exact_replay"] is False
+    assert first["exact_replay"] is True
     assert replay["exact_replay"] is True
+    assert first["case_ref"] == recorded_during_cancellation[0]["case_ref"]
     assert replay["case_ref"] == first["case_ref"]
     assert first["case_kind"] == "CANCELLATION_CROSSING"
     assert (
@@ -560,7 +565,22 @@ def test_cancellation_crossing_operation_hold_is_durable_and_immutable(
             WHERE event_type = 'OPERATION_RECOVERY_HOLD_RECORDED'
             """,
         ).fetchone()[0]
-        assert outbox_count == 1
+        case_rows = conn.execute(
+            """
+            SELECT case_ref, case_kind
+            FROM task_runtime_operation_recovery_hold
+            ORDER BY created_ts_ms, case_ref
+            """
+        ).fetchall()
+        assert outbox_count == 2
+        assert {str(row["case_kind"]) for row in case_rows} == {
+            "UNKNOWN_SIDE_EFFECT",
+            "CANCELLATION_CROSSING",
+        }
+        assert [
+            store.get_operation_recovery_hold(str(row["case_ref"]))["current"]
+            for row in case_rows
+        ].count(True) == 1
         with pytest.raises(
             sqlite3.IntegrityError,
             match="TASK_OPERATION_RECOVERY_HOLD_IMMUTABLE",

@@ -4053,6 +4053,7 @@ class DurableTaskStore(
         *,
         reason_code: str,
         ts_ms: int,
+        defer_recovery_hold: bool = False,
     ) -> sqlite3.Row:
         if str(row["status"]) != IdempotencyStatus.RESERVED.value:
             return row
@@ -4109,7 +4110,14 @@ class DurableTaskStore(
             expected_event_type="OPERATION_RECOVERY_REQUIRED",
             expected_attempt_id=attempt_id,
         )
-        return self._require_operation_reservation(conn, reservation_id)
+        updated = self._require_operation_reservation(conn, reservation_id)
+        if not defer_recovery_hold:
+            self._record_operation_recovery_hold_in_transaction(
+                conn,
+                reservation_id=reservation_id,
+                reason_code=reason,
+            )
+        return updated
 
     def _mark_attempt_reservations_recovery_required(
         self,

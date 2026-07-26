@@ -10,7 +10,7 @@
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
 
-恢复治理遵循“先持久化不确定性，再由精确证据消解”的不变量。未知副作用不能被 timeout、异常类型或操作者意图直接解释为未发生；运行时必须先冻结当前 Graph/Node/Attempt/Operation/Budget/Lease 与取消事实，再让签名证据精确绑定该 recovery case。证据只能收紧既有 authority，不能创建新的执行权；对账完成后还必须证明同一 case 已退出 current projection。无法证明时继续隔离，绝不盲目重放 worker。
+恢复治理遵循“先持久化不确定性，再由精确证据消解”的不变量。未知副作用不能被 timeout、异常类型或操作者意图直接解释为未发生；Operation 首次进入待恢复状态时，状态 mutation、恢复 case 与各自 Outbox 必须同成同败，不能把 case 留给下一次请求补写。运行时冻结当前 Graph/Node/Attempt/Operation/Budget/Lease 与取消事实后，再让签名证据精确绑定该 recovery case。未决 case 的存续应跟随真正待消解的 Operation version 与取消身份，不能因后续预算计量、租约到期或生命周期围栏而从恢复清单意外消失；这些变化仍保留在不可变 subject 中供审计。证据只能收紧既有 authority，不能创建新的执行权；对账完成后还必须证明同一 case 已退出 current projection。无法证明时继续隔离，绝不盲目重放 worker。
 
 预算治理遵循“一个总额度、每次尝试一个可追溯子边界”的不变量。Graph Budget 是唯一 aggregate ceiling，不能为每个节点复制一份可独立消费的总额度；每次 Attempt 必须在取得 Lease 和执行权的同一事务中获得绑定 graph/revision/node/attempt 的 child reservation。任何 token、工具、时间、重试或成本用量都要在同一 UoW 同时推进父级与子级账本，缺 child、身份漂移或任一侧写入失败都不能授权 worker 继续。child 的终态从 durable Attempt 与父级 Budget 派生，避免再产生一套可变的成功/失败真相；升级回填只能承认历史已消费用量，不能重新释放容量。
 
@@ -153,7 +153,7 @@ flowchart LR
 
 推断不能伪装成观测，过期信息不能伪装成当前事实，冲突不能靠最后写入者静默覆盖。来源、置信度、有效期和冲突状态是事实语义的一部分。
 
-同一原则也适用于执行恢复。一次 Operation 已持久预留、worker 响应丢失或 checkpoint 与 Budget authority 冲突时，“当前不能证明发生了什么”本身就是必须持久保存的事实，不能只活在异常对象或一次进程日志中。安全的自动恢复只适用于能够从不可变 checkpoint、完整版本链和当前 fence 精确重开的路径；未知副作用、取消交叉和 authority 冲突必须冻结为 append-only case 与同事务 Outbox。case 只证明系统必须停下并进入明确的 reconciliation 或 quarantine 队列，不证明“没有副作用”，也不授予 worker 重放权。任何后续处置都必须重开原 Graph、Node、Attempt、Operation、Budget、取消与 Lease 版本，版本漂移时重新分类，而不是消费过时判断。
+同一原则也适用于执行恢复。一次 Operation 已持久预留、worker 响应丢失或 checkpoint 与 Budget authority 冲突时，“当前不能证明发生了什么”本身就是必须持久保存的事实，不能只活在异常对象或一次进程日志中。安全的自动恢复只适用于能够从不可变 checkpoint、完整版本链和当前 fence 精确重开的路径；未知副作用、取消交叉和 authority 冲突必须冻结为 append-only case 与同事务 Outbox。非终态 Operation case 以 exact Operation version 为未决核心；Budget、Lease、Attempt 或 Graph 的后续合法围栏变化不会删除历史 subject，也不能让 case 在未对账时失去 current 身份。若之后出现 cancellation intent，应追加 intent-bound successor case并让旧 unknown case退出 current，而不是改写旧记录。case 只证明系统必须停下并进入明确的 reconciliation 或 quarantine 队列，不证明“没有副作用”，也不授予 worker 重放权。任何后续处置都必须重开原 Graph、Node、Attempt、Operation、Budget、取消与 Lease 版本，Operation 或取消身份漂移时重新分类，而不是消费过时判断。
 
 ### 3.6 规划模拟没有真实副作用
 

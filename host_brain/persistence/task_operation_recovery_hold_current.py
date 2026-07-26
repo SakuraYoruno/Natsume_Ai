@@ -86,6 +86,29 @@ def hold_is_current(
         """,
         (record["graph_id"], record["graph_revision"]),
     ).fetchone()
+    operation_matches = bool(
+        operation is not None
+        and operation["status"] == record["operation_status"]
+        and operation["status_version"] == record["operation_status_version"]
+    )
+    if not operation_matches:
+        return False
+
+    # Nonterminal Operation ambiguity remains open until that exact Operation
+    # version is reconciled.  Budget settlement, Lease expiry, and lifecycle
+    # fencing may legitimately advance after the interruption and must not
+    # make the only recovery inventory disappear.
+    case_kind = str(record.get("case_kind") or "")
+    if case_kind == "UNKNOWN_SIDE_EFFECT":
+        return cancellation is None
+    if case_kind == "CANCELLATION_CROSSING":
+        return bool(
+            cancellation is not None
+            and cancellation["intent_ref"] == record["cancellation_intent_ref"]
+        )
+
+    # Checkpoint quarantine is different: it freezes a conflicting assembled
+    # checkpoint and remains usable only while every observed version matches.
     expected_leases = (
         record.get("subject", {}).get("active_leases")
         if isinstance(record.get("subject"), Mapping)
@@ -95,7 +118,6 @@ def hold_is_current(
         graph is not None
         and node is not None
         and attempt is not None
-        and operation is not None
         and budget is not None
         and graph["status"] == record["graph_status"]
         and graph["status_version"] == record["graph_status_version"]
@@ -103,8 +125,6 @@ def hold_is_current(
         and node["status_version"] == record["node_status_version"]
         and attempt["status"] == record["attempt_status"]
         and attempt["status_version"] == record["attempt_status_version"]
-        and operation["status"] == record["operation_status"]
-        and operation["status_version"] == record["operation_status_version"]
         and budget["status"] == record["budget_status"]
         and budget["status_version"] == record["budget_status_version"]
         and _active_leases(conn, record["attempt_id"]) == expected_leases

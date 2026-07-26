@@ -47,6 +47,15 @@ class TaskOperationCheckpointStoreMixin:
                     reason_code=recovery_reason,
                     ts_ms=ts_ms,
                 )
+            elif str(row["status"]) == IdempotencyStatus.RECOVERY_REQUIRED.value:
+                self._record_operation_recovery_hold_in_transaction(
+                    conn,
+                    reservation_id=str(row["reservation_id"]),
+                    reason_code=str(
+                        row["recovery_reason_code"]
+                        or "IDEMPOTENCY_RECOVERY_REQUIRED"
+                    ),
+                )
             return self._operation_record(row)
 
     def get_committed_operation_checkpoint(
