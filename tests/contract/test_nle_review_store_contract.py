@@ -24,6 +24,7 @@ from host_brain.persistence.review_repository import (
     REVIEW_STORE_INVALID,
     REVIEW_STORE_SCHEMA_NOT_READY,
     REVIEW_TOKEN_EXPIRED,
+    REVIEW_TOKEN_INVALID,
     REVIEW_TOKEN_SUBJECT_MISMATCH,
     ReviewStore,
     ReviewStoreError,
@@ -335,6 +336,65 @@ def test_t_nle_10_pre_resume_is_token_bound_and_one_time(tmp_path: Path) -> None
             resume_phase=ReviewResumePhase.PRE_EXECUTION,
             checkpoint_id="checkpoint://pre/graph-1/node-1/v0",
             resume_result_ref="review-resume://review-pre-once/pre/duplicate",
+        )
+    assert duplicate.value.reason_code == REVIEW_RESUME_ALREADY_CONSUMED
+
+
+def test_operator_public_token_resume_is_separate_one_time_and_restart_safe(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(1_000)
+    store = _store(tmp_path, clock)
+    store.create_review(_review("review-operator-public-token"))
+    approved = store.approve_review(
+        "review-operator-public-token",
+        actor_id="principal.operator",
+    )
+    bearer = str(approved["resume_token_ref"])
+    public_ref = str(approved["resume_token"]["token_ref_public"])
+    assert public_ref == approved["review"]["review"]["token_ref"]
+    assert public_ref.startswith("review-token://")
+    assert bearer.startswith("review_resume::")
+    assert bearer.encode("utf-8") not in store.db_path.read_bytes()
+
+    with pytest.raises(ReviewStoreError) as ordinary_api:
+        store.resume_review(
+            "review-operator-public-token",
+            resume_token_ref=public_ref,
+            subject_ref="work-order://graph-1/node-1",
+            subject_version=3,
+            resume_phase=ReviewResumePhase.PRE_EXECUTION,
+            checkpoint_id="checkpoint://pre/graph-1/node-1/v0",
+        )
+    assert ordinary_api.value.reason_code == REVIEW_TOKEN_INVALID
+
+    reopened = ReviewStore(store.db_path, clock=clock)
+    resumed = reopened.resume_review_by_operator_token_ref(
+        "review-operator-public-token",
+        token_ref_public=public_ref,
+        subject_ref="work-order://graph-1/node-1",
+        subject_version=3,
+        resume_phase=ReviewResumePhase.PRE_EXECUTION,
+        checkpoint_id="checkpoint://pre/graph-1/node-1/v0",
+        resume_result_ref=(
+            "review-resume://operator/review-operator-public-token"
+        ),
+    )
+    assert resumed["review"]["review"]["status"] == "CONSUMED"
+    assert resumed["review"]["review"]["resume_count"] == 1
+
+    restarted = ReviewStore(store.db_path, clock=clock)
+    with pytest.raises(ReviewStoreError) as duplicate:
+        restarted.resume_review_by_operator_token_ref(
+            "review-operator-public-token",
+            token_ref_public=public_ref,
+            subject_ref="work-order://graph-1/node-1",
+            subject_version=3,
+            resume_phase=ReviewResumePhase.PRE_EXECUTION,
+            checkpoint_id="checkpoint://pre/graph-1/node-1/v0",
+            resume_result_ref=(
+                "review-resume://operator/review-operator-public-token"
+            ),
         )
     assert duplicate.value.reason_code == REVIEW_RESUME_ALREADY_CONSUMED
 

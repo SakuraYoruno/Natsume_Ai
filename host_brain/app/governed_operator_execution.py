@@ -24,6 +24,10 @@ from host_brain.app.governed_terminal_reconciliation_runtime import (
     TERMINAL_TARGET_ID,
     terminal_reconciliation_commit_event,
 )
+from host_brain.task_runtime.operator_control_support import (
+    OPERATOR_CONTROL_TARGET_ID,
+    compile_frozen_operator_control,
+)
 from host_brain.core.mode_transition import TransitionSource
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
@@ -76,6 +80,12 @@ class FrozenSysModeSwitchExecutor:
                 frozen,
                 runtime_scope_id=self._embodiment_runtime_scope_id,
             )
+            return
+        if (
+            frozen.route == "delegate"
+            and frozen.target_id == OPERATOR_CONTROL_TARGET_ID
+        ):
+            yield compile_frozen_operator_control(frozen)
             return
         if frozen.route != "delegate" or frozen.target_id != SYS_MODE_TARGET_ID:
             raise GovernedOperatorRuntimeError(

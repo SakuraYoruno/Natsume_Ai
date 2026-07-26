@@ -49,7 +49,7 @@ def _contracts() -> tuple[Any, dict[str, Any], ExecutorAssignment, TaskGraph]:
                 dependencies=(),
                 route="executive_runtime",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=(),
@@ -466,6 +466,7 @@ def _coordinator(
 ) -> GovernedTaskCoordinator:
     coordinator = coordinator_type(
         task_store=store,  # type: ignore[arg-type]
+        internal_agent_checkpoint_uow=object(),  # type: ignore[arg-type]
         outbox_publisher=(
             outbox_publisher
             if outbox_publisher is not None

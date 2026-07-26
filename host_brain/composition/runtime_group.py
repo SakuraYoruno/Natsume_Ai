@@ -17,6 +17,9 @@ from host_brain.observability.command_ports import (
 from host_brain.persistence.review_continuation_binding import (
     intent_admission_initial_status,
 )
+from host_brain.contracts.review_cancellation import (
+    cancelled_review_target_status,
+)
 
 
 _SURFACE_RUNTIME = {
@@ -32,6 +35,11 @@ _SURFACE_RUNTIME = {
 }
 _OPERATOR_RUNTIME_TARGETS = {
     "operator_sys_mode_switch": "operator",
+    "operator_edge_command_push": "operator",
+    "operator_task_terminal_reconcile": "operator",
+    "operator_task_operation_reconcile": "operator",
+    "operator_task_effect_reconcile": "operator",
+    "operator_task_control": "operator",
 }
 _CLAIM_COMPLETION_SURFACES = frozenset(
     {
@@ -219,13 +227,19 @@ class GovernedRuntimeGroup:
         if self._active_names or self._acceptance_effect_runtime_active:
             return
         try:
-            if self._acceptance_effect_runtime is not None:
-                await _await_call(self._acceptance_effect_runtime.activate())
-                self._acceptance_effect_runtime_active = True
             for name, runtime in self._runtimes.items():
                 await _await_call(runtime.activate())
                 self._active_names.append(name)
             self._continuation_open = True
+            # A recovery-time Acceptance Effect may need the app-local
+            # Runtime Group (for example, to persist one graph cancellation).
+            # Activate every target runtime before replaying committed effects
+            # so startup can reconcile rather than deadlock on an inactive
+            # provider.  Public ASGI admission remains closed until lifespan
+            # activation completes.
+            if self._acceptance_effect_runtime is not None:
+                await _await_call(self._acceptance_effect_runtime.activate())
+                self._acceptance_effect_runtime_active = True
             if self._review_worker is not None:
                 await _await_call(self._review_worker.start())
                 self._review_worker_started = True
@@ -945,6 +959,9 @@ class GovernedRuntimeGroup:
                     else "WAITING_ACCEPTANCE_REVIEW"
                 )
             )
+            expected_after_status = cancelled_review_target_status(
+                expected_waiting
+            )
             if any(
                 (
                     _TASK_CANCEL_INTENT_REF.fullmatch(intent_ref) is None,
@@ -963,7 +980,7 @@ class GovernedRuntimeGroup:
                     int(before.get("status_version") or -1)
                     != subject_version,
                     str(after.get("status") or "").strip().upper()
-                    != "CANCELLED",
+                    != expected_after_status,
                     int(after.get("status_version") or -1)
                     != subject_version + 1,
                 )
@@ -976,8 +993,6 @@ class GovernedRuntimeGroup:
             raise
         except Exception as exc:
             raise _OperatorReviewCancellationRecoveryPending() from exc
-
-
 async def _await_call(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 

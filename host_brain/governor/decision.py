@@ -581,6 +581,12 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
         "operator_task_terminal_reconciliation": 4,
         "operator_task_operation_reconciliation": 4,
         "operator_task_effect_reconciliation": 4,
+        # Cancellation remains a high-risk, Reviewable control.  Review
+        # decisions themselves are authenticated human control-plane actions;
+        # assigning them high risk would recursively require another Review.
+        # Their eventual mutation is still risk-4 ActionPreview-bound.
+        "operator_task_graph_cancellation": 4,
+        "operator_task_review_control": 2,
     }.get(action_name)
     if builtin_risk is not None:
         return builtin_risk

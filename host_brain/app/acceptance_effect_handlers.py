@@ -37,6 +37,9 @@ from host_brain.app.accepted_sys_mode_receipt import (
 from host_brain.app.accepted_sys_mode_transition_handler import (
     AcceptedSysModeTransitionHandler,
 )
+from host_brain.app.accepted_operator_control_handler import (
+    AcceptedOperatorControlHandler,
+)
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedLifeConversationProjectionV1,
     AcceptedPreferenceSignalV1,
@@ -65,6 +68,11 @@ def build_production_acceptance_effect_handlers(
     operation_reacquisition_continuation_provider: Callable[[], Any] | None = None,
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
     embodiment_runtime_provider: Callable[[], Any] | None = None,
+    graph_cancellation_service_provider: Callable[[], Any] | None = None,
+    secure_ingress_authority_resolver: Any | None = None,
+    task_store: Any | None = None,
+    review_command_service: Any | None = None,
+    review_store: Any | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
         "conversation.user_turn": _AcceptedConversationUserTurnHandler(
@@ -92,6 +100,29 @@ def build_production_acceptance_effect_handlers(
     if mode_transition_service_provider is not None:
         handlers["host.sys_mode_transition"] = AcceptedSysModeTransitionHandler(
             service_provider=mode_transition_service_provider,
+        )
+    operator_control_dependencies = (
+        graph_cancellation_service_provider,
+        secure_ingress_authority_resolver,
+        task_store,
+        review_command_service,
+        review_store,
+    )
+    if any(value is not None for value in operator_control_dependencies):
+        if any(value is None for value in operator_control_dependencies):
+            raise TypeError(
+                "Operator control handler requires all app-local dependencies"
+            )
+        handlers["task.operator_control"] = AcceptedOperatorControlHandler(
+            graph_cancellation_service_provider=(
+                graph_cancellation_service_provider
+            ),
+            secure_ingress_authority_resolver=(
+                secure_ingress_authority_resolver
+            ),
+            task_store=task_store,
+            review_command_service=review_command_service,
+            review_store=review_store,
         )
     if embodiment_runtime_provider is not None:
         if not callable(embodiment_runtime_provider):

@@ -37,6 +37,13 @@ from host_brain.app.governed_operator_execution import (
     SYS_MODE_TARGET_ID as _TARGET_ID,
     require_operator_runtime_scope_id as _runtime_scope_id,
 )
+from host_brain.task_runtime.operator_control_support import (
+    OPERATOR_CONTROL_EFFECT_TYPE,
+    OPERATOR_CONTROL_TARGET_ID,
+)
+from host_brain.app.governed_operator_control_runtime import (
+    GovernedOperatorControlMixin,
+)
 from host_brain.app.governed_operator_edge_support import (
     EDGE_ACTION_KIND as _EDGE_ACTION_KIND,
     EDGE_EFFECT_TYPE as _EDGE_EFFECT_TYPE,
@@ -103,6 +110,9 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
 )
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
+from host_brain.task_runtime.review_command_service import (
+    TaskReviewCommandService,
+)
 from host_brain.task_runtime.worker_registry import GovernedWorkerRegistry
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
@@ -112,9 +122,11 @@ class GovernedOperatorComposition:
     runtime: "GovernedOperatorRuntime"
     acceptance_effect_dispatcher: AcceptanceEffectDispatcher
     acceptance_effect_runtime: AcceptanceEffectRuntime
+    review_command_service: TaskReviewCommandService
 
 
 class GovernedOperatorRuntime(
+    GovernedOperatorControlMixin,
     GovernedEffectReconciliationMixin,
     GovernedOperationReconciliationMixin,
     GovernedTerminalReconciliationMixin,
@@ -276,6 +288,14 @@ class GovernedOperatorRuntime(
                 outcome["physical_effect_verified"]
             )
             return bound
+        control_result = self._bind_operator_control_review_outcome(
+            command_id=operator_command_id,
+            execution_receipt=receipt,
+            args=args,
+            result=bound,
+        )
+        if control_result is not None:
+            return control_result
         target_mode = str(args.get("target_mode") or "").strip().lower()
         reason = str(args.get("reason") or "").strip()
         source = str(args.get("source") or "").strip().lower()
@@ -859,6 +879,7 @@ def build_governed_operator_runtime(
                 TERMINAL_EFFECT_TYPE,
                 OPERATION_RECONCILIATION_EFFECT_TYPE,
                 EFFECT_RECONCILIATION_EFFECT_TYPE,
+                OPERATOR_CONTROL_EFFECT_TYPE,
             }
         ),
     )
@@ -952,6 +973,9 @@ def build_governed_operator_composition(
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
+    review_command_service = TaskReviewCommandService(
+        review_store=task_runtime_container.review_store,
+    )
     dispatcher = AcceptanceEffectDispatcher(
         task_store=task_runtime_container.task_store,
         handlers=build_production_acceptance_effect_handlers(
@@ -998,6 +1022,17 @@ def build_governed_operator_composition(
             ),
             agent_runtime_ports=agent_runtime_ports,
             embodiment_runtime_provider=embodiment_runtime_provider,
+            graph_cancellation_service_provider=lambda: getattr(
+                task_runtime_container,
+                "bound_runtime",
+                None,
+            ),
+            secure_ingress_authority_resolver=(
+                secure_ingress_authority_resolver
+            ),
+            task_store=task_runtime_container.task_store,
+            review_command_service=review_command_service,
+            review_store=task_runtime_container.review_store,
         ),
         owner_id=f"{runtime_owner_id}::acceptance-effects",
         action_preview_service=action_preview_service,
@@ -1026,6 +1061,7 @@ def build_governed_operator_composition(
         runtime=runtime,
         acceptance_effect_dispatcher=dispatcher,
         acceptance_effect_runtime=effect_runtime,
+        review_command_service=review_command_service,
     )
 
 
@@ -1037,6 +1073,7 @@ def _require_operator_target(target_id: str) -> str:
         TERMINAL_TARGET_ID,
         OPERATION_RECONCILIATION_TARGET_ID,
         EFFECT_RECONCILIATION_TARGET_ID,
+        OPERATOR_CONTROL_TARGET_ID,
     }:
         raise GovernedOperatorRuntimeError(
             GOVERNED_OPERATOR_RUNTIME_INVALID,

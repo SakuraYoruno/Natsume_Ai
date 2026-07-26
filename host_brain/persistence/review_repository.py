@@ -617,6 +617,72 @@ class ReviewStore:
             token_digest = review_resume_token_digest(resume_token_ref)
         except ValueError as exc:
             raise ReviewStoreError(REVIEW_TOKEN_INVALID, "resume token is invalid") from exc
+        return self._resume_review_with_token_digest(
+            review_id,
+            token_digest=token_digest,
+            subject_ref=subject_ref,
+            subject_version=subject_version,
+            resume_phase=resume_phase,
+            checkpoint_id=checkpoint_id,
+            resume_result_ref=resume_result_ref,
+        )
+
+    def resume_review_by_operator_token_ref(
+        self,
+        review_id: str,
+        *,
+        token_ref_public: str,
+        subject_ref: str,
+        subject_version: int,
+        resume_phase: ReviewResumePhase | str,
+        checkpoint_id: str,
+        resume_result_ref: str | None = None,
+    ) -> dict[str, Any]:
+        """Consume a token by its durable public identity for Secure Operator ingress.
+
+        The ordinary API continues to require the unguessable bearer.  This
+        path is deliberately separate: Secure Ingress, the Operator TaskGraph,
+        node grant, Verification, Acceptance and Action Preview already
+        authenticate the human action.  Using the public identity makes the
+        one-time token recoverable after a response loss without persisting its
+        bearer secret in WorkOrder, receipts or command outcomes.
+        """
+
+        public_ref = _text(token_ref_public)
+        prefix = "review-token://"
+        digest = public_ref.removeprefix(prefix)
+        if (
+            not public_ref.startswith(prefix)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ReviewStoreError(
+                REVIEW_TOKEN_INVALID,
+                "operator resume token public reference is invalid",
+            )
+        return self._resume_review_with_token_digest(
+            review_id,
+            token_digest=digest,
+            subject_ref=subject_ref,
+            subject_version=subject_version,
+            resume_phase=resume_phase,
+            checkpoint_id=checkpoint_id,
+            resume_result_ref=resume_result_ref,
+            expected_token_ref_public=public_ref,
+        )
+
+    def _resume_review_with_token_digest(
+        self,
+        review_id: str,
+        *,
+        token_digest: str,
+        subject_ref: str,
+        subject_version: int,
+        resume_phase: ReviewResumePhase | str,
+        checkpoint_id: str,
+        resume_result_ref: str | None,
+        expected_token_ref_public: str | None = None,
+    ) -> dict[str, Any]:
         phase = self._phase_value(resume_phase)
         checkpoint = _durable_ref(checkpoint_id, field_name="checkpoint_id")
         result_ref = _durable_ref(
@@ -641,6 +707,15 @@ class ReviewStore:
                 raise ReviewStoreError(
                     REVIEW_TOKEN_SUBJECT_MISMATCH,
                     "resume token is bound to a different review",
+                )
+            if (
+                expected_token_ref_public is not None
+                and str(token_row["token_ref_public"])
+                != expected_token_ref_public
+            ):
+                raise ReviewStoreError(
+                    REVIEW_TOKEN_SUBJECT_MISMATCH,
+                    "resume token public identity drifted",
                 )
             if str(token_row["state"]) == "CONSUMED" or item.status is ReviewStatus.CONSUMED:
                 raise ReviewStoreError(

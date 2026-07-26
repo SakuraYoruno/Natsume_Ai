@@ -21,6 +21,9 @@ from host_brain.contracts.agent_runtime.review_policy import (
     ReviewStatus,
     ReviewType,
 )
+from host_brain.contracts.review_cancellation import (
+    cancelled_review_target_status,
+)
 from host_brain.core.ids import now_ms
 from host_brain.persistence.review_continuation_binding import (
     REVIEW_CONTINUATION_CLAIM_LOST,
@@ -56,17 +59,12 @@ from host_brain.persistence.review_continuation_codec import (
     _row_dict,
     _waiting_status,
 )
+from host_brain.persistence.review_continuation_schema import (
+    continuation_table_exists,
+)
 from host_brain.persistence.task_record_codec import (
     _graph_cancellation_intent_record,
 )
-
-
-def continuation_table_exists(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (REVIEW_CONTINUATION_TABLE,),
-    ).fetchone()
-    return row is not None
 
 
 def enqueue_task_review_continuation_in_transaction(
@@ -189,15 +187,22 @@ def _validate_cancelled_task_review_checkpoint(
         "status": expected_waiting,
         "status_version": int(review.subject_version),
     }
+    try:
+        expected_after_status = cancelled_review_target_status(expected_waiting)
+    except ValueError as exc:
+        raise ReviewContinuationStoreError(
+            REVIEW_CONTINUATION_CONFLICT,
+            "cancelled Review checkpoint has no legal Graph cancellation transition",
+        ) from exc
     expected_after = {
-        "status": "CANCELLED",
+        "status": expected_after_status,
         "status_version": int(review.subject_version) + 1,
     }
     if (
         str(cancellation.get("status") or "") not in {"REQUESTED", "FINALIZED"}
         or before != expected_before
         or after != expected_after
-        or str(node["status"]) != "CANCELLED"
+        or str(node["status"]) != expected_after_status
         or int(node["status_version"]) != expected_after["status_version"]
     ):
         raise ReviewContinuationStoreError(
@@ -216,8 +221,6 @@ def _validate_cancelled_task_review_checkpoint(
         resume_phase=review.resume_phase.value,
         checkpoint_crossed=True,
     )
-
-
 def validate_task_review_admission_in_transaction(
     conn: sqlite3.Connection,
     *,

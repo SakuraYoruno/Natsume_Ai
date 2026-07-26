@@ -312,6 +312,7 @@ def _effect_descriptor(
         "task.terminal_reconciliation": 4,
         "task.operation_reconciliation": 4,
         "task.acceptance_effect_reconciliation": 4,
+        "task.operator_control": 4,
         "life.conversation_turn_recorded": 2,
         "life.foreground_completed": 2,
         "surface.reply_delivery": 3,

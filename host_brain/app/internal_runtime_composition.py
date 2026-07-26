@@ -26,6 +26,7 @@ class InternalRuntimeComposition:
     operator_runtime: Any
     acceptance_effect_dispatcher: Any
     acceptance_effect_runtime: Any
+    review_commands: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +163,7 @@ def compose_internal_runtime(
         operator_runtime=operator_composition.runtime,
         acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         acceptance_effect_runtime=operator_composition.acceptance_effect_runtime,
+        review_commands=operator_composition.review_command_service,
     )
 
 
@@ -181,7 +183,6 @@ async def activate_internal_runtime(
     memory: Any,
     intent_engine_provider: Callable[[], Any],
     runtime_group_factory: Callable[..., Any],
-    review_command_service_factory: Callable[..., Any],
     internal_command_service_factory: Callable[..., Any],
 ) -> ActivatedInternalRuntime:
     """Bind and activate the canonical group, then publish its app-local ports."""
@@ -210,10 +211,17 @@ async def activate_internal_runtime(
         acceptance_effect_runtime=composition.acceptance_effect_runtime,
         operation_reacquisition_owner_id=composition.canonical_owner,
     )
-    review_commands = review_command_service_factory(
-        review_store=task_runtime.review_store,
-        wake_continuation=runtime_group.wake_review_continuation,
+    review_commands = composition.review_commands
+    bind_review_wake = getattr(
+        review_commands,
+        "bind_wake_continuation",
+        None,
     )
+    if not callable(bind_review_wake):
+        raise TypeError(
+            "app-local Review command service lacks continuation binding"
+        )
+    bind_review_wake(runtime_group.wake_review_continuation)
     bind_reacquisition_owner = getattr(
         task_runtime.operation_reconciliation_service,
         "bind_execution_owner",
@@ -242,6 +250,9 @@ async def activate_internal_runtime(
     application.state.scheduler_container = scheduler
     application.state.task_review_command_service = review_commands
     application.state.task_graph_cancellation_command_service = runtime_group
+    application.state.task_graph_cancellation_operator_enabled = bool(
+        cancellation_operator_enabled
+    )
     application.state.task_operation_reacquisition_continuation = (
         runtime_group if operation_reconciliation_operator_enabled else None
     )

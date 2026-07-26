@@ -35,6 +35,8 @@ ACTION_ALLOWLIST = {
     "operator_task_terminal_reconciliation",
     "operator_task_operation_reconciliation",
     "operator_task_effect_reconciliation",
+    "operator_task_graph_cancellation",
+    "operator_task_review_control",
     "work_code",
     "work_translate",
 }
@@ -43,6 +45,8 @@ ACTION_TARGET_RULES = {
     "operator_edge_command_push": "edge",
     "operator_task_operation_reconciliation": "task_runtime",
     "operator_task_effect_reconciliation": "task_runtime",
+    "operator_task_graph_cancellation": "task_runtime",
+    "operator_task_review_control": "task_runtime",
 }
 
 REQUIRED_FIELDS: dict[str, type] = {
@@ -164,6 +168,40 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "reconciler_actor_id": str,
         },
         "optional": {},
+    },
+    "operator_task_graph_cancellation": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "request_id": str,
+            "operator_actor_id": str,
+            "graph_id": str,
+            "graph_revision": int,
+            "reason_code": str,
+        },
+        "optional": {},
+    },
+    "operator_task_review_control": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "request_id": str,
+            "operator_actor_id": str,
+            "review_id": str,
+        },
+        "optional": {
+            "actor_id": str,
+            "subject_ref": str,
+            "subject_version": int,
+            "resume_phase": str,
+            "checkpoint_id": str,
+            "resume_binding_sha256": str,
+            "resume_result_ref": str,
+        },
     },
     "work_code": {"required": {"text": str}, "optional": {}},
     "work_translate": {"required": {"text": str}, "optional": {}},

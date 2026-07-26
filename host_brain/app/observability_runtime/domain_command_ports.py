@@ -22,7 +22,6 @@ from host_brain.observability.command_ports import (
     ObsCommandPortExecutionError,
     ObsCommandPortRegistry,
 )
-from host_brain.composition.runtime_group import GraphCancellationOperatorError
 from host_brain.task_runtime.graph_cancellation_effect_reconciliation import (
     GraphCancellationEffectReconciliationError,
 )
@@ -60,7 +59,11 @@ GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
     "scheduler.task.trigger",
     "sys_mode.switch",
     "task_effect.reconcile",
+    "task_graph.cancel",
     "task_operation.reconcile",
+    "task_review.approve",
+    "task_review.reject",
+    "task_review.resume",
     "task_terminal.reconcile",
 })
 BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
@@ -69,7 +72,7 @@ BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
     if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
 )
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 31
+    len(BLOCKED_OPERATOR_COMMAND_IDS) != 27
     or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
     or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
     != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
@@ -635,36 +638,12 @@ async def _security_hunt(
     return dict(result)
 
 
-async def _task_graph_cancel(payload: Mapping[str, Any], _request_id: str) -> Any:
-    del _request_id
-    service = operator_runtime_value("task_graph_cancellation_command_service")
-    request_cancellation = getattr(service, "request_graph_cancellation", None)
-    if not callable(request_cancellation):
-        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_UNAVAILABLE")
-    authority = payload.get("_operator_authority")
-    if not isinstance(authority, Mapping):
-        raise ObsDomainCommandError("OBS_DOMAIN_BOUND_AUTHORITY_INVALID")
-    try:
-        result = request_cancellation(
-            graph_id=_required_text(payload, "graph_id"),
-            graph_revision=int(payload["graph_revision"]),
-            reason_code=_required_text(payload, "reason_code").upper(),
-            authority=dict(authority),
-        )
-        if inspect.isawaitable(result):
-            result = await result
-    except GraphCancellationOperatorError as exc:
-        raise ObsCommandPortExecutionError(
-            exc.reason_code,
-            side_effects_may_have_run=exc.side_effects_may_have_run,
-        ) from exc
-    if not isinstance(result, Mapping):
-        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_RESULT_INVALID")
-    return {
-        "success": True,
-        "side_effects_executed": True,
-        "cancellation": dict(result),
-    }
+async def _task_graph_cancel(payload: Mapping[str, Any], request_id: str) -> Any:
+    if operator_runtime_value(
+        "task_graph_cancellation_operator_enabled"
+    ) is not True:
+        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_DISABLED")
+    return await _execute_governed_operator_control(payload, request_id)
 
 
 async def _task_operation_reconcile(
@@ -726,33 +705,23 @@ async def _task_terminal_reconcile(
     return await reconcile(payload, request_id)
 
 
-def _task_review_approve(payload: Mapping[str, Any], _request_id: str) -> Any:
-    service = _task_review_service()
-    review_id = _required_text(payload, "review_id")
-    approved = service.approve_review(
-        review_id,
-        actor_id=_required_text(payload, "actor_id"),
-        expected_subject_ref=_required_text(payload, "subject_ref"),
-        expected_subject_version=int(payload["subject_version"]),
-        expected_resume_phase=_required_text(payload, "resume_phase"),
-        expected_checkpoint_id=_required_text(payload, "checkpoint_id"),
-    )
-    return {"accepted": True, **dict(approved)}
-
-
-def _task_review_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
-    service = _task_review_service()
-    review_id = _required_text(payload, "review_id")
-    record = service.reject_review(
-        review_id,
-        actor_id=_required_text(payload, "actor_id"),
-    )
-    return {"accepted": True, "review": dict(record)}
-
-
-def _task_review_resume(
+async def _task_review_approve(
     payload: Mapping[str, Any],
-    _request_id: str,
+    request_id: str,
+) -> Any:
+    return await _execute_governed_operator_control(payload, request_id)
+
+
+async def _task_review_reject(
+    payload: Mapping[str, Any],
+    request_id: str,
+) -> Any:
+    return await _execute_governed_operator_control(payload, request_id)
+
+
+async def _task_review_resume(
+    payload: Mapping[str, Any],
+    request_id: str,
     *,
     degradation_capability_port_provider: (
         Callable[[], DegradationCapabilityPort | None] | None
@@ -778,29 +747,23 @@ def _task_review_resume(
                 or "DEGRADATION_STATE_UNAVAILABLE"
             )
         )
-    service = _task_review_service()
-    review_id = _required_text(payload, "review_id")
-    resume = service.resume_review(
-        review_id,
-        resume_token_ref=_required_text(payload, "resume_token_ref"),
-        subject_ref=_required_text(payload, "subject_ref"),
-        subject_version=int(payload["subject_version"]),
-        resume_phase=_required_text(payload, "resume_phase"),
-        checkpoint_id=_required_text(payload, "checkpoint_id"),
-        resume_result_ref=_optional_text(payload, "resume_result_ref"),
-    )
-    return {"accepted": True, "resume": dict(resume)}
+    return await _execute_governed_operator_control(payload, request_id)
 
 
-def _task_review_service() -> Any:
-    service = operator_runtime_value("task_review_command_service")
-    required = ("approve_review", "reject_review", "resume_review")
-    if service is None or any(
-        not callable(getattr(service, method_name, None))
-        for method_name in required
-    ):
-        raise ObsDomainCommandError("OBS_TASK_REVIEW_DOMAIN_UNAVAILABLE")
-    return service
+async def _execute_governed_operator_control(
+    payload: Mapping[str, Any],
+    request_id: str,
+) -> Any:
+    runtime = operator_runtime_value("governed_operator_runtime")
+    execute = getattr(runtime, "execute_operator_control", None)
+    if not callable(execute):
+        raise ObsDomainCommandError("OBS_TASK_CONTROL_RUNTIME_UNAVAILABLE")
+    result = execute(payload, request_id)
+    if inspect.isawaitable(result):
+        result = await result
+    if not isinstance(result, Mapping):
+        raise ObsDomainCommandError("OBS_TASK_CONTROL_RESULT_INVALID")
+    return dict(result)
 
 
 _HANDLERS: Mapping[str, DomainHandler] = {

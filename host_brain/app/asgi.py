@@ -1247,7 +1247,6 @@ def create_app(
                     memory=memory,
                     intent_engine_provider=intent_engine_provider,
                     runtime_group_factory=GovernedRuntimeGroup,
-                    review_command_service_factory=TaskReviewCommandService,
                     internal_command_service_factory=InternalAgentCommandService,
                 )
                 task_runtime_container = task_runtime
