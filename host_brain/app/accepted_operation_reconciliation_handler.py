@@ -205,19 +205,13 @@ class AcceptedOperationReconciliationHandler:
             request["action"] == "RELEASE"
             and request["intent_ref"] is None
         )
-        if terminal_failure and (
-            terminal is None
-            or str(terminal.get("authority_kind") or "")
-            != "RECONCILED_OPERATION_TERMINAL_FAILURE"
-            or str(terminal.get("graph_status") or "") != "FAILED"
-            or str(terminal.get("node_status") or "") != "FAILED"
-            or str(terminal.get("attempt_status") or "") != "FAILED"
-            or str(terminal.get("budget_status") or "") != "RELEASED"
-            or str(terminal.get("lease_status") or "") != "EXPIRED"
-        ):
-            raise AcceptanceEffectOutcomeUnknown(
-                "reconciled terminal failure has no exact Task settlement"
-            )
+        if terminal_failure:
+            try:
+                _terminal_failure_receipt_record(terminal)
+            except ValueError as exc:
+                raise AcceptanceEffectOutcomeUnknown(
+                    "reconciled terminal failure has no exact Task settlement"
+                ) from exc
         receipt_ref = operation_reconciliation_handler_receipt_ref(
             request=request,
             operation=operation,
@@ -251,12 +245,26 @@ def operation_reconciliation_handler_receipt_ref(
         str(request.get("action") or "").strip().upper() == "RELEASE"
         and not str(request.get("intent_ref") or "").strip()
     )
+    terminal_failure_record = (
+        _terminal_failure_receipt_record(terminal)
+        if terminal_failure
+        else None
+    )
+    node_failure = (
+        terminal_failure_record is not None
+        and terminal_failure_record["authority_kind"]
+        == "RECONCILED_OPERATION_NODE_FAILURE"
+    )
     material: dict[str, Any] = {
         "schema_version": (
             "Natsume.task.operation_reconciliation_receipt.v2"
             if checkpoint_commit
             else (
-                "Natsume.task.operation_reconciliation_receipt.v3"
+                (
+                    "Natsume.task.operation_reconciliation_receipt.v4"
+                    if node_failure
+                    else "Natsume.task.operation_reconciliation_receipt.v3"
+                )
                 if terminal_failure
                 else "Natsume.task.operation_reconciliation_receipt.v1"
             )
@@ -297,50 +305,7 @@ def operation_reconciliation_handler_receipt_ref(
             }
         )
     if terminal_failure:
-        terminal_record = dict(terminal or {})
-        required_terminal = {
-            "authority_kind": str(
-                terminal_record.get("authority_kind") or ""
-            ),
-            "graph_status": str(
-                terminal_record.get("graph_status") or ""
-            ),
-            "node_status": str(
-                terminal_record.get("node_status") or ""
-            ),
-            "attempt_status": str(
-                terminal_record.get("attempt_status") or ""
-            ),
-            "budget_status": str(
-                terminal_record.get("budget_status") or ""
-            ),
-            "lease_status": str(
-                terminal_record.get("lease_status") or ""
-            ),
-            "failure_reason_code": str(
-                terminal_record.get("failure_reason_code") or ""
-            ),
-            "error_ref": str(
-                terminal_record.get("error_ref") or ""
-            ),
-        }
-        if (
-            required_terminal["authority_kind"]
-            != "RECONCILED_OPERATION_TERMINAL_FAILURE"
-            or required_terminal["graph_status"] != "FAILED"
-            or required_terminal["node_status"] != "FAILED"
-            or required_terminal["attempt_status"] != "FAILED"
-            or required_terminal["budget_status"] != "RELEASED"
-            or required_terminal["lease_status"] != "EXPIRED"
-            or not required_terminal["failure_reason_code"]
-            or not required_terminal["error_ref"].startswith(
-                "taskerror://operation-failure/sha256/"
-            )
-        ):
-            raise ValueError(
-                "terminal failure reconciliation receipt is incomplete"
-            )
-        material["terminal_failure"] = required_terminal
+        material["terminal_failure"] = terminal_failure_record
     encoded = json.dumps(
         material,
         ensure_ascii=False,
@@ -350,6 +315,114 @@ def operation_reconciliation_handler_receipt_ref(
     return "operation-reconcile://receipt/sha256/" + hashlib.sha256(
         encoded
     ).hexdigest()
+
+
+def _terminal_failure_receipt_record(
+    terminal: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate live settlement state and return stable receipt material.
+
+    Multi-node Graph/Budget settlement is a later 0090 decision.  Its live
+    PENDING/COMMITTED projection is validated here but deliberately omitted
+    from the v4 receipt digest so the accepted Operation effect remains an
+    exact replay after that append-only Graph settlement commits.
+    """
+
+    terminal_record = dict(terminal or {})
+    common = {
+        "authority_kind": str(
+            terminal_record.get("authority_kind") or ""
+        ),
+        "node_status": str(
+            terminal_record.get("node_status") or ""
+        ),
+        "attempt_status": str(
+            terminal_record.get("attempt_status") or ""
+        ),
+        "lease_status": str(
+            terminal_record.get("lease_status") or ""
+        ),
+        "failure_reason_code": str(
+            terminal_record.get("failure_reason_code") or ""
+        ),
+        "error_ref": str(
+            terminal_record.get("error_ref") or ""
+        ),
+    }
+    if (
+        common["node_status"] != "FAILED"
+        or common["attempt_status"] != "FAILED"
+        or common["lease_status"] != "EXPIRED"
+        or not common["failure_reason_code"]
+        or not common["error_ref"].startswith(
+            "taskerror://operation-failure/sha256/"
+        )
+    ):
+        raise ValueError(
+            "terminal failure reconciliation receipt is incomplete"
+        )
+    graph_status = str(
+        terminal_record.get("graph_status") or ""
+    )
+    budget_status = str(
+        terminal_record.get("budget_status") or ""
+    )
+    if common["authority_kind"] == "RECONCILED_OPERATION_TERMINAL_FAILURE":
+        if graph_status != "FAILED" or budget_status != "RELEASED":
+            raise ValueError(
+                "single-node failure terminal is incomplete"
+            )
+        return {
+            "authority_kind": common["authority_kind"],
+            "graph_status": graph_status,
+            "node_status": common["node_status"],
+            "attempt_status": common["attempt_status"],
+            "budget_status": budget_status,
+            "lease_status": common["lease_status"],
+            "failure_reason_code": common["failure_reason_code"],
+            "error_ref": common["error_ref"],
+        }
+    if (
+        common["authority_kind"] != "RECONCILED_OPERATION_NODE_FAILURE"
+        or str(terminal_record.get("settlement_scope") or "")
+        != "NODE_ONLY"
+    ):
+        raise ValueError(
+            "multi-node failure authority is incomplete"
+        )
+    settlement_status = str(
+        terminal_record.get("graph_settlement_status") or ""
+    )
+    settlement_ref = (
+        str(terminal_record.get("parallel_settlement_ref") or "").strip()
+        or None
+    )
+    pending = (
+        settlement_status == "PENDING"
+        and graph_status == "ACTIVE"
+        and budget_status in {"ACTIVE", "EXCEEDED"}
+        and settlement_ref is None
+    )
+    committed = (
+        settlement_status == "COMMITTED"
+        and graph_status == "FAILED"
+        and budget_status == "RELEASED"
+        and settlement_ref is not None
+        and settlement_ref.startswith("taskbatch://sha256/")
+    )
+    if not pending and not committed:
+        raise ValueError(
+            "multi-node failure Graph settlement is incomplete"
+        )
+    return {
+        "authority_kind": common["authority_kind"],
+        "settlement_scope": "NODE_ONLY",
+        "node_status": common["node_status"],
+        "attempt_status": common["attempt_status"],
+        "lease_status": common["lease_status"],
+        "failure_reason_code": common["failure_reason_code"],
+        "error_ref": common["error_ref"],
+    }
 
 
 def _request(payload: Mapping[str, Any]) -> dict[str, Any]:

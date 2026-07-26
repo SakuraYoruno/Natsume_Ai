@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,9 @@ from host_brain.app.accepted_operation_reconciliation_handler import (
 from host_brain.app.internal_task_contracts import build_internal_task_contracts
 from host_brain.contracts.agent_runtime.internal_raw_failure_claim_result import (
     INTERNAL_RAW_FAILURE_RESULT_REF_PREFIX,
+)
+from host_brain.contracts.agent_runtime.task_graph import (
+    TaskGraphCompletionPolicy,
 )
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 from host_brain.orchestration import GovernedCommandApplication
@@ -95,6 +99,23 @@ class _FailureResponseLossStore:
             self.response_lost = True
             raise TimeoutError("simulated terminal failure response loss")
         return result
+
+
+class _AlwaysFailWorker:
+    def __init__(self, calls: list[str]) -> None:
+        self._calls = calls
+        self.invocations = 0
+
+    async def execute_stream(
+        self,
+        *,
+        execution_context: dict[str, Any],
+        **_: Any,
+    ):
+        self.invocations += 1
+        self._calls.append(str(execution_context["node_id"]))
+        raise RuntimeError("simulated concurrent post-reservation interruption")
+        yield  # pragma: no cover - preserve the async-generator contract
 
 
 class _UnavailableClaimStore:
@@ -450,6 +471,454 @@ async def test_signed_release_atomically_fails_raw_worker_without_replay(
         reopened.resolve_reconciled_operation_failure(
             admitted.reservation_id
         )
+
+
+@pytest.mark.asyncio
+async def test_signed_release_closes_one_node_then_0090_settles_multinode_graph(
+    tmp_path: Path,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    verifier = Ed25519ReconciliationProofVerifier(
+        {"reconciler-multinode-failure-v1": public_key}
+    )
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ())),
+        concurrency=1,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
+    )
+    contracts = (
+        replace(
+            contracts[0],
+            governor_grant_ref="grant://multinode-failure/parent",
+        ),
+        *contracts[1:],
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _FailOnceWorker(
+        _ProjectedWorker(projections=projections, calls=calls),
+        calls,
+    )
+    first_store = DurableTaskStore(
+        db_path,
+        clock=clock,
+        reconciliation_proof_verifier=verifier,
+    )
+    first_application = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=first_store,
+            projections=projections,
+            worker=worker,
+            owner_id="multinode-failure-owner-a",
+            lease_ttl_ms=20,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_NodeGrantVerifier(),
+        ),
+        node_grant_service=_NodeGrantService(),
+    )
+
+    interrupted = await _events(first_application, contracts)
+
+    assert interrupted[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+    assert worker.invocations == 1
+    assert calls == ["left"]
+    operation = dict(
+        first_store.get_operation_reservation(admitted.reservation_id)
+    )
+    snapshot = first_store.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+    attempt = dict(snapshot["attempts"][0])
+    assert first_store.get_graph(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )["status"] == "ACTIVE"
+    assert first_store.get_node(
+        admitted.graph_id,
+        admitted.graph_revision,
+        "left",
+    )["status"] == "RUNNING"
+    assert first_store.get_node(
+        admitted.graph_id,
+        admitted.graph_revision,
+        "right",
+    )["status"] == "READY"
+    assert len(snapshot["active_leases"]) == 1
+
+    actor_id = "reconciler://operator/multinode-failure-test"
+    attestation_ref = "proof://operation-multinode-failure/integration"
+    request = {
+        "reservation_id": admitted.reservation_id,
+        "expected_version": operation["status_version"],
+        "reconciler_actor_id": actor_id,
+        "attestation_ref": attestation_ref,
+        "attestation_key_id": "reconciler-multinode-failure-v1",
+        "attestation_signature": _release_signature(
+            private_key,
+            operation=operation,
+            expected_version=operation["status_version"],
+            actor_id=actor_id,
+            attestation_ref=attestation_ref,
+        ),
+    }
+    evidence = first_store.stage_operation_reconciliation_evidence(
+        request_id="request-signed-operation-multinode-failure",
+        ingress_audit_ref=(
+            "secure-ingress-audit://operation/multinode-failure"
+        ),
+        body_sha256="c" * 64,
+        action="RELEASE",
+        intent_ref=None,
+        downstream_receipt_ref=None,
+        **request,
+    )
+    clock.advance(21)
+    service = OperationFailureReconciliationService(
+        task_store=first_store,
+        outbox_factory=OutboxMessage,
+    )
+
+    pending = service.reconcile_operation_failure(**request)
+
+    assert pending["terminal"] == {
+        "authority_kind": "RECONCILED_OPERATION_NODE_FAILURE",
+        "graph_status": "ACTIVE",
+        "node_status": "FAILED",
+        "attempt_status": "FAILED",
+        "budget_status": "ACTIVE",
+        "lease_status": "EXPIRED",
+        "failure_reason_code": "GOVERNED_WORKER_FAILED",
+        "error_ref": pending["terminal"]["error_ref"],
+        "settlement_scope": "NODE_ONLY",
+        "graph_settlement_status": "PENDING",
+        "parallel_settlement_ref": None,
+    }
+    pending_terminal = first_store.resolve_reconciled_operation_failure(
+        admitted.reservation_id
+    )
+    assert pending_terminal["graph_settlement_status"] == "PENDING"
+    assert pending_terminal["graph"]["status"] == "ACTIVE"
+    assert pending_terminal["budget"]["status"] == "ACTIVE"
+    assert pending_terminal["node"]["node_id"] == "left"
+    assert pending_terminal["node"]["status"] == "FAILED"
+    assert pending_terminal["attempt"]["attempt_id"] == attempt["attempt_id"]
+
+    command_service = OperationReconciliationCommandService(
+        cancellation_service=object(),  # unreachable for no-intent RELEASE
+        reacquisition_service=object(),  # unreachable for no-intent RELEASE
+        checkpoint_service=object(),  # unreachable for no-intent RELEASE
+        failure_service=service,
+    )
+    handler = AcceptedOperationReconciliationHandler(
+        service=command_service,
+        evidence_store=first_store,
+        continuation_provider=lambda: (_ for _ in ()).throw(
+            AssertionError("node failure must not rerun the target")
+        ),
+    )
+    effect_payload = {
+        "operator_command_id": "task_operation.reconcile",
+        "request_id": evidence["request_id"],
+        "evidence_ref": evidence["evidence_ref"],
+        "evidence_digest": evidence["evidence_digest"],
+        "reservation_id": request["reservation_id"],
+        "expected_version": request["expected_version"],
+        "action": "RELEASE",
+        "reconciler_actor_id": actor_id,
+    }
+    pending_handler = await handler(effect_payload)
+    pending_receipt_ref = pending_handler["receipt_ref"]
+    assert pending_handler["target_terminal"] == pending["terminal"]
+    assert pending_receipt_ref.startswith(
+        "operation-reconcile://receipt/sha256/"
+    )
+
+    with first_store._connect() as conn:
+        graph_budget_events = conn.execute(
+            """
+            SELECT event_type, attempt_id FROM task_runtime_outbox
+            WHERE event_type IN (
+                'TASK_GRAPH_FAILED',
+                'BUDGET_RESERVATION_RELEASED'
+            )
+            ORDER BY event_type
+            """
+        ).fetchall()
+    assert graph_budget_events == []
+
+    reopened_store = DurableTaskStore(
+        db_path,
+        clock=clock,
+        reconciliation_proof_verifier=verifier,
+    )
+    reopened_application = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=reopened_store,
+            projections=projections,
+            worker=worker,
+            owner_id="multinode-failure-owner-b",
+            lease_ttl_ms=20,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_NodeGrantVerifier(),
+        ),
+        node_grant_service=_NodeGrantService(),
+    )
+
+    settled_events = await _events(reopened_application, contracts)
+
+    assert settled_events[-1]["execution_receipt"]["status"] == "FAILED"
+    assert worker.invocations == 1
+    assert calls == ["left"]
+    settled = reopened_store.resolve_reconciled_operation_failure(
+        admitted.reservation_id
+    )
+    assert settled["authority_kind"] == "RECONCILED_OPERATION_NODE_FAILURE"
+    assert settled["graph_settlement_status"] == "COMMITTED"
+    assert settled["graph"]["status"] == "FAILED"
+    assert settled["budget"]["status"] == "RELEASED"
+    assert settled["parallel_settlement_ref"].startswith(
+        "taskbatch://sha256/"
+    )
+
+    replay_service = OperationFailureReconciliationService(
+        task_store=reopened_store,
+        outbox_factory=OutboxMessage,
+    )
+    replay_command_service = OperationReconciliationCommandService(
+        cancellation_service=object(),
+        reacquisition_service=object(),
+        checkpoint_service=object(),
+        failure_service=replay_service,
+    )
+    replay_handler = AcceptedOperationReconciliationHandler(
+        service=replay_command_service,
+        evidence_store=reopened_store,
+        continuation_provider=lambda: (_ for _ in ()).throw(
+            AssertionError("settled node failure must not rerun the target")
+        ),
+    )
+    committed_handler = await replay_handler(effect_payload)
+    assert committed_handler["exact_replay"] is True
+    assert committed_handler["receipt_ref"] == pending_receipt_ref
+    assert committed_handler["target_terminal"]["graph_status"] == "FAILED"
+    assert (
+        committed_handler["target_terminal"]["graph_settlement_status"]
+        == "COMMITTED"
+    )
+    assert worker.invocations == 1
+
+    with reopened_store._connect() as conn:
+        decision = conn.execute(
+            """
+            SELECT * FROM task_runtime_parallel_settlement_decision
+            WHERE graph_id = ? AND graph_revision = ?
+            """,
+            (admitted.graph_id, admitted.graph_revision),
+        ).fetchone()
+        assert decision is not None
+        event_counts = {
+            str(row["event_type"]): int(row["count"])
+            for row in conn.execute(
+                """
+                SELECT event_type, COUNT(*) AS count
+                FROM task_runtime_outbox
+                WHERE event_type IN (
+                    'OPERATION_RECOVERY_RELEASE',
+                    'TASK_ATTEMPT_FAILED',
+                    'TASK_NODE_FAILED',
+                    'TASK_GRAPH_FAILED',
+                    'TASK_LEASE_EXPIRED',
+                    'BUDGET_RESERVATION_RELEASED'
+                )
+                GROUP BY event_type
+                """
+            ).fetchall()
+        }
+    assert event_counts == {
+        "BUDGET_RESERVATION_RELEASED": 1,
+        "OPERATION_RECOVERY_RELEASE": 1,
+        "TASK_ATTEMPT_FAILED": 1,
+        "TASK_GRAPH_FAILED": 1,
+        "TASK_LEASE_EXPIRED": 1,
+        "TASK_NODE_FAILED": 1,
+    }
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM task_runtime_outbox WHERE outbox_id = ?",
+            (str(decision["budget_outbox_id"]),),
+        )
+    with pytest.raises(TaskStoreError):
+        reopened_store.resolve_reconciled_operation_failure(
+            admitted.reservation_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_0090_failure_decision_reopens_every_signed_failed_node(
+    tmp_path: Path,
+) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    verifier = Ed25519ReconciliationProofVerifier(
+        {"reconciler-multifailure-v1": public_key}
+    )
+    db_path = _migrated_db(tmp_path)
+    contracts = _contracts(
+        (("left", ()), ("right", ())),
+        concurrency=2,
+        completion_policy=TaskGraphCompletionPolicy.ATOMIC_GRAPH_SUCCESS_V1,
+    )
+    contracts = (
+        replace(
+            contracts[0],
+            governor_grant_ref="grant://multifailure/parent",
+        ),
+        *contracts[1:],
+    )
+    admitted = AdmittedExecution.from_contracts(
+        command=contracts[0],
+        assignment=contracts[2],
+        graph=contracts[3],
+    )
+    clock = _Clock()
+    projections = WorkerProjectionStore(db_path, clock=clock)
+    calls: list[str] = []
+    worker = _AlwaysFailWorker(calls)
+    store = DurableTaskStore(
+        db_path,
+        clock=clock,
+        reconciliation_proof_verifier=verifier,
+    )
+    application = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=store,
+            projections=projections,
+            worker=worker,
+            owner_id="multifailure-owner-a",
+            lease_ttl_ms=20,
+            bounded_fanout_enabled=True,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_NodeGrantVerifier(),
+        ),
+        node_grant_service=_NodeGrantService(),
+    )
+
+    interrupted = await _events(application, contracts)
+
+    assert interrupted[-1]["execution_receipt"]["status"] == "RECOVERY_REQUIRED"
+    assert worker.invocations == 2
+    assert sorted(calls) == ["left", "right"]
+    snapshot = store.read_scheduler_snapshot(
+        admitted.graph_id,
+        admitted.graph_revision,
+    )
+    assert {row["status"] for row in snapshot["attempts"]} == {"RUNNING"}
+    assert len(snapshot["active_leases"]) == 2
+
+    service = OperationFailureReconciliationService(
+        task_store=store,
+        outbox_factory=OutboxMessage,
+    )
+    requests: dict[str, dict[str, Any]] = {}
+    clock.advance(21)
+    for node_id in ("left", "right"):
+        node_admission = admitted.for_node(node_id)
+        operation = dict(
+            store.get_operation_reservation(node_admission.reservation_id)
+        )
+        actor_id = f"reconciler://operator/multifailure/{node_id}"
+        attestation_ref = f"proof://operation-multifailure/{node_id}"
+        request = {
+            "reservation_id": node_admission.reservation_id,
+            "expected_version": operation["status_version"],
+            "reconciler_actor_id": actor_id,
+            "attestation_ref": attestation_ref,
+            "attestation_key_id": "reconciler-multifailure-v1",
+            "attestation_signature": _release_signature(
+                private_key,
+                operation=operation,
+                expected_version=operation["status_version"],
+                actor_id=actor_id,
+                attestation_ref=attestation_ref,
+            ),
+        }
+        requests[node_id] = request
+        pending = service.reconcile_operation_failure(**request)
+        assert pending["terminal"]["graph_settlement_status"] == "PENDING"
+        assert pending["terminal"]["graph_status"] == "ACTIVE"
+
+    reopened = DurableTaskStore(
+        db_path,
+        clock=clock,
+        reconciliation_proof_verifier=verifier,
+    )
+    reopened_application = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            store=reopened,
+            projections=projections,
+            worker=worker,
+            owner_id="multifailure-owner-b",
+            lease_ttl_ms=20,
+            bounded_fanout_enabled=True,
+            atomic_graph_success_enabled=True,
+            node_grant_verifier=_NodeGrantVerifier(),
+        ),
+        node_grant_service=_NodeGrantService(),
+    )
+
+    settled_events = await _events(reopened_application, contracts)
+
+    assert settled_events[-1]["execution_receipt"]["status"] == "FAILED"
+    assert worker.invocations == 2
+    terminals = {
+        node_id: reopened.resolve_reconciled_operation_failure(
+            request["reservation_id"]
+        )
+        for node_id, request in requests.items()
+    }
+    assert {
+        terminal["graph_settlement_status"]
+        for terminal in terminals.values()
+    } == {"COMMITTED"}
+    assert len(
+        {
+            terminal["parallel_settlement_ref"]
+            for terminal in terminals.values()
+        }
+    ) == 1
+    with reopened._connect() as conn:
+        decision = conn.execute(
+            """
+            SELECT selected_node_id
+            FROM task_runtime_parallel_settlement_decision
+            WHERE graph_id = ? AND graph_revision = ?
+            """,
+            (admitted.graph_id, admitted.graph_revision),
+        ).fetchone()
+    assert decision is not None
+    nonselected = ({"left", "right"} - {str(decision["selected_node_id"])}).pop()
+    assert terminals[nonselected]["node"]["node_id"] == nonselected
+    assert terminals[nonselected]["attempt"]["status"] == "FAILED"
 
 
 @pytest.mark.asyncio

@@ -44,7 +44,7 @@ class OperationFailureReconciliationStorePort(Protocol):
 
 
 class OperationFailureReconciliationService:
-    """Fail one exact single-node Graph after signed no-effect attribution."""
+    """Fail one exact node after signed no-effect attribution."""
 
     __slots__ = ("_outbox_factory", "_store")
 
@@ -279,6 +279,38 @@ class OperationFailureReconciliationService:
                 "operation failure terminal is incomplete",
                 side_effects_may_have_run=True,
             )
+        terminal_projection = {
+            "authority_kind": terminal.get("authority_kind"),
+            "graph_status": graph.get("status"),
+            "node_status": node.get("status"),
+            "attempt_status": attempt.get("status"),
+            "budget_status": (
+                terminal.get("budget", {}).get("status")
+                if isinstance(terminal.get("budget"), Mapping)
+                else None
+            ),
+            "lease_status": (
+                terminal.get("lease", {}).get("status")
+                if isinstance(terminal.get("lease"), Mapping)
+                else None
+            ),
+            "failure_reason_code": terminal.get(
+                "failure_reason_code"
+            ),
+            "error_ref": terminal.get("error_ref"),
+        }
+        if terminal.get("settlement_scope") == "NODE_ONLY":
+            terminal_projection.update(
+                {
+                    "settlement_scope": "NODE_ONLY",
+                    "graph_settlement_status": terminal.get(
+                        "graph_settlement_status"
+                    ),
+                    "parallel_settlement_ref": terminal.get(
+                        "parallel_settlement_ref"
+                    ),
+                }
+            )
         return {
             "status": "RECONCILED",
             "graph_id": str(graph.get("graph_id") or ""),
@@ -286,26 +318,7 @@ class OperationFailureReconciliationService:
             "node_id": str(node.get("node_id") or ""),
             "attempt_id": str(attempt.get("attempt_id") or ""),
             "operation": dict(operation),
-            "terminal": {
-                "authority_kind": terminal.get("authority_kind"),
-                "graph_status": graph.get("status"),
-                "node_status": node.get("status"),
-                "attempt_status": attempt.get("status"),
-                "budget_status": (
-                    terminal.get("budget", {}).get("status")
-                    if isinstance(terminal.get("budget"), Mapping)
-                    else None
-                ),
-                "lease_status": (
-                    terminal.get("lease", {}).get("status")
-                    if isinstance(terminal.get("lease"), Mapping)
-                    else None
-                ),
-                "failure_reason_code": terminal.get(
-                    "failure_reason_code"
-                ),
-                "error_ref": terminal.get("error_ref"),
-            },
+            "terminal": terminal_projection,
             "replayed": bool(replayed),
         }
 

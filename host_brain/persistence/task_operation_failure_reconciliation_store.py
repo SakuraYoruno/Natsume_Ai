@@ -1,11 +1,12 @@
-"""Atomic signed terminal failure for a post-reservation worker interruption.
+"""Atomic signed failure settlement for a post-reservation interruption.
 
 This store boundary is deliberately distinct from retry/reacquisition and
-Graph cancellation.  A signed ``RELEASE + NO_SIDE_EFFECT`` decision may close
-one exact single-node execution only after its original Lease is no longer
-live.  The Operation, Attempt, TaskNode, TaskGraph, Lease and graph Budget are
-settled in one SQLite transaction and can be reopened exactly after response
-loss.
+Graph cancellation.  A signed ``RELEASE + NO_SIDE_EFFECT`` decision closes one
+exact Operation, Attempt, TaskNode and expired Lease.  A single-node Graph is
+also failed and its Budget released in that transaction.  A multi-node Graph
+remains ACTIVE until the existing append-only 0090 parallel-settlement
+authority atomically closes the shared Graph and Budget.  Both phases can be
+reopened exactly after response loss.
 """
 
 from __future__ import annotations
@@ -24,11 +25,18 @@ from host_brain.contracts.agent_runtime.operation_reconciliation import (
     build_operation_failure_outbox_identity,
     build_reconciliation_attestation_binding,
 )
+from host_brain.contracts.agent_runtime.parallel_settlement import (
+    normalize_parallel_settlement_decision,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphStatus,
     TaskNodeStatus,
     validate_task_graph_transition,
     validate_task_node_transition,
+)
+from host_brain.persistence.task_decision_integrity import (
+    _assert_parallel_settlement_decision_outbox_binding,
+    _find_invalid_declared_parallel_settlement_decision_ref,
 )
 from host_brain.persistence.reconciliation_proof_verifier import (
     TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
@@ -38,6 +46,7 @@ from host_brain.persistence.task_record_codec import (
     _dumps,
     _graph_record,
     _node_record,
+    _parallel_settlement_decision_record,
     _validate_attempt_transition,
     _validated_node_payload,
 )
@@ -58,11 +67,12 @@ from host_brain.persistence.task_store_types import (
 _SIGNATURE_PATTERN = re.compile(r"^ed25519:[A-Za-z0-9_-]{86}==$")
 _REASON_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,119}$")
 _FAILURE_AUTHORITY_KIND = "RECONCILED_OPERATION_TERMINAL_FAILURE"
+_NODE_FAILURE_AUTHORITY_KIND = "RECONCILED_OPERATION_NODE_FAILURE"
 _INTERNAL_AUTHORITY_KIND = "INTERNAL_AGENT_RAW_FAILURE_TERMINAL"
 
 
 class TaskOperationFailureReconciliationStoreMixin:
-    """Persist and reopen one signed no-side-effect terminal failure."""
+    """Persist and reopen one signed no-side-effect node failure."""
 
     def reconcile_operation_failure(
         self,
@@ -184,7 +194,7 @@ class TaskOperationFailureReconciliationStoreMixin:
                 (attempt_id,),
             ).fetchone()
             if (
-                len(nodes) != 1
+                not nodes
                 or len(budgets) != 1
                 or cancellation is not None
                 or projections is not None
@@ -192,9 +202,10 @@ class TaskOperationFailureReconciliationStoreMixin:
             ):
                 raise TaskStoreError(
                     TASK_STORE_INVALID,
-                    "terminal failure requires one node, one graph Budget, "
+                    "failure reconciliation requires TaskNodes, one graph Budget, "
                     "no cancellation, projection, or Acceptance Effect",
                 )
+            graph_wide_terminal = len(nodes) == 1
             budget = budgets[0]
             if (
                 str(attempt["status"]) != AttemptStatus.RUNNING.value
@@ -434,31 +445,32 @@ class TaskOperationFailureReconciliationStoreMixin:
                 expected_attempt_id=attempt_id,
             )
 
-            validate_task_graph_transition(
-                TaskGraphStatus.ACTIVE,
-                TaskGraphStatus.FAILED,
-            )
-            graph_version = int(graph["status_version"]) + 1
-            graph_outbox = self._operation_failure_outbox(
-                kind="graph",
-                aggregate_type="TASK_GRAPH",
-                aggregate_id=graph_id,
-                graph_revision=graph_revision,
-                aggregate_version=graph_version,
-                event_type="TASK_GRAPH_FAILED",
-                attempt_id=attempt_id,
-                evidence_refs=evidence_refs,
-            )
-            self._transition_graph_in_transaction(
-                conn,
-                graph_id=graph_id,
-                revision=graph_revision,
-                expected_version=int(graph["status_version"]),
-                target_status=TaskGraphStatus.FAILED,
-                outbox=graph_outbox,
-                ts_ms=ts_ms,
-                attempt_id=attempt_id,
-            )
+            if graph_wide_terminal:
+                validate_task_graph_transition(
+                    TaskGraphStatus.ACTIVE,
+                    TaskGraphStatus.FAILED,
+                )
+                graph_version = int(graph["status_version"]) + 1
+                graph_outbox = self._operation_failure_outbox(
+                    kind="graph",
+                    aggregate_type="TASK_GRAPH",
+                    aggregate_id=graph_id,
+                    graph_revision=graph_revision,
+                    aggregate_version=graph_version,
+                    event_type="TASK_GRAPH_FAILED",
+                    attempt_id=attempt_id,
+                    evidence_refs=evidence_refs,
+                )
+                self._transition_graph_in_transaction(
+                    conn,
+                    graph_id=graph_id,
+                    revision=graph_revision,
+                    expected_version=int(graph["status_version"]),
+                    target_status=TaskGraphStatus.FAILED,
+                    outbox=graph_outbox,
+                    ts_ms=ts_ms,
+                    attempt_id=attempt_id,
+                )
 
             lease_version = int(lease["status_version"]) + 1
             lease_cursor = conn.execute(
@@ -502,47 +514,48 @@ class TaskOperationFailureReconciliationStoreMixin:
                 expected_attempt_id=attempt_id,
             )
 
-            budget_version = int(budget["status_version"]) + 1
-            budget_cursor = conn.execute(
-                """
-                UPDATE task_runtime_budget_reservation
-                SET status = 'RELEASED',
-                    status_version = status_version + 1,
-                    updated_ts_ms = ?
-                WHERE budget_id = ? AND status IN ('ACTIVE', 'EXCEEDED')
-                  AND status_version = ?
-                """,
-                (
-                    ts_ms,
-                    str(budget["budget_id"]),
-                    int(budget["status_version"]),
-                ),
-            )
-            self._require_cas(
-                budget_cursor,
-                subject=f"BudgetReservation {budget['budget_id']}",
-            )
-            budget_outbox = self._operation_failure_outbox(
-                kind="budget",
-                aggregate_type="BUDGET_RESERVATION",
-                aggregate_id=str(budget["budget_id"]),
-                aggregate_version=budget_version,
-                event_type="BUDGET_RESERVATION_RELEASED",
-                attempt_id=attempt_id,
-                evidence_refs=evidence_refs,
-            )
-            self._insert_outbox(
-                conn,
-                budget_outbox,
-                ts_ms=ts_ms,
-                expected_aggregate=(
-                    "BUDGET_RESERVATION",
-                    str(budget["budget_id"]),
-                    budget_version,
-                ),
-                expected_event_type="BUDGET_RESERVATION_RELEASED",
-                expected_attempt_id=attempt_id,
-            )
+            if graph_wide_terminal:
+                budget_version = int(budget["status_version"]) + 1
+                budget_cursor = conn.execute(
+                    """
+                    UPDATE task_runtime_budget_reservation
+                    SET status = 'RELEASED',
+                        status_version = status_version + 1,
+                        updated_ts_ms = ?
+                    WHERE budget_id = ? AND status IN ('ACTIVE', 'EXCEEDED')
+                      AND status_version = ?
+                    """,
+                    (
+                        ts_ms,
+                        str(budget["budget_id"]),
+                        int(budget["status_version"]),
+                    ),
+                )
+                self._require_cas(
+                    budget_cursor,
+                    subject=f"BudgetReservation {budget['budget_id']}",
+                )
+                budget_outbox = self._operation_failure_outbox(
+                    kind="budget",
+                    aggregate_type="BUDGET_RESERVATION",
+                    aggregate_id=str(budget["budget_id"]),
+                    aggregate_version=budget_version,
+                    event_type="BUDGET_RESERVATION_RELEASED",
+                    attempt_id=attempt_id,
+                    evidence_refs=evidence_refs,
+                )
+                self._insert_outbox(
+                    conn,
+                    budget_outbox,
+                    ts_ms=ts_ms,
+                    expected_aggregate=(
+                        "BUDGET_RESERVATION",
+                        str(budget["budget_id"]),
+                        budget_version,
+                    ),
+                    expected_event_type="BUDGET_RESERVATION_RELEASED",
+                    expected_attempt_id=attempt_id,
+                )
             terminal = self._resolve_operation_failure_uow(
                 conn,
                 request["reservation_id"],
@@ -767,8 +780,9 @@ class TaskOperationFailureReconciliationStoreMixin:
             proof_ref=normalized["attestation_ref"],
             proof_digest=expected_proof_digest,
         )
+        graph_wide_terminal = len(nodes) == 1
         exact = (
-            len(nodes) == 1
+            bool(nodes)
             and len(budgets) == 1
             and len(commands) == 1
             and projections is None
@@ -777,7 +791,6 @@ class TaskOperationFailureReconciliationStoreMixin:
             and str(attempt["status"]) == AttemptStatus.FAILED.value
             and str(attempt["error_ref"] or "") == error_ref
             and str(node["status"]) == TaskNodeStatus.FAILED.value
-            and str(graph["status"]) == TaskGraphStatus.FAILED.value
             and str(lease["status"]) == LeaseStatus.EXPIRED.value
             and lease["released_ts_ms"] is not None
             and str(lease["attempt_id"]) == attempt_id
@@ -785,8 +798,6 @@ class TaskOperationFailureReconciliationStoreMixin:
             == str(operation.get("owner_id") or "")
             and int(lease["fencing_token"] or 0)
             == int(operation.get("fencing_token") or 0)
-            and str(budgets[0]["status"])
-            == BudgetReservationStatus.RELEASED.value
             and str(commands[0]["graph_id"]) == graph_id
             and int(commands[0]["graph_revision"]) == graph_revision
             and _REASON_PATTERN.fullmatch(reason_code) is not None
@@ -796,6 +807,138 @@ class TaskOperationFailureReconciliationStoreMixin:
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "reconciled terminal failure Task lineage drifted",
             )
+        settlement_scope = "GRAPH_TERMINAL" if graph_wide_terminal else "NODE_ONLY"
+        graph_settlement_status = "COMMITTED"
+        parallel_settlement_ref: str | None = None
+        authority_kind = _FAILURE_AUTHORITY_KIND
+        if graph_wide_terminal:
+            if (
+                str(graph["status"]) != TaskGraphStatus.FAILED.value
+                or str(budgets[0]["status"])
+                != BudgetReservationStatus.RELEASED.value
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "single-node failure Graph or Budget terminal drifted",
+                )
+        else:
+            authority_kind = _NODE_FAILURE_AUTHORITY_KIND
+            invalid_declared_ref = (
+                _find_invalid_declared_parallel_settlement_decision_ref(
+                    conn,
+                    graph_id=graph_id,
+                    graph_revision=graph_revision,
+                )
+            )
+            if invalid_declared_ref is not None:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "multi-node failure declares an invalid parallel settlement",
+                )
+            decision_rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_parallel_settlement_decision
+                WHERE graph_id = ? AND graph_revision = ?
+                ORDER BY graph_version_after, decision_ref
+                """,
+                (graph_id, graph_revision),
+            ).fetchall()
+            decision_records: list[
+                tuple[dict[str, Any], Any]
+            ] = []
+            for decision_row in decision_rows:
+                record = _parallel_settlement_decision_record(
+                    decision_row
+                )
+                _assert_parallel_settlement_decision_outbox_binding(
+                    conn,
+                    record,
+                )
+                normalized_decision = (
+                    normalize_parallel_settlement_decision(
+                        record["payload"]
+                    )
+                )
+                self._validate_parallel_decision_attempt_lineage(
+                    conn,
+                    decision=normalized_decision,
+                    graph_id=graph_id,
+                    revision=graph_revision,
+                    require_latest=False,
+                    reason_code=TASK_STORE_DURABLE_DATA_INVALID,
+                )
+                decision_records.append(
+                    (record, normalized_decision)
+                )
+            graph_status = str(graph["status"])
+            budget_status = str(budgets[0]["status"])
+            if (
+                graph_status == TaskGraphStatus.ACTIVE.value
+                and budget_status
+                in {
+                    BudgetReservationStatus.ACTIVE.value,
+                    BudgetReservationStatus.EXCEEDED.value,
+                }
+            ):
+                if any(
+                    int(record["graph_version_after"])
+                    >= int(graph["status_version"])
+                    for record, _ in decision_records
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "active multi-node failure has a non-historical settlement",
+                    )
+                graph_settlement_status = "PENDING"
+            elif (
+                graph_status == TaskGraphStatus.FAILED.value
+                and budget_status == BudgetReservationStatus.RELEASED.value
+            ):
+                terminal_decisions = [
+                    item
+                    for item in decision_records
+                    if int(item[0]["graph_version_after"])
+                    == int(graph["status_version"])
+                ]
+                if len(terminal_decisions) != 1:
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "terminal multi-node failure requires one latest parallel settlement",
+                    )
+                decision_record, decision = terminal_decisions[0]
+                selected = next(
+                    (
+                        outcome
+                        for outcome in decision.payload["outcomes"]
+                        if outcome["node_id"] == node_id
+                    ),
+                    None,
+                )
+                if (
+                    decision.payload["decision_kind"] != "FAILURE"
+                    or decision.payload["graph_target_status"] != "FAILED"
+                    or decision.payload["budget_target_status"] != "RELEASED"
+                    or decision.payload["budget_id"]
+                    != str(budgets[0]["budget_id"])
+                    or int(decision_record["graph_version_after"])
+                    != int(graph["status_version"])
+                    or int(decision_record["budget_version_after"])
+                    != int(budgets[0]["status_version"])
+                    or not isinstance(selected, Mapping)
+                    or selected["attempt_id"] != attempt_id
+                    or selected["status"] != "FAILED"
+                    or error_ref not in selected["evidence_refs"]
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_DURABLE_DATA_INVALID,
+                        "parallel failure settlement does not bind the reconciled node",
+                    )
+                parallel_settlement_ref = decision.decision_ref
+            else:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "multi-node failure Graph or Budget settlement drifted",
+                )
         self._assert_operation_failure_terminal_outboxes(
             conn,
             request=normalized,
@@ -805,9 +948,10 @@ class TaskOperationFailureReconciliationStoreMixin:
             lease=lease,
             budget=budgets[0],
             error_ref=error_ref,
+            graph_wide_terminal=graph_wide_terminal,
         )
         return {
-            "authority_kind": _FAILURE_AUTHORITY_KIND,
+            "authority_kind": authority_kind,
             "operation": operation,
             "attempt": dict(attempt),
             "node": _node_record(node),
@@ -817,6 +961,9 @@ class TaskOperationFailureReconciliationStoreMixin:
             "command": dict(commands[0]),
             "failure_reason_code": reason_code,
             "error_ref": error_ref,
+            "settlement_scope": settlement_scope,
+            "graph_settlement_status": graph_settlement_status,
+            "parallel_settlement_ref": parallel_settlement_ref,
         }
 
     def _assert_operation_failure_terminal_outboxes(
@@ -830,15 +977,16 @@ class TaskOperationFailureReconciliationStoreMixin:
         lease: sqlite3.Row,
         budget: sqlite3.Row,
         error_ref: str,
+        graph_wide_terminal: bool,
     ) -> None:
-        """Reopen every atomic terminal Outbox, not only aggregate rows."""
+        """Reopen every Outbox owned by this atomic failure phase."""
 
         graph_id = str(graph["graph_id"])
         graph_revision = int(graph["revision"])
         node_id = str(node["node_id"])
         attempt_id = str(attempt["attempt_id"])
         evidence_refs = (error_ref, request["attestation_ref"])
-        messages = (
+        messages = [
             (
                 self._operation_failure_reconciliation_outbox(
                     request=request,
@@ -892,25 +1040,6 @@ class TaskOperationFailureReconciliationStoreMixin:
             ),
             (
                 self._operation_failure_outbox(
-                    kind="graph",
-                    aggregate_type="TASK_GRAPH",
-                    aggregate_id=graph_id,
-                    graph_revision=graph_revision,
-                    aggregate_version=int(graph["status_version"]),
-                    event_type="TASK_GRAPH_FAILED",
-                    attempt_id=attempt_id,
-                    evidence_refs=evidence_refs,
-                ),
-                (
-                    "TASK_GRAPH",
-                    graph_id,
-                    int(graph["status_version"]),
-                ),
-                "TASK_GRAPH_FAILED",
-                graph_revision,
-            ),
-            (
-                self._operation_failure_outbox(
                     kind="lease",
                     aggregate_type="TASK_LEASE",
                     aggregate_id=str(lease["lease_id"]),
@@ -927,25 +1056,49 @@ class TaskOperationFailureReconciliationStoreMixin:
                 "TASK_LEASE_EXPIRED",
                 None,
             ),
-            (
-                self._operation_failure_outbox(
-                    kind="budget",
-                    aggregate_type="BUDGET_RESERVATION",
-                    aggregate_id=str(budget["budget_id"]),
-                    aggregate_version=int(budget["status_version"]),
-                    event_type="BUDGET_RESERVATION_RELEASED",
-                    attempt_id=attempt_id,
-                    evidence_refs=evidence_refs,
-                ),
+        ]
+        if graph_wide_terminal:
+            messages.extend(
                 (
-                    "BUDGET_RESERVATION",
-                    str(budget["budget_id"]),
-                    int(budget["status_version"]),
-                ),
-                "BUDGET_RESERVATION_RELEASED",
-                None,
-            ),
-        )
+                    (
+                        self._operation_failure_outbox(
+                            kind="graph",
+                            aggregate_type="TASK_GRAPH",
+                            aggregate_id=graph_id,
+                            graph_revision=graph_revision,
+                            aggregate_version=int(graph["status_version"]),
+                            event_type="TASK_GRAPH_FAILED",
+                            attempt_id=attempt_id,
+                            evidence_refs=evidence_refs,
+                        ),
+                        (
+                            "TASK_GRAPH",
+                            graph_id,
+                            int(graph["status_version"]),
+                        ),
+                        "TASK_GRAPH_FAILED",
+                        graph_revision,
+                    ),
+                    (
+                        self._operation_failure_outbox(
+                            kind="budget",
+                            aggregate_type="BUDGET_RESERVATION",
+                            aggregate_id=str(budget["budget_id"]),
+                            aggregate_version=int(budget["status_version"]),
+                            event_type="BUDGET_RESERVATION_RELEASED",
+                            attempt_id=attempt_id,
+                            evidence_refs=evidence_refs,
+                        ),
+                        (
+                            "BUDGET_RESERVATION",
+                            str(budget["budget_id"]),
+                            int(budget["status_version"]),
+                        ),
+                        "BUDGET_RESERVATION_RELEASED",
+                        None,
+                    ),
+                )
+            )
         for message, aggregate, event_type, revision in messages:
             self._assert_mutation_outbox_replay(
                 conn,

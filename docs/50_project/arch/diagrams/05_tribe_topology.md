@@ -3,8 +3,8 @@
 
 # 图 05：数字生命状态与表达
 
-版本：v2.0
-核对日期：2026-07-15
+版本：v2.1
+核对日期：2026-07-26
 
 文件名保留为 `05_tribe_topology.md` 以兼容旧链接。本图不再把一个固定 family 清单当作整个数字生命架构，而是描述状态、记忆、关系、场景、人格和最终表达的 authority 关系。
 
@@ -106,6 +106,8 @@ flowchart LR
 
 后台周期、器官信号或模型建议不能直接外发消息、改变人格或执行设备动作。它们只能提出 intent，随后进入与用户请求相同的治理和验收链。当前 Intent Arbiter 尚未完整统一 user/task/life/relationship/long-term goal。
 
+Scheduler 的定义管理和 occurrence 执行也遵守这条边界。`scheduler.task.publish/delete/enable/disable` 先绑定 Scheduler 或 Operator 的精确 ingress authority，再进入 immutable HostCommand/TaskGraph；人工或时钟 occurrence 必须先 durable admission，重放按 `request_id/occurrence_id` 重开，不得重复制造任务。Scheduler 只把 occurrence payload、当前 mode 和 Life context 编译为受治理 intent，不能直接写 Life、Bond、Persona 或外发渠道。
+
 ## Tribe/Organ 的位置
 
 `host_brain/tribe/` 与 `host_brain/organ_ops/` 提供器官化信号、descriptor 和协作材料。它们可以影响 affect、drive、continuity、task 或 safety 上下文，但不是一组平行的状态数据库，也不应各自拥有最终回复或真实副作用 authority。具体可用 family 以 `host_brain/tribe/registry.py` 为准，不在架构文档中冻结数量。
@@ -114,6 +116,7 @@ flowchart LR
 
 - Life command/reducer：`host_brain/digital_life/`
 - Life composition：`host_brain/composition/life.py`
+- Scheduler command/occurrence authority：`host_brain/scheduler/command_service.py`
 - Persona/Surface：`host_brain/persona/`、`host_brain/surface_runtime/`
 - Scene policy：`host_brain/persona/scene_policy.py`
 - World projection：`host_brain/runtime/world_model.py`、`host_brain/persistence/world_model_query_repository.py`
