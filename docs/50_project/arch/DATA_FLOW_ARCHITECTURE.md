@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.5
+版本：v3.6
 
 核对日期：2026-07-26
 
@@ -280,9 +280,9 @@ flowchart TD
     SchedulerResult -.-> SchedulerClaim["native ingress 绑定 actual receipt\nOperator 独立 outcome 仅在可归因后封口"]
     Internal["Internal Agent"] --> InternalWO["边界 v2 → WorkOrderV3\nBudget + child grant"]
     InternalWO --> Admission
-    Worker -.-> ProtectedStage["protected raw artifact stage\nexact inventory + ref/digest projection"]
+    Worker -.-> ProtectedStage["protected raw artifact stage\nexact inventory + optional write manifest/patch"]
     ProtectedStage -.-> InternalEffect["internal.agent.result_commit\npost-Acceptance exact TaskStore evidence"]
-    InternalEffect -.-> WorkspacePromotion["clean/no-change Git Workspace\n0116 ACTIVE→ACCEPTED→PROMOTED"]
+    InternalEffect -.-> WorkspacePromotion["no-change 或 sealed write delta 重验\n确定性 accepted HEAD\n0116 ACTIVE→ACCEPTED→PROMOTED"]
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
@@ -327,7 +327,7 @@ flowchart LR
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。0117 在 occurrence admission 的同一 `BEGIN IMMEDIATE` 中把 live DUE retry row 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前 renew、运行中 heartbeat，过期 lease 不能自我复活，第二实例/stale fence不能 dispatch/clear/defer，backoff 取真实失败时刻。该 Clock 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因和 canary 仍未完成。
-- Internal 状态为 `PARTIAL / INTERNAL_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`。外部入口只接受未准入的 v2 描述，准入后的 worker、Agent executor、Review 和 Workspace 直接消费同一个 `WorkOrderV3`。raw material 进入 exact-inventory protected stage，公共 projection 只含 ref/digest 与摘要。首次 activation 与生命周期 supervisor 周期扫描 sealed checkpoint，以更高 fence 重建唯一 projection 并继续原图，Agent 不重跑；A/B/C 仍是三个独立原子边界。terminal worker 处理精确 sealed abandon/cleanup与两类 signed cancellation。当前 no-intent signed raw failure 另由一个 SQLite UoW 写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal 必须先提交独立 deterministic claim，才清理未 sealed Git Workspace/stage，claim outage 时现场不动。一般 unknown effect、其它 crash-left/failure/cancellation closeout、general `settle_worker` crash bundle仍缺；一般write、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
+- Internal 状态为 `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`。外部入口只接受未准入的 v2 描述，准入后的 worker、Agent executor、Review 和 Workspace 直接消费同一个 `WorkOrderV3`。raw material 进入 exact-inventory protected stage，公共 projection 只含 ref/digest 与摘要。具备 exact Workspace authority 的 write 额外密封 frozen-base path manifest 与 binary patch；Acceptance 重算 delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支不移动。首次 activation 与生命周期 supervisor 周期扫描 sealed checkpoint，以更高 fence 重建唯一 projection 并继续原图，Agent 不重跑；A/B/C 仍是三个独立原子边界。terminal worker 处理精确 sealed abandon/cleanup与两类 signed cancellation。当前 no-intent signed raw failure 另由一个 SQLite UoW 写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal 必须先提交独立 deterministic claim，才清理未 sealed Git Workspace/stage，claim outage 时现场不动。一般 unknown effect、其它 crash-left/failure/cancellation closeout、general `settle_worker` crash bundle仍缺；Domain/Skill/Codex write、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
 - post-COMMIT settlement 流程为：`Operation COMMITTED → BudgetUsage identity 不确定 → RECOVERY_REQUIRED → Lease 到期 → higher-fence checkpoint takeover → EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT`。共享 `EXCEEDED` 下的 `MISSING` 只能在同一 snapshot 证明唯一 winner 后补写为 version-stable、共享 winner Outbox/dimensions 的 `ALREADY_EXCEEDED`。正向流现覆盖双 checkpoint、four-root mixed settlement、五节点菱形与八个并行根节点；依赖只在前驱 accepted 后释放，worker 不重跑。`CONFLICT`、unknown `RESERVED/RECOVERY_REQUIRED` 与 cancellation crossing 会在新 Lease 前写 0130 exact hold + Outbox：conflict quarantine，后两类进入各自 signed reconciliation。无限规模、其它 failure/cancellation、自动归因和部署 fan-out仍缺。
 
 ```mermaid
@@ -776,12 +776,14 @@ authenticated Internal ingress
   → native WorkOrderV3 Agent executor (external accepts pre-admission v2 only; V3/graph identity rejects)
   → raw work-order/prompt/metadata/result/changed-files/verification
     写入 protected exact-inventory stage
+  → write result 额外密封 frozen-base path manifest + binary patch
   → WorkerProjection 只携带 protected stage ref/digest + bounded summary
   → Verification + Acceptance / POST Review
   → internal.agent.result_commit Acceptance Effect
   → reopen exact TaskStore Node=ACCEPTED / Attempt=SUCCEEDED
     / Lease=RELEASED / Node artifact / claimed Effect
-  → clean/no-change Git Workspace only
+  → no-change HEAD；或逐字重算 sealed patch 后生成 deterministic accepted HEAD
+    （source branch 不移动）
   → 0116 ACTIVE → ACCEPTED → PROMOTED
   → canonical Agent result repository
   → exact COMMITTED result receipt
@@ -805,7 +807,7 @@ flowchart LR
     R -. "混合 / 缺 receipt" .-> H
 ```
 
-前置 Review 不执行 handler，且在尚无 worker receipt 时保持 ingress claim result 未绑定；内部 acceptance decision 不是 `ACCEPT` 时不允许进入 canonical result commit。`artifact_store_read_model.py` 只重开/校验 seal inventory、promotion、recovery envelope 与 tombstone；`internal_startup_checkpoint_continuation.py` 只续接 exact admission；`periodic_durable_continuation.py` 只提供 lifecycle cadence/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 在精确 lineage 与更高 fence 下重建唯一 WorkerProjection；`node_worker_stream.py` 只归一化 stream 与中断心跳；`operation_recovery_checkpoint_loader.py` 只校验、接管并加载 COMMITTED checkpoint。上述 continuation/recovery 流均禁止 supervisor 自行调用 Agent/worker。failure service 和 Store UoW 现在可关闭签名 `NO_SIDE_EFFECT` 的单节点整图或多节点目标节点；后者只由0090继续Graph/Budget结算，不授权 sibling worker。Internal terminal worker 的 deterministic raw-failure claim/真实 Git cleanup 仍是单节点专属链。一般 crash-left unsealed cleanup、未知外部效果、其它失败/取消、其它批处理、handle-level TOCTOU、一般 write、OS/container isolation 与七路线验收仍未完成；外部 v2 ingress compatibility 不拥有 Internal worker execution authority。NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+前置 Review 不执行 handler，且在尚无 worker receipt 时保持 ingress claim result 未绑定；内部 acceptance decision 不是 `ACCEPT` 时不允许进入 canonical result commit。`artifact_store_read_model.py` 只重开/校验 seal inventory、promotion、recovery envelope 与 tombstone；`workspace_write_promotion.py` 只把 frozen-base delta 变成密封候选和确定性 accepted HEAD；`internal_startup_checkpoint_continuation.py` 只续接 exact admission；`periodic_durable_continuation.py` 只提供 lifecycle cadence/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 在精确 lineage 与更高 fence 下重建唯一 WorkerProjection；`node_worker_stream.py` 只归一化 stream 与中断心跳；`operation_recovery_checkpoint_loader.py` 只校验、接管并加载 COMMITTED checkpoint。上述 continuation/recovery 流均禁止 supervisor 自行调用 Agent/worker。failure service 和 Store UoW 现在可关闭签名 `NO_SIDE_EFFECT` 的单节点整图或多节点目标节点；后者只由0090继续Graph/Budget结算，不授权 sibling worker。Internal terminal worker 的 deterministic raw-failure claim/真实 Git cleanup 仍是单节点专属链。一般 crash-left unsealed cleanup、未知外部效果、其它失败/取消、其它批处理、Domain/Skill/Codex write、handle-level TOCTOU、OS/container isolation 与七路线验收仍未完成；外部 v2 ingress compatibility 不拥有 Internal worker execution authority。NE-01 仍 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## 6. Acceptance Effect 与对话提交语义
 
@@ -1373,7 +1375,7 @@ All ingress sources
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
 10. 建立默认启用、有单 writer 和 transition journal 的 Scene/World/Intent context，并使其变成 TaskGraph 输入事实。
-11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 路线执行 `server-derived workspace_id → source commit freeze → lease/worktree → worker protected stage → sealed checkpoint → activation/periodic projection recovery → Acceptance → real TaskStore evidence → clean/no-change HEAD capture → 0116 ACTIVE→ACCEPTED→PROMOTED`；终态 worker 另行处理 sealed abandon/cleanup。两种 exact signed pre-checkpoint cancellation terminal 与无取消意图的 exact signed raw-failure terminal 都已能先提交各自 claim 再清理 unsealed stage，真实 SQLite+Git 证明响应丢失重开和 source repository 不变，但该正向路径仍只覆盖 no-change inspect 与该精确失败子集。一般 write promotion、一般 crash-left unsealed cleanup、一般 unknown-effect/其它 failure/cancel claim closeout、general `settle_worker` crash bundle、逐操作 fence/强杀、handle-level 原子 TOCTOU 与 OS/container/tenant 隔离仍未解决。
+11. W0 继续在 D0 canonical path fence 之上熔断未授权写入。W1/0101 把逻辑 workspace 精确绑定到 graph epoch/root WorkOrder/owner/configured-root/allow-list。W2 的认证 Internal 路线执行 `server-derived workspace_id → source commit freeze → lease/worktree → worker protected stage → optional bounded manifest/binary patch → Acceptance/real TaskStore evidence → live delta byte recheck → deterministic accepted HEAD → 0116 ACTIVE→ACCEPTED→PROMOTED → artifact-preserving terminal cleanup`；no-change 继续使用原 HEAD 路线。commit 已生成但 lifecycle 事务回滚时，新 Runtime 可在租约接管后得到同一 HEAD；seal 后漂移则在 artifact promotion 前失败。两种 signed cancellation terminal 与 signed raw-failure terminal 仍必须先提交各自 claim 再清理现场。该正向 write 只覆盖 Governed Internal；Domain/Skill/Codex、一般 crash-left/unknown-effect/其它 failure/cancel、general `settle_worker` crash bundle、逐操作 fence/强杀、handle-level TOCTOU 与 OS/container/tenant 隔离仍未解决。
 
 ## 13. 代码证据索引
 

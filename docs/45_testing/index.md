@@ -3,9 +3,18 @@
 
 # 测试与验收目录
 
-版本：v2.11
+版本：v2.12
 维护日期：2026-07-26
 状态：当前证据
+
+## NE-01 Governed Internal Workspace 写入晋升当前切片
+
+- 写 WorkOrder 没有 exact `workspace_execution_authority` 时仍在 Agent 执行前失败关闭；有 canonical Internal TaskGraph/Attempt/Lease/Workspace authority 时才允许进入隔离 worktree。
+- Worker 完成后，Runtime 在活 Workspace fence 内捕获 frozen base 到结果树的 UTF-8 路径清单和 binary Git patch。两者作为可选但不可拆分的 protected-stage seal 成员，最多 1000 条路径、32 MiB；秘密路径、symlink/Git link、allow-list 越界和 seal 后漂移全部拒绝。
+- Acceptance 重新计算 live patch，生成 parent 固定为 frozen base、作者时间固定的 deterministic commit；配置源分支不移动。0116 必须先写 `ACTIVE→ACCEPTED`，artifact 再晋升，最后写 `PROMOTED`；accepted artifact 留存 patch，终态 cleanup 才删除 worktree/临时 branch。
+- 真实 SQLite + Git 三项 focused integration 为 `3 passed in 15.82s`：正向 promotion/exact replay/cleanup、post-seal tamper、commit 已生成但 lifecycle insert 回滚后新 Runtime 实例接管并复用同一 accepted HEAD。
+- 受影响回归为 `78 passed, 3 skipped in 55.52s`，0 fail；3 个 skip 均为现有 Windows 环境无法创建测试 symlink，不是本切片失败。该证据只关闭 Governed Internal write，不证明 Domain/Skill/Codex、OS/container tenant、handle-level TOCTOU、NE-01 波次 integration 或 NE-07 全栈；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- fresh Gate 3 首轮发现 `workspace_runtime.py` 增长到 1533 行。未扩白名单：不可变 receipt/reason/有界值合同下沉到 `workspace_runtime_contracts.py` 后，runtime owner 为 1493 行；Core Architecture Gate 1～14 全部 `PASS`。兼容回归首轮 69 项通过、4 项旧期望失败；其中两项改为明确验证“缺 exact authority 仍 proposal-only”，一项改为断言 WorkerProjection 物理不可变 trigger，一项同步新的 Workspace grant reason。四个失败选择器复跑 `4 passed in 18.61s`，不得将其与首轮 69 项相加伪造整批结果。
 
 ## NE-01 签名多节点 Operation 失败恢复当前切片
 
@@ -111,7 +120,7 @@
 - 当前 file-disjoint 运行时验证为：新增 supervisor/Host/Internal/SQLite 集合 `13 passed in 4.58s`；Host/ASGI/RuntimeGroup/Internal terminal 与四条真实 Internal SQLite+Git checkpoint/review/cancellation 恢复合并集合 `85 passed in 27.57s`。两组可合计为 98 个不同 case，但历史批次和后续文档 Gate 不得重复相加。兼容集合首次命令使用了不存在的旧 recovery 文件名，pytest 在 collection 前以“no tests ran”退出；改为 `test_aw02_internal_agent_runtime_cutover.py` 的四个精确 selector 后 85 项全绿。
 - 覆盖 manifest、文档 authority/freshness、交付元数据与本切片核心回归的最终组合 Gate 为 `52 passed`；它包含前述 13 项新增集合，不能与 98 相加。第一次命令引用了不存在的旧文件名，pytest 在 collection 前以“no tests ran”退出；修正为 `test_delivery_metadata_gate.py` 后组合 Gate 全绿，不能把首次命令伪记为测试失败或 PASS。
 - 目标模块 `compileall`、两份机器状态 JSON、`git diff --check` 均通过；fresh architecture static Gate 1～14 为 `PASS`、`failed_gates=[]`，未扩大白名单。
-- 该切片没有 migration，不证明 raw worker failure、unknown-effect attribution、其它 cancellation、一般 multi-node/batch settlement、一般 write、NE-01 波次 integration 或 NE-07 Docker 全栈。程序状态保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+- 该周期 survivor 切片没有 migration，当时不证明 raw worker failure、unknown-effect attribution、其它 cancellation、一般 multi-node/batch settlement 或一般 write；本轮独立 Workspace 证据已补上 Internal write promotion，但 Domain/Skill/Codex write、NE-01 波次 integration 与 NE-07 Docker 全栈仍缺。程序状态保持 `IN_PROGRESS`，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Internal pre-checkpoint 签名终态取消收口当前切片
 

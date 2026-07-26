@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 _ACCEPTED_REF = re.compile(
     r"^agent-artifact://([A-Za-z0-9._-]{1,120})/"
     r"([A-Za-z0-9._-]{1,240})/sha256/([0-9a-f]{64})$"
@@ -22,8 +21,7 @@ _DURABLE_REF = re.compile(
 
 
 def _artifact_store_module() -> Any:
-    # Imported lazily so artifact_store can depend on this focused module
-    # without creating an import-time cycle.
+    # Imported lazily to avoid an artifact_store import cycle.
     from . import artifact_store
 
     return artifact_store
@@ -72,6 +70,7 @@ def inventory_governed_seals(
         "owner.json",
         *core._SEALED_FILES,
         core._PROJECTION_RECOVERY_FILE,
+        *core._WORKSPACE_WRITE_FILES,
         "seal.json",
         "promotion.json",
         ".tmp",
@@ -188,6 +187,7 @@ def inventory_unsealed_governed_stages(
         "owner.json",
         *core._SEALED_FILES,
         core._PROJECTION_RECOVERY_FILE,
+        *core._WORKSPACE_WRITE_FILES,
         "seal.json",
         "promotion.json",
         ".tmp",

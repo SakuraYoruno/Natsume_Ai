@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
 import base64
 import hashlib
 import hmac
@@ -22,8 +21,19 @@ from typing import Any
 from host_brain.agent_runtime.workspace_allocator import (
     DurableWorkspaceLease,
     WorkspaceAllocator,
+    WorkspaceWriteCandidate,
 )
 from host_brain.agent_runtime.workspace_policy import WorkspaceResolution
+from host_brain.agent_runtime.workspace_runtime_contracts import (
+    DurableWorkspaceRuntimeError,
+    WORKSPACE_CLEANUP_UNAVAILABLE,
+    WORKSPACE_HEARTBEAT_LOST,
+    WORKSPACE_RUNTIME_BINDING_INVALID,
+    WorkspaceArtifactAbandonmentReceipt,
+    WorkspaceArtifactPromotionReceipt,
+    WorkspaceCleanupReceipt,
+    required_workspace_value,
+)
 from host_brain.contracts.agent_runtime.work_order import (
     AgentWorkOrder,
     WorkOrderV3,
@@ -41,46 +51,6 @@ from host_brain.persistence.workspace_repository import (
     WorkspaceRepository,
     WorkspaceRepositoryError,
 )
-
-
-WORKSPACE_RUNTIME_BINDING_INVALID = "WORKSPACE_RUNTIME_BINDING_INVALID"
-WORKSPACE_HEARTBEAT_LOST = "WORKSPACE_HEARTBEAT_LOST"
-WORKSPACE_CLEANUP_UNAVAILABLE = "WORKSPACE_CLEANUP_UNAVAILABLE"
-
-
-@dataclass(frozen=True, slots=True)
-class WorkspaceCleanupReceipt:
-    workspace_id: str
-    receipt_ref: str
-    digest: str
-    replayed: bool
-
-
-@dataclass(frozen=True, slots=True)
-class WorkspaceArtifactPromotionReceipt:
-    workspace_id: str
-    accepted_event_id: str
-    promotion_event_id: str
-    artifact_ref: str
-    no_change_receipt_ref: str
-    replayed: bool
-
-
-@dataclass(frozen=True, slots=True)
-class WorkspaceArtifactAbandonmentReceipt:
-    workspace_id: str
-    abandonment_event_id: str
-    tombstone_ref: str
-    reason_code: str
-    replayed: bool
-
-
-class DurableWorkspaceRuntimeError(RuntimeError):
-    def __init__(self, reason_code: str, detail: str) -> None:
-        self.reason_code = str(reason_code or WORKSPACE_RUNTIME_BINDING_INVALID)
-        self.detail = str(detail or "durable workspace runtime failed")
-        super().__init__(f"{self.reason_code}: {self.detail}")
-
 
 class _WorkspaceHeartbeatScope(AbstractContextManager[None]):
     def __init__(
@@ -216,6 +186,8 @@ class _WorkspaceHeartbeatScope(AbstractContextManager[None]):
 
 class DurableWorkspaceRuntime:
     """Allocate, lease, heartbeat and clean configured git worktrees."""
+
+    _required = staticmethod(required_workspace_value)
 
     def __init__(
         self,
@@ -633,6 +605,22 @@ class DurableWorkspaceRuntime:
                 )
             return authority
 
+    def capture_write_candidate(
+        self,
+        resolution: WorkspaceResolution,
+    ) -> WorkspaceWriteCandidate | None:
+        """Capture one fence-bound write proposal before the worker exits."""
+
+        with self._lock:
+            lease = self._lease_for_resolution(resolution)
+        try:
+            return self.allocator.capture_write_candidate(lease)
+        except WorkspaceRepositoryError as exc:
+            raise DurableWorkspaceRuntimeError(
+                exc.reason_code,
+                exc.detail,
+            ) from exc
+
     def promote_no_change_artifact(
         self,
         *,
@@ -646,10 +634,72 @@ class DurableWorkspaceRuntime:
     ) -> WorkspaceArtifactPromotionReceipt:
         """Promote one sealed read-only result through the 0116 lifecycle."""
 
+        return self._promote_artifact(
+            workspace_id=workspace_id,
+            execution_authority=execution_authority,
+            verification_ref=verification_ref,
+            acceptance_ref=acceptance_ref,
+            effect_ref=effect_ref,
+            artifact_promoter=artifact_promoter,
+            allow_start=allow_start,
+            write_manifest=None,
+            write_patch=None,
+        )
+
+    def promote_write_artifact(
+        self,
+        *,
+        workspace_id: str,
+        execution_authority: dict[str, Any],
+        verification_ref: str,
+        acceptance_ref: str,
+        effect_ref: str,
+        write_manifest: dict[str, Any],
+        write_patch: bytes,
+        artifact_promoter: Callable[[], str],
+        allow_start: bool = True,
+    ) -> WorkspaceArtifactPromotionReceipt:
+        """Promote an exact sealed write candidate through accepted HEAD."""
+
+        return self._promote_artifact(
+            workspace_id=workspace_id,
+            execution_authority=execution_authority,
+            verification_ref=verification_ref,
+            acceptance_ref=acceptance_ref,
+            effect_ref=effect_ref,
+            artifact_promoter=artifact_promoter,
+            allow_start=allow_start,
+            write_manifest=dict(write_manifest),
+            write_patch=write_patch,
+        )
+
+    def _promote_artifact(
+        self,
+        *,
+        workspace_id: str,
+        execution_authority: dict[str, Any],
+        verification_ref: str,
+        acceptance_ref: str,
+        effect_ref: str,
+        artifact_promoter: Callable[[], str],
+        allow_start: bool,
+        write_manifest: dict[str, Any] | None,
+        write_patch: bytes | None,
+    ) -> WorkspaceArtifactPromotionReceipt:
         if not callable(artifact_promoter):
             raise DurableWorkspaceRuntimeError(
                 WORKSPACE_RUNTIME_BINDING_INVALID,
                 "artifact_promoter must be callable",
+            )
+        if (write_manifest is None) != (write_patch is None):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "Workspace write manifest and patch must be supplied together",
+            )
+        if write_patch is not None and not isinstance(write_patch, bytes):
+            raise DurableWorkspaceRuntimeError(
+                WORKSPACE_RUNTIME_BINDING_INVALID,
+                "Workspace write patch must be bytes",
             )
         authority = self._promotion_authority(
             workspace_id=workspace_id,
@@ -658,15 +708,18 @@ class DurableWorkspaceRuntime:
         verification = self._durable_ref(verification_ref, "verification_ref")
         acceptance = self._durable_ref(acceptance_ref, "acceptance_ref")
         effect = self._durable_ref(effect_ref, "effect_ref")
+        identity = {
+            "workspace_id": workspace_id,
+            "execution_authority": authority,
+            "verification_ref": verification,
+            "acceptance_ref": acceptance,
+            "effect_ref": effect,
+        }
+        if write_manifest is not None:
+            identity["write_manifest"] = write_manifest
         identity_digest = hashlib.sha256(
             json.dumps(
-                {
-                    "workspace_id": workspace_id,
-                    "execution_authority": authority,
-                    "verification_ref": verification,
-                    "acceptance_ref": acceptance,
-                    "effect_ref": effect,
-                },
+                identity,
                 sort_keys=True,
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -681,14 +734,22 @@ class DurableWorkspaceRuntime:
                 "reconciliation cannot initiate an unstarted Workspace promotion",
             )
         replayed = snapshot.state is not WorkspaceLifecycleState.ACTIVE
-        no_change_ref = ""
+        workspace_receipt_ref = ""
         if snapshot.state is WorkspaceLifecycleState.ACTIVE:
             lease = self._continuation_lease(
                 workspace_id,
                 purpose=f"accept:{identity_digest}",
             )
-            no_change = self.allocator.capture_no_change_head(lease)
-            no_change_ref = no_change.receipt_ref
+            accepted = (
+                self.allocator.capture_no_change_head(lease)
+                if write_manifest is None
+                else self.allocator.accept_write_candidate(
+                    lease,
+                    manifest=write_manifest,
+                    patch_bytes=write_patch or b"",
+                )
+            )
+            workspace_receipt_ref = accepted.receipt_ref
             mutation = self.repository.accept_workspace(
                 workspace_id,
                 event_id=accepted_event_id,
@@ -700,10 +761,10 @@ class DurableWorkspaceRuntime:
                 lease_owner=lease.lease_owner,
                 lease_token=lease.lease_token,
                 lease_fencing_token=lease.lease_fencing_token,
-                base_commit=no_change.base_commit,
-                accepted_head=no_change.accepted_head,
-                tree_digest=no_change.tree_digest,
-                diff_digest=no_change.diff_digest,
+                base_commit=accepted.base_commit,
+                accepted_head=accepted.accepted_head,
+                tree_digest=accepted.tree_digest,
+                diff_digest=accepted.diff_digest,
                 verification_ref=verification,
                 acceptance_ref=acceptance,
             )
@@ -731,14 +792,34 @@ class DurableWorkspaceRuntime:
                 WORKSPACE_RUNTIME_BINDING_INVALID,
                 "workspace accepted receipt differs from the exact effect authority",
             )
-        if not no_change_ref:
-            no_change_ref = "workspace-no-change://sha256/" + hashlib.sha256(
-                (
-                    f"{workspace_id}\n{accepted_event.base_commit}\n"
-                    f"{accepted_event.accepted_head}\n{accepted_event.tree_digest}\n"
-                    f"{accepted_event.diff_digest}"
-                ).encode("utf-8")
-            ).hexdigest()
+        if not workspace_receipt_ref:
+            if write_manifest is None:
+                workspace_receipt_ref = (
+                    "workspace-no-change://sha256/"
+                    + hashlib.sha256(
+                        (
+                            f"{workspace_id}\n{accepted_event.base_commit}\n"
+                            f"{accepted_event.accepted_head}\n"
+                            f"{accepted_event.tree_digest}\n"
+                            f"{accepted_event.diff_digest}"
+                        ).encode("utf-8")
+                    ).hexdigest()
+                )
+            else:
+                candidate_ref = str(
+                    write_manifest.get("receipt_ref") or ""
+                ).strip()
+                workspace_receipt_ref = (
+                    "workspace-write://sha256/"
+                    + hashlib.sha256(
+                        (
+                            f"{workspace_id}\n{accepted_event.base_commit}\n"
+                            f"{accepted_event.accepted_head}\n"
+                            f"{accepted_event.tree_digest}\n"
+                            f"{accepted_event.diff_digest}\n{candidate_ref}"
+                        ).encode("utf-8")
+                    ).hexdigest()
+                )
 
         artifact_ref = self._durable_ref(artifact_promoter(), "artifact_ref")
         snapshot = self.repository.get_lifecycle(workspace_id)
@@ -780,7 +861,7 @@ class DurableWorkspaceRuntime:
             accepted_event_id=accepted_event_id,
             promotion_event_id=promotion_event_id,
             artifact_ref=artifact_ref,
-            no_change_receipt_ref=no_change_ref,
+            no_change_receipt_ref=workspace_receipt_ref,
             replayed=replayed,
         )
 
@@ -1399,17 +1480,6 @@ class DurableWorkspaceRuntime:
             f"{self._runtime_instance_id}"
         )
         return hashlib.sha256(binding.encode("utf-8")).hexdigest()[:24]
-
-    @staticmethod
-    def _required(value: Any, field: str, maximum: int) -> str:
-        normalized = str(value or "").strip()
-        if not normalized or len(normalized) > maximum:
-            raise DurableWorkspaceRuntimeError(
-                WORKSPACE_RUNTIME_BINDING_INVALID,
-                f"{field} is missing or invalid",
-            )
-        return normalized
-
 
 __all__ = [
     "DurableWorkspaceRuntime",

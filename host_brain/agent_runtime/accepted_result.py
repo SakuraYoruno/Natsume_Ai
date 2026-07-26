@@ -471,18 +471,13 @@ class InternalAcceptedResultHandler:
                 + _stable_id("accept", canonical["command_id"])
             )
         try:
-            return self._workspace.promote_no_change_artifact(
-                workspace_id=seal.workspace_id,
-                execution_authority=authority,
+            return self._promote_sealed_workspace_artifact(
+                seal=seal,
+                authority=authority,
                 verification_ref=verification_ref,
                 acceptance_ref=acceptance_ref,
                 effect_ref=effect_ref,
                 allow_start=allow_start,
-                artifact_promoter=lambda: self._artifacts.promote_governed_stage(
-                    stage_ref=seal.stage_ref,
-                    seal_digest=seal.seal_digest,
-                    acceptance_ref=acceptance_ref,
-                ),
             )
         except AcceptanceEffectOutcomeUnknown:
             raise
@@ -497,6 +492,41 @@ class InternalAcceptedResultHandler:
                 "Internal Agent artifact promotion crossed or may have crossed "
                 f"a durable boundary: {_opaque_exception(exc)}"
             ) from exc
+
+    def _promote_sealed_workspace_artifact(
+        self,
+        *,
+        seal: Any,
+        authority: Mapping[str, Any],
+        verification_ref: str,
+        acceptance_ref: str,
+        effect_ref: str,
+        allow_start: bool,
+    ) -> Any:
+        write_candidate = self._artifacts.read_workspace_write_candidate(seal)
+        promotion = {
+            "workspace_id": seal.workspace_id,
+            "execution_authority": dict(authority),
+            "verification_ref": verification_ref,
+            "acceptance_ref": acceptance_ref,
+            "effect_ref": effect_ref,
+            "allow_start": allow_start,
+            "artifact_promoter": (
+                lambda: self._artifacts.promote_governed_stage(
+                    stage_ref=seal.stage_ref,
+                    seal_digest=seal.seal_digest,
+                    acceptance_ref=acceptance_ref,
+                )
+            ),
+        }
+        if write_candidate is None:
+            return self._workspace.promote_no_change_artifact(**promotion)
+        write_manifest, write_patch = write_candidate
+        return self._workspace.promote_write_artifact(
+            **promotion,
+            write_manifest=write_manifest,
+            write_patch=write_patch,
+        )
 
     async def _promotion_completely_unstarted(
         self,

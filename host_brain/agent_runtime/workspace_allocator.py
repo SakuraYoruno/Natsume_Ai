@@ -20,6 +20,12 @@ import time
 from typing import Any, Callable, Iterator, TypeVar
 
 from host_brain.agent_runtime.workspace_paths import resolve_workspace_path
+from host_brain.agent_runtime.workspace_write_promotion import (
+    WorkspaceWriteCandidate,
+    WorkspaceWriteSnapshot,
+    accept_workspace_write_candidate,
+    capture_workspace_write_candidate,
+)
 from host_brain.persistence.workspace_repository import (
     WORKSPACE_AUTHORITY_INVALID,
     WorkspaceAuthority,
@@ -365,6 +371,98 @@ class WorkspaceAllocator:
                 context,
                 operation="accepted-head",
                 callback=capture,
+            ),
+        )
+
+    def capture_write_candidate(
+        self,
+        lease: DurableWorkspaceLease,
+    ) -> WorkspaceWriteCandidate | None:
+        """Seal the exact Git delta while the worker still owns its fence."""
+
+        def capture(authority: WorkspaceAuthority) -> WorkspaceWriteCandidate | None:
+            resolved_source = self._git_source_for(authority)
+            if resolved_source is None:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "Workspace write candidate requires a configured Git workspace",
+                )
+            _source, base_commit = resolved_source
+            workspace = self._prepare_from_authority(authority).path
+            return capture_workspace_write_candidate(
+                authority=authority,
+                workspace=workspace,
+                base_commit=base_commit,
+                git_object_pattern=_GIT_OBJECT,
+                git_output=self._git_output,
+                git_bytes=self._git_bytes,
+                git_returncode=self._git_returncode,
+                authorize_path=self._assert_allowed,
+            )
+
+        return self.repository.run_fenced(
+            lease.workspace_id,
+            lease_owner=lease.lease_owner,
+            lease_token=lease.lease_token,
+            lease_fencing_token=lease.lease_fencing_token,
+            expected_status="ACTIVE",
+            max_operation_ms=int(_GIT_COMMAND_TIMEOUT_S * 1000),
+            operation=lambda context: self._run_authority_operation(
+                context,
+                operation="write-candidate",
+                callback=capture,
+            ),
+        )
+
+    def accept_write_candidate(
+        self,
+        lease: DurableWorkspaceLease,
+        *,
+        manifest: Mapping[str, Any],
+        patch_bytes: bytes,
+    ) -> WorkspaceWriteSnapshot:
+        """Reopen a sealed delta and create one deterministic accepted HEAD."""
+
+        if not isinstance(manifest, Mapping) or not isinstance(patch_bytes, bytes):
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                "workspace write candidate is not canonical",
+            )
+        def accept(authority: WorkspaceAuthority) -> WorkspaceWriteSnapshot:
+            resolved_source = self._git_source_for(authority)
+            if resolved_source is None:
+                raise WorkspaceRepositoryError(
+                    WORKSPACE_AUTHORITY_INVALID,
+                    "accepted write HEAD requires a configured Git workspace",
+                )
+            _source, base_commit = resolved_source
+            workspace = self._prepare_from_authority(authority).path
+            return accept_workspace_write_candidate(
+                authority=authority,
+                workspace=workspace,
+                base_commit=base_commit,
+                branch=self._workspace_branch(authority.workspace_id),
+                manifest=manifest,
+                patch_bytes=patch_bytes,
+                git_object_pattern=_GIT_OBJECT,
+                git_output=self._git_output,
+                git_bytes=self._git_bytes,
+                git_returncode=self._git_returncode,
+                git_output_with_env=self._git_output_with_env,
+                authorize_path=self._assert_allowed,
+            )
+
+        return self.repository.run_fenced(
+            lease.workspace_id,
+            lease_owner=lease.lease_owner,
+            lease_token=lease.lease_token,
+            lease_fencing_token=lease.lease_fencing_token,
+            expected_status="ACTIVE",
+            max_operation_ms=int(_GIT_COMMAND_TIMEOUT_S * 1000),
+            operation=lambda context: self._run_authority_operation(
+                context,
+                operation="accepted-write-head",
+                callback=accept,
             ),
         )
 
@@ -944,6 +1042,70 @@ class WorkspaceAllocator:
         return str(completed.stdout or "").strip()
 
     @staticmethod
+    def _git_bytes(repository: Path, *args: str) -> bytes:
+        timeout_s = WorkspaceAllocator._git_remaining_s()
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repository), *args],
+                capture_output=True,
+                text=False,
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_OPERATION_TIMEOUT,
+                "configured Git sequence exhausted its operation deadline",
+            ) from exc
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or b"git command failed").decode(
+                "utf-8",
+                errors="replace",
+            ).strip()
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                f"configured git operation failed: {detail[:400]}",
+            )
+        return bytes(completed.stdout or b"")
+
+    @staticmethod
+    def _git_output_with_env(
+        repository: Path,
+        *args: str,
+        extra_env: Mapping[str, str],
+    ) -> str:
+        timeout_s = WorkspaceAllocator._git_remaining_s()
+        environment = os.environ.copy()
+        environment.update(
+            {str(key): str(value) for key, value in extra_env.items()}
+        )
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repository), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=timeout_s,
+                env=environment,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise WorkspaceRepositoryError(
+                WORKSPACE_OPERATION_TIMEOUT,
+                "configured Git sequence exhausted its operation deadline",
+            ) from exc
+        if completed.returncode != 0:
+            detail = str(
+                completed.stderr or completed.stdout or "git command failed"
+            ).strip()
+            raise WorkspaceRepositoryError(
+                WORKSPACE_AUTHORITY_INVALID,
+                f"configured git operation failed: {detail[:400]}",
+            )
+        return str(completed.stdout or "").strip()
+
+    @staticmethod
     def _git_remaining_s() -> float:
         deadline = _GIT_DEADLINE.get()
         if deadline is None:
@@ -977,5 +1139,7 @@ __all__ = [
     "ManagedWorkspaceRoot",
     "WorkspaceCleanupResult",
     "WorkspaceNoChangeSnapshot",
+    "WorkspaceWriteCandidate",
+    "WorkspaceWriteSnapshot",
     "WorkspaceAllocator",
 ]

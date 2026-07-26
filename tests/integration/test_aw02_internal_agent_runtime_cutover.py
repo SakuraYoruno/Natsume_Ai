@@ -2963,14 +2963,19 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
             ("agent_runtime", command.command_id),
         )
         projection_id = str(committed["receipt_ref"])
-        _tamper_then_restore(
-            "UPDATE task_runtime_worker_projection SET target_id = ? "
-            "WHERE projection_id = ?",
-            ("tampered-target", projection_id),
-            "UPDATE task_runtime_worker_projection SET target_id = ? "
-            "WHERE projection_id = ?",
-            ("agent_runtime", projection_id),
-        )
+        with sqlite3.connect(str(db_path)) as conn:
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match="TASK_RUNTIME_WORKER_PROJECTION_IMMUTABLE",
+            ):
+                conn.execute(
+                    "UPDATE task_runtime_worker_projection SET target_id = ? "
+                    "WHERE projection_id = ?",
+                    ("tampered-target", projection_id),
+                )
+        assert reopened_store.resolve_internal_agent_completion_lineage(
+            **lineage_kwargs
+        )["recovered"] is True
 
         rogue_lease_id = "lease-internal-seal-recovery-rogue"
         with sqlite3.connect(str(db_path)) as conn:
@@ -3574,7 +3579,7 @@ async def test_write_agent_finish_cannot_create_durable_acceptance(
         projection = json.loads(str(proposed[0]))
         result_proposal = projection["acceptance_effect_intents"][0]["payload"]["result"]
         assert result_proposal["status"] == "BLOCKED"
-        assert result_proposal["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
+        assert result_proposal["reason_code"] == "WORKSPACE_WRITE_GRANT_REQUIRED"
         assert result_proposal["acceptance"]["decision"] == "NOT_RUN"
         assert attempt_service.calls == 0
 

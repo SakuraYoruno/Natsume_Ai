@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.9
+版本：v2.10
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-26
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -43,6 +43,12 @@
 - replay / render / projection：只做纯归一化，不推进画像、时间线、额度或任何持久事实。
 
 长期人格和用户偏好不能从上述易失运行时直接“长出来”。它们必须在 NE-06 经 Feedback Proposal、Lab、Review 和版本激活进入独立权威链；运行期情感上下文只是当前响应的输入，不是人格写 authority。
+
+### 1.4 工作区里的变更不是已验收产物
+
+Worker 写过文件，只能证明某个易失工作副本发生过变化。理论上，受治理代码产物必须依次绑定 frozen base、精确 Task/Attempt/Lease authority、密封的路径清单与内容摘要、Verification、Acceptance 和 durable promotion receipt。Acceptance 前不得移动用户源分支；Acceptance 后应生成不可变 accepted HEAD，并把可重建的差异材料保存在受保护 artifact 中。这样即使临时 worktree 被清理，系统仍能证明“接受了什么”，而不是只留下一个可能被 Git GC 回收的悬空对象。
+
+同一原则要求失败关闭：seal 后工作区漂移、路径越界、秘密文件、符号链接、缺失 patch 或 lifecycle 事务不确定，都不能被解释成成功。确定性 commit 允许事务回滚后的新 Runtime 精确重开，但它不是向生产仓库自动合并的权限；把 accepted artifact 应用到用户分支仍应是另一项显式、可审核的 Effect。
 
 ---
 

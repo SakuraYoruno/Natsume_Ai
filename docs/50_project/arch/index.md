@@ -3,11 +3,13 @@
 
 # Natsume AI 架构文档目录
 
-版本：v4.0
-维护日期：2026-07-15
+版本：v4.1
+维护日期：2026-07-26
 状态：`CURRENT_ARCHITECTURE_CATALOG`
 
 本目录只保留当前结构说明、稳定目标、差距、专项架构和可维护图册。旧路线图、混写完成报告、旧 Agentic RAG/Gateway 方案和按文件行数生成的模块快照已删除；Git 历史承担追溯。
+
+当前 Workspace 写边界：Governed Internal write 已从 frozen source 密封 manifest/binary patch，在 Acceptance 重算 deterministic accepted HEAD，并经 0116 晋升；调用方 source branch 不移动。Domain/Skill/Codex write、handle-level TOCTOU、OS/container tenant 与跨路线 canary 仍为未完成项。
 
 ## 推荐阅读顺序
 
