@@ -317,6 +317,84 @@ async def test_secure_ingress_direct_routes_preserve_surface_principal_and_diges
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("input_source", "expected_surface"),
+    (
+        ("OPERATOR", HostCommandSurface.OPERATOR),
+        ("SCHEDULER", HostCommandSurface.SCHEDULER),
+    ),
+)
+async def test_control_delegate_keeps_target_allowlist_without_child_policy(
+    input_source: str,
+    expected_surface: HostCommandSurface,
+) -> None:
+    repository = _ReplayCommandRepository()
+    target_id = "operator_sys_mode_switch"
+    source_id = input_source.lower()
+    runtime = GovernedHostRuntime(
+        application=_CapturingApplication(repository),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=repository,
+        supported_routes=frozenset({"delegate"}),
+        delegate_target_validator=lambda candidate: (
+            candidate if candidate == target_id else None
+        ),
+    )
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": f"intent-{source_id}-control-delegate",
+        "session_id": f"session-{source_id}-control-delegate",
+        "seq": 1,
+        "nonce": "nonce-operator-control-delegate",
+        "route": "delegate",
+        "target_id": target_id,
+        "task": "switch the governed system mode",
+        "args": {"operator_command_id": "sys_mode.switch"},
+    }
+    governor = {
+        "request_id": f"request-{source_id}-control-delegate",
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "risk_level": 2,
+        "tokens": {},
+        "ts_ms": 1_800_000_000_000,
+    }
+    authority = {
+        "principal_id": f"{source_id}.local",
+        "claim_ref": f"secure-ingress-claim://aw02/{source_id}",
+        "audit_ref": f"secure-ingress-audit://aw02/{source_id}",
+        "body_sha256": "b" * 64,
+        "operator_command_id": "sys_mode.switch",
+    }
+    await runtime.activate()
+    try:
+        events = await _collect(
+            runtime.execute_stream(
+                request_body={"input_source": input_source},
+                request_id=governor["request_id"],
+                session_id=intent["session_id"],
+                ts_ms=governor["ts_ms"],
+                intent_draft=intent,
+                governor_result=governor,
+                person_id=authority["principal_id"],
+                sanitized_message=intent["task"],
+                command_authority=authority,
+            )
+        )
+        assert events[-1]["decision"] == "APPROVE"
+        command = repository.record["command"]
+        work_order = repository.record["work_order"]
+        assert command.surface is expected_surface
+        assert "delegate_target_policy" not in work_order.input_pack
+        assert all(
+            value > 0
+            for value in work_order.budget_policy.limits.to_dict().values()
+        )
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_direct_delegate_rejects_unenabled_target_before_application_admission() -> None:
     repository = _ReplayCommandRepository()
     application = _CapturingApplication(repository)

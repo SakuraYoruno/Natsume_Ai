@@ -679,16 +679,21 @@ class GovernedHostRuntime:
                     skill_requires_durable_review=skill_requires_review,
                 )
             else:
-                delegate_target_policy: Mapping[str, Any] | None = None
-                if route == "delegate":
-                    delegate_target_policy = self._validate_delegate_target(
-                        intent_draft
-                    )
                 authority = dict(command_authority or {})
                 surface = _resolve_host_command_surface(
                     request_body=request_body,
                     authority=authority,
                 )
+                delegate_target_policy: Mapping[str, Any] | None = None
+                if route == "delegate":
+                    delegate_target_policy = self._validate_delegate_target(
+                        intent_draft,
+                        immutable_policy_required=surface
+                        not in {
+                            HostCommandSurface.OPERATOR,
+                            HostCommandSurface.SCHEDULER,
+                        },
+                    )
                 ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
                 # Older admitted Chat/Delegate intents predate the explicit
                 # action/target projection.  Preserve their established Host
@@ -1112,7 +1117,9 @@ class GovernedHostRuntime:
     def _validate_delegate_target(
         self,
         intent_draft: Mapping[str, Any],
-    ) -> dict[str, Any]:
+        *,
+        immutable_policy_required: bool,
+    ) -> dict[str, Any] | None:
         validator = self._delegate_target_validator
         target_id = str(
             intent_draft.get("target_id")
@@ -1147,6 +1154,17 @@ class GovernedHostRuntime:
                 "delegate target validator must be synchronous before admission",
             )
         if not isinstance(result, Mapping):
+            if (
+                not immutable_policy_required
+                and str(result or "").strip() == target_id
+            ):
+                # Operator and Scheduler commands reuse the direct ``delegate``
+                # worker route as an internal control transport.  Their exact
+                # target allowlist is already frozen by the app-local control
+                # composition, and they carry a finite non-zero graph budget.
+                # They are not child-agent Delegates and therefore must not be
+                # forced into the pentest target-policy contract.
+                return None
             raise GovernedHostAdapterError(
                 GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
                 "delegate target validator returned no immutable policy",

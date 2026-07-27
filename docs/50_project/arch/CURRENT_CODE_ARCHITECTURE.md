@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.51
+版本：v5.52
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -23,7 +23,13 @@ recovery 入口重开它，`acceptance_effects` 只允许 result node 编译 Eff
 Delegate 的 `governed-delegate-policy://sha256/...` 同时进入 WorkOrder
 input/metadata，预算 validator、frozen executor 与 dispatcher 均重验；
 当前唯一 target 必须 Review 后执行、内部用量 exact-zero、无 Effect port。
-这批代码的本地单元集合为 `93 passed`，真实 SQLite 四路线为 `1 passed`；
+Operator/Scheduler 虽然复用 `route=delegate` 的 worker transport，但它们是
+受认证控制面：仍由 app-local allowlist 固定 target，并使用有限非零预算；
+它们不进入 child-agent target policy，也不能冒充 `pentest_agent`。该区分在
+合同验证和 Budget authority 两层同时执行。这批代码的 Plan/Delegate
+定向集合为 `89 passed`，Operator 控制面回归为 `21 passed`（集合有重叠，
+不相加），真实 SQLite 四路线为
+`1 passed`；
 正式 clean-SHA 收据尚未生成，所以本节只记代码事实，不改变机器路线状态。
 
 Skill 的生产执行面现在先经过一个穷举、失败关闭的 policy partition。生产

@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.29
+版本：v2.30
 维护日期：2026-07-27
 状态：当前证据
 
@@ -20,7 +20,13 @@
   effect/outbox/delivery claim 拒绝。
 - `test_gr05_frozen_route_executors.py` 在 COMMIT 前重验 admitted policy 与
   dispatcher audit 的 adapter/mode/ref 一致性，不能只相信 URI 前缀。
-- 定向单元/合同集合为 `93 passed in 2.54s`。
+- Operator/Scheduler 的 `route=delegate` 是已认证控制传输，不是 child-agent
+  Delegate：target allowlist 仍须精确命中，但它不携带 pentest target policy，
+  使用有限非零预算。`test_aw02_governed_host_runtime.py` 与真实
+  `test_ne01_governed_operator_sys_mode.py` 共同覆盖该边界，回归集合为
+  `21 passed in 41.62s`；Scheduler 的同边界另由下述定向集合覆盖。
+- 当前 Plan/Delegate 定向单元/合同集合为 `89 passed`；它与上述
+  Operator 集合存在重叠，数字分别报告、不相加。
 - `test_gr05_universal_host_runtime.py` 使用真实文件型 SQLite，Delegate 首次
   返回 `WAITING_APPROVAL` 且零 Attempt；Review approve/resume 后由
   `ReviewContinuationWorker` claim exact checkpoint，最终 `ACCEPTED` 且

@@ -19,7 +19,7 @@ from host_brain.contracts.agent_runtime.delegate_target_policy import (
     validate_governed_delegate_target_policy,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
-from natsume_contracts.task import HostCommand
+from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
 GOVERNED_HOST_AUTHORITY_INVALID = "GOVERNED_HOST_AUTHORITY_INVALID"
@@ -277,13 +277,21 @@ def require_fail_closed_governed_work_order(
         or approval_policy.get("grant_ref")
         or ""
     ).strip()
+    is_child_agent_delegate = (
+        command.route_type == "delegate"
+        and command.surface
+        not in {
+            HostCommandSurface.OPERATOR,
+            HostCommandSurface.SCHEDULER,
+        }
+    )
     budget_invalid = (
         _port_free_delegate_budget_invalid(
             work_order,
             command=command,
             limits=limits,
         )
-        if command.route_type == "delegate"
+        if is_child_agent_delegate
         else any(int(value) <= 0 for value in limits.values())
     )
     if (

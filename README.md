@@ -22,9 +22,13 @@ content-addressed `governed_delegate_target_policy.v1`，先进入 durable
 pre-execution Review，再由 claim-fenced continuation 执行；内部
 token/tool/retry/model-cost 仍以 digest-bound attestation 精确为零。dispatcher
 和 frozen executor 都会拒绝 side-effect、delivery 或 Outbox descriptor，
-只有外层 Graph Acceptance 能提交结果。定向单元集合为 `93 passed`，真实
+只有外层 Graph Acceptance 能提交结果。Operator/Scheduler 复用的
+`route=delegate` 只是一条已认证控制传输：它继续使用 app-local target
+allowlist 和有限非零预算，不会伪装成 `pentest_agent`、也不需要 child-agent
+target policy。当前 Plan/Delegate 定向集合为 `89 passed`，真实
 文件型 SQLite 的 Chat/Skill/Delegate/Plan 集成为 `1 passed`；后者已真实走
-Delegate `WAITING_APPROVAL → approve/resume → ACCEPTED`。这还是实现提交前的
+Delegate `WAITING_APPROVAL → approve/resume → ACCEPTED`。另一个控制面回归集合
+为 `21 passed`，Scheduler 的同边界另由上述定向集合覆盖。这些仍是正式提交绑定收据生成前的
 本地证据，必须在干净 SHA 上重跑正式七路线收据后才能把 Plan/Delegate 从
 `INCOMPLETE` 提升为 `COMPLETE`；真实 provider 与 Docker 全栈仍留给 NE-07。
 
