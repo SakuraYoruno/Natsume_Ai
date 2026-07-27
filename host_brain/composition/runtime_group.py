@@ -54,6 +54,16 @@ _WAITING_REVIEW_STATUSES = frozenset(
 )
 _DENIED_REVIEW_STATUSES = frozenset({"REJECTED", "EXPIRED", "CANCELLED"})
 _TASK_CANCEL_INTENT_REF = re.compile(r"^taskcancel-intent://sha256/[0-9a-f]{64}$")
+_CONTROL_STARTUP_SURFACES = (
+    HostCommandSurface.INTERNAL,
+    HostCommandSurface.SCHEDULER,
+    HostCommandSurface.OPERATOR,
+)
+_CONTROL_SURVIVOR_CONTINUATION_FAILED = (
+    "GOVERNED_CONTROL_SURVIVOR_CONTINUATION_FAILED"
+)
+_DEFAULT_CONTROL_SURVIVOR_INTERVAL_MS = 5_000
+_DEFAULT_CONTROL_SURVIVOR_DRAIN_TIMEOUT_S = 120.0
 
 
 def _runtime_name_for_command(command: HostCommand) -> str | None:
@@ -121,6 +131,12 @@ class GovernedRuntimeGroup:
         graph_cancellation_state_reader: Any | None = None,
         acceptance_effect_runtime: Any | None = None,
         operation_reacquisition_owner_id: str | None = None,
+        startup_task_store: Any | None = None,
+        startup_continuation_factory: Callable[..., Any] | None = None,
+        startup_survivor_factory: Callable[..., Any] | None = None,
+        startup_survivor_interval_ms: int = (
+            _DEFAULT_CONTROL_SURVIVOR_INTERVAL_MS
+        ),
     ) -> None:
         normalized = {
             str(name).strip(): runtime
@@ -158,6 +174,62 @@ class GovernedRuntimeGroup:
             operation_reacquisition_owner_id or ""
         ).strip() or None
         self._operation_reacquisition_lock = asyncio.Lock()
+        self._startup_recovery_lock = asyncio.Lock()
+        self._startup_recovery_completed = False
+        startup_dependencies = (
+            startup_task_store,
+            startup_continuation_factory,
+            startup_survivor_factory,
+        )
+        if any(value is not None for value in startup_dependencies) and not all(
+            value is not None for value in startup_dependencies
+        ):
+            raise TypeError(
+                "control startup continuation requires TaskStore, "
+                "continuation factory and supervisor factory"
+            )
+        self._startup_continuation = (
+            startup_continuation_factory(
+                task_store=startup_task_store,
+                command_repository=command_repository,
+                resume_admission=self._resume_startup_admission,
+                surfaces=_CONTROL_STARTUP_SURFACES,
+            )
+            if startup_task_store is not None
+            else None
+        )
+        if self._startup_continuation is not None and not callable(
+            getattr(self._startup_continuation, "recover", None)
+        ):
+            raise TypeError(
+                "control startup continuation must expose recover"
+            )
+        self._startup_survivor = (
+            startup_survivor_factory(
+                runner=self._startup_continuation.recover,
+                task_name="governed-control-survivor-continuation",
+                failure_reason_code=_CONTROL_SURVIVOR_CONTINUATION_FAILED,
+                interval_ms=int(startup_survivor_interval_ms),
+            )
+            if self._startup_continuation is not None
+            else None
+        )
+        if self._startup_survivor is not None:
+            for method_name in (
+                "run_once",
+                "start",
+                "wake",
+                "request_stop",
+                "join",
+                "health_snapshot",
+            ):
+                if not callable(
+                    getattr(self._startup_survivor, method_name, None)
+                ):
+                    raise TypeError(
+                        "control startup supervisor lacks "
+                        f"{method_name}"
+                    )
         if acceptance_effect_runtime is not None:
             for method_name in ("activate", "drain", "aclose"):
                 if not callable(getattr(acceptance_effect_runtime, method_name, None)):
@@ -178,7 +250,6 @@ class GovernedRuntimeGroup:
         review_dependencies = (
             review_store,
             review_decision_store,
-            command_repository,
             review_continuation_worker_factory,
             review_continuation_worker_id,
         )
@@ -223,6 +294,26 @@ class GovernedRuntimeGroup:
     def review_continuation_worker(self) -> Any | None:
         return self._review_worker
 
+    @property
+    def startup_continuation_report(self) -> tuple[dict[str, Any], ...]:
+        continuation = self._startup_continuation
+        return () if continuation is None else continuation.report
+
+    @property
+    def startup_survivor_health(self) -> dict[str, Any]:
+        continuation = self._startup_survivor
+        return (
+            {
+                "running": False,
+                "stop_requested": False,
+                "completed_cycles": 0,
+                "last_report": (),
+                "last_failure": None,
+            }
+            if continuation is None
+            else continuation.health_snapshot()
+        )
+
     def get(self, name: str) -> Any:
         return self._runtimes[str(name)]
 
@@ -234,6 +325,7 @@ class GovernedRuntimeGroup:
                 await _await_call(runtime.activate())
                 self._active_names.append(name)
             self._continuation_open = True
+            self._startup_recovery_completed = False
             # A recovery-time Acceptance Effect may need the app-local
             # Runtime Group (for example, to persist one graph cancellation).
             # Activate every target runtime before replaying committed effects
@@ -251,13 +343,16 @@ class GovernedRuntimeGroup:
             raise
 
     async def close_admission(self) -> None:
-        # Review continuation is an internal producer.  Quiesce it while every
-        # surface is still active, then close public admission and drain.
+        # Startup and Review continuation are internal producers.  Stop and
+        # join the survivor first while every surface can still finish an
+        # already-started exact re-entry, then close public admission.
+        await self._stop_startup_survivor()
         await self._stop_review_worker()
         for name in tuple(self._active_names):
             await _await_call(self._runtimes[name].close_admission())
 
     async def drain(self) -> None:
+        await self._stop_startup_survivor()
         for name in tuple(self._active_names):
             await _await_call(self._runtimes[name].drain())
         if self._acceptance_effect_runtime_active:
@@ -265,6 +360,10 @@ class GovernedRuntimeGroup:
 
     async def aclose(self) -> None:
         failures: list[tuple[str, BaseException]] = []
+        try:
+            await self._stop_startup_survivor()
+        except BaseException as exc:
+            failures.append(("control_survivor_continuation", exc))
         try:
             await self._stop_review_worker()
         except BaseException as exc:
@@ -294,6 +393,56 @@ class GovernedRuntimeGroup:
         worker = self._review_worker
         if worker is not None:
             worker.wake()
+
+    def wake_startup_survivor(self) -> None:
+        continuation = self._startup_survivor
+        if continuation is not None:
+            continuation.wake()
+
+    async def recover_startup_graphs(self) -> tuple[dict[str, Any], ...]:
+        """Recover every non-Host surface after all shared owners are active."""
+
+        async with self._startup_recovery_lock:
+            if not self._continuation_open or not self._active_names:
+                raise RuntimeError("CONTROL_STARTUP_CONTINUATION_RUNTIME_INACTIVE")
+            if self._startup_recovery_completed:
+                return self.startup_continuation_report
+            supervisor = self._startup_survivor
+            if supervisor is None:
+                self._startup_recovery_completed = True
+                return ()
+            report = await supervisor.run_once()
+            self._startup_recovery_completed = True
+            await supervisor.start()
+            return report
+
+    async def _resume_startup_admission(
+        self,
+        command: HostCommand,
+        work_order: Any,
+        assignment: Any,
+        graph: Any,
+    ) -> Mapping[str, Any]:
+        runtime_name = _runtime_name_for_command(command)
+        runtime = self._runtimes.get(str(runtime_name or ""))
+        continuation = getattr(runtime, "continue_startup_admission", None)
+        if runtime is None or not callable(continuation):
+            raise RuntimeError(
+                "CONTROL_STARTUP_CONTINUATION_SURFACE_UNAVAILABLE:"
+                f"{command.surface.value}"
+            )
+        record = {
+            "command": command,
+            "work_order": work_order,
+            "assignment": assignment,
+            "graph": graph,
+        }
+        async with self._operation_reacquisition_lock:
+            result = await _await_call(continuation(record))
+        return _mapping(
+            result,
+            field_name="control startup continuation result",
+        )
 
     @property
     def operation_reacquisition_owner_id(self) -> str | None:
@@ -649,6 +798,16 @@ class GovernedRuntimeGroup:
         await _await_call(worker.stop())
         await _await_call(worker.join())
         self._review_worker_started = False
+
+    async def _stop_startup_survivor(self) -> None:
+        async with self._startup_recovery_lock:
+            continuation = self._startup_survivor
+            if continuation is None:
+                return
+            continuation.request_stop()
+            await continuation.join(
+                timeout_s=_DEFAULT_CONTROL_SURVIVOR_DRAIN_TIMEOUT_S
+            )
 
     async def _complete_secure_ingress_claim(
         self,

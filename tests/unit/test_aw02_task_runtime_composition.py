@@ -185,6 +185,12 @@ class _TaskStore(_Closeable):
     def assert_node_verification_ready(self) -> None:
         self.events.append("task-store:node-verification-ready")
 
+    def assert_node_acceptance_ready(self) -> None:
+        self.events.append("task-store:node-acceptance-ready")
+
+    def assert_review_denial_settlement_ready(self) -> None:
+        self.events.append("task-store:review-denial-settlement-ready")
+
     def inventory_terminal_reconciliation_cases(
         self,
         *,
@@ -335,6 +341,8 @@ def test_build_migrates_before_constructing_one_explicit_durable_graph(
         "task-store:terminal-reconciliation-ready",
         "task-store:node-artifact-ready",
         "task-store:node-verification-ready",
+        "task-store:node-acceptance-ready",
+        "task-store:review-denial-settlement-ready",
         f"task-store:recover:{container.recovery_id}",
         "task-store:terminal-reconciliation-inventory",
         "review-store:build",
@@ -484,7 +492,7 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert caught.value.reason_code == TASK_RUNTIME_CONSTRUCTION_FAILED
     assert "private platform detail" not in caught.value.detail
     assert caught.value.rollback_failures == ()
-    assert len(events) == 12
+    assert len(events) == 14
     assert events[:2] == [
         "migration:apply:startup::task-runtime",
         "task-store:build",
@@ -496,8 +504,10 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
     assert events[6] == "task-store:terminal-reconciliation-ready"
     assert events[7] == "task-store:node-artifact-ready"
     assert events[8] == "task-store:node-verification-ready"
-    assert events[9].startswith("task-store:recover:task-runtime-startup::")
-    assert events[10:] == ["task-store:close", "migration:close"]
+    assert events[9] == "task-store:node-acceptance-ready"
+    assert events[10] == "task-store:review-denial-settlement-ready"
+    assert events[11].startswith("task-store:recover:task-runtime-startup::")
+    assert events[12:] == ["task-store:close", "migration:close"]
 
 
 def test_execution_owner_is_unique_per_container_construction(tmp_path: Path) -> None:
@@ -575,9 +585,11 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
     assert events[6] == "task-store:terminal-reconciliation-ready"
     assert events[7] == "task-store:node-artifact-ready"
     assert events[8] == "task-store:node-verification-ready"
-    assert events[9].startswith("task-store:recover:task-runtime-startup::")
-    assert events[10] == "task-store:terminal-reconciliation-inventory"
-    assert events[11:] == [
+    assert events[9] == "task-store:node-acceptance-ready"
+    assert events[10] == "task-store:review-denial-settlement-ready"
+    assert events[11].startswith("task-store:recover:task-runtime-startup::")
+    assert events[12] == "task-store:terminal-reconciliation-inventory"
+    assert events[13:] == [
         "review-store:build",
         "review-continuation-store:build",
         "worker-projection-store:build",

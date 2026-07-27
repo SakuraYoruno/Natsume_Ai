@@ -9,7 +9,9 @@ replays a worker after a live lease or uncertain effect.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+import hashlib
 import inspect
+import json
 from typing import Any
 
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
@@ -17,7 +19,7 @@ from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from natsume_contracts.task import ExecutorAssignment, HostCommand, HostCommandSurface
 
 
-_HOST_SURFACES = frozenset(
+_DEFAULT_HOST_SURFACES = frozenset(
     {
         HostCommandSurface.CHAT,
         HostCommandSurface.HOST_INPUT,
@@ -25,10 +27,11 @@ _HOST_SURFACES = frozenset(
         HostCommandSurface.GATEWAY,
     }
 )
-_HOST_SURFACE_VALUES = tuple(sorted(surface.value for surface in _HOST_SURFACES))
 _RESUMABLE_GRAPH_STATUSES = frozenset({"CREATED", "ACTIVE", "BLOCKED"})
 _LIVE_LEASE_STATUS = "ACTIVE"
 _EXECUTION_IN_PROGRESS = "GOVERNED_EXECUTION_IN_PROGRESS"
+_PAGE_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_page.v1"
+_CURSOR_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_cursor.v1"
 
 
 class HostStartupGraphContinuationError(RuntimeError):
@@ -49,10 +52,11 @@ ResumeAdmission = Callable[
 class HostStartupGraphContinuation:
     """Re-enter exact Host admissions after TaskStore startup recovery.
 
-    The inventory is intentionally bounded.  Exceeding the limit is an
-    activation error rather than silently claiming that all resumable Graphs
-    were inspected; an exact full page is valid.  A graph with a live Lease is
-    reported as deferred and is never sent to a worker by this component.
+    Each repository page is bounded, while a separate total scan limit prevents
+    unbounded startup work.  The repository advances an immutable keyset cursor
+    so more than one page cannot strand every survivor behind an overflow
+    sentinel.  A graph with a live Lease is reported as deferred and is never
+    sent to a worker by this component.
     """
 
     def __init__(
@@ -61,6 +65,7 @@ class HostStartupGraphContinuation:
         task_store: Any | None,
         command_repository: Any,
         resume_admission: ResumeAdmission,
+        surfaces: Sequence[HostCommandSurface] | None = None,
     ) -> None:
         if not callable(resume_admission):
             raise TypeError("resume_admission must be callable")
@@ -72,15 +77,27 @@ class HostStartupGraphContinuation:
                         f"{method_name}"
                     )
         if task_store is not None and not callable(
-            getattr(command_repository, "list_nonterminal_admissions", None)
+            getattr(
+                command_repository,
+                "list_nonterminal_admission_page",
+                None,
+            )
         ):
             raise TypeError(
                 "Host startup continuation requires a surface-filtered "
-                "command_repository inventory"
+                "paginated command_repository inventory"
             )
         self._store = task_store
         self._commands = command_repository
         self._resume_admission = resume_admission
+        normalized_surfaces = _normalize_surfaces(
+            _DEFAULT_HOST_SURFACES if surfaces is None else surfaces
+        )
+        self._surfaces = frozenset(normalized_surfaces)
+        self._surface_values = tuple(
+            sorted(surface.value for surface in normalized_surfaces)
+        )
+        self._surfaces_sha256 = _surfaces_sha256(self._surface_values)
         self._report: tuple[dict[str, Any], ...] = ()
 
     @property
@@ -91,6 +108,7 @@ class HostStartupGraphContinuation:
         self,
         *,
         page_limit: int = 100,
+        scan_limit: int = 10_000,
     ) -> tuple[dict[str, Any], ...]:
         """Resume all bounded Host-owned nonterminal Graphs once."""
 
@@ -102,95 +120,127 @@ class HostStartupGraphContinuation:
             raise HostStartupGraphContinuationError(
                 "startup continuation page_limit is outside [1, 500]"
             )
-        raw_records = await _maybe_await(
-            self._commands.list_nonterminal_admissions(
-                surfaces=_HOST_SURFACE_VALUES,
-                limit=int(page_limit),
-            )
-        )
-        if not isinstance(raw_records, Sequence) or isinstance(
-            raw_records,
-            (str, bytes, bytearray),
-        ):
+        if not 1 <= int(scan_limit) <= 100_000:
             raise HostStartupGraphContinuationError(
-                "nonterminal Host admission inventory is invalid"
-            )
-        records = tuple(raw_records)
-        if len(records) > int(page_limit):
-            raise HostStartupGraphContinuationError(
-                "nonterminal Host admission inventory exceeded its safe startup bound"
+                "startup continuation scan_limit is outside [1, 100000]"
             )
 
         reports: list[dict[str, Any]] = []
-        for record in records:
-            graph_id, graph_revision, graph_status = _admission_identity(record)
-            command = _command_for_graph(
-                record,
-                graph_id=graph_id,
-                graph_revision=graph_revision,
-            )
-            if command.surface not in _HOST_SURFACES:
-                raise HostStartupGraphContinuationError(
-                    "surface-filtered Host admission inventory returned foreign work"
+        cursor: Mapping[str, Any] | None = None
+        scanned = 0
+        seen_commands: set[str] = set()
+        seen_graphs: set[tuple[str, int]] = set()
+        while True:
+            raw_page = await _maybe_await(
+                self._commands.list_nonterminal_admission_page(
+                    surfaces=self._surface_values,
+                    limit=int(page_limit),
+                    cursor=dict(cursor) if cursor is not None else None,
                 )
-            command, work_order, assignment, graph = _canonical_host_admission(
-                record,
-                command=command,
-                graph_id=graph_id,
-                graph_revision=graph_revision,
             )
-            if graph_status not in _RESUMABLE_GRAPH_STATUSES:
+            records, next_cursor = _validated_page(
+                raw_page,
+                previous_cursor=cursor,
+                page_limit=int(page_limit),
+                surfaces_sha256=self._surfaces_sha256,
+            )
+            scanned += len(records)
+            if scanned > int(scan_limit):
                 raise HostStartupGraphContinuationError(
-                    "nonterminal TaskGraph inventory has an unsupported status"
+                    "nonterminal Host admission inventory exceeded its verified scan bound"
                 )
-            snapshot = await _maybe_await(
-                store.read_scheduler_snapshot(graph_id, graph_revision)
-            )
-            snapshot_status = _snapshot_status(
-                snapshot,
-                graph_id=graph_id,
-                graph_revision=graph_revision,
-            )
-            if snapshot_status not in _RESUMABLE_GRAPH_STATUSES:
-                continue
-            if _has_live_lease(snapshot):
-                reports.append(
-                    _report(
-                        graph_id,
-                        graph_revision,
-                        status="DEFERRED",
-                        reason_code="GOVERNED_HOST_STARTUP_LIVE_LEASE",
+            for record in records:
+                graph_id, graph_revision, graph_status = _admission_identity(
+                    record
+                )
+                command = _command_for_graph(
+                    record,
+                    graph_id=graph_id,
+                    graph_revision=graph_revision,
+                )
+                if record.get("command_id") != command.command_id:
+                    raise HostStartupGraphContinuationError(
+                        "paginated Host admission command key differs from its command"
                     )
+                graph_identity = (graph_id, graph_revision)
+                if (
+                    command.command_id in seen_commands
+                    or graph_identity in seen_graphs
+                ):
+                    raise HostStartupGraphContinuationError(
+                        "paginated Host admission inventory repeated an identity"
+                    )
+                seen_commands.add(command.command_id)
+                seen_graphs.add(graph_identity)
+                if command.surface not in self._surfaces:
+                    raise HostStartupGraphContinuationError(
+                        "surface-filtered Host admission inventory returned foreign work"
+                    )
+                command, work_order, assignment, graph = _canonical_host_admission(
+                    record,
+                    command=command,
+                    graph_id=graph_id,
+                    graph_revision=graph_revision,
                 )
-                continue
-            try:
-                terminal = await self._resume_admission(
-                    command,
-                    work_order,
-                    assignment,
-                    graph,
+                if graph_status not in _RESUMABLE_GRAPH_STATUSES:
+                    raise HostStartupGraphContinuationError(
+                        "nonterminal TaskGraph inventory has an unsupported status"
+                    )
+                snapshot = await _maybe_await(
+                    store.read_scheduler_snapshot(graph_id, graph_revision)
                 )
-            except Exception as exc:
-                if str(getattr(exc, "reason_code", "")) == _EXECUTION_IN_PROGRESS:
+                snapshot_status = _snapshot_status(
+                    snapshot,
+                    graph_id=graph_id,
+                    graph_revision=graph_revision,
+                )
+                if snapshot_status not in _RESUMABLE_GRAPH_STATUSES:
+                    continue
+                if _has_live_lease(snapshot):
                     reports.append(
                         _report(
                             graph_id,
                             graph_revision,
                             status="DEFERRED",
-                            reason_code=_EXECUTION_IN_PROGRESS,
+                            reason_code="GOVERNED_HOST_STARTUP_LIVE_LEASE",
                         )
                     )
                     continue
-                raise HostStartupGraphContinuationError(
-                    f"exact Host TaskGraph continuation failed: {type(exc).__name__}"
-                ) from exc
-            reports.append(
-                _terminal_report(
-                    graph_id,
-                    graph_revision,
-                    terminal,
+                try:
+                    terminal = await self._resume_admission(
+                        command,
+                        work_order,
+                        assignment,
+                        graph,
+                    )
+                except Exception as exc:
+                    if (
+                        str(getattr(exc, "reason_code", ""))
+                        == _EXECUTION_IN_PROGRESS
+                    ):
+                        reports.append(
+                            _report(
+                                graph_id,
+                                graph_revision,
+                                status="DEFERRED",
+                                reason_code=_EXECUTION_IN_PROGRESS,
+                            )
+                        )
+                        continue
+                    raise HostStartupGraphContinuationError(
+                        "exact Host TaskGraph continuation failed: "
+                        f"{type(exc).__name__}"
+                    ) from exc
+                reports.append(
+                    _terminal_report(
+                        graph_id,
+                        graph_revision,
+                        terminal,
+                    )
                 )
-            )
+            if next_cursor is None:
+                break
+            cursor = next_cursor
         self._report = tuple(reports)
         return self.report
 
@@ -270,6 +320,170 @@ def _admission_identity(value: Any) -> tuple[str, int, str]:
             "nonterminal Host admission inventory has an invalid state"
         )
     return graph_id, revision, status
+
+
+def _validated_page(
+    value: Any,
+    *,
+    previous_cursor: Mapping[str, Any] | None,
+    page_limit: int,
+    surfaces_sha256: str,
+) -> tuple[tuple[Mapping[str, Any], ...], Mapping[str, Any] | None]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_version",
+        "surfaces_sha256",
+        "records",
+        "next_cursor",
+        "has_more",
+    }:
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission page shape is invalid"
+        )
+    if (
+        value.get("schema_version") != _PAGE_SCHEMA_VERSION
+        or value.get("surfaces_sha256") != surfaces_sha256
+        or type(value.get("has_more")) is not bool
+    ):
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission page authority is invalid"
+        )
+    raw_records = value.get("records")
+    if not isinstance(raw_records, Sequence) or isinstance(
+        raw_records,
+        (str, bytes, bytearray),
+    ):
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission page records are invalid"
+        )
+    records = tuple(raw_records)
+    if len(records) > page_limit:
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission page exceeded its requested bound"
+        )
+    previous_key: tuple[int, str] | None = None
+    if previous_cursor is not None:
+        previous = _validated_cursor(
+            previous_cursor,
+            surfaces_sha256=surfaces_sha256,
+        )
+        previous_key = (
+            previous["created_at_ms"],
+            previous["command_id"],
+        )
+    page_tail_key = previous_key
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise HostStartupGraphContinuationError(
+                "nonterminal Host admission page record is invalid"
+            )
+        record_key = (
+            _non_negative_int(record.get("created_at_ms"), "created_at_ms"),
+            str(record.get("command_id") or "").strip(),
+        )
+        if (
+            not record_key[1]
+            or len(record_key[1]) > 512
+            or (page_tail_key is not None and record_key <= page_tail_key)
+        ):
+            raise HostStartupGraphContinuationError(
+                "nonterminal Host admission page key order is invalid"
+            )
+        page_tail_key = record_key
+
+    has_more = value["has_more"]
+    raw_cursor = value.get("next_cursor")
+    if has_more != (raw_cursor is not None) or (has_more and not records):
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission page continuation is inconsistent"
+        )
+    if raw_cursor is None:
+        return records, None
+    cursor = _validated_cursor(
+        raw_cursor,
+        surfaces_sha256=surfaces_sha256,
+    )
+    cursor_key = (cursor["created_at_ms"], cursor["command_id"])
+    if cursor_key != page_tail_key:
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission cursor differs from its page tail"
+        )
+    return records, cursor
+
+
+def _validated_cursor(
+    value: Any,
+    *,
+    surfaces_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_version",
+        "surfaces_sha256",
+        "created_at_ms",
+        "command_id",
+    }:
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission cursor shape is invalid"
+        )
+    command_id = str(value.get("command_id") or "").strip()
+    if (
+        value.get("schema_version") != _CURSOR_SCHEMA_VERSION
+        or value.get("surfaces_sha256") != surfaces_sha256
+        or not command_id
+        or len(command_id) > 512
+    ):
+        raise HostStartupGraphContinuationError(
+            "nonterminal Host admission cursor authority is invalid"
+        )
+    return {
+        "schema_version": _CURSOR_SCHEMA_VERSION,
+        "surfaces_sha256": surfaces_sha256,
+        "created_at_ms": _non_negative_int(
+            value.get("created_at_ms"),
+            "cursor created_at_ms",
+        ),
+        "command_id": command_id,
+    }
+
+
+def _normalize_surfaces(
+    surfaces: Sequence[HostCommandSurface],
+) -> tuple[HostCommandSurface, ...]:
+    if isinstance(surfaces, (str, bytes, bytearray)) or not isinstance(
+        surfaces,
+        (Sequence, set, frozenset),
+    ):
+        raise TypeError("startup continuation surfaces must be a sequence")
+    normalized: list[HostCommandSurface] = []
+    seen: set[HostCommandSurface] = set()
+    for surface in surfaces:
+        if not isinstance(surface, HostCommandSurface):
+            raise TypeError(
+                "startup continuation surfaces must contain HostCommandSurface values"
+            )
+        if surface not in seen:
+            normalized.append(surface)
+            seen.add(surface)
+    if not normalized:
+        raise ValueError("startup continuation requires at least one surface")
+    return tuple(normalized)
+
+
+def _surfaces_sha256(surfaces: Sequence[str]) -> str:
+    encoded = json.dumps(
+        list(surfaces),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _non_negative_int(value: Any, field_name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise HostStartupGraphContinuationError(
+            f"nonterminal Host admission {field_name} is invalid"
+        )
+    return value
 
 
 def _snapshot_status(

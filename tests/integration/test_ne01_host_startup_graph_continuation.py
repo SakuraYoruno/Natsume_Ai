@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import sqlite3
 from typing import Any
 
@@ -14,6 +15,10 @@ from host_brain.orchestration.host_route_contracts import (
     build_direct_host_route_contracts,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.host_command_repository_types import (
+    HOST_COMMAND_INVALID,
+    HostCommandRepositoryError,
+)
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
@@ -57,13 +62,15 @@ class _MutableClock:
         return self.value
 
 
-def _contracts() -> tuple[Any, Any, Any, Any]:
+def _contracts(index: int = 0) -> tuple[Any, Any, Any, Any]:
+    suffix = f"-{int(index):04d}" if index else ""
+    ts_ms = NOW + int(index)
     direct = build_direct_host_route_contracts(
         surface=HostCommandSurface.CHAT,
-        request_id="request-host-startup-sqlite",
-        session_id="session-host-startup-sqlite",
-        principal_id="person-host-startup-sqlite",
-        ts_ms=NOW,
+        request_id=f"request-host-startup-sqlite{suffix}",
+        session_id=f"session-host-startup-sqlite{suffix}",
+        principal_id=f"person-host-startup-sqlite{suffix}",
+        ts_ms=ts_ms,
         intent_draft={
             "route": "chat",
             "target_id": "surface_reply",
@@ -72,23 +79,45 @@ def _contracts() -> tuple[Any, Any, Any, Any]:
             "target": "host",
         },
         governor_result={
-            "request_id": "request-host-startup-sqlite",
+            "request_id": f"request-host-startup-sqlite{suffix}",
             "decision": "APPROVE",
             "tokens": {},
-            "ts_ms": NOW,
+            "ts_ms": ts_ms,
         },
         sanitized_message="resume durable Host graph from SQLite",
-        person_id="person-host-startup-sqlite",
+        person_id=f"person-host-startup-sqlite{suffix}",
     )
     assignment = ExecutorAssignment(
         work_order_id=direct.work_order.work_order_id,
         executor=TaskExecutor.CANONICAL,
-        assignment_id="runtime-assignment://host-startup-sqlite/canonical",
-        assigned_at_ms=NOW,
+        assignment_id=(
+            f"runtime-assignment://host-startup-sqlite{suffix}/canonical"
+        ),
+        assigned_at_ms=ts_ms,
         is_new_task=True,
         reason_code="RUNTIME_NEW_TASK_CANONICAL",
     )
     return direct.command, direct.work_order, assignment, direct.graph
+
+
+def _seed_host_admissions_in_process(
+    db_path: str,
+    count: int,
+    queue: Any,
+) -> None:
+    try:
+        commands = HostCommandRepository(
+            db_path,
+            clock=lambda: NOW + 1_000,
+        )
+        graph_ids: list[str] = []
+        for index in range(int(count)):
+            command, work_order, assignment, graph = _contracts(index + 1)
+            commands.admit(command, work_order, assignment, graph)
+            graph_ids.append(graph.graph_id)
+        queue.put({"kind": "ok", "graph_ids": graph_ids})
+    except Exception as exc:  # pragma: no cover - surfaced by parent assertion
+        queue.put({"kind": "error", "detail": f"{type(exc).__name__}:{exc}"})
 
 
 @pytest.mark.asyncio
@@ -109,17 +138,23 @@ async def test_host_startup_continuation_reads_exact_sqlite_admission(
     assert [(item["graph_id"], item["revision"], item["status"]) for item in inventory] == [
         (graph.graph_id, graph.revision, TaskGraphStatus.CREATED.value)
     ]
-    host_inventory = commands.list_nonterminal_admissions(
+    host_page = commands.list_nonterminal_admission_page(
         surfaces=(HostCommandSurface.CHAT.value,),
         limit=1,
+        cursor=None,
     )
-    assert len(host_inventory) == 1
-    assert host_inventory[0]["command"] == admitted["command"]
-    assert host_inventory[0]["runtime_graph_status"] == "CREATED"
-    assert commands.list_nonterminal_admissions(
+    assert host_page["has_more"] is False
+    assert host_page["next_cursor"] is None
+    assert len(host_page["records"]) == 1
+    assert host_page["records"][0]["command"] == admitted["command"]
+    assert host_page["records"][0]["runtime_graph_status"] == "CREATED"
+    scheduler_page = commands.list_nonterminal_admission_page(
         surfaces=(HostCommandSurface.SCHEDULER.value,),
         limit=1,
-    ) == []
+        cursor=None,
+    )
+    assert scheduler_page["records"] == []
+    assert scheduler_page["has_more"] is False
 
     application = _CapturingApplication()
     runtime = GovernedHostRuntime(
@@ -189,6 +224,75 @@ async def test_host_startup_continuation_reads_exact_sqlite_admission(
         ),
     )
     assert store.list_nonterminal_graphs(limit=10) == []
+
+
+@pytest.mark.asyncio
+async def test_host_startup_recovers_more_than_one_hundred_sqlite_admissions(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "host-startup-paginated-continuation.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="ne01-host-startup-pagination-migrate",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    seeder = context.Process(
+        target=_seed_host_admissions_in_process,
+        args=(str(db_path), 101, queue),
+    )
+    seeder.start()
+    seeder.join(60)
+    assert seeder.exitcode == 0
+    seeded = queue.get(timeout=10)
+    assert seeded["kind"] == "ok", seeded
+
+    commands = HostCommandRepository(db_path, clock=lambda: NOW + 1_000)
+    store = DurableTaskStore(db_path, clock=lambda: NOW + 1_000)
+    expected_graph_ids = set(seeded["graph_ids"])
+
+    first_page = commands.list_nonterminal_admission_page(
+        surfaces=(HostCommandSurface.CHAT.value,),
+        limit=100,
+        cursor=None,
+    )
+    assert len(first_page["records"]) == 100
+    assert first_page["has_more"] is True
+    assert first_page["next_cursor"] is not None
+    tampered_cursor = dict(first_page["next_cursor"])
+    tampered_cursor["surfaces_sha256"] = "sha256:" + ("0" * 64)
+    with pytest.raises(HostCommandRepositoryError) as exc_info:
+        commands.list_nonterminal_admission_page(
+            surfaces=(HostCommandSurface.CHAT.value,),
+            limit=100,
+            cursor=tampered_cursor,
+        )
+    assert exc_info.value.reason_code == HOST_COMMAND_INVALID
+    second_page = commands.list_nonterminal_admission_page(
+        surfaces=(HostCommandSurface.CHAT.value,),
+        limit=100,
+        cursor=first_page["next_cursor"],
+    )
+    assert len(second_page["records"]) == 1
+    assert second_page["has_more"] is False
+    assert second_page["next_cursor"] is None
+
+    application = _CapturingApplication()
+    runtime = GovernedHostRuntime(
+        application=application,
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=commands,
+        task_store=store,
+    )
+    await runtime.activate()
+    report = await runtime.recover_startup_graphs()
+    await runtime.aclose()
+
+    assert len(application.calls) == 101
+    assert len(report) == 101
+    assert {item["graph_id"] for item in report} == expected_graph_ids
+    assert all(item["status"] == "COMPLETED" for item in report)
 
 
 @pytest.mark.asyncio

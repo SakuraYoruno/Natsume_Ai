@@ -192,7 +192,7 @@ class GovernedHostRuntime:
             and callable(
                 getattr(
                     command_repository,
-                    "list_nonterminal_admissions",
+                    "list_nonterminal_admission_page",
                     None,
                 )
             )
@@ -916,11 +916,19 @@ class GovernedHostRuntime:
     ) -> dict[str, Any]:
         """Re-enter one exact Host admission after signed no-effect recovery."""
 
+        return await self.continue_startup_admission(record)
+
+    async def continue_startup_admission(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact Host-owned admission selected by a survivor."""
+
         async with self._lifecycle:
             if not self._active or not self._accepting:
                 raise GovernedHostAdapterError(
                     GOVERNED_HOST_RUNTIME_INACTIVE,
-                    "governed Host runtime is not accepting Operation recovery",
+                    "governed Host runtime is not accepting startup recovery",
                 )
             self._in_flight += 1
         try:
@@ -1245,14 +1253,14 @@ def build_governed_host_runtime(
     if not callable(
         getattr(
             task_runtime_container.command_repository,
-            "list_nonterminal_admissions",
+            "list_nonterminal_admission_page",
             None,
         )
     ):
         raise GovernedHostAdapterError(
             GOVERNED_HOST_AUTHORITY_INVALID,
             "production governed Host runtime requires a surface-filtered "
-            "nonterminal admission inventory",
+            "paginated nonterminal admission inventory",
         )
     node_grant_service = NodeBoundGrantService(
         ledger=ledger,

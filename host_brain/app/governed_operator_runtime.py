@@ -373,6 +373,14 @@ class GovernedOperatorRuntime(
             operation,
         )
 
+    async def continue_startup_admission(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Delegate exact Operator survivor recovery to its Host spine."""
+
+        return await self._runtime.continue_startup_admission(record)
+
     async def request_graph_cancellation(
         self,
         record: Mapping[str, Any],

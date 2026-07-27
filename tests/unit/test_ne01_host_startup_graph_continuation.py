@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+import hashlib
+import json
 from typing import Any
 
 import pytest
@@ -50,22 +52,68 @@ class _CommandRepository:
         additional_records: tuple[dict[str, Any], ...] = (),
     ) -> None:
         self.records = (record, *additional_records)
-        self.inventory_calls: list[tuple[tuple[str, ...], int]] = []
+        self.inventory_calls: list[
+            tuple[tuple[str, ...], int, dict[str, Any] | None]
+        ] = []
 
-    def list_nonterminal_admissions(
+    def list_nonterminal_admission_page(
         self,
         *,
         surfaces: tuple[str, ...],
         limit: int,
-    ) -> list[dict[str, Any]]:
+        cursor: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         normalized = tuple(str(item) for item in surfaces)
-        self.inventory_calls.append((normalized, int(limit)))
+        copied_cursor = dict(cursor) if cursor is not None else None
+        self.inventory_calls.append((normalized, int(limit), copied_cursor))
         filtered = []
         for record in self.records:
             command = record.get("command")
             if str(getattr(command, "surface", "")) in normalized:
                 filtered.append(dict(record))
-        return filtered[: int(limit) + 1]
+        filtered.sort(
+            key=lambda item: (item["created_at_ms"], item["command_id"])
+        )
+        if cursor is not None:
+            cursor_key = (cursor["created_at_ms"], cursor["command_id"])
+            filtered = [
+                item
+                for item in filtered
+                if (item["created_at_ms"], item["command_id"]) > cursor_key
+            ]
+        page_records = filtered[: int(limit)]
+        has_more = len(filtered) > int(limit)
+        surfaces_sha256 = "sha256:" + hashlib.sha256(
+            json.dumps(
+                list(normalized),
+                ensure_ascii=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        next_cursor = None
+        if has_more:
+            tail = page_records[-1]
+            next_cursor = {
+                "schema_version": "Natsume.host.nonterminal_admission_cursor.v1",
+                "surfaces_sha256": surfaces_sha256,
+                "created_at_ms": tail["created_at_ms"],
+                "command_id": tail["command_id"],
+            }
+        return {
+            "schema_version": "Natsume.host.nonterminal_admission_page.v1",
+            "surfaces_sha256": surfaces_sha256,
+            "records": page_records,
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+        }
+
+
+class _OutOfOrderCommandRepository(_CommandRepository):
+    def list_nonterminal_admission_page(self, **kwargs: Any) -> dict[str, Any]:
+        page = super().list_nonterminal_admission_page(**kwargs)
+        page["records"] = list(reversed(page["records"]))
+        return page
 
 
 class _Application:
@@ -91,13 +139,19 @@ class _Application:
         return {"status": "CANCELLED"}
 
 
-def _contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _contracts(
+    *,
+    suffix: str = "",
+    ts_offset: int = 0,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    request_suffix = f"-{suffix}" if suffix else ""
+    ts_ms = NOW + int(ts_offset)
     direct = build_direct_host_route_contracts(
         surface=HostCommandSurface.CHAT,
-        request_id="request-host-startup",
-        session_id="session-host-startup",
-        principal_id="person-host-startup",
-        ts_ms=NOW,
+        request_id=f"request-host-startup{request_suffix}",
+        session_id=f"session-host-startup{request_suffix}",
+        principal_id=f"person-host-startup{request_suffix}",
+        ts_ms=ts_ms,
         intent_draft={
             "route": "chat",
             "target_id": "surface_reply",
@@ -106,19 +160,21 @@ def _contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
             "target": "host",
         },
         governor_result={
-            "request_id": "request-host-startup",
+            "request_id": f"request-host-startup{request_suffix}",
             "decision": "APPROVE",
             "tokens": {},
-            "ts_ms": NOW,
+            "ts_ms": ts_ms,
         },
         sanitized_message="resume the exact durable Host graph",
-        person_id="person-host-startup",
+        person_id=f"person-host-startup{request_suffix}",
     )
     assignment = ExecutorAssignment(
         work_order_id=direct.work_order.work_order_id,
         executor=TaskExecutor.CANONICAL,
-        assignment_id="runtime-assignment://host-startup/canonical",
-        assigned_at_ms=NOW,
+        assignment_id=(
+            f"runtime-assignment://host-startup{request_suffix}/canonical"
+        ),
+        assigned_at_ms=ts_ms,
         is_new_task=True,
         reason_code="RUNTIME_NEW_TASK_CANONICAL",
     )
@@ -128,6 +184,8 @@ def _contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         "status": "CREATED",
     }
     record = {
+        "command_id": direct.command.command_id,
+        "created_at_ms": direct.command.created_at_ms,
         "graph_id": direct.graph.graph_id,
         "graph_revision": direct.graph.revision,
         "runtime_graph_status": "CREATED",
@@ -137,7 +195,7 @@ def _contracts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         "graph": direct.graph,
     }
     snapshot = {
-        "observed_ts_ms": NOW,
+        "observed_ts_ms": ts_ms,
         "graph_record": dict(graph_record),
         "active_leases": [],
     }
@@ -166,7 +224,7 @@ async def test_host_runtime_activation_reenters_exact_nonterminal_graph() -> Non
     await runtime.recover_startup_graphs()
 
     assert commands.inventory_calls == [
-        (("chat", "gateway", "host_input", "tool"), 100)
+        (("chat", "gateway", "host_input", "tool"), 100, None)
     ]
     assert len(application.calls) == 1
     resumed = application.calls[0]
@@ -341,24 +399,81 @@ async def test_startup_inventory_filters_foreign_surface_before_exact_bound() ->
 
 
 @pytest.mark.asyncio
-async def test_startup_continuation_rejects_a_truncated_inventory() -> None:
-    record, graph_record, snapshot = _contracts()
-    graph_id = graph_record["graph_id"]
-    graph_revision = graph_record["revision"]
+async def test_startup_continuation_recovers_every_paginated_admission() -> None:
+    record, graph_record, snapshot = _contracts(suffix="first")
+    other_record, other_graph_record, other_snapshot = _contracts(
+        suffix="second",
+        ts_offset=1,
+    )
     store = _StartupStore(
-        snapshots={(graph_id, graph_revision): snapshot},
+        snapshots={
+            (graph_record["graph_id"], graph_record["revision"]): snapshot,
+            (
+                other_graph_record["graph_id"],
+                other_graph_record["revision"],
+            ): other_snapshot,
+        },
+    )
+    calls: list[tuple[Any, ...]] = []
+
+    async def resume(*args: Any) -> dict[str, Any]:
+        calls.append(args)
+        graph = args[-1]
+        return await _completed_terminal(graph.graph_id, graph.revision)
+
+    commands = _CommandRepository(
+        record,
+        additional_records=(other_record,),
     )
     continuation = HostStartupGraphContinuation(
         task_store=store,
-        command_repository=_CommandRepository(
+        command_repository=commands,
+        resume_admission=resume,
+    )
+
+    report = await continuation.recover(page_limit=1)
+
+    assert len(report) == 2
+    assert {item["graph_id"] for item in report} == {
+        graph_record["graph_id"],
+        other_graph_record["graph_id"],
+    }
+    assert len(calls) == 2
+    assert len(commands.inventory_calls) == 2
+    assert commands.inventory_calls[0][-1] is None
+    assert commands.inventory_calls[1][-1] is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_continuation_rejects_non_monotonic_page_keys() -> None:
+    record, graph_record, snapshot = _contracts(suffix="first")
+    other_record, other_graph_record, other_snapshot = _contracts(
+        suffix="second",
+        ts_offset=1,
+    )
+    store = _StartupStore(
+        snapshots={
+            (graph_record["graph_id"], graph_record["revision"]): snapshot,
+            (
+                other_graph_record["graph_id"],
+                other_graph_record["revision"],
+            ): other_snapshot,
+        },
+    )
+    continuation = HostStartupGraphContinuation(
+        task_store=store,
+        command_repository=_OutOfOrderCommandRepository(
             record,
-            additional_records=(record,),
+            additional_records=(other_record,),
         ),
-        resume_admission=lambda *_args: _completed_terminal(graph_id, graph_revision),
+        resume_admission=lambda *_args: _completed_terminal(
+            graph_record["graph_id"],
+            graph_record["revision"],
+        ),
     )
 
     with pytest.raises(HostStartupGraphContinuationError) as exc_info:
-        await continuation.recover(page_limit=1)
+        await continuation.recover(page_limit=2)
 
     assert exc_info.value.reason_code == "GOVERNED_HOST_STARTUP_CONTINUATION_INVALID"
 
