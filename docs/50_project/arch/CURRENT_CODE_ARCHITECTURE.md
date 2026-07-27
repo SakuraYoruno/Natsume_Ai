@@ -865,6 +865,21 @@ child/0090/Budget authority，不能以 Graph/Node 的裸状态或上层先验�
 `24 passed in 67.50s`，无 migration；一般 Budget/Workspace recovery 与
 NE-01 仍未完成。
 
+## Workspace cleanup 监督与 Host shutdown
+
+`ProcessAgentWorkspaceContainer` 仍是 cleanup repository/allocator/runtime/worker
+的唯一 app-local owner。`app_factory` 新增只读 provider，从当前 FastAPI state
+取得 worker health，并在进入 health route 前移除 report payload、workspace
+identity、物理路径和异常 detail。`/health` 将 configured unhealthy worker
+计入 runtime component degradation；`/ready` 同时改为非 READY。
+
+关停顺序在 Task Runtime drain/close 后进入 Workspace quiesce。该 close 本身
+已有外部操作 deadline，Host 再对同一 handle 做一次 bounded retry；成功才继续
+hard-state、Memory、Security 与 process reference withdrawal。重试耗尽则以
+`dependencies_preserved=true` 退出，live 和 partial-startup 都保留唯一 retry
+handle。它解决的是进程生命周期内的安全重试，不是进程已被强杀后的 supervisor
+重启证明。
+
 ## 只读 Agent 的 runtime repository 边界
 
 `WorkspacePolicy` 已不再为 `runtime_repo/current_runtime_repo` 返回 live

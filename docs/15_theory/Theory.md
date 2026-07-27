@@ -1388,3 +1388,22 @@ executor-owned 临时快照，再把该快照作为观察对象。
 只是资源回收，不改变 Task/Acceptance 事实。它仍不是强隔离：恶意进程可越过普通
 目录边界时，必须由未来的 OS/container/tenant sandbox 处理，不能把临时副本写成
 “只读文件系统已完成”。
+
+## 25. 资源关闭失败也是一种仍存活的 authority
+
+后台清理线程收到 stop 不等于它已经停止。只要 join timeout，线程、SQLite/Git
+操作和它持有的 container 就仍是 live resource；此时继续撤销 TaskStore、
+security 或唯一 app-local 引用，会把“可重试的不确定关停”变成无人可恢复的
+泄漏。因此关停必须把失败的 close 当作 authority-preserving terminal：
+
+```text
+close attempt 1
+→ bounded retry on the same handle
+→ success: continue dependency withdrawal
+→ failure: retain handles + stop teardown + expose retry-required health
+```
+
+这一原则同样适用于启动尚未完整发布的资源。Task Runtime 没有 live 并不代表
+cleanup worker 没有 live；partial-startup rollback 也不能丢掉最后一个引用。
+健康投影应只公开判断所需的状态与计数，不能为可观测性复制 workspace identity、
+物理路径或原始异常正文。

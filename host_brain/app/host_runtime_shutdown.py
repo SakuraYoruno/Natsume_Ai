@@ -30,6 +30,7 @@ _RUNTIME_STATE_FIELDS = (
     "service_health_heartbeat",
 )
 _SHUTDOWN_REASON = "HOST_RUNTIME_SHUTDOWN_RETRY_REQUIRED"
+_WORKSPACE_QUIESCE_ATTEMPTS = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,15 +168,25 @@ async def shutdown_host_runtime_authority(
     # The execution authority is now closed (or never became live).  Resource
     # release is best effort and exhaustive; no individual close may skip the
     # remaining partial-startup resources.
-    pre_release_calls = (
-        (
-            "agent_workspace",
-            lambda: workspace_quiesce(
-                application,
-                agent_workspace_container,
-                task_runtime,
-            ),
+    workspace_error = await _attempt_with_retry(
+        "agent_workspace",
+        lambda: workspace_quiesce(
+            application,
+            agent_workspace_container,
+            task_runtime,
         ),
+        failures,
+        logger,
+        attempts=_WORKSPACE_QUIESCE_ATTEMPTS,
+    )
+    first_error = first_error or workspace_error
+    if workspace_error is not None:
+        # A cleanup worker that did not stop remains a live process-owned
+        # resource even when Task Runtime activation never completed.  Never
+        # discard its only retry handle during partial-startup rollback.
+        _raise_preserved_shutdown(application, failures, workspace_error)
+
+    pre_release_calls = (
         (
             "host_hard_state",
             lambda: host_lifecycle.stop_activity_monitor(logger=logger),
@@ -312,6 +323,53 @@ async def _cancel_owned_task(
             )
         return exc
     return None
+
+
+async def _attempt_with_retry(
+    component: str,
+    action: Callable[[], Any],
+    failures: list[HostRuntimeShutdownFailure],
+    logger: Any,
+    *,
+    attempts: int,
+) -> BaseException | None:
+    last_error: BaseException | None = None
+    for attempt_index in range(max(1, int(attempts))):
+        try:
+            value = action()
+            if inspect.isawaitable(value):
+                await value
+            return None
+        except BaseException as exc:
+            last_error = exc
+            if attempt_index + 1 < attempts:
+                log_warning = getattr(logger, "warning", None)
+                if callable(log_warning):
+                    log_warning(
+                        "HOST_RUNTIME_SHUTDOWN_COMPONENT_RETRY:%s:%s",
+                        component,
+                        attempt_index + 1,
+                    )
+                continue
+    assert last_error is not None
+    failures.append(
+        HostRuntimeShutdownFailure(
+            component=component,
+            reason_code=f"{component.upper()}_CLOSE_FAILED",
+        )
+    )
+    log_error = getattr(logger, "error", None)
+    if callable(log_error):
+        log_error(
+            "HOST_RUNTIME_SHUTDOWN_COMPONENT_FAILED:%s",
+            component,
+            exc_info=(
+                type(last_error),
+                last_error,
+                last_error.__traceback__,
+            ),
+        )
+    return last_error
 
 
 def _raise_preserved_shutdown(

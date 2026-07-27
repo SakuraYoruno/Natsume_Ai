@@ -19,6 +19,7 @@ from host_brain.app.health_routes import (
     DependencyProbeProvider,
     DegradationStateProvider,
     HealthLedgerProvider,
+    WorkspaceCleanupHealthProvider,
     create_health_router,
 )
 from host_brain.input_runtime.contracts_and_normalization import GovernedCommandApplicationProvider
@@ -74,6 +75,7 @@ def register_host_routers(
     degradation_state_provider: DegradationStateProvider | None = None,
     health_ledger_provider: HealthLedgerProvider | None = None,
     health_dependency_probe_provider: DependencyProbeProvider | None = None,
+    workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
     degradation_capability_port_provider: Callable[[], Any | None] | None = None,
 ) -> None:
     operator_query_gateway = OperatorQueryGateway.from_environment()
@@ -226,6 +228,7 @@ def register_host_routers(
             degradation_state_provider=degradation_state_provider,
             ledger_provider=health_ledger_provider,
             dependency_probe_provider=health_dependency_probe_provider,
+            workspace_cleanup_health_provider=workspace_cleanup_health_provider,
         )
     )
 

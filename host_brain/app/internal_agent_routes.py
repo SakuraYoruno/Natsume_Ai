@@ -667,6 +667,11 @@ async def _live_report(*, request: Request, source: str) -> dict[str, Any]:
         "health_degradation_state_provider",
         None,
     )
+    workspace_cleanup_health_provider = getattr(
+        request.app.state,
+        "health_workspace_cleanup_provider",
+        None,
+    )
     try:
         if source_key == "readiness":
             from host_brain.app.health_routes import (  # noqa: PLC0415
@@ -676,6 +681,9 @@ async def _live_report(*, request: Request, source: str) -> dict[str, Any]:
             return await build_live_readiness_report(
                 ledger_provider=ledger_provider,
                 dependency_probe_provider=dependency_probe_provider,
+                workspace_cleanup_health_provider=(
+                    workspace_cleanup_health_provider
+                ),
             )
         from host_brain.app.health_routes import build_live_health_report  # noqa: PLC0415
 
@@ -683,6 +691,7 @@ async def _live_report(*, request: Request, source: str) -> dict[str, Any]:
             degradation_state_provider=degradation_state_provider,
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
+            workspace_cleanup_health_provider=workspace_cleanup_health_provider,
         )
     except (DegradationStateUnavailable, HealthRuntimeDependencyUnavailable) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

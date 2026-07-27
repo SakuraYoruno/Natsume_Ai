@@ -1080,6 +1080,24 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   writer、一般 multi-node/batch/unknown-effect、多 Workspace、wave
   integration 或 NE-07；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01-WORKSPACE-CLEANUP-SUPERVISION
+
+- T-NE01-WORKSPACE-CLEANUP-01：configured worker 的 health snapshot 必须经
+  app-local provider 进入 `/health`，raw detail、workspace ID 和路径不得出现。
+- T-NE01-WORKSPACE-CLEANUP-02：DEGRADED/STOPPED/RETRY_REQUIRED/
+  UNAVAILABLE 必须增加 runtime component failure；`/ready` 必须
+  `ready=false`。未配置 W2 且无 retry error 时保持 NOT_CONFIGURED。
+- T-NE01-WORKSPACE-CLEANUP-03：第一次 quiesce 失败、第二次成功必须继续完整
+  shutdown，并清除 retry state。
+- T-NE01-WORKSPACE-CLEANUP-04：live runtime 两次 close 失败必须保留
+  Workspace、Task、Security handles，hard-state 与 process refs 均不得撤销。
+- T-NE01-WORKSPACE-CLEANUP-05：partial startup 两次 close 失败也必须保留
+  Workspace retry handle，不能因 Task Runtime 未 live 而继续拆除。
+- T-NE01-WORKSPACE-CLEANUP-06：真实 cleanup worker failure health、stop
+  probe、pending continuation 与 ASGI composition 必须继续通过。
+
+去重定向集为 `25 passed`，无 migration；不证明跨进程 supervisor 或 NE-07。
+
 ## NE-01-RUNTIME-REPO-SNAPSHOT：只读共享检出退役
 
 - T-NE01-RUNTIME-REPO-SNAPSHOT-01：真实 Git fixture 的 committed tracked
