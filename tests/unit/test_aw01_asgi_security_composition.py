@@ -16,6 +16,12 @@ from host_brain.app import (
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.emotion_context import HostEmotionRuntime
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.app.host_startup_graph_continuation import (
+    HostStartupGraphContinuation,
+)
+from host_brain.app.periodic_durable_continuation import (
+    PeriodicDurableContinuation,
+)
 from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
 from host_brain.composition.host_application import HostApplicationPorts
 
@@ -586,7 +592,15 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     internal_runtime = object()
     scheduler_runtime = object()
     intent_admission_verifier = object()
-    runtime_group = SimpleNamespace(wake_review_continuation=lambda: None)
+
+    async def recover_control_startup_graphs() -> tuple[object, ...]:
+        events.append("control-startup-graphs-recovered")
+        return ()
+
+    runtime_group = SimpleNamespace(
+        wake_review_continuation=lambda: None,
+        recover_startup_graphs=recover_control_startup_graphs,
+    )
     internal_ingress = object()
     scheduler_ingress = object()
     scheduler_service = object()
@@ -1062,6 +1076,9 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "operation_reacquisition_owner_id": (
                 "test-canonical-owner::runtime::test-boot"
             ),
+            "startup_task_store": task_runtime_container.task_store,
+            "startup_continuation_factory": HostStartupGraphContinuation,
+            "startup_survivor_factory": PeriodicDurableContinuation,
         }
         return runtime_group
 
@@ -1516,6 +1533,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "governed-runtime-bound",
         "governed-runtime-activated",
         "host-startup-graphs-recovered",
+        "control-startup-graphs-recovered",
         "scheduler-clock-activated",
         "serving",
         "guardian-heartbeat-stopped",

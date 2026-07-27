@@ -145,9 +145,14 @@ def test_surface_adapter_and_internal_composition_have_no_hidden_locator_fallbac
 def test_internal_runtime_lifespan_runs_host_graph_recovery_after_group_activation() -> None:
     source = inspect.getsource(internal_runtime_composition.activate_internal_runtime)
     activation = source.index("await task_runtime.activate_runtime()")
-    continuation = source.index("await composition.host_runtime.recover_startup_graphs()")
+    host_continuation = source.index(
+        "await composition.host_runtime.recover_startup_graphs()"
+    )
+    control_continuation = source.index(
+        "await runtime_group.recover_startup_graphs()"
+    )
     scheduler = source.index("await scheduler.activate_clock()")
-    assert activation < continuation < scheduler
+    assert activation < host_continuation < control_continuation < scheduler
 
 
 def test_agent_and_surface_runtime_ports_expose_experience_read_pack_only() -> None:

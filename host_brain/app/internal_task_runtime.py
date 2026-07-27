@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Mapping
 import hashlib
-import inspect
 import re
 from typing import Any, Protocol
 
@@ -84,6 +83,10 @@ from host_brain.task_runtime.worker_registry import (
 )
 from host_brain.app.internal_startup_checkpoint_continuation import (
     InternalStartupCheckpointContinuation,
+)
+from host_brain.app.internal_startup_admission import (
+    collect_internal_continuation_result,
+    execute_internal_startup_admission,
 )
 from host_brain.app.periodic_durable_continuation import (
     PeriodicDurableContinuation,
@@ -596,7 +599,7 @@ class GovernedInternalRuntime:
                 graph=graph,
                 continuation_claim=dict(claim or {}),
             )
-            result = await _review_continuation_result(operation)
+            result = await collect_internal_continuation_result(operation)
             return await self._accepted_effect_runtime.dispatch(
                 result,
                 command=command,
@@ -615,44 +618,26 @@ class GovernedInternalRuntime:
     ) -> dict[str, Any]:
         """Re-enter one exact Internal admission after signed no-effect recovery."""
 
+        return await self.continue_startup_admission(record)
+
+    async def continue_startup_admission(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact Internal admission selected by a survivor."""
+
         async with self._condition:
             if not self._active or not self._accepting:
                 raise GovernedInternalRuntimeError(
                     INTERNAL_RUNTIME_INACTIVE,
-                    "internal runtime is not accepting Operation recovery",
+                    "internal runtime is not accepting startup recovery",
                 )
             self._in_flight += 1
         try:
-            durable = dict(record or {})
-            command = durable.get("command")
-            work_order = durable.get("work_order")
-            assignment = durable.get("assignment")
-            graph = durable.get("graph")
-            if (
-                not isinstance(command, HostCommand)
-                or command.surface is not HostCommandSurface.INTERNAL
-                or not isinstance(work_order, WorkOrderV3)
-                or assignment is None
-                or graph is None
-            ):
-                raise GovernedInternalRuntimeError(
-                    INTERNAL_RUNTIME_AUTHORITY_INVALID,
-                    "Operation recovery Internal admission is incomplete or misrouted",
-                )
-            require_governed_control_route_policy(
-                command, work_order, graph, GovernedInternalRuntimeError, INTERNAL_RUNTIME_AUTHORITY_INVALID
-            )
-            result = await _review_continuation_result(
-                self._application.execute_stream(
-                    command=command,
-                    work_order=work_order,
-                    assignment=assignment,
-                    graph=graph,
-                )
-            )
-            return await self._accepted_effect_runtime.dispatch(
-                result,
-                command=command,
+            return await execute_internal_startup_admission(
+                record=record,
+                application=self._application,
+                accepted_effect_runtime=self._accepted_effect_runtime,
             )
         finally:
             self._wake_terminal_continuation()
@@ -1452,33 +1437,6 @@ def _assert_stable_replay(candidate: HostCommand, durable: HostCommand) -> None:
             INTERNAL_RUNTIME_AUTHORITY_INVALID,
             "replayed internal command changed stable semantics: " + ", ".join(drift),
         )
-
-
-async def _review_continuation_result(operation: Any) -> dict[str, Any]:
-    current = await operation if inspect.isawaitable(operation) else operation
-    if isinstance(current, Mapping):
-        return dict(current)
-    if not hasattr(current, "__aiter__"):
-        raise GovernedInternalRuntimeError(
-            INTERNAL_RUNTIME_AUTHORITY_INVALID,
-            "Review continuation returned no durable Internal result",
-        )
-    terminal: dict[str, Any] | None = None
-    async for raw_event in current:
-        if not isinstance(raw_event, Mapping):
-            raise GovernedInternalRuntimeError(
-                INTERNAL_RUNTIME_AUTHORITY_INVALID,
-                "Review continuation emitted a non-mapping Internal event",
-            )
-        event = dict(raw_event)
-        if bool(event.get("done")):
-            terminal = event
-    if terminal is None:
-        raise GovernedInternalRuntimeError(
-            INTERNAL_RUNTIME_AUTHORITY_INVALID,
-            "Review continuation emitted no durable Internal terminal result",
-        )
-    return terminal
 
 
 __all__ = [

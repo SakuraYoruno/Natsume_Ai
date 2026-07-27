@@ -19,7 +19,7 @@ from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from natsume_contracts.task import ExecutorAssignment, HostCommand, HostCommandSurface
 
 
-_HOST_SURFACES = frozenset(
+_DEFAULT_HOST_SURFACES = frozenset(
     {
         HostCommandSurface.CHAT,
         HostCommandSurface.HOST_INPUT,
@@ -27,7 +27,6 @@ _HOST_SURFACES = frozenset(
         HostCommandSurface.GATEWAY,
     }
 )
-_HOST_SURFACE_VALUES = tuple(sorted(surface.value for surface in _HOST_SURFACES))
 _RESUMABLE_GRAPH_STATUSES = frozenset({"CREATED", "ACTIVE", "BLOCKED"})
 _LIVE_LEASE_STATUS = "ACTIVE"
 _EXECUTION_IN_PROGRESS = "GOVERNED_EXECUTION_IN_PROGRESS"
@@ -66,6 +65,7 @@ class HostStartupGraphContinuation:
         task_store: Any | None,
         command_repository: Any,
         resume_admission: ResumeAdmission,
+        surfaces: Sequence[HostCommandSurface] | None = None,
     ) -> None:
         if not callable(resume_admission):
             raise TypeError("resume_admission must be callable")
@@ -90,6 +90,14 @@ class HostStartupGraphContinuation:
         self._store = task_store
         self._commands = command_repository
         self._resume_admission = resume_admission
+        normalized_surfaces = _normalize_surfaces(
+            _DEFAULT_HOST_SURFACES if surfaces is None else surfaces
+        )
+        self._surfaces = frozenset(normalized_surfaces)
+        self._surface_values = tuple(
+            sorted(surface.value for surface in normalized_surfaces)
+        )
+        self._surfaces_sha256 = _surfaces_sha256(self._surface_values)
         self._report: tuple[dict[str, Any], ...] = ()
 
     @property
@@ -125,7 +133,7 @@ class HostStartupGraphContinuation:
         while True:
             raw_page = await _maybe_await(
                 self._commands.list_nonterminal_admission_page(
-                    surfaces=_HOST_SURFACE_VALUES,
+                    surfaces=self._surface_values,
                     limit=int(page_limit),
                     cursor=dict(cursor) if cursor is not None else None,
                 )
@@ -134,6 +142,7 @@ class HostStartupGraphContinuation:
                 raw_page,
                 previous_cursor=cursor,
                 page_limit=int(page_limit),
+                surfaces_sha256=self._surfaces_sha256,
             )
             scanned += len(records)
             if scanned > int(scan_limit):
@@ -163,7 +172,7 @@ class HostStartupGraphContinuation:
                     )
                 seen_commands.add(command.command_id)
                 seen_graphs.add(graph_identity)
-                if command.surface not in _HOST_SURFACES:
+                if command.surface not in self._surfaces:
                     raise HostStartupGraphContinuationError(
                         "surface-filtered Host admission inventory returned foreign work"
                     )
@@ -318,6 +327,7 @@ def _validated_page(
     *,
     previous_cursor: Mapping[str, Any] | None,
     page_limit: int,
+    surfaces_sha256: str,
 ) -> tuple[tuple[Mapping[str, Any], ...], Mapping[str, Any] | None]:
     if not isinstance(value, Mapping) or set(value) != {
         "schema_version",
@@ -329,10 +339,9 @@ def _validated_page(
         raise HostStartupGraphContinuationError(
             "nonterminal Host admission page shape is invalid"
         )
-    expected_surfaces_sha256 = _host_surfaces_sha256()
     if (
         value.get("schema_version") != _PAGE_SCHEMA_VERSION
-        or value.get("surfaces_sha256") != expected_surfaces_sha256
+        or value.get("surfaces_sha256") != surfaces_sha256
         or type(value.get("has_more")) is not bool
     ):
         raise HostStartupGraphContinuationError(
@@ -355,7 +364,7 @@ def _validated_page(
     if previous_cursor is not None:
         previous = _validated_cursor(
             previous_cursor,
-            surfaces_sha256=expected_surfaces_sha256,
+            surfaces_sha256=surfaces_sha256,
         )
         previous_key = (
             previous["created_at_ms"],
@@ -391,7 +400,7 @@ def _validated_page(
         return records, None
     cursor = _validated_cursor(
         raw_cursor,
-        surfaces_sha256=expected_surfaces_sha256,
+        surfaces_sha256=surfaces_sha256,
     )
     cursor_key = (cursor["created_at_ms"], cursor["command_id"])
     if cursor_key != page_tail_key:
@@ -436,9 +445,32 @@ def _validated_cursor(
     }
 
 
-def _host_surfaces_sha256() -> str:
+def _normalize_surfaces(
+    surfaces: Sequence[HostCommandSurface],
+) -> tuple[HostCommandSurface, ...]:
+    if isinstance(surfaces, (str, bytes, bytearray)) or not isinstance(
+        surfaces,
+        (Sequence, set, frozenset),
+    ):
+        raise TypeError("startup continuation surfaces must be a sequence")
+    normalized: list[HostCommandSurface] = []
+    seen: set[HostCommandSurface] = set()
+    for surface in surfaces:
+        if not isinstance(surface, HostCommandSurface):
+            raise TypeError(
+                "startup continuation surfaces must contain HostCommandSurface values"
+            )
+        if surface not in seen:
+            normalized.append(surface)
+            seen.add(surface)
+    if not normalized:
+        raise ValueError("startup continuation requires at least one surface")
+    return tuple(normalized)
+
+
+def _surfaces_sha256(surfaces: Sequence[str]) -> str:
     encoded = json.dumps(
-        list(_HOST_SURFACE_VALUES),
+        list(surfaces),
         ensure_ascii=True,
         separators=(",", ":"),
         allow_nan=False,

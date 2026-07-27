@@ -503,11 +503,19 @@ class GovernedSchedulerRuntime:
     ) -> dict[str, Any]:
         """Re-enter one exact Scheduler admission after signed no-effect recovery."""
 
+        return await self.continue_startup_admission(record)
+
+    async def continue_startup_admission(
+        self,
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Re-enter one exact Scheduler-owned admission selected by a survivor."""
+
         async with self._condition:
             if not self._active or not self._accepting:
                 raise GovernedSchedulerRuntimeError(
                     SCHEDULER_RUNTIME_INACTIVE,
-                    "scheduler runtime is not accepting Operation recovery",
+                    "scheduler runtime is not accepting startup recovery",
                 )
             self._in_flight += 1
         try:

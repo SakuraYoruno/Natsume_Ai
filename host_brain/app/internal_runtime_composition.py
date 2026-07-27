@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from host_brain.app.host_startup_graph_continuation import (
+    HostStartupGraphContinuation,
+)
+from host_brain.app.periodic_durable_continuation import (
+    PeriodicDurableContinuation,
+)
 from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
 
 
@@ -218,6 +224,9 @@ async def activate_internal_runtime(
         graph_cancellation_state_reader=task_runtime.task_store,
         acceptance_effect_runtime=composition.acceptance_effect_runtime,
         operation_reacquisition_owner_id=composition.canonical_owner,
+        startup_task_store=task_runtime.task_store,
+        startup_continuation_factory=HostStartupGraphContinuation,
+        startup_survivor_factory=PeriodicDurableContinuation,
     )
     review_commands = composition.review_commands
     bind_review_wake = getattr(
@@ -243,6 +252,7 @@ async def activate_internal_runtime(
     task_runtime.bind_runtime(runtime_group)
     await task_runtime.activate_runtime()
     await composition.host_runtime.recover_startup_graphs()
+    await runtime_group.recover_startup_graphs()
     await scheduler.activate_clock()
     internal_command_service = internal_command_service_factory(
         runtime=composition.internal_runtime,
