@@ -9,6 +9,20 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+最新 NE-01 进程恢复切片已把签名终态的“目标写入成功、处理进程尚未返回”
+窗口纳入真实 Windows `spawn` 与文件型 SQLite 验证。`COMMIT +
+SIDE_EFFECT_CONFIRMED` 会在独立签名进程确认 canonical WorkerProjection 后，
+由目标 UoW 提交 Operation/Outbox；即使 Accepted handler 随即硬退出，新进程
+也只重开同一 proof/receipt，并以零 worker 调用继续 Verification 与
+Acceptance。无 cancellation intent 的 `RELEASE + NO_SIDE_EFFECT` 同样可在
+目标失败终态提交后跨处理进程崩溃精确重放，下一次 Host 启动的 survivor 与
+worker 都为零。0131 之后的全部相关集成测试也改为绑定唯一 current recovery
+case ref 与 subject digest，不再使用无 case 的过时测试证据。新增跨进程
+`2 passed in 18.33s`，既有签名回归 `5 passed in 18.06s`。这验证的是现有
+Operation/Outbox UoW 与幂等 handler receipt，无新增生产 writer；取消绑定
+组合、自动未知副作用归因、部署 fan-out、波次集成和 NE-07 仍未完成，因此
+NE-01 保持 `IN_PROGRESS`。
+
 最新 NE-01 切片关闭了 Scheduler 一次 sweep 内的可变批次窗口。
 `SchedulerDefinitionRepository.read_clock_batch()` 先在一个 SQLite 读事务中
 同时取得待恢复的 CLOCK occurrence 与新到期 definition，再把 capture time、

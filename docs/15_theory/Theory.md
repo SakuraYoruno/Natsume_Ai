@@ -3,12 +3,19 @@
 
 # Natsume AI 核心理论
 
-版本：v2.29
+版本：v2.30
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
+
+持久执行不能把“调用返回”当成“状态提交”。目标状态变更与调用方收到结果是
+两个崩溃窗口：前者必须由目标 UoW、Outbox 和不可变 proof 定义，后者只能
+重开同一 receipt。因而签名 `COMMIT` 或 `RELEASE` 在目标 mutation 后丢失
+响应时，恢复者不得再次调用 worker、重新推断副作用或生成第二个 recovery
+case；它只能验证原 case、Operation 版本和 proof 后精确重放。这一原则同时
+适用于正常完成、负向终态、取消和未来跨服务 effect。
 
 Skill 的 registry metadata、旧 token 和 Scheduler 持久 intent 都不是执行
 authority。合法执行必须先冻结为 TaskGraph 节点，再由同一个 app-local

@@ -5,9 +5,17 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.25
+版本：v3.26
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前恢复批次补齐签名 `COMMIT` 与无 intent 的签名 `RELEASE` 在 handler
+进程崩溃窗口中的机械证据：进程 A 产生真实 recovery hold，独立进程 B
+签名并调用生产 Accepted handler，在目标 Operation/Outbox UoW 已提交但
+handler 尚未返回时硬退出；新进程 C 必须 exact replay，worker 调用为零；
+终态进程 D 的启动 inventory 和 worker 调用仍为零。所有 0131 后证据必须
+携带唯一 current case ref/subject digest。该切片不新增 writer，也不把
+取消绑定组合、自动未知副作用归因、部署 fan-out 或整波 canary 写成完成。
 
 当前执行切片先收口 Scheduler clock sweep 与控制路线验收盲点：
 

@@ -1,10 +1,28 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.31
+版本：v0.32
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-SIGNED-TERMINAL-PROCESS-RESTART
+
+- T-NE01-STPR-01：checkpoint `COMMIT + SIDE_EFFECT_CONFIRMED` 必须由独立
+  进程对唯一 current 0131 case 签名；目标 Operation/Outbox mutation 后、
+  handler 返回前硬退出时，新进程必须 exact replay 且 worker 调用为零。
+- T-NE01-STPR-02：无 cancellation intent 的
+  `RELEASE + NO_SIDE_EFFECT` 在同一崩溃窗口中必须重开 exact failure
+  terminal，不得重新运行 worker或产生第二个 terminal receipt。
+- T-NE01-STPR-03：两类 evidence 与 Acceptance Effect payload 都必须绑定
+  exact recovery case ref/subject digest；无 case、过时 case 或 digest 漂移
+  必须失败关闭。
+- T-NE01-STPR-04：handler replay 完成后的新 Host 进程必须报告空 survivor、
+  空 WorkerProjection 和零 worker 调用。
+- 当前证据：`test_ne01_signed_terminal_process_restart.py` 为
+  `2 passed in 18.33s`；既有 checkpoint/failure 签名回归为
+  `5 passed in 18.06s`。不覆盖 cancellation-bound 组合、部署 key/HTTP、
+  真实 provider 或整波 canary。
 
 ## T-NE01-SCHEDULER-CLOCK-BATCH
 

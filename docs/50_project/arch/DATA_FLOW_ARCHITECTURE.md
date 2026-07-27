@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.28
+版本：v3.29
 
 核对日期：2026-07-27
 
@@ -12,6 +12,24 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+签名终态在 handler 崩溃窗口中的当前数据流为：
+
+```text
+current recovery case
+→ 独立签名 evidence
+→ 外层 governed Review / Preview / Acceptance
+→ 目标 Operation + Outbox UoW
+→ [handler 进程可在此硬退出]
+→ 新进程重开 proof 与 handler receipt
+→ COMMIT: Verification / Acceptance continuation（worker=0）
+   RELEASE: failure terminal replay（worker=0）
+→ 终态 Host startup inventory=0
+```
+
+case ref 与 subject digest 同时约束 evidence 和 Effect payload；目标 mutation
+已经提交时，响应丢失不会回退为“未知并重做”。该流目前只证明 checkpoint
+COMMIT 与无 intent RELEASE，不覆盖 cancellation-bound 组合。
 
 Scheduler clock 的当前一轮数据流先冻结再执行：
 

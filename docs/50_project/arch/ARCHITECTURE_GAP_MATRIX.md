@@ -3,10 +3,18 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.26
+版本：v3.27
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+签名 Operation 的 handler 响应丢失缺口已进一步缩小：真实 OS 进程证明
+checkpoint `COMMIT` 和无 intent raw-failure `RELEASE` 都能在目标 UoW
+提交后、handler 返回前崩溃，并由新进程零 worker 精确重放；终态 Host
+再次启动也不重入。0131 case binding 已成为相关集成证据的强制前置条件。
+该项只移除两种 action 的 handler-crash 子缺口；cancellation-bound
+组合、自动 unknown-effect attribution、部署并发 fan-out 与整波 canary
+仍留在 NE-01。
 
 Scheduler 的“先执行 pending、再查询 due”缺口已在当前工作树关闭。
 Repository 以一个 SQLite read transaction 冻结两组输入，并生成包含
