@@ -1147,3 +1147,37 @@ Lease只获得“进入执行 authority 校验”的资格，不直接获得执�
 签名、业务 scope、fingerprint、receipt 与 reconciler 继续隔离在
 append-only evidence/Operation proof 中，通用 snapshot、Command、
 WorkOrder 和 TaskGraph 只保留所需最小事实，不因恢复而扩张权限。
+
+---
+
+## 21. Workspace 终态必须由执行路线与持久证据共同决定
+
+一个 worktree 的存在不能证明任务仍在运行，文件名、目录位置和进程内
+result 也不能授权删除。安全的终态清理必须同时重开：
+
+```text
+immutable admission + exact node route
++ WorkOrder / Workspace epoch
++ Attempt / Lease / fencing
++ Operation checkpoint or signed terminal
++ Verification / Acceptance / cancellation decision
++ sealed artifact descriptor and digest
+= PROMOTE, ABANDON or HOLD
+```
+
+因此，Internal Delegate 与 Direct Agent Skill 可以共享最终的 Workspace
+lifecycle cleaner，却不能共享未经分类的终态推断。各 route-specific
+reconciler 只能解释自己的 admission 和证据；未归属、缺证据或互相冲突的
+stage 必须 `HOLD/BLOCKED`，不能因为另一路径“看起来相似”而删除。
+
+失败结果也不是无证据结果。对 write-capable Agent，失败时仍须把密封
+descriptor 和公开结果 digest 写入 immutable projection；它不产生
+Acceptance Effect，却使 canonical Verification rejection 能精确指向要
+abandon 的 artifact。成功则保持相反方向：只有 Acceptance 后的 Effect
+可以 promotion。两者最终都由 durable lifecycle 清理，而不是由 worker
+在返回前自行删除。
+
+租约换权还会推进 authority version。恢复进程取得 cleanup Lease 后必须
+重新读取这一新版本再执行 CAS；继续使用取得 Lease 前的版本，会把合法
+恢复误判为 stale fence。这个规则适用于所有“先换权、再变更状态”的持久
+资源，不只适用于 Git Workspace。

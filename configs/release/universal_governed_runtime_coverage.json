@@ -19,6 +19,7 @@
     "effect_reconciliation": "GENERAL_UNKNOWN_ACCEPTANCE_EFFECT_SIGNED_GOVERNED_OPERATOR_LOCAL_SQLITE_PASS_DEFAULT_OFF_DEPLOYED_KEY_HTTP_NETWORK_CANARY_NOT_RUN_CANCELLATION_BOUND_MODES_SEPARATE",
     "generic_acceptance_effect_reconciliation": "PARTIAL_SIGNED_GENERAL_UNKNOWN_EFFECT_PROOF_PLUS_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_LOCAL_SQLITE_PROVEN_DEFAULT_OFF_DEPLOYED_KEY_HTTP_NETWORK_CANARY_NOT_RUN",
     "internal_protected_artifact_promotion": "PARTIAL_INTERNAL_GOVERNED_WRITE_WORKORDER_EXACT_AUTHORITY_BINARY_PATCH_MANIFEST_DETERMINISTIC_ACCEPTED_HEAD_0116_PROMOTION_SOURCE_BRANCH_PRESERVED_POST_SEAL_TAMPER_FAIL_CLOSED_RUNTIME_RECONSTRUCTION_AFTER_LIFECYCLE_ROLLBACK_PROVEN_PLUS_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_POST_ADMISSION_NATIVE_WORKORDERV3_LIFECYCLE_SURVIVOR_REUSES_EXACT_SEALED_CONTINUATION_SIGNED_MULTINODE_NODE_FAILURE_PLUS_0090_SETTLEMENT_PROVEN_DOMAIN_SKILL_CODEX_GENERAL_WRITE_GENERAL_UNKNOWN_EFFECT_OTHER_FAILURE_CANCELLATION_CLAIM_CLOSEOUT_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_INCOMPLETE",
+    "direct_agent_skill_workspace_terminal": "PARTIAL_LOCAL_REAL_SQLITE_GIT_SUCCESS_PROMOTION_AND_VERIFICATION_FAILURE_FRESH_RUNTIME_CLEANUP_PROVEN_FAILURE_PROJECTION_HAS_BOUNDED_SEAL_DESCRIPTOR_NO_ACCEPTANCE_EFFECT_ROUTE_SPECIFIC_CLASSIFIER_SHARED_LIFECYCLE_CLEANER_POST_LEASE_AUTHORITY_VERSION_REOPENED_SOURCE_HEAD_UNCHANGED_SECOND_RESTART_ZERO_REPLAY_PLAN_WRITE_OTHER_TERMINAL_MATRIX_DOMAIN_PACK_OS_CONTAINER_AND_NE07_INCOMPLETE",
     "acceptance_effect_recovery_guardian": "WIRED_APP_LOCAL_DURABLE_SLO_OPAQUE_INCIDENT_ONLY",
     "terminal_reconciliation": "AUTO_EXACT_LOCAL_SQLITE_PASS_SIGNED_OPERATOR_GOVERNED_LOCAL_INTEGRATION_PASS_DEFAULT_OFF_HTTP_NETWORK_CANARY_NOT_RUN",
     "terminal_reconciliation_auto": "ENABLED_EXACT_REPAIRABLE_ONLY",
@@ -286,6 +287,7 @@
         "host_brain/lifecycle_runtime/scheduler_handlers.py",
         "host_brain/model_runtime/governed_budget.py",
         "host_brain/agent_runtime/governed_skill_work_order.py",
+        "host_brain/agent_runtime/skill_artifact_terminal_reconciliation.py",
         "host_brain/skills/executor_registry.py",
         "tests/unit/test_ne01_skill_authority_single_owner.py",
         "tests/unit/test_ne01_governed_agent_model_budget.py",
@@ -297,6 +299,7 @@
       ],
       "canonical_execution_boundary": "PASS_CLEAN_SHA_3D68BD1ECA69AD1593454634C2999D07B4D4F2F5: the app-local governed Skill executor is the only production caller of SkillMeta.handler, bind_validated_skill_authority and dispatch_executor_payload. It requires an exact durable TaskGraph node context and verified node grant before registry access. The Executive executor is physically absent; token-only SkillLoader and Scheduler metadata paths fail closed without handler or Broker execution; canonical receipt persistence failure propagates. The clean SHA produced 209 targeted passes, one real GR05 pass, zero static/doc gate failures and a passing delivery metadata gate.",
       "model_budget_boundary": "PASS_FORMAL_CLEAN_SHA_C68850F8_ENABLED_SCOPE: all 93 canonical Host Skills are exhaustively classified as 28 inline read-only, 13 pre-Acceptance proposal-only, 3 post-Acceptance Workspace and 49 blocked pending typed Acceptance Effect. Only 44 enabled entries enter the runtime manifest. The separate legacy Personality Registry has 19 metadata entries but a zero governed manifest (5 blocked and 14 unclassified); dynamic MCP Skills are blocked. Every enabled invocation consumes canonical Task precharge; ordinary Skills have no bare model port, Agent model Skills use the Task-bound measured guard, proposal-only results cannot commit user-visible effects, and the three reviewed risk-4 writers use post-Acceptance protected Workspace promotion. Exact descriptor drift, manifest/search/scheduler/admission and stale durable graph execution fail closed. A clean c68850f8 shared-SQLite v3 receipt revalidated all seven routes and exact migration 0135, so budget_enforcement and transactional_side_effects are PASS for the enabled Skill scope. Blocked capabilities are not counted as complete.",
+      "workspace_terminal_boundary": "LOCAL_REAL_SQLITE_GIT_SUCCESS_AND_VERIFICATION_FAILURE_RESTART_CLEANUP_PASS_57_TARGETED_TESTS_NO_MIGRATION_PLAN_WRITE_OTHER_TERMINAL_MATRIX_AND_NE01_REMAIN_INCOMPLETE",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",

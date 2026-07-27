@@ -489,6 +489,8 @@ class _CommandRepository:
             graph_id=graph_id,
             graph_revision=graph_revision,
             surface=SimpleNamespace(value="internal"),
+            route_type="delegate",
+            target_id="agent_runtime",
             ingress_claim_ref="ingress-claim://internal/terminal",
         )
         graph = SimpleNamespace(

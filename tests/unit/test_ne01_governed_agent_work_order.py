@@ -28,6 +28,10 @@ from host_brain.app.governed_task_adapter import (
     _build_contracts,
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.task_runtime.acceptance_effects import (
     AcceptanceEffectCompileError,
     compile_graph_acceptance_effects,
@@ -340,6 +344,8 @@ def test_runtime_reads_direct_skill_policy_from_its_app_local_registry() -> None
             skill_name=target,
             risk_level=4,
             require_confirm=True,
+            execution_policy=SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE,
+            budget_policy=SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL,
         )
     )
     runtime = GovernedHostRuntime(
@@ -476,7 +482,7 @@ def test_acceptance_compiler_rejects_worker_artifact_lineage_tamper() -> None:
 
 
 @pytest.mark.asyncio
-async def test_frozen_worker_requires_consumed_review_and_emits_bounded_proposal(
+async def test_frozen_worker_emits_bounded_success_and_failure_artifact_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     command, order, graph, _commit = _agent_acceptance_fixture()
@@ -508,10 +514,12 @@ async def test_frozen_worker_requires_consumed_review_and_emits_bounded_proposal
             )
 
     class _Ledger:
+        result_status = "SUCCESS"
+
         @staticmethod
         def get_event(ref: str):
             assert ref == "skill-receipt://agent-write"
-            return {"result_status": "SUCCESS"}
+            return {"result_status": _Ledger.result_status}
 
     class _ReviewStore:
         @staticmethod
@@ -544,9 +552,6 @@ async def test_frozen_worker_requires_consumed_review_and_emits_bounded_proposal
     class _ProjectionStore:
         @staticmethod
         def stage(*, projection_id: str, projection: dict):
-            assert projection["acceptance_effect_intents"][0][
-                "effect_type"
-            ] == AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
             return {
                 "projection_id": projection_id,
                 "payload_digest": projection["payload_digest"],
@@ -632,5 +637,54 @@ async def test_frozen_worker_requires_consumed_review_and_emits_bounded_proposal
     )
     assert "_protected_stage" not in str(events[-1])
     assert events[-1]["receipt_ref"].startswith(
+        "worker-projection://skill/"
+    )
+
+    failed_public_result = {
+        "status": "FAILED",
+        "work_order_id": order.work_order_id,
+        "result_text": "bounded failed result",
+        "reason_code": "AGENT_EXECUTION_FAILED",
+    }
+
+    def _execute_failed(**kwargs):
+        captured_context.update(kwargs["governed_execution_context"])
+        return SimpleNamespace(
+            payload={
+                "receipt_ref": "skill-receipt://agent-write",
+                "result": {
+                    **failed_public_result,
+                    "_protected_stage": protected,
+                },
+            },
+            result_text="governed write failed",
+            success=False,
+            error_text="AGENT_EXECUTION_FAILED",
+        )
+
+    _Ledger.result_status = "FAILED"
+    monkeypatch.setattr(
+        "host_brain.app.governed_frozen_skill_runtime.execute_frozen_governed_skill",
+        _execute_failed,
+    )
+    failed_events = [
+        event
+        async for event in worker.execute_stream(
+            command=command,
+            work_order=order,
+            execution_context=execution_context,
+        )
+    ]
+    failed_commit = failed_events[-1]
+    assert failed_commit["decision"] == "REJECT"
+    assert "acceptance_effect_intents" not in failed_commit
+    assert failed_commit["audit_refs"]["terminal_workspace_artifact"] == (
+        protected
+    )
+    assert failed_commit["audit_refs"][
+        "terminal_workspace_result_digest"
+    ] == canonical_workspace_artifact_digest(failed_public_result)
+    assert "_protected_stage" not in str(failed_commit)
+    assert failed_commit["receipt_ref"].startswith(
         "worker-projection://skill/"
     )
