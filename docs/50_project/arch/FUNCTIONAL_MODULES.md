@@ -645,3 +645,17 @@ Skill 的 `SUCCEEDED` Attempt 还必须联结当前 `CANCELLED` Review、带 rec
 的 `COMMITTED` Operation 和零 Effect。任何未知 status、重复 decision、
 Graph/Node/Review version drift 或 Effect 均失败关闭。该模块扩展没有改变
 NE-01 的总体 `IN_PROGRESS` 定级。
+
+## 16. Direct Skill 签名失败职责边界
+
+| 模块 | 唯一职责 | 禁止承担 |
+|---|---|---|
+| `persistence/task_operation_failure_reconciliation_store.py` | 验证 Ed25519 `RELEASE/NO_SIDE_EFFECT`，原子结算 Task、Lease、Budget 与 Outbox | 删除 Workspace、解释 Skill stage |
+| `agent_runtime/skill_artifact_terminal_reconciliation.py` | 重开 TaskStore cryptographic terminal，并把 exact direct Skill stage 分类为 `TERMINAL_SIGNED_NO_EFFECT_FAILURE` | 伪造 proof、直接改 Task 或凭 status 猜测 |
+| `persistence/workspace_terminal_failure_authority.py` | 只读重算 proof/error identity、唯一 lineage、零下游 authority 和六类 Outbox | 验签私钥管理、执行 worker、写 Task terminal |
+| `persistence/workspace_lifecycle_repository.py` | 在 ABANDON CAS 前调用只读 failure proof | 把 Workspace 状态提升为 Task authority |
+| `agent_runtime/workspace_runtime.py` | 先持久 ABANDON，再 tombstone stage，最后由 lifecycle cleaner 清理 worktree | 重跑中断 worker 或自行推断外部副作用 |
+
+该分层沿用唯一 Task authority；没有新增 migration、Store 或第二套恢复状态机。
+它只覆盖 direct Skill 的 single-node signed failure，不能外推为一般
+multi-node、batch、unknown-effect 或 Workspace 事务完成。

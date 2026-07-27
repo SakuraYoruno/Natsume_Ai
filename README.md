@@ -852,3 +852,36 @@ Ingress 与 fresh Runtime 的去重受影响集合为
 无 migration。其它 Direct/Plan terminal matrix、一般 unknown effect、
 多 Workspace、NE-01 波次集成和 NE-07 真实全栈仍未完成，NE-01 继续为
 `IN_PROGRESS`。
+
+## 当前 NE-01 边界：Direct Skill 签名失败后的 Workspace 终态
+
+Direct Agent Skill 可能已经把文件变更密封到受保护 stage，却在提交
+WorkerProjection/Operation checkpoint 前中断。这个状态不能按普通
+Verification failure 清理，也不能盲目重跑 worker。现在的唯一安全路径是：
+
+```text
+Operation RECOVERY_REQUIRED
++ 到期且 owner/fence 精确的原 Lease
++ Ed25519 RELEASE / NO_SIDE_EFFECT 证明
++ 单节点 Graph 与唯一 graph Budget
++ 零 Projection / Verification / Acceptance / Effect / cancellation / artifact
++ 六类 exact Outbox
+= Task FAILED + Lease EXPIRED + Budget RELEASED
+→ Workspace ABANDONED → CLEANED
+```
+
+Skill terminal reconciler 会通过 `DurableTaskStore` 重新验签并重开完整失败
+terminal；Workspace repository 在最终 ABANDON CAS 前再用只读 proof 校验
+Task/Operation/Lease/Budget 基数、proof digest、error ref 和六类 Outbox。
+仅把 Graph/Node/Attempt 改成 `FAILED`、删除 Outbox、注入 Acceptance Effect
+或替换签名都会保持 `BLOCKED + ACTIVE Workspace`。
+
+真实 SQLite、临时 Ed25519 key、真实 Git worktree 与 fresh Runtime 已覆盖
+正常清理、Outbox/Effect/signature 篡改、源 HEAD 不变和第二次重启零 replay。
+本切片基于
+`origin/dev@8030a0cc69e2d88c4761e03ea9cf435630555878`，无 migration；
+代码相关非重叠定向批次为 `44 passed in 90.46s` 与
+`11 passed in 75.31s`。一般多节点失败、其它
+unknown-effect/cancellation 组合、多 Workspace、NE-01 波次集成和 NE-07
+真实服务栈仍未完成，状态保持 `IN_PROGRESS`，
+`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

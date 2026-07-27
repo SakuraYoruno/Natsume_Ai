@@ -607,6 +607,31 @@ provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Direct Skill 签名失败 Workspace 证据
+
+- 真实 Agent writer 在真实 Git worktree 写入并密封 stage，随后不提交
+  WorkerProjection 或 Operation COMMIT，以模拟响应丢失前的真实中断边界；
+- 真实 SQLite Operation 先进入 `RECOVERY_REQUIRED`，时钟越过原 Lease
+  到期点后，由临时 Ed25519 key 签署 exact `RELEASE/NO_SIDE_EFFECT`；
+- TaskStore 必须在一个 UoW 中得到 Graph/Node/Attempt=`FAILED`、
+  Lease=`EXPIRED`、Operation/Budget=`RELEASED` 及六类可重开的 Outbox；
+- fresh Runtime 重新验签后才允许 `ABANDONED → CLEANED`，源 Git HEAD 和
+  文件不变，第二个 fresh Runtime 的 terminal inventory 为零；
+- 删除 `OPERATION_RECOVERY_RELEASE` Outbox、注入 Acceptance Effect 或把
+  proof signature 替换为同格式无效签名时，terminal worker 必须
+  `BLOCKED`，Workspace 保持 `ACTIVE`；
+- Workspace contract 另证明只伪造 `FAILED/FAILED/FAILED/EXPIRED` 状态、
+  没有完整证明时不能取得 abandon authority。
+
+代码相关的两个非重叠定向批次为 `44 passed in 90.46s` 与
+`11 passed in 75.31s`；前者覆盖 Workspace 合同、四条真实签名/篡改集成和
+取消 proof，后者覆盖既有 Direct Skill success/failure、签名 Operation
+failure 与 Plan Review 回归。数字不与先前批次相加为波次结论。本切片无
+migration，基线为
+`origin/dev@8030a0cc69e2d88c4761e03ea9cf435630555878`；NE-01 波次
+integration、真实网络与 NE-07 服务栈未运行，远程 CI 为
+`NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 Plan 写节点 Workspace 原子终态证据
 
 当前切片新增两条真实 SQLite + Git 集成路径：

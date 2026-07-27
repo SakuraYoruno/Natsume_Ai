@@ -316,3 +316,19 @@ Workspace`。去重受影响集合为 `68 passed in 117.23s`。
 unknown-effect、多 Workspace、波次 integration 和真实服务栈仍缺，因此
 `Universal execution scope`、Workspace 与 Full Architecture 的总体定级均
 保持 `PARTIAL / INCOMPLETE`。
+
+## 8. 当前 Direct Skill 签名失败缺口修正
+
+Direct Skill 在密封 Workspace stage 后、提交 checkpoint 前中断的单节点
+失败路径，现已复用 canonical Operation failure settlement，而不是新增
+Workspace 自有任务状态机。TaskStore 负责 Ed25519 验签和原子
+Operation/Task/Lease/Budget/Outbox 结算；Skill terminal reconciler 负责
+route 语义；`workspace_terminal_failure_authority.py` 只在最终 ABANDON
+前重验持久结构、digest、error ref、六类 Outbox 和零下游 authority。
+
+正常的真实 SQLite+Git 路径会 `ABANDONED → CLEANED`，Outbox、Effect 或
+signature 篡改均保持 `BLOCKED + ACTIVE`，仅伪造终态字段也被 repository
+拒绝。该证据把 Workspace ownership 的 Direct Skill 单节点
+`RELEASE/NO_SIDE_EFFECT` 失败子集从缺失推进为本地实证，但没有覆盖一般
+multi-node/batch failure、其它 unknown-effect/cancellation、多 Workspace、
+波次 integration 或服务栈，故矩阵总状态仍为 `PARTIAL`。

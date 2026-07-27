@@ -823,3 +823,32 @@ Secure Ingress、fresh Runtime、第二次重启、Plan accepted-writer 回归�
 证据篡改。本批无 migration。NE-01 仍为 `IN_PROGRESS`；一般 Direct/Plan
 terminal matrix、unknown-effect、多 Workspace、波次 integration 和 NE-07
 真实服务栈继续待办，远程 CI 记为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## 13. 当前实施进展：Direct Skill 签名无副作用失败终态
+
+本批关闭 Direct Agent Skill 已密封 Workspace、但 WorkerProjection 与
+Operation checkpoint 尚未提交时发生响应丢失或进程中断所留下的孤儿
+worktree：
+
+1. worker interruption 先以原 Attempt/Lease/owner/fence 把 Operation
+   原子推进为 `RECOVERY_REQUIRED`，不推断副作用；
+2. Lease 到期后，既有 `OperationFailureReconciliationService` 只接受
+   case-bound Ed25519 `RELEASE + NO_SIDE_EFFECT`，并在一个 SQLite UoW
+   结算 Operation、Attempt、Node、Graph、Lease、graph Budget 与六类
+   Outbox；
+3. `GovernedSkillArtifactTerminalReconciler` 新增的 direct-skill 矩阵只在
+   `DurableTaskStore.resolve_reconciled_operation_failure()` 重新验签且返回
+   `GRAPH_TERMINAL / COMMITTED` 时成立；
+4. `workspace_terminal_failure_authority.py` 在 Workspace ABANDON CAS 前
+   独立重算 proof digest、failure error ref、唯一 Graph/Node/Operation/
+   Budget/HostCommand 基数、零下游 authority 和六个 exact Outbox；
+5. raw `FAILED/EXPIRED/RELEASED` 状态、缺 Outbox、已有 Effect 或签名漂移
+   均 fail-closed，stage 与 Workspace 保持可对账。
+
+基于 `origin/dev@8030a0cc69e2d88c4761e03ea9cf435630555878` 的真实
+SQLite/Git/Ed25519/fresh-Runtime 证据为两个不重叠代码批次：
+`44 passed in 90.46s` 与 `11 passed in 75.31s`。正常路径源 HEAD 不变、
+第二次重启零 replay；本批无
+migration。NE-01 仍为 `IN_PROGRESS`，因为一般 multi-node/batch failure、
+其它 unknown-effect/cancellation、并发多 Workspace、波次 integration 和
+NE-07 全栈尚未验收，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。

@@ -786,3 +786,31 @@ Operation=`COMMITTED` 且带 receipt，再对 exact Attempt 查询 Effect count�
 `origin/dev@55ece25163667a4db5464a6d2451ab3e7b8f76c9`，无 migration。
 该实现不覆盖其它 Direct/Plan terminal matrix 或一般 unknown-effect，NE-01
 仍为 `IN_PROGRESS`。
+
+### Direct Skill 已密封但未提交 checkpoint 的失败恢复
+
+`GovernedSkillArtifactTerminalReconciler` 现有第五条受支持终态是 direct
+Skill 的签名单节点失败：
+
+```text
+route = skill
+Graph / Node / Attempt = FAILED
+Lease = EXPIRED
+Operation = RELEASED + RELEASE + NO_SIDE_EFFECT
+graph Budget = RELEASED
+WorkerProjection / Verification / Acceptance / Effect / cancellation = 0
+```
+
+分类器不直接相信这些 status。它调用
+`DurableTaskStore.resolve_reconciled_operation_failure()` 重新验证 Ed25519
+proof、owner/fence、Operation fingerprint、terminal settlement 与 Outbox；
+只有返回 `RECONCILED_OPERATION_TERMINAL_FAILURE` 且 scope 为
+`GRAPH_TERMINAL` 才产生 `TERMINAL_SIGNED_NO_EFFECT_FAILURE`。
+
+Workspace repository 随后通过
+`workspace_terminal_failure_authority.py` 在同一只读 transaction 中再次
+联结 HostCommand、Graph、Node、Attempt、Lease、Operation 和唯一 graph
+Budget，重算 proof/error identity 并精确核对六类 Outbox。该模块没有 mutation
+或 worker authority。真实 SQLite/Git/fresh-Runtime 测试证明正常清理、三类
+篡改阻断与零 replay；这仍只是 direct single-node raw-failure 子集，NE-01
+保持 `IN_PROGRESS`。

@@ -456,6 +456,7 @@ def test_direct_abandonment_accepts_only_exact_terminal_task_lineage(
         ("ACTIVE", "RUNNING", "RUNNING", "ACTIVE"),
         ("FAILED", "FAILED", "RECOVERABLE", "RELEASED"),
         ("CANCELLED", "CANCELLED", "FAILED", "RELEASED"),
+        ("FAILED", "FAILED", "FAILED", "EXPIRED"),
     ),
 )
 def test_direct_abandonment_rejects_live_review_recoverable_and_success_states(

@@ -1027,3 +1027,32 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   多 Workspace、NE-01 波次集成或 NE-07 服务栈；远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`。文档 authority/freshness、交付元数据与 coverage
   合同为 `39 passed in 12.64s`。
+
+## T-NE01-DIRECT-SKILL-SIGNED-FAILURE：Direct Skill 签名失败终态
+
+- T-NE01-DIRECT-SKILL-SIGNED-FAILURE-01：真实 Agent writer 必须在真实 Git
+  worktree 产生并密封 stage，但故意不写 WorkerProjection 或 Operation
+  COMMIT；随后只允许原 Attempt/Lease/owner/fence 把 Operation 标记为
+  `RECOVERY_REQUIRED`。
+- T-NE01-DIRECT-SKILL-SIGNED-FAILURE-02：Lease 到期后，临时 Ed25519
+  `RELEASE/NO_SIDE_EFFECT` 必须绑定 reservation、scope、fingerprint、
+  recovery version、actor 与 attestation ref。TaskStore 必须在一个 SQLite
+  UoW 中关闭 Operation、Attempt、Node、Graph、Lease、graph Budget 并写六类
+  exact Outbox。
+- T-NE01-DIRECT-SKILL-SIGNED-FAILURE-03：Skill terminal reconciler 必须经
+  TaskStore 重新验签；Workspace repository 还要独立重验唯一 lineage、
+  proof/error digest、六类 Outbox及零 Projection/Verification/Acceptance/
+  Effect/cancellation/artifact，才可 `ABANDONED → CLEANED`。
+- T-NE01-DIRECT-SKILL-SIGNED-FAILURE-04：删除 Operation release Outbox、
+  注入 Acceptance Effect、替换为同格式无效签名或仅伪造
+  `FAILED/FAILED/FAILED/EXPIRED` 状态时必须 fail-closed，Workspace 保持
+  `ACTIVE`。
+- T-NE01-DIRECT-SKILL-SIGNED-FAILURE-05：正常路径必须证明 source HEAD/
+  文件不变、worktree/stage 清理和第二个 fresh Runtime 零 replay。
+- 当前代码相关非重叠批次为 `44 passed in 90.46s` 与
+  `11 passed in 75.31s`；第一批包含 Workspace 合同、
+  四条真实签名/篡改集成及取消 proof，第二批覆盖已有 Direct Skill、
+  Operation failure 与 Plan Review 回归。无 migration，基线为
+  `origin/dev@8030a0cc69e2d88c4761e03ea9cf435630555878`。该 Gate 不
+  证明一般 multi-node/batch failure、其它 unknown-effect/cancellation、
+  多 Workspace、NE-01 波次 integration 或 NE-07 全栈。

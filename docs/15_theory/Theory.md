@@ -1249,3 +1249,33 @@ decision-before、decision-after 和当前 Node 的 status/version 完全一致�
 这条规则需要两层验证：route-specific reconciler 解释 Acceptance Review
 语义，Workspace repository 在最终状态 CAS 中只读重验持久取消链和零 Effect。
 上层分类正确不能替代底层删除围栏，底层也不能只凭状态字符串猜测业务顺序。
+
+---
+
+## 24. 签名 `NO_SIDE_EFFECT` 只在完整失败终态中授权清理
+
+“外部副作用没有发生”的签名证明只回答 Operation 归因问题，不会自动证明
+Workspace 可以删除。安全清理还必须证明签名所绑定的 Attempt 已由同一原子
+结算推进为 `FAILED`，原 Lease 已 `EXPIRED`、Budget 已 `RELEASED`，并且
+不存在 Projection、Verification、Acceptance、Effect、cancellation 或
+Task artifact 等互相冲突的下游事实。
+
+```text
+cryptographic Operation attribution
++ canonical Task terminal settlement
++ exact Outbox replay identities
++ zero downstream authority
+= route-specific Workspace abandonment authority
+```
+
+因此验证被分成两层。route-specific reconciler 通过持有 verifier 的
+TaskStore 重新验证 Ed25519 signature 和完整 terminal；Workspace repository
+不获得签名私钥或新的执行 authority，只在最终 CAS 中只读重算 proof digest、
+failure error ref、Task 基数和每一条 Outbox。任一层失败都必须保留 stage 与
+worktree。这个分层避免 persistence lifecycle 变成第二个 Task Runtime，
+同时防止上层一次成功判断被陈旧或篡改的数据库状态绕过。
+
+已密封但未提交 checkpoint 的 worker 也不得因此重跑。签名
+`RELEASE / NO_SIDE_EFFECT` 的含义是把该 Attempt 确定性终止并清理其孤立
+Workspace，不是取得新 Lease 继续执行；需要继续任务时必须由上层创建新的
+不可变图 revision 或明确的新 Attempt 语义。

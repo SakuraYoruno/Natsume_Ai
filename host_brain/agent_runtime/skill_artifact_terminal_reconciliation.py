@@ -254,6 +254,7 @@ class GovernedSkillArtifactTerminalReconciler:
             (task_store, "list_acceptance_effect_intents"),
             (task_store, "get_graph_cancellation_for_graph"),
             (task_store, "get_graph_cancellation_decision_for_intent"),
+            (task_store, "resolve_reconciled_operation_failure"),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -535,15 +536,27 @@ class GovernedSkillArtifactTerminalReconciler:
             and attempt_status == "SUCCEEDED"
             and operation_status == "COMMITTED"
         )
+        signed_no_effect_failure = (
+            str(getattr(binding.command, "route_type", "") or "") == "skill"
+            and graph_status == "FAILED"
+            and node_status == "FAILED"
+            and attempt_status == "FAILED"
+            and str(lease.get("status") or "") == "EXPIRED"
+            and operation_status == "RELEASED"
+        )
         if not (
             own_verification_failed
             or plan_failed_after_acceptance
             or plan_cancelled_after_acceptance
             or post_review_cancelled
+            or signed_no_effect_failure
         ):
             self._invalid(
                 "unproven Agent Skill terminal matrix remains fail closed"
             )
+        if signed_no_effect_failure:
+            self._assert_signed_no_effect_failure(binding)
+            return "TERMINAL_SIGNED_NO_EFFECT_FAILURE"
         self._assert_committed_checkpoint(binding)
         self._assert_projection_descriptor(binding, seal=seal)
         if plan_failed_after_acceptance or plan_cancelled_after_acceptance:
@@ -808,6 +821,59 @@ class GovernedSkillArtifactTerminalReconciler:
         if not exact:
             self._invalid("Agent Skill Task/Lease lineage drifted")
         return graph, node, attempt, lease, operation
+
+    def _assert_signed_no_effect_failure(
+        self,
+        binding: _SkillArtifactBinding,
+    ) -> None:
+        terminal = self._tasks.resolve_reconciled_operation_failure(
+            binding.reservation_id
+        )
+        if not isinstance(terminal, Mapping):
+            self._invalid("Agent Skill signed failure terminal is absent")
+        operation = terminal.get("operation")
+        attempt = terminal.get("attempt")
+        node = terminal.get("node")
+        graph = terminal.get("graph")
+        lease = terminal.get("lease")
+        budget = terminal.get("budget")
+        command = terminal.get("command")
+        exact = (
+            terminal.get("authority_kind")
+            == "RECONCILED_OPERATION_TERMINAL_FAILURE"
+            and terminal.get("settlement_scope") == "GRAPH_TERMINAL"
+            and terminal.get("graph_settlement_status") == "COMMITTED"
+            and terminal.get("parallel_settlement_ref") is None
+            and isinstance(operation, Mapping)
+            and operation.get("reservation_id") == binding.reservation_id
+            and operation.get("status") == "RELEASED"
+            and operation.get("reconciliation_action") == "RELEASE"
+            and operation.get("reconciliation_outcome") == "NO_SIDE_EFFECT"
+            and not operation.get("receipt_ref")
+            and isinstance(attempt, Mapping)
+            and attempt.get("attempt_id") == binding.attempt_id
+            and attempt.get("status") == "FAILED"
+            and isinstance(node, Mapping)
+            and node.get("node_id") == binding.authority["node_id"]
+            and node.get("status") == "FAILED"
+            and isinstance(graph, Mapping)
+            and graph.get("graph_id") == binding.authority["graph_id"]
+            and graph.get("revision") == binding.authority["graph_revision"]
+            and graph.get("status") == "FAILED"
+            and isinstance(lease, Mapping)
+            and lease.get("lease_id") == binding.authority["lease_id"]
+            and lease.get("status") == "EXPIRED"
+            and isinstance(budget, Mapping)
+            and budget.get("status") == "RELEASED"
+            and isinstance(command, Mapping)
+            and command.get("command_id") == binding.authority["command_id"]
+            and command.get("route_type") == "skill"
+            and command.get("target_id") == binding.target_id
+        )
+        if not exact:
+            self._invalid(
+                "Agent Skill signed no-effect failure authority drifted"
+            )
 
     def _assert_committed_checkpoint(
         self,

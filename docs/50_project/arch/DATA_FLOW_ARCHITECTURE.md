@@ -1954,3 +1954,27 @@ reconciler 先解释 route-specific Review 顺序，Workspace repository 再在
 Attempt 的 Effect 数量。已有 Effect 的故障注入证明该流不会把可能已经开始的
 外部提交误当成可删除临时文件；正常路径则在 fresh Runtime 中完成
 `ABANDONED → CLEANED` 且不修改 source HEAD。
+
+## Direct Skill checkpoint 前签名失败流
+
+```mermaid
+flowchart LR
+    A["Direct Agent Skill"] --> B["sealed Workspace stage"]
+    B --> C["process/response interruption"]
+    C --> D["Operation RECOVERY_REQUIRED"]
+    D --> E["Lease expires"]
+    E --> F["Ed25519 RELEASE + NO_SIDE_EFFECT"]
+    F --> G["atomic Task failure UoW"]
+    G --> H["Operation/Attempt/Node/Graph/Lease/Budget + 6 Outboxes"]
+    H --> I["TaskStore cryptographic reopen"]
+    I --> J["Workspace structural proof"]
+    J --> K{"zero downstream authority?"}
+    K -->|"yes"| L["ABANDONED → CLEANED"]
+    K -->|"no / tampered"| M["BLOCKED + ACTIVE"]
+```
+
+这个流不会将已密封 stage 当作已提交 checkpoint，也不会重新执行 worker。
+TaskStore 的 cryptographic reopen 和 Workspace repository 的 structural
+reopen 缺一不可：前者防止伪签名，后者防止签名后的 Task/Outbox/Effect
+状态漂移。正常与阻断路径都保留源 Git HEAD；只有完整无副作用终态可以删除
+隔离 worktree。
