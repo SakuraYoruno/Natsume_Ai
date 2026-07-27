@@ -634,6 +634,36 @@ NE-07 Docker/前后端全栈。远程 CI 保持
 NE-01 wave integration，也没有启动 Docker 或真实外部 provider；
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Plan 签名失败与时间预算拒绝交叉证据
+
+- 新参数使用真实 reviewed Plan Workspace writer，在 stage seal 后、
+  WorkerProjection/Operation checkpoint 前中断，并用确定性 monotonic clock
+  让实际 `time_ms` 超过 5,000ms graph Budget。
+- 签名 `RELEASE / NO_SIDE_EFFECT` 后，节点必须为 Attempt/Node=`FAILED`、
+  Lease=`EXPIRED`、Operation=`RELEASED`；Graph 暂时 `ACTIVE`、Budget
+  `EXCEEDED`，禁止提前清理 Workspace。
+- fresh Runtime 必须追加 current 0090 `BUDGET` decision，得到
+  `BUDGET_BLOCKED`、Graph=`BLOCKED`、Budget=`RELEASED`，且 writer/result
+  调用数不增加。
+- TaskStore 只在失败 `error_ref` 与唯一 Budget winner 的 `usage_id` 同时
+  出现在 selected outcome，并能重开父/子 BudgetUsage、child reservation
+  和 Outbox 时，才允许既有
+  `RECONCILED_OPERATION_NODE_FAILURE` 以 Graph `BLOCKED` 形状重开；签名
+  reconciliation response loss 必须 exact replay，且 Accepted handler 的
+  v4/v5 receipt ref 在 0090 PENDING→COMMITTED 前后保持相同。
+- Workspace authority 在独立 SQLite read/CAS 中重复验证同一证明。复制
+  数据库并删除 current 0090 Budget Outbox 后，TaskStore reader 抛出
+  durable-data invalid，Workspace helper 返回 false，artifact abandoner
+  不得运行；正常数据库才允许 `ABANDONED/CLEANED`。
+
+`tests/integration/test_ne01_plan_node_review_runtime.py` 六种真实 Plan
+Workspace 终态为 `6 passed in 39.93s`；相邻 Accepted handler、签名失败、
+Workspace 与多节点预算回归为 `46 passed in 137.82s`，两组独立报告，不
+汇总为波次证据。无 migration，基线为
+`origin/dev@921a56b77a05b192e1967efe97b06142a782166c`。该结果不等于
+一般 Budget/recovery matrix、NE-01 wave integration 或 NE-07 全栈；
+`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 Plan 写节点多节点签名失败证据
 
 - 使用真实 capability PlanningSearch 编译三节点 immutable TaskGraph；

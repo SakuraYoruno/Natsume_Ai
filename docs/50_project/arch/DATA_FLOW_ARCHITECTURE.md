@@ -2032,3 +2032,33 @@ usage 只引用 winner Outbox，不拥有 Graph terminal selection。整个流�
 writer/result，也不移动 source HEAD。repository CAS 在同一写事务重新查询
 而不是接收上层布尔结论；删除 current 0090 Budget Outbox 后，直调 Workspace
 runtime 也会在 artifact abandoner 前失败关闭。
+
+## Plan 签名失败与时间预算拒绝交叉流
+
+```mermaid
+flowchart LR
+    A["reviewed writer"] --> B["Workspace write + sealed stage"]
+    B --> C["pre-checkpoint interruption"]
+    C --> D["actual elapsed time EXCEEDED"]
+    D --> E["signed RELEASE / NO_SIDE_EFFECT"]
+    E --> F["Operation RELEASED\nNode/Attempt FAILED\nLease EXPIRED"]
+    F --> G["fresh Runtime"]
+    G --> H["0090 BUDGET decision"]
+    H --> I["Graph BLOCKED + Budget RELEASED"]
+    I --> J{"failure ref + winner usage + child binding exact?"}
+    J -->|"yes"| K["Plan-only combined authority"]
+    K --> L["Workspace CAS reopens proof"]
+    L --> M["ABANDONED → CLEANED"]
+    J -->|"no"| N["BLOCKED + ACTIVE Workspace"]
+    L -->|"drift"| N
+```
+
+此流与 post-COMMIT Budget rejection 不同：Operation 由密码学
+`NO_SIDE_EFFECT` proof 关闭为 `RELEASED`，而不是保留已提交 checkpoint；
+共享 Graph 仍由 0090 Budget authority 结算。TaskStore 和 Workspace
+repository 都要求 selected outcome 同时绑定签名失败 `error_ref` 与唯一
+rejected `usage_id`，并验证同 Attempt 的 child BudgetReservation/Usage。
+node-failure kind 与 Accepted handler receipt ref 在 0090 前后保持稳定；
+response loss 只重放已提交 reconciliation，不重签、不重跑 writer 或 result。
+Graph/Node 裸状态、任意 `BLOCKED` decision 或缺失 Budget Outbox 均不能形成
+cleanup authority。

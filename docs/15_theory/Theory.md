@@ -1337,3 +1337,40 @@ Graph/Budget Outbox 一起重开，并确认 Verification、Acceptance、Artifac
 Effect 和 cancellation 均未取得 authority。最终 CAS 不能信任调用者已经
 检查过的布尔结果，否则检查与删除之间仍存在 authority 漂移窗口。这样
 Budget 拒绝既不吞掉已提交事实，也不会把未验收文件误晋升为 accepted HEAD。
+
+---
+
+## 27. 节点失败证明与图级预算裁决是两层 authority
+
+一个节点可以同时满足两项事实：外部效果经签名证明为
+`NO_SIDE_EFFECT`，而其实际资源用量已经使共享 graph Budget 超限。前者只回答
+“这个 Attempt 是否可以安全关闭”，后者回答“整张 Graph 应以什么终态
+结算”。因此签名 `RELEASE` 不能顺带把 Graph 判为 `FAILED`，预算 winner
+也不能替代节点的密码学失败证明。
+
+正确的组合顺序是：
+
+```text
+sealed workspace + interrupted worker
+→ measured time usage EXCEEDED
+→ signed RELEASE / NO_SIDE_EFFECT
+→ Operation RELEASED + Attempt/Node FAILED + Lease EXPIRED
+→ current 0090 BUDGET decision
+→ Graph BLOCKED + Budget RELEASED
+→ Workspace ABANDONED + CLEANED
+```
+
+组合 authority 必须证明 0090 选择的 `BUDGET_BLOCKED` outcome 正是签名失败
+节点，既包含失败 `error_ref`，又包含唯一超额 `usage_id`；该 usage 还必须
+回连同一 Attempt 的 child BudgetReservation 和 graph Budget Outbox。只检查
+`Graph=BLOCKED` 与 `Node=FAILED` 会把任意两条互不相关的终态拼成删除权限。
+节点 reconciliation 的 authority kind 与 Acceptance receipt digest 还必须
+保持稳定：0090 是随后提交的图级事实，不能让已经接受的节点级 effect 因
+PENDING→COMMITTED 而获得新的身份。
+
+Workspace 删除是最后一层不可逆本地效果，所以它应独立重开上述联结，而不是
+消费调用者提供的“已验证”布尔值。这样即使 TaskStore reader 与 Workspace
+repository 之间发生篡改、版本漂移或 response loss，删除仍会在最终 CAS
+失败关闭。这个原则也说明 terminal matrix 不能按单维枚举完成：签名、
+预算、取消、未知效果和 checkpoint 阶段的交叉组合都需要各自明确的唯一
+authority。

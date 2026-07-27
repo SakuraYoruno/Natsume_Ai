@@ -361,3 +361,19 @@ Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
 预算、其它失败/取消/unknown-effect、wave integration 与 NE-07 仍缺，所以
 Budget、Workspace、Universal Runtime 和整体架构继续为
 `PARTIAL / INCOMPLETE`。
+
+## 11. 签名失败 × 时间预算拒绝交叉缺口修正
+
+| 能力 | 修正前 | 当前证据 | 仍缺 |
+|---|---|---|---|
+| 双 authority 终态 | 签名节点失败只识别 0090 `FAILURE + FAILED`，预算已 `EXCEEDED` 时无法重开 | 稳定 node-failure kind 精确组合 signed failure 与 0090 `BUDGET + BLOCKED`，不改变既有 receipt identity | 其它 route/terminal 交叉组合 |
+| Budget winner 绑定 | Graph/Node 状态可见，但不足以证明同一 Attempt 导致超额 | selected outcome 同时绑定失败 `error_ref`、唯一 `usage_id`、child reservation 和父/子 usage | 一般 time/concurrency policy |
+| Workspace 最终删除 | 上层即使识别组合终态，仓储 CAS 仍不认识 Graph `BLOCKED` | repository 在最终事务独立重开 0090/winner/child usage，篡改 Outbox 时不调用 abandoner | 多 Workspace 原子提交 |
+| route 隔离 | 放宽 Graph `BLOCKED` 可能误放行 Direct Skill | artifact classifier 仅允许 Plan 的已验证 BLOCKED 形状；单节点 Direct Skill 继续强制 Graph `FAILED` | 其它受控写 Skill |
+
+真实六路径 Plan Workspace 回归为 `6 passed in 39.93s`，相邻回归为
+`46 passed in 137.82s`，两组独立报告。本批关闭单一“seal 后、
+checkpoint 前签名失败且 time budget 超限”的 Plan writer 路径，无
+migration。其它失败/取消/unknown-effect 组合、一般预算策略、多
+Workspace、wave integration 与 NE-07 仍缺，因此 NE-01、Budget、
+Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。

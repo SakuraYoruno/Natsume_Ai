@@ -1080,6 +1080,38 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   writer、一般 multi-node/batch/unknown-effect、多 Workspace、wave
   integration 或 NE-07；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## T-NE01-PLAN-SIGNED-BUDGET-CROSSING：签名失败与时间预算拒绝交叉终态
+
+- T-NE01-PLAN-SIGNED-BUDGET-CROSSING-01：真实 reviewed Plan writer 必须
+  先写入 Git Workspace 并 seal stage，再在 WorkerProjection/Operation
+  checkpoint 前中断；确定性 monotonic clock 必须让实际 `time_ms` 成为唯一
+  graph Budget overage。
+- T-NE01-PLAN-SIGNED-BUDGET-CROSSING-02：Ed25519
+  `RELEASE/NO_SIDE_EFFECT` 只能关闭 Operation=`RELEASED`、
+  Attempt/Node=`FAILED`、Lease=`EXPIRED`；结算前 Graph=`ACTIVE`、
+  Budget=`EXCEEDED`。
+- T-NE01-PLAN-SIGNED-BUDGET-CROSSING-03：fresh Runtime 必须通过 current
+  0090 `BUDGET` decision 得到 `BUDGET_BLOCKED`、Graph=`BLOCKED`、
+  Budget=`RELEASED`，writer/result 零重放。
+- T-NE01-PLAN-SIGNED-BUDGET-CROSSING-04：TaskStore 必须要求 selected
+  outcome 同时包含 signed failure `error_ref` 与唯一 winner `usage_id`，
+  并验证同 Attempt 的 child reservation/usage 和 winner Outbox；response
+  loss 必须 exact replay，Accepted handler 的 v4/v5 receipt ref 必须在
+  0090 PENDING→COMMITTED 前后保持相同。
+- T-NE01-PLAN-SIGNED-BUDGET-CROSSING-05：组合 authority 只允许 Plan；
+  Direct Skill graph-wide signed failure 不得以 Graph `BLOCKED` 清理。
+- T-NE01-PLAN-SIGNED-BUDGET-CROSSING-06：Workspace 最终 CAS 必须独立
+  重开同一 0090/Budget/child authority。删除 current Budget Outbox 后，
+  TaskStore reader 和 Workspace proof 都必须失败关闭，artifact abandoner
+  零调用；正常副本完成 `ABANDONED/CLEANED` 且源 HEAD 不变。
+- 当前完整六路径回归为 `6 passed in 39.93s`；相邻 Accepted handler、
+  签名失败、Workspace 与多节点 Budget 回归为
+  `46 passed in 137.82s`，两组独立报告，不汇总为波次证据。无 migration，
+  基线 `origin/dev@921a56b77a05b192e1967efe97b06142a782166c`。本 Gate
+  不证明一般 time/concurrency policy、其它 terminal cross-product、多
+  Workspace、NE-01 wave integration 或 NE-07；远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`。
+
 ## T-NE01-PLAN-WRITER-BUDGET-REJECTED：提交后预算拒绝与 Workspace 终态
 
 - T-NE01-PLAN-WRITER-BUDGET-REJECTED-01：真实 reviewed writer 必须先写入

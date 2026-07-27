@@ -791,6 +791,39 @@ terminal matrix、Domain Pack、OS/container isolation、NE-01 wave
 integration 和 NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`，
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## 当前 NE-01 边界：Plan 签名失败与时间预算拒绝交叉终态
+
+Plan 的 reviewed 写节点现在覆盖了一个此前会永久遗留 Workspace 的交叉窗口：
+worker 已在真实 Git worktree 写入并密封 stage，但在
+WorkerProjection/Operation checkpoint 前中断；与此同时，该 Attempt 的真实
+elapsed time 使共享 graph Budget 进入 `EXCEEDED`。Ed25519
+`RELEASE / NO_SIDE_EFFECT` 只关闭 Operation、Attempt、Node 与 Lease，
+不能替代 graph 级预算结算。
+
+fresh Runtime 会依据 0090 唯一选择 `BUDGET` 而不是 `FAILURE`，原子推进
+Graph=`BLOCKED`、Budget=`RELEASED`。TaskStore 仅在 current 0090 decision、
+签名失败 `error_ref`、唯一 `TASK_STORE_BUDGET_EXCEEDED` winner、父/子
+BudgetUsage、node-bound child reservation 与相应 Outbox 全部精确一致时，
+才允许既有 `RECONCILED_OPERATION_NODE_FAILURE` 以
+Graph=`BLOCKED` 的 committed settlement 重开。authority kind 保持稳定，
+所以 Accepted handler 在 0090 前后的 v4/v5 receipt digest 不变；Plan
+artifact classifier 才负责允许这条 route-specific 形状。Direct Skill 的
+单节点签名失败仍必须是 Graph=`FAILED`。
+
+Workspace 最终 `ACTIVE → ABANDONED` CAS 会在自己的 SQLite 事务内再次
+重开相同预算与签名失败证明，不能信任上层分类结果。真实 SQLite、Git
+worktree、Review continuation、签名 proof 和 fresh Runtime 的六路径回归为
+`6 passed in 39.93s`；相邻 Accepted handler、签名失败、Workspace 与
+多节点预算回归另为 `46 passed in 137.82s`，两组独立报告，不汇总为波次
+证据。删除 current 0090 Budget Outbox 后，
+TaskStore reader 与 Workspace cleanup 都失败关闭，artifact abandoner 不会
+运行。无 migration，基线为
+`origin/dev@921a56b77a05b192e1967efe97b06142a782166c`。本切片只关闭
+“密封后、checkpoint 前签名失败，同时命中 time budget”的单 Plan writer
+路径；一般 time/concurrency policy、其它失败/取消/unknown-effect 组合、
+多 Workspace、NE-01 波次集成和 NE-07 仍未完成，状态保持
+`IN_PROGRESS`。
+
 ## 当前 NE-01 边界：Plan 写节点提交后预算拒绝
 
 Plan 的 reviewed 写节点现在还覆盖了另一个真实失败窗口：worker 已写入并密封
