@@ -81,9 +81,10 @@ class _Reader(TaskTerminalReconciliationReadMixin):
     (
         "INTERNAL_AGENT_BUDGET_REJECTED",
         "CANONICAL_CHECKPOINT_BUDGET_REJECTED",
+        "PARALLEL_CHECKPOINT_BUDGET_REJECTED",
     ),
 )
-def test_reconciliation_accepts_exact_internal_and_canonical_checkpoint_terminals(
+def test_reconciliation_accepts_exact_checkpoint_budget_terminals(
     authority_kind: str,
 ) -> None:
     reader = _Reader(_resolved(authority_kind))

@@ -832,3 +832,26 @@ outcome，因此不能靠追加一条看似较新的失败记录绕过。
 真实测试中的 fresh Runtime 没有再次调用写节点，也没有调用依赖它的结果
 节点；删除最终 Budget Outbox 会阻断 cleanup。该结构仍只覆盖单一 reviewed
 Plan writer 的 pre-checkpoint no-effect failure，未提升为通用 batch recovery。
+
+## 19. Plan post-COMMIT Budget rejection 的双层 authority
+
+```mermaid
+flowchart TD
+    W["COMMITTED writer checkpoint"] --> U["rejected BudgetUsage"]
+    U --> C["child terminal UoW"]
+    C --> Q["all child fences quiescent"]
+    Q --> S["0090 shared Graph/Budget UoW"]
+    S --> R["TaskStore read-only combined authority"]
+    R --> A["Skill artifact route classifier"]
+    A --> V["Workspace repository CAS\nindependent authority reopen"]
+    V --> X["Workspace abandon/cleanup"]
+```
+
+child UoW 只拥有 Attempt/Node/Lease terminal；0090 只拥有 Graph/Budget
+terminal。组合 reader 要求两侧 Outbox、唯一 winner、父/子 usage 与 current
+decision 在同一 SQLite snapshot 中一致。winner 未终态或 sibling 仍
+in-flight 时，共享 writer不会执行；另一 owner 已终态的 winner只能由 exact
+durable facts重建。`workspace_terminal_budget_authority.py` 在 lifecycle
+repository 的最终写事务内再次验证相同 winner、Lease、child Outbox、
+父/子 usage、current 0090 和零 downstream authority；上层分类成功不是
+仓储放行凭据。Workspace 层不获得 Budget mutation 或重新执行 worker 的能力。

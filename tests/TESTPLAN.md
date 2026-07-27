@@ -1079,3 +1079,30 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   `origin/dev@49615ae6e4d4364c26b3eb651012fa50bf959d0e`。该测试不证明并行
   writer、一般 multi-node/batch/unknown-effect、多 Workspace、wave
   integration 或 NE-07；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## T-NE01-PLAN-WRITER-BUDGET-REJECTED：提交后预算拒绝与 Workspace 终态
+
+- T-NE01-PLAN-WRITER-BUDGET-REJECTED-01：真实 reviewed writer 必须先写入
+  Git Workspace、seal stage 并 COMMIT WorkerProjection/Operation，再由
+  canonical worker usage 触发 graph Budget rejection。
+- T-NE01-PLAN-WRITER-BUDGET-REJECTED-02：child 终态必须是 Node/Attempt
+  `FAILED`、Lease `RELEASED`、Operation `COMMITTED`；0090 独立提交
+  Graph `BLOCKED` 与 Budget `RELEASED`。
+- T-NE01-PLAN-WRITER-BUDGET-REJECTED-03：fresh Runtime 必须重开
+  `PARALLEL_CHECKPOINT_BUDGET_REJECTED`，writer/read/result sibling 均零
+  额外调用；父/子 usage、winner 与 terminal Outbox 缺一不可。
+- T-NE01-PLAN-WRITER-BUDGET-REJECTED-04：winner 在 graph-order recovery
+  中尚未关闭或仍有 sibling fence 时必须 defer；另一 owner 已关闭 winner
+  时，只允许从 exact durable terminal 重建。
+- T-NE01-PLAN-WRITER-BUDGET-REJECTED-05：删除 current 0090 Budget
+  Outbox 后必须阻断 Workspace cleanup；正常副本须保持 source HEAD/文件不变，
+  完成 `ABANDONED/CLEANED` 且第二次重启零 inventory。
+- T-NE01-PLAN-WRITER-BUDGET-REJECTED-06：Workspace repository 最终
+  ACTIVE→ABANDONED CAS 必须在同一事务独立重开 exact 0090/child/Budget
+  authority；篡改副本绕过 reconciler 直接调用 runtime 时必须在 artifact
+  abandoner 前以 stale authority 拒绝，lifecycle 和 worktree 均保持 ACTIVE。
+- 去重受影响集为 `53 passed in 138.76s`；Workspace lifecycle authority
+  合同集为 `24 passed in 67.50s`，两组不相加。无 migration，基线
+  `origin/dev@c7984d9e0bb95a5b0176360c39b2e405e247f63e`。本 Gate 不证明
+  一般 Budget policy、其它 terminal matrix、multi-Workspace、NE-01 wave
+  integration 或 NE-07；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。

@@ -142,22 +142,47 @@ class ParallelSettlementRuntime:
                 outcomes=outcomes,
                 budget=budget,
             )
+            if budget_blocked is None:
+                # Response-loss recovery walks committed checkpoints in graph
+                # order.  The canonical EXCEEDED usage can belong to a later
+                # child that is still fenced RUNNING; keep the Graph ACTIVE
+                # until that exact winner closes its child terminal.
+                return budget, None
         if budget.status == "EXCEEDED" or budget_blocked is not None:
             if budget_blocked is None:
                 raise GovernedRuntimeError(
                     GOVERNED_DURABLE_STATE_CONFLICT,
                     "parallel Budget settlement lacks its rejected durable usage",
                 )
+            if await self._parallel_settlement_conflict_is_in_progress(
+                admitted=admitted
+            ):
+                # The winning child can close before later committed
+                # checkpoints in graph order.  The shared 0090 writer must
+                # wait for every child fence; otherwise it would race an
+                # in-flight sibling and manufacture a partial decision.
+                return budget, None
             selected = budget_blocked
+            selected_lineage = (selected.node_id, selected.attempt_id)
             settlement_outcomes = tuple(
                 selected
-                if (
-                    outcome.node_id == selected.node_id
-                    and outcome.attempt_id == selected.attempt_id
-                )
+                if (outcome.node_id, outcome.attempt_id) == selected_lineage
                 else outcome
                 for outcome in outcomes
+                # ALREADY_EXCEEDED siblings can also report BUDGET_BLOCKED,
+                # but only the unique TASK_STORE_BUDGET_EXCEEDED lineage is
+                # the 0090 selected outcome.  Their exact durable FAILED
+                # states are reconstructed below with the rest of the graph.
+                if (
+                    outcome.status != "BUDGET_BLOCKED"
+                    or (outcome.node_id, outcome.attempt_id) == selected_lineage
+                )
             )
+            if not any(
+                (outcome.node_id, outcome.attempt_id) == selected_lineage
+                for outcome in settlement_outcomes
+            ):
+                settlement_outcomes = (*settlement_outcomes, selected)
             budget, graph_status, decision_ref = await self._settle_parallel_terminal(
                 admitted=admitted.for_node(selected.node_id),
                 outcomes=settlement_outcomes,

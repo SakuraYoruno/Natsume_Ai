@@ -197,6 +197,7 @@ class _AcceptedProjectionReader:
     (
         "INTERNAL_AGENT_BUDGET_REJECTED",
         "CANONICAL_CHECKPOINT_BUDGET_REJECTED",
+        "PARALLEL_CHECKPOINT_BUDGET_REJECTED",
     ),
 )
 async def test_exact_checkpoint_budget_terminal_replays_blocked_usage_and_error(

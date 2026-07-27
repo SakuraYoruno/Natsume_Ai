@@ -15,6 +15,7 @@ import re
 import sqlite3
 from typing import Any, Mapping
 
+import host_brain.persistence.workspace_terminal_budget_authority as _terminal_budget
 import host_brain.persistence.workspace_terminal_failure_authority as _terminal_failure
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WORKSPACE_LIFECYCLE_SCHEMA_VERSION,
@@ -37,7 +38,6 @@ from host_brain.persistence.workspace_terminal_cancellation_authority import (
     finalized_cancellation_preserves_node_state,
     finalized_post_review_cancellation_allows_workspace_abandonment,
 )
-
 WORKSPACE_LIFECYCLE_CONFLICT = "WORKSPACE_LIFECYCLE_CONFLICT"
 WORKSPACE_LIFECYCLE_DATA_INVALID = "WORKSPACE_LIFECYCLE_DATA_INVALID"
 WORKSPACE_LIFECYCLE_REPLAY_DRIFT = "WORKSPACE_LIFECYCLE_REPLAY_DRIFT"
@@ -684,6 +684,7 @@ class WorkspaceLifecycleRepositoryMixin:
                 and WorkspaceLifecycleState(str(values["to_state"]))
                 is WorkspaceLifecycleState.ABANDONED
             ),
+            terminal_reason_code=str(values.get("reason_code") or ""),
         )
         try:
             event = WorkspaceLifecycleEventV1.create(
@@ -894,6 +895,7 @@ class WorkspaceLifecycleRepositoryMixin:
         ts_ms: int,
         require_live: bool,
         allow_terminal_abandonment: bool,
+        terminal_reason_code: str,
     ) -> None:
         row = conn.execute(
             """
@@ -1075,10 +1077,7 @@ class WorkspaceLifecycleRepositoryMixin:
                     str(row["graph_status"]) == "BLOCKED"
                     and str(row["node_status"]) == "FAILED"
                     and str(row["attempt_status"]) == "FAILED"
-                    and (
-                        str(row["lease_status"]) == "RELEASED"
-                        or recovered_task_binding is not None
-                    )
+                    and _terminal_budget.allows_abandonment(conn, row, terminal_reason_code)
                 )
             )
         )

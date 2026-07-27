@@ -10,10 +10,12 @@ from host_brain.persistence.task_store_types import TASK_STORE_BUDGET_EXCEEDED
 
 from .admission import AdmittedExecution
 from .budget_runtime import BudgetRuntimeContext
+from .coordinator_receipts import build_execution_receipt, terminal_event
 from .coordinator_records import (
     _ParallelNodeOutcome,
     _evidence_refs,
     _mapping,
+    _record_evidence_refs,
     _required_record_text,
     _status,
     _text,
@@ -111,7 +113,7 @@ class ParallelSettlementProjection:
         admitted: AdmittedExecution,
         outcomes: tuple[_ParallelNodeOutcome, ...],
         budget: BudgetRuntimeContext,
-    ) -> _ParallelNodeOutcome:
+    ) -> _ParallelNodeOutcome | None:
         snapshot = _mapping(
             await _maybe_await(
                 self._store.read_scheduler_snapshot(
@@ -130,31 +132,42 @@ class ParallelSettlementProjection:
         outcomes_by_lineage = {
             (outcome.node_id, outcome.attempt_id): outcome for outcome in outcomes
         }
-        terminal_winners: list[tuple[Mapping[str, Any], _ParallelNodeOutcome]] = []
+        terminal_winners: list[Mapping[str, Any]] = []
         for raw_usage in raw_usages:
             if not isinstance(raw_usage, Mapping):
                 continue
             node_id = _text(raw_usage.get("node_id"))
             attempt_id = _text(raw_usage.get("attempt_id"))
-            source = outcomes_by_lineage.get((node_id, attempt_id))
             exceeded_dimensions = raw_usage.get("exceeded_dimensions")
             if (
-                source is None
-                or _text(raw_usage.get("budget_id")) != budget.budget_id
+                _text(raw_usage.get("budget_id")) != budget.budget_id
                 or raw_usage.get("accepted") is not False
                 or _text(raw_usage.get("reason_code")) != TASK_STORE_BUDGET_EXCEEDED
                 or not isinstance(exceeded_dimensions, list)
                 or not exceeded_dimensions
             ):
                 continue
-            terminal_winners.append((raw_usage, source))
+            terminal_winners.append(raw_usage)
         if len(terminal_winners) != 1:
             raise GovernedRuntimeError(
                 GOVERNED_DURABLE_STATE_CONFLICT,
                 "EXCEEDED Budget must have exactly one canonical winning usage "
-                "matching the latest Attempt lineage",
+                "in the durable graph ledger",
             )
-        usage, source = terminal_winners[0]
+        usage = terminal_winners[0]
+        winner_node_id = _required_record_text(usage, "node_id")
+        winner_attempt_id = _required_record_text(usage, "attempt_id")
+        source = outcomes_by_lineage.get(
+            (winner_node_id, winner_attempt_id)
+        )
+        if source is None:
+            source = await self._reopen_durable_budget_winner_outcome(
+                admitted=admitted,
+                snapshot=snapshot,
+                usage=usage,
+            )
+        if source is None:
+            return None
         usage_ref = _required_record_text(usage, "usage_id")
         event = dict(source.event)
         receipt_raw = event.get("execution_receipt")
@@ -184,6 +197,176 @@ class ParallelSettlementProjection:
             accepted=False,
             reason_code=GOVERNED_BUDGET_EXCEEDED,
             event=event,
+        )
+
+    async def _reopen_durable_budget_winner_outcome(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        snapshot: Mapping[str, Any],
+        usage: Mapping[str, Any],
+    ) -> _ParallelNodeOutcome | None:
+        """Rebuild the winner when another fenced owner closed it first.
+
+        Parallel checkpoint recovery is intentionally multi-owner safe.  The
+        caller's local outcome tuple can omit the canonical EXCEEDED winner
+        when a competing owner has already finished that child.  In that case
+        only the exact durable FAILED Attempt/Node, COMMITTED Operation and
+        released Lease may stand in for the missing process-local event.
+        """
+
+        node_id = _required_record_text(usage, "node_id")
+        attempt_id = _required_record_text(usage, "attempt_id")
+        if node_id not in {binding.node_id for binding in admitted.nodes}:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable Budget winner is outside the admitted TaskGraph",
+            )
+        raw_attempts = snapshot.get("attempts")
+        raw_leases = snapshot.get("active_leases")
+        raw_graph = snapshot.get("graph_record")
+        raw_nodes = (
+            raw_graph.get("nodes")
+            if isinstance(raw_graph, Mapping)
+            else None
+        )
+        if (
+            not isinstance(raw_attempts, list)
+            or not isinstance(raw_leases, list)
+            or not isinstance(raw_nodes, list)
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable Budget winner snapshot is incomplete",
+            )
+        attempts = [
+            dict(item)
+            for item in raw_attempts
+            if isinstance(item, Mapping)
+            and _text(item.get("node_id")) == node_id
+        ]
+        if not attempts:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable Budget winner has no Attempt lineage",
+            )
+        latest = max(
+            attempts,
+            key=lambda item: (
+                int(item.get("attempt_no") or 0),
+                _text(item.get("attempt_id")),
+            ),
+        )
+        matching_nodes = [
+            dict(item)
+            for item in raw_nodes
+            if isinstance(item, Mapping)
+            and _text(item.get("node_id")) == node_id
+        ]
+        if len(matching_nodes) != 1:
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable Budget winner node snapshot is ambiguous",
+            )
+        node = matching_nodes[0]
+        attempt = latest
+        winner_admission = admitted.for_node(node_id)
+        operation = _mapping(
+            await _maybe_await(
+                self._store.get_operation_reservation(
+                    winner_admission.reservation_id
+                )
+            ),
+            field_name="durable Budget winner operation",
+        )
+        active_lease = any(
+            isinstance(item, Mapping)
+            and _text(item.get("attempt_id")) == attempt_id
+            for item in raw_leases
+        )
+        receipt_ref = _required_record_text(operation, "receipt_ref")
+        node_status = _status(node)
+        attempt_status = _status(attempt)
+        if (
+            _text(latest.get("attempt_id")) != attempt_id
+            or _text(attempt.get("graph_id")) != admitted.graph_id
+            or int(attempt.get("graph_revision") or 0)
+            != admitted.graph_revision
+            or _text(attempt.get("node_id")) != node_id
+            or _text(operation.get("attempt_id")) != attempt_id
+            or _status(operation) != "COMMITTED"
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable Budget winner lineage or committed Operation drifted",
+            )
+        if (
+            node_status in {
+                "LEASED",
+                "RUNNING",
+                "EXECUTED",
+                "VERIFYING",
+                "VERIFIED",
+                "CANCEL_REQUESTED",
+            }
+            and attempt_status in {
+                "CREATED",
+                "LEASED",
+                "RUNNING",
+                "RECOVERABLE",
+                "CANCEL_REQUESTED",
+            }
+        ):
+            # The winner has durable usage but its response-loss checkpoint
+            # has not yet been closed.  Its own graph-ordered recovery must
+            # produce the FAILED terminal; a sibling cannot synthesize it.
+            return None
+        if (
+            node_status != "FAILED"
+            or attempt_status != "FAILED"
+            or active_lease
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_DURABLE_STATE_CONFLICT,
+                "durable Budget winner child terminal state drifted",
+            )
+        usage_id = _required_record_text(usage, "usage_id")
+        evidence_refs = tuple(
+            dict.fromkeys(
+                reference
+                for reference in (
+                    *_record_evidence_refs(node),
+                    *_record_evidence_refs(attempt),
+                    _text(attempt.get("error_ref")),
+                    usage_id,
+                    _text(usage.get("outbox_id")),
+                    receipt_ref,
+                )
+                if reference
+            )
+        )
+        receipt = build_execution_receipt(
+            winner_admission,
+            attempt_id=attempt_id,
+            receipt_ref=receipt_ref,
+            status="BUDGET_BLOCKED",
+            verification_status="NOT_RUN",
+            accepted=False,
+            replayed=True,
+            reason_code=GOVERNED_BUDGET_EXCEEDED,
+            evidence_refs=evidence_refs,
+            projection={
+                "budget_usage": dict(usage),
+                "winner_reopen": "DURABLE_PARALLEL_CHECKPOINT",
+            },
+        )
+        return _ParallelNodeOutcome(
+            node_id=node_id,
+            attempt_id=attempt_id,
+            status="BUDGET_BLOCKED",
+            accepted=False,
+            reason_code=GOVERNED_BUDGET_EXCEEDED,
+            event=terminal_event(receipt),
         )
 
     async def validate_parallel_outcome_snapshot(

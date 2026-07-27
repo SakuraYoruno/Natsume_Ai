@@ -7,6 +7,9 @@ from typing import Any
 
 from .task_budget_usage_store import _assert_terminal_budget_authority
 from .task_record_codec import _graph_record, _node_record, _outbox_record
+from .task_terminal_reconciliation_decision_authority import (
+    canonical_current_parallel_terminal_decision,
+)
 from .task_store_types import (
     TASK_STORE_DURABLE_DATA_INVALID,
     TASK_STORE_INVALID,
@@ -114,6 +117,19 @@ class TaskCheckpointBudgetTerminalReadStoreMixin:
             for row in rows
         ]
         known = [mode for mode in modes if mode is not None]
+        parallel = (
+            self._try_resolve_parallel_checkpoint_budget_rejection_terminal_uow(
+                conn,
+                attempt_id,
+            )
+        )
+        if parallel is not None:
+            if rows or known:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "checkpoint budget terminal has competing direct and parallel authority",
+                )
+            return parallel
         if not known:
             if self._has_checkpoint_budget_terminal_shape_uow(
                 conn,
@@ -134,6 +150,294 @@ class TaskCheckpointBudgetTerminalReadStoreMixin:
             attempt_id,
             authority_mode=known[0],
         )
+
+    def _try_resolve_parallel_checkpoint_budget_rejection_terminal_uow(
+        self,
+        conn: sqlite3.Connection,
+        attempt_id: str,
+    ) -> dict[str, Any] | None:
+        """Reopen one 0090-owned multi-node checkpoint budget terminal.
+
+        A multi-node child closes only its Attempt/Node/Lease after the
+        committed worker usage is rejected.  The outer 0090 decision is the
+        sole writer for the shared Graph and Budget terminal.  This reader
+        therefore requires both authorities in one SQLite snapshot instead of
+        pretending that the single-node five-Outbox bundle exists.
+        """
+
+        decision_table = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_parallel_settlement_decision'
+            """
+        ).fetchone()
+        if decision_table is None:
+            return None
+        attempt_identity = conn.execute(
+            """
+            SELECT graph_id, graph_revision
+            FROM task_runtime_attempt
+            WHERE attempt_id = ?
+            """,
+            (str(attempt_id),),
+        ).fetchone()
+        if attempt_identity is None:
+            return None
+        graph_id = str(attempt_identity["graph_id"])
+        revision = int(attempt_identity["graph_revision"])
+        candidate_rows = conn.execute(
+            """
+            SELECT decision_ref
+            FROM task_runtime_parallel_settlement_decision
+            WHERE graph_id = ? AND graph_revision = ?
+              AND decision_kind = 'BUDGET'
+            ORDER BY graph_version_after, decision_ref
+            """,
+            (graph_id, revision),
+        ).fetchall()
+        if not candidate_rows:
+            return None
+        attempt = self._require_attempt(conn, str(attempt_id))
+        graph = self._require_graph(conn, graph_id, revision)
+        decision = canonical_current_parallel_terminal_decision(
+            conn,
+            {
+                "graph_id": graph_id,
+                "revision": revision,
+                "status": str(graph["status"]),
+                "status_version": int(graph["status_version"]),
+            },
+        )
+        if not isinstance(decision, dict):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "parallel checkpoint budget terminal lacks one canonical current decision",
+            )
+        node = self._require_node(
+            conn,
+            graph_id,
+            revision,
+            str(attempt["node_id"]),
+        )
+        selected = [
+            dict(outcome)
+            for outcome in decision.get("outcomes") or ()
+            if isinstance(outcome, dict)
+            and str(outcome.get("node_id") or "") == str(node["node_id"])
+            and str(outcome.get("attempt_id") or "") == str(attempt_id)
+        ]
+        budgets = conn.execute(
+            """
+            SELECT * FROM task_runtime_budget_reservation
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY budget_id
+            """,
+            (graph_id, revision),
+        ).fetchall()
+        operations = conn.execute(
+            """
+            SELECT * FROM task_runtime_idempotency_reservation
+            WHERE attempt_id = ? ORDER BY reservation_id
+            """,
+            (str(attempt_id),),
+        ).fetchall()
+        leases = conn.execute(
+            """
+            SELECT * FROM task_runtime_lease
+            WHERE attempt_id = ? ORDER BY fencing_token, lease_id
+            """,
+            (str(attempt_id),),
+        ).fetchall()
+        if (
+            decision.get("decision_kind") != "BUDGET"
+            or decision.get("selected_node_id") != str(node["node_id"])
+            or decision.get("graph_target_status") != "BLOCKED"
+            or decision.get("budget_target_status") != "RELEASED"
+            or len(selected) != 1
+            or selected[0].get("status") != "BUDGET_BLOCKED"
+            or str(attempt["status"]) != "FAILED"
+            or str(node["status"]) != "FAILED"
+            or str(graph["status"]) != "BLOCKED"
+            or len(budgets) != 1
+            or budgets[0]["node_id"] is not None
+            or budgets[0]["attempt_id"] is not None
+            or str(budgets[0]["budget_id"])
+            != str(decision.get("budget_id") or "")
+            or str(budgets[0]["status"]) != "RELEASED"
+            or int(budgets[0]["status_version"])
+            != int(decision.get("budget_status_version_before") or -1) + 1
+            or len(operations) != 1
+            or str(operations[0]["status"]) != "COMMITTED"
+            or not str(operations[0]["receipt_ref"] or "").strip()
+            or not leases
+            or sum(str(item["status"]) == "RELEASED" for item in leases) != 1
+            or str(leases[-1]["status"]) != "RELEASED"
+            or any(str(item["status"]) == "ACTIVE" for item in leases)
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "parallel checkpoint budget terminal state matrix drifted",
+            )
+        terminal_version = int(
+            decision["budget_status_version_before"]
+        )
+        winner, _dimensions = _assert_terminal_budget_authority(
+            conn,
+            budget_row=budgets[0],
+            terminal_version=terminal_version,
+        )
+        if (
+            str(winner["node_id"]) != str(node["node_id"])
+            or str(winner["attempt_id"]) != str(attempt_id)
+            or str(winner["usage_id"])
+            not in tuple(selected[0].get("evidence_refs") or ())
+        ):
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "parallel checkpoint budget winner differs from the selected write node",
+            )
+        self._assert_node_budget_usage_replay_in_transaction(
+            conn,
+            parent_budget_id=str(budgets[0]["budget_id"]),
+            attempt_id=str(attempt_id),
+            usage_id=str(winner["usage_id"]),
+            accepted=False,
+            parent_outbox_id=str(winner["outbox_id"]),
+        )
+        final_lease = leases[-1]
+        self._validate_parallel_checkpoint_budget_terminal_outboxes_uow(
+            conn,
+            attempt=attempt,
+            node=node,
+            lease=final_lease,
+            usage_id=str(winner["usage_id"]),
+        )
+        nodes = conn.execute(
+            """
+            SELECT * FROM task_runtime_node
+            WHERE graph_id = ? AND graph_revision = ?
+            ORDER BY node_id
+            """,
+            (graph_id, revision),
+        ).fetchall()
+        decision_row = conn.execute(
+            """
+            SELECT decision_ref
+            FROM task_runtime_parallel_settlement_decision
+            WHERE graph_id = ? AND graph_revision = ?
+              AND graph_version_after = ?
+            """,
+            (graph_id, revision, int(graph["status_version"])),
+        ).fetchone()
+        if decision_row is None:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "parallel checkpoint budget terminal decision identity disappeared",
+            )
+        return {
+            "authority_kind": "PARALLEL_CHECKPOINT_BUDGET_REJECTED",
+            "attempt": dict(attempt),
+            "node": _node_record(node),
+            "graph": _graph_record(graph, nodes),
+            "lease": dict(final_lease),
+            "historical_lease_id": str(operations[0]["lease_id"]),
+            "budget": self._budget_record(budgets[0]),
+            "reservation": self._operation_record(operations[0]),
+            "usage": dict(winner),
+            "parallel_settlement_ref": str(decision_row["decision_ref"]),
+        }
+
+    @staticmethod
+    def _validate_parallel_checkpoint_budget_terminal_outboxes_uow(
+        conn: sqlite3.Connection,
+        *,
+        attempt: sqlite3.Row,
+        node: sqlite3.Row,
+        lease: sqlite3.Row,
+        usage_id: str,
+    ) -> None:
+        """Require exact child terminal Outboxes beside the validated 0090 pair."""
+
+        attempt_ref = str(attempt["attempt_id"])
+        graph_id = str(attempt["graph_id"])
+        revision = int(attempt["graph_revision"])
+        identities = (
+            (
+                "TASK_ATTEMPT_FAILED",
+                "TASK_ATTEMPT",
+                attempt_ref,
+                int(attempt["status_version"]),
+                attempt_ref,
+                True,
+            ),
+            (
+                "TASK_NODE_FAILED",
+                "TASK_NODE",
+                f"{graph_id}@{revision}/{node['node_id']}",
+                int(node["status_version"]),
+                None,
+                True,
+            ),
+            (
+                "TASK_LEASE_RELEASED_TERMINAL",
+                "TASK_LEASE",
+                str(lease["lease_id"]),
+                int(lease["status_version"]),
+                attempt_ref,
+                False,
+            ),
+        )
+        error_ref = str(attempt["error_ref"] or "")
+        if not error_ref:
+            raise TaskStoreError(
+                TASK_STORE_DURABLE_DATA_INVALID,
+                "parallel checkpoint budget terminal Attempt lacks error evidence",
+            )
+        for (
+            event_type,
+            aggregate_type,
+            aggregate_id,
+            aggregate_version,
+            expected_attempt_id,
+            require_evidence,
+        ) in identities:
+            rows = conn.execute(
+                """
+                SELECT * FROM task_runtime_outbox
+                WHERE aggregate_type = ? AND aggregate_id = ?
+                  AND aggregate_version = ? AND event_type = ?
+                ORDER BY outbox_id
+                """,
+                (
+                    aggregate_type,
+                    aggregate_id,
+                    aggregate_version,
+                    event_type,
+                ),
+            ).fetchall()
+            if len(rows) != 1:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "parallel checkpoint budget terminal child Outbox is ambiguous",
+                )
+            record = _outbox_record(rows[0])
+            evidence = tuple(record.get("evidence_refs") or ())
+            if (
+                record.get("attempt_id") != expected_attempt_id
+                or (
+                    require_evidence
+                    and (
+                        error_ref not in evidence
+                        or usage_id not in evidence
+                    )
+                )
+            ):
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "parallel checkpoint budget terminal child Outbox drifted",
+                )
 
     @staticmethod
     def _has_checkpoint_budget_terminal_shape_uow(

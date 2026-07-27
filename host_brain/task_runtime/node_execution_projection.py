@@ -237,6 +237,7 @@ class NodeExecutionProjection:
                     not in {
                         "INTERNAL_AGENT_BUDGET_REJECTED",
                         "CANONICAL_CHECKPOINT_BUDGET_REJECTED",
+                        "PARALLEL_CHECKPOINT_BUDGET_REJECTED",
                     }
                     or _required_record_text(latest, "error_ref")
                     != terminal_error_ref

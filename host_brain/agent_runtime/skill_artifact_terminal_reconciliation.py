@@ -255,6 +255,7 @@ class GovernedSkillArtifactTerminalReconciler:
             (task_store, "get_graph_cancellation_for_graph"),
             (task_store, "get_graph_cancellation_decision_for_intent"),
             (task_store, "resolve_reconciled_operation_failure"),
+            (task_store, "try_resolve_checkpoint_budget_rejection_terminal"),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -545,12 +546,22 @@ class GovernedSkillArtifactTerminalReconciler:
             and str(lease.get("status") or "") == "EXPIRED"
             and operation_status == "RELEASED"
         )
+        committed_budget_rejection = (
+            str(getattr(binding.command, "route_type", "") or "")
+            in {"skill", "plan"}
+            and graph_status == "BLOCKED"
+            and node_status == "FAILED"
+            and attempt_status == "FAILED"
+            and str(lease.get("status") or "") == "RELEASED"
+            and operation_status == "COMMITTED"
+        )
         if not (
             own_verification_failed
             or plan_failed_after_acceptance
             or plan_cancelled_after_acceptance
             or post_review_cancelled
             or signed_no_effect_failure
+            or committed_budget_rejection
         ):
             self._invalid(
                 "unproven Agent Skill terminal matrix remains fail closed"
@@ -560,6 +571,9 @@ class GovernedSkillArtifactTerminalReconciler:
             return "TERMINAL_SIGNED_NO_EFFECT_FAILURE"
         self._assert_committed_checkpoint(binding)
         self._assert_projection_descriptor(binding, seal=seal)
+        if committed_budget_rejection:
+            self._assert_committed_budget_rejection(binding)
+            return "TERMINAL_BUDGET_REJECTED"
         if plan_failed_after_acceptance or plan_cancelled_after_acceptance:
             self._assert_plan_node_accepted_without_effect(binding)
         if post_review_cancelled:
@@ -892,6 +906,131 @@ class GovernedSkillArtifactTerminalReconciler:
             self._invalid(
                 "Agent Skill signed no-effect failure authority drifted"
             )
+
+    def _assert_committed_budget_rejection(
+        self,
+        binding: _SkillArtifactBinding,
+    ) -> None:
+        terminal = self._tasks.try_resolve_checkpoint_budget_rejection_terminal(
+            binding.attempt_id
+        )
+        if not isinstance(terminal, Mapping):
+            self._invalid("Agent Skill budget rejection terminal is absent")
+        authority_kind = str(terminal.get("authority_kind") or "")
+        route_type = str(getattr(binding.command, "route_type", "") or "")
+        allowed_authorities = (
+            {"CANONICAL_CHECKPOINT_BUDGET_REJECTED"}
+            if route_type == "skill"
+            else {
+                "CANONICAL_CHECKPOINT_BUDGET_REJECTED",
+                "PARALLEL_CHECKPOINT_BUDGET_REJECTED",
+            }
+        )
+        operation = terminal.get("reservation")
+        attempt = terminal.get("attempt")
+        node = terminal.get("node")
+        graph = terminal.get("graph")
+        lease = terminal.get("lease")
+        budget = terminal.get("budget")
+        usage = terminal.get("usage")
+        exact = (
+            authority_kind in allowed_authorities
+            and isinstance(operation, Mapping)
+            and operation.get("reservation_id") == binding.reservation_id
+            and operation.get("status") == "COMMITTED"
+            and str(operation.get("receipt_ref") or "").startswith(
+                "worker-projection://"
+            )
+            and isinstance(attempt, Mapping)
+            and attempt.get("attempt_id") == binding.attempt_id
+            and attempt.get("status") == "FAILED"
+            and isinstance(node, Mapping)
+            and node.get("node_id") == binding.authority["node_id"]
+            and node.get("status") == "FAILED"
+            and isinstance(graph, Mapping)
+            and graph.get("graph_id") == binding.authority["graph_id"]
+            and graph.get("revision") == binding.authority["graph_revision"]
+            and graph.get("status") == "BLOCKED"
+            and isinstance(lease, Mapping)
+            and lease.get("status") == "RELEASED"
+            and terminal.get("historical_lease_id")
+            == binding.authority["lease_id"]
+            and isinstance(budget, Mapping)
+            and budget.get("status") == "RELEASED"
+            and isinstance(usage, Mapping)
+            and usage.get("accepted") is False
+            and usage.get("reason_code") == "TASK_STORE_BUDGET_EXCEEDED"
+            and usage.get("graph_id") == binding.authority["graph_id"]
+            and usage.get("graph_revision")
+            == binding.authority["graph_revision"]
+            and usage.get("node_id") == binding.authority["node_id"]
+            and usage.get("attempt_id") == binding.attempt_id
+            and bool(tuple(usage.get("exceeded_dimensions") or ()))
+            and (
+                authority_kind
+                != "PARALLEL_CHECKPOINT_BUDGET_REJECTED"
+                or str(terminal.get("parallel_settlement_ref") or "").startswith(
+                    "taskbatch://sha256/"
+                )
+            )
+        )
+        if not exact:
+            self._invalid("Agent Skill budget rejection authority drifted")
+        authority = binding.authority
+        if (
+            self._optional_task_record(
+                "get_node_verification_decision",
+                str(authority["graph_id"]),
+                int(authority["graph_revision"]),
+                str(authority["node_id"]),
+            )
+            is not None
+            or self._optional_task_record(
+                "get_node_acceptance_decision",
+                str(authority["graph_id"]),
+                int(authority["graph_revision"]),
+                str(authority["node_id"]),
+            )
+            is not None
+            or self._optional_task_record(
+                "get_node_artifact",
+                str(authority["graph_id"]),
+                int(authority["graph_revision"]),
+                str(authority["node_id"]),
+            )
+            is not None
+            or bool(
+                self._tasks.list_acceptance_effect_intents(
+                    graph_id=str(authority["graph_id"]),
+                    graph_revision=int(authority["graph_revision"]),
+                    node_id=str(authority["node_id"]),
+                    limit=1,
+                )
+            )
+            or self._tasks.get_graph_cancellation_for_graph(
+                str(authority["graph_id"]),
+                int(authority["graph_revision"]),
+            )
+            is not None
+        ):
+            self._invalid(
+                "Agent Skill budget rejection acquired downstream authority"
+            )
+
+    def _optional_task_record(
+        self,
+        method_name: str,
+        *args: Any,
+    ) -> Any:
+        try:
+            return getattr(self._tasks, method_name)(*args)
+        except Exception as exc:
+            if str(getattr(exc, "reason_code", "")) in {
+                "TASK_STORE_NOT_FOUND",
+                "NOT_FOUND",
+            }:
+                return None
+            raise
 
     def _assert_committed_checkpoint(
         self,
