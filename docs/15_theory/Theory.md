@@ -1219,3 +1219,33 @@ intent 历史。恢复者必须重开两条不可变记录，并确认写节点�
 decision before 与 decision after 中保持完全相同的 `ACCEPTED + version`，
 同时确认该节点从未产生 Effect。缺少任一记录、版本漂移或出现 Effect 时，
 Workspace 必须继续保留，等待人工或更高等级对账。
+
+---
+
+## 23. `CANCELLED` 状态不是 Workspace 删除凭证
+
+同一 `CANCELLED` Node 可能来自执行前取消、执行中中止、验收评审等待期取消，
+也可能只是损坏或过时的投影。因而
+`Graph=CANCELLED + Node=CANCELLED` 只是结果状态，不是删除 authority。
+对于已经提交 worker checkpoint、但尚未取得 Acceptance 的写节点，安全证明
+必须保留事件时间顺序：
+
+```text
+SUCCEEDED Attempt + COMMITTED Operation
+→ PASS Verification
+→ REVIEW Acceptance decision + durable Review
+→ Graph BLOCKED / Node WAITING_ACCEPTANCE_REVIEW
+→ immutable cancellation intent
+→ trusted final cancellation decision
+→ Graph/Node CANCELLED
+```
+
+恢复者必须证明 intent 与 decision 的 digest/ref 未漂移，intent-after、
+decision-before、decision-after 和当前 Node 的 status/version 完全一致，
+当前 Graph 版本恰好是 final decision 所声明前版本的下一版，同时该 Attempt
+从未创建 Acceptance Effect。任何已有 Effect 都意味着外部可见提交可能已经
+开始，不能通过删除 Workspace 来“回滚”。
+
+这条规则需要两层验证：route-specific reconciler 解释 Acceptance Review
+语义，Workspace repository 在最终状态 CAS 中只读重验持久取消链和零 Effect。
+上层分类正确不能替代底层删除围栏，底层也不能只凭状态字符串猜测业务顺序。

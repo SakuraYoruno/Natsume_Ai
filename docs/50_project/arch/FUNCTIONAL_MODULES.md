@@ -622,9 +622,26 @@ SQLite/Git 证据；不能把这些模块表解释为 Workspace 或 NE-01 完成
 | `task_runtime/plan_workspace_acceptance_effect.py` | 在整图 Acceptance 时把 exact node proposal 编译为 node-owned Effect | speculative dispatch、信任 caller proposal 或缺 Context 生成 Preview |
 | `task_runtime/parallel_success_runtime.py` | 将非结果节点与结果节点 Effects 放入同一 graph-success UoW | 把所有 Effects 强行归给 result node |
 | `task_runtime/agent_workspace_acceptance_effect.py` | 重开 Plan/Direct Skill 的 command、node fingerprint、Review、Preview 与 artifact | 从 route 名推断批准或跳过 node identity |
-| `agent_runtime/skill_artifact_terminal_reconciliation.py` | 解释 Direct Skill 与受治理 Plan 写节点的 terminal evidence | 在已有 Effect 或证据缺失时 abandon |
-| `persistence/workspace_lifecycle_repository.py` | 在最终 CAS 前独立验证 FAILED Graph 中 ACCEPTED write node 的零副作用证明 | 仅信 reconciler 的布尔结论 |
+| `agent_runtime/skill_artifact_terminal_reconciliation.py` | 解释 Direct Skill 与受治理 Plan 写节点的 terminal evidence，包括 Direct post-review cancellation | 在已有 Effect、缺 Review 或缺 finalized cancellation 时 abandon |
+| `persistence/workspace_terminal_cancellation_authority.py` | 只读验证 finalized intent/decision、当前 Graph/Node 版本和保留的 Node state | 获得 mutation authority 或仅凭终态字符串通过 |
+| `persistence/workspace_lifecycle_repository.py` | 在最终 CAS 前独立验证 FAILED/CANCELLED Graph 的精确零副作用证明 | 仅信 reconciler 的布尔结论 |
 
 当前限制是一个 Plan 只允许一个 Workspace 写 owner。该限制是明确的安全
 上界，不代表多 Workspace 事务已实现；扩展前必须先定义并证明跨 Workspace
 提交、补偿、取消和 unknown-effect 顺序。
+
+## 15. Direct Skill 评审取消职责边界
+
+Direct Skill 的 Acceptance Review cancellation 不新增 Store、worker 或
+lifecycle owner。ReviewStore 负责 Review durable 状态，TaskStore 负责
+Graph cancellation intent/decision，Skill terminal reconciler 负责路线语义，
+Workspace repository 只负责在删除前复核持久事实。四个 owner 通过 immutable
+identity 组合，不互相代理写入。
+
+`workspace_terminal_cancellation_authority.py` 保持 focused read-only proof；
+它既支持 Plan 中保持 `ACCEPTED` 的写节点，也支持 Direct Skill 最终为
+`CANCELLED` 的节点，但 expected status 必须由调用路径显式给出。Direct
+Skill 的 `SUCCEEDED` Attempt 还必须联结当前 `CANCELLED` Review、带 receipt
+的 `COMMITTED` Operation 和零 Effect。任何未知 status、重复 decision、
+Graph/Node/Review version drift 或 Effect 均失败关闭。该模块扩展没有改变
+NE-01 的总体 `IN_PROGRESS` 定级。

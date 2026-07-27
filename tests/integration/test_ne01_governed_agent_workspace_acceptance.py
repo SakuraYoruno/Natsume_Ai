@@ -54,6 +54,16 @@ from host_brain.contracts.agent_runtime.verification_contract import (
 from host_brain.persistence.host_command_repository import (
     HostCommandRepository,
 )
+from host_brain.persistence.internal_agent_checkpoint_uow import (
+    DurableInternalAgentCheckpointUnitOfWork,
+)
+from host_brain.persistence.review_repository import ReviewStore
+from host_brain.persistence.secure_ingress_repository import (
+    SQLiteSecureIngressStore,
+)
+from host_brain.persistence.task_acceptance_effect_staging_authority import (
+    canonical_task_acceptance_effect_staging_scope,
+)
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
     OutboxMessage,
@@ -66,11 +76,27 @@ from host_brain.persistence.worker_projection_repository import (
 )
 from host_brain.persistence.workspace_repository import WorkspaceRepository
 from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.secure_ingress.graph_cancellation_authority import (
+    SecureIngressGraphCancellationAuthorityVerifier,
+)
+from host_brain.orchestration import GovernedCommandApplication
+from host_brain.task_runtime import GovernedTaskCoordinator
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
 from host_brain.task_runtime.acceptance_effects import (
     compile_graph_acceptance_effects,
+)
+from host_brain.task_runtime.review_runtime import (
+    TaskNodeReviewContext,
+    TaskNodeReviewRuntime,
+)
+from tests.integration.test_aw02_internal_agent_runtime_cutover import (
+    _commit_graph_cancellation_authority,
+)
+from tests.integration.test_gr03a_governed_durable_dag import (
+    _Publisher,
+    _Verifier,
 )
 
 
@@ -248,11 +274,73 @@ def _event(
     )
 
 
+def _inject_terminal_acceptance_effect(
+    task_store: DurableTaskStore,
+    *,
+    graph_id: str,
+    graph_revision: int,
+    node_id: str,
+    attempt_id: str,
+) -> str:
+    """Model a pre-existing Effect row that must block Workspace abandonment."""
+
+    effect_id = "acceptance-effect://governed-agent/terminal-drift"
+    idempotency_key = "governed-agent:terminal-drift"
+    payload_json = json.dumps(
+        {"content": "must block terminal Workspace abandonment"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    payload_sha256 = (
+        "sha256:" + hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    )
+    with task_store._transaction() as conn:
+        with canonical_task_acceptance_effect_staging_scope(
+            effect_id=effect_id,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            commit_scope="NODE",
+            idempotency_key=idempotency_key,
+        ):
+            conn.execute(
+                """
+                INSERT INTO task_runtime_acceptance_effect_intent(
+                    effect_id, graph_id, graph_revision, node_id, attempt_id,
+                    commit_scope, effect_type, payload_ref, payload_json,
+                    payload_sha256, idempotency_key, status, available_ts_ms,
+                    fencing_token, attempt_count, status_version,
+                    created_ts_ms, updated_ts_ms
+                ) VALUES (?, ?, ?, ?, ?, 'NODE',
+                          'conversation.assistant_turn', ?, ?, ?, ?,
+                          'PENDING', ?, 0, 0, 0, ?, ?)
+                """,
+                (
+                    effect_id,
+                    graph_id,
+                    graph_revision,
+                    node_id,
+                    attempt_id,
+                    "effect-payload://governed-agent/terminal-drift",
+                    payload_json,
+                    payload_sha256,
+                    idempotency_key,
+                    NOW,
+                    NOW,
+                    NOW,
+                ),
+            )
+    return effect_id
+
+
 def _projection(
     *,
     command,
     graph,
     node,
+    attempt_id: str,
     protected: dict[str, Any],
     result_digest: str,
     node_grant_ref: str,
@@ -271,12 +359,12 @@ def _projection(
         "graph_id": graph.graph_id,
         "graph_revision": graph.revision,
         "node_id": node.node_id,
-        "attempt_id": ATTEMPT_ID,
+        "attempt_id": attempt_id,
         "node_grant_ref": node_grant_ref,
         "audit_refs": {
             "path": "governed_task_runtime:frozen_skill",
             "command_id": command.command_id,
-            "attempt_id": ATTEMPT_ID,
+            "attempt_id": attempt_id,
             "node_grant_ref": node_grant_ref,
             "node_grant_digest": node_grant_digest,
         },
@@ -852,6 +940,7 @@ async def test_governed_agent_acceptance_promotes_real_sqlite_git_artifact(
         command=command,
         graph=graph,
         node=node,
+        attempt_id=ATTEMPT_ID,
         protected=protected,
         result_digest=result_digest,
         node_grant_ref=node_grant_ref,
@@ -1036,9 +1125,20 @@ async def test_governed_agent_acceptance_promotes_real_sqlite_git_artifact(
     assert replay.repository.get(seal.workspace_id).status == "CLEANED"
 
 
-def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("terminal_outcome", "inject_acceptance_effect"),
+    (
+        ("verification-failure", False),
+        ("post-review-cancellation", False),
+        ("post-review-cancellation", True),
+    ),
+)
+async def test_nonaccepted_agent_skill_reconciles_after_real_restart(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    terminal_outcome: str,
+    inject_acceptance_effect: bool,
 ) -> None:
     attempt_id = "attempt-governed-agent-failed"
     reservation_id = "reservation-governed-agent-failed"
@@ -1080,7 +1180,7 @@ def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
     )
     artifacts = AgentArtifactStore(tmp_path / "agent-runs")
 
-    class _FailingAgent:
+    class _TerminalAgent:
         def __init__(self, **_dependencies: Any) -> None:
             pass
 
@@ -1099,6 +1199,22 @@ def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
                 "must never reach accepted HEAD\n",
                 encoding="utf-8",
             )
+            if terminal_outcome == "post-review-cancellation":
+                return AgentResult(
+                    status="EXECUTED",
+                    work_order_id=order.work_order_id,
+                    summary="governed write awaits acceptance review",
+                    result_text="governed write awaits acceptance review",
+                    verification={
+                        "status": "PASS",
+                        "receipt_ref": (
+                            "verification://governed-agent/review"
+                        ),
+                    },
+                    acceptance={"decision": "REVIEW"},
+                    review_required=True,
+                    reason_code="ACCEPTANCE_REVIEW_REQUIRED",
+                )
             return AgentResult(
                 status="FAILED",
                 work_order_id=order.work_order_id,
@@ -1113,7 +1229,7 @@ def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
                 reason_code="AGENT_EXECUTION_FAILED",
             )
 
-    monkeypatch.setattr(executor_module, "AgentExecutor", _FailingAgent)
+    monkeypatch.setattr(executor_module, "AgentExecutor", _TerminalAgent)
     node_grant_ref = "governor-decision://sha256/" + "d" * 64
     node_grant_digest = "sha256:" + "e" * 64
     governed_context = {
@@ -1181,15 +1297,28 @@ def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
     )
     protected = dict(raw_result.pop("_protected_stage"))
     result_digest = canonical_workspace_artifact_digest(raw_result)
-    projection = _rejected_projection(
-        command=command,
-        graph=graph,
-        node=node,
-        attempt_id=attempt_id,
-        protected=protected,
-        result_digest=result_digest,
-        node_grant_ref=node_grant_ref,
-        node_grant_digest=node_grant_digest,
+    projection = (
+        _rejected_projection(
+            command=command,
+            graph=graph,
+            node=node,
+            attempt_id=attempt_id,
+            protected=protected,
+            result_digest=result_digest,
+            node_grant_ref=node_grant_ref,
+            node_grant_digest=node_grant_digest,
+        )
+        if terminal_outcome == "verification-failure"
+        else _projection(
+            command=command,
+            graph=graph,
+            node=node,
+            attempt_id=attempt_id,
+            protected=protected,
+            result_digest=result_digest,
+            node_grant_ref=node_grant_ref,
+            node_grant_digest=node_grant_digest,
+        )
     )
     projection_store.stage(
         projection_id=projection["projection_id"],
@@ -1271,66 +1400,293 @@ def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
                 attempt_id=None,
             ),
         )
-    verification = VerificationResult(
-        verification_id="verify-governed-agent-failed",
-        work_order_id=order.work_order_id,
-        required=True,
-        status=VerificationStatus.FAIL,
-        task_graph_id=graph.graph_id,
-        task_node_id=node.node_id,
-        attempt_id=attempt_id,
-        reason_code="AGENT_EXECUTION_FAILED",
-        evidence_refs=(projection["projection_id"],),
-        checks=(
-            {
-                "name": "durable-worker-projection",
-                "status": "FAIL",
-                "reason_code": "AGENT_EXECUTION_FAILED",
-            },
-        ),
-        started_at_ms=NOW,
-        finished_at_ms=NOW + 1,
-    )
-    failed = task_store.finalize_node_verification_failure(
-        graph.graph_id,
-        graph.revision,
-        node.node_id,
-        attempt_id=attempt_id,
-        reservation_id=reservation_id,
-        budget_id=budget_id,
-        expected_node_version=4,
-        expected_graph_version=1,
-        expected_budget_version=0,
-        verification_result=verification,
-        node_outbox=_event(
-            aggregate_type="TASK_NODE",
-            aggregate_id=f"{graph.graph_id}@{graph.revision}/{node.node_id}",
-            aggregate_version=5,
-            event_type="TASK_NODE_VERIFICATION_FAILED",
-            graph_revision=None,
+    if terminal_outcome == "verification-failure":
+        verification = VerificationResult(
+            verification_id="verify-governed-agent-failed",
+            work_order_id=order.work_order_id,
+            required=True,
+            status=VerificationStatus.FAIL,
+            task_graph_id=graph.graph_id,
+            task_node_id=node.node_id,
             attempt_id=attempt_id,
+            reason_code="AGENT_EXECUTION_FAILED",
             evidence_refs=(projection["projection_id"],),
-        ),
-        graph_outbox=_event(
-            aggregate_type="TASK_GRAPH",
-            aggregate_id=graph.graph_id,
-            aggregate_version=2,
-            event_type="TASK_GRAPH_FAILED",
+            checks=(
+                {
+                    "name": "durable-worker-projection",
+                    "status": "FAIL",
+                    "reason_code": "AGENT_EXECUTION_FAILED",
+                },
+            ),
+            started_at_ms=NOW,
+            finished_at_ms=NOW + 1,
+        )
+        failed = task_store.finalize_node_verification_failure(
+            graph.graph_id,
+            graph.revision,
+            node.node_id,
+            attempt_id=attempt_id,
+            reservation_id=reservation_id,
+            budget_id=budget_id,
+            expected_node_version=4,
+            expected_graph_version=1,
+            expected_budget_version=0,
+            verification_result=verification,
+            node_outbox=_event(
+                aggregate_type="TASK_NODE",
+                aggregate_id=(
+                    f"{graph.graph_id}@{graph.revision}/{node.node_id}"
+                ),
+                aggregate_version=5,
+                event_type="TASK_NODE_VERIFICATION_FAILED",
+                graph_revision=None,
+                attempt_id=attempt_id,
+                evidence_refs=(projection["projection_id"],),
+            ),
+            graph_outbox=_event(
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=graph.graph_id,
+                aggregate_version=2,
+                event_type="TASK_GRAPH_FAILED",
+                graph_revision=graph.revision,
+                attempt_id=None,
+                evidence_refs=(projection["projection_id"],),
+            ),
+            budget_outbox=_event(
+                aggregate_type="BUDGET_RESERVATION",
+                aggregate_id=budget_id,
+                aggregate_version=1,
+                event_type="BUDGET_RESERVATION_RELEASED",
+                graph_revision=None,
+                attempt_id=None,
+                evidence_refs=(projection["projection_id"],),
+            ),
+        )
+        assert failed["graph"]["status"] == "FAILED"
+    else:
+        verification = VerificationResult(
+            verification_id="verify-governed-agent-review",
+            work_order_id=order.work_order_id,
+            required=True,
+            status=VerificationStatus.PASS,
+            task_graph_id=graph.graph_id,
+            task_node_id=node.node_id,
+            attempt_id=attempt_id,
+            reason_code=None,
+            evidence_refs=(projection["projection_id"],),
+            checks=(
+                {
+                    "name": "durable-worker-projection",
+                    "status": "PASS",
+                    "reason_code": None,
+                },
+            ),
+            started_at_ms=NOW,
+            finished_at_ms=NOW + 1,
+        )
+        verified = task_store.commit_node_verification(
+            graph.graph_id,
+            graph.revision,
+            node.node_id,
+            attempt_id=attempt_id,
+            reservation_id=reservation_id,
+            expected_node_version=4,
+            target_status=TaskNodeStatus.VERIFIED,
+            verification_result=verification,
+            node_outbox=_event(
+                aggregate_type="TASK_NODE",
+                aggregate_id=(
+                    f"{graph.graph_id}@{graph.revision}/{node.node_id}"
+                ),
+                aggregate_version=5,
+                event_type="TASK_NODE_VERIFIED",
+                graph_revision=None,
+                attempt_id=attempt_id,
+                evidence_refs=(projection["projection_id"],),
+            ),
+        )
+        assert verified["node"]["status"] == "VERIFIED"
+        reviews = ReviewStore(db_path, clock=lambda: NOW)
+        review_runtime = TaskNodeReviewRuntime(reviews, clock=lambda: NOW)
+        review_item = review_runtime.prepare_post_execution_acceptance_review(
+            context=TaskNodeReviewContext(
+                work_order_id=order.work_order_id,
+                root_work_order_id=order.root_work_order_id,
+                graph_id=graph.graph_id,
+                graph_revision=graph.revision,
+                node_id=node.node_id,
+                node_status_version=6,
+                attempt_id=attempt_id,
+                requester=command.principal_id,
+                reason=(
+                    "Acceptance policy requires durable post-execution review"
+                ),
+                risk_level=4,
+                evidence_refs=(projection["projection_id"],),
+            )
+        )
+        criterion = node.acceptance_criteria[0]
+        acceptance = {
+            "schema_version": "Natsume.agent.acceptance_judgement.v1",
+            "judgement_id": "accept-governed-agent-review",
+            "work_order_id": order.work_order_id,
+            "task_graph_id": graph.graph_id,
+            "task_node_id": node.node_id,
+            "attempt_id": attempt_id,
+            "decision": "REVIEW",
+            "reason_code": "ACCEPTANCE_REVIEW_REQUIRED",
+            "evidence_refs": [projection["projection_id"]],
+            "criteria": [
+                {
+                    "criterion_id": "criterion-governed-agent-review",
+                    "criterion_text": criterion,
+                    "verdict": "FAIL",
+                    "evidence_refs": [projection["projection_id"]],
+                    "deterministic": True,
+                    "reason_code": "ACCEPTANCE_REVIEW_REQUIRED",
+                    "critic_verdict": None,
+                }
+            ],
+            "critic_candidate": None,
+            "started_at_ms": NOW,
+            "finished_at_ms": NOW + 1,
+        }
+        waiting = task_store.commit_node_acceptance_review(
+            graph.graph_id,
+            graph.revision,
+            node.node_id,
+            attempt_id=attempt_id,
+            expected_node_version=5,
+            acceptance_judgement=acceptance,
+            node_outbox=_event(
+                aggregate_type="TASK_NODE",
+                aggregate_id=(
+                    f"{graph.graph_id}@{graph.revision}/{node.node_id}"
+                ),
+                aggregate_version=6,
+                event_type="TASK_NODE_WAITING_ACCEPTANCE_REVIEW",
+                graph_revision=None,
+                attempt_id=attempt_id,
+                evidence_refs=(projection["projection_id"],),
+            ),
+            review_item=review_item,
+            work_order_id=order.work_order_id,
+            expected_graph_version=1,
+            graph_outbox=_event(
+                aggregate_type="TASK_GRAPH",
+                aggregate_id=graph.graph_id,
+                aggregate_version=2,
+                event_type="TASK_GRAPH_BLOCKED",
+                graph_revision=graph.revision,
+                attempt_id=None,
+            ),
+        )
+        assert waiting["node"]["status"] == "WAITING_ACCEPTANCE_REVIEW"
+        assert waiting["graph"]["status"] == "BLOCKED"
+        assert waiting["decision"]["target_status"] == (
+            "WAITING_ACCEPTANCE_REVIEW"
+        )
+        cancellation_claims = SQLiteSecureIngressStore(
+            db_path,
+            rate_limit=100,
+        )
+        try:
+            application = GovernedCommandApplication(
+                command_repository=command_store,
+                coordinator=GovernedTaskCoordinator(
+                    task_store=task_store,
+                    internal_agent_checkpoint_uow=(
+                        DurableInternalAgentCheckpointUnitOfWork(
+                            task_store=task_store,
+                            worker_projection_store=projection_store,
+                        )
+                    ),
+                    outbox_publisher=_Publisher(),
+                    outbox_factory=OutboxMessage,
+                    worker_resolver=object(),
+                    verifier=_Verifier("PASS"),
+                    acceptance=object(),
+                    projection_reader=projection_store,
+                    owner_id=owner_id,
+                ),
+                cancellation_authority_verifier=(
+                    SecureIngressGraphCancellationAuthorityVerifier(
+                        cancellation_claims
+                    )
+                ),
+            )
+            cancel_request_id = (
+                "request-governed-agent-post-review-cancellation"
+            )
+            cancellation_authority = _commit_graph_cancellation_authority(
+                db_path,
+                graph_id=graph.graph_id,
+                graph_revision=graph.revision,
+                request_id=cancel_request_id,
+                principal_id=(
+                    "service.operator.governed-agent-cancellation"
+                ),
+            )
+            cancelled = await application.request_graph_cancellation(
+                command_id=command.command_id,
+                graph_id=graph.graph_id,
+                graph_revision=graph.revision,
+                authority=cancellation_authority,
+                source="OPERATOR",
+                reason_code="OPERATOR_REQUEST",
+            )
+        finally:
+            cancellation_claims.close()
+        assert cancelled["execution_receipt"]["status"] == "CANCELLED"
+        snapshot = task_store.read_scheduler_snapshot(
+            graph.graph_id,
+            graph.revision,
+        )
+        assert snapshot["graph_record"]["status"] == "CANCELLED"
+        assert snapshot["graph_record"]["nodes"][0]["status"] == "CANCELLED"
+        assert snapshot["attempts"][0]["status"] == "SUCCEEDED"
+        assert snapshot["budgets"][0]["status"] == "RELEASED"
+        assert reviews.get_review(review_item.review_id)["review"][
+            "status"
+        ] == "CANCELLED"
+        cancellation = task_store.get_graph_cancellation_for_graph(
+            graph.graph_id,
+            graph.revision,
+        )
+        assert cancellation is not None
+        assert cancellation["status"] == "FINALIZED"
+        assert cancellation["payload"]["graph_target_status"] == "BLOCKED"
+        decision = task_store.get_graph_cancellation_decision_for_intent(
+            cancellation["intent_ref"]
+        )
+        assert decision is not None
+        assert decision["payload"]["graph_target_status"] == "CANCELLED"
+        assert decision["payload"]["node_states_after"][node.node_id][
+            "status"
+        ] == "CANCELLED"
+        assert task_store.list_acceptance_effect_intents(
+            graph_id=graph.graph_id,
             graph_revision=graph.revision,
-            attempt_id=None,
-            evidence_refs=(projection["projection_id"],),
-        ),
-        budget_outbox=_event(
-            aggregate_type="BUDGET_RESERVATION",
-            aggregate_id=budget_id,
-            aggregate_version=1,
-            event_type="BUDGET_RESERVATION_RELEASED",
-            graph_revision=None,
-            attempt_id=None,
-            evidence_refs=(projection["projection_id"],),
-        ),
-    )
-    assert failed["graph"]["status"] == "FAILED"
+            node_id=node.node_id,
+            limit=1,
+        ) == []
+        if inject_acceptance_effect:
+            effect_id = _inject_terminal_acceptance_effect(
+                task_store,
+                graph_id=graph.graph_id,
+                graph_revision=graph.revision,
+                node_id=node.node_id,
+                attempt_id=attempt_id,
+            )
+            assert [
+                effect["effect_id"]
+                for effect in task_store.list_acceptance_effect_intents(
+                    graph_id=graph.graph_id,
+                    graph_revision=graph.revision,
+                    node_id=node.node_id,
+                    limit=1,
+                )
+            ] == [effect_id]
 
     restarted = _runtime(
         tmp_path,
@@ -1356,18 +1712,33 @@ def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
         ),
     )
     reports = group.run_once()
+    workspace_id = restarted.workspace_id_for(
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+    )
+    if inject_acceptance_effect:
+        assert any(
+            item["action"] == "BLOCKED"
+            and item["reason_code"] == "SKILL_ARTIFACT_TERMINAL_INVALID"
+            for item in reports
+        ), json.dumps(reports, ensure_ascii=False, sort_keys=True, indent=2)
+        assert all(item["action"] != "ABANDONED" for item in reports)
+        assert restarted.repository.get(workspace_id).status == "ACTIVE"
+        assert _git(source, "rev-parse", "main") == source_head
+        assert not (source / "src" / "failed-generated.txt").exists()
+        return
+    expected_reason = (
+        "TERMINAL_VERIFICATION_FAILED"
+        if terminal_outcome == "verification-failure"
+        else "TERMINAL_POST_REVIEW_CANCELLED"
+    )
     assert any(
         item["action"] == "ABANDONED"
-        and item["reason_code"] == "TERMINAL_VERIFICATION_FAILED"
+        and item["reason_code"] == expected_reason
         for item in reports
     ), json.dumps(reports, ensure_ascii=False, sort_keys=True, indent=2)
     assert any(item["action"] == "CLEANED" for item in reports), reports
-    authority = restarted.repository.get(
-        restarted.workspace_id_for(
-            graph_id=graph.graph_id,
-            graph_revision=graph.revision,
-        )
-    )
+    authority = restarted.repository.get(workspace_id)
     assert authority.status == "CLEANED"
     assert not (tmp_path / "managed" / authority.workspace_relpath).exists()
     assert _git(source, "rev-parse", "main") == source_head

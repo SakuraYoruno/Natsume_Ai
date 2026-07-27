@@ -396,8 +396,6 @@ def test_active_and_accepted_abandonment_are_distinct_exact_transitions(
         ("FAILED", "VERIFICATION_FAILED", "SUCCEEDED", "RELEASED"),
         ("FAILED", "FAILED", "FAILED", "RELEASED"),
         ("FAILED", "FAILED", "SUCCEEDED", "RELEASED"),
-        ("CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"),
-        ("CANCELLED", "CANCELLED", "SUCCEEDED", "RELEASED"),
     ),
 )
 def test_direct_abandonment_accepts_only_exact_terminal_task_lineage(
@@ -453,6 +451,8 @@ def test_direct_abandonment_accepts_only_exact_terminal_task_lineage(
         ("COMPLETED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
         ("FAILED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
         ("CANCELLED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
+        ("CANCELLED", "CANCELLED", "CANCELLED", "CANCELLED"),
+        ("CANCELLED", "CANCELLED", "SUCCEEDED", "RELEASED"),
         ("ACTIVE", "RUNNING", "RUNNING", "ACTIVE"),
         ("FAILED", "FAILED", "RECOVERABLE", "RELEASED"),
         ("CANCELLED", "CANCELLED", "FAILED", "RELEASED"),

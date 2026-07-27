@@ -795,3 +795,31 @@ Workspace lifecycle 与
 unknown-effect 组合、多 Workspace 并发写、一般
 cross-route terminal matrix、强租户隔离、波次 integration 和 NE-07 真实
 服务栈；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## 12. 当前实施进展：Direct Skill 验收评审取消终态
+
+本批关闭 Direct Agent Skill 自身在 post-execution Acceptance Review 等待期
+被取消后，受保护 Workspace 永久遗留的生产缺口：
+
+1. frozen Skill worker 先提交 `SUCCEEDED` Attempt 与 `COMMITTED` Operation；
+   PASS Verification 后，`REVIEW` judgement、ReviewItem、Node
+   `WAITING_ACCEPTANCE_REVIEW` 和 Graph `BLOCKED` 由既有 durable UoW 落盘。
+2. 取消必须走真实 Secure Ingress authority 和
+   `GovernedCommandApplication.request_graph_cancellation()`；最终 Graph/Node
+   均为 `CANCELLED`，Review 为 `CANCELLED`，Budget 释放，worker 不重跑。
+3. `GovernedSkillArtifactTerminalReconciler` 只在 Acceptance decision 精确绑定
+   当前 Attempt/review 且 judgement=`REVIEW`、节点 Effect 为零时解释该终态。
+4. `workspace_terminal_cancellation_authority.py` 只读重验唯一 finalized intent
+   与 decision 的 ref/digest、Graph 当前版本，以及
+   intent-after/decision-before/decision-after/current Node 四份相同
+   `CANCELLED + status_version`。
+5. `WorkspaceRepository` 在 abandon CAS 前再次要求上述证明、Review 当前为
+   `CANCELLED`、Operation 已 `COMMITTED` 且零 Effect；raw `CANCELLED`
+   状态组合、版本漂移、缺 decision 或已有 Effect 均保留 Workspace 并失败关闭。
+
+基于 `origin/dev@55ece25163667a4db5464a6d2451ab3e7b8f76c9` 的去重受影响
+集合为 `68 passed in 117.23s`，覆盖真实 SQLite、Git worktree、ReviewStore、
+Secure Ingress、fresh Runtime、第二次重启、Plan accepted-writer 回归与取消
+证据篡改。本批无 migration。NE-01 仍为 `IN_PROGRESS`；一般 Direct/Plan
+terminal matrix、unknown-effect、多 Workspace、波次 integration 和 NE-07
+真实服务栈继续待办，远程 CI 记为 `NOT_RUN_ACCOUNT_QUOTA`。

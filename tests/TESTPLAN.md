@@ -998,3 +998,32 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   均通过且失败列表为空。无 migration；其它 Plan
   failure/cancellation/unknown-effect、多 Workspace、NE-01 wave integration
   和 NE-07 服务栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## T-NE01-DIRECT-SKILL-POST-REVIEW-CANCEL：Direct Skill 评审取消终态
+
+- T-NE01-DIRECT-SKILL-POST-REVIEW-CANCEL-01：真实 Agent write worker 必须先
+  提交 `SUCCEEDED` Attempt、`COMMITTED` Operation 和密封 proposal；PASS
+  Verification 后，Acceptance `REVIEW`、ReviewItem、Node
+  `WAITING_ACCEPTANCE_REVIEW` 与 Graph `BLOCKED` 必须持久化。
+- T-NE01-DIRECT-SKILL-POST-REVIEW-CANCEL-02：取消必须从真实 SQLite Secure
+  Ingress authority 进入 production `request_graph_cancellation()`；最终
+  Graph/Node/Review=`CANCELLED`、Budget=`RELEASED`，worker 不得重跑。
+- T-NE01-DIRECT-SKILL-POST-REVIEW-CANCEL-03：terminal reconciler 必须重开
+  exact Acceptance decision/review/Attempt、finalized intent/decision 和零
+  Effect；fresh Runtime 才可 `ABANDONED → CLEANED`，第二次重启为零 replay，
+  source HEAD/文件不变。
+- T-NE01-DIRECT-SKILL-POST-REVIEW-CANCEL-04：Workspace repository 必须独立
+  验证 intent/decision digest/ref、Graph final version、intent-after、
+  decision-before、decision-after 和 current Node 的 status/version；仅 raw
+  `CANCELLED` 状态组合必须拒绝。
+- T-NE01-DIRECT-SKILL-POST-REVIEW-CANCEL-05：若 exact Attempt 已存在任何
+  Acceptance Effect，terminal worker 必须 `BLOCKED`，Workspace 保持
+  `ACTIVE`，不得 tombstone 或 cleanup。
+- 当前五文件去重受影响集合为 `68 passed in 117.23s`，包含 terminal
+  reconciler、取消 proof、Workspace repository、Direct Skill 与 Plan 回归；
+  不与开发中 55/4/3 等重叠复测相加。基线为
+  `origin/dev@55ece25163667a4db5464a6d2451ab3e7b8f76c9`，无 migration。
+  该 Gate 不覆盖其它 Direct/Plan terminal matrix、一般 unknown-effect、
+  多 Workspace、NE-01 波次集成或 NE-07 服务栈；远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`。文档 authority/freshness、交付元数据与 coverage
+  合同为 `39 passed in 12.64s`。

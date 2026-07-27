@@ -527,10 +527,19 @@ class GovernedSkillArtifactTerminalReconciler:
             and attempt_status == "SUCCEEDED"
             and operation_status == "COMMITTED"
         )
+        post_review_cancelled = (
+            str(getattr(binding.command, "route_type", "") or "")
+            in {"skill", "plan"}
+            and graph_status == "CANCELLED"
+            and node_status == "CANCELLED"
+            and attempt_status == "SUCCEEDED"
+            and operation_status == "COMMITTED"
+        )
         if not (
             own_verification_failed
             or plan_failed_after_acceptance
             or plan_cancelled_after_acceptance
+            or post_review_cancelled
         ):
             self._invalid(
                 "unproven Agent Skill terminal matrix remains fail closed"
@@ -539,8 +548,20 @@ class GovernedSkillArtifactTerminalReconciler:
         self._assert_projection_descriptor(binding, seal=seal)
         if plan_failed_after_acceptance or plan_cancelled_after_acceptance:
             self._assert_plan_node_accepted_without_effect(binding)
+        if post_review_cancelled:
+            self._assert_cancelled_after_acceptance_review_without_effect(
+                binding
+            )
+            self._assert_graph_finalized_cancellation(
+                binding,
+                expected_node_status="CANCELLED",
+            )
+            return "TERMINAL_POST_REVIEW_CANCELLED"
         if plan_cancelled_after_acceptance:
-            self._assert_plan_graph_finalized_cancellation(binding)
+            self._assert_graph_finalized_cancellation(
+                binding,
+                expected_node_status="ACCEPTED",
+            )
             return "TERMINAL_PLAN_GRAPH_CANCELLED_AFTER_NODE_ACCEPTANCE"
         if plan_failed_after_acceptance:
             return "TERMINAL_PLAN_GRAPH_FAILED_AFTER_NODE_ACCEPTANCE"
@@ -601,9 +622,46 @@ class GovernedSkillArtifactTerminalReconciler:
                 "terminal Plan Workspace node already has an Acceptance Effect"
             )
 
-    def _assert_plan_graph_finalized_cancellation(
+    def _assert_cancelled_after_acceptance_review_without_effect(
         self,
         binding: _SkillArtifactBinding,
+    ) -> None:
+        authority = binding.authority
+        decision = self._tasks.get_node_acceptance_decision(
+            str(authority["graph_id"]),
+            int(authority["graph_revision"]),
+            str(authority["node_id"]),
+        )
+        judgement = (
+            decision.get("judgement")
+            if isinstance(decision, Mapping)
+            else None
+        )
+        effects = self._tasks.list_acceptance_effect_intents(
+            graph_id=str(authority["graph_id"]),
+            graph_revision=int(authority["graph_revision"]),
+            node_id=str(authority["node_id"]),
+            limit=1,
+        )
+        if (
+            not isinstance(decision, Mapping)
+            or decision.get("target_status")
+            != "WAITING_ACCEPTANCE_REVIEW"
+            or decision.get("attempt_id") != binding.attempt_id
+            or not str(decision.get("review_id") or "").strip()
+            or not isinstance(judgement, Mapping)
+            or judgement.get("decision") != "REVIEW"
+            or tuple(effects or ())
+        ):
+            self._invalid(
+                "cancelled Workspace node lacks exact post-Acceptance Review"
+            )
+
+    def _assert_graph_finalized_cancellation(
+        self,
+        binding: _SkillArtifactBinding,
+        *,
+        expected_node_status: str,
     ) -> None:
         authority = binding.authority
         graph_id = str(authority["graph_id"])
@@ -648,17 +706,17 @@ class GovernedSkillArtifactTerminalReconciler:
             if isinstance(decision_payload, Mapping)
             else None
         )
-        accepted_intent_state = (
+        terminal_intent_state = (
             intent_after.get(node_id)
             if isinstance(intent_after, Mapping)
             else None
         )
-        accepted_before_state = (
+        terminal_before_state = (
             decision_before.get(node_id)
             if isinstance(decision_before, Mapping)
             else None
         )
-        accepted_after_state = (
+        terminal_after_state = (
             decision_after.get(node_id)
             if isinstance(decision_after, Mapping)
             else None
@@ -682,15 +740,16 @@ class GovernedSkillArtifactTerminalReconciler:
             or int(decision_payload.get("graph_revision") or 0) != graph_revision
             or str(decision_payload.get("graph_target_status") or "")
             != "CANCELLED"
-            or not isinstance(accepted_intent_state, Mapping)
-            or not isinstance(accepted_before_state, Mapping)
-            or not isinstance(accepted_after_state, Mapping)
-            or str(accepted_intent_state.get("status") or "") != "ACCEPTED"
-            or accepted_before_state != accepted_intent_state
-            or accepted_after_state != accepted_intent_state
+            or not isinstance(terminal_intent_state, Mapping)
+            or not isinstance(terminal_before_state, Mapping)
+            or not isinstance(terminal_after_state, Mapping)
+            or str(terminal_intent_state.get("status") or "")
+            != expected_node_status
+            or terminal_before_state != terminal_intent_state
+            or terminal_after_state != terminal_intent_state
         ):
             self._invalid(
-                "cancelled Plan Workspace node lacks exact finalized cancellation"
+                "cancelled Workspace node lacks exact finalized cancellation"
             )
 
     def _task_records(
