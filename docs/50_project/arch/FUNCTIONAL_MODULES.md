@@ -145,6 +145,13 @@ Node Acceptance 模块同样不拥有第二套 Runtime。`task_node_acceptance_c
 
 Plan Review Policy 模块的职责分为三层：Capability adapter 只从 registry 冻结 `requires_review`，Planning domain 只携带候选级来源，Graph compiler 独占 candidate→TaskNode ID 重绑定。`review_policy.py` 负责合同解析和完整覆盖失败关闭，`TaskNodeReviewRuntime`/Scheduler 负责逐节点门禁，ReviewStore 与 0096 worker 仍分别拥有决定和续跑协调。`ParallelSuccessRuntime` 不修改审批，而只核对 WorkerProjection 中冻结的历史/续签 grant authority。Budget、搜索算法和 worker 都不能自行关闭审批。
 
+Review continuation poison 模块只处理 0096 delivery coordination。
+`review_continuation_poison.py` 在调用者事务内执行稳定错误分类、版本化退避和
+有界健康投影；它没有连接、Review writer 或 Task writer。
+`ReviewContinuationGuardianObserver` 只把固定 schema 的计数/digest 投影交给
+app-local RuntimeGuardian，RuntimeGroup 只负责注入。ReviewStore、TaskStore、
+worker 和 Guardian 的 authority 因此保持分离。
+
 Delegate Dispatch 模块当前只有一个正向生产 target：只读 `pentest_agent`。Registry 负责冻结 `PORT_FREE_READ_ONLY` execution mode，dispatcher 负责调用 effect-free Domain Pack/SecureRun adapter 并签发完整 lineage-bound usage attestation；Frozen Route Executor 只负责重验 attestation 并转换为 WorkerBudgetUsage。模型、工具、嵌套派发与 Effect port 不属于该 adapter，legacy Agent trace 也不属于预算 authority。未来任何有资源消耗的 Delegate 必须新增受治理 target 合同与实际 measurement，不能复用该零用量证明。
 
 Worker Evidence 模块只负责对 durable WorkerProjection 做独立验证与验收，不执行 worker、不写 Task 状态，也不拥有领域语义。它复验 route-neutral immutable identity、grant、WorkOrder/context、receipt/COMMIT 与输出合同，并把未知语义标准交给 Review。Node Input Attestation 合同只规范前驱 TaskResult artifact 的 ref、receipt 与 payload digest；Plan Chat adapter 负责将这组已验收产物转换为唯一合成证据，不能混入普通 Memory retrieval。Task Runtime 仍是 Attempt/Lease/Budget/Review/Acceptance 的唯一状态 owner。
@@ -522,8 +529,8 @@ Composition Root 只负责把两侧构造并连接
 | 优先级 | 模块缺口 | 影响 | 目标 owner |
 |---|---|---|---|
 | P1 | 0099 历史终态只完成窄 reconciliation | Runtime 已停止静默修复；唯一 graph-scope exact FAILED bundle 可显式 auto，BLOCKED/legacy CANCELLED需签名；child/missing/multi Budget 与完整终态漂移只 quarantine。未决 case graph-wide 围栏普通 Graph/cancellation request 与 Budget transition/consume/usage/retry，仅 0099 UoW bypass；每条历史 supersession 链必须最终有可信 proof。外部 deployment inventory/remediation 未知，general/multi-node/pre-budget recovery仍缺 | Governed Execution |
-| P1 | 0096 Review continuation 仍需真实 production canary | 原子 enqueue、expiry/poison isolation、takeover/stale fence、surface 路由、POST no-rerun、grant uniqueness、denial replay 与 shutdown fault matrix 已有；Operator credential 部署和真实 canary 仍未跑 | Governed Execution |
-| P2 | Review poison 运维队列仍不完整 | claim 已按候选隔离且单批扫描最多 500 行；尚无 durable DLQ/告警，极端前 500 行全 poison 时会延迟后续健康行。跨进程低延迟仍依靠轮询与 lease takeover，wake 只是进程内提示 | Governed Execution |
+| P1 | 0096 Review continuation 仍需真实 production canary | 原子 enqueue、expiry/poison isolation、500 条坏前缀退避后健康行前进、takeover/stale fence、surface 路由、POST no-rerun、grant uniqueness、Guardian incident/recovery、denial replay 与 shutdown fault matrix 已有；Operator credential 部署和真实 canary 仍未跑 | Governed Execution |
+| P2 | Review poison 运维闭环仍不完整 | poison 行已有 durable backoff 与 runtime-scoped Guardian 告警，不再饿死健康行；尚无独立 terminal DLQ、Operator 修复 UI 或自动修复策略。跨进程低延迟仍依靠轮询与 lease takeover，wake 只是进程内提示 | Governed Execution |
 | P1 | Persona candidate 尚未进入统一 proposal/Review/版本激活 | 旧直写虽已封口，但人格长期演化仍不可用 | Persona Evolution Authority |
 | P1 | 原子终态已切流但尚未 wave canary | 新生产图已默认使用 0090/0091，定向覆盖单节点、串行、篡改、取消传播、重启与响应丢失；bounded fan-out 仍关闭，跨路线 wave integration、general recovery 和真实 canary未完成 | Governed Execution |
 | P0 | B5C 生产启用条件未完成 | Budget contention 与 0099 窄终态分类已有；cancellation gate会阻断 current anomaly、缺失 proof/supersession closure 与 quarantine。0099 仍为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`；仍缺目标部署 inventory/remediation、general/multi-node/pre-budget recovery、现实 resolver、部署密钥/凭据、完整 key lifecycle 与真实 canary | Governed Execution |

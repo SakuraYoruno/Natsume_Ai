@@ -1437,3 +1437,18 @@ cursor/revision/digest 校验后重建的 Guardian history，确认 active breac
 SQLite 中的同一 claim，而不是一个已经丢失的内存 semaphore。这两项证据仍只是
 Budget 基础语义；完整 DEGRADE、REVIEW、取消释放和任意 unknown-effect
 组合必须分别闭合。
+
+## 28. 有界恢复扫描必须让坏记录失去队首支配权
+
+“逐条捕获异常”只隔离了事务失败，并不自动保证队列活性。如果扫描固定取前
+500 行，而损坏记录失败后仍保持同一可用时间，那么每次轮询都会重新读取同一
+前缀，后面的健康任务将永久饥饿。恢复队列必须在验证失败的同一 writer
+transaction 中推进协调状态：清除过期 claim、写入稳定机器错误码、递增版本并
+设置有界指数退避。该 mutation 只能作用于 delivery coordination，不能修改
+ReviewItem、TaskNode 或 Attempt 业务真相。
+
+损坏库存还必须可跨进程观测，但可观测性不应复制用户身份或 Review 内容。健康
+投影只输出计数、采样规模、截断标记、时间与 opaque digest；Runtime Guardian
+以一个 active SLO incident 表示整段连续故障。库存变化不应产生事件洪水，库存
+归零后 replacement process 才追加 resolution。独立 DLQ/人工修复界面可以继续
+作为运维增强，但它不能成为保证健康记录可前进的前提。

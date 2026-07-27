@@ -7,11 +7,11 @@ the waiting status selected by the Review resume phase.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from pathlib import Path
 import hmac
 import re
 import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 import uuid
 
@@ -48,6 +48,7 @@ from host_brain.persistence.review_continuation_codec import (
     _REQUIRED_INDEX_COLUMNS,
     _REQUIRED_SQL_FRAGMENTS,
     _TERMINAL_DELIVERY_STATUSES,
+    _assert_claim,
     _assert_candidate_binding,
     _assert_row_binding,
     _authority_projection,
@@ -61,6 +62,11 @@ from host_brain.persistence.review_continuation_codec import (
 )
 from host_brain.persistence.review_continuation_schema import (
     continuation_table_exists,
+)
+from host_brain.persistence.review_continuation_poison import (
+    ReviewContinuationCandidateBusy,
+    defer_poison_candidate_in_transaction,
+    read_review_continuation_failure_snapshot,
 )
 from host_brain.persistence.task_record_codec import (
     _graph_cancellation_intent_record,
@@ -744,13 +750,24 @@ class ReviewContinuationStore:
                         )
                     ):
                         continue
-                    # Validate the complete Review/Task binding before the
-                    # mutation.  Any poison row rolls back only this candidate.
-                    _bundle(
-                        conn,
-                        row,
-                        allow_crossed_pre_execution=True,
-                    )
+                    # Validate before mutation.  Poison coordination moves
+                    # behind the ready set without changing Review/Task truth.
+                    try:
+                        _bundle(
+                            conn,
+                            row,
+                            allow_crossed_pre_execution=True,
+                        )
+                    except ReviewContinuationCandidateBusy:
+                        continue
+                    except ReviewContinuationStoreError as exc:
+                        defer_poison_candidate_in_transaction(
+                            conn,
+                            row=row,
+                            now=now,
+                            reason_code=exc.reason_code,
+                        )
+                        continue
                     token = f"review-continuation-claim-{uuid.uuid4().hex}"
                     cursor = conn.execute(
                         f"""
@@ -792,6 +809,15 @@ class ReviewContinuationStore:
             except ReviewContinuationStoreError:
                 continue
         return tuple(claimed)
+
+    def review_continuation_failure_snapshot(self) -> Mapping[str, Any]:
+        """Return a bounded, redacted projection of poison coordination rows."""
+
+        conn = self._connect()
+        try:
+            return read_review_continuation_failure_snapshot(conn)
+        finally:
+            conn.close()
 
     def heartbeat_review_continuation(
         self,
@@ -1247,7 +1273,7 @@ def _assert_phase_attempt(
             (binding.graph_id, binding.graph_revision, binding.node_id),
         ).fetchone()
         if live is not None and not checkpoint_crossed:
-            raise ReviewContinuationStoreError(
+            raise ReviewContinuationCandidateBusy(
                 REVIEW_CONTINUATION_CONFLICT,
                 "pre-execution waiting TaskNode has a live TaskAttempt",
             )
@@ -1449,36 +1475,6 @@ def _require_continuation(conn: sqlite3.Connection, review_id: str) -> sqlite3.R
             f"review continuation not found: {review_id}",
         )
     return row
-
-
-def _assert_claim(
-    row: sqlite3.Row,
-    *,
-    worker_id: str,
-    claim_token: str,
-    fencing_token: int,
-    expected_version: int,
-    now: int,
-    allow_expired: bool = False,
-) -> None:
-    if (
-        str(row["claim_owner"] or "") != _required_text(worker_id, field_name="worker_id")
-        or str(row["claim_token"] or "") != _required_text(claim_token, field_name="claim_token")
-        or int(row["claim_fencing_token"]) != _positive_int(
-            fencing_token, field_name="fencing_token"
-        )
-        or int(row["status_version"]) != _non_negative_int(
-            expected_version, field_name="expected_version"
-        )
-        or (
-            not allow_expired
-            and int(row["claim_expires_ts_ms"] or -1) <= int(now)
-        )
-    ):
-        raise ReviewContinuationStoreError(
-            REVIEW_CONTINUATION_CLAIM_LOST,
-            "review continuation claim is stale or belongs to another worker",
-        )
 
 
 __all__ = [

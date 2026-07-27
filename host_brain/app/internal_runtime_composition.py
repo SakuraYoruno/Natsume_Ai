@@ -16,6 +16,9 @@ from host_brain.app.host_startup_graph_continuation import (
 from host_brain.app.periodic_durable_continuation import (
     PeriodicDurableContinuation,
 )
+from host_brain.app.review_continuation_guardian_observer import (
+    ReviewContinuationGuardianObserver,
+)
 from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
 from host_brain.app.workspace_cleanup_guardian_observer import (
     WorkspaceCleanupGuardianObserver,
@@ -36,6 +39,7 @@ class InternalRuntimeComposition:
     acceptance_effect_dispatcher: Any
     acceptance_effect_runtime: Any
     review_commands: Any
+    review_continuation_observer: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +188,9 @@ def compose_internal_runtime(
         acceptance_effect_dispatcher=acceptance_effect_dispatcher,
         acceptance_effect_runtime=operator_composition.acceptance_effect_runtime,
         review_commands=operator_composition.review_command_service,
+        review_continuation_observer=ReviewContinuationGuardianObserver(
+            guardian=runtime_context_application.composition.guardian,
+        ),
     )
 
 
@@ -225,6 +232,9 @@ async def activate_internal_runtime(
         ),
         review_continuation_worker_id=(
             f"{task_runtime.recovery_id}::review-continuation"
+        ),
+        review_continuation_observer=(
+            composition.review_continuation_observer
         ),
         graph_cancellation_operator_enabled=cancellation_operator_enabled,
         graph_cancellation_state_reader=task_runtime.task_store,

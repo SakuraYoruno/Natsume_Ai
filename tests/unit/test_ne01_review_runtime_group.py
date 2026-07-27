@@ -224,6 +224,30 @@ def _group(surface: HostCommandSurface):
     return group, runtimes, command, claims, created[0], log
 
 
+def test_group_injects_review_continuation_observer_into_worker() -> None:
+    log: list[str] = []
+    command = _command(HostCommandSurface.CHAT)
+    captured: list[_Worker] = []
+    observer = object()
+
+    def factory(**kwargs: Any) -> _Worker:
+        worker = _Worker(log, **kwargs)
+        captured.append(worker)
+        return worker
+
+    GovernedRuntimeGroup(
+        {"host": _Runtime("host", log)},
+        review_store=object(),
+        review_decision_store=object(),
+        command_repository=_Commands(command),
+        review_continuation_worker_factory=factory,
+        review_continuation_worker_id="review-observer-worker",
+        review_continuation_observer=observer,  # type: ignore[arg-type]
+    )
+
+    assert captured[0].kwargs["observation_sink"] is observer
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("surface", "target_id", "runtime_name"),

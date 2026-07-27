@@ -910,3 +910,21 @@ terminal reconciler、取消 proof、Workspace repository、Direct Skill 与 Pla
 真实网络和 NE-07 服务栈未运行。当前文档 authority/freshness、交付元数据与
 coverage 合同为 `39 passed in 12.64s`；远程 CI 为
 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Review continuation 坏前缀活性证据
+
+- 文件型 SQLite 中构造 500 条跨表 subject-version 漂移协调行和 1 条健康行；
+  首轮验证 500 行各自在独立事务持久退避，第二轮验证健康行被唯一领取。
+- 健康投影固定为
+  `natsume.review_continuation.failure_snapshot.v1`，最多采样 128 行形成
+  opaque digest，公开结果不含 Review ID、用户内容或原始错误。
+- 真实 runtime-scoped Guardian 验证首次 failure、摘要变化不重复追加、
+  replacement process 重开以及唯一 recovery resolution。
+- RuntimeGroup/Host composition 验证同一个 app-local observer 被注入 worker，
+  无全局 singleton 或第二 journal；focused structure Gate 保持 Store
+  `<1500` 行。
+- 最终受影响集合为 `88 passed in 116.19s`；文档、交付元数据与 coverage
+  合同为 `39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过；无 migration。该证据不包含独立
+  terminal DLQ/Operator 修复 UI、跨进程即时 wake、production canary、
+  NE-01 波次集成或 NE-07；远程 CI 仍为
+  `NOT_RUN_ACCOUNT_QUOTA`。

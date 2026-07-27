@@ -127,6 +127,8 @@ class GovernedRuntimeGroup:
         operator_outcome_finalizer: Any | None = None,
         review_continuation_worker_factory: Callable[..., Any] | None = None,
         review_continuation_worker_id: str | None = None,
+        review_continuation_observer: Callable[[Mapping[str, Any]], Any]
+        | None = None,
         graph_cancellation_operator_enabled: bool = False,
         graph_cancellation_state_reader: Any | None = None,
         acceptance_effect_runtime: Any | None = None,
@@ -274,11 +276,18 @@ class GovernedRuntimeGroup:
                 )
 
                 factory = ReviewContinuationWorker
+            worker_arguments: dict[str, Any] = {
+                "store": review_store,
+                "runtime": self,
+                "worker_id": worker_id,
+                "review_expirer": review_decision_store,
+            }
+            if review_continuation_observer is not None:
+                worker_arguments["observation_sink"] = (
+                    review_continuation_observer
+                )
             self._review_worker = factory(
-                store=review_store,
-                runtime=self,
-                worker_id=worker_id,
-                review_expirer=review_decision_store,
+                **worker_arguments,
             )
             for method_name in ("start", "wake", "stop", "join"):
                 if not callable(getattr(self._review_worker, method_name, None)):

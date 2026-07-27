@@ -88,6 +88,8 @@ class ReviewContinuationStorePort(Protocol):
         authority: Mapping[str, Any],
     ) -> Mapping[str, Any]: ...
 
+    def review_continuation_failure_snapshot(self) -> Mapping[str, Any]: ...
+
 
 class ReviewContinuationRuntimePort(Protocol):
     async def continue_review_continuation(
@@ -132,6 +134,8 @@ class ReviewContinuationWorker:
         batch_limit: int = _DEFAULT_BATCH_LIMIT,
         shutdown_grace_ms: int = _DEFAULT_SHUTDOWN_GRACE_MS,
         sleeper: Sleeper = asyncio.sleep,
+        observation_sink: Callable[[Mapping[str, Any]], Mapping[str, Any]]
+        | None = None,
     ) -> None:
         owner = str(worker_id or "").strip()
         if not owner:
@@ -146,6 +150,8 @@ class ReviewContinuationWorker:
             raise ValueError("continuation worker timing and batch values are invalid")
         if not callable(sleeper):
             raise TypeError("sleeper must be callable")
+        if observation_sink is not None and not callable(observation_sink):
+            raise TypeError("observation_sink must be callable")
         if review_expirer is not None and not callable(
             getattr(review_expirer, "expire_due", None)
         ):
@@ -160,6 +166,12 @@ class ReviewContinuationWorker:
         self._batch_limit = int(batch_limit)
         self._shutdown_grace_seconds = int(shutdown_grace_ms) / 1_000.0
         self._sleeper = sleeper
+        self._observation_sink = observation_sink
+        self._guardian_projection_status = (
+            "READY" if observation_sink is not None else "UNBOUND"
+        )
+        self._guardian_projection_error_type: str | None = None
+        self._last_failure_snapshot: dict[str, Any] | None = None
         self._wake_event: asyncio.Event | None = None
         self._stop_event: asyncio.Event | None = None
         self._task: asyncio.Task[None] | None = None
@@ -172,6 +184,27 @@ class ReviewContinuationWorker:
     @property
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
+
+    def health_snapshot(self) -> dict[str, Any]:
+        snapshot = dict(self._last_failure_snapshot or {})
+        return {
+            "status": (
+                "DEGRADED"
+                if snapshot.get("status") == "FAILED"
+                or self._guardian_projection_status == "FAILED"
+                else "HEALTHY"
+            ),
+            "running": self.running,
+            "poisoned_count": int(snapshot.get("poisoned_count") or 0),
+            "sampled_count": int(snapshot.get("sampled_count") or 0),
+            "truncated": bool(snapshot.get("truncated", False)),
+            "last_failure_ts_ms": snapshot.get("last_failure_ts_ms"),
+            "incident_digest": snapshot.get("incident_digest"),
+            "guardian_projection_status": self._guardian_projection_status,
+            "guardian_projection_error_type": (
+                self._guardian_projection_error_type
+            ),
+        }
 
     async def start(self) -> None:
         """Fail closed on 0096, reconcile history, then scan immediately."""
@@ -268,9 +301,39 @@ class ReviewContinuationWorker:
         if len(claimed) > self._batch_limit:
             raise RuntimeError("review continuation store exceeded the requested limit")
         if not claimed:
+            await self._observe_store_health()
             return 0
         await asyncio.gather(*(self._process_claim_isolated(raw) for raw in claimed))
+        await self._observe_store_health()
         return len(claimed)
+
+    async def _observe_store_health(self) -> None:
+        sink = self._observation_sink
+        if sink is None:
+            return
+        try:
+            raw = await _maybe_await(
+                self._store.review_continuation_failure_snapshot()
+            )
+            snapshot = _mapping(raw, field_name="Review continuation failure snapshot")
+            if snapshot.get("schema") != (
+                "natsume.review_continuation.failure_snapshot.v1"
+            ):
+                raise RuntimeError(
+                    "Review continuation failure snapshot schema is invalid"
+                )
+            result = await _maybe_await(sink(snapshot))
+            if not isinstance(result, Mapping):
+                raise RuntimeError(
+                    "Review continuation observation sink returned an invalid result"
+                )
+        except Exception as exc:
+            self._guardian_projection_status = "FAILED"
+            self._guardian_projection_error_type = exc.__class__.__name__[:120]
+            raise
+        self._last_failure_snapshot = snapshot
+        self._guardian_projection_status = "READY"
+        self._guardian_projection_error_type = None
 
     async def _expire_due_reviews(self) -> None:
         expirer = self._review_expirer
