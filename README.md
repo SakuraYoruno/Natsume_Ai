@@ -66,9 +66,15 @@ Operator 清单因此为 `16 active / 23 retired / 39 known / blocked=0`。
 本切片已通过真实文件型 SQLite、Host runtime authority 和完整 governed
 Operator 激活/撤销/重放定向验证；全部 `test_ne03_*` 单元与集成文件又以
 一次完整波次得到 `271 passed, 2 warnings in 332.52s`。两个 warning 都是
-socket rollout 依赖的 websockets deprecation，不是测试跳过或失败。部署
+socket rollout 依赖的 websockets deprecation，不是测试跳过或失败。
 最终 migration/Core Release 回归为 `48 passed in 81.34s`，fresh 架构
-Gate 1～14 与统一 static/doc Gate 均通过且没有扩大 allowlist。部署
+Gate 1～14 与统一 static/doc Gate 均通过且没有扩大 allowlist。
+Universal Runtime coverage 首次复跑因仍绑定 0135 而按设计失败关闭
+（`23 passed / 9 failed`）；随后以 SQLite backup 复制既有七路线证据，
+只追加应用 0136/0137，并在干净提交 `708aa845` 上 query-only 重开，未重跑
+任何已验收 worker。新收据七路线均为 `PASS`，digest 为
+`sha256:3eb9b295b6a598fa0ce38c63d29e6cbaffac4909f6ce3f24344b1a3bd51bf129`，
+release/metadata/coverage 最终整组 `32 passed in 4.71s`。部署
 多实例 canary、Windows graceful stop 与 NE-07 全栈尚未执行，因此状态只是
 `PRODUCTION_WIRED_LOCAL_WAVE_PASS / NE03_IN_PROGRESS`。
 

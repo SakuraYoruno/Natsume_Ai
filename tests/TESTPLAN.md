@@ -644,8 +644,15 @@ replay 为 `1 passed in 115.13s`。migration 兼容组首次为
 不计跳过或失败。修复历史夹具后，migration/Core Release 最终整组为
 `48 passed in 81.34s`；fresh 架构 Gate 1～14 为
 `PASS / failed_gates=[]`，且未扩大 allowlist；统一 `static_scan,doc_gate`
-为 `PASS / failures=[] in 109s`。部署 canary、Windows graceful stop 与
-NE-07 真实服务栈仍未运行，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+最终重跑为 `PASS / failures=[] in 114.5s`。Universal Runtime coverage 首轮因
+manifest 仍绑定 0135 而失败关闭，结果为 `23 passed / 9 failed`；随后以
+SQLite backup 复制既有七路线数据库，仅追加应用 0136/0137，在干净提交
+`708aa845ef68b9f7df931b2aba8c204cf6e9946a` 上 query-only 重开，未重跑
+任何已验收 worker。新收据七路线均为 `PASS`，receipt digest 为
+`sha256:3eb9b295b6a598fa0ce38c63d29e6cbaffac4909f6ce3f24344b1a3bd51bf129`；
+release/metadata/coverage 最终整组 `32 passed in 4.71s`。部署 canary、
+Windows graceful stop 与 NE-07 真实服务栈仍未运行，远程 CI 为
+`NOT_RUN_ACCOUNT_QUOTA`。
 
 NE-01 第三个切片及其 Tool/MCP authority 收口的强制测试矩阵：Obs locator retirement、ReAct/Tool/MCP旧authority封口、Operator与Tool HTTP治理链仍按原 commit-bound 证据解释，不外推为真实生产executor。该历史矩阵完成时 atomic/fan-out/cancellation/reconciliation均关闭；当前切片已将新生产Graph切到atomic default，但bounded fan-out、cancellation与reconciliation仍保持关闭。历史证据不得被改写成当前能力，也不能把测试adapter写成生产能力。
 

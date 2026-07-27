@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.39
+版本：v2.40
 维护日期：2026-07-28
 状态：当前证据
 
@@ -1104,6 +1104,13 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
 - 修复历史夹具后，migration/Core Release 最终整组为
   `48 passed in 81.34s`；fresh 架构 Gate 1～14 为
   `PASS / failed_gates=[]`，且未扩大 allowlist；统一
-  `static_scan,doc_gate` 为 `PASS / failures=[] in 109s`。
+  `static_scan,doc_gate` 最终重跑为 `PASS / failures=[] in 114.5s`。
+- Universal Runtime coverage 首轮因 manifest 仍绑定 0135 而按设计
+  fail-closed，结果为 `23 passed / 9 failed`。随后以 SQLite backup 复制
+  既有七路线数据库，只追加应用 0136/0137，并在干净提交
+  `708aa845ef68b9f7df931b2aba8c204cf6e9946a` 上 query-only 重开，未重跑
+  任何已验收 worker。新收据七路线均为 `PASS`，receipt digest 为
+  `sha256:3eb9b295b6a598fa0ce38c63d29e6cbaffac4909f6ce3f24344b1a3bd51bf129`；
+  release/metadata/coverage 最终整组 `32 passed in 4.71s`。
 - 部署多实例 canary、Windows graceful stop 与 NE-07 真实服务栈尚未运行，
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
