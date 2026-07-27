@@ -9,6 +9,19 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+当前 NE-01 结构门禁已同步到 `origin/dev` 实际合并的原子 authority，而不是继续
+冻结过时调用次数、构造签名和 MRO 下标。Review denial 的 Node/Graph/Budget/
+Outbox 已由单一 settlement UoW 取代三次 lifecycle 写；Plan writer 的
+parallel checkpoint Budget 终态、共享 execution registry 注入和新增
+Store mixin 也进入精确结构合同。两处真实职责越界没有通过抬阈值处理：
+Retry writer 把纯 identity 与 facade 拆出后为 751 行，Operation checkpoint
+owner 把纯 evidence validator 拆出后为 206 行；新模块不持有连接或事务。
+全部 30 个 unit structure 文件为 `120 passed in 11.09s`，相关功能/合同为
+`110 passed in 74.16s`，原子 Review/checkpoint 行为复跑为
+`39 passed in 6.56s`，文档/交付合同为 `79 passed in 42.49s`；架构 Gate
+1～14 与统一 static/doc Gate 通过。这只是修复已合并语义的门禁和职责边界，
+不代表 NE-01、波次集成或生产 canary 完成。
+
 当前 NE-01 Budget policy 安全边界不再把未实现动作静默改写成 `BLOCK`。
 `BudgetPolicy` v1 仍可序列化 `BLOCK / DEGRADE / REVIEW`，以便保存前向兼容
 提案；canonical `DurableBudgetRuntime` 目前只声明并执行 `BLOCK`。任何

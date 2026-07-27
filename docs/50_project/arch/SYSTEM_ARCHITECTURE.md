@@ -898,3 +898,11 @@ Budget policy 的合同表达能力与 production 执行能力必须分开。当
 `CONSUMED/RELEASED` 并释放容量。真正支持 `DEGRADE/REVIEW` 时必须新增预算
 例外或替换 Graph 的持久 authority，并且产生新 immutable
 `graph_revision + 1`；不得在 executor 内二次规划或把动作改写为 `BLOCK`。
+
+结构 Gate 的基线更新必须同时绑定 production owner 和独立行为证据。当前
+Review denial 调用矩阵减少，是因为 0135 settlement Store 把 Node、Graph、
+Budget、Outbox 合成同一 UoW；Plan writer terminal hash 增加，是因为
+projection 只接受经独立验证的
+`PARALLEL_CHECKPOINT_BUDGET_REJECTED`。DurableTaskStore 的 MRO 合同冻结完整
+34 个 mixin owner，但局部测试使用相对邻接，避免在无关 owner 插入后误报。
+Retry/Operation checkpoint 的纯 helper 不进入 MRO，也不拥有 transaction。

@@ -432,3 +432,19 @@ DAG lifecycle 调用矩阵和 terminal replay hash 的旧结构期望；本 Budg
 切片不掩盖也不吸收该基线修复。预算例外、降级 replacement Graph、Review、
 `graph_revision + 1`、restart 与 rollback 未完成，因此本 trace 只关闭静默
 降级漏洞，NE-01 仍为 `IN_PROGRESS`。
+
+TRACE-NE01-STRUCTURE-AUTHORITY-01（已合并 authority 结构门禁纠偏，当前切片）：
+`origin/dev` 的 atomic Review denial、Plan writer acceptance/checkpoint、
+共享 execution registry 与 DurableTaskStore 新 owner 不得继续被旧调用数、
+AST hash、构造签名或 MRO 绝对下标误判。每项差异先追溯 #149/#167/#172 等
+引入 commit 和真实行为合同；Review denial 只有在单一 settlement UoW 存在时
+才删除 `transition_graph ×2 + transition_node + cancel_waiting_review_node`
+期望，parallel checkpoint hash 只增加已验证 terminal kind。两处真实文件
+越界通过拆出无连接 identity/facade/validator 关闭，Retry writer
+827→751 行、Operation checkpoint owner 267→206 行，policy 阈值与 allowlist
+均不变。最终 30 个结构文件 `120 passed in 11.09s`，相关功能/合同
+`110 passed in 74.16s`，原子 Review/checkpoint 为
+`39 passed in 6.56s`，文档/交付合同为 `79 passed in 42.49s`；架构 Gate
+1～14 与统一 static/doc Gate 通过。证据入口为三个 runtime structure tests、
+三个纯 persistence helper 及原 atomic behavior tests。该 trace 不新增生产
+能力，NE-01 wave integration、canary 与 NE-07 仍未运行。

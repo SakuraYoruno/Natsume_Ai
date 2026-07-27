@@ -64,9 +64,10 @@ def _attribute_calls(
     ]
 
 
-def test_public_constructor_signature_is_unchanged_by_registry_wiring() -> None:
+def test_public_constructor_signature_freezes_injected_runtime_authorities() -> None:
     assert tuple(inspect.signature(coordinator.GovernedTaskCoordinator).parameters) == (
         "task_store",
+        "internal_agent_checkpoint_uow",
         "outbox_publisher",
         "outbox_factory",
         "worker_resolver",
@@ -74,10 +75,12 @@ def test_public_constructor_signature_is_unchanged_by_registry_wiring() -> None:
         "acceptance",
         "projection_reader",
         "review_runtime",
+        "node_grant_verifier",
         "acceptance_effects_enabled",
         "bounded_fanout_enabled",
         "atomic_graph_success_enabled",
         "fanout_event_buffer_size",
+        "execution_registry",
         "owner_id",
         "lease_ttl_ms",
         "operation_ttl_ms",
@@ -102,11 +105,17 @@ def test_coordinator_owns_one_registry_without_raw_lock_or_task_map() -> None:
     ]
     assert len(registry_assignments) == 1
     value = registry_assignments[0].value
-    assert isinstance(value, ast.Call)
-    assert isinstance(value.func, ast.Name)
-    assert value.func.id == LocalGraphExecutionRegistry.__name__
-    assert value.args == []
-    assert value.keywords == []
+    assert isinstance(value, ast.BoolOp)
+    assert isinstance(value.op, ast.Or)
+    assert len(value.values) == 2
+    injected, fallback = value.values
+    assert isinstance(injected, ast.Name)
+    assert injected.id == "execution_registry"
+    assert isinstance(fallback, ast.Call)
+    assert isinstance(fallback.func, ast.Name)
+    assert fallback.func.id == LocalGraphExecutionRegistry.__name__
+    assert fallback.args == []
+    assert fallback.keywords == []
 
     source = inspect.getsource(coordinator)
     assert "_execution_registry_lock" not in source

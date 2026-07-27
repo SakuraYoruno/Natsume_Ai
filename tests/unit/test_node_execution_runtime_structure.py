@@ -58,7 +58,10 @@ _EXECUTE_STREAM_BASELINE_SHA256 = (
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",
     "selected_parallel_decision_outcome": "f601f3cc6506170720737b6e739492328d6707d8b53890500762da1ce038b453",
-    "terminal_replay": "bc06a51a2ea908f588fb32d0a7c42cb6cc176224cf722f6fe756b2a08a677e29",
+    # The terminal projection now admits the independently verified
+    # PARALLEL_CHECKPOINT_BUDGET_REJECTED authority in addition to the
+    # internal and canonical checkpoint variants.
+    "terminal_replay": "e9718eb3908aa23361b35481a8504cd01c3fa3370994a0d62174a9f2406b4f03",
     "attempts_for_node": "003bb661287f2e0b56314f00adffcb4af68cd79a8e85329cbc443ee8ac3fab00",
     "try_operation": "6896d47dd8bef7b3ac99547aabe3be258af6f74ab434b3dfd68f250f368714e6",
 }

@@ -346,6 +346,12 @@ bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
 清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
 Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
 
+### 当前结构门禁纠偏
+
+| 项目 | 状态 | 证据 | 剩余边界 |
+|---|---|---|---|
+| 已合并 atomic authority 与旧结构基线漂移 | `CLOSED_LOCAL` | 30 个 unit structure 文件 `120 passed`；Review denial、Plan writer terminal、registry 注入和当前 Store MRO 均按实际 owner 审计。Retry writer 751 行、Operation checkpoint owner 206 行，未抬阈值或 allowlist | 持续结构 Gate；不等同 NE-01 wave、canary 或 Full Architecture 完成 |
+
 ## cleanup Guardian 与通用多节点 Budget 增量
 
 | 缺口 | 本切片前 | 当前证据 | 仍缺 |

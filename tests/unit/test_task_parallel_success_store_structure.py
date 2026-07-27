@@ -7,6 +7,9 @@ from host_brain.persistence import task_repository, task_store_types
 from host_brain.persistence.task_parallel_success_store import (
     TaskParallelSuccessStoreMixin,
 )
+from host_brain.persistence.task_parallel_settlement_store import (
+    TaskParallelSettlementStoreMixin,
+)
 
 
 PARALLEL_SUCCESS_METHODS = (
@@ -21,7 +24,12 @@ PARALLEL_SUCCESS_METHODS = (
 
 
 def test_parallel_success_mixin_preserves_authority_and_owner_transaction() -> None:
-    assert task_repository.DurableTaskStore.__bases__[4] is TaskParallelSuccessStoreMixin
+    bases = task_repository.DurableTaskStore.__bases__
+    success_index = bases.index(TaskParallelSuccessStoreMixin)
+    assert bases[success_index : success_index + 2] == (
+        TaskParallelSuccessStoreMixin,
+        TaskParallelSettlementStoreMixin,
+    )
     for name in PARALLEL_SUCCESS_METHODS:
         assert getattr(task_repository.DurableTaskStore, name) is getattr(
             TaskParallelSuccessStoreMixin,

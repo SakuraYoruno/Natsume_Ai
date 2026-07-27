@@ -1259,3 +1259,28 @@ static/doc 与架构 Gate 1～14 均通过。更宽 62 项结构探针为
 `60 passed, 2 failed`：DAG lifecycle 调用矩阵与 terminal replay AST hash
 的测试期望已落后于 `origin/dev` 中逐字相同的生产源。本切片不把它们当作
 Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更新结构基线。
+
+## T-NE01-STRUCTURE-AUTHORITY：已合并原子 authority 结构门禁
+
+- T-NE01-SA-01：Review denial 调用矩阵只有在 0135 settlement Store 同事务
+  提交 Node/Graph/Budget/Outbox 且 route-specific 原子合同存在时，才能移除
+  原三次 lifecycle 写；不得仅为绿灯改计数。
+- T-NE01-SA-02：`terminal_replay` AST 只允许新增已由 focused behavior
+  验证的 `PARALLEL_CHECKPOINT_BUDGET_REJECTED`；其余 projection 方法 hash
+  必须不变。
+- T-NE01-SA-03：Coordinator 构造合同必须包含 checkpoint UoW、node grant
+  verifier 和可注入 execution registry；fallback 只能是 app-local
+  `LocalGraphExecutionRegistry`，不得恢复 module-global registry。
+- T-NE01-SA-04：DurableTaskStore 完整 MRO 必须冻结当前 34 个 owner；局部
+  owner 测试按 exact relative adjacency 断言，不使用会被无关合法插入破坏的
+  旧绝对下标。
+- T-NE01-SA-05：Retry writer 超过 800 行时必须拆出无事务 identity/facade，
+  保持 `_schedule_retry()` 的唯一 UoW owner；Operation checkpoint 超过 240
+  行时必须拆出纯 evidence validator，Store 仍拥有唯一 SQLite snapshot。
+  禁止提高阈值或增加 allowlist。
+- T-NE01-SA-06：所有 `tests/unit/*structure*.py` 必须一次性通过；最终证据为
+  `120 passed in 11.09s`。相关 Retry/Operation checkpoint 功能与合同为
+  `110 passed in 74.16s`，原子 Review/checkpoint 为
+  `39 passed in 6.56s`，文档/交付合同为 `79 passed in 42.49s`；架构
+  Gate 1～14 与统一 static/doc Gate 通过。各组不累加。该 Gate 不证明
+  NE-01 wave、production canary 或 NE-07。

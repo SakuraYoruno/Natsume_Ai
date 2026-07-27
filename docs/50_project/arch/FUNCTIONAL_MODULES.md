@@ -753,3 +753,13 @@ mutation authority。
 
 observer 没有 repository/UoW，health 没有 mutation，Budget 测试也没有引入
 Plan/Skill 专用执行器。剩余一般 Budget 和 recovery 继续由 NE-01 后续切片处理。
+
+### Retry 与 Operation checkpoint 职责拆分
+
+Retry scheduling 分成三个窄模块：751 行 writer 唯一拥有 `BEGIN IMMEDIATE`
+与全部状态/Outbox mutation；65 行 facade 只选择 graph-terminal 或
+node-only 语义；86 行 identity builder 只校验输入并派生 content-addressed
+usage/evidence。Operation checkpoint 的 206 行 Store owner 继续在一个
+SQLite snapshot 内读取 Reservation/Attempt/Lease/Outbox，82 行 validator
+只验证 COMMIT evidence。后两类 helper 都不拥有连接、commit 或 rollback，
+因此拆分没有产生第二 persistence authority。

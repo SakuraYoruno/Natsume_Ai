@@ -34,14 +34,13 @@ _MIGRATED_METHODS = (
 )
 
 _COORDINATOR_CALL_MATRIX = {
-    "transition_graph": 13,
-    "transition_node": 7,
+    "transition_graph": 11,
+    "transition_node": 6,
     "commit_node_verification": 1,
     "finalize_verification_failure": 1,
     "accept_node_output": 2,
     "commit_node_acceptance_review": 1,
     "transition_graph_with_acceptance_effects": 1,
-    "cancel_waiting_review_node": 1,
     "transition_attempt": 2,
     "finalize_node_budget": 4,
     "reject_budget_charge": 3,
@@ -62,10 +61,13 @@ _NODE_EXECUTION_CALL_MATRIX = {
 }
 
 _DAG_SCHEDULING_CALL_MATRIX = {
-    "transition_graph": 11,
-    "transition_node": 4,
+    # Review denial terminalization moved from three independent lifecycle
+    # calls into settle_review_denial(), whose Store UoW commits Node, Graph,
+    # Budget and Outbox atomically.  The route-specific structure contract
+    # freezes that replacement authority separately.
+    "transition_graph": 9,
+    "transition_node": 3,
     "accept_node_output": 1,
-    "cancel_waiting_review_node": 1,
 }
 
 _ACCEPTED_GRAPH_FINALIZATION_CALL_MATRIX = {
@@ -362,7 +364,7 @@ def test_coordinator_wires_the_same_instances_and_only_calls_the_service() -> No
     assert dag_matrix + node_execution_matrix + finalizer_matrix == Counter(
         _COORDINATOR_CALL_MATRIX
     )
-    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 40
+    assert len(dag_calls) + len(node_execution_calls) + len(finalizer_calls) == 36
 
 
 def test_store_matrix_and_exact_failure_replay_are_frozen() -> None:

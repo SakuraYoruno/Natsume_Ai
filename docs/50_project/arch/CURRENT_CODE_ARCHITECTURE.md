@@ -951,3 +951,14 @@ Workspace reader 变成 Budget writer，也没有把状态组合当作删除凭�
 SQLite/Git 六路径回归为 `6 passed in 39.93s`，相邻回归另为
 `46 passed in 137.82s`；无 migration。一般 Budget/recovery 交叉矩阵与
 NE-01 仍未完成。
+
+### 已合并 atomic authority 的结构基线
+
+当前结构 Gate 已按实际 atomic owner 重建：Review denial 由
+`settle_review_denial()` 单事务提交 Node、Graph、Budget 和 Outbox，不再要求
+scheduler 出现三次独立 lifecycle 写；Plan writer 的
+`PARALLEL_CHECKPOINT_BUDGET_REJECTED`、共享 `LocalGraphExecutionRegistry`
+注入和 34 个 DurableTaskStore mixin 的顺序均有明确结构合同。Retry writer
+只借用 `TaskRetryScheduleFacadeMixin` 与纯 identity builder，仍独占
+`_schedule_retry()` 事务；Operation checkpoint Store 保留单一 snapshot，
+只把纯 Outbox evidence 校验下沉。没有新增连接、writer、阈值例外或 allowlist。

@@ -1460,3 +1460,12 @@ ReviewItem、TaskNode 或 Attempt 业务真相。
 以一个 active SLO incident 表示整段连续故障。库存变化不应产生事件洪水，库存
 归零后 replacement process 才追加 resolution。独立 DLQ/人工修复界面可以继续
 作为运维增强，但它不能成为保证健康记录可前进的前提。
+
+### 结构门禁冻结 authority，而不是偶然形状
+
+结构测试冻结的是 authority 边界，不是永远不变的调用次数或列表下标。当多个
+Node/Graph/Budget 写被新的单事务 owner 原子取代时，旧调用数必须先对照迁移、
+writer UoW、exact replay 和行为测试审计，再更新结构基线；直接改 hash 不构成
+证据。反过来，文件越过既有职责上限时也不能只提高阈值，应把无连接的纯
+identity、facade 或 validator 从唯一 writer 中抽离，同时保持 writer、连接和
+事务 owner 不变。

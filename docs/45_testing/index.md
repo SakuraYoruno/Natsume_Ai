@@ -947,3 +947,22 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
 - 该结果只证明 unsupported action 不再被静默按 BLOCK 执行，并确认现有
   concurrency 是 Lease/child reservation 容量；真正预算例外、降级图、
   `graph_revision + 1`、Review/restart/rollback 仍未实现，NE-01 不升级。
+
+### NE-01 已合并结构 authority 基线纠偏
+
+- 初始全体 30 个 unit structure 文件暴露 `109 passed / 11 failed`。11 项都
+  先与 `origin/dev` 源和引入 commit 对照：9 项是 atomic Review denial、
+  Plan writer effect/checkpoint、registry 注入及 Store MRO 已变但期望未同步；
+  2 项是 Retry writer 827 行和 Operation checkpoint owner 267 行真实越界。
+- 结构期望改为冻结当前 exact authority 或相对 owner 顺序；Review denial
+  三次 lifecycle 写只有在单一 settlement UoW 与独立 route-specific contract
+  存在时才从矩阵删除。parallel checkpoint Budget terminal hash 绑定已验证
+  `PARALLEL_CHECKPOINT_BUDGET_REJECTED`，不是盲改。
+- 真实越界通过纯模块拆分处理：Retry writer 751 行、identity 86 行、facade
+  65 行；Operation checkpoint owner 206 行、evidence validator 82 行。
+  新模块均无 connection/transaction，阈值与 allowlist 没有增加。
+- 最终全体结构集合 `120 passed in 11.09s`；Retry/Operation checkpoint 相关
+  功能与合同 `110 passed in 74.16s`；原子 Review/checkpoint 集合
+  `39 passed in 6.56s`，文档/交付合同 `79 passed in 42.49s`，架构 Gate
+  1～14 与统一 static/doc Gate 通过。各组有重叠风险，不累加为伪总数；NE-01
+  wave integration、production canary、真实 provider 和 NE-07 仍未运行。
