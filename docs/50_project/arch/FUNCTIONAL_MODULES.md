@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.33
+版本：v2.34
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -27,6 +27,17 @@ Operation status version 只有一个 current nonterminal case。
 消费 contracts 而不反向依赖 app。
 [`app/governed_acceptance_effect_projection.py`](../../../host_brain/app/governed_acceptance_effect_projection.py)
 只把 Effect dispatcher 结果投影到 audit refs，不取得 Effect writer。
+
+Operator Command Inventory 模块把“可执行合同”和“历史替代计划”物理分开。
+[`observability/command_ports.py`](../../../host_brain/observability/command_ports.py)
+只定义 14 条 active governed command；
+[`contracts/operator_command_retirement.py`](../../../host_brain/contracts/operator_command_retirement.py)
+以 data-only 合同保存 23 个退役 ID、替代 authority 和目标波次，不拥有
+handler 或 writer。`domain_command_ports.py` 的 blocked set 为空且不再含
+Bio/Forge/Avatar/Tool/Mate/Bond/Security/Canon dormant adapter；生成式
+Monitor client 同样只含 active 清单。BFF 的 410 与前端本地拒绝都不能执行
+替代路线，它们只防止旧命令悄悄恢复。本文后续 `14/37、23 blocked` 是历史
+库存证据，不是现行模块能力。
 
 Plan Execution Policy 模块由
 [`contracts/agent_runtime/plan_execution_policy.py`](../../../host_brain/contracts/agent_runtime/plan_execution_policy.py)

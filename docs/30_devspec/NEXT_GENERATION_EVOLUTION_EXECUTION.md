@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.23
+版本：v3.24
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 
@@ -22,8 +22,19 @@ Scheduler trigger 或明确 reviewed Internal 使用 TaskNode Review，二者不
 同时存在。Review 创建必须使用 TaskStore 的 canonical clock。同一
 RECOVERY_REQUIRED Operation status version 只能有一个 current recovery
 case，重复观察返回 exact replay，冲突 authority 失败关闭。本切片完成后仍
-不得把 blocked Operator 命令、一般恢复、波次 integration 或 NE-07 写为
+不得把一般恢复、波次 integration 或 NE-07 写为
 PASS。
+
+现行 Operator 合同已经停止把未实现命令留在 active manifest 中长期阻断。
+生产清单只保留 14 条已治理命令，`blocked=0`；原 23 条 ID 进入独立
+`RetiredOperatorCommandV1` 清单，并绑定 NE-01/02/05/06 的替代 authority。
+后端 registry、OpenAPI、生成式 Monitor client 和 domain handlers 均不再
+注册这些 ID；认证 BFF 对旧 ID 返回 410 和 replacement，且不进入 Secure
+Ingress，Monitor 在 fetch 前失败关闭。Avatar/Mate 收敛到 Edge，Tool 和
+Security Hunt 分别回到 Governed Tool、Internal/Scheduler；Forge、Canon、
+Bio、Bond 只能经后续 proposal/version activation 新合同恢复。本文后续
+`14/37、23 blocked` 数字均为历史切片证据，不代表现行 active inventory。
+这项退役不关闭一般恢复、部署 canary 或 NE-01。
 
 当前 Plan/Delegate 封板切片的合同是“准入政策不可变，任何恢复点重新开封”。
 `CAPABILITY_SEARCH_V1` 必须在 admission 前冻结

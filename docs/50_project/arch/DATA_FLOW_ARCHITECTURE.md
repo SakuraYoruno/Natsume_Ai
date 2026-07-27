@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.26
+版本：v3.27
 
 核对日期：2026-07-27
 
@@ -12,6 +12,25 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+Operator 命令的数据流先经过 active/retired 分界，而不是把未实现命令送入
+handler 前统一阻断：
+
+```mermaid
+flowchart LR
+    UI["Monitor / authenticated BFF"] --> M{"active manifest?"}
+    M -->|"14 active"| S["Secure Ingress"]
+    S --> G["HostCommand → TaskGraph → Acceptance Effect"]
+    M -->|"23 retired"| R["410 OPERATOR_COMMAND_RETIRED"]
+    R --> P["replacement authority + wave"]
+    R -. "zero ingress / zero writer" .-> X["No domain handler"]
+```
+
+active manifest、OpenAPI、生成式 client 与 domain registry 使用同一 14 项
+集合；Monitor 的 retired entry 没有 `commandId`，所以浏览器在 fetch 前
+拒绝。Avatar/Mate 的替代链是已治理 Edge，Tool/Hunt 的替代链属于
+Tool/Internal/Scheduler，Forge/Canon/Bio/Bond 等待 NE-05/06 version
+activation。后文 `14/37、23 blocked` 是历史数据流，不再描述当前路由。
 
 Scheduler、Internal、Operator 的已启用 control transport 数据流如下：
 

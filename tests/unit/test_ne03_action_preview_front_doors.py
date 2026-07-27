@@ -9,8 +9,7 @@ import pytest
 from host_brain.app import acceptance_effect_handlers
 from host_brain.task_runtime.acceptance_effect_dispatcher import _receipt_ref
 from host_brain.app.observability_runtime.domain_command_ports import (
-    BLOCKED_OPERATOR_COMMAND_IDS,
-    _DomainCommandPort,
+    build_default_obs_domain_command_registry,
 )
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.channels.life_delivery_transport import LifeDeliveryTransport
@@ -25,10 +24,9 @@ from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.integrations.runtime_events import RuntimeEventStore
 from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
-    OBS_COMMAND_ENVELOPE_SCHEMA,
-    ObsCommandAuthority,
-    ObsCommandEnvelope,
-    ObsCommandPortExecutionError,
+)
+from host_brain.contracts.operator_command_retirement import (
+    RETIRED_OPERATOR_COMMAND_IDS,
 )
 from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
@@ -971,38 +969,12 @@ async def test_life_gateway_actuator_requires_preview_and_strips_private_context
         await transport(missing)
 
 
-@pytest.mark.asyncio
-async def test_legacy_operator_and_retired_edge_actuators_fail_before_side_effect(
+def test_retired_operator_and_legacy_edge_actuators_have_no_writer(
     monkeypatch,
 ) -> None:
-    calls: list[dict[str, Any]] = []
-    port = _DomainCommandPort(
-        command_id="mate.action.submit",
-        handler=lambda payload, request_id: calls.append(
-            {"payload": payload, "request_id": request_id}
-        ),
-    )
-    authority = ObsCommandAuthority.bind(
-        principal_id="operator-preview",
-        tenant_id="tenant-preview",
-        request_id="request-preview-operator",
-    )
-    envelope = ObsCommandEnvelope(
-        schema_version=OBS_COMMAND_ENVELOPE_SCHEMA,
-        command_id="mate.action.submit",
-        action="device:mate:write",
-        required_scopes=("device:mate:write",),
-        payload={"action": "expression", "emotion_tag": "neutral"},
-        authority=authority,
-        claim_ref="secure-ingress-claim://preview/operator",
-        audit_ref="audit://preview/operator",
-        body_sha256="sha256:" + "4" * 64,
-    )
-    with pytest.raises(ObsCommandPortExecutionError) as blocked:
-        await port.execute(envelope)
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-    assert calls == []
+    registry = build_default_obs_domain_command_registry()
+    assert registry.resolve_spec("mate.action.submit") is None
+    assert registry.resolve_port("mate.action.submit") is None
 
     monkeypatch.setenv("EDGE_COMMAND_BASE_URL", "http://127.0.0.1:17800")
     pusher = EdgeCommandPusher.from_env()
@@ -1014,40 +986,12 @@ async def test_legacy_operator_and_retired_edge_actuators_fail_before_side_effec
     assert result["reason"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
 
 
-@pytest.mark.asyncio
-async def test_all_23_legacy_obs_direct_commands_fail_before_handler() -> None:
-    calls: list[str] = []
-    authority = ObsCommandAuthority.bind(
-        principal_id="operator-preview",
-        tenant_id="tenant-preview",
-        request_id="request-preview-all-obs",
-    )
-    assert len(DEFAULT_OBS_COMMAND_SPECS) == 37
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 23
-    blocked_specs = tuple(
-        spec
-        for spec in DEFAULT_OBS_COMMAND_SPECS
-        if spec.command_id in BLOCKED_OPERATOR_COMMAND_IDS
-    )
-    assert len(blocked_specs) == 23
-    for spec in blocked_specs:
-        port = _DomainCommandPort(
-            command_id=spec.command_id,
-            handler=lambda _payload, _request_id, command_id=spec.command_id: calls.append(command_id),
-        )
-        envelope = ObsCommandEnvelope(
-            schema_version=OBS_COMMAND_ENVELOPE_SCHEMA,
-            command_id=spec.command_id,
-            action=spec.action,
-            required_scopes=spec.required_scopes,
-            payload={},
-            authority=authority,
-            claim_ref=f"secure-ingress-claim://preview/{spec.command_id}",
-            audit_ref=f"audit://preview/{spec.command_id}",
-            body_sha256="sha256:" + "a" * 64,
-        )
-        with pytest.raises(ObsCommandPortExecutionError) as blocked:
-            await port.execute(envelope)
-        assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-        assert blocked.value.side_effects_may_have_run is False
-    assert calls == []
+def test_all_23_legacy_obs_commands_are_retired_from_active_manifest() -> None:
+    active = {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
+    registry = build_default_obs_domain_command_registry()
+    assert len(active) == 14
+    assert len(RETIRED_OPERATOR_COMMAND_IDS) == 23
+    assert active.isdisjoint(RETIRED_OPERATOR_COMMAND_IDS)
+    for command_id in RETIRED_OPERATOR_COMMAND_IDS:
+        assert registry.resolve_spec(command_id) is None
+        assert registry.resolve_port(command_id) is None

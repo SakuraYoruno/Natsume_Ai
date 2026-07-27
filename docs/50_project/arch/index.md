@@ -17,6 +17,12 @@ address。定向单元 `89 passed`、真实 SQLite 四路线 `1 passed`；正式
 clean-SHA `3db60ff1` 的同库 v3 收据已验证七路，并把当前启用 Plan/Delegate
 范围提升为 `COMPLETE`。Scheduler/Internal/Operator 与 NE-01 保持未完成。
 
+当前 Operator 库存为 `14 active governed / 0 blocked / 23 retired`。
+退役 ID 不在后端 manifest、domain handler、OpenAPI 或生成式 Monitor
+client 中；BFF 只返回 410 replacement，浏览器不发请求。旧文中的
+`14/37、23 blocked` 是历史提交口径。替代 authority 与真实 canary尚未
+全部完成，因此 Operator 和 NE-01 仍不封板。
+
 当前 Skill 执行边界：canonical Host Registry 的 93 个条目按 exact descriptor 分为 28 个只读、
 13 个 proposal-only、3 个 post-Acceptance Workspace 和 49 个 blocked。
 只有前 44 个进入运行 manifest；后 49 个等待 typed Acceptance Effect，

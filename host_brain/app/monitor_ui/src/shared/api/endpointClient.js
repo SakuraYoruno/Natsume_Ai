@@ -4,7 +4,11 @@ import { obsRequest } from './obsClient.js'
 import { submitOperatorCommand } from './operatorCommandGateway.js'
 
 function assertEndpointEntry(entry) {
-  if (!entry || typeof entry !== 'object' || (!entry.path && !entry.queryPath && !entry.commandId)) {
+  if (
+    !entry
+    || typeof entry !== 'object'
+    || (!entry.path && !entry.queryPath && !entry.commandId && entry.retired !== true)
+  ) {
     throw new Error('Invalid endpoint registry entry')
   }
 }
@@ -22,6 +26,13 @@ export function endpointRequest(entry, {
 } = {}) {
   assertEndpointEntry(entry)
   const normalizedMethod = String(method || 'GET').toUpperCase()
+  if (normalizedMethod !== 'GET' && entry.retired === true) {
+    throw Object.assign(new Error('OPERATOR_COMMAND_RETIRED'), {
+      commandId: String(entry.retiredCommandId || ''),
+      replacementAuthority: String(entry.replacementAuthority || ''),
+      replacementWave: String(entry.replacementWave || ''),
+    })
+  }
   if (normalizedMethod !== 'GET' && entry.commandId) {
     return submitOperatorCommand(entry.commandId, {
       body: body || {},

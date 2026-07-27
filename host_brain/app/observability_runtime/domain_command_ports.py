@@ -15,6 +15,9 @@ from functools import partial
 from typing import Any, Callable, Mapping
 
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.contracts.operator_command_retirement import (
+    RETIRED_OPERATOR_COMMAND_IDS,
+)
 from host_brain.observability.command_ports import (
     DEFAULT_OBS_COMMAND_SPECS,
     ObsCommandEnvelope,
@@ -50,38 +53,19 @@ class ObsDomainCommandError(RuntimeError):
 DomainHandler = Callable[[Mapping[str, Any], str], Any]
 
 
-# These legacy Obs command adapters still invoke production writers/actuators
-# directly instead of admitting an immutable TaskGraph.  Secure Ingress proves
-# who asked; it is not an exact node-bound Preview Receipt.  Keep them visibly
-# fail-closed until NE-01 gives each command a Governed Operator route.
-GOVERNED_OPERATOR_COMMAND_IDS = frozenset({
-    "edge.command.push",
-    "scheduler.task.disable",
-    "scheduler.task.enable",
-    "scheduler.task.trigger",
-    "sys_mode.auto_rules.update",
-    "sys_mode.event.submit",
-    "sys_mode.switch",
-    "task_effect.reconcile",
-    "task_graph.cancel",
-    "task_operation.reconcile",
-    "task_review.approve",
-    "task_review.reject",
-    "task_review.resume",
-    "task_terminal.reconcile",
-})
-BLOCKED_OPERATOR_COMMAND_IDS = frozenset(
-    spec.command_id
-    for spec in DEFAULT_OBS_COMMAND_SPECS
-    if spec.command_id not in GOVERNED_OPERATOR_COMMAND_IDS
+# The active manifest is an allow-list, not a graveyard for dormant direct
+# writers.  Every advertised command must already enter the canonical
+# HostCommand -> immutable TaskGraph spine.  Retired identities live in a
+# separate data-only contract so neither Host nor Monitor can route them.
+GOVERNED_OPERATOR_COMMAND_IDS = frozenset(
+    spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS
 )
+BLOCKED_OPERATOR_COMMAND_IDS = frozenset()
 if (
-    len(BLOCKED_OPERATOR_COMMAND_IDS) != 23
-    or BLOCKED_OPERATOR_COMMAND_IDS & GOVERNED_OPERATOR_COMMAND_IDS
-    or BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS
-    != {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
+    len(GOVERNED_OPERATOR_COMMAND_IDS) != 14
+    or GOVERNED_OPERATOR_COMMAND_IDS & RETIRED_OPERATOR_COMMAND_IDS
 ):
-    raise RuntimeError("OPERATOR_COMMAND_GOVERNANCE_SET_MUST_MATCH_MANIFEST")
+    raise RuntimeError("OPERATOR_COMMAND_ACTIVE_AND_RETIRED_SETS_INVALID")
 
 
 def _required_text(payload: Mapping[str, Any], field: str) -> str:
@@ -89,11 +73,6 @@ def _required_text(payload: Mapping[str, Any], field: str) -> str:
     if not value:
         raise ObsDomainCommandError("OBS_DOMAIN_BOUND_PAYLOAD_INVALID")
     return value
-
-
-def _optional_text(payload: Mapping[str, Any], field: str) -> str | None:
-    value = str(payload.get(field) or "").strip()
-    return value or None
 
 
 def build_obs_domain_result_ref(command_id: str, claim_ref: str) -> str:
@@ -132,11 +111,6 @@ class _DomainCommandPort:
     async def execute(self, envelope: ObsCommandEnvelope) -> ObsCommandExecutionResult:
         if envelope.command_id != self.command_id:
             raise ObsDomainCommandError("OBS_DOMAIN_COMMAND_ID_MISMATCH")
-        if self.command_id in BLOCKED_OPERATOR_COMMAND_IDS:
-            raise ObsCommandPortExecutionError(
-                "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
-                side_effects_may_have_run=False,
-            )
         payload = dict(envelope.payload)
         canonical_request_id = str(envelope.authority.request_id or "").strip()
         if not canonical_request_id:
@@ -190,197 +164,6 @@ class _DomainCommandPort:
         )
 
 
-def _bio_module() -> Any:
-    from host_brain.app import obs_routes_agent_bio_ops
-
-    return obs_routes_agent_bio_ops
-
-
-def _bio_decision_body(payload: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "owner_organ": _required_text(payload, "owner_organ"),
-        "operator": _required_text(payload, "operator"),
-        "reason": _optional_text(payload, "reason"),
-        "dry_run": bool(payload.get("dry_run", False)),
-    }
-
-
-def _bio_daily_cycle(payload: Mapping[str, Any], _request_id: str) -> Any:
-    body = {
-        "run_id": _optional_text(payload, "run_id"),
-        "inputs": dict(payload.get("inputs") or {}),
-    }
-    return _bio_module().run_codex_bio_ops_daily_cycle(body=body)
-
-
-def _bio_adoption(payload: Mapping[str, Any], *, accept: bool) -> Any:
-    module = _bio_module()
-    handler = (
-        module.accept_codex_bio_ops_adoption
-        if accept
-        else module.reject_codex_bio_ops_adoption
-    )
-    return handler(
-        candidate_id=_required_text(payload, "candidate_id"),
-        run_id=_optional_text(payload, "run_id"),
-        body=_bio_decision_body(payload),
-    )
-
-
-def _bio_adoption_accept(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _bio_adoption(payload, accept=True)
-
-
-def _bio_adoption_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _bio_adoption(payload, accept=False)
-
-
-def _bio_owner_inbox(payload: Mapping[str, Any], *, packets: bool) -> Any:
-    module = _bio_module()
-    handler = (
-        module.materialize_codex_bio_ops_owner_intake_packets
-        if packets
-        else module.materialize_codex_bio_ops_owner_inbox
-    )
-    owner = _required_text(payload, "owner_organ")
-    return handler(
-        run_id=_optional_text(payload, "run_id"),
-        owner_organ=owner,
-        body={"owner_organ": owner},
-    )
-
-
-def _bio_owner_inbox_materialize(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _bio_owner_inbox(payload, packets=False)
-
-
-def _bio_owner_inbox_packets(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _bio_owner_inbox(payload, packets=True)
-
-
-def _bio_owner_queue_consume(payload: Mapping[str, Any], _request_id: str) -> Any:
-    owner = _required_text(payload, "owner_organ")
-    return _bio_module().consume_codex_bio_ops_owner_queues(
-        run_id=_optional_text(payload, "run_id"),
-        owner_organ=owner,
-        body={"owner_organ": owner, "dry_run": bool(payload.get("dry_run", False))},
-    )
-
-
-def _bio_owner_state_import(payload: Mapping[str, Any], _request_id: str) -> Any:
-    owner = _required_text(payload, "owner_organ")
-    return _bio_module().import_codex_bio_ops_owner_state(
-        run_id=_optional_text(payload, "run_id"),
-        owner_organ=owner,
-        body={"owner_organ": owner, "dry_run": bool(payload.get("dry_run", False))},
-    )
-
-
-def _bio_owner_state(payload: Mapping[str, Any], *, accept: bool) -> Any:
-    module = _bio_module()
-    handler = (
-        module.accept_codex_bio_ops_owner_state
-        if accept
-        else module.reject_codex_bio_ops_owner_state
-    )
-    return handler(
-        candidate_id=_required_text(payload, "candidate_id"),
-        run_id=_optional_text(payload, "run_id"),
-        body=_bio_decision_body(payload),
-    )
-
-
-def _bio_owner_state_accept(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _bio_owner_state(payload, accept=True)
-
-
-def _bio_owner_state_reject(payload: Mapping[str, Any], _request_id: str) -> Any:
-    return _bio_owner_state(payload, accept=False)
-
-
-def _capability_forge_service(route_ports: HostRoutePorts) -> Any:
-    provider = route_ports.capability_forge_service_provider
-    if not callable(provider):
-        raise ObsDomainCommandError("OBS_CAPABILITY_FORGE_DOMAIN_UNAVAILABLE")
-    try:
-        service = provider()
-    except Exception as exc:
-        raise ObsDomainCommandError(
-            "OBS_CAPABILITY_FORGE_DOMAIN_UNAVAILABLE"
-        ) from exc
-    if service is None:
-        raise ObsDomainCommandError("OBS_CAPABILITY_FORGE_DOMAIN_UNAVAILABLE")
-    return service
-
-
-def _forge_create(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    canary_percent = (
-        int(payload["canary_traffic_percent"])
-        if "canary_traffic_percent" in payload
-        else 5
-    )
-    return _capability_forge_service(route_ports).create_proposal(
-        session_id=_required_text(payload, "session_id"),
-        proposer=_required_text(payload, "proposer"),
-        candidate_key=_optional_text(payload, "candidate_key"),
-        canary_traffic_percent=canary_percent,
-    )
-
-
-def _forge_approve(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    return _capability_forge_service(route_ports).approve_and_promote(
-        proposal_id=_required_text(payload, "proposal_id"),
-        approval_token_ref=_required_text(payload, "approval_token_ref"),
-        approver=_required_text(payload, "approver"),
-        target_stage=str(payload.get("target_stage") or "shadow").strip().lower(),
-    )
-
-
-def _forge_rollback(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    return _capability_forge_service(route_ports).rollback(
-        proposal_id=_required_text(payload, "proposal_id"),
-        operator=_required_text(payload, "operator"),
-        reason=_optional_text(payload, "reason"),
-    )
-
-
-async def _avatar_behavior(payload: Mapping[str, Any], request_id: str) -> Any:
-    from host_brain.channels.embodiment import submit_avatar_behavior
-
-    result = await submit_avatar_behavior(
-        behavior_id=_required_text(payload, "behavior_id"),
-        emotion_tag=_optional_text(payload, "emotion_tag"),
-        body_action_id=_optional_text(payload, "body_action_id"),
-        emotion_intensity=payload.get("emotion_intensity"),
-        duration_s=payload.get("duration_s"),
-        talk_state=_optional_text(payload, "talk_state"),
-        source=_optional_text(payload, "source") or "command",
-        request_id=request_id,
-    )
-    return {
-        "success": bool(result.success),
-        "reason_code": result.reason_code,
-        "detail": result.detail,
-        "latency_ms": int(result.latency_ms or 0),
-        "event": dict(result.event or {}),
-    }
-
-
 async def _sysmode_switch(
     payload: Mapping[str, Any],
     request_id: str,
@@ -423,32 +206,6 @@ async def _sysmode_event(
     return await _execute_governed_operator_state_control(
         payload,
         request_id,
-    )
-
-
-def _forge_runtime_match(
-    payload: Mapping[str, Any],
-    request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    return _capability_forge_service(route_ports).get_runtime_route_override(
-        request_id=request_id,
-        suggested_family=_required_text(payload, "suggested_family"),
-        missing_capability_tags=list(payload.get("missing_capability_tags") or ()),
-        reason_code=_optional_text(payload, "reason_code"),
-    )
-
-
-def _blocked_legacy_operator_handler(
-    _payload: Mapping[str, Any],
-    _request_id: str,
-) -> Any:
-    """Keep manifest coverage without retaining a dormant domain writer."""
-
-    raise ObsCommandPortExecutionError(
-        "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
-        side_effects_may_have_run=False,
     )
 
 
@@ -517,93 +274,6 @@ async def _scheduler_trigger(payload: Mapping[str, Any], _request_id: str) -> An
         or effect_committed,
         "side_effects_executed": effect_committed,
     }
-
-
-def _tool_execute(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    from host_brain.app import tool_routes
-
-    body = tool_routes.ToolExecuteRequest(**_canon_payload(payload, (
-        "tool_id", "intent_id", "session_id", "seq", "args", "context",
-        "approval_token_ref", "confirm_token_ref", "thread_id", "turn_id",
-    )))
-    return tool_routes.execute_tool(body, _route_ports=route_ports)
-
-
-def _mate_action(payload: Mapping[str, Any], request_id: str) -> Any:
-    from host_brain.app import mateengine_routes
-
-    body_values = _canon_payload(payload, (
-        "action", "state", "touch_type", "emotion_tag", "expression", "preset",
-        "text", "enabled", "ttl", "duration", "intensity", "scale",
-        "position_x", "position_y",
-    ))
-    body_values["request_id"] = request_id
-    return mateengine_routes.mateengine_action(
-        mateengine_routes.MateEngineActionRequest(**body_values)
-    )
-
-
-def _mate_say(payload: Mapping[str, Any], _request_id: str) -> Any:
-    from host_brain.app import mateengine_routes
-
-    return mateengine_routes.mateengine_say(
-        mateengine_routes.MateEngineSayRequest(**_canon_payload(payload, (
-            "text", "emotion", "ttl",
-        )))
-    )
-
-
-def _bond_event(
-    payload: Mapping[str, Any],
-    request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    from host_brain.app import bond_routes
-
-    body_values = _canon_payload(payload, (
-        "user_id", "update_kind", "evidence_refs", "emotion_tag", "emotion_intensity",
-    ))
-    body_values["request_id"] = request_id
-    return bond_routes.submit_bond_event(
-        bond_routes.BondEventRequest(**body_values),
-        _route_ports=route_ports,
-    )
-
-
-async def _security_hunt(
-    payload: Mapping[str, Any],
-    _request_id: str,
-    *,
-    route_ports: HostRoutePorts,
-) -> Any:
-    """Use the same Host-bound Security Immune provider as the HTTP adapter."""
-
-    provider = route_ports.security_immune_agent_provider
-    if not callable(provider):
-        raise ObsDomainCommandError("OBS_SECURITY_IMMUNE_AGENT_UNAVAILABLE")
-    try:
-        agent = provider()
-        run_once = getattr(agent, "run_once", None)
-        if agent is None or not callable(run_once):
-            raise TypeError("security immune agent is unavailable")
-        result = run_once(
-            reason=_optional_text(payload, "reason") or "operator_command",
-        )
-        if inspect.isawaitable(result):
-            result = await result
-    except ObsDomainCommandError:
-        raise
-    except Exception as exc:
-        raise ObsDomainCommandError("OBS_SECURITY_IMMUNE_AGENT_UNAVAILABLE") from exc
-    if not isinstance(result, Mapping):
-        raise ObsDomainCommandError("OBS_SECURITY_IMMUNE_AGENT_RESULT_INVALID")
-    return dict(result)
 
 
 async def _task_graph_cancel(payload: Mapping[str, Any], request_id: str) -> Any:
@@ -755,36 +425,13 @@ async def _execute_governed_operator_state_control(
 
 
 _HANDLERS: Mapping[str, DomainHandler] = {
-    "bio.daily_cycle.run": _bio_daily_cycle,
-    "bio.adoption.accept": _bio_adoption_accept,
-    "bio.adoption.reject": _bio_adoption_reject,
-    "bio.owner_inbox.materialize": _bio_owner_inbox_materialize,
-    "bio.owner_inbox.intake_packets": _bio_owner_inbox_packets,
-    "bio.owner_queue.consume": _bio_owner_queue_consume,
-    "bio.owner_state.import": _bio_owner_state_import,
-    "bio.owner_state.accept": _bio_owner_state_accept,
-    "bio.owner_state.reject": _bio_owner_state_reject,
-    "capability_forge.proposal.create": _forge_create,
-    "capability_forge.proposal.approve": _forge_approve,
-    "capability_forge.proposal.rollback": _forge_rollback,
-    "avatar.behavior.apply": _avatar_behavior,
     "sys_mode.switch": _sysmode_switch,
     "sys_mode.auto_rules.update": _sysmode_auto_rules,
     "sys_mode.event.submit": _sysmode_event,
-    "capability_forge.runtime.match": _forge_runtime_match,
-    "canon.proposal.submit": _blocked_legacy_operator_handler,
-    "canon.proposal.approve": _blocked_legacy_operator_handler,
-    "canon.proposal.reject": _blocked_legacy_operator_handler,
-    "canon.proposal.rollback": _blocked_legacy_operator_handler,
     "scheduler.task.enable": _scheduler_enable,
     "scheduler.task.disable": _scheduler_disable,
     "scheduler.task.trigger": _scheduler_trigger,
-    "tool.execute": _tool_execute,
-    "mate.action.submit": _mate_action,
-    "mate.say.submit": _mate_say,
-    "bond.event.submit": _bond_event,
     "edge.command.push": _edge_command_push,
-    "security.hunt.run_once": _security_hunt,
     "task_graph.cancel": _task_graph_cancel,
     "task_operation.reconcile": _task_operation_reconcile,
     "task_effect.reconcile": _task_effect_reconcile,
@@ -796,14 +443,7 @@ _HANDLERS: Mapping[str, DomainHandler] = {
 
 
 _ROUTE_PORT_HANDLERS: Mapping[str, Callable[..., Any]] = {
-    "capability_forge.proposal.create": _forge_create,
-    "capability_forge.proposal.approve": _forge_approve,
-    "capability_forge.proposal.rollback": _forge_rollback,
-    "capability_forge.runtime.match": _forge_runtime_match,
-    "tool.execute": _tool_execute,
-    "bond.event.submit": _bond_event,
     "sys_mode.switch": _sysmode_switch,
-    "security.hunt.run_once": _security_hunt,
 }
 
 
@@ -846,6 +486,7 @@ build_default_obs_domain_port_registry = build_default_obs_domain_command_regist
 __all__ = [
     "BLOCKED_OPERATOR_COMMAND_IDS",
     "GOVERNED_OPERATOR_COMMAND_IDS",
+    "RETIRED_OPERATOR_COMMAND_IDS",
     "OBS_DOMAIN_RESULT_SCHEMA",
     "ObsDomainCommandError",
     "build_obs_domain_result_ref",

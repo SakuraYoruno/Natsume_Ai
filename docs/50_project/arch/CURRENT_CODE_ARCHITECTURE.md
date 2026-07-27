@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.53
+版本：v5.54
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -27,12 +27,23 @@ admission Review，Scheduler trigger/Internal 可使用节点 Review，合同禁
 同时声明两套 Review。Review runtime 与 TaskStore 共享可信时钟。同一
 Operation status version 的 unknown-side-effect recovery hold 也已收成唯一
 current authority，重复登记只允许 exact replay。这关闭的是三路已启用
-控制入口的执行政策漂移，不代表 Operator `23/37` blocked 命令、一般恢复、
+控制入口的执行政策漂移，不代表一般恢复、
 整波 integration 或 NE-07 已完成。
 纯 replay normalization 位于 contracts 层，Scheduler 不再反向 import app；
 Host 的 Effect audit projection 和 control policy composition 也已拆为 focused
 app 模块。两个被本切片推过 1500 行的 owner 已回落至 1480/1499 行，Gate
 1～14 在未新增 allowlist 的前提下重新全部通过。
+
+Operator 的现行生产库存是 `14 active governed / 0 blocked / 23 retired`，
+不是旧的 `14/37 + 23 blocked`。active manifest、domain handler registry、
+OpenAPI 和生成式 Monitor client 只公布 14 条已接通命令；23 个旧 ID 由
+[`operator_command_retirement.py`](../../../host_brain/contracts/operator_command_retirement.py)
+绑定替代 authority。BFF 对旧 ID 返回 410 且不触发 Secure Ingress，Monitor
+也不再拥有可路由的 `commandId`。Avatar/Mate 归并 Edge，raw Tool/Hunt
+回到 Governed Tool 或 Internal/Scheduler，Forge/Canon/Bio/Bond 等待
+NE-05/06 proposal/version authority。后文所有 `14/37、23 blocked` 均为
+历史切片口径，被本段取代；退役清理不等于 Operator 的真实网络 canary、
+一般恢复或 NE-01 完成。
 
 当前代码已把 Plan/Delegate 的 enabled-scope authority 收成显式合同。
 Plan 的 search trace 与 execution policy 分离：前者解释选路，后者以

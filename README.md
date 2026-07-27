@@ -25,12 +25,27 @@ TaskStore 暴露的同一可信时钟，固定时钟和重启测试不再因两�
 case，后续 Budget/Lease 推进只能 exact replay 该 case，不能制造第二个
 签名对账 authority。最终三个互不重叠的本地回归组分别为 `29 passed`、
 `32 passed` 和 `8 passed`，共 69 项、零失败。该切片不会把仍失败关闭的
-Operator 命令、一般恢复、
+一般恢复、
 波次集成或 NE-07 提前写成完成，NE-01 继续为 `IN_PROGRESS`。
 纯 WorkOrder replay normalization 已下沉 contracts，Acceptance Effect
 audit projection 与 control policy composition 已拆成 focused 模块；
 `governed_task_adapter.py`/`internal_task_runtime.py` 分别保持 1480/1499 行，
 没有扩大巨石白名单，完整架构静态 Gate 1～14 为 `PASS`。
+
+Operator 清单已经从“37 条均对外公布、其中 23 条永远阻断”改为严格
+allow-list：生产 manifest、OpenAPI、生成式 Monitor client 和 domain handler
+registry 现在只包含 14 条已进入 Governed Runtime 的命令，活动清单内
+`blocked=0`。原 23 条旧命令不是改名为完成，而是从可执行合同中退役：
+Avatar/Mate 统一迁往 `edge.command.push`，原始 Tool 与 Security Hunt 分别
+迁往 governed Skill/Tool 和 Internal/Scheduler，Forge、Canon、Bio、Bond
+只能在 NE-05/06 的 proposal/version authority 完成后以新合同返回。
+退役映射由
+[`operator_command_retirement.py`](host_brain/contracts/operator_command_retirement.py)
+冻结；同源 BFF 对旧 ID 返回 `410 OPERATOR_COMMAND_RETIRED` 和替代 authority，
+且不会进入 Secure Ingress，Monitor 也在发起网络请求前拒绝。后文出现的
+`14/37 + 23 blocked` 是提交绑定历史口径，已由本段和机器状态取代。该清理
+消除了伪能力与 dormant writer，但不证明一般恢复、真实 HTTP/Edge canary
+或 NE-01 已完成。
 
 NE-01 已封板 Plan 与 Delegate 的当前启用范围，接下来收口 Scheduler、
 Internal、Operator 与一般恢复。当前唯一启用的
