@@ -931,7 +931,10 @@ def build_governed_operator_runtime(
             projection_reader=projection_store
         ),
         projection_reader=projection_store,
-        review_runtime=TaskNodeReviewRuntime(review_store),
+        review_runtime=TaskNodeReviewRuntime.for_task_store(
+            review_store,
+            task_runtime_container.task_store,
+        ),
         node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
         atomic_graph_success_enabled=True,

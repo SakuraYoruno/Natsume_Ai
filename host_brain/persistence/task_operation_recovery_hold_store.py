@@ -201,6 +201,52 @@ class TaskOperationRecoveryHoldStoreMixin:
         checkpoint_state: str | None,
     ) -> dict[str, Any]:
         observations = load_hold_observations(conn, **identity)
+        # A nonterminal Operation ambiguity belongs to the immutable
+        # Operation status version.  Lease expiry and Budget settlement may
+        # advance after the interruption, but they must not manufacture a
+        # second simultaneously-current reconciliation authority for that
+        # same version.
+        if checkpoint_state is None:
+            operation = observations["operation"]
+            rows = conn.execute(
+                f"""
+                SELECT * FROM {_TABLE}
+                WHERE reservation_id = ? AND operation_status_version = ?
+                ORDER BY created_ts_ms, case_ref
+                """,
+                (
+                    identity["reservation_id"],
+                    int(operation["status_version"]),
+                ),
+            ).fetchall()
+            current = []
+            for row in rows:
+                record = self._validated_hold_record(conn, row)
+                if hold_is_current(conn, record):
+                    current.append(record)
+            if len(current) > 1:
+                raise TaskStoreError(
+                    TASK_STORE_DURABLE_DATA_INVALID,
+                    "Operation version has multiple current recovery holds",
+                )
+            if current:
+                existing = current[0]
+                if (
+                    str(existing["reason_code"])
+                    != str(reason_code or "").strip().upper()
+                    or str(existing["attempt_id"]) != identity["attempt_id"]
+                    or str(existing["node_id"]) != identity["node_id"]
+                    or str(existing["budget_id"]) != identity["budget_id"]
+                ):
+                    raise TaskStoreError(
+                        TASK_STORE_CAS_CONFLICT,
+                        "Operation recovery hold authority changed before replay",
+                    )
+                return {
+                    **existing,
+                    "exact_replay": True,
+                    "current": True,
+                }
         _, subject_json, subject_sha256, case_ref = (
             build_operation_recovery_hold_subject(
                 **observations,

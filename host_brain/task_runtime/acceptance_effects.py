@@ -31,6 +31,10 @@ from host_brain.contracts.agent_runtime.plan_execution_policy import (
     PlanExecutionPolicyError,
     require_plan_result_effect_owner,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    ControlRouteExecutionPolicyError,
+    require_control_route_execution_policy,
+)
 from natsume_contracts.edge.embodiment_v1 import build_embodiment_command
 from natsume_contracts.task import HostCommand, HostCommandSurface
 from host_brain.runtime.action_preview_authority import (
@@ -114,6 +118,18 @@ def compile_graph_acceptance_effects(
         raise AcceptanceEffectCompileError("worker projection request_id drifted")
 
     pack = _json_mapping(getattr(work_order, "input_pack", {}), field_name="work_order.input_pack")
+    if command.surface in {
+        HostCommandSurface.INTERNAL,
+        HostCommandSurface.OPERATOR,
+        HostCommandSurface.SCHEDULER,
+    }:
+        try:
+            require_control_route_execution_policy(
+                command=command,
+                work_order=work_order,
+            )
+        except ControlRouteExecutionPolicyError as exc:
+            raise AcceptanceEffectCompileError(exc.detail) from exc
     if command.route_type == "plan":
         metadata = _json_mapping(
             getattr(work_order, "metadata", {}),

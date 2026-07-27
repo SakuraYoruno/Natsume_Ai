@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：TRACE-EXEC-08～08AP 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.9
+版本：v5.10
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -19,6 +19,25 @@
 4. 自动化测试证明其覆盖的行为，不能单独把 `PARTIAL` 提升为 `WIRED`。
 5. 历史 receipt 只对固定 commit、route 和环境成立。
 6. 执行顺序只来自 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+TRACE-EXEC-08AT（Scheduler/Internal/Operator 控制执行政策）：三类 surface
+复用 `route=delegate` 时必须携带 content-addressed
+`ControlRouteExecutionPolicyV1`，绑定 exact command/target/owner、
+Review mode、有限 Budget、durable WorkerProjection verification 和
+Graph-Acceptance-only Effect。Policy/ref 必须覆盖 WorkOrder input/
+metadata、Budget、WorkOrder/TaskNode input refs，并在 initial/replay/
+Review/recovery/verifier/acceptance/effect 编译重开。Operator 只使用
+durable Intent admission Review；Scheduler trigger 与 reviewed Internal
+可使用 TaskNode Review，双 Review 必须拒绝。Review 与 TaskStore 使用同一
+canonical clock。同一 Operation version 只允许一个 current nonterminal
+recovery case。证据入口为
+`test_gr05_direct_host_route_contracts.py`、
+`test_aw02_internal_agent_runtime_cutover.py`、
+`test_ne01_governed_operator_scheduler_trigger.py`、
+`test_governed_operator_replay_attribution.py`、
+`test_gr06_acceptance_effect_compiler.py` 与 Operator reconciliation
+集成。当前结论仅为
+`ENABLED_CONTROL_TRANSPORT_POLICY_WIRED / NE01_IN_PROGRESS`。
 
 TRACE-EXEC-08AQ（Skill 唯一执行 authority）：已经准入的 frozen Skill node
 只能由 `app/governed_skill_execution.py` 执行；该模块是

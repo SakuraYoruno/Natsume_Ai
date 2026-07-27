@@ -32,6 +32,10 @@ from host_brain.contracts.agent_runtime.verification_contract import (
     VERIFICATION_RESULT_SCHEMA_VERSION,
     VerificationResult,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    ControlRouteExecutionPolicyError,
+    require_control_route_execution_policy,
+)
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
     validate_worker_projection_payload,
@@ -40,6 +44,7 @@ from host_brain.task_runtime.worker_registry import (
     GovernedWorkerRegistryError,
     GovernedWorkerRoute,
 )
+from natsume_contracts.task import HostCommandSurface
 
 
 GOVERNED_WORKER_PROJECTION_NOT_FOUND = "GOVERNED_WORKER_PROJECTION_NOT_FOUND"
@@ -332,6 +337,21 @@ def _inspect_projection(
     worker_commit: Mapping[str, Any],
     evidence_refs: Sequence[str],
 ) -> _ProjectionInspection:
+    if getattr(command, "surface", None) in {
+        HostCommandSurface.INTERNAL,
+        HostCommandSurface.OPERATOR,
+        HostCommandSurface.SCHEDULER,
+    }:
+        try:
+            require_control_route_execution_policy(
+                command=command,
+                work_order=work_order,
+            )
+        except ControlRouteExecutionPolicyError as exc:
+            _blocked(
+                GOVERNED_WORKER_AUTHORITY_DRIFT,
+                exc.detail,
+            )
     if not isinstance(worker_commit, Mapping):
         _blocked(
             GOVERNED_WORKER_COMMIT_DRIFT,

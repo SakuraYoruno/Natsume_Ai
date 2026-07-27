@@ -16,6 +16,13 @@ from typing import Any
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.persistence.task_repository import OutboxMessage
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.app.governed_control_route_policy import (
+    freeze_direct_control_route_policy,
+    require_governed_control_route_policy,
+)
+from host_brain.app.governed_acceptance_effect_projection import (
+    dispatch_accepted_effects,
+)
 from host_brain.orchestration import (
     GovernedCommandApplication,
     governor_grant_ref,
@@ -702,6 +709,17 @@ class GovernedHostRuntime:
                 direct_intent = dict(intent_draft or {})
                 direct_intent.setdefault("action", "exec_intent")
                 direct_intent.setdefault("target", "host")
+                operator_command_id = (
+                    str(authority.get("operator_command_id") or "").strip()
+                    or None
+                )
+                control_route_execution_policy = (
+                    freeze_direct_control_route_policy(
+                        surface=surface,
+                        authority=authority,
+                        intent_draft=direct_intent,
+                    )
+                )
                 contracts = build_direct_host_route_contracts(
                     surface=surface,
                     request_id=request_id,
@@ -723,12 +741,12 @@ class GovernedHostRuntime:
                     ),
                     ingress_claim_ref=ingress_claim_ref,
                     ingress_audit_ref=ingress_audit_ref,
-                    operator_command_id=(
-                        str(authority.get("operator_command_id") or "").strip()
-                        or None
-                    ),
+                    operator_command_id=operator_command_id,
                     frozen_context=frozen_context,
                     delegate_target_policy=delegate_target_policy,
+                    control_route_execution_policy=(
+                        control_route_execution_policy
+                    ),
                 )
                 candidate_command = contracts.command
                 candidate_work_order = contracts.work_order
@@ -773,6 +791,7 @@ class GovernedHostRuntime:
                         GOVERNED_HOST_AUTHORITY_INVALID,
                         "durable replay record is incomplete",
                     )
+            require_governed_control_route_policy(command, work_order, graph)
             async for event in self._application.execute_stream(
                 command=command,
                 work_order=work_order,
@@ -871,6 +890,7 @@ class GovernedHostRuntime:
                 work_order=work_order,
                 graph=graph,
             )
+            require_governed_control_route_policy(command, work_order, graph)
             operation = self._application.execute_review_continuation(
                 command=command,
                 work_order=work_order,
@@ -964,6 +984,7 @@ class GovernedHostRuntime:
             work_order=work_order,
             graph=graph,
         )
+        require_governed_control_route_policy(command, work_order, graph)
         terminal: dict[str, Any] | None = None
         terminal_count = 0
         async for event in self._application.execute_stream(
@@ -1175,46 +1196,10 @@ class GovernedHostRuntime:
         self,
         event: Mapping[str, Any],
     ) -> dict[str, Any]:
-        projected = dict(event)
-        dispatcher = self._acceptance_effect_dispatcher
-        receipt = projected.get("execution_receipt")
-        if dispatcher is None or not isinstance(receipt, Mapping):
-            return projected
-        if not bool(receipt.get("accepted")) or str(receipt.get("status") or "") != "ACCEPTED":
-            return projected
-        graph_id = str(receipt.get("graph_id") or "").strip()
-        graph_revision = int(receipt.get("graph_revision") or 0)
-        if not graph_id or graph_revision < 1:
-            return projected
-        results = await dispatcher.dispatch_graph(
-            graph_id=graph_id,
-            graph_revision=graph_revision,
+        return await dispatch_accepted_effects(
+            event,
+            self._acceptance_effect_dispatcher,
         )
-        statuses = [str(row.get("status") or "") for row in results]
-        recovery_pending = sum(
-            bool(row.get("recovery_pending"))
-            or str(row.get("dispatch_state") or "") == "RECOVERY_PENDING"
-            for row in results
-        )
-        audit_refs = dict(projected.get("audit_refs") or {})
-        audit_refs["acceptance_effects"] = {
-            "count": len(results),
-            "committed": statuses.count("COMMITTED"),
-            "failed": statuses.count("FAILED"),
-            "pending": sum(status not in {"COMMITTED", "FAILED"} for status in statuses),
-            "recovery_pending": recovery_pending,
-            "dispatch_status": (
-                "FAILED"
-                if "FAILED" in statuses
-                else "RECOVERY_PENDING"
-                if recovery_pending
-                else "COMMITTED"
-                if results and all(status == "COMMITTED" for status in statuses)
-                else "NO_EFFECTS"
-            ),
-        }
-        projected["audit_refs"] = audit_refs
-        return projected
 
 
 def build_governed_host_runtime(
@@ -1392,7 +1377,10 @@ def build_governed_host_runtime(
         ),
         projection_reader=projection_reader,
         review_runtime=(
-            TaskNodeReviewRuntime(task_runtime_container.review_store)
+            TaskNodeReviewRuntime.for_task_store(
+                task_runtime_container.review_store,
+                task_runtime_container.task_store,
+            )
             if getattr(task_runtime_container, "review_store", None) is not None
             else None
         ),

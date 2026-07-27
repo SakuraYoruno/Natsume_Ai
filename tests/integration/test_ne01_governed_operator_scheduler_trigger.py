@@ -25,6 +25,10 @@ from natsume_contracts.identity import (
 from natsume_contracts.task import HostCommandSurface
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    require_control_route_execution_policy,
+)
 from host_brain.app.acceptance_effect_handlers import (
     build_production_acceptance_effect_handlers,
 )
@@ -511,6 +515,22 @@ async def test_authenticated_operator_trigger_runs_one_reviewed_durable_taskgrap
         assert graph.revision == 1 and len(graph.nodes) == 1
         assert order.review_policy["durable_review_required"] is True
         assert order.budget_policy is not None
+        control_policy = require_control_route_execution_policy(
+            command=command,
+            work_order=order,
+            graph=graph,
+        )
+        assert control_policy is not None
+        assert control_policy["control_command_id"] == COMMAND_ID
+        assert control_policy["target_id"] == "operator_governed_worker"
+        assert (
+            order.input_pack[CONTROL_ROUTE_EXECUTION_POLICY_KEY]
+            == order.metadata[CONTROL_ROUTE_EXECUTION_POLICY_KEY]
+        )
+        assert (
+            order.budget_policy.metadata["control_policy_ref"]
+            == control_policy["policy_ref"]
+        )
 
         waiting = task_store.read_scheduler_snapshot(
             command.graph_id,

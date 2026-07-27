@@ -8,6 +8,14 @@ from host_brain.app.governed_delegate_dispatch import GovernedDelegateTarget
 from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     READONLY_DELEGATE_EXECUTION_MODE,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    CONTROL_ROUTE_INTENT_REVIEW_REQUIRED,
+    ControlRouteExecutionPolicyError,
+    freeze_control_route_execution_policy,
+    require_control_route_execution_policy,
+    validate_control_route_execution_policy,
+)
 from host_brain.orchestration.host_route_contracts import (
     HOST_ROUTE_AUTHORITY_INVALID,
     HOST_ROUTE_UNSUPPORTED,
@@ -76,6 +84,48 @@ def _governed_delegate_policy(target_id: str = "pentest_agent") -> dict:
         adapter_id="readonly-pentest-domain-handoff.v1",
         execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
     ).policy_projection()
+
+
+def _build_operator_control(
+    *,
+    command_id: str = "task_graph.cancel",
+    target_id: str = "operator_task_control",
+):
+    policy = freeze_control_route_execution_policy(
+        surface=HostCommandSurface.OPERATOR,
+        control_command_id=command_id,
+        target_id=target_id,
+        review_required=False,
+        intent_review_required=True,
+    )
+    contracts = build_direct_host_route_contracts(
+        surface=HostCommandSurface.OPERATOR,
+        request_id="request-operator-control-policy",
+        session_id="session-operator-control-policy",
+        principal_id="principal-operator-control-policy",
+        ts_ms=100,
+        intent_draft={
+            "id": "intent-direct-route",
+            "route": "delegate",
+            "target_id": target_id,
+            "action": "operator_task_graph_cancellation",
+            "target": "task_runtime",
+            "task": "execute one frozen Operator control",
+            "args": {"operator_command_id": command_id},
+        },
+        governor_result=_governor(
+            "delegate",
+            target_id,
+            request_id="request-operator-control-policy",
+        ),
+        sanitized_message="execute one frozen Operator control",
+        person_id="principal-operator-control-policy",
+        ingress_claim_ref="ingress-claim://operator/control-policy",
+        ingress_audit_ref="audit://operator/control-policy",
+        operator_command_id=command_id,
+        control_route_execution_policy=policy,
+    )
+    return contracts, policy
 
 
 @pytest.mark.parametrize(
@@ -172,6 +222,97 @@ def test_enabled_delegate_freezes_target_policy_and_requires_durable_review() ->
             delegate_target_policy=tampered,
         )
     assert raised.value.reason_code == HOST_ROUTE_AUTHORITY_INVALID
+
+
+def test_operator_control_policy_is_content_addressed_and_bound_to_graph() -> None:
+    contracts, policy = _build_operator_control()
+
+    assert validate_control_route_execution_policy(policy) == policy
+    assert (
+        contracts.work_order.input_pack[CONTROL_ROUTE_EXECUTION_POLICY_KEY]
+        == policy
+    )
+    assert (
+        contracts.work_order.metadata[CONTROL_ROUTE_EXECUTION_POLICY_KEY]
+        == policy
+    )
+    assert contracts.work_order.metadata["control_command_id"] == (
+        "task_graph.cancel"
+    )
+    assert policy["review_mode"] == CONTROL_ROUTE_INTENT_REVIEW_REQUIRED
+    assert contracts.work_order.review_policy == {
+        "review_required": False,
+        "durable_review_required": False,
+        "mode": "governor_grant_review_waiver",
+        "reason": "durable_intent_admission_review",
+        "waiver_authority": "governor_grant",
+        "waiver_ref": contracts.work_order.review_ref,
+        "frozen_control_policy_ref": policy["policy_ref"],
+    }
+    assert contracts.work_order.budget_policy is not None
+    assert contracts.work_order.budget_policy.metadata[
+        "control_policy_ref"
+    ] == policy["policy_ref"]
+    assert require_control_route_execution_policy(
+        command=contracts.command,
+        work_order=contracts.work_order,
+        graph=contracts.graph,
+    ) == policy
+
+    tampered = dict(policy)
+    tampered["target_id"] = "operator_state_control"
+    with pytest.raises(ControlRouteExecutionPolicyError):
+        validate_control_route_execution_policy(tampered)
+
+
+def test_control_surface_rejects_missing_or_mismatched_execution_policy() -> None:
+    policy = freeze_control_route_execution_policy(
+        surface=HostCommandSurface.OPERATOR,
+        control_command_id="task_graph.cancel",
+        target_id="operator_task_control",
+        review_required=False,
+        intent_review_required=True,
+    )
+    for candidate in (None, {**policy, "control_command_id": "task_review.resume"}):
+        with pytest.raises(HostRouteContractError) as raised:
+            build_direct_host_route_contracts(
+                surface=HostCommandSurface.OPERATOR,
+                request_id="request-operator-policy-rejected",
+                session_id="session-operator-policy-rejected",
+                principal_id="principal-operator-policy-rejected",
+                ts_ms=100,
+                intent_draft={
+                    "route": "delegate",
+                    "target_id": "operator_task_control",
+                    "action": "operator_task_graph_cancellation",
+                    "target": "task_runtime",
+                    "task": "reject missing policy",
+                    "args": {"operator_command_id": "task_graph.cancel"},
+                },
+                governor_result=_governor(
+                    "delegate",
+                    "operator_task_control",
+                    request_id="request-operator-policy-rejected",
+                ),
+                sanitized_message="reject missing policy",
+                person_id="principal-operator-policy-rejected",
+                ingress_claim_ref="ingress-claim://operator/policy-rejected",
+                ingress_audit_ref="audit://operator/policy-rejected",
+                operator_command_id="task_graph.cancel",
+                control_route_execution_policy=candidate,
+            )
+        assert raised.value.reason_code == HOST_ROUTE_AUTHORITY_INVALID
+
+
+def test_control_policy_rejects_two_independent_review_authorities() -> None:
+    with pytest.raises(ControlRouteExecutionPolicyError):
+        freeze_control_route_execution_policy(
+            surface=HostCommandSurface.OPERATOR,
+            control_command_id="task_graph.cancel",
+            target_id="operator_task_control",
+            review_required=True,
+            intent_review_required=True,
+        )
 
 
 @pytest.mark.parametrize(("route", "target"), [("chat", ""), ("delegate", "intent_agent")])

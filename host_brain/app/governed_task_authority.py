@@ -18,7 +18,14 @@ from host_brain.contracts.agent_runtime.delegate_target_policy import (
     GovernedDelegateTargetPolicyError,
     validate_governed_delegate_target_policy,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    ControlRouteExecutionPolicyError,
+    require_control_route_execution_policy,
+)
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.work_order_replay import (
+    normalized_work_order_replay_payload,
+)
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
@@ -101,69 +108,6 @@ def assert_stable_work_order_replay(
             GOVERNED_HOST_AUTHORITY_INVALID,
             "replayed WorkOrderV3 changed stable semantics: " + ", ".join(drift),
         )
-
-
-def normalized_work_order_replay_payload(work_order: WorkOrderV3) -> dict[str, Any]:
-    payload = work_order.to_dict()
-    authority_refs = {
-        str(work_order.approval_ref or "").strip(),
-        str(work_order.review_ref or "").strip(),
-    } - {""}
-    payload["approval_ref"] = "<durable-authority-ref>"
-    payload["review_ref"] = "<durable-authority-ref>"
-    payload["input_refs"] = [
-        "<durable-authority-ref>" if str(ref) in authority_refs else str(ref)
-        for ref in work_order.input_refs
-    ]
-    approval_policy = mapping(payload.get("approval_policy"))
-    approval_policy["governor_grant_ref"] = "<durable-authority-ref>"
-    payload["approval_policy"] = approval_policy
-    review_policy = mapping(payload.get("review_policy"))
-    review_policy["review_ref"] = "<durable-authority-ref>"
-    payload["review_policy"] = review_policy
-    metadata = mapping(payload.get("metadata"))
-    lineage = mapping(metadata.get("lineage"))
-    lineage["approval_ref"] = "<durable-authority-ref>"
-    lineage["review_ref"] = "<durable-authority-ref>"
-    metadata["lineage"] = lineage
-    planning_lineage = mapping(metadata.get("planning_lineage"))
-    planning_lineage["approval_ref"] = "<durable-authority-ref>"
-    planning_lineage["review_ref"] = "<durable-authority-ref>"
-    metadata["planning_lineage"] = planning_lineage
-    payload["metadata"] = metadata
-    _normalize_frozen_executor_payloads_for_replay(payload)
-    return payload
-
-
-def _normalize_frozen_executor_payloads_for_replay(payload: dict[str, Any]) -> None:
-    """Mask rotating authority references nested in an admitted adapter payload."""
-
-    input_pack = mapping(payload.get("input_pack"))
-    raw_payloads = mapping(input_pack.get("frozen_node_executor_payloads"))
-    if not raw_payloads:
-        return
-    normalized_payloads: dict[str, Any] = {}
-    for node_id, raw_payload in raw_payloads.items():
-        frozen = mapping(raw_payload)
-        adapter_order = mapping(frozen.get("work_order"))
-        metadata = mapping(adapter_order.get("metadata"))
-        lineage = mapping(metadata.get("governed_lineage"))
-        if lineage:
-            # The durable WorkOrder stays authoritative on replay.  A renewed
-            # governor/review reference is not a semantic change to the frozen
-            # legacy adapter body, but changes its transport digest.
-            if "approval_ref" in lineage:
-                lineage["approval_ref"] = "<durable-authority-ref>"
-            if "review_ref" in lineage:
-                lineage["review_ref"] = "<durable-authority-ref>"
-            metadata["governed_lineage"] = lineage
-            adapter_order["metadata"] = metadata
-            frozen["work_order"] = adapter_order
-            if "payload_sha256" in frozen:
-                frozen["payload_sha256"] = "<frozen-payload-digest>"
-        normalized_payloads[str(node_id)] = frozen
-    input_pack["frozen_node_executor_payloads"] = normalized_payloads
-    payload["input_pack"] = input_pack
 
 
 def assert_work_order_command_binding(
@@ -268,6 +212,21 @@ def require_fail_closed_governed_work_order(
             GOVERNED_HOST_AUTHORITY_INVALID,
             f"governed WorkOrderV3 is invalid: {exc}",
         ) from exc
+    if command.surface in {
+        HostCommandSurface.INTERNAL,
+        HostCommandSurface.OPERATOR,
+        HostCommandSurface.SCHEDULER,
+    }:
+        try:
+            require_control_route_execution_policy(
+                command=command,
+                work_order=work_order,
+            )
+        except ControlRouteExecutionPolicyError as exc:
+            raise GovernedHostAdapterError(
+                exc.reason_code,
+                exc.detail,
+            ) from exc
     policy = work_order.budget_policy
     limits = policy.limits.to_dict() if policy is not None else {}
     approval_policy = mapping(work_order.approval_policy)
@@ -281,10 +240,16 @@ def require_fail_closed_governed_work_order(
         command.route_type == "delegate"
         and command.surface
         not in {
+            HostCommandSurface.INTERNAL,
             HostCommandSurface.OPERATOR,
             HostCommandSurface.SCHEDULER,
         }
     )
+    is_control_transport = command.surface in {
+        HostCommandSurface.INTERNAL,
+        HostCommandSurface.OPERATOR,
+        HostCommandSurface.SCHEDULER,
+    }
     budget_invalid = (
         _port_free_delegate_budget_invalid(
             work_order,
@@ -292,6 +257,12 @@ def require_fail_closed_governed_work_order(
             limits=limits,
         )
         if is_child_agent_delegate
+        else (
+            not limits
+            or any(int(value) < 0 for value in limits.values())
+            or int(limits.get("concurrency", 0)) < 1
+        )
+        if is_control_transport
         else any(int(value) <= 0 for value in limits.values())
     )
     if (

@@ -39,6 +39,13 @@ from host_brain.contracts.agent_runtime.work_order import (
     WORK_ORDER_V3_SCHEMA_VERSION,
     WorkOrderV3,
 )
+from host_brain.app.governed_task_authority import (
+    GovernedHostAdapterError,
+    assert_stable_work_order_replay,
+)
+from host_brain.app.governed_control_route_policy import (
+    require_governed_control_route_policy,
+)
 from host_brain.app.internal_task_contracts import (
     INTERNAL_AGENT_WORKER_ROUTE,
     INTERNAL_RUNTIME_AUTHORITY_INVALID,
@@ -443,11 +450,31 @@ class GovernedInternalRuntime:
                         "durable replay record has no typed HostCommand",
                     )
                 _assert_stable_replay(candidate_command, command)
-                if order is None or assignment is None or graph is None:
+                if not isinstance(order, WorkOrderV3):
+                    raise GovernedInternalRuntimeError(
+                        INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                        "durable internal replay has no typed WorkOrderV3",
+                    )
+                try:
+                    assert_stable_work_order_replay(
+                        candidate_order,
+                        order,
+                        candidate_command=candidate_command,
+                        durable_command=command,
+                    )
+                except GovernedHostAdapterError as exc:
+                    raise GovernedInternalRuntimeError(
+                        INTERNAL_RUNTIME_AUTHORITY_INVALID,
+                        exc.detail,
+                    ) from exc
+                if assignment is None or graph is None:
                     raise GovernedInternalRuntimeError(
                         INTERNAL_RUNTIME_AUTHORITY_INVALID,
                         "durable internal replay record is incomplete",
                     )
+            require_governed_control_route_policy(
+                command, order, graph, GovernedInternalRuntimeError, INTERNAL_RUNTIME_AUTHORITY_INVALID
+            )
             async for event in self._application.execute_stream(
                 command=command,
                 work_order=order,
@@ -559,6 +586,9 @@ class GovernedInternalRuntime:
                     INTERNAL_RUNTIME_AUTHORITY_INVALID,
                     "Review continuation Internal admission is incomplete or misrouted",
                 )
+            require_governed_control_route_policy(
+                command, work_order, graph, GovernedInternalRuntimeError, INTERNAL_RUNTIME_AUTHORITY_INVALID
+            )
             operation = self._application.execute_review_continuation(
                 command=command,
                 work_order=work_order,
@@ -609,6 +639,9 @@ class GovernedInternalRuntime:
                     INTERNAL_RUNTIME_AUTHORITY_INVALID,
                     "Operation recovery Internal admission is incomplete or misrouted",
                 )
+            require_governed_control_route_policy(
+                command, work_order, graph, GovernedInternalRuntimeError, INTERNAL_RUNTIME_AUTHORITY_INVALID
+            )
             result = await _review_continuation_result(
                 self._application.execute_stream(
                     command=command,
@@ -1213,7 +1246,10 @@ def build_governed_internal_runtime(
             projection_store=projection_store,
         ),
         projection_reader=projection_store,
-        review_runtime=TaskNodeReviewRuntime(review_store),
+        review_runtime=TaskNodeReviewRuntime.for_task_store(
+            review_store,
+            task_runtime_container.task_store,
+        ),
         node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
         atomic_graph_success_enabled=True,

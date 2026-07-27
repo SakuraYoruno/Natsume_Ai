@@ -137,6 +137,25 @@ class TaskNodeReviewGate:
 class TaskNodeReviewRuntime:
     """Idempotently create and inspect reviews bound to durable TaskNodes."""
 
+    @classmethod
+    def for_task_store(
+        cls,
+        review_store: ReviewStore,
+        task_store: Any,
+        *,
+        review_ttl_ms: int = 24 * 60 * 60 * 1_000,
+    ) -> "TaskNodeReviewRuntime":
+        """Use the canonical TaskStore clock for Review creation and commit."""
+
+        clock = getattr(task_store, "trusted_now_ms", None)
+        if not callable(clock):
+            raise TypeError("TaskStore trusted clock is required")
+        return cls(
+            review_store,
+            clock=clock,
+            review_ttl_ms=review_ttl_ms,
+        )
+
     def __init__(
         self,
         review_store: ReviewStore,

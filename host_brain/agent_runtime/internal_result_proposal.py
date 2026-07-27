@@ -25,6 +25,10 @@ from host_brain.contracts.agent_runtime.projection_recovery import (
 from host_brain.core.trace_redaction import sanitize_public_payload
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    ControlRouteExecutionPolicyError,
+    require_control_route_execution_policy,
+)
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
     validate_worker_projection_payload,
@@ -499,6 +503,16 @@ class _ProposalProjectionAuthority:
         if not isinstance(command, HostCommand) or not isinstance(work_order, WorkOrderV3):
             _invalid("HostCommand and WorkOrderV3 are required")
         work_order.validate()
+        try:
+            require_control_route_execution_policy(
+                command=command,
+                work_order=work_order,
+            )
+        except ControlRouteExecutionPolicyError as exc:
+            raise InternalAgentProposalError(
+                INTERNAL_AGENT_PROPOSAL_INVALID,
+                exc.detail,
+            ) from exc
         commit = dict(worker_commit or {})
         receipt_ref = str(commit.get("receipt_ref") or "").strip()
         if not receipt_ref.startswith("worker-projection://"):
@@ -579,6 +593,17 @@ def _reopen_frozen_admission(
         or assignment.executor is not TaskExecutor.CANONICAL
     ):
         _invalid("frozen Internal Agent node differs from durable admission")
+    try:
+        require_control_route_execution_policy(
+            command=command,
+            work_order=work_order,
+            graph=graph,
+        )
+    except ControlRouteExecutionPolicyError as exc:
+        raise InternalAgentProposalError(
+            INTERNAL_AGENT_PROPOSAL_INVALID,
+            exc.detail,
+        ) from exc
     return command, work_order, graph, assignment
 
 

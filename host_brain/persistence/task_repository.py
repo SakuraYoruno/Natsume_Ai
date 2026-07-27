@@ -399,6 +399,11 @@ class DurableTaskStore(
 
         return int(self._clock())
 
+    def trusted_now_ms(self) -> int:
+        """Expose the canonical TaskStore clock to composed durable runtimes."""
+
+        return self._now()
+
     def assert_schema_ready(self) -> None:
         if not self.db_path.exists():
             raise TaskStoreError(

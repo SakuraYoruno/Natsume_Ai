@@ -3,10 +3,23 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.23
+版本：v3.24
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+Scheduler、Internal、Operator 的“同一 `delegate` 字符串承载三种隐含执行
+语义”断点已在当前启用入口收敛为显式
+`ControlRouteExecutionPolicyV1`。政策绑定 command/target/owner、
+Review 层级、Budget、verification 和 Effect owner，并在执行、重放、
+Review、恢复、Verifier/Acceptance 与 Effect 编译处重开。Operator 保留
+Intent admission Review，不能再叠加 TaskNode Review；Scheduler trigger
+和 reviewed Internal 继续精确绑定节点 Review。TaskStore/Review 使用同一
+clock。同一 Operation version 的 current recovery case 也被约束为唯一，
+避免签名 reconciliation 因 Budget 版本推进产生歧义。该项只关闭已启用
+控制路线的 policy/replay 漂移；Operator 尚未迁移的 23 个命令、一般
+multi-node recovery、整波 integration、部署 canary 和 NE-07 仍是缺口，
+因此三路和 NE-01 状态不升级。
 
 Plan 与 Delegate 的当前 enabled-scope 局部断点已经关闭。
 Plan 新增 content-addressed execution policy，要求每次初始执行、重放、

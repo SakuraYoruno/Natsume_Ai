@@ -26,6 +26,14 @@ from host_brain.contracts.agent_runtime.delegate_target_policy import (
     GovernedDelegateTargetPolicyError,
     validate_governed_delegate_target_policy,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_BUDGET_MODE,
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    CONTROL_ROUTE_INTENT_REVIEW_REQUIRED,
+    CONTROL_ROUTE_REVIEW_REQUIRED,
+    ControlRouteExecutionPolicyError,
+    validate_control_route_execution_policy,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphCompletionPolicy,
@@ -147,6 +155,7 @@ def build_direct_host_route_contracts(
     operator_command_id: str | None = None,
     frozen_context: Mapping[str, Any] | None = None,
     delegate_target_policy: Mapping[str, Any] | None = None,
+    control_route_execution_policy: Mapping[str, Any] | None = None,
 ) -> HostRouteContracts:
     if not isinstance(surface, HostCommandSurface):
         raise HostRouteContractError(HOST_ROUTE_CONTRACT_INVALID, "surface must be HostCommandSurface")
@@ -224,6 +233,25 @@ def build_direct_host_route_contracts(
             HOST_ROUTE_AUTHORITY_INVALID,
             "delegate target policy is restricted to the Delegate route",
         )
+    control_surface = surface in {
+        HostCommandSurface.OPERATOR,
+        HostCommandSurface.SCHEDULER,
+    }
+    control_policy = (
+        _validated_control_route_execution_policy(
+            control_route_execution_policy,
+            surface=surface,
+            control_command_id=operator_command,
+            target_id=target,
+        )
+        if control_surface
+        else None
+    )
+    if not control_surface and control_route_execution_policy is not None:
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            "control route policy is restricted to a governed control surface",
+        )
     message = _text(sanitized_message)[:_MAX_TEXT]
     if not message:
         raise HostRouteContractError(HOST_ROUTE_CONTRACT_INVALID, "sanitized_message is required")
@@ -280,6 +308,7 @@ def build_direct_host_route_contracts(
                 else {}
             ),
             "delegate_target_policy": delegate_policy or {},
+            CONTROL_ROUTE_EXECUTION_POLICY_KEY: control_policy or {},
         }
     )
     durable_review_required = False
@@ -313,6 +342,11 @@ def build_direct_host_route_contracts(
                 HOST_ROUTE_AUTHORITY_INVALID,
                 "Delegate durable Review flag differs from target policy",
             )
+    elif control_policy is not None:
+        durable_review_required = (
+            control_policy["review_mode"]
+            == CONTROL_ROUTE_REVIEW_REQUIRED
+        )
     review_ref = (
         f"review-policy://task-node/{route}/{suffix}"
         if durable_review_required
@@ -355,6 +389,14 @@ def build_direct_host_route_contracts(
                     "enabled_target": target,
                 }
                 if port_free_delegate
+                else {}
+            ),
+            **(
+                {
+                    "measurement_mode": CONTROL_ROUTE_BUDGET_MODE,
+                    "control_policy_ref": control_policy["policy_ref"],
+                }
+                if control_policy is not None
                 else {}
             ),
         },
@@ -403,6 +445,7 @@ def build_direct_host_route_contracts(
         "emotion_context",
         "render_target_lang",
         "delegate_target_policy",
+        CONTROL_ROUTE_EXECUTION_POLICY_KEY,
     }
     overlap = sorted(reserved_frozen_keys.intersection(frozen))
     if overlap:
@@ -436,6 +479,11 @@ def build_direct_host_route_contracts(
                 if delegate_policy is not None
                 else {}
             ),
+            **(
+                {CONTROL_ROUTE_EXECUTION_POLICY_KEY: control_policy}
+                if control_policy is not None
+                else {}
+            ),
         },
         allowed_actions=(
             ("render_reply",)
@@ -460,6 +508,9 @@ def build_direct_host_route_contracts(
                 "reason": (
                     "delegate_target_policy_requires_operator_review"
                     if route == "delegate"
+                    and delegate_policy is not None
+                    else "control_route_policy_requires_operator_review"
+                    if control_policy is not None
                     else "governor_airlock_tool_requires_operator_review"
                 ),
                 "review_ref": review_ref,
@@ -470,6 +521,12 @@ def build_direct_host_route_contracts(
                         ]
                     }
                     if delegate_policy is not None
+                    else {
+                        "frozen_control_policy_ref": control_policy[
+                            "policy_ref"
+                        ]
+                    }
+                    if control_policy is not None
                     else {
                         "frozen_tool_binding": intent_projection.get(
                             "tool_binding"
@@ -482,9 +539,26 @@ def build_direct_host_route_contracts(
                 "review_required": False,
                 "durable_review_required": False,
                 "mode": "governor_grant_review_waiver",
-                "reason": "explicit_low_risk_direct_route_waiver",
+                "reason": (
+                    "durable_intent_admission_review"
+                    if control_policy is not None
+                    and control_policy["review_mode"]
+                    == CONTROL_ROUTE_INTENT_REVIEW_REQUIRED
+                    else "explicit_low_risk_direct_route_waiver"
+                ),
                 "waiver_authority": "governor_grant",
                 "waiver_ref": review_ref,
+                **(
+                    {
+                        "frozen_control_policy_ref": control_policy[
+                            "policy_ref"
+                        ]
+                    }
+                    if control_policy is not None
+                    and control_policy["review_mode"]
+                    == CONTROL_ROUTE_INTENT_REVIEW_REQUIRED
+                    else {}
+                ),
             }
         ),
         metadata={
@@ -493,6 +567,14 @@ def build_direct_host_route_contracts(
             **(
                 {"operator_command_id": operator_command}
                 if operator_command
+                else {}
+            ),
+            **(
+                {
+                    "control_command_id": operator_command,
+                    CONTROL_ROUTE_EXECUTION_POLICY_KEY: control_policy,
+                }
+                if control_policy is not None
                 else {}
             ),
             **(
@@ -516,7 +598,15 @@ def build_direct_host_route_contracts(
         graph_revision=1,
         capability_requirements=(("surface_reply",) if route == "chat" else (target,)),
         risk_level=_governor_risk(governor),
-        input_refs=(input_ref, grant_ref),
+        input_refs=(
+            input_ref,
+            grant_ref,
+            *(
+                (control_policy["policy_ref"],)
+                if control_policy is not None
+                else ()
+            ),
+        ),
         output_contract=output_contract,
         budget_policy=budget,
         business_idempotency_scope=business_scope,
@@ -528,7 +618,15 @@ def build_direct_host_route_contracts(
         node_id=node_id,
         dependencies=(),
         route=f"{route}:{quote(target, safe='')}",
-        input_refs=(input_ref, grant_ref),
+        input_refs=(
+            input_ref,
+            grant_ref,
+            *(
+                (control_policy["policy_ref"],)
+                if control_policy is not None
+                else ()
+            ),
+        ),
         output_contract=output_contract,
         retry_policy={"max_attempts": 2, "retry_backoff_ms": 0},
         risk_level=work_order.risk_level,
@@ -586,6 +684,35 @@ def _validated_delegate_target_policy(
         raise HostRouteContractError(
             HOST_ROUTE_AUTHORITY_INVALID,
             "Delegate target policy differs from the admitted target",
+        )
+    return policy
+
+
+def _validated_control_route_execution_policy(
+    value: Mapping[str, Any] | None,
+    *,
+    surface: HostCommandSurface,
+    control_command_id: str,
+    target_id: str,
+) -> dict[str, Any]:
+    try:
+        policy = validate_control_route_execution_policy(
+            value if isinstance(value, Mapping) else {}
+        )
+    except ControlRouteExecutionPolicyError as exc:
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            exc.detail,
+        ) from exc
+    if (
+        policy["surface"] != surface.value
+        or policy["control_command_id"] != control_command_id
+        or policy["transport_route"] != "delegate"
+        or policy["target_id"] != target_id
+    ):
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            "control route policy differs from authenticated command target",
         )
     return policy
 

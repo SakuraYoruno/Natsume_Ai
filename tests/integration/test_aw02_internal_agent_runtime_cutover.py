@@ -40,6 +40,10 @@ from host_brain.persistence.task_graph_admission_authority import (
 )
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    require_control_route_execution_policy,
+)
 from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
     INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX,
 )
@@ -3225,6 +3229,22 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             for value in admitted["work_order"].budget_policy.limits.to_dict().values()
         )
         assert admitted["graph"].nodes[0].route == "delegate:agent_runtime"
+        control_policy = require_control_route_execution_policy(
+            command=admitted["command"],
+            work_order=admitted["work_order"],
+            graph=admitted["graph"],
+        )
+        assert control_policy is not None
+        assert control_policy["control_command_id"] == "internal.agent.execute"
+        assert control_policy["target_id"] == "agent_runtime"
+        assert (
+            admitted["work_order"].input_pack[
+                CONTROL_ROUTE_EXECUTION_POLICY_KEY
+            ]
+            == admitted["work_order"].metadata[
+                CONTROL_ROUTE_EXECUTION_POLICY_KEY
+            ]
+        )
         assert "runtime_assignment" not in admitted["work_order"].metadata
         assert "confirmed_owner" not in admitted["work_order"].metadata
         snapshot = task_store.read_scheduler_snapshot(
