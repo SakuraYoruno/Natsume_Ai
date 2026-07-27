@@ -974,11 +974,27 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   以及该 node 的 Acceptance Effect 总数为零，才允许
   `ABANDONED → CLEANED`。
 - T-NE01-PLAN-WORKSPACE-ATOMIC-05：真实 SQLite 与临时 Git worktree
-  分别跑 graph-success、downstream-failure；两者都验证 source `main`
-  HEAD/文件不变，fresh Runtime 收口，第二次重启零 replay。
-- 单次受影响集合为 `99 passed in 127.35s`；最终 zero-effect fail-closed
-  收紧后真实 Plan 两路径定向复跑 `2 passed in 17.83s`。文档/发布合同为
-  `56 passed in 9.35s`，两组不相加。统一 `static_scan,doc_gate` 与架构 Gate 1～14
+  分别跑 graph-success、downstream-failure、downstream-cancellation；
+  三者都验证 source `main` HEAD/文件不变，fresh Runtime 收口，第二次重启零
+  replay。
+- T-NE01-PLAN-WORKSPACE-ATOMIC-06：downstream-cancellation 必须由真实
+  Secure Ingress authority 发起；Graph=`CANCELLED`、write node=`ACCEPTED`。
+  intent 保持 immutable `BLOCKED` target，final decision 单独绑定
+  `CANCELLED`，且 intent-after、decision-before、decision-after 中写节点
+  status/version 完全一致。缺少 final decision、digest drift 或出现任何
+  write-node Effect 时必须保留 Workspace。
+- 前序受影响集合为 `99 passed in 127.35s`，当时两路径定向为
+  `2 passed in 17.83s`；本次三路径真实 Plan 定向为 `3 passed in 21.34s`，
+  Workspace 仓储合同为 `23 passed in 58.29s`，两组不相加。抽取只读取消
+  proof 后 Plan+仓储去重集为 `26 passed in 79.73s`；加入 Direct Skill
+  相邻回归后的最终受影响集为 `28 passed in 92.34s`，各组重叠不得相加。
+  取消 proof 独立防篡改单测为 `6 passed in 0.33s`，覆盖 exact success、
+  intent/decision digest drift、decision ref drift、status-version drift 与
+  missing decision；最终与三路径 Plan、Workspace 仓储合同合并复跑为
+  `32 passed in 82.89s`，该数字已包含 3、23、6 项且不包含另行记录的
+  Direct Skill 相邻回归。
+  文档/发布合同当前为
+  `39 passed in 10.01s`，两组不相加。统一 `static_scan,doc_gate` 与架构 Gate 1～14
   均通过且失败列表为空。无 migration；其它 Plan
   failure/cancellation/unknown-effect、多 Workspace、NE-01 wave integration
   和 NE-07 服务栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

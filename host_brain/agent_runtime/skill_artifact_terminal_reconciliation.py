@@ -252,6 +252,8 @@ class GovernedSkillArtifactTerminalReconciler:
             (task_store, "get_node_acceptance_decision"),
             (task_store, "get_node_artifact"),
             (task_store, "list_acceptance_effect_intents"),
+            (task_store, "get_graph_cancellation_for_graph"),
+            (task_store, "get_graph_cancellation_decision_for_intent"),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -518,14 +520,29 @@ class GovernedSkillArtifactTerminalReconciler:
             and attempt_status == "SUCCEEDED"
             and operation_status == "COMMITTED"
         )
-        if not own_verification_failed and not plan_failed_after_acceptance:
+        plan_cancelled_after_acceptance = (
+            str(getattr(binding.command, "route_type", "") or "") == "plan"
+            and graph_status == "CANCELLED"
+            and node_status == "ACCEPTED"
+            and attempt_status == "SUCCEEDED"
+            and operation_status == "COMMITTED"
+        )
+        if not (
+            own_verification_failed
+            or plan_failed_after_acceptance
+            or plan_cancelled_after_acceptance
+        ):
             self._invalid(
                 "unproven Agent Skill terminal matrix remains fail closed"
             )
         self._assert_committed_checkpoint(binding)
         self._assert_projection_descriptor(binding, seal=seal)
-        if plan_failed_after_acceptance:
+        if plan_failed_after_acceptance or plan_cancelled_after_acceptance:
             self._assert_plan_node_accepted_without_effect(binding)
+        if plan_cancelled_after_acceptance:
+            self._assert_plan_graph_finalized_cancellation(binding)
+            return "TERMINAL_PLAN_GRAPH_CANCELLED_AFTER_NODE_ACCEPTANCE"
+        if plan_failed_after_acceptance:
             return "TERMINAL_PLAN_GRAPH_FAILED_AFTER_NODE_ACCEPTANCE"
         decision = self._tasks.get_node_verification_decision(
             str(binding.authority["graph_id"]),
@@ -581,7 +598,99 @@ class GovernedSkillArtifactTerminalReconciler:
         )
         if tuple(effects or ()):
             self._invalid(
-                "failed Plan Workspace node already has an Acceptance Effect"
+                "terminal Plan Workspace node already has an Acceptance Effect"
+            )
+
+    def _assert_plan_graph_finalized_cancellation(
+        self,
+        binding: _SkillArtifactBinding,
+    ) -> None:
+        authority = binding.authority
+        graph_id = str(authority["graph_id"])
+        graph_revision = int(authority["graph_revision"])
+        node_id = str(authority["node_id"])
+        cancellation = self._tasks.get_graph_cancellation_for_graph(
+            graph_id,
+            graph_revision,
+        )
+        intent_ref = str(
+            cancellation.get("intent_ref")
+            if isinstance(cancellation, Mapping)
+            else ""
+        ).strip()
+        decision = (
+            self._tasks.get_graph_cancellation_decision_for_intent(intent_ref)
+            if intent_ref
+            else None
+        )
+        intent_payload = (
+            cancellation.get("payload")
+            if isinstance(cancellation, Mapping)
+            else None
+        )
+        decision_payload = (
+            decision.get("payload")
+            if isinstance(decision, Mapping)
+            else None
+        )
+        intent_after = (
+            intent_payload.get("node_states_after")
+            if isinstance(intent_payload, Mapping)
+            else None
+        )
+        decision_before = (
+            decision_payload.get("node_states_before")
+            if isinstance(decision_payload, Mapping)
+            else None
+        )
+        decision_after = (
+            decision_payload.get("node_states_after")
+            if isinstance(decision_payload, Mapping)
+            else None
+        )
+        accepted_intent_state = (
+            intent_after.get(node_id)
+            if isinstance(intent_after, Mapping)
+            else None
+        )
+        accepted_before_state = (
+            decision_before.get(node_id)
+            if isinstance(decision_before, Mapping)
+            else None
+        )
+        accepted_after_state = (
+            decision_after.get(node_id)
+            if isinstance(decision_after, Mapping)
+            else None
+        )
+        if (
+            not isinstance(cancellation, Mapping)
+            or str(cancellation.get("status") or "") != "FINALIZED"
+            or str(cancellation.get("graph_id") or "") != graph_id
+            or int(cancellation.get("graph_revision") or 0) != graph_revision
+            or not isinstance(intent_payload, Mapping)
+            or str(intent_payload.get("graph_id") or "") != graph_id
+            or int(intent_payload.get("graph_revision") or 0) != graph_revision
+            or str(intent_payload.get("graph_target_status") or "") != "BLOCKED"
+            or not isinstance(decision, Mapping)
+            or str(decision.get("intent_ref") or "") != intent_ref
+            or str(decision.get("graph_id") or "") != graph_id
+            or int(decision.get("graph_revision") or 0) != graph_revision
+            or not isinstance(decision_payload, Mapping)
+            or str(decision_payload.get("intent_ref") or "") != intent_ref
+            or str(decision_payload.get("graph_id") or "") != graph_id
+            or int(decision_payload.get("graph_revision") or 0) != graph_revision
+            or str(decision_payload.get("graph_target_status") or "")
+            != "CANCELLED"
+            or not isinstance(accepted_intent_state, Mapping)
+            or not isinstance(accepted_before_state, Mapping)
+            or not isinstance(accepted_after_state, Mapping)
+            or str(accepted_intent_state.get("status") or "") != "ACCEPTED"
+            or accepted_before_state != accepted_intent_state
+            or accepted_after_state != accepted_intent_state
+        ):
+            self._invalid(
+                "cancelled Plan Workspace node lacks exact finalized cancellation"
             )
 
     def _task_records(

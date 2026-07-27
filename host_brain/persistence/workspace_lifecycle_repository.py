@@ -31,6 +31,9 @@ from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
     validate_worker_projection_record,
 )
+from host_brain.persistence.workspace_terminal_cancellation_authority import (
+    finalized_cancellation_preserves_accepted_node,
+)
 
 
 WORKSPACE_LIFECYCLE_CONFLICT = "WORKSPACE_LIFECYCLE_CONFLICT"
@@ -947,10 +950,10 @@ class WorkspaceLifecycleRepositoryMixin:
             and str(row["node_status"]) == "ACCEPTED"
             and recovered_task_binding is not None
         )
-        failed_graph_accepted_node_binding = bool(
+        terminal_graph_accepted_node_lineage = bool(
             allow_terminal_abandonment
             and row is not None
-            and str(row["graph_status"]) == "FAILED"
+            and str(row["graph_status"]) in {"FAILED", "CANCELLED"}
             and str(row["node_status"]) == "ACCEPTED"
             and str(row["attempt_status"]) == "SUCCEEDED"
             and (
@@ -993,6 +996,21 @@ class WorkspaceLifecycleRepositoryMixin:
             ).fetchone()[0]
             == 1
         )
+        terminal_graph_accepted_node_binding = bool(
+            terminal_graph_accepted_node_lineage
+            and (
+                str(row["graph_status"]) == "FAILED"
+                or (
+                    str(row["graph_status"]) == "CANCELLED"
+                    and finalized_cancellation_preserves_accepted_node(
+                        conn,
+                        graph_id=graph_id,
+                        graph_revision=graph_revision,
+                        node_id=node_id,
+                    )
+                )
+            )
+        )
         terminal_abandonment_binding = bool(
             allow_terminal_abandonment
             and row is not None
@@ -1007,7 +1025,7 @@ class WorkspaceLifecycleRepositoryMixin:
                         or recovered_task_binding is not None
                     )
                 )
-                or failed_graph_accepted_node_binding
+                or terminal_graph_accepted_node_binding
                 or (
                     str(row["graph_status"]) == "CANCELLED"
                     and str(row["node_status"]) == "CANCELLED"
