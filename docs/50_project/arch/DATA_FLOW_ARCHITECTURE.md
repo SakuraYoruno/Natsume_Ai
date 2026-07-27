@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.24
+版本：v3.25
 
 核对日期：2026-07-27
 
@@ -40,8 +40,8 @@ flowchart TD
 Plan policy 在首次 admission 前写入 WorkOrder metadata，恢复路径只重开同一
 不可变图，不重新选路。Delegate policy 同时写入 input/metadata，Graph Budget
 允许模型维度精确为零，但外层 dispatch、时间、并发与 retry 仍有界。当前
-真实 SQLite 已覆盖 Review continuation；正式 clean-SHA 七路线收据尚待重跑，
-所以这张图是代码数据流，不是路线 `COMPLETE` 结论。
+真实 SQLite 已覆盖 Review continuation；clean-SHA `3db60ff1` 的同库七路线
+收据已重开这条数据流，因此当前启用 Plan/Delegate 范围为 `COMPLETE`。
 
 Skill 的当前执行流先做 policy partition；虚线入口只能拒绝，不能进入
 handler：
@@ -110,7 +110,7 @@ flowchart LR
     C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
 ```
 
-Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat 以及当前启用 Skill 的最后控制；其它五路仍独立保持 `PARTIAL / INCOMPLETE`。
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat、Skill 与当前启用 Plan/Delegate 的全部路线控制；Scheduler/Internal/Operator 仍独立保持 `PARTIAL / INCOMPLETE`。
 
 当前本地七路数据生成流已经在干净提交上形成正式收据：
 

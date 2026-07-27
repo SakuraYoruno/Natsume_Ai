@@ -12,9 +12,9 @@
 
 ## 1. 结论
 
-当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat 与当前启用 Skill 为 `COMPLETE`，其余五路为 `INCOMPLETE`。
+当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 
-当前工作树已把 Plan/Delegate 的剩余 enabled-scope authority 收成显式合同。
+当前代码已把 Plan/Delegate 的 enabled-scope authority 收成显式合同。
 Plan 的 search trace 与 execution policy 分离：前者解释选路，后者以
 `capability-plan-policy://sha256/...` 冻结 graph/revision、原子完成、
 Graph Budget digest、两条 Skill 和 final Chat 的 Registry policy、
@@ -30,7 +30,8 @@ Operator/Scheduler 虽然复用 `route=delegate` 的 worker transport，但它�
 定向集合为 `89 passed`，Operator 控制面回归为 `21 passed`（集合有重叠，
 不相加），真实 SQLite 四路线为
 `1 passed`；
-正式 clean-SHA 收据尚未生成，所以本节只记代码事实，不改变机器路线状态。
+干净提交 `3db60ff1` 的同库 v3 收据已重开这些代码事实并把两条 enabled
+scope 路线提升为 `COMPLETE`；不外推到其它 target 或通用搜索收益。
 
 Skill 的生产执行面现在先经过一个穷举、失败关闭的 policy partition。生产
 canonical Host Registry 共 93 个 Skill：28 个 inline read-only、13 个 pre-Acceptance
@@ -76,7 +77,7 @@ Chat 与 Plan 合成的模型预算校准现在使用真实生产等价调用链
 
 Universal Runtime 现在有一套独立的提交绑定判定器和七路正式 PASS 收据。Persistence reader 以 SQLite URI `mode=ro` 和 `query_only=ON` 在单一事务重开运行事实；Release builder 将事实约束为 `natsume.universal-runtime-route-acceptance.v3`，绑定干净 Git HEAD、仓库与数据库 migration head，并逐节点核对 Attempt/Lease/Operation、父子 Budget usage lineage、Verification/Acceptance、Artifact/WorkerProjection、Effect/Outbox/Receipt。输出只保留 bounded identifier、状态、版本和 digest；原始 Command/WorkOrder/Graph/Effect payload、用户正文和模型输出不能进入收据。
 
-当前本地验收 composition 已覆盖七路：GR05 共同运行 Chat、Direct Skill、Delegate 与多节点 Plan；`tools/acceptance/universal_remaining_routes.py` 对同一数据库调用真实 Scheduler、Internal 和 Operator application boundaries。Scheduler Effect 在节点验收后执行，Internal result commit 由正式 handler 持久化，Operator 经过 durable Review continuation 后才切换 HardState，并由 outer outcome 完成 Secure Ingress claim。干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 的串联运行得到七路 PASS；Chat 具备正式模型预算 lineage，Skill 当前 44 个启用项具备完备 Budget/Effect policy，两条路线均为 `COMPLETE`；其余五路仍因其它控制部分完成而保持 `INCOMPLETE`。
+当前本地验收 composition 已覆盖七路：GR05 共同运行 Chat、Direct Skill、reviewed Delegate 与多节点 Plan；`tools/acceptance/universal_remaining_routes.py` 对同一数据库调用真实 Scheduler、Internal 和 Operator application boundaries。Scheduler Effect 在节点验收后执行，Internal result commit 由正式 handler 持久化，Operator 经过 durable Review continuation 后才切换 HardState，并由 outer outcome 完成 Secure Ingress claim。干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35` 的串联运行得到七路 PASS；Chat、Skill 和当前启用 Plan/Delegate 范围均为 `COMPLETE`；Scheduler/Internal/Operator 仍因其它控制部分完成而保持 `INCOMPLETE`。
 
 Review 拒绝现在有独立持久终态。0135 的 append-only settlement 精确绑定 terminal Review 状态/版本/digest、Graph revision、Node、graph Budget、三条 Outbox，以及 POST Review 的 0134 Acceptance、`SUCCEEDED` Attempt 和可选已有多节点 `BLOCKED` decision。PRE Review 仅在零 Attempt 时原子取消 Node/Graph 并释放 Budget；POST Review 原子失败 Node/Graph 并释放 Budget。Scheduler 或 Review continuation 在提交响应丢失后只重开同一 settlement；不会创建 Attempt、签发 Grant 或重跑 Worker。Store reader 会重新验证 Review、aggregate、Acceptance、blocking decision 和三条 Outbox，任一漂移失败关闭。
 
@@ -88,7 +89,7 @@ Plan 的当前生产窄路径不再把 `SkillMeta.require_confirm=true` 的能�
 
 当前普通 Delegate 只准入 `pentest_agent` 的 `PORT_FREE_READ_ONLY` adapter。它不持有模型、工具、嵌套派发或 Effect port；dispatcher 必须产生 digest-bound `ReadonlyDelegateUsageAttestationV1`，绑定 command、graph/revision、node、attempt、node grant、target、adapter 与 invocation，并明确证明内部 token/tool/retry/model-cost 为零。Task Runtime 仍按真实外层动作预扣一次 canonical Delegate dispatch；冻结执行器不再从 `intent_agent_trace/repair_agent_trace` 推测用量。缺失、非零、篡改或 binding 漂移均在 COMMIT 前失败关闭，真实 SQLite 的 WorkerProjection 与 BudgetUsage 保存同一 attestation ref。当前启用 target 的 `budget_enforcement=PASS`，不外推到一般 Delegate、Review/restart、program-wide Budget、commit-bound acceptance 或 NE-01。
 
-当前启用的通用 worker 不再各自伪造验收结果。`governed_worker_evidence.py` 是 Chat/Skill/Delegate/Plan/Tool/Operator 的共享独立证据 owner：Verifier 与 Acceptance 通过同一只读接口但分别重开 durable WorkerProjection，复验完整执行身份、node grant、WorkOrder/context、receipt digest、COMMIT 与输出合同；任意未知语义条件返回 `REVIEW`。Skill 的 terminal COMMIT 现在完整镜像 canonical projection，不再丢失 graph/node/attempt/grant 字段。Plan 的 final Chat 从 canonical TaskResult artifacts 构造唯一输入证据集和 bundle attestation，已声明但未消费的依赖不再通过验收。当前 Delegate/Plan 的 verification 控制为 `PASS`，两条路线及 NE-01 总状态仍为 `INCOMPLETE / IN_PROGRESS`。
+当前启用的通用 worker 不再各自伪造验收结果。`governed_worker_evidence.py` 是 Chat/Skill/Delegate/Plan/Tool/Operator 的共享独立证据 owner：Verifier 与 Acceptance 通过同一只读接口但分别重开 durable WorkerProjection，复验完整执行身份、node grant、WorkOrder/context、receipt digest、COMMIT 与输出合同；任意未知语义条件返回 `REVIEW`。Skill 的 terminal COMMIT 现在完整镜像 canonical projection，不再丢失 graph/node/attempt/grant 字段。Plan 的 final Chat 从 canonical TaskResult artifacts 构造唯一输入证据集和 bundle attestation，已声明但未消费的依赖不再通过验收。当前 Delegate/Plan 的全部声明控制均为 `PASS`，两条 enabled scope 路线为 `COMPLETE`；NE-01 总状态仍为 `IN_PROGRESS`。
 
 Chat 路线的一个真实正确性缺口已经关闭：`life.conversation_turn_recorded` 与 `life.foreground_completed` 不再仅凭 Life command receipt 提交 Task Effect。生产 ASGI 把同一 `LifeProjectionDispatcher` 注入 Acceptance handlers；handler 重建并核对 exact command 的 projection-intent 全集，只领取自己的 intent，并在每个 payload-bound durable receipt 完整后生成 content-addressed barrier receipt。`surface.post_process` 的 durable mode要求 visible assistant turn 与 LifeMemory admission 成功，否则 projection 不产生 receipt，后序 `surface.reply_delivery` 也不会运行。response loss、restart、failed projection、receipt tamper 和 GR05 实际顺序均有本地 SQLite 证据。该控制项为 `transactional_side_effects=PASS`，但 external delivery 仍为 eventual，`commit_bound_acceptance=MISSING`，所以 Chat 与 NE-01 没有完成。
 
@@ -117,7 +118,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
 | Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0135_task_review_denial_settlement.sql`。0126～0132 的 Operation、Effect、mode-policy、recovery 与节点预算边界保持不变；0133 增加 durable Verification，0134 增加 durable Acceptance/Review 创建，0135 增加 Review denial 原子 settlement。这些资产都不代表七路线或 NE-01 已生产封板 |
-| Universal Runtime 七路线 | `CHAT + SKILL COMPLETE / FIVE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`c68850f8` 同库收据使七路 commit binding、Chat 模型预算和 Skill 当前启用范围的 Budget/Effect policy 通过；49 个 blocked Skill 不计完成。Plan/Delegate/Scheduler/Internal/Operator 仍有独立缺口。Scheduler occurrence 与管理 HTTP 已把真实 writer 移至 Acceptance 后，Operator 仍为 `14/37` |
+| Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`3db60ff1` 同库收据使七路 commit binding 和当前 Plan/Delegate enabled-scope 其余控制通过。Scheduler/Internal/Operator 仍有独立缺口；Operator 仍为 `14/37` |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`workspace_write_promotion.py` 密封 bounded safe-path manifest 与 binary patch并确定性生成 accepted HEAD；源 branch 不移动。`internal_startup_checkpoint_continuation.py` 提供 exact scan，`periodic_durable_continuation.py` 只托管 timer/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 仍以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 除精确 sealed abandon/cleanup 外，只对 finalized cancellation 且符合共享中立合同两类 exact signed terminal 的未封存单节点先关闭 claim、再 cleanup/discard；失败顺序不会删除证据。一般 unknown effect、其它 crash-left/取消 closeout 与 general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、OS/container isolation、canary与七路线验收也未完成 |
 | Direct Agent Skill Workspace | `PARTIAL / REVIEWED_SKILL_CODEX_WORKSPACE_PROMOTION_LOCAL_PROVEN` | 三条登记 Skill 冻结 risk 4 和 durable Review；server-bound V3 拒绝 caller authority。private `codex_runtime` 取得 app-local Artifact/Workspace ports，WorkerProjection 只含 sealed ref/digest proposal；231 行 pure `agent_workspace_acceptance_effect.py` 校验 proposal，1499 行 canonical compiler 编排 Graph Effect，未扩大 allowlist。promotion handler 重开 exact terminal lineage并先于 visible Effects 晋升 0116。Domain Pack、其它 Skill、一般 failure/cancellation、完整进程/network canary与七路线验收仍缺 |

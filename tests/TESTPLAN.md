@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.29
+版本：v0.30
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -25,11 +25,14 @@
   approve/resume 后必须经 claim-fenced continuation 精确执行一次，随后删除
   continuation。adapter 返回 side-effect、delivery、Effect 或 Outbox
   descriptor 必须在 COMMIT 前失败关闭。
-- 当前定向单元/合同集合为 `93 passed in 2.54s`；真实文件型 SQLite
-  Chat/Skill/Delegate/Plan 集成为 `1 passed in 26.40s`。正式 clean-SHA
-  七路线收据尚待重跑，故 Plan/Delegate 保持 `INCOMPLETE`；真实 provider、
-  NE-01 波次 integration 和 NE-07 Docker 全栈未运行，远程
-  CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- T-NE01-PDEP-06：Operator/Scheduler 即使复用 `route=delegate`，也必须
+  作为 app-local allowlist 约束的控制传输使用有限非零预算；它们不得取得
+  child-agent target policy，也不得让普通 Delegate 退回字符串 allowlist。
+- 当前定向单元/合同集合为 `89 passed in 6.63s`；真实文件型 SQLite
+  Chat/Skill/Delegate/Plan 集成为 `1 passed in 26.36s`。clean-SHA
+  `3db60ff1` 的七路线收据已通过，故当前启用 Plan/Delegate 范围为
+  `COMPLETE`；真实 provider、NE-01 波次 integration 和 NE-07 Docker 全栈
+  未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-SKILL-BUDGET-EFFECT-POLICY
 
@@ -59,7 +62,7 @@
 - T-NE01-URA-05：请求标识只输出 digest；用户正文、模型输出、secret、Command/WorkOrder/Graph/Effect payload 及额外字段均不得进入收据；篡改总 digest 必须拒绝。
 - T-NE01-URA-06：GR05 必须在同一 Host Runtime/SQLite 完成 Chat、Direct Skill、Delegate 和 Plan；Direct Skill 不得用 Plan 节点间接代替。
 - T-NE01-URA-07：Scheduler、Internal、Operator 必须写入同一 canonical SQLite；三路分别经过正式 CommandService/Effect、Internal result commit、Operator durable Review/HardState/outer outcome，所有 Secure Ingress claim 都必须 terminal COMMITTED 且有 result ref。
-- 最新正式串联运行绑定干净提交 `c68850f859048be955c15366e33ada3a917d9b12`、migration 0135 和同一文件型 SQLite，GR05 为 `1 passed in 25.45s`，剩余三路 CLI 为 `PASS`，七路 reason code 全空；收据为 `docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json`。七路 `commit_bound_acceptance=PASS`；Chat 与 Skill 当前启用范围为 `COMPLETE`，49 个 blocked Skill 不计完成，其它五路和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 最新正式串联运行绑定干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35`、migration 0135 和同一文件型 SQLite，GR05 为 `1 passed in 26.36s`，剩余三路 CLI 为 `PASS`，七路 reason code 全空；收据为 `docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json`。七路 `commit_bound_acceptance=PASS`；Chat、Skill、当前启用 Plan/Delegate 范围为 `COMPLETE`，Scheduler/Internal/Operator 和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-ATOMIC-INTERRUPTION-RECOVERY-HOLD
 

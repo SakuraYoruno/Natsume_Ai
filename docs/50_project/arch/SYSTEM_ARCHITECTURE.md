@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.26
+版本：v2.27
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -81,8 +81,10 @@ planner，也不写 Task 状态：Plan policy 绑定不可变 Graph、Graph Budg
 每节点 Registry/Review/effect mode；Delegate policy 绑定 target adapter、
 durable Review、exact-zero inner usage 与 Graph-Acceptance-only effect。
 Host、Review continuation、startup recovery 和 frozen executor 只消费这份
-政策并重验 content address。该层阻止配置热变更在重放时悄悄扩大权限；当前
-本地 SQLite 已通过，正式提交绑定状态仍待下一份收据确认。
+政策并重验 content address。该层阻止配置热变更在重放时悄悄扩大权限；
+clean-SHA `3db60ff1` 的同库 v3 收据已重开 Plan 三节点与 Delegate Review
+continuation，当前 enabled scope 为 `COMPLETE`。该结论不覆盖其它 Delegate
+target 或 NE-02 通用搜索收益。
 
 ```mermaid
 flowchart LR

@@ -2,16 +2,16 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_SKILL_BUDGET_EFFECT_POLICY_AND_SEVEN_ROUTE_FORMAL_CLEAN_SHA_SHARED_SQLITE_ACCEPTANCE_OVER_ORIGIN_DEV_DCAABDE16",
-  "current_document_slice": "NE01_SKILL_BUDGET_AND_TRANSACTIONAL_EFFECT_CONTROLS_PASS_CLEAN_SHA_C68850F8",
+  "evaluated_source": "NE01_PLAN_DELEGATE_EXECUTION_POLICY_AND_SEVEN_ROUTE_FORMAL_CLEAN_SHA_SHARED_SQLITE_ACCEPTANCE_OVER_ORIGIN_DEV_5FECD47C4",
+  "current_document_slice": "NE01_PLAN_AND_DELEGATE_ENABLED_SCOPE_CONTROLS_PASS_CLEAN_SHA_3DB60FF1",
   "evidence_binding": {
-    "evaluated_commit_sha": "c68850f859048be955c15366e33ada3a917d9b12",
+    "evaluated_commit_sha": "3db60ff170a085056d7fd9ba792cb7064de14d35",
     "migration_head": "0135_task_review_denial_settlement.sql"
   },
-  "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real v3 acceptance receipt binds one clean evaluated Git HEAD, the exact repository/applied migration head and route PASS result. The v3 collector reads one real file-backed SQLite snapshot in query-only mode and verifies command, graph, nodes, attempts, leases, operations, parent/child budgets, verification, acceptance, artifacts, worker projections, effects, outboxes and absence of current recovery/cancellation facts. For Chat and Plan synthesis it additionally binds canonical ModelAttempt lifecycle and provider measurement to immutable WorkerProjection plus parent/child Budget usage. Source files, tests, fixtures, an outer admitted graph, a synthetic receipt or the historical GR-06 four-route receipt cannot satisfy commit_bound_acceptance. On clean Git HEAD c68850f859048be955c15366e33ada3a917d9b12, GR05 invoked real Chat, Skill, Delegate and Plan Host Runtime boundaries, then the remaining-route driver invoked real Scheduler, Internal and reviewed Operator application boundaries against the same canonical file-backed SQLite. The query-only collector produced one privacy-safe v3 receipt with all seven routes PASS and exact repository/applied migration head 0135; therefore every commit_bound_acceptance control is PASS. Chat retains its complete production-equivalent model budget lineage. Skill additionally binds an exhaustive 93-item canonical Host policy inventory: only 44 explicitly classified capabilities can execute, every enabled node is Task-precharged, proposal-only results cannot commit user-visible effects, three reviewed risk-4 writers use post-Acceptance Workspace promotion, and 49 capabilities remain fail-closed pending typed Effects. Chat and Skill are COMPLETE for their enabled production scopes; blocked capabilities are not counted as complete. Other PARTIAL controls keep the remaining five routes and the NE-01 program INCOMPLETE. The controlled terminal provider proves governance, not real-provider quality, PlanningSearch benefit or NE-07. Delegate remains intentionally narrow: only the read-only pentest_agent adapter is admitted; every other delegate target is rejected before HostCommand/TaskGraph admission. Canonical Store contention is separately proven for 8/16/32 threads and cross-process writers.",
+  "route_control_scope": "The fail-closed matrix covers every required production route: chat, skill, plan, delegate, scheduler, internal and operator. Route COMPLETE means the enabled worker path consumes every declared control and a real v3 acceptance receipt binds one clean evaluated Git HEAD, the exact repository/applied migration head and route PASS result. The v3 collector reads one real file-backed SQLite snapshot in query-only mode and verifies command, graph, nodes, attempts, leases, operations, parent/child budgets, verification, acceptance, artifacts, worker projections, effects, outboxes and absence of current recovery/cancellation facts. For Chat and Plan synthesis it additionally binds canonical ModelAttempt lifecycle and provider measurement to immutable WorkerProjection plus parent/child Budget usage. Source files, tests, fixtures, an outer admitted graph or a synthetic receipt cannot satisfy commit_bound_acceptance. On clean Git HEAD 3db60ff170a085056d7fd9ba792cb7064de14d35, GR05 invoked real Chat, Skill, reviewed Delegate and three-node Plan Host Runtime boundaries, then the remaining-route driver invoked real Scheduler, Internal and reviewed Operator application boundaries against the same canonical file-backed SQLite. The query-only collector produced one privacy-safe v3 receipt with all seven routes PASS and exact repository/applied migration head 0135. Plan reopens one content-addressed graph/budget/node/effect policy at admission, replay, Review continuation and recovery; Delegate reopens one content-addressed target/review/budget/effect policy and rejects effect claims. Chat, Skill, the enabled CAPABILITY_SEARCH_V1 Plan scope and the enabled read-only pentest_agent Delegate scope are COMPLETE. Scheduler, Internal and Operator retain other PARTIAL controls, so NE-01 remains INCOMPLETE. Operator and Scheduler control transports may reuse route=delegate but remain separate finite-budget allowlisted control authorities; they do not inherit the child-agent policy. The controlled terminal provider proves governance, not real-provider quality, generic PlanningSearch benefit or NE-07. Every other Delegate target remains rejected before HostCommand/TaskGraph admission.",
   "production_enablement": {
     "atomic_graph_success": "ENABLED_FOR_NEW_PRODUCTION_GRAPHS",
-    "commit_bound_acceptance_collector": "PASS_V3_QUERY_ONLY_REAL_FILE_BACKED_CANONICAL_SQLITE_CLEAN_GIT_C68850F859048BE955C15366E33ADA3A917D9B12_EXACT_MIGRATION_0135_TAMPER_AND_PRIVACY_FAIL_CLOSED_ALL_SEVEN_ROUTES_PASS_CHAT_MODELATTEMPT_WORKERPROJECTION_PARENT_CHILD_BUDGET_LINEAGE_AND_SKILL_POLICY_PASS_CONTROLLED_TERMINAL_PROVIDER_REAL_PROVIDER_QUALITY_PLANNINGSEARCH_BENEFIT_AND_NE07_NOT_PROVEN",
+    "commit_bound_acceptance_collector": "PASS_V3_QUERY_ONLY_REAL_FILE_BACKED_CANONICAL_SQLITE_CLEAN_GIT_3DB60FF170A085056D7FD9BA792CB7064DE14D35_EXACT_MIGRATION_0135_TAMPER_AND_PRIVACY_FAIL_CLOSED_ALL_SEVEN_ROUTES_PASS_CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPE_CONTROLS_PASS_SCHEDULER_INTERNAL_OPERATOR_AND_NE01_INCOMPLETE_REAL_PROVIDER_QUALITY_GENERIC_PLANNINGSEARCH_BENEFIT_AND_NE07_NOT_PROVEN",
     "bounded_fanout": "OFF_SIGNED_DURABLE_CANARY_REQUIRED_NE07_NOT_RUN",
     "graph_enablement_gate": "ATOMIC_FAIL_CLOSED_CAPABILITY_CHECK_SIGNED_DURABLE_BOUNDED_FANOUT_RECEIPT_EXACT_BUILD_MIGRATION_CONFIGURATION_REQUIRED",
     "durable_cancellation": "GOVERNED_OPERATOR_CONTROL_LOCAL_REAL_SQLITE_PASS_DEFAULT_OFF_COMPLETE_PROCESS_RESTART_HTTP_NETWORK_CANARY_NOT_RUN",
@@ -101,7 +101,7 @@
         "commit_bound_acceptance": "PASS"
       },
       "acceptance_binding": {
-        "receipt_ref": "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
+        "receipt_ref": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       }
     },
     "skill": {
@@ -146,11 +146,11 @@
         "commit_bound_acceptance": "PASS"
       },
       "acceptance_binding": {
-        "receipt_ref": "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
+        "receipt_ref": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       }
     },
     "delegate": {
-      "status": "INCOMPLETE",
+      "status": "COMPLETE",
       "evidence_refs": [
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
@@ -170,10 +170,11 @@
         "tests/unit/test_ne01_governed_worker_evidence.py",
         "tests/unit/test_sub_agent_protocol_context.py",
         "tests/unit/test_ne01_legacy_subagent_retirement.py",
-        "tests/integration/test_gr05_universal_host_runtime.py"
+        "tests/integration/test_gr05_universal_host_runtime.py",
+        "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       ],
       "enabled_target_scope": "PENTEST_READONLY_ONLY: pentest_agent is registered as PORT_FREE_READ_ONLY and now freezes one content-addressed governed_delegate_target_policy.v1 into both WorkOrder input and metadata. The policy requires durable pre-execution Review, PORT_FREE_READ_ONLY_ATTESTED_ZERO Budget measurement and GRAPH_ACCEPTANCE_RESULT_ONLY effects. It receives an immutable invocation carrying command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/fence/parent+node grant, but no model, tool, nested-dispatch or effect port. The outer Task Runtime precharges exactly one canonical Delegate dispatch tool call; the adapter emits a digest-bound attestation proving its internal token/tool/retry/model-cost usage is exactly zero. The old SubAgentDispatcher is a direct-request reject gate; intent_agent, translate_agent, vision_agent, repair_agent and unregistered targets are rejected before persistence.",
-      "independent_evidence_boundary": "The enabled read-only pentest_agent worker uses the shared route-neutral verifier and acceptance owner. Admission validates the target policy content address and creates durable pre-execution Review before any Attempt; claim-fenced continuation is the only resume path. Frozen execution reopens the target policy and requires dispatcher audit adapter/modes/ref to match, then revalidates the delegate usage attestation against command, graph/revision, node, attempt, node grant, target, adapter and invocation before WorkerBudgetUsage settlement. Dispatcher and executor both reject side-effect, delivery, Effect or Outbox claims instead of silently discarding them. The local real-SQLite GR05 path proves WAITING_APPROVAL to approve/resume to ACCEPTED. Delegate remains INCOMPLETE only until a new clean-SHA route receipt revalidates review_resume and transactional_side_effects; broader targets are deliberately unsupported rather than partially enabled.",
+      "independent_evidence_boundary": "The enabled read-only pentest_agent worker uses the shared route-neutral verifier and acceptance owner. Admission validates the target policy content address and creates durable pre-execution Review before any Attempt; claim-fenced continuation is the only resume path. Frozen execution reopens the target policy and requires dispatcher audit adapter/modes/ref to match, then revalidates the delegate usage attestation against command, graph/revision, node, attempt, node grant, target, adapter and invocation before WorkerBudgetUsage settlement. Dispatcher and executor both reject side-effect, delivery, Effect or Outbox claims instead of silently discarding them. Clean SHA 3db60ff1 real-SQLite GR05 proves WAITING_APPROVAL to approve/resume to ACCEPTED, and the shared query-only v3 receipt reopens the resulting Attempt, Budget, Verification, Acceptance, Effect, Outbox and Receipt chain. COMPLETE is restricted to the enabled read-only pentest_agent scope; broader targets are deliberately unsupported rather than partially enabled.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
@@ -181,19 +182,19 @@
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
         "budget_enforcement": "PASS",
-        "review_resume": "PARTIAL",
+        "review_resume": "PASS",
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PARTIAL",
+        "transactional_side_effects": "PASS",
         "commit_bound_acceptance": "PASS"
       },
       "acceptance_binding": {
-        "receipt_ref": "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
+        "receipt_ref": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       }
     },
     "plan": {
-      "status": "INCOMPLETE",
+      "status": "COMPLETE",
       "evidence_refs": [
         "host_brain/orchestration/planning_execution.py",
         "host_brain/orchestration/planning_recovery.py",
@@ -219,25 +220,26 @@
         "tests/integration/test_gr04_planning_replan_sqlite.py",
         "tests/integration/test_ne01_plan_node_review_runtime.py",
         "tests/integration/test_ne01_review_automatic_continuation.py",
-        "tests/integration/test_gr05_universal_host_runtime.py"
+        "tests/integration/test_gr05_universal_host_runtime.py",
+        "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       ],
-      "independent_evidence_boundary": "Every enabled capability-plan Skill node and final Chat synthesis node is independently verified against its durable projection. Admission now freezes a content-addressed capability_plan_execution_policy.v1 binding graph/revision/result, atomic completion, Graph Budget digest, selected node bindings, current Skill Registry risk/Review/execution/budget policy and effect mode. Initial execution, exact replay, Review continuation, startup/operation recovery and Acceptance Effect compilation reopen the same policy; intermediate Skills are SPECULATIVE_EFFECT_FREE and only the final Chat may own GRAPH_ACCEPTANCE_RESULT_ONLY effects. The synthesis node still receives only accepted predecessor TaskResult artifacts with exact artifact/receipt/payload-digest attestation. Local unit and real-SQLite evidence passes; Plan remains INCOMPLETE only until the new clean implementation SHA is re-evaluated by the formal route receipt. General NE-02 candidate search and external benefit proof remain separately incomplete and are not part of the enabled-route closeout.",
+      "independent_evidence_boundary": "Every enabled capability-plan Skill node and final Chat synthesis node is independently verified against its durable projection. Admission freezes a content-addressed capability_plan_execution_policy.v1 binding graph/revision/result, atomic completion, Graph Budget digest, selected node bindings, current Skill Registry risk/Review/execution/budget policy and effect mode. Initial execution, exact replay, Review continuation, startup/operation recovery and Acceptance Effect compilation reopen the same policy; intermediate Skills are SPECULATIVE_EFFECT_FREE and only the final Chat may own GRAPH_ACCEPTANCE_RESULT_ONLY effects. The synthesis node receives only accepted predecessor TaskResult artifacts with exact artifact/receipt/payload-digest attestation. Clean SHA 3db60ff1 executed the three-node graph in real SQLite and the query-only v3 receipt revalidated three Attempts, Leases, node Budgets, Verifications, Acceptances and the unique result effect owner. COMPLETE is restricted to the enabled CAPABILITY_SEARCH_V1 runtime scope. Generic NE-02 cross-domain search and external benefit proof remain separately incomplete.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
-        "canonical_execution_authority": "PARTIAL",
+        "canonical_execution_authority": "PASS",
         "durable_attempt_lease": "PASS",
         "node_bound_grant": "PASS",
-        "budget_enforcement": "PARTIAL",
+        "budget_enforcement": "PASS",
         "review_resume": "PASS",
         "verification": "PASS",
         "acceptance": "PASS",
         "receipt": "PASS",
-        "transactional_side_effects": "PARTIAL",
+        "transactional_side_effects": "PASS",
         "commit_bound_acceptance": "PASS"
       },
       "acceptance_binding": {
-        "receipt_ref": "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
+        "receipt_ref": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       }
     },
     "scheduler": {
@@ -289,7 +291,7 @@
         "commit_bound_acceptance": "PASS"
       },
       "acceptance_binding": {
-        "receipt_ref": "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
+        "receipt_ref": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       }
     },
     "internal": {
@@ -410,7 +412,7 @@
         "commit_bound_acceptance": "PASS"
       },
       "acceptance_binding": {
-        "receipt_ref": "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
+        "receipt_ref": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       }
     },
     "operator": {
@@ -524,7 +526,7 @@
         "commit_bound_acceptance": "PASS"
       },
       "acceptance_binding": {
-        "receipt_ref": "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
+        "receipt_ref": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
       }
     }
   },

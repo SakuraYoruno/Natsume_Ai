@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.10
+版本：v9.11
 维护日期：2026-07-27
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -23,9 +23,10 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 存在性：Plan policy 绑定 Graph/Budget/Registry/Review/effect owner 并在
 initial/replay/continuation/recovery 重开；Delegate policy 绑定
 target/adapter/durable Review/exact-zero usage/effect mode，并拒绝内层
-Effect/Outbox/delivery claim。工作树定向证据为 `93 passed`、真实 SQLite
-四路线 `1 passed`；clean-SHA v3 收据尚待生成，因此两路继续
-`INCOMPLETE`，不以本地绿测越级。
+Effect/Outbox/delivery claim。定向证据为 `89 passed`、真实 SQLite
+四路线 `1 passed`；clean-SHA `3db60ff1` 的同库 v3 收据已重开七路线，
+因此当前启用 Plan/Delegate 范围为 `COMPLETE`。通用搜索收益、其它 Delegate
+target 和 NE-01 总波次不随之升级。
 
 当前 Skill 文档基线为 canonical Host Registry 的 93 项完备 policy
 partition：28 个 read-only、13 个

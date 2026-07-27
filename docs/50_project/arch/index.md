@@ -3,7 +3,7 @@
 
 # Natsume AI 架构文档目录
 
-版本：v4.7
+版本：v4.8
 维护日期：2026-07-27
 状态：`CURRENT_ARCHITECTURE_CATALOG`
 
@@ -13,9 +13,9 @@
 Registry/Review 和唯一 result effect owner；Delegate 冻结 target/adapter、
 durable Review、exact-zero inner budget 与无直接 Effect。initial、replay、
 Review continuation、startup recovery 和 frozen execution 都重开 content
-address。定向单元 `93 passed`、真实 SQLite 四路线 `1 passed`；正式
-clean-SHA 收据尚未重跑，因此目录把它列为当前代码切片，不提前标成
-路线 `COMPLETE`。
+address。定向单元 `89 passed`、真实 SQLite 四路线 `1 passed`；正式
+clean-SHA `3db60ff1` 的同库 v3 收据已验证七路，并把当前启用 Plan/Delegate
+范围提升为 `COMPLETE`。Scheduler/Internal/Operator 与 NE-01 保持未完成。
 
 当前 Skill 执行边界：canonical Host Registry 的 93 个条目按 exact descriptor 分为 28 个只读、
 13 个 proposal-only、3 个 post-Acceptance Workspace 和 49 个 blocked。
