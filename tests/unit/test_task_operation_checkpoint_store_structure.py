@@ -7,6 +7,7 @@ from host_brain.persistence import task_repository
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
 )
+from host_brain.persistence import task_operation_checkpoint_validation
 from host_brain.task_runtime.ports import TaskStorePort
 
 
@@ -43,6 +44,10 @@ def test_operation_checkpoint_store_is_one_focused_repository_mixin() -> None:
         "get_committed_operation_checkpoint",
         "reconcile_operation_reservation_state",
     }
+    helper_source = inspect.getsource(task_operation_checkpoint_validation)
+    assert len(helper_source.splitlines()) < 150
+    assert "sqlite3" not in helper_source
+    assert "task_repository" not in helper_source
 
 
 def test_operation_checkpoint_ports_expose_the_atomic_store_boundary() -> None:

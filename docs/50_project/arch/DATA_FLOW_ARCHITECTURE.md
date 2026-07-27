@@ -2155,3 +2155,12 @@ flowchart TD
 cleanup flow 不把异常正文或物理 identity 写入 journal；成功轮询也不制造心跳
 事件。Budget flow 使用已有 graph/child ledger，而不是新建路由专用计数器。
 两者都只增加可恢复证据，不代替 OS supervisor 或一般 reconciliation。
+
+### 结构拆分后的不变数据流
+
+职责拆分不改变数据流：retry request 先由纯 identity builder 生成
+`usage_id/digest/evidence_refs`，无 I/O facade 选择 graph-terminal 或
+node-only 参数，随后仍只进入同一个 `_schedule_retry()` writer transaction。
+Operation checkpoint 仍在 Store 的单一 SQLite read snapshot 中读取四类记录，
+再把已读取的 Outbox/Reservation 映射交给纯 validator；validator 不重新查询
+数据库，也不能拼装另一份 authority。

@@ -10,6 +10,9 @@ from host_brain.persistence.task_atomic_failure_store import (
 from host_brain.persistence.task_retry_mutation_store import (
     TaskRetryMutationStoreMixin,
 )
+from host_brain.persistence.task_retry_schedule_facade import (
+    TaskRetryScheduleFacadeMixin,
+)
 from host_brain.persistence.task_retry_replay_store import (
     TaskRetryReplayStoreMixin,
 )
@@ -17,10 +20,9 @@ from host_brain.persistence.task_retry_replay_store import (
 
 RETRY_MUTATION_METHODS = (
     "promote_retry_due",
-    "schedule_retry",
-    "schedule_retry_node_outcome",
     "_schedule_retry",
 )
+RETRY_FACADE_METHODS = ("schedule_retry", "schedule_retry_node_outcome")
 RETRY_REPLAY_METHODS = ("_replay_scheduled_retry_in_transaction",)
 ATOMIC_FAILURE_METHODS = (
     "fail_running_attempt_bundle",
@@ -116,13 +118,16 @@ def _assert_execute_calls_use_conn(
 
 
 def test_retry_and_atomic_failure_mixins_preserve_public_method_identity() -> None:
-    assert task_repository.DurableTaskStore.__bases__[8:11] == (
+    bases = task_repository.DurableTaskStore.__bases__
+    retry_index = bases.index(TaskRetryMutationStoreMixin)
+    assert bases[retry_index : retry_index + 3] == (
         TaskRetryMutationStoreMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
     )
     for owner, names in (
         (TaskRetryMutationStoreMixin, RETRY_MUTATION_METHODS),
+        (TaskRetryScheduleFacadeMixin, RETRY_FACADE_METHODS),
         (TaskRetryReplayStoreMixin, RETRY_REPLAY_METHODS),
         (TaskAtomicFailureStoreMixin, ATOMIC_FAILURE_METHODS),
     ):
@@ -133,6 +138,7 @@ def test_retry_and_atomic_failure_mixins_preserve_public_method_identity() -> No
 def test_retry_and_atomic_failure_mixins_are_stateless_borrowers() -> None:
     for owner in (
         TaskRetryMutationStoreMixin,
+        TaskRetryScheduleFacadeMixin,
         TaskRetryReplayStoreMixin,
         TaskAtomicFailureStoreMixin,
     ):
@@ -177,7 +183,7 @@ def test_retry_mutation_owns_one_transaction_and_passes_its_connection() -> None
         _assert_execute_calls_use_conn(method, inside=transactions[0])
 
     for wrapper_name in ("schedule_retry", "schedule_retry_node_outcome"):
-        wrapper = _method_ast(TaskRetryMutationStoreMixin, wrapper_name)
+        wrapper = _method_ast(TaskRetryScheduleFacadeMixin, wrapper_name)
         assert _transaction_blocks(wrapper) == []
         calls = _named_calls(wrapper, "_schedule_retry")
         assert len(calls) == 1

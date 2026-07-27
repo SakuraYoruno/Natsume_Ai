@@ -13,10 +13,11 @@ from host_brain.task_runtime import parallel_success_runtime
 from host_brain.task_runtime.parallel_success_runtime import ParallelSuccessRuntime
 
 
-# Frozen from fa03e0e71 GovernedTaskCoordinator._complete_parallel_success.
-# The fixture intentionally survives removal of the source Coordinator method.
+# Frozen after accepted Plan writer effects moved into the same atomic
+# all-success Graph commit.  The fixture intentionally survives removal of the
+# source Coordinator method and protects that effect-intent compilation.
 _COMPLETE_BASELINE_SHA256 = (
-    "37512557f3e7ef077e7610b7a7269598aedf30d8730233e1f37895764e9ad5cc"
+    "14121b8d6ad65dc5b3c847e1aae53a0e98468eaca735adb0408707bc4201e689"
 )
 _ROUTE_AUTHORITY_BASELINE_SHA256 = (
     "7ac394f0ca329bec9cc25a78c30fa296ccd6fa57cf093d3d8fb430e8fcdd5fcd"

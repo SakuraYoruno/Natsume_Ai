@@ -7,14 +7,10 @@ the concrete store.  It must not create an independent persistence boundary.
 from __future__ import annotations
 
 from contextlib import nullcontext
-import hashlib
 import sqlite3
 from typing import Any
 
-from host_brain.contracts.agent_runtime.budget_policy import (
-    BudgetAmount,
-    BudgetReservationStatus,
-)
+from host_brain.contracts.agent_runtime.budget_policy import BudgetReservationStatus
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphStatus,
     TaskNodeStatus,
@@ -41,9 +37,15 @@ from host_brain.persistence.task_store_types import (
     TaskStoreError,
     build_outbox_payload_ref,
 )
+from host_brain.persistence.task_retry_schedule_identity import (
+    build_retry_schedule_identity,
+)
+from host_brain.persistence.task_retry_schedule_facade import (
+    TaskRetryScheduleFacadeMixin,
+)
 
 
-class TaskRetryMutationStoreMixin:
+class TaskRetryMutationStoreMixin(TaskRetryScheduleFacadeMixin):
     """Own retry promotion and scheduling mutations without store state."""
 
     def promote_retry_due(
@@ -183,67 +185,6 @@ class TaskRetryMutationStoreMixin:
                 self._require_node(conn, graph_id, graph_revision, node_id)
             )
 
-    def schedule_retry(
-        self,
-        attempt_id: str,
-        *,
-        budget_id: str,
-        owner_id: str,
-        fencing_token: int,
-        expected_attempt_version: int,
-        error_ref: str,
-        outbox: OutboxMessage,
-    ) -> dict[str, Any]:
-        """Schedule the legacy retry decision, including graph blocking.
-
-        A rejected retry budget keeps the original behavior and terminalizes
-        the graph as BLOCKED.  Parallel children must use
-        :meth:`schedule_retry_node_outcome` instead.
-        """
-
-        return self._schedule_retry(
-            attempt_id,
-            budget_id=budget_id,
-            owner_id=owner_id,
-            fencing_token=fencing_token,
-            expected_attempt_version=expected_attempt_version,
-            expected_graph_version=None,
-            error_ref=error_ref,
-            outbox=outbox,
-            terminalize_graph_on_budget_rejection=True,
-        )
-
-    def schedule_retry_node_outcome(
-        self,
-        attempt_id: str,
-        *,
-        budget_id: str,
-        owner_id: str,
-        fencing_token: int,
-        expected_attempt_version: int,
-        expected_graph_version: int,
-        error_ref: str,
-        outbox: OutboxMessage,
-    ) -> dict[str, Any]:
-        """Schedule one child retry without owning the graph terminal state.
-
-        On budget rejection the shared reservation becomes EXCEEDED and the
-        Attempt/Node/Lease are closed, while the exact ACTIVE TaskGraph version
-        remains unchanged for the outer fan-in owner.
-        """
-
-        return self._schedule_retry(
-            attempt_id,
-            budget_id=budget_id,
-            owner_id=owner_id,
-            fencing_token=fencing_token,
-            expected_attempt_version=expected_attempt_version,
-            expected_graph_version=expected_graph_version,
-            error_ref=error_ref,
-            outbox=outbox,
-            terminalize_graph_on_budget_rejection=False,
-        )
-
     def _schedule_retry(
         self,
         attempt_id: str,
@@ -266,40 +207,23 @@ class TaskRetryMutationStoreMixin:
         """
 
         self.assert_dag_scheduling_ready()
-        failure_ref = str(error_ref or "").strip()
-        budget_ref = str(budget_id or "").strip()
-        if not failure_ref or not budget_ref:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "retry scheduling requires error_ref and budget_id",
-            )
-        if not terminalize_graph_on_budget_rejection and (
-            isinstance(expected_graph_version, bool)
-            or not isinstance(expected_graph_version, int)
-            or expected_graph_version < 0
-        ):
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "node-only retry scheduling requires a non-negative expected_graph_version",
-            )
-        retry_delta = BudgetAmount(retry_count=1)
-        retry_delta_json = _dumps(retry_delta.to_dict())
-        retry_delta_digest = "sha256:" + hashlib.sha256(
-            retry_delta_json.encode("utf-8")
-        ).hexdigest()
-        retry_usage_material = f"{budget_ref}\n{attempt_id}\nretry"
-        if not terminalize_graph_on_budget_rejection:
-            retry_usage_material += "\nnode-only"
-        retry_usage_digest = hashlib.sha256(
-            retry_usage_material.encode("utf-8")
-        ).hexdigest()
-        retry_usage_id = f"budget-usage://{retry_usage_digest}"
-        retry_evidence_refs = (failure_ref, retry_usage_id)
-        if tuple(outbox.evidence_refs) != retry_evidence_refs:
-            raise TaskStoreError(
-                TASK_STORE_INVALID,
-                "retry attempt outbox must bind error_ref and retry usage",
-            )
+        identity = build_retry_schedule_identity(
+            error_ref=error_ref,
+            budget_id=budget_id,
+            attempt_id=attempt_id,
+            expected_graph_version=expected_graph_version,
+            terminalize_graph_on_budget_rejection=(
+                terminalize_graph_on_budget_rejection
+            ),
+            attempt_outbox=outbox,
+        )
+        failure_ref, budget_ref = identity.failure_ref, identity.budget_ref
+        retry_delta = identity.retry_delta
+        retry_delta_json = identity.retry_delta_json
+        retry_delta_digest = identity.retry_delta_digest
+        retry_usage_digest = identity.retry_usage_digest
+        retry_usage_id = identity.retry_usage_id
+        retry_evidence_refs = identity.retry_evidence_refs
         ts_ms = self._now()
         with self._transaction() as conn:
             attempt = self._require_attempt(conn, attempt_id)

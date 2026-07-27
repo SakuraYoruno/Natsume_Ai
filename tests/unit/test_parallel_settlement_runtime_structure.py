@@ -134,6 +134,7 @@ def test_projection_is_store_only_and_runtime_store_calls_are_frozen() -> None:
         "read_scheduler_snapshot",
         "get_node",
         "get_attempt",
+        "get_operation_reservation",
     }
     assert runtime_calls == {
         "get_graph",

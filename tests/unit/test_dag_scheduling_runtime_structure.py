@@ -17,10 +17,12 @@ from host_brain.task_runtime.dag_scheduling_runtime import (
 
 # Frozen after the scheduler became the only composition owner that can resume
 # an exact multi-node COMMITTED checkpoint after every live owner fence clears.
-# The current baseline also permits one exact denied Review to terminalize
-# without minting a worker grant, while retaining fail-closed durable guards.
+# The current baseline permits one exact denied Review to terminalize without
+# minting a worker grant and delegates committed multi-node checkpoint re-entry
+# to the narrow settlement helper.  The helper reopens canonical evidence and
+# removes a redundant scheduler-level get_graph read.
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "8caad01d94d68699b11c3297275fce0e8a592d6c69d9b176c9bdadc79fc47763"
+    "ec846d5ae2dc209c78cefea7252f81533064f3ba35d364c120341b7a28a87622"
 )
 _PREFLIGHT_BASELINE_SHA256 = (
     "0808b13ad9b97bb5b116c44d195f7a09c3b3a591bb92c15eda3c2df3cd7ff1bd"
@@ -224,7 +226,7 @@ def test_execute_stream_dependency_call_matrices_are_frozen() -> None:
     execute = _method(owner, "execute_stream")
     expected = {
         "_store": {
-            "get_graph": 3,
+            "get_graph": 2,
             "read_scheduler_snapshot": 1,
             "get_node": 1,
             "resolve_node_input_artifacts": 1,

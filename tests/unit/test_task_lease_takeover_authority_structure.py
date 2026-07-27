@@ -11,6 +11,13 @@ from host_brain.persistence.task_lease_takeover_authority import (
     TaskLeaseTakeoverAuthorityMixin,
 )
 from host_brain.persistence.task_node_artifact_store import TaskNodeArtifactStoreMixin
+from host_brain.persistence.task_node_budget_store import TaskNodeBudgetStoreMixin
+from host_brain.persistence.task_node_verification_store import (
+    TaskNodeVerificationStoreMixin,
+)
+from host_brain.persistence.task_node_verification_terminal_store import (
+    TaskNodeVerificationTerminalStoreMixin,
+)
 from host_brain.persistence.task_ready_claim_store import TaskReadyClaimStoreMixin
 
 
@@ -23,10 +30,16 @@ def _module_tree() -> ast.Module:
 def test_lease_takeover_authority_mixin_preserves_repository_mro() -> None:
     bases = task_repository.DurableTaskStore.__bases__
     artifact_index = bases.index(TaskNodeArtifactStoreMixin)
-    assert bases[artifact_index : artifact_index + 3] == (
-        TaskNodeArtifactStoreMixin,
+    takeover_index = bases.index(TaskLeaseTakeoverAuthorityMixin)
+    assert artifact_index < takeover_index
+    assert bases[takeover_index:] == (
         TaskLeaseTakeoverAuthorityMixin,
+        TaskNodeVerificationTerminalStoreMixin,
+        TaskNodeVerificationStoreMixin,
+        TaskNodeBudgetStoreMixin,
         TaskBudgetUsageStoreMixin,
+        TaskDagStateStoreMixin,
+        TaskReadyClaimStoreMixin,
     )
     assert (
         task_repository.DurableTaskStore._assert_lease_takeover_operation_authority
@@ -39,11 +52,6 @@ def test_lease_takeover_authority_mixin_preserves_repository_mro() -> None:
     assert (
         task_repository.DurableTaskStore._replay_committed_lease_acquisition
         is TaskLeaseTakeoverAuthorityMixin._replay_committed_lease_acquisition
-    )
-    assert bases[-3:] == (
-        TaskBudgetUsageStoreMixin,
-        TaskDagStateStoreMixin,
-        TaskReadyClaimStoreMixin,
     )
 
 

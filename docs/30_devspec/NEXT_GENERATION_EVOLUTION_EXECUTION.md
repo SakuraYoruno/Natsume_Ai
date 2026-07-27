@@ -1054,3 +1054,24 @@ transaction 按 active fenced Lease 计数，并为每个 Attempt 创建
 `graph_revision + 1`，并覆盖 Review、restart、exact replay 与 rollback；
 executor 不得在原图内二次规划。本切片只是消除虚假支持与静默改写，不把两种
 动作标为完成。
+
+### NE-01 已合并 authority 的结构门禁纠偏
+
+`origin/dev` 已通过 #149、#167、#172 等切片引入 atomic Review denial、
+Plan writer acceptance effect、parallel checkpoint Budget terminal 和共享
+execution registry，但部分旧结构测试仍冻结变更前的 lifecycle 调用数、AST
+hash、构造签名和 Store MRO 绝对下标。纠偏先把每个差异追溯到真实 commit 与
+行为合同，再更新 frozen baseline；没有来源的 hash refresh 禁止合并。
+
+两个真实职责越界不调整 Gate 阈值或 allowlist：
+
+- `TaskRetryMutationStoreMixin` 继续是唯一 retry writer/UoW owner，纯
+  content-addressed identity 和无事务 facade 分别下沉，owner 为 751 行；
+- `TaskOperationCheckpointStoreMixin` 继续拥有同一 SQLite snapshot，纯
+  COMMIT Outbox evidence validator 下沉，owner 为 206 行。
+
+全体 30 个 unit structure 文件为 `120 passed in 11.09s`；相关 Retry 和
+Operation checkpoint 功能/合同为 `110 passed in 74.16s`；原子
+Review/checkpoint 集合为 `39 passed in 6.56s`，文档/交付合同为
+`79 passed in 42.49s`，架构 Gate 1～14 与统一 static/doc Gate 通过。本切片
+没有新增生产能力，不代替 NE-01 wave integration、production canary 或 NE-07。

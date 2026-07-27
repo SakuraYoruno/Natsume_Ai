@@ -67,6 +67,9 @@ from host_brain.persistence.task_operation_checkpoint_reconciliation_store impor
 from host_brain.persistence.task_operation_checkpoint_store import (
     TaskOperationCheckpointStoreMixin,
 )
+from host_brain.persistence.task_operation_recovery_hold_store import (
+    TaskOperationRecoveryHoldStoreMixin,
+)
 from host_brain.persistence.task_worker_interruption_store import (
     TaskWorkerInterruptionStoreMixin,
 )
@@ -101,8 +104,23 @@ from host_brain.persistence.task_budget_usage_store import (
 from host_brain.persistence.task_node_artifact_store import (
     TaskNodeArtifactStoreMixin,
 )
+from host_brain.persistence.task_review_denial_store import (
+    TaskReviewDenialStoreMixin,
+)
+from host_brain.persistence.task_node_acceptance_store import (
+    TaskNodeAcceptanceStoreMixin,
+)
 from host_brain.persistence.task_lease_takeover_authority import (
     TaskLeaseTakeoverAuthorityMixin,
+)
+from host_brain.persistence.task_node_verification_terminal_store import (
+    TaskNodeVerificationTerminalStoreMixin,
+)
+from host_brain.persistence.task_node_verification_store import (
+    TaskNodeVerificationStoreMixin,
+)
+from host_brain.persistence.task_node_budget_store import (
+    TaskNodeBudgetStoreMixin,
 )
 from host_brain.persistence.reconciliation_proof_verifier import (
     Ed25519ReconciliationProofVerifier,
@@ -192,6 +210,7 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskInternalAgentCheckpointStoreMixin,
         TaskOperationCheckpointStoreMixin,
         TaskWorkerInterruptionStoreMixin,
+        TaskOperationRecoveryHoldStoreMixin,
         TaskOperationReconciliationEvidenceStoreMixin,
         TaskOperationCheckpointReconciliationStoreMixin,
         TaskOperationReconciliationStoreMixin,
@@ -200,7 +219,12 @@ def test_acceptance_effect_mixins_preserve_api_and_borrow_store_transactions() -
         TaskGraphCancellationEffectOverlayMixin,
         TaskTerminalReconciliationStoreMixin,
         TaskNodeArtifactStoreMixin,
+        TaskReviewDenialStoreMixin,
+        TaskNodeAcceptanceStoreMixin,
         TaskLeaseTakeoverAuthorityMixin,
+        TaskNodeVerificationTerminalStoreMixin,
+        TaskNodeVerificationStoreMixin,
+        TaskNodeBudgetStoreMixin,
         TaskBudgetUsageStoreMixin,
         TaskDagStateStoreMixin,
         TaskReadyClaimStoreMixin,
