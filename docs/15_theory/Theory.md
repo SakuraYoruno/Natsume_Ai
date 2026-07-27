@@ -1211,3 +1211,11 @@ fingerprint。
 Operation 与密封 artifact 一致，并且该节点从未暂存 Acceptance Effect；
 只有这组零副作用证据完整时才可 abandon。证据不全时保持 Workspace，而
 不是盲目 promotion、replay 或 cleanup。
+
+取消比失败多一层时间顺序证明。若写节点已经 `ACCEPTED`，而下游节点在
+Acceptance Review 等待期被取消，取消 intent 只能先把整图冻结到
+`BLOCKED`，最终 `CANCELLED` 必须由另一条可信 decision 表达；不能改写
+intent 历史。恢复者必须重开两条不可变记录，并确认写节点在 intent after、
+decision before 与 decision after 中保持完全相同的 `ACCEPTED + version`，
+同时确认该节点从未产生 Effect。缺少任一记录、版本漂移或出现 Effect 时，
+Workspace 必须继续保留，等待人工或更高等级对账。

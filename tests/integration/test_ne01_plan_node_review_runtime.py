@@ -62,6 +62,9 @@ from host_brain.orchestration.planning_graph_compiler import (
     PlanningGraphCompiler,
 )
 from host_brain.persistence.host_command_repository import HostCommandRepository
+from host_brain.persistence.secure_ingress_repository import (
+    SQLiteSecureIngressStore,
+)
 from host_brain.persistence.review_continuation_store import (
     ReviewContinuationStore,
 )
@@ -78,6 +81,9 @@ from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStore,
 )
 from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.secure_ingress.graph_cancellation_authority import (
+    SecureIngressGraphCancellationAuthorityVerifier,
+)
 from host_brain.skills.registry import SkillMeta, SkillRegistry
 from host_brain.task_runtime.review_continuation_worker import (
     ReviewContinuationWorker,
@@ -93,6 +99,9 @@ from tests.integration.test_ne01_governed_agent_workspace_acceptance import (
     _git,
     _runtime as _workspace_runtime,
     _source_repository,
+)
+from tests.integration.test_aw02_internal_agent_runtime_cutover import (
+    _commit_graph_cancellation_authority,
 )
 from tests.integration.test_gr03a_governed_durable_dag import (
     NOW,
@@ -447,6 +456,27 @@ class _ExactCriteriaAcceptance:
         }
 
 
+class _SelectiveAcceptance(_ExactCriteriaAcceptance):
+    def __init__(self) -> None:
+        self.review_node_id: str | None = None
+
+    def judge(
+        self,
+        *args: Any,
+        execution_context: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        judgement = super().judge(
+            *args,
+            execution_context=execution_context,
+            **kwargs,
+        )
+        if execution_context["node_id"] == self.review_node_id:
+            judgement["decision"] = "REVIEW"
+            judgement["reason_code"] = "ACCEPTANCE_REVIEW_REQUIRED"
+        return judgement
+
+
 class _SelectiveVerifier:
     def __init__(self) -> None:
         self.failed_node_id: str | None = None
@@ -503,18 +533,18 @@ class _ContinuationRuntime:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "fail_after_workspace",
-    (False, True),
-    ids=("graph-success", "downstream-failure"),
+    "terminal_outcome",
+    ("success", "downstream-failure", "downstream-cancellation"),
 )
 async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acceptance(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
-    fail_after_workspace: bool,
+    terminal_outcome: str,
 ) -> None:
     source, source_head = _source_repository(tmp_path)
     db_path = _migrated_db(tmp_path)
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
+    cancellation_claims = SQLiteSecureIngressStore(db_path, rate_limit=100)
     try:
         token_service = TokenService(
             approval_ttl_ms=600_000,
@@ -642,6 +672,7 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             clock=lambda: NOW,
         )
         selective_verifier = _SelectiveVerifier()
+        selective_acceptance = _SelectiveAcceptance()
         application = GovernedCommandApplication(
             command_repository=command_repository,
             coordinator=GovernedTaskCoordinator(
@@ -656,7 +687,7 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                 outbox_factory=OutboxMessage,
                 worker_resolver=_PlanResolver(worker),
                 verifier=selective_verifier,
-                acceptance=_ExactCriteriaAcceptance(),
+                acceptance=selective_acceptance,
                 projection_reader=projection_store,
                 review_runtime=TaskNodeReviewRuntime(
                     reviews,
@@ -668,6 +699,11 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                 owner_id="ne01-plan-node-review-runtime",
             ),
             node_grant_service=grant_service,
+            cancellation_authority_verifier=(
+                SecureIngressGraphCancellationAuthorityVerifier(
+                    cancellation_claims
+                )
+            ),
         )
         service = GovernedPlanningExecutionService(
             search=adapter,  # type: ignore[arg-type]
@@ -701,8 +737,10 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         )
         graph = prepared.admission.graph
         order = prepared.admission.work_order
-        if fail_after_workspace:
+        if terminal_outcome == "downstream-failure":
             selective_verifier.failed_node_id = graph.result_node_id
+        elif terminal_outcome == "downstream-cancellation":
+            selective_acceptance.review_node_id = graph.result_node_id
         required_nodes = {
             node.node_id
             for node in graph.nodes
@@ -747,11 +785,11 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             raise continuation_runtime.errors[0]
         assert continuation_runtime.results[-1]["execution_receipt"][
             "status"
-        ] == (
-            "VERIFICATION_FAILED"
-            if fail_after_workspace
-            else "ACCEPTED"
-        ), continuation_runtime.results[-1]
+        ] == {
+            "success": "ACCEPTED",
+            "downstream-failure": "VERIFICATION_FAILED",
+            "downstream-cancellation": "WAITING_ACCEPTANCE_REVIEW",
+        }[terminal_outcome], continuation_runtime.results[-1]
         assert worker.calls == [node.node_id for node in graph.nodes]
         assert len(worker.grants) == len(graph.nodes)
         assert worker.grants[0]["review_continuation_authority"] is None
@@ -761,22 +799,71 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         )
         assert continuations.get_review_continuation(review["review_id"]) is None
 
-        snapshot = DurableTaskStore(
+        snapshot_store = DurableTaskStore(
             db_path,
             clock=lambda: NOW,
-        ).read_scheduler_snapshot(graph.graph_id, graph.revision)
+        )
+        snapshot = snapshot_store.read_scheduler_snapshot(
+            graph.graph_id,
+            graph.revision,
+        )
+        if terminal_outcome == "downstream-cancellation":
+            assert snapshot["graph_record"]["status"] == "BLOCKED"
+            assert {
+                node["node_id"]: node["status"]
+                for node in snapshot["graph_record"]["nodes"]
+            }[graph.result_node_id] == "WAITING_ACCEPTANCE_REVIEW"
+            cancel_request_id = "request-ne01-plan-workspace-cancellation"
+            cancellation_authority = _commit_graph_cancellation_authority(
+                db_path,
+                graph_id=graph.graph_id,
+                graph_revision=graph.revision,
+                request_id=cancel_request_id,
+                principal_id="service.operator.plan-workspace-cancellation",
+            )
+            cancelled = await application.request_graph_cancellation(
+                command_id=prepared.admission.command.command_id,
+                graph_id=graph.graph_id,
+                graph_revision=graph.revision,
+                authority=cancellation_authority,
+                source="OPERATOR",
+                reason_code="OPERATOR_REQUEST",
+            )
+            assert cancelled["execution_receipt"]["status"] == "CANCELLED"
+            cancellation = snapshot_store.get_graph_cancellation_for_graph(
+                graph.graph_id,
+                graph.revision,
+            )
+            assert cancellation is not None
+            assert cancellation["status"] == "FINALIZED"
+            assert cancellation["payload"]["graph_target_status"] == "BLOCKED"
+            decision = snapshot_store.get_graph_cancellation_decision_for_intent(
+                cancellation["intent_ref"]
+            )
+            assert decision is not None
+            assert decision["payload"]["graph_target_status"] == "CANCELLED"
+            snapshot = snapshot_store.read_scheduler_snapshot(
+                graph.graph_id,
+                graph.revision,
+            )
         assert snapshot["graph_record"]["status"] == (
-            "FAILED" if fail_after_workspace else "COMPLETED"
+            {
+                "success": "COMPLETED",
+                "downstream-failure": "FAILED",
+                "downstream-cancellation": "CANCELLED",
+            }[terminal_outcome]
         )
         node_statuses = {
             node["node_id"]: node["status"]
             for node in snapshot["graph_record"]["nodes"]
         }
         assert node_statuses[required_node_id] == "ACCEPTED"
-        if fail_after_workspace:
+        if terminal_outcome == "downstream-failure":
             assert node_statuses[graph.result_node_id] == (
                 "VERIFICATION_FAILED"
             )
+        elif terminal_outcome == "downstream-cancellation":
+            assert node_statuses[graph.result_node_id] == "CANCELLED"
         else:
             assert set(node_statuses.values()) == {"ACCEPTED"}
         assert len(snapshot["attempts"]) == len(graph.nodes)
@@ -804,7 +891,7 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             now_ms=NOW + 6_000,
             runtime_owner_id="ne01-plan-node-review-runtime",
         )
-        if fail_after_workspace:
+        if terminal_outcome != "success":
             assert workspace_effects == []
             reports = AgentArtifactTerminalReconcilerGroup(
                 GovernedSkillArtifactTerminalReconciler(
@@ -826,7 +913,14 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                 item["workspace_id"] == seal.workspace_id
                 and item["action"] == "ABANDONED"
                 and item["reason_code"]
-                == "TERMINAL_PLAN_GRAPH_FAILED_AFTER_NODE_ACCEPTANCE"
+                == {
+                    "downstream-failure": (
+                        "TERMINAL_PLAN_GRAPH_FAILED_AFTER_NODE_ACCEPTANCE"
+                    ),
+                    "downstream-cancellation": (
+                        "TERMINAL_PLAN_GRAPH_CANCELLED_AFTER_NODE_ACCEPTANCE"
+                    ),
+                }[terminal_outcome]
                 for item in reports
             ), reports
             assert any(
@@ -904,7 +998,7 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                 projection_store=projection_store,
             )
         ]
-        if fail_after_workspace:
+        if terminal_outcome != "success":
             replay_reconcilers.insert(
                 0,
                 GovernedSkillArtifactTerminalReconciler(
@@ -944,4 +1038,5 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         assert len(child_decisions) == len(graph.nodes)
         assert len(renewal_decisions) == len(graph.nodes)
     finally:
+        cancellation_claims.close()
         ledger.close()

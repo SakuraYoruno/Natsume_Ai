@@ -452,6 +452,7 @@ def test_direct_abandonment_accepts_only_exact_terminal_task_lineage(
         ("BLOCKED", "WAITING_ACCEPTANCE_REVIEW", "SUCCEEDED", "RELEASED"),
         ("COMPLETED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
         ("FAILED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
+        ("CANCELLED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
         ("ACTIVE", "RUNNING", "RUNNING", "ACTIVE"),
         ("FAILED", "FAILED", "RECOVERABLE", "RELEASED"),
         ("CANCELLED", "CANCELLED", "FAILED", "RELEASED"),

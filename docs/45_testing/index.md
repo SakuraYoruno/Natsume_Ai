@@ -681,7 +681,38 @@ online takeover 与 startup 集成为 `33 passed in 137.00s`，两组重叠不
 
 本前序集合无 mock Workspace、无内存 TaskStore，也没有用端口探针代替
 文件状态验证。它本身不包括 Plan；下一节单独补充 single-writer Plan
-success/downstream-failure，但所有其它 review/budget/raw-failure/
+success/downstream-failure/downstream-cancellation，但所有其它 review/budget/raw-failure/
 cancellation terminal matrix、OS/container isolation、NE-01 wave
 integration 或 NE-07 Docker/前后端全栈仍未覆盖。远程 CI 继续记录
 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Plan 单写节点 Workspace 原子终态证据
+
+- capability Plan 至多允许一个 reviewed、risk-4、非结果
+  `POST_ACCEPTANCE_WORKSPACE` Agent Skill；第二个写 owner、写结果节点或
+  policy drift 在 Effect 前失败关闭。
+- 写 worker 只生成 sealed proposal。只有整图成功时，node-owned promotion
+  才与 result Effects 在一个 parallel-success UoW 中暂存。
+- 下游验证失败时，Graph=`FAILED` 且 write node=`ACCEPTED`；只有精确
+  Acceptance/artifact/Operation/projection 和零 node Effect 才可 abandon。
+- 下游结果等待 Acceptance Review 后由真实 Secure Ingress authority 取消时，
+  Graph=`CANCELLED` 而 write node 仍为 `ACCEPTED`。immutable intent 保持
+  `BLOCKED` target，可信 final decision 单独绑定 `CANCELLED`；intent-after、
+  decision-before、decision-after 的 node status/version 必须完全一致。
+- 真实 SQLite 与临时 Git worktree 三路径为 `3 passed in 21.34s`，覆盖
+  graph-success、downstream-failure、downstream-cancellation；三者都验证
+  source HEAD/文件不变、fresh Runtime 收口和第二次重启零 replay。Workspace
+  仓储合同另为 `23 passed in 58.29s`，两组不相加。
+- 抽取只读取消 proof 模块后，Plan 三路径与 Workspace 仓储合同的去重受影响
+  集为 `26 passed in 79.73s`；再加入 Direct Skill 相邻回归的本批最终受影响
+  集为 `28 passed in 92.34s`，二者重叠不得相加。
+- 只读取消 proof 的独立防篡改单测为 `6 passed in 0.33s`：精确 authority
+  通过；intent/decision payload digest、decision ref、intent status version
+  漂移及 decision 缺失均失败关闭。最终把该组与三路径 Plan、Workspace 仓储
+  合同合并复跑为 `32 passed in 82.89s`；它包含前述 3、23、6 项，不再相加，
+  且不包含另行记录的 Direct Skill 相邻回归。
+
+本批无 migration，不宣称其它 failure/cancellation/unknown-effect 组合、
+多 Workspace、强租户隔离、NE-01 波次集成或 NE-07 全栈完成。远程 CI 仍为
+`NOT_RUN_ACCOUNT_QUOTA`。当前 coverage、authority、freshness 与 metadata
+文档合同为 `39 passed in 10.01s`。
