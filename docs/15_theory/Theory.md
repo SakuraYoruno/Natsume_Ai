@@ -1407,3 +1407,33 @@ close attempt 1
 cleanup worker 没有 live；partial-startup rollback 也不能丢掉最后一个引用。
 健康投影应只公开判断所需的状态与计数，不能为可观测性复制 workspace identity、
 物理路径或原始异常正文。
+
+---
+
+## 26. 周期性失败应形成一个持久 incident，而不是事件洪水
+
+后台轮询每隔数秒遇到同一故障时，连续失败次数属于健康投影，不能自然等同于
+多个独立事故。正确边界是：首次失败生成与私密内容无关的随机 opaque identity，
+同一连续失败序列复用该 identity；持久 Guardian 只拥有一个 active SLO breach。
+这样既能在进程重启后恢复降级事实，也不会把异常正文、低熵路径哈希或每次轮询
+复制进 append-only journal。
+
+恢复不能依赖当前进程的内存计数。替换进程第一次成功轮询必须扫描经过
+cursor/revision/digest 校验后重建的 Guardian history，确认 active breach
+确由本 observer 创建，再追加 resolution。响应丢失后的重复恢复应是 no-op。
+如果 Guardian 写入失败，业务 cleanup 即使成功也不能被健康投影标为完全健康，
+否则可观察状态会掩盖持久事实断链。
+
+## 27. 时间与并发预算是执行 authority，不是结束后的统计
+
+多节点 Graph 的时间上限应在每个节点开始前从同一 durable Budget 重算剩余量，
+而不是给每个节点重复发放完整总额。超时发生时，系统只知道 worker 被中断，
+不知道外部效果，因此应持久化 rejected time usage 与
+`RECOVERY_REQUIRED` operation，等待 reconciliation，而不能直接声明
+`FAILED/NO_SIDE_EFFECT`。
+
+并发额度同样必须随 ready claim 原子进入 Attempt-bound child reservation。
+当额度为一时，另一个 ready 节点保持 `READY`；进程重启或第二个进程看到的是
+SQLite 中的同一 claim，而不是一个已经丢失的内存 semaphore。这两项证据仍只是
+Budget 基础语义；完整 DEGRADE、REVIEW、取消释放和任意 unknown-effect
+组合必须分别闭合。

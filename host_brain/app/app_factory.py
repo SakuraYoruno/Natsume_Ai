@@ -90,6 +90,14 @@ def _read_agent_workspace_cleanup_health(application: FastAPI) -> dict[str, Any]
             if isinstance(last_report, (list, tuple))
             else 0
         ),
+        "guardian_projection_status": (
+            str(raw.get("guardian_projection_status") or "UNBOUND")
+            .strip()
+            .upper()
+        ),
+        "guardian_projection_error_type": raw.get(
+            "guardian_projection_error_type",
+        ),
         "reason_code": (
             str(shutdown_error.get("reason_code") or "").strip()
             if retry_required and isinstance(shutdown_error, dict)

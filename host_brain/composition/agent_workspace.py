@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import logging
 from pathlib import Path
+import secrets
 import threading
 import time
 from typing import Any
@@ -54,12 +56,16 @@ class WorkspaceCleanupContinuationWorker:
         *,
         interval_ms: int = 5_000,
         batch_limit: int = 100,
+        observation_sink: Callable[[Mapping[str, Any]], Any] | None = None,
     ) -> None:
         if int(interval_ms) < 100:
             raise ValueError("workspace cleanup interval must be at least 100ms")
         if int(batch_limit) < 1 or int(batch_limit) > 1_000:
             raise ValueError("workspace cleanup batch limit must be between 1 and 1000")
         self._runtime = runtime
+        if observation_sink is not None and not callable(observation_sink):
+            raise TypeError("workspace cleanup observation sink must be callable")
+        self._observation_sink = observation_sink
         self._interval_s = int(interval_ms) / 1000.0
         self._batch_limit = int(batch_limit)
         self._stop = threading.Event()
@@ -72,6 +78,11 @@ class WorkspaceCleanupContinuationWorker:
         self._last_run_ts_ms: int | None = None
         self._last_success_ts_ms: int | None = None
         self._consecutive_failures = 0
+        self._guardian_projection_status = (
+            "READY" if observation_sink is not None else "UNBOUND"
+        )
+        self._guardian_projection_error_type: str | None = None
+        self._guardian_incident_digest: str | None = None
 
     @property
     def running(self) -> bool:
@@ -109,6 +120,10 @@ class WorkspaceCleanupContinuationWorker:
                 ),
                 "last_report": tuple(dict(item) for item in self._last_report),
                 "close_timeout_s": self._close_timeout_s,
+                "guardian_projection_status": self._guardian_projection_status,
+                "guardian_projection_error_type": (
+                    self._guardian_projection_error_type
+                ),
             }
 
     def run_once(self) -> tuple[dict[str, Any], ...]:
@@ -127,14 +142,101 @@ class WorkspaceCleanupContinuationWorker:
                     "error_type": type(exc).__name__,
                     "detail": str(exc)[:500],
                 }
+                consecutive_failures = self._consecutive_failures
+                if self._guardian_incident_digest is None:
+                    self._guardian_incident_digest = (
+                        "sha256:" + secrets.token_hex(32)
+                    )
+                incident_digest = self._guardian_incident_digest
+                should_notify = (
+                    consecutive_failures == 1
+                    or self._guardian_projection_status == "FAILED"
+                )
+            if should_notify:
+                try:
+                    self._notify_failure(
+                        error=exc,
+                        consecutive_failures=consecutive_failures,
+                        incident_digest=incident_digest,
+                    )
+                except Exception as observer_exc:
+                    with self._state_lock:
+                        self._guardian_projection_status = "FAILED"
+                        self._guardian_projection_error_type = type(
+                            observer_exc
+                        ).__name__
             raise
         normalized = tuple(dict(item) for item in report)
+        # Every successful pass asks the durable observer to resolve owned
+        # breaches.  A replacement process has no in-memory failure counter,
+        # so gating this call on local state would strand a pre-crash incident.
+        if self._observation_sink is not None:
+            try:
+                self._notify_recovery()
+            except Exception as exc:
+                with self._state_lock:
+                    self._last_run_ts_ms = ts_ms
+                    self._consecutive_failures = max(
+                        1,
+                        self._consecutive_failures,
+                    )
+                    self._last_failure = {
+                        "ts_ms": ts_ms,
+                        "error_type": type(exc).__name__,
+                        "detail": (
+                            "Workspace cleanup recovery could not be "
+                            "projected durably"
+                        ),
+                    }
+                    self._guardian_projection_status = "FAILED"
+                    self._guardian_projection_error_type = type(exc).__name__
+                raise RuntimeError(
+                    "AGENT_WORKSPACE_CLEANUP_GUARDIAN_PROJECTION_FAILED"
+                ) from exc
         with self._state_lock:
             self._last_run_ts_ms = ts_ms
             self._last_success_ts_ms = ts_ms
             self._consecutive_failures = 0
             self._last_report = normalized
+            self._guardian_incident_digest = None
+            if self._observation_sink is not None:
+                self._guardian_projection_status = "READY"
+                self._guardian_projection_error_type = None
         return normalized
+
+    def _notify_failure(
+        self,
+        *,
+        error: Exception,
+        consecutive_failures: int,
+        incident_digest: str,
+    ) -> None:
+        if self._observation_sink is None:
+            return
+        self._observation_sink(
+            {
+                "schema": "natsume.agent_workspace.cleanup_observation.v1",
+                "status": "FAILED",
+                "error_type": type(error).__name__,
+                # This random opaque identity is stable for one consecutive
+                # failure sequence and is never derived from private details.
+                "error_digest": incident_digest,
+                "consecutive_failures": int(consecutive_failures),
+            }
+        )
+        with self._state_lock:
+            self._guardian_projection_status = "READY"
+            self._guardian_projection_error_type = None
+
+    def _notify_recovery(self) -> None:
+        if self._observation_sink is None:
+            return
+        self._observation_sink(
+            {
+                "schema": "natsume.agent_workspace.cleanup_observation.v1",
+                "status": "RECOVERED",
+            }
+        )
 
     def start(self) -> None:
         with self._state_lock:
@@ -250,6 +352,8 @@ def compose_agent_workspace_application_scope(
     task_runtime_container: Any,
     runtime_settings: Any,
     runtime_owner_id: str,
+    *,
+    cleanup_observer: Callable[[Mapping[str, Any]], Any] | None = None,
 ) -> ProcessAgentWorkspaceContainer | None:
     """Build and publish the optional W2 runtime without hiding retry handles."""
 
@@ -264,6 +368,7 @@ def compose_agent_workspace_application_scope(
             lease_ms=runtime_settings.agent_workspace_lease_ms,
             heartbeat_interval_ms=runtime_settings.agent_workspace_heartbeat_ms,
             cleanup_interval_ms=runtime_settings.agent_workspace_cleanup_poll_ms,
+            cleanup_observer=cleanup_observer,
             token_secret=(
                 runtime_settings.agent_workspace_hmac_secret
                 .get_secret_value()
@@ -350,6 +455,7 @@ def build_process_agent_workspace_container(
     lease_ms: int = 120_000,
     heartbeat_interval_ms: int | None = None,
     cleanup_interval_ms: int = 5_000,
+    cleanup_observer: Callable[[Mapping[str, Any]], Any] | None = None,
     token_secret: bytes,
 ) -> ProcessAgentWorkspaceContainer:
     """Build one process-local secret holder over durable W1 authority."""
@@ -402,6 +508,7 @@ def build_process_agent_workspace_container(
     cleanup_worker = WorkspaceCleanupContinuationWorker(
         runtime,
         interval_ms=cleanup_interval_ms,
+        observation_sink=cleanup_observer,
     )
     return ProcessAgentWorkspaceContainer(
         repository=repository,

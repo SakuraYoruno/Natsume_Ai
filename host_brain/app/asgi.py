@@ -1029,43 +1029,22 @@ def create_app(
                     )
                     return _scheduler_result_wiring.security_immune_scheduler_handler_result(result)
 
-                async def agent_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    from host_brain.agent_runtime.immune import (  # noqa: PLC0415
-                        build_immune_proposal_from_report,
-                    )
-                    from host_brain.app.health_routes import (  # noqa: PLC0415
-                        build_live_health_report,
-                    )
-
-                    proposal = build_immune_proposal_from_report(
-                        await build_live_health_report(
-                            degradation_state_provider=(
-                                runtime_context_composition.guardian.read_degradation_state
-                                if runtime_context_composition is not None
-                                else None
-                            ),
-                            ledger_provider=lambda: ledger,
-                            dependency_probe_provider=collect_dependency_probes,
-                            workspace_cleanup_health_provider=getattr(
-                                application.state,
-                                "health_workspace_cleanup_provider",
-                                None,
-                            ),
+                agent_immune_scheduler_handler = (
+                    _scheduler_result_wiring.build_agent_immune_scheduler_handler(
+                        degradation_state_provider=(
+                            runtime_context_composition.guardian.read_degradation_state
+                            if runtime_context_composition is not None
+                            else None
                         ),
-                        source="health",
+                        ledger_provider=lambda: ledger,
+                        dependency_probe_provider=collect_dependency_probes,
+                        workspace_cleanup_health_provider_resolver=lambda: getattr(
+                            application.state,
+                            "health_workspace_cleanup_provider",
+                            None,
+                        ),
                     )
-                    if not proposal.get("triggered"):
-                        return {
-                            "status": "SKIPPED",
-                            "reason_code": "IMMUNE_WORKORDER_NOT_REQUIRED",
-                            "proposal": proposal,
-                        }
-                    return {
-                        "status": "BLOCKED",
-                        "reason_code": "IMMUNE_REVIEW_REQUIRED",
-                        "summary": "Immune proposal requires governed review",
-                        "proposal": proposal,
-                    }
+                )
 
                 async def life_tick_scheduler_handler(
                     *,

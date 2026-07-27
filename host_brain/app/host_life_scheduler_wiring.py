@@ -612,6 +612,50 @@ def security_immune_scheduler_handler_result(value: Any) -> dict[str, Any]:
     return scheduler_handler_result(result)
 
 
+def build_agent_immune_scheduler_handler(
+    *,
+    degradation_state_provider: Callable[[], Any] | None,
+    ledger_provider: Callable[[], Any],
+    dependency_probe_provider: Callable[..., Any],
+    workspace_cleanup_health_provider_resolver: Callable[[], Any],
+) -> Callable[..., Any]:
+    """Bind the health-based immune proposal handler to app-local read ports."""
+
+    async def run(**_: Any) -> dict[str, Any]:
+        from host_brain.agent_runtime.immune import (  # noqa: PLC0415
+            build_immune_proposal_from_report,
+        )
+        from host_brain.app.health_routes import (  # noqa: PLC0415
+            build_live_health_report,
+        )
+
+        proposal = build_immune_proposal_from_report(
+            await build_live_health_report(
+                degradation_state_provider=degradation_state_provider,
+                ledger_provider=ledger_provider,
+                dependency_probe_provider=dependency_probe_provider,
+                workspace_cleanup_health_provider=(
+                    workspace_cleanup_health_provider_resolver()
+                ),
+            ),
+            source="health",
+        )
+        if not proposal.get("triggered"):
+            return {
+                "status": "SKIPPED",
+                "reason_code": "IMMUNE_WORKORDER_NOT_REQUIRED",
+                "proposal": proposal,
+            }
+        return {
+            "status": "BLOCKED",
+            "reason_code": "IMMUNE_REVIEW_REQUIRED",
+            "summary": "Immune proposal requires governed review",
+            "proposal": proposal,
+        }
+
+    return run
+
+
 def _result_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
     if isinstance(value, Mapping):
         result = dict(value)
@@ -670,6 +714,7 @@ __all__ = [
     "LifeSnapshotReaderPort",
     "SCHEDULER_HANDLER_RESULT_INVALID",
     "SchedulerHandlerResultError",
+    "build_agent_immune_scheduler_handler",
     "compose_life_command_authority",
     "compose_life_dispatchers",
     "distillation_scheduler_handler_result",

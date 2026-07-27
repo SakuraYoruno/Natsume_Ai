@@ -353,6 +353,49 @@ class _SlowWorker(_Worker):
             yield event
 
 
+class _NodeDelayWorker(_Worker):
+    def __init__(
+        self,
+        calls: list[str],
+        *,
+        delays: dict[str, float],
+    ) -> None:
+        super().__init__(calls, set())
+        self._delays = dict(delays)
+
+    async def execute_stream(
+        self,
+        *,
+        execution_context: dict[str, Any],
+        **_: Any,
+    ):
+        node_id = str(execution_context["node_id"])
+        self._calls.append(node_id)
+        delay = float(self._delays.get(node_id, 0.0))
+        if delay > 0:
+            await asyncio.sleep(delay)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "node_id": node_id,
+            "budget_usage": {
+                "schema_version": (
+                    "Natsume.task_runtime.worker_budget_usage.v1"
+                ),
+                "usage_id": f"worker-usage://{node_id}/node-delay",
+                "measurements": {
+                    "token_count": 10,
+                    "retry_count": 0,
+                    "model_cost_micros": 25,
+                },
+                "evidence_refs": [
+                    f"model-budget://{node_id}/node-delay"
+                ],
+            },
+        }
+
+
 class _AsyncFanOutProbe:
     """Async barrier plus counters used to prove bounded, overlapping work."""
 
@@ -4514,6 +4557,99 @@ async def test_gr03b_typed_worker_usage_exceeded_blocks_acceptance_and_is_durabl
 
 
 @pytest.mark.asyncio
+async def test_ne01_multinode_remaining_time_budget_times_out_without_replay(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    command, work_order, assignment, graph = _contracts(
+        (("root", ()), ("final", ("root",))),
+    )
+    limited = replace(
+        work_order,
+        budget_policy=replace(
+            work_order.budget_policy,
+            limits=replace(
+                work_order.budget_policy.limits,
+                time_ms=300,
+            ),
+        ),
+    )
+    calls: list[str] = []
+    worker = _NodeDelayWorker(
+        calls,
+        delays={"root": 0.01, "final": 0.6},
+    )
+    clock = _elapsed_clock()
+    store = DurableTaskStore(db_path, clock=clock)
+    app = GovernedCommandApplication(
+        command_repository=HostCommandRepository(db_path, clock=clock),
+        coordinator=_coordinator(
+            db_path,
+            calls,
+            clock=clock,
+            task_store=store,
+            worker_resolver=_StaticResolver(worker),
+        ),
+    )
+
+    events = [
+        event
+        async for event in app.execute_stream(
+            command=command,
+            work_order=limited,
+            assignment=assignment,
+            graph=graph,
+        )
+    ]
+
+    receipt = events[-1]["execution_receipt"]
+    assert calls == ["root", "final"]
+    assert receipt["status"] == "RECOVERY_REQUIRED"
+    assert receipt["reason_code"] == "GOVERNED_OPERATION_RECOVERY_REQUIRED"
+    assert (
+        receipt["projection"]["worker_failure_reason_code"]
+        == "GOVERNED_TIME_BUDGET_EXCEEDED"
+    )
+    assert 1 <= receipt["projection"]["time_budget_ms"] < 300
+    snapshot = store.read_scheduler_snapshot(graph.graph_id, graph.revision)
+    assert snapshot["graph_record"]["status"] == "ACTIVE"
+    assert {
+        node["node_id"]: node["status"]
+        for node in snapshot["graph_record"]["nodes"]
+    } == {"final": "RUNNING", "root": "ACCEPTED"}
+    time_usage = [
+        row
+        for row in snapshot["budget_usage"]
+        if int(row["delta"]["time_ms"]) > 0
+    ]
+    assert len(time_usage) == 2
+    assert time_usage[0]["accepted"] is True
+    assert time_usage[1]["accepted"] is False
+    assert time_usage[1]["exceeded_dimensions"] == ["time_ms"]
+    assert snapshot["budgets"][0]["status"] == "EXCEEDED"
+    assert [
+        row["status"]
+        for row in snapshot["node_budgets"]
+        if row["node_id"] == "final"
+    ] == ["EXCEEDED"]
+    with sqlite3.connect(db_path) as conn:
+        operation = conn.execute(
+            """
+            SELECT status FROM task_runtime_idempotency_reservation
+            WHERE attempt_id = ?
+            """,
+            (
+                next(
+                    row["attempt_id"]
+                    for row in snapshot["attempts"]
+                    if row["node_id"] == "final"
+                ),
+            ),
+        ).fetchone()
+    assert operation == ("RECOVERY_REQUIRED",)
+
+
+@pytest.mark.asyncio
 async def test_gr03a_restart_resumes_after_accepted_predecessor_without_reexecution(
     tmp_path: Path,
 ) -> None:
@@ -5576,6 +5712,11 @@ async def test_ne01_b1_atomic_claim_enforces_durable_graph_concurrency(
     assert [(row["node_id"], row["attempt_no"]) for row in snapshot["attempts"]] == [
         ("left", 1),
     ]
+    assert len(snapshot["node_budgets"]) == 1
+    assert snapshot["node_budgets"][0]["node_id"] == "left"
+    assert snapshot["node_budgets"][0]["status"] == "ACTIVE"
+    assert snapshot["node_budgets"][0]["reserved"]["concurrency"] == 1
+    assert snapshot["node_budgets"][0]["remaining"]["concurrency"] == 1
     assert reopened.get_node(graph.graph_id, graph.revision, "right")["status"] == "READY"
 
 

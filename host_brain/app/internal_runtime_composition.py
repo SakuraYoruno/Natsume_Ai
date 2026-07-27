@@ -17,6 +17,9 @@ from host_brain.app.periodic_durable_continuation import (
     PeriodicDurableContinuation,
 )
 from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
+from host_brain.app.workspace_cleanup_guardian_observer import (
+    WorkspaceCleanupGuardianObserver,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +89,9 @@ def compose_internal_runtime(
         task_runtime,
         runtime_settings,
         canonical_owner,
+        cleanup_observer=WorkspaceCleanupGuardianObserver(
+            guardian=runtime_context_application.composition.guardian,
+        ),
     )
     artifact_store = artifact_store_factory() if workspace_container is not None else None
     scheduler_workers = scheduler_worker_registry_factory()

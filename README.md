@@ -791,6 +791,32 @@ terminal matrix、Domain Pack、OS/container isolation、NE-01 wave
 integration 和 NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`，
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Workspace cleanup 持久 Guardian 与多节点预算证据
+
+app-local cleanup worker 的失败不再只停留在进程内 health。Host composition
+把同一 `RuntimeGuardian` 的受限观察端口注入 worker：一次连续失败序列只写一条
+`agent-workspace-cleanup-continuation` SLO breach，证据使用随机生成且不由异常、
+路径、workspace 或凭据派生的 opaque digest。替换进程完成一次真实 cleanup
+后，会从完整 durable Guardian journal 找出该 observer 拥有的 active breach
+并逐条 resolve；重复成功轮询不会追加事件。Guardian append/resolve 失败时，
+worker 保持 `DEGRADED`，`/health` 与 `/ready` 不能把 cleanup 误报为健康。
+
+通用两节点 Graph 还新增实际剩余时间与并发额度证据。前驱消耗时间后，后继只取得
+durable graph Budget 的剩余毫秒数；worker 超时会写唯一被拒绝的 `time_ms`
+usage，把 Attempt operation 留在 `RECOVERY_REQUIRED`，Graph 保持 `ACTIVE`，
+不会伪造终态或重放 worker。并发调度的首个 ready claim 同时取得
+Attempt-bound child Budget 的 `concurrency=1`，第二个节点保持 `READY`，不是
+依赖进程内 semaphore 自报限流。
+
+基于 `origin/dev@f2dae580df4ff7308deb966f41b605de7b3a37f0` 的 cleanup、
+Guardian、health/readiness、ASGI composition、两节点 time/concurrency Budget
+和聚焦结构回归为 `48 passed in 21.13s`；无 migration。该证据没有实现
+OS 进程 supervisor 自动拉起，也没有完成 DEGRADE/REVIEW 预算语义、一般
+unknown-effect/batch recovery、program-wide Budget、NE-01 波次集成或 NE-07
+真实服务栈。NE-01 保持 `IN_PROGRESS`。PR #176 首个 HEAD 的 9 个失败 job
+已逐个确认 `step_count=0` 且 `runner_name=""`，另有 1 个 nightly job 被跳过，
+因此远程状态记为 `NOT_RUN_ACCOUNT_QUOTA`，不冒充测试通过。
+
 ## NE-01 Workspace cleanup 监督与关停重试
 
 Host 的 app-local Workspace container 现在通过显式 provider 将 cleanup worker
@@ -849,7 +875,7 @@ TaskStore reader 与 Workspace cleanup 都失败关闭，artifact abandoner 不�
 运行。无 migration，基线为
 `origin/dev@921a56b77a05b192e1967efe97b06142a782166c`。本切片只关闭
 “密封后、checkpoint 前签名失败，同时命中 time budget”的单 Plan writer
-路径；一般 time/concurrency policy、其它失败/取消/unknown-effect 组合、
+路径；完整 DEGRADE/REVIEW、其它失败/取消/unknown-effect 组合、
 多 Workspace、NE-01 波次集成和 NE-07 仍未完成，状态保持
 `IN_PROGRESS`。
 
@@ -879,7 +905,7 @@ artifact 删除回调前拒绝并保持 `BLOCKED + ACTIVE Workspace`。
 `24 passed in 67.50s`；两组不相加。无 migration，基线为
 `origin/dev@c7984d9e0bb95a5b0176360c39b2e405e247f63e`。这只关闭单一 Plan
 writer 的 post-COMMIT Budget rejection 与既有多 owner winner 恢复竞态；
-一般时间/并发预算、其它 terminal matrix、多 Workspace、NE-01 波次集成和
+完整 DEGRADE/REVIEW 与取消释放、其它 terminal matrix、多 Workspace、NE-01 波次集成和
 NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`。
 
 ## 当前 NE-01 边界：Plan 写节点签名失败后的多节点结算

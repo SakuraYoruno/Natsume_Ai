@@ -945,7 +945,7 @@ Runtime 的完整六路径回归为 `6 passed in 39.93s`；相邻 Accepted handl
 还证明 response-loss exact replay 不重复签名结算，writer/result 不重跑，
 源 HEAD 不移动，Workspace 最终 `ABANDONED → CLEANED`。本批无 migration，
 基线为 `origin/dev@921a56b77a05b192e1967efe97b06142a782166c`。
-一般 time/concurrency policy、其它交叉 terminal matrix、多 Workspace、
+完整 DEGRADE/REVIEW、其它交叉 terminal matrix、多 Workspace、
 NE-01 wave integration 和 NE-07 仍待完成，NE-01 继续为
 `IN_PROGRESS`。
 
@@ -980,3 +980,29 @@ Acceptance authority。OS/container/tenant isolation、handle-level TOCTOU、
 顺序及 Internal live-report 端口的去重定向集为 `25 passed`。无 migration；
 该切片不证明进程 kill 后的
 自动重启、OS/container isolation、一般 terminal recovery 或 NE-07。
+
+### NE-01：cleanup Guardian journal 与通用多节点 Budget
+
+当前切片在既有 bounded shutdown retry 之上增加两条生产证据：
+
+1. `WorkspaceCleanupContinuationWorker` 只通过注入的 observer 上报
+   `FAILED/RECOVERED`，不导入 Guardian repository，也不拥有第二个 journal；
+2. `WorkspaceCleanupGuardianObserver` 只接受固定 schema、合法 error type、
+   opaque `sha256` identity 和正连续失败数，持久 mutation 仍由 app-local
+   `RuntimeGuardian` 完成；
+3. 同一连续故障只产生一个 breach；replacement process 的成功 pass 会从
+   durable history 解析所有本 observer 的 active breach 并恢复，exact replay
+   不追加事件；
+4. Guardian projection 失败保留 worker 降级状态，health/readiness 以稳定
+   reason code 失败关闭，公开响应不包含异常 detail、路径或 workspace identity；
+5. 两节点 Graph 使用同一 graph Budget：后继仅取得前驱消耗后的剩余
+   `time_ms`，超时写 rejected usage 和 `RECOVERY_REQUIRED` operation；
+6. ready claim 原子创建 `concurrency=1` child reservation，第二节点仍为
+   `READY`，证明约束来自 durable ledger。
+
+定向回归为 `48 passed in 21.13s`，基线
+`origin/dev@f2dae580df4ff7308deb966f41b605de7b3a37f0`，无 migration。
+该切片不宣称 Windows/容器 supervisor 自动重启，也不关闭 DEGRADE/REVIEW、
+一般 batch/unknown-effect recovery、program-wide Budget、波次集成或 NE-07。
+状态仍为 `IN_PROGRESS`。PR #176 的 9 个失败 job 均为零步骤且无 runner，
+另有 1 个 skipped，远程 CI 记为 `NOT_RUN_ACCOUNT_QUOTA`。

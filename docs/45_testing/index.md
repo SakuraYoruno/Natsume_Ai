@@ -607,6 +607,30 @@ provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 cleanup Guardian 与多节点 Budget 定向证据
+
+本切片的去重定向命令覆盖：
+
+- 真实 migration SQLite、`RuntimeEventStore`、runtime scope/owner/lease/fence
+  下的 cleanup failure → Guardian breach → replacement-process recovery；
+- 同一连续失败第二次轮询不新增 Guardian event，成功 exact replay 不重复
+  resolution；
+- 私密路径、凭据、异常正文和 exception type 不进入 durable Guardian journal；
+- Guardian observer 故障时 worker、`/health`、`/ready` 保持降级；
+- ASGI 唯一 runtime context Guardian 注入 Workspace composition；
+- 一般两节点 Graph 的实际 remaining-time timeout、rejected BudgetUsage、
+  child Budget `EXCEEDED` 与 Operation `RECOVERY_REQUIRED`；
+- durable graph concurrency claim 为一时，首节点持有 child reservation，
+  第二节点仍为 `READY`；
+- ASGI 聚焦文件边界与抽离后的 Agent immune scheduler handler。
+
+结果为 `48 passed in 21.13s`，0 fail/skip；基线为
+`origin/dev@f2dae580df4ff7308deb966f41b605de7b3a37f0`，无 migration。
+这不是 NE-01 波次 integration，也没有启动 Docker/Host/Obs/Monitor/Edge/
+Gateway；一般 Budget 与 supervisor 仍未验收。PR #176 首个 HEAD 的 9 个
+失败 job 已逐个验证为零步骤、无 runner，另有 1 个 skipped，记录为
+`NOT_RUN_ACCOUNT_QUOTA`，不计为远程通过。
+
 ## NE-01 Workspace cleanup 健康与关停重试
 
 - `/health` 必须显示 app-local cleanup worker 的 HEALTHY/DEGRADED/STOPPED/

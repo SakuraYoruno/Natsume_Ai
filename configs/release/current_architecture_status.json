@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-27",
   "source_baseline": {
-    "dev_commit": "575beba5d96c614cb325e1920af5411d192cc7b7",
+    "dev_commit": "f2dae580df4ff7308deb966f41b605de7b3a37f0",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_WORKSPACE_CLEANUP_APP_LOCAL_HEALTH_READINESS_AND_BOUNDED_SHUTDOWN_RETRY_OVER_ORIGIN_DEV_575BEBA5D_WITH_PRIOR_SNAPSHOT_AND_TERMINAL_EVIDENCE_RETAINED"
+    "evaluated_source": "NE01_WORKSPACE_CLEANUP_DURABLE_GUARDIAN_INCIDENT_AND_GENERAL_MULTINODE_REMAINING_TIME_CONCURRENCY_BUDGET_OVER_ORIGIN_DEV_F2DAE580D_WITH_PRIOR_SUPERVISION_AND_TERMINAL_EVIDENCE_RETAINED"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_READONLY_RUNTIME_REPO_EXACT_HEAD_EPHEMERAL_SNAPSHOT_NO_LIVE_CHECKOUT_LOCAL_PASS_WORKSPACE_CLEANUP_APP_LOCAL_HEALTH_READINESS_AND_BOUNDED_SAME_HANDLE_SHUTDOWN_RETRY_LIVE_AND_PARTIAL_STARTUP_PRESERVE_LOCAL_PASS_DIRECT_AGENT_SKILL_POST_EXECUTION_ACCEPTANCE_REVIEW_CANCELLATION_AND_SIGNED_SINGLE_NODE_NO_EFFECT_FAILURE_EXACT_WORKSPACE_ABANDON_CLEAN_LOCAL_REAL_SQLITE_GIT_PASS_PLAN_SINGLE_REVIEWED_WORKSPACE_WRITER_PRECHECKPOINT_SIGNED_FAILURE_POST_COMMIT_BUDGET_REJECTION_AND_PRECHECKPOINT_SIGNED_FAILURE_PLUS_TIME_BUDGET_CROSS_TERMINAL_CURRENT_0090_MULTI_OWNER_WINNER_REOPEN_WORKSPACE_CLEANUP_LOCAL_PASS_SCHEDULER_CLOCK_BATCH_AND_CONTROL_POLICY_ACCEPTANCE_PASS_HOST_AND_CONTROL_SURVIVOR_PAGINATION_SAFE_CHECKPOINT_RESERVED_UNKNOWN_EFFECT_SIGNED_REACQUIRE_SIGNED_HANDLER_CRASH_CANCELLATION_BOUND_COMMIT_RELEASE_ACCEPTED_RESERVED_FANOUT_AND_PARALLEL_RETRY_FAILURE_BUDGET_REVIEW_OS_PROCESS_RECOVERY_LOCAL_PASS_AUTOMATIC_UNKNOWN_EFFECT_ATTRIBUTION_DEPLOYED_FEATURE_PROMOTION_WAVE_INTEGRATION_REAL_PROVIDER_AND_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_READONLY_RUNTIME_REPO_EXACT_HEAD_EPHEMERAL_SNAPSHOT_NO_LIVE_CHECKOUT_LOCAL_PASS_WORKSPACE_CLEANUP_APP_LOCAL_HEALTH_READINESS_BOUNDED_SAME_HANDLE_SHUTDOWN_RETRY_AND_DURABLE_RUNTIME_GUARDIAN_FAILURE_RECOVERY_LOCAL_PASS_GENERAL_TWO_NODE_REMAINING_TIME_TIMEOUT_AND_DURABLE_CONCURRENCY_CHILD_CLAIM_LOCAL_PASS_DIRECT_AGENT_SKILL_POST_EXECUTION_ACCEPTANCE_REVIEW_CANCELLATION_AND_SIGNED_SINGLE_NODE_NO_EFFECT_FAILURE_EXACT_WORKSPACE_ABANDON_CLEAN_LOCAL_REAL_SQLITE_GIT_PASS_PLAN_SINGLE_REVIEWED_WORKSPACE_WRITER_PRECHECKPOINT_SIGNED_FAILURE_POST_COMMIT_BUDGET_REJECTION_AND_PRECHECKPOINT_SIGNED_FAILURE_PLUS_TIME_BUDGET_CROSS_TERMINAL_CURRENT_0090_MULTI_OWNER_WINNER_REOPEN_WORKSPACE_CLEANUP_LOCAL_PASS_SCHEDULER_CLOCK_BATCH_AND_CONTROL_POLICY_ACCEPTANCE_PASS_HOST_AND_CONTROL_SURVIVOR_PAGINATION_SAFE_CHECKPOINT_RESERVED_UNKNOWN_EFFECT_SIGNED_REACQUIRE_SIGNED_HANDLER_CRASH_CANCELLATION_BOUND_COMMIT_RELEASE_ACCEPTED_RESERVED_FANOUT_AND_PARALLEL_RETRY_FAILURE_BUDGET_REVIEW_OS_PROCESS_RECOVERY_LOCAL_PASS_OS_PROCESS_SUPERVISOR_AUTOMATIC_UNKNOWN_EFFECT_ATTRIBUTION_COMPLETE_DEGRADE_REVIEW_PROGRAM_WIDE_BUDGET_DEPLOYED_FEATURE_PROMOTION_WAVE_INTEGRATION_REAL_PROVIDER_AND_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -29,7 +29,25 @@
     "status": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_SEVEN_ROUTE_FORMAL_ACCEPTANCE_AND_PARALLEL_MIXED_TERMINAL_PROCESS_RECOVERY_LOCAL_PASS_PROGRAM_INCOMPLETE",
     "commit_binding": "FORMAL_ACCEPTANCE_EVALUATED_COMMIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_BASED_ON_ORIGIN_DEV_C97ED7963AF69B476047A48003DD68146BCF5F29",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_WORKSPACE_CLEANUP_SUPERVISION",
+    "slice": "NE01_WORKSPACE_CLEANUP_GUARDIAN_AND_MULTINODE_BUDGET",
+    "workspace_cleanup_guardian_and_multinode_budget_current_validation": {
+      "status": "LOCAL_REAL_SQLITE_GUARDIAN_AND_GENERAL_TWO_NODE_BUDGET_PASS_NE01_IN_PROGRESS",
+      "base_commit": "f2dae580df4ff7308deb966f41b605de7b3a37f0",
+      "guardian_boundary": "ONE_OPAQUE_DURABLE_SLO_BREACH_PER_CONSECUTIVE_FAILURE_INCIDENT_REPLACEMENT_PROCESS_SUCCESS_RESOLVES_OWNED_ACTIVE_BREACH_EXACT_REPLAY_NO_EVENT",
+      "privacy_boundary": "RANDOM_INCIDENT_DIGEST_NOT_DERIVED_FROM_EXCEPTION_PATH_WORKSPACE_CREDENTIAL_OR_PRIVATE_DETAIL_DURABLE_JOURNAL_CONTAINS_NONE",
+      "health_boundary": "GUARDIAN_APPEND_OR_RESOLVE_FAILURE_KEEPS_WORKER_DEGRADED_AND_HEALTH_READINESS_FAIL_CLOSED",
+      "time_budget_boundary": "TWO_NODE_GRAPH_FINAL_WORKER_RECEIVES_ACTUAL_REMAINING_TIME_TIMEOUT_PERSISTS_REJECTED_USAGE_AND_OPERATION_RECOVERY_REQUIRED_WITHOUT_FAKE_GRAPH_TERMINAL",
+      "concurrency_budget_boundary": "ATOMIC_READY_CLAIM_CREATES_ACTIVE_ATTEMPT_BOUND_CHILD_RESERVATION_WITH_CONCURRENCY_ONE_SECOND_READY_NODE_REMAINS_UNCLAIMED",
+      "targeted_validation": "48_PASSED_IN_21_13_SECONDS",
+      "documentation_and_contract_validation": "58_PASSED",
+      "delivery_gate": "PASS_STATIC_SCAN_AND_DOC_GATE_FAILURES_EMPTY",
+      "architecture_gates": "PASS_1_TO_14_FAILED_GATES_EMPTY_NO_ALLOWLIST_EXPANSION",
+      "migration": "NONE_CURRENT_HEAD_0135",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA_VERIFIED_9_FAILED_JOBS_ZERO_STEPS_BLANK_RUNNER_ONE_SKIPPED_PR_176_FIRST_HEAD",
+      "boundary": "NO_OS_PROCESS_SUPERVISOR_COMPLETE_DEGRADE_REVIEW_GENERAL_UNKNOWN_EFFECT_BATCH_RECOVERY_PROGRAM_WIDE_BUDGET_OR_NE07"
+    },
     "workspace_cleanup_supervision_current_validation": {
       "status": "LOCAL_REAL_CLEANUP_WORKER_AND_APP_LIFECYCLE_PASS_NE01_IN_PROGRESS",
       "base_commit": "575beba5d96c614cb325e1920af5411d192cc7b7",
@@ -4636,6 +4654,8 @@
       "scope": "HOST_CANONICAL_ROUTES",
       "contention_status": "PROVEN_8_16_32_THREADS_AND_CROSS_PROCESS",
       "single_node_time_guard": "POSITIVE_TIME_MS_READS_CANONICAL_DURABLE_REMAINING_ZERO_PRE_DISPATCH_WRITES_TIME_GUARD_REJECTION_TIMEOUT_FIRST_ATOMICALLY_MARKS_EXACT_OPERATION_RECOVERY_REQUIRED_PLUS_OUTBOX_THEN_SETTLES_USAGE_NO_EFFECT_ATTRIBUTION",
+      "multinode_remaining_time_guard": "LOCAL_REAL_SQLITE_TWO_NODE_GRAPH_PASS_PREDECESSOR_ELAPSED_USAGE_REDUCES_FINAL_NODE_WORKER_TIMEOUT_FINAL_REJECTED_TIME_USAGE_PARENT_AND_CHILD_BUDGET_EXCEEDED_OPERATION_RECOVERY_REQUIRED_ROOT_ACCEPTED_GRAPH_ACTIVE_NO_BLIND_REPLAY",
+      "durable_concurrency_claim": "LOCAL_REAL_SQLITE_ATOMIC_READY_CLAIM_PASS_GRAPH_LIMIT_ONE_FIRST_ATTEMPT_BOUND_CHILD_RESERVATION_ACTIVE_RESERVED_CONCURRENCY_ONE_SECOND_NODE_REMAINS_READY",
       "agent_multicall_model_guard": "CHAT_INTERNAL_AND_GOVERNED_AGENT_SKILL_SHARE_EXACT_TASK_BOUND_GUARD_INTERNAL_USES_FROZEN_BUDGET_SKILL_SEALED_AUTHORITY_PRESERVES_CANONICAL_BUDGET_JSON_READONLY_V2_IS_REBUILT_AS_GRAPH_BOUND_V3_EACH_NEXT_CALL_SUBTRACTS_MEASURED_TOKEN_RETRY_COST_AND_ELAPSED_TIME_MISSING_CACHE_DUPLICATE_OR_OVERAGE_FAILS_CLOSED",
       "ordinary_skill_model_guard": "DECLARED_MODEL_BUDGET_REQUIRED_SKILLS_RECEIVE_ONLY_GOVERNED_SKILL_MODEL_BUDGET_RUNTIME_FROM_EXACT_ACTIVE_TASK_BUDGET_UNDECLARED_SKILLS_HAVE_NO_RAW_MODEL_ATTEMPT_PORT_SERVER_ATTESTATION_IS_REBOUND_BEFORE_WORKER_BUDGET_USAGE",
       "readonly_delegate_guard": "ENABLED_PENTEST_AGENT_ONLY_PORT_FREE_READ_ONLY_OUTER_CANONICAL_DISPATCH_PRECHARGED_ONE_TOOL_CALL_INNER_TOKEN_TOOL_RETRY_MODEL_COST_EXACT_ZERO_ATTESTATION_BOUND_TO_COMMAND_GRAPH_REVISION_NODE_ATTEMPT_GRANT_TARGET_ADAPTER_AND_INVOCATION",
@@ -4668,9 +4688,10 @@
         "tests/unit/test_ne01_governed_agent_work_order.py",
         "tests/unit/test_ne01_budget_runtime_contention_retry.py",
         "tests/unit/test_aw02_governed_task_coordinator.py",
-        "tests/unit/test_parallel_settlement_budget_winner_selection.py"
+        "tests/unit/test_parallel_settlement_budget_winner_selection.py",
+        "tests/integration/test_gr03a_governed_durable_dag.py"
       ],
-      "missing": ["concurrency charge", "complete DEGRADE semantics", "complete REVIEW semantics", "general multi-node time budget enforcement", "general unknown-effect attribution and recovery", "program-wide coverage"]
+      "missing": ["complete DEGRADE semantics", "complete REVIEW semantics", "general unknown-effect attribution and recovery", "program-wide coverage"]
     },
     "review_resume": {
       "status": "WIRED",
@@ -5361,6 +5382,7 @@
         "ordered multi-PREPARED consume-COMMITTED Review recovery saga",
         "maintenance and sleep journal",
         "durable SLO breach and acknowledgement journal",
+        "Workspace cleanup uses one opaque durable SLO incident per consecutive failure sequence and replacement-process success resolves owned active breaches without replay",
         "1001+ cursor-paged replay and semantic delta validation",
         "0113 stage-rank and terminal runtime-scope activation identity are physically constrained",
         "Catalog pending reconciliation requires the exact operation snapshot stage and candidate listener identity",
@@ -5388,6 +5410,8 @@
         "host_brain/runtime/degradation_authority.py",
         "host_brain/app/asgi.py",
         "host_brain/app/observability_runtime/service_health_heartbeat.py",
+        "host_brain/app/workspace_cleanup_guardian_observer.py",
+        "host_brain/composition/agent_workspace.py",
         "host_brain/audit/migrations/0112_runtime_context_authority.sql",
         "host_brain/audit/migrations/0113_service_catalog_rollout_authority.sql",
         "host_brain/service_catalog/host_startup.py",
@@ -5396,6 +5420,7 @@
         "tests/unit/test_ne03_runtime_guardian.py",
         "tests/unit/test_ne03_service_catalog_rollout_authority.py",
         "tests/unit/test_ne03_health_guardian_cutover.py",
+        "tests/integration/test_ne01_workspace_cleanup_guardian_observer.py",
         "tests/unit/test_service_health_heartbeat.py",
         "tests/integration/test_ne03_runtime_context_durability.py",
         "tests/integration/test_ne03_service_catalog_host_socket_rollout.py"
@@ -5607,7 +5632,7 @@
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Read-only runtime_repo/current_runtime_repo no longer exposes the live checkout: WorkspacePolicy freezes exact HEAD, exports only tracked regular files into an executor-owned ephemeral snapshot, excludes dirty/untracked/.git state, binds the source commit and cleans the snapshot after result sealing. The durable cleanup worker now exposes a sanitized app-local health/readiness projection; Host shutdown retries the same close handle once and, on exhaustion, preserves Workspace/Task dependencies and stops teardown for both live and partial-startup shapes. Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal and three reviewed risk-4 Direct Agent Skills seal an exact bounded path manifest plus binary patch, revalidate it after Graph Acceptance, create a deterministic accepted HEAD without moving the configured source branch and persist 0116 ACTIVE→ACCEPTED→PROMOTED. Direct Skill payload cannot inject V3, Workspace, Review, Grant, Budget, Lease or fence authority. Success uses only a post-Acceptance promotion intent; failure uses only a bounded immutable terminal descriptor. A route-specific reconciler reopens exact Task, Lease, Operation, projection and canonical terminal evidence before abandonment, while the shared lifecycle cleaner reopens the post-Lease authority version before cleanup CAS. Real SQLite and Git cover Direct success and Verification failure plus one reviewed non-result Plan Workspace writer across graph success, downstream failure, downstream post-review cancellation, pre-checkpoint signed failure, post-COMMIT Budget rejection and the signed-failure/time-budget cross terminal, with zero source-branch mutation and zero terminal replay. This remains partial: additional Plan write ownership, the remaining Direct Skill and Plan terminal matrices, general Budget policy, unknown effect and arbitrary multi-node/batch settlement recovery are not fully proven. Cross-process supervisor restart, RuntimeGuardian durable cleanup incidents, crash-left snapshot startup sweep, handle-level atomic TOCTOU, per-operation preemption, Domain Pack and other Skill injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
+      "reason": "Read-only runtime_repo/current_runtime_repo no longer exposes the live checkout: WorkspacePolicy freezes exact HEAD, exports only tracked regular files into an executor-owned ephemeral snapshot, excludes dirty/untracked/.git state, binds the source commit and cleans the snapshot after result sealing. The durable cleanup worker exposes a sanitized app-local health/readiness projection; Host shutdown retries the same close handle once and, on exhaustion, preserves Workspace/Task dependencies and stops teardown for both live and partial-startup shapes. Cleanup failure and recovery now also enter the existing runtime-scoped RuntimeGuardian as one opaque durable SLO incident per consecutive failure sequence; replacement-process success resolves owned active breaches, while Guardian projection failure keeps readiness degraded. Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal and three reviewed risk-4 Direct Agent Skills seal an exact bounded path manifest plus binary patch, revalidate it after Graph Acceptance, create a deterministic accepted HEAD without moving the configured source branch and persist 0116 ACTIVE→ACCEPTED→PROMOTED. Direct Skill payload cannot inject V3, Workspace, Review, Grant, Budget, Lease or fence authority. Success uses only a post-Acceptance promotion intent; failure uses only a bounded immutable terminal descriptor. A route-specific reconciler reopens exact Task, Lease, Operation, projection and canonical terminal evidence before abandonment, while the shared lifecycle cleaner reopens the post-Lease authority version before cleanup CAS. Real SQLite and Git cover Direct success and Verification failure plus one reviewed non-result Plan Workspace writer across graph success, downstream failure, downstream post-review cancellation, pre-checkpoint signed failure, post-COMMIT Budget rejection and the signed-failure/time-budget cross terminal, with zero source-branch mutation and zero terminal replay. This remains partial: additional Plan write ownership, the remaining Direct Skill and Plan terminal matrices, general Budget policy, unknown effect and arbitrary multi-node/batch settlement recovery are not fully proven. Cross-process OS supervisor restart, crash-left snapshot startup sweep, handle-level atomic TOCTOU, per-operation preemption, Domain Pack and other Skill injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
       "status": "PARTIAL_V2_CODE_BOUNDARY_NO_PRODUCTION_CALLER",

@@ -865,6 +865,33 @@ child/0090/Budget authority，不能以 Graph/Node 的裸状态或上层先验�
 `24 passed in 67.50s`，无 migration；一般 Budget/Workspace recovery 与
 NE-01 仍未完成。
 
+## Workspace cleanup Guardian 与多节点 Budget 当前接线
+
+Workspace cleanup 的 mutation owner 仍是
+`ProcessAgentWorkspaceContainer.cleanup_worker`。生产 composition 只新增一个
+app-local `WorkspaceCleanupGuardianObserver`，它把脱敏状态转换为既有
+`RuntimeGuardian.record_slo_breach()/resolve_slo_breach()` 调用；没有新 Store、
+全局 singleton 或第二 writer。Guardian 事件继续绑定 Host 的
+`runtime_scope_id + owner + lease + fencing token`。cleanup worker health
+同时暴露受枚举约束的 projection 状态；projection 失败会覆盖伪健康结果为
+`DEGRADED`。
+
+```text
+cleanup repository/Git pass
+  ├─ fail → one opaque incident → RuntimeGuardian SLO breach
+  └─ success → reopen owned active breaches → durable resolution
+```
+
+Task Runtime 侧没有新增预算实现分支。一般两节点证据直接经过现有
+`DurableTaskStore`、`BudgetRuntime` 与 node worker timeout：ready claim 在同一
+canonical SQLite authority 下创建 child concurrency reservation；实际 elapsed
+time 由 graph Budget 的剩余额度约束。timeout 只形成 rejected usage 与
+operation recovery hold，不自行推断效果或 Graph 终态。
+
+当前 48 项定向证据只关闭上述接线和两种预算基础行为。跨进程 supervisor 拉起、
+一般批次恢复、DEGRADE/REVIEW、取消释放、unknown-effect 与 NE-01/NE-07
+仍为未完成边界。
+
 ## Workspace cleanup 监督与 Host shutdown
 
 `ProcessAgentWorkspaceContainer` 仍是 cleanup repository/allocator/runtime/worker
