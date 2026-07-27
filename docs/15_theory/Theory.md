@@ -820,6 +820,8 @@ Lease 不是“某个逻辑 worker 名称曾经拥有任务”，而是“某次
 
 恢复发现也必须与恢复授权分离。启动扫描、周期轮询和事件 wake 只能重复询问“是否已有可继续的 durable authority”，不能因时间经过就获得 worker、Lease takeover 或副作用归因权。发现集合超过单页上限时也不能选择“整批不做”或用可变运行状态作 offset：前者会形成容量触发的恢复死锁，后者会在扫描本身推进状态时跳项或重复。正确边界是以 immutable admission identity 做 keyset pagination，将过滤集合摘要写入 cursor，并在消费者端再次验证页内严格递增、页尾 cursor、重复 command/Graph 与总扫描上限；新 admission 落在已越过键之前时留给下一完整周期，而不是篡改当前扫描快照。不同 surface 可以共享发现算法，但必须使用互不重叠、摘要绑定的 surface 集合，并在组合根按 command surface/target 交给唯一 runtime continuation；scanner 不得用虚构的 reconciliation Operation 复用签名恢复端口。生命周期算法属于 Composition，但具体 continuation/supervisor 实现由 App composition 以 factory 注入，不能为了复用而形成 `composition → app` 反向依赖。mandatory boot scan 还必须在所有 runtime 与共享 Effect owner 激活后、任何 Scheduler clock 生产新工作前完成。周期 supervisor 应串行化扫描、合并重复 wake，在关停时停止产生新扫描并等待已进入的持久化事务完成；普通故障可以留存不含敏感正文的类型化 health 并在下一轮重试，但不能通过取消协程截断未知提交边界。当前 Host、RuntimeGroup 控制面与 Internal sealed-checkpoint survivor 都复用原 exact continuation：live Lease、漂移 tuple、未知效果和不满足 sealed lineage 的 checkpoint 仍分别 `DEFERRED`、`BLOCKED` 或 `HOLD`。因此“能跨页发现全部 survivor”与“进程存活期间会再次发现”都不等于“通用恢复已经完成”。
 
+崩溃恢复还必须根据最后一个 durable boundary 决定是否允许重入 worker，而不是把“进程死了”统一等同于“可以重试”。如果旧进程只留下 RUNNING Attempt、过期 Lease、已接受 PRECHARGE 且不存在 Operation，则新进程可在同一 Attempt 上取得更高 fencing token，旧 Lease 必须转为 EXPIRED；如果 Operation 已 COMMITTED 并绑定 exact worker receipt，则新进程只能从 checkpoint 继续 Verification/Acceptance，worker 调用必须为 0。多节点图还必须保留已 ACCEPTED predecessor 的 artifact、receipt 与 Attempt，只处理崩溃节点。真实 spawn→硬退出→新 Host mandatory scan→第三进程零重放的本地证据已覆盖这两个安全子集；RESERVED 但结果未知的 Operation 仍必须进入 reconciliation，不能从这些正向子集推导自动重放许可。
+
 ### 11.3 Verification、Acceptance 与 Receipt 不可合并
 
 - **Verification**：结果是否符合节点的技术断言，例如测试通过、schema 合法、目标文件存在。
