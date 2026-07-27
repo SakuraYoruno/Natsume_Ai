@@ -56,6 +56,12 @@ _INTENT_CONSTRAINT_FIELDS = {
 _LONG_TERM_GOAL_FACT_KEYS = frozenset(
     {"goal.long_term.ref", "long_term_goal.ref"}
 )
+_LONG_TERM_GOAL_CONTROL_EXEMPT_ACTIONS = frozenset(
+    {
+        "operator_long_term_goal_control",
+        "operator_task_review_control",
+    }
+)
 _DURABLE_REF_RE = re.compile(
     r"^[a-z][a-z0-9+.-]{1,31}://"
     r"[A-Za-z0-9][A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,511}$"
@@ -684,6 +690,14 @@ def build_canonical_intent_frame(
         raise IntentAuthorityError("frozen Scene payload differs from Scene journal")
 
     explicit = _explicit_constraints(input_pack)
+    if (
+        str(approved_action_binding.get("action_kind") or "").strip()
+        in _LONG_TERM_GOAL_CONTROL_EXEMPT_ACTIONS
+    ):
+        # A restrictive goal cannot recursively block the authenticated
+        # Review command or its own revoke path.  Those controls remain
+        # Governor-, Review- and ActionPreview-bound.
+        explicit["long_term_goal_constraints"] = ()
     derived = _derived_constraints(
         work_order=work_order,
         node=node,
@@ -782,6 +796,7 @@ class ProductionIntentAuthorityPort:
     scene_resolver: Any | None
     governor_ledger: Any
     policy_identity: IntentPolicyIdentityV1
+    long_term_goal_authority: Any
     policy_constraints: tuple[ContextConstraintV1, ...] = ()
     clock: Callable[[], int] | None = None
 
@@ -792,6 +807,12 @@ class ProductionIntentAuthorityPort:
             raise TypeError("governor_ledger must expose trace_request")
         if type(self.policy_identity) is not IntentPolicyIdentityV1:
             raise TypeError("policy_identity must be IntentPolicyIdentityV1")
+        if not callable(
+            getattr(self.long_term_goal_authority, "active_identity", None)
+        ):
+            raise TypeError(
+                "long_term_goal_authority must expose active_identity"
+            )
         constraints = tuple(self.policy_constraints)
         if any(
             type(item) is not ContextConstraintV1
@@ -998,6 +1019,49 @@ class ProductionIntentAuthorityPort:
         )
         if frame.workspace_id != workspace_id or frame.subject_id != subject_id:
             raise IntentAuthorityError("Intent authority query crossed workspace scope")
+        try:
+            active_goals = self.long_term_goal_authority.active_identity(
+                workspace_id=workspace_id,
+                subject_id=subject_id,
+            )
+        except Exception as exc:
+            raise IntentAuthorityError(
+                "long-term-goal authority lookup failed"
+            ) from exc
+        active_refs = tuple(
+            sorted(str(item) for item in active_goals.get("goal_refs") or ())
+        )
+        active_constraints = tuple(
+            sorted(
+                _json_digest(dict(item))
+                for item in active_goals.get("constraints") or ()
+                if isinstance(item, Mapping)
+            )
+        )
+        frozen_constraints = tuple(
+            sorted(
+                _json_digest(item.to_dict())
+                for item in frame.long_term_goal_constraints
+            )
+        )
+        exempt_action = (
+            str(binding.get("action_kind") or "").strip()
+            in _LONG_TERM_GOAL_CONTROL_EXEMPT_ACTIONS
+        )
+        if (
+            active_refs != frame.long_term_goal_refs
+            or (
+                not exempt_action
+                and (
+                    len(active_constraints)
+                    != len(tuple(active_goals.get("constraints") or ()))
+                    or active_constraints != frozen_constraints
+                )
+            )
+        ):
+            raise IntentAuthorityError(
+                "long-term-goal authority changed after Runtime Context freeze"
+            )
         return frame, scene, dict(binding), current_ms
 
 

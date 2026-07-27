@@ -424,7 +424,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0136_planning_search_cohort_ledger.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal，不拥有 Task 或 activation authority。
+当前连续 SQLite migration head 为 `0137_long_term_goal_authority.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head。后二者都不拥有 Task activation authority。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -506,7 +506,7 @@ activation rollback 或 `aclose` quiescence 任一未完成都返回 `TASK_RUNTI
 
 HTTP Tool runtime 已改为 app-local application 捕获 Secure Ingress、Governor、Host Runtime、Catalog 与 binding resolver；唯一 `ToolBroker(...)` constructor 位于 `host_brain/tools/broker.py`，只由 app-local `GovernedHostToolRuntimeComposition` boundary 构造。原始 Broker direct/bound API 固定拒绝。Frozen Tool Worker 先在单个 SQLite 读事务内原子复验 Graph/Node/Attempt/Lease/Reservation 与 owner/fence/expiry，再分阶段复验 grant/binding；通过后 `before_handler` 才写 `PENDING` marker。旧 MCP direct/nested callback 固定拒绝，兼容 `MCPToolBroker` 只能拒绝；registry 仅保留 read-only scorecard/discovery。普通 ReAct `GovernedToolNode → CapabilityBroker` 仍需独立审计，Tool seed readiness 早于 runtime activation 的 P2 与真实 workspace-bound governed Tool/MCP/Visual executor 仍缺。
 
-当前切片的 full architecture static 仍必须以本提交 fresh Gate 为准，不能沿用历史 `PASS`。Gate 1 的 application/persistence 与 app/composition SCC、生产 locator 和 Tribe fallback 已归零。0115/0129 分别持久化 mode 与 mode-policy，当前 Operator `14/37` 已进入 TaskGraph，旧 Obs sys-mode mutation helper 为 0；Scheduler CRUD HTTP 的双前缀 direct writer 也已归零。首次 Gate 3 对 `acceptance_effects.py:1511` 失败，state-control route predicate 下沉后主 owner 为 1500 行，未扩白名单，最终 Gate 1～14=`PASS`、`failed_gates=[]`。其余 `23/37` Operator 命令、易失 Endocrine 事件缓冲/last state、易失 Tribe bus、其它恢复边界与真实 executor 仍未完成。当前 Scheduler Admin 唯一受影响批次为 `34 passed in 139.12s`，不包含真实 HTTP/network、完整 Host 进程重启、production canary 或 NE-01 wave integration；后者保持 `NOT_RUN_PER_WAVE_POLICY`，远程 CI 保持 `NOT_RUN_ACCOUNT_QUOTA`，NE-01维持`IN_PROGRESS`。
+当前切片的 full architecture static 仍必须以本提交 fresh Gate 为准，不能沿用历史 `PASS`。Gate 1 的 application/persistence 与 app/composition SCC、生产 locator 和 Tribe fallback 已归零。0115/0129 分别持久化 mode 与 mode-policy，0137 持久化长期目标；当前 Operator 为 `16 active / 23 retired / 39 known / blocked=0`，旧 Obs sys-mode mutation helper 为 0；Scheduler CRUD HTTP 的双前缀 direct writer 也已归零。首次 Gate 3 对 `acceptance_effects.py:1511` 失败，state-control route predicate 下沉后主 owner 为 1500 行，未扩白名单，最近一次 Gate 1～14=`PASS`、`failed_gates=[]`，但当前提交仍须 fresh 复跑。易失 Endocrine 事件缓冲/last state、易失 Tribe bus、其它恢复边界与真实 executor 仍未完成。Scheduler Admin 历史受影响批次为 `34 passed in 139.12s`，不包含真实 HTTP/network、完整 Host 进程重启、production canary 或 NE-01 wave integration；远程 CI 保持 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## 5. Command 与 Task 架构
 
@@ -564,7 +564,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0136_planning_search_cohort_ledger.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0135 保持各自既有窄 authority；0136 定义 PlanningSearch cohort evidence/proposal，但不定义执行、Review 或 activation authority，也不取代 0090/0091 的普通 Graph settlement。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0137_long_term_goal_authority.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0135 保持各自既有窄 authority；0136 定义 PlanningSearch cohort evidence/proposal；0137 定义 runtime-fenced 长期目标 event/head。两者都不取代 0090/0091 的普通 Graph settlement。
 
 ## 7. 数字生命状态模型
 
@@ -589,7 +589,7 @@ flowchart LR
     SCENE --> PER --> SURF
 ```
 
-该图表达职责边界。NE-03 当前生产链为 `server observation → 0111 Observation Journal → WorldResolver → SceneResolver → frozen ContextPack → Intent admission → Action Preview authority reopen`：Host ASGI lifespan 在取得 runtime lease/fence 后构造唯一 app-local composition，World 读取 captured head，Scene/Guardian 的 revision 在 0112 中 CAS 封口。Surface、Proactive 和 Task admission 消费同一 Scene revision/digest；production Intent authority 重开 HostCommand/WorkOrder/TaskGraph/Scene/Grant 并持久化 restrict-only receipt set。高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance/Life 在执行点再次重开 Task/Attempt/Lease/Grant/Context/Scene/Guardian；终端仅放行持有 exact proof 的 Acceptance surface Gateway 和 Scheduler-derived Life Edge/Gateway/VTS/MateEngine。旧 reply-performance、Gateway voice、chat cue、37 个 Operator 直写与其他缺证明路径失败关闭，待 NE-01 正向迁移；Preview receipt 本身不产生新权限。`RuntimeGuardian` 的 health heartbeat task、可选 keepalive、observer、probe cache 与 HTTP transport 由每个 Host lifespan 的 `ServiceHealthHeartbeat` 单独拥有，scope close 不会改绑、读取、取消或关闭别的 Host；没有 observer 的 compatibility probe 无权写全局 degradation reducer，独立 Obs health projection/probe registry 只读取 durable ledger/projection，不读取任何跨进程不可见 cache。兼容顶层 helper 不属于 Host production authority。0113 Service Catalog 从 durable head 逐级真实启动到默认目标 ENFORCE，commit-bound 本地 Gate 与 crash takeover 已通过。这不等于整个演化架构完成：长周期目标 owner、Bond 上游原始证据、Windows graceful stop、Governed Operator 功能迁移与部署多实例 canary 仍未验收，World 也不是可模拟未来的规划世界模型。
+该图表达职责边界。NE-03 当前生产链为 `server observation + 0137 active goals → 0111 Observation Journal → WorldResolver → SceneResolver → frozen ContextPack → Intent admission → Action Preview authority reopen`：Host ASGI lifespan 在取得 runtime lease/fence 后构造唯一 app-local composition，World 读取 captured head，Scene/Guardian 的 revision 在 0112 中 CAS 封口。0137 长期目标只能经已验收的 governed Operator Effect 激活/撤销，并以 typed ref/constraint 进入 World；撤销形成 `SOURCE_REVOKED` expiry。Surface、Proactive 和 Task admission 消费同一 Scene revision/digest；production Intent authority 重开 HostCommand/WorkOrder/TaskGraph/Scene/Grant 和 current goal identity，并持久化 restrict-only receipt set；冻结后 goal 漂移的旧图失败关闭。高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance/Life 在执行点再次重开 Task/Attempt/Lease/Grant/Context/Scene/Guardian；Preview receipt 本身不产生新权限。`RuntimeGuardian` 的 health heartbeat task、可选 keepalive、observer、probe cache 与 HTTP transport 由每个 Host lifespan 的 `ServiceHealthHeartbeat` 单独拥有。0113 Service Catalog 从 durable head 逐级真实启动到默认目标 ENFORCE，commit-bound 本地 Gate 与 crash takeover 已通过；当前 `test_ne03_*` 完整波次为 `271 passed, 2 warnings in 332.52s`。这不等于整个演化架构完成：Bond 上游原始证据、Windows graceful stop 与部署多实例 canary 仍未验收，World 也不是可模拟未来的规划世界模型。
 
 安全演化的目标链必须是：运行证据/反馈 → proposal → 隔离实验与 shadow → Review → version activation → rollback point。任何 milestone、后台周期或模型输出直接调用 trait writer 都违反目标 authority。
 
@@ -654,7 +654,7 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 | TaskGraph revision + `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS` | 新生产 Graph 的成功/失败已分别切到 0091/0090 原子终态；公开 accepted replay 要求 Graph COMPLETED 与 graph Budget CONSUMED。历史 legacy Graph 继续只读兼容。two-checkpoint mixed Budget 仅为本地窄证明；bounded fan-out 部署门禁/cancellation 仍 OFF，general、unknown-effect 与任意 multi-node/batch recovery、现实 resolver、外部 inventory/凭据/key lifecycle/canary未完成 |
 | Typed task composition；生产 Service Locator 已物理清零；0112 readiness 与 Catalog SQLite 已归 repository，Obs daemon 由 ports claim + 唯一 lifespan 启停并向 `/health` 暴露 app-local secret-free supervision | 外部 namespace、`host_startup.py`/ASGI concrete Catalog wiring、真实 workspace-bound governed executor、daemon durable SLO journal/Guardian acknowledgement/production canary 仍缺 |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
-| ASGI app-local Runtime Context、0111 World observation/resolver、0112 Scene/Guardian、三消费者 Scene identity、durable Intent admission、Action Preview authority、0113 Host Catalog 五阶段及 commit-bound 本地 Gate | 长周期目标 owner、Bond 上游原始证据、Windows graceful stop、Governed Operator 功能迁移、legacy compatibility adapter 清理与部署多实例 canary 尚未收口 |
+| ASGI app-local Runtime Context、0111 World observation/resolver、0112 Scene/Guardian、0137 长期目标 owner、三消费者 Scene identity、durable Intent admission、Action Preview authority、0113 Host Catalog 五阶段及本地波次 | Bond 上游原始证据、Windows graceful stop、其余 Governed Operator 功能迁移、legacy compatibility adapter 清理与部署多实例 canary 尚未收口 |
 | Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |
 
 过渡期文档必须同时画出两侧，并明确哪一侧拥有 authority。隐藏兼容层会制造虚假的完成结论。

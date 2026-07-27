@@ -18,6 +18,7 @@ from typing import Any
 from host_brain.core.emotion_constants import normalize_emotion_tag
 
 from .context_contracts import (
+    ContextConstraintV1,
     ContextContractError,
     SceneResolutionInputV1,
     WorldFactV2,
@@ -52,6 +53,7 @@ _RUNTIME_CONTEXT_FIELDS = frozenset(
         "scene_resolution_input_v1",
         "scene_decision_v2",
         "scene_identity_v2",
+        "intent_constraints_v1",
     }
 )
 
@@ -145,6 +147,71 @@ def _bounded_risk(value: object) -> int:
     except (TypeError, ValueError):
         result = 1
     return max(1, min(5, result))
+
+
+def _long_term_goal_context(
+    snapshot: WorldSnapshotV2,
+) -> dict[str, Any]:
+    refs = tuple(
+        sorted(
+            {
+                str(item.value).strip()
+                for item in snapshot.facts
+                if item.key == "goal.long_term.ref"
+                and isinstance(item.value, str)
+                and str(item.value).strip()
+            }
+        )
+    )
+    constraints: dict[str, ContextConstraintV1] = {}
+    try:
+        for fact in snapshot.facts:
+            if fact.key != "goal.long_term.constraint":
+                continue
+            raw = fact.value
+            if not isinstance(raw, Mapping):
+                raise RuntimeContextApplicationError(
+                    "World long-term-goal constraint is untyped"
+                )
+            item = ContextConstraintV1(
+                code=raw["code"],
+                disposition=raw["disposition"],
+                origin=raw["origin"],
+                source_ref=raw["source_ref"],
+                reason=raw.get("reason", ""),
+            )
+            if item.origin != "LONG_TERM_GOAL" or item.source_ref not in refs:
+                raise RuntimeContextApplicationError(
+                    "World long-term-goal constraint lacks a bound goal"
+                )
+            existing = constraints.get(item.constraint_digest)
+            if existing is not None and existing != item:
+                raise RuntimeContextApplicationError(
+                    "World long-term-goal constraints conflict"
+                )
+            constraints[item.constraint_digest] = item
+    except (ContextContractError, KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, RuntimeContextApplicationError):
+            raise
+        raise RuntimeContextApplicationError(
+            "World long-term-goal constraint is invalid"
+        ) from exc
+    bound_refs = {item.source_ref for item in constraints.values()}
+    if set(refs) != bound_refs:
+        raise RuntimeContextApplicationError(
+            "active World long-term goal has no restrictive constraint"
+        )
+    return {
+        "schema": "natsume.intent-constraints.v1",
+        "long_term_goal_refs": list(refs),
+        "long_term_goal_constraints": [
+            item.to_dict()
+            for item in sorted(
+                constraints.values(),
+                key=lambda value: value.constraint_digest,
+            )
+        ],
+    }
 
 
 def _relationship_state(bond_summary: Mapping[str, Any] | None) -> str:
@@ -348,6 +415,7 @@ class RuntimeContextApplicationService:
                 "revision": scene.revision,
                 "decision_digest": scene.decision_digest,
             },
+            "intent_constraints_v1": _long_term_goal_context(snapshot),
         }
         return self.require_frozen(payload)
 
@@ -447,6 +515,23 @@ class RuntimeContextApplicationService:
         if reopened_world.to_dict() != world:
             raise RuntimeContextApplicationError(
                 "frozen World snapshot is not canonical"
+            )
+        canonical_goal_context = _long_term_goal_context(canonical_world)
+        frozen_goal_context = payload.get("intent_constraints_v1")
+        if frozen_goal_context is None:
+            # Compatibility is limited to historical contexts with no goal
+            # authority at all.  A non-empty goal set must always carry its
+            # exact constraint projection.
+            if canonical_goal_context["long_term_goal_refs"]:
+                raise RuntimeContextApplicationError(
+                    "frozen long-term-goal constraints are missing"
+                )
+        elif (
+            not isinstance(frozen_goal_context, Mapping)
+            or dict(frozen_goal_context) != canonical_goal_context
+        ):
+            raise RuntimeContextApplicationError(
+                "frozen long-term-goal constraints drifted"
             )
         world_identity = _mapping(payload.get("world_identity_v2"))
         if world_identity != {

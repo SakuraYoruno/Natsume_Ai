@@ -29,6 +29,7 @@ class RuntimeContextComposition:
 
     event_store: Any
     observation_port: Any
+    long_term_goal_authority: Any
     world_resolver: WorldResolver
     world_observation_application: RuntimeWorldObservationApplication
     scene_resolver: SceneResolver
@@ -42,6 +43,7 @@ def build_runtime_context_composition(
     *,
     event_store: Any,
     observation_port: Any,
+    long_term_goal_authority: Any,
     runtime_scope_id: str,
     runtime_authority_provider: Any,
     intent_policy_identity: IntentPolicyIdentityV1,
@@ -75,6 +77,14 @@ def build_runtime_context_composition(
     if not callable(getattr(observation_port, "current_expiry_authority_ref", None)):
         raise RuntimeContextCompositionError(
             "Runtime context requires explicit World expiry authority"
+        )
+    if not callable(
+        getattr(long_term_goal_authority, "list_active_world_facts", None)
+    ) or not callable(
+        getattr(long_term_goal_authority, "active_identity", None)
+    ):
+        raise RuntimeContextCompositionError(
+            "Runtime context requires the durable long-term-goal authority"
         )
     if intent_authority_port is not None and intent_authority_port_factory is not None:
         raise RuntimeContextCompositionError(
@@ -129,12 +139,14 @@ def build_runtime_context_composition(
     return RuntimeContextComposition(
         event_store=event_store,
         observation_port=observation_port,
+        long_term_goal_authority=long_term_goal_authority,
         world_resolver=world_resolver,
         world_observation_application=RuntimeWorldObservationApplication(
             event_store=event_store,
             observation_port=observation_port,
             world_resolver=world_resolver,
             environment_observation_provider=environment_provider,
+            long_term_goal_authority=long_term_goal_authority,
         ),
         scene_resolver=scene_resolver,
         intent_arbiter=IntentArbiter(

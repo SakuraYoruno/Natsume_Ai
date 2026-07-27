@@ -618,8 +618,10 @@
 - T-NE03-GUARDIAN-02：Recovery Review 使用 durable PREPARED→consume→COMMITTED；consume 后 append 失败或进程重启必须按 deterministic result ref 对账，限制在 COMMITTED 前不得解除。
 - T-NE03-GUARDIAN-03：`ServiceHealthHeartbeat` 必须由每个 Host ASGI lifespan 独占。两个 scope 可分别启动并绑定不同 Guardian observer；关闭一个 scope 只能 cancel/join 自己的 heartbeat/keepalive task，并关闭自身 probe cache/HTTP transport，不能改绑、读取、取消或关闭另一个 scope 的资源。模块不得再存在 `_heartbeat_task` 或 `_heartbeat_degradation_observer`；没有 injected observer 的 compatibility probe 只写自身兼容 cache，不能回退 global degradation reducer。兼容顶层 helper 不属于 Host production authority，且不得把该定向测试写成完整 Health 隔离或 NE-03 完成。
 - T-NE03-GUARDIAN-04：独立 Obs health projection 与 `obs_routes_core` probe registry 只能读取 durable ledger/projection；即使 compatibility helper 或 Host 本地 cache 存在，也不得读取 `service_health_heartbeat.get_cached()`。Host lifespan 的 cache/transport 已为 app-local，但它们仍是非 durable probe state，不能充当跨进程真相。
-- T-NE03-PREVIEW-01：Action Preview 只能由 app-local authority 重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、node-bound Grant、ContextPack/Scene 与 Acceptance Effect claim；caller 自报、future issue、TTL、response-loss replay、旧 WorkOrder/effect、origin 超过 1000 条和 derived scope/args 扩大均 fail-closed。Derived terminal 必须再次递归重开 origin Attempt/Lease；Acceptance surface 只允许合同绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝。Scheduler Proactive 必须把 typed proof、固定 request ID 和 exact message 贯穿到终端；EdgeCommandPusher 的构造/from_env/init/set 均不得关闭门禁。Raw Edge HTTP transport 与低层 Embodiment command port 必须为模块私有且不出现在 `__all__`。Scheduler-derived Life Edge/Gateway/VTS/MateEngine 与公开具身 submit/enqueue必须覆盖 exact terminal 正向、无 proof 零副作用和篡改拒绝；已 claim 的 durable outbox 只能经私有 submitter 执行。旧 reply-performance、Gateway voice、Avatar 直通以及 37 个尚未进入 Governed TaskGraph 的 Operator 写命令必须在副作用前失败关闭，且不得把安全阻断记为功能迁移。
+- T-NE03-PREVIEW-01：Action Preview 只能由 app-local authority 重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、node-bound Grant、ContextPack/Scene 与 Acceptance Effect claim；caller 自报、future issue、TTL、response-loss replay、旧 WorkOrder/effect、origin 超过 1000 条和 derived scope/args 扩大均 fail-closed。Derived terminal 必须再次递归重开 origin Attempt/Lease；Acceptance surface 只允许合同绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝。Scheduler Proactive 必须把 typed proof、固定 request ID 和 exact message 贯穿到终端；EdgeCommandPusher 的构造/from_env/init/set 均不得关闭门禁。Raw Edge HTTP transport 与低层 Embodiment command port 必须为模块私有且不出现在 `__all__`。Scheduler-derived Life Edge/Gateway/VTS/MateEngine 与公开具身 submit/enqueue必须覆盖 exact terminal 正向、无 proof 零副作用和篡改拒绝；已 claim 的 durable outbox 只能经私有 submitter 执行。旧 reply-performance、Gateway voice、Avatar 直通以及未登记或已退役 Operator 命令必须在副作用前失败关闭，且不得把安全阻断记为功能迁移。
 - T-NE03-CATALOG-01：0113 Service Catalog 必须从 durable head 严格经历 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE；每阶段启动真实 socket/Uvicorn 并核验 Host/Guardian identity，中间候选关闭、最终候选保留。Pending listener 必须精确绑定 operation ID、snapshot、stage 与 candidate，其他健康 listener 不能推进 head；`REGISTERED` 崩溃必须以同 operation ID 恢复。候选停止失败或 listener 仍占用时保持待对账，不得写伪 `ROLLED_BACK`。覆盖 target 停点/恢复、双 coordinator、非法 operation receipt 状态机、terminal-first、append response-loss、错误/正确双 listener reconciliation、stage/rank 与 runtime-scope/activation identity SQL tamper、rollback_ref replay drift、stage skip/regression、exact replay 与 ENFORCE 重启。
+- T-NE03-LONG-TERM-GOAL-01：0137 必须在同一 SQLite UoW 追加 immutable event 并推进 canonical head；repository 与 trigger 都要复验 Host runtime scope/owner/lease/fence、expected version、previous digest 与 accepted ingress identity。覆盖 activate、revoke、exact replay、payload drift、跨 workspace、stale/released fence、append/head fault rollback、restart 和 tamper；`:memory:`/URI store 必须拒绝。
+- T-NE03-LONG-TERM-GOAL-02：只有 Secure Ingress→Governor→TaskGraph→Review→Action Preview→Acceptance Effect 可写 0137；World 只投影 active goal 的 typed ref/constraint，撤销/替换必须追加 `SOURCE_REVOKED` expiry。ContextPack/IntentFrame 冻结 exact refs/constraints，Production Intent authority 在 admission 重开 current identity，冻结后漂移的旧图失败关闭。目标控制与 Task Review control 可跳过 goal constraint 本身以防递归锁死，但不得跳过 Governor、Grant、Review、Preview 或 Acceptance。
 
 当前执行记录（由 `artifacts/local-gates/<final-head-sha>/` 绑定 #84 最终 HEAD）：NE-03 wave `239 passed`；既有受影响回归 `101 passed`；raw transport 私有化后回归 `36 passed`；Service Catalog 关闭加固回归 `6 passed`；独立审计复跑 Guardian/Catalog `42 passed`、ActionPreview/Edge `47 passed`。production CLI Host 在隔离 runtime 环境和 fresh SQLite 上逐级完成 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，生成 5 个 operation / 15 个 receipt，`/health` 为 HTTP 200、`status=OK`、`service_identity=host.main/http`，Guardian durability=`READY`、fencing token=5。Windows Ctrl+Break 清除进程/端口且没有伪造 lease release；旧 lease 到期后，同一 SQLite/端口/快照由 coordinator fence=2 接管，恢复 ENFORCE/health OK，Guardian fence=6，ledger 累计 6 operation / 18 receipt。该项是 crash-fenced recovery，不是 graceful-stop PASS；另以故障注入证明显式 `HostCatalogRuntime.close()` 即使 candidate stop 报错也继续释放 authority/reservation，Windows 优雅停止脚本留到 NE-07。commit-bound Gate 已成功退出；部署多实例 canary 未执行，NE-03 以 `LOCAL_ACCEPTANCE_PASSED_WITH_KNOWN_BOUNDARIES` 合入，当前活动波次为 `NE-01_IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -628,6 +630,22 @@
 2026-07-24 corrective slice：新增加的 scope-local transport/cache 覆盖以 `tests/unit/test_service_health_heartbeat.py` 为核心，验证两个 Host scope 的 task/observer/probe state/transport 不互相影响，关闭一方只关闭一方的 transport；rebase 到 `dev@06ad32e47` 后，与健康路由、启动边界、Obs durable projection、内部 HTTP 的去重定向批次为 `54 passed in 8.55s`。这取代上一段对“cache/HTTP transport 未 app-local”的边界描述，但不替代真实多实例、Windows graceful stop、NE-03 完成或 NE-07 全服务栈验收；远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 2026-07-24 NE-03 本地波次集成：最初把所有 SQLite/Scene/Intent/Preview 文件放入一个 120 秒命令，因超时终止且**不计通过**；随后只为符合本地时限按不重叠逻辑组完整重跑。rebase 到 `dev@06ad32e47` 后，`test_ne03_runtime_context_durability.py` 的 7 项（包括 Scene/Guardian 1001+ 分页重放、schema、composition、stale-head、lease takeover、并发 head）为 `7 passed in 72.02s`；`test_ne03_runtime_guardian_sqlite.py` 的 cursor paging、双实例竞争与 append response-loss 为 `3 passed in 29.65s`；Context Application、Action Preview、Scene Resolver 与 Production Intent Authority 为 `136 passed in 125.32s`。这是 local SQLite/contract evidence，不能代替真实多实例、Windows graceful stop、NE-03 封板或 NE-07 全服务栈验收；远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+2026-07-28 0137 corrective slice 的定向证据分开记录，不相加冒充整波：
+长期目标 repository/World revoke 为 `9 passed in 7.55s`；
+Production Intent/Context 为 `59 passed in 114.77s`；Obs/Security/Release
+为 `62 passed in 29.05s`；真实 Governed Operator activate→revoke→exact
+replay 为 `1 passed in 115.13s`。migration 兼容组首次为
+`43 passed / 1 failed`，唯一失败是历史 0135 测试错误使用 latest catalog
+却仍断言 head=135；限定该测试只加载 through-135 catalog 后，修复项与
+0137 repository 复跑为 `3 passed in 7.50s`。随后全部 `test_ne03_*`
+单元/集成文件一次完整运行得到
+`271 passed, 2 warnings in 332.52s`；warning 为 websockets deprecated，
+不计跳过或失败。修复历史夹具后，migration/Core Release 最终整组为
+`48 passed in 81.34s`；fresh 架构 Gate 1～14 为
+`PASS / failed_gates=[]`，且未扩大 allowlist；统一 `static_scan,doc_gate`
+为 `PASS / failures=[] in 109s`。部署 canary、Windows graceful stop 与
+NE-07 真实服务栈仍未运行，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 NE-01 第三个切片及其 Tool/MCP authority 收口的强制测试矩阵：Obs locator retirement、ReAct/Tool/MCP旧authority封口、Operator与Tool HTTP治理链仍按原 commit-bound 证据解释，不外推为真实生产executor。该历史矩阵完成时 atomic/fan-out/cancellation/reconciliation均关闭；当前切片已将新生产Graph切到atomic default，但bounded fan-out、cancellation与reconciliation仍保持关闭。历史证据不得被改写成当前能力，也不能把测试adapter写成生产能力。
 
@@ -762,7 +780,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
 - T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0136，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0137，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 
@@ -1267,7 +1285,8 @@ static/doc Gate 和架构 Gate 1～14 通过。无 migration，NE-01 保持
   `DEGRADED/FAILED` 且不泄漏异常正文；不得因此删除 coordination evidence。
 - T-NE01-RPQ-07：`review_continuation_store.py` 必须继续小于 1,500 行，
   poison helper 不得拥有连接或 Review/Task writer；该历史切片绑定 0135，
-  当前 0136 只增加 PlanningSearch cohort evidence，不改变本测试边界。
+  0136 只增加 PlanningSearch cohort evidence，当前 0137 只增加长期目标
+  authority，均不改变本测试边界。
 
 当前最终受影响集合为 `88 passed in 116.19s`；文档、交付元数据与 coverage
 合同为 `39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过。该 Gate 关闭有界扫描饥饿和 durable

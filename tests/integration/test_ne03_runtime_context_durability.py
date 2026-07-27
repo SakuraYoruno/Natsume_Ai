@@ -37,6 +37,16 @@ from host_brain.runtime.context_authority_schema import (
 NOW = 1_900_000_000_000
 
 
+class _EmptyLongTermGoalAuthority:
+    @staticmethod
+    def list_active_world_facts(**_kwargs):
+        return ()
+
+    @staticmethod
+    def active_identity(**_kwargs):
+        return {"goal_refs": [], "constraints": []}
+
+
 def _store(tmp_path: Path, name: str, *, clock=lambda: NOW) -> RuntimeEventStore:
     db_path = tmp_path / name
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -230,6 +240,7 @@ def test_runtime_context_composition_requires_real_schema_and_typed_ports(
     composition = build_runtime_context_composition(
         event_store=store,
         observation_port=ObservationPort(),
+        long_term_goal_authority=_EmptyLongTermGoalAuthority(),
         runtime_scope_id="runtime-scope-context",
         runtime_authority_provider=authority_provider,
         intent_authority_port=IntentPort(),

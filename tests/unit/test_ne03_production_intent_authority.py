@@ -105,6 +105,18 @@ class _SceneResolver:
         return self.scene
 
 
+class _EmptyLongTermGoalAuthority:
+    def active_identity(self, **_kwargs):
+        return {
+            "goal_refs": [],
+            "constraints": [],
+            "authority_digest": "sha256:" + "0" * 64,
+        }
+
+
+EMPTY_GOALS = _EmptyLongTermGoalAuthority()
+
+
 def _authority_fixture(*, expires_at_ms: int = 10_000, risk_level: int = 1):
     snapshot = WorldSnapshotV2(
         workspace_id="workspace-a",
@@ -291,6 +303,7 @@ def test_production_intent_authority_reopens_all_three_durable_owners() -> None:
         scene_resolver=None,
         governor_ledger=ledger,
         policy_identity=POLICY,
+        long_term_goal_authority=EMPTY_GOALS,
         clock=lambda: NOW_MS,
     )
     port.bind_scene_resolver(resolver)
@@ -354,6 +367,7 @@ def test_production_intent_authority_rejects_cross_workspace_query() -> None:
         scene_resolver=None,
         governor_ledger=ledger,
         policy_identity=POLICY,
+        long_term_goal_authority=EMPTY_GOALS,
         clock=lambda: NOW_MS,
     )
     port.bind_scene_resolver(_SceneResolver(scene))
@@ -621,6 +635,73 @@ def test_long_term_goal_refs_are_owned_by_frozen_world_evidence() -> None:
         )
 
 
+def test_production_intent_authority_rejects_goal_changed_after_freeze() -> None:
+    record, original_scene, _binding, ledger = _authority_fixture()
+    work_order = record["work_order"]
+    assert isinstance(work_order, WorkOrderV3)
+    frozen_goal = "long-term-goal://workspace-a/person-a/reliable-assistant/v1"
+    snapshot = WorldSnapshotV2(
+        workspace_id="workspace-a",
+        subject_id="person-a",
+        revision=1,
+        facts=(
+            WorldFactV2(
+                workspace_id="workspace-a",
+                subject_id="person-a",
+                key="goal.long_term.ref",
+                value=frozen_goal,
+                source_ref="runtimeevent://sha256/" + "8" * 64,
+                confidence=1.0,
+                observed_at_ms=1_000,
+                expires_at_ms=10_000,
+                conflict_group="long-term-goal",
+                revision=1,
+            ),
+        ),
+    )
+    scene = replace(
+        original_scene,
+        world_snapshot_digest=snapshot.snapshot_digest,
+        decision_digest="",
+    )
+    input_pack = deepcopy(work_order.input_pack)
+    input_pack["world_snapshot_v2"] = snapshot.to_dict()
+    input_pack["world_identity_v2"] = {
+        "workspace_id": snapshot.workspace_id,
+        "subject_id": snapshot.subject_id,
+        "revision": snapshot.revision,
+        "snapshot_digest": snapshot.snapshot_digest,
+    }
+    input_pack["scene_decision_v2"] = scene.to_dict()
+    input_pack["scene_identity_v2"]["decision_digest"] = scene.decision_digest
+    record["work_order"] = replace(work_order, input_pack=input_pack)
+    port = ProductionIntentAuthorityPort(
+        command_repository=_CommandRepository(record),
+        scene_resolver=_SceneResolver(scene),
+        governor_ledger=ledger,
+        policy_identity=POLICY,
+        # Empty current identity represents revocation after Context freeze.
+        long_term_goal_authority=EMPTY_GOALS,
+        clock=lambda: NOW_MS,
+    )
+
+    with pytest.raises(
+        IntentAuthorityError,
+        match="long-term-goal authority changed",
+    ):
+        port.resolve_intent_authority(
+            workspace_id="workspace-a",
+            subject_id="person-a",
+            task_graph_id="graph-a",
+            graph_revision=1,
+            task_node_id="node-a",
+            scene_id=scene.scene_id,
+            scene_revision=scene.revision,
+            scene_decision_digest=scene.decision_digest,
+            grant_ref=record["command"].governor_grant_ref,  # type: ignore[union-attr]
+        )
+
+
 def test_production_intent_authority_rejects_expired_durable_binding() -> None:
     record, scene, _binding, ledger = _authority_fixture(expires_at_ms=NOW_MS)
     port = ProductionIntentAuthorityPort(
@@ -628,6 +709,7 @@ def test_production_intent_authority_rejects_expired_durable_binding() -> None:
         scene_resolver=_SceneResolver(scene),
         governor_ledger=ledger,
         policy_identity=POLICY,
+        long_term_goal_authority=EMPTY_GOALS,
         clock=lambda: NOW_MS,
     )
 
@@ -653,6 +735,7 @@ def test_production_intent_authority_cannot_rebind_scene_owner() -> None:
         scene_resolver=first,
         governor_ledger=ledger,
         policy_identity=POLICY,
+        long_term_goal_authority=EMPTY_GOALS,
     )
 
     with pytest.raises(IntentAuthorityError, match="already bound"):
@@ -711,6 +794,7 @@ def _intent_admission_verifier(
         scene_resolver=resolver,
         governor_ledger=ledger,
         policy_identity=POLICY,
+        long_term_goal_authority=EMPTY_GOALS,
         clock=lambda: clock[0],
     )
     verifier = DurableIntentAdmissionVerifier(

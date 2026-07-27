@@ -60,6 +60,7 @@ def build_production_acceptance_effect_handlers(
     *,
     mode_transition_service_provider: Callable[[], Any] | None = None,
     scheduler_command_service_provider: Callable[[], Any] | None = None,
+    long_term_goal_authority_provider: Callable[[], Any] | None = None,
     scheduler_operation_handler: Callable[[Mapping[str, Any]], Any] | None = None,
     internal_result_commit_handler: Callable[[Mapping[str, Any]], Any] | None = None,
     agent_workspace_artifact_handler: Callable[[Mapping[str, Any]], Any] | None = None,
@@ -118,6 +119,7 @@ def build_production_acceptance_effect_handlers(
         if (
             mode_transition_service_provider is None
             or secure_ingress_authority_resolver is None
+            or long_term_goal_authority_provider is None
         ):
             raise TypeError(
                 "Operator state control requires all app-local dependencies"
@@ -129,6 +131,9 @@ def build_production_acceptance_effect_handlers(
                 ),
                 mode_transition_service_provider=(
                     mode_transition_service_provider
+                ),
+                long_term_goal_authority_provider=(
+                    long_term_goal_authority_provider
                 ),
                 secure_ingress_authority_resolver=(
                     secure_ingress_authority_resolver

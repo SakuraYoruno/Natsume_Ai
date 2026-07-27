@@ -39,6 +39,7 @@ ACTION_ALLOWLIST = {
     "operator_task_review_control",
     "operator_scheduler_state_control",
     "operator_host_mode_policy_control",
+    "operator_long_term_goal_control",
     "work_code",
     "work_translate",
 }
@@ -57,6 +58,7 @@ ACTION_TARGET_RULES = {
     "operator_task_review_control": "task_runtime",
     "operator_scheduler_state_control": "system",
     "operator_host_mode_policy_control": "system",
+    "operator_long_term_goal_control": "system",
 }
 
 REQUIRED_FIELDS: dict[str, type] = {
@@ -250,6 +252,24 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
         "optional": {
             "rules": dict,
             "event_type": str,
+        },
+    },
+    "operator_long_term_goal_control": {
+        "required": {
+            "text": str,
+            "route": str,
+            "target_id": str,
+            "operator_command_id": str,
+            "request_id": str,
+            "operator_actor_id": str,
+            "observed_at_ms": int,
+            "workspace_id": str,
+            "subject_id": str,
+            "goal_id": str,
+            "expected_version": int,
+        },
+        "optional": {
+            "constraints": list,
         },
     },
     "work_code": {"required": {"text": str}, "optional": {}},

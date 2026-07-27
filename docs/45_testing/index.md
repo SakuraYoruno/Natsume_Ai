@@ -1084,3 +1084,26 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   Review/activation 尚未执行，状态为
   `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### NE-03 0137 长期目标 authority
+
+- `0137_long_term_goal_authority.sql` 建立 runtime-fenced、append-only 的
+  workspace/subject-scoped goal event/head；accepted operation exact replay
+  不再次进入 writer。
+- World 只投影 active goal 的 typed ref/constraint，撤销或替换追加
+  `SOURCE_REVOKED` expiry；Intent admission 重开 current goal identity，
+  冻结后漂移失败关闭。
+- 定向证据分别为 repository/World `9 passed in 7.55s`、
+  Production Intent/Context `59 passed in 114.77s`、
+  Obs/Security/Release `62 passed in 29.05s`，以及完整 Governed Operator
+  activate→revoke→replay `1 passed in 115.13s`；这些批次不相加。
+- migration 兼容组如实保留一次历史 0135 head 断言失败，限定 through-135
+  catalog 后修复项与 0137 repository 复跑 `3 passed in 7.50s`。
+- 全部 `test_ne03_*` 单元/集成文件一次完整运行得到
+  `271 passed, 2 warnings in 332.52s`；warning 为 websockets deprecated。
+- 修复历史夹具后，migration/Core Release 最终整组为
+  `48 passed in 81.34s`；fresh 架构 Gate 1～14 为
+  `PASS / failed_gates=[]`，且未扩大 allowlist；统一
+  `static_scan,doc_gate` 为 `PASS / failures=[] in 109s`。
+- 部署多实例 canary、Windows graceful stop 与 NE-07 真实服务栈尚未运行，
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

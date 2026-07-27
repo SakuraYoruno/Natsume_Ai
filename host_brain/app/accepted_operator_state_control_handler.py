@@ -13,6 +13,7 @@ from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
 )
 from host_brain.task_runtime.operator_state_control_support import (
+    LONG_TERM_GOAL_CONTROL_COMMAND_IDS,
     OPERATOR_STATE_CONTROL_EFFECT_TYPE,
     SCHEDULER_ADMIN_CONTROL_COMMAND_IDS,
     STATE_CONTROL_COMMAND_IDS,
@@ -34,6 +35,7 @@ class AcceptedOperatorStateControlHandler:
         *,
         scheduler_command_service_provider: Callable[[], Any],
         mode_transition_service_provider: Callable[[], Any],
+        long_term_goal_authority_provider: Callable[[], Any],
         secure_ingress_authority_resolver: Any,
     ) -> None:
         if not callable(scheduler_command_service_provider):
@@ -43,6 +45,10 @@ class AcceptedOperatorStateControlHandler:
         if not callable(mode_transition_service_provider):
             raise TypeError(
                 "mode_transition_service_provider must be callable"
+            )
+        if not callable(long_term_goal_authority_provider):
+            raise TypeError(
+                "long_term_goal_authority_provider must be callable"
             )
         if not callable(
             getattr(
@@ -54,6 +60,7 @@ class AcceptedOperatorStateControlHandler:
             raise TypeError("Secure Ingress authority resolver is required")
         self._scheduler_provider = scheduler_command_service_provider
         self._mode_provider = mode_transition_service_provider
+        self._long_term_goal_provider = long_term_goal_authority_provider
         self._authority_resolver = secure_ingress_authority_resolver
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -64,6 +71,11 @@ class AcceptedOperatorStateControlHandler:
                 in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS
             ):
                 await self._apply_scheduler(value)
+            elif (
+                value["operator_command_id"]
+                in LONG_TERM_GOAL_CONTROL_COMMAND_IDS
+            ):
+                self._apply_long_term_goal(value)
             else:
                 self._apply_mode_policy(value)
         except Exception as exc:
@@ -85,6 +97,9 @@ class AcceptedOperatorStateControlHandler:
             value,
             scheduler_command_service_provider=self._scheduler_provider,
             mode_transition_service_provider=self._mode_provider,
+            long_term_goal_authority_provider=(
+                self._long_term_goal_provider
+            ),
             secure_ingress_authority_resolver=self._authority_resolver,
         )
 
@@ -166,6 +181,33 @@ class AcceptedOperatorStateControlHandler:
             observed_at_ms=int(args["observed_at_ms"]),
         )
 
+    def _apply_long_term_goal(self, value: Mapping[str, Any]) -> None:
+        args = dict(value["state_args"])
+        service = self._long_term_goal_service()
+        apply = getattr(service, "apply_accepted_transition", None)
+        if not callable(apply):
+            raise RuntimeError(
+                "APP_LOCAL_LONG_TERM_GOAL_CONTROL_UNAVAILABLE"
+            )
+        result = apply(
+            authority=_reopen_authority(
+                value,
+                resolver=self._authority_resolver,
+            ),
+            command_id=str(value["operator_command_id"]),
+            operation_id=str(value["operation_id"]),
+            workspace_id=str(args["workspace_id"]),
+            subject_id=str(args["subject_id"]),
+            goal_id=str(args["goal_id"]),
+            expected_version=int(args["expected_version"]),
+            constraints=tuple(args.get("constraints") or ()),
+            observed_at_ms=int(args["observed_at_ms"]),
+        )
+        if inspect.isawaitable(result):
+            raise RuntimeError(
+                "APP_LOCAL_LONG_TERM_GOAL_CONTROL_MUST_BE_TRANSACTIONAL"
+            )
+
     def _scheduler_service(self) -> Any:
         service = self._scheduler_provider()
         if service is None:
@@ -178,12 +220,21 @@ class AcceptedOperatorStateControlHandler:
             raise RuntimeError("APP_LOCAL_HOST_MODE_SERVICE_UNAVAILABLE")
         return service
 
+    def _long_term_goal_service(self) -> Any:
+        service = self._long_term_goal_provider()
+        if service is None:
+            raise RuntimeError(
+                "APP_LOCAL_LONG_TERM_GOAL_SERVICE_UNAVAILABLE"
+            )
+        return service
+
 
 async def resolve_operator_state_control_outcome(
     value: Mapping[str, Any],
     *,
     scheduler_command_service_provider: Callable[[], Any],
     mode_transition_service_provider: Callable[[], Any],
+    long_term_goal_authority_provider: Callable[[], Any],
     secure_ingress_authority_resolver: Any,
 ) -> dict[str, Any]:
     """Read one exact canonical result without invoking its writer."""
@@ -191,7 +242,25 @@ async def resolve_operator_state_control_outcome(
     payload = dict(value or {})
     command_id = str(payload.get("operator_command_id") or "")
     args = dict(payload.get("state_args") or {})
-    if command_id in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
+    if command_id in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
+        service = long_term_goal_authority_provider()
+        resolver = getattr(service, "resolve_accepted_transition", None)
+        if not callable(resolver):
+            raise AcceptanceEffectOutcomeUnknown(
+                "long-term-goal accepted-operation reader is unavailable"
+            )
+        operation = resolver(operation_id=str(payload["operation_id"]))
+        if inspect.isawaitable(operation):
+            operation = await operation
+        if operation is None:
+            raise AcceptanceEffectOutcomeUnknown(
+                "long-term-goal state control has no exact durable operation"
+            )
+        identity, public = _long_term_goal_operation_identity(
+            payload,
+            operation,
+        )
+    elif command_id in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
         service = scheduler_command_service_provider()
         if command_id == "scheduler.task.publish":
             method = "resolve_accepted_publish_definition"
@@ -262,6 +331,85 @@ async def resolve_operator_state_control_outcome(
         "operator_command_id": command_id,
         "operation_id": payload["operation_id"],
         **public,
+    }
+
+
+def _long_term_goal_operation_identity(
+    value: Mapping[str, Any],
+    operation: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    args = dict(value["state_args"])
+    raw = (
+        dict(operation)
+        if isinstance(operation, Mapping)
+        else dict(operation.to_dict())
+        if callable(getattr(operation, "to_dict", None))
+        else {}
+    )
+    command_id = str(value["operator_command_id"])
+    expected_status = (
+        "ACTIVE" if command_id == "long_term_goal.activate" else "REVOKED"
+    )
+    constraints = tuple(
+        dict(item)
+        for item in raw.get("constraints") or ()
+        if isinstance(item, Mapping)
+    )
+    expected_specs = tuple(
+        sorted(
+            (
+                str(item.get("code") or "").strip().upper(),
+                str(item.get("disposition") or "").strip().upper(),
+                str(item.get("reason") or "").strip(),
+            )
+            for item in args.get("constraints") or ()
+            if isinstance(item, Mapping)
+        )
+    )
+    actual_specs = tuple(
+        sorted(
+            (
+                str(item.get("code") or "").strip().upper(),
+                str(item.get("disposition") or "").strip().upper(),
+                str(item.get("reason") or "").strip(),
+            )
+            for item in constraints
+        )
+    )
+    if (
+        raw.get("operation_id") != value.get("operation_id")
+        or raw.get("workspace_id") != args.get("workspace_id")
+        or raw.get("subject_id") != args.get("subject_id")
+        or raw.get("goal_id") != args.get("goal_id")
+        or raw.get("status") != expected_status
+        or type(raw.get("version")) is not int
+        or int(raw["version"]) != int(args["expected_version"]) + 1
+        or not str(raw.get("goal_ref") or "").startswith(
+            "long-term-goal://"
+        )
+        or not str(raw.get("event_digest") or "").startswith("sha256:")
+        or actual_specs != expected_specs
+    ):
+        raise AcceptanceEffectOutcomeUnknown(
+            "long-term-goal durable operation drifted"
+        )
+    identity = {
+        "workspace_id": str(raw["workspace_id"]),
+        "subject_id": str(raw["subject_id"]),
+        "goal_id": str(raw["goal_id"]),
+        "goal_ref": str(raw["goal_ref"]),
+        "version": int(raw["version"]),
+        "status": str(raw["status"]),
+        "event_digest": str(raw["event_digest"]),
+    }
+    return identity, {
+        "workspace_id": identity["workspace_id"],
+        "subject_id": identity["subject_id"],
+        "goal_id": identity["goal_id"],
+        "goal_ref": identity["goal_ref"],
+        "goal_version": identity["version"],
+        "goal_status": identity["status"],
+        "goal_event_digest": identity["event_digest"],
     }
 
 

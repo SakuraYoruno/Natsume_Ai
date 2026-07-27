@@ -498,10 +498,10 @@ def test_0135_review_denial_settlement_upgrades_the_real_head_134(
     assert seeded.success is True, seeded.as_dict()
     assert seeded.summary["current_version"] == 134
 
-    upgraded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
-        request_id="0135-upgrade",
-        ts_ms=24,
-    )
+    upgraded = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=_migration_catalog_through(tmp_path, 135),
+    ).apply_migrations(request_id="0135-upgrade", ts_ms=24)
 
     assert upgraded.success is True, upgraded.as_dict()
     assert upgraded.summary["current_version"] == 135

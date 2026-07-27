@@ -986,10 +986,10 @@ def test_retired_operator_and_legacy_edge_actuators_have_no_writer(
     assert result["reason"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
 
 
-def test_all_23_legacy_obs_commands_are_retired_from_active_manifest() -> None:
+def test_legacy_obs_commands_are_retired_from_expanded_active_manifest() -> None:
     active = {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
     registry = build_default_obs_domain_command_registry()
-    assert len(active) == 14
+    assert len(active) == 16
     assert len(RETIRED_OPERATOR_COMMAND_IDS) == 23
     assert active.isdisjoint(RETIRED_OPERATOR_COMMAND_IDS)
     for command_id in RETIRED_OPERATOR_COMMAND_IDS:

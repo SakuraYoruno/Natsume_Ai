@@ -133,7 +133,7 @@ Host 情感连续状态和回复形态额度的 module-global authority 也已�
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 
-当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0136_planning_search_cohort_ledger.sql`。0132～0135 的 Task Budget/Verification/Acceptance/Review denial 语义保持不变；0136 新增 PlanningSearch cohort evidence/proposal，不改变 Task execution authority。
+当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0137_long_term_goal_authority.sql`。0132～0135 的 Task Budget/Verification/Acceptance/Review denial 语义保持不变；0136 新增 PlanningSearch cohort evidence/proposal；0137新增 runtime-fenced 长期目标 event/head，二者都不改变 Task execution authority。
 
 Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：每个写请求冻结 Secure Ingress method/path/body、definition head 和 claim，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，只有 post-Acceptance `operator.state_control` Effect 可以写 canonical repository；不可变 admin operation receipt 与 claim 之间的崩溃可由新实例精确恢复。路由中的直接 Scheduler writer 为 0，read 路由保持只读，trigger 保持既有 governed occurrence。
 
@@ -143,7 +143,7 @@ Workspace 正向写链现覆盖 Governed Internal 与三条已登记 risk-4 Dire
 
 最新 `dev` 已含 exact Internal 单节点取消子流、Host/Internal lifecycle survivor、Operation 中断持久分类与 governed `REACQUIRE`。当前分支在同一 `task_operation.reconcile` 命令内新增 signed checkpoint `COMMIT`：只接受 canonical worker-projection receipt，读取层与 Operation mutation UoW 双重校验 immutable admission/Graph/Node/Attempt/scope/fingerprint/digest 和旧 Lease expiry。真实 SQLite 证明错误签名、live Lease、投影 UPDATE/DELETE 均拒绝，首次 COMMIT 响应丢失后 exact reopen 仍继续原图且 worker 调用数为 1。该状态不等于部署 key/HTTP canary、一般 unknown-effect、其它取消、多节点/批次恢复、事务化 Chat 或七路线验收完成。
 
-Edge command 的旧全局 client owner、startup 注册和 Tribe/内部直推调用点已归零；首条正向 Obs 路径现把 `edge.somatic + emotion_state_command` 经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable embodiment outbox，并支持 exact replay 与只读 receipt reconciliation。连同 Operation、独立 general Effect、Task/Review control，以及 Scheduler/Host mode-policy state control，当前 Operator 为 `14/37`；更多 command type、其余 `23/37` 个 Operator 命令及真实 Edge/Gateway 服务仍是缺口。Scheduler HTTP 以独立 surface 计数，不虚增 Operator 库存。
+Edge command 的旧全局 client owner、startup 注册和 Tribe/内部直推调用点已归零；首条正向 Obs 路径现把 `edge.somatic + emotion_state_command` 经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable embodiment outbox，并支持 exact replay 与只读 receipt reconciliation。连同 Operation、独立 general Effect、Task/Review control、Scheduler/Host mode-policy state control，以及 0137 长期目标激活/撤销，当前 Operator 为 `16 active / 23 retired / 39 known / blocked=0`；更多 Edge command type 及真实 Edge/Gateway 服务仍是缺口。Scheduler HTTP 以独立 surface 计数，不虚增 Operator 库存。
 
 ## 1. 状态定义
 
@@ -242,7 +242,7 @@ PlanningRecovery 只在自身调用中 opt-in Graph Outbox snapshot，并使用�
 | 执行巨石拆分 | `STATIC_GATE_PASS / RUNTIME_PROGRAM_PARTIAL` | `dag_scheduling_runtime.py`、focused Budget/Operation/Effect Store modules、`coordinator.py`、本轮 Acceptance/ASGI/Scheduler focused modules | `task_repository.py` 保持既有 cohesive policy；本轮三个 owner 已降到各自阈值内。967行 Budget rejection writer、444行只读 terminal resolver与93行纯 route helper职责分离，`new_mixed_over_800=[]`；没有第二 Store authority或白名单扩张。静态债务关闭不代表运行时缺口关闭 | NE-01 Lane D 结构完成、运行闭环未决 |
 | Host/Obs/Worker scope 隔离 | `PARTIAL_APP_LOCAL_SERVICES_DURABLE_HOST_MODE_AND_RESOURCE_STATUS_TRIBE_FALLBACK_RETIRED` | 独立 ASGI、typed route ports、query-only repositories、HardState/ModePolicy owners 0115/0129、ResourceManager 0123 journal、app-local `AcceptanceEffectRuntime`、Host lifecycle/Tribe catalog tests | Host lifecycle、mode/history/policy、ResourceManager status 与 Tribe 23-Agent production identity 已按 app/runtime scope 所有，Tribe compatibility context 已 execution-local 且无上下文 fallback 归零；ResourceManager shared JSON authority 为 0。Scheduler 管理 runtime 也由 ASGI typed provider 显式注入。Endocrine、Host source、Chat/Delegate 与大部分 Worker 对象图仍共享或易失；`23/37` 个 Operator 写入口、其它外部资源恢复、真实 Edge 与完整 Host/Worker composition 未闭环 | NE-01 |
 
-Host lifecycle/HardState/ModePolicy、ResourceManager 0123 journal、生产 locator 退役、Tribe shared-runtime/Agent catalog app-local 与无上下文 fallback 归零收窄了对象图，但仍不证明其它外部资源恢复、namespace 隔离或完整 Composition。当前 Operator 为 `14/37`，剩余 `23/37` 个写入口、易失 Endocrine 事件缓冲/last state、易失 bus、真实 workspace-bound executor、真实 Edge canary与完整 Worker/Obs scope未清零。Scheduler CRUD HTTP 直接 writer 已归零，但仅是独立切片。production canary/wave integration=`NOT_RUN_PER_WAVE_POLICY`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`，NE-01 和完整架构仍未完成。
+Host lifecycle/HardState/ModePolicy、ResourceManager 0123 journal、生产 locator 退役、Tribe shared-runtime/Agent catalog app-local 与无上下文 fallback 归零收窄了对象图，但仍不证明其它外部资源恢复、namespace 隔离或完整 Composition。当前 Operator 为 `16 active / 23 retired / 39 known / blocked=0`；易失 Endocrine 事件缓冲/last state、易失 bus、真实 workspace-bound executor、真实 Edge canary与完整 Worker/Obs scope未清零。Scheduler CRUD HTTP 直接 writer 已归零，但仅是独立切片。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`，NE-01 和完整架构仍未完成。
 
 Gate 10 的证据不能和其它批次相加：Runtime Context `7 passed`；Catalog unit/contract `15 passed`；Host socket integration `6 passed`；Repository/Global 独立复跑 `16 passed`，其中最后一组与 15 项有重叠。Global SQLite boundary=`PASS`。
 
@@ -254,11 +254,20 @@ Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界�
 
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
-| World Model | `PARTIAL_PRODUCTION_OBSERVATION_WIRED_NOT_PREDICTIVE` | 0111、`RuntimeWorldObservationApplication`、`WorldResolver` | Host lifespan 中以 server-owned principal/Bond/Emotion/environment 追加并重开 World，显式 expiry、competing refs 与 captured-head 封口已有；Bond 原始证据 owner 与预测世界模型仍缺 | NE-03 |
+| World Model | `PARTIAL_PRODUCTION_OBSERVATION_AND_GOAL_OWNER_WIRED_NOT_PREDICTIVE` | 0111、0137、`RuntimeWorldObservationApplication`、`SQLiteLongTermGoalAuthority`、`WorldResolver` | Host lifespan 中以 server-owned principal/Bond/Emotion/environment/active-goal 追加并重开 World，TTL 与 `SOURCE_REVOKED` 显式 expiry、competing refs 与 captured-head 封口已有；Bond 原始证据 owner、预测世界模型与部署 canary仍缺 | NE-03 |
 | Scene Engine | `PARTIAL_THREE_CONSUMERS_PRODUCTION_WIRED_LOCAL_ACCEPTANCE_PASSED` | 0112、`RuntimeContextApplicationService`、`SceneResolver` | caller 不能指定最终 scene/constraints，Surface、Proactive、Task admission 冻结同一 revision/digest；八类场景 commit-bound Gate 已通过，多实例 canary 待收口 | NE-03 |
-| Intent Arbiter | `PARTIAL_PRODUCTION_ADMISSION_WIRED_RESTRICT_ONLY_LOCAL_ACCEPTANCE_PASSED` | `ProductionIntentAuthorityPort`、`DurableIntentAdmissionVerifier`、`IntentArbitrationV1` | graph/context/action/grant/policy 由重开 authority 证明，节点/graph receipt set 与 durable Review continuation 已接 Task Runtime；长周期目标 owner 仍缺 | NE-03 |
+| Intent Arbiter | `PARTIAL_PRODUCTION_ADMISSION_AND_GOAL_OWNER_WIRED_RESTRICT_ONLY_LOCAL_WAVE_PASS` | `ProductionIntentAuthorityPort`、`DurableIntentAdmissionVerifier`、`IntentArbitrationV1`、0137 | graph/context/action/grant/policy/current goal identity 由重开 authority 证明，节点/graph receipt set 与 durable Review continuation 已接 Task Runtime；冻结后 goal 漂移失败关闭。部署 canary仍缺 | NE-03 |
 | Action Preview / Shadow | `PARTIAL_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED` | `runtime/action_preview_authority.py`、`runtime/action_preview_resolver.py`、Task/Acceptance/Life/terminal transport gates | lifespan-owned resolver 重开 Command/Task/Attempt/Lease/Grant/Context/Scene/Guardian，derived scope/args 受 descriptor 约束；终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine 以及 Operator sys-mode、terminal、Edge、Operation/Effect reconciliation、`task.operator_control` 与 `operator.state_control` 的 typed terminal proof。旧任务/effect、剩余 `23/37` 个直写 Operator、reply-performance/Gateway voice/Avatar 直通失败关闭；后者和 Operator 其余功能正向迁移属于 NE-01 | NE-03→NE-01 |
 | Runtime Guardian / Service Catalog | `PARTIAL_HOST_LIFESPAN_PROBE_STATE_AND_ENFORCE_TARGET_WIRED` | 0112、0113、`runtime/runtime_guardian.py`、`service_health_heartbeat.py`、`service_catalog/host_startup.py` | ASGI Guardian 绑定 Host lease/fence；`ServiceHealthHeartbeat` 按 Host lifespan 独占 task/keepalive/observer/probe cache/HTTP transport，scope close 不得影响其他 Host；未注入 observer 的 compatibility probe 只写自己的兼容 cache，不能回退到全局 degradation reducer。独立 Obs health projection/probe registry 已停止读取任何跨进程不可见 cache，改为 durable ledger/projection；兼容顶层 helper 不属于 Host production authority。Catalog fresh DB 逐级真实启动五阶段且默认目标 ENFORCE，operation/receipt/head、crash takeover 可恢复并由 SQLite 状态机保护；Windows graceful stop 与部署多实例 canary 仍缺 | NE-03→NE-07 |
+
+0137 当前定向证据分开记录，不伪加总：长期目标 repository/World revocation
+为 `9 passed in 7.55s`，Production Intent/Context 为
+`59 passed in 114.77s`，Obs/Security/Release 为
+`62 passed in 29.05s`；真实 Governed Operator 激活→撤销→exact replay
+为 `1 passed in 115.13s`。全部 `test_ne03_*` 单元/集成文件又以一次完整
+运行得到 `271 passed, 2 warnings in 332.52s`。部署多实例 canary、
+Windows graceful stop 与 NE-07 真实服务栈尚未运行，因此本表保持
+`PARTIAL / IN_PROGRESS`。
 | Evolution Lab | `SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER` | 0108 V1 ledger、runner | dataset digest 未独立重算、verifier 可补 hash、隔离可绕过且无 production composition | NE-04 |
 | Counterfactual | `LEDGER_CONTRACT_ONLY` | V1 ExperimentReport | 没有可信独立双臂、sandbox/effect audit 或 promotion authority | NE-04 |
 | Capability Maturity | `PARTIAL_NE05_PRODUCTION_FAIL_CLOSED` | scorecard/provider/Governor adapter + production IntentDecisionEngine wiring | 生产门禁默认开启且缺失/伪造 scorecard 最高风险；仍缺 durable promotion/degradation authority | NE-05 |

@@ -132,18 +132,19 @@ handler 前统一阻断：
 ```mermaid
 flowchart LR
     UI["Monitor / authenticated BFF"] --> M{"active manifest?"}
-    M -->|"14 active"| S["Secure Ingress"]
+    M -->|"16 active"| S["Secure Ingress"]
     S --> G["HostCommand → TaskGraph → Acceptance Effect"]
     M -->|"23 retired"| R["410 OPERATOR_COMMAND_RETIRED"]
     R --> P["replacement authority + wave"]
     R -. "zero ingress / zero writer" .-> X["No domain handler"]
 ```
 
-active manifest、OpenAPI、生成式 client 与 domain registry 使用同一 14 项
+active manifest、OpenAPI、生成式 client 与 domain registry 使用同一 16 项
 集合；Monitor 的 retired entry 没有 `commandId`，所以浏览器在 fetch 前
 拒绝。Avatar/Mate 的替代链是已治理 Edge，Tool/Hunt 的替代链属于
 Tool/Internal/Scheduler，Forge/Canon/Bio/Bond 等待 NE-05/06 version
-activation。后文 `14/37、23 blocked` 是历史数据流，不再描述当前路由。
+activation。后文 `14/37、23 blocked` 是历史数据流；当前 inventory 为
+`16 active / 23 retired / 39 known / blocked=0`。
 
 Scheduler、Internal、Operator 的已启用 control transport 数据流如下：
 
@@ -1365,7 +1366,7 @@ Host lifespan
 
 Forge、Semantic Recall公开运行配置、Governance只读快照与Organ分别从独立endpoint/contract/cache/failure domain进入四个job并各写一个文档；生产Semantic/Governance不读取Capability v1的兼容内嵌child，因此Forge/ledger endpoint故障不会连带阻断二者。反向也隔离：兼容 child provider 异常只会把 Capability v1 中对应字段降级为有类型的`SOURCE_UNAVAILABLE`，不会在 Forge 自身 authority 有效时使 capability-forge endpoint 失效。Forge/Organ/sys-mode等运行时来源缺token、Host或有效证据时仍失败关闭。mode transition history 由 0115 journal 持久化；auto-rules、last-interaction 与 mode-event outcome 由 0129 policy journal 持久化，二者都绑定同一 Host runtime authority。Organ 指标仍是易失派生状态，Organ不是Life authority。D6的Memory/VTS冷读、0103迁移与ModelAttempt口径继续有效。
 
-D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0；后续切片又物理删除生产 locator container/facade/environment/wiring，让 Tribe shared state/registry/bus/23-Agent catalog 归 Host scope，并退役无上下文 fallback；Obs Organ registry 现在只保存 Agent ID/族名，不再保存已删除的模块单例名。现行生产 inventory 为 consumer/import/module/field/lock/ref 全 0。0123 又把 ResourceManager shared status file 改成 Host-fenced Runtime Event journal，Obs 只读 canonical head。当前十四条 governed Operator 命令仍不覆盖其余 `23/37` 条命令、commit-bound acceptance、事务化 Chat、真实 workspace-bound executor、易失 Endocrine 事件缓冲/last state、易失 bus、其它资源恢复和完整 Host/Worker/Obs composition；Scheduler CRUD HTTP 已切流但也只有本地 SQLite 证据。Query Plane、Composition 与 NE-01 继续 partial/in-progress，HTTP/network canary 与 wave integration 未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+D7a把`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用从5降至0；后续切片又物理删除生产 locator container/facade/environment/wiring，让 Tribe shared state/registry/bus/23-Agent catalog 归 Host scope，并退役无上下文 fallback；Obs Organ registry 现在只保存 Agent ID/族名，不再保存已删除的模块单例名。现行生产 inventory 为 consumer/import/module/field/lock/ref 全 0。0123 又把 ResourceManager shared status file 改成 Host-fenced Runtime Event journal，Obs 只读 canonical head。当前 Operator 为 `16 active / 23 retired / 39 known / blocked=0`；长期目标两条新命令与既有状态控制共用受治理 Acceptance Effect，但真实 workspace-bound executor、易失 Endocrine 事件缓冲/last state、易失 bus、其它资源恢复和完整 Host/Worker/Obs composition仍是缺口。Scheduler CRUD HTTP 已切流但也只有本地 SQLite 证据。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 Ledger-stats 的 source job 对每张表按公开时间戳与 `id/rowid` 倒序取最近 5,001 行，再升序物化最新 5,000 行。内容 digest 未变化时复用原 source identity，`QueryProjectionStore` 只刷新 freshness，journal 的唯一 source tuple 不新增；新增事实才推进 cursor 并追加 journal。`truncated` 表示物化窗口之外仍有旧尾部；查询只在 `start_ms` 严格晚于最老保留时间时服务最新有界窗口，同毫秒边界、直接全表读取和未命中的 request ID 返回 typed truncated。source unavailable 与 retention 外查询也走 typed fail-closed。
 
@@ -1557,17 +1558,36 @@ Graph Acceptance
 
 [world_observation_journal.py](../../../host_brain/persistence/world_observation_journal.py) 通过 0111 为每个 workspace/subject 维护原子 head，持久端而非 caller 分配连续 revision。Host lifespan 中的 [world_observation_application.py](../../../host_brain/runtime/world_observation_application.py) 只把 Secure Ingress principal、既有 Bond/Emotion 投影与 composition-owned environment 转为 canonical RuntimeEvent 和 observation batch；raw request body 不能提交 scene 或 constraints。每次 append 同时校验 source event、Host runtime lease/fence、server time、active TTL target 和 authority lineage，显式 expiry transition 而非读取负责推进 TTL。`WorldResolver` 捕获 exact head 后只读分页到该 revision，并核对 digest chain、物理列/JSON 与 terminal digest。
 
+0137 长期目标数据流不允许 UI 或 caller 直接写 World：
+
+```mermaid
+flowchart LR
+    O["认证 Operator activate/revoke"] --> I["Secure Ingress + Governor"]
+    I --> T["HostCommand → TaskGraph → Review"]
+    T --> P["Action Preview + Acceptance Effect"]
+    P --> G["0137 append-only goal event/head"]
+    G --> W["World observation typed goal facts"]
+    W --> C["ContextPack / IntentFrame freeze"]
+    C --> A["Intent admission reopen current identity"]
+    G -->|"revoke/replace"| X["0111 SOURCE_REVOKED expiry"]
+```
+
+0137 trigger 与 repository 同时复验 Host runtime scope/owner/lease/fence、
+expected version 和 previous digest；event/head 在同一事务提交，response-loss
+按 operation ID exact replay。只有 active goal 可生成
+`goal.long_term.ref/constraint`；撤销不会依赖 TTL 等待，也不会因读取续期。
+
 [scene_resolver.py](../../../host_brain/runtime/scene_resolver.py) 是 NE-03 的 canonical、workspace/subject-scoped 场景解析边界。它只接受不可变 `WorldSnapshotV2` 与 typed `SceneResolutionInputV1`，Guardian status/digest 必须从 composition 注入的 `RuntimeGuardian.snapshot` 读取，caller 不能指定最终 scene、constraints 或伪造 `READY`。八类场景、fingerprint、digest chain、tail refresh 与 1001+ replay 已覆盖；0112 对 `SCENE_STATE/<scope digest>/<revision>` 建立唯一 CAS，并以 Host lease trigger 阻断旧进程追加。
 
 Host 请求经 [context_application.py](../../../host_brain/runtime/context_application.py) 将重开的 World 与 Scene 冻结进 `WorkOrderV3.input_pack`。Surface eligibility、proactive dispatch 和 Task admission 都要求完整且可重开的 `scene_identity_v2`，上下文漂移失败关闭。旧 [scene_policy.py](../../../host_brain/persona/scene_policy.py) 定义仍保留用于兼容，但已无这三处生产 `build_scene_decision()` 调用；这是三消费者切流，不是预测型 World/Scene 模型完成。
 
 ### 9.5 Intent 与 Runtime Guardian
 
-`IntentArbiter` 不能裸信 `IntentFrameV1` 的 digest；生产 [production_intent_authority.py](../../../host_brain/runtime/production_intent_authority.py) 重开 canonical HostCommand、WorkOrder、TaskGraph/node、ContextPack、Scene、action、Grant 和 composition-owned policy。[Intent admission](../../../host_brain/runtime/intent_admission.py) 在 TaskGraph 已持久化、worker/child grant 执行前先仲裁所有节点，写入 node preparation、graph prepared marker、最终节点 receipt 与 graph complete marker；中途崩溃只能按 exact identity 修复。`BLOCK` 与无效 evidence 失败关闭，`REVIEW` 经 Task Runtime durable ReviewStore 和一次性 continuation 恢复；输出固定 `permission_effect=RESTRICT_ONLY`、`execution_authorized=false`。
+`IntentArbiter` 不能裸信 `IntentFrameV1` 的 digest；生产 [production_intent_authority.py](../../../host_brain/runtime/production_intent_authority.py) 重开 canonical HostCommand、WorkOrder、TaskGraph/node、ContextPack、Scene、action、Grant、composition-owned policy 和 0137 current goal identity。[Intent admission](../../../host_brain/runtime/intent_admission.py) 在 TaskGraph 已持久化、worker/child grant 执行前先仲裁所有节点，写入 node preparation、graph prepared marker、最终节点 receipt 与 graph complete marker；中途崩溃只能按 exact identity 修复。goal refs 或 typed constraint 在 Context freeze 后漂移时旧图失败关闭。`BLOCK` 与无效 evidence 失败关闭，`REVIEW` 经 Task Runtime durable ReviewStore 和一次性 continuation 恢复；输出固定 `permission_effect=RESTRICT_ONLY`、`execution_authorized=false`。
 
 `RuntimeGuardian` 由 Host ASGI lifespan 中的 [runtime/production_composition.py](../../../host_brain/runtime/production_composition.py) 构造，并绑定同一 runtime scope/owner/lease/fence。Health/heartbeat 与已审计高风险前门通过 typed degradation port 消费 Guardian；每个 lifespan 的 [`ServiceHealthHeartbeat`](../../../host_brain/app/observability_runtime/service_health_heartbeat.py) 独占并关闭自身 heartbeat/keepalive task、observer、probe cache 与 HTTP transport，禁止跨 Host scope 改绑、读取、取消或关闭。没有 observer 的 compatibility probe 只能刷新自己的兼容 cache，不能回退写入全局 degradation reducer；独立 Obs health projection 和 probe registry 只读 durable ledger/projection，不能读任何跨进程不可见 cache。兼容顶层 helper 不是 Host production authority；Host lifespan 不再构造、绑定或在 shutdown 解绑 process-owned MCP broker。legacy global degradation 只能通过显式 compatibility adapter 使用。Guardian 先得到不可变 next-state、再持久化并替换本地投影，重放校验 RuntimeEvent envelope、revision/digest chain 和 from/to identity。
 
-[action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine，以及 Operator sys-mode、terminal、Edge、Operation/Effect reconciliation、`task.operator_control` 与 `operator.state_control`。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通和剩余 `23/37` 个尚未进入 Governed TaskGraph 的 Operator 写入口失败关闭；这证明局部安全执行链，不代表 Operator 平面或其它具身功能已迁移。
+[action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine，以及 Operator sys-mode、长期目标、terminal、Edge、Operation/Effect reconciliation、`task.operator_control` 与 `operator.state_control`。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通失败关闭；这证明局部安全执行链，不代表 Operator 平面或其它具身功能已全部迁移。
 
 签名终态修复的完整命令不会进入通用 TaskGraph：
 
@@ -1701,7 +1721,7 @@ flowchart LR
     J --> H["Host runtime-fenced snapshot"]
 ```
 
-production owner 在 bind 前拒绝写入。0115 与 0129 的 trigger/repository 都验证 exact lease/fence；各自 event/head 同事务，故 append 或 head 故障会共同回滚。restart/new fence 先完整分页重放 revision/digest chain，再采用 durable head；不同 bootstrap state 不能覆盖已提交事实。成功 mutation 只由 canonical journal 形成审计；exact operation replay 返回原结果且不重复写入，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch`、`sys_mode.auto_rules.update/event.submit` 与 Operator `scheduler.task.enable/disable` 已进入 governed vertical slice；Scheduler CRUD HTTP 另以 `SCHEDULER` surface 使用相同 accepted effect，双前缀 direct writer 已归零。当前 Operator 共覆盖 `14/37`。完整 Host 进程重启、commit-bound acceptance、production canary 和 NE-01 wave integration仍未完成。
+production owner 在 bind 前拒绝写入。0115、0129 与 0137 的 trigger/repository 都验证 exact lease/fence；各自 event/head 同事务，故 append 或 head 故障会共同回滚。restart/new fence 先采用 durable head，exact operation replay 返回原结果且不重复写入，payload drift、并发 stale head、released/expired lease 和 tamper 失败关闭。`sys_mode.switch`、`sys_mode.auto_rules.update/event.submit`、`scheduler.task.enable/disable` 与 `long_term_goal.activate/revoke` 已进入 governed vertical slice；Scheduler CRUD HTTP 另以 `SCHEDULER` surface 使用相同 accepted effect，双前缀 direct writer 已归零。当前 Operator 为 `16 active / 23 retired / 39 known / blocked=0`。完整 Host 进程重启、production canary 和 NE-07 全栈仍未完成。
 
 | 能力 | 读路径 | 写路径 | 定级 |
 |---|---|---|---|

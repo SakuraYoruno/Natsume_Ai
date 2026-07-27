@@ -247,13 +247,22 @@ class WorldResolver:
                         raise WorldResolverError(
                             "expiry transition does not reference an active fact"
                         )
+                    ttl_valid = (
+                        expiry.reason_code == "TTL_EXPIRED"
+                        and expiry.effective_at_ms >= fact.expires_at_ms
+                    )
+                    source_revocation_valid = (
+                        expiry.reason_code == "SOURCE_REVOKED"
+                        and fact.key.startswith("goal.long_term.")
+                        and expiry.effective_at_ms == batch.observed_at_ms
+                    )
                     if (
-                        expiry.effective_at_ms < fact.expires_at_ms
+                        not (ttl_valid or source_revocation_valid)
                         or batch.observed_at_ms < expiry.effective_at_ms
                         or expiry.effective_at_ms > now_ms
                     ):
                         raise WorldResolverError(
-                            "TTL expiry transition occurred before expires_at_ms"
+                            "World fact expiry transition is invalid"
                         )
                     active.pop(expiry.fact_digest)
                     expired.add(expiry.fact_digest)

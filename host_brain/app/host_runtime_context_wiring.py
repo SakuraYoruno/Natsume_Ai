@@ -17,6 +17,9 @@ from host_brain.persistence.hard_state_journal import SQLiteHardStateJournal
 from host_brain.persistence.host_mode_policy_journal import (
     SQLiteHostModePolicyJournal,
 )
+from host_brain.persistence.long_term_goal_repository import (
+    SQLiteLongTermGoalAuthority,
+)
 from host_brain.persistence.world_observation_journal import (
     SQLiteWorldObservationJournal,
 )
@@ -131,9 +134,16 @@ def compose_host_runtime_context(
         runtime_authority_provider=runtime_authority_provider,
         source_event_verifier=RuntimeEventWorldSourceVerifier(event_store),
     )
+    long_term_goal_authority = SQLiteLongTermGoalAuthority(
+        task_runtime.canonical_db_path,
+        runtime_scope_id=runtime_scope_id,
+        runtime_authority_provider=runtime_authority_provider,
+    )
+    long_term_goal_authority.assert_schema_ready()
     composition = build_runtime_context_composition(
         event_store=event_store,
         observation_port=observation_journal,
+        long_term_goal_authority=long_term_goal_authority,
         runtime_scope_id=runtime_scope_id,
         runtime_authority_provider=runtime_authority_provider,
         intent_policy_identity=policy_identity,
@@ -143,6 +153,7 @@ def compose_host_runtime_context(
                 scene_resolver=scene_resolver,
                 governor_ledger=ledger,
                 policy_identity=policy_identity,
+                long_term_goal_authority=long_term_goal_authority,
             )
         ),
         environment_observation_provider=environment_observation_provider,
