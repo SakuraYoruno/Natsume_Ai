@@ -9,6 +9,18 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+当前 NE-01 Budget policy 安全边界不再把未实现动作静默改写成 `BLOCK`。
+`BudgetPolicy` v1 仍可序列化 `BLOCK / DEGRADE / REVIEW`，以便保存前向兼容
+提案；canonical `DurableBudgetRuntime` 目前只声明并执行 `BLOCK`。任何
+`DEGRADE/REVIEW` WorkOrder 都会在查询 Store、创建 Reservation 或 Outbox
+之前以 `GOVERNED_BUDGET_ACTION_UNSUPPORTED` 失败关闭，直接调用低层 charge
+也不能绕过。并发预算不是累计 usage：READY claim 在同一个 SQLite writer
+transaction 内按 active Lease 计数，并给每个 Attempt 建立
+`concurrency=1` 的 child reservation；Attempt 终态派生 child
+`CONSUMED/RELEASED` 后释放槽位。真正的 `DEGRADE/REVIEW` 仍需预算例外或
+replacement `graph_revision + 1` 的持久 authority、重启和 exact replay，
+本切片没有冒充实现，NE-01 继续为 `IN_PROGRESS`。
+
 最新 NE-01 切片关闭了 Review continuation 有界扫描的队首饥饿缺口。
 `claim_pending_review_continuations()` 仍最多读取 500 个候选，但跨表绑定损坏的
 协调行现在会在自己的 SQLite writer transaction 中写入稳定错误码、递增版本并

@@ -1034,3 +1034,23 @@ Acceptance authority。OS/container/tenant isolation、handle-level TOCTOU、
 和 TaskNode 仍是业务 truth。尚未提供独立 Operator DLQ/修复 UI，跨进程低延迟
 仍依靠有界 polling/lease takeover；Budget DEGRADE/REVIEW、一般恢复、波次
 集成、生产 canary 与 NE-07 均未完成，NE-01 保持 `IN_PROGRESS`。
+
+### NE-01 Budget 动作 support matrix 与零副作用拒绝
+
+`BudgetPolicy` v1 保持 forward-compatible，不删除 `DEGRADE/REVIEW`，但合同
+可序列化不代表 production executor 已实现。`DurableBudgetRuntime` 现在公开
+唯一 support matrix `{BLOCK}`，并在 `ensure_active()` 第一次 Store readiness
+查询之前校验；低层 charge 再做第二道校验，阻止手工构造 context 绕过。两种
+未实现动作统一以 `GOVERNED_BUDGET_ACTION_UNSUPPORTED` 失败关闭，Store、
+Reservation、usage 与 Outbox 调用数均为 0。此前 receipt 中
+`requested_action=DEGRADE/REVIEW + enforced_action=BLOCK` 的静默降级不再可能。
+
+并发额度保持现有 durable capacity 语义：READY claim 的同一个 SQLite writer
+transaction 按 active fenced Lease 计数，并为每个 Attempt 创建
+`concurrency=1` child reservation；Attempt 终态派生 child
+`CONSUMED/RELEASED`，因此释放 slot。它不是像 token/cost 一样累计到
+`consumed_json` 的永久用量。真实 `DEGRADE/REVIEW` 仍需新增预算例外或预编译
+降级候选，通过独立 application authority 产生 immutable
+`graph_revision + 1`，并覆盖 Review、restart、exact replay 与 rollback；
+executor 不得在原图内二次规划。本切片只是消除虚假支持与静默改写，不把两种
+动作标为完成。

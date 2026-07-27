@@ -122,6 +122,11 @@ class BudgetPolicy:
             raise ContractViolation(BUDGET_POLICY_INVALID, "BudgetPolicy schema version is invalid")
         if not self.scope:
             raise ContractViolation(BUDGET_POLICY_INVALID, "BudgetPolicy.scope is required")
+        if not isinstance(self.on_exceeded, BudgetExceededAction):
+            raise ContractViolation(
+                BUDGET_POLICY_INVALID,
+                "BudgetPolicy.on_exceeded must be a BudgetExceededAction",
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {

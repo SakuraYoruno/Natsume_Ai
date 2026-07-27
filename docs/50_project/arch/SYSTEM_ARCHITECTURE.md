@@ -886,3 +886,15 @@ live Graph/Budget 状态仍会被验证，但不进入已接受节点 effect 的
 Skill 单节点终态继续要求 `Graph=FAILED`，避免把任意 Budget block 伪装成
 安全失败。系统不因此宣称一般 terminal cross-product、Budget policy 或
 Workspace isolation 完成。
+
+Budget policy 的合同表达能力与 production 执行能力必须分开。当前
+`BudgetPolicy` v1 可以保存 `DEGRADE/REVIEW` 提案，但唯一 canonical
+`DurableBudgetRuntime` 的 support matrix 只有 `BLOCK`。`ensure_active`
+在 schema/lineage 校验后、`assert_budget_usage_ready()` 之前执行动作门禁；
+低层 `_charge()` 再做第二道相同门禁，因此未来遗漏 Host adapter 校验也不能
+创建 Reservation、usage 或 Outbox。并发维度则由 READY claim 的
+`BEGIN IMMEDIATE`、active fenced Lease 计数和 Attempt-bound
+`concurrency=1` child reservation共同执行，终态 Attempt 使 child 投影为
+`CONSUMED/RELEASED` 并释放容量。真正支持 `DEGRADE/REVIEW` 时必须新增预算
+例外或替换 Graph 的持久 authority，并且产生新 immutable
+`graph_revision + 1`；不得在 executor 内二次规划或把动作改写为 `BLOCK`。
