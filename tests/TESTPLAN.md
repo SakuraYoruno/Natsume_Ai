@@ -1080,6 +1080,26 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   writer、一般 multi-node/batch/unknown-effect、多 Workspace、wave
   integration 或 NE-07；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01-RUNTIME-REPO-SNAPSHOT：只读共享检出退役
+
+- T-NE01-RUNTIME-REPO-SNAPSHOT-01：真实 Git fixture 的 committed tracked
+  content 必须进入 snapshot；随后制造的 dirty tracked/untracked 内容不得进入。
+- T-NE01-RUNTIME-REPO-SNAPSHOT-02：snapshot 必须位于 runtime-owned root，
+  不含 `.git`，并绑定 exact `git-commit://<sha>`。
+- T-NE01-RUNTIME-REPO-SNAPSHOT-03：archive absolute/`..`/symlink/hardlink/
+  非 regular member 必须失败关闭，不得调用 Agent。
+- T-NE01-RUNTIME-REPO-SNAPSHOT-04：fixture executor 故意修改 snapshot 后，
+  live source 内容必须不变，result 返回前 snapshot 必须不存在。
+- T-NE01-RUNTIME-REPO-SNAPSHOT-05：write-capable order 的
+  `runtime_repo/current_runtime_repo` 继续以
+  `WORKSPACE_WRITE_GRANT_REQUIRED` 阻断。
+
+本 Gate 不证明 OS/container/tenant isolation 或 crash-left snapshot startup
+cleanup；定向集为 `20 passed`，去重受影响集为
+`44 passed in 1.97s`；文档/机器状态合同为 `39 passed`，统一
+static/doc Gate 和架构 Gate 1～14 通过。无 migration，NE-01 保持
+`IN_PROGRESS`。
+
 ## T-NE01-PLAN-SIGNED-BUDGET-CROSSING：签名失败与时间预算拒绝交叉终态
 
 - T-NE01-PLAN-SIGNED-BUDGET-CROSSING-01：真实 reviewed Plan writer 必须

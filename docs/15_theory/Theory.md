@@ -1374,3 +1374,17 @@ repository 之间发生篡改、版本漂移或 response loss，删除仍会在�
 失败关闭。这个原则也说明 terminal matrix 不能按单维枚举完成：签名、
 预算、取消、未知效果和 checkpoint 阶段的交叉组合都需要各自明确的唯一
 authority。
+
+## 24. 逻辑只读不能以共享检出目录为代价
+
+“工具列表里没有 write”只证明编排层没有主动授予写动作，不能证明第三方执行器、
+依赖或缺陷绝不会触碰传入路径。因此只读 Agent 的输入也应遵循复制而非借用：
+运行时从受信 Git source 冻结一个精确 commit，把 tracked regular tree 导出到
+executor-owned 临时快照，再把该快照作为观察对象。
+
+这个边界同时排除 dirty/untracked 私有状态和 Git control directory，防止一次
+检查看到另一个并发开发者的 WIP，也防止错误执行器污染 Host 正在使用的 checkout。
+快照的 `source_ref` 是内容身份，临时物理路径不是 authority；执行完成后的清理
+只是资源回收，不改变 Task/Acceptance 事实。它仍不是强隔离：恶意进程可越过普通
+目录边界时，必须由未来的 OS/container/tenant sandbox 处理，不能把临时副本写成
+“只读文件系统已完成”。

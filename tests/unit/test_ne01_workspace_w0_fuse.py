@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
+import subprocess
+import tarfile
 
 import pytest
 
@@ -14,6 +17,7 @@ from host_brain.agent_runtime.agent_tools import (
 from host_brain.agent_runtime.workspace_policy import (
     WORKSPACE_WRITE_GRANT_REQUIRED,
     WorkspacePolicy,
+    WorkspacePolicyViolation,
 )
 from host_brain.contracts.agent_runtime.work_order import AgentWorkOrder
 
@@ -46,13 +50,119 @@ def _tool_ids(*, run_mode: str, allowed: list[str], forbidden: list[str]) -> set
     }
 
 
-def test_read_only_inspect_can_read_runtime_repo() -> None:
+def test_read_only_inspect_uses_exact_ephemeral_runtime_repo_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "source"
+    repository.mkdir()
+    subprocess.run(["git", "init", str(repository)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "snapshot@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "Snapshot Fixture"],
+        check=True,
+    )
+    tracked = repository / "tracked.txt"
+    tracked.write_text("accepted\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "commit", "-m", "fixture"],
+        check=True,
+        capture_output=True,
+    )
+    tracked.write_text("dirty checkout\n", encoding="utf-8")
+    (repository / "untracked.txt").write_text("private\n", encoding="utf-8")
+    snapshot_root = tmp_path / "runs"
+    monkeypatch.setattr(workspace_policy_module, "REPO_ROOT", repository)
+    monkeypatch.setattr(
+        workspace_policy_module,
+        "DEFAULT_CODEX_RUNS_ROOT",
+        snapshot_root,
+    )
+
     resolution = WorkspacePolicy().resolve(
         _order(run_mode="inspect", workspace={"strategy": "runtime_repo"})
     )
+    snapshot_path = resolution.path
 
-    assert resolution.source == "runtime_repo"
-    assert resolution.path == workspace_policy_module.REPO_ROOT.resolve()
+    assert resolution.source == "runtime_repo_snapshot"
+    assert resolution.source_ref and resolution.source_ref.startswith("git-commit://")
+    assert snapshot_path != repository.resolve()
+    assert snapshot_path.is_relative_to(snapshot_root.resolve())
+    assert (snapshot_path / "tracked.txt").read_text(encoding="utf-8") == "accepted\n"
+    assert not (snapshot_path / "untracked.txt").exists()
+    assert not (snapshot_path / ".git").exists()
+
+    resolution.cleanup()
+
+    assert not snapshot_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("member_name", "member_type"),
+    [
+        ("../escape.txt", tarfile.REGTYPE),
+        ("/absolute.txt", tarfile.REGTYPE),
+        ("unsafe-symlink", tarfile.SYMTYPE),
+        ("unsafe-hardlink", tarfile.LNKTYPE),
+    ],
+)
+def test_runtime_repo_snapshot_rejects_unsafe_archive_members(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    member_name: str,
+    member_type: bytes,
+) -> None:
+    repository = tmp_path / "source"
+    repository.mkdir()
+    archive_buffer = BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w:") as bundle:
+        member = tarfile.TarInfo(member_name)
+        member.type = member_type
+        if member_type == tarfile.REGTYPE:
+            payload = b"escape"
+            member.size = len(payload)
+            bundle.addfile(member, BytesIO(payload))
+        else:
+            member.linkname = "../outside"
+            bundle.addfile(member)
+    archive_bytes = archive_buffer.getvalue()
+    commit = "a" * 40
+
+    def fake_git(
+        command: list[str],
+        **options: object,
+    ) -> subprocess.CompletedProcess:
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(command, 0, f"{commit}\n", "")
+        if "archive" in command:
+            output = options.get("stdout")
+            assert output is not None and hasattr(output, "write")
+            output.write(archive_bytes)
+            return subprocess.CompletedProcess(command, 0, None, b"")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(workspace_policy_module, "REPO_ROOT", repository)
+    monkeypatch.setattr(
+        workspace_policy_module,
+        "DEFAULT_CODEX_RUNS_ROOT",
+        tmp_path / "runs",
+    )
+    monkeypatch.setattr(workspace_policy_module.subprocess, "run", fake_git)
+
+    with pytest.raises(
+        WorkspacePolicyViolation,
+        match="archive contains an unsafe member",
+    ):
+        WorkspacePolicy().resolve(
+            _order(run_mode="inspect", workspace={"strategy": "runtime_repo"})
+        )
+
+    assert not (tmp_path / "escape.txt").exists()
+    assert not (tmp_path / "absolute.txt").exists()
 
 
 @pytest.mark.parametrize(

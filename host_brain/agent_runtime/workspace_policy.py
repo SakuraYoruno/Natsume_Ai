@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import subprocess
+import tarfile
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
 from host_brain.agent_runtime.artifact_store import DEFAULT_CODEX_RUNS_ROOT, REPO_ROOT, sanitize_segment
@@ -58,6 +61,18 @@ class WorkspaceResolution:
     workspace_id: str | None = None
     lease_owner: str | None = None
     lease_fencing_token: int | None = None
+    source_ref: str | None = None
+    _temporary_directory: TemporaryDirectory[str] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+
+    def cleanup(self) -> None:
+        """Release an executor-owned ephemeral workspace, if any."""
+
+        if self._temporary_directory is not None:
+            self._temporary_directory.cleanup()
 
 
 def _find_repo_root(start: Path) -> Path | None:
@@ -94,6 +109,122 @@ def _clone_repo(git_url: str, clone_root: Path, clone_name: str | None) -> Path:
     return _normalize_existing_path(target_dir)
 
 
+def _runtime_repo_snapshot(work_order_id: str) -> WorkspaceResolution:
+    """Materialize the exact tracked HEAD without exposing the live checkout."""
+
+    repository = REPO_ROOT.resolve(strict=True)
+    completed = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "--verify", "HEAD^{commit}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=30,
+    )
+    commit = completed.stdout.strip().lower()
+    if (
+        completed.returncode != 0
+        or len(commit) not in {40, 64}
+        or any(char not in "0123456789abcdef" for char in commit)
+    ):
+        detail = (completed.stderr or completed.stdout or "git HEAD unavailable").strip()
+        raise WorkspacePolicyViolation(
+            "RUNTIME_REPO_SNAPSHOT_FAILED",
+            f"runtime repository HEAD could not be frozen: {detail[:400]}",
+        )
+
+    runtime_runs_root = DEFAULT_CODEX_RUNS_ROOT.expanduser()
+    runtime_runs_root.mkdir(parents=True, exist_ok=True)
+    runtime_runs_root = runtime_runs_root.resolve(strict=True)
+    snapshot_parent = (
+        runtime_runs_root
+        / sanitize_segment(work_order_id, "work-order")
+        / "runtime_repo_snapshots"
+    )
+    snapshot_parent.mkdir(parents=True, exist_ok=True)
+    snapshot_parent = snapshot_parent.resolve(strict=True)
+    if snapshot_parent != runtime_runs_root and runtime_runs_root not in snapshot_parent.parents:
+        raise WorkspacePolicyViolation(
+            "RUNTIME_REPO_SNAPSHOT_FAILED",
+            "runtime repository snapshot root escaped the configured runs root",
+        )
+    temporary_directory = TemporaryDirectory(
+        prefix="snapshot-",
+        dir=snapshot_parent,
+    )
+    snapshot = Path(temporary_directory.name).resolve(strict=True)
+    archive_path = snapshot / ".natsume-runtime-repo-snapshot.tar"
+    try:
+        with archive_path.open("xb") as archive_output:
+            archive = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "archive",
+                    "--format=tar",
+                    commit,
+                ],
+                stdout=archive_output,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=120,
+            )
+        if archive.returncode != 0:
+            detail = archive.stderr.decode("utf-8", errors="replace").strip()
+            raise WorkspacePolicyViolation(
+                "RUNTIME_REPO_SNAPSHOT_FAILED",
+                f"runtime repository snapshot could not be exported: {detail[:400]}",
+            )
+        with tarfile.open(archive_path, mode="r:") as bundle:
+            for member in bundle.getmembers():
+                relative = PurePosixPath(member.name)
+                if (
+                    relative.is_absolute()
+                    or not relative.parts
+                    or ".." in relative.parts
+                    or member.issym()
+                    or member.islnk()
+                    or not (member.isdir() or member.isfile())
+                ):
+                    raise WorkspacePolicyViolation(
+                        "RUNTIME_REPO_SNAPSHOT_FAILED",
+                        "runtime repository archive contains an unsafe member",
+                    )
+                target = snapshot.joinpath(*relative.parts)
+                resolved_target = target.resolve(strict=False)
+                if snapshot != resolved_target and snapshot not in resolved_target.parents:
+                    raise WorkspacePolicyViolation(
+                        "RUNTIME_REPO_SNAPSHOT_FAILED",
+                        "runtime repository archive escaped its snapshot root",
+                    )
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise WorkspacePolicyViolation(
+                        "RUNTIME_REPO_SNAPSHOT_FAILED",
+                        "runtime repository archive file has no payload",
+                    )
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("xb") as output:
+                    while chunk := source.read(1024 * 1024):
+                        output.write(chunk)
+        archive_path.unlink()
+    except Exception:
+        temporary_directory.cleanup()
+        raise
+    return WorkspaceResolution(
+        path=snapshot,
+        source="runtime_repo_snapshot",
+        created_workspace=True,
+        source_ref=f"git-commit://{commit}",
+        _temporary_directory=temporary_directory,
+    )
+
+
 class WorkspacePolicy:
     def __init__(
         self,
@@ -119,7 +250,7 @@ class WorkspacePolicy:
             return self._resolve_durable(work_order, workspace=workspace)
         self._enforce_w0_workspace_source(work_order, workspace=workspace, strategy=strategy)
         if strategy in {"runtime_repo", "current_runtime_repo"}:
-            return WorkspaceResolution(path=REPO_ROOT.resolve(), source="runtime_repo")
+            return _runtime_repo_snapshot(work_order.work_order_id)
 
         raw_path = str(workspace.get("path") or "").strip()
         if raw_path:

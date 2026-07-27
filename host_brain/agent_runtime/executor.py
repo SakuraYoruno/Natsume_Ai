@@ -310,6 +310,7 @@ class AgentRuntimeExecutor:
                     risk_flags=["policy_block"],
                     review_required=self.review_policy.review_required(order),
                 )
+                resolution.cleanup()
                 return result.to_dict()
             if order.run_mode == "self_evolve":
                 current_branch = _current_git_branch(resolution.path)
@@ -324,6 +325,7 @@ class AgentRuntimeExecutor:
                         review_required=True,
                         reason_code=branch_reason or "EVOLUTION_EXPERIMENT_BRANCH_REQUIRED",
                     )
+                    resolution.cleanup()
                     return result.to_dict()
 
             # Prompt construction may validate or normalize private WorkOrder
@@ -386,6 +388,8 @@ class AgentRuntimeExecutor:
                 review_required=order.review_required,
                 reason_code=reason_code,
             )
+            if "resolution" in locals():
+                resolution.cleanup()
             return result.to_dict()
 
         assert run_dir is not None
@@ -541,6 +545,7 @@ class AgentRuntimeExecutor:
                 "workspace_id": resolution.workspace_id,
                 "workspace_lease_owner": resolution.lease_owner,
                 "workspace_lease_fencing_token": resolution.lease_fencing_token,
+                "workspace_source_ref": resolution.source_ref,
                 "prompt_profile": prompt_profile_name(order),
                 "event_id": event_id,
                 "ts_ms": ts,
@@ -592,6 +597,7 @@ class AgentRuntimeExecutor:
             # This private transfer object never enters result.json.  The
             # proposal boundary converts it to a bounded protected ref/digest.
             payload["_protected_stage"] = seal.protected_payload()
+        resolution.cleanup()
         return payload
 
     def _persist_result(self, run_dir: Path, result: AgentResult, *, order: WorkOrderV3, event_id: str, ts_ms: int) -> None:

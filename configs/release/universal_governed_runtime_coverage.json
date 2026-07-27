@@ -2,8 +2,8 @@
   "schema_version": "natsume.universal-governed-runtime-coverage.v2",
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
-  "evaluated_source": "NE01_PLAN_WRITER_SIGNED_FAILURE_TIME_BUDGET_CROSS_TERMINAL_AND_WORKSPACE_RECOVERY_OVER_ORIGIN_DEV_921A56B77A_WITH_PRIOR_FORMAL_CLEAN_SHA_ACCEPTANCE_RETAINED",
-  "current_document_slice": "NE01_SINGLE_REVIEWED_PLAN_WRITER_PRECHECKPOINT_SIGNED_NO_EFFECT_FAILURE_PLUS_ACTUAL_TIME_BUDGET_OVERAGE_CURRENT_0090_COMBINED_AUTHORITY_AND_WORKSPACE_CLEANUP_LOCAL_PASS_PROGRAM_INCOMPLETE",
+  "evaluated_source": "NE01_RUNTIME_REPO_EXACT_HEAD_EPHEMERAL_READONLY_INSPECTION_SNAPSHOT_OVER_ORIGIN_DEV_A4FFD02EA_WITH_PRIOR_FORMAL_CLEAN_SHA_ACCEPTANCE_RETAINED",
+  "current_document_slice": "NE01_RUNTIME_REPO_LIVE_CHECKOUT_RETIREMENT_LOCAL_REAL_GIT_PASS_PROGRAM_INCOMPLETE",
   "evidence_binding": {
     "evaluated_commit_sha": "2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0",
     "migration_head": "0135_task_review_denial_settlement.sql"
@@ -11,6 +11,7 @@
   "route_control_scope": "The fail-closed matrix covers chat, skill, plan, delegate, scheduler, internal and operator. A real v3 receipt must bind one clean Git HEAD, exact repository/applied migration head and a single query-only file-backed SQLite snapshot. It reopens strict Command, WorkOrder and TaskGraph JSON plus their digests, then verifies Graph, Node, Attempt, Lease, Operation, parent/child Budget, Verification, Acceptance, Artifact, WorkerProjection, Effect, Outbox and zero current recovery ambiguity. Internal, Operator and Scheduler must each independently reopen exactly one content-addressed control policy; every non-control route must expose zero. On clean Git HEAD 2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0, GR05 and the remaining-route driver produced seven PASS results, no reason codes and migration head 0135. Chat, Skill, enabled CAPABILITY_SEARCH_V1 Plan and enabled read-only pentest_agent Delegate remain COMPLETE. Scheduler, Internal and Operator retain other PARTIAL controls, so NE-01 remains INCOMPLETE. The controlled terminal provider proves governance, not real-provider quality, generic PlanningSearch benefit or NE-07.",
   "production_enablement": {
     "atomic_graph_success": "ENABLED_FOR_NEW_PRODUCTION_GRAPHS",
+    "readonly_runtime_repo_inspection": "LOCAL_REAL_GIT_PASS_EXACT_HEAD_TRACKED_REGULAR_TREE_EPHEMERAL_SNAPSHOT_NO_LIVE_CHECKOUT_DIRTY_UNTRACKED_OR_GIT_CONTROL_UNSAFE_ARCHIVE_MEMBERS_FAIL_CLOSED_EXECUTOR_POST_RESULT_CLEANUP_FIXTURE_WRITE_SOURCE_UNCHANGED_20_TARGETED_44_AFFECTED_39_DOCUMENTATION_DELIVERY_AND_ARCHITECTURE_GATES_PASS_NO_MIGRATION_OS_CONTAINER_TENANT_AND_CRASH_LEFT_STARTUP_SWEEP_INCOMPLETE",
     "commit_bound_acceptance_collector": "PASS_V3_QUERY_ONLY_REAL_FILE_BACKED_CANONICAL_SQLITE_CLEAN_GIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_EXACT_MIGRATION_0135_STRICT_ADMISSION_DIGEST_AND_CONTROL_POLICY_REOPEN_TAMPER_AND_PRIVACY_FAIL_CLOSED_ALL_SEVEN_ROUTES_PASS_SCHEDULER_INTERNAL_OPERATOR_AND_NE01_REMAIN_INCOMPLETE",
     "bounded_fanout": "OFF_SIGNED_DURABLE_CANARY_REQUIRED_LOCAL_FEATURE_ENABLED_ACCEPTED_PLUS_RESERVED_PROCESS_CRASH_SIGNED_REACQUIRE_SELECTIVE_RESUME_PASS_NE07_NOT_RUN",
     "graph_enablement_gate": "ATOMIC_FAIL_CLOSED_CAPABILITY_CHECK_SIGNED_DURABLE_BOUNDED_FANOUT_RECEIPT_EXACT_BUILD_MIGRATION_CONFIGURATION_REQUIRED",

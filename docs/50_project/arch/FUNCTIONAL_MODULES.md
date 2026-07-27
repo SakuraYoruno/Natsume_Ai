@@ -703,3 +703,16 @@ Node snapshot、Attempt/error ref 或 Budget binding 漂移都失败关闭。
 migration 或第二套状态机。它只覆盖一个 reviewed Plan writer 的
 pre-checkpoint signed failure 与 time-budget overage 交叉点；其它 route、
 取消、unknown-effect、并发预算和多 Workspace 组合仍待实现与证明。
+
+## 20. 只读运行仓库快照职责
+
+| 模块 | 当前职责 |
+|---|---|
+| `agent_runtime/workspace_policy.py` | 冻结受信仓库 exact HEAD，安全导出 tracked regular tree，拒绝 archive link/escape，并持有临时目录生命周期 |
+| `agent_runtime/executor.py` | 只把 snapshot 交给 Agent/Verifier；持久化 commit source ref，并在终态输出完成后显式释放 |
+| `agent_runtime/workspace_allocator.py` | 不参与只读 snapshot；继续独占 W2 durable write worktree/lease authority |
+| `tests/unit/test_ne01_workspace_w0_fuse.py` | 证明 commit freeze、dirty/untracked 排除、无 `.git` 与 cleanup |
+| `tests/integration/test_codex_workplane.py` | 证明 executor 即使误写 snapshot 也不污染 live checkout，并在返回前清理 |
+
+该职责划分删除了 read-only Agent 对共享 checkout 的物理依赖，但不宣称具备
+OS/container/tenant 强隔离。

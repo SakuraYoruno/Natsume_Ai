@@ -791,6 +791,21 @@ terminal matrix、Domain Pack、OS/container isolation、NE-01 wave
 integration 和 NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`，
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 只读运行仓库隔离
+
+`workspace.strategy=runtime_repo/current_runtime_repo` 不再把 Host 正在运行的
+共享 Git 检出目录交给 Agent。`WorkspacePolicy` 先冻结受信仓库的精确
+`HEAD^{commit}`，只导出该提交中的 tracked regular files/directories 到
+runtime-owned 临时目录；绝对路径、`..`、symlink、hardlink 和其它 tar member
+均失败关闭。dirty/untracked 文件与 `.git` 不会进入快照，结果 metadata 只记录
+`git-commit://<sha>`。
+
+执行器在校验、验收和结果持久化完成后显式清理该临时目录。集成测试还让 fixture
+故意修改快照文件，确认共享仓库内容不变并且返回前快照已删除。该切片关闭的是
+“只读检查暴露共享 checkout”这一项；它没有提供 OS/container/tenant 级只读
+挂载，也没有扩大任何写 WorkOrder 的 authority。NE-01 继续为
+`IN_PROGRESS`，NE-07 真实服务栈尚未运行。
+
 ## 当前 NE-01 边界：Plan 签名失败与时间预算拒绝交叉终态
 
 Plan 的 reviewed 写节点现在覆盖了一个此前会永久遗留 Workspace 的交叉窗口：

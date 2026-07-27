@@ -948,3 +948,17 @@ Runtime 的完整六路径回归为 `6 passed in 39.93s`；相邻 Accepted handl
 一般 time/concurrency policy、其它交叉 terminal matrix、多 Workspace、
 NE-01 wave integration 和 NE-07 仍待完成，NE-01 继续为
 `IN_PROGRESS`。
+
+### NE-01：退役只读 Agent 的共享 runtime_repo
+
+当前切片把 `runtime_repo/current_runtime_repo` 从“返回 `REPO_ROOT`”改为
+“冻结 `HEAD^{commit}` 并导出临时 tracked-tree snapshot”。归档只接受安全的
+regular file/directory member；dirty/untracked、`.git`、link 与路径逃逸不会
+进入 worker。`AgentRuntimeExecutor` 在 result/seal 完成后释放快照，并在公开
+metadata 中绑定无主机路径的 `git-commit://<sha>`。
+
+定向 policy 与 executor 集成验证覆盖 exact commit、dirty/untracked 排除、
+路径隔离、故意快照写入不影响 source、显式 cleanup 和 metadata source binding。
+本切片无 migration，不改变 write WorkOrder 的 W0/W2、Lease、Review 或
+Acceptance authority。OS/container/tenant isolation、handle-level TOCTOU、
+一般 Workspace terminal matrix 和 NE-01 波次集成仍未完成。
