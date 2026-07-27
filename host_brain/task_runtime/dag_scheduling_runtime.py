@@ -62,6 +62,7 @@ from .dag_scheduling_reentry import reconstruct_parallel_outcomes
 from .dag_scheduling_completion_replay import (
     is_completed_internal_checkpoint_without_parallel_decision,
 )
+from .dag_checkpoint_reentry import settle_committed_checkpoint_reentry
 from .dag_scheduling_settlement import settle_waiting_approval
 from .review_denial_lifecycle import reopen_denied_review_terminal, settle_denied_review
 from .errors import (
@@ -374,34 +375,28 @@ class DurableDagSchedulingRuntime:
                 async for event in self._node_execution.execute_stream(
                     **recovery_execution_kwargs,
                 ):
-                    yield event
                     if bool(event.get("done")):
-                        recovery_terminal = event
+                        recovery_terminal = dict(event)
+                    else:
+                        yield event
                 if recovery_terminal is None:
                     raise GovernedRuntimeError(
                         GOVERNED_DURABLE_STATE_CONFLICT,
                         "committed checkpoint recovery produced no terminal receipt",
                     )
-                recovery_receipt = recovery_terminal.get("execution_receipt")
-                if not isinstance(recovery_receipt, Mapping):
-                    raise GovernedRuntimeError(
-                        GOVERNED_DURABLE_STATE_CONFLICT,
-                        "committed checkpoint recovery terminal has no receipt",
-                    )
-                if (
-                    _text(recovery_receipt.get("status")).upper()
-                    == "RECOVERY_REQUIRED"
-                ):
-                    return
-                if len(admitted.nodes) == 1:
-                    return
-                latest_graph = await _maybe_await(
-                    self._store.get_graph(
-                        admitted.graph_id,
-                        admitted.graph_revision,
+                budget, checkpoint_terminal = (
+                    await settle_committed_checkpoint_reentry(
+                        admitted=admitted,
+                        recovery_admission=recovery_admission,
+                        command=command,
+                        recovery_terminal=recovery_terminal,
+                        budget=budget,
+                        parallel_success_enabled=parallel_success_enabled,
+                        parallel_settlement=self._parallel_settlement,
                     )
                 )
-                if _status(latest_graph) == "COMPLETED":
+                if checkpoint_terminal is not None:
+                    yield checkpoint_terminal
                     return
                 budget = await self._budgets.refresh(budget)
                 continue

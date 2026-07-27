@@ -5,9 +5,24 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.26
+版本：v3.27
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前批次先关闭取消与混合 fan-out 的进程崩溃子窗口：
+
+1. cancellation-bound `COMMIT/RELEASE` 必须在目标 mutation 后响应丢失时
+   exact replay，同一 durable continuation 只能最终执行一次；
+2. 一个 fan-out 兄弟已 `ACCEPTED`、另一个停在 `RESERVED/RUNNING` 时，
+   live Lease 必须 defer，过期后必须先形成 current recovery hold；
+3. 只有 exact case-bound Ed25519 `REACQUIRE` 可以让新 owner 以更高 fence
+   继续未知节点；已验收兄弟不得重跑，join 只能在依赖重新满足后执行；
+4. checkpoint 子节点的 `done` 只进入 parallel settlement，Host 每次启动
+   continuation 必须恰好收到一个规范 Graph 终态。
+
+新增跨进程测试为 `3 passed in 32.25s`，独立相邻恢复集合为
+`16 passed in 83.15s`。生产 fan-out/cancellation 开关、部署密钥与整波
+canary 仍未开启，不能据此提升 NE-01 状态。
 
 当前恢复批次补齐签名 `COMMIT` 与无 intent 的签名 `RELEASE` 在 handler
 进程崩溃窗口中的机械证据：进程 A 产生真实 recovery hold，独立进程 B

@@ -9,6 +9,21 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+最新 NE-01 恢复批次补齐两组真实跨进程证据。第一组覆盖取消绑定的
+`COMMIT + SIDE_EFFECT_CONFIRMED` 与 `RELEASE + NO_SIDE_EFFECT`：目标
+Operation 已提交而 Accepted handler 尚未返回时硬退出，新进程只重开同一
+case-bound proof，随后由 cancellation continuation 把 Graph、Node 和
+Attempt 收口为 `CANCELLED`；第四个进程确认零 pending continuation。第二组
+在启用受控 fan-out 的测试组合中让一个根节点已 `ACCEPTED`、兄弟节点停在
+`RESERVED/RUNNING` 后硬退出；live Lease 只允许 defer，过期后必须生成
+current hold，经签名 `REACQUIRE` 后仅执行未知兄弟与 join，已验收兄弟不重跑。
+恢复调度现在会把 checkpoint 节点终态先交给统一 parallel settlement，Host
+只收到一个规范 Graph 终态，不再因节点终态与图终态重复而失败关闭。新增
+跨进程集合 `3 passed in 32.25s`，独立相邻恢复回归 `16 passed in 83.15s`。
+这证明的是本地 Windows/SQLite 受控子集；bounded fan-out 与 cancellation
+生产开关仍为 `OFF`，部署签名 canary、整波集成和 NE-07 尚未执行，因此
+NE-01 继续为 `IN_PROGRESS`。
+
 最新 NE-01 进程恢复切片已把签名终态的“目标写入成功、处理进程尚未返回”
 窗口纳入真实 Windows `spawn` 与文件型 SQLite 验证。`COMMIT +
 SIDE_EFFECT_CONFIRMED` 会在独立签名进程确认 canonical WorkerProjection 后，

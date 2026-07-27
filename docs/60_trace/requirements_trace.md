@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator active manifest 为 `14 governed / 0 blocked`；另外 23 个旧 ID 已从后端 manifest、handler、OpenAPI 和 Monitor 生成客户端退役，并由独立 replacement policy 记录，不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、一般恢复和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.13
+版本：v5.14
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -19,6 +19,17 @@
 4. 自动化测试证明其覆盖的行为，不能单独把 `PARTIAL` 提升为 `WIRED`。
 5. 历史 receipt 只对固定 commit、route 和环境成立。
 6. 执行顺序只来自 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+TRACE-EXEC-08AV（取消终态与混合 fan-out 跨进程恢复）：取消绑定的签名
+`COMMIT/RELEASE` 在目标 mutation 后、handler 返回前崩溃时必须 exact
+replay，并由独立 durable cancellation continuation 唯一收口。多节点
+checkpoint re-entry 不得同时公开 Node 与 Graph 两个 `done`；一个兄弟已
+`ACCEPTED`、另一个停在 `RESERVED/RUNNING` 时，live Lease 必须 defer，
+过期后必须持久 current hold，只有 exact case-bound Ed25519 `REACQUIRE`
+才能以 higher fence 只重跑未知兄弟和后继 join。当前 Windows spawn/SQLite
+新增 `3 passed in 32.25s`，独立相邻回归 `16 passed in 83.15s`。该 trace
+保持 `LOCAL_PASS / FEATURE_DEFAULT_OFF / NE01_IN_PROGRESS`，不代表部署 key、
+生产 canary、整波 integration 或 NE-07 已完成。
 
 TRACE-EXEC-08AU（Scheduler sweep 冻结与控制 policy 验收）：Clock 必须在
 第一个 worker 前从一个 SQLite read transaction 取得 pending CLOCK

@@ -3,12 +3,25 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.36
+版本：v2.37
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Durable DAG Recovery 模块现在对 committed checkpoint 使用统一
+`ParallelSettlementRuntime`：Node execution 只产出内部 outcome，Scheduler
+负责把 outcome 与最新 Graph/Budget/Attempt snapshot 归并为唯一外层结果。
+这使 Host startup continuation 不会把一个恢复节点的 `ACCEPTED` 与随后整图
+`COMPLETED` 误当成两个调用终态。真实进程测试已覆盖一个已验收兄弟和一个
+未知 `RESERVED` 兄弟的选择性恢复；模块仍缺部署开关、其它混合图形与波次
+canary。
+
+Graph Cancellation Recovery 模块已增加 COMMIT/RELEASE 目标 mutation 后
+handler 崩溃链。Accepted handler 仍不拥有 cancellation worker authority；
+它只重开 Operation proof 并 wake durable continuation，后者在独立 claim/fence
+下最终收口，terminal restart 不再领取工作。
 
 Operation Terminal Recovery 模块由 case-bound evidence store、action-specific
 checkpoint/failure service、`AcceptedOperationReconciliationHandler` 和

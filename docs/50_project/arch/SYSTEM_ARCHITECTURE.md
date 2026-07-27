@@ -3,11 +3,22 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.29
+版本：v2.30
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+Host 的跨进程恢复现在保持两层终态边界：Node continuation 可以产生
+checkpoint outcome，但不得直接成为多节点调用的最终结果；DAG Scheduler
+将其交给 shared settlement，并只把唯一 Graph terminal 交给 Host。该边界
+已经由一个 sibling ACCEPTED、另一个 sibling RESERVED 的真实进程崩溃链
+验证，避免“SQLite 已完成、Host 却因两个终态失败”的分裂结果。
+
+取消恢复则由 Operation reconciliation 与 Graph cancellation continuation
+分工：前者提交/重开 exact signed action，后者持有 graph terminal authority。
+COMMIT 和 RELEASE 两种 cancellation action 都能跨 handler 崩溃继续，且
+终态进程不再领取 continuation。生产开关仍受 signed canary gate 约束。
 
 跨进程恢复的系统边界现在明确区分目标提交与 handler 响应。目标
 Operation/Outbox Store 是 durable mutation owner；Accepted handler 和 Host
