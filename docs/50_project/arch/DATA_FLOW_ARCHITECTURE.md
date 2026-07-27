@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.27
+版本：v3.28
 
 核对日期：2026-07-27
 
@@ -12,6 +12,25 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+Scheduler clock 的当前一轮数据流先冻结再执行：
+
+```mermaid
+flowchart LR
+    T["captured_at_ms + limit"] --> R["SQLite BEGIN read snapshot"]
+    R --> P["pending CLOCK occurrences"]
+    R --> D["newly due definition heads"]
+    P --> B["ClockBatchV1 + sha256 ref"]
+    D --> B
+    B --> V["Clock validate ref/time/limit"]
+    V --> W["execute pending then admitted due"]
+    W -. "no second due query" .-> X["same frozen sweep"]
+```
+
+`B` 使用深层 JSON round-trip 切断 nested mapping alias。控制路线的正式
+验收另从同一 canonical SQLite 私下加载 Command/WorkOrder/TaskGraph，
+核对 digest 并重验 policy，随后只把 policy 的安全字段写入 evidence
+digest；raw admission payload 不流出 reader。
 
 Operator 命令的数据流先经过 active/retired 分界，而不是把未实现命令送入
 handler 前统一阻断：

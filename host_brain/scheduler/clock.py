@@ -15,6 +15,10 @@ import inspect
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from host_brain.contracts.scheduler_clock_batch import (
+    SchedulerClockBatchError,
+    validate_scheduler_clock_batch,
+)
 from host_brain.core.ids import now_ms as default_now_ms
 from host_brain.scheduler.command_ingress import SchedulerCommandIngress
 from host_brain.scheduler.contracts import (
@@ -37,6 +41,13 @@ class SchedulerClockError(RuntimeError):
 
 
 class SchedulerClockRepositoryPort(Protocol):
+    def read_clock_batch(
+        self,
+        *,
+        due_at_ms: int,
+        limit: int = 100,
+    ) -> Mapping[str, Any]: ...
+
     def list_pending_occurrences(self, *, limit: int = 100) -> list[Mapping[str, Any]]: ...
 
     def list_due(
@@ -160,6 +171,7 @@ class SchedulerClock:
         self._loop_task: asyncio.Task[None] | None = None
         self._active = False
         self._last_tick_ms: int | None = None
+        self._last_batch_ref: str | None = None
         self._last_error: str | None = None
         self._dispatch_tasks: set[asyncio.Future[Any]] = set()
 
@@ -210,7 +222,22 @@ class SchedulerClock:
             failures: list[dict[str, str]] = []
             seen: set[str] = set()
 
-            pending_rows = self._definitions.list_pending_occurrences(limit=self._limit)
+            try:
+                batch = validate_scheduler_clock_batch(
+                    self._definitions.read_clock_batch(
+                        due_at_ms=received_at_ms,
+                        limit=self._limit,
+                    ),
+                    expected_captured_at_ms=received_at_ms,
+                    expected_limit=self._limit,
+                )
+            except SchedulerClockBatchError as exc:
+                raise SchedulerClockError(
+                    exc.reason_code,
+                    exc.detail,
+                ) from exc
+            self._last_batch_ref = str(batch["batch_ref"])
+            pending_rows = list(batch["pending_occurrences"])
             for raw in pending_rows:
                 claim: Mapping[str, Any] | None = None
                 dispatch_owned = False
@@ -251,12 +278,8 @@ class SchedulerClock:
                         )
                     failures.append(_failure(raw, exc))
 
-            remaining = max(0, self._limit - len(seen))
-            if remaining:
-                due_rows = self._definitions.list_due(
-                    due_at_ms=received_at_ms,
-                    limit=remaining,
-                )
+            due_rows = list(batch["due_definitions"])
+            if due_rows:
                 for raw in due_rows:
                     due_key = _due_retry_key(raw)
                     claim: Mapping[str, Any] | None = None
@@ -348,6 +371,7 @@ class SchedulerClock:
 
             self._last_error = failures[-1]["reason_code"] if failures else None
             return {
+                "batch_ref": self._last_batch_ref,
                 "received_at_ms": received_at_ms,
                 "recovered": recovered,
                 "admitted": admitted_count,
@@ -362,6 +386,7 @@ class SchedulerClock:
         return {
             "active": self._active,
             "last_tick_ms": self._last_tick_ms,
+            "last_batch_ref": self._last_batch_ref,
             "last_error": self._last_error,
             "poll_interval_s": self._poll_interval_s,
             "backoff_count": int(retry_summary.get("retry_count") or 0),

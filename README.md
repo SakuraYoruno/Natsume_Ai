@@ -9,6 +9,23 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+最新 NE-01 切片关闭了 Scheduler 一次 sweep 内的可变批次窗口。
+`SchedulerDefinitionRepository.read_clock_batch()` 先在一个 SQLite 读事务中
+同时取得待恢复的 CLOCK occurrence 与新到期 definition，再把 capture time、
+limit、顺序和深拷贝后的 JSON 行绑定为
+`scheduler-clock-batch://sha256/...`。`SchedulerClock` 在执行第一个 worker
+之前独立重开该合同，并且本轮不再二次查询 due rows；因此先执行的 pending
+worker 不能改写或重新选择同一轮剩余任务。七路线 query-only 验收 reader
+也会私下严格重开持久化 Command、WorkOrder、TaskGraph 及三者 digest，并对
+Scheduler/Internal/Operator 重新执行
+`ControlRouteExecutionPolicyV1` 绑定校验；公开收据仍只保留无正文、无
+secret 的 policy/digest 证据。核心 Scheduler、合同和真实 SQLite
+三控制路线集合为 `45 passed`；加入结构、控制 policy、coverage 与文档
+回归后的最终受影响集合为 `100 passed in 64.61s`，架构 Gate 1～14 和统一
+`static_scan,doc_gate` 也均通过。新 clean-SHA 七路线正式收据要在本切片提交
+后生成，因此 Scheduler 与 NE-01 仍是 `INCOMPLETE / IN_PROGRESS`，远程
+CI 仍记 `NOT_RUN_ACCOUNT_QUOTA`，Docker 全栈仍留到 NE-07。
+
 NE-01 当前切片正在收口 Scheduler、Internal、Operator 复用
 `route=delegate` 时的控制面语义。三者现在必须携带同一个
 content-addressed `ControlRouteExecutionPolicyV1`，精确绑定 surface、

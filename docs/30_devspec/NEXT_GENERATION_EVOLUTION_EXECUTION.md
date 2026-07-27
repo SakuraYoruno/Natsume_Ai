@@ -5,9 +5,27 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.24
+版本：v3.25
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前执行切片先收口 Scheduler clock sweep 与控制路线验收盲点：
+
+1. Clock 必须在任何 worker 前通过一个 SQLite read transaction 同时读取
+   pending CLOCK occurrence 与 newly-due definition。
+2. capture time、limit、行顺序和深层 JSON 内容必须冻结为
+   `natsume.scheduler.clock-batch.v1`，并由 Clock 独立重验
+   `scheduler-clock-batch://sha256/...`；本轮禁止第二次 due query。
+3. 七路线验收 reader 必须用严格 JSON loader 重开
+   `command_json/work_order_json/graph_json`，核对各自 digest，并调用
+   `require_control_route_execution_policy()`；公开 snapshot 不得携带这些
+   raw payload。
+4. Scheduler/Internal/Operator PASS 必须各有一个完整、content-addressed
+   且 binding-valid 的控制政策；非控制路线携带该政策必须失败关闭。
+5. 本切片的核心 45 项定向/合同/SQLite 验证和最终 100 项受影响回归、
+   Gate 1～14、统一 delivery gate 通过，只允许写 `LOCAL_TARGETED_PASS`。
+   提交后生成的新 clean-SHA 七路线收据、NE-01
+   波次 integration 与 NE-07 全栈未完成前，状态不得升级。
 
 当前 Scheduler/Internal/Operator 收口切片采用统一不可变控制执行政策。
 任何以 `INTERNAL/OPERATOR/SCHEDULER + route=delegate` 进入 Task Runtime 的

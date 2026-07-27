@@ -3,9 +3,30 @@
 
 # 测试与验收目录
 
-版本：v2.32
+版本：v2.33
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Scheduler 时钟批次与控制政策验收切片
+
+- `test_ne01_scheduler_clock_batch.py` 验证 capture time、limit、顺序、深层
+  JSON 行和 digest 的 exact reopen；alias mutation、重复 identity、越界与
+  payload tamper 均失败关闭。
+- `test_aw02_scheduler_clock.py` 证明一个 pending worker 修改原 due mapping
+  后，同一 sweep 仍使用执行前冻结的 definition；Clock 不再执行第二次
+  `list_due()`。
+- `test_aw02_scheduler_repository.py` 使用真实 migration SQLite，证明 pending
+  与 due 在同一事务读取、重开 repository 得到相同 batch ref，嵌套字段篡改
+  被拒绝。
+- Universal acceptance reader 严格重开 admission 的 Command、WorkOrder、
+  TaskGraph 和三个 digest。控制路线只有在完整 policy 重新验证后才投影
+  privacy-safe evidence；非控制路线夹带 policy 也会失败。
+- Scheduler/acceptance 核心批次为 `45 passed in 53.57s`；加入结构、
+  control-policy、coverage 与文档回归后的最终受影响集合为
+  `100 passed in 64.61s`。架构 Gate 1～14 和
+  `static_scan,doc_gate` 均为 PASS。这些仍是 pre-commit 本地证据；新
+  clean-SHA 七路线收据为 `PENDING`，不得与历史 37/19/69 项批次相加，也
+  不证明一般恢复、波次 integration 或 NE-07。
 
 ## NE-01 Operator 旧命令物理退役切片
 

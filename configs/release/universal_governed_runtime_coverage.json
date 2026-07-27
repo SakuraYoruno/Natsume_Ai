@@ -3,7 +3,7 @@
   "baseline_commit": "a6d7ae383",
   "baseline_role": "ORIGINAL_AUDIT_BASELINE",
   "evaluated_source": "NE01_PLAN_DELEGATE_EXECUTION_POLICY_AND_SEVEN_ROUTE_FORMAL_CLEAN_SHA_SHARED_SQLITE_ACCEPTANCE_OVER_ORIGIN_DEV_5FECD47C4",
-  "current_document_slice": "NE01_CONTROL_ROUTE_EXECUTION_POLICY_LOCAL_TARGETED_69_AND_STATIC_GATES_1_TO_14_PASS_CLEAN_SHA_RECEIPT_PENDING",
+  "current_document_slice": "NE01_SCHEDULER_CLOCK_BATCH_AND_CONTROL_POLICY_ACCEPTANCE_FINAL_AFFECTED_100_STATIC_GATES_1_TO_14_AND_DELIVERY_GATE_PASS_CLEAN_SHA_RECEIPT_PENDING",
   "evidence_binding": {
     "evaluated_commit_sha": "3db60ff170a085056d7fd9ba792cb7064de14d35",
     "migration_head": "0135_task_review_denial_settlement.sql"
@@ -39,7 +39,8 @@
     "budget": "PARTIAL_GRAPH_CEILING_PLUS_ATTEMPT_BOUND_CHILD_RESERVATION_ATOMIC_READY_CLAIM_PARENT_CHILD_USAGE_UOW_RETRY_AND_RESPONSE_LOSS_REPLAY_LOCAL_SQLITE_PROVEN_PROGRAM_WIDE_ROUTE_COVERAGE_CANCELLATION_AND_NE07_CANARY_INCOMPLETE",
     "preoperation_attempt_takeover": "CANONICAL_OPERATION_FREE_PERSISTED_ATTEMPT_SAME_ATTEMPT_HIGHER_FENCE_PROVEN_POST_RESERVATION_KNOWN_INTERRUPTION_ATOMIC_RECOVERY_REQUIRED_OPERATION_OUTBOX_0130_CASE_AND_CASE_OUTBOX_GENERAL_UNKNOWN_EFFECT_AUTO_ATTRIBUTION_AND_ALL_FAILURE_CLASSES_INCOMPLETE",
     "operation_recovery_hold": "0130_KNOWN_INTERRUPTION_MARKER_OPERATION_OUTBOX_APPEND_ONLY_EXACT_GRAPH_NODE_ATTEMPT_OPERATION_BUDGET_CANCELLATION_ACTIVE_LEASE_SUBJECT_AND_CASE_OUTBOX_ONE_UOW_RUNTIME_READS_EXACT_CASE_UNKNOWN_AND_CANCELLATION_CURRENT_LIVENESS_FOLLOWS_OPERATION_VERSION_AND_CANCELLATION_IDENTITY_GRAPH_CANCELLATION_APPENDS_SUCCESSOR_0131_CASE_BOUND_SIGNED_EVIDENCE_CHECKPOINT_CONFLICT_QUARANTINED_NO_BLIND_WORKER_REPLAY_GENERAL_RECOVERY_INCOMPLETE",
-    "control_route_execution_policy": "WIRED_CONTENT_ADDRESSED_INTERNAL_OPERATOR_SCHEDULER_CONTROL_TRANSPORT_BINDS_EXACT_SURFACE_COMMAND_TARGET_OWNER_REVIEW_BUDGET_VERIFICATION_EFFECT_WORKORDER_TASKNODE_AND_REOPENS_INITIAL_REPLAY_REVIEW_RECOVERY_VERIFIER_ACCEPTANCE_EFFECT_OPERATOR_INTENT_REVIEW_AND_TASKNODE_REVIEW_MUTUALLY_EXCLUSIVE_CLEAN_SHA_RECEIPT_PENDING",
+    "control_route_execution_policy": "WIRED_CONTENT_ADDRESSED_INTERNAL_OPERATOR_SCHEDULER_CONTROL_TRANSPORT_BINDS_EXACT_SURFACE_COMMAND_TARGET_OWNER_REVIEW_BUDGET_VERIFICATION_EFFECT_WORKORDER_TASKNODE_AND_REOPENS_INITIAL_REPLAY_REVIEW_RECOVERY_VERIFIER_ACCEPTANCE_EFFECT_PLUS_QUERY_ONLY_ACCEPTANCE_READER_STRICTLY_REOPENS_COMMAND_WORKORDER_GRAPH_DIGESTS_AND_POLICY_OPERATOR_INTENT_REVIEW_AND_TASKNODE_REVIEW_MUTUALLY_EXCLUSIVE_CLEAN_SHA_RECEIPT_PENDING",
+    "scheduler_clock_batch": "WIRED_ONE_SQLITE_READ_TRANSACTION_CAPTURES_PENDING_CLOCK_OCCURRENCES_AND_DUE_DEFINITIONS_BEFORE_ANY_WORKER_DEEP_JSON_FREEZE_CAPTURE_TIME_LIMIT_ORDER_AND_ROWS_CONTENT_ADDRESSED_RUNTIME_REVALIDATION_NO_SECOND_DUE_QUERY_CORE_45_PASS_FINAL_AFFECTED_100_PASS_STATIC_GATES_1_TO_14_AND_DELIVERY_GATE_PASS_CLEAN_SHA_RECEIPT_PENDING",
     "signed_multinode_operation_failure": "LOCAL_REAL_SQLITE_PROVEN_SIGNED_RELEASE_NO_SIDE_EFFECT_ATOMICALLY_CLOSES_ONLY_OPERATION_TARGET_ATTEMPT_NODE_AND_EXPIRED_LEASE_GRAPH_AND_SHARED_BUDGET_REMAIN_UNCHANGED_UNTIL_EXISTING_0090_FAILURE_DECISION_COMMITS_ON_REENTRY_READY_SIBLING_WORKER_CALLS_ZERO_ACCEPTANCE_RECEIPT_STABLE_ACROSS_PENDING_COMMITTED_SETTLEMENT_DUAL_SIGNED_FAILURE_NONSELECTED_NODE_REOPENS_FROM_SAME_DECISION_OUTCOME_0090_OUTBOX_TAMPER_FAILS_CLOSED_OTHER_FAILURE_CANCELLATION_AND_SEVEN_ROUTE_COMMIT_BOUND_ACCEPTANCE_INCOMPLETE",
     "host_startup_graph_continuation": "PARTIAL_LIFECYCLE_SURVIVOR_EXACT_HOST_ADMISSION_REENTRY_SURFACE_FILTERED_SINGLE_READ_TRANSACTION_EXACT_BOUND_ACCEPTED_TRUE_OVERFLOW_FAIL_CLOSED_AFTER_COMPLETE_RUNTIME_GROUP_ACTIVATION_MANDATORY_BOOT_THEN_PERIODIC_TIMER_OR_WAKE_LIVE_LEASE_OR_EXECUTION_DEFERRED_EXPIRED_LEASE_ONLINE_REEVALUATED_NO_WORKER_AUTHORITY_GENERAL_RECOVERY_INCOMPLETE",
     "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_MODE_POLICY_0129_DURABLE_RUNTIME_FENCED_OPERATOR_STATE_CONTROLS_LOCAL_SQLITE_PROVEN_HTTP_NETWORK_CANARY_NOT_RUN",
@@ -246,8 +247,10 @@
     "scheduler": {
       "status": "INCOMPLETE",
       "control_transport_execution_policy": "PASS_LOCAL_ENABLED_SCOPE_CONTENT_ADDRESSED_POLICY_REOPENED_AT_INITIAL_REPLAY_REVIEW_RECOVERY_VERIFIER_ACCEPTANCE_EFFECT_CLEAN_SHA_RECEIPT_PENDING",
-      "production_boundary": "Scheduler occurrences and administrative writes now share the governed execution boundary. Occurrence workers emit only immutable scheduler.operation.execute plans; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW, and the real handler runs after Acceptance. Migration 0117 keeps DUE owner/fence conversion and heartbeat durable. Administrative create/update/delete/enable/disable under both /scheduler and /host-scheduler prefixes now freeze Scheduler Secure Ingress method/path/body/claim and definition head, create a SCHEDULER HostCommand plus immutable TaskGraph, and mutate the canonical repository only through the post-Acceptance operator.state_control effect. The immutable scheduler_admin_operation_result is committed before outer claim completion; a restarted repository/service resolves the exact receipt and completes the original claim without remutation. Route calls to publish_definition, set_enabled or delete_definition are zero. The current affected code batch is 34 passed in 139.12 seconds and supersedes the development 32-test and pre-structure-fix 127.26-second results. Gate 3 initially rejected acceptance_effects.py at 1511 lines; the state-control route predicate moved to its focused compiler, restoring the owner to 1500 lines with no allowlist expansion and final Gates 1-14 PASS. The route remains INCOMPLETE because mutable batch freezing, general multi-node and unknown-effect recovery, program-wide Budget measurement, commit-bound acceptance, complete process restart, real HTTP/network canary, wave integration and production canary remain missing.",
+      "production_boundary": "Scheduler occurrences and administrative writes share the governed execution boundary. Before any worker runs, SchedulerDefinitionRepository now captures pending CLOCK occurrences plus newly due definition heads in one SQLite read transaction and binds capture time, bound, exact order and deep-frozen JSON rows to scheduler-clock-batch://sha256 authority. SchedulerClock independently reopens that authority and never requeries due rows inside the same sweep, so an earlier pending worker cannot mutate or reselect the remainder. Occurrence workers emit only immutable scheduler.operation.execute plans; Graph Verification/Acceptance and Effect staging share the canonical TaskStore UoW, and the real handler runs after Acceptance. Migration 0117 keeps DUE owner/fence conversion and heartbeat durable. Administrative create/update/delete/enable/disable under both /scheduler and /host-scheduler prefixes freeze Scheduler Secure Ingress method/path/body/claim and definition head, create a SCHEDULER HostCommand plus immutable TaskGraph, and mutate the canonical repository only through the post-Acceptance operator.state_control effect. The immutable scheduler_admin_operation_result is committed before outer claim completion; a restarted repository/service resolves the exact receipt and completes the original claim without remutation. Route calls to publish_definition, set_enabled or delete_definition are zero. The current Scheduler and route-acceptance affected batch is 45 passed in 53.57 seconds. The route remains INCOMPLETE because the new clean-SHA receipt, general multi-node and unknown-effect recovery, program-wide Budget measurement, complete process restart, real HTTP/network canary, wave integration and production canary remain missing.",
       "evidence_refs": [
+        "host_brain/contracts/scheduler_clock_batch.py",
+        "host_brain/persistence/scheduler_clock_batch_store.py",
         "host_brain/scheduler/governed_runtime.py",
         "host_brain/scheduler/scheduler_routes.py",
         "host_brain/scheduler/command_service.py",
@@ -257,6 +260,9 @@
         "host_brain/scheduler/worker_registry.py",
         "host_brain/scheduler/clock.py",
         "host_brain/persistence/scheduler_repository.py",
+        "host_brain/persistence/universal_route_acceptance_reader.py",
+        "host_brain/release/universal_route_acceptance.py",
+        "host_brain/release/universal_route_control_policy.py",
         "host_brain/audit/migrations/0117_scheduler_clock_retry_authority.sql",
         "host_brain/task_runtime/acceptance_effect_dispatcher.py",
         "host_brain/app/governed_operator_state_control_runtime.py",
@@ -264,6 +270,7 @@
         "host_brain/task_runtime/operator_state_control_support.py",
         "host_brain/persistence/host_command_claim_result_validation.py",
         "tests/unit/test_aw02_scheduler_route_cutover.py",
+        "tests/unit/test_ne01_scheduler_clock_batch.py",
         "tests/unit/test_aw03_scheduler_durable_uow.py",
         "tests/unit/test_ne01_scheduler_operation_plan.py",
         "tests/unit/test_ne01_scheduler_accepted_operation.py",

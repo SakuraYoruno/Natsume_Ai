@@ -1,10 +1,29 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.30
+版本：v0.31
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-SCHEDULER-CLOCK-BATCH
+
+- T-NE01-SCB-01：Repository 必须在一个 SQLite read transaction 中按稳定
+  顺序同时读取 pending CLOCK occurrence 与 newly-due definition，合计不得
+  超过 limit。
+- T-NE01-SCB-02：ClockBatch 必须绑定 schema、capture time、limit、深冻结
+  JSON 行和顺序；duplicate identity、未知字段、非有限 JSON、overflow、
+  digest/time/limit drift 均失败关闭。
+- T-NE01-SCB-03：Clock 必须在首个 worker 前重开 batch，同一 sweep 不得
+  第二次查询 due；前序 worker 修改原 nested mapping 不能影响剩余节点。
+- T-NE01-SCB-04：query-only acceptance reader 必须严格重开 Command、
+  WorkOrder、TaskGraph 和三个 admission digest，再验证控制 policy；不得把
+  raw JSON、用户文本、模型输出或 secret 投影到收据。
+- T-NE01-SCB-05：Scheduler/Internal/Operator 各要求恰好一个有效 policy；
+  非控制路线夹带 policy 必须失败。当前相关批次为
+  `45 passed in 53.57s`，最终受影响集合为 `100 passed in 64.61s`，架构
+  Gate 1～14 和统一 delivery gate 通过；新 clean-SHA receipt、波次
+  integration、完整进程 restart 和 NE-07 仍未运行。
 
 ## T-NE01-PLAN-DELEGATE-EXECUTION-POLICY
 

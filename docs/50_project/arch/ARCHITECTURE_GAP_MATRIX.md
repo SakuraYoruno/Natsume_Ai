@@ -3,10 +3,19 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.25
+版本：v3.26
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+Scheduler 的“先执行 pending、再查询 due”缺口已在当前工作树关闭。
+Repository 以一个 SQLite read transaction 冻结两组输入，并生成包含
+capture time、limit、顺序与深层 JSON 行的 content-addressed batch；
+Clock 在执行前重开且同轮不再查询数据库。七路线 reader 同时补上
+Command/WorkOrder/TaskGraph digest 与控制 policy 的独立重开，避免仅凭
+surface/route 字符串判 PASS。该项从缺口矩阵移除，但 Scheduler 仍缺一般
+unknown-effect/multi-node recovery、全程序 Budget 度量、新 clean-SHA
+正式收据、完整进程重启和部署 canary，因此路线状态仍为 `INCOMPLETE`。
 
 Scheduler、Internal、Operator 的“同一 `delegate` 字符串承载三种隐含执行
 语义”断点已在当前启用入口收敛为显式

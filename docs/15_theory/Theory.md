@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.28
+版本：v2.29
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -32,6 +32,14 @@ typed Effect/Workspace handler 完成。没有这条分界，Worker 的“成功
 业务计算、授权和外部效果重新混成第二套 authority。
 
 跨路线完成性遵循“同一提交、同一数据库快照、逐路线完整证据”的不变量。代码、单测或某几条路线成功都不能外推为通用 Runtime 完成；验收者必须以只读事务独立重开真实持久事实，并把 Git HEAD、仓库与数据库 migration head、Command/Graph/Node/Attempt/Lease/Operation、父子 Budget、Verification、Acceptance、Artifact、Effect/Outbox/Receipt 串成不可替换的证据链。一个 request 只能证明一条路线，未运行路线必须显式保留 `NOT_RUN`。收据只能暴露完成判断需要的标识、状态、版本与 digest，不能复制用户正文、模型输出、secret 或执行 payload。这样，“能够验收”与“已经七路验收通过”才不会被混为一谈。
+
+批处理的不可变性必须早于第一个 Effect。Scheduler 若先执行 pending
+occurrence、再查询本轮 due definition，前一个 worker 就能通过修改数据库
+或共享 mapping 改变后半轮的执行集合；即使每个单项都有 TaskGraph，这一轮
+本身仍不是可重放决定。正确边界是在一个一致性读事务中冻结全部有界输入，
+把 capture time、limit、顺序与深层 JSON 内容写入 content address，然后
+由运行时在执行前重开。验收同样不能相信数据库行上“已有 policy ref”这一
+表象，而应私下重开原始版本化合同和 digest，再只投影隐私安全的判断证据。
 
 跨路线验收可以使用确定性的本地 worker 检查调度、授权、预算、Review、验收和副作用原子性，但收据必须标明其证据边界。确定性 worker 不能证明真实模型质量、外部 provider attestation、PlanningSearch 收益或真实网络/设备可用性；这些结论只能由后续各自的独立验收合同给出。换言之，同库七路 PASS 是 Runtime 治理证据，不是整个智能系统的 PASS。
 

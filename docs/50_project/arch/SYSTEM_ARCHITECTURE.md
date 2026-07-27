@@ -3,11 +3,18 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.27
+版本：v2.28
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+Scheduler 的生产对象图现在把“发现本轮工作”视为独立不可变 authority。
+Persistence owner 在单一 SQLite snapshot 内构造 ClockBatch；Scheduler
+进程只接收 content-addressed、深冻结的 bounded rows，并在任何执行前重验。
+这样 Task Runtime 仍独占每个 occurrence 的 Attempt/Lease/Budget/Acceptance，
+而 Clock 只决定同一 capture point 的有界候选集合。Release 的 query-only
+reader 与运行对象图分离，只能裁决已落盘事实，不能修改 Scheduler 或 Task。
 
 Skill 执行现在有一个显式 policy gate 和一个 app-local authority root。
 canonical Host Registry 对 93 个 Skill 做完备分区：28 个 inline read-only、13 个

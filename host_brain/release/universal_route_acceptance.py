@@ -14,21 +14,17 @@ from typing import Any
 from host_brain.persistence.universal_route_acceptance_reader import (
     UniversalRouteAcceptanceReader,
 )
-
-
-UNIVERSAL_ROUTE_ACCEPTANCE_SCHEMA_VERSION = (
-    "natsume.universal-runtime-route-acceptance.v3"
+from host_brain.release.universal_route_control_policy import (
+    CONTROL_ROUTE_POLICY_EVIDENCE_FIELDS,
+    evaluate_control_route_policy,
 )
+
+
+UNIVERSAL_ROUTE_ACCEPTANCE_SCHEMA_VERSION = "natsume.universal-runtime-route-acceptance.v3"
 UNIVERSAL_ROUTE_ACCEPTANCE_INVALID = "UNIVERSAL_ROUTE_ACCEPTANCE_INVALID"
-UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_INVALID = (
-    "UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_INVALID"
-)
-UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_DIRTY = (
-    "UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_DIRTY"
-)
-UNIVERSAL_ROUTE_ACCEPTANCE_MIGRATION_MISMATCH = (
-    "UNIVERSAL_ROUTE_ACCEPTANCE_MIGRATION_MISMATCH"
-)
+UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_INVALID = "UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_INVALID"
+UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_DIRTY = "UNIVERSAL_ROUTE_ACCEPTANCE_SOURCE_DIRTY"
+UNIVERSAL_ROUTE_ACCEPTANCE_MIGRATION_MISMATCH = "UNIVERSAL_ROUTE_ACCEPTANCE_MIGRATION_MISMATCH"
 
 ROUTE_PASS = "PASS"
 ROUTE_FAIL = "FAIL"
@@ -472,6 +468,11 @@ def _evaluate_route(
         operations=operations,
         reasons=reasons,
     )
+    evaluate_control_route_policy(
+        route=route,
+        raw=raw,
+        reasons=reasons,
+    )
 
     effects = _records(raw, "effects")
     if not effects:
@@ -882,6 +883,7 @@ def _route_record(
         key: len(_records(raw, key))
         for key in (
             "commands",
+            "control_route_policies",
             "graphs",
             "nodes",
             "attempts",
@@ -936,6 +938,7 @@ def _privacy_bounded_evidence(raw: Mapping[str, Any]) -> dict[str, Any]:
             "graph_revision",
             "created_at_ms",
         ),
+        "control_route_policies": CONTROL_ROUTE_POLICY_EVIDENCE_FIELDS,
         "graphs": ("graph_id", "revision", "status", "status_version"),
         "nodes": ("node_id", "status", "status_version"),
         "attempts": (

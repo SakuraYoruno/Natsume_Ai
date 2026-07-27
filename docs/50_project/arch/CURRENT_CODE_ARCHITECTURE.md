@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.54
+版本：v5.55
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,15 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
+
+SchedulerClock 当前不再把一次 sweep 拆成“pending 执行”和“due 再查询”两
+个可互相影响的阶段。`scheduler_clock_batch.py` 定义中立的版本化合同，
+`scheduler_clock_batch_store.py` 在一个 SQLite snapshot 中读取两组行并
+深冻结，`clock.py` 在第一个 worker 前重验 batch ref/capture/limit。验收
+reader 会在不输出 raw payload 的前提下重开持久 admission typed contracts、
+digest 和 control policy；Release evaluator 要求三条控制 surface 各有且
+仅有一个有效政策。45 项当前集合已通过，但新正式收据尚未绑定 clean SHA，
+所以这是一项已接线的局部事实，不是 Scheduler 或 NE-01 封板。
 
 Scheduler、Internal、Operator 虽然都以 `route=delegate` 进入 canonical
 worker resolver，但现在由

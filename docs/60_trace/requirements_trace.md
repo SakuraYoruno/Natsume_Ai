@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator active manifest 为 `14 governed / 0 blocked`；另外 23 个旧 ID 已从后端 manifest、handler、OpenAPI 和 Monitor 生成客户端退役，并由独立 replacement policy 记录，不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、一般恢复和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.11
+版本：v5.12
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -19,6 +19,21 @@
 4. 自动化测试证明其覆盖的行为，不能单独把 `PARTIAL` 提升为 `WIRED`。
 5. 历史 receipt 只对固定 commit、route 和环境成立。
 6. 执行顺序只来自 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+TRACE-EXEC-08AU（Scheduler sweep 冻结与控制 policy 验收）：Clock 必须在
+第一个 worker 前从一个 SQLite read transaction 取得 pending CLOCK
+occurrence 和 newly-due definition，按 capture time/limit/order/deep JSON
+生成 `scheduler-clock-batch://sha256`，消费方重验且同轮禁止第二次 due
+query。Universal acceptance reader 必须严格解析 admission 三个版本化
+payload、核对 digest、重开 control policy，同时禁止 raw payload 进入收据。
+Scheduler/Internal/Operator 各缺失、重复或篡改 policy 时路线失败；Chat/
+Skill/Plan/Delegate 携带控制 policy 同样失败。证据入口为
+`test_ne01_scheduler_clock_batch.py`、`test_aw02_scheduler_clock.py`、
+`test_aw02_scheduler_repository.py`、`test_aw02_scheduler_production_cutover.py`、
+`test_universal_route_acceptance.py` 与
+`test_ne01_universal_remaining_route_acceptance.py`。核心集合 `45 passed`，
+最终受影响集合 `100 passed`，Gate 1～14 与统一 delivery gate 通过；
+clean-SHA 收据待提交后生成，FR 状态不升级。
 
 TRACE-EXEC-08AT（Scheduler/Internal/Operator 控制执行政策）：三类 surface
 复用 `route=delegate` 时必须携带 content-addressed
