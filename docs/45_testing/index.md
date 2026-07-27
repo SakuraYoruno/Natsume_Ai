@@ -999,3 +999,16 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   `NOT_RUN_TOOL_UNAVAILABLE`。本组使用受控 transport，不是外部
   provider、24 项 cohort 或收益 PASS，状态仍为
   `ACCEPTANCE_PENDING_EXTERNAL`。
+
+### NE-02 Research 固定 cohort 统计协议
+
+- `tests/unit/test_d20_research_benefit_cohort.py` 定向结果为 `9 passed in
+  0.62s`。
+- 正向用例固定 24 个唯一 paired workload、三个主题、本地/Web 来源，
+  验证输入倒序不改变 report，并要求均值提升、paired bootstrap 下界、
+  citation、含 hidden verifier 的成本与 p95 时延全部通过。
+- 负向用例覆盖 23 项 cohort、单主题、缺 Web、terminal/response digest
+  漂移、verifier 与 arm 共用 execution、未 attested verifier、非 owner
+  randomized 顺序、质量/严重错误/成本/时延门槛失败。
+- 本组只验证纯合同与确定性统计器；append-only cohort repository、真实
+  provider、24 项运行与 promotion 均为 `NOT_RUN`，不得提升收益状态。

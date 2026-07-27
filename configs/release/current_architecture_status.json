@@ -5,12 +5,12 @@
     "dev_commit": "a407e73ebd1df59b52a3664d1c1f342238d41564",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE02_EXTERNAL_TRANSPORT_IDENTITY_LOCAL_TARGETED_PASS_REAL_PROVIDER_AND_COHORT_ACCEPTANCE_PENDING"
+    "evaluated_source": "NE02_RESEARCH_FIXED_BENEFIT_PROTOCOL_LOCAL_TARGETED_PASS_DURABLE_COHORT_AND_REAL_PROVIDER_ACCEPTANCE_PENDING"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-02",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_D20C_PRODUCTION_TRANSPORT_IDENTITY_CANONICAL_AUDIT_BINDING_LOCAL_TARGETED_PASS_LOCAL_PRIVATE_CLI_UNKNOWN_AND_HISTORICAL_UNIDENTIFIED_RECEIPTS_BENEFIT_INELIGIBLE_REAL_PROVIDER_24_RESEARCH_20_CODE_30_PENTEST_COHORTS_AND_PROMOTION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
+  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_D20C_TRANSPORT_IDENTITY_AND_FIXED_24_RESEARCH_BENEFIT_PROTOCOL_LOCAL_TARGETED_PASS_PURE_EVALUATOR_ONLY_DURABLE_COHORT_REAL_PROVIDER_20_CODE_30_PENTEST_AND_PROMOTION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
   "next_wave": "NE-03",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,6 +26,28 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne02_research_fixed_benefit_protocol": {
+      "status": "LOCAL_TARGETED_PASS_DURABLE_LEDGER_AND_EXTERNAL_ACCEPTANCE_PENDING",
+      "cohort": "EXACTLY_24_UNIQUE_PAIRED_WORKLOADS_AT_LEAST_THREE_TOPICS_LOCAL_FILE_AND_WEB",
+      "quality_authority": "INDEPENDENT_HIDDEN_VERIFIER_EXECUTION_BINDS_ARM_RESPONSE_PROFILE_RUBRIC_AND_EXTERNAL_TRANSPORT_ATTESTATION",
+      "statistics": "DETERMINISTIC_10000_ITERATION_PAIRED_BOOTSTRAP_PLUS_QUALITY_CITATION_SEVERE_ERROR_TOTAL_COST_AND_P95_LATENCY_GATES",
+      "influence": "REPORT_IS_PROPOSAL_ONLY_AND_PRODUCTION_INFLUENCE_FALSE",
+      "local_validation": "9_PASSED_IN_0_62_SECONDS",
+      "migration": "NONE_DURABLE_COHORT_OWNER_DEFERRED_TO_SINGLE_NE02_NEXT_FREE_MIGRATION",
+      "not_run": [
+        "append-only cohort repository",
+        "24 real external Research workloads",
+        "independent deployed hidden verifier",
+        "benefit or promotion acceptance"
+      ],
+      "evidence_refs": [
+        "host_brain/contracts/planning_search/research_benefit_cohort.py",
+        "host_brain/contracts/planning_search/research_benefit_cohort_models.py",
+        "host_brain/contracts/planning_search/research_benefit_cohort_evaluator.py",
+        "host_brain/planning_search/research_benefit_cohort.py",
+        "tests/unit/test_d20_research_benefit_cohort.py"
+      ]
+    },
     "ne02_external_transport_identity_current_validation": {
       "status": "LOCAL_TARGETED_PASS_ACCEPTANCE_PENDING_EXTERNAL",
       "base_commit": "a407e73ebd1df59b52a3664d1c1f342238d41564",

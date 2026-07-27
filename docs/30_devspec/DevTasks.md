@@ -29,6 +29,13 @@ Research attestation 必须精确一致；本地、私网、CLI、未知 transpo
 20 项和 Pentest 30 次验收尚未执行，因此本波仍为 `IN_PROGRESS /
 ACCEPTANCE_PENDING_EXTERNAL`。
 
+Research 24 项验收协议的纯合同与确定性 evaluator 已落地：固定 cohort
+规模/主题/来源覆盖，hidden verifier 独立 execution 与 response binding，
+10,000 次 paired bootstrap，以及质量、citation、严重错误、含 verifier 成本
+和 p95 时延的不可放宽门槛均有定向测试。下一步是在本波统一 next-free
+migration 中建立 append-only cohort owner，再运行真实双臂；当前不得把
+`proposal_eligible` 的可计算性写成已获得真实收益。
+
 ## 历史编号
 
 - TASK-0000～TASK-0622、M48～M57、AW-00～08、GR-00～06 已冻结。

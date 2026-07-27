@@ -582,6 +582,8 @@ D19 只在 registration 显式绑定同一 `CodeBenchmarkVerificationPlan` 时�
 
 这不是生产 Research route、TaskGraph、Host、BrowserWorker 或网页抓取接线；没有 production prompt/workload、真实 provider credential execution、独立信任域 verifier、paired cohort、成本/延迟对照、收益统计、winner/promotion authority，也没有 OS/tenant/sandbox。成对 runner 的 in-process canonical-model double 只覆盖本地恢复机械链，绝不能作为 external provider attestation 或 cohort evidence。adapter 的 SQLite audit 重开只证明本地持久审计可对照，不是外部 transport 或 production composition 证据。loader 的根目录和 manifest 都是受信实验输入，其 before/open/after 检查不是 hostile concurrent replacement 的原子 TOCTOU 防线；byte-span validity 也不能据此推导事实正确性或来源独立性。因此 D20c 为 `ACCEPTANCE_PENDING_EXTERNAL`，Research benefit 仍为 `UNPROVEN`。
 
+`contracts/planning_search/research_benefit_cohort.py` 现承载后续真实验收的中立协议和纯 evaluator。它把单臂质量判断从 citation receipt 分离：hidden verifier 拥有不同 execution/attempt，绑定 arm response digest、profile/rubric 和自身 provider attestation。本协议不接受调用方调整 cohort 数或阈值，固定 24 项、三类主题、本地/Web 覆盖、10,000 次 deterministic paired bootstrap、质量/citation/严重错误/总成本/p95 时延 Gate；模型和 verifier 成本/时延一起计入。结构或身份漂移抛错，实验性能失败则生成不可 eligible 的 reason-code report。即使 report 通过也仅能进入 proposal，不能直接影响生产。目前没有 SQLite cohort owner、真实 workload/provider 或报告持久化，因此这一模块是可执行验收算法，不是已完成验收。
+
 ### 5.2 Host Plan
 
 Host production adapter 不再调用 `host_brain/orchestration/plan_intent_search.py`。该文件保留为纯 compatibility/contract adapter：它可以检查旧 `planned_steps/steps` 的合法拓扑，但无法由 Host 接受、构造上下文或 admission。当前 Host 只接受显式 `CAPABILITY_SEARCH_V1`，从 app-composed Registry 冻结竞争候选，选中后才得到 immutable graph；顶层或 `args` 内的旧执行列表直接拒绝。

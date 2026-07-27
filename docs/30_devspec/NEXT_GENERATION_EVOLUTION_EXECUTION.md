@@ -483,6 +483,8 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / S
 
 2026-07-27 NE-02 transport-identity 切片：生产 `VaultBackedSingleAttemptAdapter` 现于实际 transport 调用点生成脱敏 endpoint identity digest、external-HTTPS decision 与调用时延，`ModelAttemptService` 把它们连同 tool/token/cost measurement 写入 canonical terminal audit。D20c 签发时必须从 result 与重开的 audit 同时获得相同 identity 且 external=true；localhost、`.local`、单标签/内部域名、私网/非全局 IP、无 endpoint 的 Codex CLI、未知 transport 以及历史无 transport identity 的 V1 receipt 都不得进入 benefit eligibility。该切片完整受影响定向集合 `60 passed`，无 migration；仍未运行真实 provider 或 cohort，整体状态不升级。
 
+2026-07-27 NE-02 Research benefit-protocol 切片：新增 `ResearchQualityVerifierReceiptV1`、固定 24 项 `ResearchBenefitCohortSpecV1`、paired evidence/report 与确定性 evaluator。quality verifier 与 arm execution 必须分离并绑定 exact response digest；只有带 external transport identity 的 fresh attestation 可计收益。协议固定三类主题与本地/Web 来源覆盖、10,000 次 paired bootstrap、质量提升/citation/严重错误/含 verifier 成本/p95 时延门槛，失败仍保留 reason code；通过也只能 `proposal_eligible`，production influence 永远为 false。定向 `9 passed`。此切片没有 migration、durable cohort owner 或真实外部运行，状态继续 `IN_PROGRESS / ACCEPTANCE_PENDING_EXTERNAL`；持久化将与 Code/Pentest 固定队列在本波统一 next-free migration 收口，避免重复刷新 migration head 与七路线证据。
+
 #### Code 第二真实领域
 
 - D16 的纯 catalog 只能作为前置 planner：其 `allowed_path_refs` / `forbidden_path_refs` 不是 live Workspace ACL，不能拿模拟 descriptor 代替 executor；

@@ -1036,6 +1036,8 @@ owner-randomized 0107 RunSpec (CSPRNG order + cohort key digest only)
 
 本轮 transport 数据流改为 `Vault-backed adapter → server-owned endpoint classification → ProviderResponse metadata → ModelAttempt terminal audit → D20c attestation`。分类器只持久化 SHA-256 identity digest 和 `transport_external`，不会把 URL、query、userinfo 或 credential 带入账本；HTTPS 域名以外的 localhost、`.local`、非全局 IP、无 endpoint 的 Codex CLI 和未知 transport 都是非外部。D20c 必须在 result terminal row 与重新读取的 audit row 上同时得到相同 digest 和 `true`，否则不能进入 `benefit_eligible`。这只是阻断伪外部证据，真实 endpoint 可达性和 cohort 收益仍待外部验收。
 
+后续 Research 收益流已冻结为 `24 项 preregistered spec → 48 条 paired arm terminal receipt → 48 条独立 hidden-verifier quality receipt → deterministic paired bootstrap/report → EvolutionProposal`。每条 quality receipt 绑定 run/role/arm execution、被评估 response digest、独立 verifier execution/attempt、隐藏 profile/rubric 和外部 transport attestation。evaluator 会重验 workload/run/terminal identity、owner-randomized 标记、双臂相同 provider/model、verifier profile，再计算包含 verifier 请求的成本与时延。阈值失败保留 reason code，通过也只开放 proposal；不得出现 `report → production policy` 直连。当前只落地 spec/receipt/evaluator，虚线中的 SQLite cohort owner、真实 provider 执行和 proposal repository 尚未接线。
+
 ### 4.10 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
 
 ```text
