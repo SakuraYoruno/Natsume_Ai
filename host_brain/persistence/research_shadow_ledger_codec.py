@@ -337,6 +337,8 @@ def research_provider_attestation_from_dict(raw: Any) -> ExternalProviderRunAtte
             cost_micros=raw.get("cost_micros"),
             provider_latency_ms=raw.get("provider_latency_ms"),
             total_latency_ms=raw.get("total_latency_ms"),
+            transport_identity_digest=raw.get("transport_identity_digest"),
+            transport_external=raw.get("transport_external"),
             fresh_request=raw.get("fresh_request", True),
         )
     except (TypeError, ValueError) as exc:
@@ -372,7 +374,8 @@ def research_model_receipt_from_dict(raw: Any) -> ResearchModelExecutionReceiptV
         )
     except (TypeError, ValueError) as exc:
         raise ResearchShadowLedgerError("Research model receipt payload is invalid") from exc
-    if canonical(receipt.to_dict()) != canonical(raw):
+    normalized_raw = _demote_legacy_transport_benefit(raw)
+    if canonical(receipt.to_dict()) != canonical(normalized_raw):
         raise ResearchShadowLedgerError("Research model receipt payload drift")
     return receipt
 
@@ -421,9 +424,45 @@ def paired_receipt_from_dict(raw: Any) -> PairedResearchRunReceiptV1:
         )
     except (TypeError, ValueError) as exc:
         raise ResearchShadowLedgerError("Research terminal receipt payload is invalid") from exc
-    if canonical(receipt.to_dict()) != canonical(raw):
+    normalized_raw = _demote_legacy_transport_benefit(raw)
+    if canonical(receipt.to_dict()) != canonical(normalized_raw):
         raise ResearchShadowLedgerError("Research terminal receipt payload drift")
     return receipt
+
+
+def _demote_legacy_transport_benefit(raw: dict[str, Any]) -> dict[str, Any]:
+    """Read historical V1 receipts without preserving their old eligibility.
+
+    Before transport identity existed, ``benefit_eligible`` could be true
+    based only on a provider name and usage.  Those append-only rows remain
+    readable, but the derived boolean is downgraded during decoding.  No
+    evidence field or digest is fabricated.
+    """
+
+    normalized = json.loads(json.dumps(raw, ensure_ascii=False))
+
+    def _demote_model(value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        attestation = value.get("attestation")
+        if (
+            isinstance(attestation, dict)
+            and value.get("benefit_eligible") is True
+            and "transport_identity_digest" not in attestation
+            and "transport_external" not in attestation
+        ):
+            value["benefit_eligible"] = False
+            return True
+        return False
+
+    if _demote_model(normalized):
+        return normalized
+    demoted = False
+    for key in ("baseline_model", "selected_model"):
+        demoted = _demote_model(normalized.get(key)) or demoted
+    if demoted:
+        normalized["benefit_eligible"] = False
+    return normalized
 
 
 def as_sequence(value: Any, *, field: str) -> tuple[Any, ...]:

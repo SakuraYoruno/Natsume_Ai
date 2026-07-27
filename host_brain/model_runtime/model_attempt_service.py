@@ -186,18 +186,28 @@ def _provider_budget_measurements(usage: Mapping[str, Any] | None) -> dict[str, 
     has_cost, cost = _present_int("model_cost_micros")
     if has_cost:
         measured["model_cost_micros"] = cost
+    has_tool_calls, tool_calls = _present_int("tool_call_count")
+    if has_tool_calls:
+        measured["tool_call_count"] = tool_calls
     return measured
 
 
-def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict[str, int]:
-    """Keep only one provider-reported transport measurement in the audit trail."""
+def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Keep only bounded server-owned transport evidence in the audit trail."""
 
     if not isinstance(metadata, Mapping):
         return {}
+    result: dict[str, Any] = {}
     value = metadata.get("provider_latency_ms")
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return {}
-    return {"provider_latency_ms": int(value)}
+    if not isinstance(value, bool) and isinstance(value, int) and value >= 0:
+        result["provider_latency_ms"] = int(value)
+    identity = str(metadata.get("transport_identity_digest") or "").strip().lower()
+    if len(identity) == 64 and all(char in "0123456789abcdef" for char in identity):
+        result["transport_identity_digest"] = identity
+    external = metadata.get("transport_external")
+    if isinstance(external, bool):
+        result["transport_external"] = external
+    return result
 
 
 class ModelAttemptService:

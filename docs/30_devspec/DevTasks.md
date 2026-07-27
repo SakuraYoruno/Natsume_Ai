@@ -22,6 +22,13 @@
 真实网络、附属服务和回滚仍由 NE-07 统一验收；该口径不是把 NE-01 标成
 production `COMPLETED`。
 
+NE-02 当前已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
+生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
+Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史
+无 identity receipt 均不可计收益。真实凭据、24 项 Research cohort、Code
+20 项和 Pentest 30 次验收尚未执行，因此本波仍为 `IN_PROGRESS /
+ACCEPTANCE_PENDING_EXTERNAL`。
+
 ## 历史编号
 
 - TASK-0000～TASK-0622、M48～M57、AW-00～08、GR-00～06 已冻结。

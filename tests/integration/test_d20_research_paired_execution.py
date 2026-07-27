@@ -116,7 +116,11 @@ class _CanonicalModelService:
                     "model_cost_micros": tokens,
                     "tool_call_count": 0,
                 },
-                "provider_transport_measurements": {"provider_latency_ms": 30},
+                "provider_transport_measurements": {
+                    "provider_latency_ms": 30,
+                    "transport_identity_digest": "d" * 64,
+                    "transport_external": True,
+                },
             },
         )
         started = replace(

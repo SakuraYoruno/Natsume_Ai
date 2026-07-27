@@ -14,6 +14,7 @@ from host_brain.model_runtime import (
     ProviderAttemptRequest,
     RouteNotConfiguredError,
     build_production_provider_registry,
+    build_vault_backed_provider_registry,
     build_production_route_policy,
     production_provider_payload,
     route_decision_from_graph_runtime,
@@ -171,6 +172,88 @@ def test_injected_provider_callable_is_invoked_exactly_once() -> None:
     assert payloads[0]["messages"] == [{"role": "user", "content": "hello"}]
     assert "timeout_ms" not in payloads[0]
     assert "llm_api_key" not in payloads[0]
+
+
+def test_vault_backed_transport_emits_server_owned_external_identity() -> None:
+    calls = []
+
+    def _transport(**kwargs):
+        calls.append(dict(kwargs))
+        return {
+            "content": "ok",
+            "usage": {"output_tokens": 1},
+            "metadata": {"provider_latency_ms": 7},
+        }
+
+    registry = build_vault_backed_provider_registry(
+        ("openai",),
+        credential_resolver=lambda _provider: "secret-not-persisted",
+        base_url_resolver=lambda _provider: "https://api.openai.com/v1",
+        transport=_transport,
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(provider_name="openai", model_id="gpt-research"),
+        scene_type="RESEARCH",
+        cognitive_tier="RESEARCH",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-external-identity",
+        attempt_id="attempt-external-identity",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="RESEARCH",
+        cognitive_tier="RESEARCH",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    response = asyncio.run(registry.get("production.openai").complete(request))
+
+    assert response.metadata["provider_latency_ms"] >= 0
+    assert response.metadata["transport_external"] is True
+    assert len(response.metadata["transport_identity_digest"]) == 64
+    assert "api.openai.com" not in repr(response.metadata)
+    assert calls[0]["base_url_override"] == "https://api.openai.com/v1"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    (
+        "http://127.0.0.1:11434/v1",
+        "http://localhost:8000/v1",
+        "https://10.0.0.8/v1",
+        "https://ollama:11434/v1",
+        "https://model.service.internal/v1",
+    ),
+)
+def test_vault_backed_transport_marks_local_endpoints_non_external(base_url: str) -> None:
+    registry = build_vault_backed_provider_registry(
+        ("openai",),
+        credential_resolver=lambda _provider: "local-key",
+        base_url_resolver=lambda _provider: base_url,
+        transport=lambda **_kwargs: {"content": "local"},
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(provider_name="openai", model_id="local-model"),
+        scene_type="RESEARCH",
+        cognitive_tier="RESEARCH",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-local-identity",
+        attempt_id="attempt-local-identity",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="RESEARCH",
+        cognitive_tier="RESEARCH",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    response = asyncio.run(registry.get("production.openai").complete(request))
+
+    assert response.metadata["transport_external"] is False
 
 
 def test_guarded_provider_payload_clamps_output_without_exposing_budget_authority() -> None:

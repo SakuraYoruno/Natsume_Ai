@@ -980,3 +980,22 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   `39 passed in 6.56s`，文档/交付合同 `79 passed in 42.49s`，架构 Gate
   1～14 与统一 static/doc Gate 通过。各组有重叠风险，不累加为伪总数；NE-01
   wave integration、production canary、真实 provider 和 NE-07 仍未运行。
+
+### NE-02 D20c 外部 transport identity
+
+- 生产 Vault-backed provider adapter 以 server-owned base-url resolver 计算
+  脱敏 transport identity、外部 HTTPS 决策和实际调用时延；原始 URL 与凭据
+  不进入 ModelAttempt audit。
+- canonical terminal audit 保留 provider latency、transport digest、
+  `transport_external` 以及 tool/token/cost measurement；D20c result 与审计
+  重开值不一致时失败关闭。
+- localhost、`.local`、单标签/内部域名、非全局 IP、CLI/未知 transport 和历史无 identity
+  receipt 不得 `benefit_eligible`。
+- 受影响生产 adapter、ModelAttempt、Research contract/codec、D20c adapter、
+  paired runner、历史 V1 降级重开与真实 SQLite audit 回归为
+  `60 passed in 26.89s`；无
+  migration。统一 `static_scan,doc_gate` 为 `PASS / failures=[]`
+  （108.4 秒）；当前环境未安装 Ruff，记为
+  `NOT_RUN_TOOL_UNAVAILABLE`。本组使用受控 transport，不是外部
+  provider、24 项 cohort 或收益 PASS，状态仍为
+  `ACCEPTANCE_PENDING_EXTERNAL`。

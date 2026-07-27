@@ -8,8 +8,13 @@ and converts the canonical attempt into a provider-neutral chat payload.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import ipaddress
+import json
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
+from urllib.parse import urlsplit
 
 from host_brain.model_runtime.contracts import ProviderAttemptRequest, ProviderResponse
 from host_brain.model_runtime.provider_adapters import (
@@ -36,6 +41,13 @@ ProviderPayloadCallable = Callable[[Mapping[str, Any]], Any]
 CredentialResolver = Callable[[str], str | None]
 BaseUrlResolver = Callable[[str], str | None]
 SingleAttemptTransport = Callable[..., str | Mapping[str, Any]]
+
+_DEFAULT_PROVIDER_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "deepseek": "https://api.deepseek.com/v1",
+    "minimax": "https://api.minimaxi.com/v1",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +210,12 @@ class VaultBackedSingleAttemptAdapter:
                 "guarded Codex CLI calls do not expose a hard output cap"
             )
         provider_name = "openai" if self._provider == "openai_compatible" else self._provider
+        base_url_override = self._base_url_resolver(self._provider)
+        transport_identity_digest, transport_external = _transport_identity(
+            provider=provider_name,
+            base_url=base_url_override,
+        )
+        started_ns = time.monotonic_ns()
         raw_response = await asyncio.to_thread(
             self._transport,
             provider_name=provider_name,
@@ -207,12 +225,21 @@ class VaultBackedSingleAttemptAdapter:
             messages=request.prompt.as_message_dicts(),
             gen_params=_transport_generation_parameters(request),
             response_format=request.prompt.output_contract.response_format(),
-            base_url_override=self._base_url_resolver(self._provider),
+            base_url_override=base_url_override,
             feature_key=f"model_attempt:{request.scene_type.lower()}",
         )
+        elapsed_ms = max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
         if isinstance(raw_response, Mapping):
             usage = raw_response.get("usage")
             metadata = raw_response.get("metadata")
+            transport_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+            transport_metadata.update(
+                {
+                    "provider_latency_ms": int(elapsed_ms),
+                    "transport_identity_digest": transport_identity_digest,
+                    "transport_external": transport_external,
+                }
+            )
             return ProviderResponse(
                 content=str(
                     raw_response.get("content")
@@ -226,9 +253,16 @@ class VaultBackedSingleAttemptAdapter:
                     else None
                 ),
                 usage=dict(usage) if isinstance(usage, Mapping) else {},
-                metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
+                metadata=transport_metadata,
             )
-        return ProviderResponse(content=str(raw_response or ""))
+        return ProviderResponse(
+            content=str(raw_response or ""),
+            metadata={
+                "provider_latency_ms": int(elapsed_ms),
+                "transport_identity_digest": transport_identity_digest,
+                "transport_external": transport_external,
+            },
+        )
 
     def stream(self, request: ProviderAttemptRequest):
         return self._stream(request)
@@ -237,6 +271,74 @@ class VaultBackedSingleAttemptAdapter:
         response = await self.complete(request)
         if response.content:
             yield response.content
+
+
+def _transport_identity(*, provider: str, base_url: str | None) -> tuple[str, bool]:
+    """Return a secret-free digest and conservative external-network decision.
+
+    The raw endpoint never enters ModelAttempt metadata.  Missing well-known
+    provider URLs are resolved to their public defaults; Codex CLI and unknown
+    endpoints remain non-external.  A hostname is not DNS-resolved here, so
+    runtime network policy remains a separate defence.
+    """
+
+    normalized_provider = str(provider or "").strip().lower()
+    raw_url = str(base_url or "").strip()
+    if not raw_url:
+        raw_url = _DEFAULT_PROVIDER_BASE_URLS.get(normalized_provider, "")
+    scheme = ""
+    hostname = ""
+    port: int | None = None
+    path = ""
+    try:
+        parsed = urlsplit(raw_url)
+        scheme = str(parsed.scheme or "").strip().lower()
+        hostname = str(parsed.hostname or "").strip().rstrip(".").lower()
+        port = parsed.port
+        path = "/" + "/".join(
+            segment for segment in str(parsed.path or "").split("/") if segment
+        )
+    except (TypeError, ValueError):
+        scheme = ""
+        hostname = ""
+        port = None
+        path = ""
+    canonical = {
+        "schema": "natsume.model-provider-transport-identity.v1",
+        "provider": normalized_provider,
+        "scheme": scheme,
+        "hostname": hostname,
+        "port": port,
+        "path": path,
+    }
+    encoded = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return digest, _is_external_https_host(scheme=scheme, hostname=hostname)
+
+
+def _is_external_https_host(*, scheme: str, hostname: str) -> bool:
+    if scheme != "https" or not hostname:
+        return False
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".local")
+        or hostname.endswith(".internal")
+        or hostname.endswith(".lan")
+        or hostname.endswith(".home.arpa")
+        or "." not in hostname
+    ):
+        return False
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return True
+    return bool(address.is_global)
 
 
 def build_vault_backed_provider_registry(

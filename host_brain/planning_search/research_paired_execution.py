@@ -546,6 +546,7 @@ def _assert_model_matches_spec(
         model.execution_id != expected_execution_id
         or model.arm_id != expected_arm_id
         or model.evidence_class != "ATTESTED_EXTERNAL"
+        or not model.benefit_eligible
         or model.prompt_digest != spec.profile.prompt_digest
         or model.total_tokens is None
         or model.tool_call_count is None

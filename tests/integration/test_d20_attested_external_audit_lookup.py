@@ -70,7 +70,11 @@ def _records() -> tuple[ModelAttemptRecord, ModelAttemptRecord, ModelAttemptResu
                 "model_cost_micros": 29,
                 "tool_call_count": 0,
             },
-            "provider_transport_measurements": {"provider_latency_ms": 37},
+            "provider_transport_measurements": {
+                "provider_latency_ms": 37,
+                "transport_identity_digest": "d" * 64,
+                "transport_external": True,
+            },
         },
     )
     result = ModelAttemptResult(
@@ -118,6 +122,7 @@ async def test_d20c_reopens_sqlite_model_audit_before_external_attestation(tmp_p
         assert run.attestation.provider == "openai"
         assert run.attestation.total_tokens == 101
         assert run.attestation.provider_latency_ms == 37
+        assert run.attestation.transport_identity_digest == "d" * 64
     finally:
         reader_ledger.close()
         writer_ledger.close()
