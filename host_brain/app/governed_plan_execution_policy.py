@@ -14,6 +14,7 @@ from host_brain.contracts.agent_runtime.plan_execution_policy import (
     PLAN_EXECUTION_POLICY_INVALID,
     PLAN_EXECUTION_POLICY_METADATA_KEY,
     PLAN_EXECUTION_POLICY_SCHEMA_VERSION,
+    PLAN_NODE_WORKSPACE_EFFECT_MODE,
     PLAN_RESULT_EFFECT_MODE,
     PLAN_SPECULATIVE_EFFECT_MODE,
     PlanExecutionPolicyError,
@@ -241,6 +242,7 @@ def _expected_policy(
             "app-local SkillRegistry is unavailable"
         )
     node_policies: list[dict[str, Any]] = []
+    workspace_effect_nodes = 0
     for index, (candidate_id, node, raw_binding) in enumerate(
         zip(selected_candidate_ids, graph.nodes, bindings, strict=True)
     ):
@@ -323,9 +325,10 @@ def _expected_policy(
             if execution_policy not in {
                 SkillExecutionPolicy.INLINE_READ_ONLY,
                 SkillExecutionPolicy.PRE_ACCEPTANCE_PROPOSAL_ONLY,
+                SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE,
             }:
                 raise GovernedPlanExecutionPolicyError(
-                    "intermediate Plan Skills cannot own post-Acceptance effects"
+                    "intermediate Plan Skill execution policy is unsupported"
                 )
             if (
                 int(getattr(skill_meta, "risk_level", 0)) != node.risk_level
@@ -341,7 +344,14 @@ def _expected_policy(
                 "value",
                 "",
             )
-            effect_mode = PLAN_SPECULATIVE_EFFECT_MODE
+            if (
+                execution_policy
+                is SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE
+            ):
+                workspace_effect_nodes += 1
+                effect_mode = PLAN_NODE_WORKSPACE_EFFECT_MODE
+            else:
+                effect_mode = PLAN_SPECULATIVE_EFFECT_MODE
         else:
             if (
                 node.node_id != graph.result_node_id
@@ -368,6 +378,11 @@ def _expected_policy(
                 "budget_policy": budget_policy_value,
                 "effect_mode": effect_mode,
             }
+        )
+    if workspace_effect_nodes > 1:
+        raise GovernedPlanExecutionPolicyError(
+            "one atomic Plan revision may select at most one write-capable "
+            "Workspace Skill"
         )
     return freeze_plan_execution_policy(
         {

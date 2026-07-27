@@ -947,6 +947,52 @@ class WorkspaceLifecycleRepositoryMixin:
             and str(row["node_status"]) == "ACCEPTED"
             and recovered_task_binding is not None
         )
+        failed_graph_accepted_node_binding = bool(
+            allow_terminal_abandonment
+            and row is not None
+            and str(row["graph_status"]) == "FAILED"
+            and str(row["node_status"]) == "ACCEPTED"
+            and str(row["attempt_status"]) == "SUCCEEDED"
+            and (
+                str(row["lease_status"]) == "RELEASED"
+                or recovered_task_binding is not None
+            )
+            and conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM task_runtime_node_acceptance_decision AS acceptance
+                JOIN task_runtime_node_artifact AS artifact
+                  ON artifact.graph_id = acceptance.graph_id
+                 AND artifact.graph_revision = acceptance.graph_revision
+                 AND artifact.node_id = acceptance.node_id
+                 AND artifact.attempt_id = acceptance.attempt_id
+                JOIN task_runtime_idempotency_reservation AS operation
+                  ON operation.attempt_id = acceptance.attempt_id
+                 AND operation.status = 'COMMITTED'
+                 AND operation.receipt_ref = artifact.receipt_ref
+                WHERE acceptance.graph_id = ?
+                  AND acceptance.graph_revision = ?
+                  AND acceptance.node_id = ?
+                  AND acceptance.attempt_id = ?
+                  AND acceptance.target_status = 'ACCEPTED'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM task_runtime_acceptance_effect_intent AS effect
+                      WHERE effect.graph_id = acceptance.graph_id
+                        AND effect.graph_revision = acceptance.graph_revision
+                        AND effect.node_id = acceptance.node_id
+                        AND effect.attempt_id = acceptance.attempt_id
+                  )
+                """,
+                (
+                    graph_id,
+                    graph_revision,
+                    node_id,
+                    attempt_id,
+                ),
+            ).fetchone()[0]
+            == 1
+        )
         terminal_abandonment_binding = bool(
             allow_terminal_abandonment
             and row is not None
@@ -961,6 +1007,7 @@ class WorkspaceLifecycleRepositoryMixin:
                         or recovered_task_binding is not None
                     )
                 )
+                or failed_graph_accepted_node_binding
                 or (
                     str(row["graph_status"]) == "CANCELLED"
                     and str(row["node_status"]) == "CANCELLED"

@@ -37,6 +37,9 @@ from .errors import (
     GovernedRuntimeError,
 )
 from .node_execution_projection import NodeExecutionProjection
+from .plan_workspace_acceptance_effect import (
+    compile_plan_node_acceptance_effects,
+)
 from .parallel_success_records import _projection_route_authority
 from .ports import ExecutionProjectionReaderPort, TaskStorePort
 from .runtime_outbox import RuntimeOutbox
@@ -353,7 +356,28 @@ class ParallelSuccessRuntime:
                 "all-accepted Graph/Budget are not in a committable state",
             )
         try:
-            effect_intents = compile_graph_acceptance_effects(
+            effect_intents = []
+            if command.route_type == "plan":
+                for binding in admitted.nodes:
+                    if binding.node_id == result_node_id:
+                        continue
+                    node_attempt_id = _required_record_text(
+                        latest_attempt_by_node[binding.node_id],
+                        "attempt_id",
+                    )
+                    effect_intents.extend(
+                        compile_plan_node_acceptance_effects(
+                            command=command,
+                            work_order=work_order,
+                            node_id=binding.node_id,
+                            attempt_id=node_attempt_id,
+                            worker_commit={
+                                **projections[binding.node_id],
+                                "receipt_ref": receipt_refs[binding.node_id],
+                            },
+                        )
+                    )
+            effect_intents.extend(compile_graph_acceptance_effects(
                 command=command,
                 work_order=work_order,
                 node_id=result_node_id,
@@ -362,7 +386,8 @@ class ParallelSuccessRuntime:
                     **result_projection,
                     "receipt_ref": result_receipt_ref,
                 },
-            )
+            ))
+            effect_intents = tuple(effect_intents)
         except Exception as exc:
             raise GovernedRuntimeError(
                 _exception_reason(exc, "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"),

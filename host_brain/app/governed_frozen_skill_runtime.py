@@ -447,7 +447,12 @@ class _FrozenSkillWorker:
                             "work_order_id": work_order.work_order_id,
                             "target_id": target,
                             "operation_fingerprint": (
-                                work_order.operation_fingerprint
+                                str(
+                                    execution_context.get(
+                                        "operation_fingerprint"
+                                    )
+                                    or ""
+                                ).strip()
                             ),
                             "protected_artifact": protected,
                             "result_digest": (

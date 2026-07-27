@@ -77,7 +77,7 @@ def _migrated_runtime(
     assert result.success is True, result.as_dict()
     # The fixture always migrates through the current catalog head; 0116 is
     # verified below as an immutable historical asset, not as the latest head.
-    assert result.summary["current_version"] == 125
+    assert result.summary["current_version"] == result.summary["latest_version"]
     with sqlite3.connect(db_path) as conn:
         _execute_task_admission_insert(
             conn,
@@ -451,6 +451,7 @@ def test_direct_abandonment_accepts_only_exact_terminal_task_lineage(
     (
         ("BLOCKED", "WAITING_ACCEPTANCE_REVIEW", "SUCCEEDED", "RELEASED"),
         ("COMPLETED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
+        ("FAILED", "ACCEPTED", "SUCCEEDED", "RELEASED"),
         ("ACTIVE", "RUNNING", "RUNNING", "ACTIVE"),
         ("FAILED", "FAILED", "RECOVERABLE", "RELEASED"),
         ("CANCELLED", "CANCELLED", "FAILED", "RELEASED"),

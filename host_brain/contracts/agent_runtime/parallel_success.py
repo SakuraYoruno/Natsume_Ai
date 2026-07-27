@@ -1,8 +1,8 @@
 """Canonical contract for one durable whole-graph success decision.
 
-The contract deliberately binds success to an explicit result node.  A fan-out
-completion therefore cannot choose the user-visible result from child finish
-order, and a response-loss replay can compare the complete durable snapshot.
+The user-visible result remains bound to one explicit result node.  Deferred
+graph effects may belong to any accepted node, but each must bind the exact
+Attempt and receipt already frozen in ``accepted_outcomes``.
 """
 
 from __future__ import annotations
@@ -182,8 +182,7 @@ def _normalize_outcomes(
 def _normalize_effects(
     value: Any,
     *,
-    result_node_id: str,
-    result_attempt_id: str,
+    accepted_outcomes: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
         raise ParallelSuccessContractError("effect_intents must be a non-empty array")
@@ -192,6 +191,10 @@ def _normalize_effects(
             f"effect_intents may contain at most {MAX_PARALLEL_SUCCESS_EFFECTS} items"
         )
     normalized: list[dict[str, Any]] = []
+    accepted_attempts = {
+        str(outcome["node_id"]): str(outcome["attempt_id"])
+        for outcome in accepted_outcomes
+    }
     effect_ids: set[str] = set()
     idempotency_keys: set[str] = set()
     for raw in value:
@@ -211,9 +214,9 @@ def _normalize_effects(
         attempt_id = _text(
             raw.get("attempt_id"), field_name=f"effect.{effect_id}.attempt_id"
         )
-        if node_id != result_node_id or attempt_id != result_attempt_id:
+        if accepted_attempts.get(node_id) != attempt_id:
             raise ParallelSuccessContractError(
-                "graph effects must bind the explicit result node and attempt"
+                "graph effects must bind one exact accepted node Attempt"
             )
         normalized.append(
             {
@@ -309,8 +312,7 @@ def normalize_parallel_success_decision(
         )
     effects = _normalize_effects(
         payload.get("effect_intents"),
-        result_node_id=result_node_id,
-        result_attempt_id=result_attempt_id,
+        accepted_outcomes=outcomes,
     )
 
     graph_outbox_id = _text(

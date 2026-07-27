@@ -215,7 +215,7 @@ class AdmittedExecution:
                     GOVERNED_ADMISSION_INVALID,
                     "node identity and frozen worker route are required",
                 )
-            operation_fingerprint = _node_operation_fingerprint(
+            operation_fingerprint = derive_node_operation_fingerprint(
                 command.operation_fingerprint,
                 node_id=node_id,
                 multiple_nodes=multiple_nodes,
@@ -386,7 +386,7 @@ def _topological_nodes(nodes: Sequence[Any]) -> tuple[Any, ...]:
     return tuple(result)
 
 
-def _node_operation_fingerprint(
+def derive_node_operation_fingerprint(
     command_fingerprint: str,
     *,
     node_id: str,
@@ -397,6 +397,9 @@ def _node_operation_fingerprint(
         return base
     digest = hashlib.sha256(f"{base}\n{node_id}".encode("utf-8")).hexdigest()
     return f"sha256:{digest}" if base.startswith("sha256:") else digest
+
+
+_node_operation_fingerprint = derive_node_operation_fingerprint
 
 
 def _text(value: Any) -> str:
@@ -416,4 +419,8 @@ def _exact_positive_int(value: Any, field_name: str) -> int:
     return value
 
 
-__all__ = ["AdmittedExecution", "AdmittedTaskNode"]
+__all__ = [
+    "AdmittedExecution",
+    "AdmittedTaskNode",
+    "derive_node_operation_fingerprint",
+]

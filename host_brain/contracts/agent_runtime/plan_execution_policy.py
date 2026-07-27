@@ -19,6 +19,7 @@ PLAN_EXECUTION_POLICY_SCHEMA_VERSION = (
 )
 PLAN_EXECUTION_POLICY_METADATA_KEY = "capability_plan_execution_policy"
 PLAN_SPECULATIVE_EFFECT_MODE = "SPECULATIVE_EFFECT_FREE"
+PLAN_NODE_WORKSPACE_EFFECT_MODE = "GRAPH_ACCEPTANCE_NODE_WORKSPACE"
 PLAN_RESULT_EFFECT_MODE = "GRAPH_ACCEPTANCE_RESULT_ONLY"
 PLAN_CHAT_EXECUTION_POLICY = "TASK_RUNTIME_CHAT"
 PLAN_CHAT_BUDGET_POLICY = "MODELATTEMPT_MEASURED"
@@ -119,6 +120,37 @@ def require_plan_result_effect_owner(
     return normalized
 
 
+def require_plan_workspace_effect_owner(
+    *,
+    policy: Mapping[str, Any],
+    node_id: str,
+    target_id: str,
+) -> dict[str, Any]:
+    """Require one pre-result node's graph-Acceptance Workspace authority."""
+
+    normalized = validate_plan_execution_policy(policy)
+    node_ref = str(node_id or "").strip()
+    target_ref = str(target_id or "").strip()
+    matches = [
+        dict(node)
+        for node in normalized["nodes"][:-1]
+        if node["node_id"] == node_ref
+    ]
+    if (
+        len(matches) != 1
+        or matches[0]["route"] != "skill"
+        or matches[0]["target_id"] != target_ref
+        or matches[0]["execution_policy"] != "POST_ACCEPTANCE_WORKSPACE"
+        or matches[0]["effect_mode"] != PLAN_NODE_WORKSPACE_EFFECT_MODE
+        or matches[0]["review_required"] is not True
+        or matches[0]["risk_level"] < 4
+    ):
+        raise PlanExecutionPolicyError(
+            "Plan node has no graph-Acceptance Workspace effect authority"
+        )
+    return matches[0]
+
+
 def _normalized_base(payload: Mapping[str, Any]) -> dict[str, Any]:
     raw = _mapping(payload, field_name="Plan execution policy payload")
     if set(raw) != _BASE_KEYS:
@@ -179,21 +211,39 @@ def _normalized_base(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
     execution_nodes = nodes[:-1]
     result = nodes[-1]
+    workspace_effect_nodes = 0
     for index, node in enumerate(execution_nodes):
+        speculative = (
+            node["effect_mode"] == PLAN_SPECULATIVE_EFFECT_MODE
+            and node["execution_policy"] != "POST_ACCEPTANCE_WORKSPACE"
+        )
+        workspace_effect = (
+            node["effect_mode"] == PLAN_NODE_WORKSPACE_EFFECT_MODE
+            and node["execution_policy"] == "POST_ACCEPTANCE_WORKSPACE"
+            and node["review_required"] is True
+            and node["risk_level"] >= 4
+        )
         if (
             node["route"] != "skill"
-            or node["effect_mode"] != PLAN_SPECULATIVE_EFFECT_MODE
+            or not (speculative or workspace_effect)
             or not node["execution_policy"]
             or not node["budget_policy"]
         ):
             raise PlanExecutionPolicyError(
-                "every pre-result Plan node must be one effect-free governed Skill"
+                "every pre-result Plan node must be a governed speculative "
+                "Skill or one reviewed Workspace proposal owner"
             )
+        if workspace_effect:
+            workspace_effect_nodes += 1
         expected_dependencies = () if index == 0 else (node_ids[index - 1],)
         if tuple(node["depends_on_node_ids"]) != expected_dependencies:
             raise PlanExecutionPolicyError(
                 "capability execution nodes must retain the selected path order"
             )
+    if workspace_effect_nodes > 1:
+        raise PlanExecutionPolicyError(
+            "one atomic Plan revision may own at most one Workspace proposal"
+        )
     if (
         result["node_id"] != result_node_id
         or result["route"] != "chat"
@@ -351,10 +401,12 @@ __all__ = [
     "PLAN_EXECUTION_POLICY_INVALID",
     "PLAN_EXECUTION_POLICY_METADATA_KEY",
     "PLAN_EXECUTION_POLICY_SCHEMA_VERSION",
+    "PLAN_NODE_WORKSPACE_EFFECT_MODE",
     "PLAN_RESULT_EFFECT_MODE",
     "PLAN_SPECULATIVE_EFFECT_MODE",
     "PlanExecutionPolicyError",
     "freeze_plan_execution_policy",
     "require_plan_result_effect_owner",
+    "require_plan_workspace_effect_owner",
     "validate_plan_execution_policy",
 ]

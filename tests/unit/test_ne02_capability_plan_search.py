@@ -13,6 +13,7 @@ from host_brain.app.governed_plan_execution_policy import (
 )
 from host_brain.contracts.agent_runtime.plan_execution_policy import (
     PLAN_EXECUTION_POLICY_METADATA_KEY,
+    PLAN_NODE_WORKSPACE_EFFECT_MODE,
     PLAN_RESULT_EFFECT_MODE,
 )
 from host_brain.orchestration.capability_plan_search import (
@@ -30,7 +31,10 @@ from host_brain.contracts.agent_runtime.review_policy import (
 )
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
-from host_brain.contracts.skill_execution import SkillExecutionPolicy
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.planning_search.capability_domain import CapabilitySuccessorCatalog
 from host_brain.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_MODE,
@@ -40,9 +44,18 @@ from host_brain.planning_search.capability_domain_models import (
 )
 from host_brain.planning_search.contracts import SearchCandidate
 from host_brain.skills.registry import SkillMeta, SkillRegistry
+from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.task_runtime.admission import derive_node_operation_fingerprint
 from host_brain.task_runtime.acceptance_effects import (
     AcceptanceEffectCompileError,
     compile_graph_acceptance_effects,
+)
+from host_brain.agent_runtime.workspace_artifact_effect import (
+    AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+    AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA,
+)
+from host_brain.task_runtime.plan_workspace_acceptance_effect import (
+    compile_plan_node_acceptance_effects,
 )
 from natsume_contracts.task import (
     HostCommandSurface,
@@ -160,6 +173,80 @@ def _intent() -> tuple[dict, dict]:
             expires_at_ms=61_000,
         ),
         "ts_ms": 1_000,
+    }
+    return intent, governor
+
+
+def _write_registry(*, two_writers: bool = False) -> SkillRegistry:
+    registry = SkillRegistry()
+    registry.register(
+        SkillMeta(
+            skill_name="agent_worker",
+            clearance="HIGH",
+            risk_level=4,
+            scope="host",
+            reversible=True,
+            require_confirm=True,
+            handler=_handler,
+            family="code",
+            capability_tags=("coding", "codex"),
+            fallback_policy="strict_fail",
+            execution_policy=SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE,
+            budget_policy=SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL,
+        )
+    )
+    registry.register(
+        SkillMeta(
+            skill_name=("agent_self_heal" if two_writers else "code_read"),
+            clearance=("HIGH" if two_writers else "LOW"),
+            risk_level=(4 if two_writers else 1),
+            scope="host",
+            reversible=True,
+            require_confirm=two_writers,
+            handler=_handler,
+            family="code",
+            capability_tags=("coding", "codex"),
+            fallback_policy="strict_fail",
+            execution_policy=(
+                SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE
+                if two_writers
+                else SkillExecutionPolicy.INLINE_READ_ONLY
+            ),
+            budget_policy=(
+                SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL
+                if two_writers
+                else SkillBudgetPolicy.TASK_PRECHARGE
+            ),
+        )
+    )
+    return registry
+
+
+def _write_intent() -> tuple[dict, dict]:
+    intent, governor = _intent()
+    intent["id"] = "intent-ne01-plan-workspace"
+    intent["request_id"] = "request-ne01-plan-workspace"
+    intent["session_id"] = "session-ne01-plan-workspace"
+    intent["person_id"] = "person-ne01-plan-workspace"
+    intent["principal_id"] = "person-ne01-plan-workspace"
+    intent["task"] = "inspect and write one reviewed code change"
+    intent["args"] = {
+        "task": intent["task"],
+        "planning_mode": CAPABILITY_PLANNING_MODE,
+        "planning_capability_tags": ["coding"],
+        "planning_max_risk_level": 4,
+    }
+    governor = {
+        **governor,
+        "request_id": intent["request_id"],
+        "intent_id": intent["id"],
+        "approved_action_binding": build_governed_action_binding(
+            intent_envelope=intent,
+            approval_token_ref="approval-plan-workspace",
+            risk_level=4,
+            issued_at_ms=1_000,
+            expires_at_ms=61_000,
+        ),
     }
     return intent, governor
 
@@ -325,6 +412,218 @@ def test_capability_plan_freezes_and_reopens_execution_budget_and_effect_owner()
             work_order=order,
             graph=graph,
             skill_registry=incomplete_registry,
+        )
+
+
+def test_capability_plan_freezes_one_reviewed_workspace_effect_owner() -> None:
+    intent, governor = _write_intent()
+    registry = _write_registry()
+    adapter = build_capability_plan_search(
+        intent,
+        governor_result=governor,
+        skill_registry=registry,
+        input_refs=("input://sha256/" + "8" * 64,),
+        frozen_context={"user_message": intent["task"]},
+    )
+    result = adapter.search(adapter.request)
+    compiled = PlanningGraphCompiler().compile(
+        result,
+        created_at=1_234,
+        compilation_context=adapter.compilation_context_for(result),
+    )
+    bound = bind_governed_plan_execution_policy(
+        compiled,
+        skill_registry=registry,
+    )
+    policy = bound.work_order.metadata[PLAN_EXECUTION_POLICY_METADATA_KEY]
+    workspace_nodes = [
+        node
+        for node in policy["nodes"][:-1]
+        if node["effect_mode"] == PLAN_NODE_WORKSPACE_EFFECT_MODE
+    ]
+
+    assert len(workspace_nodes) == 1
+    assert workspace_nodes[0]["target_id"] == "agent_worker"
+    assert workspace_nodes[0]["execution_policy"] == (
+        SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE.value
+    )
+    assert workspace_nodes[0]["review_required"] is True
+    assert workspace_nodes[0]["risk_level"] == 4
+    assert pre_execution_review_required(
+        bound.work_order,
+        node_id=workspace_nodes[0]["node_id"],
+    )
+    assert all(
+        node["effect_mode"] == "SPECULATIVE_EFFECT_FREE"
+        for node in policy["nodes"][:-1]
+        if node["node_id"] != workspace_nodes[0]["node_id"]
+    )
+
+
+def test_plan_workspace_proposal_compiles_only_at_graph_acceptance() -> None:
+    intent, governor = _write_intent()
+    registry = _write_registry()
+    input_ref = "input://sha256/" + "6" * 64
+    fact = WorldFactV2(
+        workspace_id="workspace-plan-unit",
+        subject_id=intent["principal_id"],
+        key="project.mode",
+        value="implementation",
+        source_ref="world-observation://plan-unit/1",
+        confidence=1.0,
+        observed_at_ms=1_234,
+        expires_at_ms=61_234,
+    )
+    world = WorldSnapshotV2(
+        workspace_id=fact.workspace_id,
+        subject_id=fact.subject_id,
+        revision=1,
+        facts=(fact,),
+    )
+    adapter = build_capability_plan_search(
+        intent,
+        governor_result=governor,
+        skill_registry=registry,
+        input_refs=(input_ref,),
+        frozen_context={
+            "runtime_context_schema": "natsume.runtime-context.request.v1",
+            "workspace_id": fact.workspace_id,
+            "subject_id": fact.subject_id,
+            "world_snapshot_v2": world.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": fact.workspace_id,
+                "subject_id": fact.subject_id,
+                "scene_id": "scene.implementation",
+                "revision": 1,
+                "decision_digest": "d" * 64,
+            },
+            "user_message": intent["task"],
+        },
+    )
+    result = adapter.search(adapter.request)
+    bound = bind_governed_plan_execution_policy(
+        PlanningGraphCompiler().compile(
+            result,
+            created_at=1_234,
+            compilation_context=adapter.compilation_context_for(result),
+        ),
+        skill_registry=registry,
+    )
+    order = bound.work_order
+    graph = bound.task_graph
+    command = build_host_command(
+        surface=HostCommandSurface.HOST_INPUT,
+        request_id=intent["request_id"],
+        session_id=intent["session_id"],
+        principal_id=intent["principal_id"],
+        ingress_claim_ref=None,
+        ingress_audit_ref=None,
+        governor_grant_ref=order.approval_ref,
+        input_ref=input_ref,
+        input_sha256="sha256:" + "6" * 64,
+        root_work_order_id=graph.root_work_order_id,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        route_type="plan",
+        target_id="planning_search",
+        business_scope=order.business_idempotency_scope,
+        operation_fingerprint=order.operation_fingerprint,
+        created_at_ms=1_234,
+    )
+    policy = order.metadata[PLAN_EXECUTION_POLICY_METADATA_KEY]
+    workspace_policy = next(
+        node
+        for node in policy["nodes"][:-1]
+        if node["effect_mode"] == PLAN_NODE_WORKSPACE_EFFECT_MODE
+    )
+    speculative_policy = next(
+        node
+        for node in policy["nodes"][:-1]
+        if node["effect_mode"] == "SPECULATIVE_EFFECT_FREE"
+    )
+    descriptor = {
+        "effect_type": AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+        "commit_scope": "NODE",
+        "payload": {
+            "schema_version": AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA,
+            "work_order_id": order.work_order_id,
+            "target_id": workspace_policy["target_id"],
+            "operation_fingerprint": derive_node_operation_fingerprint(
+                order.operation_fingerprint,
+                node_id=workspace_policy["node_id"],
+                multiple_nodes=True,
+            ),
+            "protected_artifact": {
+                "schema_version": "Natsume.agent.governed_artifact_stage.v1",
+                "ref": "agent-stage://workspace-plan/attempt-plan",
+                "digest": "sha256:" + "a" * 64,
+            },
+            "result_digest": "sha256:" + "b" * 64,
+        },
+    }
+    worker_commit = {
+        "decision": "APPROVE",
+        "request_id": command.request_id,
+        "narrative": "reviewed Workspace proposal",
+        "receipt_ref": "worker-projection://plan/workspace",
+        "audit_refs": {
+            "node_grant_ref": "governor-decision://sha256/" + "c" * 64,
+            "node_grant_digest": "sha256:" + "d" * 64,
+        },
+        "acceptance_effect_intents": [descriptor],
+    }
+
+    effects = compile_plan_node_acceptance_effects(
+        command=command,
+        work_order=order,
+        node_id=workspace_policy["node_id"],
+        attempt_id="attempt-plan-workspace",
+        worker_commit=worker_commit,
+    )
+
+    assert len(effects) == 1
+    assert effects[0].effect_type == AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
+    assert effects[0].node_id == workspace_policy["node_id"]
+    assert effects[0].payload["target_id"] == "agent_worker"
+    assert effects[0].commit_scope.value == "GRAPH"
+    with pytest.raises(
+        AcceptanceEffectCompileError,
+        match="speculative Plan node",
+    ):
+        compile_plan_node_acceptance_effects(
+            command=command,
+            work_order=order,
+            node_id=speculative_policy["node_id"],
+            attempt_id="attempt-plan-speculative",
+            worker_commit=worker_commit,
+        )
+
+
+def test_capability_plan_rejects_two_workspace_effect_owners() -> None:
+    intent, governor = _write_intent()
+    registry = _write_registry(two_writers=True)
+    adapter = build_capability_plan_search(
+        intent,
+        governor_result=governor,
+        skill_registry=registry,
+        input_refs=("input://sha256/" + "7" * 64,),
+        frozen_context={"user_message": intent["task"]},
+    )
+    result = adapter.search(adapter.request)
+    compiled = PlanningGraphCompiler().compile(
+        result,
+        created_at=1_234,
+        compilation_context=adapter.compilation_context_for(result),
+    )
+
+    with pytest.raises(
+        GovernedPlanExecutionPolicyError,
+        match="at most one",
+    ):
+        bind_governed_plan_execution_policy(
+            compiled,
+            skill_registry=registry,
         )
 
 

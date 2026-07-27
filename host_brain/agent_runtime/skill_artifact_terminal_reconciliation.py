@@ -25,8 +25,16 @@ from host_brain.contracts.agent_runtime.work_order import (
     WorkOrderV3,
     canonicalize_work_order,
 )
+from host_brain.contracts.agent_runtime.plan_execution_policy import (
+    PLAN_EXECUTION_POLICY_METADATA_KEY,
+    PlanExecutionPolicyError,
+    require_plan_workspace_effect_owner,
+)
 from host_brain.persistence.worker_projection_repository import (
     validate_worker_projection_payload,
+)
+from host_brain.task_runtime.admission import (
+    derive_node_operation_fingerprint,
 )
 
 
@@ -71,11 +79,67 @@ class SkillArtifactTerminalReport:
         }
 
 
-def direct_write_skill_command_id(
+def _write_skill_route_owner(
+    *,
+    command: Any,
+    graph: Any,
+    work_order: Any,
+    node_id: str,
+) -> str | None:
+    matches = [
+        node
+        for node in tuple(getattr(graph, "nodes", ()) or ())
+        if str(getattr(node, "node_id", "") or "") == str(node_id)
+    ]
+    if len(matches) != 1:
+        return None
+    route_kind, separator, target_id = str(
+        getattr(matches[0], "route", "") or ""
+    ).partition(":")
+    if (
+        separator != ":"
+        or route_kind != "skill"
+        or target_id not in WRITE_AGENT_RUNTIME_SKILL_IDS
+    ):
+        return None
+    command_route = str(getattr(command, "route_type", "") or "")
+    if (
+        command_route == "skill"
+        and str(getattr(command, "target_id", "") or "") == target_id
+        and str(getattr(work_order, "task_node_id", "") or "") == str(node_id)
+        and str(getattr(graph, "result_node_id", "") or "") == str(node_id)
+    ):
+        return target_id
+    if (
+        command_route != "plan"
+        or str(getattr(command, "target_id", "") or "") != "planning_search"
+        or not isinstance(work_order, WorkOrderV3)
+    ):
+        return None
+    metadata = dict(work_order.metadata or {})
+    try:
+        require_plan_workspace_effect_owner(
+            policy=(
+                metadata.get(PLAN_EXECUTION_POLICY_METADATA_KEY)
+                if isinstance(
+                    metadata.get(PLAN_EXECUTION_POLICY_METADATA_KEY),
+                    Mapping,
+                )
+                else {}
+            ),
+            node_id=str(node_id),
+            target_id=target_id,
+        )
+    except PlanExecutionPolicyError:
+        return None
+    return target_id
+
+
+def governed_write_skill_command_id(
     authority: Mapping[str, Any],
     command_repository: Any,
 ) -> str | None:
-    """Return the exact direct-Skill command owner, if this route owns it."""
+    """Return the exact direct-Skill or Plan-node command owner."""
 
     graph_id = str(authority.get("graph_id") or "")
     node_id = str(authority.get("node_id") or "")
@@ -93,18 +157,22 @@ def direct_write_skill_command_id(
         return None
     command = record.get("command")
     graph = record.get("graph")
-    target_id = str(getattr(command, "target_id", "") or "")
+    work_order = record.get("work_order")
     authority_command_id = str(authority.get("command_id") or "")
     matching = [
         node
         for node in tuple(getattr(graph, "nodes", ()) or ())
         if str(getattr(node, "node_id", "") or "") == node_id
     ]
+    binding = _write_skill_route_owner(
+        command=command,
+        graph=graph,
+        work_order=work_order,
+        node_id=node_id,
+    )
     exact = (
         getattr(getattr(command, "surface", None), "value", None)
         != "internal"
-        and str(getattr(command, "route_type", "") or "") == "skill"
-        and target_id in WRITE_AGENT_RUNTIME_SKILL_IDS
         and str(getattr(command, "graph_id", "") or "") == graph_id
         and int(getattr(command, "graph_revision", 0) or 0)
         == graph_revision
@@ -114,20 +182,19 @@ def direct_write_skill_command_id(
             == authority_command_id
         )
         and len(matching) == 1
-        and str(getattr(matching[0], "route", "") or "")
-        == f"skill:{target_id}"
+        and binding is not None
     )
     command_id = str(getattr(command, "command_id", "") or "")
     return command_id if exact and command_id else None
 
 
-def direct_write_skill_event_command_id(
+def governed_write_skill_event_command_id(
     event: Any,
     command_repository: Any,
 ) -> str | None:
-    """Resolve a terminal lifecycle event to its direct-Skill command."""
+    """Resolve a lifecycle event to its direct-Skill or Plan command."""
 
-    return direct_write_skill_command_id(
+    return governed_write_skill_command_id(
         {
             "graph_id": event.graph_id,
             "graph_revision": event.graph_revision,
@@ -137,17 +204,24 @@ def direct_write_skill_event_command_id(
     )
 
 
-def is_direct_write_skill_artifact(
+def is_governed_write_skill_artifact(
     artifact: Any,
     command_repository: Any,
 ) -> bool:
-    """Identify the exact direct-Skill owner without trusting filenames."""
+    """Identify an exact governed write-Skill owner without trusting filenames."""
 
     authority = dict(getattr(artifact, "execution_authority", {}) or {})
-    return direct_write_skill_command_id(
+    return governed_write_skill_command_id(
         authority,
         command_repository,
     ) is not None
+
+
+# Compatibility aliases for callers compiled before Plan nodes gained the same
+# route-owned Workspace lifecycle.
+direct_write_skill_command_id = governed_write_skill_command_id
+direct_write_skill_event_command_id = governed_write_skill_event_command_id
+is_direct_write_skill_artifact = is_governed_write_skill_artifact
 
 
 class GovernedSkillArtifactTerminalReconciler:
@@ -175,6 +249,9 @@ class GovernedSkillArtifactTerminalReconciler:
             (task_store, "get_operation_reservation"),
             (task_store, "get_committed_operation_checkpoint"),
             (task_store, "get_node_verification_decision"),
+            (task_store, "get_node_acceptance_decision"),
+            (task_store, "get_node_artifact"),
+            (task_store, "list_acceptance_effect_intents"),
             (command_repository, "get_by_graph"),
             (projection_store, "load"),
         )
@@ -305,15 +382,9 @@ class GovernedSkillArtifactTerminalReconciler:
             self._invalid("Agent Skill artifact has no HostCommand admission")
         command = record.get("command")
         graph = record.get("graph")
+        work_order = record.get("work_order")
         route_type = str(getattr(command, "route_type", "") or "")
-        target_id = str(getattr(command, "target_id", "") or "")
         surface = getattr(getattr(command, "surface", None), "value", None)
-        if (
-            route_type != "skill"
-            or target_id not in WRITE_AGENT_RUNTIME_SKILL_IDS
-            or surface == "internal"
-        ):
-            return None
         nodes = tuple(getattr(graph, "nodes", ()) or ())
         selected = [
             node
@@ -321,6 +392,14 @@ class GovernedSkillArtifactTerminalReconciler:
             if str(getattr(node, "node_id", "") or "")
             == str(authority["node_id"])
         ]
+        target_id = _write_skill_route_owner(
+            command=command,
+            graph=graph,
+            work_order=work_order,
+            node_id=str(authority["node_id"]),
+        )
+        if target_id is None or surface == "internal":
+            return None
         expected = (
             (getattr(command, "command_id", None), authority["command_id"]),
             (getattr(command, "root_work_order_id", None), authority["root_work_order_id"]),
@@ -332,6 +411,7 @@ class GovernedSkillArtifactTerminalReconciler:
             len(selected) != 1
             or str(getattr(selected[0], "route", "") or "")
             != f"skill:{target_id}"
+            or route_type not in {"skill", "plan"}
             or any(actual != wanted for actual, wanted in expected)
         ):
             self._invalid("Agent Skill artifact admission identity drifted")
@@ -345,6 +425,11 @@ class GovernedSkillArtifactTerminalReconciler:
         workspace = dict(sealed_order.workspace or {})
         reservation_id = str(metadata.get("reservation_id") or "").strip()
         workspace_id = str(getattr(artifact, "workspace_id", "") or "")
+        expected_operation_fingerprint = derive_node_operation_fingerprint(
+            str(getattr(command, "operation_fingerprint", "") or ""),
+            node_id=str(authority["node_id"]),
+            multiple_nodes=len(nodes) > 1,
+        )
         order_exact = (
             sealed_order.work_order_id == authority["root_work_order_id"]
             and sealed_order.root_work_order_id == authority["root_work_order_id"]
@@ -355,7 +440,7 @@ class GovernedSkillArtifactTerminalReconciler:
             and metadata.get("skill_id") == target_id
             and reservation_id
             and sealed_order.operation_fingerprint
-            == getattr(command, "operation_fingerprint", None)
+            == expected_operation_fingerprint
             and sealed_order.business_idempotency_scope
             == getattr(command, "business_scope", None)
             and sealed_order.requires_write
@@ -420,17 +505,28 @@ class GovernedSkillArtifactTerminalReconciler:
         }
         if not terminal_graph and not terminal_node:
             return None
-        if (
-            graph_status != "FAILED"
-            or node_status != "VERIFICATION_FAILED"
-            or attempt_status != "SUCCEEDED"
-            or operation_status != "COMMITTED"
-        ):
+        own_verification_failed = (
+            graph_status == "FAILED"
+            and node_status == "VERIFICATION_FAILED"
+            and attempt_status == "SUCCEEDED"
+            and operation_status == "COMMITTED"
+        )
+        plan_failed_after_acceptance = (
+            str(getattr(binding.command, "route_type", "") or "") == "plan"
+            and graph_status == "FAILED"
+            and node_status == "ACCEPTED"
+            and attempt_status == "SUCCEEDED"
+            and operation_status == "COMMITTED"
+        )
+        if not own_verification_failed and not plan_failed_after_acceptance:
             self._invalid(
                 "unproven Agent Skill terminal matrix remains fail closed"
             )
         self._assert_committed_checkpoint(binding)
         self._assert_projection_descriptor(binding, seal=seal)
+        if plan_failed_after_acceptance:
+            self._assert_plan_node_accepted_without_effect(binding)
+            return "TERMINAL_PLAN_GRAPH_FAILED_AFTER_NODE_ACCEPTANCE"
         decision = self._tasks.get_node_verification_decision(
             str(binding.authority["graph_id"]),
             int(binding.authority["graph_revision"]),
@@ -444,6 +540,49 @@ class GovernedSkillArtifactTerminalReconciler:
         ):
             self._invalid("Agent Skill Verification terminal drifted")
         return "TERMINAL_VERIFICATION_FAILED"
+
+    def _assert_plan_node_accepted_without_effect(
+        self,
+        binding: _SkillArtifactBinding,
+    ) -> None:
+        authority = binding.authority
+        acceptance = self._tasks.get_node_acceptance_decision(
+            str(authority["graph_id"]),
+            int(authority["graph_revision"]),
+            str(authority["node_id"]),
+        )
+        artifact = self._tasks.get_node_artifact(
+            str(authority["graph_id"]),
+            int(authority["graph_revision"]),
+            str(authority["node_id"]),
+        )
+        operation = self._tasks.get_operation_reservation(
+            binding.reservation_id
+        )
+        projection_ref = (
+            str(operation.get("receipt_ref") or "")
+            if isinstance(operation, Mapping)
+            else ""
+        )
+        if (
+            not isinstance(acceptance, Mapping)
+            or acceptance.get("target_status") != "ACCEPTED"
+            or acceptance.get("attempt_id") != binding.attempt_id
+            or not isinstance(artifact, Mapping)
+            or artifact.get("attempt_id") != binding.attempt_id
+            or artifact.get("receipt_ref") != projection_ref
+        ):
+            self._invalid("accepted Plan Workspace node lineage drifted")
+        effects = self._tasks.list_acceptance_effect_intents(
+            graph_id=str(authority["graph_id"]),
+            graph_revision=int(authority["graph_revision"]),
+            node_id=str(authority["node_id"]),
+            limit=1,
+        )
+        if tuple(effects or ()):
+            self._invalid(
+                "failed Plan Workspace node already has an Acceptance Effect"
+            )
 
     def _task_records(
         self,
@@ -627,5 +766,8 @@ __all__ = [
     "SkillArtifactTerminalReport",
     "direct_write_skill_command_id",
     "direct_write_skill_event_command_id",
+    "governed_write_skill_command_id",
+    "governed_write_skill_event_command_id",
+    "is_governed_write_skill_artifact",
     "is_direct_write_skill_artifact",
 ]

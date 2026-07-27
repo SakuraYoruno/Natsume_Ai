@@ -118,6 +118,7 @@ def _runtime(
     db_path: Path,
     source: Path,
     now_ms: int = NOW,
+    runtime_owner_id: str = RUNTIME_OWNER,
 ) -> DurableWorkspaceRuntime:
     managed = tmp_path / "managed"
     managed.mkdir(exist_ok=True)
@@ -142,7 +143,7 @@ def _runtime(
     return DurableWorkspaceRuntime(
         repository=repository,
         allocator=allocator,
-        runtime_owner_id=RUNTIME_OWNER,
+        runtime_owner_id=runtime_owner_id,
         managed_root_ref="worktrees",
         git_source_key="runtime-repository",
         lease_ms=5_000,

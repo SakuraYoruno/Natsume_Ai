@@ -564,10 +564,10 @@ def _max_risk(value: Any) -> int:
             CAPABILITY_PLAN_SEARCH_INVALID,
             "planning_max_risk_level must be an integer",
         ) from exc
-    if not 1 <= resolved <= 3:
+    if not 1 <= resolved <= 4:
         raise CapabilityPlanSearchError(
             CAPABILITY_PLAN_SEARCH_INVALID,
-            "planning_max_risk_level must be between 1 and 3",
+            "planning_max_risk_level must be between 1 and 4",
         )
     return resolved
 

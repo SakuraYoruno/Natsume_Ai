@@ -323,7 +323,7 @@ Scheduler governed occurrence 当前沿同一边界运行：Task worker 只提�
 
 通用 Effect 恢复按领域 authority 只读重开：visible turn 精确重验 turn+MemoryEvent。Preference 首先要求 app-local store privacy gate 为真实 `bool`，否则失败关闭且零写；配置 false 或 malformed env 保守解析为 `bool false`，只写 `DISABLED` receipt 且 event/current profile/0118 child version 为 0。启用路径以 deterministic operation ID 在一个 SQLite UoW 写 event、append-only profile child version 与 evaluation receipt；parent receipt 可见后 trigger 禁止追加 child，reconcile 再比较 receipt 声明与 child 实际全集，绕过 trigger 的篡改仍会失败。推荐反馈只选 admitted timestamp 以前且 exact person/conversation/session 的 delivery，并绑定 canonical full-delivery digest；零信号必须存在 `NO_SIGNAL` receipt。Surface 初次 POST 响应丢失后使用真实 `internal_reply` HMAC/timestamp/nonce 发起只读 query；Gateway 从同一 SQLite outbox snapshot 的 canonical payload 校验 `effect_id`，Host 重派生并校验 delivery/payload identity；`NOT_FOUND` 与任何漂移均保持 `UNKNOWN`。
 
-Internal worker 的 raw work order、prompt、metadata、result、changed-files 与 verification 在 Acceptance 前只进入 protected stage；seal 锁定 exact inventory/byte digest。受治理 write 同时锁定 frozen-base manifest 与 binary patch；Acceptance 重算后生成 deterministic accepted HEAD，并通过 0116 生命周期晋升，源分支不移动。若进程在 seal 后、WorkerProjection 前退出，首次 runtime activation 或周期 survivor 会以严格更高 fence 重建唯一 projection并继续原图；Agent 调用数保持 1。检查点 A/B/C 仍是三个分别原子的持久边界。pre-checkpoint cancellation 只在 exact single-node cancellation lineage 下消费自己的两种签名终态。没有 cancellation intent 的 raw failure 现在由独立 failure service 在单一 UoW 中确认 `NO_SIDE_EFFECT` 并写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal terminal worker 只有在重开该终态后，才先提交 deterministic claim、再清理 Workspace/stage。当前状态为 `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`，不是通用 worker crash recovery。三条 Direct Agent Skill 使用独立 route-specific classifier，当前已证明 success 与 Verification failure 的跨 runtime lifecycle，但不继承 Internal claim authority；Plan write、其它 terminal matrix、一般 unknown effect、general `settle_worker` crash bundle、Domain Pack/其它 Skill、handle-level原子TOCTOU与OS隔离也未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+Internal worker 的 raw work order、prompt、metadata、result、changed-files 与 verification 在 Acceptance 前只进入 protected stage；seal 锁定 exact inventory/byte digest。受治理 write 同时锁定 frozen-base manifest 与 binary patch；Acceptance 重算后生成 deterministic accepted HEAD，并通过 0116 生命周期晋升，源分支不移动。若进程在 seal 后、WorkerProjection 前退出，首次 runtime activation 或周期 survivor 会以严格更高 fence 重建唯一 projection并继续原图；Agent 调用数保持 1。检查点 A/B/C 仍是三个分别原子的持久边界。pre-checkpoint cancellation 只在 exact single-node cancellation lineage 下消费自己的两种签名终态。没有 cancellation intent 的 raw failure 现在由独立 failure service 在单一 UoW 中确认 `NO_SIDE_EFFECT` 并写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal terminal worker 只有在重开该终态后，才先提交 deterministic claim、再清理 Workspace/stage。当前状态为 `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`，不是通用 worker crash recovery。三条 Agent Skill 使用独立 route-specific classifier，当前已证明 Direct success/Verification failure 与 Plan single-writer graph success/downstream failure 的跨 runtime lifecycle，但不继承 Internal claim authority；其它 terminal matrix、多 Workspace、一般 unknown effect、general `settle_worker` crash bundle、Domain Pack/其它 Skill、handle-level 原子 TOCTOU 与 OS 隔离仍未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 Operation 已 `COMMITTED` 后的 Budget settlement 采用不确定性 hold：若 BudgetUsage 写响应与首次精确重读都丢失，普通异常只能返回 `RECOVERY_REQUIRED`，不得把 worker 标为失败或释放 Lease/Budget，也不得覆盖可能已经原子提交的 usage/`EXCEEDED`；process-control `BaseException` 原样传播。BudgetUsage 只分为 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT`。Lease 到期后，committed-checkpoint takeover 会在更高 fence 下只读重开前两类、幂等补写 `MISSING`；共享 Budget 已 `EXCEEDED` 时，accepted 或 missing checkpoint 必须证明唯一 sibling winner，missing 只能补写为与 winner 共用 Outbox/dimensions 且不再推进版本的 `ALREADY_EXCEEDED`。真实 SQLite 现覆盖三 owner 连续响应丢失、双 checkpoint、four-root mixed settlement、五节点菱形和八个并行根节点，后继只在依赖满足后释放且 worker 不重跑。`CONFLICT`、`RESERVED/RECOVERY_REQUIRED` unknown effect 与 cancellation crossing 不再只是一次返回：0130 会在新 Lease 前写 exact version-bound append-only hold 与 Outbox；conflict 保持 quarantine，后两类要求各自签名 reconciliation。无限规模、其它 failure/cancellation、自动归因和部署 fan-out canary仍未解决。
 
@@ -471,7 +471,7 @@ D7关闭了两个更窄的结构边界。第一，`obs_routes*.py`中的`process
 
 D7b 将 worker 依赖改为 Host lifespan 捕获的实例快照；D7c 把 Obs assembly 移入 app 层。`AgentRuntimeApplicationScope` 向 Input→Cortex、Life projection 与 conversation Acceptance 发布 immutable bundle；生产 locator 已在后续切片物理清零。ResourceManager shared status authority 已经由 0123 Host-fenced Runtime Event journal 取代；外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它资源 crash recovery、事务化 Chat、真实 executor 和完整 Host/Worker/Obs 对象图仍未完成，NE-01 不能封板。
 
-Workspace 已推进到 `PARTIAL_DIRECT_AGENT_SKILL_SUCCESS_AND_VERIFICATION_FAILURE_LIFECYCLE / GENERAL_CROSS_ROUTE_INCOMPLETE`。0101 authority、`WorkspaceRepository` 和配置根 allocator 继续持有 exact graph epoch/root WorkOrder/owner/allow-list；Internal 与三条已登记 Direct Agent Skill 都只携带服务端派生逻辑 ID。稳定 HMAC secret 下，Host composition 冻结 source commit、创建 namespace worktree，并注入 Lease、heartbeat、handoff/takeover 与 cleanup continuation。写 Worker 结束时，focused `workspace_write_promotion.py` 捕获 bounded path manifest 与 binary patch；protected artifact seal 同时绑定二者。成功 Direct Skill 由 WorkerProjection 提案编译为 `agent.workspace_artifact_promote`；失败 Direct Skill 只保存 bounded terminal descriptor。route-specific reconciler 重开 exact Task/Lease/Operation/projection/decision 后 abandon，shared lifecycle cleaner 在 fresh runtime 清理；配置源分支始终不移动。真实 SQLite+Git 已证明 success/Verification-failure 与再次重启零重放。Plan write、其它 terminal matrix、一般 unknown effect、Domain Pack/其它 Skill、逐操作 fence/强杀、OS/container/tenant/handle-level TOCTOU 与真实 canary 仍未完成。
+Workspace 已推进到 `PARTIAL_DIRECT_AND_SINGLE_PLAN_WRITE_SUCCESS_FAILURE_LIFECYCLE / GENERAL_CROSS_ROUTE_INCOMPLETE`。0101 authority、`WorkspaceRepository` 和配置根 allocator 继续持有 exact graph epoch/root WorkOrder/owner/allow-list；Internal 与三条已登记 Agent Skill 都只携带服务端派生逻辑 ID。稳定 HMAC secret 下，Host composition 冻结 source commit、创建 namespace worktree，并注入 Lease、heartbeat、handoff/takeover 与 cleanup continuation。写 Worker 结束时，focused `workspace_write_promotion.py` 捕获 bounded path manifest 与 binary Git patch；protected artifact seal 同时绑定二者。Direct success/failure 与 Plan single-writer graph success/downstream failure 都由 route-specific reconciler 和 shared lifecycle cleaner 在 fresh runtime 收口；配置源分支始终不移动，再次重启零重放。其它 terminal matrix、多 Workspace、一般 unknown effect、Domain Pack/其它 Skill、逐操作 fence/强杀、OS/container/tenant/handle-level TOCTOU 与真实 canary 仍未完成。
 
 它的启动门禁已固定为 migration → TaskStore 0093/0094/0095/0098/0099/0102 与 Review 0096 readiness → `task_store.recover_startup` → 0099 bounded terminal inventory → 默认开启且只消费 `EXACT_REPAIRABLE` 的 exact system auto → publisher/worker → surface activation → continuation workers；恢复异常会终止容器构造并阻止路由开放。0102 在 recovery 前阻断 active legacy 空合同/缺 artifact，并隔离缺 exact artifact 的可投递 terminal legacy Effect；0099 继续负责窄 terminal inventory。配置中的逻辑 owner 会派生为 construction/recovery-scoped execution owner。Operation/Effect/terminal Operator services 仍由独立默认关闭开关控制，外部 deployment inventory、凭据、key lifecycle、remediation 与 canary 未知时不宣称生产就绪。
 
@@ -525,7 +525,7 @@ flowchart LR
 | Acceptance | 是否接纳结果并允许副作用 | 决定 effect intent |
 | Receipt | 外部或持久副作用实际发生了什么 | 不可变证据 |
 
-Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admission，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 的 `AgentWorkOrder` 只保留为未准入的外部 v2 描述；frozen worker、executor、prompt、review 与 Workspace 原生消费同一 V3。raw result material 在 protected stage，公共 projection 只暴露 ref/digest。Internal write 密封 frozen-base delta，Acceptance 重算 deterministic accepted HEAD 并经 0116 晋升，不移动 source branch。首次与周期 sealed checkpoint 可重建 projection 并继续 accepted path；当前 exact signed raw-failure 还可在六聚合原子失败终态和独立 claim contract 证明后清理未 sealed stage。三条 Direct Agent Skill 也能从 server-bound V3 生成 protected stage；成功由 graph Acceptance promotion Effect 提升，失败由独立 Skill terminal reconciler 在 canonical Verification failure 后 abandon，再交 shared lifecycle cleaner。Plan write、其它 terminal matrix、其它 failure/cancel/budget claim closeout、unknown effect、Domain Pack/其它 Skill 和 general `settle_worker` crash bundle仍缺。0096 task-bound Review不等于一般recoverable Attempt takeover；cancellation `PRODUCTION_OFF` 定级未改变。
+Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admission，并贯通 child grant、Review、Verification、Acceptance 与 Receipt。Internal 的 `AgentWorkOrder` 只保留为未准入的外部 v2 描述；frozen worker、executor、prompt、review 与 Workspace 原生消费同一 V3。raw result material 在 protected stage，公共 projection 只暴露 ref/digest。Internal write 密封 frozen-base delta，Acceptance 重算 deterministic accepted HEAD 并经 0116 晋升，不移动 source branch。首次与周期 sealed checkpoint 可重建 projection 并继续 accepted path；当前 exact signed raw-failure 还可在六聚合原子失败终态和独立 claim contract 证明后清理未 sealed stage。三条 Agent Skill 也能从 server-bound V3 生成 protected stage；Direct success/failure 与至多一个 reviewed Plan 写节点的 graph success/downstream failure 均通过 graph Acceptance 或 zero-effect terminal 证明收口，再交 shared lifecycle cleaner。其它 terminal matrix、多 Workspace、其它 failure/cancel/budget claim closeout、unknown effect、Domain Pack/其它 Skill 和 general `settle_worker` crash bundle 仍缺。0096 task-bound Review 不等于一般 recoverable Attempt takeover；cancellation `PRODUCTION_OFF` 定级未改变。
 
 ## 6. 状态与数据 authority
 
@@ -720,6 +720,37 @@ Internal reconciler 解释。前者确认精确 ownership 后，后者跳过 sta
 失败 projection 只包含密封 ref/digest 和公开结果 digest，不包含原始文件，
 也没有 Acceptance Effect。真实 SQLite+Git 已覆盖 direct Skill 成功和
 Verification failure 的跨 runtime cleanup，并修复 cleanup Lease 换权后
-必须重开最新 authority version 的 CAS 边界。Plan 内 write node、其它
-terminal matrix、Domain Pack 与强隔离仍未完成，因而 Workspace 和 NE-01
-仍为 `PARTIAL / IN_PROGRESS`。
+必须重开最新 authority version 的 CAS 边界。下一节补充受限 Plan
+single-writer success/downstream-failure；其它 terminal matrix、Domain
+Pack 与强隔离仍未完成，因而 Workspace 和 NE-01 仍为
+`PARTIAL / IN_PROGRESS`。
+
+## 15. Plan 写节点的整图提交边界
+
+```mermaid
+flowchart TD
+    P["Immutable Plan TaskGraph"] --> W["Reviewed risk-4 write node"]
+    W --> S["Sealed Workspace proposal"]
+    S --> NA["Node Verification + Acceptance"]
+    NA --> G{"Whole graph terminal"}
+    G -->|"all accepted"| U["Parallel-success UoW"]
+    U --> E["Node-owned promotion Effect + result Effects"]
+    E --> V["Action Preview + exact handler reopen"]
+    V --> H["accepted HEAD promoted"]
+    G -->|"downstream failed"| Z["Prove zero Effect"]
+    Z --> A["Workspace ABANDONED"]
+    H --> C["Shared lifecycle cleanup"]
+    A --> C
+```
+
+Plan policy 只允许一个非结果 Workspace 写 owner。该节点的 Attempt、Lease、
+Grant、Budget、Review、Verification、Acceptance 和 artifact 都保持
+node-bound；最终可见结果仍由 result node 拥有。整图成功 UoW 可以包含多个
+节点各自拥有的 Effects，但不能把写节点伪装成 result node，也不能在
+speculative batch 中提前 dispatch。
+
+下游失败恢复由 route-specific reconciler 和 repository 双重验证：Graph
+FAILED、write node ACCEPTED、Attempt SUCCEEDED、Lease 终止、唯一
+Acceptance decision、artifact/Operation/projection 一致且该 node Effect
+为零。真实 SQLite+Git 已证明 success promotion 与 downstream-failure
+abandon/cleanup；其它终态矩阵与强隔离仍是 NE-01 缺口。
