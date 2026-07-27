@@ -332,3 +332,16 @@ signature 篡改均保持 `BLOCKED + ACTIVE`，仅伪造终态字段也被 repos
 `RELEASE/NO_SIDE_EFFECT` 失败子集从缺失推进为本地实证，但没有覆盖一般
 multi-node/batch failure、其它 unknown-effect/cancellation、多 Workspace、
 波次 integration 或服务栈，故矩阵总状态仍为 `PARTIAL`。
+
+## 9. 当前 Plan 多节点失败缺口修正
+
+| 能力 | 修正前 | 当前证据 | 仍缺 |
+|---|---|---|---|
+| Plan 写节点 pre-checkpoint failure | stage 留存但 Workspace 只接受单节点六 Outbox 终态 | 真实三节点 Graph：签名节点失败、fresh 0090 Graph/Budget 结算、Workspace 清理、零 sibling replay | 多写节点与一般 batch |
+| 0090 历史读取 | 单行 helper 无法表达 Review→resume→failure | 全部历史 decision/Outbox canonical 校验，唯一 current-version terminal 选择 | 大规模并发/部署 canary |
+| Workspace Outbox ownership | 假设六条均由 Operation failure UoW 产生 | Node 四条由 failure UoW；Graph/Budget 两条由 0090 decision 拥有 | unknown-effect 与跨 Workspace |
+
+本批把一个明确的 multi-node Plan failure 子集从缺失推进为本地实证，但
+bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
+清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
+Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。

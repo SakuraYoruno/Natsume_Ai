@@ -22,6 +22,7 @@ from host_brain.contracts.agent_runtime.parallel_settlement import (
 from host_brain.persistence.task_decision_integrity import (
     _assert_parallel_settlement_decision_outbox_binding,
     _assert_parallel_success_decision_bindings,
+    _find_invalid_declared_parallel_settlement_decision_ref,
 )
 from host_brain.persistence.task_effect_reconciliation_read_store import (
     TaskEffectReconciliationReadMixin,
@@ -31,6 +32,9 @@ from host_brain.persistence.task_graph_cancellation_effect_overlay_store import 
 )
 from host_brain.persistence.task_parallel_success_store import (
     TaskParallelSuccessStoreMixin,
+)
+from host_brain.persistence.task_parallel_settlement_store import (
+    TaskParallelSettlementStoreMixin,
 )
 from host_brain.persistence.task_record_codec import (
     _dumps,
@@ -201,6 +205,70 @@ def canonical_parallel_terminal_decision(
         return None
 
 
+def canonical_current_parallel_terminal_decision(
+    conn: sqlite3.Connection,
+    graph: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the one decision bound to current Graph version.
+
+    A Graph may retain earlier REVIEW decisions before it is resumed and later
+    reaches a FAILURE terminal.  Every historical row remains canonical and
+    keeps its Outbox; only one row may bind the current Graph status version.
+    """
+
+    rows = conn.execute(
+        """
+        SELECT * FROM task_runtime_parallel_settlement_decision
+        WHERE graph_id = ? AND graph_revision = ?
+        ORDER BY graph_version_after, decision_ref
+        """,
+        (str(graph["graph_id"]), int(graph["revision"])),
+    ).fetchall()
+    if not rows:
+        return None
+    if (
+        _find_invalid_declared_parallel_settlement_decision_ref(
+            conn,
+            graph_id=str(graph["graph_id"]),
+            graph_revision=int(graph["revision"]),
+        )
+        is not None
+    ):
+        return None
+    current: list[Mapping[str, Any]] = []
+    seen_versions: set[int] = set()
+    try:
+        for row in rows:
+            record = _parallel_settlement_decision_record(row)
+            decision = normalize_parallel_settlement_decision(
+                record["payload"]
+            )
+            _assert_parallel_settlement_decision_outbox_binding(conn, record)
+            version_after = int(record["graph_version_after"])
+            if (
+                version_after in seen_versions
+                or version_after > int(graph["status_version"])
+            ):
+                return None
+            seen_versions.add(version_after)
+            TaskParallelSettlementStoreMixin._validate_parallel_decision_attempt_lineage(
+                conn,
+                decision=decision,
+                graph_id=str(graph["graph_id"]),
+                revision=int(graph["revision"]),
+                require_latest=version_after == int(graph["status_version"]),
+                reason_code=TASK_STORE_DURABLE_DATA_INVALID,
+            )
+            payload = decision.payload
+            if version_after == int(graph["status_version"]):
+                if payload["graph_target_status"] != str(graph["status"]):
+                    return None
+                current.append(dict(payload))
+        return current[0] if len(current) == 1 else None
+    except (TaskStoreError, KeyError, TypeError, ValueError):
+        return None
+
+
 def parallel_success_authority_valid(
     owner: Any,
     conn: sqlite3.Connection,
@@ -286,6 +354,7 @@ def graph_cancellation_authority_valid(
 
 
 __all__ = [
+    "canonical_current_parallel_terminal_decision",
     "canonical_parallel_terminal_decision",
     "graph_cancellation_authority_valid",
     "parallel_success_authority_valid",

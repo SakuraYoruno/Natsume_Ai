@@ -852,3 +852,31 @@ SQLite/Git/Ed25519/fresh-Runtime 证据为两个不重叠代码批次：
 migration。NE-01 仍为 `IN_PROGRESS`，因为一般 multi-node/batch failure、
 其它 unknown-effect/cancellation、并发多 Workspace、波次 integration 和
 NE-07 全栈尚未验收，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## 14. 当前实施进展：Plan 写节点 pre-checkpoint 签名失败
+
+本批把 direct-skill 单节点清理合同接到真实三节点 Planning Graph，但没有
+扩大签名 Operation 的权限：
+
+1. Plan 的只读前驱正常 Acceptance，唯一 risk-4 写节点经真实
+   Review continuation 取得 node-bound grant；
+2. Agent 在真实 Workspace 写文件并密封 protected stage 后、生成
+   WorkerProjection 前故意中断，Runtime 只写 `RECOVERY_REQUIRED`；
+3. Lease 到期后的 Ed25519 `RELEASE/NO_SIDE_EFFECT` 只提交
+   `RECONCILED_OPERATION_NODE_FAILURE / NODE_ONLY / PENDING`，Graph 与
+   Budget 保持 `ACTIVE`；
+4. fresh `GovernedCommandApplication` 从 durable outcomes 生成 0090
+   `FAILURE`，原子提交 Graph `FAILED`、Budget `RELEASED` 与各自 Outbox，
+   结果 sibling 调用数保持 0；
+5. 新的 current-decision reader 验证该 Graph 的全部历史 0090 记录，允许
+   保留先前 `REVIEW` decision，但只接受唯一绑定当前 Graph version 的
+   terminal decision；
+6. Workspace structural proof 分别验证节点失败四条 Outbox与 0090
+   Graph/Budget Outbox，随后才允许 `ABANDONED → CLEANED`。
+
+删除当前 0090 Budget Outbox 会使 structural proof 返回 false；正常路径
+保持 source HEAD/文件不变，第二次重启 terminal inventory 为零。本批基线为
+`origin/dev@49615ae6e4d4364c26b3eb651012fa50bf959d0e`，无 migration，
+去重受影响集为 `58 passed in 128.70s`。一般并行写、其它多节点/batch
+failure、unknown effect、多 Workspace、NE-01 wave integration 与 NE-07
+真实服务栈仍待完成，远程 CI 保持 `NOT_RUN_ACCOUNT_QUOTA`。

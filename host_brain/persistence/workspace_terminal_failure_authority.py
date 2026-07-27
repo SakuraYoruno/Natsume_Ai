@@ -11,6 +11,9 @@ from host_brain.contracts.agent_runtime.operation_reconciliation import (
     build_operation_failure_outbox_identity,
     build_reconciliation_attestation_binding,
 )
+from host_brain.persistence.task_terminal_reconciliation_decision_authority import (
+    canonical_current_parallel_terminal_decision,
+)
 from host_brain.persistence.task_store_types import build_outbox_payload_ref
 
 
@@ -106,12 +109,13 @@ def finalized_no_effect_failure_allows_workspace_abandonment(
     row = rows[0] if len(rows) == 1 else None
     if row is None or not _terminal_shape_is_exact(row):
         return False
-    if not _single_owner_cardinality(
+    node_count = _owner_cardinality(
         conn,
         graph_id=graph_id,
         graph_revision=graph_revision,
         attempt_id=attempt_id,
-    ):
+    )
+    if node_count is None:
         return False
     if not _has_zero_downstream_authority(
         conn,
@@ -148,6 +152,20 @@ def finalized_no_effect_failure_allows_workspace_abandonment(
     )
     if str(row["attempt_error_ref"] or "") != error_ref:
         return False
+    graph_wide_terminal = node_count == 1
+    if (
+        not graph_wide_terminal
+        and not _parallel_failure_settlement_is_exact(
+            conn,
+            row=row,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            error_ref=error_ref,
+        )
+    ):
+        return False
     return _terminal_outboxes_are_exact(
         conn,
         row=row,
@@ -157,6 +175,7 @@ def finalized_no_effect_failure_allows_workspace_abandonment(
         attempt_id=attempt_id,
         lease_id=lease_id,
         error_ref=error_ref,
+        graph_wide_terminal=graph_wide_terminal,
     )
 
 
@@ -200,13 +219,13 @@ def _terminal_shape_is_exact(row: sqlite3.Row) -> bool:
     )
 
 
-def _single_owner_cardinality(
+def _owner_cardinality(
     conn: sqlite3.Connection,
     *,
     graph_id: str,
     graph_revision: int,
     attempt_id: str,
-) -> bool:
+) -> int | None:
     counts = conn.execute(
         """
         SELECT
@@ -230,12 +249,78 @@ def _single_owner_cardinality(
             graph_revision,
         ),
     ).fetchone()
+    if (
+        counts is None
+        or int(counts["nodes"]) < 1
+        or int(counts["operations"]) != 1
+        or int(counts["budgets"]) != 1
+        or int(counts["commands"]) != 1
+    ):
+        return None
+    return int(counts["nodes"])
+
+
+def _parallel_failure_settlement_is_exact(
+    conn: sqlite3.Connection,
+    *,
+    row: sqlite3.Row,
+    graph_id: str,
+    graph_revision: int,
+    node_id: str,
+    attempt_id: str,
+    error_ref: str,
+) -> bool:
+    decision = canonical_current_parallel_terminal_decision(
+        conn,
+        {
+            "graph_id": graph_id,
+            "revision": graph_revision,
+            "status": str(row["graph_status"]),
+            "status_version": int(row["graph_status_version"]),
+        },
+    )
+    if not isinstance(decision, dict):
+        return False
+    node_rows = conn.execute(
+        """
+        SELECT node_id, status, status_version
+        FROM task_runtime_node
+        WHERE graph_id = ? AND graph_revision = ?
+        ORDER BY node_id
+        """,
+        (graph_id, graph_revision),
+    ).fetchall()
+    actual_states = {
+        str(item["node_id"]): {
+            "status": str(item["status"]),
+            "status_version": int(item["status_version"]),
+        }
+        for item in node_rows
+    }
+    outcomes = decision.get("outcomes")
+    budget_version_before = decision.get("budget_status_version_before")
+    selected = next(
+        (
+            item
+            for item in outcomes
+            if isinstance(item, dict)
+            and str(item.get("node_id") or "") == node_id
+        ),
+        None,
+    ) if isinstance(outcomes, list) else None
     return bool(
-        counts is not None
-        and int(counts["nodes"]) == 1
-        and int(counts["operations"]) == 1
-        and int(counts["budgets"]) == 1
-        and int(counts["commands"]) == 1
+        decision.get("decision_kind") == "FAILURE"
+        and decision.get("graph_target_status") == "FAILED"
+        and decision.get("budget_target_status") == "RELEASED"
+        and decision.get("budget_id") == str(row["budget_id"])
+        and type(budget_version_before) is int
+        and budget_version_before + 1
+        == int(row["budget_status_version"])
+        and decision.get("node_states") == actual_states
+        and isinstance(selected, dict)
+        and selected.get("attempt_id") == attempt_id
+        and selected.get("status") == "FAILED"
+        and error_ref in tuple(selected.get("evidence_refs") or ())
     )
 
 
@@ -295,6 +380,7 @@ def _terminal_outboxes_are_exact(
     attempt_id: str,
     lease_id: str,
     error_ref: str,
+    graph_wide_terminal: bool,
 ) -> bool:
     proof_ref = str(row["reconciliation_proof_ref"])
     evidence = (error_ref, proof_ref)
@@ -348,16 +434,6 @@ def _terminal_outboxes_are_exact(
             evidence_refs=evidence,
         ),
         _failure_outbox(
-            kind="graph",
-            aggregate_type="TASK_GRAPH",
-            aggregate_id=graph_id,
-            aggregate_version=int(row["graph_status_version"]),
-            event_type="TASK_GRAPH_FAILED",
-            graph_revision=graph_revision,
-            attempt_id=attempt_id,
-            evidence_refs=evidence,
-        ),
-        _failure_outbox(
             kind="lease",
             aggregate_type="TASK_LEASE",
             aggregate_id=lease_id,
@@ -366,16 +442,31 @@ def _terminal_outboxes_are_exact(
             attempt_id=attempt_id,
             evidence_refs=evidence,
         ),
-        _failure_outbox(
-            kind="budget",
-            aggregate_type="BUDGET_RESERVATION",
-            aggregate_id=str(row["budget_id"]),
-            aggregate_version=int(row["budget_status_version"]),
-            event_type="BUDGET_RESERVATION_RELEASED",
-            attempt_id=attempt_id,
-            evidence_refs=evidence,
-        ),
     ]
+    if graph_wide_terminal:
+        expected.extend(
+            (
+                _failure_outbox(
+                    kind="graph",
+                    aggregate_type="TASK_GRAPH",
+                    aggregate_id=graph_id,
+                    aggregate_version=int(row["graph_status_version"]),
+                    event_type="TASK_GRAPH_FAILED",
+                    graph_revision=graph_revision,
+                    attempt_id=attempt_id,
+                    evidence_refs=evidence,
+                ),
+                _failure_outbox(
+                    kind="budget",
+                    aggregate_type="BUDGET_RESERVATION",
+                    aggregate_id=str(row["budget_id"]),
+                    aggregate_version=int(row["budget_status_version"]),
+                    event_type="BUDGET_RESERVATION_RELEASED",
+                    attempt_id=attempt_id,
+                    evidence_refs=evidence,
+                ),
+            )
+        )
     return all(_outbox_matches(conn, item) for item in expected)
 
 

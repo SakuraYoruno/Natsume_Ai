@@ -814,3 +814,25 @@ Budget，重算 proof/error identity 并精确核对六类 Outbox。该模块没
 或 worker authority。真实 SQLite/Git/fresh-Runtime 测试证明正常清理、三类
 篡改阻断与零 replay；这仍只是 direct single-node raw-failure 子集，NE-01
 保持 `IN_PROGRESS`。
+
+### Plan 多节点签名失败与 current 0090 authority
+
+`GovernedSkillArtifactTerminalReconciler` 现在接受两种互斥 signed failure：
+
+- `route=skill`：单节点 `GRAPH_TERMINAL`，Graph/Budget 由 Operation failure
+  UoW 一起关闭；
+- `route=plan`：多节点 `NODE_ONLY`，只有在
+  `graph_settlement_status=COMMITTED` 且存在规范
+  `taskbatch://sha256/...` 时才允许清理。
+
+`canonical_current_parallel_terminal_decision()` 会读取同一 Graph revision
+的全部 0090 rows，逐条运行既有 codec 与 Outbox binding validator，拒绝
+重复/future version，再返回唯一 `graph_version_after == current
+status_version` 的 decision。Workspace proof 还把其 `node_states` 与当前
+全图逐项比较，并要求目标 outcome 绑定 exact Attempt、`FAILED` 和签名
+failure error ref；Budget ID/version 必须一致。
+
+这使 Review 阶段的历史 `BLOCKED` decision 与最终 `FAILED` decision 可以
+合法共存。生产 TaskStore 仍是唯一 mutation authority，Workspace reader
+只做同事务快照的结构证明。本地真实 Plan/SQLite/Git 测试证明结果节点不
+执行、Graph/Budget fresh-runtime 结算、Outbox 篡改阻断与零 replay。

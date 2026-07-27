@@ -6,6 +6,8 @@ import sqlite3
 from typing import Any, Mapping
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import host_brain.agent_runtime.executor as executor_module
 from host_brain.agent_runtime.accepted_workspace_artifact import (
@@ -74,7 +76,11 @@ from host_brain.persistence.internal_agent_checkpoint_uow import (
 )
 from host_brain.persistence.task_repository import (
     DurableTaskStore,
+    Ed25519ReconciliationProofVerifier,
     OutboxMessage,
+)
+from host_brain.persistence.workspace_terminal_failure_authority import (
+    finalized_no_effect_failure_allows_workspace_abandonment,
 )
 from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
@@ -93,6 +99,9 @@ from host_brain.task_runtime import GovernedTaskCoordinator
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
+from host_brain.task_runtime.operation_failure_reconciliation import (
+    OperationFailureReconciliationService,
+)
 from natsume_contracts.task import HostCommandSurface
 from tests.integration.test_ne01_governed_agent_workspace_acceptance import (
     _ActionPreview,
@@ -110,6 +119,13 @@ from tests.integration.test_gr03a_governed_durable_dag import (
     _consume_review,
     _migrated_db,
 )
+from tests.integration.test_ne01_operation_online_takeover import _Clock
+from tests.integration.test_ne01_signed_operation_failure import (
+    _release_signature,
+)
+
+
+_RECONCILIATION_KEY_ID = "plan-workspace-signed-failure-v1"
 
 
 def _handler(_payload: Any, _context: Any) -> dict[str, str]:
@@ -227,6 +243,8 @@ class _GrantCheckingWorker:
         self.calls: list[str] = []
         self.grants: list[dict[str, Any]] = []
         self.protected_stages: list[dict[str, Any]] = []
+        self.interrupt_after_stage_node_id: str | None = None
+        self.interrupted_context: dict[str, Any] | None = None
 
     async def execute_stream(
         self,
@@ -353,6 +371,14 @@ class _GrantCheckingWorker:
                 assert raw_result["status"] == "EXECUTED", raw_result
                 protected = dict(raw_result.pop("_protected_stage"))
                 self.protected_stages.append(protected)
+                if (
+                    execution_context["node_id"]
+                    == self.interrupt_after_stage_node_id
+                ):
+                    self.interrupted_context = dict(execution_context)
+                    raise RuntimeError(
+                        "simulated Plan writer interruption before checkpoint"
+                    )
                 result_digest = canonical_workspace_artifact_digest(raw_result)
             else:
                 protected = {
@@ -534,13 +560,27 @@ class _ContinuationRuntime:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "terminal_outcome",
-    ("success", "downstream-failure", "downstream-cancellation"),
+    (
+        "success",
+        "downstream-failure",
+        "downstream-cancellation",
+        "writer-signed-failure",
+    ),
 )
 async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acceptance(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
     terminal_outcome: str,
 ) -> None:
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    proof_verifier = Ed25519ReconciliationProofVerifier(
+        {_RECONCILIATION_KEY_ID: public_key}
+    )
+    clock = _Clock()
     source, source_head = _source_repository(tmp_path)
     db_path = _migrated_db(tmp_path)
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
@@ -594,30 +634,34 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                 },
             },
         )
-        reviews = ReviewStore(db_path, clock=lambda: NOW)
-        continuations = ReviewContinuationStore(db_path, clock=lambda: NOW)
+        reviews = ReviewStore(db_path, clock=clock)
+        continuations = ReviewContinuationStore(db_path, clock=clock)
         grant_service = NodeBoundGrantService(
             ledger=ledger,
             token_service=token_service,
             review_store=continuations,
-            clock=lambda: NOW,
+            clock=clock,
             child_ttl_ms=60_000,
         )
         grant_verifier = DurableNodeGrantVerifier(
             ledger=ledger,
             review_store=continuations,
-            clock=lambda: NOW,
+            clock=clock,
         )
         projection_store = WorkerProjectionStore(
             db_path,
-            clock=lambda: NOW,
+            clock=clock,
         )
-        task_store = DurableTaskStore(db_path, clock=lambda: NOW)
+        task_store = DurableTaskStore(
+            db_path,
+            clock=clock,
+            reconciliation_proof_verifier=proof_verifier,
+        )
         workspace_runtime = _workspace_runtime(
             tmp_path,
             db_path=db_path,
             source=source,
-            now_ms=NOW,
+            now_ms=clock.value,
             runtime_owner_id="ne01-plan-node-review-runtime",
         )
         artifacts = AgentArtifactStore(tmp_path / "agent-runs")
@@ -669,7 +713,7 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         )
         command_repository = HostCommandRepository(
             db_path,
-            clock=lambda: NOW,
+            clock=clock,
         )
         selective_verifier = _SelectiveVerifier()
         selective_acceptance = _SelectiveAcceptance()
@@ -691,12 +735,14 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                 projection_reader=projection_store,
                 review_runtime=TaskNodeReviewRuntime(
                     reviews,
-                    clock=lambda: NOW,
+                    clock=clock,
                 ),
                 node_grant_verifier=grant_verifier,
                 acceptance_effects_enabled=True,
                 atomic_graph_success_enabled=True,
                 owner_id="ne01-plan-node-review-runtime",
+                lease_ttl_ms=20,
+                operation_ttl_ms=20,
             ),
             node_grant_service=grant_service,
             cancellation_authority_verifier=(
@@ -748,6 +794,8 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         }
         assert len(required_nodes) == 1
         required_node_id = next(iter(required_nodes))
+        if terminal_outcome == "writer-signed-failure":
+            worker.interrupt_after_stage_node_id = required_node_id
         assert order.review_policy[NODE_REVIEW_POLICIES_KEY][required_node_id][
             "reason_code"
         ] == "SKILL_REGISTRY_CONFIRM_REQUIRED"
@@ -789,7 +837,240 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             "success": "ACCEPTED",
             "downstream-failure": "VERIFICATION_FAILED",
             "downstream-cancellation": "WAITING_ACCEPTANCE_REVIEW",
+            "writer-signed-failure": "RECOVERY_REQUIRED",
         }[terminal_outcome], continuation_runtime.results[-1]
+        if terminal_outcome == "writer-signed-failure":
+            assert worker.interrupted_context is not None
+            assert worker.calls == [
+                node.node_id
+                for node in graph.nodes
+                if node.node_id != graph.result_node_id
+            ]
+            assert len(worker.protected_stages) == 1
+            interrupted_context = dict(worker.interrupted_context)
+            reservation_id = str(interrupted_context["reservation_id"])
+            operation = dict(
+                task_store.get_operation_reservation(reservation_id)
+            )
+            assert operation["status"] == "RECOVERY_REQUIRED"
+            lease = dict(
+                task_store.get_lease(str(interrupted_context["lease_id"]))
+            )
+            clock.value = int(lease["expires_ts_ms"]) + 1
+            actor_id = "reconciler://operator/plan-workspace-failure"
+            attestation_ref = (
+                "proof://plan-workspace/signed-no-effect-failure"
+            )
+            pending = OperationFailureReconciliationService(
+                task_store=task_store,
+                outbox_factory=OutboxMessage,
+            ).reconcile_operation_failure(
+                reservation_id=reservation_id,
+                expected_version=int(operation["status_version"]),
+                reconciler_actor_id=actor_id,
+                attestation_ref=attestation_ref,
+                attestation_key_id=_RECONCILIATION_KEY_ID,
+                attestation_signature=_release_signature(
+                    private_key,
+                    operation=operation,
+                    expected_version=int(operation["status_version"]),
+                    actor_id=actor_id,
+                    attestation_ref=attestation_ref,
+                ),
+            )
+            assert pending["terminal"]["authority_kind"] == (
+                "RECONCILED_OPERATION_NODE_FAILURE"
+            )
+            assert pending["terminal"]["graph_settlement_status"] == "PENDING"
+            assert pending["terminal"]["graph_status"] == "ACTIVE"
+            assert pending["terminal"]["budget_status"] == "ACTIVE"
+
+            reopened_store = DurableTaskStore(
+                db_path,
+                clock=clock,
+                reconciliation_proof_verifier=proof_verifier,
+            )
+            reopened_application = GovernedCommandApplication(
+                command_repository=HostCommandRepository(
+                    db_path,
+                    clock=clock,
+                ),
+                coordinator=GovernedTaskCoordinator(
+                    task_store=reopened_store,
+                    internal_agent_checkpoint_uow=(
+                        DurableInternalAgentCheckpointUnitOfWork(
+                            task_store=reopened_store,
+                            worker_projection_store=projection_store,
+                        )
+                    ),
+                    outbox_publisher=_Publisher(),
+                    outbox_factory=OutboxMessage,
+                    worker_resolver=_PlanResolver(worker),
+                    verifier=selective_verifier,
+                    acceptance=selective_acceptance,
+                    projection_reader=projection_store,
+                    review_runtime=TaskNodeReviewRuntime(
+                        reviews,
+                        clock=clock,
+                    ),
+                    node_grant_verifier=grant_verifier,
+                    acceptance_effects_enabled=True,
+                    atomic_graph_success_enabled=True,
+                    owner_id="ne01-plan-node-review-recovery-runtime",
+                    lease_ttl_ms=20,
+                    operation_ttl_ms=20,
+                ),
+                node_grant_service=grant_service,
+                cancellation_authority_verifier=(
+                    SecureIngressGraphCancellationAuthorityVerifier(
+                        cancellation_claims
+                    )
+                ),
+            )
+            calls_before_settlement = list(worker.calls)
+            settled_events = [
+                event
+                async for event in reopened_application.execute_stream(
+                    command=prepared.admission.command,
+                    work_order=prepared.admission.work_order,
+                    assignment=prepared.admission.assignment,
+                    graph=prepared.admission.graph,
+                )
+            ]
+            assert settled_events[-1]["execution_receipt"]["status"] == "FAILED"
+            assert worker.calls == calls_before_settlement
+            settled = reopened_store.resolve_reconciled_operation_failure(
+                reservation_id
+            )
+            assert settled["authority_kind"] == (
+                "RECONCILED_OPERATION_NODE_FAILURE"
+            )
+            assert settled["graph_settlement_status"] == "COMMITTED"
+            assert settled["graph"]["status"] == "FAILED"
+            assert settled["budget"]["status"] == "RELEASED"
+            assert str(settled["parallel_settlement_ref"]).startswith(
+                "taskbatch://sha256/"
+            )
+
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                assert finalized_no_effect_failure_allows_workspace_abandonment(
+                    conn,
+                    graph_id=graph.graph_id,
+                    graph_revision=graph.revision,
+                    node_id=required_node_id,
+                    attempt_id=str(interrupted_context["attempt_id"]),
+                    lease_id=str(interrupted_context["lease_id"]),
+                )
+                tampered_path = tmp_path / "tampered-parallel-settlement.sqlite3"
+                with sqlite3.connect(tampered_path) as tampered:
+                    conn.backup(tampered)
+            with sqlite3.connect(tampered_path) as tampered:
+                tampered.row_factory = sqlite3.Row
+                decision = tampered.execute(
+                    """
+                    SELECT budget_outbox_id
+                    FROM task_runtime_parallel_settlement_decision
+                    WHERE graph_id = ? AND graph_revision = ?
+                      AND budget_outbox_id IS NOT NULL
+                    ORDER BY graph_version_after DESC
+                    LIMIT 1
+                    """,
+                    (graph.graph_id, graph.revision),
+                ).fetchone()
+                assert decision is not None
+                tampered.execute(
+                    "DELETE FROM task_runtime_outbox WHERE outbox_id = ?",
+                    (str(decision["budget_outbox_id"]),),
+                )
+                tampered.commit()
+                assert not finalized_no_effect_failure_allows_workspace_abandonment(
+                    tampered,
+                    graph_id=graph.graph_id,
+                    graph_revision=graph.revision,
+                    node_id=required_node_id,
+                    attempt_id=str(interrupted_context["attempt_id"]),
+                    lease_id=str(interrupted_context["lease_id"]),
+                )
+
+            protected = worker.protected_stages[0]
+            seal = artifacts.inspect_governed_stage(
+                stage_ref=protected["ref"],
+                seal_digest=protected["digest"],
+            )
+            restarted_workspace = _workspace_runtime(
+                tmp_path,
+                db_path=db_path,
+                source=source,
+                now_ms=clock.value + 6_000,
+                runtime_owner_id=(
+                    "ne01-plan-node-review-recovery-runtime"
+                ),
+            )
+            reports = AgentArtifactTerminalReconcilerGroup(
+                GovernedSkillArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=restarted_workspace,
+                    task_store=reopened_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+                InternalArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=restarted_workspace,
+                    task_store=reopened_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+            ).run_once()
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "ABANDONED"
+                and item["reason_code"]
+                == "TERMINAL_SIGNED_NO_EFFECT_FAILURE"
+                for item in reports
+            ), reports
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "CLEANED"
+                for item in reports
+            ), reports
+            assert _git(source, "rev-parse", "main") == source_head
+            assert not (source / "src" / "plan-generated.txt").exists()
+            cleaned = restarted_workspace.repository.get(seal.workspace_id)
+            assert cleaned.status == "CLEANED"
+            assert not (
+                tmp_path / "managed" / cleaned.workspace_relpath
+            ).exists()
+
+            replay_workspace = _workspace_runtime(
+                tmp_path,
+                db_path=db_path,
+                source=source,
+                now_ms=clock.value + 12_000,
+                runtime_owner_id=(
+                    "ne01-plan-node-review-recovery-runtime"
+                ),
+            )
+            replay_reports = AgentArtifactTerminalReconcilerGroup(
+                GovernedSkillArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=replay_workspace,
+                    task_store=reopened_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+                InternalArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=replay_workspace,
+                    task_store=reopened_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+            ).run_once()
+            assert replay_reports == ()
+            assert worker.calls == calls_before_settlement
+            return
         assert worker.calls == [node.node_id for node in graph.nodes]
         assert len(worker.grants) == len(graph.nodes)
         assert worker.grants[0]["review_continuation_authority"] is None
@@ -801,7 +1082,8 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
 
         snapshot_store = DurableTaskStore(
             db_path,
-            clock=lambda: NOW,
+            clock=clock,
+            reconciliation_proof_verifier=proof_verifier,
         )
         snapshot = snapshot_store.read_scheduler_snapshot(
             graph.graph_id,
