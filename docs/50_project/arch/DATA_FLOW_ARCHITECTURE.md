@@ -2084,3 +2084,28 @@ flowchart LR
 snapshot 是可丢弃输入副本，W2 durable worktree 仍只服务已准入写节点。恶意进程
 能够绕过目录边界的问题仍属于 OS/container/tenant isolation，当前不得标记为
 完成。
+
+## Workspace cleanup health 与 shutdown retry 流
+
+```mermaid
+flowchart TD
+    A["cleanup worker"] --> B["app-local health_snapshot"]
+    B --> C["sanitize\nstatus/count/time/error type only"]
+    C --> D["/health runtime_components"]
+    C --> E["/ready runtime_components"]
+    D --> F{"configured unhealthy?"}
+    E --> F
+    F -->|"yes"| G["DEGRADED + not ready"]
+    F -->|"no"| H["preserve existing health/readiness"]
+
+    I["Host shutdown\nTask Runtime drained"] --> J["Workspace close attempt 1"]
+    J -->|"success"| N["continue dependency withdrawal"]
+    J -->|"failure"| K["same-handle bounded retry"]
+    K -->|"success"| N
+    K -->|"failure"| L["retain Workspace/Task handles"]
+    L --> M["HOST_RUNTIME_SHUTDOWN_RETRY_REQUIRED\nstop teardown"]
+```
+
+health/readiness 是只读投影，不会运行 cleanup 或修改 repository。关停重试复用
+同一 container，不重建 Runtime、不重新分配 lease，也不把 close exception
+解释为 cleanup 成功。

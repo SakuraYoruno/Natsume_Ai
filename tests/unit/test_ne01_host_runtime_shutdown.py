@@ -102,6 +102,7 @@ def _shutdown_kwargs(
     task_live: bool = True,
     task_fail: bool = False,
     resource_manager_fail: bool = False,
+    workspace_failures: int = 0,
 ) -> tuple[dict[str, Any], SimpleNamespace, _TaskRuntime, _Security, list[str]]:
     events: list[str] = []
     task_runtime = _TaskRuntime(
@@ -111,11 +112,22 @@ def _shutdown_kwargs(
     )
     security = _Security(events, obs_fail=obs_fail)
     memory = _SyncResource(events, "memory")
+    workspace_container = object()
+    workspace_attempts = 0
+
+    def quiesce_workspace(*_args: object) -> None:
+        nonlocal workspace_attempts
+        workspace_attempts += 1
+        events.append("workspace:close")
+        if workspace_attempts <= workspace_failures:
+            raise RuntimeError("workspace close failed")
+
     application = SimpleNamespace(
         state=SimpleNamespace(
             task_runtime_container=task_runtime if task_live else None,
             memory_service_container=memory,
             security_service_container=security,
+            agent_workspace_container=workspace_container,
         )
     )
     kwargs = {
@@ -123,10 +135,8 @@ def _shutdown_kwargs(
         "security": security,
         "scheduler": _Scheduler(events),
         "task_runtime": task_runtime,
-        "agent_workspace_container": object(),
-        "workspace_quiesce": (
-            lambda *_args: events.append("workspace:close")
-        ),
+        "agent_workspace_container": workspace_container,
+        "workspace_quiesce": quiesce_workspace,
         "host_lifecycle": _HostLifecycle(
             events,
             fail_resource_manager=resource_manager_fail,
@@ -226,6 +236,71 @@ async def test_resource_manager_stop_failure_preserves_live_task_runtime() -> No
     assert application.state.task_runtime_container is task_runtime
     assert application.state.security_service_container is security
     assert application.state.memory_service_container is kwargs["memory"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_close_retries_once_then_completes_shutdown() -> None:
+    kwargs, application, _task_runtime, _security, events = _shutdown_kwargs(
+        workspace_failures=1,
+    )
+
+    await shutdown_host_runtime_authority(**kwargs)
+
+    assert events.count("workspace:close") == 2
+    assert "hard-state:close" in events
+    assert "process-refs:withdraw" in events
+    assert application.state.agent_workspace_container is None
+    assert application.state.host_runtime_shutdown_error is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_close_exhaustion_preserves_live_dependencies() -> None:
+    kwargs, application, task_runtime, security, events = _shutdown_kwargs(
+        workspace_failures=2,
+    )
+    workspace_container = kwargs["agent_workspace_container"]
+
+    with pytest.raises(HostRuntimeShutdownError) as raised:
+        await shutdown_host_runtime_authority(**kwargs)
+
+    assert raised.value.dependencies_preserved is True
+    assert events == [
+        "obs:drain",
+        "scheduler:stop",
+        "resource-manager:stop",
+        "task-runtime:close",
+        "workspace:close",
+        "workspace:close",
+    ]
+    assert application.state.agent_workspace_container is workspace_container
+    assert application.state.task_runtime_container is task_runtime
+    assert application.state.security_service_container is security
+    assert "hard-state:close" not in events
+
+
+@pytest.mark.asyncio
+async def test_partial_startup_workspace_close_exhaustion_keeps_retry_handle() -> None:
+    kwargs, application, task_runtime, _security, events = _shutdown_kwargs(
+        task_live=False,
+        workspace_failures=2,
+    )
+    workspace_container = kwargs["agent_workspace_container"]
+
+    with pytest.raises(HostRuntimeShutdownError) as raised:
+        await shutdown_host_runtime_authority(**kwargs)
+
+    assert raised.value.dependencies_preserved is True
+    assert application.state.agent_workspace_container is workspace_container
+    assert application.state.task_runtime_container is None
+    assert task_runtime.activated is False
+    assert events == [
+        "obs:drain",
+        "scheduler:stop",
+        "resource-manager:stop",
+        "task-runtime:close",
+        "workspace:close",
+        "workspace:close",
+    ]
 
 
 @pytest.mark.asyncio

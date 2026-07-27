@@ -25,6 +25,80 @@ from host_brain.observability.command_http import ObsCommandIngressProvider
 from host_brain.skills.signed_intake_http import SignedSkillProviderIntakeProvider
 
 
+def _read_agent_workspace_cleanup_health(application: FastAPI) -> dict[str, Any]:
+    container = getattr(application.state, "agent_workspace_container", None)
+    shutdown_error = getattr(
+        application.state,
+        "agent_workspace_shutdown_error",
+        None,
+    )
+    retry_required = bool(
+        isinstance(shutdown_error, dict)
+        and shutdown_error.get("retry_required")
+    )
+    if container is None:
+        return {
+            "status": "RETRY_REQUIRED" if retry_required else "NOT_CONFIGURED",
+            "configured": retry_required,
+            "running": False,
+            "reason_code": (
+                str(shutdown_error.get("reason_code") or "").strip()
+                if isinstance(shutdown_error, dict)
+                else None
+            ),
+            "shutdown_retry_required": retry_required,
+        }
+    worker = getattr(container, "cleanup_worker", None)
+    snapshot_reader = getattr(worker, "health_snapshot", None)
+    if not callable(snapshot_reader):
+        return {
+            "status": "UNAVAILABLE",
+            "configured": True,
+            "running": False,
+            "reason_code": "AGENT_WORKSPACE_CLEANUP_HEALTH_UNAVAILABLE",
+            "shutdown_retry_required": retry_required,
+        }
+    try:
+        raw = dict(snapshot_reader())
+    except Exception:
+        return {
+            "status": "UNAVAILABLE",
+            "configured": True,
+            "running": False,
+            "reason_code": "AGENT_WORKSPACE_CLEANUP_HEALTH_READ_FAILED",
+            "shutdown_retry_required": retry_required,
+        }
+    last_report = raw.get("last_report")
+    last_failure = raw.get("last_failure")
+    return {
+        "status": "RETRY_REQUIRED" if retry_required else raw.get("status"),
+        "configured": True,
+        "running": bool(raw.get("running", False)),
+        "consecutive_failures": raw.get("consecutive_failures", 0),
+        "last_run_ts_ms": raw.get("last_run_ts_ms"),
+        "last_success_ts_ms": raw.get("last_success_ts_ms"),
+        "last_failure": (
+            {
+                "ts_ms": last_failure.get("ts_ms"),
+                "error_type": last_failure.get("error_type"),
+            }
+            if isinstance(last_failure, dict)
+            else None
+        ),
+        "last_report_count": (
+            len(last_report)
+            if isinstance(last_report, (list, tuple))
+            else 0
+        ),
+        "reason_code": (
+            str(shutdown_error.get("reason_code") or "").strip()
+            if retry_required and isinstance(shutdown_error, dict)
+            else None
+        ),
+        "shutdown_retry_required": retry_required,
+    }
+
+
 def create_host_fastapi_app(
     *,
     lifespan: Any,
@@ -79,10 +153,16 @@ def create_host_fastapi_app(
     )
     if not isinstance(obs_route_ports, ObsRoutePorts):
         raise TypeError("obs_route_ports must be ObsRoutePorts")
+    workspace_cleanup_health_provider = (
+        lambda: _read_agent_workspace_cleanup_health(app)
+    )
     app.state.obs_route_ports = obs_route_ports
     app.state.health_ledger_provider = get_ledger
     app.state.health_dependency_probe_provider = collect_dependency_probes
     app.state.health_degradation_state_provider = degradation_state_provider
+    app.state.health_workspace_cleanup_provider = (
+        workspace_cleanup_health_provider
+    )
     register_host_routers(
         app,
         input_runtime_ports=input_runtime_ports,
@@ -108,6 +188,7 @@ def create_host_fastapi_app(
         degradation_state_provider=degradation_state_provider,
         health_ledger_provider=get_ledger,
         health_dependency_probe_provider=collect_dependency_probes,
+        workspace_cleanup_health_provider=workspace_cleanup_health_provider,
         degradation_capability_port_provider=(
             degradation_capability_port_provider
         ),

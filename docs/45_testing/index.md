@@ -607,6 +607,25 @@ provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Workspace cleanup 健康与关停重试
+
+- `/health` 必须显示 app-local cleanup worker 的 HEALTHY/DEGRADED/STOPPED/
+  RETRY_REQUIRED 状态；响应只保留 error type、时间戳、计数，不得出现 raw
+  detail、workspace ID 或物理路径；
+- `/ready` 在 configured worker unhealthy 时必须 `ready=false`，但 W2 未配置
+  且没有 shutdown error 时为 `NOT_CONFIGURED`，不能误报故障；
+- shutdown 第一次 Workspace close 失败、第二次成功时继续 hard-state 与
+  process-reference withdrawal，最终不保留错误；
+- 两次失败时，不论 live runtime 或 partial startup，均在 hard-state close
+  前终止，保留 container/Task handle 并返回 `dependencies_preserved=true`；
+- 真实 cleanup continuation worker 的 failure health、stop probe、pending
+  inventory 续跑与 ASGI composition 回归保持通过。
+
+去重定向集为 `25 passed`；文档与机器状态合同为 `39 passed`，统一
+`static_scan,doc_gate` 和架构 Gate 1～14 均通过且未扩大白名单。无
+migration。该 Gate 未执行 process kill、Host 真机重启或 NE-07 服务栈；
+远程 CI 在 PR 创建前为 `NOT_RUN_PENDING_PR`，不得提前写成额度失败。
+
 ## NE-01 runtime_repo 只读快照验证
 
 - unit fixture 创建真实 Git repository，冻结已提交 `HEAD` 后再制造 dirty tracked

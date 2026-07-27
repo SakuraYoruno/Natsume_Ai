@@ -156,7 +156,7 @@ def test_app_factory_forwards_app_local_degradation_provider(monkeypatch) -> Non
     monkeypatch.setattr(app_factory, "register_host_routers", register)
     monkeypatch.setattr(app_factory, "configure_http_middleware", lambda _app: None)
 
-    app_factory.create_host_fastapi_app(
+    application = app_factory.create_host_fastapi_app(
         lifespan=None,
         metrics=RuntimeMetrics(),
         logger=logging.getLogger("test.ne03.health-provider"),
@@ -179,6 +179,103 @@ def test_app_factory_forwards_app_local_degradation_provider(monkeypatch) -> Non
     assert captured["degradation_state_provider"] is provider
     assert captured["health_ledger_provider"] is ledger_provider
     assert callable(captured["health_dependency_probe_provider"])
+    workspace_health_provider = captured["workspace_cleanup_health_provider"]
+    assert callable(workspace_health_provider)
+    assert workspace_health_provider() == {
+        "status": "NOT_CONFIGURED",
+        "configured": False,
+        "running": False,
+        "reason_code": None,
+        "shutdown_retry_required": False,
+    }
+    application.state.agent_workspace_container = SimpleNamespace(
+        cleanup_worker=SimpleNamespace(
+            health_snapshot=lambda: {
+                "status": "DEGRADED",
+                "running": True,
+                "consecutive_failures": 2,
+                "last_run_ts_ms": 100,
+                "last_success_ts_ms": 90,
+                "last_failure": {
+                    "ts_ms": 100,
+                    "error_type": "WorkspaceRepositoryError",
+                    "detail": "private path must never escape",
+                },
+                "last_report": ({"workspace_id": "private"},),
+            }
+        )
+    )
+    assert workspace_health_provider() == {
+        "status": "DEGRADED",
+        "configured": True,
+        "running": True,
+        "consecutive_failures": 2,
+        "last_run_ts_ms": 100,
+        "last_success_ts_ms": 90,
+        "last_failure": {
+            "ts_ms": 100,
+            "error_type": "WorkspaceRepositoryError",
+        },
+        "last_report_count": 1,
+        "reason_code": None,
+        "shutdown_retry_required": False,
+    }
+
+
+def test_workspace_cleanup_health_degrades_without_exposing_failure_detail(
+    monkeypatch,
+) -> None:
+    _patch_health_report_dependencies(monkeypatch)
+    app = FastAPI()
+    app.include_router(
+        health_routes.create_health_router(
+            degradation_state_provider=lambda: _guardian_state(
+                "scope-workspace-health"
+            ),
+            ledger_provider=_ledger_provider,
+            workspace_cleanup_health_provider=lambda: {
+                "status": "DEGRADED",
+                "configured": True,
+                "running": True,
+                "consecutive_failures": 3,
+                "last_run_ts_ms": 123,
+                "last_success_ts_ms": 100,
+                "last_failure": {
+                    "ts_ms": 123,
+                    "error_type": "WorkspaceRepositoryError",
+                    "detail": "secret physical path",
+                },
+                "last_report_count": 2,
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health?skip_dependency_probes=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "DEGRADED"
+    assert payload["details"]["summary"]["runtime_component_unavailable"] == 1
+    cleanup = payload["details"]["runtime_components"][
+        "agent_workspace_cleanup"
+    ]
+    assert cleanup == {
+        "status": "DEGRADED",
+        "configured": True,
+        "running": True,
+        "consecutive_failures": 3,
+        "last_run_ts_ms": 123,
+        "last_success_ts_ms": 100,
+        "last_failure": {
+            "ts_ms": 123,
+            "error_type": "WorkspaceRepositoryError",
+        },
+        "last_report_count": 2,
+        "reason_code": None,
+        "shutdown_retry_required": False,
+    }
+    assert "secret physical path" not in response.text
 
 
 def test_two_production_health_routers_keep_guardian_authority_app_local(
@@ -303,3 +400,49 @@ def test_ready_route_uses_explicit_ledger_and_probe_ports(monkeypatch) -> None:
     assert response.json()["summary"]["dependency_probes"] == {
         "edge.rpc.gateway": {"available": True}
     }
+    assert response.json()["summary"]["runtime_components"][
+        "agent_workspace_cleanup"
+    ]["status"] == "NOT_CONFIGURED"
+
+
+def test_ready_route_blocks_on_workspace_cleanup_retry_required(monkeypatch) -> None:
+    _patch_health_report_dependencies(monkeypatch)
+    monkeypatch.setattr(
+        health_routes,
+        "build_env_readiness_report",
+        lambda **_kwargs: {
+            "readiness_status": "READY",
+            "reason_code": None,
+        },
+    )
+
+    async def read_probes() -> dict[str, object]:
+        return {}
+
+    app = FastAPI()
+    app.include_router(
+        health_routes.create_health_router(
+            degradation_state_provider=lambda: _guardian_state(
+                "scope-ready-workspace"
+            ),
+            ledger_provider=_ledger_provider,
+            dependency_probe_provider=read_probes,
+            workspace_cleanup_health_provider=lambda: {
+                "status": "RETRY_REQUIRED",
+                "configured": True,
+                "running": True,
+                "reason_code": "AGENT_WORKSPACE_SHUTDOWN_RETRY_REQUIRED",
+                "shutdown_retry_required": True,
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert payload["status"] == "DEGRADED"
+    assert payload["reason_code"] == "AGENT_WORKSPACE_SHUTDOWN_RETRY_REQUIRED"
+    assert payload["summary"]["runtime_component_unavailable"] == 1

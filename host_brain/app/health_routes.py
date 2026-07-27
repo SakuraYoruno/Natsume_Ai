@@ -46,6 +46,7 @@ _logger = logging.getLogger("Natsume.health_routes")
 DegradationStateProvider = Callable[[], Mapping[str, Any]]
 HealthLedgerProvider = Callable[[], Any]
 DependencyProbeProvider = Callable[[], Awaitable[Mapping[str, Any]]]
+WorkspaceCleanupHealthProvider = Callable[[], Mapping[str, Any]]
 
 
 class DegradationStateUnavailable(RuntimeError):
@@ -57,6 +58,99 @@ class HealthRuntimeDependencyUnavailable(RuntimeError):
 
 
 _support_router = APIRouter()
+
+_WORKSPACE_CLEANUP_UNHEALTHY = frozenset(
+    {"DEGRADED", "STOPPED", "RETRY_REQUIRED", "UNAVAILABLE"}
+)
+
+
+def _read_workspace_cleanup_health(
+    provider: WorkspaceCleanupHealthProvider | None,
+) -> dict[str, Any]:
+    if provider is None:
+        return {
+            "status": "NOT_CONFIGURED",
+            "configured": False,
+            "reason_code": None,
+        }
+    try:
+        raw = provider()
+    except Exception:
+        return {
+            "status": "UNAVAILABLE",
+            "configured": True,
+            "reason_code": "AGENT_WORKSPACE_CLEANUP_HEALTH_READ_FAILED",
+        }
+    if not isinstance(raw, Mapping):
+        return {
+            "status": "UNAVAILABLE",
+            "configured": True,
+            "reason_code": "AGENT_WORKSPACE_CLEANUP_HEALTH_INVALID",
+        }
+    status_value = str(raw.get("status") or "").strip().upper()
+    if status_value not in {
+        "HEALTHY",
+        "DEGRADED",
+        "STOPPED",
+        "RETRY_REQUIRED",
+        "NOT_CONFIGURED",
+        "UNAVAILABLE",
+    }:
+        return {
+            "status": "UNAVAILABLE",
+            "configured": True,
+            "reason_code": "AGENT_WORKSPACE_CLEANUP_HEALTH_INVALID",
+        }
+    configured = bool(raw.get("configured", status_value != "NOT_CONFIGURED"))
+    try:
+        consecutive_failures = max(
+            0,
+            int(raw.get("consecutive_failures") or 0),
+        )
+        last_report_count = max(0, int(raw.get("last_report_count") or 0))
+        last_run_ts_ms = (
+            None
+            if raw.get("last_run_ts_ms") is None
+            else max(0, int(raw["last_run_ts_ms"]))
+        )
+        last_success_ts_ms = (
+            None
+            if raw.get("last_success_ts_ms") is None
+            else max(0, int(raw["last_success_ts_ms"]))
+        )
+    except (TypeError, ValueError, OverflowError):
+        return {
+            "status": "UNAVAILABLE",
+            "configured": True,
+            "reason_code": "AGENT_WORKSPACE_CLEANUP_HEALTH_INVALID",
+        }
+    last_failure = raw.get("last_failure")
+    safe_last_failure = None
+    if isinstance(last_failure, Mapping):
+        try:
+            failure_ts_ms = (
+                None
+                if last_failure.get("ts_ms") is None
+                else max(0, int(last_failure["ts_ms"]))
+            )
+        except (TypeError, ValueError, OverflowError):
+            failure_ts_ms = None
+        safe_last_failure = {
+            "ts_ms": failure_ts_ms,
+            "error_type": str(last_failure.get("error_type") or "")[:120] or None,
+        }
+    return {
+        "status": status_value,
+        "configured": configured,
+        "running": bool(raw.get("running", False)),
+        "consecutive_failures": consecutive_failures,
+        "last_run_ts_ms": last_run_ts_ms,
+        "last_success_ts_ms": last_success_ts_ms,
+        "last_failure": safe_last_failure,
+        "last_report_count": last_report_count,
+        "reason_code": str(raw.get("reason_code") or "").strip() or None,
+        "shutdown_retry_required": bool(raw.get("shutdown_retry_required", False)),
+    }
 
 
 def _read_health_ledger(
@@ -162,12 +256,17 @@ def _apply_host_health_status(health_report: dict[str, Any]) -> None:
     summary = dict(health_report.get("summary") or {})
     required_unavailable = int(summary.get("required_unavailable") or 0)
     optional_unavailable = int(summary.get("optional_unavailable") or 0)
+    runtime_component_unavailable = int(
+        summary.get("runtime_component_unavailable") or 0
+    )
     public_status = "FAILED" if required_unavailable else (
-        "DEGRADED" if optional_unavailable else "OK"
+        "DEGRADED"
+        if optional_unavailable or runtime_component_unavailable
+        else "OK"
     )
     if required_unavailable:
         summary["overall_status"] = "DOWN"
-    elif optional_unavailable:
+    elif optional_unavailable or runtime_component_unavailable:
         summary["overall_status"] = "DEGRADED"
     else:
         summary["overall_status"] = "UP"
@@ -245,6 +344,7 @@ async def build_live_health_report(
     degradation_state_provider: DegradationStateProvider | None = None,
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
+    workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
     allow_legacy_degradation_provider: bool = False,
     allow_legacy_process_providers: bool = False,
 ) -> dict[str, Any]:
@@ -291,6 +391,24 @@ async def build_live_health_report(
         ledger=ledger,
         ts_ms=ts_value,
     )
+    workspace_cleanup = _read_workspace_cleanup_health(
+        workspace_cleanup_health_provider
+    )
+    health_report["runtime_components"] = {
+        "agent_workspace_cleanup": workspace_cleanup,
+    }
+    summary = dict(health_report.get("summary") or {})
+    workspace_unhealthy = bool(
+        workspace_cleanup.get("configured")
+        and str(workspace_cleanup.get("status") or "") in _WORKSPACE_CLEANUP_UNHEALTHY
+    )
+    summary["runtime_component_unavailable"] = 1 if workspace_unhealthy else 0
+    health_report["summary"] = summary
+    if workspace_unhealthy and not health_report.get("reason_code"):
+        health_report["reason_code"] = (
+            str(workspace_cleanup.get("reason_code") or "").strip()
+            or "AGENT_WORKSPACE_CLEANUP_UNHEALTHY"
+        )
     # GET /health is a read adapter. Service probe observations are owned by
     # the lifespan-managed heartbeat and its RuntimeGuardian observer; a
     # health request must never advance either durable aggregate.  Missing or
@@ -310,6 +428,7 @@ async def build_live_readiness_report(
     ts_ms: int | None = None,
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
+    workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
     allow_legacy_process_providers: bool = False,
 ) -> dict[str, Any]:
     req_id = str(request_id or new_request_id()).strip()
@@ -332,6 +451,27 @@ async def build_live_readiness_report(
         ledger=ledger,
         ts_ms=ts_value,
     )
+    workspace_cleanup = _read_workspace_cleanup_health(
+        workspace_cleanup_health_provider
+    )
+    readiness_report["runtime_components"] = {
+        "agent_workspace_cleanup": workspace_cleanup,
+    }
+    workspace_unhealthy = bool(
+        workspace_cleanup.get("configured")
+        and str(workspace_cleanup.get("status") or "") in _WORKSPACE_CLEANUP_UNHEALTHY
+    )
+    if workspace_unhealthy:
+        readiness_report["runtime_component_unavailable"] = 1
+        if str(readiness_report.get("readiness_status") or "").upper() == "READY":
+            readiness_report["readiness_status"] = "DEGRADED"
+        if not readiness_report.get("reason_code"):
+            readiness_report["reason_code"] = (
+                str(workspace_cleanup.get("reason_code") or "").strip()
+                or "AGENT_WORKSPACE_CLEANUP_UNHEALTHY"
+            )
+    else:
+        readiness_report["runtime_component_unavailable"] = 0
     if inventory_path:
         readiness_report["node_inventory_path"] = inventory_path
     return readiness_report
@@ -350,6 +490,7 @@ async def health_check(
     degradation_state_provider: DegradationStateProvider | None = None,
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
+    workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
     allow_legacy_degradation_provider: bool = False,
     allow_legacy_process_providers: bool = False,
 ) -> HealthResponse:
@@ -365,6 +506,7 @@ async def health_check(
             degradation_state_provider=degradation_state_provider,
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
+            workspace_cleanup_health_provider=workspace_cleanup_health_provider,
             allow_legacy_degradation_provider=(
                 allow_legacy_degradation_provider
             ),
@@ -447,6 +589,7 @@ async def environment_readiness(
     *,
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
+    workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
     allow_legacy_process_providers: bool = False,
 ) -> ReadinessResponse:
     """Readiness endpoint."""
@@ -459,6 +602,7 @@ async def environment_readiness(
             ts_ms=ts_ms,
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
+            workspace_cleanup_health_provider=workspace_cleanup_health_provider,
             allow_legacy_process_providers=allow_legacy_process_providers,
         )
         if include_immune_proposal:
@@ -616,6 +760,7 @@ def create_health_router(
     degradation_state_provider: DegradationStateProvider | None = None,
     ledger_provider: HealthLedgerProvider | None = None,
     dependency_probe_provider: DependencyProbeProvider | None = None,
+    workspace_cleanup_health_provider: WorkspaceCleanupHealthProvider | None = None,
     allow_legacy_degradation_provider: bool = False,
     allow_legacy_process_providers: bool = False,
 ) -> APIRouter:
@@ -652,6 +797,7 @@ def create_health_router(
             degradation_state_provider=degradation_state_provider,
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
+            workspace_cleanup_health_provider=workspace_cleanup_health_provider,
             allow_legacy_degradation_provider=(
                 allow_legacy_degradation_provider
             ),
@@ -681,6 +827,7 @@ def create_health_router(
             include_immune_proposal=include_immune_proposal,
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,
+            workspace_cleanup_health_provider=workspace_cleanup_health_provider,
             allow_legacy_process_providers=allow_legacy_process_providers,
         )
 
@@ -702,6 +849,7 @@ __all__ = [
     "DependencyProbeProvider",
     "HealthLedgerProvider",
     "HealthRuntimeDependencyUnavailable",
+    "WorkspaceCleanupHealthProvider",
     "build_live_health_report",
     "build_live_readiness_report",
     "canon_sync_health_check",

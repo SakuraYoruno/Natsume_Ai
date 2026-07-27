@@ -716,3 +716,17 @@ pre-checkpoint signed failure 与 time-budget overage 交叉点；其它 route�
 
 该职责划分删除了 read-only Agent 对共享 checkout 的物理依赖，但不宣称具备
 OS/container/tenant 强隔离。
+
+## 21. Workspace cleanup 监督职责
+
+| 模块 | 当前职责 |
+|---|---|
+| `composition/agent_workspace.py` | 独占 cleanup worker、健康原始状态和可重试 close handle |
+| `app/app_factory.py` | 从当前 FastAPI state 读取唯一 container，生成不含路径/ID/detail 的 app-local health 投影 |
+| `app/health_routes.py` | 校验 typed health mapping，将 unhealthy component 映射为 DEGRADED 与 readiness 非 READY |
+| `app/host_runtime_shutdown.py` | 同一 handle 两次有界 quiesce；耗尽后保留依赖并停止 teardown |
+| `tests/unit/test_ne01_host_runtime_shutdown.py` | 覆盖一次失败后成功、live 耗尽和 partial-startup 耗尽 |
+| `tests/unit/test_ne03_health_guardian_cutover.py` | 覆盖 provider 作用域、敏感 detail 删除、health/readiness 降级 |
+
+该模块链不创建第二套 Workspace 状态，也不把 health projection 作为 cleanup
+mutation authority。

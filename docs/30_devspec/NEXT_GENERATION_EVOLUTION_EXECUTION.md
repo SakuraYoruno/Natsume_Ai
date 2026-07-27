@@ -962,3 +962,21 @@ metadata 中绑定无主机路径的 `git-commit://<sha>`。
 本切片无 migration，不改变 write WorkOrder 的 W0/W2、Lease、Review 或
 Acceptance authority。OS/container/tenant isolation、handle-level TOCTOU、
 一般 Workspace terminal matrix 和 NE-01 波次集成仍未完成。
+
+### NE-01：Workspace cleanup health 与 bounded shutdown retry
+
+1. `app_factory.py` 从当前 FastAPI state 读取唯一
+   `ProcessAgentWorkspaceContainer.cleanup_worker`，输出脱敏 app-local
+   health snapshot；
+2. `health_routes.py` 通过 typed provider 将快照加入 `/health` 与 `/ready`；
+   unhealthy worker 使 Host DEGRADED、readiness 非 READY，错误 detail、
+   workspace ID 和物理路径不进入响应；
+3. `host_runtime_shutdown.py` 对 quiesce 使用同一 handle 最多两次有界 close；
+   首次失败不写最终 failure，第二次成功继续正常撤销依赖；
+4. 两次均失败时，live 与 partial-startup 两种形状都保留 Workspace/Task
+   handles，写 `HOST_RUNTIME_SHUTDOWN_RETRY_REQUIRED` 并停止后续 teardown。
+
+真实 cleanup worker continuation、ASGI composition、health/readiness 与关停
+顺序及 Internal live-report 端口的去重定向集为 `25 passed`。无 migration；
+该切片不证明进程 kill 后的
+自动重启、OS/container isolation、一般 terminal recovery 或 NE-07。

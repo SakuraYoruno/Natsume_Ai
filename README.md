@@ -791,6 +791,20 @@ terminal matrix、Domain Pack、OS/container isolation、NE-01 wave
 integration 和 NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`，
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Workspace cleanup 监督与关停重试
+
+Host 的 app-local Workspace container 现在通过显式 provider 将 cleanup worker
+健康投影到 `/health` 和 `/ready`。公开结果只包含运行状态、连续失败数、时间戳、
+错误类型和 report 数量，不暴露 workspace ID、物理路径或异常 detail。worker
+处于 `DEGRADED/STOPPED/RETRY_REQUIRED/UNAVAILABLE` 时，健康状态降级且 readiness
+不再返回 ready。
+
+Host 关停对 Workspace quiesce 执行至多两次有界 close；第一次 timeout 后复用
+同一 container retry handle。第二次仍失败时，无论 Task Runtime 曾经 live 还是
+仅处于 partial startup，都会停止后续依赖拆除并保留 app-local handles，供同一
+生命周期重试，避免后台 cleanup thread 被失去引用。本切片不改变 Workspace
+Task/Graph authority，也不替代 NE-07 进程实测。
+
 ## NE-01 只读运行仓库隔离
 
 `workspace.strategy=runtime_repo/current_runtime_repo` 不再把 Host 正在运行的

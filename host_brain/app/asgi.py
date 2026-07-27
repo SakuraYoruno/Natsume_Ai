@@ -1046,6 +1046,11 @@ def create_app(
                             ),
                             ledger_provider=lambda: ledger,
                             dependency_probe_provider=collect_dependency_probes,
+                            workspace_cleanup_health_provider=getattr(
+                                application.state,
+                                "health_workspace_cleanup_provider",
+                                None,
+                            ),
                         ),
                         source="health",
                     )

@@ -346,6 +346,19 @@ bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
 清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
 Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
 
+## 13. Workspace cleanup 监督缺口修正
+
+| 能力 | 修正前 | 当前证据 | 仍缺 |
+|---|---|---|---|
+| worker health | worker 内存中有 snapshot，但 Host/Monitor 无生产读取 | app-local provider 接入 `/health`、`/ready`，unhealthy 明确降级 | RuntimeGuardian durable incident 关联 |
+| 敏感边界 | raw last report/error detail 可能被直接复制 | 只公开状态、计数、时间和 error type | NE-07 Monitor 实际展示 |
+| shutdown retry | inner quiesce 保留 handle，outer shutdown 后续仍可能撤销它 | 同一 handle 两次 bounded close；耗尽立即 preserve-and-stop | OS supervisor 跨进程自动重启 |
+| partial startup | Task Runtime 非 live 时可能误认为无 authority | cleanup close 耗尽同样保留唯一 handle | 强杀后的 orphan 扫描 |
+
+因此 `cleanup worker health route and automatic shutdown retry orchestration`
+从 Workspace missing 清单移除。跨进程 supervisor、一般 crash-left inventory、
+OS/container isolation、波次集成和 NE-07 仍缺，NE-01 保持 `IN_PROGRESS`。
+
 ## 12. 只读 runtime_repo 共享检出缺口修正
 
 | 能力 | 修正前 | 当前证据 | 仍缺 |
