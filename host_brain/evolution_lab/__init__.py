@@ -33,6 +33,10 @@ from .v2_runner import (
     V2DatasetReader,
     V2LabVerifier,
 )
+from .production_composition import (
+    TrustedEvolutionLabComposition,
+    build_trusted_evolution_lab_composition,
+)
 
 __all__ = [
     "CounterfactualPairV1",
@@ -67,4 +71,6 @@ __all__ = [
     "LabSandboxExecutionV1",
     "V2DatasetReader",
     "V2LabVerifier",
+    "TrustedEvolutionLabComposition",
+    "build_trusted_evolution_lab_composition",
 ]

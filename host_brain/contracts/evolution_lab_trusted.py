@@ -198,16 +198,22 @@ class DockerSandboxAttestationV1:
     command: tuple[str, ...]
     inspect_evidence: Mapping[str, Any]
     sandbox_profile_digest: str
+    runtime_source_digest: str
+    output_source_digest: str
     dataset_digest: str
     output_digest: str
+    output_mount_type: str
     network_mode: str
     readonly_rootfs: bool
     readonly_dataset: bool
+    readonly_runtime: bool
     temporary_output: bool
     no_new_privileges: bool
     cap_drop_all: bool
+    non_root_user: str
     pids_limit: int
     memory_limit_bytes: int
+    nano_cpus: int
     exit_code: int
     started_at_ms: int
     finished_at_ms: int
@@ -259,10 +265,20 @@ class DockerSandboxAttestationV1:
         object.__setattr__(self, "inspect_evidence", inspect_evidence)
         for field in (
             "sandbox_profile_digest",
+            "runtime_source_digest",
+            "output_source_digest",
             "dataset_digest",
             "output_digest",
         ):
             object.__setattr__(self, field, _digest(getattr(self, field), field))
+        output_mount_type = _text(
+            self.output_mount_type, "output_mount_type", 40
+        ).lower()
+        if output_mount_type != "bind":
+            raise TrustedEvolutionLabContractError(
+                "trusted Lab output must use an isolated bind mount"
+            )
+        object.__setattr__(self, "output_mount_type", "bind")
         network_mode = _text(self.network_mode, "network_mode", 40).lower()
         if network_mode != "none":
             raise TrustedEvolutionLabContractError(
@@ -272,6 +288,7 @@ class DockerSandboxAttestationV1:
         for field in (
             "readonly_rootfs",
             "readonly_dataset",
+            "readonly_runtime",
             "temporary_output",
             "no_new_privileges",
             "cap_drop_all",
@@ -281,6 +298,14 @@ class DockerSandboxAttestationV1:
                     f"trusted Lab container requires {field}=true"
                 )
             object.__setattr__(self, field, True)
+        non_root_user = _text(
+            self.non_root_user, "non_root_user", 80
+        )
+        if non_root_user in {"0", "0:0", "root", "root:root"}:
+            raise TrustedEvolutionLabContractError(
+                "trusted Lab container must use a non-root user"
+            )
+        object.__setattr__(self, "non_root_user", non_root_user)
         object.__setattr__(
             self, "pids_limit", _positive_int(self.pids_limit, "pids_limit")
         )
@@ -288,6 +313,9 @@ class DockerSandboxAttestationV1:
             self,
             "memory_limit_bytes",
             _positive_int(self.memory_limit_bytes, "memory_limit_bytes"),
+        )
+        object.__setattr__(
+            self, "nano_cpus", _positive_int(self.nano_cpus, "nano_cpus")
         )
         if isinstance(self.exit_code, bool) or self.exit_code != 0:
             raise TrustedEvolutionLabContractError(
@@ -326,11 +354,17 @@ class DockerSandboxAttestationV1:
             "image_reference": self.image_reference,
             "memory_limit_bytes": self.memory_limit_bytes,
             "name": self.container_name,
+            "nano_cpus": self.nano_cpus,
             "network_mode": "none",
             "no_new_privileges": True,
             "output_mount_temporary": True,
+            "output_mount_type": "bind",
+            "output_source_digest": self.output_source_digest,
             "pids_limit": self.pids_limit,
             "readonly_rootfs": True,
+            "runtime_mount_readonly": True,
+            "runtime_source_digest": self.runtime_source_digest,
+            "user": self.non_root_user,
         }
         if self.inspect_evidence != expected_inspect:
             raise TrustedEvolutionLabContractError(
@@ -387,16 +421,22 @@ class DockerSandboxAttestationV1:
             ),
             "inspect_digest": self.inspect_digest,
             "sandbox_profile_digest": self.sandbox_profile_digest,
+            "runtime_source_digest": self.runtime_source_digest,
+            "output_source_digest": self.output_source_digest,
             "dataset_digest": self.dataset_digest,
             "output_digest": self.output_digest,
+            "output_mount_type": "bind",
             "network_mode": "none",
             "readonly_rootfs": True,
             "readonly_dataset": True,
+            "readonly_runtime": True,
             "temporary_output": True,
             "no_new_privileges": True,
             "cap_drop_all": True,
+            "non_root_user": self.non_root_user,
             "pids_limit": self.pids_limit,
             "memory_limit_bytes": self.memory_limit_bytes,
+            "nano_cpus": self.nano_cpus,
             "exit_code": 0,
             "started_at_ms": self.started_at_ms,
             "finished_at_ms": self.finished_at_ms,
@@ -432,16 +472,22 @@ class DockerSandboxAttestationV1:
             command=tuple(payload.get("command", ())),
             inspect_evidence=payload.get("inspect_evidence", {}),
             sandbox_profile_digest=payload.get("sandbox_profile_digest"),
+            runtime_source_digest=payload.get("runtime_source_digest"),
+            output_source_digest=payload.get("output_source_digest"),
             dataset_digest=payload.get("dataset_digest"),
             output_digest=payload.get("output_digest"),
+            output_mount_type=payload.get("output_mount_type"),
             network_mode=payload.get("network_mode"),
             readonly_rootfs=payload.get("readonly_rootfs"),
             readonly_dataset=payload.get("readonly_dataset"),
+            readonly_runtime=payload.get("readonly_runtime"),
             temporary_output=payload.get("temporary_output"),
             no_new_privileges=payload.get("no_new_privileges"),
             cap_drop_all=payload.get("cap_drop_all"),
+            non_root_user=payload.get("non_root_user"),
             pids_limit=payload.get("pids_limit"),
             memory_limit_bytes=payload.get("memory_limit_bytes"),
+            nano_cpus=payload.get("nano_cpus"),
             exit_code=payload.get("exit_code"),
             started_at_ms=payload.get("started_at_ms"),
             finished_at_ms=payload.get("finished_at_ms"),

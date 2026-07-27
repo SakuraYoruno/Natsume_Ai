@@ -28,7 +28,13 @@ from host_brain.core.ids import now_ms
 EVOLUTION_LAB_TRUSTED_MIGRATION_ASSET_KEY = (
     "0138#evolution_lab_trusted_sandbox"
 )
+EVOLUTION_LAB_TRUSTED_REDACTION_MIGRATION_ASSET_KEY = (
+    "0139#evolution_lab_trusted_redaction_repair"
+)
 _MIGRATION_FILE = "0138_evolution_lab_trusted_sandbox.sql"
+_REDACTION_MIGRATION_FILE = (
+    "0139_evolution_lab_trusted_redaction_repair.sql"
+)
 _ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
     {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
 )
@@ -116,6 +122,17 @@ class SQLiteTrustedEvolutionLabLedger:
             migration_checksum = hashlib.sha256(
                 migration_path.read_text(encoding="utf-8-sig").encode("utf-8")
             ).hexdigest()
+            redaction_migration_path = (
+                Path(__file__).resolve().parents[1]
+                / "audit"
+                / "migrations"
+                / _REDACTION_MIGRATION_FILE
+            )
+            redaction_migration_checksum = hashlib.sha256(
+                redaction_migration_path.read_text(
+                    encoding="utf-8-sig"
+                ).encode("utf-8")
+            ).hexdigest()
             with self._connection() as conn:
                 rows = conn.execute(
                     """
@@ -132,6 +149,16 @@ class SQLiteTrustedEvolutionLabLedger:
                     """,
                     (EVOLUTION_LAB_TRUSTED_MIGRATION_ASSET_KEY,),
                 ).fetchone()
+                redaction_asset = conn.execute(
+                    """
+                    SELECT checksum, disposition
+                    FROM schema_migration_assets
+                    WHERE asset_key = ?
+                    """,
+                    (
+                        EVOLUTION_LAB_TRUSTED_REDACTION_MIGRATION_ASSET_KEY,
+                    ),
+                ).fetchone()
         except (OSError, sqlite3.Error) as exc:
             raise TrustedEvolutionLabLedgerError(
                 "migration 0138 trusted Evolution Lab schema is not ready"
@@ -143,21 +170,27 @@ class SQLiteTrustedEvolutionLabLedger:
             "evolution_lab_trusted_run_receipt",
             "evolution_lab_trusted_report",
             "evolution_lab_trusted_proposal",
-            "evolution_lab_redaction_receipt",
+            "evolution_lab_trusted_redaction_receipt",
             "evolution_lab_golden_suite_receipt",
             "evolution_lab_trusted_event_chain_guard",
             "evolution_lab_trusted_head_matches_event",
             "evolution_lab_trusted_run_operation_bound",
+            "evolution_lab_trusted_redaction_insert_guard",
         }
         if (
             not required.issubset(names)
             or asset is None
+            or redaction_asset is None
             or str(asset["checksum"]) != migration_checksum
+            or str(redaction_asset["checksum"])
+            != redaction_migration_checksum
             or str(asset["disposition"])
+            not in _ALLOWED_MIGRATION_DISPOSITIONS
+            or str(redaction_asset["disposition"])
             not in _ALLOWED_MIGRATION_DISPOSITIONS
         ):
             raise TrustedEvolutionLabLedgerError(
-                "migration 0138 trusted Evolution Lab schema is not ready"
+                "migrations 0138/0139 trusted Evolution Lab schema is not ready"
             )
 
     def reserve_execution(
@@ -572,7 +605,8 @@ class SQLiteTrustedEvolutionLabLedger:
         with self._transaction() as conn:
             existing = conn.execute(
                 """
-                SELECT receipt_json FROM evolution_lab_redaction_receipt
+                SELECT receipt_json
+                FROM evolution_lab_trusted_redaction_receipt
                 WHERE redaction_id = ?
                 """,
                 (receipt.redaction_id,),
@@ -585,7 +619,7 @@ class SQLiteTrustedEvolutionLabLedger:
                 return receipt.receipt_digest
             conn.execute(
                 """
-                INSERT INTO evolution_lab_redaction_receipt
+                INSERT INTO evolution_lab_trusted_redaction_receipt
                 (redaction_id, workspace_id, source_digest,
                  output_dataset_digest, receipt_digest, receipt_json,
                  created_at_ms)
@@ -1089,6 +1123,7 @@ def _text(value: object, field: str, maximum: int) -> str:
 
 __all__ = [
     "EVOLUTION_LAB_TRUSTED_MIGRATION_ASSET_KEY",
+    "EVOLUTION_LAB_TRUSTED_REDACTION_MIGRATION_ASSET_KEY",
     "SQLiteTrustedEvolutionLabLedger",
     "TrustedEvolutionLabLedgerError",
     "TrustedExecutionClaim",

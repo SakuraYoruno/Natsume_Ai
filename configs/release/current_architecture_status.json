@@ -5,12 +5,12 @@
     "dev_commit": "6a4c23cab683709c0dcbce75fd68fd9445f88135",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE04_MIGRATION_0138_TRUSTED_EVOLUTION_LAB_LEDGER_LOCAL_TARGETED_PASS_DOCKER_CALLER_PENDING"
+    "evaluated_source": "NE04_TRUSTED_DOCKER_EXECUTOR_AND_THREE_GOLDEN_EXPERIMENTS_LOCAL_REAL_CONTAINER_PASS_COMMIT_BOUND_SUITE_AND_OPERATOR_PENDING"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-04",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "NE04_MIGRATION_0138_FENCED_TRUSTED_OPERATION_AND_DOCKER_ATTESTATION_CONTRACT_LOCAL_TARGETED_PASS_REAL_DOCKER_EXECUTOR_GOLDEN_EXPERIMENTS_COMPOSITION_OPERATOR_PROJECTION_AND_WAVE_GATE_PENDING",
+  "active_wave_detail": "NE04_0138_FENCED_AUTHORITY_0139_REDACTION_NAMESPACE_REPAIR_TYPED_COMPOSITION_REAL_DIGEST_PINNED_DOCKER_SIX_ARMS_AND_RESPONSE_LOSS_LOCAL_PASS_CLEAN_COMMIT_SUITE_OPERATOR_PROJECTION_AND_WAVE_GATE_PENDING",
   "next_wave": "NE-05",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -27,31 +27,46 @@
   },
   "active_wave_local_validation": {
     "ne04_trusted_evolution_lab_ledger_current_validation": {
-      "status": "PARTIAL_TRUSTED_LEDGER_LOCAL_TARGETED_PASS_NO_REAL_DOCKER_CALLER",
-      "migration_head": "0138_evolution_lab_trusted_sandbox.sql",
+      "status": "PARTIAL_TRUSTED_DOCKER_GOLDEN_LOCAL_PASS_COMMIT_BOUND_SUITE_OPERATOR_AND_WAVE_GATE_PENDING",
+      "migration_head": "0139_evolution_lab_trusted_redaction_repair.sql",
       "authority": "ONE_SQLITE_FENCED_OPERATION_HEAD_PLUS_APPEND_ONLY_EVENT_RUN_REPORT_PROPOSAL_REDACTION_AND_GOLDEN_SUITE_LEDGER",
       "execution_fence": "ONLY_NEW_RUNNING_CLAIM_AUTHORIZES_CONTAINER_LIVE_DUPLICATE_IS_NON_EXECUTABLE_EXPIRED_LEASE_ENTERS_RECONCILIATION",
-      "trusted_evidence": "DIGEST_PINNED_IMAGE_DOCKER_ENGINE_CONTAINER_COMMAND_SANITIZED_INSPECT_READONLY_DATASET_ROOTFS_TEMP_OUTPUT_NETWORK_NONE_NO_NEW_PRIVILEGES_CAP_DROP_ALL_RESOURCE_LIMIT_ZERO_EFFECT_AUDIT_INDEPENDENT_VERIFIER",
+      "trusted_evidence": "REAL_DIGEST_PINNED_DOCKER_ENGINE_IMAGE_CONTAINER_COMMAND_SANITIZED_INSPECT_READONLY_DATASET_RUNTIME_ROOTFS_NONROOT_TEMP_BIND_OUTPUT_NETWORK_NONE_NO_NEW_PRIVILEGES_CAP_DROP_ALL_PID_MEMORY_CPU_LIMIT_RUNTIME_AND_OUTPUT_SOURCE_DIGEST_ZERO_EFFECT_AUDIT_INDEPENDENT_VERIFIER",
       "proposal_boundary": "REPORT_AND_GOLDEN_SUITE_CAN_ONLY_CREATE_REVIEW_REQUIRED_PROPOSAL_PRODUCTION_INFLUENCE_FALSE",
-      "migration_smoke": "FRESH_0001_TO_0138_PASS",
-      "targeted_validation": "22_PASSED_IN_22_07_SECONDS",
-      "architecture_static_gates": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_NO_ALLOWLIST_EXPANSION",
-      "static_and_doc_gate": "PASS_FAILURES_EMPTY_IN_112_6_SECONDS",
+      "migration_smoke": "FRESH_0001_TO_0139_PASS_0108_REDACTION_SHAPE_PRESERVED_TRUSTED_REDACTION_DISTINCT",
+      "typed_composition": "DATASET_READER_DOCKER_EXECUTOR_INDEPENDENT_VERIFIER_V2_SPEC_REGISTRY_AND_0138_0139_EVIDENCE_LEDGER_ONLY_NO_PRODUCTION_WRITER_EFFECT_ACTUATOR_OR_ACTIVATION_PORT",
+      "real_docker_execution": "RESEARCH_PLANNING_PROACTIVE_MEMORY_WRITE_BASELINE_AND_CANDIDATE_SIX_INDEPENDENT_CONTAINERS_PASS_AND_CLEANED",
+      "recovery": "REAL_DOCKER_COMPLETION_RESPONSE_LOSS_REOPENS_EXACT_RECEIPT_UNKNOWN_EFFECT_ENTERS_RECONCILIATION_AND_IS_NOT_REEXECUTED",
+      "targeted_validation": "40_PASSED_IN_32_98_SECONDS",
+      "real_docker_validation": "2_PASSED_IN_11_86_SECONDS",
+      "ruff": "NOT_RUN_TOOL_UNAVAILABLE",
+      "prior_architecture_static_gates": "PRIOR_0138_SLICE_PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_NO_ALLOWLIST_EXPANSION",
+      "prior_static_and_doc_gate": "PRIOR_0138_SLICE_PASS_FAILURES_EMPTY_IN_112_6_SECONDS",
+      "current_slice_wave_gates": "NOT_RUN_YET_DEFERRED_UNTIL_OPERATOR_PROJECTION_AND_COMMIT_BOUND_SUITE",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "not_run": [
-        "real digest-pinned Docker executor",
-        "Research Planning golden experiment",
-        "Proactive golden experiment",
-        "Memory Write golden experiment",
-        "production composition and Operator read-only projection",
+        "clean implementation commit-bound operational golden suite receipt",
+        "Operator read-only projection and Monitor UI",
         "NE-04 wave integration"
       ],
       "evidence_refs": [
         "host_brain/audit/migrations/0138_evolution_lab_trusted_sandbox.sql",
+        "host_brain/audit/migrations/0139_evolution_lab_trusted_redaction_repair.sql",
         "host_brain/contracts/evolution_lab_trusted.py",
         "host_brain/persistence/evolution_lab_trusted_repository.py",
+        "host_brain/evolution_lab/docker_executor.py",
+        "host_brain/evolution_lab/trusted_runner.py",
+        "host_brain/evolution_lab/golden_datasets.py",
+        "host_brain/evolution_lab/golden_worker.py",
+        "host_brain/evolution_lab/golden_verifier.py",
+        "host_brain/evolution_lab/golden_experiments.py",
+        "host_brain/evolution_lab/production_composition.py",
+        "scripts/runtime/run_ne04_golden_experiments.py",
         "tests/unit/test_ne04_trusted_evolution_lab_contracts.py",
-        "tests/integration/test_ne04_trusted_evolution_lab_ledger.py"
+        "tests/unit/test_ne04_golden_experiment_runtime.py",
+        "tests/integration/test_ne04_trusted_evolution_lab_ledger.py",
+        "tests/integration/test_ne04_trusted_runner_recovery.py",
+        "tests/integration/test_ne04_real_docker_golden_suite.py"
       ]
     },
     "ne03_long_term_goal_authority_current_validation": {
@@ -5960,7 +5975,7 @@
       "reason": "Read-only runtime_repo/current_runtime_repo no longer exposes the live checkout: WorkspacePolicy freezes exact HEAD, exports only tracked regular files into an executor-owned ephemeral snapshot, excludes dirty/untracked/.git state, binds the source commit and cleans the snapshot after result sealing. The durable cleanup worker exposes a sanitized app-local health/readiness projection; Host shutdown retries the same close handle once and, on exhaustion, preserves Workspace/Task dependencies and stops teardown for both live and partial-startup shapes. Cleanup failure and recovery now also enter the existing runtime-scoped RuntimeGuardian as one opaque durable SLO incident per consecutive failure sequence; replacement-process success resolves owned active breaches, while Guardian projection failure keeps readiness degraded. Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal and three reviewed risk-4 Direct Agent Skills seal an exact bounded path manifest plus binary patch, revalidate it after Graph Acceptance, create a deterministic accepted HEAD without moving the configured source branch and persist 0116 ACTIVE→ACCEPTED→PROMOTED. Direct Skill payload cannot inject V3, Workspace, Review, Grant, Budget, Lease or fence authority. Success uses only a post-Acceptance promotion intent; failure uses only a bounded immutable terminal descriptor. A route-specific reconciler reopens exact Task, Lease, Operation, projection and canonical terminal evidence before abandonment, while the shared lifecycle cleaner reopens the post-Lease authority version before cleanup CAS. Real SQLite and Git cover Direct success and Verification failure plus one reviewed non-result Plan Workspace writer across graph success, downstream failure, downstream post-review cancellation, pre-checkpoint signed failure, post-COMMIT Budget rejection and the signed-failure/time-budget cross terminal, with zero source-branch mutation and zero terminal replay. This remains partial: additional Plan write ownership, the remaining Direct Skill and Plan terminal matrices, general Budget policy, unknown effect and arbitrary multi-node/batch settlement recovery are not fully proven. Cross-process OS supervisor restart, crash-left snapshot startup sweep, handle-level atomic TOCTOU, per-operation preemption, Domain Pack and other Skill injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
-      "status": "PARTIAL_TRUSTED_LEDGER_NO_DOCKER_CALLER",
+      "status": "PARTIAL_TRUSTED_DOCKER_GOLDEN_LOCAL_PASS",
       "evidence_refs": [
         "host_brain/evolution_lab/contracts.py",
         "host_brain/evolution_lab/policy.py",
@@ -5976,14 +5991,23 @@
         "tests/integration/test_ne04_evolution_lab_v2_ledger.py",
         "host_brain/contracts/evolution_lab_trusted.py",
         "host_brain/persistence/evolution_lab_trusted_repository.py",
+        "host_brain/evolution_lab/docker_executor.py",
+        "host_brain/evolution_lab/trusted_runner.py",
+        "host_brain/evolution_lab/golden_experiments.py",
+        "host_brain/evolution_lab/production_composition.py",
+        "scripts/runtime/run_ne04_golden_experiments.py",
         "host_brain/audit/migrations/0138_evolution_lab_trusted_sandbox.sql",
+        "host_brain/audit/migrations/0139_evolution_lab_trusted_redaction_repair.sql",
         "tests/unit/test_ne04_trusted_evolution_lab_contracts.py",
-        "tests/integration/test_ne04_trusted_evolution_lab_ledger.py"
+        "tests/unit/test_ne04_golden_experiment_runtime.py",
+        "tests/integration/test_ne04_trusted_evolution_lab_ledger.py",
+        "tests/integration/test_ne04_trusted_runner_recovery.py",
+        "tests/integration/test_ne04_real_docker_golden_suite.py"
       ],
-      "boundary": "0108 V1 and 0122 structural V2 remain read-only and permanently ineligible. 0138 adds one fenced operation/event owner and append-only trusted run/report/proposal/redaction/golden-suite evidence. Only a new claim may start a sandbox; live duplicates are non-executable, expiry enters reconciliation, and completed replay reopens the exact receipt. Trusted contracts bind a digest-pinned image, Docker engine/container/command/sanitized inspect facts, readonly dataset/rootfs, temporary output, network none, no-new-privileges, cap-drop ALL, resource limits, zero effect audit and independent verifier. This slice still has no real Docker executor, three golden runs, production composition or Operator projection, so it is not NE-04 completion."
+      "boundary": "0108 V1 and 0122 structural V2 remain read-only and permanently ineligible. Migration 0139 preserves the historical 0108 redaction table and moves trusted redaction into a distinct append-only namespace without rewriting 0138. The typed Lab composition now runs six independent Research Planning, Proactive and Memory Write arms through a dedicated digest-pinned Docker executor with no host subprocess fallback. Reopened inspect facts bind engine/image/container/command, readonly dataset/runtime/rootfs, non-root user, temporary bind output, network none, no-new-privileges, cap-drop ALL, PID/memory/CPU limits, runtime/output source digests and zero effect audit. Real completion response loss reopens one receipt; unknown effects enter reconciliation without reexecution. Clean-commit suite evidence, Operator read-only projection and the NE-04 wave gate remain pending, so this is not NE-04 completion."
     },
     "counterfactual_analysis": {
-      "status": "PARTIAL_NE04_TRUSTED_REPORT_NO_REAL_ARMS",
+      "status": "PARTIAL_NE04_TRUSTED_REAL_ARMS_NO_OPERATOR_PROJECTION",
       "evidence_refs": [
         "host_brain/evolution_lab/contracts.py",
         "host_brain/persistence/evolution_lab_ledger_repository.py",
@@ -5992,9 +6016,12 @@
         "tests/integration/test_ne04_evolution_lab_v2_ledger.py",
         "host_brain/contracts/evolution_lab_trusted.py",
         "host_brain/persistence/evolution_lab_trusted_repository.py",
-        "host_brain/audit/migrations/0138_evolution_lab_trusted_sandbox.sql"
+        "host_brain/evolution_lab/golden_experiments.py",
+        "tests/integration/test_ne04_real_docker_golden_suite.py",
+        "host_brain/audit/migrations/0138_evolution_lab_trusted_sandbox.sql",
+        "host_brain/audit/migrations/0139_evolution_lab_trusted_redaction_repair.sql"
       ],
-      "boundary": "0138 trusted reports require one authoritative receipt for every registered variant and a baseline comparison for every alternative, while persisting outcome/evidence/cost/latency/risk/verification deltas. Reports and suites remain proposal-only. Real digest-pinned isolated arms and the three golden experiments are not yet run."
+      "boundary": "0138 trusted reports require one authoritative receipt for every registered variant and a baseline comparison for every alternative, while persisting outcome/evidence/cost/latency/risk/verification deltas. All three golden baseline/candidate pairs have run in real digest-pinned Docker and remain proposal-only. A clean implementation commit-bound aggregate receipt and Operator projection are still pending."
     },
     "skill_supply_chain": {
       "status": "PARTIAL_NON_ATOMIC_NO_RUNTIME_RESOLVER",

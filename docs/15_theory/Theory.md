@@ -981,6 +981,8 @@ Evolution Lab 只能读取脱敏快照与可重放 trace，不能持有生产写
 
 “无副作用”不能由实验 runner 自报。可用于晋级评审的证据必须来自具体隔离运行时：冻结 dataset 只读挂载、临时输出、禁网、只读根文件系统、最小 capability、资源上限与独立 verifier 都要能从运行时事实重新打开。外部 sandbox operation 先持久预留再执行；响应丢失、活租约重复请求或未知终态只能重开原结果或进入 reconciliation，不能盲目再跑。即便这些证据全部成立，Lab 的最高权限仍只是生成 proposal，production activation 必须由后续 Review 与版本 authority 独立完成。
 
+实现层还必须区分“临时”与“退出即丢失”。Docker tmpfs 在容器停止后无法由 host 重新打开，因此需要取回并持久验证的实验输出使用 acceptance-root 下的隔离临时 bind mount；其实际 source identity 只以 digest 进入 attestation，并在 durable receipt 提交后删除。dataset 与 worker 则只读挂载，worker 源码 digest 和完整 sandbox profile 绑定 `ExperimentSpec`。这样既能在响应丢失时保留 reconciliation 事实，也不会把运行目录误当长期数据资产。
+
 ### 13.2 可演化对象的不同门槛
 
 | 对象 | 允许的自动化程度 | 必要门槛 |

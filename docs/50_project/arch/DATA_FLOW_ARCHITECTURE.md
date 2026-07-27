@@ -2284,8 +2284,26 @@ sequenceDiagram
 ```
 
 0138 不会把 0108/0122 记录升级成可信证据。operation head 与 append-only
-event chain 同事务 CAS；只有新 claim 能启动容器。可信 receipt 重新绑定
-image digest、engine、container、command、sanitized inspect、只读 dataset/rootfs、
-临时 output、禁网、security option、cap drop、资源限制、零 effect audit 与
-独立 verifier。当前图中 Ledger 路径已有真实 SQLite 定向证据；Docker、Verifier
-和 Operator 的生产接线仍待本波后续，因而不能把这张目标流图解读为 NE-04 已完成。
+event chain 同事务 CAS；只有新 claim 能启动容器。实际生产 composition 已把
+冻结 dataset、专用 digest-pinned Docker executor、独立 verifier 和两个
+repository 接成闭合对象图；executor 不使用 Airlock 的 subprocess fallback。
+六个真实 arm 已重新绑定 image/engine/container/command/inspect、只读
+dataset/runtime/rootfs、隔离临时 bind output、禁网、非 root、security option、
+cap drop、资源限制和零 effect audit。容器完成后先持久 receipt 再清理；
+response loss 重开原 receipt，未知结果保留容器事实并进入 reconciliation。
+Operator 只读投影、clean-commit 正式 suite receipt 和本波 Gate 尚未完成，
+因此不能把这张流图解读为 NE-04 已封板。
+
+```mermaid
+flowchart LR
+    S["Frozen ExperimentSpecV2"]
+    R["0138 fenced claim"]
+    D["Digest-pinned Docker"]
+    I["Reopened inspect facts"]
+    V["Independent verifier"]
+    L["Trusted run/report ledger"]
+    P["Review-required proposal"]
+    S --> R --> D --> I --> V --> L --> P
+    D -. "unknown terminal" .-> X["RECONCILIATION_REQUIRED"]
+    L -. "exact replay" .-> E["same receipt; no new container"]
+```

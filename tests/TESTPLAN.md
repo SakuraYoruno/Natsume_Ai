@@ -1385,7 +1385,8 @@ Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更
 ## T-NE04-TRUSTED-LEDGER：可信隔离实验的持久操作权威
 
 - T-NE04-TL-01：fresh migration catalog 必须从既有 head 前向应用到
-  `0138_evolution_lab_trusted_sandbox`；0108/0122 表和 receipt 不得重写、
+  `0138_evolution_lab_trusted_sandbox` 和
+  `0139_evolution_lab_trusted_redaction_repair`；0108/0122 表和 receipt 不得重写、
   backfill 或获得 promotion eligibility。
 - T-NE04-TL-02：每个 exact `(spec digest, variant)` 只有首次 reserve 返回
   `execution_authorized=true`；活租约重复请求必须返回不可执行 replay，
@@ -1406,9 +1407,37 @@ Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更
   普通 SQLite connection 无 repository UDF 时不能写，event/head/receipt
   篡改必须失败关闭。
 - T-NE04-TL-07：本切片定向合同与 ledger 为 `22 passed in 22.07s`，
-  fresh 0001→0138 migration smoke 通过。它只证明 0138 持久 authority，
+  fresh 0001→0139 migration smoke 通过。0139 必须保留 0108 redaction
+  表原形，并把 trusted redaction 写入独立表；它只证明 0138/0139 持久 authority，
   不证明真实 Docker executor、三条 Golden Experiment、production
   composition、Operator projection、波次集成或 NE-04 完成；
   fresh architecture Gate 1～14 全部通过且未扩大 allowlist，统一
   `static_scan,doc_gate` 为 `PASS / failures=[] in 112.6s`；
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## T-NE04-DOCKER-GOLDEN：真实隔离容器与三类 Golden Experiment
+
+- T-NE04-DG-01：production composition 只允许冻结 DatasetReader、专用
+  Docker executor、独立 Verifier、0122 spec registry 与 0138 evidence
+  ledger；静态测试禁止生产 writer、TokenService、CapabilityBroker effect、
+  Edge actuator、activation port 和 ProcessServiceContainer。
+- T-NE04-DG-02：image 必须为 digest-pinned reference。真实 inspect 必须逐项
+  复验 container/image/command、`network=none`、只读 rootfs、非 root user、
+  `no-new-privileges`、`cap-drop ALL`、PID/内存/CPU 与 dataset/runtime/output
+  三个 mount；worker source 和临时 output source 只以 digest 入 receipt。
+- T-NE04-DG-03：Docker 或任何隔离条件不可用时失败关闭，禁止降级到 Airlock
+  host subprocess。容器终态不确定时 append `RECONCILIATION_REQUIRED`；
+  第二次调用不能再启动 executor。
+- T-NE04-DG-04：completion 已提交但响应丢失时，runner 必须从 0138 重开
+  exact receipt，容器只运行一次；完成后删除对应容器和隔离临时目录。
+- T-NE04-DG-05：Research Planning、Proactive、Memory Write 各运行独立
+  baseline/candidate，共六个容器；相同 spec/dataset/seed 的 output digest
+  稳定，candidate quality 至少高 0.2，candidate policy/severe error 均为 0。
+- T-NE04-DG-06：report 必须比较 outcome/evidence/cost/latency/risk/
+  verification，且只能 append Review-required proposal；所有 receipt 的
+  `production_side_effects=false`、`production_influence_enabled=false`。
+- T-NE04-DG-07：完整 NE-04 非 Docker 定向/合同/ledger/release 集合为
+  `40 passed in 32.98s`；真实 digest-pinned Docker 集合为
+  `2 passed in 11.86s`，覆盖六 arm suite 与真实 completion response loss。
+  这些仍是测试 cohort，不代替 clean-commit 正式 suite receipt、Operator
+  projection、NE-04 波次 Gate 或 NE-07 完整服务栈。

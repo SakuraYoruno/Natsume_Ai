@@ -577,7 +577,7 @@ ReAct 与 Visual 的退役结论、历史 inventory 和测试批次保持各自�
 
 完成条件：Research planning、主动行为、记忆写入三类实验可重复；同 seed/dataset digest 结果稳定；Lab 外部副作用为 0。
 
-当前边界：0108 V1 与 0122 structural V2 保持只读且永久 `benefit_eligible=false`。0138 新增独立 trusted operation/event owner 和 append-only run/report/proposal/redaction/golden-suite 账本；只有首次 fenced claim 可启动 sandbox，活租约重复调用只返回不可执行 replay，过期租约进入 reconciliation，完成后只重开 exact receipt。trusted contract 要求 digest-pinned image、Docker engine/container/command、sanitized inspect evidence、只读 dataset/rootfs、临时 output、禁网、`no-new-privileges`、`cap-drop ALL`、资源上限、零 effect audit 与独立 verifier，并保持 proposal-only。合同/ledger 定向当前为 `22 passed in 22.07s`，fresh migration catalog 已到 0138。真实 Docker executor、三条 Golden Experiment、production composition、Operator 只读投影和本波集成尚未完成，因而 NE-04 仍为 `IN_PROGRESS`。
+当前边界：0108 V1 与 0122 structural V2 保持只读且永久 `benefit_eligible=false`。0138 独占 trusted operation/event 与 append-only run/report/proposal/golden-suite，0139 另建 trusted redaction namespace 并移除 0138 对 0108 表的误拦截；migration head 为 0139。只有首次 fenced claim 可启动 sandbox，活租约重放不可执行，过期或未知终态进入 reconciliation，完成后只重开 exact receipt。专用 production composition 现已接入 code-backed dataset、digest-pinned Docker executor、独立 verifier 与两个 SQLite authority，并明确不复用可降级为 subprocess 的 Airlock。Research Planning、Proactive、Memory Write 六个真实容器 arm 已在本机 Docker 通过；response-loss exact reopen 也由真实容器验证，完整 NE-04 非 Docker 定向/合同/ledger/release 集合为 `40 passed in 32.98s`，真实 Docker 集合为 `2 passed in 11.86s`。该证据仍绑定测试 cohort 而非 clean implementation commit；正式 commit-bound suite receipt、Operator 只读投影和本波 integration 尚未完成，所以状态是 `PARTIAL_TRUSTED_DOCKER_GOLDEN_LOCAL_PASS`，NE-04 仍为 `IN_PROGRESS`。
 
 ### NE-05：Skill Compiler、成熟度与签名供应链
 

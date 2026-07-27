@@ -114,6 +114,8 @@ Lab 只能读取脱敏快照和可复放 trace，输出 `ExperimentReport` 或 p
 
 可信 Lab worker 必须运行在可重新检查的隔离容器中；镜像以 digest 固定，dataset 只读、output 临时、网络关闭、rootfs 只读，并删除 capability、限制 PID/内存。运行前由 durable operation ledger 签发唯一 fence；响应丢失重开原 receipt，未知结果进入 reconciliation。Docker/Verifier receipt 只使报告具备“可提交 Review”的资格，不授予 activation。
 
+隔离输出采用 acceptance-root 下的单次 bind mount，以便容器退出后仍可由独立 host reader 重开；其 source path 不进入公开收据，只保留 digest，并在 run receipt durable commit 后删除。worker 本身只读挂载且源码 digest 纳入 sandbox profile。实现不得将 Docker 不可用降级为本机 subprocess。
+
 ### 4.6 Capability Lifecycle
 
 职责：从文档、轨迹、脚本和 API 合同生成 Skill Draft；完成签名、SBOM、隔离验证、成熟度、staged activation 与 rollback。

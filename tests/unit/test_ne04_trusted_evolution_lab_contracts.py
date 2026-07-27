@@ -27,6 +27,8 @@ from host_brain.contracts.evolution_lab_trusted import (
 IMAGE_REFERENCE = "python@sha256:" + "a" * 64
 IMAGE_ID = "b" * 64
 ENGINE_IDENTITY = "docker://engine/27.5.1@sha256:" + "c" * 64
+RUNTIME_SOURCE_DIGEST = "7" * 64
+OUTPUT_SOURCE_DIGEST = "8" * 64
 
 
 def _spec(kind: str = "research_planning") -> ExperimentSpecV2:
@@ -80,11 +82,17 @@ def _inspect(
         "image_reference": IMAGE_REFERENCE,
         "memory_limit_bytes": 268_435_456,
         "name": container_name,
+        "nano_cpus": 1_000_000_000,
         "network_mode": "none",
         "no_new_privileges": True,
         "output_mount_temporary": True,
+        "output_mount_type": "bind",
+        "output_source_digest": OUTPUT_SOURCE_DIGEST,
         "pids_limit": 64,
         "readonly_rootfs": True,
+        "runtime_mount_readonly": True,
+        "runtime_source_digest": RUNTIME_SOURCE_DIGEST,
+        "user": "65534:65534",
     }
 
 
@@ -137,16 +145,22 @@ def _run(
         command=command,
         inspect_evidence=inspect,
         sandbox_profile_digest=spec.isolation_profile_digest,
+        runtime_source_digest=RUNTIME_SOURCE_DIGEST,
+        output_source_digest=OUTPUT_SOURCE_DIGEST,
         dataset_digest=spec.dataset_manifest.dataset_digest,
         output_digest=output_digest,
+        output_mount_type="bind",
         network_mode="none",
         readonly_rootfs=True,
         readonly_dataset=True,
+        readonly_runtime=True,
         temporary_output=True,
         no_new_privileges=True,
         cap_drop_all=True,
+        non_root_user="65534:65534",
         pids_limit=64,
         memory_limit_bytes=268_435_456,
+        nano_cpus=1_000_000_000,
         exit_code=0,
         started_at_ms=100,
         finished_at_ms=120,
@@ -275,7 +289,7 @@ def test_ne04_golden_suite_requires_three_reports_and_six_independent_arms() -> 
     suite = GoldenExperimentSuiteReceiptV1(
         suite_id="ne04-golden-suite",
         commit_sha="d" * 40,
-        migration_head="0138#evolution_lab_trusted_sandbox",
+        migration_head="0139#evolution_lab_trusted_redaction_repair",
         engine_identity=ENGINE_IDENTITY,
         image_reference=IMAGE_REFERENCE,
         report_digests={

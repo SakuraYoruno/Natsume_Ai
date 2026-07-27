@@ -20,6 +20,7 @@ from host_brain.contracts.evolution_lab import (
 from host_brain.contracts.evolution_lab_trusted import (
     DockerSandboxAttestationV1,
     GoldenExperimentSuiteReceiptV1,
+    RedactionReceiptV1 as TrustedRedactionReceiptV1,
     TrustedExperimentReportV2,
     TrustedExperimentRunReceiptV2,
     docker_effect_audit_evidence_digest,
@@ -37,6 +38,8 @@ from host_brain.persistence.evolution_lab_v2_repository import (
 IMAGE_REFERENCE = "python@sha256:" + "a" * 64
 IMAGE_ID = "b" * 64
 ENGINE_IDENTITY = "docker://engine/27.5.1@sha256:" + "c" * 64
+RUNTIME_SOURCE_DIGEST = "7" * 64
+OUTPUT_SOURCE_DIGEST = "8" * 64
 
 
 def _spec(kind: str) -> ExperimentSpecV2:
@@ -104,11 +107,17 @@ def _receipt(
         "image_reference": IMAGE_REFERENCE,
         "memory_limit_bytes": 268_435_456,
         "name": claim.container_name,
+        "nano_cpus": 1_000_000_000,
         "network_mode": "none",
         "no_new_privileges": True,
         "output_mount_temporary": True,
+        "output_mount_type": "bind",
+        "output_source_digest": OUTPUT_SOURCE_DIGEST,
         "pids_limit": 64,
         "readonly_rootfs": True,
+        "runtime_mount_readonly": True,
+        "runtime_source_digest": RUNTIME_SOURCE_DIGEST,
+        "user": "65534:65534",
     }
     audit = EffectAuditReceiptV1(
         execution_id=claim.execution_id,
@@ -134,16 +143,22 @@ def _receipt(
         command=command,
         inspect_evidence=inspect,
         sandbox_profile_digest=spec.isolation_profile_digest,
+        runtime_source_digest=RUNTIME_SOURCE_DIGEST,
+        output_source_digest=OUTPUT_SOURCE_DIGEST,
         dataset_digest=spec.dataset_manifest.dataset_digest,
         output_digest=output_digest,
+        output_mount_type="bind",
         network_mode="none",
         readonly_rootfs=True,
         readonly_dataset=True,
+        readonly_runtime=True,
         temporary_output=True,
         no_new_privileges=True,
         cap_drop_all=True,
+        non_root_user="65534:65534",
         pids_limit=64,
         memory_limit_bytes=268_435_456,
+        nano_cpus=1_000_000_000,
         exit_code=0,
         started_at_ms=100,
         finished_at_ms=120,
@@ -186,7 +201,7 @@ def _prepare(tmp_path, *, clock=lambda: 100):
         ts_ms=1,
     )
     assert migrated.success is True
-    assert migrated.summary["latest_version"] == 138
+    assert migrated.summary["latest_version"] == 139
     return (
         db_path,
         SQLiteEvolutionLabV2Ledger(db_path),
@@ -481,7 +496,7 @@ def test_ne04_trusted_ledger_persists_three_golden_reports_and_proposal_only(
     suite = GoldenExperimentSuiteReceiptV1(
         suite_id="ne04-golden-suite-ledger",
         commit_sha="d" * 40,
-        migration_head="0138#evolution_lab_trusted_sandbox",
+        migration_head="0139#evolution_lab_trusted_redaction_repair",
         engine_identity=ENGINE_IDENTITY,
         image_reference=IMAGE_REFERENCE,
         report_digests={
@@ -514,3 +529,44 @@ def test_ne04_trusted_ledger_persists_three_golden_reports_and_proposal_only(
             """
         ).fetchone()
         assert suite_flags == ("PASS", 0, 0)
+
+
+def test_ne04_trusted_redaction_uses_distinct_0139_namespace(
+    tmp_path,
+) -> None:
+    db_path, _, trusted_ledger = _prepare(tmp_path)
+    receipt = TrustedRedactionReceiptV1(
+        redaction_id="trusted-redaction-ne04",
+        workspace_id="workspace-ne04-redaction",
+        source_digest="1" * 64,
+        rules_version="redaction.v2",
+        rules_digest="2" * 64,
+        output_dataset_digest="3" * 64,
+        record_count=4,
+        removed_field_count=2,
+        created_at_ms=100,
+    )
+
+    assert (
+        trusted_ledger.append_redaction_receipt(receipt)
+        == receipt.receipt_digest
+    )
+    assert (
+        trusted_ledger.append_redaction_receipt(receipt)
+        == receipt.receipt_digest
+    )
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM evolution_lab_trusted_redaction_receipt
+            """
+        ).fetchone()[0] == 1
+        columns = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA table_info(evolution_lab_redaction_receipt)"
+            )
+        }
+    assert "receipt_id" in columns
+    assert "redaction_id" not in columns
