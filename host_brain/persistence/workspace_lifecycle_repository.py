@@ -15,6 +15,7 @@ import re
 import sqlite3
 from typing import Any, Mapping
 
+import host_brain.persistence.workspace_terminal_failure_authority as _terminal_failure
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WORKSPACE_LIFECYCLE_SCHEMA_VERSION,
     WorkspaceLifecycleContractError,
@@ -36,7 +37,6 @@ from host_brain.persistence.workspace_terminal_cancellation_authority import (
     finalized_cancellation_preserves_node_state,
     finalized_post_review_cancellation_allows_workspace_abandonment,
 )
-
 
 WORKSPACE_LIFECYCLE_CONFLICT = "WORKSPACE_LIFECYCLE_CONFLICT"
 WORKSPACE_LIFECYCLE_DATA_INVALID = "WORKSPACE_LIFECYCLE_DATA_INVALID"
@@ -1065,6 +1065,13 @@ class WorkspaceLifecycleRepositoryMixin:
                 or terminal_graph_accepted_node_binding
                 or terminal_graph_cancelled_node_binding
                 or (
+                    str(row["lease_status"]) == "EXPIRED"
+                    and _terminal_failure.finalized_no_effect_failure_allows_workspace_abandonment(
+                        conn, graph_id=graph_id, graph_revision=graph_revision,
+                        node_id=node_id, attempt_id=attempt_id, lease_id=task_lease_id,
+                    )
+                )
+                or (
                     str(row["graph_status"]) == "BLOCKED"
                     and str(row["node_status"]) == "FAILED"
                     and str(row["attempt_status"]) == "FAILED"
@@ -1476,7 +1483,6 @@ def _nonnegative_int(value: Any, *, field: str) -> int:
 
 def _digest(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
 
 def _normalized_sql_digest(value: Any) -> str:
     normalized = re.sub(r"\s+", "", str(value or "").lower())

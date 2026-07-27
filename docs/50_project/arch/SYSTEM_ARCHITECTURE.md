@@ -784,3 +784,28 @@ Effect 时，上层报告 `BLOCKED`，底层也拒绝删除，Workspace 保持 `
 当前证据为五文件去重集合 `68 passed in 117.23s`，无 migration。该围栏只
 关闭一个 Direct Skill cancellation 组合，不改变一般 cancellation、
 unknown-effect、多 Workspace 或 NE-01 的未完成状态。
+
+## 17. Direct Skill 签名失败的双重重开
+
+```mermaid
+flowchart TD
+    S["sealed direct Skill stage"] --> R["RECOVERY_REQUIRED Operation"]
+    R --> T["TaskStore signed failure UoW"]
+    T --> C["cryptographic terminal reopen"]
+    C --> F["Skill route classifier"]
+    F --> P["Workspace read-only failure proof"]
+    P --> A["ACTIVE → ABANDONED"]
+    A --> X["stage tombstone"]
+    X --> L["shared lifecycle CLEANED"]
+```
+
+第一重由 TaskStore 持有 proof verifier，重开 Ed25519 signature、Operation
+scope/fingerprint、Attempt/Lease owner/fence、Task terminal 和原子 Outbox。
+第二重由 Workspace repository 在状态 CAS 前执行，只读核对单节点/单
+Operation/单 graph Budget/单 HostCommand 基数、proof digest、failure error
+ref、零 Projection/Verification/Acceptance/Effect/cancellation/artifact 和
+六类 exact Outbox。Workspace 层不获得 Task mutation authority。
+
+这种组合既阻止伪签名，也阻止签名结算后的持久状态漂移。任何不一致都使
+terminal worker 报告 `BLOCKED`，stage 与 worktree 保持可对账；只有 exact
+direct single-node no-effect failure 可以清理。一般失败恢复仍未完成。
