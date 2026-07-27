@@ -338,15 +338,17 @@ def test_controlled_experiment_persists_path_free_receipt_and_replays_after_rest
             receipt_ref="",
         ),
     )
-    with pytest.raises(CodeBenchmarkLedgerContractError, match="successful controlled arm"):
-        CodeBenchmarkRunReceipt(
-            spec=receipt.spec,
-            run=_run_with_evidence(
-                receipt,
-                baseline=failed_baseline,
-                selected=receipt.run.selected_evidence,
-            ),
-        )
+    failed_terminal = CodeBenchmarkRunReceipt(
+        spec=receipt.spec,
+        run=_run_with_evidence(
+            receipt,
+            baseline=failed_baseline,
+            selected=receipt.run.selected_evidence,
+        ),
+    )
+    assert failed_terminal.run.report.baseline_outcome.success is False
+    assert failed_terminal.status == "COMPLETED_CLEAN"
+    assert failed_terminal.production_influence_enabled is False
 
     over_budget_baseline = _evidence_with_controlled_receipt(
         receipt.run.baseline_evidence,

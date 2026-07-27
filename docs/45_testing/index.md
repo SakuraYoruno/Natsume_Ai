@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.38
+版本：v2.39
 维护日期：2026-07-28
 状态：当前证据
 
@@ -426,7 +426,7 @@
 - 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
 - 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
 - Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
-- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0135。该证据使用本地临时 key、单节点和进程内 route continuation；0130/0131 的 hold/reconciliation、0132 的 child Budget、0133 的 Verification decision、0134 的 Acceptance decision 与 0135 的 Review denial settlement 证据由各自切片单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0136。该证据使用本地临时 key、单节点和进程内 route continuation；0130～0135 的 Task 证据与 0136 的 cohort evidence 分别记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 
@@ -1056,5 +1056,31 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   benefit report 合格时生成 proposal；content-addressed report ref 漂移直接
   拒绝。即使正向通过，`review_required=true`、
   `activation_authority=false`、`production_influence_enabled=false`。
-- 本组没有 migration/durable cohort owner、真实 30 次实验、真实非 Pentest
-  收益或 Review/激活；Pentest L3 保持 shadow。
+- 本协议切片当时没有 migration/durable cohort owner；后续 0136 已补 owner。
+  真实 30 次实验、真实非 Pentest 收益或 Review/激活仍未执行，Pentest L3
+  保持 shadow。
+
+### NE-02 统一 cohort 持久 authority
+
+- `0136_planning_search_cohort_ledger.sql` 建立 Research/Code/Pentest 共用的
+  append-only registration、member evidence、report、promotion evidence
+  与 proposal 表，并以不可变 trigger 拒绝 UPDATE/DELETE。
+- `SQLitePlanningSearchCohortAuthorityResolver` 分别重开 0107 Research
+  terminal、0106 Code cleanup-gated terminal、0105 Pentest calibration；
+  Pentest 还要求独立 Task/Authorization/Verification receipt authority。
+- `tests/integration/test_ne02_planning_search_cohort_ledger.py` 使用一个真实文件型
+  SQLite 跑完 24+20+30 共 74 个成员，证明 source rejection 不落库、完整报告、
+  Review-only promotion、response-loss exact replay、重启、checksum drift 与
+  append-only 篡改失败关闭。
+- NE-02 最终波次集合覆盖 26 个 contract/unit/integration 文件，结果为
+  `169 passed, 1 skipped in 104.80s`；skip 是 Windows symlink 权限不足，
+  不计 PASS。首轮为 `165 passed / 4 failed / 1 skipped`，修正后完整重跑通过。
+- 收口发布合同首轮为 `58 passed / 1 failed`；唯一失败是 Core Release
+  manifest 仍固定 0135。同步为 0136 后完整复跑
+  `59 passed in 8.75s`。统一 `static_scan,doc_gate` 为
+  `PASS / failures=[] in 109.4s`；fresh 架构 Gate 1～14 为
+  `PASS / failed_gates=[] in 25.6s`。
+- 这不是 24/20/30 个真实实验。真实 provider、授权 lab、隐藏 verifier、
+  Review/activation 尚未执行，状态为
+  `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

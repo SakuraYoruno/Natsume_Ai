@@ -75,7 +75,7 @@ LEGACY_INLINE_SCHEMA_ASSETS: dict[
     ),
 }
 
-# 0089, 0093 and 0095 contain ALTER TABLE statements followed by
+# 0089, 0093, 0095 and 0131 contain ALTER TABLE statements followed by
 # indexes/triggers in
 # one explicit transaction.  SQL may commit before the runner persists its
 # migration receipt; the next startup then sees a duplicate column although
@@ -256,6 +256,46 @@ CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
                     "new.aggregate_type<>'task_graph'",
                     "new.graph_revisionisnull",
                     "raise(abort,'task_runtime_outboxgraphrevisionisinvalid')",
+                ),
+            ),
+        },
+    ),
+    "0131_task_operation_recovery_hold_binding.sql": (
+        "379a5a7ae11c8962f95f9de1994b3cf602bec7bdf2277884761ffbc0b1407891",
+        "task_runtime_operation_reconciliation_evidence",
+        {
+            "recovery_case_ref": ("TEXT", False),
+            "recovery_case_subject_sha256": ("TEXT", False),
+        },
+        {
+            "idx_task_operation_reconciliation_evidence_recovery_case": (
+                "task_runtime_operation_reconciliation_evidence",
+                ("recovery_case_ref",),
+            ),
+        },
+        (
+            "recovery_case_reftext",
+            "check(recovery_case_refisnullor(length(recovery_case_ref)=97",
+            "recovery_case_subject_sha256text",
+            "check(recovery_case_subject_sha256isnullor(length(recovery_case_subject_sha256)=71",
+        ),
+        {
+            "trg_task_operation_reconciliation_evidence_recovery_case": (
+                "task_runtime_operation_reconciliation_evidence",
+                (
+                    "beforeinsertontask_runtime_operation_reconciliation_evidence",
+                    "new.recovery_case_refisnull",
+                    "new.recovery_case_subject_sha256isnotnull",
+                    "hold.case_ref=new.recovery_case_ref",
+                    "hold.subject_sha256=new.recovery_case_subject_sha256",
+                    "hold.reservation_id=new.reservation_id",
+                    "hold.operation_status_version=new.expected_version",
+                    "operation.status_version=hold.operation_status_version",
+                    "'signed_operation_reconciliation_required'",
+                    "'signed_cancellation_reconciliation_required'",
+                    "new.actionin('commit','release','reacquire')",
+                    "new.actionin('commit','release')",
+                    "raise(abort,'task_operation_reconciliation_recovery_case_invalid')",
                 ),
             ),
         },

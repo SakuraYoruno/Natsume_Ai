@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.33
+版本：v2.34
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -424,7 +424,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0135_task_review_denial_settlement.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0132 继续封闭各自既有边界；0133 增加 append-only Verification decision，0134 增加 append-only Acceptance decision 与 Acceptance/Review 创建，0135 增加 denial terminal settlement。Review poison 活性修复不新增 migration，而是只复用 0096 已有 `available_ts_ms`、`last_error` 与 `status_version` 协调列；ReviewStore/TaskNode 业务真相不回填、不复制。它们不提供部署 key、Operator credential、完整 Host 进程重启、所有恢复类别或七路线验收，因此不代表 Chat、Universal Runtime 或 NE-01 封板。
+当前连续 SQLite migration head 为 `0136_planning_search_cohort_ledger.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal，不拥有 Task 或 activation authority。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -564,7 +564,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0135_task_review_denial_settlement.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0132 保持各自既有窄 authority；0133 定义 durable Verification，0134 定义 durable Acceptance/Review 创建，0135 定义 Review denial 原子终态；它们都不定义副作用归因 authority，0135 也不取代 0090/0091 的普通 Graph settlement。它不改变七路线总体 `INCOMPLETE`。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0136_planning_search_cohort_ledger.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0135 保持各自既有窄 authority；0136 定义 PlanningSearch cohort evidence/proposal，但不定义执行、Review 或 activation authority，也不取代 0090/0091 的普通 Graph settlement。
 
 ## 7. 数字生命状态模型
 
@@ -925,3 +925,26 @@ projection 只接受经独立验证的
 `PARALLEL_CHECKPOINT_BUDGET_REJECTED`。DurableTaskStore 的 MRO 合同冻结完整
 34 个 mixin owner，但局部测试使用相对邻接，避免在无关 owner 插入后误报。
 Retry/Operation checkpoint 的纯 helper 不进入 MRO，也不拥有 transaction。
+
+## 21. PlanningSearch 固定 cohort 的证据层
+
+0136 在规划内核与未来 Evolution/Review 之间增加一个只写证据、不执行计划的
+持久层。它不能调用模型、工具或 worker，也不能激活 L3：
+
+```mermaid
+flowchart LR
+    R["Research 0107 terminal"] --> A["Source Authority Resolver"]
+    C["Code 0106 terminal"] --> A
+    P["Pentest 0105 calibration\n+ Task/Auth/Verification receipts"] --> A
+    A --> L["0136 append-only cohort ledger"]
+    L --> E["24 / 20 / 30 complete reports"]
+    E --> G{"Pentest safe +\nnon-Pentest benefit?"}
+    G -->|"yes"| Q["Review-required proposal"]
+    G -->|"no"| F["Retained failed report"]
+    Q --> X["No activation authority\nNo production influence"]
+```
+
+`planning_search_cohort_ledger_repository.py` 保留唯一连接和事务 owner；纯重开、
+canonical/digest 校验在 support 模块，避免产生第二 writer。报告引用完整
+evidence-set digest；response-loss replay 先查现有 identity，因此不会重新
+执行实验。真实 provider/lab 证据仍是外部验收边界。

@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.34
+版本：v2.35
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-28
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -1497,3 +1497,24 @@ writer UoW、exact replay 和行为测试审计，再更新结构基线；直接
 证据。反过来，文件越过既有职责上限时也不能只提高阈值，应把无连接的纯
 identity、facade 或 validator 从唯一 writer 中抽离，同时保持 writer、连接和
 事务 owner 不变。
+
+## 29. 收益报告必须由可重开的 cohort authority 派生
+
+统计 evaluator 能重算指标，不等于它拥有证据。可用于演化决策的 cohort
+必须先冻结 domain、cohort version、成员数和每个 workload/run identity，
+再逐项从更低层的 terminal authority 重开执行事实。Research 的模型与
+citation terminal、Code 的 cleanup-gated terminal、Pentest 的 calibration
+prediction/outcome 及 Task/Authorization/Verification receipt 不能由 cohort
+调用者重新自报；任何缺失或 digest 漂移都必须在写入成员前失败关闭。
+
+cohort owner 自身只保存 append-only registration、成员、authority proof 和
+派生报告。响应丢失时先按成员 identity 重开，不能重新运行模型、verifier 或
+实验。报告必须绑定按 workload 排序的完整 evidence-set digest，不能从不完整
+集合产生；Research/Code/Pentest 的固定成员数分别是 24/20/30。
+
+跨域收益只是 promotion 的输入，不是生产激活权。安全 Pentest calibration 与
+至少一个非 Pentest 收益报告同时存在时，系统最多生成要求人工 Review 的
+content-addressed proposal；proposal 不得拥有 activation authority 或直接
+改变 L3 production influence。真实 provider、授权实验环境和隐藏 verifier
+缺失时，正确状态是 `ACCEPTANCE_PENDING_EXTERNAL`，不是用本地构造出的合格
+数字填补证据。

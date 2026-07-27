@@ -5,12 +5,12 @@
     "dev_commit": "a407e73ebd1df59b52a3664d1c1f342238d41564",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE02_RESEARCH_24_CODE_20_AND_PENTEST_30_FIXED_PROTOCOLS_PLUS_CROSS_DOMAIN_PROPOSAL_GATE_LOCAL_TARGETED_PASS_DURABLE_COHORT_AND_REAL_EXPERIMENT_ACCEPTANCE_PENDING"
+    "evaluated_source": "NE02_MIGRATION_0136_DURABLE_COHORT_AUTHORITY_AND_FIXED_24_20_30_PROTOCOLS_LOCAL_WAVE_PASS_REAL_EXTERNAL_EXPERIMENT_ACCEPTANCE_PENDING"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-02",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_RESEARCH_24_CODE_20_PENTEST_30_FIXED_PROTOCOLS_AND_CROSS_DOMAIN_PROPOSAL_GATE_LOCAL_TARGETED_PASS_DURABLE_COHORT_REAL_PROVIDER_REAL_WORKLOAD_VERIFIED_OUTCOME_REVIEW_AND_ACTIVATION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
+  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_MIGRATION_0136_SINGLE_DURABLE_COHORT_AUTHORITY_REAL_LOWER_LEDGER_REOPEN_AND_FIXED_24_20_30_LOCAL_WAVE_PASS_REAL_PROVIDER_WORKLOAD_AUTHORIZED_LAB_REVIEW_AND_ACTIVATION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
   "next_wave": "NE-03",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,8 +26,37 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne02_durable_cohort_authority_current_validation": {
+      "status": "CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_EXTERNAL",
+      "migration_head": "0136_planning_search_cohort_ledger.sql",
+      "authority": "ONE_APPEND_ONLY_SQLITE_OWNER_FOR_RESEARCH_24_CODE_20_PENTEST_30_REPORTS_AND_CROSS_DOMAIN_PROMOTION_PROPOSALS",
+      "source_reopen": "RESEARCH_0107_TERMINAL_CODE_0106_TERMINAL_PENTEST_0105_CALIBRATION_PLUS_INJECTED_TASK_AUTHORIZATION_VERIFICATION_RECEIPT_AUTHORITY",
+      "exact_replay": "EXISTING_MEMBER_AND_PROPOSAL_REOPEN_WITHOUT_CALLING_SOURCE_RESOLVER_OR_REEXECUTING_ARMS",
+      "promotion_boundary": "SAFE_PENTEST_PLUS_AT_LEAST_ONE_NON_PENTEST_BENEFIT_REPORT_CREATES_REVIEW_REQUIRED_PROPOSAL_ONLY_ACTIVATION_AND_PRODUCTION_INFLUENCE_FALSE",
+      "migration_recovery": "0131_CHECKSUM_BOUND_PHYSICAL_DDL_RECEIPT_LOSS_REPLAY_REPAIRED_WITH_STRICT_COLUMN_INDEX_TRIGGER_POSTCONDITION",
+      "integration": "169_PASSED_1_SKIPPED_IN_104_80_SECONDS",
+      "integration_skip": "WINDOWS_SYMLINK_PRIVILEGE_UNAVAILABLE_NOT_COUNTED_AS_PASS",
+      "transparent_first_wave_run": "165_PASSED_4_FAILED_1_SKIPPED;_REMOVED_UNUSED_PENTEST_COMPAT_FACADE_ADDED_0131_RECEIPT_LOSS_RECOVERY_AND_ALIGNED_D19_FAILED_ARM_TERMINAL_ASSERTION",
+      "release_contracts": "59_PASSED_IN_8_75_SECONDS_AFTER_58_PASSED_1_STALE_0135_MANIFEST_ASSERTION_FAILED",
+      "static_and_doc_gate": "PASS_FAILURES_EMPTY_IN_109_4_SECONDS",
+      "architecture_static_gates": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_IN_25_6_SECONDS",
+      "static_checks": "COMPILEALL_JSON_AND_GIT_DIFF_CHECK_PASS_RUFF_NOT_INSTALLED",
+      "real_research_24": "NOT_RUN_ACCEPTANCE_PENDING_EXTERNAL",
+      "real_code_20": "NOT_RUN_ACCEPTANCE_PENDING_EXTERNAL",
+      "real_pentest_30": "NOT_RUN_AUTHORIZED_LAB_REQUIRED",
+      "review_activation": "NOT_RUN_PROPOSAL_HAS_NO_ACTIVATION_AUTHORITY",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "evidence_refs": [
+        "host_brain/audit/migrations/0136_planning_search_cohort_ledger.sql",
+        "host_brain/contracts/planning_search/cohort_ledger.py",
+        "host_brain/persistence/planning_search_cohort_authority_resolver.py",
+        "host_brain/persistence/planning_search_cohort_ledger_repository.py",
+        "host_brain/persistence/planning_search_cohort_ledger_support.py",
+        "tests/integration/test_ne02_planning_search_cohort_ledger.py"
+      ]
+    },
     "ne02_code_fixed_benefit_protocol": {
-      "status": "LOCAL_TARGETED_PASS_REAL_20_WORKLOAD_COHORT_PENDING",
+      "status": "LOCAL_PROTOCOL_AND_DURABLE_OWNER_PASS_REAL_20_WORKLOAD_COHORT_PENDING",
       "cohort": "EXACTLY_20_UNIQUE_PAIRED_WORKLOADS_SAME_SOURCE_MODEL_PROVIDER_PROFILE_AND_BUDGET",
       "execution_identity": "OWNER_RANDOMIZED_INDEPENDENT_FRESH_WORKTREES_AND_DISTINCT_MODEL_HIDDEN_STATIC_EXECUTIONS",
       "benefit_gate": "PASS_RATE_GAIN_AT_LEAST_10_PERCENTAGE_POINTS_OR_NONINFERIOR_5_POINTS_WITH_COST_REDUCTION_AT_LEAST_15_PERCENT",
@@ -35,9 +64,8 @@
       "failure_evidence": "D19_CLEANUP_GATED_PASS_AND_FAIL_TERMINAL_OBSERVATIONS_RETAINED_WITH_EXACT_STATUS_BINDING",
       "influence": "REPORT_IS_PROPOSAL_ONLY_AND_PRODUCTION_INFLUENCE_FALSE",
       "local_validation": "15_PASSED_IN_4_96_SECONDS",
-      "migration": "NONE_DURABLE_COHORT_OWNER_DEFERRED_TO_SINGLE_NE02_NEXT_FREE_MIGRATION",
+      "migration": "0136_PLANNING_SEARCH_COHORT_LEDGER",
       "not_run": [
-        "append-only Code cohort repository",
         "20 real external model Code workloads",
         "independent deployed hidden and static verifiers",
         "benefit or promotion acceptance",
@@ -62,7 +90,7 @@
       "durable_binding": "SUCCESSOR_CATALOG_DIGEST_COUNT_INITIAL_STATE_AND_TRACE_ENTER_OPTIONAL_0105_SHADOW_PREDICTION",
       "production_influence": "FALSE_L1_L2_BASELINE_SELECTION_UNCHANGED",
       "local_validation": "38_PASSED_IN_7_86_SECONDS",
-      "migration": "NONE_REUSES_0105_CALIBRATION_CURRENT_HEAD_0135",
+      "migration": "REUSES_0105_CALIBRATION_AND_0136_COHORT_AUTHORITY_CURRENT_HEAD_0136",
       "not_run": [
         "30 authorized environment experiments",
         "verified Task or Run outcome receipts",
@@ -78,7 +106,7 @@
       ]
     },
     "ne02_pentest_fixed_calibration_protocol": {
-      "status": "LOCAL_TARGETED_PASS_SHADOW_ONLY_DURABLE_OWNER_AND_REAL_EXPERIMENT_PENDING",
+      "status": "LOCAL_PROTOCOL_AND_DURABLE_OWNER_PASS_SHADOW_ONLY_REAL_EXPERIMENT_PENDING",
       "cohort": "EXACTLY_30_UNIQUE_PREREGISTERED_AUTHORIZED_RUNS",
       "authority_binding": "ENVIRONMENT_SCOPE_CAPABILITY_MANIFEST_FACTS_POLICY_ALGORITHM_ADAPTER_BUDGET_TASK_AUTHORIZATION_VERIFICATION_AND_INDEPENDENT_VERIFIER",
       "successor_identity": "CATALOG_DIGEST_DERIVED_FROM_CURRENT_AUTHORITY_VIRTUAL_STATE_AND_SORTED_UNIQUE_CANDIDATE_IDS",
@@ -89,9 +117,8 @@
       "local_validation": "7_PASSED_IN_0_40_SECONDS",
       "combined_contract_and_document_gates": "40_PASSED_IN_8_66_SECONDS",
       "static_checks": "COMPILEALL_JSON_AND_GIT_DIFF_CHECK_PASS_RUFF_NOT_INSTALLED",
-      "migration": "NONE_DURABLE_COHORT_OWNER_DEFERRED_TO_SINGLE_NE02_NEXT_FREE_MIGRATION",
+      "migration": "0136_PLANNING_SEARCH_COHORT_LEDGER",
       "not_run": [
-        "append-only Pentest cohort repository",
         "30 real authorized Pentest experiments",
         "real non-Pentest benefit cohort",
         "durable Review, version activation and rollback"
@@ -107,15 +134,14 @@
       ]
     },
     "ne02_research_fixed_benefit_protocol": {
-      "status": "LOCAL_TARGETED_PASS_DURABLE_LEDGER_AND_EXTERNAL_ACCEPTANCE_PENDING",
+      "status": "LOCAL_PROTOCOL_AND_DURABLE_OWNER_PASS_EXTERNAL_ACCEPTANCE_PENDING",
       "cohort": "EXACTLY_24_UNIQUE_PAIRED_WORKLOADS_AT_LEAST_THREE_TOPICS_LOCAL_FILE_AND_WEB",
       "quality_authority": "INDEPENDENT_HIDDEN_VERIFIER_EXECUTION_BINDS_ARM_RESPONSE_PROFILE_RUBRIC_AND_EXTERNAL_TRANSPORT_ATTESTATION",
       "statistics": "DETERMINISTIC_10000_ITERATION_PAIRED_BOOTSTRAP_PLUS_QUALITY_CITATION_SEVERE_ERROR_TOTAL_COST_AND_P95_LATENCY_GATES",
       "influence": "REPORT_IS_PROPOSAL_ONLY_AND_PRODUCTION_INFLUENCE_FALSE",
       "local_validation": "9_PASSED_IN_0_62_SECONDS",
-      "migration": "NONE_DURABLE_COHORT_OWNER_DEFERRED_TO_SINGLE_NE02_NEXT_FREE_MIGRATION",
+      "migration": "0136_PLANNING_SEARCH_COHORT_LEDGER",
       "not_run": [
-        "append-only cohort repository",
         "24 real external Research workloads",
         "independent deployed hidden verifier",
         "benefit or promotion acceptance"
@@ -138,12 +164,12 @@
       "targeted_validation": "60_PASSED_IN_26_89_SECONDS",
       "static_and_doc_gate": "PASS_FAILURES_EMPTY_IN_108_4_SECONDS",
       "ruff": "NOT_RUN_TOOL_UNAVAILABLE",
-      "migration": "NONE_CURRENT_HEAD_0135",
+      "migration": "NONE_CURRENT_HEAD_0136",
       "real_provider": "NOT_RUN_ACCEPTANCE_PENDING_EXTERNAL",
       "research_cohort": "NOT_RUN_24_REQUIRED",
       "code_cohort": "NOT_RUN_20_REQUIRED",
       "pentest_cohort": "NOT_RUN_30_REQUIRED",
-      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "wave_integration": "169_PASSED_1_WINDOWS_SYMLINK_PRIVILEGE_SKIP_IN_104_80_SECONDS",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "program_status": "INCOMPLETE"
     },

@@ -3,7 +3,7 @@
 
 # 当前架构程序注册表
 
-版本：v4.2
+版本：v4.3
 维护日期：2026-07-28
 状态：`ONE_ACTIVE_PROGRAM`
 
@@ -29,11 +29,11 @@ Research attestation 必须精确一致；本地、私网、CLI、未知 transpo
 20 项和 Pentest 30 次验收尚未执行，因此本波仍为 `IN_PROGRESS /
 ACCEPTANCE_PENDING_EXTERNAL`。
 
-Research 24 项验收协议的纯合同与确定性 evaluator 已落地：固定 cohort
+Research 24 项验收协议的纯合同、确定性 evaluator 与 0136 durable owner 已落地：固定 cohort
 规模/主题/来源覆盖，hidden verifier 独立 execution 与 response binding，
 10,000 次 paired bootstrap，以及质量、citation、严重错误、含 verifier 成本
-和 p95 时延的不可放宽门槛均有定向测试。下一步是在本波统一 next-free
-migration 中建立 append-only cohort owner，再运行真实双臂；当前不得把
+和 p95 时延的不可放宽门槛均有定向测试。owner 会先从 0107 terminal ledger
+重开每个 pair，再持久化成员 proof 和完整报告。下一步是运行真实双臂；当前不得把
 `proposal_eligible` 的可计算性写成已获得真实收益。
 
 Pentest L3 已把固定根全集改为两层 catalog：当前 ToolContract/PreActionGate
@@ -44,15 +44,25 @@ calibration，生产选择仍强制使用 L1/L2 baseline。固定 30 次协议�
 proposal Gate 的纯合同现已落地：每次运行绑定授权环境、facts/capability/
 policy 派生 successor、独立 Task/Authorization/Verification receipt 和
 校准指标；Pentest 合格且 Research/Code 至少一域证明收益后也只生成强制
-Review、无 activation authority 的 proposal。下一步仍是统一 migration/
-owner、30 次真实授权实验、真实非 Pentest 收益与 Review；当前不得升级
+Review、无 activation authority 的 proposal。0136 已把 0105 calibration
+与三类外部 receipt authority 绑定为统一 cohort 成员。下一步仍是 30 次真实
+授权实验、真实非 Pentest 收益与 Review；当前不得升级
 L3 production influence。
 
 Code 20 项收益协议已冻结：同 source/model/provider/profile/budget、独立 fresh
 worktree 与 execution；通过率提升至少 10 个百分点，或非劣 5 个百分点且成本
 降低至少 15%，同时 hidden/static/diff-risk 不得退化。D19 失败 arm 现会在
 cleanup 后形成 terminal observation，不再因测试失败被 cohort 丢弃。下一步
-仍是统一 migration/owner、真实外部模型执行、20 项 evidence 和 proposal Gate。
+仍是真实外部模型执行、20 项 evidence 和 proposal Gate。
+
+本地 NE-02 波次集合最终为 `169 passed, 1 skipped in 104.80s`，跳过项仅为
+Windows symlink 权限缺失且不计 PASS。migration head 为 0136；首次集合中的
+4 项失败已透明保留并修复。当前本地代码状态为
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，不等于真实收益达标，
+也不允许 L3 production promotion。
+收口发布合同首次因 manifest 仍硬编码 0135 得到 `58 passed / 1 failed`；
+更新为 0136 后完整复跑为 `59 passed in 8.75s`。统一 static/doc Gate
+和 fresh 架构 Gate 1～14 均通过，失败清单为空。
 
 ## 历史编号
 

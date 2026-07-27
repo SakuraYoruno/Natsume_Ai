@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.34
+版本：v3.35
 
 核对日期：2026-07-28
 
@@ -2205,3 +2205,31 @@ node-only 参数，随后仍只进入同一个 `_schedule_retry()` writer transa
 Operation checkpoint 仍在 Store 的单一 SQLite read snapshot 中读取四类记录，
 再把已读取的 Outbox/Reservation 映射交给纯 validator；validator 不重新查询
 数据库，也不能拼装另一份 authority。
+
+## NE-02 cohort evidence 与 promotion 数据流
+
+```mermaid
+sequenceDiagram
+    participant O as Cohort Owner
+    participant S as Lower Source Ledger
+    participant L as 0136 Cohort Ledger
+    participant R as Review
+
+    O->>L: preregister exact 24/20/30 spec
+    loop each frozen workload
+        O->>S: reopen terminal/calibration/receipt facts
+        S-->>O: content-addressed authority proof
+        O->>L: append member + proof
+    end
+    O->>L: seal complete evidence set
+    L-->>O: immutable report
+    O->>L: safe Pentest + non-Pentest benefit
+    L-->>R: Review-required proposal only
+    Note over L,R: activation=false, production influence=false
+```
+
+同一 `(domain, cohort, version, workload)` 重放先从 0136 重开 canonical
+evidence/proof，不再次访问来源 ledger。报告写入前由 SQL trigger 和 repository
+共同要求精确成员数，重开时重新计算 evidence-set digest。promotion evidence
+和 proposal 在一个事务中写入；任何报告缺失、eligibility 不足或 digest 漂移
+均整体回滚。真实模型/实验没有在本流中被 fixture 替代。

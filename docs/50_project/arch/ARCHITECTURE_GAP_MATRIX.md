@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.31
+版本：v3.32
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -133,7 +133,7 @@ Host 情感连续状态和回复形态额度的 module-global authority 也已�
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 
-当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0135_task_review_denial_settlement.sql`。0132 的 Attempt-bound child Budget 语义保持不变；0133 增加 durable Verification，0134 增加 durable Acceptance/Review 创建，0135 增加 Review denial 原子终态。0130/0131 schema 与 signed reconciliation 保持不变；known interruption marker、0130 case 和两类 Outbox 已合并为同一事务，未决 case不会因后续 Budget/Lease/lifecycle 变化从 current inventory 消失。五节点菱形与八根节点已证明精确 `COMMITTED` checkpoint 的依赖释放和跨 owner 恢复，worker 各调用一次；无限规模、其它 failure/cancellation 组合、自动归因、Workspace 终态和部署 fan-out 仍未完成。
+当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0136_planning_search_cohort_ledger.sql`。0132～0135 的 Task Budget/Verification/Acceptance/Review denial 语义保持不变；0136 新增 PlanningSearch cohort evidence/proposal，不改变 Task execution authority。
 
 Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：每个写请求冻结 Secure Ingress method/path/body、definition head 和 claim，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，只有 post-Acceptance `operator.state_control` Effect 可以写 canonical repository；不可变 admin operation receipt 与 claim 之间的崩溃可由新实例精确恢复。路由中的直接 Scheduler writer 为 0，read 路由保持只读，trigger 保持既有 governed occurrence。
 
@@ -353,6 +353,21 @@ multi-node/batch failure、其它 unknown-effect/cancellation、多 Workspace、
 bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
 清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
 Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
+
+## 13. NE-02 固定 cohort authority 差距
+
+| 能力 | 当前证据 | 仍缺 | 状态 |
+|---|---|---|---|
+| 统一持久 owner | 0136 单一 SQLite UoW 持有 24/20/30 registration、member、report、proposal | 部署 namespace/canary | `CODE_COMPLETE_LOCAL` |
+| 来源真实性 | Research/Code 重开 0107/0106 terminal；Pentest 重开 0105 与三类 receipt authority | 真实 provider transport、授权 lab、独立 verifier 部署 | `ACCEPTANCE_PENDING_EXTERNAL` |
+| exact replay | response loss/restart 不再次调用 resolver 或执行 arm | 跨主机存储故障演练 | `LOCAL_PASS` |
+| 收益 Gate | 固定统计、完整 evidence-set digest、失败报告保留 | 24 Research、20 Code、30 Pentest 真实 cohort | `UNPROVEN` |
+| L3 promotion | 仅生成 Review-required、无 activation/prod influence proposal | Review、版本 activation、rollback、生产 canary | `SHADOW_ONLY` |
+
+因此“durable cohort owner missing”已从缺口中删除，但“真实收益已证明”和
+“L3 已生产启用”仍是明确缺口。最终波次集合
+`169 passed, 1 Windows privilege skip` 只关闭本地代码/持久化阶段；远程 CI
+因账户额度为 `NOT_RUN_ACCOUNT_QUOTA`，不能冒充 PASS。
 
 ### 当前结构门禁纠偏
 

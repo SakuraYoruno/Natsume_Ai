@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.35
+版本：v0.36
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -762,7 +762,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
 - T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0135，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0136，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 
@@ -1266,7 +1266,8 @@ static/doc Gate 和架构 Gate 1～14 通过。无 migration，NE-01 保持
 - T-NE01-RPQ-06：Guardian projection 抛错时 worker health 必须保持
   `DEGRADED/FAILED` 且不泄漏异常正文；不得因此删除 coordination evidence。
 - T-NE01-RPQ-07：`review_continuation_store.py` 必须继续小于 1,500 行，
-  poison helper 不得拥有连接或 Review/Task writer；migration head 保持 0135。
+  poison helper 不得拥有连接或 Review/Task writer；该历史切片绑定 0135，
+  当前 0136 只增加 PlanningSearch cohort evidence，不改变本测试边界。
 
 当前最终受影响集合为 `88 passed in 116.19s`；文档、交付元数据与 coverage
 合同为 `39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过。该 Gate 关闭有界扫描饥饿和 durable
@@ -1324,3 +1325,33 @@ Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更
   `39 passed in 6.56s`，文档/交付合同为 `79 passed in 42.49s`；架构
   Gate 1～14 与统一 static/doc Gate 通过。各组不累加。该 Gate 不证明
   NE-01 wave、production canary 或 NE-07。
+
+## T-NE02-COHORT-AUTHORITY：固定收益 cohort 的单一持久证据 owner
+
+- T-NE02-CA-01：fresh 0001→0136 必须创建 Research/Code/Pentest 共用的
+  registration、member、report、promotion evidence/proposal 表；0136 asset
+  checksum、五张表、全部 append-only trigger 与 foreign key 必须通过 readiness。
+- T-NE02-CA-02：registration 的成员数只能为 Research=24、Code=20、
+  Pentest=30；不完整成员集合不能 seal report。
+- T-NE02-CA-03：Research member 必须从 0107 exact terminal receipt 重开；
+  Code member 必须从 0106 cleanup-gated terminal receipt 重开；Pentest member
+  必须从 0105 exact prediction/outcome 及 Task/Authorization/Verification
+  receipt authority 重开。resolver 缺失、拒绝或 digest 漂移均不得写入成员。
+- T-NE02-CA-04：成员、报告和 proposal exact replay 不重新调用来源 resolver、
+  不重新执行 arm，也不改变 created timestamp 或产生第二行。
+- T-NE02-CA-05：报告必须绑定按 workload 排序的完整 evidence-set digest；
+  restart reader、SQL tamper、非 canonical JSON、proof/report digest 漂移均
+  fail closed。
+- T-NE02-CA-06：promotion 必须同时存在合格 Pentest report 和至少一个合格
+  Research/Code report；输出固定为 Review-required proposal，
+  activation/prod influence=false，不能自行提升 L3。
+- T-NE02-CA-07：0131 非幂等 DDL 在“物理 schema 已完整提交但 catalog receipt
+  丢失”时，只能在 exact checksum 及 column/index/trigger postcondition 全部
+  成立后回填 `APPLIED_WITH_COMPAT`；不完整 schema 不得跳过。
+- T-NE02-CA-08：最终波次集合为 `169 passed, 1 skipped in 104.80s`；唯一
+  skip 是 Windows symlink privilege 不可用且不计 PASS。首轮四项失败必须在
+  证据中保留，不得从报告删除。收口发布合同首次因旧 0135 manifest 断言得到
+  `58 passed / 1 failed`，更新为 0136 后完整复跑
+  `59 passed in 8.75s`；统一 static/doc Gate 与架构 Gate 1～14 均通过且
+  失败清单为空。真实 24/20/30 实验、Review、activation 和
+  NE-07 不由本地 fixture 提升。

@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.30
+版本：v3.31
 日期：2026-07-28
 状态：`NE-02_IN_PROGRESS / PROGRAM_INCOMPLETE`
 
@@ -185,7 +185,7 @@ exact TaskGraph node authority 下调用。Executive 执行文件必须不存在
 
 历史 Chat 副作用切片先把 `transactional_side_effects` 从 `PARTIAL` 提升为单控制项 `PASS`：两个 Life Acceptance Effect 必须在 exact command 的完整 projection-intent 集合和 durable receipts 全部吻合后才能 COMMIT；foreground 的 `surface.post_process` receipt 又要求 visible assistant turn 与 LifeMemory admission 已持久成功。该切片当时 Chat 仍不完整；后续 `3d68bd1e` 正式收据已补齐 commit binding 与模型 Budget，所以当前 Chat 为 `COMPLETE`。外部 Gateway delivery 仍是幂等 eventual delivery，不属于同一 SQL transaction。
 
-Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；Operator 当前仍为 `14/37`，其余 `23/37` 继续失败关闭，Scheduler surface 不计入该库存。当前连续 migration head 为 0135；0133 固化节点 Verification，0134 固化节点 Acceptance/Review 创建边界，0135 固化 Review denial 原子终态，均不改写 Scheduler authority。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
+Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；Operator 当前仍为 `14/37`，其余 `23/37` 继续失败关闭，Scheduler surface 不计入该库存。当前连续 migration head 为 0136；0133～0135 固化节点 Verification、Acceptance/Review 和 denial terminal，0136 独立持有 PlanningSearch cohort evidence，均不改写 Scheduler authority。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
 
 当前后续切片以最新 `origin/dev` 为动态基线，不再把任何历史提交号当固定 Goal authority。多节点恢复在既有双 checkpoint、共享 `EXCEEDED` 缺失落账与 four-root mixed settlement 之上，新增五节点 `root → (left,right) → join → tail` 菱形图和八个并行根节点的真实 SQLite 重启恢复：精确 `COMMITTED` checkpoint 只按不可变图序续接，依赖满足后才释放后继，每个 worker 调用一次，不存在固定四节点恢复上限。0130 同时把 `UNKNOWN_SIDE_EFFECT`、`CANCELLATION_CROSSING`、checkpoint Budget/authority `CONFLICT` 冻结为 exact Graph/Node/Attempt/Operation/Budget/cancellation/active-Lease 版本绑定的 append-only case。当前实现已把 known interruption 的 `RECOVERY_REQUIRED` marker、Operation Outbox、0130 case 与 case Outbox收进同一 SQLite UoW；Budget/Lease/lifecycle 后续推进不再让未对账 case从 current inventory消失，Graph cancellation 会追加 intent-bound successor 并淘汰旧 unknown current case。前两类仍须各自签名对账，冲突保持 quarantine 且不得取得 takeover Lease。状态提升为 `ATOMIC_INTERRUPTION_RECOVERY_HOLD_LOCAL_PROVEN / GENERAL_SHAPE_COMMITTED_CHECKPOINT_RECOVERY_LOCAL_PROVEN / GENERAL_RECOVERY_INCOMPLETE`，但不改变 NE-01=`IN_PROGRESS`、wave integration=`NOT_RUN`、Docker full stack=`NOT_RUN_NE07` 或 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -727,7 +727,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0135_task_review_denial_settlement.sql`：0115～0132 保留为连续历史资产，0133 固化节点 Verification 与直接拒绝终态，0134 固化节点 Acceptance/Review 创建边界，0135 固化拒绝后的 Node/Graph/Budget/Outbox 原子 settlement；这些资产不创建第二个通用 Graph settlement authority。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0136_planning_search_cohort_ledger.sql`：0115～0132 保留为连续历史资产，0133 固化节点 Verification 与直接拒绝终态，0134 固化节点 Acceptance/Review 创建边界，0135 固化拒绝后的 Node/Graph/Budget/Outbox 原子 settlement，0136 独立持有 PlanningSearch cohort evidence/proposal；这些资产不创建第二个通用 Graph settlement authority。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 
@@ -1108,3 +1108,31 @@ Operation checkpoint 功能/合同为 `110 passed in 74.16s`；原子
 Review/checkpoint 集合为 `39 passed in 6.56s`，文档/交付合同为
 `79 passed in 42.49s`，架构 Gate 1～14 与统一 static/doc Gate 通过。本切片
 没有新增生产能力，不代替 NE-01 wave integration、production canary 或 NE-07。
+
+## 17. NE-02 当前实施进展：统一 cohort 证据 authority
+
+连续 migration head 已推进到
+`0136_planning_search_cohort_ledger.sql`。本 migration 建立一个
+append-only owner，统一持有 Research 24、Code 20、Pentest 30 的冻结
+registration、成员 evidence、来源 proof、完整报告和跨域 promotion proposal。
+它不持有模型、工具、Task 或 activation writer。
+
+成员进入 0136 前必须通过显式 source resolver：
+
+- Research 从 0107 owner 重开 exact paired terminal receipt；
+- Code 从 0106 owner 重开 cleanup-gated terminal receipt；
+- Pentest 从 0105 owner 重开 prediction/outcome，并由注入的只读 authority
+  重开 Task、Authorization、Verification 三类 content-addressed receipt。
+
+报告只有在成员数精确为 24/20/30 时才能写入；重启后按 evidence-set digest
+重开。安全 Pentest 与至少一个合格非 Pentest 报告只能生成
+Review-required proposal，migration 和合同均固定 activation/prod influence
+为 false。exact replay 在查询到相同成员后不再调用 source resolver。
+
+NE-02 波次集合最终为 `169 passed, 1 skipped in 104.80s`。唯一 skip 是
+Windows symlink privilege 不可用，不计为通过。首轮
+`165 passed / 4 failed / 1 skipped` 暴露并修复了通用内核中的未使用
+Pentest facade、0131 receipt-loss replay 缺口和 D19 失败 arm 旧断言。
+真实 Research/Code provider cohort、授权 Pentest lab、Review 和 activation
+均未执行，因此本波状态只能是
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`。

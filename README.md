@@ -9,7 +9,8 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
-NE-01 的代码波次已在当前 `dev@27b032f1e` 完成本地封口，状态为
+NE-01 的代码波次封口证据绑定 `27b032f1e`，并已进入当前
+`origin/dev@a407e73e`；状态为
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，不是生产全栈 `PASS`。
 同一个文件型 canonical SQLite 先运行 Chat、Skill、Delegate、Plan，再追加
 Scheduler、Internal、Operator；只读收据得到七路线全部 `PASS`，
@@ -28,6 +29,30 @@ Budget 生产动作仍只启用 `BLOCK`；`DEGRADE/REVIEW` 是 proposal-only，
 有签名的 fan-out promotion、真实 HTTP/network/provider、外部 namespace 和
 Docker 全栈仍由 NE-07 验收，所以整体继续 `INCOMPLETE`，当前实现波切换到
 NE-02 PlanningSearch。
+
+NE-02 的本地证据 authority 已推进到连续 migration
+`0136_planning_search_cohort_ledger.sql`。Research 24、Code 20、Pentest
+30 三个固定 cohort 不再只是内存 evaluator：同一个 append-only SQLite owner
+持久化 preregistration、成员证据、来源 authority proof、报告和跨域 promotion
+proposal。Research 成员必须从 0107 terminal receipt 重开，Code 必须从 0106
+cleanup-gated terminal receipt 重开，Pentest 必须同时重开 0105 calibration
+prediction/outcome 与 Task、Authorization、Verification 三类 receipt；exact
+replay 不再次调用来源解析器。跨域 Gate 即使通过也只写
+`review_required=true / activation_authority=false /
+production_influence_enabled=false` 的 proposal。
+
+NE-02 波次集合最终为 `169 passed, 1 skipped in 104.80s`；唯一跳过项是当前
+Windows 没有创建 symlink 的权限，不计为通过。首轮结果为
+`165 passed / 4 failed / 1 skipped`，随后删除无调用者的 Pentest 兼容 facade、
+补齐 0131 物理 DDL 已提交但 migration receipt 丢失时的 checksum-bound 恢复，
+并把 D19 旧断言改为保留 cleanup-gated 失败 arm terminal evidence。以上只证明
+本地机械协议与恢复；真实 24/20/30 外部实验、授权 Pentest lab、收益门槛和
+Review/activation 尚未执行，因此 NE-02 仍是
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，L3 继续 shadow。
+收口发布合同首轮为 `58 passed / 1 failed`，唯一失败是 Core Release manifest
+仍硬编码 0135；同步为 0136 后完整复跑 `59 passed in 8.75s`。统一
+`static_scan,doc_gate` 为 `PASS / failures=[]`，耗时 109.4 秒；fresh 架构
+Gate 1～14 为 `PASS / failed_gates=[]`，耗时 25.6 秒。
 
 当前 NE-01 结构门禁已同步到 `origin/dev` 实际合并的原子 authority，而不是继续
 冻结过时调用次数、构造签名和 MRO 下标。Review denial 的 Node/Graph/Budget/
@@ -288,7 +313,7 @@ NE-01 的预算 authority 已从“只有一条图级共享记录”推进到父
 
 当前 NE-01 已把同一真实写产物链从 Governed Internal 扩到三条已登记的直接 Agent Skill：`agent_worker`、`agent_self_heal`、`agent_self_evolve`。Skill payload 仍只能提交未准入的兼容 WorkOrder；server 在节点执行前用冻结的 HostCommand、TaskGraph、Attempt、Lease、node grant、Budget、risk-4 policy 和唯一已消费的 pre-execution Review 重建 `WorkOrderV3`，caller 不能选择 Workspace、ArtifactStore、Review ref 或执行 authority。`codex_runtime` adapter 只取得 app-local ArtifactStore/WorkspaceRuntime，写结果先密封为 protected stage；WorkerProjection 只转移 ref/digest，Graph Acceptance 再编译 `agent.workspace_artifact_promote`。Accepted handler 会重开 immutable admission、WorkerProjection、Node/Attempt/Lease、NodeArtifact、claimed/committed Effect、terminal Preview 和 sealed bytes，随后才用既有 0116 推进 `ACTIVE → ACCEPTED → PROMOTED`；提升失败会在可见对话、Life 和 delivery Effect 之前停止。真实 SQLite+Git 集成已证明源 `main` 不移动、accepted HEAD 可跨 Runtime 重建读取；既有 exact replay、seal 后篡改与 lifecycle 回滚证据继续适用。Domain Pack、未登记 Skill、其它 failure/cancellation、OS/container tenant、handle-level TOCTOU、七路线整体验收和 NE-01 仍未完成。
 
-当前 NE-01 恢复切片由连续 migration `0130_task_operation_recovery_hold.sql` 与 `0131_task_operation_recovery_hold_binding.sql` 共同组成；仓库连续 migration head 已推进到 `0135_task_review_denial_settlement.sql`，0132～0135 不改写这两条恢复语义。现在 `RESERVED → RECOVERY_REQUIRED` mutation、Operation Outbox、append-only `operation-recovery-hold://...` 与 `OPERATION_RECOVERY_HOLD_RECORDED` Outbox 在同一个 SQLite 事务中提交，Hold 写入失败会把 Operation marker 一并回滚，不再依赖下一次请求重入补登记。subject 仍精确冻结 Graph、Node、Attempt、Operation、graph Budget、取消意图、active Lease 及各自版本；未决 unknown/cancellation case 的 current 身份由 exact Operation version 和取消身份决定，后续 Budget 计量、Lease 到期或 lifecycle fence 不会让恢复清单消失。Graph cancellation 会追加 intent-bound successor case，并使此前 unknown case 退出 current projection。checkpoint conflict 继续要求完整版本快照。exact replay 只能重开同一 case/outbox；UPDATE/DELETE、subject/outbox 漂移和过时 Operation 版本均失败关闭。
+当前 NE-01 恢复切片由连续 migration `0130_task_operation_recovery_hold.sql` 与 `0131_task_operation_recovery_hold_binding.sql` 共同组成；仓库连续 migration head 已推进到 `0136_planning_search_cohort_ledger.sql`，0132～0135 不改写这两条恢复语义，0136 也只新增 PlanningSearch 证据 authority。现在 `RESERVED → RECOVERY_REQUIRED` mutation、Operation Outbox、append-only `operation-recovery-hold://...` 与 `OPERATION_RECOVERY_HOLD_RECORDED` Outbox 在同一个 SQLite 事务中提交，Hold 写入失败会把 Operation marker 一并回滚，不再依赖下一次请求重入补登记。subject 仍精确冻结 Graph、Node、Attempt、Operation、graph Budget、取消意图、active Lease 及各自版本；未决 unknown/cancellation case 的 current 身份由 exact Operation version 和取消身份决定，后续 Budget 计量、Lease 到期或 lifecycle fence 不会让恢复清单消失。Graph cancellation 会追加 intent-bound successor case，并使此前 unknown case 退出 current projection。checkpoint conflict 继续要求完整版本快照。exact replay 只能重开同一 case/outbox；UPDATE/DELETE、subject/outbox 漂移和过时 Operation 版本均失败关闭。
 
 0131 进一步要求 `task_operation.reconcile` 在存在唯一 current hold 时，必须携带 exact case ref 与 subject digest；两者进入 Secure Ingress、不可变 WorkOrder/TaskGraph、风险 4 Review、Acceptance Effect 和 append-only reconciliation evidence。Accepted handler 复用既有 Operation/Outbox 单事务 authority 执行签名 `REACQUIRE/COMMIT/RELEASE`，随后必须重新打开同一 case并证明其已变为 non-current，才提交 v5 handler receipt。UNKNOWN case 不得伪装 cancellation intent；CANCELLATION case 必须绑定 exact intent 且只允许 `COMMIT/RELEASE`；每个 case 最多一份 evidence，响应丢失或进程重启只重开同一事实。checkpoint `CONFLICT` 继续隔离，不能借 0131 绕过。当前受影响回归为 `129 passed in 146.40s`，文档/机器状态合同为 `51 passed`，架构静态 Gate 1～14 与统一 `static_scan,doc_gate` 均通过。该链关闭的是“hold 与对账证据脱节”的当前断点，不推断副作用、不自动归因未知效果，也不代表一般恢复或 NE-01 完成。
 
@@ -365,7 +390,7 @@ HardState 运行期真相现由每个 Host lifespan 的 `HostHardStateOwner` 与
 
 Scheduler governed occurrence 不再在 worker 内调用领域 handler。worker 只把冻结 occurrence/definition/worker/fingerprint 与 graph/node/Attempt authority 编译为一个 `scheduler.operation.execute` 描述；canonical WorkerProjection 是 Acceptance 前的不可变计划 checkpoint。Graph Verification/Acceptance 与该 Effect intent 由既有 TaskStore canonical UoW 同成同败，随后 Host lifespan 内共享的 `AcceptanceEffectDispatcher` 才重开 Action Preview、claim Effect 并调用真实 handler。实际结果继续写入既有不可变 `SchedulerExecutionResultRepository`；native Scheduler ingress claim 绑定该实际结果 receipt，Operator 外层则保留独立的 checksum-chained OBS outcome receipt，并且只能在实际结果已可归因后封口。Review 前调用数为 0、Effect commit 后为 1，duplicate 只重放既有结果；所有过期 claim 或 handler 调用后的响应丢失都只能调用显式只读 `reconcile()`，缺少 reconciler 时持续保持 `RECONCILIATION_REQUIRED`，不能盲目再调普通 handler。生产 sys-mode 已提供 exact HardState 只读恢复器；Scheduler handler 结果必须显式给出合法状态和真实 durable `receipt_ref`，空结果不再补成成功。0117 进一步删除 `SchedulerClock._retry_state`：`admit_due_occurrence` 在同一 `BEGIN IMMEDIATE` 内校验 live DUE owner/fence、写 immutable occurrence、推进 definition head，并把原 retry row 原子转为同 owner/fence 的 `OCCURRENCE` claim。独立 lifecycle task 在 dispatch 前续租并在执行中 heartbeat；lease 过期不能自我续活，clear/defer 还必须使用实际调用时间，故慢执行期间第二实例不能重复 dispatch，异常退避也不再取旧 tick 时间。该 Clock 单元/合同/durable-UoW 定向批次为 19 项、47.53 秒。definition/admin 写入口、mutable batch freezing、一般未知外部效果人工归因、波次集成与 canary 仍未收口，所以这里只能定级为 `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
-通用 Acceptance Effect 的恢复边界继续收紧，但不能外推为整条 Universal Runtime 的整体完成。可见 user turn、Preference evaluation 与 Life conversation projection 现在由三个独立 post-Acceptance Effect 驱动；visible turn 精确重开 turn/`MemoryEvent`。Preference store privacy gate contract 缺失/非 `bool` 立即失败关闭且零写；配置 false 或 malformed env 则保守解析为 disabled，提交零 event/profile 的 `DISABLED` receipt。启用时以 effect-bound deterministic operation ID 在一个 UoW 中写 event、append-only profile child version 和 evaluation receipt，0118 trigger 封住 receipt 后新增 child，reconcile 再校验 child 全集以发现绕过 trigger 的篡改；无信号写真实 `NO_SIGNAL`。推荐反馈仅选择 admission time 不晚于当前请求且 exact person/conversation/session 的 delivery，并绑定 canonical full-delivery digest。Life 以 deterministic command ID 重开 exact command receipt。Surface 初次 POST 返回 500、畸形或丢失响应时仍先进入 `UNKNOWN`；恢复只能通过真实 `internal_reply` HMAC/timestamp/nonce 的只读 Gateway query 重开原 delivery。Gateway 从同一 SQLite outbox snapshot 的 canonical payload 校验 `effect_id`，Host 重新派生并校验 delivery/payload identity；`NOT_FOUND` 绝不等价于未执行。连续 migration head 现为 `0135_task_review_denial_settlement.sql`；0128～0132 的 Effect、mode-policy、recovery 与节点预算边界保持原语义，0133 固化节点 Verification，0134 固化节点 Acceptance/Review 创建边界，0135 原子收口 Review 拒绝后的 Node/Graph/graph Budget 与三条 Outbox；这些切片都不启用部署密钥、网络入口或自动副作用推断。这些切片仍不改变 NE-01 `IN_PROGRESS` 或任何路线验收，真实服务栈金丝雀尚未运行。
+通用 Acceptance Effect 的恢复边界继续收紧，但不能外推为整条 Universal Runtime 的整体完成。可见 user turn、Preference evaluation 与 Life conversation projection 现在由三个独立 post-Acceptance Effect 驱动；visible turn 精确重开 turn/`MemoryEvent`。Preference store privacy gate contract 缺失/非 `bool` 立即失败关闭且零写；配置 false 或 malformed env 则保守解析为 disabled，提交零 event/profile 的 `DISABLED` receipt。启用时以 effect-bound deterministic operation ID 在一个 UoW 中写 event、append-only profile child version 和 evaluation receipt，0118 trigger 封住 receipt 后新增 child，reconcile 再校验 child 全集以发现绕过 trigger 的篡改；无信号写真实 `NO_SIGNAL`。推荐反馈仅选择 admission time 不晚于当前请求且 exact person/conversation/session 的 delivery，并绑定 canonical full-delivery digest。Life 以 deterministic command ID 重开 exact command receipt。Surface 初次 POST 返回 500、畸形或丢失响应时仍先进入 `UNKNOWN`；恢复只能通过真实 `internal_reply` HMAC/timestamp/nonce 的只读 Gateway query 重开原 delivery。Gateway 从同一 SQLite outbox snapshot 的 canonical payload 校验 `effect_id`，Host 重新派生并校验 delivery/payload identity；`NOT_FOUND` 绝不等价于未执行。连续 migration head 现为 `0136_planning_search_cohort_ledger.sql`；0128～0132 的 Effect、mode-policy、recovery 与节点预算边界保持原语义，0133 固化节点 Verification，0134 固化节点 Acceptance/Review 创建边界，0135 原子收口 Review 拒绝后的 Node/Graph/graph Budget 与三条 Outbox，0136 只增加 PlanningSearch cohort evidence/proposal；这些切片都不启用部署密钥、网络入口或自动副作用推断。这些切片仍不改变 NE-01 `IN_PROGRESS` 或任何路线验收，真实服务栈金丝雀尚未运行。
 
 签名终态修复不会把 `attestation_signature` 或 key ID 写入通用 WorkOrder/TaskGraph。Secure Ingress 完整验证后，0119 在独立 append-only 表中保存 exact command、request、principal、claim/audit/body digest；TaskGraph、Review 与 Acceptance Effect Intent 只携带 `signed_command_ref + signed_command_sha256`。风险 4 表示“必须 Review、可以由人工批准”，风险 5 仍保留给不可执行的绝对阻断语义；Effect 执行前还会按 exact Graph/Node/Attempt/Grant/Context/Scene/Guardian 生成 Action Preview。真实 SQLite 集成已证明 Review 前 proof 不存在且目标 Budget 不变，Review continuation 后仅 Acceptance handler 写入签名 proof并释放目标 Budget，重复请求只重开同一 Graph、Effect、proof 和 0119 行。本切片同时删除四条仍被阻断的 Canon Operator 命令在该适配器中的 dormant route writer，保留 manifest 覆盖但不再保留不可达直写实现。该证据是本地 governed integration，不是外部 HTTP/network canary、NE-01 波次验收或 NE-07 全栈验收；功能默认关闭，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 

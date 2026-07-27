@@ -3,9 +3,9 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.60
+版本：v5.61
 核对日期：2026-07-28
-原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
+合并基线：`origin/dev@a407e73e`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
@@ -197,7 +197,7 @@ reconciler 与 repository 重开唯一 Acceptance/artifact/Operation/projection
 路径、源分支不变与第二次重启零重放。多个写 owner、其它
 failure/cancellation/unknown-effect 组合及强隔离仍未完成。
 
-当前连续 migration head 为 `0135_task_review_denial_settlement.sql`。0132 在 Attempt/Lease/READY claim 的同一 `BEGIN IMMEDIATE` 中创建 immutable child Budget Reservation；Graph Budget 保持唯一 aggregate ceiling。0133 在 Verification transition 同一 UoW 固化 exact decision，0134 在 Acceptance transition 同一 UoW 固化 exact decision 并原子提交 artifact/effect 或 Review waiting bundle，0135 再原子提交 Review denial 的 Node/Graph/graph Budget、三 Outbox 和 settlement。0130/0131 schema 与签名 reconciliation 保持不变；当前 Store 已把 known interruption 的 `RECOVERY_REQUIRED` marker、0130 case 和两类 Outbox 收进同一事务，并按 exact Operation version/取消身份维护未决 current case。该局部证据仍不覆盖其它 failure/cancellation、自动副作用归因、Workspace 全终态、部署 fan-out 或七路线验收。
+当前连续 migration head 为 `0136_planning_search_cohort_ledger.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal，不改变 Task execution authority。
 
 无 cancellation intent 的 signed `RELEASE + NO_SIDE_EFFECT` 已从单节点整图终态扩展为通用节点终态。`TaskOperationFailureReconciliationStoreMixin` 的第一事务只释放 Operation、失败目标 Attempt/Node、过期原 Lease并写四条 Outbox；只有单节点兼容路径在同一事务关闭 Graph/Budget。多节点 Graph/Budget 保持 ACTIVE，重启后的 `DurableDagSchedulingRuntime` 先重建 failed outcome，再让现有 0090 writer 原子提交 Graph/Budget 失败终态。Acceptance v4 receipt 不摘要会变化的 Graph settlement 字段，因此 `PENDING→COMMITTED` 后仍精确重放；0090 decision 或 Graph/Budget Outbox 漂移会失败关闭。双根、并发额度1的真实 SQLite 测试证明 READY sibling 未执行；并发额度2的双失败测试证明非 selected 失败节点仍由同一 decision outcome 精确覆盖并可重开。该链不自动判定副作用，也不覆盖其它 failure/cancellation。
 
@@ -219,7 +219,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
-| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0135_task_review_denial_settlement.sql`。0126～0132 的 Operation、Effect、mode-policy、recovery 与节点预算边界保持不变；0133 增加 durable Verification，0134 增加 durable Acceptance/Review 创建，0135 增加 Review denial 原子 settlement。这些资产都不代表七路线或 NE-01 已生产封板 |
+| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0136_planning_search_cohort_ledger.sql`。0133～0135 收口 Task Verification/Acceptance/Review denial；0136 增加 proposal-only PlanningSearch cohort evidence。这些资产不代表外部收益或生产激活 |
 | Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`2a88f56e` 同库收据使七路 commit binding、三控制 policy 和当前 Plan/Delegate enabled-scope 其余控制通过。Scheduler/Internal/Operator 仍有独立缺口；Operator active inventory 为 14 |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`workspace_write_promotion.py` 密封 bounded safe-path manifest 与 binary patch并确定性生成 accepted HEAD；源 branch 不移动。`internal_startup_checkpoint_continuation.py` 提供 exact scan，`periodic_durable_continuation.py` 只托管 timer/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 仍以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 除精确 sealed abandon/cleanup 外，只对 finalized cancellation 且符合共享中立合同两类 exact signed terminal 的未封存单节点先关闭 claim、再 cleanup/discard；失败顺序不会删除证据。一般 unknown effect、其它 crash-left/取消 closeout 与 general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、OS/container isolation、canary与七路线验收也未完成 |
@@ -978,3 +978,28 @@ scheduler 出现三次独立 lifecycle 写；Plan writer 的
 只借用 `TaskRetryScheduleFacadeMixin` 与纯 identity builder，仍独占
 `_schedule_retry()` 事务；Operation checkpoint Store 保留单一 snapshot，
 只把纯 Outbox evidence 校验下沉。没有新增连接、writer、阈值例外或 allowlist。
+
+## 12. NE-02 固定 cohort authority 当前事实
+
+当前 migration head 为 `0136_planning_search_cohort_ledger.sql`。新增
+`SQLitePlanningSearchCohortLedger` 是三个固定 cohort 的唯一本地 writer：
+它持有 registration、member proof、report 与 promotion proposal；连接和
+`BEGIN IMMEDIATE` 仍只在 repository owner 中。support 模块仅做无连接的
+canonical、digest、registration/report 重开校验。
+
+来源不是由调用者自证。Research resolver 从
+`SQLiteResearchShadowLedger.get_terminal_receipt()` 重开 0107 receipt；
+Code 从 `CodeHistoricalBenchmarkLedger.get_completed()` 重开 0106 receipt；
+Pentest 从 `CalibrationRepository.get()` 重开 0105 prediction/outcome，并
+要求注入的 `PentestExperimentReceiptAuthority` 对 Task、Authorization、
+Verification refs 逐项返回 exact digest。不存在 permissive default。
+
+本地集成实际写入 3 个 registration、74 个 member、3 个 report、3 个
+promotion evidence 和 1 个 proposal；重启后使用拒绝所有调用的 resolver
+仍可 exact replay 已有成员和 proposal。proposal 在合同与 SQL 两层固定为
+Review-required、无 activation authority、无 production influence。
+
+这些是本地机械证据，不是实际收益。当前没有执行 24 个真实 Research、
+20 个真实 Code、30 次授权 Pentest cohort，也没有 Review/activation；
+NE-02 因而是 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，L3
+仍为 shadow。
