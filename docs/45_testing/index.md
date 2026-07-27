@@ -627,8 +627,9 @@ NE-07 Docker/前后端全栈。远程 CI 保持
 结果为 `48 passed in 21.13s`，0 fail/skip；基线为
 `origin/dev@f2dae580df4ff7308deb966f41b605de7b3a37f0`，无 migration。
 这不是 NE-01 波次 integration，也没有启动 Docker/Host/Obs/Monitor/Edge/
-Gateway；一般 Budget 与 supervisor 仍未验收。提交时远程 CI 尚未创建，
-记录为 `NOT_RUN_PENDING_PR`。
+Gateway；一般 Budget 与 supervisor 仍未验收。PR #176 首个 HEAD 的 9 个
+失败 job 已逐个验证为零步骤、无 runner，另有 1 个 skipped，记录为
+`NOT_RUN_ACCOUNT_QUOTA`，不计为远程通过。
 
 ## NE-01 Workspace cleanup 健康与关停重试
 

@@ -813,8 +813,9 @@ Guardian、health/readiness、ASGI composition、两节点 time/concurrency Budg
 和聚焦结构回归为 `48 passed in 21.13s`；无 migration。该证据没有实现
 OS 进程 supervisor 自动拉起，也没有完成 DEGRADE/REVIEW 预算语义、一般
 unknown-effect/batch recovery、program-wide Budget、NE-01 波次集成或 NE-07
-真实服务栈。NE-01 保持 `IN_PROGRESS`；本提交尚未创建 PR，远程状态为
-`NOT_RUN_PENDING_PR`，不得预写为额度失败。
+真实服务栈。NE-01 保持 `IN_PROGRESS`。PR #176 首个 HEAD 的 9 个失败 job
+已逐个确认 `step_count=0` 且 `runner_name=""`，另有 1 个 nightly job 被跳过，
+因此远程状态记为 `NOT_RUN_ACCOUNT_QUOTA`，不冒充测试通过。
 
 ## NE-01 Workspace cleanup 监督与关停重试
 

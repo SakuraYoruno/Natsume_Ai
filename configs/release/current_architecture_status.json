@@ -16,7 +16,7 @@
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
     "version": "v3.1",
-    "remote_ci": "NOT_RUN_PENDING_PR",
+    "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "remote_ci_is_blocking": false,
     "local_evidence_root": "artifacts/local-gates/<commit_sha>",
     "commit_subject_language": "CHINESE_REQUIRED",
@@ -28,7 +28,7 @@
   "active_wave_local_validation": {
     "status": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_SEVEN_ROUTE_FORMAL_ACCEPTANCE_AND_PARALLEL_MIXED_TERMINAL_PROCESS_RECOVERY_LOCAL_PASS_PROGRAM_INCOMPLETE",
     "commit_binding": "FORMAL_ACCEPTANCE_EVALUATED_COMMIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_BASED_ON_ORIGIN_DEV_C97ED7963AF69B476047A48003DD68146BCF5F29",
-    "remote_ci": "NOT_RUN_PENDING_PR",
+    "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "slice": "NE01_WORKSPACE_CLEANUP_GUARDIAN_AND_MULTINODE_BUDGET",
     "workspace_cleanup_guardian_and_multinode_budget_current_validation": {
       "status": "LOCAL_REAL_SQLITE_GUARDIAN_AND_GENERAL_TWO_NODE_BUDGET_PASS_NE01_IN_PROGRESS",
@@ -45,7 +45,7 @@
       "migration": "NONE_CURRENT_HEAD_0135",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "docker_full_stack": "NOT_RUN_NE07",
-      "remote_ci": "NOT_RUN_PENDING_PR",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA_VERIFIED_9_FAILED_JOBS_ZERO_STEPS_BLANK_RUNNER_ONE_SKIPPED_PR_176_FIRST_HEAD",
       "boundary": "NO_OS_PROCESS_SUPERVISOR_COMPLETE_DEGRADE_REVIEW_GENERAL_UNKNOWN_EFFECT_BATCH_RECOVERY_PROGRAM_WIDE_BUDGET_OR_NE07"
     },
     "workspace_cleanup_supervision_current_validation": {

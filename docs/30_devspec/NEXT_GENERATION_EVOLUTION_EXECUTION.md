@@ -1004,4 +1004,5 @@ Acceptance authority。OS/container/tenant isolation、handle-level TOCTOU、
 `origin/dev@f2dae580df4ff7308deb966f41b605de7b3a37f0`，无 migration。
 该切片不宣称 Windows/容器 supervisor 自动重启，也不关闭 DEGRADE/REVIEW、
 一般 batch/unknown-effect recovery、program-wide Budget、波次集成或 NE-07。
-状态仍为 `IN_PROGRESS`，提交时远程 CI 为 `NOT_RUN_PENDING_PR`。
+状态仍为 `IN_PROGRESS`。PR #176 的 9 个失败 job 均为零步骤且无 runner，
+另有 1 个 skipped，远程 CI 记为 `NOT_RUN_ACCOUNT_QUOTA`。

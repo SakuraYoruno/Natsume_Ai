@@ -1109,8 +1109,9 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - 当前去重定向回归为 `48 passed in 21.13s`，0 fail/skip；基线
   `origin/dev@f2dae580df4ff7308deb966f41b605de7b3a37f0`，无 migration。
   本组不证明 OS supervisor、完整 DEGRADE/REVIEW、一般 unknown-effect/
-  batch recovery、NE-01 波次 integration 或 NE-07；提交时远程 CI 为
-  `NOT_RUN_PENDING_PR`。
+  batch recovery、NE-01 波次 integration 或 NE-07。PR #176 首个 HEAD
+  的 9 个失败 job 均为零步骤且无 runner，另有 1 个 skipped，远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01-WORKSPACE-CLEANUP-SUPERVISION
 
