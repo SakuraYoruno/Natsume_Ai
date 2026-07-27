@@ -3,11 +3,18 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.31
+版本：v2.32
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+NE-01 的本地代码封口把七个入口、一般多节点恢复和 Workspace 生命周期放进
+同一证据边界：路线收据从一个 canonical SQLite 只读快照派生；恢复波次由
+fresh Windows process 重开同一 ledger，Git Workspace 只在 Acceptance 后
+promotion，失败或取消则按 exact authority abandon/cleanup。系统仍以签名
+feature receipt 控制生产 fan-out，未知副作用保持 ambiguity 直到对账，因而
+本地代码封口不会绕过 NE-07 的部署验收。
 
 Host survivor 现在在 Command Recovery Inventory 层区分两种 `BLOCKED`：
 含 ready/retry/review/execution/cancellation 节点的 actionable block 继续进入

@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.32
+版本：v3.33
 
 核对日期：2026-07-27
 
@@ -12,6 +12,26 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+NE-01 代码封口后的证据流固定为：
+
+```text
+七类真实入口
+  → HostCommand / immutable TaskGraph
+  → Attempt / Lease / child Budget / Review
+  → WorkerProjection / Verification / Acceptance
+  → Effect / Outbox / Receipt
+  → query-only 同库七路线收据
+
+进程崩溃
+  → fresh process 重开 canonical ledger
+  → exact checkpoint 或 case-bound signed reconciliation
+  → 已验收 worker 不重跑
+  → Graph/Budget/Workspace 唯一终态
+```
+
+这条流在当前提交上已有 24 个恢复用例；生产 feature promotion、网络和外部
+服务流仍没有执行，继续进入 NE-07 分支，而不是从本地收据推导为 `PASS`。
 
 并发 outer settlement 崩溃后的当前数据流为：
 

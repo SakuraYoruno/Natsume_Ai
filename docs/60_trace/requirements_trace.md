@@ -5,11 +5,17 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator active manifest 为 `14 governed / 0 blocked`；另外 23 个旧 ID 已从后端 manifest、handler、OpenAPI 和 Monitor 生成客户端退役，并由独立 replacement policy 记录，不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、一般恢复和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.15
+版本：v5.16
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
+
+当前 NE-01 trace 追加本地代码封口证据：
+`27b032f1e → 七路线 canonical SQLite receipt
+sha256:1a4ae489… → 24 个跨进程/Workspace 恢复用例`。该链只把后续实现依赖
+推进到 NE-02；production feature promotion、真实网络/provider/Docker 与
+回滚仍指向 NE-07，完整架构状态继续 `INCOMPLETE`。
 
 ## 1. 解释规则
 

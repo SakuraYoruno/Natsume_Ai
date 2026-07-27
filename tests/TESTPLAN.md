@@ -1,10 +1,24 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.33
+版本：v0.34
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-CODE-WAVE-CLOSEOUT
+
+- T-NE01-CWC-01：在干净 `dev@27b032f1e` 上，GR05 四路线和 remaining-route
+  三路线必须写入同一个文件型 canonical SQLite；query-only collector 必须
+  得到七路线 `PASS`、migration `0135`、零 reason code 和不含正文/secret 的
+  receipt `sha256:1a4ae4890d5cbf32275898681dcaec02c3948dd862ad1056481b53ab4d330383`。
+- T-NE01-CWC-02：一次去重恢复波次固定运行 24 个真实 SQLite、Windows
+  `spawn` 和 Git Workspace 用例，必须覆盖菱形、八根、pre-Operation、
+  committed checkpoint、unknown effect、cancellation、parallel terminal
+  与 promotion/abandon/restart；本次结果为 `24 passed in 165.99s`。
+- T-NE01-CWC-03：本证据只允许状态
+  `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。未签名 feature
+  promotion、未启动真实网络/provider/Docker 时禁止写 production `PASS`。
 
 ## T-NE01-CANCELLATION-FANOUT-PROCESS-RECOVERY
 
