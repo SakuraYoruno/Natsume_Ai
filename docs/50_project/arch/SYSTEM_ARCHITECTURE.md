@@ -3,19 +3,32 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.24
+版本：v2.25
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
 
-Skill 执行现在只有一个 app-local authority root。Frozen worker 提供 exact
+Skill 执行现在有一个显式 policy gate 和一个 app-local authority root。
+canonical Host Registry 对 93 个 Skill 做完备分区：28 个 inline read-only、13 个
+proposal-only、3 个 post-Acceptance Workspace、49 个 catalog-only
+blocked。只有 44 个可执行条目进入 manifest/search/scheduling/admission；
+缺 policy、descriptor drift 和 stale graph 都失败关闭。这个分区不从风险、
+名称或 handler 输出推断副作用，因此 catalog 可见不等于执行可用。
+
+独立旧 Personality Registry 的 19 个 metadata 不属于这 93 个 canonical
+条目；5 个明确 blocked、14 个 `UNCLASSIFIED`，运行 manifest 为 0。
+动态 MCP Skill 也固定 blocked。它们只保留目录兼容，不取得 Task 执行权。
+
+Frozen worker 提供 exact
 TaskGraph/Node/Attempt/Lease/Budget/grant 上下文和显式依赖，
 `governed_skill_execution.py` 才能调用 handler 并进入 Capability Broker。
 Executive 不再拥有 Skill executor；token-only Loader 和 Scheduler metadata
-只能产生失败关闭审计。这个结构清除了“同一个 Skill 被 Task Runtime 与
-兼容入口各执行一次”的双真相，但没有自动解决 Skill 的全域预算或领域
-副作用事务化，因此路线仍为 `INCOMPLETE`。
+只能产生失败关闭审计。启用节点统一先做 Task precharge；Agent 模型走
+Task-bound measurement，proposal-only 不得投递可见副作用，三条写 Agent
+只在 Acceptance 后 promotion。该结构已关闭本地代码边界，但正式验收仍
+绑定旧提交，故 Skill 路线暂为 `INCOMPLETE`；49 个 blocked 能力须在未来
+拥有 typed Effect handler 后另行验收。
 
 Plan 的审批 authority 现在贯穿 Registry、Search、Compiler 和 Task Runtime，但每层只拥有一种职责。Registry 是 `require_confirm` 来源，Search 只能选择并携带候选事实，Compiler 独占 immutable TaskNode policy 生成，ReviewStore 独占人类决定，Continuation Worker 只协调已持久决定的 claim，NodeBoundGrantService 只续签时限与原约束。Scheduler 恢复历史 accepted projection grant 与当前 renewed grant，防止长审批把已提交节点误判成 authority drift；它不允许续签改变 graph revision、目标、风险或权限。
 

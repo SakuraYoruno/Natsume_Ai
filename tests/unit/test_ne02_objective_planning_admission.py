@@ -4,6 +4,7 @@ from copy import deepcopy
 
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.governor.schemas import strict_validate_intent
+from host_brain.contracts.skill_execution import SkillExecutionPolicy
 from host_brain.orchestration.capability_plan_search import (
     build_capability_plan_search,
     is_capability_plan_intent,
@@ -13,6 +14,7 @@ from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
     classify_task_intent_by_rules,
 )
+from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
 def _handler(_payload, _context):  # noqa: ANN001, ANN201
@@ -33,6 +35,7 @@ def _research_registry() -> SkillRegistry:
             capability_tags=("research", "evidence"),
             parallelizable=True,
             fallback_policy="strict_fail",
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
         )
     )
     registry.register(
@@ -46,6 +49,7 @@ def _research_registry() -> SkillRegistry:
             family="research",
             capability_tags=("research", "evidence", "crosscheck"),
             fallback_policy="strict_fail",
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
         )
     )
     return registry
@@ -54,7 +58,9 @@ def _research_registry() -> SkillRegistry:
 def _compile_rule_seed(text: str) -> dict:
     seed = classify_task_intent_by_rules(text)
     assert seed is not None
-    return ThalamusAgent().compile_intent_draft(
+    return ThalamusAgent(
+        state_registry=TribeStateRegistry(),
+    ).compile_intent_draft(
         request_id="request-ne02-objective",
         session_id="session-ne02-objective",
         person_id="person-ne02-objective",

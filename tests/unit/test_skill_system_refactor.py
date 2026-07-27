@@ -10,6 +10,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeSkillSpec
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.skills.executor_registry import ToolExecutorRegistry, ToolExecutorSpec
 from host_brain.skills.registry import SkillRegistry
 
@@ -32,6 +36,8 @@ class _DeclarativeDemoProvider(DeclarativeSkillProvider):
             action="echo",
             normalize_args=_normalize_demo_args,
             context_aliases=(("session_id", "session_id"), ("request_id", "request_id")),
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
+            budget_policy=SkillBudgetPolicy.TASK_PRECHARGE,
         ),
     )
 
@@ -87,6 +93,8 @@ def test_declarative_skill_spec_can_skip_default_action() -> None:
         tool="demo",
         action=None,
         normalize_args=lambda args: {"value": args.get("value")},
+        execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
+        budget_policy=SkillBudgetPolicy.TASK_PRECHARGE,
     )
 
     payload = spec.build_handler()({"value": "ok"}, None)

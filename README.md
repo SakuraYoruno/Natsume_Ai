@@ -9,7 +9,33 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
-NE-01 当前正在收口 Skill 的唯一执行 authority。生产代码只允许
+NE-01 当前正在收口 Skill 的预算与副作用边界。canonical Host Registry 的 93 个
+Skill 已被穷举分类：28 个 `INLINE_READ_ONLY`、13 个
+`PRE_ACCEPTANCE_PROPOSAL_ONLY`、3 个 `POST_ACCEPTANCE_WORKSPACE`，以及
+49 个 `BLOCKED_PENDING_ACCEPTANCE_EFFECT`。前三类共 44 个才进入运行期
+manifest；后 49 个只保留 catalog 可见性，在 PlanningSearch、Scheduler
+自动调度、Host admission 和 stale durable graph 执行四层都失败关闭，直到
+存在 typed post-Acceptance Effect handler。新 Skill、缺失政策或
+`skill_id/tool/action` 描述漂移同样默认拒绝，风险等级和可逆性不能被用来
+推断写权限。
+
+另一个仅供旧 Tool/Scheduler catalog 使用的 Personality Registry 有 19 个
+条目，其中 5 个明确 blocked、14 个保持 `UNCLASSIFIED`；其 governed
+manifest 为 0，不能自动调度或进入 Host Skill 执行。动态 MCP Skill 同样
+固定为 blocked。这样旧目录不会因默认值重新获得执行 authority。
+
+全部 44 个启用 Skill 都先消费 canonical Task precharge；普通只读 Skill
+没有裸模型端口，需要模型的 Agent/声明式 Skill 必须使用 Task-bound
+measurement guard。13 个 proposal-only Agent 只能产出有界候选或 staging
+artifact，不能在 Acceptance 前投递用户可见结果；三条已审核 risk-4 Agent
+写入继续使用 protected Workspace stage 与 post-Acceptance promotion。
+`browser_research` 等在 Domain lifecycle 中包含用户可见投递的能力，以及会
+持久化浏览器 profile/session 的“读取”动作，也属于 blocked 集合。本地代码
+与定向测试已证明该分类，但当前正式七路收据仍绑定旧提交 `3d68bd1e`；
+因此在新干净提交完成同库验收前，Skill 路线仍如实保持 `INCOMPLETE`。被
+禁用的 49 个能力不计为完成。
+
+Skill 的生产代码同时只允许
 [`host_brain/app/governed_skill_execution.py`](host_brain/app/governed_skill_execution.py)
 在已经准入的 TaskGraph 节点、有效 node-bound grant、Attempt/Lease/Budget
 上下文和 app-local ports 下调用 `SkillMeta.handler`、绑定 sealed execution
@@ -21,8 +47,8 @@ Skill metadata 解释成第二条直接执行路径。机械 AST 清点要求三
 已在干净提交 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 上完成
 `209 passed` 的受影响集合、真实 GR05 `1 passed`、静态/文档 Gate 和中文
 交付元数据 Gate，因此 Skill 的 `canonical_execution_authority` 已提升为
-`PASS`。预算全覆盖和验收前领域副作用仍是独立 `PARTIAL` 缺口，Skill
-路线与 NE-01 都没有封板。
+`PASS`。本轮预算/副作用分类只有在新提交绑定收据生成后才能提升其余两个
+控制；Skill 路线与 NE-01 此刻都没有封板。
 
 NE-01 已把 Chat 模型预算从“存在合同”推进为可由持久账本独立验收的生产链。GR05 不再伪造 `surface_model_attempt`，而是经真实 `Surface Runtime → ModelAttemptService → Provider adapter → WorkerProjection → 父子 Budget ledger` 执行普通 Chat 与 Plan 最终合成；只有最末端 provider transport 使用受控 adapter。provider 返回的 token、重试和模型成本必须同时匹配 canonical `model_attempt_log`、不可变 WorkerProjection、Graph Budget usage 与 Attempt-bound child usage，exact replay 不得再次调用 provider。干净提交 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 的正式收据已重开并验证该 lineage，因此 Chat 的 `budget_enforcement` 升为 `PASS`，Chat 成为七路中第一条 `COMPLETE` 路线。该受控链证明治理和计量，不证明外部 provider 质量、PlanningSearch 收益或 NE-07 实栈。
 

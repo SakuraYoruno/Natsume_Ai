@@ -3,9 +3,44 @@
 
 # 测试与验收目录
 
-版本：v2.27
+版本：v2.28
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Skill 预算与副作用 policy 当前切片
+
+- `test_ne01_skill_execution_policy.py` 要求 canonical Host Registry 精确包含 93 个
+  Skill，并固定为 28 个 inline read-only、13 个 proposal-only、3 个
+  post-Acceptance Workspace 和 49 个 blocked；运行 manifest 必须恰为
+  44 项。
+- 独立 Personality Registry 必须为 19 项且 governed manifest=0（5 blocked、
+  14 unclassified）；动态 MCP Skill 固定 blocked，不能借默认 metadata
+  获得执行权。
+- built-in descriptor 缺失或 `skill_id/tool/action` 漂移失败关闭；自定义
+  declarative Skill 必须同时显式声明 execution 与 budget policy。
+- blocked 条目不得进入 manifest、PlanningSearch、Scheduler 自动调度或
+  Host admission；旧 durable graph 到达 frozen executor 时仍须拒绝。
+- user-visible Domain lifecycle、持久 browser profile/session、文件/系统
+  mutation、Memory/Scheduler write 都不能伪装成 inline read-only。
+- 启用条目统一 Task precharge；普通 Skill 无裸模型端口，Agent model 使用
+  measured guard；proposal-only 只产出候选/stage，三条 risk-4 Agent 写入
+  使用既有 post-Acceptance Workspace promotion。
+- 最终互不重叠的本地批次为：Skill/Registry/Scheduler 相关 unit
+  `107 passed in 3.70s`，Planning policy unit `15 passed in 0.71s`，
+  Host admission/drain unit `18 passed in 0.56s`，release/coverage 合同
+  `49 passed in 1.75s`；三条真实 SQLite/Git 集成为
+  `3 passed in 35.92s`。批次分别报告，不与历史数字相加。
+- 首次过宽命令误包含外部 E2E/VTS smoke，主动终止；随后 unit 合批因测试
+  `echo_skill` 未显式分类而在 admission 前拒绝，测试仍等待 started 导致
+  184 秒超时。为测试条目补显式只读 policy 后，该 Host 文件 18 项在
+  0.56 秒完成；超时不计 PASS，也没有掩盖失败。
+- JSON 解析、changed-module compileall 与 `git diff --check` 通过；文档受众、
+  文档 authority、20 条 freshness rule 均零失败，统一
+  `static_scan,doc_gate` 为 `PASS / failures=[]`（110.3 秒）。
+- 正式七路收据仍
+  绑定旧 SHA，因此当前只记
+  `LOCAL_CODE_POLICY_PASS / COMMIT_BOUND_REVALIDATION_PENDING`，不升级
+  Skill 路线；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Skill 唯一执行 authority 当前切片
 

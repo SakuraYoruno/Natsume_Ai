@@ -5,11 +5,23 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.19
+版本：v3.20
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
 
-当前 Skill authority 切片的交付合同是“一个生产执行 owner，所有兼容入口
+当前 Skill 预算/副作用切片的合同是“显式完备分类，未审能力失败关闭”。
+canonical Host Registry 的 93 个 Skill 必须以 exact descriptor 固定为 read-only、proposal-only、
+post-Acceptance Workspace 或 blocked pending Effect；只有前三类 44 个
+可以进入 manifest、PlanningSearch、Scheduler 和 admission。全部启用节点
+必须先做 Task precharge；Agent 模型必须走 measured guard；proposal-only
+不能提交用户可见结果；Workspace 写只允许三条已审核 risk-4 Agent 在
+Acceptance 后 promotion。任何新增、缺项、descriptor drift 或 stale graph
+执行都必须拒绝。blocked 能力不是完成项，后续只能通过新增 typed Effect
+合同逐项启用。
+独立 Personality/MCP catalog 不得复用默认只读政策：未迁移条目必须保持
+`UNCLASSIFIED/BLOCKED`，其 governed manifest 为 0。
+
+原 Skill authority 切片的交付合同是“一个生产执行 owner，所有兼容入口
 失败关闭”。`host_brain/app/governed_skill_execution.py` 是唯一允许调用
 `SkillMeta.handler`、`bind_validated_skill_authority` 和
 `dispatch_executor_payload` 的生产模块；它只能由 frozen Skill worker 在
@@ -17,13 +29,13 @@ exact TaskGraph node authority 下调用。Executive 执行文件必须不存在
 `SkillLoader` 不得解析 registry/token/handler/Broker，Scheduler 的 Codex
 和 Personality metadata 路径不得直接执行 Skill。AST inventory、缺 authority
 前置拒绝、receipt 写失败传播和真实 Universal Host Runtime 都是 Ready 前
-强制证据。该切片完成后仍不得把 Skill 标为 COMPLETE：program-wide Budget
-和 post-Acceptance transactional side effects 必须分别封板。
+强制证据。该单项 authority 已封板。
 
 上述唯一 authority 合同已在干净实现提交
 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 上通过 `209` 项受影响测试、
 真实 GR05、全仓 static/doc Gate 和中文交付元数据 Gate，故该单项控制为
-`PASS`；它不改变 Skill 路线的 `INCOMPLETE` 状态。
+`PASS`。本轮 policy 代码已有本地定向证据，但新干净 SHA 的七路同库收据
+尚未生成；在此之前，Skill 路线继续保持 `INCOMPLETE`。
 
 当前 Chat 模型预算切片移除了 GR05 对 `stream_governed_chat_with_context` 的伪造输出，普通 Chat 和 Plan 合成现在都经真实 frozen route、Surface runtime、canonical `ModelAttemptService` 与父子 Budget ledger；测试只替换 terminal provider transport，并要求两个新请求、两个成功 ModelAttempt、精确 token/cost、同一 WorkerProjection/parent/child usage，以及 replay 后 provider 调用数不增加。只读七路线采集器能够重新关联模型生命周期、Worker 预算证明和父子 usage，任何缓存、孤儿 Attempt、身份或测量漂移都失败关闭。干净提交 `3d68bd1e` 的正式 v3 收据已证明该链，Chat `budget_enforcement=PASS` 且路线状态为 `COMPLETE`；受控 provider 仍不属于真实模型质量或 NE-07 证据。
 

@@ -9,6 +9,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
+
 
 SkillHandler = Callable[[dict[str, Any], dict[str, Any] | None], dict[str, Any]]
 
@@ -104,6 +109,8 @@ class SkillMeta:
     parallelizable: bool = False
     fallback_policy: str = "chat_fallback"
     model_budget_required: bool = False
+    execution_policy: SkillExecutionPolicy = SkillExecutionPolicy.UNCLASSIFIED
+    budget_policy: SkillBudgetPolicy = SkillBudgetPolicy.TASK_PRECHARGE
     # 原 ToolMeta 字段（合并自 app/skills/tool_meta.py）
     scheduler_allowed: bool = True
     """是否允许 SCHEDULER 来源调用"""
@@ -146,6 +153,25 @@ class SkillMeta:
             raise ValueError("parallelizable must be bool")
         if not isinstance(self.model_budget_required, bool):
             raise ValueError("model_budget_required must be bool")
+        if not isinstance(self.execution_policy, SkillExecutionPolicy):
+            raise ValueError("execution_policy must be SkillExecutionPolicy")
+        if not isinstance(self.budget_policy, SkillBudgetPolicy):
+            raise ValueError("budget_policy must be SkillBudgetPolicy")
+        if self.model_budget_required and (
+            self.budget_policy
+            is not SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL
+        ):
+            raise ValueError(
+                "model_budget_required Skill must use declared-model budget policy"
+            )
+        if (
+            not self.model_budget_required
+            and self.budget_policy
+            is SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL
+        ):
+            raise ValueError(
+                "declared-model budget policy requires model_budget_required"
+            )
         fallback_policy = str(self.fallback_policy or "").strip().lower()
         if fallback_policy not in {"chat_fallback", "same_family", "strict_fail", "retry_once"}:
             raise ValueError("fallback_policy must be one of {'chat_fallback','same_family','strict_fail','retry_once'}")
@@ -174,12 +200,23 @@ class SkillMeta:
             "parallelizable": self.parallelizable,
             "fallback_policy": self.fallback_policy,
             "model_budget_required": self.model_budget_required,
+            "execution_policy": self.execution_policy.value,
+            "budget_policy": self.budget_policy.value,
+            "governed_execution_enabled": self.governed_execution_enabled,
             "scheduler_profile": (
                 self.scheduler_profile.to_dict()
                 if isinstance(self.scheduler_profile, SkillSchedulerProfile)
                 else dict(self.scheduler_profile or {})
             ),
         }
+
+    @property
+    def governed_execution_enabled(self) -> bool:
+        return self.execution_policy in (
+            SkillExecutionPolicy.INLINE_READ_ONLY,
+            SkillExecutionPolicy.PRE_ACCEPTANCE_PROPOSAL_ONLY,
+            SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE,
+        )
 
 
 def skill(
@@ -196,6 +233,8 @@ def skill(
     parallelizable: bool = False,
     fallback_policy: str = "chat_fallback",
     model_budget_required: bool = False,
+    execution_policy: SkillExecutionPolicy = SkillExecutionPolicy.UNCLASSIFIED,
+    budget_policy: SkillBudgetPolicy | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to attach SkillMeta config on handler callables."""
 
@@ -220,6 +259,15 @@ def skill(
                 "parallelizable": bool(parallelizable),
                 "fallback_policy": str(fallback_policy or "chat_fallback").strip().lower() or "chat_fallback",
                 "model_budget_required": bool(model_budget_required),
+                "execution_policy": execution_policy,
+                "budget_policy": (
+                    budget_policy
+                    or (
+                        SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL
+                        if model_budget_required
+                        else SkillBudgetPolicy.TASK_PRECHARGE
+                    )
+                ),
             },
         )
         return handler
@@ -288,6 +336,8 @@ class SkillRegistry:
         for meta in sorted(self._skills.values(), key=lambda m: m.skill_name):
             if meta.skill_name in excluded:
                 continue
+            if not meta.governed_execution_enabled:
+                continue
             if scopes is not None and meta.scope not in scopes:
                 continue
             if meta.risk_level > max_risk_level:
@@ -332,6 +382,18 @@ class SkillRegistry:
                 fallback_policy=str(cfg.get("fallback_policy") or "chat_fallback").strip().lower() or "chat_fallback",
                 model_budget_required=bool(
                     cfg.get("model_budget_required", False)
+                ),
+                execution_policy=cfg.get(
+                    "execution_policy",
+                    SkillExecutionPolicy.UNCLASSIFIED,
+                ),
+                budget_policy=cfg.get(
+                    "budget_policy",
+                    (
+                        SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL
+                        if bool(cfg.get("model_budget_required", False))
+                        else SkillBudgetPolicy.TASK_PRECHARGE
+                    ),
                 ),
             )
             self.register(meta)

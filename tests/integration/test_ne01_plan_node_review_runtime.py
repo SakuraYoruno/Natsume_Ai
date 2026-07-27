@@ -13,6 +13,7 @@ from host_brain.contracts.agent_runtime.review_policy import (
     NODE_REVIEW_POLICIES_KEY,
     pre_execution_review_required,
 )
+from host_brain.contracts.skill_execution import SkillExecutionPolicy
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.governor.tokens import TokenService
 from host_brain.orchestration import GovernedCommandApplication
@@ -84,6 +85,7 @@ def _registry() -> SkillRegistry:
             capability_tags=("research", "evidence"),
             parallelizable=True,
             fallback_policy="strict_fail",
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
         )
     )
     registry.register(
@@ -98,6 +100,7 @@ def _registry() -> SkillRegistry:
             family="research",
             capability_tags=("research", "evidence"),
             fallback_policy="strict_fail",
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
         )
     )
     return registry

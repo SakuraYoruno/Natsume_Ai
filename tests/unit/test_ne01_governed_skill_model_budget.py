@@ -11,6 +11,10 @@ from host_brain.app.governed_task_authority import (
 from host_brain.contracts.agent_runtime.worker_budget_usage import (
     build_worker_budget_usage,
 )
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.model_runtime import (
     EMERGENT_GROWTH_PATTERN_PROMPT_ID,
     CallableProviderAdapter,
@@ -347,7 +351,13 @@ def test_governed_skill_execution_wires_attestation_into_worker_payload(
                 scope="host",
                 reversible=False,
                 handler=handler,
-                model_budget_required=True,
+                    model_budget_required=True,
+                    execution_policy=(
+                        SkillExecutionPolicy.INLINE_READ_ONLY
+                    ),
+                    budget_policy=(
+                        SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL
+                    ),
             )
         },
     )()

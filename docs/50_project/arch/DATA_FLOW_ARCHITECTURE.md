@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.22
+版本：v3.23
 
 核对日期：2026-07-27
 
@@ -13,25 +13,37 @@
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
-Skill 的当前唯一执行流如下；虚线兼容入口只能拒绝，不能进入 handler：
+Skill 的当前执行流先做 policy partition；虚线入口只能拒绝，不能进入
+handler：
 
 ```mermaid
 flowchart LR
-    HC["HostCommand"] --> TG["Immutable TaskGraph node"]
-    TG --> FW["Frozen Skill worker"]
+    C["93 canonical Host Skills"] --> P{"Exact execution policy"}
+    P -->|"28 read-only + 13 proposal + 3 workspace"| M["44-item executable manifest"]
+    P -->|"49 pending typed Effect"| X["Catalog only / fail closed"]
+    M --> HC["HostCommand"]
+    HC --> TG["Immutable TaskGraph node"]
+    TG --> B["Canonical Task precharge"]
+    B --> FW["Frozen Skill worker"]
     FW --> GE["App-local governed Skill executor"]
     GE --> H["SkillMeta.handler"]
     H --> SA["Sealed authority"]
     SA --> CB["Capability Broker"]
     CB --> WP["WorkerProjection / receipt"]
     WP --> VA["Verification / Acceptance"]
-    L["Token-only SkillLoader"] -. "fail closed" .-> X["拒绝审计"]
-    S["Scheduler Skill metadata"] -. "fail closed" .-> X
+    L["Token-only SkillLoader"] -. "fail closed" .-> R["拒绝审计"]
+    S["Scheduler Skill metadata"] -. "fail closed" .-> R
+    X -. "admission / stale graph reject" .-> R
 ```
 
-缺 governed context、node grant、durable ledger 或 app-local ports 时，流程在
-接触 registry 前拒绝；receipt 写失败也不能返回成功。此图只描述 execution
-authority，不表示 Skill 领域副作用已经全部移到 Acceptance 后。
+缺 policy、descriptor 一致性、governed context、node grant、durable ledger
+或 app-local ports 时，流程在 handler 前拒绝；receipt 写失败也不能返回
+成功。read-only 不取得裸模型端口；proposal-only 只能形成候选/staging；
+三条 Workspace 写在 Acceptance 后晋升。包含用户可见 Domain lifecycle、
+持久 browser profile/session 或其它外部 mutation 的能力留在 blocked 分支。
+本图描述当前启用范围，不把 49 个 blocked 能力伪装为已实现。
+独立旧 Personality catalog 的 19 个条目和动态 MCP 条目都不进入该图的
+可执行分支；前者 manifest 为 0，后者明确 blocked。
 
 Chat/Plan 模型预算的当前生产等价数据流如下：
 

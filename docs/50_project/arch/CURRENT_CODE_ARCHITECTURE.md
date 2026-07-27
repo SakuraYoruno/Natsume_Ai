@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.49
+版本：v5.50
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -14,6 +14,30 @@
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat 当前为 `COMPLETE`，其余六路为 `INCOMPLETE`。
 
+Skill 的生产执行面现在先经过一个穷举、失败关闭的 policy partition。生产
+canonical Host Registry 共 93 个 Skill：28 个 inline read-only、13 个 pre-Acceptance
+proposal-only、3 个 post-Acceptance Workspace，以及 49 个等待 typed
+post-Acceptance Effect 的 catalog-only 能力。只有前三类 44 个进入
+manifest、PlanningSearch、Scheduler 自动调度和 Host admission；最后一类
+即使已存在于旧 durable graph，也会在 frozen executor 再次拒绝。每个
+declarative built-in 都绑定 exact `skill_id/tool/action`，新增、缺项或描述
+漂移不能自动获得执行权。
+
+旧 Tool/Scheduler catalog 使用的独立 Personality Registry 还有 19 个
+metadata：5 个明确 blocked，14 个没有经过本轮分类而保持
+`UNCLASSIFIED`；它的 governed manifest 为 0。动态 MCP Skill 也明确
+blocked。二者可供只读目录兼容，但不能进入 Host Skill admission 或自动
+调度。
+
+所有启用 Skill 都消费 canonical Task precharge；普通只读能力不取得模型
+端口，Agent 模型能力使用 Task-bound measurement guard。proposal-only
+能力只能返回候选/staging artifact；三条 risk-4 写 Agent 只通过 protected
+Workspace stage 和 Acceptance 后 promotion 产生持久写入。包含用户可见
+Domain lifecycle、外部投递、系统/文件 mutation，或会持久化浏览器
+profile/session 的能力均被归入 blocked 集合。该代码控制已有本地定向证据，
+但正式七路收据仍绑定 `3d68bd1e`，所以本提交产生新 commit-bound 收据前
+不能把 Skill 路线升级为 `COMPLETE`，49 个 blocked 能力也不算已交付。
+
 Skill 的生产执行 owner 已从 Executive 兼容层迁到 app-local
 `governed_skill_execution.py`。代码仓中 `SkillMeta.handler`、
 `bind_validated_skill_authority` 与 `dispatch_executor_payload` 的 Skill
@@ -23,8 +47,8 @@ grant、durable ledger 和显式 ports 后才接触 registry。旧 Executive exe
 `GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED`，不能消费 token、调用 handler 或
 进入 Broker；canonical receipt 写失败会向上抛出。干净提交
 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 上的 `209 passed`、真实
-GR05、static/doc 与元数据 Gate 已将该单项控制提升为 `PASS`；Skill 的
-Budget 和 transactional side effects 仍为 `PARTIAL`，路线不能升级。
+GR05、static/doc 与元数据 Gate 已将该单项控制提升为 `PASS`；本轮新增的
+预算/副作用 policy 仍等待新干净提交上的同库收据，路线暂不升级。
 
 Chat 与 Plan 合成的模型预算校准现在使用真实生产等价调用链。GR05 构造真实 prompt registry、route policy、`ModelAttemptService`、ledger audit 与 Surface ports，只控制 terminal provider transport；两个新请求各自生成 canonical `started → succeeded` Attempt，provider token/cost measurement 进入不可变 WorkerProjection，再以稳定 usage id 同时落入 Graph parent 与 Attempt-bound child Budget。exact replay 只重开既有结果，不再次调用 provider。只读验收会关联这四组事实并拒绝缓存、孤儿 Attempt、身份和测量漂移。
 

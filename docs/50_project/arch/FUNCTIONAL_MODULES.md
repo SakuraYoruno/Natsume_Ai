@@ -3,12 +3,24 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.29
+版本：v2.30
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Skill Policy 模块由稳定合同
+[`contracts/skill_execution.py`](../../../host_brain/contracts/skill_execution.py)
+和 exact built-in 清单
+[`skills/builtin_execution_policy.py`](../../../host_brain/skills/builtin_execution_policy.py)
+组成。它把 canonical Host Registry 的 93 个 Skill 固定分为 28 个 inline read-only、13 个
+proposal-only、3 个 post-Acceptance Workspace 和 49 个 blocked；新条目
+与 descriptor drift 均失败关闭。Registry manifest、Capability Search、
+Scheduler、Host admission 和 frozen executor 都消费同一分类。policy
+模块只判定边界，不执行 handler、不写 Task，也不把 blocked 能力算成完成。
+旧 Personality Registry 的 19 个 metadata 全部不进入 governed manifest
+（5 blocked、14 unclassified）；动态 MCP Skill 也固定 blocked。
 
 Skill Execution 模块的唯一生产 owner 是
 [`app/governed_skill_execution.py`](../../../host_brain/app/governed_skill_execution.py)：
@@ -18,8 +30,11 @@ authority、进入 Capability Broker，并把结果交回 Task Runtime。
 所有 `execute()` 都以 `GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED` 拒绝；
 Executive executor 已删除，Scheduler 也不得直接调用 Skill metadata。
 干净提交 `3d68bd1e` 的定向、真实 GR05、static/doc 与交付元数据证据使
-该模块的 canonical execution authority 为 `PASS`；预算和事务副作用仍由
-后续切片处理。
+该模块的 canonical execution authority 为 `PASS`。本轮还要求全部启用
+Skill 先做 Task precharge，Agent 模型使用 measured guard，proposal-only
+不产生可见 Effect，三条 risk-4 写 Agent 只经 Acceptance 后 Workspace
+promotion。代码控制已通过本地验证，但新提交绑定收据尚未生成，故路线
+状态仍保持 `INCOMPLETE`。
 
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound acceptance 已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、路线其余控制与 NE-01 仍未闭环。
 

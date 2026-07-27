@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.25
+版本：v2.26
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -17,6 +17,19 @@ executor 重开 exact node grant、Attempt、Lease、Budget 和运行期 ports�
 兼容 Loader 可以保留迁移审计，但只能失败关闭，不能因为 token 有效就恢复
 第二条执行路径。执行结果的 receipt 也是终态因果链的一部分：写入失败必须
 向 Task Runtime 暴露为失败或待对账，而不能为了返回“成功”而吞掉异常。
+
+能力目录与执行能力必须严格分离。每个 Skill 都要在注册时声明一种不可歧义
+的执行策略：纯只读、验收前仅生成 proposal、验收后受控写入，或等待 typed
+Effect 而禁用。风险等级、名称、`reversible` 标记和 handler 返回值都不能
+替代这项声明；新增或 descriptor 漂移默认拒绝。所谓“读”若会持久化浏览器
+profile/session、触发外部网络状态或用户可见投递，也属于 Effect，而不是
+只读。这样，缩小生产能力面是诚实的安全收口，不是把被禁用能力计为完成。
+
+预算与副作用是同一个执行合同的两面。任何启用 Skill 都先消费 Task 账本；
+模型调用还必须提交 provider measurement。proposal 可以在 Acceptance 前
+计算，但不能提交用户可见或不可逆结果；真实写入只能由 Acceptance 后的
+typed Effect/Workspace handler 完成。没有这条分界，Worker 的“成功”会把
+业务计算、授权和外部效果重新混成第二套 authority。
 
 跨路线完成性遵循“同一提交、同一数据库快照、逐路线完整证据”的不变量。代码、单测或某几条路线成功都不能外推为通用 Runtime 完成；验收者必须以只读事务独立重开真实持久事实，并把 Git HEAD、仓库与数据库 migration head、Command/Graph/Node/Attempt/Lease/Operation、父子 Budget、Verification、Acceptance、Artifact、Effect/Outbox/Receipt 串成不可替换的证据链。一个 request 只能证明一条路线，未运行路线必须显式保留 `NOT_RUN`。收据只能暴露完成判断需要的标识、状态、版本与 digest，不能复制用户正文、模型输出、secret 或执行 payload。这样，“能够验收”与“已经七路验收通过”才不会被混为一谈。
 

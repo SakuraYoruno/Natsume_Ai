@@ -3,10 +3,27 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.20
+版本：v3.21
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+Skill 的预算与副作用边界已经在代码层完成穷举分类：canonical Host
+Registry 的 93 个条目分为
+28 个 inline read-only、13 个 pre-Acceptance proposal-only、3 个
+post-Acceptance Workspace 和 49 个 pending typed Effect。只有 44 个
+启用条目进入 manifest/search/scheduler/admission；缺 policy、descriptor
+漂移与 stale graph 都失败关闭。所有启用 Skill 先消费 Task precharge，
+Agent 模型必须提交 canonical measurement，proposal-only 不得投递可见
+结果，三条 risk-4 写 Agent 仅经 Acceptance 后 Workspace promotion。
+本地代码缺口已清零，但新 commit-bound 同库验收尚未生成，故机器矩阵仍将
+Skill 两项控制保留为 `PARTIAL`，待干净提交收据后才能升级；49 个 blocked
+能力不属于完成范围。
+
+旧 Personality Registry 的 19 个 metadata 仍保留目录用途，但 governed
+manifest 为 0：5 个明确 blocked，14 个 `UNCLASSIFIED`。动态 MCP Skill
+也固定 blocked。这关闭了通过默认 `SkillMeta` 值重新获得执行权的旁路，
+但不等于这些旧能力已迁入 canonical Runtime。
 
 Skill 的双执行 authority 缺口已在代码层收敛：Executive executor 被物理
 删除，token-only `SkillLoader` 与 Scheduler metadata 路径只失败关闭，
@@ -14,9 +31,8 @@ handler、sealed authority binding 和 Broker dispatch 各只有 app-local
 governed executor 一个生产调用者；receipt 写失败不再被吞掉。干净提交
 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 的 `209 passed`、真实
 Universal Host Runtime、static/doc 和交付元数据 Gate 已把
-`canonical_execution_authority` 提升为 `PASS`。Skill 的 program-wide
-Budget 与 post-Acceptance transactional side effects 仍为 `PARTIAL`，
-所以该路线和 NE-01 总体状态不变。
+`canonical_execution_authority` 提升为 `PASS`。该路线和 NE-01 在新收据
+生成前总体状态不变。
 
 Chat 的模型用量已经从 GR05 假投影改为真实生产等价调用链：frozen route 调用 Surface runtime，Surface 调用 canonical `ModelAttemptService`，terminal provider 返回 usage，Task Runtime 再把同一测量原子记入 Graph aggregate 与 Attempt-bound child ledger。只读验收新增 ModelAttempt→WorkerProjection→parent/child usage 的逐字段校验，replay 也必须保持 provider 调用数不变。真实链路暴露的预算 guard 泄漏和 COMMIT audit path 漂移已经修复。干净提交 `3d68bd1e` 的正式收据已清零该缺口，Chat `budget_enforcement=PASS` 并成为第一条 `COMPLETE` 路线；外部 provider 质量仍不在此证明范围。
 
