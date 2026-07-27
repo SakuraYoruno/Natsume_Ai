@@ -3,10 +3,20 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.27
+版本：v3.28
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+一般恢复缺口进一步缩小，但没有消失。现在真实进程证据覆盖：
+cancellation-bound `COMMIT/RELEASE` 的目标提交后 handler 崩溃；以及
+`ACCEPTED` 兄弟与 `RESERVED/RUNNING` 未知兄弟并存时的 fan-out 崩溃、
+live defer、expired hold、签名重获、选择性续跑和 terminal zero replay。
+生产缺陷也已修正：checkpoint continuation 不再把节点内部 `done` 与最终
+Graph `done` 同时暴露给 Host，而是统一交给 parallel settlement。尚缺的是
+其它 mixed terminal/Review/Budget 图形、部署签名 key、开关 promotion、
+波次 canary 和七路线故障矩阵；因此 `GENERAL_MULTI_NODE_RECOVERY` 仍为
+`PARTIAL`，bounded fan-out/cancellation 仍为 `OFF`。
 
 签名 Operation 的 handler 响应丢失缺口已进一步缩小：真实 OS 进程证明
 checkpoint `COMMIT` 和无 intent raw-failure `RELEASE` 都能在目标 UoW

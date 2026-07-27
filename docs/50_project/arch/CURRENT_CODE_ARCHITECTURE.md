@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.56
+版本：v5.57
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,19 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
+
+`DurableDagSchedulingRuntime` 当前对 committed checkpoint re-entry 采用与
+普通 fan-out 相同的终态归并：非 `done` 进度继续向外流，节点 `done` 被缓冲
+并转换成 `_ParallelNodeOutcome`，再由 `ParallelSettlementRuntime` 决定
+恢复阻断、失败、Review 或继续；只有单节点、明确 `RECOVERY_REQUIRED` 或
+最终原子 Graph 结果会成为调用者终态。这修复了账本已完成却因 Host 收到两个
+`done` 而拒绝 startup continuation 的缺陷。
+
+真实 Windows spawn/SQLite 现已证明 cancellation-bound COMMIT/RELEASE
+handler crash exact replay，以及 `left ACCEPTED + right RESERVED` 并发崩溃
+后 live defer、expired hold、签名 REACQUIRE、只执行 right/join 和 terminal
+零 worker。该证据通过显式启用测试组合获得；生产 feature receipt 尚不存在，
+因此 bounded fan-out 与 cancellation 仍不启用。
 
 Operation reconciliation 当前新增了真实处理进程崩溃证据，而不是新的执行
 authority。checkpoint `COMMIT + SIDE_EFFECT_CONFIRMED` 与无 cancellation

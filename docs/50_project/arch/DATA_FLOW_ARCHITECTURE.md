@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.29
+版本：v3.30
 
 核对日期：2026-07-27
 
@@ -12,6 +12,25 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+混合 fan-out 崩溃后的当前恢复流为：
+
+```text
+left ACCEPTED + right RESERVED/RUNNING
+→ 进程硬退出
+→ live Lease：DEFERRED（零 worker）
+→ Lease 过期：RECOVERY_REQUIRED + current hold
+→ exact case-bound Ed25519 REACQUIRE
+→ 新 owner / higher fence 执行 right（left 不重跑）
+→ join 依赖满足后执行
+→ child terminal 缓冲并进入 parallel settlement
+→ 唯一 Graph COMPLETED receipt
+→ 再次启动 inventory=0 / worker=0
+```
+
+取消绑定的 COMMIT/RELEASE 同样先重开目标 Operation proof，再由唯一
+cancellation continuation 收口 Graph；handler response loss 不会产生第二次
+目标 mutation。上述均为本地 feature-enabled 证据，不代表生产开关已开启。
 
 签名终态在 handler 崩溃窗口中的当前数据流为：
 

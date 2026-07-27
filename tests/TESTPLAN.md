@@ -1,10 +1,27 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.32
+版本：v0.33
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-CANCELLATION-FANOUT-PROCESS-RECOVERY
+
+- T-NE01-CFPR-01：cancellation-bound `COMMIT` 与 `RELEASE` 在目标 UoW
+  已提交、handler 未返回时硬退出，后继进程必须 exact replay；Graph/Node/
+  Attempt 只由 cancellation continuation 收口，终态重启处理数为 0。
+- T-NE01-CFPR-02：fan-out 一个兄弟已 `ACCEPTED`、另一个
+  `RESERVED/RUNNING` 后硬退出时，live Lease 只能返回 `DEFERRED`，不得调用
+  worker 或制造 hold。
+- T-NE01-CFPR-03：Lease 过期后必须形成唯一 current hold；无 exact case-bound
+  Ed25519 `REACQUIRE` 不得继续，签名重获后只能执行未知兄弟与依赖 join。
+- T-NE01-CFPR-04：多节点 committed checkpoint 的内部 Node `done` 必须进入
+  parallel settlement，Host startup continuation 只能观察到一个 Graph
+  terminal；最终再次启动必须 inventory/worker 都为 0。
+- 当前证据：两个新增文件共 `3 passed in 32.25s`；独立相邻恢复集合
+  `16 passed in 83.15s`。生产 feature flag、部署密钥、真实 provider 和整波
+  canary 不在此测试范围。
 
 ## T-NE01-SIGNED-TERMINAL-PROCESS-RESTART
 

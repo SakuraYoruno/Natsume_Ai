@@ -3,12 +3,20 @@
 
 # Natsume AI 核心理论
 
-版本：v2.30
+版本：v2.31
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
+
+多节点恢复必须区分“节点内部终态”和“调用者可见的图终态”。节点完成只是
+parallel settlement 的输入；只有失败、Review、恢复阻断或整图原子成功的
+唯一决策，才可以成为 Host 的外层 `done`。若 checkpoint continuation 同时
+公开节点 `done` 和最终 Graph `done`，即使账本完全正确，调用者也无法证明
+哪一个是唯一提交结果；正确做法是缓冲节点终态、重开 durable snapshot、经
+同一个 settlement/finalizer 产生唯一图回执。已验收兄弟节点必须保持不变，
+未知兄弟只能在 Lease 失效且签名重获 authority 后继续。
 
 持久执行不能把“调用返回”当成“状态提交”。目标状态变更与调用方收到结果是
 两个崩溃窗口：前者必须由目标 UoW、Outbox 和不可变 proof 定义，后者只能

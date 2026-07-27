@@ -3,9 +3,29 @@
 
 # 测试与验收目录
 
-版本：v2.34
+版本：v2.35
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 取消终态与混合 fan-out 跨进程恢复
+
+- `test_ne01_signed_cancellation_process_restart.py` 分别覆盖 cancellation
+  `COMMIT + SIDE_EFFECT_CONFIRMED` 和
+  `RELEASE + NO_SIDE_EFFECT`。每条均由进程 A 建立 REQUESTED intent/current
+  hold，进程 B 在目标 UoW 提交后、handler 返回前硬退出，进程 C exact
+  replay 并运行真实 cancellation continuation，进程 D 证明零 pending。
+- `test_ne01_fanout_reserved_process_restart.py` 在真实文件型 SQLite 中并行
+  启动两个根节点：`left` 已 `ACCEPTED` 后，`right` 保持
+  `RESERVED/RUNNING` 并令进程硬退出。新 Host 在 live Lease 下只 defer；
+  Lease 过期后写 current hold；签名 `REACQUIRE` 后只调用 `right` 与
+  `join`，`left` 的 Artifact/Attempt 不变，终态重启 worker=0。
+- 回归同时证明 checkpoint continuation 的节点 `done` 不再直接泄漏给
+  Host；它先进入现有 parallel settlement，最终仅公开一个 Graph `done`。
+  新增两文件共 `3 passed in 32.25s`；不含新增 case 的相邻 cancellation、
+  signed unknown-effect、Host restart、general multi-node 与 signed failure
+  集合为 `16 passed in 83.15s`。
+- 这些测试使用临时 Ed25519 key 和受控 projected worker。部署 key lifecycle、
+  生产 fan-out/cancellation 开关、真实 provider、波次集成与 NE-07 均未运行。
 
 ## NE-01 签名终态处理进程崩溃恢复
 
