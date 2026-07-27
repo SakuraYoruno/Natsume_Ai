@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator active manifest 为 `14 governed / 0 blocked`；另外 23 个旧 ID 已从后端 manifest、handler、OpenAPI 和 Monitor 生成客户端退役，并由独立 replacement policy 记录，不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、一般恢复和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.14
+版本：v5.15
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -19,6 +19,17 @@
 4. 自动化测试证明其覆盖的行为，不能单独把 `PARTIAL` 提升为 `WIRED`。
 5. 历史 receipt 只对固定 commit、route 和环境成立。
 6. 执行顺序只来自 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+TRACE-EXEC-08AW（并发 mixed-terminal 进程恢复与 survivor 终态过滤）：
+retryable+hard failure、Budget overrun、post-Acceptance Review 必须在
+outer settlement 前崩溃后由新 Host 从 durable outcome 唯一收口，resolver
+和 worker 调用均为 0。`BLOCKED` 图只有仍含 ready/retry/review/execution/
+cancel 节点时才能进入 Host recovery inventory；已释放 Budget 且仅余终态/
+结构性阻断节点不得成为永久 survivor。首轮 `2 passed, 1 failed` 找到预算
+终态泄漏，修复后新增矩阵及相邻 Host startup 集合为
+`14 passed in 46.30s`，旧并发结算回归为 `12 passed in 49.41s`；旧夹具
+遗漏 mandatory ReviewRuntime 的问题已修正。状态为
+`LOCAL_OS_PROCESS_PASS / FEATURE_DEFAULT_OFF / NE01_IN_PROGRESS`。
 
 TRACE-EXEC-08AV（取消终态与混合 fan-out 跨进程恢复）：取消绑定的签名
 `COMMIT/RELEASE` 在目标 mutation 后、handler 返回前崩溃时必须 exact

@@ -3,11 +3,19 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.30
+版本：v2.31
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+Host survivor 现在在 Command Recovery Inventory 层区分两种 `BLOCKED`：
+含 ready/retry/review/execution/cancellation 节点的 actionable block 继续进入
+startup 与周期 continuation；已由 failure/budget settlement 收口、共享预算
+已释放且只剩终态/结构性阻断节点的 terminal block 不再进入 Host worker
+清单。图的 canonical 状态和审计回执保持不变，筛选只改变“谁仍有执行权”。
+跨进程矩阵已证明 retry+failure、Budget 和 Review 三类 outer-settlement
+崩溃都由新 Host 以零 worker replay 唯一收口。
 
 Host 的跨进程恢复现在保持两层终态边界：Node continuation 可以产生
 checkpoint outcome，但不得直接成为多节点调用的最终结果；DAG Scheduler

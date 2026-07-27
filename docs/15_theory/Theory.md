@@ -3,12 +3,20 @@
 
 # Natsume AI 核心理论
 
-版本：v2.31
+版本：v2.32
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
+
+`BLOCKED` 是图状态，不等于“永远需要 Host worker 重入”。可恢复性必须由
+当前 durable authority 判定：仍有 `READY`、重试、Review、活动执行或取消
+请求的节点，才属于 Host survivor；预算或失败 settlement 已释放共享预算、
+且只剩失败/验收完成/结构性阻断节点时，该图已经拥有终态 authority。若仅按
+Graph 枚举值扫描，幂等重放虽然不会重复 worker，却会让每次启动永久生成
+伪 pending。恢复 inventory 因而必须区分 actionable block 与 terminal
+block，同时让 Review、retry 和 cancellation 的合法 continuation 保持可见。
 
 多节点恢复必须区分“节点内部终态”和“调用者可见的图终态”。节点完成只是
 parallel settlement 的输入；只有失败、Review、恢复阻断或整图原子成功的

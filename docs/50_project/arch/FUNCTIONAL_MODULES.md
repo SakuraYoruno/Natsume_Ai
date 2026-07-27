@@ -3,12 +3,20 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.37
+版本：v2.38
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Host Recovery Inventory 模块现在不是简单枚举
+`CREATED/ACTIVE/BLOCKED`。它在同一 SQLite snapshot 中只保留带 actionable
+TaskNode 的 `BLOCKED` admission，避免 Budget/Failure 已拥有终态回执后仍被
+每次启动和 periodic scan 重放；Review、retry、running、cancel 等节点仍可
+进入 continuation。新的 Parallel Terminal Process Recovery 集成模块用三个
+独立进程阶段验证 retry+failure、Budget、Review→deny，并记录 terminal 数、
+resolver/worker 调用、Budget 和 Outbox 不变性。
 
 Durable DAG Recovery 模块现在对 committed checkpoint 使用统一
 `ParallelSettlementRuntime`：Node execution 只产出内部 outcome，Scheduler
