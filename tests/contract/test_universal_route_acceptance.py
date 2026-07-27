@@ -8,6 +8,9 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    freeze_control_route_execution_policy,
+)
 from host_brain.persistence.universal_route_acceptance_reader import (
     UniversalRouteAcceptanceReader,
 )
@@ -70,6 +73,20 @@ def _snapshot(
     acceptance_outbox = f"outbox-{route}-acceptance"
     surface = route if route in {"scheduler", "internal", "operator"} else "chat"
     route_type = "delegate" if route in {"scheduler", "internal", "operator"} else route
+    control_route_policies: list[dict[str, object]] = []
+    if route in {"scheduler", "internal", "operator"}:
+        control_route_policies.append(
+            {
+                **freeze_control_route_execution_policy(
+                    surface=route,
+                    control_command_id=f"acceptance.{route}.command",
+                    target_id=f"{route}_runtime",
+                    review_required=False,
+                ),
+                "admission_digests_valid": True,
+                "binding_valid": True,
+            }
+        )
     raw = {
         "request_id": request_id,
         "commands": [
@@ -83,6 +100,7 @@ def _snapshot(
                 "created_at_ms": NOW,
             }
         ],
+        "control_route_policies": control_route_policies,
         "graphs": [
             {
                 "graph_id": graph_id,
@@ -472,6 +490,47 @@ def test_surface_owned_routes_override_worker_route_type(route: str) -> None:
     receipt = _receipt(snapshot, request_ids)
 
     assert receipt["route_acceptance"][route]["status"] == ROUTE_PASS
+    assert receipt["route_acceptance"][route]["evidence_counts"][
+        "control_route_policies"
+    ] == 1
+
+
+@pytest.mark.parametrize("route", ["scheduler", "internal", "operator"])
+def test_control_route_requires_reopened_frozen_execution_policy(
+    route: str,
+) -> None:
+    snapshot, request_ids = _snapshot(route)
+    snapshot["routes"][route]["control_route_policies"][0][
+        "binding_valid"
+    ] = False
+
+    receipt = _receipt(snapshot, request_ids)
+
+    result = receipt["route_acceptance"][route]
+    assert result["status"] == ROUTE_FAIL
+    assert "CONTROL_ROUTE_POLICY_BINDING_INVALID" in result["reason_codes"]
+
+
+def test_non_control_route_rejects_smuggled_control_policy() -> None:
+    snapshot, request_ids = _snapshot("chat")
+    snapshot["routes"]["chat"]["control_route_policies"] = [
+        {
+            **freeze_control_route_execution_policy(
+                surface="scheduler",
+                control_command_id="acceptance.scheduler.smuggled",
+                target_id="scheduler_runtime",
+                review_required=False,
+            ),
+            "admission_digests_valid": True,
+            "binding_valid": True,
+        }
+    ]
+
+    receipt = _receipt(snapshot, request_ids)
+
+    result = receipt["route_acceptance"]["chat"]
+    assert result["status"] == ROUTE_FAIL
+    assert "CONTROL_ROUTE_POLICY_UNEXPECTED" in result["reason_codes"]
 
 
 def test_receipt_digest_and_privacy_declaration_are_tamper_evident() -> None:

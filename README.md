@@ -9,6 +9,27 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+最新 NE-01 切片关闭了 Scheduler 一次 sweep 内的可变批次窗口。
+`SchedulerDefinitionRepository.read_clock_batch()` 先在一个 SQLite 读事务中
+同时取得待恢复的 CLOCK occurrence 与新到期 definition，再把 capture time、
+limit、顺序和深拷贝后的 JSON 行绑定为
+`scheduler-clock-batch://sha256/...`。`SchedulerClock` 在执行第一个 worker
+之前独立重开该合同，并且本轮不再二次查询 due rows；因此先执行的 pending
+worker 不能改写或重新选择同一轮剩余任务。七路线 query-only 验收 reader
+也会私下严格重开持久化 Command、WorkOrder、TaskGraph 及三者 digest，并对
+Scheduler/Internal/Operator 重新执行
+`ControlRouteExecutionPolicyV1` 绑定校验；公开收据仍只保留无正文、无
+secret 的 policy/digest 证据。核心 Scheduler、合同和真实 SQLite
+三控制路线集合为 `45 passed`；加入结构、控制 policy、coverage 与文档
+回归后的最终受影响集合为 `100 passed in 64.61s`，架构 Gate 1～14 和统一
+`static_scan,doc_gate` 也均通过。随后在 clean SHA `2a88f56e` 上完成 GR05
+与三条控制路线的同库运行；七路均为 `PASS`，Scheduler/Internal/Operator
+各自重开一个控制政策，其余路线为零，正式 receipt digest 为
+`sha256:505c300bc88882258bc47d13c75a542fb4a9526fc4e16cf2b7e9875d8d9cdd1a`。
+这只关闭 clock batch 与控制 policy 的提交绑定，Scheduler 与 NE-01 仍是
+`INCOMPLETE / IN_PROGRESS`，远程
+CI 仍记 `NOT_RUN_ACCOUNT_QUOTA`，Docker 全栈仍留到 NE-07。
+
 NE-01 当前切片正在收口 Scheduler、Internal、Operator 复用
 `route=delegate` 时的控制面语义。三者现在必须携带同一个
 content-addressed `ControlRouteExecutionPolicyV1`，精确绑定 surface、
@@ -68,7 +89,7 @@ target policy。当前 Plan/Delegate 定向集合为 `89 passed`，真实
 文件型 SQLite 的 Chat/Skill/Delegate/Plan 集成为 `1 passed`；后者已真实走
 Delegate `WAITING_APPROVAL → approve/resume → ACCEPTED`。另一个控制面回归集合
 为 `21 passed`，Scheduler 的同边界另由上述定向集合覆盖。干净提交
-`3db60ff170a085056d7fd9ba792cb7064de14d35` 的同库七路线收据已重开这些
+`2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0` 的同库七路线收据已重开这些
 事实，Plan 的 `CAPABILITY_SEARCH_V1` 与 Delegate 的只读 `pentest_agent`
 启用范围均为 `COMPLETE`。这不包含通用 NE-02 搜索收益、其它 Delegate target
 或 NE-07 的真实 provider/Docker 全栈。
@@ -125,7 +146,7 @@ NE-01 已把 Chat 模型预算从“存在合同”推进为可由持久账本�
 NE-01 的七路线提交绑定验收账本 v3 已覆盖全部七路；Scheduler、Internal、
 Operator 仍缺的是各自其它控制，而不是提交绑定。只读采集器在一个事务中打开真实文件型 SQLite，核对 HostCommand、不可变 TaskGraph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox，以及当前 recovery/cancellation 空集；对 Chat/Plan 还核对 ModelAttempt 和 Worker 模型预算。收据同时绑定干净 Git HEAD、仓库 migration head 和数据库已应用 migration head。请求标识只输出摘要，禁止用户正文、模型输出、secret 和原始 payload。
 
-本地剩余路线驱动器又通过真实 Scheduler CommandService、Internal CommandService 和带 Review/HardState Effect/外层 outcome 的 Operator Runtime，把三路终态顺序写入同一个 canonical SQLite。最新串联运行绑定干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35`，仓库与数据库 migration head 均为 `0135_task_review_denial_settlement.sql`；只读 validator 得到七路全部 `PASS`、reason code 全空。正式隐私安全收据见 [ne01_plan_delegate_route_acceptance_20260727.json](docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json)，receipt digest 为 `sha256:ac275b0854d6ef56c9fe685ee99dad965556009363e92fb9105ed2788f57beab`。因此七路 `commit_bound_acceptance` 均为 `PASS`，Chat、Skill、当前启用 Plan 和 Delegate 范围均为 `COMPLETE`；Scheduler、Internal、Operator 和 NE-01 仍为 `INCOMPLETE / IN_PROGRESS`。
+本地剩余路线驱动器又通过真实 Scheduler CommandService、Internal CommandService 和带 Review/HardState Effect/外层 outcome 的 Operator Runtime，把三路终态顺序写入同一个 canonical SQLite。最新串联运行绑定干净提交 `2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0`，仓库与数据库 migration head 均为 `0135_task_review_denial_settlement.sql`；只读 validator 严格重开 admission digest 和控制政策后得到七路全部 `PASS`、reason code 全空。正式隐私安全收据见 [ne01_scheduler_clock_control_route_acceptance_20260727.json](docs/45_testing/test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json)，receipt digest 为 `sha256:505c300bc88882258bc47d13c75a542fb4a9526fc4e16cf2b7e9875d8d9cdd1a`。因此七路 `commit_bound_acceptance` 均为 `PASS`，Chat、Skill、当前启用 Plan 和 Delegate 范围均为 `COMPLETE`；Scheduler、Internal、Operator 和 NE-01 仍为 `INCOMPLETE / IN_PROGRESS`。
 
 本地采集入口如下；必须为每条路线传入同一真实运行数据库中的 request id，且采集时 tracked worktree 必须干净：
 
@@ -198,10 +219,10 @@ Edge 指令的旧进程级 owner 已退役，首条正向受治理链也已接�
 
 | 范围 | 当前结论 | 说明 |
 |---|---|---|
-| Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / NE-01 IN_PROGRESS` | fail-closed Gate 覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。干净提交 `3db60ff1` 的同库 v3 正式收据使七路提交绑定控制全部 `PASS`；当前 `CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 的 authority、Budget、Review 和事务副作用控制也全部通过。Plan/Delegate 的 `COMPLETE` 只覆盖已启用范围；Scheduler/Internal/Operator 仍有各自 `PARTIAL` 控制 |
+| Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / NE-01 IN_PROGRESS` | fail-closed Gate 覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。干净提交 `2a88f56e` 的同库 v3 正式收据严格重开 admission digest 与控制政策并使七路提交绑定控制全部 `PASS`；当前 `CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 的 authority、Budget、Review 和事务副作用控制也全部通过。Plan/Delegate 的 `COMPLETE` 只覆盖已启用范围；Scheduler/Internal/Operator 仍有各自 `PARTIAL` 控制 |
 | 本地交付元数据 | `WIRED_FAIL_CLOSED / REMOTE_CI_NOT_RUN` | `scripts/ci/check_delivery_metadata.py` 审计 `origin/dev..HEAD` 的中文 vertical-slice 提交、单父历史、PR 固定七章节、真实 Markdown 换行和完成口径；feature merge commit、字面量 `\\n` 与无边界整体完成声明会失败。该本地 Gate 不替代 GitHub Actions；当前远程状态仍为 `NOT_RUN_ACCOUNT_QUOTA` |
 | Durable Task Runtime | `PARTIAL_ATOMIC_DEFAULT / ATTEMPT_BOUND_NODE_BUDGET_LOCAL_PROVEN / GENERAL_SHAPE_RECOVERY_INCOMPLETE / NE01_IN_PROGRESS` | 新生产 Graph 统一声明 `ATOMIC_GRAPH_SUCCESS_V1`，0090/0091 原子收口失败/成功。0132 在 READY claim 的同一事务内创建 Attempt-bound child Budget Reservation，父级仍是唯一总额度；用量、超限、retry 与 replay 同时绑定父子账本。五节点菱形与八根节点 checkpoint 已证明依赖释放、跨 owner 恢复和 worker exactly-once；0130/0131 的 signed hold/reconciliation 边界保持。七路线提交绑定已通过；无限规模、其它 failure/cancellation 组合、Workspace 一般终态、bounded fan-out 部署启用、key/HTTP/network canary 与波次验收仍未完成 |
-| Scheduler | `PARTIAL / ADMIN_AND_OCCURRENCE_GOVERNED` | occurrence 生产 worker 只生成不可变 operation plan，真实 handler 在 Acceptance 后执行；0117 继续封闭 DUE→occurrence owner/fence。管理 HTTP 的 create/update/delete/enable/disable 也统一生成 `SCHEDULER HostCommand → TaskGraph`，Acceptance Effect 只以冻结的 method/path/body/head 和 Scheduler claim 写 canonical repository；结果 journal 与 claim 之间的崩溃可精确恢复。双前缀路由中直接 definition/admin writer 为 0。提交绑定已通过；mutable batch freezing、一般多节点与 unknown-effect 恢复、波次集成和 canary 仍缺 |
+| Scheduler | `PARTIAL / ADMIN_AND_OCCURRENCE_GOVERNED` | occurrence 生产 worker 只生成不可变 operation plan，真实 handler 在 Acceptance 后执行；0117 继续封闭 DUE→occurrence owner/fence。Clock 先在一个 SQLite snapshot 冻结 pending+due batch，执行前重验且同轮不二次查询。管理 HTTP 统一生成 `SCHEDULER HostCommand → TaskGraph`，直接 definition/admin writer 为 0。提交绑定已通过；一般多节点与 unknown-effect 恢复、完整进程重启、波次集成和 canary 仍缺 |
 | Acceptance Effect 恢复 | `PARTIAL / EXACT_POST_ACCEPTANCE_EFFECTS_AND_AUTHENTICATED_SURFACE_QUERY` | visible turn、Preference 与 Life conversation projection 已拆成三个独立 post-Acceptance Effect。Preference store 的 privacy gate contract 缺失/非 `bool` 时失败关闭且零写；配置显式 false 或 malformed env 会保守解析为 `bool false`，只写 `DISABLED` receipt，事件、当前 profile 和 0118 child profile version 都为 0。启用时，0118 在一个 SQLite UoW 中写事件、append-only profile child version 与 evaluation receipt，并以 sealed-child trigger 和 reconcile full-set 校验拒绝追加/篡改；无信号也写真实 `NO_SIGNAL`。推荐反馈只能绑定 admission timestamp 以前、同 person 且 exact conversation/session 的 delivery，并保存 canonical full-delivery digest。Surface 初次 POST 响应丢失后，只能用既有 `internal_reply` HMAC/timestamp/nonce 对 Gateway durable outbox 做只读查询；Gateway 从同一 SQLite outbox payload 重开并精确校验 `effect_id`，Host 同时校验 outbox/delivery/platform/conversation/payload digest。`NOT_FOUND` 永远保持 `UNKNOWN`，不得盲目重发 |
 | Internal Agent | `PARTIAL / GOVERNED_WRITE_PROMOTION + SIGNED_RAW_FAILURE_CLEANUP` | 外部入口只接受尚未准入的 v2 描述并编译为 V3；准入后的 worker、Executor、Review 与 Workspace 原生消费同一个 `WorkOrderV3`。exact authority 下的写 Worker可密封 bounded manifest/binary patch，Acceptance 逐字重算后生成 deterministic accepted HEAD，并以 0116 晋升 artifact；源分支不变，response loss、lifecycle rollback 后 Runtime 重建和 post-seal tamper 均有真实 SQLite+Git 证据。提交绑定已通过；一般 unknown-effect、其它 failure/cancellation、handle-level TOCTOU 与 OS/container isolation 仍缺 |
 | 直接 Agent Skill 写入 | `PARTIAL / REVIEWED_SKILL_CODEX_WORKSPACE_PROMOTION_LOCAL_PROVEN` | `agent_worker/self_heal/self_evolve` 的真实 Direct Skill admission 冻结 registry risk/confirm policy；risk 4 节点必须重开唯一已消费的 task/node-bound Review。公共 payload 不能注入 V3、Workspace、ArtifactStore、grant、Budget、Review 或 fence。`codex_runtime` 只在 sealed governed authority 下取得 app-local ports，WorkerProjection 只提交 protected stage descriptor，Graph Acceptance 生成 promotion Effect；Accepted handler 重开 Task/Attempt/Lease/Preview/Effect/seal 后才提升 Git artifact，且该 Effect 先于可见对话/Life/delivery。Domain Pack、其它 Skill、一般恢复与真实服务 canary 仍失败关闭 |

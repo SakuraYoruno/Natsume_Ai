@@ -10,11 +10,19 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
 from typing import Any
 from urllib.parse import quote
+
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    require_control_route_execution_policy,
+)
+from host_brain.contracts.agent_runtime.task_graph import TaskGraph
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from natsume_contracts.task import HostCommand
 
 
 UNIVERSAL_ROUTE_ACCEPTANCE_READ_INVALID = (
@@ -37,6 +45,12 @@ _REQUIRED_TABLE_COLUMNS: Mapping[str, frozenset[str]] = {
             "route_type",
             "graph_id",
             "graph_revision",
+            "command_json",
+            "command_digest",
+            "work_order_json",
+            "work_order_digest",
+            "graph_json",
+            "graph_digest",
             "created_at_ms",
         }
     ),
@@ -406,28 +420,45 @@ class UniversalRouteAcceptanceReader:
         *,
         request_id: str,
     ) -> dict[str, Any]:
-        command_rows = _rows(
-            connection,
+        admission_rows = connection.execute(
             """
             SELECT command_id, request_id, surface, route_type, graph_id,
-                   graph_revision, created_at_ms
+                   graph_revision, command_json, command_digest,
+                   work_order_json, work_order_digest, graph_json,
+                   graph_digest, created_at_ms
             FROM host_command_journal
             WHERE request_id = ?
             ORDER BY created_at_ms, command_id
             """,
             (request_id,),
-        )
+        ).fetchall()
+        command_rows = [
+            {
+                "command_id": str(row["command_id"]),
+                "request_id": str(row["request_id"]),
+                "surface": str(row["surface"]),
+                "route_type": str(row["route_type"]),
+                "graph_id": str(row["graph_id"]),
+                "graph_revision": int(row["graph_revision"]),
+                "created_at_ms": int(row["created_at_ms"]),
+            }
+            for row in admission_rows
+        ]
         if len(command_rows) != 1:
             return {
                 "request_id": request_id,
                 "commands": command_rows,
             }
         command = command_rows[0]
+        control_route_policies = _capture_control_route_policy(
+            admission_rows[0]
+        )
         graph_id = str(command["graph_id"])
         revision = int(command["graph_revision"])
         return {
             "request_id": request_id,
             "commands": command_rows,
+            "control_route_policies": control_route_policies,
             "graphs": _rows(
                 connection,
                 """
@@ -906,6 +937,120 @@ def _capture_worker_model_budgets(
             }
         )
     return bindings
+
+
+def _capture_control_route_policy(
+    row: sqlite3.Row,
+) -> list[dict[str, Any]]:
+    """Reopen frozen admission authority without returning raw payloads."""
+
+    surface = str(row["surface"] or "").strip().lower()
+    try:
+        command_payload = _strict_json_object(
+            row["command_json"],
+            field_name="host_command_journal.command_json",
+        )
+        work_order_payload = _strict_json_object(
+            row["work_order_json"],
+            field_name="host_command_journal.work_order_json",
+        )
+        graph_payload = _strict_json_object(
+            row["graph_json"],
+            field_name="host_command_journal.graph_json",
+        )
+        for payload, digest_value, field_name in (
+            (
+                command_payload,
+                row["command_digest"],
+                "host_command_journal.command_digest",
+            ),
+            (
+                work_order_payload,
+                row["work_order_digest"],
+                "host_command_journal.work_order_digest",
+            ),
+            (
+                graph_payload,
+                row["graph_digest"],
+                "host_command_journal.graph_digest",
+            ),
+        ):
+            if _canonical_digest(payload) != str(digest_value or ""):
+                raise ValueError(f"{field_name} differs from its JSON")
+
+        command = HostCommand.from_mapping(command_payload)
+        work_order = WorkOrderV3.from_mapping(work_order_payload)
+        graph = TaskGraph.from_mapping(graph_payload)
+        policy = require_control_route_execution_policy(
+            command=command,
+            work_order=work_order,
+            graph=graph,
+        )
+        if policy is None:
+            return []
+        return [
+            {
+                **policy,
+                "admission_digests_valid": True,
+                "binding_valid": True,
+            }
+        ]
+    except Exception:
+        # Keep the snapshot privacy-bounded.  Release evaluation only needs
+        # the stable invalid state; parser details could contain raw payload.
+        return [
+            {
+                "schema_version": None,
+                "surface": surface or None,
+                "control_command_id": None,
+                "transport_route": None,
+                "target_id": None,
+                "execution_owner": None,
+                "execution_mode": None,
+                "review_mode": None,
+                "budget_mode": None,
+                "verification_mode": None,
+                "effect_mode": None,
+                "policy_ref": None,
+                "admission_digests_valid": False,
+                "binding_valid": False,
+            }
+        ]
+
+
+def _strict_json_object(value: Any, *, field_name: str) -> dict[str, Any]:
+    def reject_constant(raw: str) -> None:
+        raise ValueError(f"non-finite constant in {field_name}: {raw}")
+
+    def reject_duplicate_pairs(
+        pairs: list[tuple[str, Any]],
+    ) -> dict[str, Any]:
+        parsed: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in parsed:
+                raise ValueError(f"duplicate key in {field_name}")
+            parsed[key] = item
+        return parsed
+
+    parsed = json.loads(
+        str(value),
+        parse_constant=reject_constant,
+        object_pairs_hook=reject_duplicate_pairs,
+    )
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name} must contain an object")
+    return parsed
+
+
+def _canonical_digest(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        dict(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def _rows(

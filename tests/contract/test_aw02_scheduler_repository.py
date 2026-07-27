@@ -16,6 +16,10 @@ from host_brain.contracts.agent_runtime.task_graph import (
 )
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.scheduler_clock_batch import (
+    SchedulerClockBatchError,
+    validate_scheduler_clock_batch,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.host_command_repository import (
     HOST_COMMAND_INGRESS_CONFLICT,
@@ -93,6 +97,53 @@ def _publish(repository: SchedulerDefinitionRepository) -> dict:
         expected_head_version=0,
         next_scheduled_at_ms=NOW + 1_000,
     )
+
+
+def test_clock_batch_is_one_content_addressed_repository_snapshot(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    repository = SchedulerDefinitionRepository(db_path, clock=lambda: NOW)
+    repository.publish_definition(
+        task_id="scheduler.test.first",
+        definition={
+            **_definition(),
+            "task_id": "scheduler.test.first",
+        },
+        expected_head_version=0,
+        next_scheduled_at_ms=NOW,
+    )
+    repository.publish_definition(
+        task_id="scheduler.test.second",
+        definition={
+            **_definition(),
+            "task_id": "scheduler.test.second",
+        },
+        expected_head_version=0,
+        next_scheduled_at_ms=NOW,
+    )
+
+    first = repository.read_clock_batch(due_at_ms=NOW, limit=2)
+    reopened = validate_scheduler_clock_batch(
+        first,
+        expected_captured_at_ms=NOW,
+        expected_limit=2,
+    )
+    assert [row["task_id"] for row in reopened["due_definitions"]] == [
+        "scheduler.test.first",
+        "scheduler.test.second",
+    ]
+    assert reopened["pending_occurrences"] == []
+
+    restarted = SchedulerDefinitionRepository(
+        db_path,
+        clock=lambda: NOW,
+    ).read_clock_batch(due_at_ms=NOW, limit=2)
+    assert restarted["batch_ref"] == first["batch_ref"]
+
+    first["due_definitions"][0]["definition"]["worker_key"] = "drifted"
+    with pytest.raises(SchedulerClockBatchError, match="digest"):
+        validate_scheduler_clock_batch(first)
 
 
 def _claim_due(

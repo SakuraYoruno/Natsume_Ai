@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 
 import pytest
 
+from host_brain.contracts.scheduler_clock_batch import (
+    build_scheduler_clock_batch,
+)
 from host_brain.scheduler.clock import SchedulerClock, _next_scheduled_at_ms
 from host_brain.scheduler.contracts import SchedulerDefinitionSnapshot
 from host_brain.scheduler.governed_runtime import (
@@ -113,6 +116,19 @@ class _RetryStateRepository:
                 default=None,
             ),
         }
+
+    def read_clock_batch(self, *, due_at_ms, limit):
+        pending = self.list_pending_occurrences(limit=limit)
+        due = self.list_due(
+            due_at_ms=due_at_ms,
+            limit=max(0, limit - len(pending)),
+        )
+        return build_scheduler_clock_batch(
+            captured_at_ms=due_at_ms,
+            limit=limit,
+            pending_occurrences=pending,
+            due_definitions=due,
+        )
 
 
 def _request_id(task_id: str, revision: int, scheduled_at_ms: int) -> str:
@@ -233,12 +249,17 @@ async def test_clock_recovers_durable_authority_then_preflights_and_admits_due()
         def preflight_definition(self, definition):
             events.append("preflight")
             assert definition.task_id == "due_task"
+            assert definition.worker_key == "scheduler_production"
             return "normal"
 
         async def execute_occurrence(self, *, occurrence, authority, received_at_ms):
             del authority
             events.append("execute:" + occurrence.task_id)
             assert received_at_ms == NOW
+            if occurrence.task_id == "pending_task":
+                # The due row was already deep-frozen in the same clock batch.
+                # A prior worker cannot mutate the rest of this sweep.
+                due["definition"]["worker_key"] = "drifted_after_batch_capture"
             return {"done": True}
 
     clock = SchedulerClock(
@@ -253,6 +274,7 @@ async def test_clock_recovers_durable_authority_then_preflights_and_admits_due()
     result = await clock.run_once()
 
     assert result == {
+        "batch_ref": result["batch_ref"],
         "received_at_ms": NOW,
         "recovered": 1,
         "admitted": 1,
@@ -261,6 +283,9 @@ async def test_clock_recovers_durable_authority_then_preflights_and_admits_due()
         "failed": 0,
         "failures": [],
     }
+    assert result["batch_ref"].startswith(
+        "scheduler-clock-batch://sha256/"
+    )
     assert events == [
         "execute:pending_task",
         "preflight",

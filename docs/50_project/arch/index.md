@@ -3,18 +3,24 @@
 
 # Natsume AI 架构文档目录
 
-版本：v4.8
+版本：v4.9
 维护日期：2026-07-27
 状态：`CURRENT_ARCHITECTURE_CATALOG`
 
 本目录只保留当前结构说明、稳定目标、差距、专项架构和可维护图册。旧路线图、混写完成报告、旧 Agentic RAG/Gateway 方案和按文件行数生成的模块快照已删除；Git 历史承担追溯。
+
+当前 Scheduler batch 边界：pending CLOCK occurrence 与 newly-due
+definition 在首个 worker 前由单一 SQLite snapshot 深冻结并生成 content
+address；Clock 重验且同轮不再查询 due。clean SHA `2a88f56e` 的七路线
+收据严格重开 admission digest，Internal/Operator/Scheduler 各重开一份
+控制 policy 并全部 PASS。一般恢复、完整进程重启和全栈 canary 仍未完成。
 
 当前 Plan/Delegate 政策边界：Plan 在 admission 前冻结 Graph、Budget、
 Registry/Review 和唯一 result effect owner；Delegate 冻结 target/adapter、
 durable Review、exact-zero inner budget 与无直接 Effect。initial、replay、
 Review continuation、startup recovery 和 frozen execution 都重开 content
 address。定向单元 `89 passed`、真实 SQLite 四路线 `1 passed`；正式
-clean-SHA `3db60ff1` 的同库 v3 收据已验证七路，并把当前启用 Plan/Delegate
+clean-SHA `2a88f56e` 的同库 v3 收据已验证七路，并把当前启用 Plan/Delegate
 范围提升为 `COMPLETE`。Scheduler/Internal/Operator 与 NE-01 保持未完成。
 
 当前 Operator 库存为 `14 active governed / 0 blocked / 23 retired`。

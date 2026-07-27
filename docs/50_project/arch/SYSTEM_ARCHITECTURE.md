@@ -3,11 +3,21 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.27
+版本：v2.28
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+Scheduler 的生产对象图现在把“发现本轮工作”视为独立不可变 authority。
+Persistence owner 在单一 SQLite snapshot 内构造 ClockBatch；Scheduler
+进程只接收 content-addressed、深冻结的 bounded rows，并在任何执行前重验。
+这样 Task Runtime 仍独占每个 occurrence 的 Attempt/Lease/Budget/Acceptance，
+而 Clock 只决定同一 capture point 的有界候选集合。Release 的 query-only
+reader 与运行对象图分离，只能裁决已落盘事实，不能修改 Scheduler 或 Task。
+clean SHA `2a88f56e` 的正式同库收据已让七路全部 PASS，并证明
+Internal/Operator/Scheduler policy count 各为 1；其它运行控制和全栈 canary
+仍不由该收据覆盖。
 
 Skill 执行现在有一个显式 policy gate 和一个 app-local authority root。
 canonical Host Registry 对 93 个 Skill 做完备分区：28 个 inline read-only、13 个
@@ -82,7 +92,7 @@ planner，也不写 Task 状态：Plan policy 绑定不可变 Graph、Graph Budg
 durable Review、exact-zero inner usage 与 Graph-Acceptance-only effect。
 Host、Review continuation、startup recovery 和 frozen executor 只消费这份
 政策并重验 content address。该层阻止配置热变更在重放时悄悄扩大权限；
-clean-SHA `3db60ff1` 的同库 v3 收据已重开 Plan 三节点与 Delegate Review
+clean-SHA `2a88f56e` 的同库 v3 收据已重开 Plan 三节点与 Delegate Review
 continuation，当前 enabled scope 为 `COMPLETE`。该结论不覆盖其它 Delegate
 target 或 NE-02 通用搜索收益。
 

@@ -5,9 +5,28 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.24
+版本：v3.25
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前执行切片先收口 Scheduler clock sweep 与控制路线验收盲点：
+
+1. Clock 必须在任何 worker 前通过一个 SQLite read transaction 同时读取
+   pending CLOCK occurrence 与 newly-due definition。
+2. capture time、limit、行顺序和深层 JSON 内容必须冻结为
+   `natsume.scheduler.clock-batch.v1`，并由 Clock 独立重验
+   `scheduler-clock-batch://sha256/...`；本轮禁止第二次 due query。
+3. 七路线验收 reader 必须用严格 JSON loader 重开
+   `command_json/work_order_json/graph_json`，核对各自 digest，并调用
+   `require_control_route_execution_policy()`；公开 snapshot 不得携带这些
+   raw payload。
+4. Scheduler/Internal/Operator PASS 必须各有一个完整、content-addressed
+   且 binding-valid 的控制政策；非控制路线携带该政策必须失败关闭。
+5. 本切片的核心 45 项定向/合同/SQLite 验证和最终 100 项受影响回归、
+   Gate 1～14、统一 delivery gate 通过；clean SHA `2a88f56e` 随后完成
+   GR05 与三控制路线同库采集，七路 PASS、三个控制 policy count 均为 1。
+   这只允许相应局部控制写 `PASS`；NE-01 波次 integration 与 NE-07 全栈
+   未完成前，程序状态不得升级。
 
 当前 Scheduler/Internal/Operator 收口切片采用统一不可变控制执行政策。
 任何以 `INTERNAL/OPERATOR/SCHEDULER + route=delegate` 进入 Task Runtime 的
@@ -92,7 +111,7 @@ exact TaskGraph node authority 下调用。Executive 执行文件必须不存在
 
 真实链路校准还修复两个生产边界：`surface.post_process` 不再把内部 `governed_model_budget` guard 复制到 Life acceptance trace；`GovernedFrozenNodeWorker` 保留 executor 自己的 audit path，不再用 Task Runtime fallback path 覆盖它。前者防止内部预算 authority 泄漏并触发 secret gate，后者防止瞬时 COMMIT 与 durable WorkerProjection 出现来源漂移。
 
-当前七路线验收切片建立 `natsume.universal-runtime-route-acceptance.v3`。采集器只能以 `mode=ro`、`query_only=ON` 在单一事务读取真实文件型 SQLite；它必须把每条 request 映射到唯一 Chat、Skill、Plan、Delegate、Scheduler、Internal 或 Operator 路线，并验证完整 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 链，同时证明没有当前 recovery hold、effect reconciliation 或 cancellation 历史。Chat/Plan 额外要求 ModelAttempt→WorkerProjection→父子 usage 精确一致。最新正式运行绑定提交 `3db60ff170a085056d7fd9ba792cb7064de14d35`、migration 0135 和同一文件型 SQLite，七条路线均为验收 `PASS`；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 和只读 `pentest_agent` Delegate 范围均为 `COMPLETE`，Scheduler/Internal/Operator 仍为 `INCOMPLETE`。
+当前七路线验收切片建立 `natsume.universal-runtime-route-acceptance.v3`。采集器只能以 `mode=ro`、`query_only=ON` 在单一事务读取真实文件型 SQLite；它必须把每条 request 映射到唯一 Chat、Skill、Plan、Delegate、Scheduler、Internal 或 Operator 路线，严格重开 admission Command/WorkOrder/TaskGraph 及 digest，并验证完整 Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 链，同时证明没有当前 recovery hold、effect reconciliation 或 cancellation 历史。三条控制路线必须分别重开一个 control policy；其它路线必须为零。Chat/Plan 额外要求 ModelAttempt→WorkerProjection→父子 usage 精确一致。最新正式运行绑定提交 `2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0`、migration 0135 和同一文件型 SQLite，七条路线均为验收 `PASS`；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 和只读 `pentest_agent` Delegate 范围均为 `COMPLETE`，Scheduler/Internal/Operator 仍因其它控制为 `INCOMPLETE`。
 
 当前同库验收驱动切片把 Direct Skill 加入 GR05，并以独立 local acceptance composition 顺序调用真实 Scheduler、Internal 和 Operator 应用边界。Scheduler 经 definition/occurrence/CommandService 与 Acceptance Effect；Internal 经官方 CommandService、node grant、Budget、Verification、Acceptance 和 result commit；Operator 经 exact OBS authority、风险 Review、continuation、HardState Effect 与 outer outcome/claim settlement。正式收据位于 `docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json`，run id 为 `universal-runtime-acceptance://sha256/eb7f4b25441b3d8b8856d15bd50356005688495d9328efb17bc7744ddc44fbc6`。bounded deterministic worker 只用于治理语义，不具备 provider/收益资格；一般恢复、其它路线控制、波次集成、真实模型与 NE-07 仍未完成。
 
@@ -144,7 +163,7 @@ Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/eve
 
 | 项目 | 执行起点 |
 |---|---|
-| Universal Runtime 七路线 | Gate 已覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`，干净提交 `3db60ff1` 的同库 v3 收据使七路 `commit_bound_acceptance=PASS`。Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 均为 `COMPLETE`。Scheduler/Internal/Operator 仍有 `PARTIAL` 控制；实际 Edge 网络、部署验签 key、真实外部模型质量、完整进程重启 canary 与设备未验收 |
+| Universal Runtime 七路线 | Gate 已覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`，干净提交 `2a88f56e` 的同库 v3 收据严格重开 admission digest 与三条 control policy，使七路 `commit_bound_acceptance=PASS`。Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 均为 `COMPLETE`。Scheduler/Internal/Operator 仍有 `PARTIAL` 控制；实际 Edge 网络、部署验签 key、真实外部模型质量、完整进程重启 canary 与设备未验收 |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE`：post-Acceptance handler 与 immutable result authority 不变；0117 已删除 `SchedulerClock._retry_state`，并在同一 UoW 将 live DUE retry claim 原子转成 occurrence-bound claim。执行前 renew、执行中 heartbeat；过期 lease、第二 owner、stale fence 和旧 tick 时间都不能授权 dispatch/clear/defer。单元、合同与 durable-UoW 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因与 canary 未完成 |
 | Acceptance Effect 恢复 | `PARTIAL / EXACT_POST_ACCEPTANCE_EFFECTS_AND_AUTHENTICATED_QUERY`：visible turn、Preference、Life projection 是三个独立 post-Acceptance Effect。Preference store gate 缺失/非 `bool` 时失败关闭且零写；配置 false 或 malformed env 保守解析为 `bool false`，只写零 event/profile 的 `DISABLED` receipt。启用路径由 0118 在同一 SQLite UoW 写 event、append-only profile child version 与 evaluation receipt，sealed-child trigger 与 reconcile full-set 校验共同拒绝追加/篡改；`NO_SIGNAL` 也有真实 receipt。推荐反馈只绑定 admitted-time 以前且 exact person/conversation/session 的 delivery，并冻结 canonical delivery digest。Surface response loss 只能用 `internal_reply` HMAC 只读 query；Gateway 从同一 SQLite outbox payload 精确校验 `effect_id`，`NOT_FOUND` 永远保持 `UNKNOWN` |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`：边界只接收未准入的 v2 描述并编译为 V3；准入后的 worker、Executor、Review 与 Workspace 原生消费 V3。首次 activation 与 lifecycle survivor 可对 sealed checkpoint 重建唯一 WorkerProjection 并继续原图，不重跑 Agent。具备 exact Workspace authority 的 write 密封 frozen-base manifest/binary patch，Acceptance 重算 deterministic accepted HEAD 并经 0116 晋升，源分支不移动。Operation 预留后的已知 interruption 先写 `RECOVERY_REQUIRED + Outbox`。当前精确 raw failure 只有在 signed no-intent `RELEASE/NO_SIDE_EFFECT` 已原子终结 Operation/Attempt/Node/Graph/Lease/Budget 后，才能生成独立 deterministic claim result；terminal worker 必须先关闭真实 Secure Ingress claim，再清理 Git Workspace/stage，claim outage 时两者都保留。finalized cancellation 继续使用自己的两类签名终态，不能混用。一般 unknown effect、其它 failure/cancellation、多节点/批次、handle-level TOCTOU、OS/container isolation、七路线验收与canary仍缺 |

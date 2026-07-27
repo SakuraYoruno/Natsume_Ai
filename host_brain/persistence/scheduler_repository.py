@@ -19,6 +19,9 @@ import sqlite3
 from typing import Any
 
 from host_brain.core.ids import now_ms
+from host_brain.persistence.scheduler_clock_batch_store import (
+    SchedulerClockBatchStoreMixin,
+)
 from host_brain.persistence.scheduler_clock_retry_store import (
     SchedulerClockRetryStoreMixin,
 )
@@ -335,6 +338,7 @@ class _SchedulerSQLiteRepository:
 
 
 class SchedulerDefinitionRepository(
+    SchedulerClockBatchStoreMixin,
     SchedulerClockRetryStoreMixin,
     _SchedulerSQLiteRepository,
 ):

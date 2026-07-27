@@ -344,6 +344,7 @@ async def test_clock_to_task_runtime_to_durable_result_is_one_real_chain(
         tick = await scheduler.clock.run_once()
 
         assert tick == {
+            "batch_ref": tick["batch_ref"],
             "received_at_ms": NOW,
             "recovered": 0,
             "admitted": 1,
@@ -352,6 +353,9 @@ async def test_clock_to_task_runtime_to_durable_result_is_one_real_chain(
             "failed": 0,
             "failures": [],
         }
+        assert tick["batch_ref"].startswith(
+            "scheduler-clock-batch://sha256/"
+        )
         assert len(worker_calls) == 1
         assert scheduler.worker_registry is workers
         assert intent_engine.calls == 1

@@ -3,12 +3,26 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.34
+版本：v2.35
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Scheduler Clock Batch 模块由
+[`contracts/scheduler_clock_batch.py`](../../../host_brain/contracts/scheduler_clock_batch.py)
+和
+[`persistence/scheduler_clock_batch_store.py`](../../../host_brain/persistence/scheduler_clock_batch_store.py)
+组成。前者只负责版本、规范化、深冻结、唯一 identity 和 content-address
+校验；后者只拥有一个 read transaction，在 worker 外读取 pending/due。
+`scheduler/clock.py` 负责消费并重验，不拥有第二次 due discovery authority。
+Universal Route Acceptance Reader 是独立只读验收 owner：它可私下加载 raw
+admission JSON 来重验 typed contracts/digest，但只能向 Release 层返回
+隐私安全 policy 投影，不能成为运行时执行或修复 owner。控制 policy 的
+Release 判定位于 `release/universal_route_control_policy.py`，避免把新职责
+继续堆进主验收编排器。clean SHA `2a88f56e` 的共享 SQLite 收据已通过七路
+并证明三条控制 policy 各一份；模块仍不取得执行 authority。
 
 Control Route Execution Policy 模块由
 [`contracts/agent_runtime/control_route_execution_policy.py`](../../../host_brain/contracts/agent_runtime/control_route_execution_policy.py)
@@ -55,7 +69,8 @@ Delegate Target Policy 模块由
 登记并生成政策；direct contract builder 将它冻结到 WorkOrder；authority
 validator、frozen executor 和 dispatcher audit 分别重开同一 content
 address。当前只读 `pentest_agent` 的 Review continuation 已有真实 SQLite
-证据，但干净提交收据尚待生成，故模块代码可用不等于路线已封板。
+证据，且 clean SHA `2a88f56e` 的最新收据已再次重开；路线封板仍只限当前
+启用的只读 target。
 
 Skill Policy 模块由稳定合同
 [`contracts/skill_execution.py`](../../../host_brain/contracts/skill_execution.py)
