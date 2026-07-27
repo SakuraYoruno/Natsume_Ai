@@ -9,6 +9,26 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+NE-01 的代码波次已在当前 `dev@27b032f1e` 完成本地封口，状态为
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，不是生产全栈 `PASS`。
+同一个文件型 canonical SQLite 先运行 Chat、Skill、Delegate、Plan，再追加
+Scheduler、Internal、Operator；只读收据得到七路线全部 `PASS`，
+run id 为
+`universal-runtime-acceptance://sha256/5f23080c825daf4aa1d6abcdd9866225d1e67c9a47c37c6e02cd5e178e1bd82d`，
+receipt digest 为
+`sha256:1a4ae4890d5cbf32275898681dcaec02c3948dd862ad1056481b53ab4d330383`。
+随后一次性执行 24 个真实 SQLite、Windows 跨进程和 Git Workspace
+恢复用例，结果为 `24 passed in 165.99s`；覆盖菱形图、八根 fan-out、
+pre-Operation/committed checkpoint、签名未知副作用、取消交叉、并行
+failure/Budget/Review 以及 accepted HEAD promotion/abandon/restart。
+本地证据位于忽略目录
+`artifacts/local-gates/27b032f1ebc408c8456a7182d456cb98b441a260/ne01-wave/`。
+Budget 生产动作仍只启用 `BLOCK`；`DEGRADE/REVIEW` 是 proposal-only，
+不得静默执行。未知副作用按设计必须签名对账，不以“自动猜测效果”作为完成项。
+有签名的 fan-out promotion、真实 HTTP/network/provider、外部 namespace 和
+Docker 全栈仍由 NE-07 验收，所以整体继续 `INCOMPLETE`，当前实现波切换到
+NE-02 PlanningSearch。
+
 当前 NE-01 结构门禁已同步到 `origin/dev` 实际合并的原子 authority，而不是继续
 冻结过时调用次数、构造签名和 MRO 下标。Review denial 的 Node/Graph/Budget/
 Outbox 已由单一 settlement UoW 取代三次 lifecycle 写；Plan writer 的

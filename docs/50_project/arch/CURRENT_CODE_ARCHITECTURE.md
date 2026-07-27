@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.58
+版本：v5.59
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -11,6 +11,16 @@
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
 ## 1. 结论
+
+NE-01 当前代码波次为
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。在
+`dev@27b032f1e` 上，七路线共用一个文件型 canonical SQLite 并通过 query-only
+receipt；同一代码随后通过 24 个去重的真实 SQLite、Windows 进程和 Git
+Workspace 恢复场景。代码已经具备 bounded fan-out、签名 ambiguity
+reconciliation、原子 terminal settlement 和 Workspace promotion/abandon
+所需路径；部署 feature receipt、真实网络/provider、外部 namespace 与 Docker
+仍未执行，因此 Universal Runtime 的严格生产 Gate 继续为 `INCOMPLETE`。
+当前代码实施焦点转入 NE-02，不改变完整架构 `INCOMPLETE`。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

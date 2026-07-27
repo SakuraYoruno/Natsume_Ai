@@ -3,12 +3,19 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.38
+版本：v2.39
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
+`PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名
+reconciliation、并行 terminal 和 Workspace Git 生命周期。模块的本地
+代码状态为 `CODE_COMPLETE_LOCAL`；Feature Canary Store 仍控制 production
+fan-out，真实 HTTP/network/provider 和 Docker 留给 NE-07，因此发布状态是
+`ACCEPTANCE_PENDING_NE07`。PlanningSearch 模块成为当前 NE-02 活动模块。
 
 Host Recovery Inventory 模块现在不是简单枚举
 `CREATED/ACTIVE/BLOCKED`。它在同一 SQLite snapshot 中只保留带 actionable

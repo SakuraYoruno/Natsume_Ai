@@ -3,10 +3,17 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.29
+版本：v3.30
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+NE-01 的剩余差距已从“本地代码/恢复未封口”收窄为 NE-07 部署验收。
+当前提交的七路线同库收据全部 `PASS`，24 个去重恢复用例通过；因此实现依赖
+允许进入 NE-02。NE-01 仍不是 production `PASS`：signed feature promotion、
+真实 HTTP/network/provider、外部 namespace、Docker 服务栈和回滚演练尚未
+执行。Budget `DEGRADE/REVIEW` 明确为 proposal-only，未知副作用明确要求
+签名对账；二者不再作为需要“自动执行/自动归因”的伪缺口。
 
 一般 mixed-terminal 恢复缺口已从“未证明”缩到部署/路线级边界。真实进程
 矩阵现在覆盖 retry+hard failure、Budget overrun 与 Review→deny 在 outer

@@ -5,9 +5,20 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.28
+版本：v3.29
 日期：2026-07-27
-状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+状态：`NE-02_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
+`dev@27b032f1e` 的同库七路线收据全部 `PASS`，receipt digest 为
+`sha256:1a4ae4890d5cbf32275898681dcaec02c3948dd862ad1056481b53ab4d330383`；
+一次去重恢复波次以 `24 passed in 165.99s` 覆盖一般图形、跨进程 checkpoint、
+签名 unknown-effect/cancellation、并行 failure/Budget/Review 和真实 Git
+Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE-01 生产
+`PASS`：签名 feature promotion、真实 HTTP/network/provider、外部 namespace
+与 Docker 全栈仍必须在 NE-07 完成。`DEGRADE/REVIEW` 没有 runtime state
+machine，继续 proposal-only 且零 mutation 失败关闭；unknown effect 必须
+签名对账，不把自动归因列为完成条件。当前唯一活动实现波为 NE-02。
 
 当前批次封闭 outer settlement 前进程崩溃的 mixed-terminal 窗口：
 

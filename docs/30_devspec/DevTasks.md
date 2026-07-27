@@ -3,8 +3,8 @@
 
 # 当前架构程序注册表
 
-版本：v4.0
-维护日期：2026-07-15
+版本：v4.1
+维护日期：2026-07-27
 状态：`ONE_ACTIVE_PROGRAM`
 
 ## 唯一活动程序
@@ -16,6 +16,11 @@
 - 机器状态：`../../configs/release/current_architecture_status.json`
 
 当前执行波为 NE-00～NE-07。NE 是端到端 Architecture Wave，不拆回逐个 TASK Seal。
+
+当前活动实现波为 `NE-02`。NE-01 已达到
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，其目标部署 promotion、
+真实网络、附属服务和回滚仍由 NE-07 统一验收；该口径不是把 NE-01 标成
+production `COMPLETED`。
 
 ## 历史编号
 

@@ -3,9 +3,23 @@
 
 # 测试与验收目录
 
-版本：v2.36
+版本：v2.37
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 代码波次封口
+
+- 当前基线 `27b032f1ebc408c8456a7182d456cb98b441a260` 先运行真实
+  Governed Host 四路线，再向同一文件型 SQLite 追加 Scheduler、Internal、
+  Operator。只读 collector 得到七路线全部 `PASS`，receipt digest 为
+  `sha256:1a4ae4890d5cbf32275898681dcaec02c3948dd862ad1056481b53ab4d330383`。
+- 恢复波次去重后为 24 个用例，结果 `24 passed in 165.99s`。范围包括
+  `test_ne01_general_multinode_recovery.py`、四类跨进程签名恢复、fan-out、
+  parallel terminal、cancellation continuation 和真实 Git Workspace。
+- 证据保存在忽略目录 `artifacts/local-gates/<sha>/ne01-wave/`，不提交
+  SQLite、日志或用户数据。状态为
+  `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`；远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`，真实全栈尚未运行。
 
 ## NE-01 并发终态跨进程恢复矩阵
 
