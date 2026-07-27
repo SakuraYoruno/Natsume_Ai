@@ -912,3 +912,39 @@ result 调用数保持不变，源 HEAD 不移动。本批无 migration，基线
 `origin/dev@c7984d9e0bb95a5b0176360c39b2e405e247f63e`。NE-01 仍为
 `IN_PROGRESS`；一般 Budget policy、其它 recovery/Workspace 矩阵、波次
 integration 与 NE-07 服务栈不在本批完成口径内。
+
+## 16. 当前实施进展：签名失败与时间预算拒绝交叉终态
+
+本批补齐 reviewed Plan writer 在 stage seal 后、checkpoint 前中断，同时
+真实 elapsed time 触发 graph Budget rejection 的恢复链：
+
+1. writer 在真实 Git worktree 写入并 seal stage，随后中断，Operation 进入
+   `RECOVERY_REQUIRED`；
+2. Ed25519 `RELEASE / NO_SIDE_EFFECT` 只关闭该 Operation、Attempt、Node 和
+   Lease；Budget 保留唯一 `EXCEEDED` usage；
+3. fresh Runtime 依据 0090 `BUDGET` decision 原子结算
+   Graph=`BLOCKED`、Budget=`RELEASED`，不把节点失败错误提升为 graph
+   `FAILURE`；
+4. `TaskOperationFailureReconciliationStoreMixin` 只在 current decision、
+   graph/budget version、失败 `error_ref`、唯一 Budget winner、父/子
+   usage、child reservation 与 Outbox 精确一致时，才允许既有
+   `RECONCILED_OPERATION_NODE_FAILURE` 以 committed
+   Graph=`BLOCKED` 形状重开；
+5. Accepted handler 将 0090 live settlement 视为 receipt 外部的后续事实，
+   因而 PENDING→BLOCKED 前后的 v4/v5 receipt digest 保持稳定；Skill
+   artifact terminal reconciler 只允许 Plan 消费该形状，Direct Skill 仍要求
+   单节点 Graph=`FAILED`；
+6. `workspace_terminal_failure_authority.py` 在 Workspace 最终 CAS 前独立
+   重开同一 0090/winner/child-usage 证明，篡改 current Budget Outbox 时拒绝
+   artifact cleanup。
+
+真实 SQLite、Git worktree、Review continuation、签名 proof 与 fresh
+Runtime 的完整六路径回归为 `6 passed in 39.93s`；相邻 Accepted handler、
+签名失败、Workspace 和多节点预算集合为 `46 passed in 137.82s`，两组独立
+报告，不汇总为波次证据。新路径
+还证明 response-loss exact replay 不重复签名结算，writer/result 不重跑，
+源 HEAD 不移动，Workspace 最终 `ABANDONED → CLEANED`。本批无 migration，
+基线为 `origin/dev@921a56b77a05b192e1967efe97b06142a782166c`。
+一般 time/concurrency policy、其它交叉 terminal matrix、多 Workspace、
+NE-01 wave integration 和 NE-07 仍待完成，NE-01 继续为
+`IN_PROGRESS`。

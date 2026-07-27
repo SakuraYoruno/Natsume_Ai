@@ -25,6 +25,9 @@ from host_brain.agent_runtime.skill_artifact_terminal_reconciliation import (
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
+from host_brain.app.accepted_operation_reconciliation_handler import (
+    operation_reconciliation_handler_receipt_ref,
+)
 from host_brain.app.governed_plan_execution_policy import (
     bind_governed_plan_execution_policy,
 )
@@ -79,6 +82,7 @@ from host_brain.persistence.task_repository import (
     Ed25519ReconciliationProofVerifier,
     OutboxMessage,
 )
+from host_brain.persistence.task_store_types import TaskStoreError
 from host_brain.persistence.workspace_terminal_failure_authority import (
     finalized_no_effect_failure_allows_workspace_abandonment,
 )
@@ -570,6 +574,7 @@ class _ContinuationRuntime:
         "downstream-failure",
         "downstream-cancellation",
         "writer-signed-failure",
+        "writer-signed-budget-rejection",
         "writer-budget-rejection",
     ),
 )
@@ -617,11 +622,39 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         ledger.log_governor(governor)
         parent_ref = governor_grant_ref(intent["request_id"], governor)
         skill_registry = _registry()
+        signed_budget_crossing = (
+            terminal_outcome == "writer-signed-budget-rejection"
+        )
+        crossing_scope = "host-plan:ne01-signed-budget-crossing"
         adapter = build_capability_plan_search(
             intent,
             governor_result=governor,
             skill_registry=skill_registry,
             request_id=intent["request_id"],
+            business_idempotency_scope=(
+                crossing_scope if signed_budget_crossing else None
+            ),
+            budget_policy=(
+                {
+                    "schema_version": "Natsume.agent.budget_policy.v1",
+                    "scope": crossing_scope,
+                    "limits": {
+                        "token_count": 100_000,
+                        "tool_call_count": 100,
+                        "time_ms": 5_000,
+                        "concurrency": 3,
+                        "retry_count": 3,
+                        "model_cost_micros": 1_000_000,
+                    },
+                    "on_exceeded": "BLOCK",
+                    "metadata": {
+                        "policy": "signed_failure_budget_crossing_test",
+                        "fail_closed": True,
+                    },
+                }
+                if signed_budget_crossing
+                else None
+            ),
             input_refs=("input://sha256/" + "4" * 64,),
             frozen_context={
                 "runtime_context_schema": (
@@ -800,8 +833,24 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         }
         assert len(required_nodes) == 1
         required_node_id = next(iter(required_nodes))
-        if terminal_outcome == "writer-signed-failure":
+        if terminal_outcome in {
+            "writer-signed-failure",
+            "writer-signed-budget-rejection",
+        }:
             worker.interrupt_after_stage_node_id = required_node_id
+            if signed_budget_crossing:
+                monotonic_ns = 0
+
+                def _crossing_monotonic_ns() -> int:
+                    nonlocal monotonic_ns
+                    monotonic_ns += 3_000_000_000
+                    return monotonic_ns
+
+                monkeypatch.setattr(
+                    executor_module.time,
+                    "monotonic_ns",
+                    _crossing_monotonic_ns,
+                )
         elif terminal_outcome == "writer-budget-rejection":
             worker.token_count_overrides[required_node_id] = 10_000_000
         assert order.review_policy[NODE_REVIEW_POLICIES_KEY][required_node_id][
@@ -846,9 +895,13 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             "downstream-failure": "VERIFICATION_FAILED",
             "downstream-cancellation": "WAITING_ACCEPTANCE_REVIEW",
             "writer-signed-failure": "RECOVERY_REQUIRED",
+            "writer-signed-budget-rejection": "RECOVERY_REQUIRED",
             "writer-budget-rejection": "BUDGET_BLOCKED",
         }[terminal_outcome], continuation_runtime.results[-1]
-        if terminal_outcome == "writer-signed-failure":
+        if terminal_outcome in {
+            "writer-signed-failure",
+            "writer-signed-budget-rejection",
+        }:
             assert worker.interrupted_context is not None
             assert worker.calls == [
                 node.node_id
@@ -892,7 +945,22 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             )
             assert pending["terminal"]["graph_settlement_status"] == "PENDING"
             assert pending["terminal"]["graph_status"] == "ACTIVE"
-            assert pending["terminal"]["budget_status"] == "ACTIVE"
+            assert pending["terminal"]["budget_status"] == (
+                "EXCEEDED" if signed_budget_crossing else "ACTIVE"
+            )
+            receipt_request = {
+                "reservation_id": reservation_id,
+                "expected_version": int(operation["status_version"]),
+                "action": "RELEASE",
+                "reconciler_actor_id": actor_id,
+                "attestation_ref": attestation_ref,
+                "attestation_key_id": _RECONCILIATION_KEY_ID,
+            }
+            pending_receipt_ref = operation_reconciliation_handler_receipt_ref(
+                request=receipt_request,
+                operation=pending["operation"],
+                terminal=pending["terminal"],
+            )
 
             reopened_store = DurableTaskStore(
                 db_path,
@@ -946,7 +1014,9 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                     graph=prepared.admission.graph,
                 )
             ]
-            assert settled_events[-1]["execution_receipt"]["status"] == "FAILED"
+            assert settled_events[-1]["execution_receipt"]["status"] == (
+                "BUDGET_BLOCKED" if signed_budget_crossing else "FAILED"
+            )
             assert worker.calls == calls_before_settlement
             settled = reopened_store.resolve_reconciled_operation_failure(
                 reservation_id
@@ -955,11 +1025,42 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                 "RECONCILED_OPERATION_NODE_FAILURE"
             )
             assert settled["graph_settlement_status"] == "COMMITTED"
-            assert settled["graph"]["status"] == "FAILED"
+            assert settled["graph"]["status"] == (
+                "BLOCKED" if signed_budget_crossing else "FAILED"
+            )
             assert settled["budget"]["status"] == "RELEASED"
             assert str(settled["parallel_settlement_ref"]).startswith(
                 "taskbatch://sha256/"
             )
+            replayed_failure = OperationFailureReconciliationService(
+                task_store=reopened_store,
+                outbox_factory=OutboxMessage,
+            ).reconcile_operation_failure(
+                reservation_id=reservation_id,
+                expected_version=int(operation["status_version"]),
+                reconciler_actor_id=actor_id,
+                attestation_ref=attestation_ref,
+                attestation_key_id=_RECONCILIATION_KEY_ID,
+                attestation_signature=_release_signature(
+                    private_key,
+                    operation=operation,
+                    expected_version=int(operation["status_version"]),
+                    actor_id=actor_id,
+                    attestation_ref=attestation_ref,
+                ),
+            )
+            assert replayed_failure["replayed"] is True
+            assert replayed_failure["terminal"]["authority_kind"] == (
+                settled["authority_kind"]
+            )
+            assert replayed_failure["terminal"]["graph_status"] == (
+                settled["graph"]["status"]
+            )
+            assert operation_reconciliation_handler_receipt_ref(
+                request=receipt_request,
+                operation=replayed_failure["operation"],
+                terminal=replayed_failure["terminal"],
+            ) == pending_receipt_ref
 
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -1001,6 +1102,12 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
                     attempt_id=str(interrupted_context["attempt_id"]),
                     lease_id=str(interrupted_context["lease_id"]),
                 )
+            with pytest.raises(TaskStoreError):
+                DurableTaskStore(
+                    tampered_path,
+                    clock=clock,
+                    reconciliation_proof_verifier=proof_verifier,
+                ).resolve_reconciled_operation_failure(reservation_id)
 
             protected = worker.protected_stages[0]
             seal = artifacts.inspect_governed_stage(

@@ -855,3 +855,34 @@ durable facts重建。`workspace_terminal_budget_authority.py` 在 lifecycle
 repository 的最终写事务内再次验证相同 winner、Lease、child Outbox、
 父/子 usage、current 0090 和零 downstream authority；上层分类成功不是
 仓储放行凭据。Workspace 层不获得 Budget mutation 或重新执行 worker 的能力。
+
+## 20. Signed node failure 与 graph Budget 的交叉终态
+
+```mermaid
+flowchart TD
+    W["sealed Plan Workspace"] --> I["worker interrupted before checkpoint"]
+    I --> U["measured time usage EXCEEDED"]
+    U --> P["Ed25519 RELEASE / NO_SIDE_EFFECT"]
+    P --> N["Operation RELEASED\nAttempt/Node FAILED\nLease EXPIRED"]
+    N --> D["0090 BUDGET decision"]
+    D --> G["Graph BLOCKED\nBudget RELEASED"]
+    G --> R["TaskStore combined authority reopen"]
+    R --> C["Plan-only artifact classification"]
+    C --> V["Workspace final CAS\nindependent reopen"]
+    V --> X["ABANDONED → CLEANED"]
+```
+
+节点层的签名证明与图层的 Budget decision 各自保留唯一写 authority。组合
+reader 只把它们连接起来：selected outcome 必须同时携带同一 Attempt 的
+failure `error_ref` 与唯一 rejected `usage_id`，该 usage 必须回连 child
+BudgetReservation 和父 Budget Outbox。缺失任一 current 0090 Outbox、usage
+binding 或 version 都会阻断 Workspace 删除。
+
+0090 是节点 reconciliation 之后的图级事实，因此 node-failure authority
+kind 与 Accepted handler v4/v5 receipt ref 不随 PENDING→COMMITTED 改变；
+live Graph/Budget 状态仍会被验证，但不进入已接受节点 effect 的稳定 digest。
+
+这个结构只为 Plan 打开 `Graph=BLOCKED` 的 signed no-effect cleanup；Direct
+Skill 单节点终态继续要求 `Graph=FAILED`，避免把任意 Budget block 伪装成
+安全失败。系统不因此宣称一般 terminal cross-product、Budget policy 或
+Workspace isolation 完成。

@@ -864,3 +864,26 @@ child/0090/Budget authority，不能以 Graph/Node 的裸状态或上层先验�
 `53 passed in 138.76s`，Workspace authority 合同集另为
 `24 passed in 67.50s`，无 migration；一般 Budget/Workspace recovery 与
 NE-01 仍未完成。
+
+### Plan 签名失败与 Budget terminal 的组合 authority
+
+`task_operation_failure_reconciliation_store.py` 现在区分两种多节点 signed
+failure 结算：普通 0090 `FAILURE + Graph FAILED` 与预算型 0090
+`BUDGET + Graph BLOCKED + Budget RELEASED` 都保持稳定的
+`RECONCILED_OPERATION_NODE_FAILURE` kind。后者只有在签名失败 Attempt
+同时是唯一 Budget overage winner 时才可重开。
+
+后者不是对 `BLOCKED` 的宽泛放行。Store 会重开 decision 前的 graph/budget
+version、selected `BUDGET_BLOCKED` outcome、签名 failure `error_ref`、唯一
+`TASK_STORE_BUDGET_EXCEEDED` usage、同 Attempt 的 child reservation/usage
+bridge 及 winner Outbox。Accepted handler 的 receipt material 有意不包含
+随后提交的 0090 live Graph settlement，因此 PENDING→BLOCKED 不改变
+v4/v5 receipt ref。`GovernedSkillArtifactTerminalReconciler` 只允许
+`route=plan` 消费 BLOCKED 形状，单节点 Direct Skill 仍要求 Graph `FAILED`。
+
+`workspace_terminal_failure_authority.py` 同样只读重开上述联结，且
+graph-wide single-node terminal 明确拒绝 `BLOCKED`。因此新能力没有把
+Workspace reader 变成 Budget writer，也没有把状态组合当作删除凭据。真实
+SQLite/Git 六路径回归为 `6 passed in 39.93s`，相邻回归另为
+`46 passed in 137.82s`；无 migration。一般 Budget/recovery 交叉矩阵与
+NE-01 仍未完成。

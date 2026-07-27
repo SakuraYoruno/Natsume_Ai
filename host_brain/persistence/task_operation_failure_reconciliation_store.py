@@ -38,6 +38,9 @@ from host_brain.persistence.task_decision_integrity import (
     _assert_parallel_settlement_decision_outbox_binding,
     _find_invalid_declared_parallel_settlement_decision_ref,
 )
+from host_brain.persistence.task_budget_usage_store import (
+    _assert_terminal_budget_authority,
+)
 from host_brain.persistence.reconciliation_proof_verifier import (
     TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED,
     TASK_STORE_RECONCILIATION_PROOF_INVALID,
@@ -891,7 +894,11 @@ class TaskOperationFailureReconciliationStoreMixin:
                     )
                 graph_settlement_status = "PENDING"
             elif (
-                graph_status == TaskGraphStatus.FAILED.value
+                graph_status
+                in {
+                    TaskGraphStatus.FAILED.value,
+                    TaskGraphStatus.BLOCKED.value,
+                }
                 and budget_status == BudgetReservationStatus.RELEASED.value
             ):
                 terminal_decisions = [
@@ -914,9 +921,20 @@ class TaskOperationFailureReconciliationStoreMixin:
                     ),
                     None,
                 )
+                budget_terminal = (
+                    graph_status == TaskGraphStatus.BLOCKED.value
+                )
+                expected_decision_kind = (
+                    "BUDGET" if budget_terminal else "FAILURE"
+                )
+                expected_selected_status = (
+                    "BUDGET_BLOCKED" if budget_terminal else "FAILED"
+                )
                 if (
-                    decision.payload["decision_kind"] != "FAILURE"
-                    or decision.payload["graph_target_status"] != "FAILED"
+                    decision.payload["decision_kind"]
+                    != expected_decision_kind
+                    or decision.payload["graph_target_status"]
+                    != graph_status
                     or decision.payload["budget_target_status"] != "RELEASED"
                     or decision.payload["budget_id"]
                     != str(budgets[0]["budget_id"])
@@ -926,12 +944,41 @@ class TaskOperationFailureReconciliationStoreMixin:
                     != int(budgets[0]["status_version"])
                     or not isinstance(selected, Mapping)
                     or selected["attempt_id"] != attempt_id
-                    or selected["status"] != "FAILED"
+                    or selected["status"] != expected_selected_status
                     or error_ref not in selected["evidence_refs"]
                 ):
                     raise TaskStoreError(
                         TASK_STORE_DURABLE_DATA_INVALID,
                         "parallel failure settlement does not bind the reconciled node",
+                    )
+                if budget_terminal:
+                    winner, _dimensions = _assert_terminal_budget_authority(
+                        conn,
+                        budget_row=budgets[0],
+                        terminal_version=int(
+                            decision.payload[
+                                "budget_status_version_before"
+                            ]
+                        ),
+                    )
+                    if (
+                        str(winner["node_id"]) != node_id
+                        or str(winner["attempt_id"]) != attempt_id
+                        or str(winner["usage_id"])
+                        not in tuple(selected["evidence_refs"])
+                    ):
+                        raise TaskStoreError(
+                            TASK_STORE_DURABLE_DATA_INVALID,
+                            "parallel Budget settlement does not bind the "
+                            "signed failed node",
+                        )
+                    self._assert_node_budget_usage_replay_in_transaction(
+                        conn,
+                        parent_budget_id=str(budgets[0]["budget_id"]),
+                        attempt_id=attempt_id,
+                        usage_id=str(winner["usage_id"]),
+                        accepted=False,
+                        parent_outbox_id=str(winner["outbox_id"]),
                     )
                 parallel_settlement_ref = decision.decision_ref
             else:

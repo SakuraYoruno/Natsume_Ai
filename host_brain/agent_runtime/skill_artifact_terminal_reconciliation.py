@@ -540,7 +540,14 @@ class GovernedSkillArtifactTerminalReconciler:
         signed_no_effect_failure = (
             str(getattr(binding.command, "route_type", "") or "")
             in {"skill", "plan"}
-            and graph_status == "FAILED"
+            and (
+                graph_status == "FAILED"
+                or (
+                    str(getattr(binding.command, "route_type", "") or "")
+                    == "plan"
+                    and graph_status == "BLOCKED"
+                )
+            )
             and node_status == "FAILED"
             and attempt_status == "FAILED"
             and str(lease.get("status") or "") == "EXPIRED"
@@ -856,17 +863,22 @@ class GovernedSkillArtifactTerminalReconciler:
         route_type = str(
             getattr(binding.command, "route_type", "") or ""
         )
+        authority_kind = str(terminal.get("authority_kind") or "")
+        signed_budget_terminal = (
+            route_type == "plan"
+            and isinstance(graph, Mapping)
+            and graph.get("status") == "BLOCKED"
+        )
         terminal_authority_is_exact = (
             route_type == "skill"
-            and terminal.get("authority_kind")
+            and authority_kind
             == "RECONCILED_OPERATION_TERMINAL_FAILURE"
             and terminal.get("settlement_scope") == "GRAPH_TERMINAL"
             and terminal.get("graph_settlement_status") == "COMMITTED"
             and terminal.get("parallel_settlement_ref") is None
         ) or (
             route_type == "plan"
-            and terminal.get("authority_kind")
-            == "RECONCILED_OPERATION_NODE_FAILURE"
+            and authority_kind == "RECONCILED_OPERATION_NODE_FAILURE"
             and terminal.get("settlement_scope") == "NODE_ONLY"
             and terminal.get("graph_settlement_status") == "COMMITTED"
             and str(terminal.get("parallel_settlement_ref") or "").startswith(
@@ -890,7 +902,8 @@ class GovernedSkillArtifactTerminalReconciler:
             and isinstance(graph, Mapping)
             and graph.get("graph_id") == binding.authority["graph_id"]
             and graph.get("revision") == binding.authority["graph_revision"]
-            and graph.get("status") == "FAILED"
+            and graph.get("status")
+            == ("BLOCKED" if signed_budget_terminal else "FAILED")
             and isinstance(lease, Mapping)
             and lease.get("lease_id") == binding.authority["lease_id"]
             and lease.get("status") == "EXPIRED"

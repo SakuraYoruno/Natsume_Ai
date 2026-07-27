@@ -345,10 +345,10 @@ def _terminal_failure_receipt_record(
 ) -> dict[str, Any]:
     """Validate live settlement state and return stable receipt material.
 
-    Multi-node Graph/Budget settlement is a later 0090 decision.  Its live
-    PENDING/COMMITTED projection is validated here but deliberately omitted
-    from the v4 receipt digest so the accepted Operation effect remains an
-    exact replay after that append-only Graph settlement commits.
+    Multi-node FAILURE or BUDGET Graph settlement is a later 0090 decision.
+    Its live PENDING/COMMITTED projection is validated here but deliberately
+    omitted from the v4 receipt digest so the accepted Operation effect
+    remains an exact replay after that append-only Graph settlement commits.
     """
 
     terminal_record = dict(terminal or {})
@@ -428,7 +428,7 @@ def _terminal_failure_receipt_record(
     )
     committed = (
         settlement_status == "COMMITTED"
-        and graph_status == "FAILED"
+        and graph_status in {"FAILED", "BLOCKED"}
         and budget_status == "RELEASED"
         and settlement_ref is not None
         and settlement_ref.startswith("taskbatch://sha256/")

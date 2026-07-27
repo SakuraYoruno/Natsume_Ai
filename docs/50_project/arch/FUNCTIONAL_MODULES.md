@@ -687,3 +687,19 @@ Node snapshot、Attempt/error ref 或 Budget binding 漂移都失败关闭。
 模块间没有新增第二个 Budget 或 Task writer，也没有新增 migration。该职责表
 只覆盖已提交 Plan writer 的实际用量拒绝；一般模型/工具计量、其它 routes、
 多 Workspace 事务和跨主机 canary 仍不属于完成项。
+
+## 19. Plan 签名失败 × Budget terminal 职责
+
+| 模块 | 当前职责 |
+|---|---|
+| `persistence/task_operation_failure_reconciliation_store.py` | 在签名 node failure 已关闭后，验证 current 0090 `BUDGET`、唯一 overage winner 与 child BudgetUsage，并以稳定的 node-failure kind 重开精确 authority |
+| `persistence/task_budget_usage_store.py` | 保持 canonical graph Budget winner/Outbox 校验 owner；不解释 Workspace 或签名 proof |
+| `app/accepted_operation_reconciliation_handler.py` | 接受已验证的 Plan BLOCKED settlement，但从稳定 v4/v5 receipt material 排除后续 0090 live state，保证 response-loss ref 不漂移 |
+| `agent_runtime/skill_artifact_terminal_reconciliation.py` | 仅为 Plan 接受组合 authority，并要求 Graph `BLOCKED`；Direct Skill 继续要求 Graph `FAILED` |
+| `persistence/workspace_terminal_failure_authority.py` | 在 Workspace 最终 CAS 前独立重开失败 `error_ref`、selected usage、child reservation/usage 和 0090 Outbox |
+| Workspace lifecycle repository/runtime | 只在组合证明 current 且零 downstream authority 时 abandon/cleanup，不改变 Graph 或 Budget |
+
+这条职责链复用既有 0090 和 signed reconciliation mutation owner，没有新增
+migration 或第二套状态机。它只覆盖一个 reviewed Plan writer 的
+pre-checkpoint signed failure 与 time-budget overage 交叉点；其它 route、
+取消、unknown-effect、并发预算和多 Workspace 组合仍待实现与证明。

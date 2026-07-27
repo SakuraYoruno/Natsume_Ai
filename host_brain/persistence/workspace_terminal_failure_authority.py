@@ -14,7 +14,13 @@ from host_brain.contracts.agent_runtime.operation_reconciliation import (
 from host_brain.persistence.task_terminal_reconciliation_decision_authority import (
     canonical_current_parallel_terminal_decision,
 )
-from host_brain.persistence.task_store_types import build_outbox_payload_ref
+from host_brain.persistence.task_budget_usage_store import (
+    _assert_terminal_budget_authority,
+)
+from host_brain.persistence.task_store_types import (
+    TaskStoreError,
+    build_outbox_payload_ref,
+)
 
 
 _REASON = re.compile(r"^[A-Z][A-Z0-9_]{0,119}$")
@@ -153,6 +159,8 @@ def finalized_no_effect_failure_allows_workspace_abandonment(
     if str(row["attempt_error_ref"] or "") != error_ref:
         return False
     graph_wide_terminal = node_count == 1
+    if graph_wide_terminal and str(row["graph_status"]) != "FAILED":
+        return False
     if (
         not graph_wide_terminal
         and not _parallel_failure_settlement_is_exact(
@@ -183,7 +191,7 @@ def _terminal_shape_is_exact(row: sqlite3.Row) -> bool:
     reason = str(row["recovery_reason_code"] or "").strip().upper()
     recovery_version = row["reconciliation_recovery_version"]
     return bool(
-        str(row["graph_status"]) == "FAILED"
+        str(row["graph_status"]) in {"FAILED", "BLOCKED"}
         and str(row["node_status"]) == "FAILED"
         and str(row["attempt_status"]) == "FAILED"
         and str(row["lease_status"]) == "EXPIRED"
@@ -308,9 +316,16 @@ def _parallel_failure_settlement_is_exact(
         ),
         None,
     ) if isinstance(outcomes, list) else None
-    return bool(
-        decision.get("decision_kind") == "FAILURE"
-        and decision.get("graph_target_status") == "FAILED"
+    common = bool(
+        decision.get("decision_kind") in {"FAILURE", "BUDGET"}
+        and decision.get("graph_target_status")
+        == (
+            "BLOCKED"
+            if decision.get("decision_kind") == "BUDGET"
+            else "FAILED"
+        )
+        and decision.get("graph_target_status")
+        == str(row["graph_status"])
         and decision.get("budget_target_status") == "RELEASED"
         and decision.get("budget_id") == str(row["budget_id"])
         and type(budget_version_before) is int
@@ -319,8 +334,69 @@ def _parallel_failure_settlement_is_exact(
         and decision.get("node_states") == actual_states
         and isinstance(selected, dict)
         and selected.get("attempt_id") == attempt_id
-        and selected.get("status") == "FAILED"
+        and selected.get("status")
+        == (
+            "BUDGET_BLOCKED"
+            if decision.get("decision_kind") == "BUDGET"
+            else "FAILED"
+        )
         and error_ref in tuple(selected.get("evidence_refs") or ())
+    )
+    if not common:
+        return False
+    if decision.get("decision_kind") != "BUDGET":
+        return True
+    try:
+        budget = conn.execute(
+            """
+            SELECT * FROM task_runtime_budget_reservation
+            WHERE budget_id = ?
+            """,
+            (str(row["budget_id"]),),
+        ).fetchone()
+        if budget is None:
+            return False
+        winner, _dimensions = _assert_terminal_budget_authority(
+            conn,
+            budget_row=budget,
+            terminal_version=int(budget_version_before),
+        )
+    except (KeyError, TaskStoreError, TypeError, ValueError):
+        return False
+    usage_id = str(winner["usage_id"])
+    if (
+        str(winner["node_id"]) != node_id
+        or str(winner["attempt_id"]) != attempt_id
+        or usage_id not in tuple(selected.get("evidence_refs") or ())
+    ):
+        return False
+    children = conn.execute(
+        """
+        SELECT * FROM task_runtime_node_budget_reservation
+        WHERE parent_budget_id = ? AND attempt_id = ?
+        """,
+        (str(row["budget_id"]), attempt_id),
+    ).fetchall()
+    bindings = conn.execute(
+        """
+        SELECT * FROM task_runtime_node_budget_usage
+        WHERE parent_budget_id = ? AND usage_id = ?
+        """,
+        (str(row["budget_id"]), usage_id),
+    ).fetchall()
+    child = children[0] if len(children) == 1 else None
+    binding = bindings[0] if len(bindings) == 1 else None
+    return bool(
+        child is not None
+        and binding is not None
+        and str(child["graph_id"]) == graph_id
+        and int(child["graph_revision"]) == graph_revision
+        and str(child["node_id"]) == node_id
+        and str(child["attempt_id"]) == attempt_id
+        and str(binding["node_budget_id"]) == str(child["node_budget_id"])
+        and str(binding["attempt_id"]) == attempt_id
+        and bool(binding["accepted"]) is False
+        and str(binding["parent_outbox_id"]) == str(winner["outbox_id"])
     )
 
 
