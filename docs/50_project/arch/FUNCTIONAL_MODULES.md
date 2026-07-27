@@ -659,3 +659,16 @@ NE-01 的总体 `IN_PROGRESS` 定级。
 该分层沿用唯一 Task authority；没有新增 migration、Store 或第二套恢复状态机。
 它只覆盖 direct Skill 的 single-node signed failure，不能外推为一般
 multi-node、batch、unknown-effect 或 Workspace 事务完成。
+
+## 17. Plan 多节点失败新增职责
+
+| 模块 | 当前职责 |
+|---|---|
+| `persistence/task_terminal_reconciliation_decision_authority.py` | 只读验证全部历史 0090 decision/Outbox，返回唯一绑定当前 Graph version 的 terminal decision |
+| `persistence/workspace_terminal_failure_authority.py` | 单节点继续验证六条 failure Outbox；多节点改为验证四条节点 failure Outbox，并复用 current 0090 authority 验证 Graph/Budget 两条 Outbox |
+| `agent_runtime/skill_artifact_terminal_reconciliation.py` | 区分 Skill `GRAPH_TERMINAL` 与 Plan `NODE_ONLY + COMMITTED 0090`，两者共享 signed no-effect reason |
+| `task_runtime/ParallelSettlementRuntime` | fresh Runtime 中从 durable outcomes 生成/重开 0090；不由 Workspace 模块调用或替代 |
+
+没有新增迁移或第二套 mutation Store。新增 reader 不能选择“最后一行”，也
+不能删除历史 Review decision；任何历史 codec/Outbox 漂移、当前版本不唯一、
+Node snapshot、Attempt/error ref 或 Budget binding 漂移都失败关闭。

@@ -791,6 +791,31 @@ terminal matrix、Domain Pack、OS/container isolation、NE-01 wave
 integration 和 NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`，
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## 当前 NE-01 边界：Plan 写节点签名失败后的多节点结算
+
+Direct Skill 的单节点失败围栏现已扩展到一个真实 Plan 多节点 Graph：前置
+只读节点已 `ACCEPTED`，受审核写节点完成真实 Git Workspace 写入和 stage
+密封，却在 WorkerProjection/Operation checkpoint 前中断。签名
+`RELEASE / NO_SIDE_EFFECT` 只把该 Attempt、Node、Operation 与原 Lease
+推进到失败终态；共享 Graph 和 graph Budget 仍保持 `ACTIVE`，直到 fresh
+Runtime 依据现有 0090 authority 追加唯一当前版本的 `FAILURE` decision。
+
+Workspace 清理不会把 0090 当成一条覆盖历史的“最新记录”。此前进入
+Review 时形成的 0090 `REVIEW` decision 继续 append-only 保留；只读验证器
+逐条重开所有历史 decision 与 Outbox，再选出唯一绑定当前 Graph
+status/version 的 `FAILURE`，精确核对全部 Node state、目标失败
+Attempt/error ref、Budget version 和 Graph/Budget Outbox。删除最终 Budget
+Outbox 会阻断清理，未运行的结果节点不会被补跑。
+
+真实 SQLite、临时 Ed25519、真实 Plan admission/Review continuation、Git
+worktree、fresh Host owner 与第二次重启已经证明
+`RECOVERY_REQUIRED → NODE_ONLY/PENDING → 0090 COMMITTED → Graph FAILED /
+Budget RELEASED → Workspace ABANDONED/CLEANED`。基线为
+`origin/dev@49615ae6e4d4364c26b3eb651012fa50bf959d0e`，本批无 migration；
+去重受影响集为 `58 passed in 128.70s`。这只关闭单一受审核 Plan 写节点的
+pre-checkpoint 无副作用失败窗；并行写节点、一般 batch/unknown-effect、
+多 Workspace、波次 integration 和 NE-07 仍未完成。
+
 ## 当前 NE-01 边界：Plan 写节点的原子 Workspace 终态
 
 `CAPABILITY_SEARCH_V1` Plan 现在可以包含至多一个需要人工 Review、风险等级

@@ -1056,3 +1056,26 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   `origin/dev@8030a0cc69e2d88c4761e03ea9cf435630555878`。该 Gate 不
   证明一般 multi-node/batch failure、其它 unknown-effect/cancellation、
   多 Workspace、NE-01 波次 integration 或 NE-07 全栈。
+
+## T-NE01-PLAN-WRITER-SIGNED-FAILURE：Plan 写节点多节点结算
+
+- T-NE01-PLAN-WRITER-SIGNED-FAILURE-01：真实 PlanningSearch 必须生成包含
+  read、reviewed writer 与 result 的 immutable 三节点 Graph；writer 在真实
+  Git Workspace 密封 stage 后、WorkerProjection 前中断。
+- T-NE01-PLAN-WRITER-SIGNED-FAILURE-02：中断只产生
+  `RECOVERY_REQUIRED`；Lease 到期后的 Ed25519
+  `RELEASE/NO_SIDE_EFFECT` 只允许 `NODE_ONLY/PENDING`，Graph/Budget
+  仍为 `ACTIVE`。
+- T-NE01-PLAN-WRITER-SIGNED-FAILURE-03：fresh application 必须由
+  durable outcomes 提交 0090 `FAILURE`，Graph=`FAILED`、
+  Budget=`RELEASED`；writer 与 result 均不得重跑。
+- T-NE01-PLAN-WRITER-SIGNED-FAILURE-04：历史 `REVIEW` 和当前
+  `FAILURE` decision 必须并存且全部通过 codec/Outbox validation；唯一
+  current Graph version 才能成为 terminal authority。
+- T-NE01-PLAN-WRITER-SIGNED-FAILURE-05：删除当前 0090 Budget Outbox
+  后 Workspace proof 必须 false；未篡改路径须完成
+  `ABANDONED/CLEANED`、source HEAD/文件不变和第二次重启零 replay。
+- 去重受影响集合固定为 `58 passed in 128.70s`，无 migration，基线
+  `origin/dev@49615ae6e4d4364c26b3eb651012fa50bf959d0e`。该测试不证明并行
+  writer、一般 multi-node/batch/unknown-effect、多 Workspace、wave
+  integration 或 NE-07；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。

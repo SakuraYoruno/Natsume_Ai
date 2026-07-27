@@ -1279,3 +1279,30 @@ worktree。这个分层避免 persistence lifecycle 变成第二个 Task Runtime
 `RELEASE / NO_SIDE_EFFECT` 的含义是把该 Attempt 确定性终止并清理其孤立
 Workspace，不是取得新 Lease 继续执行；需要继续任务时必须由上层创建新的
 不可变图 revision 或明确的新 Attempt 语义。
+
+---
+
+## 25. 多节点失败必须区分节点归因与 Graph 结算
+
+多节点 Graph 中，一个签名 `NO_SIDE_EFFECT` 证明只能终结它精确绑定的
+Operation、Attempt、Node 与 Lease，不能顺带释放共享 Budget 或关闭整个
+Graph。Graph 终态必须由看见完整 durable Node outcome 集合的并行结算
+authority 另行决定：
+
+```text
+signed node attribution
+→ Node FAILED，Graph/Budget 仍 ACTIVE
+→ fresh scheduler rebuilds all durable outcomes
+→ current-version 0090 FAILURE
+→ Graph FAILED + Budget RELEASED
+```
+
+append-only 还意味着历史 `REVIEW` decision 不能因为后来失败而被删除。
+可信读取必须验证全部历史 decision 的 canonical payload 与 Outbox，并只把
+唯一绑定当前 Graph status/version 的 decision 当作当前 authority；“取最后
+一行”或“要求表中只有一行”都无法表达 Review 恢复后的真实历史。
+
+Workspace abandonment 位于这两层之后：它既要重开节点签名失败的四条
+Outbox，也要重开 0090 自己拥有的 Graph/Budget Outbox，并证明当前完整
+Node snapshot 与 failure outcome 一致。这样 sibling 不会因 cleanup 被重跑，
+历史也不会为迁就终态而被改写。

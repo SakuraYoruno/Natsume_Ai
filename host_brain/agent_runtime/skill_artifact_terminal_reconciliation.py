@@ -537,7 +537,8 @@ class GovernedSkillArtifactTerminalReconciler:
             and operation_status == "COMMITTED"
         )
         signed_no_effect_failure = (
-            str(getattr(binding.command, "route_type", "") or "") == "skill"
+            str(getattr(binding.command, "route_type", "") or "")
+            in {"skill", "plan"}
             and graph_status == "FAILED"
             and node_status == "FAILED"
             and attempt_status == "FAILED"
@@ -838,12 +839,28 @@ class GovernedSkillArtifactTerminalReconciler:
         lease = terminal.get("lease")
         budget = terminal.get("budget")
         command = terminal.get("command")
-        exact = (
-            terminal.get("authority_kind")
+        route_type = str(
+            getattr(binding.command, "route_type", "") or ""
+        )
+        terminal_authority_is_exact = (
+            route_type == "skill"
+            and terminal.get("authority_kind")
             == "RECONCILED_OPERATION_TERMINAL_FAILURE"
             and terminal.get("settlement_scope") == "GRAPH_TERMINAL"
             and terminal.get("graph_settlement_status") == "COMMITTED"
             and terminal.get("parallel_settlement_ref") is None
+        ) or (
+            route_type == "plan"
+            and terminal.get("authority_kind")
+            == "RECONCILED_OPERATION_NODE_FAILURE"
+            and terminal.get("settlement_scope") == "NODE_ONLY"
+            and terminal.get("graph_settlement_status") == "COMMITTED"
+            and str(terminal.get("parallel_settlement_ref") or "").startswith(
+                "taskbatch://sha256/"
+            )
+        )
+        exact = (
+            terminal_authority_is_exact
             and isinstance(operation, Mapping)
             and operation.get("reservation_id") == binding.reservation_id
             and operation.get("status") == "RELEASED"
@@ -867,8 +884,9 @@ class GovernedSkillArtifactTerminalReconciler:
             and budget.get("status") == "RELEASED"
             and isinstance(command, Mapping)
             and command.get("command_id") == binding.authority["command_id"]
-            and command.get("route_type") == "skill"
-            and command.get("target_id") == binding.target_id
+            and command.get("route_type") == route_type
+            and command.get("target_id")
+            == getattr(binding.command, "target_id", None)
         )
         if not exact:
             self._invalid(

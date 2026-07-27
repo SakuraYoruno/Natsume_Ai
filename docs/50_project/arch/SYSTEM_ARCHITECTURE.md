@@ -809,3 +809,26 @@ ref、零 Projection/Verification/Acceptance/Effect/cancellation/artifact 和
 这种组合既阻止伪签名，也阻止签名结算后的持久状态漂移。任何不一致都使
 terminal worker 报告 `BLOCKED`，stage 与 worktree 保持可对账；只有 exact
 direct single-node no-effect failure 可以清理。一般失败恢复仍未完成。
+
+## 18. Plan 多节点失败的两阶段终态
+
+```mermaid
+flowchart TD
+    W["Plan writer sealed stage"] --> N["signed node failure UoW"]
+    N --> P["NODE_ONLY / settlement PENDING"]
+    P --> R["fresh Task Runtime"]
+    R --> D["current 0090 FAILURE decision"]
+    D --> T["Graph/Budget terminal UoW"]
+    T --> C["cryptographic + structural reopen"]
+    C --> X["Workspace abandon and cleanup"]
+```
+
+阶段一只归因一个 Operation/Attempt/Node/Lease，阶段二才拥有共享
+Graph/Budget。系统保留 Review 时的历史 0090 decision；新只读 authority
+验证全部历史记录和 Outbox，并以 current Graph status/version 选择唯一
+terminal row。Workspace proof 同时验证全图 Node snapshot 和目标失败
+outcome，因此不能靠追加一条看似较新的失败记录绕过。
+
+真实测试中的 fresh Runtime 没有再次调用写节点，也没有调用依赖它的结果
+节点；删除最终 Budget Outbox 会阻断 cleanup。该结构仍只覆盖单一 reviewed
+Plan writer 的 pre-checkpoint no-effect failure，未提升为通用 batch recovery。

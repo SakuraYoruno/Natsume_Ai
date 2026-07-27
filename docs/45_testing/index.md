@@ -607,6 +607,28 @@ provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Plan 写节点多节点签名失败证据
+
+- 使用真实 capability PlanningSearch 编译三节点 immutable TaskGraph；
+- 前置只读节点通过，唯一写节点经真实 Review continuation 后在真实 Git
+  worktree 写入并密封 stage，随后于 WorkerProjection 前抛出中断；
+- Runtime 返回 `RECOVERY_REQUIRED`，临时 Ed25519
+  `RELEASE/NO_SIDE_EFFECT` 仅生成 `NODE_ONLY/PENDING`，此时 Graph/Budget
+  必须仍为 `ACTIVE`；
+- fresh Host owner 触发 0090 failure settlement，Graph=`FAILED`、
+  Budget=`RELEASED`，结果节点调用次数为 0；
+- 历史 `REVIEW` 与最终 `FAILURE` decision 同时保留；current reader 必须
+  重开全部 canonical decision/Outbox，并选择唯一当前 Graph version；
+- Workspace proof 删除最终 Budget Outbox 后必须拒绝，原数据库则完成
+  `ABANDONED → CLEANED`、source HEAD/文件不变、第二次重启零 replay。
+
+最终去重受影响集为 `58 passed in 128.70s`，覆盖 Plan 四种 terminal
+outcome、Direct Skill 签名篡改、Workspace 合同、Operation 多节点结算和
+terminal reconciler 单元回归。无 migration，基线为
+`origin/dev@49615ae6e4d4364c26b3eb651012fa50bf959d0e`。这不是 NE-01
+波次 integration，也未运行 Docker/网络/前后端全栈；远程 CI 为
+`NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 Direct Skill 签名失败 Workspace 证据
 
 - 真实 Agent writer 在真实 Git worktree 写入并密封 stage，随后不提交

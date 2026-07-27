@@ -1978,3 +1978,28 @@ TaskStore 的 cryptographic reopen 和 Workspace repository 的 structural
 reopen 缺一不可：前者防止伪签名，后者防止签名后的 Task/Outbox/Effect
 状态漂移。正常与阻断路径都保留源 Git HEAD；只有完整无副作用终态可以删除
 隔离 worktree。
+
+## Plan 写节点多节点签名失败流
+
+```mermaid
+flowchart LR
+    A["read node ACCEPTED"] --> B["writer Review approved"]
+    B --> C["Workspace write + sealed stage"]
+    C --> D["pre-checkpoint interruption"]
+    D --> E["Operation RECOVERY_REQUIRED"]
+    E --> F["signed RELEASE / NO_SIDE_EFFECT"]
+    F --> G["writer Node FAILED"]
+    G --> H["Graph/Budget remain ACTIVE"]
+    H --> I["fresh Runtime rebuilds outcomes"]
+    I --> J["0090 FAILURE decision"]
+    J --> K["Graph FAILED + Budget RELEASED"]
+    K --> L["TaskStore cryptographic reopen"]
+    L --> M["Workspace current-decision proof"]
+    M --> N["ABANDONED → CLEANED"]
+```
+
+进入 Review 时形成的历史 0090 `REVIEW` row 不会被覆盖。current-decision
+reader 验证所有历史 rows 与 Outbox，只选择绑定当前 Graph version 的最终
+`FAILURE`。节点失败阶段的 Attempt/Node/Lease/Operation Outbox 与 0090
+阶段的 Graph/Budget Outbox分别由各自 UoW 负责；两组证据都完整时才删除
+worktree。结果节点在失败后不会被调度。
