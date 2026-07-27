@@ -26,9 +26,10 @@ TaskGraph/Node/Attempt/Lease/Budget/grant 上下文和显式依赖，
 Executive 不再拥有 Skill executor；token-only Loader 和 Scheduler metadata
 只能产生失败关闭审计。启用节点统一先做 Task precharge；Agent 模型走
 Task-bound measurement，proposal-only 不得投递可见副作用，三条写 Agent
-只在 Acceptance 后 promotion。该结构已关闭本地代码边界，但正式验收仍
-绑定旧提交，故 Skill 路线暂为 `INCOMPLETE`；49 个 blocked 能力须在未来
-拥有 typed Effect handler 后另行验收。
+只在 Acceptance 后 promotion。该结构已由干净提交 `c68850f8` 的同库 v3
+收据复验，当前 44 个启用项的 Skill 路线为 `COMPLETE`；49 个 blocked
+能力须在未来拥有 typed Effect handler 后另行验收，不因 catalog 可见而
+获得执行权。
 
 Plan 的审批 authority 现在贯穿 Registry、Search、Compiler 和 Task Runtime，但每层只拥有一种职责。Registry 是 `require_confirm` 来源，Search 只能选择并携带候选事实，Compiler 独占 immutable TaskNode policy 生成，ReviewStore 独占人类决定，Continuation Worker 只协调已持久决定的 claim，NodeBoundGrantService 只续签时限与原约束。Scheduler 恢复历史 accepted projection grant 与当前 renewed grant，防止长审批把已提交节点误判成 authority drift；它不允许续签改变 graph revision、目标、风险或权限。
 

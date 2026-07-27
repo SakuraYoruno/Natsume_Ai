@@ -12,7 +12,7 @@
 
 ## 1. 结论
 
-当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat 当前为 `COMPLETE`，其余六路为 `INCOMPLETE`。
+当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat 与当前启用 Skill 为 `COMPLETE`，其余五路为 `INCOMPLETE`。
 
 Skill 的生产执行面现在先经过一个穷举、失败关闭的 policy partition。生产
 canonical Host Registry 共 93 个 Skill：28 个 inline read-only、13 个 pre-Acceptance
@@ -35,8 +35,9 @@ blocked。二者可供只读目录兼容，但不能进入 Host Skill admission 
 Workspace stage 和 Acceptance 后 promotion 产生持久写入。包含用户可见
 Domain lifecycle、外部投递、系统/文件 mutation，或会持久化浏览器
 profile/session 的能力均被归入 blocked 集合。该代码控制已有本地定向证据，
-但正式七路收据仍绑定 `3d68bd1e`，所以本提交产生新 commit-bound 收据前
-不能把 Skill 路线升级为 `COMPLETE`，49 个 blocked 能力也不算已交付。
+且干净提交 `c68850f8` 的新 v3 同库收据已将当前 44 个启用 Skill 的 Budget
+与 transactional Effect 控制提升为 `PASS`，所以启用范围的 Skill 路线为
+`COMPLETE`；49 个 blocked 能力没有执行权，也不算已交付。
 
 Skill 的生产执行 owner 已从 Executive 兼容层迁到 app-local
 `governed_skill_execution.py`。代码仓中 `SkillMeta.handler`、
@@ -48,7 +49,8 @@ grant、durable ledger 和显式 ports 后才接触 registry。旧 Executive exe
 进入 Broker；canonical receipt 写失败会向上抛出。干净提交
 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 上的 `209 passed`、真实
 GR05、static/doc 与元数据 Gate 已将该单项控制提升为 `PASS`；本轮新增的
-预算/副作用 policy 仍等待新干净提交上的同库收据，路线暂不升级。
+预算/副作用 policy 又由 `c68850f8` 同库收据正式复验，路线当前启用范围
+已升级为 `COMPLETE`。
 
 Chat 与 Plan 合成的模型预算校准现在使用真实生产等价调用链。GR05 构造真实 prompt registry、route policy、`ModelAttemptService`、ledger audit 与 Surface ports，只控制 terminal provider transport；两个新请求各自生成 canonical `started → succeeded` Attempt，provider token/cost measurement 进入不可变 WorkerProjection，再以稳定 usage id 同时落入 Graph parent 与 Attempt-bound child Budget。exact replay 只重开既有结果，不再次调用 provider。只读验收会关联这四组事实并拒绝缓存、孤儿 Attempt、身份和测量漂移。
 
@@ -56,7 +58,7 @@ Chat 与 Plan 合成的模型预算校准现在使用真实生产等价调用链
 
 Universal Runtime 现在有一套独立的提交绑定判定器和七路正式 PASS 收据。Persistence reader 以 SQLite URI `mode=ro` 和 `query_only=ON` 在单一事务重开运行事实；Release builder 将事实约束为 `natsume.universal-runtime-route-acceptance.v3`，绑定干净 Git HEAD、仓库与数据库 migration head，并逐节点核对 Attempt/Lease/Operation、父子 Budget usage lineage、Verification/Acceptance、Artifact/WorkerProjection、Effect/Outbox/Receipt。输出只保留 bounded identifier、状态、版本和 digest；原始 Command/WorkOrder/Graph/Effect payload、用户正文和模型输出不能进入收据。
 
-当前本地验收 composition 已覆盖七路：GR05 共同运行 Chat、Direct Skill、Delegate 与多节点 Plan；`tools/acceptance/universal_remaining_routes.py` 对同一数据库调用真实 Scheduler、Internal 和 Operator application boundaries。Scheduler Effect 在节点验收后执行，Internal result commit 由正式 handler 持久化，Operator 经过 durable Review continuation 后才切换 HardState，并由 outer outcome 完成 Secure Ingress claim。干净提交 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 的串联运行得到七路 PASS；Chat 还具备正式模型预算 lineage 并成为第一条 `COMPLETE` 路线，其余六路仍因其它控制部分完成而保持 `INCOMPLETE`。
+当前本地验收 composition 已覆盖七路：GR05 共同运行 Chat、Direct Skill、Delegate 与多节点 Plan；`tools/acceptance/universal_remaining_routes.py` 对同一数据库调用真实 Scheduler、Internal 和 Operator application boundaries。Scheduler Effect 在节点验收后执行，Internal result commit 由正式 handler 持久化，Operator 经过 durable Review continuation 后才切换 HardState，并由 outer outcome 完成 Secure Ingress claim。干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 的串联运行得到七路 PASS；Chat 具备正式模型预算 lineage，Skill 当前 44 个启用项具备完备 Budget/Effect policy，两条路线均为 `COMPLETE`；其余五路仍因其它控制部分完成而保持 `INCOMPLETE`。
 
 Review 拒绝现在有独立持久终态。0135 的 append-only settlement 精确绑定 terminal Review 状态/版本/digest、Graph revision、Node、graph Budget、三条 Outbox，以及 POST Review 的 0134 Acceptance、`SUCCEEDED` Attempt 和可选已有多节点 `BLOCKED` decision。PRE Review 仅在零 Attempt 时原子取消 Node/Graph 并释放 Budget；POST Review 原子失败 Node/Graph 并释放 Budget。Scheduler 或 Review continuation 在提交响应丢失后只重开同一 settlement；不会创建 Attempt、签发 Grant 或重跑 Worker。Store reader 会重新验证 Review、aggregate、Acceptance、blocking decision 和三条 Outbox，任一漂移失败关闭。
 
@@ -97,7 +99,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
 | Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0135_task_review_denial_settlement.sql`。0126～0132 的 Operation、Effect、mode-policy、recovery 与节点预算边界保持不变；0133 增加 durable Verification，0134 增加 durable Acceptance/Review 创建，0135 增加 Review denial 原子 settlement。这些资产都不代表七路线或 NE-01 已生产封板 |
-| Universal Runtime 七路线 | `CHAT COMPLETE / SIX INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`3d68bd1e` 同库收据使七路 commit binding 与 Chat 模型预算通过；Skill/Plan/Delegate/Scheduler/Internal/Operator 仍有独立缺口。Scheduler occurrence 与管理 HTTP 已把真实 writer 移至 Acceptance 后，Operator 仍为 `14/37` |
+| Universal Runtime 七路线 | `CHAT + SKILL COMPLETE / FIVE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`c68850f8` 同库收据使七路 commit binding、Chat 模型预算和 Skill 当前启用范围的 Budget/Effect policy 通过；49 个 blocked Skill 不计完成。Plan/Delegate/Scheduler/Internal/Operator 仍有独立缺口。Scheduler occurrence 与管理 HTTP 已把真实 writer 移至 Acceptance 后，Operator 仍为 `14/37` |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`workspace_write_promotion.py` 密封 bounded safe-path manifest 与 binary patch并确定性生成 accepted HEAD；源 branch 不移动。`internal_startup_checkpoint_continuation.py` 提供 exact scan，`periodic_durable_continuation.py` 只托管 timer/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 仍以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 除精确 sealed abandon/cleanup 外，只对 finalized cancellation 且符合共享中立合同两类 exact signed terminal 的未封存单节点先关闭 claim、再 cleanup/discard；失败顺序不会删除证据。一般 unknown effect、其它 crash-left/取消 closeout 与 general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、OS/container isolation、canary与七路线验收也未完成 |
 | Direct Agent Skill Workspace | `PARTIAL / REVIEWED_SKILL_CODEX_WORKSPACE_PROMOTION_LOCAL_PROVEN` | 三条登记 Skill 冻结 risk 4 和 durable Review；server-bound V3 拒绝 caller authority。private `codex_runtime` 取得 app-local Artifact/Workspace ports，WorkerProjection 只含 sealed ref/digest proposal；231 行 pure `agent_workspace_acceptance_effect.py` 校验 proposal，1499 行 canonical compiler 编排 Graph Effect，未扩大 allowlist。promotion handler 重开 exact terminal lineage并先于 visible Effects 晋升 0116。Domain Pack、其它 Skill、一般 failure/cancellation、完整进程/network canary与七路线验收仍缺 |
@@ -107,7 +109,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 | Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
 | Code/Research 收益 | `UNPROVEN` | Code 已有冻结 ref/digest 驱动的动态 pure catalog、trusted-process private-bare 双 worktree、`VERIFIED_CLEAN`/0106 restart replay，以及 D19 受控 pytest 子进程回执；没有 durable historical cohort、受控模型/工具、OS/container sandbox、独立信任域 verifier 或成对收益结论 |
 | Budget | `ATTEMPT_CHILD_RESERVATION_AND_PARENT_CONTENTION_LOCAL_PROVEN / PROGRAM_PARTIAL` | 0132 为每个 Attempt 创建 child reservation；父级仍是唯一 aggregate ceiling。8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；parent/child usage、retry 与 terminal observation 同事务，重启和升级回填不恢复已消费容量。全部 cancellation/release 组合、concurrency 计量、DEGRADE/REVIEW 与七路线 policy 未完整执行 |
-| Governed Chat Surface 模型预算 | `PASS_FORMAL_MODELATTEMPT_WORKERPROJECTION_PARENT_CHILD_BUDGET_LINEAGE` | 已 admission 的 Host Chat 把冻结剩余预算传给 Surface 主模型调用；canonical ModelAttempt、provider usage、WorkerProjection 与父子账本由 `3d68bd1e` 正式收据重开并精确匹配，replay 不再调用 provider。受控 terminal provider 不证明外部模型质量；其它路线仍需各自预算闭环 |
+| Governed Chat Surface 模型预算 | `PASS_FORMAL_MODELATTEMPT_WORKERPROJECTION_PARENT_CHILD_BUDGET_LINEAGE` | 已 admission 的 Host Chat 把冻结剩余预算传给 Surface 主模型调用；canonical ModelAttempt、provider usage、WorkerProjection 与父子账本由 `c68850f8` 正式收据重开并精确匹配，replay 不再调用 provider。受控 terminal provider 不证明外部模型质量；其它路线仍需各自预算闭环 |
 | Governed Agent Runtime 模型端口 | `PARTIAL_D15_GOVERNED_AGENT_MODEL_PORT_BRIDGE / REACT_SKILL_DELEGATE_FAIL_CLOSED` | 仅在 CapabilityBroker 已重验 sealed governed authority 后，`codex_runtime` 从 composed `ModelAttemptService` 派生同一 `PromptRegistry` 并交给 `AgentRuntimeExecutor`；缺端口/authority 直接关闭。前一 ReAct 切片只把 `run_skill` / `dispatch_sub_agent` 从发现面移除，并令注入的旧 ToolSpec 在低层执行器前拒绝；它不证明普通 ReAct Tool authority、文件/Web/Browser 路线或完整 Agent executor 已退役。ReAct 模型调用仍未受 `ModelBudgetGuard` 约束，也没有把上述提案编译为新 TaskGraph revision，因此只是窄安全封口，不是 Code/Research 工具能力 |
 | Visual Agent 直连 HTTP | `RETIRED_COMPATIBILITY_ONLY / PRODUCTION_OFF` | `/v1/agent/run`（不是 Delegate 的 `vision_agent`）只以兼容 SSE 返回 `AGENT_INIT → LOOP_DONE / REJECTED` 和固定拒绝码；raw Agent Loop/ClawdBot/Edge client 与 Ledger writer 已删除。视觉聊天仅 `text` 可进入模型链，其他值在 runtime/model/Prompt/Memory/Ledger 前拒绝；legacy Action Planner 模型入口封口，纯 parser 为 `NONE_PROPOSAL_ONLY`。正向恢复必须经过 Secure Ingress/Governor → HostCommand → `graph_revision + 1` → node Attempt/Lease/Grant/Budget/Verification/Acceptance/Receipt；安全退役不等于视觉自动化能力完成 |
 | Edge 指令直推 authority | `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING` | 全局 pusher owner/accessor、Host startup 注册和 Tribe 直推为 0。Obs `edge.command.push` 仅允许 `edge.somatic + emotion_state_command`，进入 OPERATOR HostCommand/TaskGraph、risk-4 Review、Verification/Acceptance，再以 `edge.embodiment_enqueue` 和 terminal Preview 写入 `HostEmbodimentRuntime` durable outbox；重复请求精确重开，claim 失效后只读查 receipt、不重发。Edge route 仍只是一条；Operator 全平面当前 `14/37`，更多 Edge command type 与真实 Edge/Gateway canary 仍缺 |

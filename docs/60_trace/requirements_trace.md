@@ -43,8 +43,10 @@ Workspace promotion。证据为 `test_ne01_skill_execution_policy.py`、
 `test_ne01_governed_skill_model_budget.py`、
 `test_ne01_governed_agent_workspace_acceptance.py`、GR05 与 registry/
 scheduler/search 回归。当前结论为
-`LOCAL_CODE_POLICY_PASS / COMMIT_BOUND_REVALIDATION_PENDING`，故 Skill 与
-NE-01 暂保持 `INCOMPLETE / IN_PROGRESS`；49 个 blocked 能力不计完成。
+干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 的同库 v3 收据已把
+Budget 与 transactional Effect 控制提升为 `PASS`，故当前 44 个启用项的
+Skill 路线为 `COMPLETE`；NE-01 仍为 `IN_PROGRESS`，49 个 blocked 能力
+不计完成。
 独立 Personality Registry 的 19 个 metadata 必须保持 manifest=0（5 个
 blocked、14 个 unclassified），动态 MCP Skill 也必须 blocked。
 

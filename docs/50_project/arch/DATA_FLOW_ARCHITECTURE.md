@@ -80,7 +80,7 @@ flowchart LR
     C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
 ```
 
-Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat 的最后一个控制；其它路线仍可独立保持 `PARTIAL / INCOMPLETE`。
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat 以及当前启用 Skill 的最后控制；其它五路仍独立保持 `PARTIAL / INCOMPLETE`。
 
 当前本地七路数据生成流已经在干净提交上形成正式收据：
 
@@ -91,7 +91,7 @@ flowchart TD
     I["Internal CommandService\nResult commit"] --> DB
     O["Operator OBS authority\nReview + HardState Effect + outer outcome"] --> DB
     DB --> R["query-only v3 Reader"]
-    R --> V["七路正式 PASS\ncommit 3d68bd1e + migration 0135"]
+    R --> V["七路正式 PASS\ncommit c68850f8 + migration 0135"]
     V --> X["仓库内隐私安全收据\ncommit-bound controls = PASS"]
 ```
 

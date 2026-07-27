@@ -12,8 +12,9 @@
 当前 Skill 执行边界：canonical Host Registry 的 93 个条目按 exact descriptor 分为 28 个只读、
 13 个 proposal-only、3 个 post-Acceptance Workspace 和 49 个 blocked。
 只有前 44 个进入运行 manifest；后 49 个等待 typed Acceptance Effect，
-catalog 可见不等于执行可用或已完成。新提交绑定验收完成前，机器状态仍将
-Skill 路线保持为 `INCOMPLETE`。
+catalog 可见不等于执行可用或已完成。干净提交 `c68850f8` 的 v3 同库收据
+已经把 44 个启用项的 Skill 路线提升为 `COMPLETE`，但没有授权或完成
+49 个 blocked 能力。
 旧 Personality Registry 的 19 个 metadata 与动态 MCP Skill 均不进入
 governed manifest。
 

@@ -6,6 +6,15 @@
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
+## T-NE01-SKILL-BUDGET-EFFECT-POLICY
+
+- T-NE01-SBEP-01：canonical Host Registry 必须恰好把 93 个 Skill 按 exact `skill_id/tool/action` 分为 28 个 inline read-only、13 个 pre-Acceptance proposal-only、3 个 post-Acceptance Workspace 和 49 个 blocked pending typed Effect；新增、缺项或 descriptor drift 失败关闭。
+- T-NE01-SBEP-02：只有前三类 44 个 Skill 可进入 runtime manifest、PlanningSearch、Scheduler 与 Host admission；blocked 或 unclassified Skill 即使已存在于 durable graph，也必须在 frozen executor 再次拒绝。
+- T-NE01-SBEP-03：44 个启用节点必须全部先消费 canonical Task precharge；普通 Skill 不取得裸模型端口，Agent 模型调用只能经 Task-bound measurement guard。
+- T-NE01-SBEP-04：proposal-only 结果不得提交用户可见副作用；三条 risk-4 Agent writer 只能经 protected stage 与 post-Acceptance Workspace promotion；其余写/外部动作没有 typed Effect 时保持 blocked。
+- T-NE01-SBEP-05：独立 Personality Registry 的 19 个 metadata 必须保持 governed manifest=0，动态 MCP Skill 必须 blocked，二者不得通过旧 Loader、Scheduler metadata 或 stale graph 恢复执行 authority。
+- 当前定向证据为 Skill/Registry/Scheduler `107 passed in 3.70s`、Planning policy `15 passed in 0.71s`、Host admission/drain `18 passed in 0.56s`、release/coverage `49 passed in 1.75s`；真实 SQLite/Git 集成为 `3 passed in 35.92s`，各批不相加。干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 的正式 v3 收据为 `docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json`，receipt digest=`sha256:eee1b416d6de71a92df07d57a5c8cf84f4788ed3d9d74b4365fa99d571e6f13e`。Skill 当前 44 个启用项为 `COMPLETE`；49 个 blocked 能力不计完成，NE-01 仍为 `IN_PROGRESS`，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+
 ## T-NE01-CHAT-MODEL-BUDGET-LINEAGE
 
 - T-NE01-CMB-01：Direct Chat 与 Plan final Chat 必须经真实 Surface ports 和 canonical `ModelAttemptService`；测试只允许控制 terminal provider transport，不得 monkeypatch Surface 结果或自造 model-attempt trace。
@@ -25,7 +34,7 @@
 - T-NE01-URA-05：请求标识只输出 digest；用户正文、模型输出、secret、Command/WorkOrder/Graph/Effect payload 及额外字段均不得进入收据；篡改总 digest 必须拒绝。
 - T-NE01-URA-06：GR05 必须在同一 Host Runtime/SQLite 完成 Chat、Direct Skill、Delegate 和 Plan；Direct Skill 不得用 Plan 节点间接代替。
 - T-NE01-URA-07：Scheduler、Internal、Operator 必须写入同一 canonical SQLite；三路分别经过正式 CommandService/Effect、Internal result commit、Operator durable Review/HardState/outer outcome，所有 Secure Ingress claim 都必须 terminal COMMITTED 且有 result ref。
-- 正式串联运行绑定干净提交 `c15f88d9e201552ec9e3a589cda93b305818f5ef`、migration 0135 和同一文件型 SQLite，GR05 为 `1 passed in 26.37s`，剩余三路 CLI 为 `PASS`，七路 reason code 全空；收据为 `docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json`。七路 `commit_bound_acceptance=PASS`，Chat 的模型预算与路线状态为 `PASS / COMPLETE`；其它六路和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 最新正式串联运行绑定干净提交 `c68850f859048be955c15366e33ada3a917d9b12`、migration 0135 和同一文件型 SQLite，GR05 为 `1 passed in 25.45s`，剩余三路 CLI 为 `PASS`，七路 reason code 全空；收据为 `docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json`。七路 `commit_bound_acceptance=PASS`；Chat 与 Skill 当前启用范围为 `COMPLETE`，49 个 blocked Skill 不计完成，其它五路和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-ATOMIC-INTERRUPTION-RECOVERY-HOLD
 

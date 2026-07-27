@@ -39,8 +39,13 @@
   `static_scan,doc_gate` 为 `PASS / failures=[]`（110.3 秒）。
 - 正式七路收据仍
   绑定旧 SHA，因此当前只记
-  `LOCAL_CODE_POLICY_PASS / COMMIT_BOUND_REVALIDATION_PENDING`，不升级
-  Skill 路线；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+  干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 随后以同一
+  真实 SQLite 重跑七路线，正式收据为
+  [ne01_skill_policy_route_acceptance_20260727.json](test_reports/ne01_skill_policy_route_acceptance_20260727.json)，
+  receipt digest=`sha256:eee1b416d6de71a92df07d57a5c8cf84f4788ed3d9d74b4365fa99d571e6f13e`。
+  该收据把 Skill 当前启用范围的 Budget 与 transactional Effect 控制提升为
+  `PASS`，路线状态为 `COMPLETE`；49 个 blocked 能力不计完成。远程
+  CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Skill 唯一执行 authority 当前切片
 
@@ -80,8 +85,8 @@
 - `UniversalRouteAcceptanceReader` 只读打开真实文件型 SQLite，在一个事务中读取 Command、Graph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox、recovery、reconciliation 与 cancellation 投影；内存数据库、缺表/缺列和迁移不一致均失败关闭。
 - `UniversalRouteAcceptanceBuilder` 要求干净 Git HEAD、仓库/数据库 migration head 一致、每个 request 只证明一条路线，并输出经过字段白名单和总 receipt digest 保护的隐私边界收据。
 - GR05 已加入 Direct Skill，真实 Host Runtime 的单项集成 `1 passed`，共同证明 Chat、Skill、Delegate、Plan。`test_ne01_universal_remaining_route_acceptance.py` 另以同一真实 SQLite 运行 Scheduler、Internal 和带 Review/outer outcome 的 Operator，单项集成 `1 passed`。
-- 两段已在干净提交 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 上串联，GR05 单项为 `1 passed in 29.34s`；剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 得到七路全部 `PASS`、reason code 全空，migration head 为 0135。正式收据为 [ne01_universal_route_acceptance_20260727.json](test_reports/ne01_universal_route_acceptance_20260727.json)，receipt digest=`sha256:10d1a8f8be608a65d5246a6820771d820b3f6e547d8c4f2c8cb80dac41904477`。
-- 机器矩阵中七路 `commit_bound_acceptance` 已全部为 `PASS`；Chat 的模型预算控制也为 `PASS`，因此 Chat 首先达到 `COMPLETE`。其它 `PARTIAL` 控制仍使其余六路和 NE-01 保持 `INCOMPLETE / IN_PROGRESS`。受控 terminal provider 不具备真实 provider 质量、PlanningSearch 收益或 NE-07 资格，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 最新串联运行绑定干净提交 `c68850f859048be955c15366e33ada3a917d9b12`；GR05 单项为 `1 passed in 25.45s`，剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 得到七路全部 `PASS`、reason code 全空，migration head 为 0135。正式收据为 [ne01_skill_policy_route_acceptance_20260727.json](test_reports/ne01_skill_policy_route_acceptance_20260727.json)，receipt digest=`sha256:eee1b416d6de71a92df07d57a5c8cf84f4788ed3d9d74b4365fa99d571e6f13e`。
+- 机器矩阵中七路 `commit_bound_acceptance` 已全部为 `PASS`；Chat 的模型预算控制与 Skill 当前启用范围的 Budget/transactional Effect 控制也为 `PASS`，因此 Chat 和 Skill 达到 `COMPLETE`。49 个 blocked Skill 不计完成；其它 `PARTIAL` 控制仍使其余五路和 NE-01 保持 `INCOMPLETE / IN_PROGRESS`。受控 terminal provider 不具备真实 provider 质量、PlanningSearch 收益或 NE-07 资格，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Review 拒绝原子终态当前切片
 

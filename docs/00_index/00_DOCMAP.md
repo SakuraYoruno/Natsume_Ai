@@ -23,8 +23,9 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 partition：28 个 read-only、13 个
 proposal-only、3 个 post-Acceptance Workspace、49 个 blocked pending
 typed Effect。只有 44 个启用项进入运行 manifest；blocked 能力保持目录
-可见但不算完成。代码定向证据与提交绑定七路收据必须分开记录，后者生成前
-Skill 路线仍为 `INCOMPLETE`。
+可见但不算完成。代码定向证据与提交绑定七路收据必须分开记录；当前
+`c68850f8` v3 收据已使 44 个启用项的 Skill 路线达到 `COMPLETE`，但没有
+授权或完成 49 个 blocked 能力。
 独立 Personality Registry 的 19 项 metadata 与动态 MCP Skill 没有
 governed manifest 入口。
 

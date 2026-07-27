@@ -33,12 +33,13 @@ Executive executor 已删除，Scheduler 也不得直接调用 Skill metadata。
 该模块的 canonical execution authority 为 `PASS`。本轮还要求全部启用
 Skill 先做 Task precharge，Agent 模型使用 measured guard，proposal-only
 不产生可见 Effect，三条 risk-4 写 Agent 只经 Acceptance 后 Workspace
-promotion。代码控制已通过本地验证，但新提交绑定收据尚未生成，故路线
-状态仍保持 `INCOMPLETE`。
+promotion。干净提交 `c68850f8` 的同库 v3 收据已把这些 Budget/Effect
+控制提升为 `PASS`，当前 44 个启用项的 Skill 路线为 `COMPLETE`；49 个
+blocked 能力不计完成。
 
 当前责任边界由 Host/Agent/Context/Startup typed ports 与 router/runtime factory 定义。生产 locator consumer/import/module/field/lock/ref 已全部清零；ASGI/CLI fresh 构造 `ProcessApplicationPorts`，Host builder 不再回读全局状态。`HostAuthorityRuntimeOwner` 管理 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime；pytest-only bridge 不进入生产对象图。ResourceManager status 已接入 0123 Host-fenced journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound acceptance 已闭合，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、完整 Worker/Obs Composition、路线其余控制与 NE-01 仍未闭环。
 
-Route Acceptance 模块分为三个只读责任：`persistence/universal_route_acceptance_reader.py` 只负责从一个真实 SQLite snapshot 重开 bounded facts；`release/universal_route_acceptance.py` 只负责 Git/migration 绑定、七路判定、隐私字段白名单和 digest；`scripts/runtime/collect_universal_runtime_acceptance.py` 只负责参数解析与原子写出本地证据。它们都没有 Task、Budget、Review、Effect 或 Outbox writer。Coverage Gate 只接受可通过 v3 validator 的真实收据结构；当前正式收据绑定干净提交 `3d68bd1e`、migration 0135 和七路 PASS，使七个提交绑定控制及 Chat model budget 均为 `PASS`。Chat 因此完整，但不会覆盖其余路线控制。
+Route Acceptance 模块分为三个只读责任：`persistence/universal_route_acceptance_reader.py` 只负责从一个真实 SQLite snapshot 重开 bounded facts；`release/universal_route_acceptance.py` 只负责 Git/migration 绑定、七路判定、隐私字段白名单和 digest；`scripts/runtime/collect_universal_runtime_acceptance.py` 只负责参数解析与原子写出本地证据。它们都没有 Task、Budget、Review、Effect 或 Outbox writer。Coverage Gate 只接受可通过 v3 validator 的真实收据结构；当前正式收据绑定干净提交 `c68850f8`、migration 0135 和七路 PASS，使七个提交绑定控制、Chat model budget 及 Skill 启用范围的 Budget/Effect 控制均为 `PASS`。Chat 和 Skill 当前启用范围因此完整，但不会覆盖其余路线控制或 49 个 blocked Skill。
 
 Model Budget Evidence 模块不新增 writer。`ModelAttemptService` 和 ledger audit 仍拥有 provider 调用生命周期，Surface 只把成功调用的 identity 与 measurement 放入 WorkerProjection，Task Runtime 的 Budget owner 继续原子写 parent/child usage；`UniversalRouteAcceptanceReader` 只抽取隐私有界证据，release validator 只做跨表等值和生命周期校验。`governed_model_budget` 是执行期 guard，不属于 Life/Effect payload；executor 的 audit path 属于 executor，不得被 worker wrapper 覆盖。当前 GR05 只替换 terminal provider transport，证明模块接线和 replay，不证明外部模型质量。
 
@@ -113,7 +114,7 @@ Direct Agent Skill Workspace 模块由五个窄 owner 组成：`governed_skill_w
 
 | 功能域 | 外部入口/呈现 | 当前主 owner | 主要下游 | 当前裁决 |
 |---|---|---|---|---|
-| 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 已进入主链；Chat 的投影屏障、模型预算和提交绑定控制均为 PASS，Chat 路线为 COMPLETE；其余六路仍未完成 |
+| 对话与多模态输入 | `/v1/chat`、`/v1/host/input`、`/v1/edge/events` | `input_runtime`、`agent_runtime/cortex_runtime.py`、`surface_runtime`、`persona` | Governor、Governed Runtime、Memory、Gateway/Edge | Host `chat/skill/delegate/plan` 已进入主链；Chat 的投影屏障、模型预算和提交绑定控制均为 PASS；Skill 当前启用范围的 Budget/Effect/提交绑定控制均为 PASS；两条路线 COMPLETE，49 个 blocked Skill 不计完成，其余五路仍未完成 |
 | 任务、Skill 与 Delegate | Chat 意图、Operator 命令 | `orchestration`、`task_runtime`、`agent_runtime`、`skills` | Model Runtime、Capability Broker、Domain Pack | Host canonical route `WIRED`；0102+GR06 canonical Node Acceptance 已统一 exact Effect/artifact/`ACCEPTED`/Attempt Outbox。public TaskStore graph/effect staging 入口已删除，应用 Python 写 authority 已封口；raw/orphan SQL 仍可绕过，通用恢复与生产并发仍 `PARTIAL` |
 | 视觉桌面自动化兼容入口 | `/v1/agent/run`、`/v1/agent/info`、vision chat `response_format` fence | `app/agent_routes.py`、`app/chat_handler_vision.py` | 无执行下游 | `RETIRED_COMPATIBILITY_ONLY / PRODUCTION_OFF`；raw loop/client 与 Ledger writer 已删除，`run` 只返回固定拒绝，`info` 明示不可用，vision chat 非 `text` 在 handle/model/Memory/Ledger 前拒绝；`ActionPlan` schema/parser 仅 proposal-only。它不是 Delegate `vision_agent`，也不是正向 Visual Agent Runtime |
 | 自动化与定时任务 | Scheduler API、Monitor Automation | `scheduler`、`lifecycle_runtime` | Governed Command、Life、Memory、Security Immune | governed occurrence 的 worker 已改为 immutable operation plan，真实 handler 由共享 Acceptance Effect dispatcher 在验收后执行；0117 已持久化 DUE→OCCURRENCE fence 与 execution heartbeat。definition/admin、mutable batch、一般未知效果归因和 canary 仍为 `PARTIAL` |
