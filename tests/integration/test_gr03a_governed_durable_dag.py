@@ -2440,11 +2440,16 @@ async def test_ne01_b4_later_batch_failure_decision_includes_prior_accepted_batc
     calls: list[str] = []
     worker = _Worker(calls, set())
     acceptance = _Acceptance(decisions_by_node={"left": "REVIEW"})
+    review_store = ReviewStore(db_path, clock=lambda: NOW)
     first_runtime = _coordinator(
         db_path,
         calls,
         worker_resolver=_FailingNodeResolver(worker, fail_node_id="right"),
         acceptance=acceptance,
+        review_runtime=TaskNodeReviewRuntime(
+            review_store,
+            clock=lambda: NOW,
+        ),
         bounded_fanout_enabled=True,
     )
     live_decisions: list[tuple[str, dict[str, Any]]] = []
@@ -2498,6 +2503,10 @@ async def test_ne01_b4_later_batch_failure_decision_includes_prior_accepted_batc
         calls,
         worker_resolver=reentry_resolver,
         acceptance=acceptance,
+        review_runtime=TaskNodeReviewRuntime(
+            ReviewStore(db_path, clock=lambda: NOW),
+            clock=lambda: NOW,
+        ),
         bounded_fanout_enabled=True,
     )
     committed_settlement = reentry_runtime._store.settle_parallel_graph_budget  # noqa: SLF001

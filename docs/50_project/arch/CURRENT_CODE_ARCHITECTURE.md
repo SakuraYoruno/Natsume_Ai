@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.57
+版本：v5.58
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,15 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
+
+`HostCommandRecoveryInventoryMixin` 现在只把 actionable `BLOCKED` 图交给
+Host startup/periodic continuation。SQL 在同一 snapshot 中要求至少存在
+`READY`、Review、retry、执行中或取消请求节点；已由 Budget/Failure
+settlement 收口且仅剩 FAILED/ACCEPTED/结构性 BLOCKED 节点的 admission
+不会再次出现。真实 spawn 矩阵已覆盖 retry+failure、Budget 与 Review
+拒绝：进程恢复均不 resolve/调用 worker、只产生一个外层 terminal，最终
+重启清单为空。该过滤不改变 canonical Graph 状态或其它 reconciliation
+owner 的读模型。
 
 `DurableDagSchedulingRuntime` 当前对 committed checkpoint re-entry 采用与
 普通 fan-out 相同的终态归并：非 `done` 进度继续向外流，节点 `done` 被缓冲

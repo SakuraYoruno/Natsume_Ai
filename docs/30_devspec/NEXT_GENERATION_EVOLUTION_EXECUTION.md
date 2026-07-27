@@ -5,9 +5,27 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.27
+版本：v3.28
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前批次封闭 outer settlement 前进程崩溃的 mixed-terminal 窗口：
+
+1. 同一并发 ready-set 内的 retryable failure、hard failure、Budget overrun
+   与 post-Acceptance Review 必须先各自持久化，再由新 Host 重开唯一 0090
+   decision；禁止重新 resolve 或调用 worker。
+2. Review settlement 可以保持图 `BLOCKED`，因为仍有明确
+   `WAITING_ACCEPTANCE_REVIEW`；拒绝后必须以 0135 单一 UoW 结束。
+3. Budget/Failure 的 `BLOCKED` 若只剩终态或结构性阻断节点，不得继续进入
+   Host startup/periodic inventory；Review、retry、running、cancel 等
+   actionable 状态仍必须被扫描。
+4. 第一次运行如实得到 `2 passed, 1 failed` 并发现永久 Budget survivor；
+   修复 inventory 分类后，新增矩阵与 Host startup 相邻集合最终为
+   `14 passed in 46.30s`，旧并发结算回归为
+   `12 passed in 49.41s`，worker replay 为 0、每图只公开一个 terminal。
+
+本批次不提升部署开关，不替代 Scheduler/Internal/Operator 全路线 canary，
+也不提前执行 NE-07。
 
 当前批次先关闭取消与混合 fan-out 的进程崩溃子窗口：
 

@@ -3,10 +3,19 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.28
+版本：v3.29
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+一般 mixed-terminal 恢复缺口已从“未证明”缩到部署/路线级边界。真实进程
+矩阵现在覆盖 retry+hard failure、Budget overrun 与 Review→deny 在 outer
+settlement 前硬退出；新 Host 均为零 resolver/worker replay 和唯一 Graph
+terminal。过程中发现并修复了 Budget terminal block 永久进入 survivor 的
+缺陷：`BLOCKED` admission 只有仍含 ready/retry/review/execution/cancel
+节点时才进入 Host inventory。当前仍缺生产 fan-out 开关 promotion、
+Scheduler/Internal/Operator 真实进程 canary、完整 Workspace 终态矩阵与
+NE-01 波次集成，因此总体状态不升级。
 
 一般恢复缺口进一步缩小，但没有消失。现在真实进程证据覆盖：
 cancellation-bound `COMMIT/RELEASE` 的目标提交后 handler 崩溃；以及

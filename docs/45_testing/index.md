@@ -3,9 +3,29 @@
 
 # 测试与验收目录
 
-版本：v2.35
+版本：v2.36
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 并发终态跨进程恢复矩阵
+
+- `test_ne01_parallel_terminal_process_restart.py` 使用 Windows `spawn` 与
+  真实文件型 SQLite，在 retryable+hard failure、Budget overrun、以及
+  post-Acceptance Review 三种场景中让进程 A 于 0090 outer settlement
+  提交前硬退出。
+- 进程 B 通过真实 Host startup continuation 重开，resolver/worker 调用均为
+  0，每条只观察到一个 `done`；Review 在拒绝后由进程 C 提交 0135 denial，
+  终态进程再启动 inventory=0。
+- 首轮 `2 passed, 1 failed` 暴露 Budget 已释放但 `BLOCKED` 图仍被重复发现；
+  修复 recovery inventory 的 actionable-node 过滤后，新增矩阵、SQLite
+  startup integration 与 continuation unit 的最终集合为
+  `14 passed in 46.30s`。
+- 旧并发 failure/Budget/Review/retry 结算集合随后为
+  `12 passed in 49.41s`。首次宽回归发现一条 7 月 16 日旧夹具没有注入
+  现行强制的 durable ReviewRuntime，使节点停在 `VERIFIED`；补齐真实
+  ReviewStore/Runtime 后通过。这是测试权威修复，不放宽生产 Review 门禁。
+- 该集合证明本地进程恢复与清单分类，不证明生产 fan-out promotion、七路线
+  canary、真实 provider 或 NE-07。
 
 ## NE-01 取消终态与混合 fan-out 跨进程恢复
 

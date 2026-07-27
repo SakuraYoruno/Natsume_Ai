@@ -23,6 +23,21 @@ from host_brain.persistence.host_command_repository_types import (
 
 _PAGE_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_page.v1"
 _CURSOR_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_cursor.v1"
+_ACTIONABLE_BLOCKED_NODE_STATUSES = (
+    "READY",
+    "WAITING_APPROVAL",
+    "LEASED",
+    "RUNNING",
+    "EXECUTED",
+    "VERIFYING",
+    "VERIFIED",
+    "WAITING_ACCEPTANCE_REVIEW",
+    "RETRY_PENDING",
+    "CANCEL_REQUESTED",
+)
+_ACTIONABLE_BLOCKED_NODE_SQL = ", ".join(
+    f"'{status}'" for status in _ACTIONABLE_BLOCKED_NODE_STATUSES
+)
 
 
 class HostCommandRecoveryInventoryMixin:
@@ -85,6 +100,18 @@ class HostCommandRecoveryInventoryMixin:
                   ON graph.graph_id = journal.graph_id
                  AND graph.revision = journal.graph_revision
                 WHERE graph.status IN ('CREATED', 'ACTIVE', 'BLOCKED')
+                  AND (
+                      graph.status <> 'BLOCKED'
+                      OR EXISTS (
+                          SELECT 1
+                            FROM task_runtime_node AS actionable_node
+                           WHERE actionable_node.graph_id = graph.graph_id
+                             AND actionable_node.graph_revision = graph.revision
+                             AND actionable_node.status IN (
+                                 {_ACTIONABLE_BLOCKED_NODE_SQL}
+                             )
+                      )
+                  )
                   AND journal.surface IN ({placeholders})
                   {cursor_sql}
                 ORDER BY journal.created_at_ms, journal.command_id
@@ -152,6 +179,18 @@ class HostCommandRecoveryInventoryMixin:
                   ON graph.graph_id = journal.graph_id
                  AND graph.revision = journal.graph_revision
                 WHERE graph.status IN ('CREATED', 'ACTIVE', 'BLOCKED')
+                  AND (
+                      graph.status <> 'BLOCKED'
+                      OR EXISTS (
+                          SELECT 1
+                            FROM task_runtime_node AS actionable_node
+                           WHERE actionable_node.graph_id = graph.graph_id
+                             AND actionable_node.graph_revision = graph.revision
+                             AND actionable_node.status IN (
+                                 {_ACTIONABLE_BLOCKED_NODE_SQL}
+                             )
+                      )
+                  )
                   AND journal.surface IN ({placeholders})
                 ORDER BY graph.updated_ts_ms DESC,
                          journal.graph_id,

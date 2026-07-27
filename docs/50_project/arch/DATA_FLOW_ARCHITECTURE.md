@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.30
+版本：v3.31
 
 核对日期：2026-07-27
 
@@ -12,6 +12,22 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+并发 outer settlement 崩溃后的当前数据流为：
+
+```text
+两个根节点形成 durable outcome
+→ 0090 outer settlement 前进程硬退出
+→ 新 Host 从 exact admission + scheduler snapshot 重开
+→ resolver=0 / worker=0
+→ FAILURE 或 BUDGET：提交唯一 Graph/Budget terminal
+   REVIEW：提交 BLOCKED，保留 WAITING_ACCEPTANCE_REVIEW
+→ Review reject：下一进程提交唯一 0135 denial settlement
+→ inventory 只保留仍有 actionable node 的 BLOCKED 图
+→ 终态再次启动 inventory=0
+```
+
+这条筛选不改写 Graph、Node 或 Budget，只防止终态 block 被误当成仍有执行权。
 
 混合 fan-out 崩溃后的当前恢复流为：
 

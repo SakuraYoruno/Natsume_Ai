@@ -9,6 +9,22 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+最新 NE-01 批次把并发图的失败、重试、预算超限和人工 Review 放进同一个
+Windows `spawn`/文件型 SQLite 恢复矩阵。进程 A 在两个根节点都形成 durable
+outcome、但外层 0090 settlement 尚未提交时硬退出；全新 Host 只能重开既有
+Attempt/Acceptance/Budget/Review，worker resolve 与调用均为 0，并且只公开
+一个 Graph 终态。Review 图在新进程中先稳定进入 `BLOCKED`，拒绝后由下一
+进程提交唯一 denial settlement；失败/预算图完成后再次启动 inventory=0。
+首轮透明结果为 `2 passed, 1 failed`，失败暴露出已释放预算的
+`BUDGET_BLOCKED` 图仍被永久 survivor 扫描。现在 Host recovery inventory
+只把含 `READY/RETRY_PENDING/WAITING_* / RUNNING/CANCEL_REQUESTED` 等可行动
+节点的 `BLOCKED` 图视为可恢复，纯终态阻断不再重复重放；最终启动/进程集合
+`14 passed in 46.30s`，旧并发结算回归 `12 passed in 49.41s`。宽回归还
+暴露并修正了一条旧测试夹具遗漏 durable ReviewRuntime 的问题，不改变生产
+合同。该修复关闭 mixed terminal 的本地进程恢复子缺口，
+但生产 fan-out 开关、七路线进程 canary 和整波集成尚未运行，NE-01 仍为
+`IN_PROGRESS`。
+
 最新 NE-01 恢复批次补齐两组真实跨进程证据。第一组覆盖取消绑定的
 `COMMIT + SIDE_EFFECT_CONFIRMED` 与 `RELEASE + NO_SIDE_EFFECT`：目标
 Operation 已提交而 Accepted handler 尚未返回时硬退出，新进程只重开同一
