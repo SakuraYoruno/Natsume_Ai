@@ -1787,3 +1787,29 @@ request、Budget、Graph revision、Node 与 Attempt，且只承载 canonical
 measurement；它本身不拥有预算写 authority。当前只证明这一普通 Skill 模型
 旁路被关闭，不代表 Delegate、外部工具、所有 legacy 调用或跨 route 累计成本
 已经 program-wide 收口。
+
+## `RESERVED` 未知副作用跨进程恢复流
+
+```mermaid
+flowchart LR
+    A["Process A: Operation RESERVED"] --> X["hard exit before worker"]
+    X --> L{"original Lease live?"}
+    L -->|"yes"| D["Host startup DEFERRED; worker = 0"]
+    L -->|"no"| H["RECOVERY_REQUIRED + immutable current hold"]
+    H --> P{"exact case-bound Ed25519 NO_SIDE_EFFECT?"}
+    P -->|"no"| H
+    P -->|"yes"| F["same Attempt; unique highest old fence + 1"]
+    F --> S["TaskStore verifies proof\nsnapshot emits minimal execution fence"]
+    S --> R["Host survivor re-enters immutable admission"]
+    R --> O{"DAG owner / Lease / fence exact?"}
+    O -->|"no"| H
+    O -->|"yes"| W["worker exactly once"]
+    W --> V["Verification → Acceptance → Graph complete"]
+    V --> Z["fresh restart: zero replay"]
+```
+
+签名和 current-case subject 只存在 reconciliation evidence/Operation proof
+authority；scheduler snapshot 不复制签名、scope、fingerprint、receipt 或
+reconciler，只输出 Store 已验签的最小 execution-fence 投影。
+HostCommand、WorkOrder、Assignment 与 TaskGraph 不因恢复增加权限。图中
+`Host survivor` 只是发现与重入，不是第二个 scheduler。

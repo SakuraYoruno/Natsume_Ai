@@ -692,3 +692,23 @@ graph/revision/node 的 WorkOrderV3。Internal 路径则直接从
 晋升回归；这些集合分别记录，不相加为波次总数。真实模型 provider、
 完整 NE-01 integration、七路线 commit-bound acceptance 和 NE-07 服务栈
 均未运行，故 Budget 与 NE-01 仍为 `PARTIAL / IN_PROGRESS`。
+
+### `RESERVED` 后硬退出的当前恢复链
+
+`DurableTaskStore.read_scheduler_snapshot()` 现在在同一个 SQLite read
+transaction 中读取 Graph、Attempt、active Lease 与仍为 `RESERVED` 的
+Operation。Store 先通过 canonical `_operation_record()` 重验 digest、key
+和 Ed25519 signature，再丢弃完整证明、scope、fingerprint、receipt 与
+reconciler，只投影 replacement fence 所需的最小字段和
+`signed_reacquisition_verified`。普通 live Lease仍由
+`HostStartupGraphContinuation` 直接延后；仅当该 projection 与 replacement
+Lease 的 Attempt/Lease/owner/fence 精确一致时，发现层才把 immutable
+admission 交回 DAG Runtime。DAG Runtime 再用自身 owner 做最终校验，
+发现层没有 worker authority。
+
+签名换权还支持启动恢复已经把原始 Lease 持久化为 `EXPIRED` 的状态。
+Store 只接受 Operation 绑定的唯一原始 Lease，要求其已到期、属于同一
+Attempt/owner、仍是最高 fence 且不存在其他活跃 owner，然后才允许同一
+Attempt 取得 `fence + 1`。真实 Windows spawn 链已证明无证明时 worker=0、
+签名后 worker=1、终态重启 worker=0。受控 worker不等于真实 provider，
+所以该恢复子集为本地通过，NE-01 仍为 `IN_PROGRESS`。

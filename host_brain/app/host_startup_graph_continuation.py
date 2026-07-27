@@ -518,16 +518,52 @@ def _snapshot_status(
 def _has_live_lease(snapshot: Mapping[str, Any]) -> bool:
     observed_ts_ms = snapshot.get("observed_ts_ms")
     leases = snapshot.get("active_leases")
+    operation_fences = snapshot.get("operation_execution_fences", ())
     if (
         isinstance(observed_ts_ms, bool)
         or not isinstance(observed_ts_ms, int)
         or observed_ts_ms < 0
         or not isinstance(leases, Sequence)
         or isinstance(leases, (str, bytes, bytearray))
+        or not isinstance(operation_fences, Sequence)
+        or isinstance(operation_fences, (str, bytes, bytearray))
     ):
         raise HostStartupGraphContinuationError(
-            "TaskGraph scheduler Lease snapshot is invalid"
+            "TaskGraph scheduler execution-owner snapshot is invalid"
         )
+    verified_fences: list[Mapping[str, Any]] = []
+    for operation_fence in operation_fences:
+        if not isinstance(operation_fence, Mapping):
+            raise HostStartupGraphContinuationError(
+                "TaskGraph scheduler Operation fence item is invalid"
+            )
+        required_text = (
+            "reservation_id",
+            "attempt_id",
+            "lease_id",
+            "owner_id",
+            "status",
+        )
+        fencing_token = operation_fence.get("fencing_token")
+        status_version = operation_fence.get("status_version")
+        signed_verified = operation_fence.get(
+            "signed_reacquisition_verified"
+        )
+        if (
+            any(
+                not str(operation_fence.get(field_name) or "").strip()
+                for field_name in required_text
+            )
+            or type(fencing_token) is not int
+            or fencing_token < 1
+            or type(status_version) is not int
+            or status_version < 0
+            or type(signed_verified) is not bool
+        ):
+            raise HostStartupGraphContinuationError(
+                "TaskGraph scheduler Operation fence projection is invalid"
+            )
+        verified_fences.append(operation_fence)
     for lease in leases:
         if not isinstance(lease, Mapping):
             raise HostStartupGraphContinuationError(
@@ -544,6 +580,28 @@ def _has_live_lease(snapshot: Mapping[str, Any]) -> bool:
                 "TaskGraph scheduler Lease expiry is invalid"
             )
         if status == _LIVE_LEASE_STATUS and expires_ts_ms > observed_ts_ms:
+            signed_replacements = [
+                operation_fence
+                for operation_fence in verified_fences
+                if operation_fence.get("signed_reacquisition_verified") is True
+                and str(operation_fence.get("status") or "").strip().upper()
+                == "RESERVED"
+                and str(operation_fence.get("attempt_id") or "").strip()
+                == str(lease.get("attempt_id") or "").strip()
+                and str(operation_fence.get("lease_id") or "").strip()
+                == str(lease.get("lease_id") or "").strip()
+                and str(operation_fence.get("owner_id") or "").strip()
+                == str(lease.get("owner_id") or "").strip()
+                and operation_fence.get("fencing_token")
+                == lease.get("fencing_token")
+            ]
+            if len(signed_replacements) == 1:
+                # The canonical DAG runtime still verifies that the replacement
+                # fence belongs to its own execution owner before invoking a
+                # worker.  Startup must re-enter this one signed state so that
+                # check can run; treating it as an unrelated live owner would
+                # strand a successfully reconciled Operation forever.
+                continue
             return True
     return False
 

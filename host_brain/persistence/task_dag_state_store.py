@@ -40,6 +40,49 @@ from host_brain.persistence.task_store_types import (
 )
 
 
+def _operation_execution_fence_projection(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the minimum verified Operation data needed by Host discovery.
+
+    ``record`` has already passed ``DurableTaskStore._operation_record()``,
+    including digest and signature verification whenever reconciliation proof
+    fields are present.  The general scheduler snapshot must not expose that
+    raw proof, business scope, fingerprint, receipt, or actor to app-level
+    discovery merely so it can distinguish one replacement execution fence.
+    """
+
+    status = str(record.get("status") or "").strip().upper()
+    status_version = record.get("status_version")
+    recovery_version = record.get("reconciliation_recovery_version")
+    signed_reacquisition_verified = (
+        status == "RESERVED"
+        and str(record.get("reconciliation_action") or "").strip().upper()
+        == "REACQUIRE"
+        and str(record.get("reconciliation_outcome") or "").strip().upper()
+        == "NO_SIDE_EFFECT"
+        and bool(str(record.get("reconciliation_proof_ref") or "").strip())
+        and bool(str(record.get("reconciliation_proof_digest") or "").strip())
+        and bool(str(record.get("reconciliation_proof_key_id") or "").strip())
+        and bool(str(record.get("reconciliation_proof_signature") or "").strip())
+        and type(recovery_version) is int
+        and recovery_version >= 0
+        and type(status_version) is int
+        and status_version == recovery_version + 1
+        and not str(record.get("receipt_ref") or "").strip()
+    )
+    return {
+        "reservation_id": str(record.get("reservation_id") or "").strip(),
+        "attempt_id": str(record.get("attempt_id") or "").strip(),
+        "lease_id": str(record.get("lease_id") or "").strip(),
+        "owner_id": str(record.get("owner_id") or "").strip(),
+        "fencing_token": record.get("fencing_token"),
+        "status": status,
+        "status_version": status_version,
+        "signed_reacquisition_verified": signed_reacquisition_verified,
+    }
+
+
 class TaskDagStateStoreMixin:
     """Persist and read DAG state without owning concrete store state."""
 
@@ -430,6 +473,18 @@ class TaskDagStateStoreMixin:
                    ORDER BY lease.attempt_id, lease.fencing_token""",
                 (str(graph_id), int(revision)),
             ).fetchall()
+            operation_rows = conn.execute(
+                """
+                SELECT operation.*
+                FROM task_runtime_idempotency_reservation AS operation
+                JOIN task_runtime_attempt AS attempt
+                  ON attempt.attempt_id = operation.attempt_id
+                WHERE attempt.graph_id = ? AND attempt.graph_revision = ?
+                  AND operation.status = 'RESERVED'
+                ORDER BY operation.attempt_id, operation.reservation_id
+                """,
+                (str(graph_id), int(revision)),
+            ).fetchall()
             budget_rows = conn.execute(
                 """SELECT * FROM task_runtime_budget_reservation
                    WHERE graph_id = ? AND graph_revision = ?
@@ -569,6 +624,12 @@ class TaskDagStateStoreMixin:
                 "graph_record": _graph_record(graph_row, node_rows),
                 "attempts": [dict(row) for row in attempt_rows],
                 "active_leases": [dict(row) for row in lease_rows],
+                "operation_execution_fences": [
+                    _operation_execution_fence_projection(
+                        self._operation_record(row)
+                    )
+                    for row in operation_rows
+                ],
                 "budgets": [self._budget_record(row) for row in budget_rows],
                 "budget_usage": [_budget_usage_record(row) for row in budget_usage_rows],
                 "node_budgets": [

@@ -694,3 +694,33 @@ provider retry、模型成本和经过时间；缺失 usage、重复 measurement
 `commit_bound_acceptance`、program-wide Budget 策略、一般多节点恢复、
 生产真实模型 canary、波次集成和 NE-07 Docker 全栈仍未完成，因此
 NE-01 保持 `IN_PROGRESS`。
+
+## 当前 NE-01 边界：`RESERVED` 未知副作用跨进程签名恢复
+
+当前 Host 已能处理一个此前只在同进程测试中成立、真实重启会永久卡住的
+恢复窗口。进程 A 在 Operation 已持久化为 `RESERVED`、worker 尚未启动时
+硬退出；新进程在原 Lease 存活期间只返回 `DEFERRED`，到期后只提交
+`RECOVERY_REQUIRED` 与唯一 current recovery hold，worker 调用数保持 0。
+受信 reconciler 提交与该 case、Operation version 和
+`NO_SIDE_EFFECT` 精确绑定的 Ed25519 证明后，Store 才允许同一 Attempt
+取得严格更高的 fence。
+
+启动恢复已经把旧 Lease 写成 `EXPIRED` 时，换权不再错误要求它仍为
+`ACTIVE`；但只接受 Operation 精确绑定、唯一且最高 fence 的原始 Lease，
+任何其他活跃 owner 仍失败关闭。TaskStore 会在一致性 scheduler snapshot
+内验签 Operation，但只向 Host survivor 投影 replacement Lease 所需的
+`reservation/attempt/lease/owner/fence/status/version` 与
+`signed_reacquisition_verified`；原始证明、业务 scope、fingerprint、
+receipt 和 reconciler 不离开 persistence 边界。只有这一条最小已验证
+execution fence 可越过发现层的普通 live Lease 停点，DAG Runtime 仍须
+复验当前 owner、Lease 和 fence 后才可执行 worker。签名仅保存在
+append-only evidence/Operation proof 字段，不进入 HostCommand、WorkOrder、
+Assignment、TaskGraph JSON 或通用 scheduler snapshot。
+
+定向集合为 `10 passed in 16.20s`，包含启动判定、既有签名换权与新的
+Windows spawn 跨进程链；相邻恢复/Operator/online takeover 集合为
+`33 passed in 137.00s`，两组重叠不相加。最终新进程只执行一次 worker，
+完成 Verification、Acceptance 与 Graph，第三次重启为零重放。该证据使用
+生产 Task Runtime 协议上的受控 projected worker，不是外部模型、Skill 或
+provider；签名 `COMMIT/RELEASE`、其它失败/取消、并发 fan-out、波次集成和
+NE-07 仍未完成，因此 NE-01 继续为 `IN_PROGRESS`。

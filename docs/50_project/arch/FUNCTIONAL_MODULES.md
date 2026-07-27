@@ -555,3 +555,16 @@ Composition Root 只负责把两侧构造并连接
 该模块边界只关闭 Internal/Agent Skill 多轮模型超支旁路；Budget 的
 concurrency、DEGRADE/REVIEW、一般多节点恢复和 program-wide coverage
 仍属于 Governed Execution 的 P1 缺口。
+
+## 12. 未知副作用签名恢复模块边界
+
+| 模块 | 唯一职责 | 禁止承担 |
+|---|---|---|
+| `persistence/task_operation_reacquisition_authority.py` | 验签并确认原始 Lease 是 exact、已到期、唯一最高 fence 且无竞争 owner | 推断副作用未发生、创建新 Attempt |
+| `persistence/task_dag_state_store.py` | 在同一 read transaction 验证 `RESERVED` Operation proof，并只投影最小 execution fence | 向通用 snapshot 泄露签名、scope、fingerprint、receipt/reconciler，或决定谁可执行 worker |
+| `app/host_startup_graph_continuation.py` | 普通 live Lease延后；只消费 Store 已验证的最小 fence，让 exact replacement 进入 canonical Runtime 校验 | 直接消费签名、换 Lease 或执行 worker |
+| `task_runtime/existing_operation_resolution.py` | 复验当前 Runtime owner、replacement Lease/fence 并继续原图 | 生成新图、二次规划或接受漂移 owner |
+| `persistence/task_operation_reconciliation_evidence_store.py` | 保存并重验完整签名与 current recovery case | 把签名注入通用 WorkOrder/TaskGraph |
+
+该边界当前只覆盖 `REACQUIRE + NO_SIDE_EFFECT` 的 `RESERVED` 后硬退出；
+其它 reconciliation action 和失败类别仍在 NE-01 待办中。

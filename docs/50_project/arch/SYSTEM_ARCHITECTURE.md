@@ -655,3 +655,14 @@ Host 启动时默认运行的 terminal exact-auto 只处理 `EXACT_REPAIRABLE`�
 这条 terminal inventory 之外，Host lifespan 还在 RuntimeGroup（含共享 Acceptance Effect owner）完全激活后执行一次 `HostStartupGraphContinuation`。它只读取最多 100 条 nonterminal durable graph，并经 canonical command repository 重开同一 immutable admission；只有 Host 的 `CHAT/HOST_INPUT/TOOL/GATEWAY` surface 可进入已有 governed application。live Lease 与并发执行均保持 `DEFERRED`，没有 scanner 自行夺取 Lease、生成新图或重放未知副作用；达到上限或任何 lineage/receipt 失配均失败关闭。已由 signed reconciliation node-local 关闭的 ACTIVE 多节点图会在这条 immutable DAG 重入中先进入 0090 Graph/Budget settlement，READY sibling 不执行。它仍只是 Host restart 的窄恢复入口，不改变 Scheduler/Internal 各自的 recovery owner，也不使其它通用多节点恢复完成。
 
 Review 的拒绝终结由同一 Task Runtime 持有，而非新的 worker 入口：应用层只传递精确 node identity，scheduler 仅在无 node grant、目标仍为等待 Review、无活跃 sibling 且 durable Review decision 仍为 `REVIEW_DENIED` 时继续既有终结链。该 guard 不发行执行 authority，漂移一律失败关闭，因此不能被解释为通用恢复或并发 fan-out 已启用。
+
+Host survivor 对 live Lease 的处理现在区分“另一执行 owner”与“已经由签名
+reconciler 创建的 replacement fence”。前者继续 `DEFERRED`；后者先由
+TaskStore 在同一 read transaction 重开并验签 `REACQUIRE/NO_SIDE_EFFECT`
+Operation，再通过只含 reservation/Attempt/Lease/owner/fence/status/version
+和 verified bool 的最小 projection 进入 canonical DAG Runtime。原始签名、
+scope、fingerprint、receipt 和 reconciler 不进入通用 scheduler snapshot。
+Runtime 仍按本进程 owner 复验，因而这个例外只修复 startup 发现死锁，不把
+survivor 提升为执行 authority。真实启动若已将旧 Lease 置为 `EXPIRED`，
+换权 Store 会读取历史原始 Lease并要求它仍是唯一最高 fence、没有其他
+active Lease；不会为了兼容重启而降低互斥性。

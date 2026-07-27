@@ -1099,3 +1099,28 @@ Token/成本维度或 graph/node/attempt 漂移都意味着证据不足，必须
 Agent、受治理 Agent Skill，以及显式声明模型预算的普通受治理 Skill；但
 program-wide Budget、七路线最终 receipt 与真实 provider 验收仍是
 NE-01/NE-07 的未完成条件。
+
+### 11.2.2 启动恢复后的签名换权
+
+签名 `NO_SIDE_EFFECT` 不能只在原进程尚保留一条过期但状态仍为
+`ACTIVE` 的 Lease 时成立。真实启动恢复会先把该 Lease 持久化为
+`EXPIRED` 并把 Attempt 收紧为 `RECOVERABLE`；如果换权算法硬编码
+“必须存在一条 ACTIVE Lease”，安全流程反而会在第一次真实重启后永久
+失去继续路径。
+
+允许历史 Lease 不等于放松 fence。换权事务必须重开 Operation 绑定的原始
+Lease，并同时证明：它属于同一 Attempt 和旧 owner、已到期、状态只可能为
+`ACTIVE/EXPIRED`、仍是该 Attempt 唯一最高 fence，且不存在另一条活跃
+Lease。任一条件不成立都意味着已有竞争 owner 或历史漂移，必须拒绝。
+签名换权提交后，TaskStore 要在一致性 scheduler read transaction 内重开
+并验签 Operation，但不能把完整证明暴露给启动发现层。通用 snapshot 只输出
+最小的已验证 execution-fence 投影：reservation、Attempt、Lease、owner、
+fence、status/version 和一个 Store 生成的验签结论。发现层只能让这一条
+精确替代 Lease进入 canonical DAG Runtime；它本身不执行 worker，最终
+Runtime 仍须复验本进程 owner、Operation、Lease 与 fence 的完全一致。
+
+这样形成两层互锁：普通 live Lease 在发现层直接 `DEFERRED`；签名替代
+Lease只获得“进入执行 authority 校验”的资格，不直接获得执行权。原始
+签名、业务 scope、fingerprint、receipt 与 reconciler 继续隔离在
+append-only evidence/Operation proof 中，通用 snapshot、Command、
+WorkOrder 和 TaskGraph 只保留所需最小事实，不因恢复而扩张权限。
