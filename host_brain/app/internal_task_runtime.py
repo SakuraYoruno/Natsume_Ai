@@ -22,6 +22,10 @@ from host_brain.agent_runtime.internal_artifact_terminal_reconciliation import (
     InternalArtifactTerminalContinuationWorker,
     InternalArtifactTerminalReconciler,
 )
+from host_brain.agent_runtime.skill_artifact_terminal_reconciliation import (
+    AgentArtifactTerminalReconcilerGroup,
+    GovernedSkillArtifactTerminalReconciler,
+)
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
@@ -1262,13 +1266,22 @@ def build_governed_internal_runtime(
                 "Internal artifact terminal continuation requires both store and Workspace"
             )
         terminal_worker = InternalArtifactTerminalContinuationWorker(
-            reconciler=InternalArtifactTerminalReconciler(
-                artifact_store=artifact_store,
-                workspace_runtime=workspace_runtime,
-                task_store=task_runtime_container.task_store,
-                command_repository=task_runtime_container.command_repository,
-                projection_store=projection_store,
-                claim_result_store=claim_result_store,
+            reconciler=AgentArtifactTerminalReconcilerGroup(
+                GovernedSkillArtifactTerminalReconciler(
+                    artifact_store=artifact_store,
+                    workspace_runtime=workspace_runtime,
+                    task_store=task_runtime_container.task_store,
+                    command_repository=task_runtime_container.command_repository,
+                    projection_store=projection_store,
+                ),
+                InternalArtifactTerminalReconciler(
+                    artifact_store=artifact_store,
+                    workspace_runtime=workspace_runtime,
+                    task_store=task_runtime_container.task_store,
+                    command_repository=task_runtime_container.command_repository,
+                    projection_store=projection_store,
+                    claim_result_store=claim_result_store,
+                ),
             )
         )
     return GovernedInternalRuntime(

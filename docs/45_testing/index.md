@@ -632,3 +632,25 @@ online takeover 与 startup 集成为 `33 passed in 137.00s`，两组重叠不
 真实生产缺口，修复后才取得最终结果。该 worker 是受控生产协议 adapter；
 真实 provider、完整波次与 Docker 服务栈未运行，远程 CI 为
 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 Direct Agent Skill Workspace 终态证据
+
+当前切片的定向集合为 `57 passed`，由以下互补证据组成：
+
+- 真实 SQLite + 真实 Git worktree：成功 promotion 后在 fresh Runtime 中
+  清理，源 HEAD 不变，再重启零重放；
+- 真实 SQLite + 真实 Git worktree：Agent 写入失败后密封 artifact，
+  immutable rejection projection 与 canonical Verification failure 精确
+  绑定，fresh Runtime 执行 ABANDON→CLEAN，失败文件不进入源分支；
+- 活跃 direct Skill stage 只返回 `HOLD`，Internal reconciler 不再重复解释
+  或报告伪损坏；
+- frozen Skill wrapper 的成功分支只生成 promotion intent，失败分支只生成
+  bounded terminal descriptor 且不包含 `_protected_stage`；
+- terminal worker、route ownership、模型预算和 governed WorkOrder 相邻
+  单元回归通过。
+
+本集合无 mock Workspace、无内存 TaskStore，也没有用端口探针代替文件
+状态验证。它不包括 Plan 内 write node、所有 review/budget/raw-failure/
+cancellation terminal matrix、OS/container isolation、NE-01 wave
+integration 或 NE-07 Docker/前后端全栈。远程 CI 继续记录
+`NOT_RUN_ACCOUNT_QUOTA`。

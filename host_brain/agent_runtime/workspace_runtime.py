@@ -1171,6 +1171,12 @@ class DurableWorkspaceRuntime:
             self._cleanup_inflight.add(authority.workspace_id)
             try:
                 lease = self._cleanup_lease(authority)
+                # A restart/takeover acquires a new Workspace lease and
+                # therefore advances the authority version.  Reopen that
+                # exact post-acquisition row before beginning cleanup; using
+                # the pre-lease version makes every legitimate cross-process
+                # terminal cleanup fail with WORKSPACE_STALE_FENCE.
+                authority = self.repository.get(workspace_id)
                 if authority.status == "ACTIVE":
                     authority = self.repository.begin_cleanup(
                         workspace_id,

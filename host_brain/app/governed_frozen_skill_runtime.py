@@ -417,11 +417,11 @@ class _FrozenSkillWorker:
             if isinstance(raw_agent_result, Mapping)
             else None
         )
-        if success and target in WRITE_AGENT_RUNTIME_SKILL_IDS:
+        if target in WRITE_AGENT_RUNTIME_SKILL_IDS:
             if not isinstance(protected_stage, Mapping):
                 raise GovernedHostAdapterError(
                     GOVERNED_HOST_AUTHORITY_INVALID,
-                    "accepted Agent write has no sealed protected artifact",
+                    "governed Agent write has no sealed protected artifact",
                 )
             protected = dict(protected_stage)
             if (
@@ -431,36 +431,53 @@ class _FrozenSkillWorker:
             ):
                 raise GovernedHostAdapterError(
                     GOVERNED_HOST_AUTHORITY_INVALID,
-                    "accepted Agent protected artifact descriptor drifted",
+                    "governed Agent protected artifact descriptor drifted",
                 )
             public_agent_result = dict(raw_agent_result)
             public_agent_result.pop("_protected_stage", None)
-            commit["acceptance_effect_intents"] = [
-                {
-                    "effect_type": AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
-                    "commit_scope": "NODE",
-                    "payload": {
-                        "schema_version": (
-                            AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA
-                        ),
-                        "work_order_id": work_order.work_order_id,
-                        "target_id": target,
-                        "operation_fingerprint": (
-                            work_order.operation_fingerprint
-                        ),
-                        "protected_artifact": protected,
-                        "result_digest": (
-                            canonical_workspace_artifact_digest(
-                                public_agent_result
-                            )
-                        ),
-                    },
+            if success:
+                commit["acceptance_effect_intents"] = [
+                    {
+                        "effect_type": AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+                        "commit_scope": "NODE",
+                        "payload": {
+                            "schema_version": (
+                                AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA
+                            ),
+                            "work_order_id": work_order.work_order_id,
+                            "target_id": target,
+                            "operation_fingerprint": (
+                                work_order.operation_fingerprint
+                            ),
+                            "protected_artifact": protected,
+                            "result_digest": (
+                                canonical_workspace_artifact_digest(
+                                    public_agent_result
+                                )
+                            ),
+                        },
+                    }
+                ]
+            else:
+                # A failed write-capable Agent still owns a real, sealed
+                # Workspace stage.  Persist only its bounded descriptor in
+                # the immutable worker projection so terminal reconciliation
+                # can abandon the exact artifact after the canonical Task
+                # failure.  Raw files never cross this boundary and no
+                # Acceptance effect is proposed.
+                commit["audit_refs"] = {
+                    **dict(commit["audit_refs"]),
+                    "terminal_workspace_artifact": protected,
+                    "terminal_workspace_result_digest": (
+                        canonical_workspace_artifact_digest(
+                            public_agent_result
+                        )
+                    ),
                 }
-            ]
         elif protected_stage is not None:
             raise GovernedHostAdapterError(
                 GOVERNED_HOST_AUTHORITY_INVALID,
-                "non-accepted Agent execution attempted to transfer a protected artifact",
+                "non-Agent execution attempted to transfer a protected artifact",
             )
         worker_budget = build_worker_budget_usage(
             usage_id=stable_worker_usage_id(

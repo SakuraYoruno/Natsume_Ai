@@ -16,6 +16,13 @@ from host_brain.agent_runtime.accepted_workspace_artifact import (
 )
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.executor import execute_agent_runtime_payload
+from host_brain.agent_runtime.internal_artifact_terminal_reconciliation import (
+    InternalArtifactTerminalReconciler,
+)
+from host_brain.agent_runtime.skill_artifact_terminal_reconciliation import (
+    AgentArtifactTerminalReconcilerGroup,
+    GovernedSkillArtifactTerminalReconciler,
+)
 from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
 from host_brain.agent_runtime.workspace_allocator import (
@@ -35,6 +42,15 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraphStatus,
     TaskNodeStatus,
 )
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetReservation,
+    BudgetReservationStatus,
+)
+from host_brain.contracts.agent_runtime.verification_contract import (
+    VerificationResult,
+    VerificationStatus,
+)
 from host_brain.persistence.host_command_repository import (
     HostCommandRepository,
 )
@@ -43,6 +59,7 @@ from host_brain.persistence.task_repository import (
     OutboxMessage,
     build_outbox_payload_ref,
 )
+from host_brain.persistence.task_store_types import AttemptStatus
 from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
     WorkerProjectionStore,
@@ -100,10 +117,11 @@ def _runtime(
     *,
     db_path: Path,
     source: Path,
+    now_ms: int = NOW,
 ) -> DurableWorkspaceRuntime:
     managed = tmp_path / "managed"
     managed.mkdir(exist_ok=True)
-    repository = WorkspaceRepository(db_path, clock=lambda: NOW)
+    repository = WorkspaceRepository(db_path, clock=lambda: now_ms)
     allocator = WorkspaceAllocator(
         repository=repository,
         managed_roots={
@@ -279,6 +297,62 @@ def _projection(
                 },
             }
         ],
+    }
+    payload_digest = "sha256:" + hashlib.sha256(
+        json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        **body,
+        "projection_id": (
+            "worker-projection://skill/"
+            + payload_digest.split(":", 1)[1]
+        ),
+        "payload_digest": payload_digest,
+        "schema_version": WORKER_PROJECTION_SCHEMA_VERSION,
+    }
+
+
+def _rejected_projection(
+    *,
+    command,
+    graph,
+    node,
+    attempt_id: str,
+    protected: dict[str, Any],
+    result_digest: str,
+    node_grant_ref: str,
+    node_grant_digest: str,
+) -> dict[str, Any]:
+    body = {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "REJECT",
+        "reason_code": "AGENT_EXECUTION_FAILED",
+        "command_id": command.command_id,
+        "request_id": command.request_id,
+        "narrative": "governed Agent execution failed",
+        "route_type": "skill",
+        "target_id": command.target_id,
+        "graph_id": graph.graph_id,
+        "graph_revision": graph.revision,
+        "node_id": node.node_id,
+        "attempt_id": attempt_id,
+        "node_grant_ref": node_grant_ref,
+        "audit_refs": {
+            "path": "governed_task_runtime:frozen_skill",
+            "command_id": command.command_id,
+            "attempt_id": attempt_id,
+            "node_grant_ref": node_grant_ref,
+            "node_grant_digest": node_grant_digest,
+            "terminal_workspace_artifact": protected,
+            "terminal_workspace_result_digest": result_digest,
+        },
     }
     payload_digest = "sha256:" + hashlib.sha256(
         json.dumps(
@@ -493,6 +567,146 @@ def _complete_attempt(
             ),
         )
         conn.commit()
+
+
+def _start_public_attempt(
+    *,
+    task_store: DurableTaskStore,
+    command,
+    graph,
+    node,
+    attempt_id: str,
+    reservation_id: str,
+    budget_id: str,
+    owner_id: str,
+) -> dict[str, Any]:
+    task_store.transition_graph(
+        graph.graph_id,
+        graph.revision,
+        expected_version=0,
+        target_status=TaskGraphStatus.ACTIVE,
+        outbox=_event(
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=graph.graph_id,
+            aggregate_version=1,
+            event_type="TASK_GRAPH_ACTIVE",
+            graph_revision=graph.revision,
+            attempt_id=None,
+        ),
+    )
+    task_store.create_budget_reservation(
+        BudgetReservation(
+            budget_id=budget_id,
+            scope=command.business_scope,
+            limits=BudgetAmount(
+                token_count=4_096,
+                tool_call_count=8,
+                time_ms=60_000,
+                concurrency=1,
+                retry_count=1,
+                model_cost_micros=250_000,
+            ),
+            reserved=BudgetAmount(
+                token_count=4_096,
+                tool_call_count=8,
+                time_ms=60_000,
+                concurrency=1,
+                retry_count=1,
+                model_cost_micros=250_000,
+            ),
+            status=BudgetReservationStatus.ACTIVE,
+        ),
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        outbox=_event(
+            aggregate_type="BUDGET_RESERVATION",
+            aggregate_id=budget_id,
+            aggregate_version=0,
+            event_type="BUDGET_RESERVATION_CREATED",
+            graph_revision=None,
+            attempt_id=None,
+        ),
+    )
+    claimed = task_store.claim_ready_node(
+        attempt_id=attempt_id,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        node_id=node.node_id,
+        expected_node_version=0,
+        expected_attempt_count=0,
+        owner_id=owner_id,
+        lease_ttl_ms=60_000,
+        budget_id=budget_id,
+        operation_scope=command.business_scope,
+        operation_fingerprint=command.operation_fingerprint,
+        attempt_created_outbox=_event(
+            aggregate_type="TASK_ATTEMPT",
+            aggregate_id=attempt_id,
+            aggregate_version=0,
+            event_type="TASK_ATTEMPT_CREATED",
+            graph_revision=None,
+            attempt_id=attempt_id,
+        ),
+        attempt_leased_outbox=_event(
+            aggregate_type="TASK_ATTEMPT",
+            aggregate_id=attempt_id,
+            aggregate_version=1,
+            event_type="TASK_ATTEMPT_LEASED",
+            graph_revision=None,
+            attempt_id=attempt_id,
+        ),
+    )
+    lease = dict(claimed["lease"])
+    task_store.transition_attempt(
+        attempt_id,
+        owner_id=owner_id,
+        fencing_token=int(lease["fencing_token"]),
+        expected_version=1,
+        target_status=AttemptStatus.RUNNING,
+        outbox=_event(
+            aggregate_type="TASK_ATTEMPT",
+            aggregate_id=attempt_id,
+            aggregate_version=2,
+            event_type="TASK_ATTEMPT_RUNNING",
+            graph_revision=None,
+            attempt_id=attempt_id,
+        ),
+    )
+    task_store.transition_node(
+        graph.graph_id,
+        graph.revision,
+        node.node_id,
+        expected_version=1,
+        target_status=TaskNodeStatus.RUNNING,
+        outbox=_event(
+            aggregate_type="TASK_NODE",
+            aggregate_id=f"{graph.graph_id}@{graph.revision}/{node.node_id}",
+            aggregate_version=2,
+            event_type="TASK_NODE_RUNNING",
+            graph_revision=None,
+            attempt_id=None,
+        ),
+    )
+    reserved = task_store.reserve_operation(
+        reservation_id=reservation_id,
+        business_scope=command.business_scope,
+        operation_fingerprint=command.operation_fingerprint,
+        attempt_id=attempt_id,
+        lease_id=str(lease["lease_id"]),
+        owner_id=owner_id,
+        fencing_token=int(lease["fencing_token"]),
+        ttl_ms=60_000,
+        outbox=_event(
+            aggregate_type="OPERATION_RESERVATION",
+            aggregate_id=reservation_id,
+            aggregate_version=0,
+            event_type="OPERATION_RESERVED",
+            graph_revision=None,
+            attempt_id=attempt_id,
+        ),
+    )
+    assert reserved.acquired is True
+    return lease
 
 
 @pytest.mark.asyncio
@@ -767,7 +981,12 @@ async def test_governed_agent_acceptance_promotes_real_sqlite_git_artifact(
     assert _git(source, "rev-parse", "main") == source_head
     assert not (source / "src" / "generated.txt").exists()
 
-    restarted = _runtime(tmp_path, db_path=db_path, source=source)
+    restarted = _runtime(
+        tmp_path,
+        db_path=db_path,
+        source=source,
+        now_ms=NOW + 6_000,
+    )
     restarted_lifecycle = restarted.repository.get_lifecycle(
         seal.workspace_id
     )
@@ -781,3 +1000,399 @@ async def test_governed_agent_acceptance_promotes_real_sqlite_git_artifact(
         seal_digest=protected["digest"],
     )
     assert accepted.accepted_dir is not None
+
+    terminal = InternalArtifactTerminalReconciler(
+        artifact_store=artifacts,
+        workspace_runtime=restarted,
+        task_store=task_store,
+        command_repository=command_store,
+        projection_store=projection_store,
+    )
+    cleaned = terminal.run_once()
+    assert any(
+        item["workspace_id"] == seal.workspace_id
+        and item["attempt_id"] == ATTEMPT_ID
+        and item["action"] == "CLEANED"
+        for item in cleaned
+    ), cleaned
+    cleaned_authority = restarted.repository.get(seal.workspace_id)
+    assert cleaned_authority.status == "CLEANED"
+    assert cleaned_authority.cleanup_receipt_ref.startswith(
+        "workspace-cleanup://"
+    )
+    assert not (
+        tmp_path / "managed" / cleaned_authority.workspace_relpath
+    ).exists()
+
+    replay = _runtime(
+        tmp_path,
+        db_path=db_path,
+        source=source,
+        now_ms=NOW + 12_000,
+    )
+    replayed = terminal.run_once()
+    assert all(item["workspace_id"] != seal.workspace_id for item in replayed)
+    assert replay.repository.get(seal.workspace_id).status == "CLEANED"
+
+
+def test_failed_agent_skill_abandons_and_cleans_after_real_restart(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    attempt_id = "attempt-governed-agent-failed"
+    reservation_id = "reservation-governed-agent-failed"
+    budget_id = "budget-governed-agent-failed"
+    owner_id = RUNTIME_OWNER
+    source, source_head = _source_repository(tmp_path)
+    db_path = tmp_path / "governed-agent-failed.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="governed-agent-failed-migrations",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    task_store = DurableTaskStore(db_path, clock=lambda: NOW)
+    command_store = HostCommandRepository(db_path, task_store=task_store)
+    projection_store = WorkerProjectionStore(db_path, clock=lambda: NOW)
+    command, order, graph = _contracts()
+    node = graph.nodes[0]
+    assignment = CanonicalRuntimeRouter().assign_new_task(
+        order.work_order_id,
+        assigned_at_ms=NOW,
+    )
+    admitted = command_store.admit(command, order, assignment, graph)
+    assert admitted["created"] is True
+    lease = _start_public_attempt(
+        task_store=task_store,
+        command=command,
+        graph=graph,
+        node=node,
+        attempt_id=attempt_id,
+        reservation_id=reservation_id,
+        budget_id=budget_id,
+        owner_id=owner_id,
+    )
+
+    workspace_runtime = _runtime(
+        tmp_path,
+        db_path=db_path,
+        source=source,
+    )
+    artifacts = AgentArtifactStore(tmp_path / "agent-runs")
+
+    class _FailingAgent:
+        def __init__(self, **_dependencies: Any) -> None:
+            pass
+
+        def execute(
+            self,
+            _order,
+            *,
+            workspace: Path,
+            cancelled=None,
+            model_budget_guard=None,
+        ) -> AgentResult:
+            assert callable(cancelled)
+            assert not cancelled()
+            assert model_budget_guard is not None
+            (workspace / "src" / "failed-generated.txt").write_text(
+                "must never reach accepted HEAD\n",
+                encoding="utf-8",
+            )
+            return AgentResult(
+                status="FAILED",
+                work_order_id=order.work_order_id,
+                summary="governed write failed verification",
+                result_text="governed write failed verification",
+                verification={
+                    "status": "FAIL",
+                    "reason_code": "AGENT_EXECUTION_FAILED",
+                },
+                acceptance={"decision": "FAIL"},
+                review_required=True,
+                reason_code="AGENT_EXECUTION_FAILED",
+            )
+
+    monkeypatch.setattr(executor_module, "AgentExecutor", _FailingAgent)
+    node_grant_ref = "governor-decision://sha256/" + "d" * 64
+    node_grant_digest = "sha256:" + "e" * 64
+    governed_context = {
+        "execution_mode": "governed_task_runtime",
+        "command_id": command.command_id,
+        "request_id": command.request_id,
+        "principal_id": command.principal_id,
+        "target_id": command.target_id,
+        "command_target_id": command.target_id,
+        "work_order_id": order.work_order_id,
+        "graph_id": graph.graph_id,
+        "graph_revision": graph.revision,
+        "node_id": node.node_id,
+        "attempt_id": attempt_id,
+        "lease_id": str(lease["lease_id"]),
+        "lease_owner_id": owner_id,
+        "fencing_token": int(lease["fencing_token"]),
+        "reservation_id": reservation_id,
+        "node_grant_ref": node_grant_ref,
+        "parent_grant_ref": command.governor_grant_ref,
+        "business_scope": command.business_scope,
+        "operation_fingerprint": command.operation_fingerprint,
+        "node_risk_level": 4,
+        "pre_execution_review_ref": "review://review-governed-agent-failed",
+        "budget": {
+            "budget_id": budget_id,
+            "status": "ACTIVE",
+            "status_version": 0,
+            "remaining": {
+                "token_count": 4_096,
+                "tool_call_count": 8,
+                "time_ms": 60_000,
+                "concurrency": 1,
+                "retry_count": 1,
+                "model_cost_micros": 250_000,
+            },
+        },
+    }
+    raw_order = {
+        "schema_version": "Natsume.agent.work_order.v2",
+        "work_order_id": order.work_order_id,
+        "domain": "code",
+        "run_mode": "worker",
+        "objective": order.objective,
+        "workspace": {"strategy": "runtime_repo"},
+        "input_pack": {"user_request": order.objective},
+        "allowed_actions": ["read_files", "write_files"],
+        "forbidden_actions": ["modify_secret_files"],
+        "acceptance_criteria": ["tests pass"],
+        "verification_plan": {"commands": ["python -m pytest -q"]},
+        "approval_policy": {"require_confirm": True, "confirmed": True},
+        "review_policy": {"review_required": True},
+        "metadata": {
+            "skill_id": "agent_worker",
+            "request_id": command.request_id,
+        },
+    }
+    raw_result = execute_agent_runtime_payload(
+        {"work_order": raw_order},
+        model_attempt_service=object(),
+        prompt_registry=object(),
+        artifact_store=artifacts,
+        workspace_runtime=workspace_runtime,
+        governed_execution_context=governed_context,
+    )
+    protected = dict(raw_result.pop("_protected_stage"))
+    result_digest = canonical_workspace_artifact_digest(raw_result)
+    projection = _rejected_projection(
+        command=command,
+        graph=graph,
+        node=node,
+        attempt_id=attempt_id,
+        protected=protected,
+        result_digest=result_digest,
+        node_grant_ref=node_grant_ref,
+        node_grant_digest=node_grant_digest,
+    )
+    projection_store.stage(
+        projection_id=projection["projection_id"],
+        projection=projection,
+    )
+    task_store.commit_operation(
+        reservation_id,
+        attempt_id=attempt_id,
+        lease_id=str(lease["lease_id"]),
+        owner_id=owner_id,
+        fencing_token=int(lease["fencing_token"]),
+        expected_version=0,
+        receipt_ref=projection["projection_id"],
+        outbox=_event(
+            aggregate_type="OPERATION_RESERVATION",
+            aggregate_id=reservation_id,
+            aggregate_version=1,
+            event_type="OPERATION_COMMITTED",
+            graph_revision=None,
+            attempt_id=attempt_id,
+            evidence_refs=(
+                projection["projection_id"],
+                (
+                    "sha256://execution/"
+                    + projection["projection_id"].rsplit("/", 1)[-1]
+                ),
+            ),
+        ),
+    )
+    task_store.transition_attempt(
+        attempt_id,
+        owner_id=owner_id,
+        fencing_token=int(lease["fencing_token"]),
+        expected_version=2,
+        target_status=AttemptStatus.SUCCEEDED,
+        outbox=_event(
+            aggregate_type="TASK_ATTEMPT",
+            aggregate_id=attempt_id,
+            aggregate_version=3,
+            event_type="TASK_ATTEMPT_SUCCEEDED",
+            graph_revision=None,
+            attempt_id=attempt_id,
+        ),
+    )
+    active_reports = AgentArtifactTerminalReconcilerGroup(
+        GovernedSkillArtifactTerminalReconciler(
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            task_store=task_store,
+            command_repository=command_store,
+            projection_store=projection_store,
+        ),
+        InternalArtifactTerminalReconciler(
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+            task_store=task_store,
+            command_repository=command_store,
+            projection_store=projection_store,
+        ),
+    ).run_once()
+    assert any(item["action"] == "HOLD" for item in active_reports)
+    assert all(item["action"] != "BLOCKED" for item in active_reports)
+    for expected_version, target in (
+        (2, TaskNodeStatus.EXECUTED),
+        (3, TaskNodeStatus.VERIFYING),
+    ):
+        task_store.transition_node(
+            graph.graph_id,
+            graph.revision,
+            node.node_id,
+            expected_version=expected_version,
+            target_status=target,
+            outbox=_event(
+                aggregate_type="TASK_NODE",
+                aggregate_id=f"{graph.graph_id}@{graph.revision}/{node.node_id}",
+                aggregate_version=expected_version + 1,
+                event_type=f"TASK_NODE_{target.value}",
+                graph_revision=None,
+                attempt_id=None,
+            ),
+        )
+    verification = VerificationResult(
+        verification_id="verify-governed-agent-failed",
+        work_order_id=order.work_order_id,
+        required=True,
+        status=VerificationStatus.FAIL,
+        task_graph_id=graph.graph_id,
+        task_node_id=node.node_id,
+        attempt_id=attempt_id,
+        reason_code="AGENT_EXECUTION_FAILED",
+        evidence_refs=(projection["projection_id"],),
+        checks=(
+            {
+                "name": "durable-worker-projection",
+                "status": "FAIL",
+                "reason_code": "AGENT_EXECUTION_FAILED",
+            },
+        ),
+        started_at_ms=NOW,
+        finished_at_ms=NOW + 1,
+    )
+    failed = task_store.finalize_node_verification_failure(
+        graph.graph_id,
+        graph.revision,
+        node.node_id,
+        attempt_id=attempt_id,
+        reservation_id=reservation_id,
+        budget_id=budget_id,
+        expected_node_version=4,
+        expected_graph_version=1,
+        expected_budget_version=0,
+        verification_result=verification,
+        node_outbox=_event(
+            aggregate_type="TASK_NODE",
+            aggregate_id=f"{graph.graph_id}@{graph.revision}/{node.node_id}",
+            aggregate_version=5,
+            event_type="TASK_NODE_VERIFICATION_FAILED",
+            graph_revision=None,
+            attempt_id=attempt_id,
+            evidence_refs=(projection["projection_id"],),
+        ),
+        graph_outbox=_event(
+            aggregate_type="TASK_GRAPH",
+            aggregate_id=graph.graph_id,
+            aggregate_version=2,
+            event_type="TASK_GRAPH_FAILED",
+            graph_revision=graph.revision,
+            attempt_id=None,
+            evidence_refs=(projection["projection_id"],),
+        ),
+        budget_outbox=_event(
+            aggregate_type="BUDGET_RESERVATION",
+            aggregate_id=budget_id,
+            aggregate_version=1,
+            event_type="BUDGET_RESERVATION_RELEASED",
+            graph_revision=None,
+            attempt_id=None,
+            evidence_refs=(projection["projection_id"],),
+        ),
+    )
+    assert failed["graph"]["status"] == "FAILED"
+
+    restarted = _runtime(
+        tmp_path,
+        db_path=db_path,
+        source=source,
+        now_ms=NOW + 6_000,
+    )
+    skill_terminal = GovernedSkillArtifactTerminalReconciler(
+        artifact_store=artifacts,
+        workspace_runtime=restarted,
+        task_store=task_store,
+        command_repository=command_store,
+        projection_store=projection_store,
+    )
+    group = AgentArtifactTerminalReconcilerGroup(
+        skill_terminal,
+        InternalArtifactTerminalReconciler(
+            artifact_store=artifacts,
+            workspace_runtime=restarted,
+            task_store=task_store,
+            command_repository=command_store,
+            projection_store=projection_store,
+        ),
+    )
+    reports = group.run_once()
+    assert any(
+        item["action"] == "ABANDONED"
+        and item["reason_code"] == "TERMINAL_VERIFICATION_FAILED"
+        for item in reports
+    ), json.dumps(reports, ensure_ascii=False, sort_keys=True, indent=2)
+    assert any(item["action"] == "CLEANED" for item in reports), reports
+    authority = restarted.repository.get(
+        restarted.workspace_id_for(
+            graph_id=graph.graph_id,
+            graph_revision=graph.revision,
+        )
+    )
+    assert authority.status == "CLEANED"
+    assert not (tmp_path / "managed" / authority.workspace_relpath).exists()
+    assert _git(source, "rev-parse", "main") == source_head
+    assert not (source / "src" / "failed-generated.txt").exists()
+
+    replay_runtime = _runtime(
+        tmp_path,
+        db_path=db_path,
+        source=source,
+        now_ms=NOW + 12_000,
+    )
+    replay_group = AgentArtifactTerminalReconcilerGroup(
+        GovernedSkillArtifactTerminalReconciler(
+            artifact_store=artifacts,
+            workspace_runtime=replay_runtime,
+            task_store=task_store,
+            command_repository=command_store,
+            projection_store=projection_store,
+        ),
+        InternalArtifactTerminalReconciler(
+            artifact_store=artifacts,
+            workspace_runtime=replay_runtime,
+            task_store=task_store,
+            command_repository=command_store,
+            projection_store=projection_store,
+        ),
+    )
+    assert replay_group.run_once() == ()
+    assert replay_runtime.repository.get(authority.workspace_id).status == "CLEANED"

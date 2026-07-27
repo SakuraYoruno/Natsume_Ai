@@ -1,5 +1,4 @@
 """Durable continuation for governed Internal Agent terminal artifacts.
-
 The worker owns no execution authority.  It may only abandon a fully sealed
 staging artifact after the canonical Task graph is already terminal, or start
 workspace cleanup after reopening immutable PROMOTED/ABANDONED evidence.
@@ -14,6 +13,10 @@ import time
 from typing import Any
 
 from host_brain.agent_runtime.artifact_store import governed_attempt_segment
+from host_brain.agent_runtime.skill_artifact_terminal_reconciliation import (
+    direct_write_skill_event_command_id,
+    is_direct_write_skill_artifact,
+)
 from host_brain.contracts.agent_runtime.projection_recovery import (
     ProjectionRecoveryContractError,
     validate_projection_recovery_envelope,
@@ -35,7 +38,6 @@ from host_brain.contracts.agent_runtime.internal_raw_failure_claim_result import
 from host_brain.contracts.agent_runtime.workspace_lifecycle import (
     WorkspaceLifecycleState,
 )
-
 
 INTERNAL_ARTIFACT_TERMINAL_INVALID = "INTERNAL_ARTIFACT_TERMINAL_INVALID"
 _INTERNAL_ROUTE = "delegate:agent_runtime"
@@ -155,6 +157,8 @@ class InternalArtifactTerminalReconciler:
         )
         for stage in unsealed:
             try:
+                if is_direct_write_skill_artifact(stage, self._commands):
+                    continue
                 reason = self._unsealed_cancellation_reason(stage)
                 if reason is None:
                     reports.append(
@@ -206,6 +210,8 @@ class InternalArtifactTerminalReconciler:
         )
         for seal in staging:
             try:
+                if is_direct_write_skill_artifact(seal, self._commands):
+                    continue
                 reason = self._terminal_abandonment_reason(seal)
                 if reason is None:
                     reports.append(
@@ -364,38 +370,42 @@ class InternalArtifactTerminalReconciler:
         return tuple(report.to_dict() for report in reports)
 
     def _command_id_for_event(self, event: Any) -> str:
+        graph_id = str(event.graph_id)
+        graph_revision = int(event.graph_revision)
+        skill_command_id = direct_write_skill_event_command_id(
+            event,
+            self._commands,
+        )
+        if skill_command_id is not None:
+            return skill_command_id
         record = self._commands.get_by_graph(
-            graph_id=str(event.graph_id),
-            graph_revision=int(event.graph_revision),
+            graph_id=graph_id,
+            graph_revision=graph_revision,
         )
         if not isinstance(record, Mapping):
             raise InternalArtifactTerminalReconciliationError(
                 "Workspace terminal event has no HostCommand admission"
             )
         command = record.get("command")
-        graph = record.get("graph")
+        nodes = tuple(getattr(record.get("graph"), "nodes", ()) or ())
         command_id = str(getattr(command, "command_id", "") or "")
-        surface = getattr(getattr(command, "surface", None), "value", None)
-        nodes = tuple(getattr(graph, "nodes", ()) or ())
-        matching_nodes = [
-            node
-            for node in nodes
-            if str(getattr(node, "node_id", "") or "") == str(event.node_id)
-        ]
-        if (
-            not command_id
-            or surface != "internal"
-            or str(getattr(command, "graph_id", "") or "")
-            != str(event.graph_id)
-            or int(getattr(command, "graph_revision", 0) or 0)
-            != int(event.graph_revision)
-            or len(nodes) != 1
-            or len(matching_nodes) != 1
-            or str(getattr(matching_nodes[0], "route", "") or "")
-            != _INTERNAL_ROUTE
-        ):
+        exact = (
+            bool(command_id)
+            and str(getattr(command, "graph_id", "") or "") == graph_id
+            and int(getattr(command, "graph_revision", 0) or 0)
+            == graph_revision
+            and getattr(getattr(command, "surface", None), "value", None)
+            == "internal"
+            and str(getattr(command, "route_type", "") or "") == "delegate"
+            and str(getattr(command, "target_id", "") or "") == "agent_runtime"
+            and len(nodes) == 1
+            and str(getattr(nodes[0], "node_id", "") or "")
+            == str(event.node_id)
+            and str(getattr(nodes[0], "route", "") or "") == _INTERNAL_ROUTE
+        )
+        if not exact:
             raise InternalArtifactTerminalReconciliationError(
-                "Workspace terminal event Internal admission is missing or drifted"
+                "Workspace terminal event admission is missing or drifted"
             )
         return command_id
 
@@ -1370,10 +1380,12 @@ class InternalArtifactTerminalContinuationWorker:
     def __init__(
         self,
         *,
-        reconciler: InternalArtifactTerminalReconciler,
+        reconciler: Any,
         interval_ms: int = 5_000,
         batch_limit: int = 100,
     ) -> None:
+        if not callable(getattr(reconciler, "run_once", None)):
+            raise TypeError("terminal continuation requires a reconciler")
         if int(interval_ms) < 100:
             raise ValueError("terminal continuation interval must be at least 100ms")
         if int(batch_limit) < 1 or int(batch_limit) > 1_000:
