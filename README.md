@@ -577,6 +577,8 @@ Host 的唯一生产 Plan 入口是 `route=plan + target_id=planning_search + ar
 
 Pentest L3 不再把当前可执行根动作复制成唯一搜索全集。`L1GraphSearch` 会把同一次 current-state policy 生成、具有已登记 ToolContract、但缺少当前 capability 的动作放入独立 successor catalog；这些动作不会进入 L1/L2 根 beam，也不能被实际执行。L3 根层仍只接受真实 PreActionGate 已通过的动作，完成纯虚拟 transition 后才按新的 virtual capabilities 过滤并解锁 catalog 中合法后继。catalog digest、数量、初始 capability/fact state 与搜索 trace 一起进入 durable shadow calibration；AgentLoop 不接收 caller 自造的运行期动作列表。当前 38 项 Pentest 定向回归通过。该改动消除了“固定根候选无法表达 capability-unlocking 路径”的机械缺口，但 outcome 仍是 `UNVERIFIED_RUNTIME_RECORD`，30 次授权实验、安全统计、独立 verifier 和 promotion Gate 均未完成，L3 继续 `SHADOW_ONLY`。
 
+Code 收益协议现固定为 20 个唯一 paired workload：两臂必须来自同一 source commit、path policy、模型/provider/profile/budget，并使用独立 fresh worktree、独立模型 execution、hidden-test 与 static verifier。收益必须满足“通过率至少提升 10 个百分点”，或“通过率非劣 5 个百分点且成本至少降低 15%”；hidden-test rate、static-check rate 和 mean diff-risk 任一退化都会拒绝。D19 也不再丢弃失败 pytest：只要两臂身份、实际 PASS/FAIL、预算与 cleanup 可验证，失败任务同样写入 terminal experiment receipt，避免 cohort 只保留成功样本。当前仅完成纯合同/evaluator 与失败终态语义，未建立 cohort owner、未跑真实 20 项模型任务，Code benefit 仍为 `UNPROVEN`。
+
 ### 状态与副作用
 
 Task Acceptance 会原子登记 effect intent，随后由 durable dispatcher 分别应用对话、Memory、Life、Gateway、Edge 等副作用。正确语义是“验收后可恢复的最终一致”，不是“所有外部系统处在同一个数据库事务”。

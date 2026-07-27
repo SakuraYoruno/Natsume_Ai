@@ -43,6 +43,12 @@ Pentest L3 已把固定根全集改为两层 catalog：当前 ToolContract/PreAc
 calibration，生产选择仍强制使用 L1/L2 baseline。下一步仍是 30 次授权实验、
 receipt-bound outcome、安全零违规统计和 proposal Gate。
 
+Code 20 项收益协议已冻结：同 source/model/provider/profile/budget、独立 fresh
+worktree 与 execution；通过率提升至少 10 个百分点，或非劣 5 个百分点且成本
+降低至少 15%，同时 hidden/static/diff-risk 不得退化。D19 失败 arm 现会在
+cleanup 后形成 terminal observation，不再因测试失败被 cohort 丢弃。下一步
+仍是统一 migration/owner、真实外部模型执行、20 项 evidence 和 proposal Gate。
+
 ## 历史编号
 
 - TASK-0000～TASK-0622、M48～M57、AW-00～08、GR-00～06 已冻结。

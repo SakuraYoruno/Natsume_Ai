@@ -1062,12 +1062,13 @@ registered clean protected source (unshared non-link .git; local Git config is t
   → 0106 preregistration transaction B: exact RunSpec
   → D19 terminal-evidence transaction only after both arms + VERIFIED_CLEAN:
      BASELINE/SELECTED evidence/outcome + cleanup + terminal receipt
-  → terminal reader requires two successful run/arm/plan/budget-bound controlled arms;
+  → terminal reader requires two run/arm/plan/budget-bound controlled arms whose
+     outcome/verifier/controlled PASS-or-FAIL states agree exactly;
      a started arm has already reserved its frozen command budget even on timeout/error
   → EXPERIMENT_EVIDENCE_ONLY (no production influence, winner or promotion)
 ```
 
-该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。D19 的 verifier 把同主机 child 仅用作受控仓库测试命令：它实际强制冻结 argv、paired `max_test_commands` / `max_wall_time_ms`、worktree cwd、`shell=False`、无 `PYTHONPATH` 与关闭自动插件加载，并只持久化无路径摘要；实际解释器路径先被同次 child 核验，持久化的是无主机路径的冻结 portable argv digest。`PASS` 必须对应 exit code `0`，receipt 还会绑定 exact run/arm/plan/budget，并在 terminal replay 重验两个 arm 的 aggregate test/wall limit及两个成功 outcome；没有受控 receipt 的 D17 verifier 仍必须与 executor cost 完全相等。arm 在 child 可能启动前就预留冻结 command count，所以 timeout/policy error 也不能同一 pair 内重试规避预算。它不能强杀子进程树，也没有 CPU/内存、container、tenant、文件系统或网络隔离。本地 source、pytest 测试及 user-site 依赖仍是受信输入；为 Windows user-site discovery 会保留 `APPDATA`，且未设 `PYTHONNOUSERSITE`。0106 先独立 append-only preregister workload/plan，再独立 preregister RunSpec；只有正常 runner cleanup 成功后的 terminal-evidence transaction 才写两 arm evidence/outcome、cleanup 和 terminal receipt。SQL/Python 会再验证 registration/spec 绑定、两个 arm、source/commit/policy 一致性及 cleanup gate，并以 immutable trigger、canonical JSON/digest 和 restart replay 拒绝漂移。它是真实本地 Git + durable experiment evidence 机械链，但口径仍仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：模型/provider/tool/token/cost 不受 D19 预算治理，也没有隐藏 oracle、durable cleanup lease/retry、cohort/statistical comparison 或收益/promotion 结论。
+该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。D19 的 verifier 把同主机 child 仅用作受控仓库测试命令：它实际强制冻结 argv、paired `max_test_commands` / `max_wall_time_ms`、worktree cwd、`shell=False`、无 `PYTHONPATH` 与关闭自动插件加载，并只持久化无路径摘要；实际解释器路径先被同次 child 核验，持久化的是无主机路径的冻结 portable argv digest。`PASS` 必须对应 exit code `0`，receipt 还会绑定 exact run/arm/plan/budget，并在 terminal replay 重验两个 arm 的 aggregate test/wall limit 及 outcome/verifier/controlled status 一致性；FAIL 也是必须保留的终态观察，不代表 `COMPLETED_CLEAN` 变成通过。没有受控 receipt 的 D17 verifier 仍必须与 executor cost 完全相等。arm 在 child 可能启动前就预留冻结 command count，所以 timeout/policy error 也不能同一 pair 内重试规避预算。它不能强杀子进程树，也没有 CPU/内存、container、tenant、文件系统或网络隔离。本地 source、pytest 测试及 user-site 依赖仍是受信输入；为 Windows user-site discovery 会保留 `APPDATA`，且未设 `PYTHONNOUSERSITE`。0106 先独立 append-only preregister workload/plan，再独立 preregister RunSpec；只有正常 runner cleanup 成功后的 terminal-evidence transaction 才写两 arm evidence/outcome、cleanup 和 terminal receipt。SQL/Python 会再验证 registration/spec 绑定、两个 arm、source/commit/policy 一致性及 cleanup gate，并以 immutable trigger、canonical JSON/digest 和 restart replay 拒绝漂移。它是真实本地 Git + durable experiment evidence 机械链，但口径仍仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：模型/provider/tool/token/cost 不受 D19 预算治理，也没有隐藏 oracle、durable cleanup lease/retry、真实 20 项 cohort 或收益/promotion 结论。
 
 ## 5. TaskGraph 状态流与回执
 
@@ -1771,6 +1772,8 @@ All ingress sources
 6. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
 
 Pentest 的对应数据流现为 `current AgentState + manifest/policy → L1 executable roots + contract-deferred successor catalog → descriptor-only virtual transition → capability-filtered deeper successors → L3 shadow trace → 0105 prediction/outcome`。depth 0 不读取 deferred catalog；只有前一虚拟节点提供所需 capability 后，后续 expander 才返回该 descriptor。AgentLoop 实际执行仍只消费 L1/L2 baseline root。catalog digest/count 与 state digest 一并进入 shadow calibration，未知 Store 故障只产生可观察降级，不能改变真实选择。
+
+Code 固定收益数据流为 `20 项 preregistration → owner-randomized baseline/selected → 同 commit 独立 fresh worktree → fresh external model execution → hidden/static verifier → PASS 或 FAIL terminal observation → cleanup receipt → paired evaluator → proposal-only report`。测试失败不能在 terminal 前被过滤；`COMPLETED_CLEAN` 表示证据与清理完整，不等于测试 PASS。evaluator 不写生产策略，也不能将 report 直接变成 L3 influence。
 7. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。

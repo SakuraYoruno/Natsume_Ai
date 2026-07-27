@@ -494,9 +494,13 @@ def _validate_controlled_arm(
         raise CodeBenchmarkLedgerContractError(
             "controlled verification receipt does not bind preregistered run, arm, plan or budget"
         )
-    if not (outcome.success and evidence.verifier.success and controlled.success):
+    if not (
+        outcome.success
+        == evidence.verifier.success
+        == controlled.success
+    ):
         raise CodeBenchmarkLedgerContractError(
-            "controlled verification plan requires a successful controlled arm outcome"
+            "controlled verification result must bind the arm outcome exactly"
         )
 
 

@@ -260,6 +260,8 @@ Host 现有两条 Plan 入口：遗留 `planned_steps/steps` 只校验并拓扑�
 
 能力规划的 risk authority 位于纯搜索边界而不是 worker：`CapabilityPlanningSnapshot` 只接受 `min(intent.planning_max_risk_level, Governor approved binding.risk_level)` 的 effective ceiling，并把 Governor decision ref 与 server-owned 两项执行步数纳入 virtual-state source refs/digest。这样已绑定的计划参数只能收紧候选，不能把较宽 request 字段解释为更高能力权限或任意 fan-out；binding 缺失、布尔值、非整数或越界时拒绝进入搜索。该限制只覆盖当前 Research/Frontend 的窄 Host adapter，不等于一般 Plan 或多领域搜索完成。
 
+当前 D19/Code cohort 口径以本段为准，并取代上文“仅两 arm PASS 才登记 terminal”的历史描述：verified cleanup 后，PASS 与 FAIL 都必须形成 terminal observation，且 outcome、verifier、controlled receipt 的状态完全一致；`COMPLETED_CLEAN` 只表示证据完整与工作区清理完成。`contracts/planning_search/code_benefit_cohort*` 在此基础上固定 20 项同 source/model/provider/profile/budget 的 paired workload，要求独立 fresh worktree 与模型/hidden/static execution；收益仅在 +10pp pass-rate，或非劣 5pp 且成本至少下降 15% 时成立，hidden/static/diff-risk 均不得退化。当前没有 durable cohort owner、真实 20 项模型运行或 promotion authority，故仍为 `UNPROVEN`。
+
 ### 3.4 Durable 执行层
 
 主要代码：

@@ -42,9 +42,9 @@ class CodeBenchmarkExperimentError(RuntimeError):
 class ControlledCodeBenchmarkExperimentService:
     """Run only a fully preregistered, cleanup-gated controlled verification.
 
-    A failed pytest command is valid local verification evidence, but this
-    stricter service does not turn it into a terminal D19 experiment receipt.
-    The workload/spec preregistration remains append-only for diagnosis.
+    A failed pytest command is a valid terminal experiment observation.  It is
+    persisted with the same cleanup and identity guarantees as a passing arm
+    so a fixed cohort can measure pass rate without dropping failed tasks.
     """
 
     def __init__(
@@ -117,7 +117,7 @@ class ControlledCodeBenchmarkExperimentService:
                 raise CodeBenchmarkExperimentError(
                     "existing terminal receipt has a different preregistered spec"
                 )
-            self._require_controlled_passes(
+            self._require_controlled_receipts(
                 completed.run,
                 "existing terminal receipt",
             )
@@ -132,12 +132,12 @@ class ControlledCodeBenchmarkExperimentService:
             selected_executor=selected_executor,
             verifier=verifier,
         )
-        self._require_controlled_passes(run, "paired verification")
+        self._require_controlled_receipts(run, "paired verification")
         receipt = CodeBenchmarkRunReceipt(spec=stored_spec, run=run)
         return self._ledger.record_completed_run(receipt)
 
     @staticmethod
-    def _require_controlled_passes(
+    def _require_controlled_receipts(
         run: CodeHistoricalBenchmarkRun,
         context: str,
     ) -> None:
@@ -149,10 +149,6 @@ class ControlledCodeBenchmarkExperimentService:
             if controlled is None:
                 raise CodeBenchmarkExperimentError(
                     f"{context} lacks a controlled {role} verifier receipt"
-                )
-            if not evidence.verifier.success or not controlled.success:
-                raise CodeBenchmarkExperimentError(
-                    f"{context} has a failed controlled {role} verification"
                 )
 
 

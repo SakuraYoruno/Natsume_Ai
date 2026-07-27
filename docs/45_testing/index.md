@@ -1025,3 +1025,18 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   descriptor 不含 args、executor 或 callback，真实选择仍是 L1/L2 baseline。
 - 本组未运行 30 次授权实验，runtime outcome 仍为
   `UNVERIFIED_RUNTIME_RECORD`；安全、收益和 promotion 均不得标记通过。
+
+### NE-02 Code 固定 20 项收益协议
+
+- `test_ne02_code_benefit_cohort.py` 与 D18/D19 受影响合同合计
+  `15 passed in 4.96s`。
+- 正向用例分别覆盖 pass-rate 提升 10 个百分点，以及 pass-rate 非劣
+  5 个百分点且含 verifier 成本降低至少 15%；evidence 倒序不改变报告。
+- 每项必须绑定同 source commit/path policy、相同 provider/model/profile/
+  budget、owner-randomized 两臂、独立 fresh worktree 和独立模型/hidden/static
+  execution；hidden/static rate 与 mean diff-risk 不得退化。
+- D19 cleanup-gated terminal 现在同时保留 PASS 与 FAIL 观察，三层状态必须
+  精确一致；失败不能在统计前被丢弃。真实 D19 集成在本波 integration
+  统一运行，本切片未重复执行。
+- 本组没有 cohort repository/migration、外部模型或真实 20 项执行，Code
+  benefit 保持 `UNPROVEN`。

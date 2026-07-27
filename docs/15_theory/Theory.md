@@ -781,6 +781,8 @@ Transition 必须：
 
 图搜索中的 successor 也不能等同于“把根候选再跑一遍”。Pentest 当前真实状态只决定哪些动作可作为 executable root；同一授权策略产生、但因缺少 capability 而暂不可执行的已登记动作，应进入独立的 virtual-only catalog。纯 transition 提供新 capability 后，expander 再按新的 virtual state 计算适用后继。catalog 不携带 executor/args/callback，不能绕过最终真实 PreActionGate；其 digest、初始 fact/capability state 和 trace 必须进入校准证据。这样可以评估 capability-unlocking 路径，同时保持真实执行仍由 L1/L2 baseline 控制。若 outcome 只是未验证运行记录，这种更真实的搜索空间仍不能成为 production promotion 依据。
 
+Code 的 pass-rate 实验不能把失败 arm 当作“没有结果”。测试失败本身是终态观察；只要实际退出状态、受控命令、工作区 diff、预算和 cleanup receipt 精确绑定，就必须 append-only 保存，否则 20 项 cohort 会产生幸存者偏差。固定收益 Gate 同时比较通过率、总成本和三个非退化护栏：hidden test、static check 与 diff risk。模型响应、hidden verifier 和 static verifier 必须使用不同 execution identity；只有 fresh external transport attestation 可计收益。通过 Gate 也只能形成 proposal evidence，不能直接让搜索结果获得生产执行权。
+
 持久证据的“唯一写 owner”不要求把所有序列化、类型和数据库职责塞进同一文件。Research shadow ledger 的 SQLite 连接、事务和 append-only UoW 继续只属于 repository owner；canonical JSON 编解码与篡改校验属于无连接 codec，snapshot/error 属于 typed projection 模块。对外 repository import 与 replay 语义保持稳定，而 codec/models 不得获得连接、事务或第二写 authority。这样的拆分降低物理复杂度，却不改变证据归属，也不能被解读为 Research 收益或生产 promotion 已完成。
 
 跨层共享类型也遵循同一原则：合同的物理归属应由“谁共同消费”决定，而不是由最早实现它的应用模块决定。Task Runtime feature-canary receipt 同时被持久层与运行时消费，Host lifecycle ports 同时被 Composition 与 App 消费，因此 canonical type 必须位于中立 `contracts` 层；旧路径只能重导出同一个 Python 对象，不能复制 dataclass/Protocol 或改变序列化形状。这样才能同时消除 persistence→application、composition→app 回边，并避免兼容层制造第二套类型身份。静态 SCC 归零只证明依赖方向正确，不证明七路线执行、持久恢复或生产验收完成。
