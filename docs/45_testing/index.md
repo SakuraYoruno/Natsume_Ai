@@ -3,9 +3,25 @@
 
 # 测试与验收目录
 
-版本：v2.33
+版本：v2.34
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 签名终态处理进程崩溃恢复
+
+- `test_ne01_signed_terminal_process_restart.py` 使用 Windows `spawn`、真实
+  文件型 SQLite 和独立 Ed25519 签名进程，覆盖 checkpoint
+  `COMMIT + SIDE_EFFECT_CONFIRMED` 与 raw failure
+  `RELEASE + NO_SIDE_EFFECT`。
+- 两条链都在目标 mutation 已提交、Accepted handler 尚未返回时硬退出；
+  新进程只能重开同一 evidence、Operation proof 和 handler receipt。
+  checkpoint 链继续 Verification/Acceptance，failure 链重开 terminal；
+  两者 worker 调用均为零，随后 Host 终态重启也为零 replay。
+- 既有 checkpoint/failure 集成测试现均重开唯一 current 0131 recovery
+  case，并把 exact case ref 与 subject digest 同时绑定进 evidence 和
+  Acceptance Effect payload。新增跨进程 `2 passed in 18.33s`，既有签名
+  回归 `5 passed in 18.06s`；取消绑定组合、真实 provider、部署 key/HTTP
+  和波次集成仍未验收。
 
 ## NE-01 Scheduler 时钟批次与控制政策验收切片
 

@@ -178,6 +178,15 @@ async def test_signed_checkpoint_commit_resumes_without_worker_reexecution(
     projection_ref = str(projection_rows[0]["projection_id"])
     projection = projections.get(projection_ref)
     assert projection["attempt_id"] == attempt["attempt_id"]
+    recovery_holds = durable.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id
+    )
+    assert len(recovery_holds) == 1
+    recovery_case = recovery_holds[0]
+    evidence_case = {
+        "recovery_case_ref": recovery_case["case_ref"],
+        "recovery_case_subject_sha256": recovery_case["subject_sha256"],
+    }
 
     actor_id = "reconciler://operator/checkpoint-integration"
     attestation_ref = "proof://operation/checkpoint-integration"
@@ -217,6 +226,7 @@ async def test_signed_checkpoint_commit_resumes_without_worker_reexecution(
             ingress_audit_ref="secure-ingress-audit://operation/checkpoint-forged",
             body_sha256="8" * 64,
             intent_ref=None,
+            **evidence_case,
             **forged,
         )
     evidence = durable.stage_operation_reconciliation_evidence(
@@ -224,6 +234,7 @@ async def test_signed_checkpoint_commit_resumes_without_worker_reexecution(
         ingress_audit_ref="secure-ingress-audit://operation/checkpoint",
         body_sha256="9" * 64,
         intent_ref=None,
+        **evidence_case,
         **request,
     )
     assert evidence["intent_ref"] is None
@@ -305,6 +316,7 @@ async def test_signed_checkpoint_commit_resumes_without_worker_reexecution(
             "expected_version": request["expected_version"],
             "action": "COMMIT",
             "reconciler_actor_id": actor_id,
+            **evidence_case,
         }
     )
 

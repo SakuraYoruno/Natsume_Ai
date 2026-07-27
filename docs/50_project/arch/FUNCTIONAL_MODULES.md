@@ -3,12 +3,21 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.35
+版本：v2.36
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Operation Terminal Recovery 模块由 case-bound evidence store、action-specific
+checkpoint/failure service、`AcceptedOperationReconciliationHandler` 和
+目标 continuation 组成。Evidence 模块只接收唯一 current 0131 case；
+action service 独占 Operation/Outbox mutation；handler receipt 负责响应丢失
+的 exact replay；continuation 只在 COMMIT 后推进原图且不得重跑 worker。
+真实 spawn 测试已覆盖 handler 在目标 mutation 后硬退出的 COMMIT/RELEASE
+两条链。模块仍不负责自动推断未知副作用，也没有完成 cancellation-bound
+组合或部署密钥 canary。
 
 Scheduler Clock Batch 模块由
 [`contracts/scheduler_clock_batch.py`](../../../host_brain/contracts/scheduler_clock_batch.py)

@@ -289,6 +289,15 @@ async def test_signed_release_atomically_fails_raw_worker_without_replay(
     assert attempt["status"] == "RUNNING"
     assert lease["status"] == "ACTIVE"
     assert budget["status"] in {"ACTIVE", "EXCEEDED"}
+    recovery_holds = first_store.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id
+    )
+    assert len(recovery_holds) == 1
+    recovery_case = recovery_holds[0]
+    evidence_case = {
+        "recovery_case_ref": recovery_case["case_ref"],
+        "recovery_case_subject_sha256": recovery_case["subject_sha256"],
+    }
 
     actor_id = "reconciler://operator/terminal-failure-test"
     attestation_ref = "proof://operation-terminal-failure/integration"
@@ -313,6 +322,7 @@ async def test_signed_release_atomically_fails_raw_worker_without_replay(
         action="RELEASE",
         intent_ref=None,
         downstream_receipt_ref=None,
+        **evidence_case,
         **request,
     )
     assert evidence["action"] == "RELEASE"
@@ -423,6 +433,7 @@ async def test_signed_release_atomically_fails_raw_worker_without_replay(
             "expected_version": request["expected_version"],
             "action": "RELEASE",
             "reconciler_actor_id": actor_id,
+            **evidence_case,
         }
     )
     assert handler_result["status"] == "COMMITTED"
@@ -557,6 +568,15 @@ async def test_signed_release_closes_one_node_then_0090_settles_multinode_graph(
         "right",
     )["status"] == "READY"
     assert len(snapshot["active_leases"]) == 1
+    recovery_holds = first_store.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id
+    )
+    assert len(recovery_holds) == 1
+    recovery_case = recovery_holds[0]
+    evidence_case = {
+        "recovery_case_ref": recovery_case["case_ref"],
+        "recovery_case_subject_sha256": recovery_case["subject_sha256"],
+    }
 
     actor_id = "reconciler://operator/multinode-failure-test"
     attestation_ref = "proof://operation-multinode-failure/integration"
@@ -583,6 +603,7 @@ async def test_signed_release_closes_one_node_then_0090_settles_multinode_graph(
         action="RELEASE",
         intent_ref=None,
         downstream_receipt_ref=None,
+        **evidence_case,
         **request,
     )
     clock.advance(21)
@@ -638,6 +659,7 @@ async def test_signed_release_closes_one_node_then_0090_settles_multinode_graph(
         "expected_version": request["expected_version"],
         "action": "RELEASE",
         "reconciler_actor_id": actor_id,
+        **evidence_case,
     }
     pending_handler = await handler(effect_payload)
     pending_receipt_ref = pending_handler["receipt_ref"]

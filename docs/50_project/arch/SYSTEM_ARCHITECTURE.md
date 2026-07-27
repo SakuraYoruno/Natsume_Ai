@@ -3,11 +3,18 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.28
+版本：v2.29
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+跨进程恢复的系统边界现在明确区分目标提交与 handler 响应。目标
+Operation/Outbox Store 是 durable mutation owner；Accepted handler 和 Host
+startup 只是可替换消费者。目标已提交后任一消费者崩溃，新进程必须按
+case-bound proof/receipt 恢复，不能获得第二次 worker authority。当前真实
+进程证据覆盖 checkpoint COMMIT 与无 intent failure RELEASE，取消绑定
+组合和部署 fan-out 仍保持失败关闭。
 
 Scheduler 的生产对象图现在把“发现本轮工作”视为独立不可变 authority。
 Persistence owner 在单一 SQLite snapshot 内构造 ClockBatch；Scheduler
