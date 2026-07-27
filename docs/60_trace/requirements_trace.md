@@ -3,9 +3,9 @@
 
 # 当前需求可追溯矩阵
 
-> 当前库存纠偏：TRACE-EXEC-08～08AP 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
+> 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator active manifest 为 `14 governed / 0 blocked`；另外 23 个旧 ID 已从后端 manifest、handler、OpenAPI 和 Monitor 生成客户端退役，并由独立 replacement policy 记录，不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、一般恢复和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.10
+版本：v5.11
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -38,6 +38,21 @@ recovery case。证据入口为
 `test_gr06_acceptance_effect_compiler.py` 与 Operator reconciliation
 集成。当前结论仅为
 `ENABLED_CONTROL_TRANSPORT_POLICY_WIRED / NE01_IN_PROGRESS`。
+
+TRACE-EXEC-08AU（Operator 旧命令物理退役）：active command manifest 必须
+只包含已经进入 HostCommand/TaskGraph 的命令，禁止继续公布永久 blocked
+伪能力。`RetiredOperatorCommandV1` 冻结 23 个旧 ID、替代 authority 和
+目标波次；active 14 与 retired 23 必须互斥，blocked set 必须为 0。
+backend registry/domain handler、OpenAPI 与生成式 Monitor client 均不得
+路由 retired ID；认证 BFF 只能返回 410 replacement receipt，Monitor
+必须在 fetch 前拒绝。Avatar/Mate 替代为 Edge，Tool/Hunt 替代为 governed
+Tool 或 Internal/Scheduler，Forge/Canon/Bio/Bond 等待 NE-05/06 version
+activation。证据入口为 `test_obs_domain_command_ports.py`、
+`test_ne03_action_preview_front_doors.py`、
+`test_aw07_operator_auth_transport.py` 和
+`operatorCommandGateway.test.js`。结论为
+`ACTIVE_14_GOVERNED / BLOCKED_ZERO / RETIRED_23 /
+REPLACEMENT_AND_NE01_INCOMPLETE`。
 
 TRACE-EXEC-08AQ（Skill 唯一执行 authority）：已经准入的 frozen Skill node
 只能由 `app/governed_skill_execution.py` 执行；该模块是

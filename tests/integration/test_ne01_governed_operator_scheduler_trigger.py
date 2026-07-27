@@ -703,6 +703,9 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
         BLOCKED_OPERATOR_COMMAND_IDS,
         GOVERNED_OPERATOR_COMMAND_IDS,
     )
+    from host_brain.contracts.operator_command_retirement import (
+        RETIRED_OPERATOR_COMMAND_IDS,
+    )
 
     manifest = {spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS}
     assert GOVERNED_OPERATOR_COMMAND_IDS == {
@@ -721,8 +724,10 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
         "task_review.resume",
         "task_terminal.reconcile",
     }
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 23
-    assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == manifest
+    assert BLOCKED_OPERATOR_COMMAND_IDS == frozenset()
+    assert GOVERNED_OPERATOR_COMMAND_IDS == manifest
+    assert len(RETIRED_OPERATOR_COMMAND_IDS) == 23
+    assert RETIRED_OPERATOR_COMMAND_IDS.isdisjoint(manifest)
 
 
 @pytest.mark.asyncio

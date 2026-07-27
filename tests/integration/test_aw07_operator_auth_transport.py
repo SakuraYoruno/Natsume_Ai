@@ -141,6 +141,35 @@ def test_http_only_session_bff_server_signs_and_calls_secure_ingress(monkeypatch
     assert TOKEN not in repr(submitted)
 
 
+def test_retired_operator_command_returns_replacement_without_ingress(
+    monkeypatch,
+) -> None:
+    gateway = _configure_binding(monkeypatch, ["obs:write"])
+    ingress = _VerifyingIngress()
+    client = _bff_client(gateway, ingress)
+    headers = _command_headers()
+    headers["Cookie"] = f"natsume_operator_session={TOKEN}"
+
+    response = client.post(
+        "/v1/host/operator-command-bff/avatar.behavior.apply",
+        json={"payload": {"behavior_id": "wave"}},
+        headers=headers,
+    )
+
+    assert response.status_code == 410
+    assert response.json() == {
+        "allowed": False,
+        "command_id": "avatar.behavior.apply",
+        "duplicate": False,
+        "executed": False,
+        "reason_code": "OPERATOR_COMMAND_RETIRED",
+        "replacement_authority": "edge.command.push",
+        "replacement_wave": "NE-01",
+        "status": "retired",
+    }
+    assert ingress.requests == []
+
+
 def test_cross_site_request_with_valid_operator_cookie_is_csrf_denied(monkeypatch) -> None:
     gateway = _configure_binding(
         monkeypatch,

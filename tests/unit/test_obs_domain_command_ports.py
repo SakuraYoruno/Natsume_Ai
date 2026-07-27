@@ -14,7 +14,6 @@ from host_brain.observability.command_ports import (
     ObsCommandAuthority,
     ObsCommandContractError,
     ObsCommandEnvelope,
-    ObsCommandPortExecutionError,
     bind_server_authority,
 )
 from host_brain.observability.operator_command_gateway import (
@@ -38,6 +37,10 @@ from host_brain.app.observability_runtime.domain_command_ports import (
     build_default_obs_domain_command_registry,
 )
 from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.contracts.operator_command_retirement import (
+    RETIRED_OPERATOR_COMMANDS_V1,
+    RETIRED_OPERATOR_COMMAND_IDS,
+)
 
 
 def _envelope(
@@ -70,23 +73,11 @@ def _envelope(
     )
 
 
-def _execute(
-    command_id: str,
-    payload: dict[str, object],
-    *,
-    route_ports: HostRoutePorts | None = None,
-):
-    registry = build_default_obs_domain_command_registry(route_ports=route_ports)
-    port = registry.resolve_port(command_id)
-    assert port is not None
-    return asyncio.run(port.execute(_envelope(command_id, payload)))
-
-
 def test_default_registry_binds_all_active_manifest_commands() -> None:
     registry = build_default_obs_domain_command_registry()
     expected = tuple(sorted(spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS))
 
-    assert len(expected) == 37
+    assert len(expected) == 14
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
     assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset(
@@ -107,45 +98,36 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
             "task_terminal.reconcile",
         }
     )
-    assert len(BLOCKED_OPERATOR_COMMAND_IDS) == 23
-    assert BLOCKED_OPERATOR_COMMAND_IDS | GOVERNED_OPERATOR_COMMAND_IDS == set(
-        expected
-    )
-    authority = ObsCommandAuthority.bind(
-        principal_id="principal.blocked-matrix",
-        tenant_id="tenant-test",
-        request_id="request-blocked-matrix",
-    )
-    for command_id in sorted(BLOCKED_OPERATOR_COMMAND_IDS):
-        spec = registry.resolve_spec(command_id)
-        port = registry.resolve_port(command_id)
-        assert spec is not None
-        assert port is not None
-        envelope = ObsCommandEnvelope(
-            schema_version=OBS_COMMAND_ENVELOPE_SCHEMA,
-            command_id=command_id,
-            action=spec.action,
-            required_scopes=spec.required_scopes,
-            payload={},
-            authority=authority,
-            claim_ref=f"secure-ingress://claim/{command_id}",
-            audit_ref=f"audit://obs-command/{command_id}",
-            body_sha256="0" * 64,
-        )
-        with pytest.raises(ObsCommandPortExecutionError) as blocked:
-            asyncio.run(port.execute(envelope))
-        assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-        assert blocked.value.side_effects_may_have_run is False
+    assert BLOCKED_OPERATOR_COMMAND_IDS == frozenset()
+    assert GOVERNED_OPERATOR_COMMAND_IDS == set(expected)
+    assert len(RETIRED_OPERATOR_COMMAND_IDS) == 23
+    assert RETIRED_OPERATOR_COMMAND_IDS.isdisjoint(expected)
+    assert {
+        policy.replacement_wave for policy in RETIRED_OPERATOR_COMMANDS_V1
+    } <= {"NE-01", "NE-02/NE-05", "NE-05", "NE-06"}
+    for command_id in RETIRED_OPERATOR_COMMAND_IDS:
+        assert registry.resolve_spec(command_id) is None
+        assert registry.resolve_port(command_id) is None
 
 
-def test_blocked_canon_commands_retain_no_dormant_route_writer() -> None:
+def test_retired_commands_retain_no_dormant_route_writer() -> None:
     from host_brain.app.observability_runtime import domain_command_ports
 
     source = inspect.getsource(domain_command_ports)
-    assert "canon_routes.submit_proposal" not in source
-    assert "canon_routes.approve_proposal" not in source
-    assert "canon_routes.reject_proposal" not in source
-    assert "canon_routes.rollback_proposal" not in source
+    for forbidden in (
+        "obs_routes_agent_bio_ops",
+        "capability_forge_service_provider",
+        "submit_avatar_behavior",
+        "tool_routes.execute_tool",
+        "mateengine_routes",
+        "bond_routes.submit_bond_event",
+        "security_immune_agent_provider",
+        "canon_routes.submit_proposal",
+        "canon_routes.approve_proposal",
+        "canon_routes.reject_proposal",
+        "canon_routes.rollback_proposal",
+    ):
+        assert forbidden not in source
 
 
 def test_scheduler_trigger_enters_operator_surface_and_reports_review_pause() -> None:
@@ -194,76 +176,6 @@ def test_scheduler_trigger_enters_operator_surface_and_reports_review_pause() ->
     assert result.result["output"]["execution_receipt"]["status"] == (
         "WAITING_APPROVAL"
     )
-
-
-def test_bio_adapter_uses_bound_principal_not_caller_owner(monkeypatch) -> None:
-    from host_brain.app import obs_routes_agent_bio_ops as bio_routes
-
-    captured: dict[str, object] = {}
-
-    def _accept(*, candidate_id, run_id, body):  # noqa: ANN001
-        captured.update(candidate_id=candidate_id, run_id=run_id, body=dict(body))
-        return {"ok": True, "decision": "OWNER_ACCEPTED"}
-
-    monkeypatch.setattr(bio_routes, "accept_codex_bio_ops_adoption", _accept)
-    with pytest.raises(ObsCommandPortExecutionError) as blocked:
-        _execute(
-            "bio.adoption.accept",
-            {
-                "candidate_id": "candidate-1",
-                "run_id": "run-1",
-                "owner_organ": "caller-forged-owner",
-                "operator": "caller-forged-operator",
-                "reason": "reviewed",
-            },
-        )
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-    assert captured == {}
-
-
-def test_capability_forge_adapter_stays_blocked_without_legacy_locator() -> None:
-    from host_brain.composition import process_services as dependencies
-
-    assert not hasattr(dependencies, "get_capability_forge_service")
-    with pytest.raises(ObsCommandPortExecutionError) as blocked:
-        _execute(
-            "capability_forge.proposal.create",
-            {
-                "session_id": "session-1",
-                "candidate_key": "candidate-key",
-                "proposer": "caller-forged-proposer",
-            },
-        )
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-
-
-def test_avatar_adapter_fails_before_async_edge_port_without_task_preview(monkeypatch) -> None:
-    from host_brain.channels import embodiment
-
-    captured: dict[str, object] = {}
-
-    async def _post_avatar_behavior(**kwargs):  # noqa: ANN003
-        await asyncio.sleep(0)
-        captured.update(kwargs)
-        return SimpleNamespace(
-            success=True,
-            reason_code="OK",
-            detail="applied",
-            latency_ms=3,
-            event={"behavior_id": kwargs["behavior_id"]},
-        )
-
-    monkeypatch.setattr(embodiment, "submit_avatar_behavior", _post_avatar_behavior)
-    with pytest.raises(ObsCommandPortExecutionError) as blocked:
-        _execute(
-            "avatar.behavior.apply",
-            {"behavior_id": "listening", "source": "owner-command"},
-        )
-    assert blocked.value.reason_code == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert blocked.value.side_effects_may_have_run is False
-    assert captured == {}
 
 
 def test_sysmode_switch_uses_request_bound_governed_operator_runtime() -> None:
@@ -335,20 +247,6 @@ def test_sysmode_switch_uses_request_bound_governed_operator_runtime() -> None:
         "/v1/host/obs-commands/sys_mode.switch"
     )
     assert direct_mode_calls == []
-
-
-def test_direct_avatar_exception_is_unreachable_without_task_preview(monkeypatch) -> None:
-    from host_brain.channels import embodiment
-
-    async def _fail(**_kwargs):  # noqa: ANN003
-        raise RuntimeError("edge unavailable")
-
-    monkeypatch.setattr(embodiment, "submit_avatar_behavior", _fail)
-    with pytest.raises(
-        ObsCommandPortExecutionError,
-        match="ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED",
-    ):
-        _execute("avatar.behavior.apply", {"behavior_id": "thinking"})
 
 
 def test_task_graph_cancel_manifest_owns_scope_and_denies_caller_authority() -> None:

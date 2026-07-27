@@ -29,6 +29,9 @@ from natsume_contracts.identity import (
     parse_identity_envelope,
 )
 from host_brain.secure_ingress import build_hmac_sha256_signature
+from host_brain.contracts.operator_command_retirement import (
+    retired_operator_command,
+)
 
 from .command_ports import (
     AUTHORITY_PAYLOAD_FIELDS,
@@ -269,6 +272,9 @@ def create_obs_command_http_router(
             policy_registry = ObsCommandPortRegistry()
             spec = policy_registry.resolve_spec(command_id)
             if spec is None:
+                retired = retired_operator_command(command_id)
+                if retired is not None:
+                    return _retired_command_response(retired)
                 return _error_response(
                     status_code=404,
                     reason_code="OBS_COMMAND_NOT_ALLOWED",
@@ -999,6 +1005,22 @@ def _error_response(
             "executed": False,
             "reason_code": str(reason_code),
             "status": "unavailable" if int(status_code) == 503 else "rejected",
+        },
+    )
+
+
+def _retired_command_response(policy: Any) -> JSONResponse:
+    return JSONResponse(
+        status_code=410,
+        content={
+            "allowed": False,
+            "command_id": str(policy.command_id),
+            "duplicate": False,
+            "executed": False,
+            "reason_code": str(policy.reason_code),
+            "replacement_authority": str(policy.replacement_authority),
+            "replacement_wave": str(policy.replacement_wave),
+            "status": "retired",
         },
     )
 

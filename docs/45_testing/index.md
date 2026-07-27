@@ -3,9 +3,28 @@
 
 # 测试与验收目录
 
-版本：v2.31
+版本：v2.32
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Operator 旧命令物理退役切片
+
+- `test_obs_domain_command_ports.py` 和
+  `test_ne03_action_preview_front_doors.py` 要求 active manifest/registry
+  恰好只有 14 条 governed command，blocked set 为 0，23 个 retired ID
+  与 active 集合不相交且没有 domain port。
+- `test_aw07_operator_auth_transport.py` 要求认证 BFF 对退役 ID 返回
+  `410 OPERATOR_COMMAND_RETIRED + replacement_authority + replacement_wave`，
+  并证明 Secure Ingress 调用数为 0。
+- 生成式 Operator OpenAPI/client 只包含 active 14 条；Monitor endpoint
+  registry 的 retired entry 不得拥有 `commandId`，`endpointPost` 必须在
+  fetch 前失败。对应 9 个 Node 测试、client freshness、lint、typecheck
+  均通过。
+- Python 最终受影响集合为 `41 passed in 25.87s`，包含 BFF 410 零
+  Secure Ingress 证明。该数字不与前一 69 项控制政策回归相加。
+- 这项证据只证明旧 Operator 广告面和 dormant handler 已退役，不证明
+  replacement authority 已全部实现，也不证明一般恢复、HTTP/Edge canary、
+  NE-01 wave integration 或 NE-07；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Scheduler/Internal/Operator 控制政策与恢复唯一性切片
 
@@ -35,7 +54,7 @@
   两个 owner 为 1480/1499 行。完整架构静态 Gate 1～14
   `PASS / failed_gates=[]`，没有修改 mixed/cohesive allowlist。
 - 本节只证明当前启用 control transport 的执行政策和 recovery-case
-  唯一性。Operator blocked 命令、一般恢复、NE-01 波次 integration 与
+  唯一性。Operator 旧命令已由上一节物理退役；一般恢复、NE-01 波次 integration 与
   NE-07 实栈仍未完成；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Plan/Delegate 执行政策与审批恢复当前切片

@@ -427,74 +427,7 @@ def _spec(
     )
 
 
-_RUN = _schema(optional=("run_id", "inputs"), strings=("run_id",), mappings=("inputs",))
-_OWNER_FILTER = _schema(optional=("run_id", "owner_organ"), strings=("run_id", "owner_organ"))
-_OWNER_WRITE = _schema(
-    optional=("run_id", "owner_organ", "dry_run"),
-    strings=("run_id", "owner_organ"),
-    booleans=("dry_run",),
-)
-_OWNER_DECISION = _schema(
-    required=("candidate_id",),
-    optional=("run_id", "reason", "dry_run"),
-    strings=("candidate_id", "run_id", "reason"),
-    booleans=("dry_run",),
-)
-
-
 DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
-    _spec("bio.daily_cycle.run", "obs:bio-ops:write", _RUN),
-    _spec("bio.adoption.accept", "obs:bio-ops:write", _OWNER_DECISION),
-    _spec("bio.adoption.reject", "obs:bio-ops:write", _OWNER_DECISION),
-    _spec("bio.owner_inbox.materialize", "obs:bio-ops:write", _OWNER_FILTER),
-    _spec("bio.owner_inbox.intake_packets", "obs:bio-ops:write", _OWNER_FILTER),
-    _spec("bio.owner_queue.consume", "obs:bio-ops:write", _OWNER_WRITE),
-    _spec("bio.owner_state.import", "obs:bio-ops:write", _OWNER_WRITE),
-    _spec("bio.owner_state.accept", "obs:bio-ops:write", _OWNER_DECISION),
-    _spec("bio.owner_state.reject", "obs:bio-ops:write", _OWNER_DECISION),
-    _spec(
-        "capability_forge.proposal.create",
-        "obs:capability-forge:write",
-        _schema(
-            required=("session_id",),
-            optional=("candidate_key", "canary_traffic_percent"),
-            strings=("session_id", "candidate_key"),
-            integers=("canary_traffic_percent",),
-        ),
-        authority_field="proposer",
-    ),
-    _spec(
-        "capability_forge.proposal.approve",
-        "obs:capability-forge:write",
-        _schema(
-            required=("proposal_id", "approval_token_ref"),
-            optional=("target_stage",),
-            strings=("proposal_id", "approval_token_ref", "target_stage"),
-        ),
-        authority_field="approver",
-    ),
-    _spec(
-        "capability_forge.proposal.rollback",
-        "obs:capability-forge:write",
-        _schema(
-            required=("proposal_id",),
-            optional=("reason",),
-            strings=("proposal_id", "reason"),
-        ),
-    ),
-    _spec(
-        "avatar.behavior.apply",
-        "obs:avatar:write",
-        _schema(
-            required=("behavior_id",),
-            optional=(
-                "emotion_tag", "body_action_id", "emotion_intensity",
-                "duration_s", "talk_state", "source",
-            ),
-            strings=("behavior_id", "emotion_tag", "body_action_id", "talk_state", "source"),
-            numbers=("emotion_intensity", "duration_s"),
-        ),
-    ),
     _spec(
         "sys_mode.switch",
         "obs:sys-mode:write",
@@ -515,69 +448,6 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         _schema(required=("event_type",), strings=("event_type",)),
     ),
     _spec(
-        "capability_forge.runtime.match",
-        "obs:capability-forge:write",
-        _schema(
-            required=("suggested_family",),
-            optional=("missing_capability_tags", "reason_code"),
-            strings=("suggested_family", "reason_code"),
-        ),
-    ),
-    _spec(
-        "canon.proposal.submit",
-        "canon:write",
-        _schema(
-            required=("proposal_id", "target_doc_id", "proposed_title", "proposed_body"),
-            optional=("proposed_tags", "summary"),
-            strings=("proposal_id", "target_doc_id", "proposed_title", "proposed_body", "summary"),
-        ),
-        authority_field="proposer_node_id",
-    ),
-    _spec(
-        "canon.proposal.approve",
-        "canon:write",
-        _schema(
-            required=(
-                "proposal_id", "apply_id", "subject_version", "subject_hash",
-                "target_doc_id", "base_version", "approval_token_ref",
-                "session_id", "trace_id", "evidence_refs",
-            ),
-            strings=(
-                "proposal_id", "apply_id", "subject_hash", "target_doc_id",
-                "approval_token_ref", "session_id", "trace_id",
-            ),
-            integers=("subject_version", "base_version"),
-        ),
-        authority_field="actor_id",
-    ),
-    _spec(
-        "canon.proposal.reject",
-        "canon:write",
-        _schema(
-            required=("proposal_id",),
-            optional=("reason",),
-            strings=("proposal_id", "reason"),
-        ),
-        authority_field="rejector_node_id",
-    ),
-    _spec(
-        "canon.proposal.rollback",
-        "canon:write",
-        _schema(
-            required=(
-                "proposal_id", "apply_id", "subject_version", "subject_hash",
-                "target_doc_id", "base_version", "approval_token_ref",
-                "session_id", "trace_id", "evidence_refs",
-            ),
-            strings=(
-                "proposal_id", "apply_id", "subject_hash", "target_doc_id",
-                "approval_token_ref", "session_id", "trace_id",
-            ),
-            integers=("subject_version", "base_version"),
-        ),
-        authority_field="actor_id",
-    ),
-    _spec(
         "scheduler.task.enable",
         "scheduler:write",
         _schema(required=("task_id",), optional=("expected_head_version",), strings=("task_id",), integers=("expected_head_version",)),
@@ -593,46 +463,6 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         _schema(required=("task_id",), optional=("payload",), strings=("task_id",), mappings=("payload",)),
     ),
     _spec(
-        "tool.execute",
-        "tool:execute",
-        _schema(
-            required=("tool_id", "intent_id", "session_id"),
-            optional=("seq", "args", "context", "approval_token_ref", "confirm_token_ref", "thread_id", "turn_id"),
-            strings=("tool_id", "intent_id", "session_id", "approval_token_ref", "confirm_token_ref", "thread_id", "turn_id"),
-            mappings=("args", "context"),
-            integers=("seq",),
-        ),
-    ),
-    _spec(
-        "mate.action.submit",
-        "device:mate:write",
-        _schema(
-            optional=(
-                "action", "state", "touch_type", "emotion_tag", "expression",
-                "preset", "text", "enabled", "ttl", "duration", "intensity",
-                "scale", "position_x", "position_y",
-            ),
-            strings=("action", "state", "touch_type", "emotion_tag", "expression", "preset", "text"),
-            booleans=("enabled",),
-            numbers=("ttl", "duration", "intensity", "scale", "position_x", "position_y"),
-        ),
-    ),
-    _spec(
-        "mate.say.submit",
-        "device:mate:write",
-        _schema(required=("text",), optional=("emotion", "ttl"), strings=("text", "emotion"), numbers=("ttl",)),
-    ),
-    _spec(
-        "bond.event.submit",
-        "bond:write",
-        _schema(
-            required=("user_id", "update_kind"),
-            optional=("evidence_refs", "emotion_tag", "emotion_intensity"),
-            strings=("user_id", "update_kind", "emotion_tag"),
-            numbers=("emotion_intensity",),
-        ),
-    ),
-    _spec(
         "edge.command.push",
         "device:edge:write",
         _schema(
@@ -643,7 +473,6 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         ),
         authority_field="source_agent",
     ),
-    _spec("security.hunt.run_once", "security:hunt:write", _schema(optional=("reason",), strings=("reason",))),
     _spec(
         "task_graph.cancel",
         "task-runtime:cancel",
@@ -779,8 +608,8 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
 )
 
 
-if len(DEFAULT_OBS_COMMAND_SPECS) != 37:  # defensive import-time invariant
-    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_37_ACTIVE_FAMILIES")
+if len(DEFAULT_OBS_COMMAND_SPECS) != 14:  # defensive import-time invariant
+    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_14_GOVERNED_COMMANDS")
 
 
 __all__ = [

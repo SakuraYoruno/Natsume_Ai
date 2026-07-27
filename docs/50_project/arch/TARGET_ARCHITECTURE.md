@@ -30,6 +30,9 @@ Natsume AI 的下一代目标不是继续增加互不相连的“高级能力模
 8. 人格、关系、主动性和用户主权规则的重大变化必须由用户确认并可回滚。
 9. Host、Obs、Edge、Gateway 和 Worker 只通过版本化合同协作，不共享实现包或全局服务容器。
 10. 运行数据进入 `runtime/`，验收产物进入 `artifacts/`；不恢复顶层 `data/skills/flows/integrations` 杂物目录。
+11. 生产 manifest 只公布已可执行且受治理的能力；尚未接线的旧命令必须从
+    active contract 退役并单独记录 replacement authority，禁止用长期
+    `blocked` 条目伪装成已经存在的产品能力。
 
 ## 3. 最终生产拓扑
 

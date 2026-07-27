@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.24
+版本：v3.25
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -17,9 +17,17 @@ Intent admission Review，不能再叠加 TaskNode Review；Scheduler trigger
 和 reviewed Internal 继续精确绑定节点 Review。TaskStore/Review 使用同一
 clock。同一 Operation version 的 current recovery case 也被约束为唯一，
 避免签名 reconciliation 因 Budget 版本推进产生歧义。该项只关闭已启用
-控制路线的 policy/replay 漂移；Operator 尚未迁移的 23 个命令、一般
+控制路线的 policy/replay 漂移；一般
 multi-node recovery、整波 integration、部署 canary 和 NE-07 仍是缺口，
 因此三路和 NE-01 状态不升级。
+
+Operator 旧库存缺口已经从“23 个 active-but-blocked 命令”改成“23 个
+明确退役 ID 的替代路线尚待后续波次完成”。生产 manifest 只有 14 条已治理
+命令，blocked 数为 0；退役 ID 不存在于 handler、OpenAPI 或 Monitor 生成
+客户端。它们的 replacement authority 由数据合同冻结，BFF 对旧 ID 返回
+410 而不进入 Secure Ingress。差距仍然存在于 Edge/Tool/Internal 的扩展
+能力及 NE-05/06 的 version activation，但不能再把不存在的写入口统计成
+产品能力。后文 `14/37、23 blocked` 只保留为历史证据。
 
 Plan 与 Delegate 的当前 enabled-scope 局部断点已经关闭。
 Plan 新增 content-addressed execution policy，要求每次初始执行、重放、
