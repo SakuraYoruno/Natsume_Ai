@@ -1232,3 +1232,30 @@ static/doc Gate 和架构 Gate 1～14 通过。无 migration，NE-01 保持
 合同为 `39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过。该 Gate 关闭有界扫描饥饿和 durable
 告警缺口，不证明独立 terminal DLQ、自动修复、跨进程即时 wake、production
 canary、NE-01 波次集成或 NE-07。
+
+## T-NE01-BUDGET-ACTION：Budget 动作生产支持边界
+
+- T-NE01-BA-01：`BudgetPolicy` v1 必须继续 round-trip `BLOCK/DEGRADE/REVIEW`，
+  避免破坏历史/提案合同；production support matrix 必须独立、显式且当前
+  精确等于 `{BLOCK}`。
+- T-NE01-BA-02：DEGRADE 与 REVIEW WorkOrder 调用 `ensure_active()` 必须在
+  Store readiness、Reservation、Outbox 或任何 SQL mutation 前返回
+  `GOVERNED_BUDGET_ACTION_UNSUPPORTED`。
+- T-NE01-BA-03：手工构造 `BudgetRuntimeContext` 后直接调用 precharge/charge
+  也必须触发同一门禁，Store/Outbox 调用数保持 0。
+- T-NE01-BA-04：现有 BLOCK 路径的 precharge、contention、terminal rejection、
+  checkpoint recovery 与七路线合同不得回归；不得把拒绝投影写成
+  `requested_action=DEGRADE/REVIEW + enforced_action=BLOCK`。
+- T-NE01-BA-05：concurrency 的权威语义是 READY claim 同事务的 active fenced
+  Lease 计数与 Attempt child reservation，不要求把 slot 累计进 usage；终态
+  Attempt 必须使 child 投影释放容量。
+- T-NE01-BA-06：在预算例外或 replacement Graph authority、Review、restart、
+  exact replay 与 rollback 全部存在前，机器状态继续把真实 DEGRADE/REVIEW
+  标为 `INCOMPLETE`。
+
+定向集合为 `30 passed in 0.94s`；文档、交付元数据与 coverage 合同为
+`79 passed in 36.98s`；changed-module compile、JSON、diff、统一
+static/doc 与架构 Gate 1～14 均通过。更宽 62 项结构探针为
+`60 passed, 2 failed`：DAG lifecycle 调用矩阵与 terminal replay AST hash
+的测试期望已落后于 `origin/dev` 中逐字相同的生产源。本切片不把它们当作
+Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更新结构基线。

@@ -928,3 +928,22 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   terminal DLQ/Operator 修复 UI、跨进程即时 wake、production canary、
   NE-01 波次集成或 NE-07；远程 CI 仍为
   `NOT_RUN_ACCOUNT_QUOTA`。
+
+### NE-01 Budget 动作 support matrix
+
+- 新增 `test_ne01_budget_policy_runtime_boundary.py`，分别从
+  `ensure_active()` 与低层 precharge 证明 `DEGRADE/REVIEW` 在任何 Store 或
+  Outbox 调用前以稳定 reason 失败关闭；合同 round-trip 仍保留 REVIEW。
+- 初始组合 `test_ne01_budget_policy_runtime_boundary.py`、
+  `test_ne01_budget_runtime_contention_retry.py` 与
+  `test_aw02_governed_task_coordinator.py` 最终复跑为 `30 passed in 0.94s`。
+- 文档、交付元数据与 coverage 合同为 `79 passed in 36.98s`；changed-module
+  `compileall`、JSON、`git diff --check`、统一 `static_scan,doc_gate` 和完整
+  架构 Gate 1～14 均通过。
+- 更宽的 62 项结构探针结果为 `60 passed, 2 failed`；两个失败文件与
+  `origin/dev` 逐字相同，分别是 DAG lifecycle 调用矩阵和 terminal replay
+  AST hash 的旧期望。本提交不把它们记成 Budget 回归，也不把 60 项冒充整批
+  PASS；结构基线按独立提交审计修复。
+- 该结果只证明 unsupported action 不再被静默按 BLOCK 执行，并确认现有
+  concurrency 是 Lease/child reservation 容量；真正预算例外、降级图、
+  `graph_revision + 1`、Review/restart/rollback 仍未实现，NE-01 不升级。

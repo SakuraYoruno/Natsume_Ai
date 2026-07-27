@@ -1126,7 +1126,7 @@ Host 跨进程安全恢复分两条数据流。PRE-OPERATION：旧进程提交 `
 
 拒绝性 Review continuation 的数据流独立于 worker re-entry：`REJECTED/EXPIRED/CANCELLED` claim → immutable `denied_review_node_id`（无 node grant）→ scheduler 读取同一 TaskGraph snapshot → 精确等待节点/无活跃 sibling 检查 → ReviewStore 重开 `REVIEW_DENIED` → 既有 terminal release、Verification/Acceptance receipt 与 outbox 路径。claim 指向未知节点、携带 grant、节点已离开等待 checkpoint、sibling 正在执行或 Review disposition 变化时，流程在任何状态 mutation 前以 durable-state conflict 失败关闭；不得把拒绝当成可重跑 worker 的许可。
 
-Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。一般两节点 ready claim 已证明 `concurrency=1` 进入 Attempt-bound child reservation；完整取消释放、`DEGRADE` / `REVIEW` 与 program-wide coverage 仍没有闭环。
+Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。一般两节点 ready claim 已证明 `concurrency=1` 进入 Attempt-bound child reservation；READY claim 同事务按 active fenced Lease 执行并发容量，Attempt 终态释放 slot。合同层可描述 `DEGRADE/REVIEW`，但 canonical runtime 当前只支持 `BLOCK`，其余动作在 Store/Outbox 之前以稳定 reason fail closed；完整取消释放、预算例外或 replacement Graph 驱动的真实 `DEGRADE/REVIEW` 与 program-wide coverage 仍没有闭环。
 
 ### 5.3 Scheduler Clock/Effect 与 Internal result 边界
 

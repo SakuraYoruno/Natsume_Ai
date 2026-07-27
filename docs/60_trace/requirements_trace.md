@@ -413,3 +413,22 @@ history 完成 resolution。证据入口为
 当前最终 `88 passed in 116.19s`，文档、交付元数据与 coverage 合同
 `39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过；无 migration；独立 terminal DLQ、Operator
 修复 UI、生产 canary、一般恢复与 NE-01 波次集成仍未完成。
+
+TRACE-NE01-BUDGET-ACTION-01（Budget action fail-closed，当前切片）：
+`BudgetPolicy` v1 的 `DEGRADE/REVIEW` 枚举只表示可保存的前向兼容提案，不得
+被 canonical runtime 静默转换为 BLOCK。`DurableBudgetRuntime.ensure_active`
+必须在任何 Store readiness、Reservation 或 Outbox 前检查显式 production
+support matrix；低层 charge 必须重复门禁以防 adapter 漏检。两种未实现动作
+固定返回 `GOVERNED_BUDGET_ACTION_UNSUPPORTED` 且 mutation 调用数为 0。
+concurrency 以 READY claim 的 active fenced Lease + Attempt child reservation
+执行和释放，不是累计 usage。证据入口为
+`host_brain/task_runtime/budget_runtime.py`、
+`host_brain/task_runtime/errors.py` 与
+`tests/unit/test_ne01_budget_policy_runtime_boundary.py`；初始组合为
+`30 passed in 0.94s`，文档/交付合同为 `79 passed in 36.98s`，changed-module
+compile、JSON、diff、统一 static/doc 与架构 Gate 1～14 通过。更宽结构探针
+为 `60 passed, 2 failed`，两项源文件与 `origin/dev` 完全相同，属于已合并
+DAG lifecycle 调用矩阵和 terminal replay hash 的旧结构期望；本 Budget
+切片不掩盖也不吸收该基线修复。预算例外、降级 replacement Graph、Review、
+`graph_revision + 1`、restart 与 rollback 未完成，因此本 trace 只关闭静默
+降级漏洞，NE-01 仍为 `IN_PROGRESS`。

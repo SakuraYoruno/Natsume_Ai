@@ -866,6 +866,14 @@ Lease 不是“某个逻辑 worker 名称曾经拥有任务”，而是“某次
 
 预算需要 reservation、charge、settlement 与 release。provider 没有返回精确计量时应标记 `UNMEASURED`，不能伪造精确值。超限行为必须按 policy 明确 BLOCK、DEGRADE 或 REVIEW。
 
+策略合同能表达某个动作，不等于执行器已经拥有该动作的状态机。没有
+预算例外、降级候选或新不可变 Graph revision 的 `DEGRADE/REVIEW`，不得在
+运行期被悄悄解释成 `BLOCK`。canonical runtime 必须在第一次持久化之前拒绝
+未支持动作；以后只有在新动作同时具备 durable decision、Review/Grant、
+`graph_revision + 1`、restart 和 exact replay 证据后，才能加入 production
+support matrix。并发额度也不是累计 token 式 usage，而是由 Attempt-bound
+child reservation 与 active fenced Lease 共同实现的可释放容量。
+
 当前实现入口是 [Budget runtime](../../host_brain/task_runtime/budget_runtime.py)。是否已覆盖全部入口与策略，以当前架构事实为准。
 
 ### 11.5 Retry 与 Replan 的区别

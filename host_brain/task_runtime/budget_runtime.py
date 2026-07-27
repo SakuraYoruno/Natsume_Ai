@@ -26,6 +26,7 @@ from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
 from .admission import AdmittedExecution
 from .errors import (
+    GOVERNED_BUDGET_ACTION_UNSUPPORTED,
     GOVERNED_BUDGET_POLICY_REQUIRED,
     GOVERNED_BUDGET_STATE_CONFLICT,
     GOVERNED_TIME_BUDGET_EXCEEDED,
@@ -43,6 +44,7 @@ _USAGE_REF = re.compile(
 _WORKER_USAGE_FIELDS = frozenset(
     {"usage_id", "token_count", "time_ms", "retry_count", "model_cost_micros"}
 )
+SUPPORTED_RUNTIME_BUDGET_ACTIONS = frozenset({BudgetExceededAction.BLOCK})
 
 
 @dataclass(frozen=True, slots=True)
@@ -644,6 +646,7 @@ class DurableBudgetRuntime:
         *,
         target_status: BudgetReservationStatus,
     ) -> BudgetRuntimeContext:
+        _require_supported_runtime_action(context.policy)
         if target_status not in {
             BudgetReservationStatus.CONSUMED,
             BudgetReservationStatus.RELEASED,
@@ -709,6 +712,7 @@ class DurableBudgetRuntime:
         idempotency identity across both persistence boundaries.
         """
 
+        _require_supported_runtime_action(context.policy)
         if target_status not in {
             BudgetReservationStatus.CONSUMED,
             BudgetReservationStatus.RELEASED,
@@ -734,6 +738,7 @@ class DurableBudgetRuntime:
         attempt_id: str,
         delta: BudgetAmount,
     ) -> BudgetCharge:
+        _require_supported_runtime_action(context.policy)
         self._assert_node_charge_binding(
             context,
             node_id=node_id,
@@ -963,7 +968,7 @@ def _required_policy(admitted: AdmittedExecution, work_order: Any) -> BudgetPoli
             GOVERNED_BUDGET_POLICY_REQUIRED,
             "WorkOrderV3 has no BudgetPolicy",
         )
-    policy.validate()
+    _require_supported_runtime_action(policy)
     if (
         work_order.root_work_order_id != admitted.work_order_id
         or work_order.task_graph_id != admitted.graph_id
@@ -974,6 +979,33 @@ def _required_policy(admitted: AdmittedExecution, work_order: Any) -> BudgetPoli
             "WorkOrderV3 budget lineage differs from the admitted graph revision",
         )
     return policy
+
+
+def _require_supported_runtime_action(policy: BudgetPolicy) -> None:
+    """Reject policy actions that have no durable production state machine.
+
+    ``BudgetPolicy`` remains a forward-compatible contract and can describe
+    DEGRADE or REVIEW proposals.  The current canonical executor must not
+    silently reinterpret either proposal as BLOCK.  A future implementation
+    may add them only together with immutable replacement-graph or budget
+    exception authority and exact restart/replay evidence.
+    """
+
+    try:
+        policy.validate()
+    except ContractViolation as exc:
+        raise GovernedRuntimeError(
+            GOVERNED_BUDGET_POLICY_REQUIRED,
+            "BudgetPolicy contract is invalid",
+        ) from exc
+    if policy.on_exceeded not in SUPPORTED_RUNTIME_BUDGET_ACTIONS:
+        raise GovernedRuntimeError(
+            GOVERNED_BUDGET_ACTION_UNSUPPORTED,
+            (
+                f"Budget action {policy.on_exceeded.value} has no canonical "
+                "durable production state machine"
+            ),
+        )
 
 
 def _worker_usage(payload: Any, *, elapsed_ms: int) -> tuple[str, BudgetAmount, str]:
@@ -1199,4 +1231,5 @@ __all__ = [
     "BudgetCharge",
     "BudgetRuntimeContext",
     "DurableBudgetRuntime",
+    "SUPPORTED_RUNTIME_BUDGET_ACTIONS",
 ]
