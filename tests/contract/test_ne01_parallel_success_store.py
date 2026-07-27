@@ -431,14 +431,22 @@ def _accept_node(
     return projection
 
 
-def _effect(graph_id: str, attempt_id: str) -> AcceptanceEffectIntentSpec:
-    payload = {"request_id": f"request::{graph_id}", "narrative": "approved right"}
+def _effect(
+    graph_id: str,
+    attempt_id: str,
+    *,
+    node_id: str = "right",
+) -> AcceptanceEffectIntentSpec:
+    payload = {
+        "request_id": f"request::{graph_id}",
+        "narrative": f"approved {node_id}",
+    }
     digest = build_acceptance_effect_payload_digest(payload)
     return AcceptanceEffectIntentSpec(
         effect_id=f"acceptance-effect://{graph_id}/reply",
         graph_id=graph_id,
         graph_revision=1,
-        node_id="right",
+        node_id=node_id,
         attempt_id=attempt_id,
         commit_scope=AcceptanceEffectCommitScope.GRAPH,
         effect_type="surface.reply_delivery",
@@ -452,6 +460,8 @@ def _effect(graph_id: str, attempt_id: str) -> AcceptanceEffectIntentSpec:
 def _fixture(
     tmp_path: Path,
     graph_id: str,
+    *,
+    effect_node_id: str = "right",
 ) -> tuple[
     DurableTaskStore,
     CanonicalParallelSuccessDecision,
@@ -472,7 +482,11 @@ def _fixture(
         }
         for node_id in ("left", "right")
     }
-    effect = _effect(graph_id, str(projections["right"]["attempt_id"]))
+    effect = _effect(
+        graph_id,
+        str(projections[effect_node_id]["attempt_id"]),
+        node_id=effect_node_id,
+    )
     graph_outbox = _event(
         "TASK_GRAPH",
         graph_id,
@@ -599,6 +613,23 @@ def test_parallel_success_commits_every_terminal_asset_and_exact_replays(
             WHERE event_type IN ('TASK_GRAPH_COMPLETED', 'BUDGET_RESERVATION_CONSUMED')
             """
         ).fetchone() == (2,)
+
+
+def test_parallel_success_accepts_effect_owned_by_non_result_accepted_node(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(
+        tmp_path,
+        "graph-parallel-success-node-effect",
+        effect_node_id="left",
+    )
+
+    completed = _complete(*fixture)
+
+    assert completed["replayed"] is False
+    assert completed["decision"]["result_node_id"] == "right"
+    assert completed["effect_intents"][0]["node_id"] == "left"
+    assert completed["effect_intents"][0]["attempt_id"] == fixture[4].attempt_id
 
 
 def test_parallel_success_late_fault_rolls_back_graph_budget_effects_and_outboxes(

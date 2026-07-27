@@ -248,17 +248,20 @@ class TaskParallelSuccessStoreMixin:
             ),
             key=lambda item: item["effect_id"],
         )
+        accepted_attempts = {
+            str(outcome["node_id"]): str(outcome["attempt_id"])
+            for outcome in decision.payload["accepted_outcomes"]
+        }
         if any(
             spec.graph_id != graph_ref
             or spec.graph_revision != revision
             or spec.commit_scope is not AcceptanceEffectCommitScope.GRAPH
-            or spec.node_id != result_node_id
-            or spec.attempt_id != result_attempt_id
+            or accepted_attempts.get(spec.node_id) != spec.attempt_id
             for spec in specs
         ):
             raise TaskStoreError(
                 TASK_STORE_INVALID,
-                "parallel success effects must bind the explicit result authority",
+                "parallel success effects must bind one exact accepted node authority",
             )
         required_evidence = {
             decision_reference,

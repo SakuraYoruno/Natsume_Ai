@@ -122,9 +122,9 @@ class CapabilityPlanningSnapshot:
         ):
             raise CapabilityPlanningError("max_risk_level must be an integer")
         max_risk_level = int(self.max_risk_level)
-        if not 1 <= max_risk_level <= 3:
+        if not 1 <= max_risk_level <= 4:
             raise CapabilityPlanningError(
-                "max_risk_level must be between 1 and 3 for capability planning"
+                "max_risk_level must be between 1 and 4 for capability planning"
             )
         capabilities = tuple(self.capabilities)
         if len(capabilities) < 2 or not all(

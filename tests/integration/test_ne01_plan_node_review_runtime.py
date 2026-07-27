@@ -7,7 +7,22 @@ from typing import Any, Mapping
 
 import pytest
 
+import host_brain.agent_runtime.executor as executor_module
+from host_brain.agent_runtime.accepted_workspace_artifact import (
+    AcceptedAgentWorkspaceArtifactHandler,
+)
+from host_brain.agent_runtime.artifact_store import AgentArtifactStore
+from host_brain.agent_runtime.executor import execute_agent_runtime_payload
+from host_brain.agent_runtime.internal_artifact_terminal_reconciliation import (
+    InternalArtifactTerminalReconciler,
+)
+from host_brain.agent_runtime.skill_artifact_terminal_reconciliation import (
+    AgentArtifactTerminalReconcilerGroup,
+    GovernedSkillArtifactTerminalReconciler,
+)
+from host_brain.agent_runtime.result_contract import AgentResult
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.app.governed_plan_execution_policy import (
     bind_governed_plan_execution_policy,
 )
@@ -16,7 +31,15 @@ from host_brain.contracts.agent_runtime.review_policy import (
     NODE_REVIEW_POLICIES_KEY,
     pre_execution_review_required,
 )
-from host_brain.contracts.skill_execution import SkillExecutionPolicy
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
+from host_brain.agent_runtime.workspace_artifact_effect import (
+    AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+    AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA,
+    canonical_workspace_artifact_digest,
+)
 from host_brain.governor.action_arbiter import build_governed_action_binding
 from host_brain.governor.tokens import TokenService
 from host_brain.orchestration import GovernedCommandApplication
@@ -54,13 +77,23 @@ from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
     WorkerProjectionStore,
 )
+from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
 from host_brain.skills.registry import SkillMeta, SkillRegistry
 from host_brain.task_runtime.review_continuation_worker import (
     ReviewContinuationWorker,
 )
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
 from host_brain.task_runtime import GovernedTaskCoordinator
+from host_brain.task_runtime.acceptance_effect_dispatcher import (
+    AcceptanceEffectDispatcher,
+)
 from natsume_contracts.task import HostCommandSurface
+from tests.integration.test_ne01_governed_agent_workspace_acceptance import (
+    _ActionPreview,
+    _git,
+    _runtime as _workspace_runtime,
+    _source_repository,
+)
 from tests.integration.test_gr03a_governed_durable_dag import (
     NOW,
     _Publisher,
@@ -93,9 +126,9 @@ def _registry() -> SkillRegistry:
     )
     registry.register(
         SkillMeta(
-            skill_name="plan_confirm",
-            clearance="MEDIUM",
-            risk_level=2,
+            skill_name="agent_worker",
+            clearance="HIGH",
+            risk_level=4,
             scope="host",
             reversible=True,
             require_confirm=True,
@@ -103,7 +136,8 @@ def _registry() -> SkillRegistry:
             family="research",
             capability_tags=("research", "evidence"),
             fallback_policy="strict_fail",
-            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
+            execution_policy=SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE,
+            budget_policy=SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL,
         )
     )
     return registry
@@ -131,7 +165,7 @@ def _intent_and_governor(
             "task": "collect and synthesize governed evidence",
             "planning_mode": "CAPABILITY_SEARCH_V1",
             "planning_capability_tags": ["research"],
-            "planning_max_risk_level": 2,
+            "planning_max_risk_level": 4,
         },
         "nonce": "nonce-ne01-plan-node-review",
     }
@@ -145,7 +179,7 @@ def _intent_and_governor(
     binding = build_governed_action_binding(
         intent_envelope=intent,
         approval_token_ref=token_ref,
-        risk_level=2,
+        risk_level=4,
         issued_at_ms=NOW - 100,
         expires_at_ms=NOW + 600_000,
     )
@@ -169,11 +203,21 @@ class _GrantCheckingWorker:
         self,
         verifier: DurableNodeGrantVerifier,
         projection_store: WorkerProjectionStore,
+        *,
+        artifact_store: AgentArtifactStore | None = None,
+        workspace_runtime: DurableWorkspaceRuntime | None = None,
     ) -> None:
         self._verifier = verifier
         self._projection_store = projection_store
+        self._artifact_store = artifact_store
+        self._workspace_runtime = workspace_runtime
+        if (artifact_store is None) != (workspace_runtime is None):
+            raise ValueError(
+                "artifact_store and workspace_runtime must be composed together"
+            )
         self.calls: list[str] = []
         self.grants: list[dict[str, Any]] = []
+        self.protected_stages: list[dict[str, Any]] = []
 
     async def execute_stream(
         self,
@@ -205,7 +249,17 @@ class _GrantCheckingWorker:
             fencing_token=execution_context["fencing_token"],
         )
         self.calls.append(execution_context["node_id"])
-        self.grants.append(verified.to_dict())
+        verified_grant = verified.to_dict()
+        self.grants.append(verified_grant)
+        node_grant_digest = "sha256:" + hashlib.sha256(
+            json.dumps(
+                verified_grant,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
         body = {
             "phase": "COMMIT",
             "done": True,
@@ -223,6 +277,7 @@ class _GrantCheckingWorker:
             "node_grant_ref": execution_context["node_grant_ref"],
             "audit_refs": {
                 "node_grant_ref": execution_context["node_grant_ref"],
+                "node_grant_digest": node_grant_digest,
             },
             "budget_usage": {
                 "schema_version": (
@@ -242,6 +297,84 @@ class _GrantCheckingWorker:
                 ],
             },
         }
+        if target_id == "agent_worker":
+            if self._artifact_store is not None:
+                review_authority = verified_grant.get(
+                    "review_continuation_authority"
+                )
+                assert isinstance(review_authority, Mapping)
+                review_ref = (
+                    "review://"
+                    + str(review_authority.get("review_id") or "").strip()
+                )
+                assert review_ref.startswith("review://")
+                raw_order = {
+                    "schema_version": "Natsume.agent.work_order.v2",
+                    "work_order_id": work_order.work_order_id,
+                    "domain": "code",
+                    "run_mode": "worker",
+                    "objective": work_order.objective,
+                    "workspace": {"strategy": "runtime_repo"},
+                    "input_pack": {"user_request": work_order.objective},
+                    "allowed_actions": ["read_files", "write_files"],
+                    "forbidden_actions": ["modify_secret_files"],
+                    "acceptance_criteria": ["tests pass"],
+                    "verification_plan": {"commands": ["python -m pytest -q"]},
+                    "approval_policy": {
+                        "require_confirm": True,
+                        "confirmed": True,
+                    },
+                    "review_policy": {"review_required": True},
+                    "metadata": {
+                        "skill_id": target_id,
+                        "request_id": command.request_id,
+                    },
+                }
+                raw_result = execute_agent_runtime_payload(
+                    {"work_order": raw_order},
+                    model_attempt_service=object(),
+                    prompt_registry=object(),
+                    artifact_store=self._artifact_store,
+                    workspace_runtime=self._workspace_runtime,
+                    governed_execution_context={
+                        **execution_context,
+                        "pre_execution_review_ref": review_ref,
+                    },
+                )
+                assert raw_result["status"] == "EXECUTED", raw_result
+                protected = dict(raw_result.pop("_protected_stage"))
+                self.protected_stages.append(protected)
+                result_digest = canonical_workspace_artifact_digest(raw_result)
+            else:
+                protected = {
+                    "schema_version": (
+                        "Natsume.agent.governed_artifact_stage.v1"
+                    ),
+                    "ref": (
+                        "agent-stage://plan-review/"
+                        f"{execution_context['attempt_id']}"
+                    ),
+                    "digest": "sha256:" + "a" * 64,
+                }
+                result_digest = "sha256:" + "b" * 64
+            body["acceptance_effect_intents"] = [
+                {
+                    "effect_type": AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
+                    "commit_scope": "NODE",
+                    "payload": {
+                        "schema_version": (
+                            AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA
+                        ),
+                        "work_order_id": work_order.work_order_id,
+                        "target_id": target_id,
+                        "operation_fingerprint": (
+                            execution_context["operation_fingerprint"]
+                        ),
+                        "protected_artifact": protected,
+                        "result_digest": result_digest,
+                    },
+                }
+            ]
         encoded = json.dumps(
             body,
             ensure_ascii=False,
@@ -314,6 +447,28 @@ class _ExactCriteriaAcceptance:
         }
 
 
+class _SelectiveVerifier:
+    def __init__(self) -> None:
+        self.failed_node_id: str | None = None
+
+    def verify(
+        self,
+        *,
+        execution_context: dict[str, Any],
+        evidence_refs: tuple[str, ...],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return _Verifier(
+            "FAIL"
+            if execution_context["node_id"] == self.failed_node_id
+            else "PASS"
+        ).verify(
+            execution_context=execution_context,
+            evidence_refs=evidence_refs,
+            **kwargs,
+        )
+
+
 class _ContinuationRuntime:
     def __init__(
         self,
@@ -347,9 +502,17 @@ class _ContinuationRuntime:
 
 
 @pytest.mark.asyncio
-async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
+@pytest.mark.parametrize(
+    "fail_after_workspace",
+    (False, True),
+    ids=("graph-success", "downstream-failure"),
+)
+async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acceptance(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    fail_after_workspace: bool,
 ) -> None:
+    source, source_head = _source_repository(tmp_path)
     db_path = _migrated_db(tmp_path)
     ledger = SQLiteLedger(str(db_path), check_same_thread=False)
     try:
@@ -359,6 +522,22 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
             undo_ttl_ms=600_000,
         )
         intent, governor = _intent_and_governor(token_service=token_service)
+        fact = WorldFactV2(
+            workspace_id="workspace-ne01-plan-review",
+            subject_id=intent["principal_id"],
+            key="project.mode",
+            value="implementation",
+            source_ref="world-observation://ne01/plan-review/1",
+            confidence=1.0,
+            observed_at_ms=NOW,
+            expires_at_ms=NOW + 60_000,
+        )
+        world = WorldSnapshotV2(
+            workspace_id=fact.workspace_id,
+            subject_id=fact.subject_id,
+            revision=1,
+            facts=(fact,),
+        )
         ledger.log_governor(governor)
         parent_ref = governor_grant_ref(intent["request_id"], governor)
         skill_registry = _registry()
@@ -368,6 +547,22 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
             skill_registry=skill_registry,
             request_id=intent["request_id"],
             input_refs=("input://sha256/" + "4" * 64,),
+            frozen_context={
+                "runtime_context_schema": (
+                    "natsume.runtime-context.request.v1"
+                ),
+                "workspace_id": fact.workspace_id,
+                "subject_id": fact.subject_id,
+                "world_snapshot_v2": world.to_dict(),
+                "scene_identity_v2": {
+                    "schema": "natsume.scene-identity.v2",
+                    "workspace_id": fact.workspace_id,
+                    "subject_id": fact.subject_id,
+                    "scene_id": "scene.implementation",
+                    "revision": 1,
+                    "decision_digest": "d" * 64,
+                },
+            },
         )
         reviews = ReviewStore(db_path, clock=lambda: NOW)
         continuations = ReviewContinuationStore(db_path, clock=lambda: NOW)
@@ -388,11 +583,65 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
             clock=lambda: NOW,
         )
         task_store = DurableTaskStore(db_path, clock=lambda: NOW)
-        worker = _GrantCheckingWorker(grant_verifier, projection_store)
+        workspace_runtime = _workspace_runtime(
+            tmp_path,
+            db_path=db_path,
+            source=source,
+            now_ms=NOW,
+            runtime_owner_id="ne01-plan-node-review-runtime",
+        )
+        artifacts = AgentArtifactStore(tmp_path / "agent-runs")
+
+        class _WritingPlanAgent:
+            def __init__(self, **_dependencies: Any) -> None:
+                pass
+
+            def execute(
+                self,
+                order,
+                *,
+                workspace,
+                cancelled=None,
+                model_budget_guard=None,
+            ) -> AgentResult:
+                assert callable(cancelled)
+                assert not cancelled()
+                assert model_budget_guard is not None
+                (workspace / "src" / "plan-generated.txt").write_text(
+                    "accepted Plan Workspace write\n",
+                    encoding="utf-8",
+                )
+                return AgentResult(
+                    status="EXECUTED",
+                    work_order_id=order.work_order_id,
+                    summary="generated one Plan-owned file",
+                    result_text="generated one Plan-owned file",
+                    verification={
+                        "status": "PASS",
+                        "receipt_ref": (
+                            "verification://ne01/plan-workspace"
+                        ),
+                    },
+                    acceptance={"decision": "ACCEPT"},
+                    review_required=False,
+                )
+
+        monkeypatch.setattr(
+            executor_module,
+            "AgentExecutor",
+            _WritingPlanAgent,
+        )
+        worker = _GrantCheckingWorker(
+            grant_verifier,
+            projection_store,
+            artifact_store=artifacts,
+            workspace_runtime=workspace_runtime,
+        )
         command_repository = HostCommandRepository(
             db_path,
             clock=lambda: NOW,
         )
+        selective_verifier = _SelectiveVerifier()
         application = GovernedCommandApplication(
             command_repository=command_repository,
             coordinator=GovernedTaskCoordinator(
@@ -406,7 +655,7 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
                 outbox_publisher=_Publisher(),
                 outbox_factory=OutboxMessage,
                 worker_resolver=_PlanResolver(worker),
-                verifier=_Verifier(),
+                verifier=selective_verifier,
                 acceptance=_ExactCriteriaAcceptance(),
                 projection_reader=projection_store,
                 review_runtime=TaskNodeReviewRuntime(
@@ -452,6 +701,8 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
         )
         graph = prepared.admission.graph
         order = prepared.admission.work_order
+        if fail_after_workspace:
+            selective_verifier.failed_node_id = graph.result_node_id
         required_nodes = {
             node.node_id
             for node in graph.nodes
@@ -496,7 +747,11 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
             raise continuation_runtime.errors[0]
         assert continuation_runtime.results[-1]["execution_receipt"][
             "status"
-        ] == "ACCEPTED"
+        ] == (
+            "VERIFICATION_FAILED"
+            if fail_after_workspace
+            else "ACCEPTED"
+        ), continuation_runtime.results[-1]
         assert worker.calls == [node.node_id for node in graph.nodes]
         assert len(worker.grants) == len(graph.nodes)
         assert worker.grants[0]["review_continuation_authority"] is None
@@ -510,13 +765,162 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
             db_path,
             clock=lambda: NOW,
         ).read_scheduler_snapshot(graph.graph_id, graph.revision)
-        assert snapshot["graph_record"]["status"] == "COMPLETED"
-        assert all(
-            node["status"] == "ACCEPTED"
-            for node in snapshot["graph_record"]["nodes"]
+        assert snapshot["graph_record"]["status"] == (
+            "FAILED" if fail_after_workspace else "COMPLETED"
         )
+        node_statuses = {
+            node["node_id"]: node["status"]
+            for node in snapshot["graph_record"]["nodes"]
+        }
+        assert node_statuses[required_node_id] == "ACCEPTED"
+        if fail_after_workspace:
+            assert node_statuses[graph.result_node_id] == (
+                "VERIFICATION_FAILED"
+            )
+        else:
+            assert set(node_statuses.values()) == {"ACCEPTED"}
         assert len(snapshot["attempts"]) == len(graph.nodes)
         assert all(attempt["status"] == "SUCCEEDED" for attempt in snapshot["attempts"])
+        workspace_effects = [
+            effect
+            for effect in task_store.list_acceptance_effect_intents(
+                graph_id=graph.graph_id,
+                graph_revision=graph.revision,
+                limit=100,
+            )
+            if effect["effect_type"]
+            == AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
+        ]
+        assert len(worker.protected_stages) == 1
+        protected = worker.protected_stages[0]
+        seal = artifacts.inspect_governed_stage(
+            stage_ref=protected["ref"],
+            seal_digest=protected["digest"],
+        )
+        restarted_workspace = _workspace_runtime(
+            tmp_path,
+            db_path=db_path,
+            source=source,
+            now_ms=NOW + 6_000,
+            runtime_owner_id="ne01-plan-node-review-runtime",
+        )
+        if fail_after_workspace:
+            assert workspace_effects == []
+            reports = AgentArtifactTerminalReconcilerGroup(
+                GovernedSkillArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=restarted_workspace,
+                    task_store=task_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+                InternalArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=restarted_workspace,
+                    task_store=task_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+            ).run_once()
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "ABANDONED"
+                and item["reason_code"]
+                == "TERMINAL_PLAN_GRAPH_FAILED_AFTER_NODE_ACCEPTANCE"
+                for item in reports
+            ), reports
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "CLEANED"
+                for item in reports
+            ), reports
+        else:
+            assert len(workspace_effects) == 1
+            assert workspace_effects[0]["node_id"] == required_node_id
+            assert workspace_effects[0]["status"] == "PENDING"
+            assert workspace_effects[0]["commit_scope"] == "GRAPH"
+            dispatched = await AcceptanceEffectDispatcher(
+                task_store=task_store,
+                handlers={
+                    AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE: (
+                        AcceptedAgentWorkspaceArtifactHandler(
+                            command_repository=command_repository,
+                            projection_store=projection_store,
+                            artifact_store=artifacts,
+                            workspace_runtime=workspace_runtime,
+                            task_store=task_store,
+                        )
+                    )
+                },
+                owner_id="ne01-plan-workspace-acceptance",
+                action_preview_service=_ActionPreview(),
+            ).dispatch_effect(workspace_effects[0]["effect_id"])
+            assert dispatched is not None
+            assert dispatched["status"] == "COMMITTED", dispatched
+            assert str(dispatched["receipt_ref"]).startswith(
+                "workspace-promotion://"
+            )
+            lifecycle = workspace_runtime.repository.get_lifecycle(
+                seal.workspace_id
+            )
+            assert lifecycle.state.value == "PROMOTED"
+            assert lifecycle.accepted_event is not None
+            assert lifecycle.accepted_event.base_commit == source_head
+            assert lifecycle.accepted_event.accepted_head != source_head
+            cleanup = InternalArtifactTerminalReconciler(
+                artifact_store=artifacts,
+                workspace_runtime=restarted_workspace,
+                task_store=task_store,
+                command_repository=command_repository,
+                projection_store=projection_store,
+            ).run_once()
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "CLEANED"
+                for item in cleanup
+            ), cleanup
+
+        assert _git(source, "rev-parse", "main") == source_head
+        assert not (source / "src" / "plan-generated.txt").exists()
+        cleaned = restarted_workspace.repository.get(seal.workspace_id)
+        assert cleaned.status == "CLEANED"
+        assert not (
+            tmp_path / "managed" / cleaned.workspace_relpath
+        ).exists()
+
+        replay_workspace = _workspace_runtime(
+            tmp_path,
+            db_path=db_path,
+            source=source,
+            now_ms=NOW + 12_000,
+            runtime_owner_id="ne01-plan-node-review-runtime",
+        )
+        replay_reconcilers = [
+            InternalArtifactTerminalReconciler(
+                artifact_store=artifacts,
+                workspace_runtime=replay_workspace,
+                task_store=task_store,
+                command_repository=command_repository,
+                projection_store=projection_store,
+            )
+        ]
+        if fail_after_workspace:
+            replay_reconcilers.insert(
+                0,
+                GovernedSkillArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=replay_workspace,
+                    task_store=task_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+            )
+        assert AgentArtifactTerminalReconcilerGroup(
+            *replay_reconcilers
+        ).run_once() == ()
+        assert replay_workspace.repository.get(seal.workspace_id).status == (
+            "CLEANED"
+        )
         with sqlite3.connect(str(db_path)) as conn:
             assert conn.execute(
                 """

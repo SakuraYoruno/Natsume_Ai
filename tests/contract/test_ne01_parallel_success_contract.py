@@ -127,7 +127,7 @@ def test_parallel_success_requires_every_node_accepted_once() -> None:
         normalize_parallel_success_decision(failed)
 
 
-def test_parallel_success_rejects_implicit_or_drifted_result_authority() -> None:
+def test_parallel_success_binds_result_and_each_effect_to_accepted_attempt() -> None:
     payload = _payload()
     payload["result_attempt_id"] = "attempt-a"
     with pytest.raises(ParallelSuccessContractError, match="result authority"):
@@ -135,8 +135,14 @@ def test_parallel_success_rejects_implicit_or_drifted_result_authority() -> None
 
     effect_drift = _payload()
     effect_drift["effect_intents"][0]["node_id"] = "node-a"
-    with pytest.raises(ParallelSuccessContractError, match="explicit result node"):
+    with pytest.raises(ParallelSuccessContractError, match="accepted node Attempt"):
         normalize_parallel_success_decision(effect_drift)
+
+    node_owned = _payload()
+    node_owned["effect_intents"][0]["node_id"] = "node-a"
+    node_owned["effect_intents"][0]["attempt_id"] = "attempt-a"
+    normalized = normalize_parallel_success_decision(node_owned)
+    assert normalized.payload["effect_intents"][1]["node_id"] == "node-a"
 
 
 def test_parallel_success_digest_detects_semantic_drift() -> None:

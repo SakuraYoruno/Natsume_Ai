@@ -607,6 +607,36 @@ provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Plan 写节点 Workspace 原子终态证据
+
+当前切片新增两条真实 SQLite + Git 集成路径：
+
+- `graph-success`：三节点 Plan 中一个经 Review 的风险 4 Agent 写节点生成
+  密封 proposal；该节点 Acceptance 后 Effect 仍为零，整图 Acceptance 才
+  原子暂存 promotion；真实 handler 完成 Action Preview、accepted HEAD
+  晋升和 fresh Runtime cleanup；
+- `downstream-failure`：同一写节点已经 ACCEPTED，但下游 result-node
+  Verification 失败使 Graph 进入 FAILED；确认零 Acceptance Effect 后，
+  fresh Runtime 按 exact decision/artifact/Operation/projection 将 Workspace
+  ABANDONED/CLEANED，失败文件不进入源分支。
+
+两条路径都验证 source `main` HEAD/文件未改变、第二次重启 inventory 和
+replay 为零。单元/合同还覆盖：最多一个写 owner、risk/Review/effect-mode
+漂移拒绝、speculative Effect 为零、node-owned graph Effect、多个节点
+Effect 的 parallel-success UoW、缺 Runtime Context/Scene Preview 拒绝，
+以及只有完整零副作用证据才允许 FAILED Graph 中的 ACCEPTED node abandon。
+
+本批无 migration。受影响集合一次运行取得 `99 passed in 127.35s`；最终
+“任何已暂存 Effect 都不得 abandon”的 fail-closed 收紧后，真实 Plan
+success/failure 集成定向复跑 `2 passed in 17.83s`。文档/机器状态/发布合同为
+`56 passed in 9.35s`。统一 `static_scan,doc_gate` 为
+`passed / failures=[]`，完整
+架构 Gate 1～14 为 `PASS / failed_gates=[]`，changed-module `compileall`、
+两份 JSON 与 `git diff --check` 通过。其它 Plan
+failure/cancellation/unknown-effect 组合、
+多 Workspace 并发写、强隔离、NE-01 wave integration 和 NE-07 真实全栈
+仍未执行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 `RESERVED` 未知副作用跨进程恢复证据
 
 2026-07-27 新增 Windows `spawn` 真实进程链：
@@ -649,8 +679,9 @@ online takeover 与 startup 集成为 `33 passed in 137.00s`，两组重叠不
 - terminal worker、route ownership、模型预算和 governed WorkOrder 相邻
   单元回归通过。
 
-本集合无 mock Workspace、无内存 TaskStore，也没有用端口探针代替文件
-状态验证。它不包括 Plan 内 write node、所有 review/budget/raw-failure/
+本前序集合无 mock Workspace、无内存 TaskStore，也没有用端口探针代替
+文件状态验证。它本身不包括 Plan；下一节单独补充 single-writer Plan
+success/downstream-failure，但所有其它 review/budget/raw-failure/
 cancellation terminal matrix、OS/container isolation、NE-01 wave
-integration 或 NE-07 Docker/前后端全栈。远程 CI 继续记录
+integration 或 NE-07 Docker/前后端全栈仍未覆盖。远程 CI 继续记录
 `NOT_RUN_ACCOUNT_QUOTA`。

@@ -1181,3 +1181,33 @@ abandon 的 artifact。成功则保持相反方向：只有 Acceptance 后的 Ef
 重新读取这一新版本再执行 CAS；继续使用取得 Lease 前的版本，会把合法
 恢复误判为 stale fence。这个规则适用于所有“先换权、再变更状态”的持久
 资源，不只适用于 Git Workspace。
+
+---
+
+## 22. 原子图中的写节点必须延迟到整图 Acceptance
+
+节点 Acceptance 只证明该节点的结果可被整图继续消费，不代表它可以提前
+改变外部世界。在 `atomic_success=true` 的 TaskGraph 中，非结果写节点必须
+遵守：
+
+```text
+node accepted + sealed proposal
+≠ externally visible effect
+
+all required nodes accepted + graph acceptance
++ exact node proposal + runtime context + action preview
+= node-owned post-acceptance effect
+```
+
+因此，Plan 可以保留每个节点独立的授权、预算、审查和证据，同时仍只有一条
+整图提交边界。Effect 的所有权属于实际写节点，而用户可见结果仍属于唯一
+result node；二者不应被错误压缩成同一个 node identity。为了避免 command
+级幂等键在多节点中混淆，写 Effect 使用由 root command fingerprint 和
+node id 派生的 operation fingerprint，原始 WorkOrder 仍保持 command 级
+fingerprint。
+
+下游失败也不能靠“写节点已 ACCEPTED”推断是否该晋升。恢复必须证明 graph
+已失败、写节点及 Attempt 的精确终态、唯一 Acceptance decision、已提交
+Operation 与密封 artifact 一致，并且该节点从未暂存 Acceptance Effect；
+只有这组零副作用证据完整时才可 abandon。证据不全时保持 Workspace，而
+不是盲目 promotion、replay 或 cleanup。

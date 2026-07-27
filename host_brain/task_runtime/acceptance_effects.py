@@ -1461,8 +1461,15 @@ def _required(value: Any, field_name: str) -> str:
     return text
 
 
+# Shared compiler primitives for route-specific graph-Acceptance modules.
+build_action_preview_context = _action_preview_context
+build_acceptance_effect_intent_spec = _spec
+
+
 __all__ = [
     "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID",
     "AcceptanceEffectCompileError",
+    "build_acceptance_effect_intent_spec",
+    "build_action_preview_context",
     "compile_graph_acceptance_effects",
 ]

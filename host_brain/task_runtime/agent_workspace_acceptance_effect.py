@@ -20,8 +20,19 @@ from host_brain.agent_runtime.workspace_artifact_effect import (
     AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
     AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA,
 )
+from host_brain.contracts.agent_runtime.plan_execution_policy import (
+    PLAN_EXECUTION_POLICY_METADATA_KEY,
+    PlanExecutionPolicyError,
+    require_plan_workspace_effect_owner,
+)
+from host_brain.contracts.agent_runtime.review_policy import (
+    pre_execution_review_required,
+)
 from host_brain.task_runtime.worker_authority_guard import (
     forbidden_worker_authority_path,
+)
+from host_brain.task_runtime.admission import (
+    derive_node_operation_fingerprint,
 )
 from natsume_contracts.task import HostCommand
 
@@ -106,12 +117,42 @@ def compile_agent_workspace_artifact_effect(
     )
     if not candidates:
         return None
-    if (
-        command.route_type != "skill"
-        or command.target_id not in WRITE_AGENT_RUNTIME_SKILL_IDS
-    ):
+    direct_skill = command.route_type == "skill"
+    plan_node_policy: dict[str, Any] | None = None
+    expected_operation_fingerprint = command.operation_fingerprint
+    if direct_skill:
+        target_id = str(command.target_id or "").strip()
+        if target_id not in WRITE_AGENT_RUNTIME_SKILL_IDS:
+            _invalid(
+                "Workspace artifact promotion requires a write-capable Agent Skill"
+            )
+    elif command.route_type == "plan":
+        metadata = getattr(work_order, "metadata", None)
+        metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+        policy = metadata.get(PLAN_EXECUTION_POLICY_METADATA_KEY)
+        proposed = _json_mapping(
+            candidates[0].get("payload"),
+            field_name="Agent Workspace artifact proposal",
+        )
+        target_id = str(proposed.get("target_id") or "").strip()
+        if target_id not in WRITE_AGENT_RUNTIME_SKILL_IDS:
+            _invalid("Plan Workspace proposal target is not write-capable")
+        try:
+            plan_node_policy = require_plan_workspace_effect_owner(
+                policy=policy if isinstance(policy, Mapping) else {},
+                node_id=node_id,
+                target_id=target_id,
+            )
+        except PlanExecutionPolicyError as exc:
+            _invalid(exc.detail)
+        expected_operation_fingerprint = derive_node_operation_fingerprint(
+            command.operation_fingerprint,
+            node_id=node_id,
+            multiple_nodes=True,
+        )
+    else:
         _invalid(
-            "Workspace artifact promotion requires a write-capable Agent Skill"
+            "Workspace artifact promotion requires a Skill or Plan node"
         )
     proposed = _json_mapping(
         candidates[0].get("payload"),
@@ -150,31 +191,53 @@ def compile_agent_workspace_artifact_effect(
     work_order_id = str(
         getattr(work_order, "work_order_id", "") or ""
     ).strip()
-    operation_fingerprint = str(
+    root_operation_fingerprint = str(
         getattr(work_order, "operation_fingerprint", "") or ""
     ).strip()
     review_policy = getattr(work_order, "review_policy", {})
     review_policy = (
         dict(review_policy) if isinstance(review_policy, Mapping) else {}
     )
-    risk_level = int(getattr(work_order, "risk_level", 0) or 0)
+    risk_level = (
+        int(plan_node_policy["risk_level"])
+        if plan_node_policy is not None
+        else int(getattr(work_order, "risk_level", 0) or 0)
+    )
+    review_required = (
+        bool(plan_node_policy["review_required"])
+        if plan_node_policy is not None
+        else (
+            review_policy.get("review_required") is True
+            and review_policy.get("durable_review_required") is True
+        )
+    )
     worker_projection_ref = str(
         worker_commit.get("receipt_ref") or ""
     ).strip()
     if (
         proposed.get("work_order_id") != work_order_id
-        or proposed.get("target_id") != command.target_id
-        or proposed.get("operation_fingerprint") != operation_fingerprint
-        or operation_fingerprint != command.operation_fingerprint
+        or proposed.get("target_id") != target_id
+        or proposed.get("operation_fingerprint")
+        != expected_operation_fingerprint
+        or root_operation_fingerprint != command.operation_fingerprint
         or not re.fullmatch(r"sha256:[0-9a-f]{64}", result_digest)
         or str(getattr(work_order, "task_graph_id", "") or "")
         != command.graph_id
         or int(getattr(work_order, "graph_revision", 0) or 0)
         != command.graph_revision
-        or str(getattr(work_order, "task_node_id", "") or "") != node_id
+        or (
+            direct_skill
+            and str(getattr(work_order, "task_node_id", "") or "") != node_id
+        )
         or risk_level < 4
-        or review_policy.get("review_required") is not True
-        or review_policy.get("durable_review_required") is not True
+        or review_required is not True
+        or (
+            plan_node_policy is not None
+            and not pre_execution_review_required(
+                work_order,
+                node_id=node_id,
+            )
+        )
         or not worker_projection_ref.startswith("worker-projection://")
     ):
         _invalid(
@@ -189,8 +252,8 @@ def compile_agent_workspace_artifact_effect(
         "graph_revision": command.graph_revision,
         "node_id": node_id,
         "attempt_id": attempt_id,
-        "target_id": command.target_id,
-        "operation_fingerprint": operation_fingerprint,
+        "target_id": target_id,
+        "operation_fingerprint": expected_operation_fingerprint,
         "worker_projection_ref": worker_projection_ref,
         "protected_artifact": protected,
         "result_digest": result_digest,

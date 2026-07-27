@@ -22,6 +22,14 @@ from host_brain.agent_runtime.workspace_artifact_effect import (
 )
 from host_brain.agent_runtime.workspace_runtime import DurableWorkspaceRuntime
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
+from host_brain.contracts.agent_runtime.plan_execution_policy import (
+    PLAN_EXECUTION_POLICY_METADATA_KEY,
+    PlanExecutionPolicyError,
+    require_plan_workspace_effect_owner,
+)
+from host_brain.contracts.agent_runtime.review_policy import (
+    pre_execution_review_required,
+)
 from host_brain.contracts.agent_runtime.work_order import (
     WorkOrderV3,
     canonicalize_work_order,
@@ -37,6 +45,9 @@ from host_brain.persistence.worker_projection_repository import (
 )
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
+)
+from host_brain.task_runtime.admission import (
+    derive_node_operation_fingerprint,
 )
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
@@ -240,39 +251,80 @@ class AcceptedAgentWorkspaceArtifactHandler:
             ),
             None,
         )
+        expected_effect_fingerprint = derive_node_operation_fingerprint(
+            command.operation_fingerprint,
+            node_id=canonical["node_id"],
+            multiple_nodes=len(graph.nodes) > 1,
+        )
         expected = (
             (command.command_id, canonical["command_id"]),
             (command.request_id, canonical["request_id"]),
             (command.root_work_order_id, canonical["work_order_id"]),
             (command.graph_id, canonical["graph_id"]),
             (command.graph_revision, canonical["graph_revision"]),
-            (command.route_type, "skill"),
-            (command.target_id, canonical["target_id"]),
             (
                 command.operation_fingerprint,
-                canonical["operation_fingerprint"],
+                work_order.operation_fingerprint,
             ),
             (work_order.work_order_id, canonical["work_order_id"]),
             (work_order.task_graph_id, canonical["graph_id"]),
             (work_order.graph_revision, canonical["graph_revision"]),
-            (work_order.task_node_id, canonical["node_id"]),
             (
-                work_order.operation_fingerprint,
                 canonical["operation_fingerprint"],
+                expected_effect_fingerprint,
             ),
             (graph.graph_id, canonical["graph_id"]),
             (graph.revision, canonical["graph_revision"]),
-            (graph.result_node_id, canonical["node_id"]),
             (getattr(node, "node_id", None), canonical["node_id"]),
+            (
+                getattr(node, "route", None),
+                f"skill:{canonical['target_id']}",
+            ),
         )
         review_policy = dict(work_order.review_policy or {})
+        direct_skill = command.route_type == "skill"
+        plan_node_policy: dict[str, Any] | None = None
+        if command.route_type == "plan":
+            metadata = dict(work_order.metadata or {})
+            try:
+                plan_node_policy = require_plan_workspace_effect_owner(
+                    policy=(
+                        metadata.get(PLAN_EXECUTION_POLICY_METADATA_KEY)
+                        if isinstance(
+                            metadata.get(PLAN_EXECUTION_POLICY_METADATA_KEY),
+                            Mapping,
+                        )
+                        else {}
+                    ),
+                    node_id=canonical["node_id"],
+                    target_id=canonical["target_id"],
+                )
+            except PlanExecutionPolicyError as exc:
+                raise AcceptedAgentWorkspaceArtifactError(exc.detail) from exc
+        direct_exact = (
+            direct_skill
+            and command.target_id == canonical["target_id"]
+            and work_order.task_node_id == canonical["node_id"]
+            and graph.result_node_id == canonical["node_id"]
+            and int(work_order.risk_level) >= 4
+            and review_policy.get("review_required") is True
+            and review_policy.get("durable_review_required") is True
+        )
+        plan_exact = (
+            plan_node_policy is not None
+            and command.target_id == "planning_search"
+            and graph.result_node_id != canonical["node_id"]
+            and int(getattr(node, "risk_level", 0) or 0) >= 4
+            and pre_execution_review_required(
+                work_order,
+                node_id=canonical["node_id"],
+            )
+        )
         if (
             any(actual != wanted for actual, wanted in expected)
             or command.surface is HostCommandSurface.INTERNAL
             or canonical["target_id"] not in WRITE_AGENT_RUNTIME_SKILL_IDS
-            or int(work_order.risk_level) < 4
-            or review_policy.get("review_required") is not True
-            or review_policy.get("durable_review_required") is not True
+            or not (direct_exact or plan_exact)
         ):
             _invalid("accepted Agent admission identity or Review policy drifted")
         return command, work_order
@@ -647,7 +699,11 @@ def _validate_durable_preview(
         or context.get("node_grant_digest")
         != node_grant.get("binding_digest")
         or work_order.task_graph_id != canonical["graph_id"]
-        or work_order.task_node_id != canonical["node_id"]
+        or (
+            command.route_type == "skill"
+            and work_order.task_node_id != canonical["node_id"]
+        )
+        or command.route_type not in {"skill", "plan"}
     ):
         _invalid("Agent Workspace durable Preview authority drifted")
 

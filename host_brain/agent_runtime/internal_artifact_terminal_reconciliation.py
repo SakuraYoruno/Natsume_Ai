@@ -14,8 +14,8 @@ from typing import Any
 
 from host_brain.agent_runtime.artifact_store import governed_attempt_segment
 from host_brain.agent_runtime.skill_artifact_terminal_reconciliation import (
-    direct_write_skill_event_command_id,
-    is_direct_write_skill_artifact,
+    governed_write_skill_event_command_id,
+    is_governed_write_skill_artifact,
 )
 from host_brain.contracts.agent_runtime.projection_recovery import (
     ProjectionRecoveryContractError,
@@ -157,7 +157,7 @@ class InternalArtifactTerminalReconciler:
         )
         for stage in unsealed:
             try:
-                if is_direct_write_skill_artifact(stage, self._commands):
+                if is_governed_write_skill_artifact(stage, self._commands):
                     continue
                 reason = self._unsealed_cancellation_reason(stage)
                 if reason is None:
@@ -210,7 +210,7 @@ class InternalArtifactTerminalReconciler:
         )
         for seal in staging:
             try:
-                if is_direct_write_skill_artifact(seal, self._commands):
+                if is_governed_write_skill_artifact(seal, self._commands):
                     continue
                 reason = self._terminal_abandonment_reason(seal)
                 if reason is None:
@@ -372,7 +372,7 @@ class InternalArtifactTerminalReconciler:
     def _command_id_for_event(self, event: Any) -> str:
         graph_id = str(event.graph_id)
         graph_revision = int(event.graph_revision)
-        skill_command_id = direct_write_skill_event_command_id(
+        skill_command_id = governed_write_skill_event_command_id(
             event,
             self._commands,
         )

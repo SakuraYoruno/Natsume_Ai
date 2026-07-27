@@ -678,7 +678,7 @@ flowchart LR
 - 0095 的 CREATED 由 immutable HostCommand evidence 回填，ACTIVE 等由 deterministic legacy ID/key 重算；升级保持 ID/key，新增 revisioned payload。旧 payload 仅 replay 兼容；source-ref 围栏收敛 legacy 重投。`created_ts=0` 容差可用于 current revisioned 与 legacy unrevisioned 两种可重建 candidate，但除 timestamp 外必须全字段 exact。PlanningRecovery 显式 opt-in 同事务 Graph Outbox inventory 并使用真实 terminal ref；默认 snapshot 不扫描 Outbox。Operator/Review exact revision。
 - Lifecycle 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`并锁死 bind/activate，只保留 `aclose` 重试。Coordinator admission close/drain/aclose 或 worker quiescence 任一失败都不关 Store；Coordinator 与 worker 都静默后才 drain Outbox/关 infrastructure。
 - Scheduler governed occurrence 已把执行流拆成两段：Task worker 只生成 immutable operation plan；Graph Verification/Acceptance 与 `scheduler.operation.execute` staging 同 TaskStore UoW，shared app-local dispatcher 在提交后才调用真实 handler，并把实际结果写回既有 immutable Scheduler result ledger。0117 在 occurrence admission 的同一 `BEGIN IMMEDIATE` 中把 live DUE retry row 原子转为 occurrence-bound owner/fence；独立 execution lifecycle 在 dispatch 前 renew、运行中 heartbeat，过期 lease 不能自我复活，第二实例/stale fence不能 dispatch/clear/defer，backoff 取真实失败时刻。该 Clock 定向批次为 19 项、47.53 秒。definition/admin、mutable batch freezing、通用未知效果人工归因和 canary 仍未完成。
-- Internal 状态为 `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`。外部入口只接受未准入的 v2 描述，准入后的 worker、Agent executor、Review 和 Workspace 直接消费同一个 `WorkOrderV3`。raw material 进入 exact-inventory protected stage，公共 projection 只含 ref/digest 与摘要。具备 exact Workspace authority 的 write 额外密封 frozen-base path manifest 与 binary patch；Acceptance 重算 delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支不移动。首次 activation 与生命周期 supervisor 周期扫描 sealed checkpoint，以更高 fence 重建唯一 projection 并继续原图，Agent 不重跑；A/B/C 仍是三个独立原子边界。terminal worker 处理精确 sealed abandon/cleanup与两类 signed cancellation。当前 no-intent signed raw failure 另由一个 SQLite UoW 写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal 必须先提交独立 deterministic claim，才清理未 sealed Git Workspace/stage，claim outage 时现场不动。Direct Agent Skill 不继承这些 Internal claim semantics；它由独立 route-specific reconciler 处理成功和 Verification failure artifact，再复用 shared lifecycle cleaner。Plan write、其它 terminal matrix、一般 unknown effect、general `settle_worker` crash bundle、Domain Pack/其它 Skill、handle-level TOCTOU、OS/container isolation与七路线验收也未完成。
+- Internal 状态为 `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`。外部入口只接受未准入的 v2 描述，准入后的 worker、Agent executor、Review 和 Workspace 直接消费同一个 `WorkOrderV3`。raw material 进入 exact-inventory protected stage，公共 projection 只含 ref/digest 与摘要。具备 exact Workspace authority 的 write 额外密封 frozen-base path manifest 与 binary patch；Acceptance 重算 delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支不移动。首次 activation 与生命周期 supervisor 周期扫描 sealed checkpoint，以更高 fence 重建唯一 projection 并继续原图，Agent 不重跑；A/B/C 仍是三个独立原子边界。terminal worker 处理精确 sealed abandon/cleanup 与两类 signed cancellation。当前 no-intent signed raw failure 另由一个 SQLite UoW 写 Operation `RELEASED`、Attempt/Node/Graph `FAILED`、Lease `EXPIRED`、Budget `RELEASED` 及 Outbox；Internal 必须先提交独立 deterministic claim，才清理未 sealed Git Workspace/stage，claim outage 时现场不动。Direct Agent Skill 不继承这些 Internal claim semantics；route-specific reconciler 现同时处理 Direct success/Verification failure 和至多一个 reviewed Plan 写节点的 whole-graph success/downstream failure，再复用 shared lifecycle cleaner。其它 terminal matrix、多 Workspace、一般 unknown effect、general `settle_worker` crash bundle、Domain Pack/其它 Skill、handle-level TOCTOU、OS/container isolation 与七路线验收仍未完成。
 - post-COMMIT settlement 流程为：`Operation COMMITTED → BudgetUsage identity 不确定 → RECOVERY_REQUIRED → Lease 到期 → higher-fence checkpoint takeover → EXACT_ACCEPTED / EXACT_REJECTED / MISSING / CONFLICT`。共享 `EXCEEDED` 下的 `MISSING` 只能在同一 snapshot 证明唯一 winner 后补写为 version-stable、共享 winner Outbox/dimensions 的 `ALREADY_EXCEEDED`。正向流现覆盖双 checkpoint、four-root mixed settlement、五节点菱形与八个并行根节点；依赖只在前驱 accepted 后释放，worker 不重跑。`CONFLICT`、unknown `RESERVED/RECOVERY_REQUIRED` 与 cancellation crossing 会在新 Lease 前写 0130 exact hold + Outbox：conflict quarantine，后两类进入各自 signed reconciliation。无限规模、其它 failure/cancellation、自动归因和部署 fan-out仍缺。
 
 ```mermaid
@@ -1895,6 +1895,30 @@ Attempt、Lease、Operation checkpoint 和 canonical terminal decision
 
 Internal reconciler 在 staging inventory 中跳过精确归属于 Direct Skill 的
 artifact，但仍拥有通用 terminal lifecycle cleanup。因此分类 authority
-按 route 分开，物理 cleanup 仍只有一个 owner。当前真实 SQLite+Git 仅证明
-success 与 Verification failure；Plan 内 write node、其它 terminal matrix、
-强隔离和 NE-07 服务栈仍未验收。
+按 route 分开，物理 cleanup 仍只有一个 owner。该前序 flow 的真实
+SQLite+Git 只证明 Direct Skill success 与 Verification failure；下一节
+补充受限 Plan single-writer success/downstream-failure。其它 terminal
+matrix、强隔离和 NE-07 服务栈仍未验收。
+
+## Plan 写节点整图成功/失败流
+
+```mermaid
+flowchart LR
+    A["Plan admission"] --> B["one reviewed write node"]
+    B --> C["workspace proposal\nno Effect"]
+    C --> D["node ACCEPTED"]
+    D --> E{"downstream/result"}
+    E -->|"accepted"| F["graph-success UoW"]
+    F --> G["node promotion Effect"]
+    G --> H["Preview + dispatch"]
+    H --> I["PROMOTED → CLEANED"]
+    E -->|"verification failed"| J["Graph FAILED"]
+    J --> K["reopen acceptance/artifact/operation\nand prove effect count = 0"]
+    K --> L["ABANDONED → CLEANED"]
+```
+
+根 command fingerprint 继续绑定整张图，写 Effect 使用 root fingerprint 与
+node id 派生的 node operation fingerprint。这样 exact replay 能区分图内
+节点，又不会让 node WorkOrder 改写 command identity。成功与失败两条路径
+均在 fresh Runtime 重开真实 SQLite/Git 状态；缺失任一 identity、Review、
+Runtime Context/Scene、Preview 或零 Effect 证明时保持 fail-closed。

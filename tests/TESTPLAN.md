@@ -953,3 +953,32 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - 当前定向结果：`10 passed in 16.20s`；相邻恢复集成
   `33 passed in 137.00s`，两者重叠不相加。真实 provider、完整波次和
   NE-07 服务栈未运行。
+
+## T-NE01-PLAN-WORKSPACE-ATOMIC：Plan 单写节点原子终态
+
+- T-NE01-PLAN-WORKSPACE-ATOMIC-01：capability Plan 至多选择一个
+  `POST_ACCEPTANCE_WORKSPACE` Agent Skill。该节点必须是非结果节点、
+  risk 4 且要求 durable pre-execution Review；第二个写 owner、政策漂移
+  或写结果节点必须在 worker/Effect 前失败关闭。
+- T-NE01-PLAN-WORKSPACE-ATOMIC-02：写 worker 只生成 sealed proposal，
+  node Acceptance 后 Acceptance Effect 仍为零。只有全部节点 accepted 时，
+  parallel-success UoW 才能把 node-owned promotion 与 result-node Effects
+  一次暂存；每个 Effect 必须绑定自己的 exact accepted Attempt。
+- T-NE01-PLAN-WORKSPACE-ATOMIC-03：handler 必须重开 command-level
+  fingerprint、派生 node operation fingerprint、WorkOrder、Review、Runtime
+  Context/Scene、Action Preview、projection 和密封 artifact；任何漂移均
+  不得晋升 accepted HEAD。
+- T-NE01-PLAN-WORKSPACE-ATOMIC-04：下游 result Verification failure 时，
+  Graph=`FAILED`、write node=`ACCEPTED`。reconciler 与 repository 都必须
+  验证唯一 Acceptance decision、artifact、COMMITTED Operation、projection
+  以及该 node 的 Acceptance Effect 总数为零，才允许
+  `ABANDONED → CLEANED`。
+- T-NE01-PLAN-WORKSPACE-ATOMIC-05：真实 SQLite 与临时 Git worktree
+  分别跑 graph-success、downstream-failure；两者都验证 source `main`
+  HEAD/文件不变，fresh Runtime 收口，第二次重启零 replay。
+- 单次受影响集合为 `99 passed in 127.35s`；最终 zero-effect fail-closed
+  收紧后真实 Plan 两路径定向复跑 `2 passed in 17.83s`。文档/发布合同为
+  `56 passed in 9.35s`，两组不相加。统一 `static_scan,doc_gate` 与架构 Gate 1～14
+  均通过且失败列表为空。无 migration；其它 Plan
+  failure/cancellation/unknown-effect、多 Workspace、NE-01 wave integration
+  和 NE-07 服务栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
