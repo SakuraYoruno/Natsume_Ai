@@ -550,3 +550,29 @@ Task 额度，并证明 Skill sealed authority 不丢失 Budget；不证明真�
 provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## NE-01 `RESERVED` 未知副作用跨进程恢复证据
+
+2026-07-27 新增 Windows `spawn` 真实进程链：
+
+- 进程 A 在 SQLite 已提交 Operation `RESERVED`、worker 尚未调用时
+  `os._exit(94)`；
+- 原 Lease 存活与到期后的两个 fresh Host 均证明 worker 调用数为 0；
+- 到期启动恢复提交 `RECOVERY_REQUIRED`、`EXPIRED` Lease、可恢复
+  Attempt 与唯一 current recovery hold；
+- 独立进程验证 case-bound Ed25519 `NO_SIDE_EFFECT`，在同一 Attempt
+  上取得 `fence + 1`；
+- fresh Host 只执行一次 worker并提交 Verification、Acceptance 和
+  Graph completion；终态再重启的 inventory 与 worker 调用均为空；
+- HostCommand、WorkOrder、Assignment、TaskGraph JSON 中不存在完整签名，
+  append-only evidence 中的签名与请求精确相同；scheduler snapshot 只含
+  Store 验签后的最小 execution-fence 投影，不含签名、scope、fingerprint、
+  receipt 或 reconciler。
+
+启动发现层的单测、既有签名换权和新进程链为
+`10 passed in 16.20s`；相邻 Host restart、governed Operator、
+online takeover 与 startup 集成为 `33 passed in 137.00s`，两组重叠不
+相加。初始运行先暴露了“startup 已将旧 Lease 写成 EXPIRED 后无法换权”的
+真实生产缺口，修复后才取得最终结果。该 worker 是受控生产协议 adapter；
+真实 provider、完整波次与 Docker 服务栈未运行，远程 CI 为
+`NOT_RUN_ACCOUNT_QUOTA`。

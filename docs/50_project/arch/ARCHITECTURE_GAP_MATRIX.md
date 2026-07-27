@@ -254,7 +254,7 @@ Scheduler governed runtime                   WIRED
 Internal governed runtime                    WIRED
 Universal execution scope                    PARTIAL
 Budget contention authority                  UNIQUE_WINNER_PROVEN / POLICY PARTIAL
-Operation recovery                           SIGNED_MULTINODE_NODE_FAILURE_PLUS_0090_PROVEN / GENERAL INCOMPLETE
+Operation recovery                           RESERVED_UNKNOWN_EFFECT_SIGNED_OS_PROCESS_REACQUIRE_PLUS_SIGNED_MULTINODE_FAILURE_PROVEN / GENERAL INCOMPLETE
 Accepted Effect restart finalization         PROVEN_NARROW
 Historical terminal reconciliation           WIRED_DEFAULT_OFF / CANARY_NOT_RUN / DEPLOYMENT_UNVERIFIED
 Persona evolution authority                  CENTRAL_FENCE_WIRED / PROPOSAL PIPELINE MISSING
@@ -267,3 +267,10 @@ Full Architecture                            INCOMPLETE
 ```
 
 当前执行只允许从 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 的 NE-00～NE-07 推进；不得复活旧 M49～M57 或 TASK-xxxx 状态作为调度依据。
+
+`RESERVED` 未知副作用现已证明跨进程 `NO_SIDE_EFFECT → REACQUIRE`：
+启动前后的原始 Lease状态都受唯一最高 fence 校验，签名替代 Lease只绕过
+Host 发现层预筛选，DAG Runtime 仍拥有最终 worker authority。通用
+scheduler snapshot 只携带 Store 验签后的最小 execution-fence 投影，不
+携带原始证明或业务身份。该项关闭一条恢复死锁，不代表签名
+`COMMIT/RELEASE`、所有 cancellation/failure 或通用并发恢复完成。

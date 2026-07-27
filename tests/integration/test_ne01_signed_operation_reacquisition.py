@@ -156,6 +156,15 @@ async def test_signed_reacquire_restarts_same_attempt_once_under_higher_fence(
     assert operation_before["status"] == "RECOVERY_REQUIRED"
     assert operation_before["attempt_id"] == attempt_before["attempt_id"]
     assert operation_before["lease_id"] == lease_before["lease_id"]
+    recovery_holds = first_store.list_current_operation_recovery_holds(
+        graph_id=admitted.graph_id
+    )
+    assert len(recovery_holds) == 1
+    recovery_case = recovery_holds[0]
+    evidence_case = {
+        "recovery_case_ref": recovery_case["case_ref"],
+        "recovery_case_subject_sha256": recovery_case["subject_sha256"],
+    }
 
     actor_id = "reconciler://operator/reacquire-test"
     attestation_ref = "proof://operation-reacquire/integration"
@@ -194,6 +203,7 @@ async def test_signed_reacquire_restarts_same_attempt_once_under_higher_fence(
         intent_ref=None,
         action="REACQUIRE",
         downstream_receipt_ref=None,
+        **evidence_case,
         **request,
     )
     evidence_replay = reopened_store.stage_operation_reconciliation_evidence(
@@ -203,6 +213,7 @@ async def test_signed_reacquire_restarts_same_attempt_once_under_higher_fence(
         intent_ref=None,
         action="REACQUIRE",
         downstream_receipt_ref=None,
+        **evidence_case,
         **request,
     )
 
@@ -223,6 +234,7 @@ async def test_signed_reacquire_restarts_same_attempt_once_under_higher_fence(
             intent_ref=None,
             action="REACQUIRE",
             downstream_receipt_ref=None,
+            **evidence_case,
             **request,
         )
     with reopened_store._connect() as conn, pytest.raises(Exception):

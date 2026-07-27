@@ -662,3 +662,27 @@ FAIL
 ```text
 按 NEXT_GENERATION_EVOLUTION_EXECUTION.md v3.8 完成 NE-01、NE-02、NE-04～NE-07，并持续守护已合入的 NE-03：封板通用执行、真实 PlanningSearch 和受治理演化闭环；最终构建 Monitor UI，启动真实 Docker Neo4j/Chroma/Redis、Host、Obs、Nginx Monitor、完整 Edge 与 Unified Gateway 做全量网络、数据、重启、故障和回滚验收。全过程使用中文提交/PR、每提交同步文档并推送，远程 CI 额度缺失只记 NOT_RUN_ACCOUNT_QUOTA。
 ```
+
+## 9. 当前实施进展：未知副作用签名恢复
+
+NE-01 已完成 `RESERVED` 后、worker 前硬退出的真实 OS 进程恢复切片：
+
+```text
+进程 A：Operation RESERVED 后硬退出
+  → 新进程：live Lease 仅 DEFERRED
+  → Lease 到期：RECOVERY_REQUIRED + current hold，worker = 0
+  → exact case-bound Ed25519 NO_SIDE_EFFECT
+  → 同一 Attempt、fence + 1
+  → fresh Host startup 进入 canonical DAG Runtime
+  → worker 一次、Verification/Acceptance 完成
+  → 再次重启零重放
+```
+
+实现同时修复了两个生产死锁：startup 已持久化 `EXPIRED` 的原始 Lease
+现在可在严格唯一最高 fence 条件下换权；签名替代 Lease不再被 Host
+survivor 的普通 live-Lease 预筛选永久挡住。TaskStore 在同一 scheduler
+read transaction 内验签，只输出不含签名、scope、fingerprint、receipt
+或 reconciler 的最小 execution-fence 投影。定向集合
+`10 passed in 16.20s`，相邻恢复集合 `33 passed in 137.00s`。该切片不
+提升 NE-01 总状态；下一批继续处理其它 failure/cancellation
+reconciliation、并发和控制面真实 worker。

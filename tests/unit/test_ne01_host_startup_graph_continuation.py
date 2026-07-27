@@ -198,6 +198,7 @@ def _contracts(
         "observed_ts_ms": ts_ms,
         "graph_record": dict(graph_record),
         "active_leases": [],
+        "operation_execution_fences": [],
     }
     return record, graph_record, snapshot
 
@@ -341,6 +342,59 @@ async def test_host_runtime_periodically_reenters_after_live_lease_expires() -> 
     )
     await runtime.aclose()
     assert runtime.survivor_continuation_health["running"] is False
+
+
+@pytest.mark.asyncio
+async def test_host_runtime_reenters_one_signed_reacquired_live_lease() -> None:
+    record, graph_record, snapshot = _contracts()
+    graph_id = graph_record["graph_id"]
+    graph_revision = graph_record["revision"]
+    snapshot["active_leases"] = [
+        {
+            "status": "ACTIVE",
+            "attempt_id": "attempt-signed-reacquired",
+            "lease_id": "lease-signed-reacquired",
+            "owner_id": "host-owner-reacquired",
+            "fencing_token": 2,
+            "expires_ts_ms": NOW + 60_000,
+        }
+    ]
+    snapshot["operation_execution_fences"] = [
+        {
+            "reservation_id": "reservation-signed-reacquired",
+            "status": "RESERVED",
+            "status_version": 2,
+            "attempt_id": "attempt-signed-reacquired",
+            "lease_id": "lease-signed-reacquired",
+            "owner_id": "host-owner-reacquired",
+            "fencing_token": 2,
+            "signed_reacquisition_verified": True,
+        }
+    ]
+    store = _StartupStore(
+        snapshots={(graph_id, graph_revision): snapshot},
+    )
+    application = _Application()
+    runtime = GovernedHostRuntime(
+        application=application,
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=_CommandRepository(record),
+        task_store=store,
+    )
+
+    await runtime.activate()
+    report = await runtime.recover_startup_graphs()
+
+    assert len(application.calls) == 1
+    assert report == (
+        {
+            "graph_id": graph_id,
+            "graph_revision": graph_revision,
+            "status": "COMPLETED",
+            "reason_code": None,
+        },
+    )
+    await runtime.aclose()
 
 
 @pytest.mark.asyncio

@@ -351,3 +351,23 @@ ModelAttempt/Emergent Growth/Skill Broker/frozen route 回归。当前仅
 `emergent_growth_weekly` 声明该能力；真实 provider、其它模型 Skill
 inventory、legacy 非 governed 调用、program-wide Budget、波次集成和 NE-07
 仍未完成。
+
+TRACE-NE01-UNKNOWN-EFFECT-PROCESS-REACQUIRE-01（当前切片）：
+当进程在 Operation `RESERVED` 提交后、worker 调用前硬退出时，任何 fresh
+Host 在证明前都不得执行 worker。原 Lease存活时报告 `DEFERRED`；到期后
+必须持久提交 `RECOVERY_REQUIRED`、旧 Lease `EXPIRED`、Attempt
+`RECOVERABLE` 和唯一 current recovery hold。只有 exact case/version-bound
+Ed25519 `NO_SIDE_EFFECT` 可让同一 Attempt 取得严格更高 fence。startup 已
+持久化为 `EXPIRED` 的旧 Lease仅在它仍是 Operation 精确绑定、唯一最高
+fence 且没有其他 active owner 时可用。TaskStore 必须在同一 scheduler
+read transaction 验签 Operation，并只输出不含签名、scope、fingerprint、
+receipt 或 reconciler 的最小 execution-fence projection。签名 replacement
+Lease只允许越过 Host discovery 预筛选，`existing_operation_resolution`
+必须再复验当前 Runtime owner/Lease/fence。完整签名不得出现在
+HostCommand、WorkOrder、Assignment、TaskGraph JSON 或通用 scheduler
+snapshot。机械证据为
+`tests/integration/test_ne01_host_signed_unknown_effect_process_restart.py`、
+`tests/integration/test_ne01_signed_operation_reacquisition.py` 与
+`tests/unit/test_ne01_host_startup_graph_continuation.py`。当前只证明
+`REACQUIRE` 子集；其它 action、failure/cancellation、真实 provider 与
+NE-07 未完成。

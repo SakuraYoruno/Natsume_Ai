@@ -92,35 +92,71 @@ def assert_signed_reacquisition_lease_authority(
             "reacquisition signature is invalid or binding was tampered",
         )
 
-    active = conn.execute(
+    leases = conn.execute(
         """
         SELECT * FROM task_runtime_lease
-        WHERE attempt_id = ? AND status = 'ACTIVE'
+        WHERE attempt_id = ?
         ORDER BY fencing_token DESC, lease_id
         """,
         (str(attempt_id),),
     ).fetchall()
-    if len(active) != 1:
-        raise TaskStoreError(
-            TASK_STORE_LEASE_CONFLICT,
-            "signed reacquisition requires exactly one active Lease",
-        )
-    live = active[0]
-    if _is_exact_lease_response_replay(
+    active = [lease for lease in leases if str(lease["status"]) == "ACTIVE"]
+    if len(active) == 1 and _is_exact_lease_response_replay(
         attempt=attempt,
-        lease=live,
+        lease=active[0],
         owner_id=owner_id,
         expected_attempt_version=expected_attempt_version,
         expected_lease_id=expected_lease_id,
         now_ts_ms=now_ts_ms,
     ):
         return
+
+    original = [
+        lease
+        for lease in leases
+        if str(lease["lease_id"]) == str(operation["lease_id"] or "")
+    ]
+    if len(original) != 1:
+        raise TaskStoreError(
+            TASK_STORE_LEASE_CONFLICT,
+            "signed reacquisition requires its one exact original Lease",
+        )
+    original_lease = original[0]
+    active_other = [
+        lease
+        for lease in active
+        if str(lease["lease_id"]) != str(original_lease["lease_id"])
+    ]
+    highest_fence = max((int(lease["fencing_token"]) for lease in leases), default=0)
+    original_status = str(original_lease["status"])
+    attempt_status = str(attempt["status"])
+    released_ts_ms = original_lease["released_ts_ms"]
+    valid_expiry_transition = (
+        (
+            original_status == "ACTIVE"
+            and released_ts_ms is None
+            and attempt_status in {"LEASED", "RUNNING"}
+        )
+        or (
+            original_status == "EXPIRED"
+            and type(released_ts_ms) is int
+            and int(original_lease["acquired_ts_ms"])
+            <= released_ts_ms
+            <= int(now_ts_ms)
+            and int(original_lease["status_version"]) >= 1
+            and attempt_status == "RECOVERABLE"
+        )
+    )
     if (
         int(attempt["status_version"]) != int(expected_attempt_version)
-        or str(live["lease_id"]) != str(operation["lease_id"] or "")
-        or str(live["owner_id"]) != str(operation["owner_id"] or "")
-        or int(live["fencing_token"]) != int(operation["fencing_token"] or 0)
-        or int(live["expires_ts_ms"]) > int(now_ts_ms)
+        or str(original_lease["attempt_id"]) != str(attempt_id)
+        or str(original_lease["owner_id"]) != str(operation["owner_id"] or "")
+        or int(original_lease["fencing_token"])
+        != int(operation["fencing_token"] or 0)
+        or int(original_lease["fencing_token"]) != highest_fence
+        or not valid_expiry_transition
+        or int(original_lease["expires_ts_ms"]) > int(now_ts_ms)
+        or active_other
     ):
         raise TaskStoreError(
             TASK_STORE_LEASE_CONFLICT,

@@ -891,3 +891,30 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
   1 项。三组分别记录且不相加为 wave integration。真实 provider、完整
   NE-01 integration 与 NE-07 服务栈均未运行，远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`。
+
+## T-NE01-UNKNOWN-EFFECT-PROCESS：`RESERVED` 后硬退出
+
+- T-NE01-UNKNOWN-EFFECT-PROCESS-01：Windows `spawn` 进程在
+  `reserve_operation()` 已提交后立即 `os._exit(94)`；marker、SQLite
+  Operation 与 Outbox 必须证明 `RESERVED` 已落库，WorkerProjection 为 0。
+- T-NE01-UNKNOWN-EFFECT-PROCESS-02：live Lease 的 fresh Host 只能
+  `DEFERRED`；Lease/Operation TTL 到期后的 fresh Host 只能提交
+  `RECOVERY_REQUIRED` 与唯一 current hold，两个阶段 worker 调用均为 0。
+- T-NE01-UNKNOWN-EFFECT-PROCESS-03：签名 `NO_SIDE_EFFECT` 必须绑定
+  exact reservation、scope、fingerprint、Operation version、actor 与
+  attestation ref，并携带 exact current case ref/digest。启动已经把原
+  Lease 写成 `EXPIRED` 时，只有 exact 唯一最高 fence 且无竞争 owner
+  才可换权。
+- T-NE01-UNKNOWN-EFFECT-PROCESS-04：TaskStore 必须在同一 scheduler read
+  transaction 验签 `RESERVED` Operation，并只输出与 replacement Lease
+  对齐的最小 execution-fence projection；projection 不得包含 signature、
+  scope、fingerprint、receipt 或 reconciler。Host discovery 可重入，但
+  DAG Runtime 必须再校验当前 owner/fence，随后只执行一个 worker。
+- T-NE01-UNKNOWN-EFFECT-PROCESS-05：最终 Verification、Acceptance、
+  Graph、Operation、Lease lineage 与父子 Budget 必须闭合；第三次进程
+  重启 inventory 和 worker 均为空。签名只能存在 evidence/Operation proof，
+  不能出现在 HostCommand/WorkOrder/Assignment/TaskGraph JSON 或通用
+  scheduler snapshot。
+- 当前定向结果：`10 passed in 16.20s`；相邻恢复集成
+  `33 passed in 137.00s`，两者重叠不相加。真实 provider、完整波次和
+  NE-07 服务栈未运行。
