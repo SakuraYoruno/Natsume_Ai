@@ -1006,3 +1006,31 @@ Acceptance authority。OS/container/tenant isolation、handle-level TOCTOU、
 一般 batch/unknown-effect recovery、program-wide Budget、波次集成或 NE-07。
 状态仍为 `IN_PROGRESS`。PR #176 的 9 个失败 job 均为零步骤且无 runner，
 另有 1 个 skipped，远程 CI 记为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+### NE-01：Review continuation 毒化前缀隔离与持久告警
+
+当前切片修正 0096 协调队列的活性边界：
+
+1. 每个候选仍独占一个 SQLite writer transaction；完整 Review/Task 绑定失败
+   时，不再 rollback 后静默留在队首，而是清除过期 claim、写稳定
+   `REVIEW_CONTINUATION_POISON_*` 错误码、递增 `status_version` 并执行
+   1 秒至 5 分钟的有界指数退避；
+2. 合法但暂时存在 live Attempt 的候选使用独立 busy 类型，只跳过本轮，不被
+   错误分类为毒化记录；
+3. 固定 500 候选扫描以 500 条跨表版本漂移记录和 1 条健康记录验证：第一轮
+   全部损坏行持久退避，第二轮精确领取健康行；
+4. Store 输出固定 schema 的隐私有界健康投影，只包含总数、最多 128 条采样
+   形成的 opaque digest、截断标记与最后失败时间，不输出 Review ID；
+5. `ReviewContinuationGuardianObserver` 由 Host app-local composition 注入
+   worker，并复用同一个 runtime-scoped Guardian journal；同一 active
+   incident 不重复追加，replacement process 在库存归零后解析 durable
+   history 并追加唯一 resolution；
+6. poison codec/查询拆入无连接、无业务状态 authority 的 focused helper，
+   `review_continuation_store.py` 保持低于 1,500 行，未扩大架构白名单。
+
+最终受影响集合为 `88 passed in 116.19s`；文档、交付元数据与 coverage 合同为
+`39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过。本切片没有新增 migration，继续复用
+0096 的 `available_ts_ms / last_error / status_version` 协调列；ReviewStore
+和 TaskNode 仍是业务 truth。尚未提供独立 Operator DLQ/修复 UI，跨进程低延迟
+仍依靠有界 polling/lease takeover；Budget DEGRADE/REVIEW、一般恢复、波次
+集成、生产 canary 与 NE-07 均未完成，NE-01 保持 `IN_PROGRESS`。

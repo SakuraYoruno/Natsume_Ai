@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.31
+版本：v3.32
 
 核对日期：2026-07-27
 
@@ -28,6 +28,25 @@
 ```
 
 这条筛选不改写 Graph、Node 或 Budget，只防止终态 block 被误当成仍有执行权。
+
+Review continuation 坏前缀的当前恢复流如下：
+
+```mermaid
+flowchart LR
+    S["bounded scan ≤ 500"] --> V{"完整 Review/Task binding"}
+    V -->|"合法且可领取"| C["claim + fence + version"]
+    V -->|"合法但 live Attempt"| B["skip this scan"]
+    V -->|"持久绑定损坏"| D["same transaction: clear expired claim\nstable poison code + version + backoff"]
+    D --> N["next scan reaches healthy rows"]
+    D --> H["bounded redacted health snapshot"]
+    H --> G["app-local RuntimeGuardian\none active SLO incident"]
+    G --> R["inventory=0 after repair\nreplacement-process resolution"]
+```
+
+`D` 只修改 0096 delivery coordination，不修改 ReviewItem、TaskNode 或
+Attempt。健康投影只含计数、采样规模、截断标记、时间和 opaque digest；
+Review ID 与原始错误正文不会进入 Guardian journal。当前没有独立 terminal
+DLQ/Operator 修复 UI，跨进程及时性仍由 polling、lease 和 takeover 提供。
 
 混合 fan-out 崩溃后的当前恢复流为：
 

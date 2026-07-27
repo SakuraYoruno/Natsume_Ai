@@ -233,6 +233,36 @@ def _assert_candidate_binding(
             )
 
 
+def _assert_claim(
+    row: sqlite3.Row,
+    *,
+    worker_id: str,
+    claim_token: str,
+    fencing_token: int,
+    expected_version: int,
+    now: int,
+    allow_expired: bool = False,
+) -> None:
+    if (
+        str(row["claim_owner"] or "")
+        != _required_text(worker_id, field_name="worker_id")
+        or str(row["claim_token"] or "")
+        != _required_text(claim_token, field_name="claim_token")
+        or int(row["claim_fencing_token"])
+        != _positive_int(fencing_token, field_name="fencing_token")
+        or int(row["status_version"])
+        != _non_negative_int(expected_version, field_name="expected_version")
+        or (
+            not allow_expired
+            and int(row["claim_expires_ts_ms"] or -1) <= int(now)
+        )
+    ):
+        raise ReviewContinuationStoreError(
+            REVIEW_CONTINUATION_CLAIM_LOST,
+            "review continuation claim is stale or belongs to another worker",
+        )
+
+
 def _authority_projection(
     durable: Mapping[str, Any],
     *,
@@ -353,6 +383,7 @@ __all__ = [
     "_REQUIRED_INDEX_COLUMNS",
     "_REQUIRED_SQL_FRAGMENTS",
     "_TERMINAL_DELIVERY_STATUSES",
+    "_assert_claim",
     "_assert_candidate_binding",
     "_assert_row_binding",
     "_authority_projection",

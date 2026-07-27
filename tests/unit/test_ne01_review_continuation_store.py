@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import sqlite3
 
@@ -709,3 +710,119 @@ def test_post_authority_allows_exact_active_downstream_attempt_and_lease(
     )
 
     assert validated == authority
+
+
+def test_poison_scan_is_durably_deferred_without_starving_healthy_row(
+    tmp_path: Path,
+) -> None:
+    path = _db(tmp_path)
+    _insert_checkpoint(path, node_status="WAITING_APPROVAL", node_version=1)
+    clock = _Clock()
+    reviews = ReviewStore(path, clock=clock)
+    healthy = _review(
+        "review-z-healthy",
+        phase=ReviewResumePhase.PRE_EXECUTION,
+        subject_version=1,
+    )
+    _create(reviews, healthy)
+    _consume(reviews, healthy)
+
+    with sqlite3.connect(str(path)) as conn:
+        conn.row_factory = sqlite3.Row
+        base_review = conn.execute(
+            "SELECT * FROM agent_runtime_review WHERE review_id = ?",
+            (healthy.review_id,),
+        ).fetchone()
+        base_continuation = conn.execute(
+            """
+            SELECT * FROM task_runtime_review_continuation
+            WHERE review_id = ?
+            """,
+            (healthy.review_id,),
+        ).fetchone()
+        assert base_review is not None
+        assert base_continuation is not None
+        review_columns = tuple(base_review.keys())
+        continuation_columns = tuple(base_continuation.keys())
+        review_insert = (
+            f"INSERT INTO agent_runtime_review({','.join(review_columns)}) "
+            f"VALUES ({','.join('?' for _ in review_columns)})"
+        )
+        continuation_insert = (
+            "INSERT INTO task_runtime_review_continuation"
+            f"({','.join(continuation_columns)}) "
+            f"VALUES ({','.join('?' for _ in continuation_columns)})"
+        )
+        for index in range(500):
+            review_id = f"review-a-poison-{index:04d}"
+            review_row = dict(base_review)
+            review_row["review_id"] = review_id
+            review_payload = json.loads(str(review_row["review_json"]))
+            review_payload["review_id"] = review_id
+            review_row["review_json"] = json.dumps(
+                review_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            conn.execute(
+                review_insert,
+                tuple(review_row[column] for column in review_columns),
+            )
+            continuation_row = dict(base_continuation)
+            continuation_row["review_id"] = review_id
+            # The ReviewItem remains bound to version 1.  Each coordination
+            # row gets a unique, deliberately corrupt checkpoint version so
+            # the existing unique index remains intact.
+            continuation_row["subject_version"] = index + 2
+            conn.execute(
+                continuation_insert,
+                tuple(
+                    continuation_row[column]
+                    for column in continuation_columns
+                ),
+            )
+
+    store = ReviewContinuationStore(path, clock=clock)
+
+    assert store.claim_pending_review_continuations(
+        worker_id="review-worker",
+        lease_ms=30_000,
+        limit=1,
+    ) == ()
+
+    with sqlite3.connect(str(path)) as conn:
+        deferred = conn.execute(
+            """
+            SELECT COUNT(*), MIN(available_ts_ms), MIN(status_version),
+                   COUNT(DISTINCT last_error)
+            FROM task_runtime_review_continuation
+            WHERE review_id LIKE 'review-a-poison-%'
+              AND claim_owner IS NULL
+              AND last_error =
+                  'REVIEW_CONTINUATION_POISON_REVIEW_CONTINUATION_CONFLICT'
+            """
+        ).fetchone()
+    assert deferred == (500, 2_000, 1, 1)
+
+    failure = store.review_continuation_failure_snapshot()
+    assert failure == {
+        "schema": "natsume.review_continuation.failure_snapshot.v1",
+        "status": "FAILED",
+        "poisoned_count": 500,
+        "sampled_count": 128,
+        "truncated": True,
+        "last_failure_ts_ms": 1_000,
+        "incident_digest": failure["incident_digest"],
+    }
+    assert str(failure["incident_digest"]).startswith("sha256:")
+    assert "review-a-poison" not in json.dumps(failure)
+
+    claimed = store.claim_pending_review_continuations(
+        worker_id="review-worker",
+        lease_ms=30_000,
+        limit=1,
+    )
+
+    assert len(claimed) == 1
+    assert claimed[0]["review_id"] == healthy.review_id

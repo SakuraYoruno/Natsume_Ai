@@ -1209,3 +1209,26 @@ static/doc Gate 和架构 Gate 1～14 通过。无 migration，NE-01 保持
   `origin/dev@c7984d9e0bb95a5b0176360c39b2e405e247f63e`。本 Gate 不证明
   一般 Budget policy、其它 terminal matrix、multi-Workspace、NE-01 wave
   integration 或 NE-07；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## T-NE01-REVIEW-POISON-QUEUE：Review 续接坏前缀活性与告警
+
+- T-NE01-RPQ-01：在同一真实 SQLite 中准备 500 条排在队首的跨表版本漂移
+  continuation 和 1 条健康 continuation；首轮不得领取坏行，且必须在各自
+  transaction 中写稳定 poison code、未来 `available_ts_ms` 与递增版本。
+- T-NE01-RPQ-02：同一时钟下第二轮必须越过已退避前缀并领取唯一健康行；
+  合法但有 live Attempt 的 candidate 只能 skip，不能被误标 poison。
+- T-NE01-RPQ-03：failure snapshot 最多采样 128 条，只公开计数、截断、
+  时间和 sha256 digest，不得公开 Review ID 或原始错误正文。
+- T-NE01-RPQ-04：Host app-local composition 必须把 observer 注入唯一
+  Review worker；同一 active incident 即使摘要变化也不得追加第二个 breach。
+- T-NE01-RPQ-05：replacement process 重开 Guardian history 后，库存归零
+  必须解析并 resolve 本 observer 的 active breach；重复恢复不得追加事件。
+- T-NE01-RPQ-06：Guardian projection 抛错时 worker health 必须保持
+  `DEGRADED/FAILED` 且不泄漏异常正文；不得因此删除 coordination evidence。
+- T-NE01-RPQ-07：`review_continuation_store.py` 必须继续小于 1,500 行，
+  poison helper 不得拥有连接或 Review/Task writer；migration head 保持 0135。
+
+当前最终受影响集合为 `88 passed in 116.19s`；文档、交付元数据与 coverage
+合同为 `39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过。该 Gate 关闭有界扫描饥饿和 durable
+告警缺口，不证明独立 terminal DLQ、自动修复、跨进程即时 wake、production
+canary、NE-01 波次集成或 NE-07。

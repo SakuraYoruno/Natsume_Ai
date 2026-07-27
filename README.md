@@ -9,6 +9,19 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+最新 NE-01 切片关闭了 Review continuation 有界扫描的队首饥饿缺口。
+`claim_pending_review_continuations()` 仍最多读取 500 个候选，但跨表绑定损坏的
+协调行现在会在自己的 SQLite writer transaction 中写入稳定错误码、递增版本并
+指数退避；它们不再原地占据下一轮队首。真实文件型 SQLite 以 500 条损坏行加
+1 条健康行验证：首轮持久退避全部损坏行，第二轮即可领取健康行。该投影只统计
+数量、截断标记、时间和 opaque digest，不公开 Review ID；Host lifespan 将它
+注入现有 app-local `RuntimeGuardian`，一个 active incident 只追加一个 SLO
+breach，替换进程在库存归零后追加唯一 resolution。实现复用 0096 协调列，没有
+新增 migration，也没有复制 Review/Task 业务状态。最终受影响集为
+`88 passed in 116.19s`；文档、交付元数据与 coverage 合同为 `39 passed`，
+fresh 架构静态 Gate 1～14 全部通过。显式 Operator 隔离队列、跨进程即时 wake、NE-01
+波次集成和生产 canary 仍未完成，所以 NE-01 继续为 `IN_PROGRESS`。
+
 最新 NE-01 批次把并发图的失败、重试、预算超限和人工 Review 放进同一个
 Windows `spawn`/文件型 SQLite 恢复矩阵。进程 A 在两个根节点都形成 durable
 outcome、但外层 0090 settlement 尚未提交时硬退出；全新 Host 只能重开既有

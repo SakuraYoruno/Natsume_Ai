@@ -26,6 +26,15 @@ class _Store:
         self.deferred: list[dict[str, Any]] = []
         self.completed: list[dict[str, Any]] = []
         self.node_status = "WAITING_APPROVAL"
+        self.failure_snapshot: dict[str, Any] = {
+            "schema": "natsume.review_continuation.failure_snapshot.v1",
+            "status": "RECOVERED",
+            "poisoned_count": 0,
+            "sampled_count": 0,
+            "truncated": False,
+            "last_failure_ts_ms": None,
+            "incident_digest": "sha256:" + ("0" * 64),
+        }
 
     def _record(self) -> dict[str, Any]:
         return {
@@ -91,6 +100,9 @@ class _Store:
             return []
         self.claimed = True
         return [self._record()]
+
+    def review_continuation_failure_snapshot(self) -> dict[str, Any]:
+        return dict(self.failure_snapshot)
 
     def validate_review_continuation_claim(
         self,
@@ -213,6 +225,7 @@ def _worker(
     poll_interval_ms: int = 60_000,
     review_expirer: _Expirer | None = None,
     shutdown_grace_ms: int = 5_000,
+    observation_sink=None,
 ) -> ReviewContinuationWorker:
     return ReviewContinuationWorker(
         store=store,
@@ -224,6 +237,7 @@ def _worker(
         retry_delay_ms=250,
         batch_limit=4,
         shutdown_grace_ms=shutdown_grace_ms,
+        observation_sink=observation_sink,
     )
 
 
@@ -344,3 +358,78 @@ async def test_aclose_timeout_cancels_owned_children_and_stops_renewal() -> None
         and not task.done()
     ]
     assert leaked == []
+
+
+@pytest.mark.asyncio
+async def test_worker_projects_poison_failure_and_recovery_into_health() -> None:
+    store = _Store(with_claim=False)
+    store.failure_snapshot = {
+        **store.failure_snapshot,
+        "status": "FAILED",
+        "poisoned_count": 7,
+        "sampled_count": 7,
+        "last_failure_ts_ms": 1_234,
+        "incident_digest": "sha256:" + ("a" * 64),
+    }
+    observations: list[dict[str, Any]] = []
+
+    def observe(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
+        observations.append(dict(snapshot))
+        return {"status": snapshot["status"]}
+
+    worker = _worker(
+        store,
+        _Runtime(store),
+        observation_sink=observe,
+    )
+
+    assert await worker.run_once() == 0
+    assert worker.health_snapshot() == {
+        "status": "DEGRADED",
+        "running": False,
+        "poisoned_count": 7,
+        "sampled_count": 7,
+        "truncated": False,
+        "last_failure_ts_ms": 1_234,
+        "incident_digest": "sha256:" + ("a" * 64),
+        "guardian_projection_status": "READY",
+        "guardian_projection_error_type": None,
+    }
+
+    store.failure_snapshot = {
+        **store.failure_snapshot,
+        "status": "RECOVERED",
+        "poisoned_count": 0,
+        "sampled_count": 0,
+        "last_failure_ts_ms": None,
+        "incident_digest": "sha256:" + ("b" * 64),
+    }
+    assert await worker.run_once() == 0
+    assert worker.health_snapshot()["status"] == "HEALTHY"
+    assert [item["status"] for item in observations] == [
+        "FAILED",
+        "RECOVERED",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_worker_fails_closed_when_guardian_projection_fails() -> None:
+    store = _Store(with_claim=False)
+
+    def broken_observer(_snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
+        raise OSError("private guardian database path")
+
+    worker = _worker(
+        store,
+        _Runtime(store),
+        observation_sink=broken_observer,
+    )
+
+    with pytest.raises(OSError, match="private guardian database path"):
+        await worker.run_once()
+
+    health = worker.health_snapshot()
+    assert health["status"] == "DEGRADED"
+    assert health["guardian_projection_status"] == "FAILED"
+    assert health["guardian_projection_error_type"] == "OSError"
+    assert "private guardian database path" not in str(health)

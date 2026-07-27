@@ -395,3 +395,21 @@ snapshot。机械证据为
 `tests/unit/test_ne01_host_startup_graph_continuation.py`。当前只证明
 `REACQUIRE` 子集；其它 action、failure/cancellation、真实 provider 与
 NE-07 未完成。
+
+TRACE-NE01-REVIEW-POISON-01（Review continuation 队列活性，当前切片）：
+迁移 0096 的有界候选扫描不得因前 500 条跨表损坏记录永久饿死健康记录。
+每个损坏候选必须在自己的 writer transaction 内清除过期 claim、写入稳定
+poison reason、推进 `status_version` 并设置有界退避；合法 live-Attempt
+候选只跳过本轮。Store 只能输出计数、采样规模、截断、时间与 opaque digest，
+Host composition 必须把该投影交给同一个 runtime-scoped Guardian，并保证
+一段 active incident 只有一个 breach，replacement process 可从 durable
+history 完成 resolution。证据入口为
+`host_brain/persistence/review_continuation_poison.py`、
+`host_brain/app/review_continuation_guardian_observer.py`、
+`tests/unit/test_ne01_review_continuation_store.py`、
+`tests/unit/test_ne01_review_continuation_worker.py`、
+`tests/unit/test_ne01_review_runtime_group.py` 与
+`tests/integration/test_ne01_review_continuation_guardian_observer.py`。
+当前最终 `88 passed in 116.19s`，文档、交付元数据与 coverage 合同
+`39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过；无 migration；独立 terminal DLQ、Operator
+修复 UI、生产 canary、一般恢复与 NE-01 波次集成仍未完成。

@@ -153,6 +153,15 @@ Universal Runtime 现在有一套独立的提交绑定判定器和七路正式 P
 
 Review 拒绝现在有独立持久终态。0135 的 append-only settlement 精确绑定 terminal Review 状态/版本/digest、Graph revision、Node、graph Budget、三条 Outbox，以及 POST Review 的 0134 Acceptance、`SUCCEEDED` Attempt 和可选已有多节点 `BLOCKED` decision。PRE Review 仅在零 Attempt 时原子取消 Node/Graph 并释放 Budget；POST Review 原子失败 Node/Graph 并释放 Budget。Scheduler 或 Review continuation 在提交响应丢失后只重开同一 settlement；不会创建 Attempt、签发 Grant 或重跑 Worker。Store reader 会重新验证 Review、aggregate、Acceptance、blocking decision 和三条 Outbox，任一漂移失败关闭。
 
+Review continuation 的恢复协调现具有队列活性保护。0096 表仍只保存 delivery
+coordination；候选跨表绑定损坏时，Store 在候选自己的事务中写稳定 poison
+错误码、版本与退避时间，不触碰 Review/Task 状态。固定 500 行扫描不再让坏
+前缀永久遮挡后续健康行。`review_continuation_poison.py` 只接收现有连接并生成
+隐私有界投影，不拥有连接或第二套业务 authority；app-local composition 把
+observer 注入 worker，并让现有 runtime-scoped Guardian 持久记录单一 SLO
+incident 与 replacement-process resolution。显式 Operator DLQ/修复 UI 和
+真实生产 canary 仍缺，因此 Review/NE-01 总状态不升级。
+
 节点 Acceptance 也有独立持久事实。0134 的 append-only decision 精确绑定 Graph revision、Node、Attempt、规范 `AcceptanceJudgement`、evidence、Node Outbox，以及可选 Review/Graph block lineage。自动接受由一个 TaskStore 事务共同提交 decision、TaskResult artifact、可选 Effect intents 与 `ACCEPTED` Node；非 `ACCEPT` judgement 由一个事务共同提交 decision、`WAITING_ACCEPTANCE_REVIEW` Node、pending ReviewItem 与 Outbox，直接单节点图还共同进入 `BLOCKED`。Scheduler snapshot 投影该 decision，Continuation 只按 exact node version 重开，worker 与 judge 均不重跑。pending Review SQL writer 已收敛为一个共享 owner；拒绝后的终态由 0135 唯一收口。
 
 节点 Verification 已有独立持久事实。0133 的 append-only decision 精确绑定 Graph revision、Node、Attempt、规范 `VerificationResult`、evidence 与 Node Outbox；Node transition 和 decision 共用一个 TaskStore UoW。Committed checkpoint 在 `VERIFIED` 后重入时从 decision 取回结果，不再读取从未落库的 `node.verification_result`。直接单节点拒绝由一个事务同时写 `VERIFICATION_FAILED` Node、`FAILED` Graph、`RELEASED` graph Budget 及各自 Outbox；响应丢失走 exact replay，伪造 Graph Outbox 会使整个事务回滚。多节点拒绝只先记录节点决定，再由 0090 唯一 settlement owner 关闭 Graph/Budget。generic `transition_node()` 仍作为低层兼容 API 存在，但生产 verifier/continuation 调用点已迁移；一般 failure/cancellation 和七路线 commit-bound evidence 尚未完成。
