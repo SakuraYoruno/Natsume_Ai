@@ -1012,3 +1012,16 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   randomized 顺序、质量/严重错误/成本/时延门槛失败。
 - 本组只验证纯合同与确定性统计器；append-only cohort repository、真实
   provider、24 项运行与 promotion 均为 `NOT_RUN`，不得提升收益状态。
+
+### NE-02 Pentest capability-derived successor
+
+- `test_gr01_pentest_planning_search_adapter.py`、
+  `test_gr01_pentest_virtual_planning_world.py`、
+  `test_pentest_agent_loop_contracts.py` 与
+  `test_pentest_strategic_planning.py` 合计 `38 passed in 7.86s`。
+- L1 必须把缺少当前 capability 的 policy 动作放入 successor-only catalog，
+  而不是 executable roots；纯 transition 提供 capability 前不得展开。
+- successor catalog 的 digest/count 必须进入 durable shadow prediction；
+  descriptor 不含 args、executor 或 callback，真实选择仍是 L1/L2 baseline。
+- 本组未运行 30 次授权实验，runtime outcome 仍为
+  `UNVERIFIED_RUNTIME_RECORD`；安全、收益和 promotion 均不得标记通过。

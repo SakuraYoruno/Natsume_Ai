@@ -1769,6 +1769,8 @@ All ingress sources
 4. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker；持续守护已完成的 Budget unique-winner 与无前置 Review 到期 retry 的 promotion+claim 单事务，完成历史半状态 reconciliation，以及 exact operation-free Attempt 窄窗之外的 general/multi-node/batch recovery。两类 takeover 都不得被泛化。
 5. 对已接通的 0096 Resume continuation 做跨进程故障矩阵和 canary：原子 enqueue、到期 sweep、claim takeover/stale fence、精确 surface 路由、POST no-rerun、grant renewal 与关闭 quiescence。
 6. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
+
+Pentest 的对应数据流现为 `current AgentState + manifest/policy → L1 executable roots + contract-deferred successor catalog → descriptor-only virtual transition → capability-filtered deeper successors → L3 shadow trace → 0105 prediction/outcome`。depth 0 不读取 deferred catalog；只有前一虚拟节点提供所需 capability 后，后续 expander 才返回该 descriptor。AgentLoop 实际执行仍只消费 L1/L2 baseline root。catalog digest/count 与 state digest 一并进入 shadow calibration，未知 Store 故障只产生可观察降级，不能改变真实选择。
 7. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。

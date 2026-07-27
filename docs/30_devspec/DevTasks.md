@@ -36,6 +36,13 @@ Research 24 项验收协议的纯合同与确定性 evaluator 已落地：固定
 migration 中建立 append-only cohort owner，再运行真实双臂；当前不得把
 `proposal_eligible` 的可计算性写成已获得真实收益。
 
+Pentest L3 已把固定根全集改为两层 catalog：当前 ToolContract/PreActionGate
+通过的动作只作为 executable roots；同一 server policy 生成但缺 capability
+的已登记动作只作为 virtual successors，待纯 transition 的新 capability
+满足后才可展开。successor catalog digest/count 已进入 durable shadow
+calibration，生产选择仍强制使用 L1/L2 baseline。下一步仍是 30 次授权实验、
+receipt-bound outcome、安全零违规统计和 proposal Gate。
+
 ## 历史编号
 
 - TASK-0000～TASK-0622、M48～M57、AW-00～08、GR-00～06 已冻结。

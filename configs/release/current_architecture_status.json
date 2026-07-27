@@ -5,12 +5,12 @@
     "dev_commit": "a407e73ebd1df59b52a3664d1c1f342238d41564",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE02_RESEARCH_FIXED_BENEFIT_PROTOCOL_LOCAL_TARGETED_PASS_DURABLE_COHORT_AND_REAL_PROVIDER_ACCEPTANCE_PENDING"
+    "evaluated_source": "NE02_RESEARCH_FIXED_BENEFIT_PROTOCOL_AND_PENTEST_DYNAMIC_SUCCESSOR_LOCAL_TARGETED_PASS_DURABLE_COHORT_AND_REAL_EXPERIMENT_ACCEPTANCE_PENDING"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-02",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_D20C_TRANSPORT_IDENTITY_AND_FIXED_24_RESEARCH_BENEFIT_PROTOCOL_LOCAL_TARGETED_PASS_PURE_EVALUATOR_ONLY_DURABLE_COHORT_REAL_PROVIDER_20_CODE_30_PENTEST_AND_PROMOTION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
+  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_RESEARCH_TRANSPORT_AND_FIXED_BENEFIT_PROTOCOL_PLUS_PENTEST_CAPABILITY_DERIVED_SUCCESSOR_LOCAL_TARGETED_PASS_DURABLE_COHORT_REAL_PROVIDER_20_CODE_30_PENTEST_VERIFIED_OUTCOME_AND_PROMOTION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
   "next_wave": "NE-03",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,6 +26,29 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne02_pentest_dynamic_successor": {
+      "status": "LOCAL_TARGETED_PASS_SHADOW_ONLY_REAL_EXPERIMENT_PENDING",
+      "root_authority": "ONLY_CURRENT_AGENT_STATE_TOOL_CONTRACT_AND_PRE_ACTION_GATE_PASSED_ACTIONS_ENTER_EXECUTABLE_ROOT_BEAM",
+      "successor_authority": "CURRENT_STATE_SERVER_POLICY_ACTIONS_WITH_REGISTERED_CONTRACT_AND_MISSING_CAPABILITY_ENTER_VIRTUAL_ONLY_CATALOG",
+      "expansion": "DEPTH_ZERO_ROOT_ONLY_DEEPER_LEVELS_REQUIRE_VIRTUAL_CAPABILITY_PRECONDITION",
+      "durable_binding": "SUCCESSOR_CATALOG_DIGEST_COUNT_INITIAL_STATE_AND_TRACE_ENTER_OPTIONAL_0105_SHADOW_PREDICTION",
+      "production_influence": "FALSE_L1_L2_BASELINE_SELECTION_UNCHANGED",
+      "local_validation": "38_PASSED_IN_7_86_SECONDS",
+      "migration": "NONE_REUSES_0105_CALIBRATION_CURRENT_HEAD_0135",
+      "not_run": [
+        "30 authorized environment experiments",
+        "verified Task or Run outcome receipts",
+        "zero-violation cohort statistics",
+        "promotion proposal review"
+      ],
+      "evidence_refs": [
+        "host_brain/pentest/agent/l1_graph_search.py",
+        "host_brain/pentest/agent/planning_search_adapter.py",
+        "host_brain/pentest/agent/virtual_planning_world.py",
+        "host_brain/pentest/agent/agent_loop.py",
+        "tests/unit/test_gr01_pentest_virtual_planning_world.py"
+      ]
+    },
     "ne02_research_fixed_benefit_protocol": {
       "status": "LOCAL_TARGETED_PASS_DURABLE_LEDGER_AND_EXTERNAL_ACCEPTANCE_PENDING",
       "cohort": "EXACTLY_24_UNIQUE_PAIRED_WORKLOADS_AT_LEAST_THREE_TOPICS_LOCAL_FILE_AND_WEB",
@@ -4610,7 +4633,6 @@
         "automatic or failure-adaptive capability replanning beyond the explicit durable FAILED-predecessor replacement route",
         "composed production Research prompt/workload, real credential/provider execution, paired real readonly workload, WorkOrder/Browser, independent trust-domain claim verification, source capture and benefit cohort",
         "actual historical cohort selection/statistical comparison, independent-trust-domain verifier, controlled model/tool/token/cost execution budget and WorkspaceGrant-bound write path",
-        "Pentest capability/fact-driven successor catalog",
         "receipt-bound baseline-versus-search comparison and promotion gate",
         "any production influence from MCTS"
       ]
