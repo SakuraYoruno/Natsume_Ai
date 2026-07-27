@@ -30,7 +30,9 @@ flowchart LR
 `B` 使用深层 JSON round-trip 切断 nested mapping alias。控制路线的正式
 验收另从同一 canonical SQLite 私下加载 Command/WorkOrder/TaskGraph，
 核对 digest 并重验 policy，随后只把 policy 的安全字段写入 evidence
-digest；raw admission payload 不流出 reader。
+digest；raw admission payload 不流出 reader。clean SHA `2a88f56e` 的
+同库收据已证明七路 PASS，三条 control surface 各有一个 policy，其他路线
+为零；这不改变三路其它控制仍为 `PARTIAL` 的事实。
 
 Operator 命令的数据流先经过 active/retired 分界，而不是把未实现命令送入
 handler 前统一阻断：
@@ -110,7 +112,7 @@ flowchart TD
 Plan policy 在首次 admission 前写入 WorkOrder metadata，恢复路径只重开同一
 不可变图，不重新选路。Delegate policy 同时写入 input/metadata，Graph Budget
 允许模型维度精确为零，但外层 dispatch、时间、并发与 retry 仍有界。当前
-真实 SQLite 已覆盖 Review continuation；clean-SHA `3db60ff1` 的同库七路线
+真实 SQLite 已覆盖 Review continuation；clean-SHA `2a88f56e` 的同库七路线
 收据已重开这条数据流，因此当前启用 Plan/Delegate 范围为 `COMPLETE`。
 
 Skill 的当前执行流先做 policy partition；虚线入口只能拒绝，不能进入
@@ -180,7 +182,7 @@ flowchart LR
     C -->|"任一路 NOT_RUN/FAIL"| M["保持 MISSING / INCOMPLETE"]
 ```
 
-Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。Chat/Plan 还要重开 ModelAttempt 和 Worker model budget。它不读取或输出用户正文、模型输出、secret 和原始 payload。干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat、Skill 与当前启用 Plan/Delegate 的全部路线控制；Scheduler/Internal/Operator 仍独立保持 `PARTIAL / INCOMPLETE`。
+Reader 会把 Command→Graph→Node→Attempt→Lease→Operation→父子 Budget→Verification→Acceptance→Artifact/Projection→Effect→Outbox/Receipt 作为一条证据链，并证明当前 recovery/reconciliation/cancellation 集为空。它先严格重开 raw admission typed contracts 与 digest，但不输出它们；Chat/Plan 还要重开 ModelAttempt 和 Worker model budget，三控制路线各重开一个 policy。干净提交 `2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0` 的正式同库收据使七路 Gate 均走 `PASS` 分支，并关闭 Chat、Skill 与当前启用 Plan/Delegate 的全部路线控制；Scheduler/Internal/Operator 仍独立保持 `PARTIAL / INCOMPLETE`。
 
 当前本地七路数据生成流已经在干净提交上形成正式收据：
 

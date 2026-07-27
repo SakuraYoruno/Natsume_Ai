@@ -22,8 +22,9 @@
 - T-NE01-SCB-05：Scheduler/Internal/Operator 各要求恰好一个有效 policy；
   非控制路线夹带 policy 必须失败。当前相关批次为
   `45 passed in 53.57s`，最终受影响集合为 `100 passed in 64.61s`，架构
-  Gate 1～14 和统一 delivery gate 通过；新 clean-SHA receipt、波次
-  integration、完整进程 restart 和 NE-07 仍未运行。
+  Gate 1～14 和统一 delivery gate 通过。clean SHA `2a88f56e` 的七路线
+  receipt 为 PASS，三控制 policy count 各为 1；波次 integration、完整
+  进程 restart 和 NE-07 仍未运行。
 
 ## T-NE01-PLAN-DELEGATE-EXECUTION-POLICY
 
@@ -49,7 +50,7 @@
   child-agent target policy，也不得让普通 Delegate 退回字符串 allowlist。
 - 当前定向单元/合同集合为 `89 passed in 6.63s`；真实文件型 SQLite
   Chat/Skill/Delegate/Plan 集成为 `1 passed in 26.36s`。clean-SHA
-  `3db60ff1` 的七路线收据已通过，故当前启用 Plan/Delegate 范围为
+  `2a88f56e` 的最新七路线收据已通过，故当前启用 Plan/Delegate 范围为
   `COMPLETE`；真实 provider、NE-01 波次 integration 和 NE-07 Docker 全栈
   未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -81,7 +82,7 @@
 - T-NE01-URA-05：请求标识只输出 digest；用户正文、模型输出、secret、Command/WorkOrder/Graph/Effect payload 及额外字段均不得进入收据；篡改总 digest 必须拒绝。
 - T-NE01-URA-06：GR05 必须在同一 Host Runtime/SQLite 完成 Chat、Direct Skill、Delegate 和 Plan；Direct Skill 不得用 Plan 节点间接代替。
 - T-NE01-URA-07：Scheduler、Internal、Operator 必须写入同一 canonical SQLite；三路分别经过正式 CommandService/Effect、Internal result commit、Operator durable Review/HardState/outer outcome，所有 Secure Ingress claim 都必须 terminal COMMITTED 且有 result ref。
-- 最新正式串联运行绑定干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35`、migration 0135 和同一文件型 SQLite，GR05 为 `1 passed in 26.36s`，剩余三路 CLI 为 `PASS`，七路 reason code 全空；收据为 `docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json`。七路 `commit_bound_acceptance=PASS`；Chat、Skill、当前启用 Plan/Delegate 范围为 `COMPLETE`，Scheduler/Internal/Operator 和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 最新正式串联运行绑定干净提交 `2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0`、migration 0135 和同一文件型 SQLite，GR05 为 `1 passed in 26.28s`，剩余三路 CLI 为 `PASS`，七路 reason code 全空；收据为 `docs/45_testing/test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json`。Internal/Operator/Scheduler control policy count 各为 1；七路 `commit_bound_acceptance=PASS`。Chat、Skill、当前启用 Plan/Delegate 范围为 `COMPLETE`，Scheduler/Internal/Operator 和 NE-01 仍未完成，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-ATOMIC-INTERRUPTION-RECOVERY-HOLD
 

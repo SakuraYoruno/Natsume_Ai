@@ -22,9 +22,12 @@ MANIFEST = ROOT / "configs/release/universal_governed_runtime_coverage.json"
 
 def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -> None:
     report = load_universal_runtime_coverage(ROOT)
+    payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    receipt_ref = payload["routes"]["chat"]["acceptance_binding"]["receipt_ref"]
+    receipt = json.loads((ROOT / receipt_ref).read_text(encoding="utf-8"))
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "3db60ff170a085056d7fd9ba792cb7064de14d35"
+    assert report.evaluated_commit_sha == receipt["commit_sha"]
     assert report.migration_head == (
         "0135_task_review_denial_settlement.sql"
     )
@@ -71,14 +74,12 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
         "revision_plus_one_replan",
         "composition_without_global_service_locator",
     )
-    payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert payload["production_enablement"][
         "scheduler_admin_governed_cutover"
     ].startswith("BOTH_HTTP_PREFIXES_CREATE_UPDATE_DELETE_ENABLE_DISABLE_")
-    assert (
-        "route calls to publish_definition, set_enabled or delete_definition are zero"
-        in payload["routes"]["scheduler"]["production_boundary"].lower()
-    )
+    scheduler_boundary = payload["routes"]["scheduler"]["production_boundary"].lower()
+    assert "one sqlite read transaction" in scheduler_boundary
+    assert "never requeries due rows inside the same sweep" in scheduler_boundary
     assert "tests/unit/test_aw02_scheduler_route_cutover.py" in payload[
         "routes"
     ]["scheduler"]["evidence_refs"]
@@ -118,7 +119,8 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
         for route in payload["routes"].values()
     )
     assert (
-        "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
+        "docs/45_testing/test_reports/"
+        "ne01_scheduler_clock_control_route_acceptance_20260727.json"
         in report.evidence_refs
     )
 
@@ -212,10 +214,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     tmp_path: Path,
 ) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    receipt_ref = (
-        "docs/45_testing/test_reports/"
-        "ne01_plan_delegate_route_acceptance_20260727.json"
-    )
+    receipt_ref = payload["routes"]["chat"]["acceptance_binding"]["receipt_ref"]
     receipt = json.loads((ROOT / receipt_ref).read_text(encoding="utf-8"))
     payload["evidence_binding"]["evaluated_commit_sha"] = receipt["commit_sha"]
     payload["evidence_binding"]["migration_head"] = receipt["migration_head"]

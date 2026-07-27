@@ -33,7 +33,8 @@ Skill/Plan/Delegate 携带控制 policy 同样失败。证据入口为
 `test_universal_route_acceptance.py` 与
 `test_ne01_universal_remaining_route_acceptance.py`。核心集合 `45 passed`，
 最终受影响集合 `100 passed`，Gate 1～14 与统一 delivery gate 通过；
-clean-SHA 收据待提交后生成，FR 状态不升级。
+clean SHA `2a88f56e` 的七路线收据也为 PASS，三个控制 policy count 各为
+1。它只升级本项局部控制，FR 复合状态不升级。
 
 TRACE-EXEC-08AT（Scheduler/Internal/Operator 控制执行政策）：三类 surface
 复用 `route=delegate` 时必须携带 content-addressed
@@ -131,7 +132,7 @@ ROUTES_INCOMPLETE`。
 | FR-PENTEST | DevSpec §7 | Pentest domain runtime + PlanningSearch adapter | security/pentest suites | `WIRED_L3_SHADOW_UNCALIBRATED` |
 | FR-PROACTIVE | DevSpec §4、§11 | proactive intent/outbox + Persona feedback paths | proactive contracts、writer 审计 | `PARTIAL_PERSONA_FENCE_WIRED` |
 
-TRACE-EXEC-08AM（通用 Worker 独立证据与 Plan 真实产物流）：Chat/Skill/Delegate/Plan/Tool/Operator 的已启用通用 worker 必须由 route-neutral Verifier 与 Acceptance 分别重开 durable WorkerProjection；command/request、graph revision、node、attempt、route/target、node grant、WorkOrder/context、receipt digest、完整 COMMIT 与 output contract 任一漂移都失败关闭。只有固定结构 predicate 可自动 PASS，任意其它验收文字必须进入 durable Review。Plan final Chat 必须实际消费已验收前驱 TaskResult artifact，并携带 artifact/receipt/payload digest bundle attestation。证据为 `test_ne01_governed_worker_evidence.py`、`test_ne01_node_input_artifact_attestation.py`、`test_gr05_frozen_route_executors.py`、真实 SQLite `test_gr05_universal_host_runtime.py` 与 `ne01_plan_delegate_route_acceptance_20260727.json`。结论为 `ENABLED_DELEGATE_PLAN_CONTROLS_COMPLETE / NE01_INCOMPLETE`。
+TRACE-EXEC-08AM（通用 Worker 独立证据与 Plan 真实产物流）：Chat/Skill/Delegate/Plan/Tool/Operator 的已启用通用 worker 必须由 route-neutral Verifier 与 Acceptance 分别重开 durable WorkerProjection；command/request、graph revision、node、attempt、route/target、node grant、WorkOrder/context、receipt digest、完整 COMMIT 与 output contract 任一漂移都失败关闭。只有固定结构 predicate 可自动 PASS，任意其它验收文字必须进入 durable Review。Plan final Chat 必须实际消费已验收前驱 TaskResult artifact，并携带 artifact/receipt/payload digest bundle attestation。证据为 `test_ne01_governed_worker_evidence.py`、`test_ne01_node_input_artifact_attestation.py`、`test_gr05_frozen_route_executors.py`、真实 SQLite `test_gr05_universal_host_runtime.py` 与最新 `ne01_scheduler_clock_control_route_acceptance_20260727.json`。结论为 `ENABLED_DELEGATE_PLAN_CONTROLS_COMPLETE / NE01_INCOMPLETE`。
 
 TRACE-EXEC-08AN（Plan 节点审批与续签 Grant）：Registry 的 `require_confirm` 必须进入 frozen capability snapshot，不能以过滤候选代替治理；Planning compiler 必须将 candidate policy 重绑定为覆盖每个 immutable TaskNode ID 的政策。Scheduler 只阻塞要求审批的节点，缺失/畸形/无来源政策失败关闭。0096 continuation 消费 exact Review 后，已 accepted predecessor 使用 immutable projection 的历史 grant，尚未执行节点使用 claim-fenced 续签 grant，worker 不重跑。`test_ne02_capability_plan_search.py` 与真实 SQLite `test_ne01_plan_node_review_runtime.py` 加上既有自动 continuation/restart/retry/Universal Host 回归证明该边界。结论为 `PLAN_ENABLED_ROUTE_NODE_GRANT_AND_REVIEW_RESUME_PASS / PLAN_AND_NE01_INCOMPLETE`；graph-scope Budget、一般搜索/恢复、事务副作用和 commit-bound acceptance 不升级。
 

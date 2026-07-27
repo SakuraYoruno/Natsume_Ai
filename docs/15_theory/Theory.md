@@ -45,7 +45,7 @@ occurrence、再查询本轮 due definition，前一个 worker 就能通过修�
 
 模型预算不能由 worker 自报一个总数。一次可验收调用必须从 canonical ModelAttempt 生命周期重开 provider、model、route、prompt/output digest 和 provider usage，再把它与不可变 WorkerProjection 中的测量证明、Graph aggregate usage 和 Attempt-bound child usage 做精确等值校验。执行所需的额度 guard 属于瞬时内部 authority，不能流入 Life、Memory、Effect 或公开收据；对外只允许暴露经白名单约束的标识、digest 和实际用量。exact replay 只能重开原有用量与结果，不能再请求 provider 或二次扣费。受控 terminal transport 可以证明这条治理链，但不能替代真实外部 provider、质量和成本收益验收。
 
-当前正式实例已在干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，Chat/Plan 的模型预算 lineage、Plan 三节点政策与 Delegate Review continuation 都被独立重开，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。Chat、当前 44 个启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 因各自声明控制均为 `PASS` 成为四条 enabled-scope `COMPLETE` 路线；其它能力、其余三路、真实模型质量或全栈 canary 都不能由此推导为完成。
+当前正式实例已在干净提交 `2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，验收者严格重开 admission digest，Internal/Operator/Scheduler 各重开一个 content-addressed control policy，Chat/Plan 的模型预算 lineage、Plan 三节点政策与 Delegate Review continuation 也被独立重开；迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。Chat、当前 44 个启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 因各自声明控制均为 `PASS` 成为四条 enabled-scope `COMPLETE` 路线；其它能力、其余三路、真实模型质量或全栈 canary 都不能由此推导为完成。
 
 恢复治理遵循“先持久化不确定性，再由精确证据消解”的不变量。未知副作用不能被 timeout、异常类型或操作者意图直接解释为未发生；Operation 首次进入待恢复状态时，状态 mutation、恢复 case 与各自 Outbox 必须同成同败，不能把 case 留给下一次请求补写。运行时冻结当前 Graph/Node/Attempt/Operation/Budget/Lease 与取消事实后，再让签名证据精确绑定该 recovery case。未决 case 的存续应跟随真正待消解的 Operation version 与取消身份，不能因后续预算计量、租约到期或生命周期围栏而从恢复清单意外消失；这些变化仍保留在不可变 subject 中供审计。证据只能收紧既有 authority，不能创建新的执行权；对账完成后还必须证明同一 case 已退出 current projection。无法证明时继续隔离，绝不盲目重放 worker。
 

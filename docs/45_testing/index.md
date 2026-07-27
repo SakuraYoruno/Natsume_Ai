@@ -24,9 +24,11 @@
 - Scheduler/acceptance 核心批次为 `45 passed in 53.57s`；加入结构、
   control-policy、coverage 与文档回归后的最终受影响集合为
   `100 passed in 64.61s`。架构 Gate 1～14 和
-  `static_scan,doc_gate` 均为 PASS。这些仍是 pre-commit 本地证据；新
-  clean-SHA 七路线收据为 `PENDING`，不得与历史 37/19/69 项批次相加，也
-  不证明一般恢复、波次 integration 或 NE-07。
+  `static_scan,doc_gate` 均为 PASS。随后 clean SHA `2a88f56e` 的 GR05
+  为 `1 passed in 26.28s`，三控制路线 CLI 为 PASS；同库正式收据七路
+  reason code 为空，Internal/Operator/Scheduler 的 control policy count
+  各为 1。该收据不得与历史 37/19/69 项批次相加，也不证明一般恢复、波次
+  integration 或 NE-07。
 
 ## NE-01 Operator 旧命令物理退役切片
 
@@ -103,8 +105,8 @@
   `ReviewContinuationWorker` claim exact checkpoint，最终 `ACCEPTED` 且
   continuation 消失。Chat/Skill/Delegate/Plan 集成为
   `1 passed in 26.40s`。
-- 干净实现 SHA `3db60ff1` 已重跑同库七路线 v3 收据：
-  `ne01_plan_delegate_route_acceptance_20260727.json` 的七路均为 `PASS`，
+- 干净实现 SHA `2a88f56e` 已重跑同库七路线 v3 收据：
+  `ne01_scheduler_clock_control_route_acceptance_20260727.json` 的七路均为 `PASS`，
   Plan 三节点与 Delegate Review continuation 均有提交绑定证据。当前启用
   Plan/Delegate 范围为 `COMPLETE`；真实 provider、Docker 与完整服务栈未运行，
   远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
@@ -187,7 +189,7 @@
 - `UniversalRouteAcceptanceReader` 只读打开真实文件型 SQLite，在一个事务中读取 Command、Graph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox、recovery、reconciliation 与 cancellation 投影；内存数据库、缺表/缺列和迁移不一致均失败关闭。
 - `UniversalRouteAcceptanceBuilder` 要求干净 Git HEAD、仓库/数据库 migration head 一致、每个 request 只证明一条路线，并输出经过字段白名单和总 receipt digest 保护的隐私边界收据。
 - GR05 已加入 Direct Skill，真实 Host Runtime 的单项集成 `1 passed`，共同证明 Chat、Skill、Delegate、Plan。`test_ne01_universal_remaining_route_acceptance.py` 另以同一真实 SQLite 运行 Scheduler、Internal 和带 Review/outer outcome 的 Operator，单项集成 `1 passed`。
-- 最新串联运行绑定干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35`；GR05 单项为 `1 passed in 26.36s`，剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 得到七路全部 `PASS`、reason code 全空，migration head 为 0135。当前正式收据为 [ne01_plan_delegate_route_acceptance_20260727.json](test_reports/ne01_plan_delegate_route_acceptance_20260727.json)，receipt digest=`sha256:ac275b0854d6ef56c9fe685ee99dad965556009363e92fb9105ed2788f57beab`。
+- 最新串联运行绑定干净提交 `2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0`；GR05 单项为 `1 passed in 26.28s`，剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 严格重开 admission digest 与控制 policy，得到七路全部 `PASS`、reason code 全空，migration head 为 0135。当前正式收据为 [ne01_scheduler_clock_control_route_acceptance_20260727.json](test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json)，receipt digest=`sha256:505c300bc88882258bc47d13c75a542fb4a9526fc4e16cf2b7e9875d8d9cdd1a`。
 - 机器矩阵中七路 `commit_bound_acceptance` 已全部为 `PASS`；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 和只读 `pentest_agent` Delegate 达到 `COMPLETE`。Scheduler/Internal/Operator 的其它 `PARTIAL` 控制仍使 NE-01 保持 `IN_PROGRESS`。受控 terminal provider 不具备真实 provider 质量、PlanningSearch 收益或 NE-07 资格，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Review 拒绝原子终态当前切片

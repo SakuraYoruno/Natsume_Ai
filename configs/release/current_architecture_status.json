@@ -5,12 +5,12 @@
     "dev_commit": "c97ed7963af69b476047a48003dd68146bcf5f29",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_SCHEDULER_CLOCK_BATCH_AND_CONTROL_POLICY_ACCEPTANCE_LOCAL_WORKTREE_OVER_OPERATOR_RETIREMENT_MERGE_C97ED7963"
+    "evaluated_source": "NE01_SCHEDULER_CLOCK_BATCH_AND_CONTROL_POLICY_ACCEPTANCE_FORMAL_CLEAN_SHA_2A88F56E_OVER_OPERATOR_RETIREMENT_MERGE_C97ED7963"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_SCHEDULER_CLOCK_BATCH_CONTENT_ADDRESSED_SINGLE_SQLITE_SNAPSHOT_AND_CONTROL_POLICY_ACCEPTANCE_REOPEN_LOCAL_PASS_NEW_CLEAN_SHA_RECEIPT_GENERAL_RECOVERY_WAVE_INTEGRATION_REAL_EXTERNAL_MODEL_AND_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_SCHEDULER_CLOCK_BATCH_CONTENT_ADDRESSED_SINGLE_SQLITE_SNAPSHOT_AND_CONTROL_POLICY_ACCEPTANCE_FORMAL_CLEAN_SHA_PASS_GENERAL_RECOVERY_WAVE_INTEGRATION_REAL_EXTERNAL_MODEL_AND_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -27,11 +27,11 @@
   },
   "active_wave_local_validation": {
     "status": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_SEVEN_ROUTE_FORMAL_CLEAN_SHA_SHARED_SQLITE_COMMIT_BOUND_ACCEPTANCE_PASS_PROGRAM_INCOMPLETE",
-    "commit_binding": "FORMAL_ACCEPTANCE_EVALUATED_COMMIT_3DB60FF170A085056D7FD9BA792CB7064DE14D35_BASED_ON_ORIGIN_DEV_5FECD47C4CBE83E3EC31B74FBF9B0BEACFAC14DC",
+    "commit_binding": "FORMAL_ACCEPTANCE_EVALUATED_COMMIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_BASED_ON_ORIGIN_DEV_C97ED7963AF69B476047A48003DD68146BCF5F29",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_PLAN_DELEGATE_EXECUTION_POLICY_AND_SEVEN_ROUTE_SHARED_SQLITE_ACCEPTANCE",
+    "slice": "NE01_SCHEDULER_CLOCK_BATCH_CONTROL_POLICY_AND_SEVEN_ROUTE_SHARED_SQLITE_ACCEPTANCE",
     "scheduler_clock_batch_current_validation": {
-      "status": "LOCAL_FINAL_AFFECTED_100_PASS_STATIC_GATES_1_TO_14_AND_DELIVERY_GATE_PASS_CLEAN_SHA_SEVEN_ROUTE_RECEIPT_PENDING_NE01_IN_PROGRESS",
+      "status": "PASS_FORMAL_CLEAN_SHA_SEVEN_ROUTE_CONTROL_POLICY_ACCEPTANCE_PROGRAM_INCOMPLETE",
       "schema": "natsume.scheduler.clock-batch.v1",
       "read_boundary": "PENDING_CLOCK_OCCURRENCES_AND_NEWLY_DUE_DEFINITIONS_CAPTURED_BEFORE_ANY_WORKER_IN_ONE_SQLITE_READ_TRANSACTION",
       "freeze_boundary": "CAPTURE_TIME_LIMIT_EXACT_ROW_ORDER_AND_DEEP_JSON_ROWS_BOUND_TO_SCHEDULER_CLOCK_BATCH_SHA256_REF",
@@ -42,14 +42,15 @@
       "final_affected_validation": "100_PASSED_IN_64_61_SECONDS_INCLUDES_STRUCTURE_CONTROL_POLICY_COVERAGE_AND_DOCUMENT_GATES",
       "architecture_static": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_NO_ALLOWLIST_EXPANSION",
       "delivery_gate": "PASS_STATIC_SCAN_AND_DOC_GATE_FAILURES_EMPTY",
-      "clean_sha_receipt": "PENDING_UNTIL_IMPLEMENTATION_COMMIT_IS_CLEAN",
+      "clean_sha_receipt": "PASS_COMMIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_RUN_F1A0F5AA_RECEIPT_505C300B",
+      "formal_receipt": "docs/45_testing/test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "boundary": "CLOSES_MUTABLE_CLOCK_SWEEP_AND_CONTROL_POLICY_ACCEPTANCE_BLIND_SPOT_NOT_GENERAL_RECOVERY_OR_NE01"
     },
     "control_route_execution_policy_current_validation": {
-      "status": "LOCAL_IMPLEMENTATION_AND_TARGETED_69_PASS_CLEAN_SHA_RECEIPT_PENDING_NE01_IN_PROGRESS",
+      "status": "PASS_FORMAL_CLEAN_SHA_ALL_THREE_CONTROL_SURFACES_REOPENED_NE01_IN_PROGRESS",
       "schema": "Natsume.host.control_route_execution_policy.v1",
       "surfaces": "INTERNAL_OPERATOR_SCHEDULER",
       "binding": "EXACT_SURFACE_CONTROL_COMMAND_TARGET_TASK_RUNTIME_OWNER_REVIEW_MODE_FINITE_BUDGET_DURABLE_WORKER_PROJECTION_VERIFICATION_GRAPH_ACCEPTANCE_ONLY_EFFECT_WORKORDER_INPUT_METADATA_BUDGET_AND_TASKNODE_INPUT_REFS",
@@ -61,6 +62,7 @@
       "targeted_validation": "POST_STRUCTURE_REFACTOR_THREE_DISJOINT_PARALLEL_GROUPS_UNIT_29_PASSED_IN_1_41_SECONDS_HOST_SCHEDULER_INTERNAL_32_PASSED_IN_61_30_SECONDS_OPERATOR_8_PASSED_IN_170_27_SECONDS_TOTAL_69_ZERO_FAILED_WALL_CLOCK_NOT_SUMMED",
       "structure_boundary": "PURE_WORKORDER_REPLAY_NORMALIZATION_IN_CONTRACTS_ZERO_SCHEDULER_TO_APP_REVERSE_IMPORT_FOCUSED_CONTROL_POLICY_AND_ACCEPTANCE_EFFECT_AUDIT_PROJECTION_MODULES_GOVERNED_TASK_ADAPTER_1480_LINES_INTERNAL_TASK_RUNTIME_1499_LINES_NO_ALLOWLIST_EXPANSION",
       "architecture_static": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
+      "formal_acceptance": "PASS_COMMIT_2A88F56E_RUN_F1A0F5AA_RECEIPT_DIGEST_505C300B_INTERNAL_OPERATOR_SCHEDULER_POLICY_COUNT_ONE_OTHER_ROUTES_ZERO",
       "evidence_refs": [
         "host_brain/contracts/agent_runtime/control_route_execution_policy.py",
         "host_brain/contracts/scheduler_clock_batch.py",
@@ -153,23 +155,23 @@
     "route_acceptance_ledger_current_validation": {
       "status": "FORMAL_CLEAN_SHA_SHARED_FILE_BACKED_SQLITE_ALL_SEVEN_COMMIT_BOUND_ACCEPTANCE_PASS_PROGRAM_INCOMPLETE",
       "schema": "natsume.universal-runtime-route-acceptance.v3",
-      "reader_boundary": "ONE_FILE_BACKED_CANONICAL_SQLITE_MODE_RO_QUERY_ONLY_SINGLE_TRANSACTION_NO_COMMAND_WORKORDER_GRAPH_EFFECT_PAYLOAD_OR_USER_TEXT_EXPOSED",
-      "source_binding": "COMMIT_3DB60FF170A085056D7FD9BA792CB7064DE14D35_REPOSITORY_AND_APPLIED_MIGRATION_HEAD_0135_EXACT_MATCH",
+      "reader_boundary": "ONE_FILE_BACKED_CANONICAL_SQLITE_MODE_RO_QUERY_ONLY_SINGLE_TRANSACTION_STRICT_COMMAND_WORKORDER_GRAPH_JSON_AND_DIGEST_REOPEN_CONTROL_POLICY_REVALIDATION_NO_RAW_PAYLOAD_EFFECT_OR_USER_TEXT_EXPOSED",
+      "source_binding": "COMMIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_REPOSITORY_AND_APPLIED_MIGRATION_HEAD_0135_EXACT_MATCH",
       "route_identity": "INTERNAL_SCHEDULER_OPERATOR_DERIVE_FROM_EXACT_HOSTCOMMAND_SURFACE_OTHERWISE_CHAT_SKILL_PLAN_DELEGATE_DERIVE_FROM_ROUTE_TYPE_ONE_REQUEST_CANNOT_PROVE_TWO_ROUTES",
-      "required_evidence": "COMPLETED_GRAPH_ALL_NODES_ACCEPTED_LATEST_SUCCEEDED_ATTEMPT_TERMINAL_RELEASED_LEASE_COMMITTED_OPERATION_RECEIPT_GRAPH_AND_CHILD_BUDGET_LINEAGE_DURABLE_VERIFICATION_ACCEPTANCE_ARTIFACT_WORKER_PROJECTION_COMMITTED_EFFECT_PUBLISHED_OUTBOX_ZERO_CURRENT_RECOVERY_HOLD_ZERO_CANCELLATION_OR_EFFECT_RECONCILIATION_HISTORY_PLUS_CHAT_AND_PLAN_MODELATTEMPT_WORKERPROJECTION_PARENT_CHILD_BUDGET_EXACT_LINEAGE",
+      "required_evidence": "COMPLETED_GRAPH_ALL_NODES_ACCEPTED_LATEST_SUCCEEDED_ATTEMPT_TERMINAL_RELEASED_LEASE_COMMITTED_OPERATION_RECEIPT_GRAPH_AND_CHILD_BUDGET_LINEAGE_DURABLE_VERIFICATION_ACCEPTANCE_ARTIFACT_WORKER_PROJECTION_COMMITTED_EFFECT_PUBLISHED_OUTBOX_ZERO_CURRENT_RECOVERY_HOLD_ZERO_CANCELLATION_OR_EFFECT_RECONCILIATION_HISTORY_PLUS_CHAT_AND_PLAN_MODELATTEMPT_LINEAGE_AND_EXACTLY_ONE_REOPENED_CONTROL_POLICY_FOR_INTERNAL_OPERATOR_SCHEDULER",
       "tamper_boundary": "RUN_ID_ROUTE_EVIDENCE_DATABASE_SNAPSHOT_AND_TOP_LEVEL_RECEIPT_DIGEST_ARE_CANONICAL_AND_REVALIDATED_LEGACY_V2_SYNTHETIC_RECEIPT_REJECTED",
       "privacy_boundary": "REQUEST_IDENTIFIERS_DIGESTED_USER_TEXT_MODEL_OUTPUT_SECRET_RAW_COMMAND_WORKORDER_GRAPH_AND_EFFECT_PAYLOAD_FORBIDDEN",
       "targeted_contracts": "RELEASE_COVERAGE_RECEIPT_METADATA_SET_37_PASSED_IN_3_78_SECONDS_DO_NOT_SUM_WITH_SKILL_OR_GR05_BATCHES",
-      "real_sqlite_calibration": "CLEAN_COMMIT_3DB60FF1_GR05_CHAT_SKILL_DELEGATE_PLAN_1_PASSED_IN_26_36_SECONDS_REMAINING_SCHEDULER_INTERNAL_OPERATOR_CLI_PASS_SHARED_DATABASE_V3_VALIDATOR_ALL_SEVEN_PASS_ZERO_REASON_CODES_PLAN_THREE_NODE_AND_DELEGATE_REVIEW_LINEAGE_PRESENT",
+      "real_sqlite_calibration": "CLEAN_COMMIT_2A88F56E_GR05_CHAT_SKILL_DELEGATE_PLAN_1_PASSED_IN_26_28_SECONDS_REMAINING_SCHEDULER_INTERNAL_OPERATOR_CLI_PASS_SHARED_DATABASE_V3_VALIDATOR_ALL_SEVEN_PASS_ZERO_REASON_CODES_CONTROL_POLICY_COUNTS_0_0_1_1_0_1_0",
       "local_driver_boundary": "SCHEDULER_USES_REAL_DEFINITION_OCCURRENCE_COMMANDSERVICE_AND_EFFECT_INTERNAL_USES_OFFICIAL_COMMANDSERVICE_NODE_GOVERNANCE_AND_RESULT_COMMIT_OPERATOR_USES_EXACT_OBS_AUTHORITY_DURABLE_REVIEW_HARDSTATE_EFFECT_OUTER_OUTCOME_AND_CLAIM_SETTLEMENT_BOUNDED_WORKERS_NOT_PROVIDER_OR_BENEFIT_ELIGIBLE",
       "global_sqlite_boundary": "PASS_WITHIN_31_PASSED_IN_8_42_SECONDS_CONTRACT_BATCH",
       "doc_authority_and_receipt_regression": "DOC_GATE_PASS_PLUS_37_RELEASE_COVERAGE_RECEIPT_METADATA_TESTS_DO_NOT_SUM",
       "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY",
       "unified_delivery_gate": "PASS_STATIC_SCAN_AND_DOC_GATE_FAILURES_EMPTY_ON_IMPLEMENTATION_WORKTREE",
       "ruff": "NOT_RUN_TOOL_UNAVAILABLE",
-      "formal_receipt": "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json",
-      "formal_run_id": "universal-runtime-acceptance://sha256/21cb20eea116b2c70f7fd5937c917888b4ede351be7e953ddda96a51c46f75a0",
-      "formal_receipt_digest": "sha256:ac275b0854d6ef56c9fe685ee99dad965556009363e92fb9105ed2788f57beab",
+      "formal_receipt": "docs/45_testing/test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json",
+      "formal_run_id": "universal-runtime-acceptance://sha256/f1a0f5aa041ec7e90f50a55e1a744663301041de033dd633f6fe56c9bc372f76",
+      "formal_receipt_digest": "sha256:505c300bc88882258bc47d13c75a542fb4a9526fc4e16cf2b7e9875d8d9cdd1a",
       "coverage_status": "ALL_SEVEN_COMMIT_BOUND_ACCEPTANCE_CONTROLS_PASS_CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_SCHEDULER_INTERNAL_OPERATOR_AND_NE01_INCOMPLETE",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "real_model": "NOT_RUN",
@@ -1764,7 +1766,7 @@
     "generic_effect_reconciliation": "VISIBLE_TURN_PREFERENCE_AND_LIFE_PROJECTION_INDEPENDENT_POST_ACCEPTANCE_EFFECTS_PREFERENCE_STORE_GATE_MISSING_OR_NON_BOOLEAN_FAILS_CLOSED_ZERO_WRITE_EXPLICIT_FALSE_OR_MALFORMED_ENV_PARSES_BOOLEAN_FALSE_AND_WRITES_ONLY_DISABLED_RECEIPT_ZERO_EVENT_PROFILE_0118_EVENT_APPEND_ONLY_CHILD_PROFILE_AND_RECEIPT_SAME_UOW_PARENT_SEALED_TRIGGER_AND_FULL_SET_RECONCILIATION_REAL_NO_SIGNAL_STRICT_ADMITTED_TIME_EXACT_CONVERSATION_SESSION_CANONICAL_DELIVERY_DIGEST_GATEWAY_READ_ONLY_QUERY_REOPENS_SAME_SQLITE_PAYLOAD_AND_VALIDATES_EFFECT_ID_NOT_FOUND_ALWAYS_UNKNOWN",
     "internal_result_boundary": "PARTIAL_INTERNAL_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_POST_ADMISSION_NATIVE_WORKORDERV3_EXACT_LIFECYCLE_SURVIVOR_REUSES_EXISTING_SEAL_LINEAGE_HIGHER_FENCE_AUTHORITY_SIGNED_NO_INTENT_RELEASE_NO_SIDE_EFFECT_ATOMIC_SINGLE_NODE_FAILURE_TERMINAL_DETERMINISTIC_SECURE_INGRESS_CLAIM_BEFORE_REAL_GIT_CLEANUP_SIGNED_CANCELLATION_TERMINALS_REMAIN_SEPARATE_GENERAL_CRASH_LEFT_UNSEALED_UNKNOWN_EFFECT_OTHER_FAILURE_CANCELLATION_MULTI_NODE_BATCH_GENERAL_WRITE_HANDLE_LEVEL_TOCTOU_OS_CONTAINER_ISOLATION_REMAIN_INCOMPLETE",
     "scheduler_clock_targeted_validation": {
-      "status": "CONTENT_ADDRESSED_SINGLE_TRANSACTION_CLOCK_BATCH_LOCAL_TARGETED_PASS_CLEAN_SHA_RECEIPT_PENDING",
+      "status": "CONTENT_ADDRESSED_SINGLE_TRANSACTION_CLOCK_BATCH_FORMAL_CLEAN_SHA_ROUTE_ACCEPTANCE_PASS",
       "scope": "SCHEDULER_MIGRATION_COVERAGE_PLUS_ATOMIC_DUE_TO_OCCURRENCE_FENCE_HEARTBEAT_ACTUAL_FAILURE_TIME_BACKOFF_AND_ONE_SNAPSHOT_PENDING_PLUS_DUE_BATCH",
       "atomic_fence_subset_tests": 19,
       "atomic_fence_subset_duration_seconds": 47.53,
@@ -3125,7 +3127,7 @@
     "workspace_write": "PARTIAL_W2_GOVERNED_INTERNAL_AND_THREE_REVIEWED_RISK4_AGENT_SKILL_WRITE_PATCH_ACCEPTED_HEAD_PROMOTION_PLUS_INTERNAL_CLEAN_NO_CHANGE_AND_EXACT_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_DOMAIN_PACK_OTHER_SKILLS_GENERAL_WRITE_INCOMPLETE_EXPLICIT_SECRET_REQUIRED_DEFAULT_FAIL_CLOSED_CANARY_NOT_RUN",
     "budget": "PARTIAL_GRAPH_CEILING_PLUS_ATTEMPT_BOUND_CHILD_RESERVATION_PARENT_CHILD_USAGE_UOW_RETRY_REPLAY_AND_BACKFILL_LOCAL_SQLITE_PROVEN_SEVEN_ROUTE_COVERAGE_AND_CANARY_INCOMPLETE",
     "skill_budget_effect_policy": "PASS_CLEAN_SHA_C68850F8_93_CANONICAL_HOST_SKILLS_EXHAUSTIVELY_CLASSIFIED_44_ENABLED_TASK_PRECHARGED_49_FAIL_CLOSED_PENDING_TYPED_POST_ACCEPTANCE_EFFECT_CHAT_AND_SKILL_COMPLETE_PROGRAM_INCOMPLETE",
-    "commit_bound_acceptance_collector": "PASS_V3_QUERY_ONLY_CANONICAL_SQLITE_TAMPER_AND_PRIVACY_FAIL_CLOSED_CLEAN_COMMIT_3DB60FF170A085056D7FD9BA792CB7064DE14D35_ALL_SEVEN_ROUTES_PASS_CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPE_CONTROLS_PASS_CONTROLLED_TERMINAL_PROVIDER_GOVERNANCE_ONLY",
+    "commit_bound_acceptance_collector": "PASS_V3_QUERY_ONLY_CANONICAL_SQLITE_STRICT_ADMISSION_DIGEST_AND_CONTROL_POLICY_REOPEN_TAMPER_AND_PRIVACY_FAIL_CLOSED_CLEAN_COMMIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_ALL_SEVEN_ROUTES_PASS_CONTROLLED_TERMINAL_PROVIDER_GOVERNANCE_ONLY",
     "host_hard_state": "WIRED_0115_DURABLE_RUNTIME_FENCED_SYS_MODE_OPERATOR_VERTICAL_SLICE_PARTIAL_COMMIT_BOUND_ACCEPTANCE_PASS_OTHER_OPERATOR_CONTROLS_AND_CANARY_INCOMPLETE",
     "production_canary": "TERMINAL_EXACT_LOCAL_SQLITE_PASS_FULL_RUNTIME_NOT_RUN"
   },
@@ -3135,14 +3137,14 @@
       "scope": ["chat", "skill", "plan", "delegate", "scheduler", "internal", "operator"],
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
-        "evaluated_commit_sha": "3db60ff170a085056d7fd9ba792cb7064de14d35",
+        "evaluated_commit_sha": "2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0",
         "migration_head": "0135_task_review_denial_settlement.sql",
         "route_status": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_REMAINING_THREE_INCOMPLETE",
         "commit_bound_acceptance": "PASS_ALL_SEVEN_FORMAL_CLEAN_SHA_SHARED_FILE_BACKED_SQLITE_RECEIPT",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "The v2 coverage matrix covers chat/skill/plan/delegate/scheduler/internal/operator. The v3 ledger reopens one file-backed canonical SQLite database in mode=ro/query_only and requires exact clean Git HEAD, repository/applied migration head, completed Graph, accepted Nodes, latest successful Attempts, terminal Leases, committed Operation receipts, graph/child Budget lineage, durable Verification/Acceptance, Artifact/WorkerProjection, committed Effects, published Outboxes and zero current recovery/cancellation ambiguity. On clean commit 3db60ff170a085056d7fd9ba792cb7064de14d35, GR05 ran Chat/Skill/reviewed Delegate/three-node Plan and the remaining-route driver ran real Scheduler/Internal/reviewed Operator application boundaries against the same database. The privacy-safe receipt validates all seven PASS with no reason codes and makes all seven commit_bound_acceptance controls PASS. Chat, Skill, enabled CAPABILITY_SEARCH_V1 Plan and enabled read-only pentest_agent Delegate are COMPLETE. Scheduler, Internal, Operator and NE-01 remain incomplete because their other controls are still partial. The controlled terminal provider is runtime-governance evidence only; deployed-key HTTP/network canary, real external model quality, generic PlanningSearch benefit, wave integration and production canary remain incomplete.",
+      "end_to_end_boundary": "The v2 coverage matrix covers chat/skill/plan/delegate/scheduler/internal/operator. The v3 ledger reopens one file-backed canonical SQLite database in mode=ro/query_only and requires exact clean Git HEAD, repository/applied migration head, strict Command/WorkOrder/TaskGraph JSON plus digest identity, completed Graph, accepted Nodes, latest successful Attempts, terminal Leases, committed Operation receipts, graph/child Budget lineage, durable Verification/Acceptance, Artifact/WorkerProjection, committed Effects, published Outboxes and zero current recovery/cancellation ambiguity. On clean commit 2a88f56e2dc7c68d7f37100c6c2d408bc2fdf6a0, GR05 ran Chat/Skill/reviewed Delegate/three-node Plan and the remaining-route driver ran real Scheduler/Internal/reviewed Operator application boundaries against the same database. Internal, Operator and Scheduler each independently reopened exactly one content-addressed control policy; the other routes exposed zero. The privacy-safe receipt validates all seven PASS with no reason codes and makes all seven commit_bound_acceptance controls PASS. Chat, Skill, enabled CAPABILITY_SEARCH_V1 Plan and enabled read-only pentest_agent Delegate are COMPLETE. Scheduler, Internal, Operator and NE-01 remain incomplete because their other controls are still partial. The controlled terminal provider is runtime-governance evidence only; deployed-key HTTP/network canary, real external model quality, generic PlanningSearch benefit, wave integration and production canary remain incomplete.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -3164,7 +3166,8 @@
         "tests/contract/test_universal_governed_runtime_coverage.py",
         "configs/release/universal_governed_runtime_coverage.json",
         "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json",
-        "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json"
+        "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json",
+        "docs/45_testing/test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json"
       ]
     },
     "read_projection_persistence_boundary": {
@@ -3360,7 +3363,6 @@
       "remaining": [
         "general unknown external effect human attribution",
         "program-wide Budget measurement",
-        "new clean-SHA seven-route receipt for this batch",
         "NE-01 wave integration and production canary"
       ],
       "evidence_refs": [
