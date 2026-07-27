@@ -227,6 +227,7 @@ class RuntimeWorldObservationApplication:
         observation_port: Any,
         world_resolver: WorldResolver,
         environment_observation_provider: Callable[..., Mapping[str, Any]],
+        long_term_goal_authority: Any,
     ) -> None:
         if not callable(getattr(event_store, "append_event", None)) or not callable(
             getattr(event_store, "get_event_by_id", None)
@@ -253,10 +254,17 @@ class RuntimeWorldObservationApplication:
             raise RuntimeWorldObservationError(
                 "composition-owned environment observation provider is required"
             )
+        if not callable(
+            getattr(long_term_goal_authority, "list_active_world_facts", None)
+        ):
+            raise RuntimeWorldObservationError(
+                "durable long-term-goal observation authority is required"
+            )
         self._events = event_store
         self._journal = observation_port
         self._resolver = world_resolver
         self._environment = environment_observation_provider
+        self._long_term_goals = long_term_goal_authority
         self._transition_lock = RLock()
 
     def observe_and_resolve(
@@ -347,6 +355,76 @@ class RuntimeWorldObservationApplication:
                 observed_at_ms=observed_at_ms,
                 source_ref="world-observation://pending/source",
             )
+            try:
+                goal_facts = tuple(
+                    self._long_term_goals.list_active_world_facts(
+                        workspace_id=workspace,
+                        subject_id=subject,
+                        observed_at_ms=observed_at_ms,
+                        source_ref="world-observation://pending/source",
+                    )
+                )
+            except Exception as exc:
+                raise RuntimeWorldObservationError(
+                    "long-term-goal observation authority is unavailable"
+                ) from exc
+            if any(
+                not isinstance(item, WorldFactV2)
+                or item.workspace_id != workspace
+                or item.subject_id != subject
+                or item.key
+                not in {"goal.long_term.ref", "goal.long_term.constraint"}
+                for item in goal_facts
+            ):
+                raise RuntimeWorldObservationError(
+                    "long-term-goal observation authority returned invalid facts"
+                )
+            desired_goal_refs = {
+                str(item.value)
+                for item in goal_facts
+                if item.key == "goal.long_term.ref"
+            }
+            revoked_goal_facts = tuple(
+                item
+                for item in active_snapshot.facts
+                if item.key.startswith("goal.long_term.")
+                and (
+                    (
+                        item.key == "goal.long_term.ref"
+                        and str(item.value) not in desired_goal_refs
+                    )
+                    or (
+                        item.key == "goal.long_term.constraint"
+                        and (
+                            not isinstance(item.value, Mapping)
+                            or str(item.value.get("source_ref") or "")
+                            not in desired_goal_refs
+                        )
+                    )
+                )
+            )
+            if revoked_goal_facts:
+                authority_ref = self._journal.current_expiry_authority_ref()
+                self._append_transition(
+                    workspace_id=workspace,
+                    subject_id=subject,
+                    observed_at_ms=observed_at_ms,
+                    expiries=tuple(
+                        WorldFactExpiryV1(
+                            fact_digest=item.fact_digest,
+                            authority_ref=authority_ref,
+                            effective_at_ms=observed_at_ms,
+                            reason_code="SOURCE_REVOKED",
+                        )
+                        for item in revoked_goal_facts
+                    ),
+                )
+                active_snapshot = self._resolver.resolve(
+                    workspace_id=workspace,
+                    subject_id=subject,
+                    now_ms=observed_at_ms,
+                )
+            desired_facts = (*desired_facts, *goal_facts)
             projected_fact_digests = {
                 digest
                 for projection in projections

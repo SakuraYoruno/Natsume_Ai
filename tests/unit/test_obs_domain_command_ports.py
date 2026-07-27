@@ -77,12 +77,14 @@ def test_default_registry_binds_all_active_manifest_commands() -> None:
     registry = build_default_obs_domain_command_registry()
     expected = tuple(sorted(spec.command_id for spec in DEFAULT_OBS_COMMAND_SPECS))
 
-    assert len(expected) == 14
+    assert len(expected) == 16
     assert registry.bound_command_ids == expected
     assert all(registry.resolve_port(command_id) is not None for command_id in expected)
     assert GOVERNED_OPERATOR_COMMAND_IDS == frozenset(
         {
-            "edge.command.push",
+                "edge.command.push",
+                "long_term_goal.activate",
+                "long_term_goal.revoke",
             "scheduler.task.disable",
             "scheduler.task.enable",
             "scheduler.task.trigger",

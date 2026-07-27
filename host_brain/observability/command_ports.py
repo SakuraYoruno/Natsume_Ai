@@ -50,6 +50,7 @@ class ObsCommandPayloadSchema:
     optional: tuple[str, ...] = ()
     string_fields: tuple[str, ...] = ()
     mapping_fields: tuple[str, ...] = ()
+    sequence_fields: tuple[str, ...] = ()
     boolean_fields: tuple[str, ...] = ()
     integer_fields: tuple[str, ...] = ()
     number_fields: tuple[str, ...] = ()
@@ -71,6 +72,14 @@ class ObsCommandPayloadSchema:
         for key in self.mapping_fields:
             if key in normalized and not isinstance(normalized[key], Mapping):
                 raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_TYPE_INVALID")
+        for key in self.sequence_fields:
+            if key in normalized and not isinstance(
+                normalized[key],
+                (list, tuple),
+            ):
+                raise ObsCommandContractError(
+                    "OBS_COMMAND_PAYLOAD_TYPE_INVALID"
+                )
         for key in self.boolean_fields:
             if key in normalized and type(normalized[key]) is not bool:
                 raise ObsCommandContractError("OBS_COMMAND_PAYLOAD_TYPE_INVALID")
@@ -105,6 +114,7 @@ class ObsCommandSpec:
                 "integer_fields": list(self.payload_schema.integer_fields),
                 "mapping_fields": list(self.payload_schema.mapping_fields),
                 "number_fields": list(self.payload_schema.number_fields),
+                "sequence_fields": list(self.payload_schema.sequence_fields),
                 "optional": list(self.payload_schema.optional),
                 "required": list(self.payload_schema.required),
                 "string_fields": list(self.payload_schema.string_fields),
@@ -396,6 +406,7 @@ def _schema(
     optional: tuple[str, ...] = (),
     strings: tuple[str, ...] = (),
     mappings: tuple[str, ...] = (),
+    sequences: tuple[str, ...] = (),
     booleans: tuple[str, ...] = (),
     integers: tuple[str, ...] = (),
     numbers: tuple[str, ...] = (),
@@ -405,6 +416,7 @@ def _schema(
         optional=optional,
         string_fields=strings,
         mapping_fields=mappings,
+        sequence_fields=sequences,
         boolean_fields=booleans,
         integer_fields=integers,
         number_fields=numbers,
@@ -446,6 +458,27 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
         "sys_mode.event.submit",
         "obs:sys-mode:write",
         _schema(required=("event_type",), strings=("event_type",)),
+    ),
+    _spec(
+        "long_term_goal.activate",
+        "obs:long-term-goal:write",
+        _schema(
+            required=("goal_id", "constraints"),
+            optional=("expected_version",),
+            strings=("goal_id",),
+            sequences=("constraints",),
+            integers=("expected_version",),
+        ),
+    ),
+    _spec(
+        "long_term_goal.revoke",
+        "obs:long-term-goal:write",
+        _schema(
+            required=("goal_id",),
+            optional=("expected_version",),
+            strings=("goal_id",),
+            integers=("expected_version",),
+        ),
     ),
     _spec(
         "scheduler.task.enable",
@@ -608,8 +641,8 @@ DEFAULT_OBS_COMMAND_SPECS: tuple[ObsCommandSpec, ...] = (
 )
 
 
-if len(DEFAULT_OBS_COMMAND_SPECS) != 14:  # defensive import-time invariant
-    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_14_GOVERNED_COMMANDS")
+if len(DEFAULT_OBS_COMMAND_SPECS) != 16:  # defensive import-time invariant
+    raise RuntimeError("OBS_COMMAND_MANIFEST_MUST_HAVE_16_GOVERNED_COMMANDS")
 
 
 __all__ = [

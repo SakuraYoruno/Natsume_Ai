@@ -160,6 +160,7 @@ class GovernedOperatorRuntime(
         runtime_scope_id: str,
         embodiment_runtime_provider: Any | None = None,
         scheduler_command_service_provider: Any | None = None,
+        long_term_goal_authority_provider: Any | None = None,
     ) -> None:
         if not callable(
             getattr(
@@ -188,6 +189,16 @@ class GovernedOperatorRuntime(
             )
         self._scheduler_command_service_provider = (
             scheduler_command_service_provider or (lambda: None)
+        )
+        if (
+            long_term_goal_authority_provider is not None
+            and not callable(long_term_goal_authority_provider)
+        ):
+            raise TypeError(
+                "long_term_goal_authority_provider must be callable"
+            )
+        self._long_term_goal_authority_provider = (
+            long_term_goal_authority_provider or (lambda: None)
         )
         if embodiment_runtime_provider is not None and not callable(
             embodiment_runtime_provider
@@ -882,6 +893,7 @@ def build_governed_operator_runtime(
     owner_id: str,
     embodiment_runtime_provider: Any | None = None,
     scheduler_command_service_provider: Any | None = None,
+    long_term_goal_authority_provider: Any | None = None,
 ) -> GovernedOperatorRuntime:
     runtime_scope_id = _runtime_scope_from_context(runtime_context_application)
     embodiment_runtime_scope_id = _embodiment_runtime_scope_id(
@@ -994,6 +1006,13 @@ def build_governed_operator_runtime(
         scheduler_command_service_provider=(
             scheduler_command_service_provider
         ),
+        long_term_goal_authority_provider=(
+            long_term_goal_authority_provider
+            or (
+                lambda: runtime_context_application.composition
+                .long_term_goal_authority
+            )
+        ),
         secure_ingress_authority_resolver=(
             secure_ingress_authority_resolver
         ),
@@ -1035,6 +1054,10 @@ def build_governed_operator_composition(
             mode_transition_service_provider=mode_transition_service_provider,
             scheduler_command_service_provider=(
                 scheduler_command_service_provider
+            ),
+            long_term_goal_authority_provider=(
+                lambda: runtime_context_application.composition
+                .long_term_goal_authority
             ),
             terminal_reconciliation_service=(
                 task_runtime_container.terminal_reconciliation_service
@@ -1127,6 +1150,10 @@ def build_governed_operator_composition(
         mode_transition_service_provider=mode_transition_service_provider,
         scheduler_command_service_provider=(
             scheduler_command_service_provider
+        ),
+        long_term_goal_authority_provider=(
+            lambda: runtime_context_application.composition
+            .long_term_goal_authority
         ),
         cancellation_authority_verifier=cancellation_authority_verifier,
         secure_ingress_authority_resolver=secure_ingress_authority_resolver,

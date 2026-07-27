@@ -12,17 +12,25 @@ from host_brain.contracts.governed_operator import (
     GovernedOperatorRuntimeError,
 )
 from host_brain.contracts.host_mode_policy import HOST_MODE_AUTO_RULES
+from host_brain.contracts.long_term_goal import (
+    LongTermGoalContractError,
+    normalize_long_term_goal_constraint_specs,
+)
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
 OPERATOR_STATE_CONTROL_TARGET_ID = "operator_state_control"
 OPERATOR_STATE_CONTROL_EFFECT_TYPE = "host.operator_state_control"
+LONG_TERM_GOAL_CONTROL_COMMAND_IDS = frozenset(
+    {"long_term_goal.activate", "long_term_goal.revoke"}
+)
 OPERATOR_STATE_CONTROL_COMMAND_IDS = frozenset(
     {
         "scheduler.task.enable",
         "scheduler.task.disable",
         "sys_mode.auto_rules.update",
         "sys_mode.event.submit",
+        *LONG_TERM_GOAL_CONTROL_COMMAND_IDS,
     }
 )
 SCHEDULER_ADMIN_CONTROL_COMMAND_IDS = frozenset(
@@ -63,6 +71,8 @@ def operator_state_control_ingress_requirements(
     domain_scope = (
         "scheduler:write"
         if command in _SET_ENABLED_COMMAND_IDS
+        else "obs:long-term-goal:write"
+        if command in LONG_TERM_GOAL_CONTROL_COMMAND_IDS
         else "obs:sys-mode:write"
     )
     return (
@@ -77,6 +87,8 @@ def operator_state_control_action_kind(command_id: str) -> str:
     return (
         "operator_scheduler_state_control"
         if command in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS
+        else "operator_long_term_goal_control"
+        if command in LONG_TERM_GOAL_CONTROL_COMMAND_IDS
         else "operator_host_mode_policy_control"
     )
 
@@ -94,6 +106,9 @@ def normalize_operator_state_control_args(
     observed_at_ms: int,
     scheduler_head_version: int | None = None,
     policy_revision: int | None = None,
+    long_term_goal_workspace_id: str | None = None,
+    long_term_goal_subject_id: str | None = None,
+    long_term_goal_head_version: int | None = None,
 ) -> dict[str, Any]:
     value = dict(payload or {})
     request_ref = _text(request_id, "request_id")
@@ -111,6 +126,47 @@ def normalize_operator_state_control_args(
         "operator_actor_id": principal,
         "observed_at_ms": observed,
     }
+    if command_id in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
+        workspace = _text(
+            long_term_goal_workspace_id,
+            "long_term_goal_workspace_id",
+        )
+        subject = _text(
+            long_term_goal_subject_id,
+            "long_term_goal_subject_id",
+        )
+        current_version = (
+            0
+            if long_term_goal_head_version is None
+            else _non_negative_int(
+                long_term_goal_head_version,
+                "long_term_goal_head_version",
+            )
+        )
+        supplied_version = value.get("expected_version")
+        if supplied_version is not None and (
+            _non_negative_int(supplied_version, "expected_version")
+            != current_version
+        ):
+            raise _invalid("long-term goal head version is stale")
+        result = {
+            **common,
+            "workspace_id": workspace,
+            "subject_id": subject,
+            "goal_id": _text(value.get("goal_id"), "goal_id"),
+            "expected_version": current_version,
+        }
+        if command_id == "long_term_goal.activate":
+            try:
+                constraints = normalize_long_term_goal_constraint_specs(
+                    value.get("constraints")
+                )
+            except LongTermGoalContractError as exc:
+                raise _invalid("long-term goal constraints are invalid") from exc
+            result["constraints"] = [
+                item.to_dict() for item in constraints
+            ]
+        return result
     if command_id in _SET_ENABLED_COMMAND_IDS:
         current_version = _positive_int(
             scheduler_head_version,
@@ -278,6 +334,9 @@ def operator_state_control_message(
         return f"{action}调度任务 {str(payload.get('task_id') or '').strip()}"
     if command == "sys_mode.auto_rules.update":
         return "更新系统模式自动切换规则"
+    if command in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
+        action = "激活" if command.endswith(".activate") else "撤销"
+        return f"{action}长期目标 {str(payload.get('goal_id') or '').strip()}"
     return f"提交系统模式事件 {str(payload.get('event_type') or '').strip()}"
 
 
@@ -432,6 +491,15 @@ def validate_operator_state_control_args(
                 "enabled",
                 "expected_head_version",
             }
+    elif command in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
+        expected = common | {
+            "workspace_id",
+            "subject_id",
+            "goal_id",
+            "expected_version",
+        }
+        if command == "long_term_goal.activate":
+            expected |= {"constraints"}
     else:
         expected = common | (
             {"rules", "expected_policy_revision"}
@@ -450,6 +518,21 @@ def validate_operator_state_control_args(
     }:
         _text(args.get(field), field)
     _non_negative_int(args.get("observed_at_ms"), "observed_at_ms")
+    if command in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
+        _text(args.get("workspace_id"), "workspace_id")
+        _text(args.get("subject_id"), "subject_id")
+        _text(args.get("goal_id"), "goal_id")
+        _non_negative_int(args.get("expected_version"), "expected_version")
+        if command == "long_term_goal.activate":
+            try:
+                normalize_long_term_goal_constraint_specs(
+                    args.get("constraints")
+                )
+            except LongTermGoalContractError as exc:
+                raise _invalid(
+                    "frozen long-term goal constraints are invalid"
+                ) from exc
+        return
     if command in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
         _text(args.get("task_id"), "task_id")
         if scheduler_http:
@@ -561,6 +644,7 @@ def _invalid(detail: str) -> GovernedOperatorRuntimeError:
 
 
 __all__ = [
+    "LONG_TERM_GOAL_CONTROL_COMMAND_IDS",
     "OPERATOR_STATE_CONTROL_COMMAND_IDS",
     "OPERATOR_STATE_CONTROL_EFFECT_TYPE",
     "OPERATOR_STATE_CONTROL_TARGET_ID",

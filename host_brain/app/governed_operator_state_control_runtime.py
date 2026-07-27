@@ -28,6 +28,9 @@ from host_brain.app.governed_operator_execution import (
 )
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 from host_brain.core.ids import now_ms
+from host_brain.persistence.long_term_goal_repository import (
+    derive_long_term_goal_scope,
+)
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
@@ -35,6 +38,7 @@ from host_brain.task_runtime import GovernedRuntimeError
 from host_brain.task_runtime.operator_state_control_support import (
     OPERATOR_STATE_CONTROL_EFFECT_TYPE,
     OPERATOR_STATE_CONTROL_TARGET_ID,
+    LONG_TERM_GOAL_CONTROL_COMMAND_IDS,
     SCHEDULER_ADMIN_CONTROL_COMMAND_IDS,
     STATE_CONTROL_COMMAND_IDS,
     build_operator_state_control_governor_intent,
@@ -274,6 +278,9 @@ class GovernedOperatorStateControlMixin:
             mode_transition_service_provider=(
                 self._mode_transition_service_provider
             ),
+            long_term_goal_authority_provider=(
+                self._long_term_goal_authority_provider
+            ),
             secure_ingress_authority_resolver=(
                 self._secure_ingress_authority_resolver
             ),
@@ -319,6 +326,43 @@ class GovernedOperatorStateControlMixin:
     ) -> dict[str, Any]:
         scheduler_version: int | None = None
         policy_revision: int | None = None
+        if command_id in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
+            service = self._long_term_goal_authority_provider()
+            reader = getattr(service, "get_head", None)
+            if not callable(reader):
+                raise _invalid(
+                    "app-local long-term-goal authority is unavailable"
+                )
+            workspace_id, subject_id = derive_long_term_goal_scope(
+                principal_id=principal_id,
+                tenant_id=str(authority.get("tenant_id") or ""),
+            )
+            goal_id = str(payload.get("goal_id") or "").strip()
+            current = reader(
+                workspace_id=workspace_id,
+                subject_id=subject_id,
+                goal_id=goal_id,
+            )
+            if inspect.isawaitable(current):
+                current = await current
+            current_version = (
+                None
+                if current is None
+                else int(
+                    current.get("version")
+                    if isinstance(current, Mapping)
+                    else getattr(current, "version", 0)
+                )
+            )
+            return normalize_operator_state_control_args(
+                payload,
+                request_id=request_id,
+                principal_id=principal_id,
+                observed_at_ms=observed_at_ms,
+                long_term_goal_workspace_id=workspace_id,
+                long_term_goal_subject_id=subject_id,
+                long_term_goal_head_version=current_version,
+            )
         if command_id in SCHEDULER_ADMIN_CONTROL_COMMAND_IDS:
             service = self._scheduler_command_service_provider()
             reader = getattr(service, "get_definition", None)
@@ -483,6 +527,9 @@ class GovernedOperatorStateControlMixin:
             mode_transition_service_provider=(
                 self._mode_transition_service_provider
             ),
+            long_term_goal_authority_provider=(
+                self._long_term_goal_authority_provider
+            ),
             secure_ingress_authority_resolver=(
                 self._secure_ingress_authority_resolver
             ),
@@ -500,6 +547,7 @@ async def require_durable_operator_state_control_outcome(
     task_store: Any,
     scheduler_command_service_provider: Any,
     mode_transition_service_provider: Any,
+    long_term_goal_authority_provider: Any,
     secure_ingress_authority_resolver: Any,
     execution_receipt: Mapping[str, Any],
     args: Mapping[str, Any],
@@ -576,6 +624,9 @@ async def require_durable_operator_state_control_outcome(
             scheduler_command_service_provider
         ),
         mode_transition_service_provider=mode_transition_service_provider,
+        long_term_goal_authority_provider=(
+            long_term_goal_authority_provider
+        ),
         secure_ingress_authority_resolver=(
             secure_ingress_authority_resolver
         ),
@@ -779,6 +830,27 @@ def _validate_replay_payload(
     supplied: Mapping[str, Any],
     frozen: Mapping[str, Any],
 ) -> None:
+    if command_id in LONG_TERM_GOAL_CONTROL_COMMAND_IDS:
+        if (
+            str(supplied.get("goal_id") or "").strip()
+            != str(frozen.get("goal_id") or "")
+            or (
+                supplied.get("expected_version") is not None
+                and supplied.get("expected_version")
+                != frozen.get("expected_version")
+            )
+            or (
+                command_id == "long_term_goal.activate"
+                and list(supplied.get("constraints") or ())
+                != list(frozen.get("constraints") or ())
+            )
+            or (
+                command_id == "long_term_goal.revoke"
+                and supplied.get("constraints") not in (None, (), [])
+            )
+        ):
+            raise _invalid("long-term goal replay input drifted")
+        return
     if command_id == "scheduler.task.publish":
         raw_definition = supplied.get("definition")
         definition = (

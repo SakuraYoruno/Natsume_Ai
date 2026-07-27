@@ -589,6 +589,7 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
         "operator_task_review_control": 2,
         "operator_scheduler_state_control": 4,
         "operator_host_mode_policy_control": 4,
+        "operator_long_term_goal_control": 4,
     }.get(action_name)
     if builtin_risk is not None:
         return builtin_risk

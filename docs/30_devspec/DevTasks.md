@@ -3,7 +3,7 @@
 
 # 当前架构程序注册表
 
-版本：v4.3
+版本：v4.4
 维护日期：2026-07-28
 状态：`ONE_ACTIVE_PROGRAM`
 
@@ -17,17 +17,27 @@
 
 当前执行波为 NE-00～NE-07。NE 是端到端 Architecture Wave，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-02`。NE-01 已达到
+当前活动实现波为 `NE-03`。NE-01 已达到
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，其目标部署 promotion、
 真实网络、附属服务和回滚仍由 NE-07 统一验收；该口径不是把 NE-01 标成
 production `COMPLETED`。
 
-NE-02 当前已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
+NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史
 无 identity receipt 均不可计收益。真实凭据、24 项 Research cohort、Code
-20 项和 Pentest 30 次验收尚未执行，因此本波仍为 `IN_PROGRESS /
-ACCEPTANCE_PENDING_EXTERNAL`。
+20 项和 Pentest 30 次验收尚未执行，因此 NE-02 保持
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`。
+
+NE-03 当前实现 0137 runtime-fenced 长期目标 authority：激活/撤销只能经
+Secure Ingress、Governor、TaskGraph、Review、Action Preview 和 Acceptance
+Effect，随后 event/head 在同一 SQLite UoW 提交。World 只投影 active goal，
+撤销以 `SOURCE_REVOKED` expiry 清除；Context/Intent 冻结 exact refs 与 typed
+constraints，并在 admission 重开 current identity。现行 Operator inventory
+为 `16 active / 23 retired / 39 known / blocked=0`。本地定向链和全部
+`test_ne03_*` 单元/集成波次均已通过；波次结果为
+`271 passed, 2 warnings in 332.52s`。部署多实例 canary、Windows graceful
+stop 和 NE-07 全栈仍未运行，因此本波保持 `IN_PROGRESS`。
 
 Research 24 项验收协议的纯合同、确定性 evaluator 与 0136 durable owner 已落地：固定 cohort
 规模/主题/来源覆盖，hidden verifier 独立 execution 与 response binding，
@@ -56,7 +66,8 @@ cleanup 后形成 terminal observation，不再因测试失败被 cohort 丢弃�
 仍是真实外部模型执行、20 项 evidence 和 proposal Gate。
 
 本地 NE-02 波次集合最终为 `169 passed, 1 skipped in 104.80s`，跳过项仅为
-Windows symlink 权限缺失且不计 PASS。migration head 为 0136；首次集合中的
+Windows symlink 权限缺失且不计 PASS。该波 migration 为 0136；仓库当前
+continuous head 为 0137。首次集合中的
 4 项失败已透明保留并修复。当前本地代码状态为
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，不等于真实收益达标，
 也不允许 L3 production promotion。

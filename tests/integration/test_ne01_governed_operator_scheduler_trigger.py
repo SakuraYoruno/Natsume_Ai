@@ -711,6 +711,8 @@ def test_operator_command_inventory_keeps_every_other_writer_fail_closed() -> No
     assert GOVERNED_OPERATOR_COMMAND_IDS == {
         COMMAND_ID,
         "edge.command.push",
+        "long_term_goal.activate",
+        "long_term_goal.revoke",
         "scheduler.task.disable",
         "scheduler.task.enable",
         "sys_mode.auto_rules.update",

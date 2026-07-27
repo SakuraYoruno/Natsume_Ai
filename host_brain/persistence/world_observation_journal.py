@@ -495,9 +495,18 @@ class SQLiteWorldObservationJournal:
                         raise WorldObservationJournalError(
                             "WORLD_OBSERVATION_EXPIRY_TARGET_INVALID"
                         )
+                    ttl_expiry = (
+                        expiry.reason_code == "TTL_EXPIRED"
+                        and expiry.effective_at_ms == target.expires_at_ms
+                    )
+                    source_revocation = (
+                        expiry.reason_code == "SOURCE_REVOKED"
+                        and target.key.startswith("goal.long_term.")
+                        and expiry.effective_at_ms == observed_at_ms
+                    )
                     if (
                         expiry.authority_ref != authority_ref
-                        or expiry.effective_at_ms != target.expires_at_ms
+                        or not (ttl_expiry or source_revocation)
                         or expiry.effective_at_ms > observed_at_ms
                         or expiry.effective_at_ms > created_at_ms
                     ):

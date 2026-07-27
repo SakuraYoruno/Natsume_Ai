@@ -1097,9 +1097,54 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
         assert event["result"]["to_mode"] == "normal"
         assert hard_state_owner.get_hard_state().sys_mode == "normal"
 
+        goal_envelope, goal_body, goal_result = await accepted(
+            "long_term_goal.activate",
+            {
+                "goal_id": "safe-evolution",
+                "constraints": [
+                    {
+                        "code": "GOAL_SAFE_EVOLUTION_REVIEW",
+                        "disposition": "REVIEW",
+                        "reason": "长期演化变更必须复核",
+                    }
+                ],
+                "expected_version": 0,
+            },
+            "request-ne03-long-term-goal-activate",
+        )
+        goal = dict(goal_result.result["output"])
+        assert goal["goal_status"] == "ACTIVE"
+        assert goal["goal_version"] == 1
+        goal_authority = (
+            runtime_context.composition.long_term_goal_authority
+        )
+        active = goal_authority.list_active(
+            workspace_id=goal["workspace_id"],
+            subject_id=goal["subject_id"],
+        )
+        assert len(active) == 1
+        assert active[0].goal_ref == goal["goal_ref"]
+
+        revoke_envelope, revoke_body, revoke_result = await accepted(
+            "long_term_goal.revoke",
+            {
+                "goal_id": "safe-evolution",
+                "expected_version": 1,
+            },
+            "request-ne03-long-term-goal-revoke",
+        )
+        revoked = dict(revoke_result.result["output"])
+        assert revoked["goal_status"] == "REVOKED"
+        assert revoked["goal_version"] == 2
+        assert goal_authority.list_active(
+            workspace_id=goal["workspace_id"],
+            subject_id=goal["subject_id"],
+        ) == ()
+
         revisions = (
             definitions.get("operator_state_scheduler")["head_version"],
             mode_policy_owner.snapshot().revision,
+            revoked["goal_version"],
         )
         for command_id, envelope, raw_body in (
             (
@@ -1117,6 +1162,16 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
                 event_envelope,
                 event_body,
             ),
+            (
+                "long_term_goal.activate",
+                goal_envelope,
+                goal_body,
+            ),
+            (
+                "long_term_goal.revoke",
+                revoke_envelope,
+                revoke_body,
+            ),
         ):
             replayed = await replay(command_id, envelope, raw_body)
             output = dict(replayed.result["output"])
@@ -1125,6 +1180,11 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
         assert (
             definitions.get("operator_state_scheduler")["head_version"],
             mode_policy_owner.snapshot().revision,
+            goal_authority.get_head(
+                workspace_id=goal["workspace_id"],
+                subject_id=goal["subject_id"],
+                goal_id="safe-evolution",
+            ).version,
         ) == revisions
 
         for request_id in (
@@ -1132,6 +1192,8 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
             "request-ne01-scheduler-enable",
             "request-ne01-mode-rules",
             "request-ne01-mode-event",
+            "request-ne03-long-term-goal-activate",
+            "request-ne03-long-term-goal-revoke",
         ):
             record = container.command_repository.get_by_request(
                 surface=HostCommandSurface.OPERATOR.value,
@@ -1144,6 +1206,8 @@ async def test_scheduler_and_mode_policy_controls_commit_only_after_acceptance(
                 "scheduler.task.enable",
                 "sys_mode.auto_rules.update",
                 "sys_mode.event.submit",
+                "long_term_goal.activate",
+                "long_term_goal.revoke",
             }
         assert finalizer.calls
     finally:

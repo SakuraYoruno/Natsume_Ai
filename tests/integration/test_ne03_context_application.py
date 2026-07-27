@@ -27,6 +27,10 @@ from host_brain.orchestration.host_route_contracts import (
 from host_brain.persistence.embodiment_outbox_repository import (
     EmbodimentOutboxRepository,
 )
+from host_brain.persistence.long_term_goal_repository import (
+    SQLiteLongTermGoalAuthority,
+    derive_long_term_goal_scope,
+)
 from host_brain.persistence.world_observation_journal import (
     SQLiteWorldObservationJournal,
 )
@@ -139,6 +143,11 @@ def _build_harness(
     composition = build_runtime_context_composition(
         event_store=store,
         observation_port=journal,
+        long_term_goal_authority=SQLiteLongTermGoalAuthority(
+            db_path,
+            runtime_scope_id=runtime_scope_id,
+            runtime_authority_provider=authority_provider,
+        ),
         runtime_scope_id=runtime_scope_id,
         runtime_authority_provider=authority_provider,
         intent_authority_port=_UnusedIntentAuthorityPort(),
@@ -251,6 +260,91 @@ def test_freeze_writes_real_world_source_and_does_not_append_same_semantics(
     assert history[0]["to_digest"] == first.scene_identity["decision_digest"]
 
 
+def test_long_term_goal_is_frozen_from_owner_and_revocation_expires_world_fact(
+    tmp_path: Path,
+) -> None:
+    harness = _build_harness(tmp_path, name="long-term-goal-context")
+    authority = harness.composition.long_term_goal_authority
+    workspace, subject = derive_long_term_goal_scope(
+        principal_id="person-ne03",
+        tenant_id=None,
+    )
+    activated = authority.apply_accepted_transition(
+        authority={
+            "allowed": True,
+            "operator_command_id": "long_term_goal.activate",
+            "audit_ref": "secure-ingress://audit/goal-activate",
+            "principal_id": "person-ne03",
+            "tenant_id": "",
+        },
+        command_id="long_term_goal.activate",
+        operation_id="operator-state-control://goal/context-activate",
+        workspace_id=workspace,
+        subject_id=subject,
+        goal_id="safe-evolution",
+        expected_version=0,
+        constraints=(
+            {
+                "code": "GOAL_SAFE_EVOLUTION_REVIEW",
+                "disposition": "REVIEW",
+                "reason": "长期演化变更必须复核",
+            },
+        ),
+        observed_at_ms=harness.clock[0],
+    )
+    frozen = _freeze(harness.service).to_dict()
+    assert frozen["intent_constraints_v1"] == {
+        "schema": "natsume.intent-constraints.v1",
+        "long_term_goal_refs": [activated.goal_ref],
+        "long_term_goal_constraints": [
+            activated.constraints[0].to_dict()
+        ],
+    }
+
+    harness.clock[0] += 1
+    authority.apply_accepted_transition(
+        authority={
+            "allowed": True,
+            "operator_command_id": "long_term_goal.revoke",
+            "audit_ref": "secure-ingress://audit/goal-revoke",
+            "principal_id": "person-ne03",
+            "tenant_id": "",
+        },
+        command_id="long_term_goal.revoke",
+        operation_id="operator-state-control://goal/context-revoke",
+        workspace_id=workspace,
+        subject_id=subject,
+        goal_id="safe-evolution",
+        expected_version=1,
+        observed_at_ms=harness.clock[0],
+    )
+    after = _freeze(
+        harness.service,
+        ts_ms=harness.clock[0],
+    ).to_dict()
+    assert after["intent_constraints_v1"] == {
+        "schema": "natsume.intent-constraints.v1",
+        "long_term_goal_refs": [],
+        "long_term_goal_constraints": [],
+    }
+    head = harness.journal.read_observation_head(
+        workspace_id=workspace,
+        subject_id=subject,
+    )
+    batches = harness.journal.list_observation_batches(
+        workspace_id=workspace,
+        subject_id=subject,
+        after_revision=0,
+        through_revision=head.revision,
+        limit=100,
+    )
+    assert any(
+        expiry.reason_code == "SOURCE_REVOKED"
+        for batch in batches
+        for expiry in batch.expiries
+    )
+
+
 def test_require_frozen_survives_restart_and_rejects_tamper_and_cross_workspace(
     tmp_path: Path,
 ) -> None:
@@ -275,6 +369,9 @@ def test_require_frozen_survives_restart_and_rejects_tamper_and_cross_workspace(
                     RuntimeEventStore(harness.store.db_path)
                 ),
                 clock=lambda: _at_local_hour(14),
+            ),
+            long_term_goal_authority=(
+                harness.composition.long_term_goal_authority
             ),
             runtime_scope_id=harness.runtime_scope_id,
             runtime_authority_provider=harness.authority_provider,
@@ -479,6 +576,9 @@ def test_surface_proactive_and_task_admission_reopen_one_durable_scene_identity(
         scene_resolver=harness.composition.scene_resolver,
         governor_ledger=_GovernorLedger(),
         policy_identity=policy,
+        long_term_goal_authority=(
+            harness.composition.long_term_goal_authority
+        ),
         clock=lambda: harness.clock[0],
     )
     admission = DurableIntentAdmissionVerifier(

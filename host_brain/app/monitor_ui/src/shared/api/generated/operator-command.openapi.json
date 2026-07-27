@@ -217,6 +217,256 @@
         ]
       }
     },
+    "/v1/host/obs-commands/long_term_goal.activate": {
+      "post": {
+        "operationId": "execute_long_term_goal_activate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "long_term_goal.activate",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "constraints": {},
+                      "expected_version": {
+                        "type": "integer"
+                      },
+                      "goal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "goal_id",
+                      "constraints"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute long_term_goal.activate",
+        "x-natsume-action": "obs:command:long_term_goal.activate",
+        "x-natsume-command-id": "long_term_goal.activate",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:long-term-goal:write"
+        ]
+      }
+    },
+    "/v1/host/obs-commands/long_term_goal.revoke": {
+      "post": {
+        "operationId": "execute_long_term_goal_revoke",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "command_id": {
+                    "const": "long_term_goal.revoke",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "expected_version": {
+                        "type": "integer"
+                      },
+                      "goal_id": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "goal_id"
+                    ],
+                    "type": "object"
+                  },
+                  "schema_version": {
+                    "const": "natsume.obs-command.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "command_id",
+                  "payload"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Completed or replayed durable receipt"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid command contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Invalid principal or signature"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Insufficient scope"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Idempotency or replay conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorCommandReceipt"
+                }
+              }
+            },
+            "description": "Unavailable or uncertain outcome"
+          }
+        },
+        "security": [
+          {
+            "idempotency": [],
+            "identity": [],
+            "nonce": [],
+            "proof": []
+          }
+        ],
+        "summary": "Execute long_term_goal.revoke",
+        "x-natsume-action": "obs:command:long_term_goal.revoke",
+        "x-natsume-command-id": "long_term_goal.revoke",
+        "x-natsume-required-scopes": [
+          "obs:write",
+          "obs:long-term-goal:write"
+        ]
+      }
+    },
     "/v1/host/obs-commands/scheduler.task.disable": {
       "post": {
         "operationId": "execute_scheduler_task_disable",

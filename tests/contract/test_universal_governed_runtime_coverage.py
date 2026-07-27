@@ -28,9 +28,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
 
     assert report.status == PROGRAM_INCOMPLETE
     assert report.evaluated_commit_sha == receipt["commit_sha"]
-    assert report.migration_head == (
-        "0135_task_review_denial_settlement.sql"
-    )
+    assert report.migration_head == "0137_long_term_goal_authority.sql"
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
         "chat": "COMPLETE",
@@ -120,7 +118,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     )
     assert (
         "docs/45_testing/test_reports/"
-        "ne01_scheduler_clock_control_route_acceptance_20260727.json"
+        "ne01_universal_route_acceptance_0137_20260728.json"
         in report.evidence_refs
     )
 

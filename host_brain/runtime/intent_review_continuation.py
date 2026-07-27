@@ -173,7 +173,10 @@ class _IntentReviewContinuationMixin:
                 except Exception as lookup_exc:
                     raise IntentAdmissionError(
                         INTENT_ADMISSION_INVALID,
-                        "durable Intent ReviewItem creation failed",
+                        (
+                            "durable Intent ReviewItem identity drifted "
+                            "or creation failed"
+                        ),
                     ) from create_exc
                 if record is None:
                     raise IntentAdmissionError(

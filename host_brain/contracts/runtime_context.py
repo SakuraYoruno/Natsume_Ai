@@ -158,7 +158,7 @@ class WorldSnapshotV2:
 
 @dataclass(frozen=True, slots=True)
 class WorldFactExpiryV1:
-    """Explicit removal of one fact after its TTL becomes effective."""
+    """Explicit removal after TTL or canonical source revocation."""
 
     fact_digest: str
     authority_ref: str
@@ -180,8 +180,10 @@ class WorldFactExpiryV1:
         ):
             raise ContextContractError("effective_at_ms must be non-negative")
         reason = _text(self.reason_code, "reason_code", 96).upper()
-        if reason != "TTL_EXPIRED":
-            raise ContextContractError("WorldFactExpiryV1 only represents TTL_EXPIRED")
+        if reason not in {"TTL_EXPIRED", "SOURCE_REVOKED"}:
+            raise ContextContractError(
+                "WorldFactExpiryV1 reason is unsupported"
+            )
         object.__setattr__(self, "reason_code", reason)
         computed = _json_digest(self.to_dict(include_digest=False))
         supplied = str(self.expiry_digest or "").strip().lower()

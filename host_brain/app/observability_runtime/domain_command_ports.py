@@ -62,7 +62,7 @@ GOVERNED_OPERATOR_COMMAND_IDS = frozenset(
 )
 BLOCKED_OPERATOR_COMMAND_IDS = frozenset()
 if (
-    len(GOVERNED_OPERATOR_COMMAND_IDS) != 14
+    len(GOVERNED_OPERATOR_COMMAND_IDS) != 16
     or GOVERNED_OPERATOR_COMMAND_IDS & RETIRED_OPERATOR_COMMAND_IDS
 ):
     raise RuntimeError("OPERATOR_COMMAND_ACTIVE_AND_RETIRED_SETS_INVALID")
@@ -200,6 +200,26 @@ async def _sysmode_auto_rules(
 
 
 async def _sysmode_event(
+    payload: Mapping[str, Any],
+    request_id: str,
+) -> Any:
+    return await _execute_governed_operator_state_control(
+        payload,
+        request_id,
+    )
+
+
+async def _long_term_goal_activate(
+    payload: Mapping[str, Any],
+    request_id: str,
+) -> Any:
+    return await _execute_governed_operator_state_control(
+        payload,
+        request_id,
+    )
+
+
+async def _long_term_goal_revoke(
     payload: Mapping[str, Any],
     request_id: str,
 ) -> Any:
@@ -428,6 +448,8 @@ _HANDLERS: Mapping[str, DomainHandler] = {
     "sys_mode.switch": _sysmode_switch,
     "sys_mode.auto_rules.update": _sysmode_auto_rules,
     "sys_mode.event.submit": _sysmode_event,
+    "long_term_goal.activate": _long_term_goal_activate,
+    "long_term_goal.revoke": _long_term_goal_revoke,
     "scheduler.task.enable": _scheduler_enable,
     "scheduler.task.disable": _scheduler_disable,
     "scheduler.task.trigger": _scheduler_trigger,
