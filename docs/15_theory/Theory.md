@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.26
+版本：v2.27
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -54,6 +54,22 @@ Review 的终态同样必须是一个不可分割事实。拒绝、过期或取�
 审批属于节点 authority，而不是整张图的模糊布尔开关。规划搜索可以发现需要人工确认的能力，但必须把该要求连同来源冻结进候选，再由编译器绑定到不可变 TaskNode ID；每个节点都要有显式策略，缺失不能继承“无需审批”。长时间审批会使旧 grant 过期，因此续跑可续签尚未执行节点的时限，但不能改写审批前已经提交的 projection authority，也不能重跑已验收 worker。续签解决的是时间围栏，不是扩大目标、风险或能力。
 
 零用量也是需要证明的事实，不能从 measurement 缺失推断。对于被限制为只读、无端口的执行 adapter，外层 runtime 可以预先记账 canonical dispatch，但 adapter 内部的 token、工具、重试和成本必须由 server 生成、digest-bound 且绑定完整 Task lineage 的 attestation 明确证明为零；缺失、非零或身份漂移都应失败关闭。未使用的 authority 也不能因此预授予：只读 Delegate 没有模型、工具、嵌套派发或 Effect 端口，未来需要这些能力时必须形成新的受治理图和预算边界。
+
+规划结果的“可执行性”也必须成为不可变事实。搜索轨迹回答为何选择一条路径，
+但不能替代执行政策；在 TaskGraph 准入前还必须冻结一份 content-addressed
+政策，精确绑定 Graph revision、完成策略、总预算、每个节点的当前 Registry
+政策、Review 要求和副作用所有权。重放、审批续跑、启动恢复与 Effect 编译都
+必须重开同一政策。中间候选节点只可产生待验证结果，不能拥有 Graph
+Acceptance 后的副作用；唯一结果节点才可提交 Effect。这样“执行器不二次
+规划”不仅是代码约定，也是恢复时可机械复验的 authority。
+
+同理，Delegate 的目标登记不能只是一个进程内 handler 映射。每个启用目标
+需要把 adapter、执行模式、预算模式、Review 模式与 Effect 模式冻结为
+content-addressed policy，并同时写入 WorkOrder 的输入与 metadata。执行点
+必须重算 digest 并与 dispatcher 的实际 audit 对齐；否则所谓“只读、零预算、
+需审批”会在准入后因配置漂移失效。当前实现已按这一不变量收口
+`CAPABILITY_SEARCH_V1` 和只读 `pentest_agent` 的本地路径，但在干净提交上
+生成新的正式收据前仍不得把两条路线定级为完成。
 
 ---
 

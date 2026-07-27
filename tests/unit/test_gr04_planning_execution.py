@@ -16,6 +16,7 @@ from host_brain.orchestration.planning_execution import (
     PlanningExecutionError,
 )
 from host_brain.orchestration.planning_graph_compiler import (
+    CompiledPlanningGraph,
     PlanningCompilationContext,
     PlanningGraphCompiler,
 )
@@ -427,3 +428,93 @@ async def test_selected_context_resolver_runs_after_search_before_compilation() 
         "skill:worker-resolver-node",
     )
     assert admission.calls[0]["compiled"] == prepared.compiled
+
+
+def _refreeze_with_order(
+    compiled: CompiledPlanningGraph,
+    *,
+    work_order,
+) -> CompiledPlanningGraph:  # noqa: ANN001
+    return CompiledPlanningGraph.freeze(
+        work_order=work_order,
+        task_graph=compiled.task_graph,
+        trace_digest=compiled.trace_digest,
+        selected_candidate_ids=compiled.selected_candidate_ids,
+        virtual_state_schema=compiled.virtual_state_schema,
+        virtual_state_digest=compiled.virtual_state_digest,
+        previous_revision=compiled.previous_revision,
+        failure_evidence_refs=compiled.failure_evidence_refs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_execution_policy_binder_may_only_extend_frozen_metadata() -> None:
+    admission = _Admission()
+
+    def bind(compiled: CompiledPlanningGraph) -> CompiledPlanningGraph:
+        order = compiled.work_order
+        return _refreeze_with_order(
+            compiled,
+            work_order=replace(
+                order,
+                metadata={
+                    **dict(order.metadata),
+                    "execution_policy": {"policy_ref": "policy://frozen"},
+                },
+            ),
+        )
+
+    service = GovernedPlanningExecutionService(
+        search=_Search(_result("search-bound-policy", "inspect")),  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=admission,  # type: ignore[arg-type]
+        command_application=_Application(),
+        compiled_execution_policy_binder=bind,
+    )
+    prepared = await service.prepare_initial(
+        SearchRequest("search-bound-policy", initial_state={}),
+        authority=_authority(),
+        created_at=100,
+    )
+
+    assert prepared.compiled.work_order.metadata["execution_policy"] == {
+        "policy_ref": "policy://frozen"
+    }
+    assert admission.calls[0]["compiled"] == prepared.compiled
+
+
+@pytest.mark.asyncio
+async def test_execution_policy_binder_cannot_change_work_order_authority() -> None:
+    admission = _Admission()
+
+    def bind(compiled: CompiledPlanningGraph) -> CompiledPlanningGraph:
+        order = compiled.work_order
+        return _refreeze_with_order(
+            compiled,
+            work_order=replace(
+                order,
+                domain="research",
+                metadata={
+                    **dict(order.metadata),
+                    "execution_policy": {"policy_ref": "policy://frozen"},
+                },
+            ),
+        )
+
+    service = GovernedPlanningExecutionService(
+        search=_Search(_result("search-drifted-policy", "inspect")),  # type: ignore[arg-type]
+        compiler=PlanningGraphCompiler(),
+        admission=admission,  # type: ignore[arg-type]
+        command_application=_Application(),
+        compiled_execution_policy_binder=bind,
+    )
+
+    with pytest.raises(PlanningExecutionError) as raised:
+        await service.prepare_initial(
+            SearchRequest("search-drifted-policy", initial_state={}),
+            authority=_authority(),
+            created_at=100,
+        )
+
+    assert raised.value.reason_code == "PLANNING_EXECUTION_INVALID"
+    assert admission.calls == []

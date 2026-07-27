@@ -142,6 +142,9 @@ class GovernedPlanningExecutionService:
         compilation_context_resolver: (
             Callable[[SearchResult], PlanningCompilationContext] | None
         ) = None,
+        compiled_execution_policy_binder: (
+            Callable[[CompiledPlanningGraph], CompiledPlanningGraph] | None
+        ) = None,
     ) -> None:
         if not callable(getattr(command_application, "execute_stream", None)):
             raise ValueError("command_application.execute_stream is required")
@@ -162,6 +165,14 @@ class GovernedPlanningExecutionService:
         ):
             raise ValueError("compilation_context_resolver must be callable")
         self._compilation_context_resolver = compilation_context_resolver
+        if (
+            compiled_execution_policy_binder is not None
+            and not callable(compiled_execution_policy_binder)
+        ):
+            raise ValueError("compiled_execution_policy_binder must be callable")
+        self._compiled_execution_policy_binder = (
+            compiled_execution_policy_binder
+        )
 
     async def prepare_initial(
         self,
@@ -202,6 +213,7 @@ class GovernedPlanningExecutionService:
             compiled,
             authority=authority,
         )
+        compiled = self._bind_compiled_execution_policy(compiled)
         return await self._admit(result, compiled=compiled, authority=authority)
 
     async def prepare_replan(
@@ -267,6 +279,7 @@ class GovernedPlanningExecutionService:
             compiled,
             authority=authority,
         )
+        compiled = self._bind_compiled_execution_policy(compiled)
         return await self._admit(result, compiled=compiled, authority=authority)
 
     async def execute_stream(
@@ -313,6 +326,67 @@ class GovernedPlanningExecutionService:
                 f"planning search did not select a side-effect-free path: {status}/{reason}",
             )
         return result
+
+    def _bind_compiled_execution_policy(
+        self,
+        compiled: CompiledPlanningGraph,
+    ) -> CompiledPlanningGraph:
+        binder = self._compiled_execution_policy_binder
+        if binder is None:
+            return compiled
+        try:
+            bound = binder(compiled)
+        except PlanningExecutionError:
+            raise
+        except Exception as exc:
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled planning execution policy could not be frozen",
+            ) from exc
+        if not isinstance(bound, CompiledPlanningGraph):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled execution policy binder returned an invalid graph",
+            )
+        bound.validate()
+        if bound.task_graph.to_dict() != compiled.task_graph.to_dict():
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled execution policy binder changed the TaskGraph",
+            )
+        stable_fields = (
+            "trace_digest",
+            "selected_candidate_ids",
+            "virtual_state_schema",
+            "virtual_state_digest",
+            "previous_revision",
+            "failure_evidence_refs",
+        )
+        if any(
+            getattr(bound, field_name) != getattr(compiled, field_name)
+            for field_name in stable_fields
+        ):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled execution policy binder changed planning lineage",
+            )
+        original_order = compiled.work_order.to_dict()
+        bound_order = bound.work_order.to_dict()
+        original_metadata = dict(original_order.pop("metadata") or {})
+        bound_metadata = dict(bound_order.pop("metadata") or {})
+        if (
+            bound_order != original_order
+            or any(
+                bound_metadata.get(key) != value
+                for key, value in original_metadata.items()
+            )
+            or set(bound_metadata) == set(original_metadata)
+        ):
+            raise PlanningExecutionError(
+                PLANNING_EXECUTION_INVALID,
+                "compiled execution policy binder changed WorkOrder authority",
+            )
+        return bound
 
     def _resolve_compilation_context(
         self,

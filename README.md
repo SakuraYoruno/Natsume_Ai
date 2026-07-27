@@ -9,6 +9,25 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+NE-01 当前正在封板 Plan 与 Delegate 的剩余控制。当前唯一启用的
+`CAPABILITY_SEARCH_V1` Plan 会在准入前冻结 content-addressed
+`capability_plan_execution_policy.v1`：它绑定 Graph revision、原子完成策略、
+Graph Budget digest、节点顺序、Skill Registry 风险/Review/执行政策，以及
+“中间 Skill 零副作用、最终 Chat 唯一拥有 Graph Acceptance Effect”的边界。
+首次执行、请求重放、Review continuation 与启动恢复都会重开同一政策；任何
+Registry、预算、拓扑或 effect owner 漂移都在 worker/Effect 前失败关闭。
+
+当前唯一启用的普通 Delegate 仍是只读 `pentest_agent`。它现在还必须冻结
+content-addressed `governed_delegate_target_policy.v1`，先进入 durable
+pre-execution Review，再由 claim-fenced continuation 执行；内部
+token/tool/retry/model-cost 仍以 digest-bound attestation 精确为零。dispatcher
+和 frozen executor 都会拒绝 side-effect、delivery 或 Outbox descriptor，
+只有外层 Graph Acceptance 能提交结果。定向单元集合为 `93 passed`，真实
+文件型 SQLite 的 Chat/Skill/Delegate/Plan 集成为 `1 passed`；后者已真实走
+Delegate `WAITING_APPROVAL → approve/resume → ACCEPTED`。这还是实现提交前的
+本地证据，必须在干净 SHA 上重跑正式七路线收据后才能把 Plan/Delegate 从
+`INCOMPLETE` 提升为 `COMPLETE`；真实 provider 与 Docker 全栈仍留给 NE-07。
+
 NE-01 当前正在收口 Skill 的预算与副作用边界。canonical Host Registry 的 93 个
 Skill 已被穷举分类：28 个 `INLINE_READ_ONLY`、13 个
 `PRE_ACCEPTANCE_PROPOSAL_ONLY`、3 个 `POST_ACCEPTANCE_WORKSPACE`，以及

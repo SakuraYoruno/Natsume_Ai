@@ -155,6 +155,8 @@
         "host_brain/app/governed_task_adapter.py",
         "host_brain/app/governed_task_authority.py",
         "host_brain/app/governed_delegate_dispatch.py",
+        "host_brain/contracts/agent_runtime/delegate_target_policy.py",
+        "host_brain/orchestration/host_route_contracts.py",
         "host_brain/app/sub_agent_protocol.py",
         "host_brain/app/handlers/intent_agent_handler.py",
         "host_brain/app/governed_route_executors.py",
@@ -170,8 +172,8 @@
         "tests/unit/test_ne01_legacy_subagent_retirement.py",
         "tests/integration/test_gr05_universal_host_runtime.py"
       ],
-      "enabled_target_scope": "PENTEST_READONLY_ONLY: pentest_agent is registered as PORT_FREE_READ_ONLY and receives an immutable invocation carrying command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/fence/parent+node grant. It receives no model, tool, nested-dispatch or effect port. The outer Task Runtime precharges exactly one canonical Delegate dispatch tool call; the adapter emits a digest-bound attestation proving its internal token/tool/retry/model-cost usage is exactly zero. The old SubAgentDispatcher is a direct-request reject gate; intent_agent, translate_agent, vision_agent, repair_agent and unregistered targets are rejected before persistence.",
-      "independent_evidence_boundary": "The enabled read-only pentest_agent worker uses the shared route-neutral verifier and acceptance owner. Verification and Acceptance independently reopen the durable projection and validate immutable authority, receipt digest, exact COMMIT and node output contract. Frozen execution additionally revalidates the delegate usage attestation against command, graph/revision, node, attempt, node grant, target, adapter and invocation before WorkerBudgetUsage settlement; missing, nonzero, tampered or drifted evidence fails before COMMIT, and legacy intent/repair traces are ignored. Unknown semantic criteria become durable REVIEW. Delegate remains INCOMPLETE because general Review/recovery, transactional effects, commit-bound acceptance and broader target support are not complete.",
+      "enabled_target_scope": "PENTEST_READONLY_ONLY: pentest_agent is registered as PORT_FREE_READ_ONLY and now freezes one content-addressed governed_delegate_target_policy.v1 into both WorkOrder input and metadata. The policy requires durable pre-execution Review, PORT_FREE_READ_ONLY_ATTESTED_ZERO Budget measurement and GRAPH_ACCEPTANCE_RESULT_ONLY effects. It receives an immutable invocation carrying command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/fence/parent+node grant, but no model, tool, nested-dispatch or effect port. The outer Task Runtime precharges exactly one canonical Delegate dispatch tool call; the adapter emits a digest-bound attestation proving its internal token/tool/retry/model-cost usage is exactly zero. The old SubAgentDispatcher is a direct-request reject gate; intent_agent, translate_agent, vision_agent, repair_agent and unregistered targets are rejected before persistence.",
+      "independent_evidence_boundary": "The enabled read-only pentest_agent worker uses the shared route-neutral verifier and acceptance owner. Admission validates the target policy content address and creates durable pre-execution Review before any Attempt; claim-fenced continuation is the only resume path. Frozen execution reopens the target policy and requires dispatcher audit adapter/modes/ref to match, then revalidates the delegate usage attestation against command, graph/revision, node, attempt, node grant, target, adapter and invocation before WorkerBudgetUsage settlement. Dispatcher and executor both reject side-effect, delivery, Effect or Outbox claims instead of silently discarding them. The local real-SQLite GR05 path proves WAITING_APPROVAL to approve/resume to ACCEPTED. Delegate remains INCOMPLETE only until a new clean-SHA route receipt revalidates review_resume and transactional_side_effects; broader targets are deliberately unsupported rather than partially enabled.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",
@@ -197,6 +199,8 @@
         "host_brain/orchestration/planning_recovery.py",
         "host_brain/orchestration/capability_plan_search.py",
         "host_brain/orchestration/planning_graph_compiler.py",
+        "host_brain/app/governed_plan_execution_policy.py",
+        "host_brain/contracts/agent_runtime/plan_execution_policy.py",
         "host_brain/planning_search/capability_domain.py",
         "host_brain/contracts/agent_runtime/review_policy.py",
         "host_brain/task_runtime/review_runtime.py",
@@ -217,7 +221,7 @@
         "tests/integration/test_ne01_review_automatic_continuation.py",
         "tests/integration/test_gr05_universal_host_runtime.py"
       ],
-      "independent_evidence_boundary": "Every enabled capability-plan Skill node and final Chat synthesis node is independently verified against its durable projection. The synthesis node receives only accepted predecessor TaskResult artifacts and carries an exact artifact/receipt/payload-digest bundle attestation; a declared graph edge without artifact consumption is no longer sufficient. Registry require_confirm is now frozen as candidate review authority and compiler-rebound to a full actual-node policy map. Only the marked node waits; 0096 continuation keeps historical grants for nodes accepted before re-entry and uses claim-fenced renewed grants for new executions. Missing/malformed policy and grant drift fail closed, and a real SQLite three-node graph proves exactly-once completion. Plan remains INCOMPLETE because general candidate generation, graph-scope program-wide Budget/recovery, transactional effects and commit-bound acceptance are not complete.",
+      "independent_evidence_boundary": "Every enabled capability-plan Skill node and final Chat synthesis node is independently verified against its durable projection. Admission now freezes a content-addressed capability_plan_execution_policy.v1 binding graph/revision/result, atomic completion, Graph Budget digest, selected node bindings, current Skill Registry risk/Review/execution/budget policy and effect mode. Initial execution, exact replay, Review continuation, startup/operation recovery and Acceptance Effect compilation reopen the same policy; intermediate Skills are SPECULATIVE_EFFECT_FREE and only the final Chat may own GRAPH_ACCEPTANCE_RESULT_ONLY effects. The synthesis node still receives only accepted predecessor TaskResult artifacts with exact artifact/receipt/payload-digest attestation. Local unit and real-SQLite evidence passes; Plan remains INCOMPLETE only until the new clean implementation SHA is re-evaluated by the formal route receipt. General NE-02 candidate search and external benefit proof remain separately incomplete and are not part of the enabled-route closeout.",
       "controls": {
         "host_command": "PASS",
         "immutable_task_graph": "PASS",

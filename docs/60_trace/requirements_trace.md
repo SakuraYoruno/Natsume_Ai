@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：TRACE-EXEC-08～08AP 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.7
+版本：v5.8
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -49,6 +49,24 @@ Skill 路线为 `COMPLETE`；NE-01 仍为 `IN_PROGRESS`，49 个 blocked 能力
 不计完成。
 独立 Personality Registry 的 19 个 metadata 必须保持 manifest=0（5 个
 blocked、14 个 unclassified），动态 MCP Skill 也必须 blocked。
+
+TRACE-EXEC-08AS（Plan/Delegate 不可变执行政策）：启用 Plan 必须在
+TaskGraph admission 前冻结 content-addressed execution policy，绑定
+graph/revision/result、atomic completion、Graph Budget digest、selected
+node bindings、当前 Skill Registry risk/Review/execution policy 与 effect
+mode。initial、replay、Review continuation、startup/operation recovery 和
+Effect 编译都必须重开；中间 Skill 不得拥有 post-Acceptance Effect。启用
+Delegate 必须冻结 target/adapter/review/budget/effect policy；当前唯一
+`pentest_agent` 在零 Attempt 时进入 durable Review，resume 后仍重验 policy
+与 exact-zero usage，并拒绝 Effect/Outbox/delivery claim。证据入口为
+`test_ne02_capability_plan_search.py`、`test_gr04_planning_execution.py`、
+`test_gr05_direct_host_route_contracts.py`、
+`test_ne01_governed_delegate_dispatch.py`、
+`test_gr05_frozen_route_executors.py` 和真实 SQLite
+`test_gr05_universal_host_runtime.py`。工作树证据为定向 `93 passed`、
+四路线 `1 passed`；clean-SHA v3 receipt 尚待重跑，故结论为
+`LOCAL_IMPLEMENTATION_PASS / PLAN_DELEGATE_COMMIT_BOUND_RECHECK_PENDING /
+ROUTES_INCOMPLETE`。
 
 ## 2. 当前核心产品能力
 

@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.25
+版本：v2.26
 核对日期：2026-07-27
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -74,6 +74,15 @@ Host composition 通过 fresh `ProcessApplicationPorts` 与 frozen Host/Agent/Co
 Edge 指令不再由 Host lifespan 创建一个进程共享客户端。Tribe Agent 只提交计划或观察，内部/Obs 兼容入口只返回 fail-closed 状态；`EdgeCommandPusher` 是不可发现的低层 adapter，只有显式 TaskGraph 执行边界持有 exact Preview proof 时才能调用。当前正向 issuer 尚缺，因此结构上清除了第二 authority，但没有把具身执行定级为完成。
 
 Tribe compatibility 面也不再发布一个进程级 active Host。每个 `TribeRuntimeScope` 持有独立 state registry、Host registry、event bus 与 23-Agent catalog；lifespan 为启动/后台 execution、HTTP middleware 为每个请求激活 execution-local `ContextVar`。旧 shared-state/cross-Agent getter 与显式 Agent ports 只能读取当前 execution 的 exact scope；跨 scope 激活、active execution 解绑和 scope 释放后的 stale inherited context 都失败关闭。23 个 Agent backing singleton/setter、state registry、Host registry 与 event bus 的无上下文 fallback 已物理删除，缺 exact context 统一拒绝。两个本地重叠 Tribe scope 已证明 identity 隔离，但这不是完整 Host multi-app production canary；易失 EventBus 仍是待清理边界。
+
+Universal Runtime 的 Plan/Delegate 控制面现在多一层不可变 execution policy，
+位置在“搜索或目标解析”之后、“HostCommand admission”之前。它不形成第二个
+planner，也不写 Task 状态：Plan policy 绑定不可变 Graph、Graph Budget 与
+每节点 Registry/Review/effect mode；Delegate policy 绑定 target adapter、
+durable Review、exact-zero inner usage 与 Graph-Acceptance-only effect。
+Host、Review continuation、startup recovery 和 frozen executor 只消费这份
+政策并重验 content address。该层阻止配置热变更在重放时悄悄扩大权限；当前
+本地 SQLite 已通过，正式提交绑定状态仍待下一份收据确认。
 
 ```mermaid
 flowchart LR

@@ -8,6 +8,9 @@ from typing import Any, Mapping
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
+from host_brain.app.governed_plan_execution_policy import (
+    bind_governed_plan_execution_policy,
+)
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.contracts.agent_runtime.review_policy import (
     NODE_REVIEW_POLICIES_KEY,
@@ -358,10 +361,11 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
         intent, governor = _intent_and_governor(token_service=token_service)
         ledger.log_governor(governor)
         parent_ref = governor_grant_ref(intent["request_id"], governor)
+        skill_registry = _registry()
         adapter = build_capability_plan_search(
             intent,
             governor_result=governor,
-            skill_registry=_registry(),
+            skill_registry=skill_registry,
             request_id=intent["request_id"],
             input_refs=("input://sha256/" + "4" * 64,),
         )
@@ -425,6 +429,12 @@ async def test_plan_confirm_node_waits_and_resumes_with_exact_renewed_grants(
             ),
             command_application=application,
             compilation_context_resolver=adapter.compilation_context_for,
+            compiled_execution_policy_binder=(
+                lambda compiled: bind_governed_plan_execution_policy(
+                    compiled,
+                    skill_registry=skill_registry,
+                )
+            ),
         )
         prepared = await service.prepare_initial(
             adapter.request,

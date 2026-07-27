@@ -3,12 +3,30 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.30
+版本：v2.31
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Plan Execution Policy 模块由
+[`contracts/agent_runtime/plan_execution_policy.py`](../../../host_brain/contracts/agent_runtime/plan_execution_policy.py)
+和
+[`app/governed_plan_execution_policy.py`](../../../host_brain/app/governed_plan_execution_policy.py)
+组成。合同只规范 content address、节点 effect mode 和唯一 result owner；
+app binder 从当前 Skill Registry、Graph Budget、Review policy 与 selection
+lineage 构造预期政策。Planning service 只允许 binder 扩展 metadata，Host
+在初始/重放/Review/恢复入口重开，Acceptance Effect compiler 再做最后一次
+result-owner 门禁。它不运行搜索、不执行 worker，也不拥有 Task writer。
+
+Delegate Target Policy 模块由
+[`contracts/agent_runtime/delegate_target_policy.py`](../../../host_brain/contracts/agent_runtime/delegate_target_policy.py)
+统一规范 target、adapter、Review、Budget 与 Effect 模式。dispatcher 负责
+登记并生成政策；direct contract builder 将它冻结到 WorkOrder；authority
+validator、frozen executor 和 dispatcher audit 分别重开同一 content
+address。当前只读 `pentest_agent` 的 Review continuation 已有真实 SQLite
+证据，但干净提交收据尚待生成，故模块代码可用不等于路线已封板。
 
 Skill Policy 模块由稳定合同
 [`contracts/skill_execution.py`](../../../host_brain/contracts/skill_execution.py)

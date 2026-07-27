@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.50
+版本：v5.51
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,18 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat 与当前启用 Skill 为 `COMPLETE`，其余五路为 `INCOMPLETE`。
+
+当前工作树已把 Plan/Delegate 的剩余 enabled-scope authority 收成显式合同。
+Plan 的 search trace 与 execution policy 分离：前者解释选路，后者以
+`capability-plan-policy://sha256/...` 冻结 graph/revision、原子完成、
+Graph Budget digest、两条 Skill 和 final Chat 的 Registry policy、
+Review 与 effect mode。`GovernedHostRuntime` 在 initial/replay/Review/
+recovery 入口重开它，`acceptance_effects` 只允许 result node 编译 Effect。
+Delegate 的 `governed-delegate-policy://sha256/...` 同时进入 WorkOrder
+input/metadata，预算 validator、frozen executor 与 dispatcher 均重验；
+当前唯一 target 必须 Review 后执行、内部用量 exact-zero、无 Effect port。
+这批代码的本地单元集合为 `93 passed`，真实 SQLite 四路线为 `1 passed`；
+正式 clean-SHA 收据尚未生成，所以本节只记代码事实，不改变机器路线状态。
 
 Skill 的生产执行面现在先经过一个穷举、失败关闭的 policy partition。生产
 canonical Host Registry 共 93 个 Skill：28 个 inline read-only、13 个 pre-Acceptance

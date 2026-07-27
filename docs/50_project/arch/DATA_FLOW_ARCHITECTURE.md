@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.23
+版本：v3.24
 
 核对日期：2026-07-27
 
@@ -12,6 +12,36 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+Plan/Delegate 当前新增的执行政策流如下；虚线表示漂移时在执行或副作用前
+失败关闭：
+
+```mermaid
+flowchart TD
+    PS["Capability PlanningSearch"] --> PG["skill → skill → chat TaskGraph"]
+    PG --> PP["Freeze Plan policy\nGraph + Budget + node modes"]
+    PP --> PA["HostCommand admission"]
+    PA --> PR["Replay / Review / recovery reopen"]
+    PR --> PE["Execute approved graph"]
+    PE --> PO{"Effect owner?"}
+    PO -->|"final result Chat"| FX["Graph Acceptance Effects"]
+    PO -->|"intermediate Skill"| RX["Reject effect authority"]
+
+    DI["Delegate intent: pentest_agent"] --> DP["Freeze target policy"]
+    DP --> DR["Durable pre-execution Review"]
+    DR --> DC["Claim-fenced continuation"]
+    DC --> DE["Port-free read-only adapter"]
+    DE --> DZ["Exact-zero usage attestation"]
+    DE -. "Effect / Outbox / delivery claim" .-> RX
+    PP -. "topology / Registry / Budget drift" .-> RX
+    DP -. "policy / adapter / mode drift" .-> RX
+```
+
+Plan policy 在首次 admission 前写入 WorkOrder metadata，恢复路径只重开同一
+不可变图，不重新选路。Delegate policy 同时写入 input/metadata，Graph Budget
+允许模型维度精确为零，但外层 dispatch、时间、并发与 retry 仍有界。当前
+真实 SQLite 已覆盖 Review continuation；正式 clean-SHA 七路线收据尚待重跑，
+所以这张图是代码数据流，不是路线 `COMPLETE` 结论。
 
 Skill 的当前执行流先做 policy partition；虚线入口只能拒绝，不能进入
 handler：

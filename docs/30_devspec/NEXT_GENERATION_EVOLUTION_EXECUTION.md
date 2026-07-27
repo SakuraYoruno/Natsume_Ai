@@ -5,9 +5,31 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.20
+版本：v3.21
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前 Plan/Delegate 封板切片的合同是“准入政策不可变，任何恢复点重新开封”。
+`CAPABILITY_SEARCH_V1` 必须在 admission 前冻结
+`capability_plan_execution_policy.v1`，精确绑定 graph/revision、
+`ATOMIC_GRAPH_SUCCESS_V1`、result node、Graph Budget digest、两条执行
+Skill 与最终 Chat 的顺序、risk、Review、execution/budget/effect mode。
+首次执行、exact replay、Review continuation、startup/operation recovery
+和 Acceptance Effect 编译必须重验；中间 Skill 只能
+`SPECULATIVE_EFFECT_FREE`，唯一 final Chat 才能
+`GRAPH_ACCEPTANCE_RESULT_ONLY`。Policy binder 只允许扩展冻结 WorkOrder
+metadata，不能改变 TaskGraph、预算、输入、目标或 Planning lineage。
+
+生产普通 Delegate 目前只允许 `pentest_agent`，且 admission 必须携带
+`governed_delegate_target_policy.v1`。该政策要求
+`DURABLE_PRE_EXECUTION_REQUIRED + PORT_FREE_READ_ONLY_ATTESTED_ZERO +
+GRAPH_ACCEPTANCE_RESULT_ONLY`；WorkOrder 输入与 metadata 必须完全相同，
+Budget 只允许模型维度精确为零而外层 dispatch/time/concurrency/retry 有界。
+Review 前不得创建 Attempt；一次性 resume 后才可运行 adapter。dispatcher
+与 frozen executor 都必须拒绝 Effect/Outbox/delivery claim，并将当前政策
+ref 与 adapter/mode 写入 audit。当前本地证据为定向 `93 passed`、真实 SQLite
+四路线 `1 passed`；干净 SHA 正式收据尚待生成，因此两路仍保持
+`INCOMPLETE`，不提前写成封板。
 
 当前 Skill 预算/副作用切片的合同是“显式完备分类，未审能力失败关闭”。
 canonical Host Registry 的 93 个 Skill 必须以 exact descriptor 固定为 read-only、proposal-only、

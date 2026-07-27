@@ -3,9 +3,32 @@
 
 # 测试与验收目录
 
-版本：v2.28
+版本：v2.29
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Plan/Delegate 执行政策与审批恢复当前切片
+
+- `test_ne02_capability_plan_search.py` 覆盖 Plan policy 冻结/重开、Graph
+  Budget digest、Registry risk/Review/execution policy、policy tamper、缺失
+  Skill 和非 result node Effect 拒绝。
+- `test_gr04_planning_execution.py` 约束 policy binder 只能扩展 WorkOrder
+  metadata，不能改写 TaskGraph、domain、预算、输入或 planning lineage。
+- `test_gr05_direct_host_route_contracts.py`、`test_aw02_governed_host_runtime.py`
+  与 `test_ne01_governed_delegate_dispatch.py` 覆盖 Delegate content address、
+  pre-execution Review、exact-zero budget mode、未登记 target、policy drift 和
+  effect/outbox/delivery claim 拒绝。
+- `test_gr05_frozen_route_executors.py` 在 COMMIT 前重验 admitted policy 与
+  dispatcher audit 的 adapter/mode/ref 一致性，不能只相信 URI 前缀。
+- 定向单元/合同集合为 `93 passed in 2.54s`。
+- `test_gr05_universal_host_runtime.py` 使用真实文件型 SQLite，Delegate 首次
+  返回 `WAITING_APPROVAL` 且零 Attempt；Review approve/resume 后由
+  `ReviewContinuationWorker` claim exact checkpoint，最终 `ACCEPTED` 且
+  continuation 消失。Chat/Skill/Delegate/Plan 集成为
+  `1 passed in 26.40s`。
+- 本节数字是实现工作树证据。正式状态提升必须在干净实现 SHA 上重新生成
+  七路线 v3 收据；生成前 Plan/Delegate 均保持 `INCOMPLETE`。真实 provider、
+  Docker 与完整服务栈未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Skill 预算与副作用 policy 当前切片
 

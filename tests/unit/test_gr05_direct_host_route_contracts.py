@@ -4,6 +4,10 @@ import json
 
 import pytest
 
+from host_brain.app.governed_delegate_dispatch import GovernedDelegateTarget
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    READONLY_DELEGATE_EXECUTION_MODE,
+)
 from host_brain.orchestration.host_route_contracts import (
     HOST_ROUTE_AUTHORITY_INVALID,
     HOST_ROUTE_UNSUPPORTED,
@@ -40,6 +44,7 @@ def _build(
     target: str = "",
     *,
     request_id: str = "request-direct-route",
+    delegate_target_policy: dict | None = None,
 ):
     return build_direct_host_route_contracts(
         surface=HostCommandSurface.CHAT,
@@ -60,7 +65,17 @@ def _build(
         sanitized_message="hello",
         person_id="person-direct-route",
         emotion_context={"emotion_tag": "NEUTRAL"},
+        delegate_target_policy=delegate_target_policy,
     )
+
+
+def _governed_delegate_policy(target_id: str = "pentest_agent") -> dict:
+    return GovernedDelegateTarget(
+        target_id=target_id,
+        handler=lambda _payload, _context: {},
+        adapter_id="readonly-pentest-domain-handoff.v1",
+        execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+    ).policy_projection()
 
 
 @pytest.mark.parametrize(
@@ -118,6 +133,45 @@ def test_enabled_readonly_pentest_delegate_receives_no_model_or_tool_authority()
         == "PORT_FREE_READ_ONLY_ATTESTED_ZERO"
     )
     assert policy.metadata["enabled_target"] == "pentest_agent"
+
+
+def test_enabled_delegate_freezes_target_policy_and_requires_durable_review() -> None:
+    target_policy = _governed_delegate_policy()
+    contracts = _build(
+        "delegate",
+        "pentest_agent",
+        delegate_target_policy=target_policy,
+    )
+
+    assert contracts.work_order.input_pack["delegate_target_policy"] == (
+        target_policy
+    )
+    assert contracts.work_order.metadata["delegate_target_policy"] == (
+        target_policy
+    )
+    assert contracts.work_order.review_policy == {
+        "review_required": True,
+        "durable_review_required": True,
+        "mode": "task_node_pre_execution_review",
+        "reason": "delegate_target_policy_requires_operator_review",
+        "review_ref": contracts.work_order.review_ref,
+        "frozen_delegate_policy_ref": target_policy["policy_ref"],
+    }
+    assert contracts.work_order.review_ref.startswith(
+        "review-policy://task-node/delegate/"
+    )
+
+    tampered = dict(target_policy)
+    tampered["policy_ref"] = (
+        "governed-delegate-policy://sha256/" + "0" * 64
+    )
+    with pytest.raises(HostRouteContractError) as raised:
+        _build(
+            "delegate",
+            "pentest_agent",
+            delegate_target_policy=tampered,
+        )
+    assert raised.value.reason_code == HOST_ROUTE_AUTHORITY_INVALID
 
 
 @pytest.mark.parametrize(("route", "target"), [("chat", ""), ("delegate", "intent_agent")])

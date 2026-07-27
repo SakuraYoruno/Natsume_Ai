@@ -26,6 +26,11 @@ from host_brain.contracts.conversation_acceptance_effects import (
     conversation_life_command_id,
     preference_operation_id,
 )
+from host_brain.contracts.agent_runtime.plan_execution_policy import (
+    PLAN_EXECUTION_POLICY_METADATA_KEY,
+    PlanExecutionPolicyError,
+    require_plan_result_effect_owner,
+)
 from natsume_contracts.edge.embodiment_v1 import build_embodiment_command
 from natsume_contracts.task import HostCommand, HostCommandSurface
 from host_brain.runtime.action_preview_authority import (
@@ -109,6 +114,23 @@ def compile_graph_acceptance_effects(
         raise AcceptanceEffectCompileError("worker projection request_id drifted")
 
     pack = _json_mapping(getattr(work_order, "input_pack", {}), field_name="work_order.input_pack")
+    if command.route_type == "plan":
+        metadata = _json_mapping(
+            getattr(work_order, "metadata", {}),
+            field_name="work_order.metadata",
+        )
+        raw_plan_policy = metadata.get(PLAN_EXECUTION_POLICY_METADATA_KEY)
+        try:
+            require_plan_result_effect_owner(
+                policy=(
+                    raw_plan_policy
+                    if isinstance(raw_plan_policy, Mapping)
+                    else {}
+                ),
+                node_id=node_ref,
+            )
+        except PlanExecutionPolicyError as exc:
+            raise AcceptanceEffectCompileError(exc.detail) from exc
     if is_operator_state_control_command(command):
         return _compile_operator_effects(
             command=command, work_order=work_order, node_id=node_ref,

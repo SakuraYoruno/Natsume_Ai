@@ -3,10 +3,22 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.21
+版本：v3.22
 核对日期：2026-07-27
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+Plan 与 Delegate 的剩余局部断点已形成代码候选，但尚未完成提交绑定验收。
+Plan 新增 content-addressed execution policy，要求每次初始执行、重放、
+Review continuation、startup/operation recovery 与 Effect 编译都重开
+Graph/revision、Graph Budget、节点 policy 和唯一 result effect owner。
+Delegate 新增 content-addressed target policy，当前 `pentest_agent` 必须先
+durable Review，内部用量精确为零，且 dispatcher/executor 双层拒绝任何
+Effect、Outbox 或 delivery claim。真实 SQLite 已证明 Delegate
+`WAITING_APPROVAL → continuation → ACCEPTED`，定向集合为 `93 passed`、
+四路线集成为 `1 passed`。在干净实现 SHA 的新七路线 v3 收据生成前，矩阵
+仍保留 Plan 的 authority/budget/effect 与 Delegate 的 review/effect 为
+`PARTIAL`；这避免把工作树测试提前写成生产封板。
 
 Skill 的预算与副作用边界已经在代码层完成穷举分类：canonical Host
 Registry 的 93 个条目分为

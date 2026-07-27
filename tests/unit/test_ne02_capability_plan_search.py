@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
 from host_brain.governor.action_arbiter import build_governed_action_binding
+from host_brain.app.governed_plan_execution_policy import (
+    GovernedPlanExecutionPolicyError,
+    bind_governed_plan_execution_policy,
+    require_governed_plan_execution_policy,
+)
+from host_brain.contracts.agent_runtime.plan_execution_policy import (
+    PLAN_EXECUTION_POLICY_METADATA_KEY,
+    PLAN_RESULT_EFFECT_MODE,
+)
 from host_brain.orchestration.capability_plan_search import (
     CAPABILITY_PLAN_SEARCH_AUTHORITY_INVALID,
     CAPABILITY_PLAN_SEARCH_INVALID,
@@ -30,6 +40,14 @@ from host_brain.planning_search.capability_domain_models import (
 )
 from host_brain.planning_search.contracts import SearchCandidate
 from host_brain.skills.registry import SkillMeta, SkillRegistry
+from host_brain.task_runtime.acceptance_effects import (
+    AcceptanceEffectCompileError,
+    compile_graph_acceptance_effects,
+)
+from natsume_contracts.task import (
+    HostCommandSurface,
+    build_host_command,
+)
 
 
 def _handler(_payload, _context):  # noqa: ANN001, ANN201
@@ -210,6 +228,104 @@ def test_registry_capability_search_generates_competing_paths_without_planned_st
         *(f"skill:{capability_id}" for capability_id in selected_capability_ids),
         "render_reply",
     )
+
+
+def test_capability_plan_freezes_and_reopens_execution_budget_and_effect_owner() -> None:
+    intent, governor = _intent()
+    registry = _registry()
+    input_ref = "input://sha256/" + "9" * 64
+    adapter = build_capability_plan_search(
+        intent,
+        governor_result=governor,
+        skill_registry=registry,
+        input_refs=(input_ref,),
+        frozen_context={"user_message": intent["task"]},
+    )
+    result = adapter.search(adapter.request)
+    compiled = PlanningGraphCompiler().compile(
+        result,
+        created_at=1_234,
+        compilation_context=adapter.compilation_context_for(result),
+    )
+    bound = bind_governed_plan_execution_policy(
+        compiled,
+        skill_registry=registry,
+    )
+    order = bound.work_order
+    graph = bound.task_graph
+    command = build_host_command(
+        surface=HostCommandSurface.HOST_INPUT,
+        request_id=intent["request_id"],
+        session_id=intent["session_id"],
+        principal_id=intent["principal_id"],
+        ingress_claim_ref=None,
+        ingress_audit_ref=None,
+        governor_grant_ref=order.approval_ref,
+        input_ref=input_ref,
+        input_sha256="sha256:" + "9" * 64,
+        root_work_order_id=graph.root_work_order_id,
+        graph_id=graph.graph_id,
+        graph_revision=graph.revision,
+        route_type="plan",
+        target_id="planning_search",
+        business_scope=order.business_idempotency_scope,
+        operation_fingerprint=order.operation_fingerprint,
+        created_at_ms=1_234,
+    )
+
+    policy = require_governed_plan_execution_policy(
+        command=command,
+        work_order=order,
+        graph=graph,
+        skill_registry=registry,
+    )
+
+    assert policy["result_node_id"] == graph.result_node_id
+    assert policy["work_order_budget_digest"].startswith("sha256:")
+    assert [node["effect_mode"] for node in policy["nodes"][:-1]] == [
+        "SPECULATIVE_EFFECT_FREE",
+        "SPECULATIVE_EFFECT_FREE",
+    ]
+    assert policy["nodes"][-1]["effect_mode"] == PLAN_RESULT_EFFECT_MODE
+    assert all(
+        node["execution_policy"] == "INLINE_READ_ONLY"
+        for node in policy["nodes"][:-1]
+    )
+
+    tampered_metadata = dict(order.metadata)
+    tampered_policy = dict(
+        tampered_metadata[PLAN_EXECUTION_POLICY_METADATA_KEY]
+    )
+    tampered_policy["work_order_budget_digest"] = "sha256:" + "0" * 64
+    tampered_metadata[PLAN_EXECUTION_POLICY_METADATA_KEY] = tampered_policy
+    with pytest.raises(GovernedPlanExecutionPolicyError):
+        require_governed_plan_execution_policy(
+            command=command,
+            work_order=replace(order, metadata=tampered_metadata),
+            graph=graph,
+            skill_registry=registry,
+        )
+
+    with pytest.raises(AcceptanceEffectCompileError):
+        compile_graph_acceptance_effects(
+            command=command,
+            work_order=order,
+            node_id=graph.nodes[0].node_id,
+            attempt_id="attempt-plan-non-result",
+            worker_commit={
+                "decision": "APPROVE",
+                "narrative": "must not own effects",
+            },
+        )
+
+    incomplete_registry = _registry(include_second=False)
+    with pytest.raises(GovernedPlanExecutionPolicyError):
+        require_governed_plan_execution_policy(
+            command=command,
+            work_order=order,
+            graph=graph,
+            skill_registry=incomplete_registry,
+        )
 
 
 def test_capability_plan_rejects_a_noncanonical_target_before_search() -> None:

@@ -15,6 +15,10 @@ from host_brain.app.governed_task_adapter import (
     GovernedHostAdapterError,
     GovernedHostRuntime,
 )
+from host_brain.app.governed_delegate_dispatch import GovernedDelegateTarget
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    READONLY_DELEGATE_EXECUTION_MODE,
+)
 from host_brain.orchestration.failure_replan_intent import (
     FAILURE_REPLAN_SCHEMA_VERSION,
 )
@@ -113,6 +117,15 @@ def _echo_skill_registry() -> SkillRegistry:
     return registry
 
 
+def _delegate_target_policy(target_id: str) -> dict:
+    return GovernedDelegateTarget(
+        target_id=target_id,
+        handler=lambda _payload, _context: {},
+        adapter_id="test-port-free-readonly.v1",
+        execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+    ).policy_projection()
+
+
 @pytest.mark.asyncio
 async def test_close_admission_rejects_new_work_and_drain_waits_for_in_flight() -> None:
     application = _BlockingApplication()
@@ -169,7 +182,7 @@ async def test_chat_and_delegate_exact_replay_use_route_aware_authority_validati
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=repository,
         supported_routes=frozenset({"chat", "delegate"}),
-        delegate_target_validator=lambda _target: None,
+        delegate_target_validator=_delegate_target_policy,
     )
     await runtime.activate()
     intent = {
@@ -250,7 +263,7 @@ async def test_secure_ingress_direct_routes_preserve_surface_principal_and_diges
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=repository,
         supported_routes=frozenset({"chat", "delegate"}),
-        delegate_target_validator=lambda _target: None,
+        delegate_target_validator=_delegate_target_policy,
     )
     intent = {
         "schema_version": "Natsume.intent.v1",
@@ -339,6 +352,11 @@ async def test_direct_delegate_rejects_unenabled_target_before_application_admis
 async def test_secure_ingress_catalog_plan_preserves_surface_principal_and_digest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        GovernedHostRuntime,
+        "_require_plan_execution_policy",
+        lambda _self, **_kwargs: None,
+    )
     captured: list[object] = []
 
     class _PlanService:
@@ -347,7 +365,13 @@ async def test_secure_ingress_catalog_plan_preserves_surface_principal_and_diges
 
         async def prepare_initial(self, _request, *, authority, created_at):  # noqa: ANN001
             captured.extend((authority, created_at))
-            return object()
+            return SimpleNamespace(
+                admission=SimpleNamespace(
+                    command=None,
+                    work_order=None,
+                    graph=None,
+                )
+            )
 
         async def execute_stream(self, _prepared):  # noqa: ANN001
             yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
@@ -496,6 +520,11 @@ async def test_legacy_plan_steps_are_rejected_before_context_or_admission(
 async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        GovernedHostRuntime,
+        "_require_plan_execution_policy",
+        lambda _self, **_kwargs: None,
+    )
     captured: dict[str, object] = {}
 
     class _PlanService:
@@ -505,7 +534,13 @@ async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
         async def prepare_initial(self, _request, *, authority, created_at):  # noqa: ANN001
             captured["authority"] = authority
             captured["created_at"] = created_at
-            return object()
+            return SimpleNamespace(
+                admission=SimpleNamespace(
+                    command=None,
+                    work_order=None,
+                    graph=None,
+                )
+            )
 
         async def execute_stream(self, _prepared):  # noqa: ANN001
             yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
@@ -586,6 +621,11 @@ async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
 async def test_capability_plan_failure_replan_uses_durable_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        GovernedHostRuntime,
+        "_require_plan_execution_policy",
+        lambda _self, **_kwargs: None,
+    )
     captured: dict[str, object] = {}
 
     class _PlanService:
@@ -607,7 +647,13 @@ async def test_capability_plan_failure_replan_uses_durable_recovery(
         async def prepare_failure_replan(self, request, **kwargs):  # noqa: ANN001, ANN003
             captured["request"] = request
             captured["replan_kwargs"] = dict(kwargs)
-            prepared = object()
+            prepared = SimpleNamespace(
+                admission=SimpleNamespace(
+                    command=None,
+                    work_order=None,
+                    graph=None,
+                )
+            )
             captured["prepared"] = prepared
             return prepared
 

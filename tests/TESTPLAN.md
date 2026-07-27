@@ -1,10 +1,35 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.28
+版本：v0.29
 日期：2026-07-27
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE01-PLAN-DELEGATE-EXECUTION-POLICY
+
+- T-NE01-PDEP-01：Plan 必须在 admission 前冻结
+  `capability_plan_execution_policy.v1`，绑定 graph/revision/result、atomic
+  completion、Graph Budget digest、selected bindings、节点 risk/Review/
+  execution/budget/effect mode；policy ref 必须与规范 payload digest 相等。
+- T-NE01-PDEP-02：initial、exact replay、Review continuation、
+  startup/operation recovery 与 Acceptance Effect 编译必须重开同一 policy；
+  Registry、Budget、拓扑、binding 或 effect owner 漂移均失败关闭。
+- T-NE01-PDEP-03：Planning binder 只能向已冻结 WorkOrder metadata 添加
+  policy，不能改写 TaskGraph、输入、domain、预算、目标或 search lineage。
+- T-NE01-PDEP-04：Delegate target policy 必须同时冻结到 WorkOrder
+  input/metadata，并声明 durable pre-execution Review、port-free exact-zero
+  inner usage 和 Graph-Acceptance-only Effect；content address、target 和
+  adapter audit 任一不一致均拒绝。
+- T-NE01-PDEP-05：当前 `pentest_agent` 在 Review 前不得创建 Attempt；
+  approve/resume 后必须经 claim-fenced continuation 精确执行一次，随后删除
+  continuation。adapter 返回 side-effect、delivery、Effect 或 Outbox
+  descriptor 必须在 COMMIT 前失败关闭。
+- 当前定向单元/合同集合为 `93 passed in 2.54s`；真实文件型 SQLite
+  Chat/Skill/Delegate/Plan 集成为 `1 passed in 26.40s`。正式 clean-SHA
+  七路线收据尚待重跑，故 Plan/Delegate 保持 `INCOMPLETE`；真实 provider、
+  NE-01 波次 integration 和 NE-07 Docker 全栈未运行，远程
+  CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## T-NE01-SKILL-BUDGET-EFFECT-POLICY
 
