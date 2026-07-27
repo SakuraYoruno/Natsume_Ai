@@ -33,6 +33,8 @@ from host_brain.persistence.worker_projection_repository import (
 )
 from host_brain.persistence.workspace_terminal_cancellation_authority import (
     finalized_cancellation_preserves_accepted_node,
+    finalized_cancellation_preserves_node_state,
+    finalized_post_review_cancellation_allows_workspace_abandonment,
 )
 
 
@@ -1011,6 +1013,41 @@ class WorkspaceLifecycleRepositoryMixin:
                 )
             )
         )
+        terminal_graph_cancelled_node_binding = bool(
+            allow_terminal_abandonment
+            and row is not None
+            and str(row["graph_status"]) == "CANCELLED"
+            and str(row["node_status"]) == "CANCELLED"
+            and (
+                (
+                    str(row["attempt_status"]) == "CANCELLED"
+                    and str(row["lease_status"]) == "CANCELLED"
+                    and finalized_cancellation_preserves_node_state(
+                        conn,
+                        graph_id=graph_id,
+                        graph_revision=graph_revision,
+                        node_id=node_id,
+                        expected_status="CANCELLED",
+                    )
+                )
+                or (
+                    str(row["attempt_status"]) == "SUCCEEDED"
+                    and (
+                        str(row["lease_status"]) == "RELEASED"
+                        or recovered_task_binding is not None
+                    )
+                    and (
+                        finalized_post_review_cancellation_allows_workspace_abandonment(
+                            conn,
+                            graph_id=graph_id,
+                            graph_revision=graph_revision,
+                            node_id=node_id,
+                            attempt_id=attempt_id,
+                        )
+                    )
+                )
+            )
+        )
         terminal_abandonment_binding = bool(
             allow_terminal_abandonment
             and row is not None
@@ -1026,23 +1063,7 @@ class WorkspaceLifecycleRepositoryMixin:
                     )
                 )
                 or terminal_graph_accepted_node_binding
-                or (
-                    str(row["graph_status"]) == "CANCELLED"
-                    and str(row["node_status"]) == "CANCELLED"
-                    and (
-                        (
-                            str(row["attempt_status"]) == "CANCELLED"
-                            and str(row["lease_status"]) == "CANCELLED"
-                        )
-                        or (
-                            str(row["attempt_status"]) == "SUCCEEDED"
-                            and (
-                                str(row["lease_status"]) == "RELEASED"
-                                or recovered_task_binding is not None
-                            )
-                        )
-                    )
-                )
+                or terminal_graph_cancelled_node_binding
                 or (
                     str(row["graph_status"]) == "BLOCKED"
                     and str(row["node_status"]) == "FAILED"

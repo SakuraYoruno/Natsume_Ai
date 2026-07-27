@@ -761,3 +761,26 @@ decision-before、decision-after 中保持完全相同的 status/version。真�
 SQLite+Git 已证明 success promotion、downstream-failure 与
 downstream-cancellation abandon/cleanup；其它终态矩阵与强隔离仍是
 NE-01 缺口。
+
+## 16. Direct Skill 的 post-review cancellation 双层围栏
+
+Direct Skill 自身的写节点在 Acceptance Review 等待期取消时，Node 最终为
+`CANCELLED`，不同于 Plan 下游取消时保持 `ACCEPTED` 的先行写节点。两种路径
+共用 finalized cancellation read proof，但必须传入不同 expected status，
+不能互相兼容或回退。
+
+系统采用双层围栏：
+
+1. route-specific terminal reconciler 要求 exact post-execution Acceptance
+   decision=`REVIEW`、review_id、Attempt、COMMITTED checkpoint、finalized
+   intent/decision 和零 Effect；
+2. Workspace repository 在 ABANDON CAS 前重新联结取消记录与当前
+   Graph/Node/Review/Operation，校验 payload digest/ref、Graph final version、
+   Node status/version、Review=`CANCELLED`、Operation=`COMMITTED`，并再次查询
+   exact Attempt 的 Effect。
+
+正常路径在 fresh Runtime 中清理真实 Git worktree；注入任何 Acceptance
+Effect 时，上层报告 `BLOCKED`，底层也拒绝删除，Workspace 保持 `ACTIVE`。
+当前证据为五文件去重集合 `68 passed in 117.23s`，无 migration。该围栏只
+关闭一个 Direct Skill cancellation 组合，不改变一般 cancellation、
+unknown-effect、多 Workspace 或 NE-01 的未完成状态。

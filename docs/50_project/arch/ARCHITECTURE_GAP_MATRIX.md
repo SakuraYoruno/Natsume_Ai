@@ -163,7 +163,7 @@ Edge command 的旧全局 client owner、startup 注册和 Tribe/内部直推调
 | production Skill 工作单冻结 | `PARTIAL / DIRECT_AND_APPROVED_PLAN_NODE` | `governed_host_contracts.py`、`governed_production_payload.py`、`planning_execution.py`、`governed_frozen_skill_runtime.py`、`skill_execution.py`、GR03d/D16/GR05 定向测试 | `codex_production` 的 profile/default 与 V2 adapter payload 已在 direct `skill` 和 selected Plan node 的 admission 期按 node 冻结，并以 digest、root/graph/node/revision、scope/fingerprint、Review/approval lineage 重验；Plan 只接受 approved candidate input 与 immutable binding，caller-supplied frozen payload 失败关闭，replan 按新 revision 重建。执行期不再重新调用 normalizer；该 legacy adapter 不拥有 TaskGraph authority。签名多节点无副作用失败已有共享 runtime 证据；其它恢复类别、全路线 Budget/Receipt 与 commit-bound acceptance 仍缺 | NE-01 |
 | Scheduler governed | `PARTIAL / ADMIN_AND_OCCURRENCE_GOVERNED` | Scheduler operation/clock owners、`governed_operator_state_control_runtime.py`、accepted state-control handler、双前缀 route cutover tests | occurrence 保持 post-Acceptance handler、immutable result ledger 与 0117 DUE owner/fence。管理 create/update/delete/enable/disable 统一经 Scheduler HostCommand/TaskGraph/Review/Acceptance；operation journal 先提交、claim completion 后提交，崩溃重启只读重开。路由直接 writer=0，提交绑定已通过。mutable batch freezing、通用未知外部效果人工归因、wave integration 与 canary 仍缺 | NE-01 |
 | Internal Agent governed | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | `workspace_write_promotion.py`、`internal_raw_failure_claim_result.py`、`internal_artifact_terminal_reconciliation.py`、`task_operation_failure_reconciliation_store.py`、`internal_agent_sealed_checkpoint_recovery.py`、0116、0130、真实 SQLite/Git integration | sealed recovery 与既有 signed cancellation terminal 保持原 authority，提交绑定已通过。具备 exact Workspace authority 的 write 已密封 bounded manifest/binary patch，Acceptance 生成 deterministic accepted HEAD 并经 0116 晋升；一般 unknown effect、取消交叉、其它 failure/cancellation、Workspace 其它终态、handle-level TOCTOU 与 OS/container isolation 仍缺 | NE-01 |
-| Agent Skill / 单写节点 Plan Workspace | `PARTIAL / DIRECT_AND_SINGLE_PLAN_WRITER_SUCCESS_FAILURE_CANCELLATION_LOCAL_PROVEN` | `governed_skill_work_order.py`、`governed_frozen_skill_runtime.py`、`plan_workspace_acceptance_effect.py`、`skill_artifact_terminal_reconciliation.py`、`workspace_terminal_cancellation_authority.py`、`agent_workspace_acceptance_effect.py`、`accepted_workspace_artifact.py`、真实 SQLite+Git integration | `agent_worker/self_heal/self_evolve` 冻结 registry risk 4 和 durable Review；caller V3/Workspace/Review/Lease authority 拒绝。Direct success/failure 与 Plan 单写节点整图成功、下游失败、下游 post-review 取消均有真实证据；Plan 只允许一个 reviewed 非结果 owner，整图 Acceptance 前 Effect 为零。失败仅在证明零 Effect 后 ABANDON/CLEAN；取消还要求 finalized intent/decision 和 accepted writer 三快照同版本。源 HEAD 不动且再重启零重放。其它 terminal matrix、多 Workspace、Domain Pack、其它 Skill、完整进程/network canary 与整路线 receipt 仍缺 | NE-01 |
+| Agent Skill / 单写节点 Plan Workspace | `PARTIAL / DIRECT_AND_SINGLE_PLAN_WRITER_SUCCESS_FAILURE_CANCELLATION_LOCAL_PROVEN` | `governed_skill_work_order.py`、`governed_frozen_skill_runtime.py`、`plan_workspace_acceptance_effect.py`、`skill_artifact_terminal_reconciliation.py`、`workspace_terminal_cancellation_authority.py`、`agent_workspace_acceptance_effect.py`、`accepted_workspace_artifact.py`、真实 SQLite+Git integration | `agent_worker/self_heal/self_evolve` 冻结 registry risk 4 和 durable Review；caller V3/Workspace/Review/Lease authority 拒绝。Direct success/failure/post-execution Review cancellation 与 Plan 单写节点整图成功、下游失败、下游 post-review 取消均有真实证据。Direct 取消要求 Review decision/current `CANCELLED` Review、`COMMITTED` Operation receipt、finalized intent/decision、当前 Graph/Node 版本和零 Effect；Plan 取消要求 accepted writer 三快照同版本和零 Effect。raw `CANCELLED` 状态不再授权删除。源 HEAD 不动且正常路径再重启零重放。其它 terminal matrix、多 Workspace、Domain Pack、其它 Skill、完整进程/network canary 与整路线 receipt 仍缺 | NE-01 |
 | 本切片结构债务 | `STATIC_PASS / PROGRAM_PARTIAL` | Acceptance/ASGI/Scheduler focused owner 保持原 writer、lifespan 与 repository UoW authority | 该历史静态通过不关闭旧 execution authority、一般恢复、七路线或 canary 缺口；生产 Service Locator 已由后续切片物理清零 | NE-01 |
 
 | 全 route universal runtime | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 coverage manifest + `2a88f56e` v3 receipt + Cortex/Scheduler/Internal/Operator integrations | fail-closed Gate 精确覆盖七路并要求 commit SHA、migration head 与 route receipt 一致。当前启用四路已完整；Scheduler clock batch/control policy 已提交绑定，Internal 与 Operator 仍有各自部分控制。真实 MCP provider、视觉 governed executor、完整 Tool/Operator/Gateway matrix 与七路线 canary 均未完成 | NE-01 |
@@ -301,3 +301,18 @@ Host 发现层预筛选，DAG Runtime 仍拥有最终 worker authority。通用
 scheduler snapshot 只携带 Store 验签后的最小 execution-fence 投影，不
 携带原始证明或业务身份。该项关闭一条恢复死锁，不代表签名
 `COMMIT/RELEASE`、所有 cancellation/failure 或通用并发恢复完成。
+
+## 7. 当前 Direct Skill 取消缺口修正
+
+Direct Skill 在 post-execution Acceptance Review 中取消的 Workspace 终态已由
+“状态组合允许删除”提升为“持久事件链授权删除”。repository 现在必须重验
+唯一 finalized intent/decision 的 ref 与 digest、当前 Graph/Node 的
+status/version，以及该 Attempt 的 Acceptance Effect 数为零。真实 SQLite、
+Git、ReviewStore、Secure Ingress 和 fresh Runtime 已证明正常
+`ABANDONED → CLEANED`，同时证明已有 Effect 时保持 `BLOCKED + ACTIVE
+Workspace`。去重受影响集合为 `68 passed in 117.23s`。
+
+该项只关闭 Direct Skill 的一个精确取消矩阵。一般 cancellation、
+unknown-effect、多 Workspace、波次 integration 和真实服务栈仍缺，因此
+`Universal execution scope`、Workspace 与 Full Architecture 的总体定级均
+保持 `PARTIAL / INCOMPLETE`。

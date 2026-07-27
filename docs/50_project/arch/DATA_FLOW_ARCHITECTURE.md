@@ -1928,3 +1928,29 @@ node id 派生的 node operation fingerprint。这样 exact replay 能区分图�
 最终结果，`CANCELLED` 只来自可信 decision。缺失任一 identity、Review、
 Runtime Context/Scene、Preview、零 Effect 或 finalized cancellation 证明时
 保持 fail-closed。
+
+## Direct Skill 验收评审取消后的 Workspace 流
+
+```mermaid
+flowchart LR
+    A["Direct Agent Skill worker"] --> B["Attempt SUCCEEDED\nOperation COMMITTED"]
+    B --> C["Verification PASS"]
+    C --> D["Acceptance REVIEW\nReviewItem pending"]
+    D --> E["Node WAITING_ACCEPTANCE_REVIEW\nGraph BLOCKED"]
+    E --> F["Secure Ingress cancellation"]
+    F --> G["immutable BLOCKED intent"]
+    G --> H["trusted CANCELLED decision"]
+    H --> I["Graph / Node / Review CANCELLED"]
+    I --> J{"Effect count = 0\nand versions exact?"}
+    J -->|"yes"| K["Workspace ABANDONED"]
+    K --> L["fresh lifecycle cleanup"]
+    L --> M["Workspace CLEANED"]
+    J -->|"no"| N["BLOCKED\nWorkspace remains ACTIVE"]
+```
+
+取消 intent、final decision 与当前 Graph/Node 是四份独立事实。terminal
+reconciler 先解释 route-specific Review 顺序，Workspace repository 再在
+最终 CAS 中只读复核 ref/digest、Graph version、四份 Node state 和 exact
+Attempt 的 Effect 数量。已有 Effect 的故障注入证明该流不会把可能已经开始的
+外部提交误当成可删除临时文件；正常路径则在 fresh Runtime 中完成
+`ABANDONED → CLEANED` 且不修改 source HEAD。

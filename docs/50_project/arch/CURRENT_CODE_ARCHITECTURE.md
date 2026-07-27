@@ -754,3 +754,35 @@ Attempt/owner、仍是最高 fence 且不存在其他活跃 owner，然后才允
 Attempt 取得 `fence + 1`。真实 Windows spawn 链已证明无证明时 worker=0、
 签名后 worker=1、终态重启 worker=0。受控 worker不等于真实 provider，
 所以该恢复子集为本地通过，NE-01 仍为 `IN_PROGRESS`。
+
+### Direct Skill post-review 取消的当前实现
+
+`GovernedSkillArtifactTerminalReconciler` 现有第四条受支持终态是 Direct
+Skill 自身的 post-execution Review cancellation：
+
+```text
+route = skill
+Graph = CANCELLED
+Node = CANCELLED
+Attempt = SUCCEEDED
+Operation = COMMITTED
+Acceptance decision = REVIEW + review_id
+Acceptance Effect count = 0
+```
+
+分类器随后重开 finalized cancellation intent/decision；共享只读
+`finalized_cancellation_preserves_node_state()` 还会联结当前
+`task_runtime_graph` 与 `task_runtime_node`，验证 final Graph version 和
+四份 Node state 完全一致。`WorkspaceLifecycleRepositoryMixin` 在真正写入
+ABANDON event 前再次调用该 proof，并要求 Review 当前为 `CANCELLED`、
+Operation=`COMMITTED` 且带 receipt，再对 exact Attempt 查询 Effect count。
+因此 terminal reconciler 的判断不能绕过 repository，raw SQL 只改状态也不能
+取得删除 authority。
+
+真实集成通过 ReviewStore、SQLite Secure Ingress、
+`GovernedCommandApplication` 和 fresh `DurableWorkspaceRuntime` 构造完整链；
+已有 Effect 的故障注入保持 Workspace `ACTIVE`。五文件去重集合为
+`68 passed in 117.23s`，基于
+`origin/dev@55ece25163667a4db5464a6d2451ab3e7b8f76c9`，无 migration。
+该实现不覆盖其它 Direct/Plan terminal matrix 或一般 unknown-effect，NE-01
+仍为 `IN_PROGRESS`。

@@ -716,3 +716,29 @@ integration 或 NE-07 Docker/前后端全栈仍未覆盖。远程 CI 继续记�
 多 Workspace、强租户隔离、NE-01 波次集成或 NE-07 全栈完成。远程 CI 仍为
 `NOT_RUN_ACCOUNT_QUOTA`。当前 coverage、authority、freshness 与 metadata
 文档合同为 `39 passed in 10.01s`。
+
+## NE-01 Direct Skill 验收评审取消终态证据
+
+- 真实 Direct Agent Skill 成功执行并提交 `COMMITTED` Operation 后，测试用
+  canonical Verification UoW 落下 PASS，再用真实 ReviewStore 和 Acceptance
+  Review UoW 形成 Node=`WAITING_ACCEPTANCE_REVIEW`、Graph=`BLOCKED`。
+- 取消由 SQLite Secure Ingress claim 和 production
+  `request_graph_cancellation()` 发起；断言 Graph/Node/Review=`CANCELLED`、
+  Attempt=`SUCCEEDED`、Budget=`RELEASED`、final intent/decision 完整。
+- fresh Runtime 只在 post-review decision、取消三快照、当前 Graph/Node
+  版本和零 Acceptance Effect 全部一致时执行 `ABANDONED → CLEANED`；源 Git
+  HEAD/文件不变，第二次重启零 replay。
+- 故障注入在同一已取消节点加入一个持久 Acceptance Effect；terminal worker
+  必须返回 `BLOCKED`，Workspace 保持 `ACTIVE`，不得 tombstone 或 cleanup。
+- proof 单元测试覆盖 intent/decision digest、ref、status version、Graph
+  version、Node version/status、缺 decision、Review 未取消/版本漂移、
+  Operation 未提交/无 receipt 和已有 Effect；raw 状态矩阵没有 finalized
+  cancellation authority 时，Workspace repository 必须拒绝。
+
+五个去重受影响文件一次运行结果为 `68 passed in 117.23s`。该集合已经包含
+terminal reconciler、取消 proof、Workspace repository、Direct Skill 与 Plan
+回归，不与先前 55/4/3 等开发中复测相加。本批无 migration，基线为
+`origin/dev@55ece25163667a4db5464a6d2451ab3e7b8f76c9`；NE-01 波次集成、
+真实网络和 NE-07 服务栈未运行。当前文档 authority/freshness、交付元数据与
+coverage 合同为 `39 passed in 12.64s`；远程 CI 为
+`NOT_RUN_ACCOUNT_QUOTA`。

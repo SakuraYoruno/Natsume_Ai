@@ -818,3 +818,37 @@ projection 且确认零 Effect 后才能 `ABANDONED → CLEANED`，取消路径�
 组合、多个独立 Workspace
 的并发写入、强租户隔离、NE-01 波次集成或 NE-07 全栈；总体继续为
 `IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## 当前 NE-01 边界：Direct Skill 验收评审取消后的 Workspace 终态
+
+Direct Agent Skill 自身在 worker 成功且 Verification 通过后，如果
+Acceptance judgement 为 `REVIEW`，会把 Node 和 Graph 分别持久化为
+`WAITING_ACCEPTANCE_REVIEW / BLOCKED`。此时由真实 Secure Ingress authority
+发起取消，最终状态是 Graph/Node=`CANCELLED`、Attempt=`SUCCEEDED`、
+Operation=`COMMITTED`，对应 Review 同步进入 `CANCELLED`；这不是普通执行前
+取消，也不能沿用 Plan 中“已验收写节点保持 `ACCEPTED`”的证明。
+
+生产 terminal reconciler 现在只接受这一条精确矩阵，并同时重开：
+
+```text
+post-execution Acceptance decision = REVIEW
++ exact review_id / Attempt
++ finalized BLOCKED cancellation intent
++ trusted CANCELLED decision
++ intent-after = decision-before = decision-after = current CANCELLED Node/version
++ current CANCELLED Graph/version = decision graph version + 1
++ node Acceptance Effect count = 0
+= ABANDONED → CLEANED
+```
+
+`WorkspaceRepository` 在最终 CAS 前独立重复校验取消 digest/ref、当前
+Review=`CANCELLED`、Operation=`COMMITTED`、Graph/Node 版本和零 Effect；
+仅伪造几个 `CANCELLED` 状态不再具有删除
+Workspace 的 authority。真实 SQLite、Git worktree、ReviewStore、Secure
+Ingress 与 fresh Runtime 的去重受影响集合为
+`68 passed in 117.23s`，同时覆盖 Direct Skill 正向收口、已有 Effect
+阻断、Plan accepted-writer 回归和取消证据篡改；源 HEAD 不变，正常路径第二次
+重启零重放。本切片基于 `origin/dev@55ece25163667a4db5464a6d2451ab3e7b8f76c9`，
+无 migration。其它 Direct/Plan terminal matrix、一般 unknown effect、
+多 Workspace、NE-01 波次集成和 NE-07 真实全栈仍未完成，NE-01 继续为
+`IN_PROGRESS`。
