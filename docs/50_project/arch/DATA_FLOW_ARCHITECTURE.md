@@ -2062,3 +2062,25 @@ node-failure kind 与 Accepted handler receipt ref 在 0090 前后保持稳定�
 response loss 只重放已提交 reconciliation，不重签、不重跑 writer 或 result。
 Graph/Node 裸状态、任意 `BLOCKED` decision 或缺失 Budget Outbox 均不能形成
 cleanup authority。
+
+## runtime_repo 只读检查快照流
+
+```mermaid
+flowchart LR
+    A["inspect WorkOrder\nruntime_repo"] --> B["WorkspacePolicy"]
+    B --> C["trusted source\nHEAD^{commit}"]
+    C --> D["git archive\ntracked tree only"]
+    D --> E{"member safe?"}
+    E -->|"no"| F["BLOCKED\nno executor call"]
+    E -->|"yes"| G["runtime-owned ephemeral snapshot\nno .git / dirty / untracked"]
+    G --> H["Agent + Verification + Acceptance"]
+    H --> I["result binds git-commit ref"]
+    I --> J["explicit snapshot cleanup"]
+    G -. "fixture writes" .-> K["snapshot only"]
+    K -.-> L["live checkout unchanged"]
+```
+
+该流不创建新的 Workspace write authority，也不复用 W2 lifecycle：read-only
+snapshot 是可丢弃输入副本，W2 durable worktree 仍只服务已准入写节点。恶意进程
+能够绕过目录边界的问题仍属于 OS/container/tenant isolation，当前不得标记为
+完成。

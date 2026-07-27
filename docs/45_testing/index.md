@@ -607,6 +607,26 @@ provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 runtime_repo 只读快照验证
+
+- unit fixture 创建真实 Git repository，冻结已提交 `HEAD` 后再制造 dirty tracked
+  与 untracked 私有文件；snapshot 必须只包含 commit 中的内容、没有 `.git`，
+  并绑定 `git-commit://<sha>`；
+- archive 中绝对路径、父目录逃逸、symlink/hardlink 或非 regular member 由
+  policy 失败关闭；snapshot physical path 必须仍位于 runtime-owned runs root；
+- executor fixture 故意写改 snapshot，source checkout 内容必须不变；result
+  必须记录 `workspace_source=runtime_repo_snapshot`，返回前 snapshot 已清理；
+- `runtime_repo/current_runtime_repo` 对 write-capable WorkOrder 的既有 W0
+  拒绝保持不变。
+
+本 Gate 是本地文件系统与真实 Git 定向证据，不是 OS/container readonly mount
+或租户隔离证据；policy/executor 定向为 `20 passed`，连同 WorkOrder、Skill
+wrapper 与 Immune 早期准入回归的去重受影响集为 `44 passed in 1.97s`。无
+migration；文档/机器状态合同为 `39 passed`，统一 static/doc Gate
+无 failure，架构 Gate 1～14 全部通过且未扩大白名单。NE-01 保持
+`IN_PROGRESS`，远程 CI 为
+`NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 Plan writer 提交后预算拒绝证据
 
 - 新场景先完成真实 Review continuation、Git Workspace 写入与 stage seal，

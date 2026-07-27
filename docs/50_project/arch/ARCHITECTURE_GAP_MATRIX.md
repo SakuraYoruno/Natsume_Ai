@@ -346,6 +346,19 @@ bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
 清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
 Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
 
+## 12. 只读 runtime_repo 共享检出缺口修正
+
+| 能力 | 修正前 | 当前证据 | 仍缺 |
+|---|---|---|---|
+| read-only source | inspect WorkOrder 直接取得 Host live `REPO_ROOT` | exact `HEAD^{commit}` tracked-tree 临时快照，source ref 写入 result | 非 Git source 的统一只读快照 |
+| WIP 隔离 | dirty/untracked 与并发开发状态对 Agent 可见 | archive 不包含 dirty/untracked 或 `.git` | OS/container/tenant 隔离 |
+| 错误写入 containment | 依赖逻辑工具白名单保护共享 checkout | fixture 故意修改 snapshot，source 内容不变 | 恶意进程级越界防护 |
+| 生命周期 | live checkout 无需清理但长期暴露 | executor 返回前显式清理 snapshot | 崩溃遗留临时目录启动扫描 |
+
+因此 `runtime_repo retirement for read-only inspection` 从 Workspace missing
+清单移除，但“强只读文件系统”“租户隔离”与一般 crash cleanup 仍缺。
+Workspace、NE-01 和整体架构继续为 `PARTIAL / INCOMPLETE`。
+
 ## 10. Plan post-COMMIT Budget rejection 缺口修正
 
 | 能力 | 修正前 | 当前证据 | 仍缺 |

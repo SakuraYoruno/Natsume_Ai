@@ -2,15 +2,15 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-27",
   "source_baseline": {
-    "dev_commit": "921a56b77a05b192e1967efe97b06142a782166c",
+    "dev_commit": "a4ffd02eae36b19cd277bad1b25bb50f9730d70b",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_PLAN_WRITER_SIGNED_FAILURE_TIME_BUDGET_CROSS_TERMINAL_AND_WORKSPACE_RECOVERY_OVER_ORIGIN_DEV_921A56B77A_WITH_PRIOR_CHECKPOINT_BUDGET_EVIDENCE_RETAINED"
+    "evaluated_source": "NE01_RUNTIME_REPO_EXACT_HEAD_EPHEMERAL_READONLY_INSPECTION_SNAPSHOT_OVER_ORIGIN_DEV_A4FFD02EA_WITH_PRIOR_TERMINAL_MATRIX_EVIDENCE_RETAINED"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-01",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_DIRECT_AGENT_SKILL_POST_EXECUTION_ACCEPTANCE_REVIEW_CANCELLATION_AND_SIGNED_SINGLE_NODE_NO_EFFECT_FAILURE_EXACT_WORKSPACE_ABANDON_CLEAN_LOCAL_REAL_SQLITE_GIT_PASS_PLAN_SINGLE_REVIEWED_WORKSPACE_WRITER_PRECHECKPOINT_SIGNED_FAILURE_POST_COMMIT_BUDGET_REJECTION_AND_PRECHECKPOINT_SIGNED_FAILURE_PLUS_TIME_BUDGET_CROSS_TERMINAL_CURRENT_0090_MULTI_OWNER_WINNER_REOPEN_WORKSPACE_CLEANUP_LOCAL_PASS_SCHEDULER_CLOCK_BATCH_AND_CONTROL_POLICY_ACCEPTANCE_PASS_HOST_AND_CONTROL_SURVIVOR_PAGINATION_SAFE_CHECKPOINT_RESERVED_UNKNOWN_EFFECT_SIGNED_REACQUIRE_SIGNED_HANDLER_CRASH_CANCELLATION_BOUND_COMMIT_RELEASE_ACCEPTED_RESERVED_FANOUT_AND_PARALLEL_RETRY_FAILURE_BUDGET_REVIEW_OS_PROCESS_RECOVERY_LOCAL_PASS_AUTOMATIC_UNKNOWN_EFFECT_ATTRIBUTION_DEPLOYED_FEATURE_PROMOTION_WAVE_INTEGRATION_REAL_PROVIDER_AND_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
+  "active_wave_detail": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_READONLY_RUNTIME_REPO_EXACT_HEAD_EPHEMERAL_SNAPSHOT_NO_LIVE_CHECKOUT_LOCAL_PASS_DIRECT_AGENT_SKILL_POST_EXECUTION_ACCEPTANCE_REVIEW_CANCELLATION_AND_SIGNED_SINGLE_NODE_NO_EFFECT_FAILURE_EXACT_WORKSPACE_ABANDON_CLEAN_LOCAL_REAL_SQLITE_GIT_PASS_PLAN_SINGLE_REVIEWED_WORKSPACE_WRITER_PRECHECKPOINT_SIGNED_FAILURE_POST_COMMIT_BUDGET_REJECTION_AND_PRECHECKPOINT_SIGNED_FAILURE_PLUS_TIME_BUDGET_CROSS_TERMINAL_CURRENT_0090_MULTI_OWNER_WINNER_REOPEN_WORKSPACE_CLEANUP_LOCAL_PASS_SCHEDULER_CLOCK_BATCH_AND_CONTROL_POLICY_ACCEPTANCE_PASS_HOST_AND_CONTROL_SURVIVOR_PAGINATION_SAFE_CHECKPOINT_RESERVED_UNKNOWN_EFFECT_SIGNED_REACQUIRE_SIGNED_HANDLER_CRASH_CANCELLATION_BOUND_COMMIT_RELEASE_ACCEPTED_RESERVED_FANOUT_AND_PARALLEL_RETRY_FAILURE_BUDGET_REVIEW_OS_PROCESS_RECOVERY_LOCAL_PASS_AUTOMATIC_UNKNOWN_EFFECT_ATTRIBUTION_DEPLOYED_FEATURE_PROMOTION_WAVE_INTEGRATION_REAL_PROVIDER_AND_DOCKER_FULL_STACK_REMAIN_INCOMPLETE",
   "next_wave": "NE-02",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -29,7 +29,26 @@
     "status": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_SEVEN_ROUTE_FORMAL_ACCEPTANCE_AND_PARALLEL_MIXED_TERMINAL_PROCESS_RECOVERY_LOCAL_PASS_PROGRAM_INCOMPLETE",
     "commit_binding": "FORMAL_ACCEPTANCE_EVALUATED_COMMIT_2A88F56E2DC7C68D7F37100C6C2D408BC2FDF6A0_BASED_ON_ORIGIN_DEV_C97ED7963AF69B476047A48003DD68146BCF5F29",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
-    "slice": "NE01_PLAN_WRITER_SIGNED_FAILURE_TIME_BUDGET_CROSS_TERMINAL",
+    "slice": "NE01_RUNTIME_REPO_READONLY_SNAPSHOT",
+    "runtime_repo_readonly_snapshot_current_validation": {
+      "status": "LOCAL_REAL_GIT_PASS_NE01_IN_PROGRESS",
+      "base_commit": "a4ffd02eae36b19cd277bad1b25bb50f9730d70b",
+      "source_boundary": "EXACT_HEAD_COMMIT_TRACKED_REGULAR_TREE_ONLY_NO_DIRTY_UNTRACKED_OR_GIT_CONTROL",
+      "archive_boundary": "ABSOLUTE_PARENT_ESCAPE_SYMLINK_HARDLINK_AND_NON_REGULAR_MEMBER_FAIL_CLOSED",
+      "executor_boundary": "RUNTIME_OWNED_EPHEMERAL_SNAPSHOT_EXPLICIT_POST_RESULT_CLEANUP",
+      "containment_validation": "FIXTURE_WRITES_SNAPSHOT_SOURCE_CHECKOUT_UNCHANGED",
+      "targeted_validation": "20_PASSED",
+      "affected_validation": "44_PASSED_IN_1_97_SECONDS",
+      "real_repository_smoke": "PASS_EXACT_HEAD_README_PRESENT_NO_GIT_AND_POST_CLEANUP_ABSENT",
+      "documentation_validation": "39_PASSED",
+      "unified_delivery_gate": "PASS_STATIC_SCAN_AND_DOC_GATE_FAILURES_EMPTY",
+      "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_NO_ALLOWLIST_EXPANSION",
+      "migration": "NONE_CURRENT_HEAD_0135",
+      "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
+      "docker_full_stack": "NOT_RUN_NE07",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "boundary": "NO_OS_CONTAINER_TENANT_READONLY_MOUNT_OR_CRASH_LEFT_SNAPSHOT_STARTUP_SWEEP"
+    },
     "plan_workspace_atomic_terminal_current_validation": {
       "status": "LOCAL_REAL_SQLITE_GIT_PASS_NE01_IN_PROGRESS",
       "base_commit": "68181a34b6fab295f359f3a31f53ad47c5a5e76f",
@@ -5368,16 +5387,30 @@
     },
     "workspace_isolation": {
       "status": "PARTIAL_DIRECT_AGENT_SKILL_AND_SINGLE_PLAN_WRITER_SUCCESS_FAILURE_CANCELLATION_SIGNED_NO_EFFECT_FAILURE_POST_COMMIT_BUDGET_REJECTION_AND_SIGNED_FAILURE_TIME_BUDGET_CROSS_LIFECYCLE",
-      "path_safety": "D0_WIRED_PLUS_INTERNAL_AND_REVIEWED_AGENT_SKILL_ARTIFACT_FULL_COMPONENT_LSTAT_SYMLINK_REPARSE_JUNCTION_REJECTION_AND_CRITICAL_IO_REVALIDATION_HANDLE_LEVEL_TOCTOU_INCOMPLETE",
+      "path_safety": "D0_WIRED_PLUS_RUNTIME_REPO_EXACT_HEAD_EPHEMERAL_SNAPSHOT_NO_LIVE_CHECKOUT_PLUS_INTERNAL_AND_REVIEWED_AGENT_SKILL_ARTIFACT_FULL_COMPONENT_LSTAT_SYMLINK_REPARSE_JUNCTION_REJECTION_AND_CRITICAL_IO_REVALIDATION_HANDLE_LEVEL_TOCTOU_INCOMPLETE",
       "write_fuse": "FAIL_CLOSED_W0_STOPGAP",
       "durable_authority": "PARTIAL_W2_INTERNAL_AND_THREE_REVIEWED_RISK4_AGENT_SKILL_WRITE_PROMOTION_PLUS_SINGLE_REVIEWED_PLAN_WRITER_WHOLE_GRAPH_ACCEPTANCE_PROMOTION_DOWNSTREAM_FAILURE_DOWNSTREAM_POST_REVIEW_CANCELLATION_PRECHECKPOINT_SIGNED_NODE_FAILURE_POST_COMMIT_BUDGET_REJECTION_AND_PRECHECKPOINT_SIGNED_FAILURE_PLUS_TIME_BUDGET_CURRENT_0090_GRAPH_BUDGET_SETTLEMENT_ZERO_EFFECT_ABANDON_PLUS_DIRECT_SKILL_SIGNED_SINGLE_NODE_NO_EFFECT_FAILURE_AND_INTERNAL_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_DOMAIN_PACK_OTHER_SKILLS_GENERAL_WRITE_INCOMPLETE",
       "migration": "0101_agent_workspace_authority + 0116_agent_workspace_lifecycle",
       "durable_lifecycle": "INTERNAL_CLEAN_NO_CHANGE_AND_INTERNAL_PLUS_REVIEWED_AGENT_SKILL_SEALED_WRITE_PATCH_REAL_TASKSTORE_EVIDENCE_DETERMINISTIC_ACCEPTED_HEAD_ACTIVE_ACCEPTED_PROMOTED_EXACT_RECONCILIATION_DIRECT_SKILL_SUCCESS_VERIFICATION_FAILURE_POST_REVIEW_CANCELLATION_AND_SIGNED_SINGLE_NODE_NO_EFFECT_FAILURE_PLUS_PLAN_SINGLE_WRITER_SUCCESS_DOWNSTREAM_FAILURE_DOWNSTREAM_POST_REVIEW_CANCELLATION_PRECHECKPOINT_SIGNED_NODE_FAILURE_POST_COMMIT_BUDGET_REJECTION_AND_PRECHECKPOINT_SIGNED_FAILURE_TIME_BUDGET_CROSS_CURRENT_0090_SETTLEMENT_CLEANUP_PROVEN_INTERNAL_SIGNED_SINGLE_NODE_RAW_FAILURE_CLAIM_BEFORE_CLEANUP_WIRED_MULTIWORKSPACE_DOMAIN_PACK_OTHER_SKILLS_AND_OTHER_TERMINAL_MATRIX_INCOMPLETE",
       "physical_root_authority": "PROCESS_CONFIGURATION_ONLY",
       "work_order_lease_payload": "SERVER_DERIVED_LOGICAL_WORKSPACE_ID_ONLY",
-      "production_scope": "GOVERNED_INTERNAL_INSPECT_AND_WRITE_PLUS_AGENT_WORKER_AGENT_SELF_HEAL_AGENT_SELF_EVOLVE_REVIEWED_DIRECT_SKILL_OR_SINGLE_PLAN_NODE_PROTECTED_ARTIFACT_POST_WHOLE_GRAPH_ACCEPTANCE_PROMOTION_ONLY",
+      "production_scope": "READONLY_RUNTIME_REPO_USES_EXACT_HEAD_EPHEMERAL_SNAPSHOT_PLUS_GOVERNED_INTERNAL_INSPECT_AND_WRITE_PLUS_AGENT_WORKER_AGENT_SELF_HEAL_AGENT_SELF_EVOLVE_REVIEWED_DIRECT_SKILL_OR_SINGLE_PLAN_NODE_PROTECTED_ARTIFACT_POST_WHOLE_GRAPH_ACCEPTANCE_PROMOTION_ONLY",
       "production_default": "FAIL_CLOSED_WITHOUT_HOST_AGENT_WORKSPACE_HMAC_SECRET",
       "production_canary": "NOT_RUN",
+      "readonly_runtime_repo": "EXACT_TRACKED_HEAD_EPHEMERAL_SNAPSHOT_NO_LIVE_CHECKOUT_NO_DIRTY_UNTRACKED_OR_GIT_CONTROL",
+      "readonly_runtime_repo_cleanup": "EXECUTOR_EXPLICIT_AFTER_RESULT_AND_SEAL_TEMPORARY_DIRECTORY_FINALIZER_FALLBACK",
+      "readonly_runtime_repo_current_validation": {
+        "status": "LOCAL_REAL_GIT_PASS_NE01_IN_PROGRESS",
+        "targeted_validation": "20_PASSED",
+        "affected_validation": "44_PASSED_IN_1_97_SECONDS",
+        "real_repository_smoke": "PASS",
+        "documentation_validation": "39_PASSED",
+        "unified_delivery_gate": "PASS_STATIC_SCAN_AND_DOC_GATE_FAILURES_EMPTY",
+        "full_architecture_static_gate": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_NO_ALLOWLIST_EXPANSION",
+        "source_mutation_after_fixture_snapshot_write": 0,
+        "migration": "NONE_CURRENT_HEAD_0135",
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
+      },
       "direct_skill_terminal_current_validation": {
         "status": "LOCAL_TARGETED_PASS_NE01_IN_PROGRESS",
         "targeted_tests": "57_PASSED",
@@ -5469,6 +5502,7 @@
       "evidence": [
         "host_brain/agent_runtime/workspace_paths.py",
         "host_brain/agent_runtime/workspace_policy.py",
+        "host_brain/agent_runtime/executor.py",
         "host_brain/agent_runtime/workspace_allocator.py",
         "host_brain/agent_runtime/workspace_write_promotion.py",
         "host_brain/agent_runtime/workspace_runtime_contracts.py",
@@ -5502,6 +5536,7 @@
         "tests/unit/test_workspace_path_resolver.py",
         "tests/unit/test_agent_tool_workspace_paths.py",
         "tests/unit/test_ne01_workspace_w0_fuse.py",
+        "tests/integration/test_codex_workplane.py",
         "tests/unit/test_ne01_workspace_w1_authority.py",
         "tests/integration/test_ne01_workspace_w2_runtime.py",
         "tests/integration/test_ne01_workspace_write_promotion.py",
@@ -5525,7 +5560,6 @@
         "agent git cwd"
       ],
       "missing": [
-        "runtime_repo retirement for read-only inspection",
         "new graph-revision Tool node binding exact node Grant and WorkspaceRuntime",
         "per-operation durable fence and lease-loss preemption for future governed Tool execution",
         "Domain Pack and Skill write promotion beyond the three reviewed Direct Agent Skills",
@@ -5539,7 +5573,7 @@
         "OS/container/tenant isolation",
         "handle-level TOCTOU hardening"
       ],
-      "reason": "Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal and three reviewed risk-4 Direct Agent Skills seal an exact bounded path manifest plus binary patch, revalidate it after Graph Acceptance, create a deterministic accepted HEAD without moving the configured source branch and persist 0116 ACTIVE→ACCEPTED→PROMOTED. Direct Skill payload cannot inject V3, Workspace, Review, Grant, Budget, Lease or fence authority. Success uses only a post-Acceptance promotion intent; failure uses only a bounded immutable terminal descriptor. A route-specific reconciler reopens exact Task, Lease, Operation, projection and canonical terminal evidence before abandonment, while the shared lifecycle cleaner reopens the post-Lease authority version before cleanup CAS. Real SQLite and Git cover Direct success and Verification failure plus one reviewed non-result Plan Workspace writer across graph success, downstream failure, downstream post-review cancellation, pre-checkpoint signed failure, post-COMMIT Budget rejection and the signed-failure/time-budget cross terminal, with zero source-branch mutation and zero terminal replay. This remains partial: additional Plan write ownership, the remaining Direct Skill and Plan terminal matrices, general Budget policy, unknown effect and arbitrary multi-node/batch settlement recovery are not fully proven. Handle-level atomic TOCTOU, per-operation preemption, Domain Pack and other Skill injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
+      "reason": "Read-only runtime_repo/current_runtime_repo no longer exposes the live checkout: WorkspacePolicy freezes exact HEAD, exports only tracked regular files into an executor-owned ephemeral snapshot, excludes dirty/untracked/.git state, binds the source commit and cleans the snapshot after result sealing. Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal and three reviewed risk-4 Direct Agent Skills seal an exact bounded path manifest plus binary patch, revalidate it after Graph Acceptance, create a deterministic accepted HEAD without moving the configured source branch and persist 0116 ACTIVE→ACCEPTED→PROMOTED. Direct Skill payload cannot inject V3, Workspace, Review, Grant, Budget, Lease or fence authority. Success uses only a post-Acceptance promotion intent; failure uses only a bounded immutable terminal descriptor. A route-specific reconciler reopens exact Task, Lease, Operation, projection and canonical terminal evidence before abandonment, while the shared lifecycle cleaner reopens the post-Lease authority version before cleanup CAS. Real SQLite and Git cover Direct success and Verification failure plus one reviewed non-result Plan Workspace writer across graph success, downstream failure, downstream post-review cancellation, pre-checkpoint signed failure, post-COMMIT Budget rejection and the signed-failure/time-budget cross terminal, with zero source-branch mutation and zero terminal replay. This remains partial: additional Plan write ownership, the remaining Direct Skill and Plan terminal matrices, general Budget policy, unknown effect and arbitrary multi-node/batch settlement recovery are not fully proven. Crash-left snapshot startup sweep, handle-level atomic TOCTOU, per-operation preemption, Domain Pack and other Skill injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
       "status": "PARTIAL_V2_CODE_BOUNDARY_NO_PRODUCTION_CALLER",

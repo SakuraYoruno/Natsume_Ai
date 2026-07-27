@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from pathlib import Path
-
+from host_brain.agent_runtime.agent_tools import (
+    AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED,
+)
 from host_brain.agent_runtime.executor import AgentRuntimeExecutor
 from host_brain.agent_runtime.artifact_store import AgentArtifactStore
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
-from host_brain.agent_runtime.workspace_policy import WORKSPACE_WRITE_GRANT_REQUIRED
 
 
-def test_codex_immuneplane_blocks_self_heal_runtime_repo_without_workspace_grant(monkeypatch, tmp_path) -> None:
+def test_codex_immuneplane_blocks_self_heal_before_workspace_resolution(
+    monkeypatch,
+    tmp_path,
+) -> None:
     executor_called = False
 
     class CanonicalFixtureExecutor:
@@ -50,8 +53,9 @@ def test_codex_immuneplane_blocks_self_heal_runtime_repo_without_workspace_grant
     ).execute(work_order)
 
     assert result["status"] == "BLOCKED"
-    assert result["reason_code"] == WORKSPACE_WRITE_GRANT_REQUIRED
+    assert result["reason_code"] == AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED
     assert result["review_required"] is True
-    assert result["risk_flags"] == ["workspace_grant_required"]
+    assert result["risk_flags"] == [AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED]
+    assert result["metadata"]["execution_authority"] == "proposal_only_agent_executor"
     assert executor_called is False
-    assert Path(result["artifacts_dir"], "work_order.json").exists()
+    assert result["artifacts_dir"] == ""

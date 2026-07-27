@@ -865,6 +865,19 @@ child/0090/Budget authority，不能以 Graph/Node 的裸状态或上层先验�
 `24 passed in 67.50s`，无 migration；一般 Budget/Workspace recovery 与
 NE-01 仍未完成。
 
+## 只读 Agent 的 runtime repository 边界
+
+`WorkspacePolicy` 已不再为 `runtime_repo/current_runtime_repo` 返回 live
+`REPO_ROOT`。它从受信 source 解析 exact `HEAD^{commit}`，通过安全 tar reader
+将 tracked regular tree 展开到 runtime-owned 临时目录，并拒绝 link、路径逃逸
+与异常 member。快照没有 `.git`，也不会携带 dirty/untracked WIP。
+
+`AgentRuntimeExecutor` 将 `runtime_repo_snapshot + git-commit://<sha>` 写入结果
+metadata，在 Verification/Acceptance/result seal 之后显式 cleanup。故意在
+fixture executor 内修改 snapshot 只改变临时副本，source checkout 保持原样。
+这是进程内共享 checkout 隔离；它不等于 OS/container/tenant 强隔离，Workspace
+总体仍为 `PARTIAL`。
+
 ### Plan 签名失败与 Budget terminal 的组合 authority
 
 `task_operation_failure_reconciliation_store.py` 现在区分两种多节点 signed
